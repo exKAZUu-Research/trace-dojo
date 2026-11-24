@@ -186,6 +186,10 @@ export interface FunctionInfo {
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */
   isVariadic?: boolean;
+  /** Whether the function is constexpr (or consteval), which constant expressions may call. */
+  isConstexpr?: boolean;
+  /** Whether the function is consteval, whose every call is a constant expression. */
+  isConsteval?: boolean;
   /** The ref-qualifier of a member function (`void f() &;`), which says whether its object is an lvalue or an rvalue. */
   refQualifier?: '&' | '&&';
   /** Whether a constructor takes part only in direct initialization, as `std::vector(size_type)` does. */

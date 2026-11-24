@@ -63,9 +63,10 @@ function defineEnumerators(compiler: CompilerBase, info: EnumInfo, body: Syntax)
       let value = next;
       if (valueNode) {
         const expr = compiler.rvalue(compiler.compileExpression(valueNode));
-        if (!isInteger(expr.type) || expr.type.enumeration?.isScoped || expr.constant === undefined)
-          compiler.error(valueNode.row, `列挙子 ${enumeratorName} の値には、整数の定数式を書いてください。`);
-        value = BigInt(expr.constant);
+        const constant = compiler.constantValueOf(expr);
+        if (!isInteger(expr.type) || expr.type.enumeration?.isScoped || constant === undefined)
+          return compiler.error(valueNode.row, `列挙子 ${enumeratorName} の値には、整数の定数式を書いてください。`);
+        value = BigInt(constant);
       } else if (previous && info.hasFixedType && value > intMax(info.underlying)) {
         compiler.error(enumerator.row, `列挙子 ${enumeratorName} の値が ${info.name} の範囲を超えました。`);
       }

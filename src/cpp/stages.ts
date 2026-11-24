@@ -57,10 +57,6 @@ const MICROSOFT_PREFIXES = ['ms_', 'seh_'];
 const UNSUPPORTED_SPECIFIERS: Record<string, string> = {
   extern: 'extern',
   thread_local: 'thread_local（スレッドごとの変数）',
-  volatile: 'volatile',
-  constinit: 'constinit',
-  consteval: 'consteval',
-  __restrict__: 'restrict',
   _Noreturn: '_Noreturn',
   noreturn: '_Noreturn',
   __thread: 'thread_local（スレッドごとの変数）',

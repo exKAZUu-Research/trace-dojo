@@ -203,7 +203,7 @@ export function evaluateConstraint(compiler: Compiler, node: Syntax): boolean {
   }
   let constant: number | bigint | undefined;
   try {
-    constant = compiler.unevaluated(() => compiler.rvalue(compiler.compileExpression(node)).constant);
+    constant = compiler.unevaluated(() => compiler.constantValueOf(compiler.compileExpression(node)));
   } catch (error) {
     if (error instanceof CompileError) return false;
     throw error;

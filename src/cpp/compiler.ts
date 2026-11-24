@@ -914,7 +914,6 @@ export class Compiler extends StatementCompiler {
       .filter((child) => child.type === 'virtual_specifier')
       .map((child) => child.text);
     if (qualifiers.has('volatile')) this.unsupported(node.row, 'volatile');
-    if (this.hasSpecifier(node, 'constexpr') && !this.context.fn) this.unsupported(node.row, 'constexpr の関数');
     if (ret.kind === 'array') this.error(node.row, '関数は配列を返せません。');
     const params = this.parameters(fieldOf(declarator, 'parameters') as Syntax);
     const displayName = owner
@@ -943,6 +942,8 @@ export class Compiler extends StatementCompiler {
       isInline: this.hasSpecifier(node, 'inline'),
       isConst: qualifiers.has('const'),
       isNoexcept: this.exceptionSpecification(declarator),
+      isConstexpr: this.hasSpecifier(node, 'constexpr') || this.hasSpecifier(node, 'consteval'),
+      isConsteval: this.hasSpecifier(node, 'consteval'),
       refQualifier: declarator.children.find((child) => child.type === 'ref_qualifier')?.text as '&' | '&&' | undefined,
       isPure: false,
       isConstructor: false,
@@ -983,9 +984,9 @@ export class Compiler extends StatementCompiler {
     if (!specifier) return false;
     const condition = specifier.children[0];
     if (!condition) return true;
-    const value = this.rvalue(this.compileExpression(condition));
-    if (value.constant === undefined) this.error(condition.row, 'noexcept(...) の条件は定数式でなければなりません。');
-    return Number(value.constant) !== 0;
+    const value = this.constantValueOf(this.compileExpression(condition));
+    if (value === undefined) this.error(condition.row, 'noexcept(...) の条件は定数式でなければなりません。');
+    return Number(value) !== 0;
   }
 
   /** Whether a declaration says `explicit`, or `explicit(true)` with a constant condition. */
@@ -994,9 +995,9 @@ export class Compiler extends StatementCompiler {
     if (!specifier) return false;
     const condition = specifier.children[0];
     if (!condition) return true;
-    const value = this.rvalue(this.compileExpression(condition));
-    if (value.constant === undefined) this.error(condition.row, 'explicit(...) の条件は定数式でなければなりません。');
-    return Number(value.constant) !== 0;
+    const value = this.constantValueOf(this.compileExpression(condition));
+    if (value === undefined) this.error(condition.row, 'explicit(...) の条件は定数式でなければなりません。');
+    return Number(value) !== 0;
   }
 
   parameters(list: Syntax): ParamInfo[] {
@@ -3694,10 +3695,11 @@ export class Compiler extends StatementCompiler {
     const expr = this.rvalue(this.compileExpression(size));
     if (!isInteger(expr.type))
       return this.error(size.row, `配列の大きさには整数を書いてください（${typeName(expr.type)}）。`);
-    if (expr.constant === undefined) {
+    const constant = this.constantValueOf(expr);
+    if (constant === undefined) {
       return this.unsupported(size.row, '大きさが定数でない配列（可変長配列）');
     }
-    const length = Number(expr.constant);
+    const length = Number(constant);
     if (length < 0) return this.error(size.row, '配列の大きさは負にできません。');
     if (!Number.isSafeInteger(length)) return this.error(size.row, '配列の大きさが大きすぎます。');
     return length;

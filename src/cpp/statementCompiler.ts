@@ -10,6 +10,7 @@ import {
   type Expr,
   type Initializer,
   type InitializerTarget,
+  initializerWithConstancy,
   type MemberConstant,
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
@@ -421,6 +422,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     entity.foldedValue = this.initializerFoldedValue(type, init);
     if (entity.isConstexpr)
       entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
+    // A constexpr variable holds its value from the start, as the compiler evaluated its initializer.
+    const evaluated = entity.isConstexpr && isArithmetic(type) ? entity.constant : undefined;
+    if (evaluated !== undefined) init = initializerWithConstancy(() => evaluated, true);
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
@@ -579,9 +583,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   constantOf(expr: Expr, type: Type): number | bigint | undefined {
     if (!isArithmetic(type)) return undefined;
     const value = this.rvalue(expr);
-    if (value.constant === undefined || !isArithmetic(value.type)) return undefined;
+    if (!isArithmetic(value.type)) return undefined;
     try {
-      return this.convert(value, unqualified(type), expr.row).constant;
+      return this.constantValueOf(this.convert(value, unqualified(type), expr.row));
     } catch {
       return undefined;
     }
@@ -951,8 +955,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private ifStatement(node: Syntax): Exec {
-    if (node.all.some((child) => child.type === 'constexpr')) return this.unsupported(node.row, 'if constexpr');
-    if (node.all.some((child) => child.type === 'consteval')) return this.unsupported(node.row, 'if consteval');
+    if (node.all.some((child) => child.type === 'constexpr')) return this.constexprIf(node);
+    if (node.all.some((child) => child.type === 'consteval')) {
+      // `if consteval` takes its first branch only while a constant expression is evaluated.
+      const consequence = this.inScope(() => this.compileStatement(fieldOf(node, 'consequence') as Syntax));
+      const alternativeNode = fieldOf(node, 'alternative')?.children[0];
+      const alternative = alternativeNode ? this.inScope(() => this.compileStatement(alternativeNode)) : undefined;
+      return (frame) => (frame.runtime.isConstantEvaluation ? consequence(frame) : alternative?.(frame));
+    }
     return this.inScope(() => {
       const clause = fieldOf(node, 'condition') as Syntax;
       const init = this.initStatement(fieldOf(clause, 'initializer'));
@@ -964,6 +974,28 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return (frame) => {
         init?.(frame);
         return condition(frame) ? consequence(frame) : alternative?.(frame);
+      };
+    });
+  }
+
+  /**
+   * `if constexpr`, whose condition is a constant expression that chooses the branch to compile: the other one is
+   * discarded, as in a template it is not instantiated (C++20 [stmt.if]p2).
+   */
+  private constexprIf(node: Syntax): Exec {
+    return this.inScope(() => {
+      const clause = fieldOf(node, 'condition') as Syntax;
+      const init = this.initStatement(fieldOf(clause, 'initializer'));
+      const valueNode = fieldOf(clause, 'value');
+      if (!valueNode || valueNode.type === 'declaration')
+        return this.error(node.row, 'if constexpr の条件には定数式を書いてください。');
+      const value = this.constantValueOf(this.compileExpression(valueNode));
+      if (value === undefined) return this.error(node.row, 'if constexpr の条件には定数式を書いてください。');
+      const chosen = Number(value) !== 0 ? fieldOf(node, 'consequence') : fieldOf(node, 'alternative')?.children[0];
+      const branch = chosen ? this.inScope(() => this.compileStatement(chosen)) : undefined;
+      return (frame) => {
+        init?.(frame);
+        return branch?.(frame);
       };
     });
   }
@@ -1393,11 +1425,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const caseValue = fieldOf(node, 'value');
         if (caseValue) {
           const label = this.compileExpression(caseValue);
-          if (!isInteger(label.type) || label.constant === undefined)
-            this.error(node.row, 'case の値には整数の定数を書いてください。');
+          const labelValue = this.constantValueOf(label);
+          if (!isInteger(label.type) || labelValue === undefined)
+            return this.error(node.row, 'case の値には整数の定数を書いてください。');
           if (scoped && !sameType(unqualified(label.type), unqualified(scoped)))
             this.error(node.row, `case の値 ${caseValue.text} は ${typeName(scoped)} 型の列挙子でなければなりません。`);
-          const integer = BigInt(label.constant);
+          const integer = BigInt(labelValue);
           if (integer < intMin(promoted.name) || integer > intMax(promoted.name))
             this.error(node.row, `case の値が ${typeName(promoted)} 型の範囲を超えています。`);
           const key = String(integer);

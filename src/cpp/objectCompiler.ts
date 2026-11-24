@@ -20,7 +20,7 @@ import {
 import { SequenceValue } from './library/containerValues';
 import { callablePositions, constructElementFromRvalue, moveConstruction } from './library/elements';
 import { StringValue } from './library/string';
-import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
+import { type Eval, type Frame, holdAll, Runtime, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
   type Access,
@@ -71,6 +71,11 @@ export function invoke(
   isCallerDestroying = false
 ): Value | Ptr {
   const { runtime } = frame;
+  if (runtime.isConstantEvaluation && !fn.native) {
+    if (!fn.isConstexpr && !fn.owner?.isLambda)
+      throw new CppRuntimeError('custom', `${fn.displayName} は constexpr ではありません。`);
+    runtime.constexprCalls++;
+  }
   if (fn.owner && self) self = self.forClass(fn.owner);
   if (fn.native) {
     const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
@@ -858,6 +863,47 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    * A call of a resolved function. A member function needs the object, as an lvalue or a prvalue; `isQualified`
    * calls the function itself rather than the final overrider of a virtual one.
    */
+  /**
+   * The value of a constant expression of arithmetic type: its folded constant, or the result of running it while
+   * compiling, which succeeds when it uses only constants and constexpr functions (C++20 [expr.const]).
+   */
+  constantValueOf(expr: Expr): number | bigint | undefined {
+    const value = this.rvalue(expr);
+    if (value.constant !== undefined) return value.constant;
+    if (!isArithmeticType(value.type) || this.isEvaluatingConstant) return undefined;
+    const runtime = new Runtime();
+    runtime.isConstantEvaluation = true;
+    this.isEvaluatingConstant = true;
+    try {
+      const frame = runtime.pushFrame(undefined, undefined, undefined, undefined);
+      const result = withTemporaries(frame, () => value.run(frame));
+      // An expression that calls no constexpr function is a constant only when the compiler folded it.
+      if (runtime.constexprCalls === 0) return undefined;
+      return typeof result === 'number' || typeof result === 'bigint' ? result : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      this.isEvaluatingConstant = false;
+    }
+  }
+
+  private isEvaluatingConstant = false;
+  /** Whether the expression compiled now is an unevaluated operand (`sizeof`, `decltype`, `noexcept`). */
+  protected isUnevaluated = false;
+
+  /** Whether the code compiled now runs only in constant evaluation: a consteval function's body. */
+  private get isImmediateContext(): boolean {
+    return this.context.fn?.isConsteval === true || this.isUnevaluated || this.isEvaluatingConstant;
+  }
+
+  /** A call of a consteval function, which the compiler evaluates: its value is a constant (C++20 [expr.const]p13). */
+  private immediateCall(fn: FunctionInfo, run: Eval<Value | Ptr>, type: Type, row: number): Expr {
+    const value = this.constantValueOf({ type, isLvalue: false, row, run });
+    if (value === undefined)
+      return this.error(row, `consteval の関数 ${fn.displayName} の呼び出しは、定数式でなければなりません。`);
+    return { type, isLvalue: false, row, run: () => value, constant: value };
+  }
+
   /** The calls of the `noexcept(e)` operand compiled now, which tells whether one of them may throw. */
   noexceptProbe: { mayThrow: boolean } | undefined;
 
@@ -877,6 +923,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
+    if (fn.isConsteval && !this.isImmediateContext) return this.immediateCall(fn, run, type, row);
     return {
       type,
       isLvalue: isReference,

@@ -198,6 +198,10 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The number of delete expressions destroying objects now. */
   deleteDepth = 0;
   readonly frames: Frame[] = [];
+  /** Whether the run evaluates a constant expression while compiling, where only constexpr functions may run. */
+  isConstantEvaluation = false;
+  /** How many constexpr functions of the program the constant evaluation called. */
+  constexprCalls = 0;
   /** The arguments of the library functions running now, the innermost last, which their callables come from. */
   readonly nativeArguments: unknown[][] = [];
   readonly budget = new ExecutionBudget();
@@ -314,6 +318,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Writes bytes (a string of character codes below 256) to standard output or standard error. */
   write(stream: 'stdout' | 'stderr', bytes: string): void {
+    if (this.isConstantEvaluation) throw new CppRuntimeError('custom', '定数式の中では出力できません。');
     if (bytes.length === 0) return;
     // oxlint-disable-next-line no-control-regex -- ASCII text decodes to itself.
     if (/^[\u0000-\u007F]*$/.test(bytes)) {

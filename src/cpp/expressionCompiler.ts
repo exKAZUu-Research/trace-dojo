@@ -98,7 +98,6 @@ type FloatingFactors = [FloatingValue, FloatingValue];
 
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
-  protected isUnevaluated = false;
   /** Whether `auto` deduces an array from an array, as a structured binding's hidden variable does. */
   protected deducesArrays = false;
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */

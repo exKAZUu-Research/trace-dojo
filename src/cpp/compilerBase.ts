@@ -472,11 +472,11 @@ export abstract class CompilerBase {
     const packNode = fieldOf(node, 'pack') as Syntax;
     const pack = this.findName(packNode.text);
     if (pack?.kind !== 'pack') return this.error(node.row, `${packNode.text} はパラメータパックではありません。`);
-    const index = this.rvalue(this.compileExpression(fieldOf(node, 'index') as Syntax));
-    if (index.constant === undefined) return this.error(node.row, 'パックの添字には整数の定数式を書いてください。');
-    const element = pack.items[Number(index.constant)];
-    if (!element || Number(index.constant) < 0)
-      return this.error(node.row, `パック ${packNode.text} の添字 ${index.constant} が範囲を超えています。`);
+    const index = this.constantValueOf(this.compileExpression(fieldOf(node, 'index') as Syntax));
+    if (index === undefined) return this.error(node.row, 'パックの添字には整数の定数式を書いてください。');
+    const element = pack.items[Number(index)];
+    if (!element || Number(index) < 0)
+      return this.error(node.row, `パック ${packNode.text} の添字 ${index} が範囲を超えています。`);
     return element;
   }
 
@@ -529,7 +529,7 @@ export abstract class CompilerBase {
   private staticAssert(node: Syntax): void {
     const conditionNode = fieldOf(node, 'condition') as Syntax;
     const condition = this.rvalue(this.compileExpression(conditionNode));
-    const value = condition.constant;
+    const value = this.constantValueOf(condition);
     if (value === undefined || !isArithmetic(condition.type))
       this.error(node.row, `static_assert の条件（${conditionNode.text}）は定数式でなければなりません。`);
     if (Number(value) !== 0) return;
@@ -701,10 +701,11 @@ export abstract class CompilerBase {
   /** A non-type template argument: the value of a constant expression, with its type. */
   private valueArgument(node: Syntax): Type {
     const expr = this.rvalue(this.compileExpression(node));
-    if (expr.type.kind !== 'int' || expr.constant === undefined)
+    const constant = this.constantValueOf(expr);
+    if (expr.type.kind !== 'int' || constant === undefined)
       return this.error(node.row, `テンプレート引数 ${node.text} には、型か整数の定数式を書いてください。`);
     const { enumeration: _, ...type } = expr.type;
-    return { ...unqualifiedInt(type), templateValue: expr.constant };
+    return { ...unqualifiedInt(type), templateValue: constant };
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */
@@ -905,6 +906,9 @@ export abstract class CompilerBase {
 
   /** The prvalue of an expression. */
   abstract rvalue(expr: Expr): Expr;
+
+  /** The value of a constant expression of arithmetic type, or undefined when the expression is none. */
+  abstract constantValueOf(expr: Expr): number | bigint | undefined;
 
   describeType(type: Type): string {
     return typeName(type);
