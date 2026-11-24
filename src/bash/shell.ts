@@ -1041,7 +1041,7 @@ export class Shell implements ArithmeticHost {
     return DYNAMIC_VARIABLES.has(name) && !this.state.unsetDynamic.has(name) && !this.findOwnVariable(name);
   }
 
-  private isScalarDynamic(name: string): boolean {
+  isScalarDynamic(name: string): boolean {
     return this.isDynamic(name) && SCALAR_DYNAMIC_VARIABLES.has(name);
   }
 
@@ -1105,7 +1105,8 @@ export class Shell implements ArithmeticHost {
         : !SCALAR_DYNAMIC_VARIABLES.has(name)
           ? this.dynamicElements(name)
           : undefined;
-    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicArrayLength(elements), allowScalarWrite);
+    const dynamicLength = this.isScalarDynamic(name) ? 1 : dynamicArrayLength(elements);
+    return this.arrayIndexFor(this.findVariable(name), subscript, dynamicLength, allowScalarWrite);
   }
 
   private arrayIndexFor(
@@ -1215,9 +1216,14 @@ export class Shell implements ArithmeticHost {
       this.reportError(`\`${name}': not a valid identifier`);
       return false;
     }
-    if (this.isDynamic(name)) return this.assignDynamic(name, value);
+    if (this.isDynamic(name) && !this.isScalarDynamic(name)) return this.assignDynamic(name, value);
     if (!existing && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-    const target = existing ?? { name, value: undefined, attributes: new Set() };
+    const target = existing ??
+      (subscript !== '' && this.isScalarDynamic(name) ? this.dynamicDeclaration(name) : undefined) ?? {
+        name,
+        value: undefined,
+        attributes: new Set(),
+      };
     const ok = this.assignElementTo(target, subscript, value, append, evaluated, name);
     if (ok && !existing) this.state.scopes[0].set(name, target);
     return ok;
@@ -1255,7 +1261,10 @@ export class Shell implements ArithmeticHost {
       this.reportError(`${reportedName}[]: bad array subscript`);
       return false;
     }
-    const declared = this.state.scopes.some((scope) => scope.get(variable.name) === variable) ? variable : undefined;
+    const declared =
+      variable.value !== undefined || this.state.scopes.some((scope) => scope.get(variable.name) === variable)
+        ? variable
+        : undefined;
     const index = evaluated ? BigInt(subscript) : this.arrayIndexFor(declared, subscript, undefined, true);
     if (index === undefined) {
       this.reportError(`${reportedName}[${subscript}]: bad array subscript`);
@@ -1304,7 +1313,7 @@ export class Shell implements ArithmeticHost {
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
-    if (this.isDynamic(name)) return true;
+    if (this.isDynamic(name) && !this.isScalarDynamic(name)) return true;
     let variable = this.findOwnVariable(name);
     if (!isIdentifier(name) && !variable) {
       this.reportError(`\`${name}': not a valid identifier`);
@@ -1312,8 +1321,12 @@ export class Shell implements ArithmeticHost {
     }
     if (variable && this.rejectReadonlyElement(variable, name)) return false;
     if (!variable) {
-      if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-      variable = { name, value: undefined, attributes: new Set() };
+      if (this.isScalarDynamic(name)) {
+        variable = this.dynamicDeclaration(name) as Variable;
+      } else {
+        if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+        variable = { name, value: undefined, attributes: new Set() };
+      }
       this.state.scopes[0].set(name, variable);
     }
     return this.assignCompoundTo(variable, elements, append, name);

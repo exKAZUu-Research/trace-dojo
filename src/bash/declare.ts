@@ -303,6 +303,7 @@ function validateCompoundDeclarationTarget(
   visibleStore = false
 ): boolean {
   const { set, unset } = options;
+  if (!localScope && shell.isDynamic(targetName) && !shell.isScalarDynamic(targetName)) return false;
   const lookupSet = visibleStore ? new Set([...set].filter((f) => f !== 'g')) : set;
   const existing = resolveCompoundExisting(shell, targetName, lookupSet, localScope);
   if (!existing && !localScope && append && shell.isUnreadHostEnv(targetName)) {
@@ -342,11 +343,23 @@ function ensureCompoundTargetVariable(
       ? scopes[0].get(targetName)
       : shell.findVariable(targetName, false);
   if (!variable) {
-    const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
-    variable = createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed');
+    variable = createCompoundVariable(shell, targetName, set, localScope);
     (localScope ?? scopes[0]).set(targetName, variable);
   }
   return variable;
+}
+
+function createCompoundVariable(
+  shell: Shell,
+  targetName: string,
+  set: Set<string>,
+  localScope: Map<string, Variable> | undefined
+): Variable {
+  if (!localScope && shell.isScalarDynamic(targetName)) {
+    return shell.dynamicDeclaration(targetName) as Variable;
+  }
+  const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
+  return createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed');
 }
 
 function resolveCompoundExisting(
@@ -558,7 +571,7 @@ function declareOne(
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
   if (rejectOperandHeader(shell, builtin, name, operand, parsed, isSubscripted)) return false;
-  if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
+  if (!isLocal && materializeOrHandleDynamic(shell, operand, parsed, options, isSubscripted)) return true;
   const assignMode = resolveAssignMode(operand, parsed);
   const tempVar =
     !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
@@ -1177,6 +1190,26 @@ function applyPrefixedTempOnly(
   else if (typeof operand !== 'string') ok = assignLocally(shell, tempVar, operand);
   if (options.set.has('r')) tempVar.attributes.add('r');
   return ok;
+}
+
+function materializeOrHandleDynamic(
+  shell: Shell,
+  operand: DeclarationArgument,
+  parsed: { name: string; subscript?: string; value?: string } | undefined,
+  options: Options,
+  isSubscripted: boolean
+): boolean {
+  const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
+  if (!shell.isDynamic(name)) return false;
+  const convertsToArray =
+    shell.isScalarDynamic(name) &&
+    !options.set.has('n') &&
+    (options.set.has('a') || options.set.has('A') || isSubscripted || isCompound(operand));
+  if (convertsToArray) {
+    shell.state.scopes[0].set(name, shell.dynamicDeclaration(name) as Variable);
+    return false;
+  }
+  return declareDynamic(shell, operand, parsed);
 }
 
 /** A global declaration of a dynamic variable, which assigns it as an assignment word does and keeps it dynamic. */
