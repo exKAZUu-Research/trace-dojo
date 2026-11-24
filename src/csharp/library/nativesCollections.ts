@@ -761,6 +761,12 @@ export class HashState implements EnumerableState {
     return this.entries.length - this.freeList.length;
   }
 
+  /** Whether a dictionary holds a pair: its key found by the dictionary's comparer, its value by default equality. */
+  containsPair(pair: CsStruct, call: NativeCall): boolean {
+    const index = this.find(pair.fields[0]);
+    return index >= 0 && valuesEqual(evaluatorOf(call), this.entries[index].value, pair.fields[1], call.frame);
+  }
+
   find(key: Value): number {
     const hash = this.equality.hash(key);
     const bucket = this.buckets.get(hash) ?? [];

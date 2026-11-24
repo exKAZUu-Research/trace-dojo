@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss -- The nativesSorted module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
+// code-gauge-allow-file fileNcss -- The nativesSorted module keeps one stage of the C# interpreter together.
+import { valuesEqual } from '../objects';
 import type { NativeState } from '../runtime';
 import type { Type } from '../types';
 import { CsObject, CsStruct, type Value } from '../values';
@@ -56,6 +57,12 @@ class SortedState implements EnumerableState {
   /** The type of a set's elements, which it holds unboxed; a dictionary's pairs carry their own type. */
   get elementType(): Type | undefined {
     return this.valueType ? undefined : this.keyType;
+  }
+
+  /** Whether a dictionary holds a pair: its key found by the dictionary's comparer, its value by default equality. */
+  containsPair(pair: CsStruct, call: NativeCall): boolean {
+    const { index, isFound } = this.position(pair.fields[0]);
+    return isFound && valuesEqual(evaluatorOf(call), this.values[index], pair.fields[1], call.frame);
   }
 
   position(key: Value): { index: number; isFound: boolean } {

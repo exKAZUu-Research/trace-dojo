@@ -213,6 +213,13 @@ function isGenericList(value: Value): boolean {
 /** `ICollection<T>.Contains` of a collection object, which `Enumerable.Contains` without a comparer calls. */
 function collectionContains(call: NativeCall, items: Value): ((value: Value) => boolean) | undefined {
   if (!(items instanceof CsObject)) return undefined;
+  // A dictionary finds a pair's key by its own comparer and compares the value by the default equality, as .NET's
+  // ICollection<KeyValuePair<K,V>>.Contains does.
+  const native = items.native as PairContainer | undefined;
+  if (typeof native?.containsPair === 'function' && native.valueType !== undefined) {
+    const pairs = native;
+    return (value) => value instanceof CsStruct && pairs.containsPair(value, call);
+  }
   const evaluator = evaluatorOf(call);
   if (!evaluator.isInstanceOf(items, libraryType(call, 'System.Collections.Generic.ICollection', [call.typeArgs[0]])))
     return undefined;
@@ -1564,4 +1571,11 @@ function countOf(items: Iterable<Value>): number {
   const iterator = items[Symbol.iterator]();
   while (!iterator.next().done) total++;
   return total;
+}
+
+/** A dictionary's state, which finds a key-value pair by its own key lookup. */
+interface PairContainer {
+  /** The values' type, which only a dictionary's state has. */
+  valueType: Type | undefined;
+  containsPair(pair: CsStruct, call: NativeCall): boolean;
 }
