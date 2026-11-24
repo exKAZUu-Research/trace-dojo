@@ -3663,6 +3663,9 @@ export class Compiler extends StatementCompiler {
         : undefined;
     const copy = single?.type.kind === 'class' && single.type.cls.isDerivedFrom(type.cls) ? single : undefined;
     if (copy && (isAggregate || library?.aggregateArray)) return this.copyInitializer(type, copy, row, false);
+    // `std::string s{name}` takes an object of the program's class through its conversion function.
+    if (library && single?.type.kind === 'class' && !copy && hasConversionFunction(single.type.cls))
+      return this.copyInitializer(type, this.constructObject(type.cls, [single], row, true), row, false);
     if (library?.aggregateArray) {
       const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
       const run = this.takeLibraryArrayClauses(library.aggregateArray, clauses, row)();
@@ -4644,4 +4647,12 @@ function callSignature(args: readonly Expr[]): Type | undefined {
   const [call, ...others] = type.cls.methods.get('operator()') ?? [];
   if (!call || others.length > 0 || call.templatePattern) return undefined;
   return { kind: 'function', ret: call.ret, params: call.params.map((param) => param.type) };
+}
+
+/** Whether a class of the program declares a conversion function (`operator std::string() const`). */
+function hasConversionFunction(cls: ClassInfo): boolean {
+  if (cls.library) return false;
+  for (let current: ClassInfo | undefined = cls; current; current = current.base)
+    for (const overloads of current.methods.values()) if (overloads.some((fn) => fn.isConversion)) return true;
+  return false;
 }

@@ -385,7 +385,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return [this.rvalue(value), constantExpr(SIZE_T, BigInt(length - 1), row)];
   }
 
-  /** The library's literal suffixes: `"abc"s` makes a `std::string`; the others need what the interpreter leaves out. */
+  /**
+   * The library's literal suffixes: `"abc"s` makes a `std::string` and `"abc"sv` a `std::string_view`; the others need
+   * what the interpreter leaves out.
+   */
   private standardLiteral(suffix: string, literal: Syntax, row: number): Expr {
     if (suffix === 's' && literal.type !== 'number_literal') {
       const value = this.compileExpression(literal);
@@ -397,7 +400,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (['h', 'min', 's', 'ms', 'us', 'ns', 'y', 'd'].includes(suffix))
       return this.unsupported(row, '<chrono> の時間のリテラル');
     if (['i', 'if', 'il'].includes(suffix)) return this.unsupported(row, '<complex> の虚数のリテラル');
-    if (suffix === 'sv') return this.unsupported(row, 'std::string_view のリテラル（"..."sv）');
+    const view = suffix === 'sv' && literal.type !== 'number_literal' ? this.findStdName('string_view') : undefined;
+    if (view?.kind === 'class') {
+      const value = this.compileExpression(literal);
+      const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+      const args = [this.rvalue(value), constantExpr(SIZE_T, BigInt(length - 1), row)];
+      return this.constructObject(view.cls, args, row, false);
+    }
     return this.error(row, `リテラルの接尾辞 ${suffix} はありません。`);
   }
 
@@ -2708,6 +2717,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         `${cls.name} には、引数（${args.map((arg) => typeName(arg.type)).join(', ')}）をとるコンストラクタがありません。`
       );
+    }
+    // A library class takes an object of the program's class through the class's conversion function.
+    const [only] = args;
+    if (cls.library && args.length === 1 && only.type.kind === 'class' && !only.type.cls.library) {
+      const conversions = [...only.type.cls.methods.values()].flat().filter((fn) => fn.isConversion);
+      const conversion = conversions.length > 0 ? implicitConversion(this, only, classType(cls)) : undefined;
+      if (conversion) return conversion.apply(only);
     }
     const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, row);
     return this.constructWith(cls, resolved, args, row);
