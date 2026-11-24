@@ -224,12 +224,27 @@ export function isFunction(value: Value): value is FunValue {
   return value instanceof Closure || value instanceof PrimFn || value instanceof Partial;
 }
 
+/**
+ * What raised an exception: a value the program threw, or a built-in failure of a kind, which a `catch` turns into
+ * the exception value of its Haskell type. A failure without a cause is an `ErrorCall`.
+ */
+export type ExceptionCause =
+  | { kind: 'value'; value: Slot }
+  | { kind: 'arith' | 'pattern' }
+  | { kind: 'io'; type: string; location: string; file?: string; description: string };
+
 export class HaskellException extends Error {
   constructor(
     /** The message `displayException` gives, which an uncaught exception reports. */
-    readonly display: string
+    readonly display: string,
+    readonly cause?: ExceptionCause
   ) {
     super(display);
     this.name = 'HaskellException';
   }
+}
+
+/** A mutable reference, `IORef a`, which holds a value until the program writes another. */
+export class RefValue {
+  constructor(public value: Slot) {}
 }

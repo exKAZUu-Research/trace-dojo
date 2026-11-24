@@ -164,30 +164,29 @@ test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %
   }
 });
 
-const unsupportedSuperclasses = [
+const flexibleSuperclasses = [
   [
     'listSuperclass',
     'class Show [a]=>D a where d::a->String\ninstance D Int where d x=show [x]\nmain=putStrLn(d(1::Int))',
+    '[1]\n',
   ],
-  ['concreteSuperclass', 'class Show Int=>D a where d::a->String\ninstance D Bool where d=show\nmain=putStrLn(d True)'],
+  [
+    'concreteSuperclass',
+    'class Show Int=>D a where d::a->String\ninstance D Bool where d=show\nmain=putStrLn(d True)',
+    'True\n',
+  ],
   [
     'maybeSuperclass',
     'class Eq(Maybe a)=>D a where d::a->Bool\ninstance D Int where d x=Just x==Just x\nmain=print(d(1::Int))',
+    'True\n',
   ],
   [
     'higherSuperclass',
     'class Show(f Int)=>D f where d::f Int->String\ninstance D Maybe where d=show\nmain=putStrLn(d(Just(1::Int)))',
+    'Just 1\n',
   ],
 ] as const;
 
-test.each(unsupportedSuperclasses)(
-  'well-kinded superclass contexts have an environment diagnostic: %s',
-  (_name, source) => {
-    const result = executeProgram('haskell', source);
-    expect(result.kind).toBe('compileError');
-    if (result.kind === 'compileError') {
-      expect(result.diagnostics[0]?.message).toContain('スーパークラス');
-      expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
-    }
-  }
-);
+test.each(flexibleSuperclasses)('superclass contexts on other types run as in GHC: %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

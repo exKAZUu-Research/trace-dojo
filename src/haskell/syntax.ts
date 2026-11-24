@@ -70,6 +70,8 @@ export type Expr =
   | { kind: 'paren'; expr: Expr; span: Span }
   /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; span: Span }
+  /** A library value that code the conversion generates refers to, whatever the program's scope has. */
+  | { kind: 'support'; name: string; span: Span }
   /** A typed hole, `_` or an unbound name starting with `_`, which GHC reports with its type. */
   | { kind: 'hole'; name: string; span: Span };
 
@@ -161,7 +163,9 @@ export interface Alt {
 export type Stmt =
   | { kind: 'bind'; pat: Pat; expr: Expr; span: Span }
   | { kind: 'let'; decls: Decl[]; span: Span }
-  | { kind: 'exp'; expr: Expr; span: Span };
+  | { kind: 'exp'; expr: Expr; span: Span }
+  /** `rec { ... }` in a do block, whose statements may refer to the variables they bind later, via `mfix`. */
+  | { kind: 'rec'; stmts: Stmt[]; span: Span };
 
 export interface ConDecl {
   name: Name;

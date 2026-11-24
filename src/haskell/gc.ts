@@ -16,6 +16,7 @@ import {
   IOThen,
   Partial,
   type PreparedBlock,
+  RefValue,
   type Slot,
   Thunk,
   TurtleValue,
@@ -188,6 +189,8 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
     for (const dict of value.dicts ?? []) push(dict);
+  } else if (value instanceof RefValue) {
+    push(value.value);
   } else if (value instanceof Thunk) {
     for (const root of runtime.previewRoots(value) ?? []) push(root);
     if (value.state === 'done') push(value.value);

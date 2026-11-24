@@ -373,6 +373,9 @@ export class Codegen {
         return { k: 'frame', size: frame.size, body, info, atomicScope, functionResult } as Core;
       });
     }
+    const primitive = arity === 0 ? primitiveBody(binding, this.options.support) : undefined;
+    // A library primitive with constraints takes the dictionaries as its first arguments.
+    if (primitive) return { k: 'prim', prim: primitiveNamed(primitive) };
     const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
     return this.compileDictionaryLambda(
       dictParams,
@@ -1688,6 +1691,17 @@ function isReturnUnit(expr: RExpr, support: CodegenSupport): boolean {
   if (fn.k !== 'var' || fn.ref.kind !== 'global') return false;
   if (fn.ref.entity !== support.value('return') && fn.ref.entity !== support.value('pure')) return false;
   return expr.arg.k === 'con' && expr.arg.con === UNIT_CON;
+}
+
+/** The name of the primitive a binding is defined as, `f = primitive "name"`, if it is one. */
+function primitiveBody(binding: Extract<RBinding, { k: 'fun' }>, support: CodegenSupport): string | undefined {
+  const { body } = binding.clauses[0].rhs;
+  if (binding.clauses.length !== 1 || body.k !== 'plain' || binding.clauses[0].rhs.where.bindings.length > 0) return;
+  const { expr } = body;
+  if (expr.k !== 'app' || expr.fn.k !== 'var' || expr.fn.ref.kind !== 'global') return;
+  if (expr.fn.ref.entity !== support.value('primitive') || expr.arg.k !== 'lit' || expr.arg.lit.kind !== 'string')
+    return;
+  return expr.arg.lit.value.join('');
 }
 
 function isOtherwise(expr: RExpr, support: CodegenSupport): boolean {

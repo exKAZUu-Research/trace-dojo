@@ -1262,6 +1262,9 @@ class Renamer {
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
       }
+      case 'support': {
+        return { k: 'var', ref: { kind: 'global', entity: this.supportValue(expr.name, span) }, name: expr.name, span };
+      }
       case 'tyapp': {
         const vars = new Set<string>();
         if (expr.type) collectTypeVars(expr.type, vars);
@@ -1530,9 +1533,10 @@ class Renamer {
     return { pat, rhs: this.renameRhs(alt.rhs, inner), span: alt.span };
   }
 
-  private renameStmts(stmts: Stmt[], parent: LocalScope, isDo: boolean): { stmts: RStmt[]; scope: LocalScope } {
+  private renameStmts(source: Stmt[], parent: LocalScope, isDo: boolean): { stmts: RStmt[]; scope: LocalScope } {
     let scope = parent;
     const result: RStmt[] = [];
+    const stmts = source.map((stmt) => (stmt.kind === 'rec' ? recursiveBind(stmt) : stmt));
     for (const [index, stmt] of stmts.entries()) {
       const isLast = index === stmts.length - 1;
       switch (stmt.kind) {
@@ -2022,6 +2026,56 @@ function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): nu
   const index = decl.params.findIndex((param) => param.name === name.name);
   if (index === -1) throw compileError(name.span, `関数従属性の ${name.name} は、クラスの型変数ではありません。`);
   return index;
+}
+
+function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[]) => Expr | Pat): Expr | Pat {
+  return items.length === 1 ? one(items[0]) : many(items);
+}
+
+/**
+ * A `rec` block as the bind `vs <- mfix (\~vs -> do { ss; return vs })`, where `vs` are the variables its statements
+ * bind, which then refer to their own later values.
+ */
+function recursiveBind(stmt: Extract<Stmt, { kind: 'rec' }>): Stmt {
+  const { span } = stmt;
+  const names: Name[] = [];
+  for (const inner of stmt.stmts) {
+    if (inner.kind === 'bind') collectPatNames(inner.pat, names);
+    else if (inner.kind === 'let') for (const binding of groupBindings(inner.decls)) names.push(...binding.names);
+    else if (inner.kind === 'rec') throw compileError(inner.span, 'rec の中に rec は書けません。');
+  }
+  const pattern = (): Pat =>
+    tupleOf(
+      names,
+      (name) => ({ kind: 'pvar', name, span }),
+      (all) =>
+        all.length === 0
+          ? { kind: 'pcon', con: { name: '()', span }, args: [], span }
+          : { kind: 'ptuple', elems: all.map((name): Pat => ({ kind: 'pvar', name, span })), span }
+    ) as Pat;
+  const result = tupleOf(
+    names,
+    (name) => ({ kind: 'var', name, span }),
+    (all) =>
+      all.length === 0
+        ? { kind: 'con', name: { name: '()', span }, span }
+        : { kind: 'tuple', elems: all.map((name): Expr => ({ kind: 'var', name, span })), span }
+  ) as Expr;
+  const body: Expr = {
+    kind: 'do',
+    stmts: [
+      ...stmt.stmts,
+      { kind: 'exp', expr: { kind: 'app', fn: { kind: 'support', name: 'return', span }, arg: result, span }, span },
+    ],
+    span,
+  };
+  const lambda: Expr = { kind: 'lambda', pats: [{ kind: 'plazy', pat: pattern(), span }], body, span };
+  return {
+    kind: 'bind',
+    pat: pattern(),
+    expr: { kind: 'app', fn: { kind: 'support', name: 'mfix', span }, arg: lambda, span },
+    span,
+  };
 }
 
 /** Whether a variable is a named typed hole: an unqualified name starting with `_` that nothing defines. */

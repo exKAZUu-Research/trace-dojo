@@ -54,7 +54,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   modifier: '多重度の注釈（%1）',
   pattern_synonym: 'パターンシノニム',
   promoted: '昇格した構成子（DataKinds）',
-  rec: 'rec ブロック（RecursiveDo）',
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
   type_binder: 'パターンの型の束縛（@a）',
@@ -1707,9 +1706,14 @@ function convertBlock(node: Node, span: Span): Expr {
     case 'do': {
       const doModule = namedChildren(node).find((child) => child.type === 'do_module');
       if (doModule) return convertQualifiedDo(node, moduleName(required(doModule, 'module')), span);
-      if (hasToken(node, 'mdo')) throw unsupportedError(span, 'mdo（RecursiveDo）');
       const statements = fields(node, 'statement').map(convertStatement);
       if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
+      if (hasToken(node, 'mdo')) {
+        if (!extensions.has('RecursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
+        const last = statements.at(-1) as Stmt;
+        const rest = statements.slice(0, -1);
+        return { kind: 'do', stmts: rest.length > 0 ? [{ kind: 'rec', stmts: rest, span }, last] : [last], span };
+      }
       return { kind: 'do', stmts: statements, span };
     }
     default: {
@@ -1751,6 +1755,8 @@ function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
       };
     } else if (stmt.kind === 'let') {
       result = { kind: 'let', decls: stmt.decls, body: rest, span };
+    } else if (stmt.kind === 'rec') {
+      throw unsupportedError(stmt.span, '修飾つきの do の中の rec');
     } else {
       const name = generatedName('bind', index);
       const failMessage: Expr = {
@@ -1929,6 +1935,10 @@ function convertStatement(node: Node): Stmt {
     }
     case 'let': {
       return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span };
+    }
+    case 'rec': {
+      if (!extensions.has('RecursiveDo')) throw syntaxError(span, 'rec を使うには、RecursiveDo の拡張が要ります。');
+      return { kind: 'rec', stmts: fields(node, 'statement').map(convertStatement), span };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');

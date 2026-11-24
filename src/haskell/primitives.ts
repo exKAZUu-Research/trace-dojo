@@ -36,12 +36,12 @@ export function primitiveNamed(name: string): Primitive {
   return prim;
 }
 
-function define(name: string, arity: number, strict: Primitive['strict'], fn: Primitive['fn']): void {
+export function define(name: string, arity: number, strict: Primitive['strict'], fn: Primitive['fn']): void {
   registry.set(name, { name, arity, strict, fn });
 }
 
 /** Defines a primitive whose arguments are all forced, taking their values. */
-function strict(name: string, arity: number, fn: (args: Value[], runtime: Runtime) => PrimResult): void {
+export function strict(name: string, arity: number, fn: (args: Value[], runtime: Runtime) => PrimResult): void {
   define(name, arity, 'all', (args, runtime) => fn(args as Value[], runtime));
 }
 
@@ -66,7 +66,7 @@ function ordering(order: number): Value {
 
 strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
 
-const unit = (): Value => nullary(UNIT_CON);
+export const unit = (): Value => nullary(UNIT_CON);
 
 export function tuple(...items: Slot[]): Value {
   return new ConValue(tupleCon(items.length), items);
@@ -100,7 +100,7 @@ function wrapInt(value: bigint): bigint {
 }
 
 function divideByZero(): HaskellException {
-  return new HaskellException('divide by zero');
+  return new HaskellException('divide by zero', { kind: 'arith' });
 }
 
 /** Floor division and modulus, as Haskell's `div` and `mod` round toward negative infinity. */
@@ -135,7 +135,7 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
       if ((b as bigint) === 0n) throw divideByZero();
       if (prefix === 'int' && (a as bigint) === INT_MIN && (b as bigint) === -1n) {
         // GHC reports the overflow of the one quotient that does not fit.
-        throw new HaskellException('arithmetic overflow');
+        throw new HaskellException('arithmetic overflow', { kind: 'arith' });
       }
       return wrap(op(a as bigint, b as bigint));
     };
@@ -185,7 +185,7 @@ function rotate64(value: bigint, count: bigint): bigint {
 
 function shiftCount(value: Value): bigint {
   const count = value as bigint;
-  if (count < 0n) throw new HaskellException('arithmetic overflow');
+  if (count < 0n) throw new HaskellException('arithmetic overflow', { kind: 'arith' });
   return count;
 }
 
@@ -770,21 +770,6 @@ define(
     )
 );
 define(
-  'hPutStr',
-  2,
-  [],
-  ([handle, text], runtime) =>
-    new IOPrim(
-      'hPutStr',
-      () => {
-        const value = runtime.machine.force(handle) as ConValue;
-        writeLazily(text, runtime, value.con.tag === 0 ? 'stdout' : 'stderr', '');
-        return unit();
-      },
-      [handle, text]
-    )
-);
-define(
   'hFlush',
   1,
   [],
@@ -835,25 +820,17 @@ define(
     new IOPrim(
       'fail',
       () => {
-        throw new HaskellException(`user error (${forceString(message, runtime)})`);
+        const description = forceString(message, runtime);
+        throw new HaskellException(`user error (${description})`, {
+          kind: 'io',
+          type: 'UserError',
+          location: '',
+          description,
+        });
       },
       [message]
     )
 );
-define(
-  'ioError',
-  1,
-  [],
-  ([message], runtime) =>
-    new IOPrim(
-      'ioError',
-      () => {
-        throw new HaskellException(forceString(message, runtime));
-      },
-      [message]
-    )
-);
-
 // ---------------------------------------------------------------------------------------------------------------
 // Turtles
 

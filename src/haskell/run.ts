@@ -3,8 +3,11 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram } from './compile';
+import type { GlobalDef } from './core';
+import { ioSupport } from './ioPrimitives';
+import { forceString } from './primitives';
 import { Runtime, type TraceFrame } from './runtime';
-import { HaskellException } from './values';
+import { HaskellException, type Slot, type Value } from './values';
 
 export function executeHaskellProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -24,6 +27,25 @@ export function executeHaskellProgram(source: string, input?: ProgramInput): Pro
 }
 
 /**
+ * The message an exception that escapes `main` reports, or `undefined` for an exit code, which ends the program
+ * without one, as `exitWith` does.
+ */
+function uncaughtMessage(runtime: Runtime, error: HaskellException): string | undefined {
+  if (error.cause?.kind !== 'value') return error.display;
+  const apply = (support: GlobalDef | undefined): Value =>
+    runtime.machine.apply(runtime.machine.force(runtime.global(support as GlobalDef)), [
+      (error.cause as { value: Slot }).value,
+    ]);
+  try {
+    if ((runtime.machine.force(apply(ioSupport.exitCode)) as bigint) >= 0n) return undefined;
+    return forceString(apply(ioSupport.display), runtime);
+  } catch (error_) {
+    if (!(error_ instanceof HaskellException)) throw error_;
+    return uncaughtMessage(runtime, error_);
+  }
+}
+
+/**
  * Runs a program's `main` to its end or to an exception that escapes it.
  *
  * @param onEnd Called when the program ends, with the entry point's frame while it still shows its variables.
@@ -38,7 +60,7 @@ export function runProgram(
     runtime.machine.runIO(runtime.global(program.main));
   } catch (error) {
     if (!(error instanceof HaskellException)) throw error;
-    uncaughtException = error.display;
+    uncaughtException = uncaughtMessage(runtime, error);
   }
   onEnd?.(runtime.frames[0]);
   runtime.collectGarbage();

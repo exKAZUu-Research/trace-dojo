@@ -153,6 +153,11 @@ export class Machine {
     this.run({ mode: 'runSlotIO', slot: action });
   }
 
+  /** Runs an IO action to its end inside a primitive, as `catch` and `runST` do, giving its result. */
+  runIOValue(action: Slot): Slot {
+    return this.run({ mode: 'runSlotIO', slot: action });
+  }
+
   makeSlot(code: Core, env: Env | undefined): Slot {
     return typedSlot(
       this.makeUntypedSlot(code, env),
@@ -330,7 +335,10 @@ export class Machine {
         return;
       }
       case 'error': {
-        throw new HaskellException(code.message);
+        throw new HaskellException(
+          code.message,
+          /Non-exhaustive (patterns|guards)/.test(code.message) ? { kind: 'pattern' } : undefined
+        );
       }
     }
   }

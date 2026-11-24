@@ -25,7 +25,9 @@ interface Layout {
 }
 
 export function validateDialect(root: Node, extensions: Extensions): void {
-  new DialectValidator(root, extensions.has('BlockArguments')).run();
+  const reserved = new Set(reservedNames);
+  if (extensions.has('RecursiveDo')) for (const name of ['rec', 'mdo']) reserved.add(name);
+  new DialectValidator(root, extensions.has('BlockArguments'), reserved).run();
 }
 
 class DialectValidator {
@@ -34,7 +36,8 @@ class DialectValidator {
 
   constructor(
     private readonly root: Node,
-    private readonly blockArguments: boolean
+    private readonly blockArguments: boolean,
+    private readonly reserved: ReadonlySet<string>
   ) {
     this.columns = sourceColumns(root.text);
   }
@@ -45,7 +48,7 @@ class DialectValidator {
 
   private visit(node: Node, context?: Layout): void {
     if (isComment(node)) return;
-    validateSyntaxNode(node, this.blockArguments);
+    validateSyntaxNode(node, this.blockArguments, this.reserved);
     const children = node.children.filter((child): child is Node => child !== null);
     if (children.length === 0) {
       this.checkToken(node, context);
@@ -84,8 +87,8 @@ class DialectValidator {
   }
 }
 
-function validateSyntaxNode(node: Node, allowBlockArguments: boolean): void {
-  if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
+function validateSyntaxNode(node: Node, allowBlockArguments: boolean, reserved: ReadonlySet<string>): void {
+  if (node.type === 'variable' && reserved.has(node.text)) fail(node);
   if (node.type === 'arithmetic_sequence') {
     const value = node.childForFieldName('step') ?? node.childForFieldName('from');
     const name = value?.type === 'qualified' ? value.childForFieldName('id') : value;

@@ -104,6 +104,9 @@ export function tupleCon(size: number): ConInfo {
   return tupleType(size).cons[0];
 }
 
+/** A mutable reference, which Data.IORef's functions read and write. */
+export const IOREF_TYPE: TypeEntity = primType('IORef', 1);
+
 export const PRIMITIVE_TYPES = [
   INT_TYPE,
   INTEGER_TYPE,
@@ -113,4 +116,5 @@ export const PRIMITIVE_TYPES = [
   IO_TYPE,
   TURTLE_TYPE,
   WORD_TYPE,
+  IOREF_TYPE,
 ];

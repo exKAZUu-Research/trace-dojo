@@ -14,11 +14,12 @@ import {
   UNIT_TYPE,
 } from './builtinTypes';
 import { ClassEnv } from './classEnv';
-import { Codegen, type CodegenSupport } from './codegen';
+import { Codegen, type CodegenSupport, globalOf } from './codegen';
 import type { GlobalDef } from './core';
 import { DERIVABLE_CLASSES } from './deriving';
 import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
 import type { Builtins } from './infer';
+import { ioSupport, setIOConstructors } from './ioPrimitives';
 import { LIBRARY_SOURCES, PUBLIC_MODULES, UNSUPPORTED_MODULES, UNSUPPORTED_VALUES } from './library';
 import {
   KNOWN_LIBRARY_CLASS_METHODS,
@@ -63,6 +64,14 @@ function compileLibrary(): Library {
   for (const { name, source } of LIBRARY_SOURCES) compiler.compileModule(name, source);
   compiler.markPrintfResults();
   compiler.markTraceTypes();
+  for (const [key, name] of [
+    ['exception', 'primException'],
+    ['display', 'primDisplayException'],
+    ['exitCode', 'primExitCode'],
+  ] as const) {
+    const entity = compiler.baseValue(name);
+    ioSupport[key] = globalOf(entity, entity.name, entity);
+  }
   for (const [name, what] of Object.entries(UNSUPPORTED_VALUES)) compiler.baseValue(name).unsupported = what;
   return {
     modules: compiler.publicModules(),
@@ -162,6 +171,8 @@ class LibraryCompiler {
       ])
         this.baseType(name).cons[0].isNewtype = true;
       setPrimitiveTypes(this.baseType('Bool').cons, this.baseType('Ordering').cons);
+      const maybe = this.baseType('Maybe').cons;
+      setIOConstructors(this.baseType('Handle').cons[3], { nothing: maybe[0], just: maybe[1] });
     }
     const checked = typecheckModule(renamed, {
       env: this.env,

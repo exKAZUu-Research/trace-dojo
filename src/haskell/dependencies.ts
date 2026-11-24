@@ -86,8 +86,12 @@ function collectBindingRefs(binding: RBinding, visit: (key: Key) => void): void 
 
 /** Collects the references of the expressions of a pattern's view patterns. */
 function collectPatRefs(pat: RPat, visit: (key: Key) => void): void {
-  if (pat.k === 'view') collectExprRefs(pat.expr, visit);
-  for (const child of rpatChildren(pat)) collectPatRefs(child, visit);
+  const pending = [pat];
+  while (pending.length > 0) {
+    const current = pending.pop() as RPat;
+    if (current.k === 'view') collectExprRefs(current.expr, visit);
+    pending.push(...rpatChildren(current));
+  }
 }
 
 function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {

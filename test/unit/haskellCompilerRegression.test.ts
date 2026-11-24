@@ -616,7 +616,7 @@ test.each([
   });
 });
 
-test.each(['System.IO (IOMode(ReadMode))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
+test.each(['System.IO (SeekMode(AbsoluteSeek))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
   'selecting unsupported type children still rejects use: %s',
   (item) => {
     expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
