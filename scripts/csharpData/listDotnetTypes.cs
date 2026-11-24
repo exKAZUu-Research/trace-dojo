@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines -- Each script runs alone with `dotnet run`, so it cannot share the assembly loading with the other.
 // Lists the public top-level types of the namespaces below across the shared framework that runs this script, for
 // DOTNET_TYPES in src/csharp/library/dotnetNames.ts. Run with the .NET SDK the interpreter follows:
 //   dotnet run scripts/csharpData/listDotnetTypes.cs

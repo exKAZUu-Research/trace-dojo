@@ -69,6 +69,7 @@ export class LookupBinder extends DeclarationBinder {
    * Looks a member up by name as C# does: the most derived non-method member hides everything below it, and methods
    * gather from every level except those that override or are hidden by a method of the same signature.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each level of the search chain shares the candidates and the inaccessible members found so far.
   lookupMember(
     type: Type,
     name: string,

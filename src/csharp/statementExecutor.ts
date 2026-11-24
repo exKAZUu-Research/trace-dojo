@@ -172,27 +172,26 @@ export abstract class StatementExecutor extends PatternMatcher {
     if (collection === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(collection);
     try {
-      return this.inScope(frame, [statement.variable, ...statement.locals], [], () => {
-        const runIteration = (element: Value): Completion => {
-          const converted = statement.elementConversion
-            ? this.withOperand(frame, element, () =>
-                this.evaluate(statement.elementConversion as BoundExpression, frame)
-              )
-            : element;
-          this.storeLocal(frame, statement.variable, copyValue(converted), true);
-          if (statement.deconstruction) {
-            // Each iteration declares the deconstructed variables anew, so a closure keeps its own iteration's values.
-            for (const local of statement.locals) if (local.isCaptured) frame.slots[local.slot] = new Cell(UNASSIGNED);
-            this.evaluate(statement.deconstruction, frame);
-          }
-          if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
-          return this.execute(statement.body, frame);
-        };
-        return this.iterate(statement, collection, frame, runIteration);
-      });
+      return this.inScope(frame, [statement.variable, ...statement.locals], [], () =>
+        this.iterate(statement, collection, frame, (element) => this.runForeachIteration(statement, frame, element))
+      );
     } finally {
       frame.temporaries.pop();
     }
+  }
+
+  private runForeachIteration(statement: ForeachStatement, frame: Frame, element: Value): Completion {
+    const converted = statement.elementConversion
+      ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
+      : element;
+    this.storeLocal(frame, statement.variable, copyValue(converted), true);
+    if (statement.deconstruction) {
+      // Each iteration declares the deconstructed variables anew, so a closure keeps its own iteration's values.
+      for (const local of statement.locals) if (local.isCaptured) frame.slots[local.slot] = new Cell(UNASSIGNED);
+      this.evaluate(statement.deconstruction, frame);
+    }
+    if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
+    return this.execute(statement.body, frame);
   }
 
   private iterate(
@@ -374,18 +373,23 @@ export abstract class StatementExecutor extends PatternMatcher {
     for (const { statement, frame } of this.handlers.slice(this.filterFloor).toReversed()) {
       for (const clause of statement.catches) {
         if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-        const { filter, local } = clause;
-        if (!filter) return { statement, clause, filterSlots: [] };
-        // The filter's locals leave scope with it, since a finally that throws can abandon the clause before its body
-        // runs; the body gets them back from the slots kept here, cells included, so closures keep sharing them.
-        const kept = this.inScope(frame, clause.locals, [], () => {
-          if (local) this.storeLocal(frame, local, thrown.exception, true);
-          return this.passesFilter(filter, frame) ? clause.locals.map((symbol) => frame.slots[symbol.slot]) : undefined;
-        });
-        if (kept) return { statement, clause, filterSlots: kept };
+        const filterSlots = this.acceptingFilterSlots(clause, thrown, frame);
+        if (filterSlots) return { statement, clause, filterSlots };
       }
     }
     return undefined;
+  }
+
+  /** The slots of a catch clause's filter locals when the clause accepts an exception, or undefined when it does not. */
+  private acceptingFilterSlots(clause: BoundCatch, thrown: CsThrow, frame: Frame): Slot[] | undefined {
+    const { filter, local } = clause;
+    if (!filter) return [];
+    // The filter's locals leave scope with it, since a finally that throws can abandon the clause before its body
+    // runs; the body gets them back from the slots kept here, cells included, so closures keep sharing them.
+    return this.inScope(frame, clause.locals, [], () => {
+      if (local) this.storeLocal(frame, local, thrown.exception, true);
+      return this.passesFilter(filter, frame) ? clause.locals.map((symbol) => frame.slots[symbol.slot]) : undefined;
+    });
   }
 
   /** Whether a catch filter holds, counting an exception it throws as false, as .NET discards that exception. */

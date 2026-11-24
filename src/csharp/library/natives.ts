@@ -3,6 +3,7 @@ import './nativesCore';
 import './nativesTime';
 import './nativesString';
 import './nativesCollections';
+import './nativesArray';
 import './nativesLinq';
 import './nativesRandom';
 import './nativesRegex';

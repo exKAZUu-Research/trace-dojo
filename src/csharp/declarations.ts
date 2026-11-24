@@ -35,6 +35,7 @@ import {
   PropertySymbol,
   sameType,
   substitute,
+  type Substitution,
   substitutionOf,
   type Type,
   TypeParameterSymbol,
@@ -865,23 +866,7 @@ export class DeclarationBinder extends BinderBase {
         `自動実装プロパティ、または 'field' キーワードを使用するプロパティのみが初期化子を持つことができます。`
       );
     }
-    if (isAuto) {
-      const field = new FieldSymbol(`<${name}>k__BackingField`, property.type, symbol);
-      field.isStatic = property.isStatic;
-      field.isReadonly = !member.accessors.some((accessor) => accessor.kind === 'set');
-      field.property = property;
-      field.initializer = member.initializer;
-      field.row = member.row;
-      field.column = member.column;
-      property.backingField = field;
-      symbol.fields.push(field);
-      if (symbol.isStatic && !property.isStatic)
-        this.error(
-          member,
-          'CS0708',
-          `'${displayTypeSymbol(symbol)}.${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
-        );
-    }
+    if (isAuto) this.declareBackingField(symbol, property, member);
     for (const accessor of member.accessors) this.declareAccessor(type, property, accessor, member.modifiers);
     if (
       member.accessors.filter((accessor) => accessor.kind === 'get').length > 1 ||
@@ -893,6 +878,28 @@ export class DeclarationBinder extends BinderBase {
       this.error(member, 'CS8051', '自動実装プロパティは get アクセサーを持つ必要があります。');
     this.addMember(symbol, property, member);
     symbol.properties.push(property);
+  }
+
+  private declareBackingField(
+    symbol: TypeSymbol,
+    property: PropertySymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' }>
+  ): void {
+    const field = new FieldSymbol(`<${property.name}>k__BackingField`, property.type, symbol);
+    field.isStatic = property.isStatic;
+    field.isReadonly = !member.accessors.some((accessor) => accessor.kind === 'set');
+    field.property = property;
+    field.initializer = member.initializer;
+    field.row = member.row;
+    field.column = member.column;
+    property.backingField = field;
+    symbol.fields.push(field);
+    if (symbol.isStatic && !property.isStatic)
+      this.error(
+        member,
+        'CS0708',
+        `'${displayTypeSymbol(symbol)}.${property.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
+      );
   }
 
   private declareAccessor(
@@ -914,21 +921,11 @@ export class DeclarationBinder extends BinderBase {
     method.isAbstract = property.isAbstract;
     method.isOverride = property.isOverride;
     method.isSealed = propertyModifiers.set.has('sealed');
-    method.access =
-      accessModifierCount(accessor.modifiers) > 0
-        ? accessibilityOf(accessor.modifiers, property.access)
-        : property.access;
-    if (
-      accessModifierCount(accessor.modifiers) > 0 &&
-      !this.isLibraryUnit &&
-      (method.access === property.access || ACCESS_RANKS[method.access] > ACCESS_RANKS[property.access])
-    ) {
-      const shown = `${displayTypeSymbol(symbol)}.${property.isIndexer ? 'this' : property.name}`;
-      this.error(
-        accessor,
-        'CS0273',
-        `'${shown}.${isGetter ? 'get' : 'set'}' アクセサーのアクセシビリティ修飾子は、プロパティまたはインデクサー '${shown}' よりも制限されていなければなりません`
-      );
+    if (accessModifierCount(accessor.modifiers) > 0) {
+      method.access = accessibilityOf(accessor.modifiers, property.access);
+      this.checkAccessorAccessibility(accessor, method, property, symbol);
+    } else {
+      method.access = property.access;
     }
     method.row = accessor.row;
     method.returnType = isGetter ? property.type : VOID_TYPE;
@@ -944,6 +941,22 @@ export class DeclarationBinder extends BinderBase {
       property.setter = method;
       property.isInitOnly = accessor.kind === 'init';
     }
+  }
+
+  private checkAccessorAccessibility(
+    accessor: Accessor,
+    method: MethodSymbol,
+    property: PropertySymbol,
+    symbol: TypeSymbol
+  ): void {
+    if (this.isLibraryUnit) return;
+    if (method.access !== property.access && ACCESS_RANKS[method.access] <= ACCESS_RANKS[property.access]) return;
+    const shown = `${displayTypeSymbol(symbol)}.${property.isIndexer ? 'this' : property.name}`;
+    this.error(
+      accessor,
+      'CS0273',
+      `'${shown}.${accessor.kind === 'get' ? 'get' : 'set'}' アクセサーのアクセシビリティ修飾子は、プロパティまたはインデクサー '${shown}' よりも制限されていなければなりません`
+    );
   }
 
   private declareOperator(
@@ -1453,15 +1466,8 @@ export class DeclarationBinder extends BinderBase {
     if (!property.isOverride) return;
     for (let current = symbol.baseType; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
-      // An indexer overrides the base indexer of the same parameter types, among the base's overloads.
-      const candidate = current.symbol.properties.find(
-        (other) =>
-          other.name === property.name &&
-          other.isIndexer === property.isIndexer &&
-          other.parameters.length === property.parameters.length &&
-          other.parameters.every((parameter, index) =>
-            sameType(substitute(parameter.type, substitution), property.parameters[index].type)
-          )
+      const candidate = current.symbol.properties.find((other) =>
+        isSameProperty(other, substitution, property, new Map())
       );
       if (!candidate) continue;
       if (!candidate.isVirtual && !candidate.isAbstract && !candidate.isOverride) {
@@ -1590,19 +1596,8 @@ export class DeclarationBinder extends BinderBase {
   findPropertyImplementation(type: NamedType, member: PropertySymbol, face: NamedType): PropertySymbol | undefined {
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
-      // An indexer implements the interface's indexer of the same parameter types, among the overloads.
       const candidate = current.symbol.properties.find(
-        (property) =>
-          property.name === member.name &&
-          property.isIndexer === member.isIndexer &&
-          !property.isStatic &&
-          property.parameters.length === member.parameters.length &&
-          property.parameters.every((parameter, index) =>
-            sameType(
-              substitute(parameter.type, substitution),
-              substitute(member.parameters[index].type, substitutionOf(face))
-            )
-          )
+        (property) => !property.isStatic && isSameProperty(property, substitution, member, substitutionOf(face))
       );
       if (candidate) {
         const ok =
@@ -1633,6 +1628,26 @@ export function accessibilityOf(modifiers: Modifiers, fallback: Accessibility): 
   if (set.has('protected')) return 'protected';
   if (set.has('internal')) return 'internal';
   return fallback;
+}
+
+/**
+ * Whether two properties have the same name and parameter types, each under its substitution, as an indexer overrides
+ * or implements the one of the same parameter types among the overloads.
+ */
+function isSameProperty(
+  property: PropertySymbol,
+  substitution: Substitution,
+  other: PropertySymbol,
+  otherSubstitution: Substitution
+): boolean {
+  return (
+    property.name === other.name &&
+    property.isIndexer === other.isIndexer &&
+    property.parameters.length === other.parameters.length &&
+    property.parameters.every((parameter, index) =>
+      sameType(substitute(parameter.type, substitution), substitute(other.parameters[index].type, otherSubstitution))
+    )
+  );
 }
 
 function accessModifierCount(modifiers: Modifiers): number {

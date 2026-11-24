@@ -230,6 +230,7 @@ function digitsOf(value: number | bigint | CsDecimal, kind: NumericKind): Digits
 }
 
 // code-gauge-allow functionNcss -- One case per standard format specifier.
+// code-gauge-allow functionCognitiveComplexity -- One case per standard format specifier.
 function formatStandard(
   value: number | bigint | CsDecimal,
   kind: NumericKind,

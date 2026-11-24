@@ -107,6 +107,8 @@ export class BuilderChunks {
    * `Replace(oldValue, newValue, start, count)` on a text, returning the new text: .NET finds the occurrences chunk by
    * chunk, and for each chunk's occurrences adds a chunk for the growth or removes what they shrink by.
    */
+  // code-gauge-allow functionCognitiveComplexity -- The scan follows .NET's chunk by chunk, sharing its position, remaining count, and pending replacements.
+  // code-gauge-allow functionNcss -- The scan follows .NET's chunk by chunk, sharing its position, remaining count, and pending replacements.
   replace(
     text: string,
     oldValue: string,

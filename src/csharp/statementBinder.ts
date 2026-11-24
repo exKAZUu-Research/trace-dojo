@@ -1296,46 +1296,51 @@ function isStatementSyntax(node: Expression): boolean {
  */
 function namesDeclaredInBlock(statement: Statement): string[] {
   const names: string[] = [];
-  const visit = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const element of node) visit(element);
-      return;
-    }
-    if (typeof node !== 'object' || node === null) return;
-    const kind = (node as { kind?: unknown }).kind;
-    // A lambda, a query, and a switch expression's arms scope their own variables.
-    if (kind === 'lambda' || kind === 'query') return;
-    if (kind === 'switch' && 'arms' in node && 'value' in node) {
-      visit(node.value);
-      return;
-    }
-    if (kind === 'single' && 'name' in node) names.push((node as { name: string }).name);
-    for (const value of Object.values(node)) visit(value);
-  };
   switch (statement.kind) {
     case 'localDeclaration': {
       for (const declarator of statement.declarators) names.push(declarator.name);
-      visit(statement.declarators.map((declarator) => declarator.initializer));
+      collectDesignatedNames(
+        statement.declarators.map((declarator) => declarator.initializer),
+        names
+      );
       break;
     }
     case 'deconstruction': {
-      visit(statement);
+      collectDesignatedNames(statement, names);
       break;
     }
     case 'expression': {
-      visit(statement.expression);
+      collectDesignatedNames(statement.expression, names);
       break;
     }
     case 'if': {
-      visit(statement.condition);
+      collectDesignatedNames(statement.condition, names);
       break;
     }
     case 'switch':
     case 'return':
     case 'throw': {
-      visit(statement.value);
+      collectDesignatedNames(statement.value, names);
       break;
     }
   }
   return names;
+}
+
+/** Adds the names of the variables a syntax node designates, outside the nodes that scope their own variables. */
+function collectDesignatedNames(node: unknown, names: string[]): void {
+  if (Array.isArray(node)) {
+    for (const element of node) collectDesignatedNames(element, names);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  const kind = (node as { kind?: unknown }).kind;
+  // A lambda, a query, and a switch expression's arms scope their own variables.
+  if (kind === 'lambda' || kind === 'query') return;
+  if (kind === 'switch' && 'arms' in node && 'value' in node) {
+    collectDesignatedNames(node.value, names);
+    return;
+  }
+  if (kind === 'single' && 'name' in node) names.push((node as { name: string }).name);
+  for (const value of Object.values(node)) collectDesignatedNames(value, names);
 }

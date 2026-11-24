@@ -549,7 +549,6 @@ export class Compiler extends StatementBinder {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected finishFunction(method: MethodSymbol, fn: FunctionScope): void {
     if (method.kind === 'localFunction' && method.declaration) {
       const declaration = method.declaration as MethodDeclaration;
@@ -580,15 +579,11 @@ export class Compiler extends StatementBinder {
   private summarizeLocalFunctions(): void {
     const callees = this.propagateLocalFunctionCaptures();
     const trials = new Set(this.pendingLocalFunctions.filter((entry) => entry.isTrial).map((entry) => entry.method));
-    const pending = new Set(this.pendingLocalFunctions.map((entry) => entry.method));
+    const order = calleesFirst(
+      this.pendingLocalFunctions.map((entry) => entry.method),
+      callees
+    );
     this.pendingLocalFunctions.length = 0;
-    const order: MethodSymbol[] = [];
-    const visit = (local: MethodSymbol): void => {
-      if (!pending.delete(local)) return;
-      for (const callee of callees.get(local) ?? []) visit(callee);
-      order.push(local);
-    };
-    for (const local of pending) visit(local);
     // The passes start from the optimistic 'assigns all' and can only take assignments away, so they end within one
     // per function.
     for (let pass = 0; pass <= order.length; pass++) {
@@ -614,6 +609,7 @@ export class Compiler extends StatementBinder {
   private readonly pendingLocalFunctions: { method: MethodSymbol; isTrial: boolean }[] = [];
 
   /** Checks a function's definite assignment and reachability, recording for a local function what it assigns. */
+  // code-gauge-allow functionCognitiveComplexity -- One callback per kind of flow diagnostic, each reporting its own message.
   private analyzeFlow(method: MethodSymbol, body: BoundBlock): void {
     markCapturedLocals(body);
     const readsBeforeAssigned: LocalSymbol[] = [];
@@ -893,4 +889,17 @@ function summaryOf(local: MethodSymbol): string {
   const assigned = local.assignedAtExit;
   if (assigned === undefined || assigned === 'never') return String(assigned);
   return local.captures.map((captured) => (assigned(captured) ? '1' : '0')).join('');
+}
+
+/** The local functions, each after the ones it calls except where they call each other recursively. */
+function calleesFirst(locals: MethodSymbol[], callees: Map<MethodSymbol, MethodSymbol[]>): MethodSymbol[] {
+  const pending = new Set(locals);
+  const order: MethodSymbol[] = [];
+  const visit = (local: MethodSymbol): void => {
+    if (!pending.delete(local)) return;
+    for (const callee of callees.get(local) ?? []) visit(callee);
+    order.push(local);
+  };
+  for (const local of pending) visit(local);
+  return order;
 }

@@ -396,17 +396,9 @@ export class BinderBase {
       this.reportInaccessibleType(position, inaccessible.symbol);
       return this.construct(position, inaccessible.symbol, [...inaccessible.outerArgs, ...args]);
     }
-    if (this.findTypeInScope(name, -1, context)) {
-      const candidate = this.findTypeInScope(name, -1, context) as TypeSymbol;
-      const arity = candidate.typeParameters.length;
-      if (arity === 0)
-        this.error(position, 'CS0308', `非ジェネリック 種類 '${candidate.name}' は型引数と一緒には使用できません`);
-      else
-        this.error(
-          position,
-          'CS0305',
-          `ジェネリック 種類 '${candidate.name}<${candidate.typeParameters.map((parameter) => parameter.name).join(', ')}>' を使用するには、${arity} 型引数が必要です`
-        );
+    const otherArity = this.findTypeInScope(name, -1, context);
+    if (otherArity) {
+      this.reportTypeArityMismatch(position, otherArity);
       return ERROR_TYPE;
     }
     const unavailable = this.unavailableType(name, name);
@@ -417,6 +409,18 @@ export class BinderBase {
       `型または名前空間の名前 '${name}' が見つかりませんでした (using ディレクティブまたはアセンブリ参照が指定されていることを確認してください)`
     );
     return ERROR_TYPE;
+  }
+
+  private reportTypeArityMismatch(position: Position, candidate: TypeSymbol): void {
+    const arity = candidate.typeParameters.length;
+    if (arity === 0)
+      this.error(position, 'CS0308', `非ジェネリック 種類 '${candidate.name}' は型引数と一緒には使用できません`);
+    else
+      this.error(
+        position,
+        'CS0305',
+        `ジェネリック 種類 '${candidate.name}<${candidate.typeParameters.map((parameter) => parameter.name).join(', ')}>' を使用するには、${arity} 型引数が必要です`
+      );
   }
 
   /** Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too. */

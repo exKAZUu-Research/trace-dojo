@@ -256,6 +256,20 @@ function skipTake(
   return object;
 }
 
+/** The `TakeRangeFromEndIterator` of SkipLast and TakeLast, which trims the source's elements once it buffers them. */
+function fromEndQuery(
+  call: NativeCall,
+  items: Value,
+  all: Iterable<Value>,
+  trim: (buffered: Value[]) => void
+): CsObject {
+  return query(call, call.typeArgs[0], generatedIterator(call, 'TakeRangeFromEndIterator', 316), [items], () => {
+    const buffered = bufferedElements(call, all);
+    trim(buffered);
+    return buffered;
+  });
+}
+
 /**
  * The count that `TryGetNonEnumeratedCount` finds without enumerating, as .NET's collections and the LINQ iterators
  * that know theirs give it, or undefined.
@@ -635,6 +649,7 @@ class GroupingState implements NativeState {
 }
 
 /** A set of the values a query has seen, each one it keeps charged against the slot limit, since a lazy source may yield without end. */
+// code-gauge-allow functionCognitiveComplexity -- The set's operations share its buckets and its comparison of values.
 function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boolean; remove(value: Value): boolean } {
   const buckets = new Map<number, Value[]>();
   const indexIn = (bucket: Value[], value: Value): number =>
@@ -1156,17 +1171,9 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.SkipLast`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
     if ((count as number) <= 0) return skip(call, items as Value, 0);
-    return query(
-      call,
-      call.typeArgs[0],
-      generatedIterator(call, 'TakeRangeFromEndIterator', 316),
-      [items as Value],
-      () => {
-        const buffered = bufferedElements(call, all);
-        buffered.length = Math.max(0, buffered.length - Math.max(0, count as number));
-        return buffered;
-      }
-    );
+    return fromEndQuery(call, items as Value, all, (buffered) => {
+      buffered.length = Math.max(0, buffered.length - Math.max(0, count as number));
+    });
   },
   [`${ENUMERABLE}.SkipWhile`]: (call, _receiver, args) =>
     predicateQuery(
@@ -1194,18 +1201,9 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.TakeLast`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
     if ((count as number) <= 0) return newArray(call, call.typeArgs[0], []);
-    return query(
-      call,
-      call.typeArgs[0],
-      generatedIterator(call, 'TakeRangeFromEndIterator', 316),
-      [items as Value],
-      () => {
-        const buffered = bufferedElements(call, all);
-        if ((count as number) <= 0) return [];
-        buffered.splice(0, Math.max(0, buffered.length - (count as number)));
-        return buffered;
-      }
-    );
+    return fromEndQuery(call, items as Value, all, (buffered) => {
+      buffered.splice(0, Math.max(0, buffered.length - (count as number)));
+    });
   },
   [`${ENUMERABLE}.TakeWhile`]: (call, _receiver, args) =>
     predicateQuery(

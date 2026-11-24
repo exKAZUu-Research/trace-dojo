@@ -87,18 +87,7 @@ export abstract class MemberBinder extends CallBinder {
     while (isChanged) {
       isChanged = false;
       for (const { fn, callee } of this.localFunctionUses) {
-        for (const local of callee.captures) {
-          for (
-            let current: FunctionScope | undefined = fn;
-            current && current.method !== local.owner;
-            current = current.outer
-          ) {
-            if (current.captures.has(local)) continue;
-            current.captures.add(local);
-            local.isCaptured = true;
-            isChanged = true;
-          }
-        }
+        for (const local of callee.captures) if (captureUpToOwner(fn, local)) isChanged = true;
       }
       for (const { fn, store } of this.captureLists) store([...fn.captures]);
     }
@@ -789,6 +778,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds an instance member of a value, or an extension method that takes it. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindInstanceMember(
     receiver: BoundExpression,
     name: string,
@@ -949,7 +939,6 @@ export abstract class MemberBinder extends CallBinder {
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
 
   /** Converts a method group to a delegate type, choosing the overload that its parameters select. */
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected bindMethodGroupConversion(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
@@ -967,46 +956,7 @@ export abstract class MemberBinder extends CallBinder {
         );
       return undefined;
     }
-    const args: ArgumentInfo[] = invoke.parameterTypes.map((type, index) => ({
-      expression: { kind: 'default', type, row },
-      name: undefined,
-      refKind: invoke.refKinds[index],
-      row,
-      target: undefined,
-    }));
-    const saved = this.diagnostics.length;
-    // A delegate passes exactly its own arguments: no optional parameter is left out, no params array expands, and
-    // each argument goes as it is, which a method that is not generic shows before overload resolution chooses.
-    let candidates = group.candidates.filter(
-      (candidate) =>
-        candidate.method.parameters.length === invoke.parameterTypes.length &&
-        (candidate.method.typeParameters.length > 0 ||
-          this.takesDelegateArguments({ candidate, typeArgs: [], args: [] }, invoke.parameterTypes, invoke.refKinds))
-    );
-    let resolved: ResolvedCall | undefined;
-    // A generic method shows it only once its type arguments are inferred: one that cannot gives way to the others.
-    while (candidates.length > 0) {
-      resolved = this.resolveCall(candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' });
-      if (!resolved || this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds)) break;
-      const rejected = resolved.candidate;
-      candidates = candidates.filter((candidate) => candidate !== rejected);
-      resolved = undefined;
-    }
-    let receiver = group.receiver;
-    if (!resolved && group.extensions.length > 0 && group.receiver) {
-      this.diagnostics.length = saved;
-      resolved = this.resolveCall(
-        group.extensions,
-        [{ expression: group.receiver, name: undefined, refKind: undefined, row, target: undefined }, ...args],
-        group.typeArgs,
-        row,
-        { name: group.name, kind: 'method', isExtension: true }
-      );
-      receiver = group.receiver;
-    }
-    this.diagnostics.length = saved;
-    if (resolved && !this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds))
-      resolved = undefined;
+    const resolved = this.resolveDelegateOverload(group, invoke, row);
     if (!resolved) {
       if (report)
         this.error(
@@ -1035,7 +985,7 @@ export abstract class MemberBinder extends CallBinder {
         );
       return undefined;
     }
-    if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
+    if (!method.isStatic && !group.receiver && method.kind !== 'localFunction') {
       if (report)
         this.error(
           row,
@@ -1044,7 +994,13 @@ export abstract class MemberBinder extends CallBinder {
         );
       return undefined;
     }
-    if (method.isStatic && receiver && !group.isSimpleName && !method.isExtension && method.kind !== 'localFunction') {
+    if (
+      method.isStatic &&
+      group.receiver &&
+      !group.isSimpleName &&
+      !method.isExtension &&
+      method.kind !== 'localFunction'
+    ) {
       if (report)
         this.error(
           row,
@@ -1059,7 +1015,7 @@ export abstract class MemberBinder extends CallBinder {
     return {
       kind: 'newDelegate',
       method,
-      receiver: method.isStatic && !method.isExtension ? undefined : receiver,
+      receiver: method.isStatic && !method.isExtension ? undefined : group.receiver,
       typeArgs: resolved.typeArgs,
       owner: resolved.candidate.owner,
       isVirtual,
@@ -1068,8 +1024,53 @@ export abstract class MemberBinder extends CallBinder {
     };
   }
 
+  /** Chooses the overload of a method group that a delegate's parameters select, reporting nothing. */
+  private resolveDelegateOverload(
+    group: Extract<NonValue, { kind: 'methodGroup' }>,
+    invoke: { parameterTypes: Type[]; refKinds: ('ref' | 'out' | 'in' | undefined)[] },
+    row: number
+  ): ResolvedCall | undefined {
+    const args: ArgumentInfo[] = invoke.parameterTypes.map((type, index) => ({
+      expression: { kind: 'default', type, row },
+      name: undefined,
+      refKind: invoke.refKinds[index],
+      row,
+      target: undefined,
+    }));
+    const saved = this.diagnostics.length;
+    // A delegate passes exactly its own arguments: no optional parameter is left out, no params array expands, and
+    // each argument goes as it is, which a method that is not generic shows before overload resolution chooses.
+    let candidates = group.candidates.filter(
+      (candidate) =>
+        candidate.method.parameters.length === invoke.parameterTypes.length &&
+        (candidate.method.typeParameters.length > 0 ||
+          this.takesDelegateArguments({ candidate, typeArgs: [], args: [] }, invoke.parameterTypes, invoke.refKinds))
+    );
+    let resolved: ResolvedCall | undefined;
+    // A generic method shows it only once its type arguments are inferred: one that cannot gives way to the others.
+    while (candidates.length > 0) {
+      resolved = this.resolveCall(candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' });
+      if (!resolved || this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds)) break;
+      const rejected = resolved.candidate;
+      candidates = candidates.filter((candidate) => candidate !== rejected);
+      resolved = undefined;
+    }
+    if (!resolved && group.extensions.length > 0 && group.receiver) {
+      this.diagnostics.length = saved;
+      resolved = this.resolveCall(
+        group.extensions,
+        [{ expression: group.receiver, name: undefined, refKind: undefined, row, target: undefined }, ...args],
+        group.typeArgs,
+        row,
+        { name: group.name, kind: 'method', isExtension: true }
+      );
+    }
+    this.diagnostics.length = saved;
+    if (resolved && !this.takesDelegateArguments(resolved, invoke.parameterTypes, invoke.refKinds)) return undefined;
+    return resolved;
+  }
+
   /** Binds a call: of a method group, a delegate, or `nameof`. */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
       return this.bindNameof(node, context);
@@ -1096,16 +1097,7 @@ export abstract class MemberBinder extends CallBinder {
     this.checkReadable(target, node.target, context);
     const invoke = this.delegateInvokeOf(target.type);
     if (!invoke) {
-      if (
-        target.kind === 'local' ||
-        target.kind === 'field' ||
-        target.kind === 'property' ||
-        target.kind === 'staticField'
-      ) {
-        this.error(node.target, 'CS0149', 'メソッド名が必要です');
-      } else {
-        this.error(node.target, 'CS0149', 'メソッド名が必要です');
-      }
+      this.error(node.target, 'CS0149', 'メソッド名が必要です');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const delegateSymbol = (target.type as NamedType).symbol;
@@ -1575,29 +1567,10 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   private bindMemberInitializer(member: MemberInitializer, type: Type, context: BindContext): BoundMemberInit {
-    const placeholder: BoundExpression = { kind: 'compoundOperand', type, row: member.row };
     // `Xs = { 1, 2 }` reads the member and fills it, so it needs no setter.
     const { value } = member;
     const isNested = value.kind === 'collectionInitializer' || value.kind === 'objectInitializer';
-    let target: BoundLValue;
-    if (member.kind === 'memberAssign') {
-      const { found, inaccessible } = this.lookupMember(type, member.name, context.fn.typeContext);
-      if (!found || found.kind === 'methods' || found.kind === 'type') {
-        if (inaccessible) this.reportInaccessible(inaccessible, member);
-        else this.error(member, 'CS0117', `'${displayType(type)}' に '${member.name}' の定義がありません`);
-        target = { kind: 'discard', type: ERROR_TYPE, row: member.row };
-      } else {
-        const access = this.memberAccessOn(placeholder, found, member, context);
-        // A nested initializer reads the member and fills what it holds, so the member must be readable.
-        if (isNested) this.checkReadable(access, member, context);
-        target = isNested ? (access as BoundLValue) : this.checkAssignable(access, member, context, 'initializer');
-      }
-    } else {
-      const access = this.bindElementAccess(placeholder, member.args, member, context);
-      if (isNested) this.checkReadable(access, member, context);
-      // An indexer assigned in an initializer is written, so it goes through the assignment's accessor checks.
-      target = isNested ? (access as BoundLValue) : this.checkAssignable(access, member, context, 'initializer');
-    }
+    const target = this.bindInitializerTarget(member, type, isNested, context);
     if (isNested) {
       return {
         kind: 'memberInit',
@@ -1607,6 +1580,32 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     return { kind: 'memberInit', target, value: this.bindAs(value, target.type, context), nested: undefined };
+  }
+
+  private bindInitializerTarget(
+    member: MemberInitializer,
+    type: Type,
+    isNested: boolean,
+    context: BindContext
+  ): BoundLValue {
+    const placeholder: BoundExpression = { kind: 'compoundOperand', type, row: member.row };
+    let access: BoundExpression;
+    if (member.kind === 'memberAssign') {
+      const { found, inaccessible } = this.lookupMember(type, member.name, context.fn.typeContext);
+      if (!found || found.kind === 'methods' || found.kind === 'type') {
+        if (inaccessible) this.reportInaccessible(inaccessible, member);
+        else this.error(member, 'CS0117', `'${displayType(type)}' に '${member.name}' の定義がありません`);
+        return { kind: 'discard', type: ERROR_TYPE, row: member.row };
+      }
+      access = this.memberAccessOn(placeholder, found, member, context);
+    } else {
+      access = this.bindElementAccess(placeholder, member.args, member, context);
+    }
+    // An assigned member or indexer is written, so it goes through the assignment's accessor checks, while a nested
+    // initializer reads the member and fills what it holds, so the member must be readable.
+    if (!isNested) return this.checkAssignable(access, member, context, 'initializer');
+    this.checkReadable(access, member, context);
+    return access as BoundLValue;
   }
 
   /** Binds collection initializer elements as `Add` calls, which `{ a, b }` makes for each element. */
@@ -1694,4 +1693,20 @@ export function propertyDisplay(target: Extract<BoundExpression, { kind: 'proper
     ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(owner)))).join(', ')}]`
     : property.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}`;
+}
+
+/** Makes a function and those around it up to a local's owner capture the local, returning whether any did not yet. */
+function captureUpToOwner(fn: FunctionScope, local: LocalSymbol): boolean {
+  let isChanged = false;
+  for (
+    let current: FunctionScope | undefined = fn;
+    current && current.method !== local.owner;
+    current = current.outer
+  ) {
+    if (current.captures.has(local)) continue;
+    current.captures.add(local);
+    local.isCaptured = true;
+    isChanged = true;
+  }
+  return isChanged;
 }

@@ -55,6 +55,7 @@ export class CsDecimal {
   }
 
   /** Parses the text of a decimal literal or of `decimal.Parse`, keeping its trailing zeros. */
+  // code-gauge-allow functionCognitiveComplexity -- The steps of one parse adjust the same coefficient and scale in turn.
   static parse(text: string): CsDecimal | undefined {
     const match = /^([+-])?(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
     if (!match || (match[2] === '' && (match[3] ?? '') === '')) return undefined;

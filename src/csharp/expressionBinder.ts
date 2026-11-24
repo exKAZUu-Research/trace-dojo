@@ -1,25 +1,16 @@
-import type { SourceDiagnostic } from '../interpreter/diagnostics';
-import type { Block, Designation, Expression, LambdaParameter, Pattern, Position } from './ast';
-import type {
-  BoundBlock,
-  BoundDeconstructTarget,
-  BoundExpression,
-  BoundLValue,
-  BoundMemberInit,
-  BoundPattern,
-  LambdaInfo,
-} from './bound';
-import type { ArgumentInfo } from './callBinder';
+// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
+import type { Designation, Expression, Pattern, Position } from './ast';
+import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext, ConversionMode } from './convertBinder';
 import { CsDecimal } from './decimal';
 import { isDelegateType } from './declarations';
 import { missingDeconstruct } from './deconstructionErrors';
-import { type BindResult, isNonValue, MemberBinder, type NonValue } from './memberBinder';
+import { LambdaBinder, typeIdentityKey } from './lambdaBinder';
+import { type BindResult, isNonValue, type NonValue } from './memberBinder';
 import type { Space } from './patternSpace';
-import { desugarQuery, TRANSPARENT_PREFIX } from './queries';
-// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
-import { FunctionScope, LocalScope } from './scopes';
+import { desugarQuery } from './queries';
+import { LocalScope } from './scopes';
 import {
   arrayType,
   displayType,
@@ -40,17 +31,15 @@ import {
   substitute,
   substitutionOf,
   type Type,
-  typeKey,
   TypeSymbol,
   VOID_TYPE,
 } from './types';
 import type { CsObject } from './values';
 
 type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
-type LambdaExpression = Extract<Expression, { kind: 'lambda' }>;
 
 /** Binds every kind of expression, and the target-typed ones once their targets are known. */
-export abstract class ExpressionBinder extends MemberBinder {
+export abstract class ExpressionBinder extends LambdaBinder {
   /** Binds a pattern against an input type, declaring its variables in the context's scope. */
   abstract bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern;
 
@@ -61,22 +50,8 @@ export abstract class ExpressionBinder extends MemberBinder {
     position: Position
   ): void;
 
-  /** Binds a block that forms a function's body, such as a lambda's. */
-  protected abstract bindFunctionBlock(block: Block, context: BindContext): BoundBlock;
-
   /** The anonymous types by shape, which share one type per list of member names and types. */
   private readonly anonymousTypes = new Map<string, TypeSymbol>();
-  private readonly lambdaCache = new Map<
-    Expression,
-    Map<
-      string,
-      {
-        result: BoundExpression | undefined;
-        diagnostics: SourceDiagnostic[];
-        returnType: Type | undefined;
-      }
-    >
-  >();
 
   bindExpression(node: Expression, context: BindContext): BindResult {
     return (
@@ -294,9 +269,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
   }
 
-  /** Whether the expression being bound may be a `throw` expression, as `??` and `?:` operands and lambda bodies may. */
-  protected allowsThrowExpression = false;
-
   protected bindThrowValue(node: Expression, context: BindContext, position: Position): BoundExpression {
     const value = this.bindValue(node, context);
     const exception = namedType(this.library.specials.get('exception') as TypeSymbol);
@@ -486,36 +458,11 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'conditionalAccess', receiver, access, temporary, wrapsNullable, type, row: node.row };
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindBinaryExpression(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     const row = node.operatorRow;
-    if (operator === '&&' || operator === '||') {
-      const leftValue = this.bindValue(node.left, context);
-      const rightValue = this.bindValue(node.right, context);
-      // Roslyn resolves `&&` as an operator on bool, so operands that are no bool fail as its operands.
-      const isBool = (operand: BoundExpression): boolean =>
-        operand.kind === 'unbound' ||
-        operand.type.kind === 'error' ||
-        this.implicitConversionOf(operand, this.boolType) !== undefined;
-      if (!isBool(leftValue) || !isBool(rightValue)) {
-        this.reportBinary(operator, leftValue, rightValue, row);
-        return { kind: 'default', type: this.boolType, row: node.row };
-      }
-      const left = this.convert(leftValue, this.boolType, node.left);
-      const right = this.convert(rightValue, this.boolType, node.right);
-      if (left.kind === 'constant' && right.kind === 'constant') {
-        return this.constant(
-          operator === '&&'
-            ? (left.value as boolean) && (right.value as boolean)
-            : (left.value as boolean) || (right.value as boolean),
-          this.boolType,
-          node.row
-        );
-      }
-      return { kind: 'logical', operator, left, right, type: this.boolType, row: node.row };
-    }
+    if (operator === '&&' || operator === '||') return this.bindLogical(node, operator, context);
     if (operator === '??') return this.bindCoalesce(node, context);
     let left = this.bindValue(node.left, context);
     let right = this.bindValue(node.right, context);
@@ -544,6 +491,37 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
     const result = this.bindBinary(operator, left, right, row);
     return { ...result, row: node.row } as BoundExpression;
+  }
+
+  private bindLogical(
+    node: Extract<Expression, { kind: 'binary' }>,
+    operator: '&&' | '||',
+    context: BindContext
+  ): BoundExpression {
+    const row = node.operatorRow;
+    const leftValue = this.bindValue(node.left, context);
+    const rightValue = this.bindValue(node.right, context);
+    // Roslyn resolves `&&` as an operator on bool, so operands that are no bool fail as its operands.
+    const isBool = (operand: BoundExpression): boolean =>
+      operand.kind === 'unbound' ||
+      operand.type.kind === 'error' ||
+      this.implicitConversionOf(operand, this.boolType) !== undefined;
+    if (!isBool(leftValue) || !isBool(rightValue)) {
+      this.reportBinary(operator, leftValue, rightValue, row);
+      return { kind: 'default', type: this.boolType, row: node.row };
+    }
+    const left = this.convert(leftValue, this.boolType, node.left);
+    const right = this.convert(rightValue, this.boolType, node.right);
+    if (left.kind === 'constant' && right.kind === 'constant') {
+      return this.constant(
+        operator === '&&'
+          ? (left.value as boolean) && (right.value as boolean)
+          : (left.value as boolean) || (right.value as boolean),
+        this.boolType,
+        node.row
+      );
+    }
+    return { kind: 'logical', operator, left, right, type: this.boolType, row: node.row };
   }
 
   private isTuple(type: Type): type is NamedType {
@@ -972,231 +950,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'tuple', elements, type, row: node.row };
   }
 
-  /**
-   * How many lambda bindings that only try a delegate type enclose the code being bound, whose diagnostics are thrown
-   * away, so the local functions declared there report none of their own either.
-   */
-  protected trialLambdaDepth = 0;
-
-  /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
-  protected bindLambda(
-    node: LambdaExpression,
-    outer: BindContext,
-    delegateType: NamedType | undefined,
-    parameterTypes: Type[],
-    returnType: Type | undefined,
-    report: boolean
-  ): { result: BoundExpression | undefined; returnType: Type | undefined } {
-    const key = `${parameterTypes.map(typeIdentityKey).join(',')}->${returnType ? typeIdentityKey(returnType) : '?'}`;
-    let cache = this.lambdaCache.get(node);
-    if (!cache) {
-      cache = new Map();
-      this.lambdaCache.set(node, cache);
-    }
-    const cached = cache.get(key);
-    if (cached && !report) return { result: cached.result, returnType: cached.returnType };
-    const savedDiagnostics = this.diagnostics.length;
-    const context = this.lambdaContext(node, outer, parameterTypes, returnType);
-    const method = context.fn.method;
-    const savedThrow = this.allowsThrowExpression;
-    let bound: { body: BoundBlock; inferred: Type | undefined };
-    if (!report) this.trialLambdaDepth++;
-    try {
-      bound = this.bindLambdaBody(node, context, returnType, report);
-    } finally {
-      this.allowsThrowExpression = savedThrow;
-      if (!report) this.trialLambdaDepth--;
-    }
-    const { body, inferred } = bound;
-    method.body = body;
-    const failed = this.diagnostics.length > savedDiagnostics;
-    const lambda: LambdaInfo = { method, captures: [...context.fn.captures], isStatic: node.isStatic };
-    this.recordCaptureList(context.fn, (captures) => {
-      lambda.captures = captures;
-    });
-    const result: BoundExpression | undefined =
-      failed || !delegateType ? undefined : { kind: 'lambda', lambda, type: delegateType, row: node.row };
-    if (!report) {
-      const diagnostics = this.diagnostics.splice(savedDiagnostics);
-      cache.set(key, { result, diagnostics, returnType: inferred });
-      return { result, returnType: inferred };
-    }
-    return {
-      result: delegateType ? { kind: 'lambda', lambda, type: delegateType, row: node.row } : undefined,
-      returnType: inferred,
-    };
-  }
-
-  /** The scope of a lambda's body, with a method for the lambda and its parameters declared. */
-  private lambdaContext(
-    node: LambdaExpression,
-    outer: BindContext,
-    parameterTypes: Type[],
-    returnType: Type | undefined
-  ): BindContext {
-    const method = new MethodSymbol('<lambda>', outer.fn.method.owner, 'localFunction');
-    method.isStatic = outer.fn.isStatic;
-    (method as { isStaticLambda?: boolean }).isStaticLambda = node.isStatic;
-    method.row = node.row;
-    method.returnType = returnType ?? VOID_TYPE;
-    method.parameters = node.parameters.map((parameter, index) => ({
-      name: parameter.name,
-      type: parameterTypes[index] ?? ERROR_TYPE,
-      refKind: parameter.modifier,
-      isParams: false,
-    }));
-    const fn = new FunctionScope(
-      method,
-      outer.fn,
-      outer.fn.typeContext,
-      returnType,
-      outer.fn.isStatic || node.isStatic,
-      outer.fn.isStatic || node.isStatic ? undefined : outer.fn.thisType,
-      'lambda'
-    );
-    const scope = new LocalScope(outer.scope, fn);
-    const context: BindContext = { scope, fn };
-    const hasDiscards = node.parameters.filter((other) => other.name === '_').length > 1;
-    for (const [index, parameter] of node.parameters.entries()) {
-      // Repeated `_` are discards, which still take their argument's position under a name no code can use.
-      const declared = hasDiscards && parameter.name === '_' ? { ...parameter, name: `\0discard${index}` } : parameter;
-      this.declareParameterLocal(declared, parameterTypes[index] ?? ERROR_TYPE, context);
-    }
-    return context;
-  }
-
-  private bindLambdaBody(
-    node: LambdaExpression,
-    context: BindContext,
-    returnType: Type | undefined,
-    report: boolean
-  ): { body: BoundBlock; inferred: Type | undefined } {
-    if (node.body.kind === 'block') {
-      const body = this.bindFunctionBlock(node.body, context);
-      const { fn } = context;
-      const inferred =
-        returnType ??
-        (fn.returnsValue
-          ? (this.bestCommonType(
-              fn.returnTypes.map((type) => ({ kind: 'default', type, row: node.row }) as BoundExpression)
-            ) ?? ERROR_TYPE)
-          : VOID_TYPE);
-      return { body, inferred };
-    }
-    const savedThrow = this.allowsThrowExpression;
-    this.allowsThrowExpression = true;
-    const value = this.bindValue(node.body, context);
-    this.allowsThrowExpression = savedThrow;
-    return this.expressionLambdaBody(node, node.body, value, returnType, report);
-  }
-
-  /** The body of a lambda with an expression body, converted to the delegate's return type. */
-  private expressionLambdaBody(
-    node: LambdaExpression,
-    bodyNode: Expression,
-    value: BoundExpression,
-    returnType: Type | undefined,
-    report: boolean
-  ): { body: BoundBlock; inferred: Type | undefined } {
-    if (returnType === undefined) {
-      const inferred = value.kind === 'throw' ? undefined : value.kind === 'unbound' ? undefined : value.type;
-      return { body: this.expressionBody(value, inferred, node.row), inferred };
-    }
-    if (returnType.kind === 'void')
-      return { body: this.voidLambdaBody(node, bodyNode, value, report), inferred: VOID_TYPE };
-    const converted = value.kind === 'throw' ? value : this.convert(value, returnType, bodyNode);
-    if (
-      report &&
-      !node.isQuery &&
-      value.kind !== 'throw' &&
-      value.type.kind !== 'error' &&
-      !this.implicitConversionOf(value, returnType)
-    ) {
-      this.error(
-        bodyNode,
-        'CS1662',
-        'デリゲート戻り値の型に暗黙的に変換できない戻り値の型がブロック内にあるため、ラムダ式 を目的のデリゲート型に変換できません'
-      );
-    }
-    return { body: this.expressionBody(converted, returnType, node.row), inferred: returnType };
-  }
-  /** The body of a lambda with an expression body whose delegate returns void, which must be a statement expression. */
-  private voidLambdaBody(
-    node: LambdaExpression,
-    bodyNode: Expression,
-    value: BoundExpression,
-    report: boolean
-  ): BoundBlock {
-    if (!this.isStatementExpression(value)) {
-      if (report)
-        this.error(
-          bodyNode,
-          'CS0201',
-          '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-        );
-      else this.diagnostics.push({ row: node.row, message: 'not a statement' });
-    }
-    return {
-      kind: 'block',
-      statements: [{ kind: 'expression', expression: value, row: bodyNode.row, step: 'none' }],
-      capturedLocals: [],
-      locals: [],
-      row: node.row,
-      step: 'none',
-    };
-  }
-
-  /** Declares a lambda's parameter, which may hide an enclosing function's local of the same name (since C# 8). */
-  private declareParameterLocal(parameter: LambdaParameter, type: Type, context: BindContext): void {
-    const local = new LocalSymbol(parameter.name, type, parameter.row, parameter.column);
-    local.isParameter = true;
-    local.refKind = parameter.modifier;
-    local.isTransparent = parameter.name.startsWith(TRANSPARENT_PREFIX);
-    local.isHidden = local.isTransparent;
-    context.fn.addLocal(local);
-    context.scope.variables.set(parameter.name, local);
-  }
-
-  private expressionBody(value: BoundExpression, returnType: Type | undefined, row: number): BoundBlock {
-    const statement =
-      returnType?.kind === 'void'
-        ? { kind: 'expression' as const, expression: value, row, step: 'none' as const }
-        : { kind: 'return' as const, value, row, step: 'none' as const };
-    return { kind: 'block', statements: [statement], capturedLocals: [], locals: [], row, step: 'none' };
-  }
-
-  /** Whether an expression may stand as a statement: an assignment, a call, an increment, `new`, or `await`. */
-  isStatementExpression(expression: BoundExpression): boolean {
-    switch (expression.kind) {
-      case 'assign':
-      case 'compoundAssign':
-      case 'increment':
-      case 'call':
-      case 'invokeDelegate':
-      case 'new':
-      case 'deconstructAssign':
-      case 'eventAccessor':
-      case 'throw': {
-        return true;
-      }
-      case 'conditionalAccess': {
-        return this.isStatementExpression(expression.access);
-      }
-      case 'convert': {
-        return expression.operand.kind === 'call' && !expression.isExplicit;
-      }
-      case 'sequence': {
-        return this.isStatementExpression(expression.value);
-      }
-      case 'default': {
-        return expression.failedCall === true || expression.type.kind === 'error';
-      }
-      default: {
-        return expression.type.kind === 'error';
-      }
-    }
-  }
-
   protected bindUnbound(
     expression: Unbound,
     target: Type,
@@ -1258,43 +1011,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     return failed ? undefined : result;
   }
 
-  private bindLambdaTo(
-    node: LambdaExpression,
-    context: BindContext,
-    target: Type,
-    report: boolean
-  ): BoundExpression | undefined {
-    const invoke = this.delegateInvokeOf(target);
-    if (!invoke) {
-      if (report && target.kind !== 'error')
-        this.error(node, 'CS1660', `ラムダ式 はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`);
-      return undefined;
-    }
-    if (invoke.parameterTypes.length !== node.parameters.length) {
-      if (report)
-        this.error(
-          node,
-          'CS1593',
-          `デリゲート '${displayType(target)}' には引数 ${node.parameters.length} を指定できません`
-        );
-      return undefined;
-    }
-    for (const [index, parameter] of node.parameters.entries()) {
-      if (!parameter.type) continue;
-      const declared = this.resolveType(parameter.type, context.fn.typeContext);
-      if (!sameType(declared, invoke.parameterTypes[index])) {
-        if (report)
-          this.error(
-            parameter,
-            'CS1678',
-            `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
-          );
-        return undefined;
-      }
-    }
-    return this.bindLambda(node, context, target as NamedType, invoke.parameterTypes, invoke.returnType, report).result;
-  }
-
   private bindTupleTo(
     node: Extract<Expression, { kind: 'tuple' }>,
     context: BindContext,
@@ -1328,81 +1044,6 @@ export abstract class ExpressionBinder extends MemberBinder {
         return value.type.kind === 'null' ? '<null>' : value.kind === 'unbound' ? '?' : displayType(value.type);
       })
       .join(', ')})`;
-  }
-
-  protected naturalTypeOf(expression: Unbound): Type | undefined {
-    const node = expression.node;
-    if (expression.methodGroup) {
-      const group = expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>;
-      if (group.candidates.length !== 1 || group.candidates[0].method.typeParameters.length > 0) return undefined;
-      const method = group.candidates[0].method;
-      const substitution = substitutionOf(group.candidates[0].owner);
-      return this.functionTypeOf(
-        method.parameters.map((parameter) => substitute(parameter.type, substitution)),
-        substitute(method.returnType, substitution)
-      );
-    }
-    if (node.kind === 'lambda') {
-      if (node.parameters.some((parameter) => !parameter.type)) return undefined;
-      const context = expression.context as BindContext;
-      const parameterTypes = node.parameters.map((parameter) =>
-        this.resolveType(parameter.type as NonNullable<LambdaParameter['type']>, context.fn.typeContext)
-      );
-      const declaredReturn = node.returnType ? this.resolveType(node.returnType, context.fn.typeContext) : undefined;
-      const returnType =
-        declaredReturn ?? this.bindLambda(node, context, undefined, parameterTypes, undefined, false).returnType;
-      if (!returnType) return undefined;
-      return this.functionTypeOf(parameterTypes, returnType);
-    }
-    return undefined;
-  }
-
-  /** The `Func` or `Action` type of parameter and return types, the natural type of lambdas and method groups. */
-  protected functionTypeOf(parameterTypes: Type[], returnType: Type): NamedType | undefined {
-    const isAction = returnType.kind === 'void';
-    const arity = parameterTypes.length + (isAction ? 0 : 1);
-    if (parameterTypes.length > 6) return undefined;
-    const symbol = this.library.typeNamed(`System.${isAction ? 'Action' : 'Func'}`, arity);
-    return namedType(symbol, isAction ? parameterTypes : [...parameterTypes, returnType]);
-  }
-
-  protected inferReturnType(expression: Unbound, parameterTypes: Type[]): Type | undefined {
-    if (expression.methodGroup) {
-      const group = expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>;
-      const args: ArgumentInfo[] = parameterTypes.map((type) => ({
-        expression: { kind: 'default', type, row: expression.row },
-        name: undefined,
-        refKind: undefined,
-        row: expression.row,
-        target: undefined,
-      }));
-      const saved = this.diagnostics.length;
-      const resolved = this.resolveCall(group.candidates, args, group.typeArgs, expression.row, {
-        name: group.name,
-        kind: 'method',
-      });
-      this.diagnostics.length = saved;
-      if (!resolved) return undefined;
-      return substitute(
-        resolved.candidate.method.returnType,
-        this.callSubstitution(resolved.candidate, resolved.typeArgs)
-      );
-    }
-    const node = expression.node;
-    if (node.kind !== 'lambda') return undefined;
-    if (node.parameters.length !== parameterTypes.length) return undefined;
-    return this.bindLambda(node, expression.context as BindContext, undefined, parameterTypes, undefined, false)
-      .returnType;
-  }
-
-  protected lambdaParameterTypes(expression: Unbound): Type[] | undefined {
-    const node = expression.node;
-    if (node.kind !== 'lambda' || node.parameters.length === 0 || node.parameters.some((parameter) => !parameter.type))
-      return undefined;
-    const context = expression.context as BindContext;
-    return node.parameters.map((parameter) =>
-      this.resolveType(parameter.type as NonNullable<LambdaParameter['type']>, context.fn.typeContext)
-    );
   }
 
   /** The default value of a type: null for references and nullables, zero for numbers, an empty struct. */
@@ -2075,14 +1716,6 @@ function inferredTupleName(expression: Expression): string | undefined {
 }
 
 export { isNonValue };
-
-/**
- * A type's part of a binding cache's key: a type's name alone is not its identity, as two namespaces may each declare
- * `Item`, and its display carries the tuple element names that its identity leaves out.
- */
-function typeIdentityKey(type: Type): string {
-  return `${typeKey(type)}:${displayType(type)}`;
-}
 
 /** A conditional branch's type as Roslyn names it in CS0173, `<null>` for one without a type. */
 function branchTypeText(branch: BoundExpression | undefined): string {

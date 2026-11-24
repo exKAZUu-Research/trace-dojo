@@ -387,6 +387,8 @@ interface TimeSpanParts {
   fraction: bigint;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of custom format character, sharing the scan position.
+// code-gauge-allow functionNcss -- One case per kind of custom format character, sharing the scan position.
 function customTimeSpan(span: TimeSpanParts, format: string, result: MeteredText): string {
   // Where the run of equal characters at the index ends, kept while a literal consumes the run in parts.
   let runEnd = 0;

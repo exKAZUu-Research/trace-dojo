@@ -498,16 +498,7 @@ export class FlowAnalyzer {
         // `void Init() => y = 0;` does. Only a recursive callee's first pass has no summary yet, which counts as
         // assigning all, the optimistic start that later passes narrow.
         if (expression.kind !== 'call' || expression.method.kind !== 'localFunction') return after;
-        // The captured locals the callee reads before assigning must be assigned at the call, where Roslyn reports them.
-        for (const local of expression.method.readsBeforeAssigned) this.read(local, after, expression.row);
-        const assignedAtExit = expression.method.assignedAtExit;
-        // What follows a call that never returns reads every local as assigned, while reachability (CS0161) does
-        // not know the call never returns, as in Roslyn, so the state stays reachable.
-        if (assignedAtExit === 'never') return union(after, new Set(this.functionLocals));
-        let assigned = after;
-        for (const local of expression.method.captures)
-          if (!assignedAtExit || assignedAtExit(local)) assigned = assign(assigned, local);
-        return assigned;
+        return this.localFunctionCall(expression.method, expression.row, after);
       }
       case 'invokeDelegate': {
         return this.arguments(expression.args, this.expression(expression.target, state));
@@ -518,6 +509,19 @@ export class FlowAnalyzer {
         return intersect(after, accessed);
       }
     }
+  }
+
+  private localFunctionCall(callee: MethodSymbol, row: number, after: State): State {
+    // The captured locals the callee reads before assigning must be assigned at the call, where Roslyn reports them.
+    for (const local of callee.readsBeforeAssigned) this.read(local, after, row);
+    const assignedAtExit = callee.assignedAtExit;
+    // What follows a call that never returns reads every local as assigned, while reachability (CS0161) does
+    // not know the call never returns, as in Roslyn, so the state stays reachable.
+    if (assignedAtExit === 'never') return union(after, new Set(this.functionLocals));
+    let assigned = after;
+    for (const local of callee.captures)
+      if (!assignedAtExit || assignedAtExit(local)) assigned = assign(assigned, local);
+    return assigned;
   }
 
   private creationExpression(expression: CreationExpression, state: State): State {

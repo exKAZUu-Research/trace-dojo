@@ -1,3 +1,4 @@
+// code-gauge-allow-file duplicateLines -- Each script runs alone with `dotnet run`, so it cannot share the assembly loading with the other.
 // Lists the public members of .NET types, for DOTNET_MEMBERS in src/csharp/library/dotnetNames.ts: one entry per type
 // that the grader's library declares, so that a member .NET has but the library lacks is reported as unavailable. Run
 // with the .NET SDK the interpreter follows, passing a file of the library's declared types' metadata names:

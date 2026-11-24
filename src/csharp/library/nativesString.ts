@@ -134,6 +134,14 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
       libraryType(call, STRING),
       splitParts(text, count, options, () => 0)
     );
+  const separatorLengthAt = isWhitespaceSplit
+    ? (index: number): number => (WHITESPACE.test(text[index] ?? '') ? 1 : 0)
+    : separatorMatcher(call, text, separators);
+  return newArray(call, libraryType(call, STRING), splitParts(text, count, options, separatorLengthAt));
+}
+
+/** The length of the separator that starts at each index of a text, or 0 where none does. */
+function separatorMatcher(call: NativeCall, text: string, separators: string[]): (index: number) => number {
   // Separators grouped by their first character, in their order, so each position tries only those that may match;
   // the comparisons left are charged, since many separators sharing a first character multiply the work.
   const byFirst = new Map<string, string[]>();
@@ -145,15 +153,13 @@ function split(call: NativeCall, text: string, args: Value[]): CsArray {
     byFirst.set(separator[0], group);
   }
   const step = stepMeter(call);
-  const separatorLengthAt = (index: number): number => {
-    if (isWhitespaceSplit) return WHITESPACE.test(text[index] ?? '') ? 1 : 0;
+  return (index) => {
     for (const separator of byFirst.get(text[index]) ?? []) {
       step();
       if (text.startsWith(separator, index)) return separator.length;
     }
     return 0;
   };
-  return newArray(call, libraryType(call, STRING), splitParts(text, count, options, separatorLengthAt));
 }
 
 function splitArguments(call: NativeCall, args: Value[]): { separators: string[]; count: number; options: number } {
@@ -183,6 +189,8 @@ function separatorsOf(value: Value, type: Type): string[] | undefined {
 }
 
 /** Splits a text at its separators into at most `count` parts, as `StringSplitOptions` filter and trim them. */
+// code-gauge-allow functionCognitiveComplexity -- The scan and .NET's skipping of removed entries share the parts and the position.
+// code-gauge-allow functionNcss -- The scan and .NET's skipping of removed entries share the parts and the position.
 function splitParts(
   text: string,
   count: number,
@@ -528,42 +536,8 @@ const stringNatives: Record<string, NativeMethod> = {
     trimWith(receiverText(receiver), charsOf(chars as Value), false, true),
   [`${STRING}.IsNormalized`]: (call, receiver) => receiverText(receiver) === receiverText(receiver).normalize(),
   [`${STRING}.Compare`]: (call, _receiver, args) => {
+    if (args.length === 5) return compareRanges(call, args);
     const [a, b] = args as (string | undefined)[];
-    if (args.length === 5) {
-      const [strA, indexA, strB, indexB, length] = args as [
-        string | undefined,
-        number,
-        string | undefined,
-        number,
-        number,
-      ];
-      if (length < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
-      if (indexA < 0)
-        failOutOfRange(
-          call,
-          'indexA',
-          'Index was out of range. Must be non-negative and less than the size of the collection.'
-        );
-      if (indexB < 0)
-        failOutOfRange(
-          call,
-          'indexB',
-          'Index was out of range. Must be non-negative and less than the size of the collection.'
-        );
-      // CompareInfo.Compare accepts a null string only with an empty range at 0, and orders it before any other.
-      const message = 'Index was out of range. Must be non-negative and less than the size of the collection.';
-      if (strA === undefined ? indexA !== 0 || length !== 0 : indexA > strA.length)
-        failOutOfRange(call, 'indexA', message);
-      if (strB === undefined ? indexB !== 0 || length !== 0 : indexB > strB.length)
-        failOutOfRange(call, 'indexB', message);
-      if (strA === undefined) return strB === undefined ? 0 : -1;
-      if (strB === undefined) return 1;
-      return compareCulture(
-        strA.slice(indexA, indexA + length),
-        strB.slice(indexB, indexB + length),
-        cultureOf(call, 0)
-      );
-    }
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
     if (typeof args[2] === 'boolean') return compareCulture(a, b, cultureOf(call, args[2] ? 1 : 0));
@@ -1251,20 +1225,7 @@ defineNatives({
       reserve(call, builder(receiver), count, 0);
       return append(call, receiver, String.fromCodePoint(args[0] as number).repeat(count));
     }
-    if (parameters.length === 3) {
-      const [start, count] = [args[1] as number, args[2] as number];
-      if (start < 0) failNegative(call, 'startIndex', start);
-      if (count < 0) failNegative(call, 'count', count);
-      if (args[0] === undefined) {
-        if (start === 0 && count === 0) return receiver;
-        failNull('value');
-      }
-      const value = args[0] as string;
-      if (count === 0) return receiver;
-      if (start > value.length - count)
-        failOutOfRange(call, 'startIndex', 'Index and length must refer to a location within the string.');
-      return append(call, receiver, value.slice(start, start + count));
-    }
+    if (parameters.length === 3) return appendRange(call, receiver, args as Value[]);
     const value = args[0] as Value;
     if (parameters[0].type.kind === 'array') return append(call, receiver, charsOf(value).join(''));
     if (value instanceof CsObject && value.native instanceof BuilderState)
@@ -1297,21 +1258,7 @@ defineNatives({
         'index',
         'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
-    let text: string;
-    if (isRepeated) {
-      const value = (args[1] as string | undefined) ?? '';
-      reserve(call, state, value.length * (args[2] as number), 0);
-      text = value.repeat(args[2] as number);
-    } else if (
-      call.method.parameters[1].type.kind === 'named' &&
-      specialOf(call.method.parameters[1].type) === 'char'
-    ) {
-      text = String.fromCodePoint(args[1] as number);
-    } else if (call.method.parameters[1].type.kind === 'array') {
-      text = charsOf(args[1] as Value).join('');
-    } else {
-      text = textOf(call, args[1] as Value, parameterType(call, 1));
-    }
+    const text = insertedText(call, state, args as Value[], isRepeated);
     reserve(call, state, text.length);
     state.insert(index, text);
     return receiver;
@@ -1398,4 +1345,48 @@ function builderRange(call: NativeCall, text: string, start: number, count: numb
   if (start < 0 || start > text.length) failOutOfRange(call, 'startIndex', message);
   if (count < 0 || start + count > text.length) failOutOfRange(call, 'count', message);
   return [text.slice(0, start), text.slice(start, start + count), text.slice(start + count)];
+}
+
+/** `String.Compare(strA, indexA, strB, indexB, length)`, which compares a range of each string. */
+function compareRanges(call: NativeCall, args: Parameters<NativeMethod>[2]): number {
+  const [strA, indexA, strB, indexB, length] = args as [string | undefined, number, string | undefined, number, number];
+  const message = 'Index was out of range. Must be non-negative and less than the size of the collection.';
+  if (length < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
+  if (indexA < 0) failOutOfRange(call, 'indexA', message);
+  if (indexB < 0) failOutOfRange(call, 'indexB', message);
+  // CompareInfo.Compare accepts a null string only with an empty range at 0, and orders it before any other.
+  if (strA === undefined ? indexA !== 0 || length !== 0 : indexA > strA.length) failOutOfRange(call, 'indexA', message);
+  if (strB === undefined ? indexB !== 0 || length !== 0 : indexB > strB.length) failOutOfRange(call, 'indexB', message);
+  if (strA === undefined) return strB === undefined ? 0 : -1;
+  if (strB === undefined) return 1;
+  return compareCulture(strA.slice(indexA, indexA + length), strB.slice(indexB, indexB + length), cultureOf(call, 0));
+}
+
+/** `StringBuilder.Append(string value, int startIndex, int count)`. */
+function appendRange(call: NativeCall, receiver: Value, args: Value[]): Value {
+  const [start, count] = [args[1] as number, args[2] as number];
+  if (start < 0) failNegative(call, 'startIndex', start);
+  if (count < 0) failNegative(call, 'count', count);
+  if (args[0] === undefined) {
+    if (start === 0 && count === 0) return receiver;
+    failNull('value');
+  }
+  const value = args[0] as string;
+  if (count === 0) return receiver;
+  if (start > value.length - count)
+    failOutOfRange(call, 'startIndex', 'Index and length must refer to a location within the string.');
+  return append(call, receiver, value.slice(start, start + count));
+}
+
+/** The text that `StringBuilder.Insert` inserts, reserving room for a repeated one before building it. */
+function insertedText(call: NativeCall, state: BuilderState, args: Value[], isRepeated: boolean): string {
+  if (isRepeated) {
+    const value = (args[1] as string | undefined) ?? '';
+    reserve(call, state, value.length * (args[2] as number), 0);
+    return value.repeat(args[2] as number);
+  }
+  const type = call.method.parameters[1].type;
+  if (type.kind === 'named' && specialOf(type) === 'char') return String.fromCodePoint(args[1] as number);
+  if (type.kind === 'array') return charsOf(args[1] as Value).join('');
+  return textOf(call, args[1] as Value, parameterType(call, 1));
 }
