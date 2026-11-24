@@ -506,8 +506,11 @@ class AstChecker {
     if (statement.isComptime) this.comptimeKeyword(statement);
     if (statement.alignment) this.expression(statement.alignment, 'value');
     if (statement.type) this.typeExpression(statement.type);
-    if (statement.value) this.expression(statement.value, 'value');
-    else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
+    const { value } = statement;
+    if (value) {
+      if (statement.isComptime) this.withComptime(statement, () => this.expression(value, 'value'));
+      else this.expression(value, 'value');
+    } else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
     if (!statement.type && statement.value?.kind === 'undefined') {
       this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
     }
