@@ -1,5 +1,6 @@
 import { ANY } from './sources/any';
 import { BITSET } from './sources/bitset';
+import { DISTRIBUTIONS } from './sources/distributions';
 import { FUNCTION } from './sources/functional';
 import { INITIALIZER_LIST } from './sources/initializerList';
 import { MEMORY } from './sources/memory';
@@ -36,6 +37,7 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   TYPE_INFO,
   ANY,
   INITIALIZER_LIST,
+  DISTRIBUTIONS,
 ];
 
 const SOURCE_BY_NAME = new Map(LIBRARY_SOURCES.flatMap((source) => source.names.map((name) => [name, source])));

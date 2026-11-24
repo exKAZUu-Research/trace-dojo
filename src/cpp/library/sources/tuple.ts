@@ -201,6 +201,25 @@ constexpr tuple_element_t<I, tuple<T...>>&& get(tuple<T...>&& t) noexcept {
   return static_cast<tuple_element_t<I, tuple<T...>>&&>(__tuple_at<I>::get(t));
 }
 
+template <unsigned long I, class A, class B>
+  requires(I < 2)
+constexpr tuple_element_t<I, std::pair<A, B>>& get(std::pair<A, B>& p) noexcept {
+  if constexpr (I == 0) return p.first;
+  else return p.second;
+}
+template <unsigned long I, class A, class B>
+  requires(I < 2)
+constexpr const tuple_element_t<I, std::pair<A, B>>& get(const std::pair<A, B>& p) noexcept {
+  if constexpr (I == 0) return p.first;
+  else return p.second;
+}
+template <class T, class A, class B>
+  requires(is_same_v<T, A> != is_same_v<T, B>)
+constexpr T& get(std::pair<A, B>& p) noexcept {
+  if constexpr (is_same_v<T, A>) return p.first;
+  else return p.second;
+}
+
 template <class T, class... U>
 constexpr unsigned long __index_of() {
   constexpr bool same[] = {is_same_v<T, U>..., false};
