@@ -2856,6 +2856,8 @@ export class Compiler extends StatementCompiler {
     if (type.kind === 'array') {
       if (expr.literalBytes !== undefined && isCharacterArray(type))
         return initializerWithConstancy(this.charArrayFromLiteral(type, expr.literalBytes, row), true);
+      if (this.deducesArrays && sameType(unqualified(expr.type), unqualified(type), false))
+        return this.arrayCopy(type, expr, row);
       return this.error(row, `配列は ${typeName(expr.type)} 型の値では初期化できません。{...} を使ってください。`);
     }
     if (isList) this.checkNarrowing(expr, type, row);
@@ -2875,6 +2877,38 @@ export class Compiler extends StatementCompiler {
           foldedValue: converted.foldedValue,
           constantPointee: converted.constantPointee,
         });
+  }
+
+  /** A copy of an array, element by element, which only a structured binding's hidden variable makes. */
+  private arrayCopy(type: Extract<Type, { kind: 'array' }>, source: Expr, row: number): Initializer {
+    const sources: Ptr[] = [];
+    const element: Expr = {
+      type: source.type.kind === 'array' ? source.type.of : type.of,
+      isLvalue: true,
+      row,
+      run: () => sources.at(-1) as Ptr,
+    };
+    const copy = this.copyInitializer(type.of, element, row, false);
+    const destroy = this.destroyerOf(type.of);
+    const locate = this.rvalue(source).run;
+    return (frame, target) => {
+      const array = locate(frame) as Ptr;
+      return constructArray(
+        frame,
+        type.length ?? 0,
+        type.of,
+        (f, storage, index) => {
+          sources.push(array.offset(index));
+          try {
+            return copy(f, storage);
+          } finally {
+            sources.pop();
+          }
+        },
+        destroy,
+        target instanceof ArrayStore ? target : undefined
+      );
+    };
   }
 
   private objectInitializer(expr: Expr): Initializer {

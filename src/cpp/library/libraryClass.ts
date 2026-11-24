@@ -70,6 +70,8 @@ interface LibraryMembers {
   readonly iteratorReference?: Type;
   readonly valueInitializedMembers?: readonly Type[];
   outputContainer?: Type;
+  /** The elements a structured binding decomposes a tuple-like object into (`std::tuple`). */
+  tupleElements?: (compiler: ExpressionCompiler, object: Expr, count: number, row: number) => Expr[];
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;
 }

@@ -4,6 +4,7 @@ import { AUTO, hasAuto, isAuto } from './compilerBase';
 import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
+  constantExpr,
   type ConstantLocation,
   constantLocationOf,
   type Expr,
@@ -45,6 +46,7 @@ import {
   isLibraryClass,
   isReferenceRelated,
   isScopedEnum,
+  LONG,
   nonReference,
   pointerTo,
   referenceTo,
@@ -350,6 +352,27 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private localDeclarator(base: Type, declarator: Syntax, declaration: Syntax): LocalDeclaration {
+    const structured = structuredBinding(declarator, `\0binding ${declarator.start}`);
+    if (structured) {
+      // `auto [a, b] = e;` declares a hidden variable and names its elements (C++20 [dcl.struct.bind]).
+      if (!hasAuto(base)) return this.error(declarator.row, '構造化束縛の型には auto を書いてください。');
+      const saved = this.deducesArrays;
+      this.deducesArrays = true;
+      let hidden: LocalDeclaration;
+      try {
+        hidden = this.localDeclarator(base, structured.declarator, declaration);
+      } finally {
+        this.deducesArrays = saved;
+      }
+      const bind = this.bindElements(structured.names, structured.hidden, declarator.row);
+      return {
+        ...hidden,
+        exec: (frame) => {
+          hidden.exec(frame);
+          return bind(frame);
+        },
+      };
+    }
     const declared = this.applyDeclarator(base, declarator);
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
@@ -1191,7 +1214,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** Declares the variable of a range-based for loop, which each iteration binds to an element. */
   private rangeVariable(node: Syntax, element: Expr): { bind: Exec; type: Type } {
     const base = this.specifiedType(node, true);
-    const declarator = fieldOf(node, 'declarator') as Syntax;
+    const written = fieldOf(node, 'declarator') as Syntax;
+    const structured = structuredBinding(written, `\0binding ${written.start}`);
+    if (structured) {
+      if (!hasAuto(base)) return this.error(written.row, '構造化束縛の型には auto を書いてください。');
+      const hidden = this.rangeVariable(
+        { ...node, all: node.all.map((child) => (child === written ? structured.declarator : child)) },
+        element
+      );
+      const bind = this.bindElements(structured.names, structured.hidden, written.row);
+      return {
+        type: hidden.type,
+        bind: (frame) => {
+          hidden.bind(frame);
+          return bind(frame);
+        },
+      };
+    }
+    const declarator = written;
     const declared = this.applyDeclarator(base, declarator);
     const name = declared.name as string;
     if (declared.type.kind === 'reference') {
@@ -1225,6 +1265,59 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }),
       type,
     };
+  }
+
+  /**
+   * Declares the names of a structured binding as references to the elements of the hidden variable: an array's
+   * elements, a pair's members, or a class's public data members.
+   */
+  private bindElements(names: Syntax[], hidden: string, row: number): Exec {
+    const source = this.entityExpr(this.lookupName(hidden, row), { ...names[0], text: hidden }, false);
+    const elements = this.decompose(source, names.length, row);
+    const slots = names.map((name, index) => {
+      this.checkRedeclaration(name.text, name.row);
+      const element = elements[index];
+      const local = this.context.declareLocal(name.text, referenceTo(element.type), false);
+      this.context.scope.names.set(name.text, { kind: 'local', local, isReference: true });
+      return { slot: local.slot, locate: element.run as Eval<Ptr> };
+    });
+    return this.fullExpression<undefined>((frame) => {
+      for (const { slot, locate } of slots) frame.slots[slot] = locate(frame);
+      return;
+    });
+  }
+
+  /** The elements a structured binding decomposes an object into. */
+  private decompose(source: Expr, count: number, row: number): Expr[] {
+    const { type } = source;
+    const mismatch = (size: number): never =>
+      this.error(row, `${typeName(type)} 型の値は ${size} 個に分かれますが、名前が ${count} 個あります。`);
+    if (type.kind === 'array') {
+      if (type.length !== count) return mismatch(type.length ?? 0);
+      return Array.from({ length: count }, (_, index) =>
+        this.subscript(source, constantExpr(LONG, BigInt(index), row), row)
+      );
+    }
+    if (type.kind !== 'class') return this.error(row, `${typeName(type)} 型の値は構造化束縛で分けられません。`);
+    const library = type.cls.library;
+    if (library?.kind === 'pair') {
+      if (count !== 2) return mismatch(2);
+      return [this.member(source, 'first', row), this.member(source, 'second', row)];
+    }
+    if (library?.aggregateArray) {
+      const length = library.aggregateArray.type.length ?? 0;
+      if (length !== count) return mismatch(length);
+      return Array.from({ length: count }, (_, index) =>
+        this.subscript(source, constantExpr(LONG, BigInt(index), row), row)
+      );
+    }
+    if (library?.tupleElements) return library.tupleElements(this, source, count, row);
+    if (library) return this.error(row, `${typeName(type)} 型の値は構造化束縛で分けられません。`);
+    const fields = type.cls.fields;
+    if (fields.some((field) => field.access !== 'public'))
+      return this.error(row, `${typeName(type)} には public でないメンバがあるので、構造化束縛で分けられません。`);
+    if (fields.length !== count) return mismatch(fields.length);
+    return fields.map((field) => this.fieldAccess(source, field, row));
   }
 
   /** Whether learners write down a variable's value: numbers, characters, Booleans, and strings. */
@@ -1699,6 +1792,28 @@ function endException(frame: Frame, exception: CppException): void {
 }
 
 /** Destroys automatic objects in reverse order and clears the local bindings. */
+/**
+ * The structured binding a declarator declares (`[a, b]`, `&[a, b]`), with its names and the declarator that declares
+ * the hidden variable of the given name in its place.
+ */
+function structuredBinding(
+  declarator: Syntax,
+  hidden: string
+): { names: Syntax[]; declarator: Syntax; hidden: string } | undefined {
+  if (declarator.type === 'structured_binding_declarator') {
+    const name: Syntax = { ...declarator, type: 'identifier', text: hidden, all: [], children: [] };
+    return { names: [...declarator.children], declarator: name, hidden };
+  }
+  const inner = declarator.children.find((child) =>
+    ['structured_binding_declarator', 'reference_declarator'].includes(child.type)
+  );
+  if (!inner || !['init_declarator', 'reference_declarator'].includes(declarator.type)) return undefined;
+  const found = structuredBinding(inner, hidden);
+  if (!found) return undefined;
+  const all = declarator.all.map((child) => (child === inner ? found.declarator : child));
+  return { ...found, declarator: { ...declarator, all, children: all.filter((child) => child.isNamed) } };
+}
+
 /** Whether a child of a condition's declaration is one of its specifiers rather than its declarator or value. */
 function isSpecifier(child: Syntax): boolean {
   return child.field !== 'declarator' && child.field !== 'value' && child.type !== '=';

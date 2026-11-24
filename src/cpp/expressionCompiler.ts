@@ -98,6 +98,8 @@ type FloatingFactors = [FloatingValue, FloatingValue];
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
   protected isUnevaluated = false;
+  /** Whether `auto` deduces an array from an array, as a structured binding's hidden variable does. */
+  protected deducesArrays = false;
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */
   private readonly literalStores = new Map<string, Box>();
   // A replacement evaluator must explicitly preserve factor evaluation, including any new side effects.
@@ -2477,7 +2479,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (init.type.kind === 'void')
       return this.error(row, 'auto の変数の初期値に、値を返さない関数（void）の結果は使えません。');
-    const decayed = init.type.kind === 'array' ? pointerTo(init.type.of) : unqualified(init.type);
+    const decayed =
+      init.type.kind === 'array' && !this.deducesArrays ? pointerTo(init.type.of) : unqualified(init.type);
     return this.deduceAutoPattern(declared, decayed, row);
   }
 

@@ -15,7 +15,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
   throw_specifier: '例外の指定（throw(...)）',
   variadic_parameter: '可変長引数（...）',
-  structured_binding_declarator: '構造化束縛（auto [a, b] = ...）',
   alignas_qualifier: 'alignas',
   alignof_expression: 'alignof',
   generic_expression: '_Generic',
