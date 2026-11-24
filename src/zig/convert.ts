@@ -1156,6 +1156,7 @@ function initializer(list: Node, span: Span, type: Expression | undefined): Expr
 }
 
 /** The qualifiers after a pointer's `*` or `[*]`, or a slice's `[]`, and the pointee type that ends them. */
+// code-gauge-allow functionNcss -- Walks the parts of one syntax node in source order.
 function pointerParts(node: Node, after: number): PointerQualifiers & { child: Expression } {
   const qualifiers: PointerQualifiers = { isConst: false, isVolatile: false, allowZero: false };
   const children = node.children.slice(after);

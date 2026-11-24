@@ -143,8 +143,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Functions -------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected compileFunctionBody(compilation: FunctionCompilation): void {
     this.separateAnalysis(() => this.compileFunctionBodyAlone(compilation));
   }
@@ -212,6 +210,8 @@ export abstract class StatementCompiler extends CallCompiler {
       );
   }
 
+  // code-gauge-allow functionNcss -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   private compileFunctionBodyAlone(compilation: FunctionCompilation): void {
     const { instance, syntax, namespace } = compilation;
     instance.state = 'compiling';
@@ -1824,7 +1824,7 @@ export abstract class StatementCompiler extends CallCompiler {
    * `inline while`, which the compiler unrolls: it evaluates the condition as it compiles each iteration, so that a
    * `comptime var` that the continue expression changes can stand in the body as a constant.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Keeps the unrolling and the generated code of one construct together.
+  // code-gauge-allow functionNcss -- Keeps the unrolling of one construct together, as Zig's Sema unrolls it.
   private inlineWhile(
     expression: ExpressionOf<'while'>,
     resultType: Type | undefined,
@@ -1840,7 +1840,6 @@ export abstract class StatementCompiler extends CallCompiler {
       breaks: [],
       broken: false,
     };
-    const row = this.stepRow(expression);
     const iterations: { body: Exec; continuation?: Exec }[] = [];
     let noreturn = false;
     let exhausted = false;
@@ -1872,6 +1871,33 @@ export abstract class StatementCompiler extends CallCompiler {
         : undefined;
       iterations.push({ body: body.exec, continuation });
     }
+    return this.unrolledLoop(
+      expression,
+      { target, exhausted, noreturn, asStatement, row: this.stepRow(expression) },
+      iterations.length,
+      (frame, index) => {
+        const iteration = iterations[index];
+        const id = target.id;
+        const completion = loopExit(runBody(iteration.body, frame, id), id);
+        if (completion || !iteration.continuation) return completion;
+        return loopExit(runBody(iteration.continuation, frame, id), id);
+      }
+    );
+  }
+
+  /**
+   * The code of a loop that the compiler unrolled: each iteration's code in turn, which the caller runs, then the else
+   * branch, which a loop that unrolled to its end has.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Keeps the generated code of one loop and its else branch together.
+  private unrolledLoop(
+    expression: ExpressionOf<'while' | 'for'>,
+    loop: { target: JumpTarget; exhausted: boolean; noreturn: boolean; asStatement: boolean; row: number | undefined },
+    count: number,
+    runIteration: (frame: Frame, index: number) => Jump | { value: Value } | undefined,
+    prepare?: (frame: Frame) => void
+  ): { stmt: Stmt; value: TExpr } {
+    const { target, exhausted, asStatement, row } = loop;
     const otherwise =
       exhausted && expression.otherwise
         ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
@@ -1879,49 +1905,37 @@ export abstract class StatementCompiler extends CallCompiler {
     const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, !exhausted, expression);
     const otherwiseExec = otherwise?.stmt?.exec;
     const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
-    const { id } = target;
-    const loop = (frame: Frame): Jump | { value: Value } | undefined => {
-      for (const iteration of iterations) {
+    const run = (frame: Frame): Jump | { value: Value } | undefined => {
+      prepare?.(frame);
+      for (let index = 0; index < count; index++) {
         frame.runtime.spend();
-        frame.runtime.steps.step(row);
-        const completion = loopExit(runBody(iteration.body, frame, id), id);
+        if (expression.kind === 'while') frame.runtime.steps.step(row);
+        const completion = runIteration(frame, index);
         if (completion) return completion;
-        if (iteration.continuation) {
-          const completion = loopExit(runBody(iteration.continuation, frame, id), id);
-          if (completion) return completion;
-        }
       }
       if (otherwiseExec) {
         const completion = otherwiseExec(frame);
         if (completion) return completion;
       }
-      if (otherwiseValue) return { value: otherwiseValue(frame) };
-      return undefined;
+      return otherwiseValue ? { value: otherwiseValue(frame) } : undefined;
     };
     const stmt: Stmt = {
       exec: (frame) => {
-        const result = loop(frame);
+        const result = run(frame);
         return result instanceof Jump ? result : undefined;
       },
-      noreturn: noreturn || otherwise?.stmt?.noreturn === true,
+      noreturn: loop.noreturn || otherwise?.stmt?.noreturn === true,
     };
-    return {
-      stmt,
-      value: this.loopResult(
-        target,
-        otherwise?.value,
-        !exhausted,
-        runtime(
-          stmt.noreturn ? NORETURN : valueType,
-          (frame) => {
-            const result = loop(frame);
-            if (result instanceof Jump) throw result;
-            return result?.value;
-          },
-          expression
-        )
-      ),
-    };
+    const value = runtime(
+      stmt.noreturn ? NORETURN : valueType,
+      (frame) => {
+        const result = run(frame);
+        if (result instanceof Jump) throw result;
+        return result?.value;
+      },
+      expression
+    );
+    return { stmt, value: this.loopResult(target, otherwise?.value, !exhausted, value) };
   }
 
   private loopType(target: JumpTarget, otherwise: TExpr | undefined, infinite: boolean, span: Span): Type {
@@ -2271,58 +2285,30 @@ export abstract class StatementCompiler extends CallCompiler {
         fn.targets.pop();
       }
     }
-    const otherwise =
-      exhausted && expression.otherwise
-        ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
-        : undefined;
-    const valueType = asStatement ? VOID : this.loopType(target, otherwise?.value, !exhausted, expression);
-    const otherwiseExec = otherwise?.stmt?.exec;
-    const otherwiseValue = otherwise?.value ? this.coerce(otherwise.value, valueType, expression).eval : undefined;
     const evaluateOperands = known.map((each) => each?.evaluateOperand);
-    const { id } = target;
-    const loop = clearingLocals(operandSlots, (frame: Frame): Jump | { value: Value } | undefined => {
-      for (const [index, evaluate] of evaluateOperands.entries())
-        if (evaluate) frame.slots[operandSlots[index]] = evaluate(frame);
-      for (const iteration of iterations) {
-        frame.runtime.spend();
-        for (const [index, slot] of iteration.slots.entries()) frame.slots[slot] = iteration.evaluators[index](frame);
+    const run = this.unrolledLoop(
+      expression,
+      { target, exhausted, noreturn, asStatement, row },
+      iterations.length,
+      (frame, index) => {
+        const iteration = iterations[index];
+        for (const [position, slot] of iteration.slots.entries())
+          frame.slots[slot] = iteration.evaluators[position](frame);
         frame.runtime.steps.stepBinding(
           row,
           iteration.bindings.some((binding) => bindingStoresAnswer(binding, frame))
         );
-        const completion = loopExit(runBody(iteration.body, frame, id), id);
-        if (completion) return completion;
-      }
-      if (otherwiseExec) {
-        const completion = otherwiseExec(frame);
-        if (completion) return completion;
-      }
-      if (otherwiseValue) return { value: otherwiseValue(frame) };
-      return undefined;
-    });
-    const stmt: Stmt = {
-      exec: (frame) => {
-        const result = loop(frame);
-        return result instanceof Jump ? result : undefined;
+        return loopExit(runBody(iteration.body, frame, target.id), target.id);
       },
-      noreturn: noreturn || otherwise?.stmt?.noreturn === true,
-    };
+      (frame) => {
+        for (const [index, evaluate] of evaluateOperands.entries())
+          if (evaluate) frame.slots[operandSlots[index]] = evaluate(frame);
+      }
+    );
+    const clear = (exec: (frame: Frame) => Value): ((frame: Frame) => Value) => clearingLocals(operandSlots, exec);
     return {
-      stmt,
-      value: this.loopResult(
-        target,
-        otherwise?.value,
-        !exhausted,
-        runtime(
-          stmt.noreturn ? NORETURN : valueType,
-          (frame) => {
-            const result = loop(frame);
-            if (result instanceof Jump) throw result;
-            return result?.value;
-          },
-          expression
-        )
-      ),
+      stmt: { ...run.stmt, exec: clear(run.stmt.exec) as Exec },
+      value: { ...run.value, eval: clear(run.value.eval) },
     };
   }
 

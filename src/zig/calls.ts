@@ -210,6 +210,7 @@ export abstract class CallCompiler extends VectorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionNcss -- Binds each argument to its parameter as Zig's Sema does, comptime and generic ones included.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -312,6 +313,8 @@ export abstract class CallCompiler extends VectorCompiler {
   private readonly declarationTypes = new WeakMap<Decl, FnType>();
   private readonly resolvingSignatures = new Set<Decl>();
 
+  // code-gauge-allow functionCognitiveComplexity -- Resolves each part of a function's type, as Zig's Sema does for a declaration.
+  // code-gauge-allow functionNcss -- Resolves each part of a function's type, as Zig's Sema does for a declaration.
   protected declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType {
     const cached = this.declarationTypes.get(decl);
     if (cached) return cached;

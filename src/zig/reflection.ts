@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- The builtins that inspect types share the analysis of `std.lang.Type`'s values.
 import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { BufferMemory } from './bufferMemory';
@@ -36,246 +37,361 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     return this.reflectionBuiltin(expression, resultType) ?? super.compileBuiltin(expression, resultType);
   }
 
-  // code-gauge-allow functionNcss -- One case per builtin, as Zig's language reference lists them.
-  // code-gauge-allow functionCognitiveComplexity -- One case per builtin, as Zig's language reference lists them.
+  // code-gauge-allow functionNcss -- Dispatches one case per builtin, as Zig's language reference lists them.
   private reflectionBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr | undefined {
-    const { name, args } = expression;
-    const arity = (count: number): void => {
-      if (args.length !== count)
-        this.error(expression, `${name} の引数の数が合いません（${count} 個が必要ですが、${args.length} 個です）。`);
-    };
-    switch (name) {
+    switch (expression.name) {
       case '@typeName': {
-        arity(1);
-        return this.text(typeName(this.compileType(args[0])), expression);
+        return this.builtinTypeName(expression);
       }
       case '@compileError': {
-        arity(1);
-        return this.error(expression, this.comptimeText(args[0]));
+        return this.builtinCompileError(expression);
       }
       case '@compileLog': {
-        const parts = args.map((arg) => this.logText(this.compile(arg)));
-        return this.error(expression, `@compileLog が残っています（出力: ${parts.join(', ')}）。`);
+        return this.builtinCompileLog(expression);
       }
       case '@setEvalBranchQuota': {
-        arity(1);
-        const quota = Number(
-          this.knownValue(this.coerce(this.compile(args[0], intType(false, 32)), intType(false, 32)), '上限')
-        );
-        this.evalBranches.quota = Math.max(this.evalBranches.quota, quota);
-        return runtime(
-          VOID,
-          (frame) => {
-            const count = frame.runtime.branchCount;
-            if (count) count.quota = Math.max(count.quota, quota);
-          },
-          expression
-        );
+        return this.builtinSetEvalBranchQuota(expression);
       }
       case '@inComptime': {
-        arity(0);
-        if (this.comptimeDepth > 0) return known(BOOL, true, expression);
-        return runtime(BOOL, (frame) => frame.runtime.branchCount !== undefined, expression);
+        return this.builtinInComptime(expression);
       }
-      case '@sizeOf':
-      case '@alignOf':
+      case '@sizeOf': {
+        return this.builtinSizeOf(expression);
+      }
+      case '@alignOf': {
+        return this.builtinSizeOf(expression);
+      }
       case '@bitSizeOf': {
-        arity(1);
-        const type = this.sizedType(args[0], name);
-        const size = name === '@sizeOf' ? sizeOf(type) : name === '@alignOf' ? alignOf(type) : bitSizeOf(type);
-        return known(COMPTIME_INT, BigInt(size), expression);
+        return this.builtinSizeOf(expression);
       }
-      case '@offsetOf':
+      case '@offsetOf': {
+        return this.builtinOffsetOf(expression);
+      }
       case '@bitOffsetOf': {
-        arity(2);
-        const type = this.sizedType(args[0], name);
-        const fieldName = this.comptimeText(args[1]);
-        if (type.kind !== 'struct')
-          return this.error(args[0], `${name} には構造体の型を書いてください（${typeName(type)} 型です）。`);
-        const fields = this.structFields(type, expression);
-        const index = fields.findIndex((field) => field.name === fieldName);
-        if (index === -1)
-          return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
-        if (fields[index].comptimeValue)
-          return this.error(args[1], `comptime のフィールド「${fieldName}」には位置がありません。`);
-        const bits = fieldOffsets(type)[index];
-        return known(COMPTIME_INT, BigInt(name === '@offsetOf' ? Math.floor(bits / 8) : bits), expression);
+        return this.builtinOffsetOf(expression);
       }
       case '@hasDecl': {
-        arity(2);
-        const type = this.containerArgument(args[0], name);
-        const declName = this.comptimeText(args[1]);
-        const decl = this.findDecl(type, declName);
-        return known(BOOL, decl !== undefined && (decl.kind === 'native' || decl.syntax.isPub), expression);
+        return this.builtinHasDecl(expression);
       }
       case '@hasField': {
-        arity(2);
-        const type = this.containerArgument(args[0], name);
-        const fieldName = this.comptimeText(args[1]);
-        return known(BOOL, this.fieldNames(type, expression).includes(fieldName), expression);
+        return this.builtinHasField(expression);
       }
       case '@FieldType': {
-        arity(2);
-        const type = this.containerArgument(args[0], name);
-        const fieldName = this.comptimeText(args[1]);
-        const fields =
-          type.kind === 'struct'
-            ? this.structFields(type, expression)
-            : type.kind === 'union'
-              ? this.unionFields(type)
-              : [];
-        const field = fields.find((each) => each.name === fieldName);
-        if (!field) return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
-        return known(TYPE, field.type, expression);
+        return this.builtinFieldType(expression);
       }
       case '@field': {
-        arity(2);
-        return this.compile(this.fieldExpression(expression));
+        return this.builtinField(expression);
       }
       case '@src': {
-        arity(0);
-        const type = this.langType('SourceLocation', expression) as StructType;
-        return known(
-          type,
-          this.structValue(type, expression, {
-            module: this.nameSlice('main'),
-            file: this.nameSlice('main.zig'),
-            fn_name: this.nameSlice(this.functionName() ?? ''),
-            line: BigInt(expression.row + 1),
-            column: BigInt(expression.col + 1),
-          }),
-          expression
-        );
+        return this.builtinSrc(expression);
       }
-      case '@setRuntimeSafety':
-      case '@setFloatMode':
-      case '@branchHint':
+      case '@setRuntimeSafety': {
+        return this.builtinSetRuntimeSafety(expression);
+      }
+      case '@setFloatMode': {
+        return this.builtinSetRuntimeSafety(expression);
+      }
+      case '@branchHint': {
+        return this.builtinSetRuntimeSafety(expression);
+      }
       case '@prefetch': {
-        // The grader runs as a Debug build does: it keeps every safety check, and evaluates floats strictly.
-        arity(name === '@prefetch' ? 2 : 1);
-        for (const arg of args) this.compile(arg);
-        return known(VOID, undefined, expression);
+        return this.builtinSetRuntimeSafety(expression);
       }
       case '@typeInfo': {
-        arity(1);
-        const type = this.compileType(args[0]);
-        const info = this.langMember('Type', expression) as UnionType;
-        return known(info, this.typeInfo(type, info, expression), expression);
+        return this.builtinTypeInfo(expression);
       }
       case '@Int': {
-        arity(2);
-        const signedness = this.langMember('Signedness', expression);
-        const signed =
-          this.knownValue(this.coerce(this.compile(args[0], signedness), signedness, args[0]), '符号') === 0n;
-        const u16 = intType(false, 16);
-        const bits = Number(this.knownValue(this.coerce(this.compile(args[1], u16), u16, args[1]), 'ビット数'));
-        return known(TYPE, intType(signed, bits), expression);
+        return this.builtinInt(expression);
       }
       case '@EnumLiteral': {
-        arity(0);
-        return known(TYPE, ENUM_LITERAL, expression);
+        return this.builtinEnumLiteral(expression);
       }
       case '@Tuple': {
-        arity(1);
-        const types = this.comptimeElements(args[0], TYPE) as Type[];
-        return known(
-          TYPE,
-          this.tupleType(types.map((type, index) => ({ name: String(index), type, hasDefault: false }))),
-          expression
-        );
+        return this.builtinTuple(expression);
       }
-      case '@constCast':
+      case '@constCast': {
+        return this.builtinConstCast(expression);
+      }
       case '@volatileCast': {
-        arity(1);
-        const operand = this.compile(args[0]);
-        const pointer = operand.type.kind === 'optional' ? operand.type.child : operand.type;
-        if (pointer.kind !== 'pointer')
-          return this.error(args[0], `${name} にはポインタを渡してください（${typeName(operand.type)} 型です）。`);
-        const cast = withPointerAttributes(pointer, name === '@constCast' ? { isConst: false } : { isVolatile: false });
-        return {
-          ...operand,
-          type: operand.type.kind === 'optional' ? optionalOf(cast) : cast,
-          place: undefined,
-          local: undefined,
-        };
+        return this.builtinConstCast(expression);
       }
       case '@bitCast': {
-        arity(1);
-        const target = this.resultTypeOf(expression, resultType);
-        const operand = this.compile(args[0]);
-        for (const [type, span] of [
-          [operand.type, args[0]],
-          [target, expression],
-        ] as const) {
-          this.resolveStorage(type, span);
-          if (!bitCastable(type)) return this.error(span, `@bitCast では ${typeName(type)} 型を変換できません。`);
-        }
-        const from = bitSizeOf(operand.type);
-        const to = bitSizeOf(target);
-        if (from !== to)
-          return this.error(
-            expression,
-            `@bitCast の変換の前後でビット数が合いません（${typeName(target)} は ${to} ビット、${typeName(operand.type)} は ${from} ビットです）。`
-          );
-        return this.derived(operand, target, (value) => reinterpret(value, operand.type, target));
+        return this.builtinBitCast(expression, resultType);
       }
       case '@backingInt': {
-        arity(1);
-        const operand = this.compile(args[0]);
-        const type = operand.type;
-        if (type.kind === 'enum') {
-          const tag = this.enumFields(type) && (type.tagType as Type);
-          return this.derived(operand, tag, (value) => value);
-        }
-        if (type.kind === 'union' && type.layout !== 'packed' && type.tagType) {
-          const tags = this.enumFields(type.tagType);
-          this.unionFields(type);
-          return this.derived(operand, type.tagType.tagType as Type, (value) => tags[(value as ZUnion).tag].value);
-        }
-        if ((type.kind === 'struct' || type.kind === 'union') && type.layout === 'packed') {
-          // Zig takes the backing integer only of a packed type that names it, as `packed struct(u8)` does.
-          if (!type.namespace.syntax?.argument)
-            return this.error(
-              args[0],
-              `${typeName(type)} 型は基底の整数型を書いていないので、@backingInt があいまいです。`
-            );
-          this.resolveStorage(type, args[0]);
-          const backing = intType(false, bitSizeOf(type));
-          return this.derived(operand, backing, (value) => reinterpret(value, type, backing));
-        }
-        return this.error(
-          args[0],
-          `@backingInt には enum か packed struct・packed union を渡してください（${typeName(type)} 型です）。`
-        );
+        return this.builtinBackingInt(expression);
       }
       case '@fromBackingInt': {
-        arity(1);
-        const target = this.resultTypeOf(expression, resultType);
-        if (target.kind === 'enum') {
-          const fields = this.enumFields(target);
-          const tag = target.tagType as Type;
-          const operand = this.coerce(this.compile(args[0], tag), tag, args[0]);
-          const values = new Set(fields.map((field) => field.value));
-          const exhaustive = target.exhaustive;
-          return this.derived(operand, target, (value) =>
-            exhaustive && !values.has(value as bigint) ? panic(PANIC.invalidEnum) : value
-          );
-        }
-        if ((target.kind === 'struct' || target.kind === 'union') && target.layout === 'packed') {
-          this.resolveStorage(target, expression);
-          const backing = intType(false, bitSizeOf(target));
-          const operand = this.coerce(this.compile(args[0], backing), backing, args[0]);
-          return this.derived(operand, target, (value) => reinterpret(value, backing, target));
-        }
-        return this.error(
-          expression,
-          `@fromBackingInt の結果の型には enum か packed struct・packed union が要ります（${typeName(target)} 型です）。`
-        );
+        return this.builtinFromBackingInt(expression, resultType);
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  private builtinArity(expression: ExpressionOf<'builtinCall'>, count: number): void {
+    if (expression.args.length !== count)
+      this.error(
+        expression,
+        `${expression.name} の引数の数が合いません（${count} 個が必要ですが、${expression.args.length} 個です）。`
+      );
+  }
+
+  private builtinTypeName(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    return this.text(typeName(this.compileType(args[0])), expression);
+  }
+
+  private builtinCompileError(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    return this.error(expression, this.comptimeText(args[0]));
+  }
+
+  private builtinCompileLog(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    const parts = args.map((arg) => this.logText(this.compile(arg)));
+    return this.error(expression, `@compileLog が残っています（出力: ${parts.join(', ')}）。`);
+  }
+
+  private builtinSetEvalBranchQuota(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const quota = Number(
+      this.knownValue(this.coerce(this.compile(args[0], intType(false, 32)), intType(false, 32)), '上限')
+    );
+    this.evalBranches.quota = Math.max(this.evalBranches.quota, quota);
+    return runtime(
+      VOID,
+      (frame) => {
+        const count = frame.runtime.branchCount;
+        if (count) count.quota = Math.max(count.quota, quota);
+      },
+      expression
+    );
+  }
+
+  private builtinInComptime(expression: ExpressionOf<'builtinCall'>): TExpr {
+    this.builtinArity(expression, 0);
+    if (this.comptimeDepth > 0) return known(BOOL, true, expression);
+    return runtime(BOOL, (frame) => frame.runtime.branchCount !== undefined, expression);
+  }
+
+  private builtinSizeOf(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 1);
+    const type = this.sizedType(args[0], name);
+    const size = name === '@sizeOf' ? sizeOf(type) : name === '@alignOf' ? alignOf(type) : bitSizeOf(type);
+    return known(COMPTIME_INT, BigInt(size), expression);
+  }
+
+  private builtinOffsetOf(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 2);
+    const type = this.sizedType(args[0], name);
+    const fieldName = this.comptimeText(args[1]);
+    if (type.kind !== 'struct')
+      return this.error(args[0], `${name} には構造体の型を書いてください（${typeName(type)} 型です）。`);
+    const fields = this.structFields(type, expression);
+    const index = fields.findIndex((field) => field.name === fieldName);
+    if (index === -1) return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
+    if (fields[index].comptimeValue)
+      return this.error(args[1], `comptime のフィールド「${fieldName}」には位置がありません。`);
+    const bits = fieldOffsets(type)[index];
+    return known(COMPTIME_INT, BigInt(name === '@offsetOf' ? Math.floor(bits / 8) : bits), expression);
+  }
+
+  private builtinHasDecl(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 2);
+    const type = this.containerArgument(args[0], name);
+    const declName = this.comptimeText(args[1]);
+    const decl = this.findDecl(type, declName);
+    return known(BOOL, decl !== undefined && (decl.kind === 'native' || decl.syntax.isPub), expression);
+  }
+
+  private builtinHasField(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 2);
+    const type = this.containerArgument(args[0], name);
+    const fieldName = this.comptimeText(args[1]);
+    return known(BOOL, this.fieldNames(type, expression).includes(fieldName), expression);
+  }
+
+  private builtinFieldType(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 2);
+    const type = this.containerArgument(args[0], name);
+    const fieldName = this.comptimeText(args[1]);
+    const fields =
+      type.kind === 'struct'
+        ? this.structFields(type, expression)
+        : type.kind === 'union'
+          ? this.unionFields(type)
+          : [];
+    const field = fields.find((each) => each.name === fieldName);
+    if (!field) return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
+    return known(TYPE, field.type, expression);
+  }
+
+  private builtinField(expression: ExpressionOf<'builtinCall'>): TExpr {
+    this.builtinArity(expression, 2);
+    return this.compile(this.fieldExpression(expression));
+  }
+
+  private builtinSrc(expression: ExpressionOf<'builtinCall'>): TExpr {
+    this.builtinArity(expression, 0);
+    const type = this.langType('SourceLocation', expression) as StructType;
+    return known(
+      type,
+      this.structValue(type, expression, {
+        module: this.nameSlice('main'),
+        file: this.nameSlice('main.zig'),
+        fn_name: this.nameSlice(this.functionName() ?? ''),
+        line: BigInt(expression.row + 1),
+        column: BigInt(expression.col + 1),
+      }),
+      expression
+    );
+  }
+
+  private builtinSetRuntimeSafety(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    // The grader runs as a Debug build does: it keeps every safety check, and evaluates floats strictly.
+    this.builtinArity(expression, name === '@prefetch' ? 2 : 1);
+    for (const arg of args) this.compile(arg);
+    return known(VOID, undefined, expression);
+  }
+
+  private builtinTypeInfo(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const type = this.compileType(args[0]);
+    const info = this.langMember('Type', expression) as UnionType;
+    return known(info, this.typeInfo(type, info, expression), expression);
+  }
+
+  private builtinInt(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 2);
+    const signedness = this.langMember('Signedness', expression);
+    const signed = this.knownValue(this.coerce(this.compile(args[0], signedness), signedness, args[0]), '符号') === 0n;
+    const u16 = intType(false, 16);
+    const bits = Number(this.knownValue(this.coerce(this.compile(args[1], u16), u16, args[1]), 'ビット数'));
+    return known(TYPE, intType(signed, bits), expression);
+  }
+
+  private builtinEnumLiteral(expression: ExpressionOf<'builtinCall'>): TExpr {
+    this.builtinArity(expression, 0);
+    return known(TYPE, ENUM_LITERAL, expression);
+  }
+
+  private builtinTuple(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const types = this.comptimeElements(args[0], TYPE) as Type[];
+    return known(
+      TYPE,
+      this.tupleType(types.map((type, index) => ({ name: String(index), type, hasDefault: false }))),
+      expression
+    );
+  }
+
+  private builtinConstCast(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { name, args } = expression;
+    this.builtinArity(expression, 1);
+    const operand = this.compile(args[0]);
+    const pointer = operand.type.kind === 'optional' ? operand.type.child : operand.type;
+    if (pointer.kind !== 'pointer')
+      return this.error(args[0], `${name} にはポインタを渡してください（${typeName(operand.type)} 型です）。`);
+    const cast = withPointerAttributes(pointer, name === '@constCast' ? { isConst: false } : { isVolatile: false });
+    return {
+      ...operand,
+      type: operand.type.kind === 'optional' ? optionalOf(cast) : cast,
+      place: undefined,
+      local: undefined,
+    };
+  }
+
+  private builtinBitCast(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const target = this.resultTypeOf(expression, resultType);
+    const operand = this.compile(args[0]);
+    for (const [type, span] of [
+      [operand.type, args[0]],
+      [target, expression],
+    ] as const) {
+      this.resolveStorage(type, span);
+      if (!bitCastable(type)) return this.error(span, `@bitCast では ${typeName(type)} 型を変換できません。`);
+    }
+    const from = bitSizeOf(operand.type);
+    const to = bitSizeOf(target);
+    if (from !== to)
+      return this.error(
+        expression,
+        `@bitCast の変換の前後でビット数が合いません（${typeName(target)} は ${to} ビット、${typeName(operand.type)} は ${from} ビットです）。`
+      );
+    return this.derived(operand, target, (value) => reinterpret(value, operand.type, target));
+  }
+
+  private builtinBackingInt(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const operand = this.compile(args[0]);
+    const type = operand.type;
+    if (type.kind === 'enum') {
+      const tag = this.enumFields(type) && (type.tagType as Type);
+      return this.derived(operand, tag, (value) => value);
+    }
+    if (type.kind === 'union' && type.layout !== 'packed' && type.tagType) {
+      const tags = this.enumFields(type.tagType);
+      this.unionFields(type);
+      return this.derived(operand, type.tagType.tagType as Type, (value) => tags[(value as ZUnion).tag].value);
+    }
+    if ((type.kind === 'struct' || type.kind === 'union') && type.layout === 'packed') {
+      // Zig takes the backing integer only of a packed type that names it, as `packed struct(u8)` does.
+      if (!type.namespace.syntax?.argument)
+        return this.error(
+          args[0],
+          `${typeName(type)} 型は基底の整数型を書いていないので、@backingInt があいまいです。`
+        );
+      this.resolveStorage(type, args[0]);
+      const backing = intType(false, bitSizeOf(type));
+      return this.derived(operand, backing, (value) => reinterpret(value, type, backing));
+    }
+    return this.error(
+      args[0],
+      `@backingInt には enum か packed struct・packed union を渡してください（${typeName(type)} 型です）。`
+    );
+  }
+
+  private builtinFromBackingInt(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
+    const { args } = expression;
+    this.builtinArity(expression, 1);
+    const target = this.resultTypeOf(expression, resultType);
+    if (target.kind === 'enum') {
+      const fields = this.enumFields(target);
+      const tag = target.tagType as Type;
+      const operand = this.coerce(this.compile(args[0], tag), tag, args[0]);
+      const values = new Set(fields.map((field) => field.value));
+      const exhaustive = target.exhaustive;
+      return this.derived(operand, target, (value) =>
+        exhaustive && !values.has(value as bigint) ? panic(PANIC.invalidEnum) : value
+      );
+    }
+    if ((target.kind === 'struct' || target.kind === 'union') && target.layout === 'packed') {
+      this.resolveStorage(target, expression);
+      const backing = intType(false, bitSizeOf(target));
+      const operand = this.coerce(this.compile(args[0], backing), backing, args[0]);
+      return this.derived(operand, target, (value) => reinterpret(value, backing, target));
+    }
+    return this.error(
+      expression,
+      `@fromBackingInt の結果の型には enum か packed struct・packed union が要ります（${typeName(target)} 型です）。`
+    );
   }
 
   private resultTypeOf(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): Type {
@@ -544,6 +660,7 @@ function optionalValue(value: Type | undefined): Value {
 }
 
 /** Whether `@bitCast` takes or gives a value of a type, which must have a fixed bit layout. */
+// code-gauge-allow duplicateLines -- Each classifies types by a different rule of Zig's (bit casts, packed fields, the C ABI).
 function bitCastable(type: Type): boolean {
   switch (type.kind) {
     case 'int':

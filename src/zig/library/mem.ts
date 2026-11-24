@@ -18,6 +18,7 @@ import {
   fnType,
   optionalOf,
   pointerTo,
+  type Sentinel,
   sliceOf,
   type StructType,
   TYPE,
@@ -465,18 +466,75 @@ function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: Delim
 
 // The namespace ---------------------------------------------------------------------------------------------------------
 
+/**
+ * Where the elements a slice, an array pointer, or a many-item pointer points to start, and how many precede the
+ * first that equals `stop`, which a many-item pointer must reach.
+ */
+function elementsUntil(
+  value: Value,
+  isArray: boolean,
+  stop: Value | undefined,
+  frame: Frame
+): { target: { slots: Value[] }; start: number; length: number } {
+  let target: { slots: Value[] };
+  let start: number;
+  let limit: number | undefined;
+  if (value instanceof Slice) {
+    target = value.target;
+    start = value.start;
+    limit = start + value.length;
+  } else if (isArray) {
+    const view = (value as Pointer).load() as ZArray;
+    target = view;
+    start = view.offset;
+    limit = start + view.length;
+  } else {
+    target = (value as Pointer).target;
+    start = (value as Pointer).index;
+  }
+  let position = start;
+  const end = limit ?? target.slots.length;
+  while (position < end && (stop === undefined || !scalarValuesEqual(target.slots[position], stop))) {
+    frame.runtime.spend();
+    position++;
+  }
+  if (limit === undefined && position >= target.slots.length) throw new MemoryFault();
+  return { target, start, length: position - start };
+}
+
+/** A pointer or slice that `std.mem.span` and the like take, seen through an optional, and what it points to. */
+function pointerOperand(
+  sema: SemaApi,
+  operandType: Type,
+  span: Span,
+  name: string
+): {
+  type: Extract<Type, { kind: 'pointer' }>;
+  optional: boolean;
+  array: Extract<Type, { kind: 'array' }> | undefined;
+  child: Type;
+  sentinel: Sentinel | undefined;
+} {
+  const optional = operandType.kind === 'optional';
+  const type = operandType.kind === 'optional' ? operandType.child : operandType;
+  if (type.kind !== 'pointer') return sema.error(span, `${name} にはポインタかスライスを渡してください。`);
+  const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
+  return {
+    type,
+    optional,
+    array,
+    child: array ? array.child : type.child,
+    sentinel: array ? array.sentinel : type.sentinel,
+  };
+}
+
 /** The elements from a pointer up to a sentinel value, for `std.mem.span`, `len`, and `sliceTo`. */
+// code-gauge-allow functionCognitiveComplexity -- Checks the operand and the end value as Zig's std.mem does before scanning.
 function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Member {
   return fnMember(name, (sema, call) => {
     const args = expectArgs(sema, call, kind === 'sliceTo' ? 2 : 1, name);
     const operand = sema.compile(args[0]);
-    let type = operand.type;
-    const optional = type.kind === 'optional';
-    if (type.kind === 'optional') type = type.child;
-    if (type.kind !== 'pointer') return sema.error(call.span, `${name} にはポインタかスライスを渡してください。`);
-    const array = type.size === 'one' && type.child.kind === 'array' ? type.child : undefined;
-    const child = array ? array.child : type.child;
-    const sentinel = array ? array.sentinel : type.sentinel;
+    const { type, optional, array, child, sentinel } = pointerOperand(sema, operand.type, call.span, name);
     const end =
       kind === 'sliceTo'
         ? sema.knownValue(sema.coerce(sema.compile(args[1], child), child, args[1]), '終わりの値')
@@ -490,31 +548,8 @@ function sentinelSpan(name: string, kind: 'span' | 'len' | 'sliceTo'): () => Mem
     const evaluate = operand.eval;
     const span = (value: Value, frame: Frame): Value => {
       if (value === NULL) return NULL;
-      let target: { slots: Value[] };
-      let start: number;
-      let limit: number;
-      if (value instanceof Slice) {
-        target = value.target;
-        start = value.start;
-        limit = start + value.length;
-      } else if (array) {
-        const view = (value as Pointer).load() as ZArray;
-        target = view;
-        start = view.offset;
-        limit = start + view.length;
-      } else {
-        target = (value as Pointer).target;
-        start = (value as Pointer).index;
-        limit = target.slots.length;
-      }
-      let position = start;
-      while (position < limit && (stop === undefined || !scalarValuesEqual(target.slots[position], stop))) {
-        frame.runtime.spend();
-        position++;
-      }
-      if (position >= target.slots.length && !(value instanceof Slice) && !array) throw new MemoryFault();
-      if (kind === 'len') return BigInt(position - start);
-      return new Slice(target, start, position - start);
+      const { target, start, length } = elementsUntil(value, array !== undefined, stop, frame);
+      return kind === 'len' ? BigInt(length) : new Slice(target, start, length);
     };
     return runtime(resultType, (frame) => span(evaluate(frame), frame), call.span);
   });

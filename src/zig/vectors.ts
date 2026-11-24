@@ -73,6 +73,7 @@ export abstract class VectorCompiler extends ReflectionCompiler {
   }
 
   /** `@reduce(op, v)`: the elements combined from the first, wrapping for integers' `.Add` and `.Mul`. */
+  // code-gauge-allow functionCognitiveComplexity -- Maps each reduction to the scalar operator that Zig applies for the element type.
   private reduceVector(expression: ExpressionOf<'builtinCall'>): TExpr {
     this.arity(expression, 2);
     const [operatorArg, vectorArg] = expression.args;
@@ -138,6 +139,7 @@ export abstract class VectorCompiler extends ReflectionCompiler {
   }
 
   /** `@shuffle(T, a, b, mask)`: each element from `a[m]` for a mask element `m >= 0`, else from `b[~m]`. */
+  // code-gauge-allow functionNcss -- Checks each operand and mask element as Zig's Sema does.
   private shuffle(expression: ExpressionOf<'builtinCall'>): TExpr {
     this.arity(expression, 4);
     const [childArg, leftArg, rightArg, maskArg] = expression.args;

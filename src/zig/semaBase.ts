@@ -642,6 +642,7 @@ export abstract class SemaBase implements SemaApi {
 
   /** Resolves the fields of the structs and unions a value of `type` holds in place, which its undefined value needs. */
   // code-gauge-allow functionCognitiveComplexity -- Resolves the by-value type graph before validating and caching layouts.
+  // code-gauge-allow functionNcss -- Resolves the by-value type graph before validating and caching layouts.
   private resolveLayout(type: Type, span: Span, seen: Set<Type>): void {
     if (type.kind === 'struct' && type.namespace.syntax?.containerKind === 'opaque')
       this.error(span, `opaque 型 ${typeName(type)} の値は持てません（ポインタにしてください）。`);
@@ -1088,11 +1089,7 @@ export abstract class SemaBase implements SemaApi {
       if (!fnTypeCoercible(fn.params, fn.returnType, to.child, from.callingConvention)) return undefined;
       return known(to, this.knownFunctionValue(expression, span), span);
     }
-    if (to.size === 'c' && from.kind === 'null') return known(to, NULL, span);
-    if (to.size === 'c' && from.kind === 'optional' && from.child.kind === 'pointer' && from.child.size !== 'slice') {
-      const inner = this.tryCoerce({ ...expression, type: from.child }, to, span);
-      return inner && { ...expression, type: to };
-    }
+    if (to.size === 'c' && from.kind !== 'pointer') return this.coerceToCPointer(expression, to, span);
     if (from.kind !== 'pointer') return undefined;
     if (!pointerQualifiersCoercible(from, to)) return undefined;
     const empty =
@@ -1107,27 +1104,8 @@ export abstract class SemaBase implements SemaApi {
       if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
       return { ...expression, type: to };
     }
-    // `*[N]T` to `[*]T` or `[*c]T`, which point to the array's first element.
-    if (from.size === 'one' && from.child.kind === 'array' && (to.size === 'many' || to.size === 'c')) {
-      const array = from.child;
-      if (!pointerChildCoercible(array.child, to.child, to.isConst)) return undefined;
-      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
-      return this.derived(expression, to, (value) => {
-        const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
-        return new Pointer(view, view.offset);
-      });
-    }
-    // A C pointer converts to and from the other single-item and many-item pointers.
-    const cPointer =
-      (to.size === 'c' && (from.size === 'one' || from.size === 'many')) ||
-      (from.size === 'c' && (to.size === 'one' || to.size === 'many'));
-    if (cPointer) {
-      if (!pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
-      if (from.size !== 'c') return { ...expression, type: to };
-      return this.derived(expression, to, (value) =>
-        value === NULL ? panic('cast causes pointer to be null') : value
-      );
-    }
+    const many = this.coerceToManyPointer(expression, from, to);
+    if (many) return many;
     // `*[N]T` to `[]T`
     if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
       const array = from.child;
@@ -1143,6 +1121,38 @@ export abstract class SemaBase implements SemaApi {
       };
     }
     return undefined;
+  }
+
+  /** `*[N]T` to `[*]T` or `[*c]T`, and a C pointer to and from the other single-item and many-item pointers. */
+  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's pointer coercion in turn.
+  private coerceToManyPointer(
+    expression: TExpr,
+    from: Extract<Type, { kind: 'pointer' }>,
+    to: Extract<Type, { kind: 'pointer' }>
+  ): TExpr | undefined {
+    if (from.size === 'one' && from.child.kind === 'array' && (to.size === 'many' || to.size === 'c')) {
+      const array = from.child;
+      if (!pointerChildCoercible(array.child, to.child, to.isConst)) return undefined;
+      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
+      return this.derived(expression, to, (value) => {
+        const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+        return new Pointer(view, view.offset);
+      });
+    }
+    const cPointer =
+      (to.size === 'c' && (from.size === 'one' || from.size === 'many')) ||
+      (from.size === 'c' && (to.size === 'one' || to.size === 'many'));
+    if (!cPointer || !pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
+    if (from.size !== 'c') return { ...expression, type: to };
+    return this.derived(expression, to, (value) => (value === NULL ? panic('cast causes pointer to be null') : value));
+  }
+
+  /** `null` or an optional pointer to `[*c]T`, which holds null itself. */
+  private coerceToCPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
+    const from = expression.type;
+    if (from.kind === 'null') return known(to, NULL, span);
+    if (from.kind !== 'optional' || from.child.kind !== 'pointer' || from.child.size === 'slice') return undefined;
+    return this.tryCoerce({ ...expression, type: from.child }, to, span) && { ...expression, type: to };
   }
 
   /** A function value that the compiler knows, as a runtime function pointer. */

@@ -237,6 +237,7 @@ const WRITE_ERROR = errorSetOf(['WriteFailed']);
 configureFiles(IO, FILE);
 addIoMembers();
 
+// code-gauge-allow functionNcss -- Declares the members of one library namespace, each a short closure.
 function addIoMembers(): void {
   addMembers(IO, {
     File: typeMember(() => FILE),

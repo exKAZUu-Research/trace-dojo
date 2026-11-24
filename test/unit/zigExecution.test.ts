@@ -10012,3 +10012,89 @@ test.each(['fixed', 'allocated'])('formatting keeps %s writer bytes separate fro
     uncaughtException: undefined,
   });
 });
+
+test('comptime parameters build generic types, and inline loops unroll over comptime variables', () => {
+  const program = `const std = @import("std");
+fn List(comptime T: type) type {
+    return struct {
+        items: [4]T = undefined,
+        len: usize = 0,
+        const Self = @This();
+        fn push(self: *Self, v: T) void {
+            self.items[self.len] = v;
+            self.len += 1;
+        }
+    };
+}
+fn rep(comptime n: usize, x: u8) [n]u8 {
+    return @splat(x);
+}
+pub fn main() void {
+    var l: List(i32) = .{};
+    l.push(5);
+    l.push(7);
+    comptime var i = 0;
+    const v = inline while (i < 5) : (i += 1) {
+        if (i == 3) break i * 10;
+    } else 0;
+    std.debug.print("{s} {} {s} {}\\n", .{ &rep(3, 'z'), l.items[1], @typeName(List(i32)), v });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: 'zzz 7 main.List(i32) 30\n' });
+  const runtimeStore = `pub fn main() void {
+    comptime var c = 0;
+    var r: bool = true;
+    _ = &r;
+    if (r) {
+        c += 1;
+    }
+}`;
+  const quota = `fn fib(n: u32) u32 {
+    return if (n < 2) n else fib(n - 1) + fib(n - 2);
+}
+pub fn main() void {
+    _ = comptime fib(14);
+}`;
+  expect(rows(runtimeStore)).toEqual([5]);
+  expect(rows(quota)).toEqual([1]);
+});
+
+test('standard input and files are read through std.Io.Reader into the reader buffer', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    var buf: [8]u8 = undefined;
+    var r = std.Io.File.stdin().reader(io, &buf);
+    const in = &r.interface;
+    var sum: i64 = 0;
+    while (in.takeDelimiter('\\n')) |line| {
+        sum += try std.fmt.parseInt(i64, line orelse break, 10);
+    } else |err| std.debug.print("{s} {}\\n", .{ @errorName(err), sum });
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = "sum.txt", .data = "total" });
+    const file = try cwd.createFile(io, "out/sum.txt", .{});
+    defer file.close(io);
+}`;
+  expect(executeProgram('zig', program, { stdin: '10\n20\n123456789\n' })).toMatchObject({
+    stderr: 'StreamTooLong 30\n',
+    uncaughtException: 'error: FileNotFound',
+    finalFiles: { 'sum.txt': 'total' },
+  });
+});
+
+test('vectors apply operators and builtins to each element', () => {
+  const program = `const std = @import("std");
+pub fn main() void {
+    const V = @Vector(4, i32);
+    const a: V = .{ 1, 2, 3, 4 };
+    var b: V = @splat(10);
+    b[2] = 7;
+    const gt = a > @as(V, @splat(2));
+    std.debug.print("{any} {} {any}\\n", .{ a * b, @reduce(.Add, a + b), @select(i32, gt, a, b) });
+    var c: @Vector(2, u8) = .{ 200, 100 };
+    c += @splat(100);
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({
+    stderr: '{ 10, 20, 21, 40 } 47 { 10, 10, 3, 4 }\n',
+    uncaughtException: 'panic: integer overflow',
+  });
+});

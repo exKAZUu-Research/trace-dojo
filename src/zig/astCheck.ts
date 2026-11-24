@@ -215,22 +215,10 @@ class AstChecker {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private checkFields(fields: readonly ContainerField[], container: Container | undefined): void {
     if (container?.containerKind === 'enum') {
-      for (const [index, field] of fields.entries()) {
-        if (field.type) this.error(field, 'enum のフィールドには型を書けません。');
-        if (isDiscardName(field) && index !== fields.length - 1) {
-          this.error(field, '「_」は enum の最後のフィールドにだけ書けます。');
-        }
-        if (isDiscardName(field) && field.value) this.error(field, '「_」には値を書けません。');
-        if (field.value && !container.argument) {
-          this.error(field, '値を指定する enum には、enum(u8) のように整数の型を書いてください。');
-        }
-        if (isDiscardName(field) && !container.argument) {
-          this.error(field, '「_」で終わる enum には、enum(u8) のように整数の型を書いてください。');
-        }
-        if (field.value) this.expression(field.value, 'value');
-      }
+      this.checkEnumFields(fields, container);
       return;
     }
     if (container?.containerKind === 'opaque' && fields.length > 0)
@@ -243,6 +231,24 @@ class AstChecker {
       if (container?.containerKind === 'struct' && !field.type && field.name !== undefined) {
         this.error(field, '構造体のフィールドには型を書いてください。');
       }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
+  private checkEnumFields(fields: readonly ContainerField[], container: Container): void {
+    for (const [index, field] of fields.entries()) {
+      if (field.type) this.error(field, 'enum のフィールドには型を書けません。');
+      if (isDiscardName(field) && index !== fields.length - 1) {
+        this.error(field, '「_」は enum の最後のフィールドにだけ書けます。');
+      }
+      if (isDiscardName(field) && field.value) this.error(field, '「_」には値を書けません。');
+      if (field.value && !container.argument) {
+        this.error(field, '値を指定する enum には、enum(u8) のように整数の型を書いてください。');
+      }
+      if (isDiscardName(field) && !container.argument) {
+        this.error(field, '「_」で終わる enum には、enum(u8) のように整数の型を書いてください。');
+      }
+      if (field.value) this.expression(field.value, 'value');
     }
   }
 
@@ -453,26 +459,12 @@ class AstChecker {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
   private statement(statement: Statement): void {
     this.budget.spend();
     switch (statement.kind) {
       case 'var': {
-        if (statement.isComptime) this.comptimeKeyword(statement);
-        if (statement.alignment) this.expression(statement.alignment, 'value');
-        if (statement.type) this.typeExpression(statement.type);
-        if (statement.value) this.expression(statement.value, 'value');
-        else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
-        if (!statement.type && statement.value?.kind === 'undefined') {
-          this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
-        }
-        if (statement.type?.kind === 'arrayType' && statement.type.count === undefined) {
-          this.error(statement.type, '配列の長さを [_] で省くのは、[_]i32{ 1, 2 } のような初期化のときだけです。');
-        }
-        if (!isDiscardName(statement)) {
-          this.declare(statement.name, statement.isConst ? 'local constant' : 'local variable', statement);
-        } else {
-          this.error(statement, '「_」という名前の変数は宣言できません。');
-        }
+        this.localVariable(statement);
         break;
       }
       case 'destructure': {
@@ -507,6 +499,25 @@ class AstChecker {
         this.withComptime(statement, () => this.expression(statement.body, 'value'));
         break;
       }
+    }
+  }
+
+  private localVariable(statement: Extract<Statement, { kind: 'var' }>): void {
+    if (statement.isComptime) this.comptimeKeyword(statement);
+    if (statement.alignment) this.expression(statement.alignment, 'value');
+    if (statement.type) this.typeExpression(statement.type);
+    if (statement.value) this.expression(statement.value, 'value');
+    else this.error(statement, '変数は初期化してください（値が決まらないときは = undefined と書きます）。');
+    if (!statement.type && statement.value?.kind === 'undefined') {
+      this.error(statement, 'undefined で初期化する変数には、型を書いてください。');
+    }
+    if (statement.type?.kind === 'arrayType' && statement.type.count === undefined) {
+      this.error(statement.type, '配列の長さを [_] で省くのは、[_]i32{ 1, 2 } のような初期化のときだけです。');
+    }
+    if (!isDiscardName(statement)) {
+      this.declare(statement.name, statement.isConst ? 'local constant' : 'local variable', statement);
+    } else {
+      this.error(statement, '「_」という名前の変数は宣言できません。');
     }
   }
 
@@ -667,23 +678,10 @@ class AstChecker {
           if (part) this.expression(part, 'value');
         break;
       }
-      case 'comptime': {
-        this.comptimeKeyword(expression);
-        this.withComptime(expression, () => this.expression(expression.operand, use));
-        break;
-      }
-      case 'nosuspend': {
-        const outer = this.nosuspendScope();
-        if (outer) this.error(expression, 'nosuspend の中に、もう一度 nosuspend を書いています。');
-        this.withScope({ kind: 'nosuspend', span: expression, parent: this.scope }, () =>
-          this.expression(expression.operand, use)
-        );
-        break;
-      }
+      case 'comptime':
+      case 'nosuspend':
       case 'async': {
-        if (!expression.operand && this.nosuspendScope())
-          this.error(expression, 'nosuspend の中には suspend を書けません。');
-        if (expression.operand) this.expression(expression.operand, 'value');
+        this.scopeMarker(expression, use);
         break;
       }
       case 'arrayType': {
@@ -726,6 +724,30 @@ class AstChecker {
         break;
       }
       default: {
+        break;
+      }
+    }
+  }
+
+  /** `comptime`, `nosuspend`, and the async syntax, which AstGen checks for the scope they stand in. */
+  private scopeMarker(expression: Extract<Expression, { kind: 'comptime' | 'nosuspend' | 'async' }>, use: Use): void {
+    switch (expression.kind) {
+      case 'comptime': {
+        this.comptimeKeyword(expression);
+        this.withComptime(expression, () => this.expression(expression.operand, use));
+        break;
+      }
+      case 'nosuspend': {
+        if (this.nosuspendScope()) this.error(expression, 'nosuspend の中に、もう一度 nosuspend を書いています。');
+        this.withScope({ kind: 'nosuspend', span: expression, parent: this.scope }, () =>
+          this.expression(expression.operand, use)
+        );
+        break;
+      }
+      case 'async': {
+        if (!expression.operand && this.nosuspendScope())
+          this.error(expression, 'nosuspend の中には suspend を書けません。');
+        if (expression.operand) this.expression(expression.operand, 'value');
         break;
       }
     }

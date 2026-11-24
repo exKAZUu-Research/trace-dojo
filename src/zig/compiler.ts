@@ -194,6 +194,7 @@ class Compiler extends StatementCompiler {
    * Runs code at compile time, as a container-level declaration's initializer runs. The code may use only the slots
    * from `ownSlots.from`, those of the locals it declares; another local's value is not known at compile time.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Maps each way compile-time evaluation can fail to the compile error Zig gives.
   protected evaluateAtCompileTime(expression: TExpr, ownSlots?: { from: number; count: number }): Value {
     this.compilePendingBodies();
     const runtime = new Runtime(undefined, this.compilationBudget);

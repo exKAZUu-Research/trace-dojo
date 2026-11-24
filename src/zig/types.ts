@@ -598,6 +598,15 @@ export function indexableChild(type: Type): Type | undefined {
 
 // Names ---------------------------------------------------------------------------------------------------------------
 
+/** A pointer type's name, with its qualifiers in the order Zig writes them, as in `[*:0]align(4) const u8`. */
+function pointerTypeName(type: PointerType): string {
+  const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
+  const prefix = { one: '*', many: `[*${sentinel}]`, slice: `[${sentinel}]`, c: '[*c]' }[type.size];
+  const alignment = type.alignment === undefined ? '' : `align(${type.alignment}) `;
+  const qualifiers = `${type.allowZero ? 'allowzero ' : ''}${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
+  return `${prefix}${alignment}${qualifiers}${typeName(type.child)}`;
+}
+
 /** The type's name as Zig's `@typeName` writes it. */
 // code-gauge-allow functionNcss -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
 // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node, type, or format specifier, as Zig defines them.
@@ -615,11 +624,7 @@ export function typeName(type: Type): string {
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }
     case 'pointer': {
-      const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
-      const prefix = { one: '*', many: `[*${sentinel}]`, slice: `[${sentinel}]`, c: '[*c]' }[type.size];
-      const alignment = type.alignment === undefined ? '' : `align(${type.alignment}) `;
-      const qualifiers = `${type.allowZero ? 'allowzero ' : ''}${type.isConst ? 'const ' : ''}${type.isVolatile ? 'volatile ' : ''}`;
-      return `${prefix}${alignment}${qualifiers}${typeName(type.child)}`;
+      return pointerTypeName(type);
     }
     case 'optional': {
       return `?${typeName(type.child)}`;

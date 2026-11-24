@@ -375,6 +375,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return this.resolveDecl(binding, span);
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Distinguishes the kinds of locals that a name may refer to, as Zig's Sema does.
   protected localReference(binding: LocalBinding, span: Span): TExpr {
     const cell = binding.comptimeCell;
     if (cell) {
@@ -714,6 +715,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Pointers --------------------------------------------------------------------------------------------------------
 
   /** `p.*`, or a pointer that a field access or an index goes through. */
+  // code-gauge-allow functionCognitiveComplexity -- Checks each kind of pointer that `.*` may go through.
   protected dereferenced(pointer: TExpr, span: Span, load = true): TExpr {
     const type = pointer.type;
     if (type.kind === 'pointer' && type.size === 'c') {
@@ -1239,6 +1241,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Operators -------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps each numeric unary operation with its type checks and evaluation.
+  // code-gauge-allow functionNcss -- One case per unary operator, as Zig defines them.
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);
@@ -1446,7 +1449,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
-  // code-gauge-allow functionNcss -- Keeps operand coercion and comparison validation together.
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
@@ -1459,22 +1461,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const rightTag = right.type.kind === 'union' ? right.type.tagType : undefined;
     if (leftTag && right.type === leftTag) left = this.coerce(left, leftTag, expression.left);
     if (rightTag && left.type === rightTag) right = this.coerce(right, rightTag, expression.right);
-    // `x == null` compares an optional with null.
-    if (right.type.kind === 'null' || left.type.kind === 'null') {
-      if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
-      const optional = right.type.kind === 'null' ? left : right;
-      if (optional.type.kind === 'pointer' && optional.type.size === 'c') {
-        const evaluate = optional.eval;
-        const isNull = operator === '==';
-        return runtime(BOOL, (frame) => (evaluate(frame) === NULL) === isNull, expression);
-      }
-      if (optional.type.kind !== 'optional' && optional.type.kind !== 'null') {
-        this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
-      }
-      const isEqual = operator === '==';
-      const index = right.type.kind === 'null' ? 0 : 1;
-      return this.combine([left, right], BOOL, (values) => (values[index] === NULL) === isEqual, expression);
-    }
+    if (right.type.kind === 'null' || left.type.kind === 'null') return this.nullComparison(expression, left, right);
     const ordered = operator !== '==' && operator !== '!=';
     const errorUnion = [left, right].find((operand) => operand.type.kind === 'error_union');
     const error = [left, right].find((operand) => operand.type.kind === 'error_set');
@@ -1493,6 +1480,23 @@ export abstract class ExpressionCompiler extends SemaBase {
     const compare = this.valueComparator(type, ordered, expression);
     const test = comparisonTest(operator);
     return this.combine([this.comparisonSnapshot(left), right], BOOL, ([a, b]) => test(compare(a, b)), expression);
+  }
+
+  /** `x == null`, which compares an optional or a C pointer with null. */
+  private nullComparison(expression: ExpressionOf<'binary'>, left: TExpr, right: TExpr): TExpr {
+    const { operator } = expression;
+    if (operator !== '==' && operator !== '!=') this.error(expression, 'null とは == と != でだけ比べられます。');
+    const isEqual = operator === '==';
+    const optional = right.type.kind === 'null' ? left : right;
+    if (optional.type.kind === 'pointer' && optional.type.size === 'c') {
+      const evaluate = optional.eval;
+      return runtime(BOOL, (frame) => (evaluate(frame) === NULL) === isEqual, expression);
+    }
+    if (optional.type.kind !== 'optional' && optional.type.kind !== 'null') {
+      this.error(expression, `${typeName(optional.type)} 型は optional ではないので、null と比べられません。`);
+    }
+    const index = right.type.kind === 'null' ? 0 : 1;
+    return this.combine([left, right], BOOL, (values) => (values[index] === NULL) === isEqual, expression);
   }
 
   private comparisonSnapshot(operand: TExpr): TExpr {

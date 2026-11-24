@@ -675,8 +675,31 @@ function kindValue(sema: SemaApi, span: Span): (name: string) => bigint {
   return (name) => (fields.find((field) => field.name === name) as { value: bigint }).value;
 }
 
+/**
+ * Opens a file for `std.Io.File`: to read when `mode` is 0, to write when 1, and both when 2, creating it with
+ * `create`, as `openFile` and `createFile` do.
+ */
+function openPath(
+  frame: Frame,
+  target: string,
+  mode: number,
+  flags: { create: boolean; truncate: boolean; exclusive: boolean }
+): Value {
+  const files = frame.runtime.io.files;
+  const writes = mode !== 0;
+  if (files.kindOf(target) === 'directory' && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
+  const create = flags.create ? (flags.exclusive ? 'exclusive' : 'always') : 'never';
+  const write = writes
+    ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
+    : undefined;
+  const read = mode === 1 ? undefined : files.openForReading(target);
+  const descriptor = frame.runtime.openFile({ path: target, read, position: 0, write, decoder: new TextDecoder() });
+  return handle('file', { fd: descriptor });
+}
+
 /** The native functions that the ported library calls, which reach the run's standard input and files. */
 // code-gauge-allow functionNcss -- Each native is a short closure over the run's file system.
+// code-gauge-allow functionCognitiveComplexity -- Each native is a short closure over the run's file system.
 function nativeMembers(fileType: Type): Record<string, () => Member> {
   return {
     readInput: call(
@@ -700,30 +723,14 @@ function nativeMembers(fileType: Type): Record<string, () => Member> {
       'openPath',
       [CONST_U8_SLICE, CONST_U8_SLICE, U8, BOOL, BOOL, BOOL],
       () => ANY_ERROR_UNION(fileType),
-      (frame, [directory, path, mode, create, truncate, exclusive]) => {
-        const target = joined(text(directory, frame), text(path, frame));
-        const files = frame.runtime.io.files;
-        return attempt(() => {
-          const writes = mode !== 0n;
-          if (files.kindOf(target) === 'directory' && (writes || create)) throw new FileSystemError('EISDIR', target);
-          const write = writes
-            ? files.open(target, {
-                create: create ? (exclusive ? 'exclusive' : 'always') : 'never',
-                truncate: create === true && truncate === true,
-                append: false,
-              })
-            : undefined;
-          const read = mode !== 1n ? files.openForReading(target) : undefined;
-          const descriptor = frame.runtime.openFile({
-            path: target,
-            read,
-            position: 0,
-            write,
-            decoder: new TextDecoder(),
-          });
-          return handle('file', { fd: descriptor });
-        });
-      }
+      (frame, [directory, path, mode, create, truncate, exclusive]) =>
+        attempt(() =>
+          openPath(frame, joined(text(directory, frame), text(path, frame)), Number(mode as bigint), {
+            create: create === true,
+            truncate: truncate === true,
+            exclusive: exclusive === true,
+          })
+        )
     ),
     removePath: call(
       'removePath',
