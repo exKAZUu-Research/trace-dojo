@@ -385,7 +385,14 @@ export abstract class ExpressionCompiler extends SemaBase {
       };
       // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
       if (this.comptimeDepth > 0) return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
-      return { ...known(binding.type, cell.slots[0], span), place, local: binding };
+      // A value read here is a constant of the code that stands here, which later stores must not change: its parts
+      // come from a copy, while stores still reach the variable.
+      const value = copyForStorage(cell.slots[0]);
+      return {
+        ...known(binding.type, value, span),
+        place: { isConst: false, locate: place.locate },
+        local: binding,
+      };
     }
     const fact = binding.known
       ? { value: binding.value }
