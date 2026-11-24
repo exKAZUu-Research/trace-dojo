@@ -139,7 +139,7 @@ function expandDeclarationAssignment(
     );
   if (arg.array) {
     const rawItems = shell.expander.expandRawCompoundItems(arg.array, options.set.has('A') && !options.set.has('a'));
-    const committed = commitCompoundDeclaration(shell, builtin, arg, builtinOptions, options, rawItems);
+    const committed = commitCompoundDeclaration(shell, builtin, arg, rawOptions, options, rawItems);
     return {
       ...arg,
       ...(subscript ? { subscript } : {}),
@@ -175,7 +175,7 @@ function commitCompoundDeclaration(
   options: Options,
   rawItems: CompoundElement[]
 ): { variable: Variable; priorKind: VariableValue['kind'] | undefined } | 'failed' | undefined {
-  if (!hasValidCompoundContext(shell, builtin, options)) return undefined;
+  if (!hasValidCompoundContext(shell, builtin, rawOptions)) return undefined;
   if (isLocalDeclaration(shell, builtin, rawOptions) && rawOptions.attemptedSet.has('n')) return undefined;
   if (options.set.has('n')) return undefined;
   const phase1Options = buildPhase1CompoundOptions(options);
@@ -183,7 +183,8 @@ function commitCompoundDeclaration(
     shell,
     builtin,
     arg,
-    phase1Options
+    phase1Options,
+    rawOptions.unset.has('n')
   );
   if (arg.subscript || referencedSubscript !== undefined) {
     return rejectCompoundArrayMember(shell, builtin, { arg, rawOptions, localScope, targetName, referencedSubscript });
@@ -253,7 +254,8 @@ function resolvePhase1CompoundTarget(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  phase1Options: Options
+  phase1Options: Options,
+  rawUnsetN: boolean
 ): {
   localScope: Map<string, Variable> | undefined;
   targetName: string;
@@ -264,16 +266,22 @@ function resolvePhase1CompoundTarget(
   const isLocal = isLocalDeclaration(shell, builtin, phase1Options);
   const { scopes, functionScopes } = shell.state;
   const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
+  if (localScope && rawUnsetN && !arg.subscript && localScope.get(arg.name)?.attributes.has('n')) {
+    const localElementTarget = resolveLocalElementNamerefTarget(shell, arg.name);
+    if (localElementTarget !== undefined) return { localScope, targetName: localElementTarget };
+  }
   if (!localScope && set.has('g') && !arg.subscript) {
-    const visibleStart = shell.findOwnVariable(arg.name);
-    const firstHop =
-      visibleStart?.attributes.has('n') && visibleStart.value?.kind === 'scalar' ? visibleStart.value.value : '';
+    const firstHop = resolveGlobalNamerefFirstHop(scopes[0].get(arg.name));
     if (firstHop !== '') {
       return { localScope, ...resolveVisibleReferentTarget(shell, firstHop), fromNameref: true };
     }
   }
   const resolved = resolveDeclaredTarget(shell, arg.name, set, unset, Boolean(arg.subscript), set.has('g'), localScope);
   return { localScope, ...resolved };
+}
+
+function resolveGlobalNamerefFirstHop(globalStart: Variable | undefined): string {
+  return globalStart?.attributes.has('n') && globalStart.value?.kind === 'scalar' ? globalStart.value.value : '';
 }
 
 // code-gauge-allow functionParameterCount -- Checks host-env append, readonly boundary, array-kind clash, and conversion error for compound targets.
@@ -489,7 +497,11 @@ function declareOperand(
   if (typeof operand !== 'string' && operand.failedCompound) return false;
   if (typeof operand !== 'string' && operand.committedTarget) {
     notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
-    return declareOne(shell, builtin, operand.name, options, isLocal);
+    const ok = declareOne(shell, builtin, operand.name, options, isLocal);
+    if (ok && isLocal && options.unset.has('n')) {
+      shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(operand.name)?.attributes.delete('n');
+    }
+    return ok;
   }
   return declareOne(shell, builtin, operand, options, isLocal, onMaterialize);
 }
