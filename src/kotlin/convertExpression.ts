@@ -60,6 +60,16 @@ export abstract class ExpressionConverter {
   protected abstract convertAnonymousFunction(node: Node): FunctionDecl;
 
   convertStatements(nodes: Node[]): Statement[] {
+    for (const [index, node] of nodes.entries()) {
+      const next = nodes[index + 1];
+      // Statements share a row only through `;`, and kotlinc does not end a function's `=` body at a `;` that
+      // another statement follows on its row, so it rejects the statement after it.
+      if (next && next.startPosition.row === node.endPosition.row && endsWithExpressionBody(node))
+        throw syntaxError(
+          next,
+          '`=` で本体を書いた関数のあとに、`;` で同じ行に次の文を続けることはできません。改行してください。'
+        );
+    }
     return nodes.map((node) => this.convertStatement(node));
   }
 
@@ -826,3 +836,11 @@ function intoRightOperand(target: Expression, apply: (operand: Expression) => Ex
 
 /** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
 const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {};
+
+/** Whether a statement ends with a function's `=` body, as `fun f() = 1` or `val g = fun() = 2` does. */
+function endsWithExpressionBody(statement: Node): boolean {
+  for (let node: Node | null = statement; node; node = node.lastChild) {
+    if (node.type === 'function_body' && node.firstChild?.type === '=') return true;
+  }
+  return false;
+}

@@ -6317,6 +6317,16 @@ fun main() {
   });
 });
 
+test.each([
+  ['a local function', 'fun main() {\n  fun local(x: Int) = x + 100; println(local(1))\n}', false],
+  ['an anonymous function', 'fun main() {\n  val f = fun(x: Int) = x + 1; println(f(1))\n}', false],
+  ['a block body', 'fun main() {\n  fun local(x: Int): Int { return x }; println(local(1))\n}', true],
+  ['a semicolon at the end of the row', 'fun main() {\n  fun local(x: Int) = x;\n  println(local(1))\n}', true],
+  ['top-level functions', 'fun top() = 1; fun main() { println(top()) }', true],
+])('rejects a statement after %s whose = body ends at a semicolon on its row', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
+});
+
 test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
   const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
 fun main() {
