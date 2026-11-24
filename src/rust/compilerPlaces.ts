@@ -10,20 +10,22 @@ import { type Frame, MOVED, RustPanic } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type DerefKind, intBits, resolve, shallow, substitute, type Type } from './types';
 import { decodeUtf8 } from './utf8';
-import { type RawPtr,
+import {
   AccessorPlace,
   CellPlace,
   ElementPlace,
   type MapValue,
   type Place,
   type RangeValue,
+  type RawPtr,
   sliceBase,
   sliceGet,
   sliceLength,
   SliceView,
   type StructValue,
   textOf,
-  type Value } from './values';
+  type Value,
+} from './values';
 
 type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
 type Derefs = DerefKind[];

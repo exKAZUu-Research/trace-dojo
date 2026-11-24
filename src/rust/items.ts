@@ -1655,6 +1655,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
         kind: 'fn',
         params: ast.params.map((param) => lowerType(param, scope)),
         ret: ast.ret ? lowerType(ast.ret, scope) : UNIT,
+        isUnsafe: ast.isUnsafe,
       };
     }
     case 'fnBound': {

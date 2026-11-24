@@ -98,7 +98,10 @@ export class Unifier {
         return x.param === (y as typeof x).param;
       }
       case 'fn': {
-        return this.unifySignatures(x, y as typeof x);
+        // An `unsafe fn` item becomes only an `unsafe fn` pointer; a safe one becomes either.
+        const other = y as typeof x;
+        if ((unsafeItem(x) && isSafePointer(other)) || (unsafeItem(other) && isSafePointer(x))) return false;
+        return this.unifySignatures(x, other);
       }
       case 'closure': {
         return x.closure.id === (y as typeof x).closure.id;
@@ -255,4 +258,12 @@ export function deepNormalize(type: Type): Type {
   const t = normalize(shallow(type));
   if (t.kind === 'dyn' || t.kind === 'fn') return t;
   return mapChildren(t, deepNormalize);
+}
+
+function unsafeItem(t: Type & { kind: 'fn' }): boolean {
+  return !!(t.item && 'ast' in t.item && t.item.ast?.isUnsafe);
+}
+
+function isSafePointer(t: Type & { kind: 'fn' }): boolean {
+  return !t.item && !t.isUnsafe;
 }

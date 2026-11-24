@@ -822,12 +822,12 @@ export class Converter extends ExpressionConverter {
   private fnPointerType(node: Node, span: Span): TypeAst {
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
     if (modifiers?.text.includes('extern')) unavailable(span, '外部の関数のポインタ（extern "C" fn）');
-    if (modifiers?.text.includes('unsafe')) unavailable(span, 'unsafe fn のポインタ');
     const params = this.field(node, 'parameters')
       .namedChildren.filter((child) => !isComment(child))
       .map((child) => this.type(child.type === 'parameter' ? this.field(child, 'type') : child));
     const ret = node.childForFieldName('return_type');
-    return { kind: 'fnPointer', params, ret: ret ? this.returnType(ret) : undefined, span };
+    const isUnsafe = modifiers?.text.includes('unsafe');
+    return { kind: 'fnPointer', params, ret: ret ? this.returnType(ret) : undefined, isUnsafe, span };
   }
 
   private boundedType(node: Node, span: Span): TypeAst {

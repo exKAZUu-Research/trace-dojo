@@ -245,6 +245,9 @@ function callValue(
     ret = t.closure.ret;
     kind = t.closure.kind;
   } else if (t.kind === 'fn') {
+    if (t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe)) {
+      c.requireUnsafe(expr.span, 'unsafe fn を呼ぶこと');
+    }
     params = t.params;
     ret = t.ret;
     kind = 'Fn';

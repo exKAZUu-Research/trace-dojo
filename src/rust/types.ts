@@ -31,7 +31,8 @@ export type Type =
   | { kind: 'adt'; def: AdtDef; args: Type[]; lifetimes?: string[] }
   | { kind: 'param'; param: TypeParam }
   | { kind: 'var'; v: TypeVar }
-  | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef }
+  /** `isUnsafe`: an `unsafe fn(..)` pointer, whose calls need `unsafe`. */
+  | { kind: 'fn'; params: Type[]; ret: Type; item?: FnDef | VariantDef; isUnsafe?: boolean }
   | { kind: 'closure'; closure: ClosureType }
   | {
       kind: 'dyn';
@@ -708,6 +709,7 @@ export function sameType(a: Type, b: Type): boolean {
     case 'fn': {
       const other = y as typeof x;
       return (
+        (x.isUnsafe ?? false) === (other.isUnsafe ?? false) &&
         x.params.length === other.params.length &&
         x.params.every((p, i) => sameType(p, other.params[i])) &&
         sameType(x.ret, other.ret)
@@ -796,7 +798,8 @@ export function typeToString(type: Type): string {
       return t.v.literal === 'int' ? '{integer}' : t.v.literal === 'float' ? '{float}' : '_';
     }
     case 'fn': {
-      return `fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
+      const unsafe = t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe) ? 'unsafe ' : '';
+      return `${unsafe}fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
     }
     case 'closure': {
       return 'クロージャ';

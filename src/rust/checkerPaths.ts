@@ -44,7 +44,6 @@ export function pathExpr(c: Checker, expr: Extract<Expr, { kind: 'path' }>, expe
   const res = resolveValuePath(c, expr.path, expr.span);
   c.annotations.paths.set(expr, res);
   if (res.kind === 'const' && res.def.ast.isMutable) c.requireUnsafe(expr.span, 'static mut を使うこと');
-  if (res.kind === 'fn' && res.fn.ast?.isUnsafe) c.requireUnsafe(expr.span, 'unsafe fn を使うこと');
   return typeOfRes(c, res, expr.span, expected);
 }
 
