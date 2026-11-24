@@ -313,12 +313,47 @@ export function quantifyType(type: Type, vars: readonly TVar[]): Type {
 type UnificationFailure = 'mismatch' | 'occurs' | 'kind' | 'escape';
 type BindVariable = (variable: TVar, type: Type) => undefined | Exclude<UnificationFailure, 'mismatch'>;
 
-export function unifyTypes(a: Type, b: Type, bind: BindVariable): UnificationFailure | undefined {
-  for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
+/**
+ * Unifies two types. A pair where either side applies a type family goes to `family`, which reduces or defers it,
+ * instead of being compared by its parts.
+ */
+export function unifyTypes(
+  a: Type,
+  b: Type,
+  bind: BindVariable,
+  family?: (x: Type, y: Type) => UnificationFailure | undefined
+): UnificationFailure | undefined {
+  const seen = new Map<Type, Set<Type>>();
+  const work: [Type, Type][] = [[a, b]];
+  while (work.length > 0) {
+    const [left, right] = work.pop()!;
+    const x = prune(left);
+    const y = prune(right);
+    if (x === y) continue;
+    let matches = seen.get(x);
+    if (matches?.has(y)) continue;
+    chargeTypeWork();
+    if (!matches) {
+      matches = new Set();
+      seen.set(x, matches);
+    }
+    matches.add(y);
+    if (family && (isFamilyApplication(x) || isFamilyApplication(y))) {
+      const failure = family(x, y);
+      if (failure) return failure;
+      continue;
+    }
     const failure = x.tag === 'forall' && y.tag === 'forall' ? unifyForalls(x, y, bind) : unifyTypeNode(x, y, bind);
     if (failure) return failure;
+    if (x.tag === 'tap' && y.tag === 'tap') work.push([x.arg, y.arg], [x.fn, y.fn]);
   }
   return undefined;
+}
+
+/** Whether a type applies a type family to all its parameters, which only its equations may reduce. */
+export function isFamilyApplication(type: Type): boolean {
+  const { head, args } = splitApp(type);
+  return head.tag === 'tcon' && head.entity.sort === 'family' && args.length >= head.entity.arity;
 }
 
 /** Unifies two polymorphic types, which must bind the same number of variables and agree with them replaced alike. */

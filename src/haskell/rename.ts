@@ -64,6 +64,7 @@ import type {
   SigType,
   Span,
   Stmt,
+  TypeEquation,
   TypeExpr,
 } from './syntax';
 import { checkTypeParams } from './typeNames';
@@ -72,11 +73,34 @@ import { chargeTypeWork } from './typeWorkBudget';
 
 export interface RDataDecl {
   entity: TypeEntity;
+  /** The type's parameters, or for a data instance, the variables of its types. */
   params: string[];
+  /** For a data instance, the types it gives the family's parameters, in terms of `params`. */
+  instanceArgs?: RType[];
   /** The kinds the parameters' annotations give, by position. */
   paramKinds?: (RType | undefined)[];
   cons: RConDecl[];
   deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; span: Span }[];
+  span: Span;
+}
+
+/** A type family with its kind annotations and, for a closed family, its equations. */
+export interface RTypeFamily {
+  entity: TypeEntity;
+  params: string[];
+  paramKinds?: (RType | undefined)[];
+  resultKind?: RType;
+  equations?: RTypeEquation[];
+  injective?: number[];
+  span: Span;
+}
+
+/** An equation of a type family, whose variables are those of its patterns. */
+export interface RTypeEquation {
+  family: TypeEntity;
+  vars: string[];
+  patterns: RType[];
+  rhs: RType;
   span: Span;
 }
 
@@ -137,6 +161,9 @@ export interface RModule {
   classes: RClassDecl[];
   instances: RInstanceDecl[];
   standaloneDerivings: RStandaloneDeriving[];
+  typeFamilies: RTypeFamily[];
+  /** The equations of open type families, including the associated types' defaults that instances use. */
+  typeInstances: RTypeEquation[];
   /** The standalone kind signatures, `type T :: k`, by the type or class they give the kind of. */
   kindSigs: { entity: TypeEntity | ClassEntity; kind: RType; span: Span }[];
   /** The module's `default` declarations: one for every class, and at most one per class with NamedDefaults. */
@@ -249,6 +276,7 @@ class Renamer {
   private readonly instances: RInstanceDecl[] = [];
   private readonly standaloneDerivings: RStandaloneDeriving[] = [];
   private readonly dataKindSigs: RModule['kindSigs'] = [];
+  private readonly declaredCons = new Map<Decl, ConInfo[]>();
 
   constructor(
     private readonly module: Module,
@@ -258,6 +286,7 @@ class Renamer {
   run(): RModule {
     this.importModules();
     this.declareTypes(this.module.decls);
+    this.declareDataInstances(this.module.decls);
     const decls = this.expandBindingWildcards(this.module.decls, (name) => {
       const own = name.qualifier ? undefined : this.ownValues.get(name.name);
       return own?.con ?? this.lookupCon(name);
@@ -284,6 +313,7 @@ class Renamer {
       standaloneDerivings: this.standaloneDerivings,
       defaultDecls: this.renameDefaultDecls(decls),
       kindSigs: [...this.renameKindSigs(decls), ...this.dataKindSigs],
+      ...this.renameFamilies(decls),
       values,
       exports: this.buildExports(),
       hasExportList: this.module.exports !== undefined,
@@ -489,7 +519,24 @@ class Renamer {
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one kind of type declaration.
   private declareTypes(decls: Decl[]): void {
     for (const decl of decls) {
-      if (decl.kind === 'data' || decl.kind === 'typeSyn') {
+      if (decl.kind === 'typeFamily' || decl.kind === 'dataFamily') {
+        const entity: TypeEntity = {
+          id: nextId(),
+          name: decl.name.name,
+          module: this.module.name,
+          sort: decl.kind === 'typeFamily' ? 'family' : 'data',
+          kind: STAR,
+          arity: decl.params.length + (decl.kind === 'dataFamily' && decl.kindSig ? kindArity(decl.kindSig) : 0),
+          cons: [],
+          fields: new Map(),
+          span: decl.span,
+          ...(decl.kind === 'dataFamily' ? { dataFamily: true } : {}),
+        };
+        this.declareOwnType(decl.name, { kind: 'type', entity });
+        this.ownTypeChildren.set(this.ownTypes.get(decl.name.name) as TypeLike, []);
+      } else if (decl.kind === 'data' && decl.instanceOf) {
+        continue;
+      } else if (decl.kind === 'data' || decl.kind === 'typeSyn') {
         const entity: TypeEntity = {
           id: nextId(),
           name: decl.name.name,
@@ -556,6 +603,25 @@ class Renamer {
     }
   }
 
+  /** Declares the constructors of data instances, which belong to their families. */
+  private declareDataInstances(decls: Decl[]): void {
+    for (const decl of decls) {
+      if (decl.kind !== 'data' || !decl.instanceOf) continue;
+      this.declareConstructors(decl, this.familyOf(decl.instanceOf.family, 'data'));
+    }
+  }
+
+  /** The family an instance names, which must be a type family or a data family as the instance is. */
+  private familyOf(name: QName, sort: 'type' | 'data'): TypeEntity {
+    const own = name.qualifier ? undefined : this.ownTypes.get(name.name);
+    const found = own ?? this.lookupType(name);
+    const entity = found.entity as TypeEntity;
+    if (found.kind !== 'type' || (sort === 'type' ? entity.sort !== 'family' : !entity.dataFamily)) {
+      throw compileError(name.span, `${name.name} は、${sort === 'type' ? '型族' : 'データ族'}ではありません。`);
+    }
+    return entity;
+  }
+
   private declareOwnType(name: Name, entity: TypeLike): void {
     if (this.ownTypes.has(name.name)) {
       throw compileError(name.span, `${name.name} が重複して宣言されています。`);
@@ -618,7 +684,12 @@ class Renamer {
         field.positions.set(con, position);
       }
     }
-    this.ownTypeChildren.set(this.ownTypes.get(decl.name.name) as TypeLike, children);
+    const like = this.ownTypes.get(decl.name.name) as TypeLike;
+    this.ownTypeChildren.set(
+      like,
+      decl.instanceOf ? [...(this.ownTypeChildren.get(like) ?? []), ...children] : children
+    );
+    this.declaredCons.set(decl, type.cons.slice(type.cons.length - decl.cons.length));
   }
 
   private declareValues(decls: Decl[]): RawBinding[] {
@@ -684,6 +755,10 @@ class Renamer {
   }
 
   private renameData(decl: Extract<Decl, { kind: 'data' }>): void {
+    if (decl.instanceOf) {
+      this.renameDataInstance(decl, decl.instanceOf);
+      return;
+    }
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
     const entity = like.entity;
     const params = checkTypeParams(decl.params);
@@ -726,6 +801,39 @@ class Renamer {
       span: decl.span,
     });
     if (decl.kindSig) this.dataKindSigs.push({ entity, kind: this.renameKind(decl.kindSig), span: decl.span });
+  }
+
+  /**
+   * Renames `data instance D t1 t2 = ...`, whose constructors build the family's type at the instance's types and
+   * whose variables are those of the instance's types.
+   */
+  private renameDataInstance(
+    decl: Extract<Decl, { kind: 'data' }>,
+    instanceOf: NonNullable<Extract<Decl, { kind: 'data' }>['instanceOf']>
+  ): void {
+    const family = this.familyOf(instanceOf.family, 'data');
+    if (instanceOf.patterns.length !== family.arity) {
+      throw compileError(decl.span, `データ族 ${family.name} には、型を ${family.arity} 個書いてください。`);
+    }
+    const vars = new Set<string>();
+    for (const pattern of instanceOf.patterns) collectTypeVars(pattern, vars);
+    const cons = (this.declaredCons.get(decl) ?? []).map((con, index): RConDecl => ({
+      con,
+      fields: decl.cons[index].fields.map((field) => this.renameType(field, vars)),
+    }));
+    const deriving = decl.deriving.map((clause) => ({
+      type: this.renameTypeName(clause.cls),
+      strategy: clause.strategy,
+      span: clause.span,
+    }));
+    this.dataDecls.push({
+      entity: family,
+      params: [...vars],
+      cons,
+      deriving,
+      span: decl.span,
+      instanceArgs: instanceOf.patterns.map((pattern) => this.renameType(pattern, vars)),
+    });
   }
 
   private renameSynonym(decl: Extract<Decl, { kind: 'typeSyn' }>): void {
@@ -856,6 +964,102 @@ class Renamer {
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });
+  }
+
+  private renameFamilies(decls: Decl[]): Pick<RModule, 'typeFamilies' | 'typeInstances'> {
+    const typeFamilies: RTypeFamily[] = [];
+    const typeInstances: RTypeEquation[] = [];
+    const defaults: { cls: string; equation: RTypeEquation; params: string[] }[] = [];
+    for (const decl of decls) {
+      if (decl.kind === 'typeFamily') {
+        const entity = this.familyOf(decl.name, 'type');
+        const equations = decl.equations?.map((equation) => this.renameEquation(equation));
+        for (const equation of equations ?? []) {
+          if (equation.family !== entity) {
+            throw compileError(
+              equation.span,
+              `閉じた型族 ${entity.name} の等式には、${entity.name} を書いてください。`
+            );
+          }
+        }
+        typeFamilies.push({
+          entity,
+          params: decl.params.map((param) => param.name),
+          paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
+          resultKind: decl.resultKind && this.renameKind(decl.resultKind),
+          equations,
+          injective: decl.injective,
+          span: decl.span,
+        });
+        if (equations) entity.closed = true;
+      } else if (decl.kind === 'dataFamily') {
+        typeFamilies.push({
+          entity: this.familyOf(decl.name, 'data'),
+          params: decl.params.map((param) => param.name),
+          paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
+          resultKind: decl.kindSig && this.renameKind(decl.kindSig),
+          span: decl.span,
+        });
+      } else if (decl.kind === 'typeInstance') {
+        const equation = this.renameEquation(decl);
+        if (decl.defaultOf) {
+          const cls = decls.find(
+            (other): other is Extract<Decl, { kind: 'class' }> =>
+              other.kind === 'class' && other.name.name === decl.defaultOf
+          );
+          defaults.push({ cls: decl.defaultOf, equation, params: cls?.params.map((param) => param.name) ?? [] });
+        } else typeInstances.push(equation);
+      }
+    }
+    for (const equation of typeInstances) {
+      if (equation.family.closed) {
+        throw compileError(equation.span, `閉じた型族 ${equation.family.name} には、type instance は書けません。`);
+      }
+    }
+    for (const item of defaults) {
+      for (const instance of this.instances) {
+        if (instance.cls.name !== item.cls || instance.cls.module !== this.module.name) continue;
+        const args = instance.cls.packed ? rtypeArgs(instance.type) : [instance.type];
+        const substitution = new Map(item.params.map((param, index) => [param, args[index]]));
+        const patterns = item.equation.patterns.map((pattern) => substituteRType(pattern, substitution));
+        const key = patterns.map(rtypeKey).join(' ');
+        const defined = typeInstances.some(
+          (equation) => equation.family === item.equation.family && equation.patterns.map(rtypeKey).join(' ') === key
+        );
+        if (defined) continue;
+        const vars = new Set<string>();
+        for (const pattern of patterns) collectRTypeVars(pattern, vars);
+        typeInstances.push({
+          ...item.equation,
+          vars: [...vars],
+          patterns,
+          rhs: substituteRType(item.equation.rhs, substitution),
+          span: instance.span,
+        });
+      }
+    }
+    return { typeFamilies, typeInstances };
+  }
+
+  private renameEquation(equation: TypeEquation): RTypeEquation {
+    const family = this.familyOf(equation.family, 'type');
+    const vars = new Set<string>();
+    for (const pattern of equation.patterns) collectTypeVars(pattern, vars);
+    const rhsVars = new Set<string>();
+    collectTypeVars(equation.rhs, rhsVars);
+    for (const name of rhsVars) {
+      if (!vars.has(name)) throw compileError(equation.span, `型族の等式の右辺の型変数 ${name} が、左辺にありません。`);
+    }
+    if (equation.patterns.length !== family.arity) {
+      throw compileError(equation.span, `型族 ${family.name} には、型を ${family.arity} 個書いてください。`);
+    }
+    return {
+      family,
+      vars: [...vars],
+      patterns: equation.patterns.map((pattern) => this.renameType(pattern, vars)),
+      rhs: this.renameType(equation.rhs, vars),
+      span: equation.span,
+    };
   }
 
   private renameKindSigs(decls: Decl[]): RModule['kindSigs'] {
@@ -1738,6 +1942,80 @@ class Renamer {
 /** The number of arguments a kind takes, as `data T :: Type -> Type where` gives `T`. */
 function kindArity(kind: TypeExpr): number {
   return kind.kind === 'tfun' ? 1 + kindArity(kind.to) : 0;
+}
+
+function rtypeArgs(type: RType): RType[] {
+  const args: RType[] = [];
+  let head = type;
+  while (head.k === 'app') {
+    args.unshift(head.arg);
+    head = head.fn;
+  }
+  return args;
+}
+
+function substituteRType(type: RType, substitution: ReadonlyMap<string, RType>): RType {
+  switch (type.k) {
+    case 'var': {
+      return substitution.get(type.name) ?? type;
+    }
+    case 'app': {
+      return { ...type, fn: substituteRType(type.fn, substitution), arg: substituteRType(type.arg, substitution) };
+    }
+    case 'fun': {
+      return { ...type, from: substituteRType(type.from, substitution), to: substituteRType(type.to, substitution) };
+    }
+    case 'tuple': {
+      return { ...type, elems: type.elems.map((elem) => substituteRType(elem, substitution)) };
+    }
+    case 'kinded': {
+      return { ...type, type: substituteRType(type.type, substitution) };
+    }
+    default: {
+      return type;
+    }
+  }
+}
+
+function collectRTypeVars(type: RType, into: Set<string>): void {
+  if (type.k === 'var') into.add(type.name);
+  else if (type.k === 'app') {
+    collectRTypeVars(type.fn, into);
+    collectRTypeVars(type.arg, into);
+  } else if (type.k === 'fun') {
+    collectRTypeVars(type.from, into);
+    collectRTypeVars(type.to, into);
+  } else if (type.k === 'tuple') for (const elem of type.elems) collectRTypeVars(elem, into);
+}
+
+/** A key of a type that is the same for types equal up to the names of their variables. */
+function rtypeKey(type: RType): string {
+  const names = new Map<string, number>();
+  const walk = (node: RType): string => {
+    switch (node.k) {
+      case 'var': {
+        if (!names.has(node.name)) names.set(node.name, names.size);
+        return `v${names.get(node.name)}`;
+      }
+      case 'con':
+      case 'class': {
+        return `c${node.entity.id}`;
+      }
+      case 'app': {
+        return `(${walk(node.fn)} ${walk(node.arg)})`;
+      }
+      case 'fun': {
+        return `(${walk(node.from)}->${walk(node.to)})`;
+      }
+      case 'tuple': {
+        return `(${node.elems.map(walk).join(',')})`;
+      }
+      default: {
+        return '?';
+      }
+    }
+  };
+  return walk(type);
 }
 
 function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): number {

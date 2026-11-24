@@ -1,6 +1,14 @@
 // code-gauge-allow-file fileNcss -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
-import { CHAR_TYPE, EQUALITY_CLASS, FUNCTION_TYPE, LIST_TYPE, tupleCon, UNIT_TYPE } from './builtinTypes';
+import {
+  CHAR_TYPE,
+  EQUALITY_CLASS,
+  EQUALITY_TYPES,
+  FUNCTION_TYPE,
+  LIST_TYPE,
+  tupleCon,
+  UNIT_TYPE,
+} from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasses, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
@@ -25,11 +33,13 @@ import type { Span } from './syntax';
 import { TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
 import {
+  couldMatch,
   defaultKind,
   freshKindVar,
   freshSkolem,
   freshTypeVar,
   instantiateType,
+  isFamilyApplication,
   type Kind,
   kindArrow,
   kindOfType,
@@ -132,7 +142,19 @@ export class Checker {
   ) {}
 
   unify(actual: Type, expected: Type, span: Span, context?: string): void {
-    const failure = unifyTypes(actual, expected, (variable, type) => this.bindVar(variable, type));
+    const bind = (variable: TVar, type: Type): ReturnType<Checker['bindVar']> => this.bindVar(variable, type);
+    const family = (x: Type, y: Type): ReturnType<typeof unifyTypes> => {
+      const left = this.reduceFamilies(x);
+      const right = this.reduceFamilies(y);
+      if (isFamilyApplication(left) || isFamilyApplication(right)) {
+        if (!typesEqual(left, right)) {
+          this.want({ cls: EQUALITY_CLASS, type: tap(tcon(EQUALITY_TYPES), left, right) }, span, context ?? '型族');
+        }
+        return undefined;
+      }
+      return unifyTypes(left, right, bind, family);
+    };
+    const failure = unifyTypes(actual, expected, bind, family);
     if (!failure) return;
     const printer = new TypePrinter();
     let message: string;
@@ -204,7 +226,11 @@ export class Checker {
       const pred = { cls: hole.pred.cls, type: zonk(hole.pred.type) };
       hole.pred = pred;
       if (pred.cls === EQUALITY_CLASS) {
-        const [left, right] = splitApp(pred.type).args;
+        const [left, right] = splitApp(pred.type).args.map((side) => this.reduceFamilies(side));
+        if (!typesEqual(left, right) && (isFamilyApplication(left) || isFamilyApplication(right))) {
+          retained.push(hole);
+          continue;
+        }
         this.unify(left, right, hole.span, `型の等しさの制約（${hole.origin}）`);
         hole.solution = { kind: 'equality' };
         continue;
@@ -261,6 +287,38 @@ export class Checker {
         for (const index of fundep.to) this.unify(args[index], givenArgs[index], span);
       }
     }
+  }
+
+  /** Reduces the type family applications of a type by their equations, as far as its known parts allow. */
+  reduceFamilies(type: Type, depth = 0): Type {
+    if (depth > 200) typeError({ row: 0, col: 0, endRow: 0, endCol: 0 }, '型族の計算が上限を超えました。');
+    const pruned = prune(type);
+    if (pruned.tag !== 'tap' && !(pruned.tag === 'tcon' && pruned.entity.sort === 'family')) return pruned;
+    const { head, args } = splitApp(pruned);
+    const reducedArgs = args.map((arg) => this.reduceFamilies(arg, depth + 1));
+    if (head.tag === 'tcon' && head.entity.sort === 'family' && args.length >= head.entity.arity) {
+      const reduced = this.reduceFamilyApplication(head.entity, reducedArgs.slice(0, head.entity.arity));
+      if (reduced) return this.reduceFamilies(tap(reduced, ...reducedArgs.slice(head.entity.arity)), depth + 1);
+    }
+    return reducedArgs.every((arg, index) => arg === args[index]) ? pruned : tap(head, ...reducedArgs);
+  }
+
+  /**
+   * The type a family's application reduces to by the first equation that matches, or `undefined` when none does
+   * yet; for a closed family, an earlier equation that could still match stops the search.
+   */
+  private reduceFamilyApplication(family: TypeEntity, args: Type[]): Type | undefined {
+    for (const equation of family.equations ?? []) {
+      const bindings: (Type | undefined)[] = [];
+      if (equation.lhs.every((pattern, index) => matchType(pattern, args[index], bindings))) {
+        return instantiateType(
+          equation.rhs,
+          equation.kinds.map((kind, index) => bindings[index] ?? this.freshVar(kind))
+        );
+      }
+      if (family.closed && equation.lhs.every((pattern, index) => couldMatch(pattern, args[index]))) return undefined;
+    }
+    return undefined;
   }
 
   noInstance(hole: EvidenceHole): never {
@@ -792,6 +850,13 @@ export class Checker {
   }
 
   instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {
+    if (con.instanceArgs) {
+      const vars = (con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
+      return {
+        type: tap(tcon(con.type), ...con.instanceArgs.map((arg) => instantiateType(arg, vars))),
+        fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
+      };
+    }
     const args = typeParamKinds(con.type).map((kind) => this.freshVar(kind));
     return {
       type: tap(tcon(con.type), ...args),
@@ -1324,6 +1389,12 @@ export function polytypeScheme(type: TForall): Scheme {
 }
 
 export function conScheme(con: ConInfo): Scheme {
+  if (con.instanceArgs) {
+    const kinds = con.instanceKinds ?? [];
+    let type: Type = tap(tcon(con.type), ...con.instanceArgs);
+    for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
+    return { kinds, preds: [], type, specified: kinds.map((_, index) => index) };
+  }
   const params = typeParamKinds(con.type);
   const kinds = [...params, ...(con.exKinds ?? [])];
   const resultArgs = params.map(

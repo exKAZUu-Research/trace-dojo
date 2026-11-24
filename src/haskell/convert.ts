@@ -30,6 +30,7 @@ import type {
   SourceLiteral,
   Span,
   Stmt,
+  TypeEquation,
   TypeExpr,
   TyVarBinder,
 } from './syntax';
@@ -40,11 +41,7 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   binding_list: 'パターンシノニム',
   constructor_synonym: 'パターンシノニム',
   constructor_synonyms: 'パターンシノニム',
-  data_family: 'データ族（data family）',
-  data_instance: 'データ族のインスタンス（data instance）',
   do_module: '修飾つきの do（QualifiedDo）',
-  equation: '型族',
-  equations: '型族',
   explicit_type: 'type を付けた型引数（RequiredTypeArguments）',
   field_path: '入れ子のレコードの更新（OverloadedRecordUpdate）',
   forall_required: 'forall',
@@ -63,10 +60,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
   type_binder: 'パターンの型の束縛（@a）',
-  type_family: '型族',
-  type_family_injectivity: '型族',
-  type_family_result: '型族',
-  type_instance: '型族のインスタンス',
   unboxed_sum: 'ボックス化されない和型',
   unboxed_tuple: 'ボックス化されないタプル',
   unboxed_unit: 'ボックス化されないタプル',
@@ -460,11 +453,17 @@ function convertTopDecl(node: Node): Decl[] {
     case 'type_synonym': {
       return [convertTypeSynonym(node)];
     }
+    case 'type_family':
+    case 'type_instance':
+    case 'data_family':
+    case 'data_instance': {
+      return [convertFamilyDecl(node)];
+    }
     case 'class': {
-      return [convertClass(node)];
+      return convertClassWithFamilies(node);
     }
     case 'instance': {
-      return [convertInstance(node)];
+      return convertInstanceWithFamilies(node);
     }
     default: {
       return convertDecl(node);
@@ -644,7 +643,7 @@ function convertLocalBinds(node: Node | undefined): Decl[] {
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch rejects one unsupported form of a data declaration.
-function convertData(node: Node): Decl {
+function convertData(node: Node, isInstance = false): Decl {
   for (const name of ['context', 'forall']) {
     const child = field(node, name);
     if (child) {
@@ -668,11 +667,11 @@ function convertData(node: Node): Decl {
     ...(kindNode ? { kindSig: convertKind(kindNode) } : {}),
     kind: 'data',
     name: typeDeclName(node),
-    params: typeParams(node),
+    params: isInstance ? [] : typeParams(node),
     cons,
     deriving: convertDerivingClauses(node),
     span: spanOf(node),
-    paramKinds: typeParamKinds(node),
+    paramKinds: isInstance ? undefined : typeParamKinds(node),
   };
 }
 
@@ -733,7 +732,96 @@ function convertStandaloneDeriving(node: Node): Decl {
   };
 }
 
-function convertNewtype(node: Node): Decl {
+/** Converts the declarations of type families and data families, and their instances. */
+function convertFamilyDecl(node: Node): Decl {
+  if (!extensions.has('TypeFamilies')) {
+    throw syntaxError(spanOf(node), '型族やデータ族を使うには、TypeFamilies の拡張が要ります。');
+  }
+  const span = spanOf(node);
+  switch (node.type) {
+    case 'type_family': {
+      const equationsNode = field(node, 'closed_family');
+      const resultNode = namedChildren(node).find((child) => child.type === 'type_family_result');
+      const injectivityNode = namedChildren(node).find((child) => child.type === 'type_family_injectivity');
+      const params = typeParams(node);
+      const kindNode = field(node, 'kind');
+      let resultKind = kindNode ? convertKind(kindNode) : undefined;
+      if (resultNode) {
+        const result = required(resultNode, 'result');
+        if (result.type === 'parens' || result.type === 'annotated') {
+          const binder = convertBinder(result);
+          resultKind = binder.kind;
+        }
+      }
+      let injective: number[] | undefined;
+      if (injectivityNode) {
+        if (!extensions.has('TypeFamilyDependencies')) {
+          throw syntaxError(spanOf(injectivityNode), '単射の注釈には、TypeFamilyDependencies の拡張が要ります。');
+        }
+        injective = fields(injectivityNode, 'determined').map((determined) => {
+          const index = params.findIndex((param) => param.name === determined.text);
+          if (index === -1) throw syntaxError(spanOf(determined), `${determined.text} は、型族の引数ではありません。`);
+          return index;
+        });
+      }
+      if (equationsNode?.type === 'abstract_family') throw unsupported(equationsNode);
+      return {
+        kind: 'typeFamily',
+        name: typeDeclName(node),
+        params,
+        paramKinds: typeParamKinds(node),
+        resultKind,
+        equations: equationsNode ? fields(equationsNode, 'equation').map(convertEquation) : undefined,
+        injective,
+        span,
+      };
+    }
+    case 'type_instance': {
+      return { kind: 'typeInstance', ...convertEquation(node) };
+    }
+    case 'data_family': {
+      const kindNode = field(node, 'kind');
+      return {
+        kind: 'dataFamily',
+        name: typeDeclName(node),
+        params: typeParams(node),
+        paramKinds: typeParamKinds(node),
+        kindSig: kindNode ? convertKind(kindNode) : undefined,
+        span,
+      };
+    }
+    default: {
+      const inner = namedChildren(node)[0];
+      if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+      const decl = inner.type === 'newtype' ? convertNewtype(inner, true) : convertData(inner, true);
+      if (decl.kind !== 'data') throw syntaxError(span, '書き方に誤りがあります。');
+      return {
+        ...decl,
+        instanceOf: { family: qualifiedName(required(inner, 'name')).name, patterns: instancePatterns(inner) },
+        span,
+      };
+    }
+  }
+}
+
+/** An equation of a type family: `F Int = Bool` in a closed family, or `type instance F Int = Bool`. */
+function convertEquation(node: Node): TypeEquation {
+  const nameNode = required(node, 'name');
+  const rhsNode = unnamedFieldChildren(node).at(-1);
+  if (!rhsNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+  return {
+    family: qualifiedName(nameNode).name,
+    patterns: instancePatterns(node),
+    rhs: convertType(rhsNode),
+    span: spanOf(node),
+  };
+}
+
+function instancePatterns(node: Node): TypeExpr[] {
+  return fields(node, 'patterns').flatMap((patterns) => namedChildren(patterns).map(convertType));
+}
+
+function convertNewtype(node: Node, isInstance = false): Decl {
   for (const name of ['context', 'forall', 'kind']) {
     const child = field(node, name);
     if (child) {
@@ -766,12 +854,12 @@ function convertNewtype(node: Node): Decl {
   return {
     kind: 'data',
     name: typeDeclName(node),
-    params: typeParams(node),
+    params: isInstance ? [] : typeParams(node),
     cons: [con],
     deriving: convertDerivingClauses(node),
     span: spanOf(node),
     newtype: true,
-    paramKinds: typeParamKinds(node),
+    paramKinds: isInstance ? undefined : typeParamKinds(node),
   };
 }
 
@@ -1040,6 +1128,47 @@ function convertTypeSynonym(node: Node): Decl {
   };
 }
 
+/** The family declarations a class or instance holds, which become top-level declarations of their own. */
+const FAMILY_NODES = new Set(['type_family', 'data_family', 'type_instance', 'data_instance']);
+
+/**
+ * Converts a class with its associated families, which become top-level families of the class; a `type instance`
+ * in the class is its family's default, which instances that leave it out use.
+ */
+function convertClassWithFamilies(node: Node): Decl[] {
+  const cls = convertClass(node);
+  if (cls.kind !== 'class') return [cls];
+  const decls: Decl[] = [cls];
+  for (const member of familyMembers(node)) {
+    const decl = convertFamilyDecl(member);
+    if (decl.kind === 'typeInstance') decls.push({ ...decl, defaultOf: cls.name.name });
+    else if (decl.kind === 'typeFamily' || decl.kind === 'dataFamily')
+      decls.push({ ...decl, associatedWith: cls.name.name });
+    else throw syntaxError(spanOf(member), 'クラスの中には、data instance は書けません。');
+  }
+  return decls;
+}
+
+function convertInstanceWithFamilies(node: Node): Decl[] {
+  const instance = convertInstance(node);
+  return [
+    instance,
+    ...familyMembers(node).map((member) => {
+      if (member.type !== 'type_instance' && member.type !== 'data_instance') {
+        throw syntaxError(spanOf(member), 'インスタンスの中には、型族やデータ族の宣言は書けません。');
+      }
+      return convertFamilyDecl(member);
+    }),
+  ];
+}
+
+function familyMembers(node: Node): Node[] {
+  const declarationsNode = field(node, 'declarations');
+  return declarationsNode
+    ? fields(declarationsNode, 'declaration').filter((child) => FAMILY_NODES.has(child.type))
+    : [];
+}
+
 function convertClass(node: Node): Decl {
   const binders = typeParamBinders(node);
   const params = binders.map((binder) => binder.name);
@@ -1058,6 +1187,7 @@ function convertClass(node: Node): Decl {
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
     ? fields(declarationsNode, 'declaration').flatMap((child) => {
+        if (FAMILY_NODES.has(child.type)) return [];
         if (child.type === 'default_signature') {
           if (!extensions.has('DefaultSignatures')) {
             throw syntaxError(spanOf(child), 'default のシグネチャを使うには、DefaultSignatures の拡張が要ります。');
@@ -1096,6 +1226,7 @@ function convertInstance(node: Node): Decl {
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
     ? fields(declarationsNode, 'declaration').flatMap((child) => {
+        if (FAMILY_NODES.has(child.type)) return [];
         rejectUnsupported(child);
         return convertDecl(child);
       })

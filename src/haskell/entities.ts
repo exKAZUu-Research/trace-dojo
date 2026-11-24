@@ -12,7 +12,14 @@ export interface TypeEntity {
   id: number;
   name: string;
   module: string;
-  sort: 'data' | 'synonym' | 'prim';
+  /** A `family` is a type family, which its equations reduce. */
+  sort: 'data' | 'synonym' | 'prim' | 'family';
+  /** A type family's equations, in order, with their own variables as `TGen` indices. */
+  equations?: { kinds: Kind[]; lhs: Type[]; rhs: Type }[];
+  /** Whether a type family is closed: its equations apply in order, each only once earlier ones cannot apply. */
+  closed?: boolean;
+  /** Whether the type is a data family, whose instances declare its constructors. */
+  dataFamily?: boolean;
   unsupported?: string;
   kind: Kind;
   /** The number of type parameters a data type or synonym declares. */
@@ -50,6 +57,12 @@ export interface ConInfo {
   context?: Pred[];
   /** What a GADT constructor fixes the data type's parameters to, by position, as `IntLit :: Int -> Expr Int` does. */
   equalities?: [number, Type][];
+  /**
+   * For a constructor of a data instance, the types the instance gives the family, in terms of the instance's own
+   * variables as `TGen` indices, whose kinds `instanceKinds` gives; its field types refer to the same variables.
+   */
+  instanceArgs?: Type[];
+  instanceKinds?: Kind[];
   /** The positions of the fields that constructing a value evaluates first, in order. */
   strictFields?: number[];
   isNewtype?: boolean;

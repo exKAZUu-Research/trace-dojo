@@ -37,7 +37,7 @@ interface FieldComparison {
 /** Builds the method bindings of a derived instance, as GHC's deriving mechanism defines them. */
 export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Support): RBinding[] {
   const builder = new Builder(decl.span, support, cls);
-  const cons = decl.entity.cons;
+  const cons = decl.cons.map((conDecl) => conDecl.con);
   switch (cls.name) {
     case 'Eq': {
       return [builder.method('==', deriveEq(builder, cons))];
@@ -698,7 +698,7 @@ function tokensOfName(name: string): string[] {
 }
 
 function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
-  const witness = builder.con(decl.entity.cons[0]);
+  const witness = builder.con(decl.cons[0].con);
   const typeName = builder.str(decl.entity.name);
   const x = builder.newVar('x');
   const y = builder.newVar('y');

@@ -116,8 +116,7 @@ function defineConstructors(decl: RDataDecl): void {
       }
     }
     field.fieldType = first;
-    const kinds = typeParamKinds(decl.entity);
-    const recordType = tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
+    const { kinds, head: recordType } = declHead(decl);
     field.entity.scheme = { kinds, preds: [], type: tap(tcon(FUNCTION_TYPE), recordType, first) };
   }
 }
@@ -366,7 +365,7 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   for (const decl of module.dataDecls) {
     for (const { cls, span, strategy } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
-      const special = decl.entity.cons.find((con) => con.exKinds);
+      const special = decl.cons.find(({ con }) => con.exKinds)?.con;
       if (special) {
         throw compileError(
           span,
@@ -375,9 +374,11 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
       }
       const anyclass = derivingStrategy(module, options, decl, cls, strategy, span) === 'anyclass';
       const functorLike = !anyclass && FUNCTOR_LIKE_CLASSES.has(cls.name);
-      const kinds = typeParamKinds(decl.entity);
+      const { kinds, head: fullHead } = declHead(decl);
       const headKinds = functorLike ? kinds.slice(0, -1) : kinds;
-      const head = tap(tcon(decl.entity), ...headKinds.map((_, index): Type => ({ tag: 'tgen', index })));
+      const head = functorLike
+        ? tap(tcon(decl.entity), ...headKinds.map((_, index): Type => ({ tag: 'tgen', index })))
+        : fullHead;
       const info = makeInstance(cls, headKinds, head, [], module.name, span);
       registerInstance(checker, info, span);
       pending.push({ decl, cls, info, span, anyclass });
@@ -501,8 +502,22 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
   checker.env.add(info);
 }
 
+/**
+ * The kinds of a data declaration's variables and the type it declares in terms of them: the type applied to its
+ * parameters, or for a data instance, the family applied to the instance's types.
+ */
+function declHead(decl: RDataDecl): { kinds: Kind[]; head: Type } {
+  const first = decl.cons[0]?.con;
+  if (decl.instanceArgs) {
+    const kinds = first?.instanceKinds ?? decl.params.map(() => STAR);
+    return { kinds, head: tap(tcon(decl.entity), ...(first?.instanceArgs ?? [])) };
+  }
+  const kinds = typeParamKinds(decl.entity);
+  return { kinds, head: tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index }))) };
+}
+
 function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
-  const cons = decl.entity.cons;
+  const cons = decl.cons.map(({ con }) => con);
   if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
     const kinds = typeParamKinds(decl.entity);
     if (kinds.length === 0 || pruneKind(kinds.at(-1) as Kind).tag !== 'star') {
@@ -524,10 +539,10 @@ function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {
 }
 
 function inferDerivedContext(checker: Checker, decl: RDataDecl, cls: ClassEntity, span: Span): Pred[] {
-  const kinds = typeParamKinds(decl.entity);
+  const { kinds } = declHead(decl);
   const params = kinds.map((kind, index) => freshSkolem(kind, 1_000_000, decl.params[index] ?? `t${index}`));
   const work: Pred[] = [];
-  for (const con of decl.entity.cons) {
+  for (const { con } of decl.cons) {
     for (const field of con.fieldTypes) {
       if (FUNCTOR_LIKE_CLASSES.has(cls.name)) {
         for (const type of functorLikeConstraints(field, kinds.length - 1)) {

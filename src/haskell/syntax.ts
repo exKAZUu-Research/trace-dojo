@@ -208,6 +208,8 @@ export type Decl =
       span: Span;
       /** Whether the declaration is a `newtype`, whose one constructor patterns match without evaluating. */
       newtype?: boolean;
+      /** For `data instance D t = ...`, the family and the types the instance gives its parameters. */
+      instanceOf?: { family: QName; patterns: TypeExpr[] };
     }
   | { kind: 'typeSyn'; name: Name; params: Name[]; paramKinds?: (TypeExpr | undefined)[]; type: TypeExpr; span: Span }
   | {
@@ -220,6 +222,37 @@ export type Decl =
       fundeps: { from: Name[]; to: Name[] }[];
       decls: Decl[];
       span: Span;
+    }
+  /** `type family F a`, open, or closed with its equations, `type family F a where ...`. */
+  | {
+      kind: 'typeFamily';
+      name: Name;
+      params: Name[];
+      paramKinds?: (TypeExpr | undefined)[];
+      resultKind?: TypeExpr;
+      /** The equations of a closed family, in order. */
+      equations?: TypeEquation[];
+      /** The arguments an injectivity annotation, `= r | r -> a`, says the result determines, by position. */
+      injective?: number[];
+      span: Span;
+      /** The class an associated family belongs to. */
+      associatedWith?: string;
+    }
+  /** `type instance F Int = Bool`, an equation of an open family. */
+  | ({
+      kind: 'typeInstance';
+      /** For a `type instance` in a class, the class whose instances use it when they leave the family out. */
+      defaultOf?: string;
+    } & TypeEquation)
+  /** `data family D a`, whose instances declare their constructors. */
+  | {
+      kind: 'dataFamily';
+      name: Name;
+      params: Name[];
+      paramKinds?: (TypeExpr | undefined)[];
+      kindSig?: TypeExpr;
+      span: Span;
+      associatedWith?: string;
     }
   /** A standalone kind signature, `type T :: Type -> Type`. */
   | { kind: 'kindSig'; name: Name; kindSig: TypeExpr; span: Span }
@@ -236,6 +269,14 @@ export type Decl =
     };
 
 export type DerivingStrategy = 'stock' | 'anyclass' | 'newtype' | 'via';
+
+/** An equation of a type family, `F Int = Bool`. */
+export interface TypeEquation {
+  family: QName;
+  patterns: TypeExpr[];
+  rhs: TypeExpr;
+  span: Span;
+}
 
 /** A class a `deriving` clause names, with the strategy it gives. */
 export interface DerivingClause {
