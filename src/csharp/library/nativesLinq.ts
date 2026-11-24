@@ -531,8 +531,12 @@ function extremumBy(call: NativeCall, args: Value[], isMax: boolean): Value {
   let best: Value;
   let bestKey: Value;
   let found = false;
+  let isEmpty = true;
   for (const item of source(call, args[0])) {
     const key = select(item);
+    // .NET returns the first item when every key is null.
+    if (isEmpty) best = item;
+    isEmpty = false;
     if (key === undefined) continue;
     if (!found || (isMax ? compare(key, bestKey) > 0 : compare(key, bestKey) < 0)) {
       best = item;
@@ -540,6 +544,7 @@ function extremumBy(call: NativeCall, args: Value[], isMax: boolean): Value {
       found = true;
     }
   }
+  if (!found && !isEmpty) return best;
   if (!found) {
     const elementType = call.typeArgs[0];
     if (elementType.kind !== 'named' || !elementType.symbol.isValueType || nullableUnderlying(elementType))
