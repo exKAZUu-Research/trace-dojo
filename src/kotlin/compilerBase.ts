@@ -6,6 +6,7 @@ import {
   ClassSymbol,
   type FunctionSymbol,
   type PropertySymbol,
+  type TypeAliasSymbol,
   type TypeParameterSymbol,
   VariableSymbol,
 } from './symbols';
@@ -69,6 +70,8 @@ export interface Core {
   map: ClassSymbol;
   mutableMap: ClassSymbol;
   function: ClassSymbol;
+  /** `kotlin.jvm.functions.Function0` and the others, by their number of parameters. */
+  functionInterfaces: ClassSymbol[];
   enum: ClassSymbol;
   intRange: ClassSymbol;
   longRange: ClassSymbol;
@@ -82,6 +85,7 @@ export interface Core {
 
 export class PackageScope {
   readonly classes = new Map<string, ClassSymbol>();
+  readonly typeAliases = new Map<string, TypeAliasSymbol>();
   readonly functions = new Map<string, FunctionSymbol[]>();
   readonly properties = new Map<string, PropertySymbol[]>();
 
@@ -112,6 +116,8 @@ export class ReceiverSymbol {
 
 export interface LoopContext {
   identity: object;
+  /** The label of `label@ for (...)`, which `break@label` and `continue@label` name. */
+  label: string | undefined;
   breaks: Flow[];
   continues: Flow[];
   valWrites: Map<VariableSymbol | PropertySymbol, number>;
@@ -139,6 +145,10 @@ export class FunctionContext {
   /** Gives the returns compiled before an inferred result type the representation that type settles on. */
   readonly inferredReturns: ((to: Repr) => void)[] = [];
   inlineLambda = false;
+  /** The name `return@label` leaves the context by: a function's name, or a lambda's label. */
+  label: string | undefined;
+  /** For a lambda, what its `return@label` must give and has given, which its result type joins. */
+  lambdaResult: { expected: KType | undefined; returnsUnit: boolean; returned: Compiled[] } | undefined;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;
   invokesExactlyOnce = false;
@@ -213,6 +223,8 @@ export class Scope {
   pendingWrites: ReadonlyMap<string, number> | undefined;
   readonly classes = new Map<string, ClassSymbol>();
   readonly typeParameters = new Map<string, TypeParameterSymbol>();
+  /** The functions declared in the scope's function body, which hide the other functions of their names. */
+  readonly functions = new Map<string, FunctionSymbol[]>();
   receiver: ReceiverSymbol | undefined;
   /** A class whose companion object's members and nested classes the scope's names reach. */
   staticClass: ClassSymbol | undefined;

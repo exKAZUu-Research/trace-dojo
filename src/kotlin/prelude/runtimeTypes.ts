@@ -142,16 +142,116 @@ internal external fun runtimeClassName(value: Any): String
 internal external fun formatStream(isError: Boolean, pattern: String, args: Array<out Any?>)
 `;
 
-export const REFLECT_SOURCE = kotlin`
-package kotlin.reflect
+/** The number of `FunctionN` interfaces, from `Function0` to `Function22`, as on the JVM. */
+export const FUNCTION_INTERFACE_COUNT = 23;
 
-interface KProperty<out V> {
+/** `kotlin.jvm.functions`: the interfaces of function types, which classes implement as `class C : (Int) -> Int`. */
+export const FUNCTIONS_SOURCE = `package kotlin.jvm.functions
+
+${Array.from({ length: FUNCTION_INTERFACE_COUNT }, (_, arity) => {
+  const params = Array.from({ length: arity }, (_, index) => `in P${index + 1}`);
+  const values = Array.from({ length: arity }, (_, index) => `p${index + 1}: P${index + 1}`);
+  return `interface Function${arity}<${[...params, 'out R'].join(', ')}> : Function<R> {
+    operator fun invoke(${values.join(', ')}): R
+}`;
+}).join('\n\n')}
+`;
+
+/** The number of `KFunctionN` interfaces, which references of functions with that many parameters implement. */
+export const REFERENCE_ARITY_COUNT = 23;
+
+function functionReferenceSource(arity: number): string {
+  const typeParams = Array.from({ length: arity }, (_, index) => `P${index + 1}`);
+  const values = typeParams.map((type, index) => `p${index + 1}: ${type}`);
+  const names = typeParams.map((_, index) => `p${index + 1}`);
+  const variance = [...typeParams.map((type) => `in ${type}`), 'out R'].join(', ');
+  const args = [...typeParams, 'R'].join(', ');
+  return `interface KFunction${arity}<${variance}> : KFunction<R>, kotlin.jvm.functions.Function${arity}<${args}>
+
+internal class FunctionReference${arity}<${args}>(override val name: String, private val target: kotlin.jvm.functions.Function${arity}<${args}>) : KFunction${arity}<${args}> {
+    override fun invoke(${values.join(', ')}): R = target.invoke(${names.join(', ')})
+    override fun toString(): String = "function " + name + REFLECTION_UNAVAILABLE
+}`;
+}
+
+/**
+ * \`kotlin.reflect\`: classes and callable references, as Kotlin/JVM provides them without its full reflection library,
+ * which tells a class's names and a callable's name.
+ */
+export const REFLECT_SOURCE = `package kotlin.reflect
+
+internal const val REFLECTION_UNAVAILABLE = " (Kotlin reflection is not available)"
+
+interface KClassifier
+
+interface KCallable<out R> {
     val name: String
+}
+
+interface KFunction<out R> : KCallable<R>, Function<R>
+
+interface KProperty<out V> : KCallable<V> {
+    override val name: String
+}
+
+interface KMutableProperty<V> : KProperty<V>
+
+interface KProperty0<out V> : KProperty<V>, () -> V {
+    fun get(): V
+}
+
+interface KMutableProperty0<V> : KProperty0<V>, KMutableProperty<V> {
+    fun set(value: V)
+}
+
+interface KProperty1<T, out V> : KProperty<V>, (T) -> V {
+    fun get(receiver: T): V
+}
+
+interface KMutableProperty1<T, V> : KProperty1<T, V>, KMutableProperty<V> {
+    fun set(receiver: T, value: V)
 }
 
 external class PropertyReference : KProperty<Any?> {
     external override val name: String
 }
+
+internal class PropertyReference0<V>(override val name: String, private val getter: () -> V) : KProperty0<V> {
+    override fun get(): V = getter()
+    override fun invoke(): V = getter()
+    override fun toString(): String = "property " + name + REFLECTION_UNAVAILABLE
+}
+
+internal class MutablePropertyReference0<V>(override val name: String, private val getter: () -> V, private val setter: (V) -> Unit) : KMutableProperty0<V> {
+    override fun get(): V = getter()
+    override fun set(value: V) = setter(value)
+    override fun invoke(): V = getter()
+    override fun toString(): String = "property " + name + REFLECTION_UNAVAILABLE
+}
+
+internal class PropertyReference1<T, V>(override val name: String, private val getter: (T) -> V) : KProperty1<T, V> {
+    override fun get(receiver: T): V = getter(receiver)
+    override fun invoke(p1: T): V = getter(p1)
+    override fun toString(): String = "property " + name + REFLECTION_UNAVAILABLE
+}
+
+internal class MutablePropertyReference1<T, V>(override val name: String, private val getter: (T) -> V, private val setter: (T, V) -> Unit) : KMutableProperty1<T, V> {
+    override fun get(receiver: T): V = getter(receiver)
+    override fun set(receiver: T, value: V) = setter(receiver, value)
+    override fun invoke(p1: T): V = getter(p1)
+    override fun toString(): String = "property " + name + REFLECTION_UNAVAILABLE
+}
+
+external class KClass<T : Any> : KClassifier {
+    external val simpleName: String?
+    external val qualifiedName: String?
+    external fun isInstance(value: Any?): Boolean
+    external override fun equals(other: Any?): Boolean
+    external override fun hashCode(): Int
+    external override fun toString(): String
+}
+
+${Array.from({ length: REFERENCE_ARITY_COUNT }, (_, arity) => functionReferenceSource(arity)).join('\n\n')}
 `;
 
 export const TURTLE_SOURCE = kotlin`

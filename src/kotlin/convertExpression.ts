@@ -3,6 +3,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import { convertAnnotation } from './annotationArguments';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
+  Annotation,
   Argument,
   BinaryOperator,
   Block,
@@ -38,12 +39,16 @@ import { decodeCharLiteral, decodeEscape, parseIntegerLiteral, parseRealLiteral 
 export abstract class ExpressionConverter {
   constructor(protected readonly isLibrary: boolean) {}
 
-  protected abstract convertStatement(node: Node): Statement;
+  /** The annotations on what is not a declaration, which the compiler checks in the file's scope. */
+  protected readonly looseAnnotations: { annotation: Annotation; target: string }[] = [];
 
-  /** Rejects a construct in learners' programs; the prelude may use it. */
-  protected requireLibrary(node: Node, what: string): void {
-    if (!this.isLibrary) throw unavailable(node, what);
+  private looseAnnotation(node: Node, target: string): Annotation {
+    const annotation = this.convertAnnotation(node);
+    this.looseAnnotations.push({ annotation, target });
+    return annotation;
   }
+
+  protected abstract convertStatement(node: Node): Statement;
 
   convertStatements(nodes: Node[]): Statement[] {
     return nodes.map((node) => this.convertStatement(node));
@@ -89,7 +94,6 @@ export abstract class ExpressionConverter {
         return this.convertString(node);
       }
       case 'multiline_string_literal': {
-        this.requireLibrary(node, '複数行の文字列リテラル（"""）');
         return this.convertString(node, true);
       }
       case 'identifier': {
@@ -97,12 +101,48 @@ export abstract class ExpressionConverter {
       }
       case 'this_expression': {
         const labelNode = named(node)[0];
-        if (labelNode) this.requireLibrary(node, 'ラベル付きの this（this@名前）');
         return { kind: 'this', row, label: labelNode ? identifierName(labelNode) : undefined };
       }
       case 'super_expression': {
-        if (named(node).length > 0) throw unavailable(node, 'super<型> や super@名前');
-        return { kind: 'super', row };
+        const typeNode = named(node).find((part) => part.type !== 'identifier');
+        const labelNode = firstOfType(node, 'identifier');
+        return {
+          kind: 'super',
+          row,
+          type: typeNode ? this.convertUserType(typeNode, false) : undefined,
+          label: labelNode ? identifierName(labelNode) : undefined,
+        };
+      }
+      case 'annotated_expression': {
+        const parts = named(node);
+        for (const annotation of parts.filter((part) => part.type === 'annotation'))
+          this.looseAnnotation(annotation, 'EXPRESSION');
+        return this.convertExpression(required(parts.findLast((part) => part.type !== 'annotation')));
+      }
+      case 'callable_reference': {
+        const typeNode = firstOfType(node, 'user_type');
+        const nameNode = firstOfType(node, 'identifier');
+        return {
+          kind: 'reference',
+          row,
+          receiver: typeNode ? { kind: 'type', type: this.convertUserType(typeNode, false) } : undefined,
+          name: nameNode ? identifierName(nameNode) : 'class',
+        };
+      }
+      case 'collection_literal': {
+        return {
+          kind: 'collectionLiteral',
+          row,
+          elements: named(node).map((element) => this.convertExpression(element)),
+        };
+      }
+      case 'labeled_expression': {
+        const [labelNode, inner] = named(node);
+        const label = labelNode.text.slice(0, -1).replaceAll(/^`|`$/g, '');
+        const expression = this.convertExpression(required(inner));
+        // A label names a lambda, which `return@label` leaves; on other expressions it changes nothing.
+        if (expression.kind === 'lambda') return { ...expression, label };
+        return expression;
       }
       case 'parenthesized_expression': {
         // Grouping changes no expression's meaning, so the compiler never sees it, except around a callee.
@@ -228,14 +268,23 @@ export abstract class ExpressionConverter {
         return { kind: 'throw', row, value: this.convertExpression(named(node)[0]) };
       }
       case 'return_expression': {
-        if (node.childForFieldName('label')) throw unavailable(node, 'ラベル付きの return（return@名前）');
-        const value = named(node)[0];
-        return { kind: 'return', row, value: value ? this.convertExpression(value) : undefined };
+        const labelNode = node.childForFieldName('label');
+        const value = named(node).find((part) => part.startIndex !== labelNode?.startIndex);
+        return {
+          kind: 'return',
+          row,
+          label: labelNode ? identifierName(labelNode) : undefined,
+          value: value ? this.convertExpression(value) : undefined,
+        };
       }
       case 'break_expression':
       case 'continue_expression': {
-        if (node.childForFieldName('label')) throw unavailable(node, 'ラベル付きの break・continue');
-        return { kind: node.type === 'break_expression' ? 'break' : 'continue', row };
+        const labelNode = node.childForFieldName('label');
+        return {
+          kind: node.type === 'break_expression' ? 'break' : 'continue',
+          row,
+          label: labelNode ? identifierName(labelNode) : undefined,
+        };
       }
       default: {
         throw syntaxError(node, '書き方に誤りがあります。');
@@ -298,7 +347,15 @@ export abstract class ExpressionConverter {
   private convertNavigation(node: Node): Expression {
     const [receiverNode, nameNode] = named(node);
     const operator = children(node).find((child) => !child.isNamed && ['.', '?.', '::'].includes(child.type));
-    if (operator?.type === '::' || !nameNode) throw unavailable(node, '関数や型の参照（::）');
+    if (operator?.type === '::') {
+      return {
+        kind: 'reference',
+        row: rowOf(node),
+        receiver: { kind: 'expression', expression: this.convertExpression(receiverNode) },
+        name: nameNode ? identifierName(nameNode) : 'class',
+      };
+    }
+    if (!nameNode) throw syntaxError(node, '書き方に誤りがあります。');
     if (nameNode.type !== 'identifier') throw syntaxError(nameNode, '書き方に誤りがあります。');
     return intoRightOperand(this.convertExpression(receiverNode), (receiver) => ({
       kind: 'member',
@@ -324,7 +381,7 @@ export abstract class ExpressionConverter {
           typeArgs = namedOfType(part, 'type_projection').map((projection) => {
             const converted = this.convertProjection(projection);
             if (converted.star || converted.variance)
-              throw unavailable(projection, '呼び出しの型引数での * や in・out');
+              throw syntaxError(projection, '関数を呼び出すときの型引数には、* や in・out を書けません。');
             return converted.type;
           });
           break;
@@ -334,9 +391,11 @@ export abstract class ExpressionConverter {
           break;
         }
         case 'annotated_lambda': {
-          const lambda = named(part);
-          if (lambda.some((child) => child.type !== 'lambda_literal')) throw unavailable(part, 'ラベル付きのラムダ式');
-          trailingLambda = this.convertLambda(lambda[0]);
+          const labelNode = firstOfType(part, 'label');
+          const lambda = this.convertLambda(required(firstOfType(part, 'lambda_literal')));
+          trailingLambda = labelNode
+            ? { ...lambda, label: labelNode.text.slice(0, -1).replaceAll(/^`|`$/g, '') }
+            : lambda;
           break;
         }
         default: {
@@ -344,14 +403,24 @@ export abstract class ExpressionConverter {
         }
       }
     }
-    return intoRightOperand(callee, (operand) => ({
-      kind: 'call',
-      row: rowOf(node),
-      callee: operand,
-      typeArgs,
-      args,
-      trailingLambda,
-    }));
+    return intoRightOperand(callee, (operand) => {
+      // A lambda passed to a function takes the function's name as its label, unless it has its own.
+      const name = operand.kind === 'name' ? operand.name : operand.kind === 'member' ? operand.name : undefined;
+      const labeled = (lambda: LambdaExpression): LambdaExpression =>
+        lambda.label === undefined ? { ...lambda, label: name } : lambda;
+      return {
+        kind: 'call',
+        row: rowOf(node),
+        callee: operand,
+        typeArgs,
+        args: args.map((argument) =>
+          argument.value.kind === 'lambda' && !GROUPED.has(argument.value)
+            ? { ...argument, value: labeled(argument.value) }
+            : argument
+        ),
+        trailingLambda: trailingLambda && labeled(trailingLambda),
+      };
+    });
   }
 
   protected convertArgument(node: Node): Argument {
@@ -359,7 +428,6 @@ export abstract class ExpressionConverter {
     const isNamed = hasToken(node, '=');
     const valueNode = parts.at(-1) as Node;
     const isSpread = hasToken(node, '*') || valueNode.type === 'spread_expression';
-    if (isSpread) this.requireLibrary(node, '配列の展開（*配列）');
     const value = this.convertExpression(valueNode.type === 'spread_expression' ? named(valueNode)[0] : valueNode);
     return {
       row: rowOf(node),
@@ -388,21 +456,27 @@ export abstract class ExpressionConverter {
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private convertWhen(node: Node): Expression {
     let subject: Expression | undefined;
+    let subjectVariable: Extract<Expression, { kind: 'when' }>['subjectVariable'];
     const entries: WhenEntry[] = [];
     for (const child of named(node)) {
       if (child.type === 'when_subject') {
         const parts = named(child);
-        if (parts.some((part) => part.type !== 'variable_declaration' && part.type !== 'annotation')) {
-          const expression = parts.find((part) => part.type !== 'annotation');
-          if (parts.length !== 1 || !expression) throw unavailable(child, 'when の主語での変数の宣言');
-          subject = this.convertExpression(expression);
-        } else {
-          throw unavailable(child, 'when の主語での変数の宣言');
+        for (const annotation of parts.filter((part) => part.type === 'annotation'))
+          this.looseAnnotation(annotation, 'LOCAL_VARIABLE');
+        const variable = parts.find((part) => part.type === 'variable_declaration');
+        const expression = parts.find((part) => part !== variable && part.type !== 'annotation');
+        if (!expression) throw syntaxError(child, 'when の主語に値を書いてください。');
+        if (variable) {
+          if (!hasToken(child, 'val')) throw syntaxError(child, 'when の主語で宣言する変数には val を書いてください。');
+          const declared = this.convertVariableDeclaration(variable);
+          if (declared.name === undefined) throw syntaxError(variable, '_ は変数の名前に使えません。');
+          subjectVariable = { row: declared.row, name: declared.name, type: declared.type };
         }
+        subject = this.convertExpression(expression);
         continue;
       }
       if (child.type !== 'when_entry') throw syntaxError(child, '書き方に誤りがあります。');
-      if (child.childForFieldName('guard')) throw unavailable(child, 'when の条件のあとの if（ガード）');
+      const guardNode = child.childForFieldName('guard');
       const conditions = child.childrenForFieldName('condition').map((condition): WhenCondition => {
         const row = rowOf(condition);
         if (condition.type === 'type_test') {
@@ -419,9 +493,14 @@ export abstract class ExpressionConverter {
         return { kind: 'expression', row, expression: this.convertExpression(condition) };
       });
       if (conditions.length === 0 && !hasToken(child, 'else')) throw syntaxError(child, 'when の条件が足りません。');
-      entries.push({ row: rowOf(child), conditions, body: this.convertBody(child.childForFieldName('body'), child) });
+      entries.push({
+        row: rowOf(child),
+        conditions,
+        guard: guardNode ? this.convertExpression(guardNode) : undefined,
+        body: this.convertBody(child.childForFieldName('body'), child),
+      });
     }
-    return { kind: 'when', row: rowOf(node), subject, entries };
+    return { kind: 'when', row: rowOf(node), subject, subjectVariable, entries };
   }
 
   private convertTry(node: Node): Expression {
@@ -429,10 +508,12 @@ export abstract class ExpressionConverter {
     const body = this.convertBody(parts[0], node);
     const catches = namedOfType(node, 'catch_block').map((block) => {
       const blockParts = named(block);
-      if (blockParts.some((part) => part.type === 'annotation'))
-        throw unavailable(block, 'catch の引数へのアノテーション');
+      for (const annotation of blockParts.filter((part) => part.type === 'annotation'))
+        this.looseAnnotation(annotation, 'VALUE_PARAMETER');
       const nameNode = required(firstOfType(block, 'identifier'));
-      const typeNode = required(blockParts.find((part) => part !== nameNode && part.type !== 'block'));
+      const typeNode = required(
+        blockParts.find((part) => part !== nameNode && part.type !== 'block' && part.type !== 'annotation')
+      );
       return {
         row: rowOf(block),
         name: identifierName(nameNode),
@@ -456,9 +537,19 @@ export abstract class ExpressionConverter {
     let params: LambdaParameter[] | undefined;
     const parametersNode = parts.find((part) => part.type === 'lambda_parameters');
     if (parametersNode) {
-      params = named(parametersNode).map((parameter) => {
-        if (parameter.type === 'multi_variable_declaration')
-          throw unavailable(parameter, 'ラムダ式の引数の分解（(a, b) ->）');
+      params = named(parametersNode).map((parameter): LambdaParameter => {
+        if (parameter.type === 'multi_variable_declaration') {
+          const typeNode = parameter.childForFieldName('type');
+          return {
+            row: rowOf(parameter),
+            name: undefined,
+            type: typeNode ? this.convertType(typeNode) : undefined,
+            destructured: namedOfType(parameter, 'variable_declaration').map((variable) => {
+              const declared = this.convertVariableDeclaration(variable);
+              return declared.name === undefined ? undefined : { ...declared, name: declared.name };
+            }),
+          };
+        }
         return this.convertVariableDeclaration(parameter);
       });
     } else if (hasToken(node, '->')) {
@@ -468,6 +559,7 @@ export abstract class ExpressionConverter {
       kind: 'lambda',
       row: rowOf(node),
       endRow: node.endPosition.row,
+      label: undefined,
       params,
       statements: this.convertStatements(parts.filter((part) => part.type !== 'lambda_parameters')),
     };
@@ -480,9 +572,10 @@ export abstract class ExpressionConverter {
     type: TypeRef | undefined;
   } {
     const parts = named(node);
-    if (parts.some((part) => part.type === 'annotation')) throw unavailable(node, '変数へのアノテーション');
+    for (const annotation of parts.filter((part) => part.type === 'annotation'))
+      this.looseAnnotation(annotation, 'LOCAL_VARIABLE');
     const nameNode = required(parts.find((part) => part.type === 'identifier'));
-    const typeNode = parts.find((part) => part !== nameNode);
+    const typeNode = parts.find((part) => part !== nameNode && part.type !== 'annotation');
     const name = identifierName(nameNode);
     return {
       row: rowOf(node),
@@ -498,23 +591,35 @@ export abstract class ExpressionConverter {
         return this.convertUserType(node, false);
       }
       case 'nullable_type': {
-        const inner = this.convertType(required(named(node).find((child) => child.type !== 'type_modifiers')));
-        return { ...inner, nullable: true };
+        const parts = named(node);
+        const annotations = this.typeAnnotations(parts.find((child) => child.type === 'type_modifiers'));
+        const inner = this.convertType(required(parts.find((child) => child.type !== 'type_modifiers')));
+        if (inner.kind === 'named' && inner.definitelyNonNull)
+          throw syntaxError(node, '確実に null でない型（T & Any）には ? を付けられません。');
+        return { ...inner, nullable: true, annotations: [...(inner.annotations ?? []), ...annotations] };
       }
       case 'parenthesized_type': {
         return this.convertType(named(node)[0]);
       }
       case 'non_nullable_type': {
-        throw unavailable(node, '確実に null でない型（T & Any）');
+        const [left, right] = named(node).map((part) => this.convertType(part));
+        const isAny =
+          right.kind === 'named' &&
+          !right.nullable &&
+          right.parts.length === 1 &&
+          right.parts[0].name === 'Any' &&
+          right.parts[0].args.length === 0;
+        if (left.kind !== 'named' || !isAny) throw syntaxError(node, '& を使った型は、型引数 & Any の形だけ書けます。');
+        return { ...left, nullable: false, definitelyNonNull: true };
       }
       case 'function_type': {
         const parts = named(node);
-        if (parts.some((part) => part.type === 'type_modifiers' || part.type === 'context_parameters')) {
-          throw unavailable(node, '関数型への修飾子');
-        }
-        const parametersIndex = parts.findIndex((part) => part.type === 'function_type_parameters');
-        const receiverNode = parametersIndex > 0 ? parts[0] : undefined;
-        const params = named(parts[parametersIndex]).map((parameter) => {
+        const modifiersNode = parts.find((part) => part.type === 'type_modifiers');
+        const contextNode = parts.find((part) => part.type === 'context_parameters');
+        const signature = parts.filter((part) => part !== modifiersNode && part !== contextNode);
+        const parametersIndex = signature.findIndex((part) => part.type === 'function_type_parameters');
+        const receiverNode = parametersIndex > 0 ? signature[0] : undefined;
+        const params = named(signature[parametersIndex]).map((parameter) => {
           if (parameter.type === 'parameter') {
             const typeNode = named(parameter).find((child) => child.type !== 'identifier');
             return this.convertType(required(typeNode));
@@ -526,8 +631,11 @@ export abstract class ExpressionConverter {
           row,
           receiver: receiverNode ? this.convertType(receiverNode) : undefined,
           params,
-          returnType: this.convertType(required(parts.at(-1))),
+          returnType: this.convertType(required(signature.at(-1))),
           nullable: false,
+          isSuspend: modifiersNode ? children(modifiersNode).some((child) => child.type === 'suspend') : false,
+          contextTypes: contextNode ? named(contextNode).map((part) => this.convertType(part)) : [],
+          annotations: this.typeAnnotations(modifiersNode),
         };
       }
       default: {
@@ -538,22 +646,33 @@ export abstract class ExpressionConverter {
 
   convertUserType(node: Node, nullable: boolean): NamedTypeRef {
     const parts: NamedTypeRef['parts'] = [];
+    const annotations: Annotation[] = [];
     for (const child of named(node)) {
       if (child.type === 'identifier') parts.push({ name: identifierName(child), args: [] });
       else if (child.type === 'type_arguments') {
         (parts.at(-1) as NamedTypeRef['parts'][number]).args = namedOfType(child, 'type_projection').map((projection) =>
           this.convertProjection(projection)
         );
-      } else throw unavailable(child, '型へのアノテーション');
+      } else if (child.type === 'type_modifiers') {
+        annotations.push(...this.typeAnnotations(child));
+      } else throw syntaxError(child, '型の書き方に誤りがあります。');
     }
-    return { kind: 'named', row: rowOf(node), parts, nullable };
+    return { kind: 'named', row: rowOf(node), parts, nullable, annotations };
+  }
+
+  /** The annotations of a type's `type_modifiers`, as `@A` of `@A Int`, where `suspend` belongs to function types. */
+  private typeAnnotations(node: Node | undefined): Annotation[] {
+    if (!node) return [];
+    for (const child of children(node))
+      if (child.type === 'suspend' && node.parent?.type !== 'function_type')
+        throw syntaxError(child, 'suspend は関数型にだけ付けられます。');
+    return namedOfType(node, 'annotation').map((annotation) => this.looseAnnotation(annotation, 'TYPE'));
   }
 
   private convertProjection(node: Node): TypeProjectionRef {
     const parts = named(node);
     if (parts.length === 0) return { star: true };
     const varianceNode = parts.find((part) => part.type === 'variance_modifier');
-    if (varianceNode) this.requireLibrary(varianceNode, '型引数の in・out（使う側の変位）');
     const typeNode = required(parts.find((part) => part.type !== 'variance_modifier'));
     return {
       star: false,
@@ -562,17 +681,36 @@ export abstract class ExpressionConverter {
     };
   }
 
-  /** Reads a declaration's modifiers, rejecting the annotations and keywords learners' programs may not use. */
-  convertModifiers(node: Node | undefined, allowed: ReadonlySet<string>, allowsValueClass = false): Modifiers {
+  /** Reads a declaration's modifiers, rejecting those that Kotlin/JVM does not accept or this environment does not run. */
+  convertModifiers(node: Node | undefined, allowsValueClass = false): Modifiers {
     const keywords = new Set<string>();
     const annotations: Modifiers['annotations'] = [];
+    let contextParameters: Modifiers['contextParameters'];
     for (const child of node ? named(node) : []) {
       if (child.type === 'annotation') {
-        annotations.push(convertAnnotation(child, this.isLibrary));
+        annotations.push(this.convertAnnotation(child));
+        continue;
+      }
+      if (child.type === 'context_parameters') {
+        if (contextParameters) throw syntaxError(child, 'context(...) は1つだけ書けます。');
+        contextParameters = named(child).map((parameter) => {
+          if (parameter.type !== 'parameter')
+            throw syntaxError(parameter, 'context(...) には、名前: 型 の形で引数を書いてください。');
+          const [nameNode, typeNode] = named(parameter);
+          return {
+            row: rowOf(parameter),
+            name: identifierName(nameNode),
+            type: this.convertType(required(typeNode)),
+            defaultValue: undefined,
+            modifiers: { keywords: new Set<string>(), annotations: [] },
+          };
+        });
         continue;
       }
       const keyword = child.text;
-      if (!this.isLibrary && !allowed.has(keyword)) throw unavailable(child, `${keyword} 修飾子`);
+      if (!this.isLibrary && keyword === 'external') throw unavailable(child, '外部の関数の宣言（external）');
+      if (keyword === 'expect' || keyword === 'actual')
+        throw syntaxError(child, `${keyword} 修飾子は、マルチプラットフォームのプロジェクトでだけ使えます。`);
       if (keywords.has(keyword)) throw syntaxError(child, `${keyword} 修飾子が2回書かれています。`);
       keywords.add(keyword);
     }
@@ -582,9 +720,31 @@ export abstract class ExpressionConverter {
     const visibility = VISIBILITY_KEYWORDS.filter((keyword) => keywords.has(keyword));
     if (node && visibility.length > 1)
       throw syntaxError(node, `公開範囲の修飾子 ${visibility.join(' と ')} は同時に書けません。`);
-    return { keywords, annotations };
+    for (const [a, b] of EXCLUSIVE_MODIFIERS)
+      if (keywords.has(a) && keywords.has(b)) throw syntaxError(required(node), `${a} と ${b} は同時に書けません。`);
+    return { keywords, annotations, contextParameters };
+  }
+
+  convertAnnotation(node: Node): Annotation {
+    return convertAnnotation(node, (argument) => this.convertArgument(argument));
   }
 }
+
+/** Modifiers that contradict each other, which kotlinc rejects together. */
+const EXCLUSIVE_MODIFIERS = [
+  ['open', 'final'],
+  ['abstract', 'final'],
+  ['open', 'abstract'],
+  ['lateinit', 'const'],
+  ['data', 'sealed'],
+  ['data', 'enum'],
+  ['data', 'inner'],
+  ['data', 'abstract'],
+  ['data', 'open'],
+  ['enum', 'inner'],
+  ['sealed', 'final'],
+  ['in', 'out'],
+] as const;
 
 /**
  * A string's content, where the grammar reads `\\uXXXX` as the content `\\u` before the content of the digits, and an
@@ -625,11 +785,6 @@ function intoRightOperand(target: Expression, apply: (operand: Expression) => Ex
 
 /** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
 const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {
-  labeled_expression: 'ラベル（名前@）',
-  callable_reference: '関数や型の参照（::）',
   object_literal: 'オブジェクト式（object : 型 { ... }）',
   anonymous_function: '無名関数（fun (...) { ... }）',
-  annotated_expression: '式へのアノテーション',
-  collection_literal: 'アノテーションの外での [...]',
-  spread_expression: '配列の展開（*配列）',
 };

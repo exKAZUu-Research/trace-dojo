@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
+import { annotationSite } from './annotationSites';
 import { VISIBILITY_KEYWORDS } from './ast';
 import type {
   ClassDecl,
@@ -13,6 +14,7 @@ import type {
   ParameterDecl,
   PropertyDecl,
   SuperSpec,
+  TypeAliasDecl,
   TypeParameterDecl,
 } from './ast';
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
@@ -44,11 +46,21 @@ import {
   type MemberSymbol,
   type ParameterSymbol,
   PropertySymbol,
+  TypeAliasSymbol,
   TypeParameterSymbol,
   type Visibility,
 } from './symbols';
-import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
-import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
+import { anyType, functionInterfaceOf, isSameType, isSubtype, substitutionOf } from './typeRelations';
+import {
+  type ClassType,
+  type FunctionType,
+  type KType,
+  NOTHING,
+  resolved,
+  substitute,
+  type Substitution,
+  typeToString,
+} from './types';
 import { KObject, type Value } from './values';
 
 export interface ClassEntry {
@@ -118,8 +130,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected declareClasses(file: KotlinFile, context: FileContext): void {
     const packageScope = this.packageScope(context.packageName);
     for (const declaration of file.declarations) {
+      if (declaration.kind === 'typeAlias') {
+        if (packageScope.classes.has(declaration.name) || packageScope.typeAliases.has(declaration.name))
+          this.error(declaration.row, `${declaration.name} が2回宣言されています。`);
+        packageScope.typeAliases.set(declaration.name, this.declareTypeAlias(declaration, context, undefined));
+        continue;
+      }
       if (declaration.kind !== 'class') continue;
-      if (packageScope.classes.has(declaration.name)) {
+      if (packageScope.classes.has(declaration.name) || packageScope.typeAliases.has(declaration.name)) {
         this.error(declaration.row, `クラス ${declaration.name} が2回宣言されています。`);
       }
       const entry = this.declareClass(declaration, context, undefined);
@@ -143,6 +161,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isData = keywords.has('data');
     symbol.isValue = keywords.has('value');
     symbol.isFunInterface = decl.isFunInterface;
+    symbol.isAnnotation = keywords.has('annotation');
+    if (symbol.isAnnotation) symbol.ownAnnotations = decl.modifiers.annotations;
     symbol.isNative = file.isLibrary && keywords.has('external');
     symbol.visibility = visibilityOf(decl.modifiers);
     symbol.row = decl.row;
@@ -164,8 +184,15 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.classEntries.push(entry);
     this.entryOfClass.set(symbol, entry);
     for (const member of decl.members) {
+      if (member.kind === 'typeAlias') {
+        if (symbol.nested.has(member.name) || symbol.typeAliases.has(member.name))
+          this.error(member.row, `${member.name} が2回宣言されています。`);
+        symbol.typeAliases.set(member.name, this.declareTypeAlias(member, file, entry));
+        continue;
+      }
       if (member.kind !== 'class') continue;
-      if (symbol.nested.has(member.name)) this.error(member.row, `クラス ${member.name} が2回宣言されています。`);
+      if (symbol.nested.has(member.name) || symbol.typeAliases.has(member.name))
+        this.error(member.row, `クラス ${member.name} が2回宣言されています。`);
       if (member.classKind === 'companion' && symbol.companion)
         this.error(member.row, 'companion object は1つしか書けません。');
       const nested = this.declareClass(member, file, entry);
@@ -173,6 +200,31 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (member.classKind === 'companion') symbol.companion = nested.symbol;
     }
     return entry;
+  }
+
+  /** The type aliases of the program, whose expansions are checked even when nothing uses them. */
+  protected readonly typeAliasSymbols: TypeAliasSymbol[] = [];
+
+  private declareTypeAlias(decl: TypeAliasDecl, file: FileContext, outer: ClassEntry | undefined): TypeAliasSymbol {
+    const symbol = new TypeAliasSymbol(decl.name, decl.row, () => {
+      const saved = this.file;
+      this.file = file;
+      try {
+        const scope = new Scope(outer?.scope, undefined);
+        const typeParameters = this.declareTypeParameters(scope, decl.typeParameters);
+        for (const param of decl.typeParameters) {
+          if (param.bounds.length > 0) this.error(param.row, '型の別名の型引数には、上限を書けません。');
+          if (param.variance) this.error(param.row, '型の別名の型引数には、in・out を書けません。');
+        }
+        this.validateAnnotations(scope, decl.modifiers, annotationSite(['TYPEALIAS']));
+        return { typeParameters, expansion: this.resolveType(scope, decl.type) };
+      } finally {
+        this.file = saved;
+      }
+    });
+    symbol.visibility = visibilityOf(decl.modifiers);
+    if (!file.isLibrary) this.typeAliasSymbols.push(symbol);
+    return symbol;
   }
 
   private checkClassHeader(decl: ClassDecl, symbol: ClassSymbol): void {
@@ -201,13 +253,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         context.starPackages.push(name);
         continue;
       }
-      const name = path.at(-1) as string;
+      const name = declaration.alias ?? (path.at(-1) as string);
       const qualified = path.join('.');
-      if (isKnownLibraryAnnotation(qualified)) {
+      const packageScope = this.packages.get(path.slice(0, -1).join('.'));
+      const declared = packageScope?.classes.has(path.at(-1) as string) === true;
+      if (isKnownLibraryAnnotation(qualified) && !declared) {
         context.importedAnnotations.set(name, qualified);
         continue;
       }
-      const packageScope = this.packages.get(path.slice(0, -1).join('.'));
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
       else this.importFromClass(context, name, declaration);
     }
@@ -220,11 +273,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     name: string,
     { path, row }: Import
   ): void {
-    const cls = packageScope.classes.get(name);
-    const functions = packageScope.functions.get(name);
-    const properties = packageScope.properties.get(name);
-    if (!cls && !functions && !properties) this.rejectImport(row, path.join('.'));
+    const original = path.at(-1) as string;
+    const cls = packageScope.classes.get(original);
+    const alias = packageScope.typeAliases.get(original);
+    const functions = packageScope.functions.get(original);
+    const properties = packageScope.properties.get(original);
+    if (!cls && !alias && !functions && !properties) this.rejectImport(row, path.join('.'));
     if (cls) context.importedClasses.set(name, cls);
+    if (alias) context.importedTypeAliases.set(name, alias);
     if (functions)
       context.importedFunctions.set(name, [...new Set([...(context.importedFunctions.get(name) ?? []), ...functions])]);
     if (properties)
@@ -236,15 +292,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Imports a nested class or the members of an object, or a class by its qualified name. */
   private importFromClass(context: FileContext, name: string, { path, row }: Import): void {
     const owner = this.findQualifiedClass(path.slice(0, -1));
-    const nested = owner?.nested.get(name);
+    const original = path.at(-1) as string;
+    const nested = owner?.nested.get(original);
     if (nested) {
       context.importedClasses.set(name, nested);
+      return;
+    }
+    const nestedAlias = owner?.typeAliases.get(original);
+    if (nestedAlias) {
+      context.importedTypeAliases.set(name, nestedAlias);
       return;
     }
     if (owner) {
       // The program's own objects reach their members as `Obj.member`; importing them is left to a later change.
       if (!owner.isLibrary) this.unavailable(row, 'オブジェクトのメンバーのインポート');
-      const members = owner.members.get(name) ?? [];
+      const members = owner.members.get(original) ?? [];
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, name, members);
       return;
@@ -285,6 +347,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Resolves the supertypes and members' signatures of every class, and declares the top-level functions and properties. */
   protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): ClassEntry[] {
     const classOrder = this.checkTypeBoundsAfter(() => this.resolveClassHierarchy());
+    for (const alias of this.typeAliasSymbols) this.typeAliasExpansion(alias, alias.row);
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.declareMembers(entry);
@@ -360,15 +423,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
-    this.validateAnnotations(entry.scope, entry.decl.modifiers);
+    this.validateAnnotations(
+      entry.scope,
+      entry.decl.modifiers,
+      annotationSite(symbol.isAnnotation ? ['ANNOTATION_CLASS', 'CLASS'] : ['CLASS'])
+    );
     for (const spec of entry.decl.supers) {
-      const type = this.resolveType(entry.scope, spec.type) as ClassType;
+      const written = this.resolveType(entry.scope, spec.type);
+      const type = written.kind === 'function' ? this.functionInterfaceType(written, spec.row) : (written as ClassType);
       if (type.kind !== 'class') this.error(spec.row, '親にはクラスかインターフェースを書いてください。');
       if (type.cls.isInterface) this.declareInterface(entry, spec, type);
       else if (symbol.kind === 'enum' && !entry.file.isLibrary)
         this.error(spec.row, 'enum class は、ほかのクラスを継承できません。');
       else this.declareSuperclass(entry, spec, type);
     }
+    if (symbol.isAnnotation) this.declareAnnotationSupertype(entry);
     if (symbol.kind === 'enum') {
       symbol.superclass = {
         kind: 'class',
@@ -379,6 +448,32 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     if (!symbol.superclass && !symbol.isInterface && symbol !== this.core?.any)
       symbol.superclass = this.core ? anyType() : undefined;
+  }
+
+  /** An annotation class implements `kotlin.Annotation` and nothing else, and holds only its parameters. */
+  private declareAnnotationSupertype(entry: ClassEntry): void {
+    const { symbol, decl } = entry;
+    if (decl.classKind !== 'class') this.error(decl.row, 'annotation 修飾子は、クラスにだけ付けられます。');
+    if (decl.supers.length > 0) this.error(decl.supers[0].row, 'アノテーションクラスは、ほかの型を継承できません。');
+    if (decl.typeParameters.length > 0 && !entry.file.isLibrary)
+      this.error(decl.row, 'アノテーションクラスには型引数を書けません。');
+    for (const member of decl.members) {
+      if (member.kind === 'class') continue;
+      this.error(member.row, 'アノテーションクラスの本体には、入れ子のクラスと companion object だけを書けます。');
+    }
+    for (const param of decl.primaryConstructor?.params ?? []) {
+      if (param.binding !== 'val') this.error(param.row, 'アノテーションクラスの引数には val を付けてください。');
+    }
+    const annotation = this.findQualifiedClass(['kotlin', 'Annotation']);
+    if (annotation) symbol.interfaces.push(annotation.type);
+  }
+
+  /** The `FunctionN` interface that a function type written as a supertype stands for. */
+  private functionInterfaceType(type: FunctionType, row: number): ClassType {
+    const found = functionInterfaceOf(type);
+    if (!found) this.error(row, '引数が多すぎる関数型は、親に書けません。');
+    if (type.nullable) this.error(row, '親には null かもしれない型を書けません。');
+    return found;
   }
 
   private declareInterface(entry: ClassEntry, spec: SuperSpec, type: ClassType): void {
@@ -467,7 +562,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   private declarePrimaryConstructor(entry: ClassEntry): FunctionSymbol {
     const { symbol, decl, scope } = entry;
     const primary = decl.primaryConstructor;
-    if (primary) this.validateAnnotations(scope, primary.modifiers);
+    if (primary) this.validateAnnotations(scope, primary.modifiers, annotationSite(['CONSTRUCTOR']));
     const constructorSymbol = new FunctionSymbol(symbol.name);
     constructorSymbol.isConstructor = true;
     constructorSymbol.owner = symbol;
@@ -621,7 +716,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareParameter(scope: Scope, param: ParameterDecl): ParameterSymbol {
-    this.validateAnnotations(scope, param.modifiers);
+    const binding = 'binding' in param ? (param as ClassParameterDecl).binding : undefined;
+    this.validateAnnotations(
+      scope,
+      param.modifiers,
+      binding
+        ? annotationSite(
+            ['VALUE_PARAMETER', 'PROPERTY', 'FIELD'],
+            ['param', 'property', 'field', 'get', ...(binding === 'var' ? ['set', 'setparam'] : [])]
+          )
+        : annotationSite(['VALUE_PARAMETER'], ['param'])
+    );
     if (!param.type) this.error(param.row, `引数 ${param.name} の型を書いてください。`);
     const { keywords } = param.modifiers;
     return {
@@ -664,7 +769,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     cls: ClassEntry | undefined,
     file: FileContext
   ): FunctionEntry {
-    this.validateAnnotations(ownerScope, decl.modifiers);
+    this.validateAnnotations(
+      ownerScope,
+      decl.modifiers,
+      annotationSite(['FUNCTION'], decl.receiver ? ['receiver'] : [])
+    );
     const symbol = new FunctionSymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -678,8 +787,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.resolvesByLambdaResult = decl.modifiers.annotations.some(
       ({ name }) => name === 'OverloadResolutionByLambdaReturnType'
     );
+    const deprecation = this.deprecationLevel(ownerScope, decl.modifiers);
     symbol.isDeprecatedError =
-      file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError');
+      (file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError')) ||
+      deprecation === 'ERROR' ||
+      deprecation === 'HIDDEN';
     symbol.isInfix = keywords.has('infix');
     symbol.isOperator = keywords.has('operator');
     symbol.isAtomic = !file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
@@ -771,7 +883,23 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     cls: ClassEntry | undefined,
     file: FileContext
   ): PropertyEntry {
-    this.validateAnnotations(ownerScope, decl.modifiers);
+    this.validateAnnotations(
+      ownerScope,
+      decl.modifiers,
+      annotationSite(
+        ['PROPERTY', 'FIELD'],
+        [
+          'property',
+          'field',
+          'get',
+          ...(decl.isVar ? ['set', 'setparam'] : []),
+          ...(decl.delegate ? ['delegate'] : []),
+          ...(decl.receiver ? ['receiver'] : []),
+        ]
+      )
+    );
+    if (decl.getter) this.validateAnnotations(ownerScope, decl.getter.modifiers, annotationSite(['PROPERTY_GETTER']));
+    if (decl.setter) this.validateAnnotations(ownerScope, decl.setter.modifiers, annotationSite(['PROPERTY_SETTER']));
     const symbol = new PropertySymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -1387,6 +1515,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       packageName,
       isLibrary,
       importedClasses: new Map(),
+      importedTypeAliases: new Map(),
       importedAnnotations: new Map(),
       importedFunctions: new Map(),
       importedProperties: new Map(),

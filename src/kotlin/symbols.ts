@@ -18,6 +18,22 @@ export class TypeParameterSymbol {
   ) {}
 }
 
+/** A `typealias`, which stands for its expansion with its type parameters replaced by the arguments of a use. */
+export class TypeAliasSymbol {
+  typeParameters: TypeParameterSymbol[] = [];
+  /** The type the alias stands for, resolved when first used. */
+  expansion: KType | undefined;
+  isResolving = false;
+  visibility: Visibility = 'public';
+
+  constructor(
+    readonly name: string,
+    readonly row: number,
+    /** Resolves the expansion in the scope of the declaration, after declaring the alias's type parameters. */
+    readonly resolve: () => { typeParameters: TypeParameterSymbol[]; expansion: KType }
+  ) {}
+}
+
 export type ClassSymbolKind = 'class' | 'interface' | 'object' | 'companion' | 'enum' | 'enumEntry';
 
 export interface EnumEntrySymbol {
@@ -32,6 +48,7 @@ export class ClassSymbol {
   readonly members = new Map<string, MemberSymbol[]>();
   readonly constructors: FunctionSymbol[] = [];
   readonly nested = new Map<string, ClassSymbol>();
+  readonly typeAliases = new Map<string, TypeAliasSymbol>();
   companion: ClassSymbol | undefined;
   enumEntries: EnumEntrySymbol[] = [];
   /** The subclasses of a sealed class, which `when` must cover to be exhaustive. */
@@ -45,6 +62,14 @@ export class ClassSymbol {
   isNative = false;
   /** Whether the class is a `fun interface`, which a lambda converts to. */
   isFunInterface = false;
+  /** Whether the class is declared in a function body, which `KClass.qualifiedName` does not name. */
+  isLocal = false;
+  /** Whether the class is an object expression's, which has no name. */
+  isAnonymous = false;
+  /** Whether the class is an `annotation class`. */
+  isAnnotation = false;
+  /** For an annotation class, the annotations written on it, whose `@Target` and `@Repeatable` say where it applies. */
+  ownAnnotations: readonly { name: string; args?: readonly { value: unknown }[] }[] = [];
   visibility: Visibility = 'public';
   /** The number of fields each instance holds, its superclasses' first. */
   fieldCount = 0;

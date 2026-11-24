@@ -1,4 +1,5 @@
-import type { Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
+import type { AnnotationSite } from './annotationSites';
+import type { Annotation, Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
 import {
   compileError,
   type Core,
@@ -15,9 +16,16 @@ import {
 import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import { keyOf } from './flowKeys';
 import { assignedNames } from './flowWrites';
-import { isJavaTypeAlias, isKnownLibraryAnnotation, knownLibraryDeclaration } from './libraryApi';
+import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
-import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
+import type {
+  ClassSymbol,
+  FunctionSymbol,
+  MemberSymbol,
+  PropertySymbol,
+  TypeAliasSymbol,
+  TypeParameterSymbol,
+} from './symbols';
 import { VariableSymbol } from './symbols';
 import {
   anyType,
@@ -62,6 +70,7 @@ export interface FileContext {
   packageName: string;
   isLibrary: boolean;
   importedClasses: Map<string, ClassSymbol>;
+  importedTypeAliases: Map<string, TypeAliasSymbol>;
   importedAnnotations: Map<string, string>;
   importedFunctions: Map<string, FunctionSymbol[]>;
   importedProperties: Map<string, PropertySymbol[]>;
@@ -110,27 +119,16 @@ export abstract class CompilerCore {
     if (known) this.unavailable(row, known);
   }
 
-  protected validateAnnotations(scope: Scope, modifiers: Modifiers): void {
+  /** Checks the annotations of a declaration written at `site`, as kotlinc does. */
+  protected validateAnnotations(scope: Scope, modifiers: Modifiers, site: AnnotationSite): void {
     if (this.file.isLibrary) return;
-    for (const { qualifiedName, name, row, markers } of modifiers.annotations) {
-      if (!qualifiedName && this.findClass(scope, name))
-        this.error(row, `${name} はアノテーションクラスではありません。`);
-      for (const marker of markers ?? []) this.validateAnnotationMarker(scope, marker.path, marker.row);
-    }
+    this.checkAnnotations(scope, modifiers.annotations, site);
   }
 
-  private validateAnnotationMarker(scope: Scope, path: string[], row: number): void {
-    const name = path.join('.');
-    const qualified = path.length > 1;
-    const ordinary = qualified ? this.findQualifiedClass(path) : this.findClass(scope, name);
-    const libraryName = qualified
-      ? name
-      : (this.file.importedAnnotations.get(name) ?? knownLibraryDeclaration(name, this.visiblePackageLevels()));
-    if (!ordinary && libraryName && isKnownLibraryAnnotation(libraryName)) return;
-    if (ordinary || (libraryName && knownLibraryDeclaration(libraryName, [])))
-      this.error(row, `${name} はアノテーションクラスではありません。`);
-    this.error(row, `${name} 型が見つかりません。`);
-  }
+  protected abstract checkAnnotations(scope: Scope, annotations: Annotation[], site: AnnotationSite): void;
+
+  /** The level of a declaration's `@Deprecated`, whose `ERROR` and `HIDDEN` reject uses of the declaration. */
+  protected abstract deprecationLevel(scope: Scope, modifiers: Modifiers): 'WARNING' | 'ERROR' | 'HIDDEN' | undefined;
 
   protected packageScope(name: string): PackageScope {
     let scope = this.packages.get(name);
@@ -171,6 +169,8 @@ export abstract class CompilerCore {
       if (first.name === 'Nothing' && !this.findClass(scope, 'Nothing')) {
         return ref.nullable ? nullable(NOTHING) : NOTHING;
       }
+      const alias = this.findTypeAlias(scope, first.name);
+      if (alias) return this.expandTypeAlias(scope, alias, first.args, ref.nullable, ref.row);
     }
     const local = this.findClass(scope, first.name);
     const names = ref.parts.map((part) => part.name);
@@ -192,7 +192,10 @@ export abstract class CompilerCore {
         : allowsBareClass && argumentsPart.args.length === 0 && !isQualifier
           ? cls.typeParameters.map((): TypeArgument => ({ variance: 'star' }))
           : this.resolveArguments(scope, cls, argumentsPart.args, ref.row);
-    for (const part of ref.parts.slice(consumed)) {
+    for (const [index, part] of ref.parts.slice(consumed).entries()) {
+      const nestedAlias = cls.typeAliases.get(part.name);
+      if (nestedAlias && index === ref.parts.length - consumed - 1)
+        return this.expandTypeAlias(scope, nestedAlias, part.args, ref.nullable, ref.row);
       const nested: ClassSymbol | undefined = cls.nested.get(part.name);
       if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
       cls = nested;
@@ -255,11 +258,76 @@ export abstract class CompilerCore {
     return undefined;
   }
 
+  /** A type alias's expansion with the type arguments of a use, as `StrMap<Int>` is `Map<String, Int>`. */
+  protected expandTypeAlias(
+    scope: Scope,
+    alias: TypeAliasSymbol,
+    refs: TypeProjectionRef[],
+    isNullable: boolean,
+    row: number
+  ): KType {
+    const expansion = this.typeAliasExpansion(alias, row);
+    if (refs.length !== alias.typeParameters.length) this.error(row, `型の別名 ${alias.name} の型引数の数が違います。`);
+    const substitution = new Map<TypeParameterSymbol, KType>();
+    for (const [index, projection] of refs.entries()) {
+      if (projection.star || projection.variance)
+        this.error(row, `型の別名 ${alias.name} の型引数には、* や in・out を書けません。`);
+      substitution.set(alias.typeParameters[index], this.resolveType(scope, projection.type));
+    }
+    const type = substitute(expansion, substitution);
+    return isNullable ? nullable(type) : type;
+  }
+
+  protected typeAliasExpansion(alias: TypeAliasSymbol, row: number): KType {
+    if (alias.expansion) return alias.expansion;
+    if (alias.isResolving) this.error(row, `型の別名 ${alias.name} が自分自身を使っています。`);
+    alias.isResolving = true;
+    try {
+      const { typeParameters, expansion } = alias.resolve();
+      alias.typeParameters = typeParameters;
+      alias.expansion = expansion;
+      return expansion;
+    } finally {
+      alias.isResolving = false;
+    }
+  }
+
+  /**
+   * The type alias a simple name stands for, when no class of the name is nearer: in the classes around the scope, then
+   * the file's explicit imports, its package, and its star imports.
+   */
+  protected findTypeAlias(scope: Scope | undefined, name: string): TypeAliasSymbol | undefined {
+    if (findClassInScope(scope, name)) return undefined;
+    for (let current = scope; current; current = current.parent) {
+      for (let cls = current.staticClass; cls; cls = cls.outer) {
+        const nested = cls.typeAliases.get(name);
+        if (nested) return nested;
+      }
+    }
+    const imported = this.file.importedTypeAliases.get(name);
+    if (imported) return imported;
+    if (this.file.importedClasses.has(name)) return undefined;
+    const own = this.packages.get(this.file.packageName)?.typeAliases.get(name);
+    if (own) return own;
+    if (this.packages.get(this.file.packageName)?.classes.has(name)) return undefined;
+    for (const packageName of this.file.starPackages) {
+      const found = this.packages.get(packageName)?.typeAliases.get(name);
+      if (found) return found;
+      if (this.packages.get(packageName)?.classes.has(name)) return undefined;
+    }
+    return undefined;
+  }
+
   /**
    * The class a simple name stands for: in the scopes, then the file's explicit imports, its package, its star imports,
-   * and the defaults.
+   * and the defaults. A type alias of a class stands for that class.
    */
   findClass(scope: Scope | undefined, name: string): ClassSymbol | undefined {
+    const alias = this.findTypeAlias(scope, name);
+    if (alias) {
+      const expansion = resolved(this.typeAliasExpansion(alias, alias.row));
+      return expansion.kind === 'class' ? expansion.cls : undefined;
+    }
     const local = findClassInScope(scope, name);
     if (local) return local;
     const imported = this.file.importedClasses.get(name);
@@ -446,6 +514,15 @@ export abstract class CompilerCore {
     if (this.file.importedClasses.has(name)) return 0;
     if (this.packages.get(this.file.packageName)?.classes.has(name)) return 1;
     return this.file.starPackages.some((packageName) => this.packages.get(packageName)?.classes.has(name)) ? 2 : 3;
+  }
+
+  /** The local functions of a name that a scope sees, innermost first, which hide the other functions of the name. */
+  protected localFunctions(scope: Scope, name: string): FunctionSymbol[] {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      const found = current.functions.get(name);
+      if (found && found.length > 0) return found;
+    }
+    return [];
   }
 
   protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {

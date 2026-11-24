@@ -110,6 +110,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       const { decl, symbol } = entry;
       const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
       Object.defineProperty(context, 'returnTarget', { value: context });
+      context.label = symbol.name;
       context.info.isAtomic = symbol.isAtomic;
       const scope = new Scope(entry.scope, context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
@@ -627,7 +628,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
    * shows, such as a smart cast or a `Nothing` result, holds only merged with the path that skips it. The body starts
    * with every parameter assigned.
    */
-  private compileParameterDefaults(
+  protected compileParameterDefaults(
     declarations: ParameterDecl[],
     params: ParameterSymbol[],
     variables: VariableSymbol[],

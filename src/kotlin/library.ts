@@ -8,7 +8,7 @@ import './natives';
 import { nativeFunctions, nativeProperties, setLibraryClasses } from './natives/registry';
 import { parseKotlin } from './parse';
 import { PRELUDE_SOURCES } from './prelude';
-import { EXCEPTIONS } from './prelude/runtimeTypes';
+import { EXCEPTIONS, FUNCTION_INTERFACE_COUNT } from './prelude/runtimeTypes';
 import type { ExceptionFactory } from './runtime';
 import type { ClassSymbol, FunctionSymbol } from './symbols';
 import { setCoreClasses } from './typeRelations';
@@ -120,7 +120,7 @@ function compileLibrary(
       }
       core = buildCore(classes);
       compiler.setCore(core);
-      setCoreClasses({ any: core.any, function: core.function });
+      setCoreClasses({ any: core.any, function: core.function, functionInterfaces: core.functionInterfaces });
       setDispatchCore(core);
       setLibraryClasses(classes);
     },
@@ -207,6 +207,9 @@ function buildCore(classes: Map<string, ClassSymbol>): Core {
     map: find('kotlin.collections.Map'),
     mutableMap: find('kotlin.collections.MutableMap'),
     function: find('kotlin.Function'),
+    functionInterfaces: Array.from({ length: FUNCTION_INTERFACE_COUNT }, (_, arity) =>
+      find(`kotlin.jvm.functions.Function${arity}`)
+    ),
     enum: find('kotlin.Enum'),
     intRange: find('kotlin.ranges.IntRange'),
     longRange: find('kotlin.ranges.LongRange'),

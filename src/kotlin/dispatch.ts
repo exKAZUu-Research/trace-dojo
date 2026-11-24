@@ -25,6 +25,10 @@ export function runtimeClassOf(value: Value): ClassSymbol {
   return classes.any;
 }
 
+function isFunctionInterface(cls: ClassSymbol | undefined): boolean {
+  return cls !== undefined && coreClasses().functionInterfaces.includes(cls);
+}
+
 /** Whether calls of a member must look up the implementation in the receiver's class. */
 export function isVirtual(member: FunctionSymbol | PropertySymbol): boolean {
   const { owner } = member;
@@ -129,6 +133,9 @@ export function callFunction(
   callRow: number | undefined
 ): Value {
   requireMemberReceiver(symbol, frame, receiver);
+  // A lambda is an instance of every function interface of its arity, whose `invoke` calls the lambda.
+  if (receiver instanceof KObject && receiver.function && symbol.name === 'invoke' && isFunctionInterface(symbol.owner))
+    return receiver.function.call(frame, args);
   const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
   const needsDefaults =
     (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);

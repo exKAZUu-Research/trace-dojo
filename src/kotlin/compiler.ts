@@ -1,5 +1,5 @@
+import { annotationSite } from './annotationSites';
 import type { Expression, KotlinFile } from './ast';
-import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -10,13 +10,14 @@ import {
   type FunctionContext,
   type PackageScope,
   reprOf,
-  type Scope,
+  Scope,
   typeMismatchMessage,
 } from './compilerBase';
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { jvmParameterDescriptor } from './jvmSignatures';
+import { LocalCompiler } from './localCompiler';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
@@ -123,7 +124,7 @@ const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
   exitProcess: 'プログラムの終了（exitProcess）',
 };
 
-export class Compiler extends BodyCompiler {
+export class Compiler extends LocalCompiler {
   constructor(
     packages: Map<string, PackageScope>,
     core: Core | undefined,
@@ -173,6 +174,14 @@ export class Compiler extends BodyCompiler {
     }
     const classOrder = this.declareHeaders(prepared);
     this.checkAtomicRows();
+    for (const { file, context } of prepared) {
+      if (context.isLibrary) continue;
+      this.file = context;
+      const fileScope = new Scope(undefined, undefined);
+      this.checkAnnotations(fileScope, file.annotations, annotationSite(['FILE'], ['file']));
+      for (const { annotation, target } of file.looseAnnotations)
+        this.checkAnnotations(fileScope, [annotation], annotationSite([target]));
+    }
     for (const { file, context } of prepared) {
       this.file = context;
       this.resolveImports(file, context);

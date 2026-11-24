@@ -178,6 +178,14 @@ function isLambdaArgument(expression: Expression): expression is LambdaExpressio
   return expression.kind === 'lambda';
 }
 
+/**
+ * Whether an argument waits until the call's other arguments give its function type, as a lambda does and a callable
+ * reference, whose overloads that type selects, does too.
+ */
+function isPostponedArgument(expression: Expression): boolean {
+  return isLambdaArgument(expression) || (expression.kind === 'reference' && expression.name !== 'class');
+}
+
 function hasTypedParameters(expression: Expression | undefined): boolean {
   return (
     expression !== undefined &&
@@ -404,7 +412,12 @@ export abstract class CallCompiler extends CompilerCore {
     }
     this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
     if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
-      this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
+      this.error(
+        row,
+        chosen.candidate.symbol.isLibrary
+          ? `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`
+          : `${chosen.candidate.symbol.name} は @Deprecated で使えなくされています。`
+      );
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -506,7 +519,7 @@ export abstract class CallCompiler extends CompilerCore {
     let viable = attempts;
     for (const attempt of attempts) this.constrainFromLambdaParameters(scope, attempt, args);
     for (const [index, argument] of args.entries()) {
-      if (isLambdaArgument(argument.value)) {
+      if (isPostponedArgument(argument.value)) {
         compiledArgs.push(undefined);
         continue;
       }
@@ -760,7 +773,8 @@ export abstract class CallCompiler extends CompilerCore {
       const paramType = substitute(param.type, attempt.substitution);
       const compiled = compiledArgs[index];
       if (!compiled) {
-        if (!this.lambdaFits(args[index].value as LambdaExpression, paramType)) return false;
+        const { value } = args[index];
+        if (value.kind === 'lambda' ? !this.lambdaFits(value, paramType) : !this.referenceFits(paramType)) return false;
         continue;
       }
       if (args[index].isSpread) continue;
@@ -820,6 +834,19 @@ export abstract class CallCompiler extends CompilerCore {
     sam: NonNullable<ReturnType<CallCompiler['samOf']>>,
     type: KType
   ): Compiled;
+
+  /** Whether a callable reference may stand for a value of the type, which its expected function type then selects. */
+  private referenceFits(type: KType): boolean {
+    if (this.samOf(type)) return true;
+    const actual = resolved(type);
+    if (actual.kind === 'class')
+      return (
+        actual.cls === this.core.function ||
+        actual.cls === this.core.any ||
+        this.core.functionInterfaces.includes(actual.cls)
+      );
+    return actual.kind !== 'nothing';
+  }
 
   /** Whether a lambda's parameters fit a function type, which only its number of parameters can tell before inference. */
   private lambdaFits(lambda: LambdaExpression, type: KType): boolean {
@@ -1146,6 +1173,12 @@ export abstract class CallCompiler extends CompilerCore {
     const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
     const sam = this.samOf(elementType);
     const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
+    if (argument.value.kind === 'reference') {
+      const reference = this.compileExpression(scope, context, argument.value, lambdaType ?? elementType);
+      if (sam) return this.samWrap(reference, sam, resolved(elementType));
+      isSubtype(reference.type, elementType);
+      return reference;
+    }
     const compiled = this.compileLambda(
       scope,
       context,
