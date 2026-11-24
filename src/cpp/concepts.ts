@@ -213,7 +213,7 @@ export function evaluateConstraint(compiler: Compiler, node: Syntax): boolean {
 }
 
 /** Whether a requires expression's requirements hold: each compiles, with its parameters as unevaluated values. */
-function requirementsHold(compiler: Compiler, node: Syntax): boolean {
+export function requirementsHold(compiler: Compiler, node: Syntax): boolean {
   const parameters = fieldOf(node, 'parameters');
   const requirements = fieldOf(node, 'requirements')?.children ?? [];
   return compiler.withRequiresParameters(parameters, () =>

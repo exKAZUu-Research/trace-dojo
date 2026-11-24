@@ -60,7 +60,9 @@ type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
 
 type MoveConstruction =
   | { kind: 'copy' | 'string' | 'sequence' | 'members' }
-  | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> };
+  | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> }
+  /** A move constructor the program writes, which the library calls. */
+  | { kind: 'program'; constructor: FunctionInfo };
 
 export function checkContainerElement(
   compiler: ExpressionCompiler,
@@ -147,6 +149,11 @@ export function movedArgument(compiler: ExpressionCompiler, type: Type, argument
   const target: Type = { kind: 'reference', to: withConst(type) };
   const bound = implicitConversion(compiler, argument, target)?.apply(argument);
   if (bound?.isXvalue && !isConstType(bound.type)) return bound.run as Eval<Ptr>;
+  // A temporary that converting an argument of another class makes is an rvalue to move from too.
+  if (argument.type.kind === 'class' && argument.type.cls !== type.cls && (!argument.isLvalue || argument.isXvalue)) {
+    const rvalue: Type = { kind: 'reference', to: type, isRvalue: true };
+    return implicitConversion(compiler, argument, rvalue)?.apply(argument).run as Eval<Ptr> | undefined;
+  }
 }
 
 export function requireElementUse(
@@ -199,8 +206,11 @@ export function canTransferElementStorage(type: Type): boolean {
   if (type.kind === 'array') return type.length === 0 || canTransferElementStorage(type.of);
   if (type.kind !== 'class') return true;
   const { cls } = type;
-  if (!cls.isComplete || cls.isNoncopyable) return false;
+  if (!cls.isComplete) return false;
   const move = moveConstruction(type);
+  // A container moves an element whose move may throw only when it cannot copy it (`std::move_if_noexcept`).
+  if (move.kind === 'program') return move.constructor.isNoexcept || cls.isNoncopyable;
+  if (cls.isNoncopyable) return false;
   if (move.kind === 'copy') return canCopyWithoutThrow(type);
   if (move.kind === 'string' || move.kind === 'sequence') return true;
   if (move.kind === 'array') return canTransferElementStorage(move.array.type);
@@ -216,6 +226,8 @@ export function moveConstruction(type: ClassType): MoveConstruction {
   if (cls.library?.kind === 'string') return { kind: 'string' };
   if (ownsMovableSequence(type)) return { kind: 'sequence' };
   if (cls.library?.aggregateArray) return { kind: 'array', array: cls.library.aggregateArray };
+  const constructor = writtenMove(cls, cls.constructors);
+  if (constructor) return { kind: 'program', constructor };
   return { kind: canMoveFields(cls) ? 'members' : 'copy' };
 }
 
@@ -255,6 +267,13 @@ export function constructElementFromRvalue(frame: Frame, type: Type, source: Val
   if (construction.kind === 'array')
     return constructMovedArray(frame, construction.array, (source as SequenceValue).items);
   const destination = target instanceof CObject ? target : undefined;
+  if (construction.kind === 'program') {
+    const object = newObject(frame, cls, false, destination);
+    object.needsConstruction = true;
+    invoke(frame, construction.constructor, [(source as CObject).receiver()], object.receiver(), cls.row, true);
+    object.needsConstruction = false;
+    return object;
+  }
   if (construction.kind === 'members') {
     const move = (): Value => transferSubobjects(frame, cls, source as CObject, destination);
     return canTransferElementStorage(type) ? frame.runtime.withoutOuterHandlers(move) : move();
@@ -454,6 +473,11 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
       frame.runtime.spend();
       target.items[index] = moveValue(frame, element, target.items[index], value);
     }
+  } else if (!cls.library && writtenMove(cls, cls.methods.get('operator=') ?? [])) {
+    const assignment = writtenMove(cls, cls.methods.get('operator=') ?? []) as FunctionInfo;
+    withTemporaries(frame, () =>
+      invoke(frame, assignment, [(source as CObject).receiver()], (target as CObject).receiver(), cls.row)
+    );
   } else if (canMoveFields(cls)) {
     const to = target as CObject;
     const from = source as CObject;
@@ -473,6 +497,23 @@ function moveField(frame: Frame, type: Type, target: Value, source: Value): Valu
     if (replacement !== undefined) location.write(replacement);
   } else location.write(value);
   return target;
+}
+
+/** The function among `candidates` the program writes for moving from an object of a class (`T(T&&)`). */
+function writtenMove(cls: ClassInfo, candidates: readonly FunctionInfo[]): FunctionInfo | undefined {
+  return candidates.find((fn) => {
+    const [param, ...rest] = fn.params;
+    return (
+      !fn.native &&
+      !fn.isDeleted &&
+      param?.type.kind === 'reference' &&
+      param.type.isRvalue === true &&
+      param.type.to.kind === 'class' &&
+      param.type.to.cls === cls &&
+      !isConstType(param.type.to) &&
+      rest.every((other) => other.defaultValue !== undefined)
+    );
+  });
 }
 
 function canMoveFields(cls: ClassInfo): boolean {

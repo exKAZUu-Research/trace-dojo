@@ -1,4 +1,5 @@
 import type { Compiler } from './compiler';
+import { asTemplate } from './compilerBase';
 import { constrainedParameters } from './concepts';
 import type { Expr } from './expr';
 import {
@@ -76,7 +77,25 @@ export function declareTemplate(compiler: Compiler, node: Syntax, owner?: ClassI
       return;
     }
     case 'friend_declaration': {
-      return compiler.unsupported(inner.row, 'テンプレートの friend 宣言');
+      if (!owner) return compiler.error(inner.row, 'friend はクラスの中に書いてください。');
+      const friend = inner.children[0];
+      if (friend?.type === 'declaration' || friend?.type === 'function_definition') {
+        // `template <class U> friend void show(Box<U>);` befriends every instance of a function template.
+        const declarator = functionDeclarator(fieldOf(friend, 'declarator') as Syntax);
+        const name = declarator && fieldOf(declarator, 'declarator');
+        if (!name) return compiler.error(inner.row, 'friend にはクラスか関数を書いてください。');
+        owner.friendTemplateNames.add(compiler.plainName(name));
+        declareFunctionTemplate(compiler, parameters, outer, friend, undefined, 'public', constraint);
+        return;
+      }
+      // `template <class U> friend class Box;` befriends every instance of a class template.
+      const entity = friend && compiler.findName(friend.text, true);
+      const template = entity && asTemplate(entity);
+      const info = template?.kind === 'template' ? template.template.program : undefined;
+      if (info?.kind !== 'class')
+        return compiler.error(inner.row, `${friend?.text ?? ''} はクラステンプレートではありません。`);
+      owner.friendClassTemplates.add(info);
+      return;
     }
     default: {
       return compiler.error(inner.row, `${inner.text.split('\n')[0]} はテンプレートにできません。`);

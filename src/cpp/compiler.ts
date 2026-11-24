@@ -5,7 +5,7 @@ import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceA
 import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
 import { deduceProgramClass } from './classTemplateDeduction';
-import { type Declared, hasAuto } from './compilerBase';
+import { asTemplate, type Declared, hasAuto } from './compilerBase';
 import {
   type ConceptInfo,
   conceptNamed,
@@ -234,6 +234,10 @@ export class Compiler extends StatementCompiler {
 
   protected override deduceClassTemplate(template: LibraryTemplate, args: Expr[], row: number): Type {
     const info = template.program;
+    // `std::function f = callable;` takes the signature of the callable's `operator()`, which libc++'s guide reads
+    // through a pointer to the member function.
+    const signature = info?.namespace === this.libraryNamespace && info.name === 'function' && callSignature(args);
+    if (signature && info?.kind === 'class') return this.instantiateClassTemplate(info, [signature], row);
     if (info?.kind === 'class') return deduceProgramClass(this, info, args, row);
     const deduced = info ? undefined : this.library.deduceTemplateArguments(template.name, args);
     if (deduced && template.takesArrayBound)
@@ -1302,11 +1306,22 @@ export class Compiler extends StatementCompiler {
   }
 
   protected declareParameterNames(list: Syntax, declare: (name: string, entity: Entity) => void): void {
+    const packs = new Map<string, Entity[]>();
+    // A parameter pack with no elements is still a pack.
+    for (const param of list.children) {
+      const packDeclarator = param.type === 'variadic_parameter_declaration' ? fieldOf(param, 'declarator') : undefined;
+      const inner = packDeclarator && withoutEllipsis(packDeclarator);
+      const name = inner && this.applyDeclarator(INT, inner).name;
+      if (name) packs.set(name, []);
+    }
     for (const param of this.parameters(list)) {
       if (!param.name) continue;
       const local = { name: param.name, slot: -1, type: param.type, isParameter: true };
-      declare(param.name, { kind: 'local', local, isReference: param.type.kind === 'reference' });
+      const entity: Entity = { kind: 'local', local, isReference: param.type.kind === 'reference' };
+      if (param.pack) packs.get(param.pack)?.push(entity);
+      else declare(param.name, entity);
     }
+    for (const [name, items] of packs) declare(name, { kind: 'pack', items });
   }
 
   protected parameterTypes(list: Syntax): Type[] {
@@ -1724,6 +1739,16 @@ export class Compiler extends StatementCompiler {
   private namesClass(node: Syntax, cls: ClassInfo): boolean {
     let entity: Entity | undefined;
     try {
+      if (node.type === 'template_type' || node.type === 'template_function' || node.type === 'template_method') {
+        // `: Base<int>(...)` names the base with its template arguments.
+        const name = fieldOf(node, 'name') as Syntax;
+        const type = this.resolveTypeSpecifier({
+          ...node,
+          type: 'template_type',
+          all: node.all.map((child) => (child === name ? { ...name, type: 'type_identifier' } : child)),
+        });
+        return type.kind === 'class' && type.cls === cls;
+      }
       entity = node.type === 'qualified_identifier' ? this.lookupQualified(node) : this.findName(node.text);
     } catch {
       return false;
@@ -1796,6 +1821,15 @@ export class Compiler extends StatementCompiler {
         return;
       };
     }
+    // `: Base(other)` copies the base of an object of a derived class with the implicit copy constructor.
+    const [source] = args;
+    if (
+      args.length === 1 &&
+      source.type.kind === 'class' &&
+      source.type.cls.isDerivedFrom(base) &&
+      base.constructors.every((ctor) => ctor.native !== undefined || !isCopyConstructor(ctor, base))
+    )
+      return this.initializeBaseInPlace(base, this.objectInitializer(this.copyObject(source, base)));
     const resolved = this.resolveConstructor(base, args, row, initializer?.children[1]?.type === 'initializer_list');
     this.checkDefined(resolved.fn, row);
     if (!resolved.fn.native && resolved.fn.access === 'private')
@@ -2296,8 +2330,10 @@ export class Compiler extends StatementCompiler {
 
   /** The template a template type's name denotes, for deduction against an argument's class. */
   templateOfName(name: Syntax): object | string | undefined {
-    const entity =
+    const found =
       name.type === 'qualified_identifier' ? this.lookupQualified(name, true) : this.findName(name.text, true);
+    // A class template's name in its own scope names the class, and with arguments the template.
+    const entity = found && asTemplate(found);
     if (entity?.kind !== 'template') return undefined;
     return entity.template.program ?? entity.template.name;
   }
@@ -4512,4 +4548,14 @@ function parsedLibrarySource(source: LibrarySource): Syntax {
     parsedSources.set(source, parsed);
   }
   return parsed;
+}
+
+/** The signature of the only argument's `operator()`, when the argument is an object of a class with one. */
+function callSignature(args: readonly Expr[]): Type | undefined {
+  const [only] = args;
+  const type = args.length === 1 ? nonReference(only.type) : undefined;
+  if (type?.kind !== 'class') return undefined;
+  const [call, ...others] = type.cls.methods.get('operator()') ?? [];
+  if (!call || others.length > 0 || call.templatePattern) return undefined;
+  return { kind: 'function', ret: call.ret, params: call.params.map((param) => param.type) };
 }

@@ -320,9 +320,11 @@ export class Deduction {
         return this.matchInstance(pattern, type);
       }
       case 'function': {
-        if (type.kind !== 'function' || type.params.length !== pattern.params.length) return false;
-        if (!this.match(pattern.ret, type.ret)) return false;
-        return pattern.params.every((param, index) => this.match(param, unqualified(type.params[index])));
+        if (type.kind !== 'function' || !this.match(pattern.ret, type.ret)) return false;
+        return this.matchList(
+          pattern.params,
+          type.params.map((param) => unqualified(param))
+        );
       }
       default: {
         return true;
@@ -337,17 +339,42 @@ export class Deduction {
     for (let cls: ClassInfo | undefined = type.cls; cls; cls = cls.base) {
       const args = this.compiler.instanceArguments(cls, template);
       if (!args) continue;
-      for (const [index, argPattern] of pattern.args.entries()) {
+      const packName = this.trailingPack(pattern.args);
+      const fixed = packName === undefined ? pattern.args : pattern.args.slice(0, -1);
+      if (packName === undefined ? args.length !== fixed.length : args.length < fixed.length) return false;
+      for (const [index, argPattern] of fixed.entries()) {
         const argument = args[index];
-        if (!argument) return false;
         if (argPattern.kind === 'valueName') {
           const value = templateValue(argument);
           if (value === undefined || !this.bindValue(argPattern.name, value)) return false;
         } else if (!this.match(argPattern, argument)) return false;
       }
+      if (packName !== undefined) this.bindPack(packName, args.slice(fixed.length));
       return true;
     }
     return false;
+  }
+
+  /** Matches patterns against types one by one, where a trailing pack (`Args...`) takes the types left over. */
+  private matchList(patterns: readonly Pattern[], types: readonly Type[]): boolean {
+    const packName = this.trailingPack(patterns);
+    const fixed = packName === undefined ? patterns : patterns.slice(0, -1);
+    if (packName === undefined ? types.length !== fixed.length : types.length < fixed.length) return false;
+    if (!fixed.every((pattern, index) => this.match(pattern as Pattern, types[index]))) return false;
+    if (packName !== undefined) this.bindPack(packName, types.slice(fixed.length));
+    return true;
+  }
+
+  /** The name of the pack a list of patterns ends with, if any. */
+  private trailingPack(patterns: readonly (Pattern | { kind: 'valueName'; name: string })[]): string | undefined {
+    const last = patterns.at(-1);
+    return last?.kind === 'parameter' && this.parameterNamed(last.name)?.isPack ? last.name : undefined;
+  }
+
+  private bindPack(name: string, types: readonly Type[]): void {
+    if (this.fixed.has(name)) return;
+    if (!this.packs.has(name)) this.packs.set(name, []);
+    for (const type of types) this.bind(name, type);
   }
 
   bind(name: string, type: Type): boolean {

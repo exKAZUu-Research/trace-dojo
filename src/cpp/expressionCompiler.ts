@@ -6,6 +6,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { arithmeticOperation, convertNumeric, type NumericValue } from './arithmetic';
 import { byteAt } from './bytes';
 import { asTemplate, hasAuto, isAuto } from './compilerBase';
+import { requirementsHold } from './concepts';
 import {
   classLocation,
   conversionFunctions,
@@ -171,6 +172,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'template_function': {
         return this.templateFunction(node);
+      }
+      case 'requires_expression': {
+        return constantExpr(BOOL, Number(requirementsHold(this as never, node)), node.row);
       }
       case PACK_ELEMENT: {
         return withPackElement(this, node, (pattern) => this.compileExpression(pattern));

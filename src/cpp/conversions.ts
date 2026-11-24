@@ -153,7 +153,10 @@ function convertWithoutFunctions(
   if (pointee && expr.functions) return functionPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
   if (pointee && allowUser && expr.type.kind === 'class' && expr.type.cls.isLambda)
     return lambdaPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
-  // A function's name converts only to a parameter that takes a callable, as the library's algorithms have.
+  // A function's name converts only to a parameter that takes a callable, as the library's algorithms have, or to
+  // a class whose constructor takes the function (`std::function`).
+  if (expr.functions && to.kind === 'class' && !to.cls.library && allowUser)
+    return classConversion(host, expr, to.cls, allowUser);
   if (to.kind === 'function' || expr.functions) {
     return to.kind === 'function' && expr.functions ? sequence(Rank.Exact, (e) => e) : undefined;
   }

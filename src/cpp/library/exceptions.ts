@@ -84,6 +84,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
   const badCast = define('bad_cast', exception, false);
   define('bad_typeid', exception, false);
   define('bad_function_call', exception, false);
+  define('bad_weak_ptr', exception, false, 'bad_weak_ptr');
   define('bad_optional_access', exception, false, 'bad_optional_access');
   define('bad_variant_access', exception, false, 'bad_variant_access');
   define('bad_any_cast', badCast, false, 'bad any cast');

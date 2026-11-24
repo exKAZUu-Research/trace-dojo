@@ -751,10 +751,12 @@ export abstract class CompilerBase {
         if (entity?.kind === 'value' || entity?.kind === 'local' || entity?.kind === 'global')
           return this.valueArgument(named);
       }
-      // `S<is_small_v<T>>` names a variable template's instance, which the grammar reads as a type.
+      // `S<is_small_v<T>>` and `S<C<T>>` name a variable template's instance and a concept's satisfaction, which the
+      // grammar reads as types.
       if (!fieldOf(argument, 'declarator') && named?.type === 'template_type') {
         const entity = this.findName((fieldOf(named, 'name') as Syntax).text);
-        if (entity?.kind === 'template' && entity.template.program?.kind === 'variable')
+        const kind = entity?.kind === 'template' ? entity.template.program?.kind : undefined;
+        if (kind === 'variable' || kind === 'concept')
           return this.valueArgument({ ...named, type: 'template_function' });
       }
       // `S<std::is_integral<T>::value>` names a static member, which the grammar reads as a type.

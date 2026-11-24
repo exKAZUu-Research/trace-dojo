@@ -296,6 +296,10 @@ export class ClassInfo {
   readonly friendClasses = new Set<ClassInfo>();
   /** The functions that may use this class's private and protected members (`friend void f(A&);`). */
   readonly friendFunctions = new Set<FunctionInfo>();
+  /** The class templates every instance of which is a friend (`template <class U> friend class Box;`). */
+  readonly friendClassTemplates = new Set<object>();
+  /** The names of the function templates every instance of which is a friend. */
+  readonly friendTemplateNames = new Set<string>();
   /** Whether the class declares a constructor that `constructors` leaves out (a defaulted copy constructor). */
   declaresConstructor = false;
   /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */

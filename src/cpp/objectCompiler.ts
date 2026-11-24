@@ -604,12 +604,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (this.usingLibraryAccess) return false;
     const fn = this.context.fn;
     if (fn !== undefined && cls.friendFunctions.has(fn)) return true;
+    if (fn?.templateScopes && !fn.owner && cls.friendTemplateNames.has(fn.name)) return true;
     const here = this.enclosingClass;
     if (!here) return false;
-    if (cls.friendClasses.has(here)) return true;
+    const befriends = (friend: ClassInfo): boolean =>
+      cls.friendClasses.has(friend) ||
+      (friend.templateOrigin !== undefined && cls.friendClassTemplates.has(friend.templateOrigin));
+    if (befriends(here)) return true;
     // A nested class is a member, which may use the private members of the classes it is in.
     for (let outer = here.outer; outer; outer = outer.outer) {
-      if (outer === cls || cls.friendClasses.has(outer)) return true;
+      if (outer === cls || befriends(outer)) return true;
     }
     return false;
   }
@@ -653,7 +657,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** Converts an expression to a type as initialization does, or stops with a message naming `what`. */
   convert(expr: Expr, to: Type, row: number, what = '値'): Expr {
     const target = nonReference(to);
-    if (expr.functions && !(target.kind === 'pointer' && target.to.kind === 'function'))
+    // A function's name converts to a pointer to it, or to a class whose constructor takes one (`std::function`).
+    if (expr.functions && !(target.kind === 'pointer' && target.to.kind === 'function') && target.kind !== 'class')
       this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
     if (expr.type.kind === 'void' && !expr.braced && !expr.functions)
       this.error(row, '値を返さない関数（void）の結果は使えません。');
@@ -1112,6 +1117,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     if (move.kind === 'array') {
       this.checkMoveOperation(move.array.type, fallback, row, { seen: context.seen });
+      return;
+    }
+    if (move.kind === 'program') {
+      this.checkDefined(move.constructor, row);
+      this.checkObjectUse(type, 'destroy', row, context);
       return;
     }
     if (move.kind !== 'members') return;
