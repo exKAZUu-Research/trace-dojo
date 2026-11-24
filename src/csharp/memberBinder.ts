@@ -160,8 +160,22 @@ export abstract class MemberBinder extends CallBinder {
     return this.convert(value, this.tupleType(types), node);
   }
 
-  /** Whether the member being bound is the target of `+=` or `-=`, which may name an event outside its type. */
-  protected isEventSubscriptionTarget = false;
+  /** The target of the `+=` or `-=` being bound, the one expression that may name an event outside its type. */
+  protected subscriptionTarget: Expression | undefined;
+
+  /** Whether the member being bound is the one that subscriptionTarget names. */
+  private isEventSubscriptionTarget = false;
+
+  /** Binds the member that a name or member access names, once its receiver is bound. */
+  protected namingMemberOf<T>(node: Expression, bind: () => T): T {
+    const saved = this.isEventSubscriptionTarget;
+    this.isEventSubscriptionTarget = this.subscriptionTarget === node;
+    try {
+      return bind();
+    } finally {
+      this.isEventSubscriptionTarget = saved;
+    }
+  }
 
   /** Binds an expression as a value. */
   bindValue(node: Expression, context: BindContext): BoundExpression {
@@ -546,7 +560,12 @@ export abstract class MemberBinder extends CallBinder {
       const type = substitute(field.type, substitution);
       if (field.isConst) return this.constantField(field, type, position);
       // Outside its declaring type, an event may only be subscribed to or unsubscribed from.
-      if (field.isEvent && context.fn.typeContext.type !== field.owner && !this.isEventSubscriptionTarget) {
+      if (
+        field.isEvent &&
+        context.fn.typeContext.type !== field.owner &&
+        !this.isEventSubscriptionTarget &&
+        !this.isBindingName
+      ) {
         const owner = displayTypeSymbol(field.owner);
         this.error(
           position,
@@ -618,7 +637,9 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (target.kind === 'typeRef')
-      return this.bindStaticMember(target.type, node.name, typeArgs, position, context, isCallee);
+      return this.namingMemberOf(node, () =>
+        this.bindStaticMember(target.type, node.name, typeArgs, position, context, isCallee)
+      );
     const receiver = target.kind === 'methodGroup' ? this.toValue(target, node.target) : target;
     // A property that a member is accessed on is read, as any value is, except in a name.
     if (!this.isBindingName) this.checkReadable(receiver, node.target, context);
@@ -637,8 +658,12 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (this.namesItsType(node.target, receiver, node.name, context))
-      return this.bindStaticMember(receiver.type as NamedType, node.name, typeArgs, position, context, isCallee);
-    return this.bindInstanceMember(receiver, node.name, typeArgs, position, context, isCallee);
+      return this.namingMemberOf(node, () =>
+        this.bindStaticMember(receiver.type as NamedType, node.name, typeArgs, position, context, isCallee)
+      );
+    return this.namingMemberOf(node, () =>
+      this.bindInstanceMember(receiver, node.name, typeArgs, position, context, isCallee)
+    );
   }
 
   /**

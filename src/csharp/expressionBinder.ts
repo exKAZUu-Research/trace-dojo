@@ -73,7 +73,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return this.bindInterpolated(node, context);
       }
       case 'name': {
-        return this.bindSimpleName(node.name, node.typeArgs, node, context);
+        return this.namingMemberOf(node, () => this.bindSimpleName(node.name, node.typeArgs, node, context));
       }
       case 'predefinedTypeName': {
         return {
@@ -1348,14 +1348,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
     }
     if (operator === '??=') return this.bindCoalesceAssignment(node, context);
     const binaryOperator = operator.slice(0, -1);
-    const isSubscription = binaryOperator === '+' || binaryOperator === '-';
-    const saved = this.isEventSubscriptionTarget;
-    this.isEventSubscriptionTarget = isSubscription;
+    const saved = this.subscriptionTarget;
+    this.subscriptionTarget = binaryOperator === '+' || binaryOperator === '-' ? node.target : undefined;
     let target: BoundLValue;
     try {
       target = this.bindLValue(node.target, context, 'compound');
     } finally {
-      this.isEventSubscriptionTarget = saved;
+      this.subscriptionTarget = saved;
     }
     if (target.kind === 'field' && target.field.isEvent && (binaryOperator === '+' || binaryOperator === '-')) {
       const value = this.bindAs(node.value, target.type, context);
