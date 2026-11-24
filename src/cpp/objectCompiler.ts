@@ -583,12 +583,22 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     objectClass?: ClassInfo
   ): void {
     if (isMemberAccessible(access, owner, naming, this.accessClass, objectClass)) return;
+    if (this.isFriendOf(owner) || this.isFriendOf(naming)) return;
     const word = accessAsMemberOf(access, owner, naming) === 'protected' ? 'protected' : 'private';
     this.error(row, `${name} は ${owner.name} の ${word} のメンバなので、ここでは使えません。`);
   }
 
+  /** Whether the code compiled now is a friend of a class: a member of a friend class, or a friend function. */
+  private isFriendOf(cls: ClassInfo): boolean {
+    if (this.usingLibraryAccess) return false;
+    const here = this.enclosingClass;
+    const fn = this.context.fn;
+    return (here !== undefined && cls.friendClasses.has(here)) || (fn !== undefined && cls.friendFunctions.has(fn));
+  }
+
   checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void {
     if (from === to || !from.isDerivedFrom(to) || isBaseAccessible(from, to, this.accessClass)) return;
+    if (this.isFriendOf(from)) return;
     this.error(row, `${to.name} は ${from.name} の public な親クラスではないので、${from.name} から変換できません。`);
   }
 

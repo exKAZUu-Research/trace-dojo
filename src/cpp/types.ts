@@ -87,6 +87,8 @@ export interface FieldInfo {
   row: number;
   /** The default member initializer (`int speed = 2;`, `Turtle t{1, 2};`), compiled with the class. */
   initializer?: Syntax;
+  /** Whether the member is `mutable`, which a const object's member function may still change. */
+  isMutable?: boolean;
   directInitializer?: boolean;
 }
 
@@ -241,6 +243,10 @@ export class ClassInfo {
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
   row = -1;
 
+  /** The classes whose code may use this class's private and protected members (`friend class B;`). */
+  readonly friendClasses = new Set<ClassInfo>();
+  /** The functions that may use this class's private and protected members (`friend void f(A&);`). */
+  readonly friendFunctions = new Set<FunctionInfo>();
   /** Whether the class declares a constructor that `constructors` leaves out (a defaulted copy constructor). */
   declaresConstructor = false;
   /** Whether the class has no name, which a typedef that names it gives it (`typedef struct { ... } P;`). */

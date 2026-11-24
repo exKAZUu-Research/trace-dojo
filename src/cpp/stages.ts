@@ -14,7 +14,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   bitfield_clause: 'ビットフィールド',
   namespace_definition: '名前空間の定義（namespace）',
   namespace_alias_definition: '名前空間の別名（namespace 名前 = ...;）',
-  friend_declaration: 'friend の宣言',
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
   trailing_return_type: '後置の戻り値の型（-> 型）',
   throw_specifier: '例外の指定（throw(...)）',
@@ -89,7 +88,6 @@ const MICROSOFT_PREFIXES = ['ms_', 'seh_'];
 const UNSUPPORTED_SPECIFIERS: Record<string, string> = {
   extern: 'extern',
   thread_local: 'thread_local（スレッドごとの変数）',
-  mutable: 'mutable',
   volatile: 'volatile',
   constinit: 'constinit',
   consteval: 'consteval',

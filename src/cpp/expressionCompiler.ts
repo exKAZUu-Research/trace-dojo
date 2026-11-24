@@ -569,7 +569,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** The data member of an object, as an lvalue that is const when the object is. */
   fieldAccess(object: Expr, field: FieldInfo, row: number): Expr {
     const { index } = field;
-    const type = isConstType(object.type) ? withConst(field.type) : field.type;
+    const type = isConstType(object.type) && !field.isMutable ? withConst(field.type) : field.type;
     if (field.type.kind === 'reference') {
       const objectRun = this.objectOf(object);
       return {

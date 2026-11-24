@@ -397,6 +397,10 @@ export class Compiler extends StatementCompiler {
             this.resolveTypeSpecifier(member);
             break;
           }
+          case 'friend_declaration': {
+            this.friendDeclaration(cls, member, definitions);
+            break;
+          }
           case 'type_definition':
           case 'alias_declaration':
           case 'static_assert_declaration': {
@@ -435,6 +439,61 @@ export class Compiler extends StatementCompiler {
     } finally {
       this.memberClass = savedClass;
     }
+  }
+
+  /**
+   * Declares a friend of a class: a class (`friend class B;`), a function (`friend void f(A&);`), or a function the
+   * declaration defines (`friend std::ostream& operator<<(...) { ... }`), whose body compiles with the members'.
+   */
+  private friendDeclaration(cls: ClassInfo, node: Syntax, definitions: { fn: FunctionInfo; node: Syntax }[]): void {
+    const inner = node.children[0];
+    if (!inner) return this.error(node.row, 'friend の後に、クラスか関数を書いてください。');
+    if (inner.type === 'declaration' || inner.type === 'function_definition') {
+      const isDefinition = inner.type === 'function_definition';
+      const base = this.specifiedType(inner, true);
+      const declarators = isDefinition ? [fieldOf(inner, 'declarator') as Syntax] : fieldsOf(inner, 'declarator');
+      if (declarators.length === 0) {
+        // `friend class B;` with an elaborated type specifier.
+        if (base.kind !== 'class') return this.error(node.row, 'friend にはクラスか関数を書いてください。');
+        cls.friendClasses.add(base.cls);
+        return;
+      }
+      for (const declarator of declarators) {
+        const declared = this.applyDeclarator(base, declarator);
+        if (!declared.function) return this.error(declarator.row, 'friend にはクラスか関数を書いてください。');
+        if (declared.nameNode?.type === 'qualified_identifier') {
+          const scope = this.resolveScope(fieldOf(declared.nameNode, 'scope') as Syntax);
+          if (scope.kind !== 'class')
+            return this.error(declarator.row, `${declared.nameNode.text} はクラスのメンバではありません。`);
+          const methods = scope.cls.methods.get(declared.name ?? '') ?? [];
+          if (methods.length === 0)
+            return this.error(
+              declarator.row,
+              `${scope.cls.name} に ${declared.name ?? ''} というメンバ関数はありません。`
+            );
+          for (const method of methods) cls.friendFunctions.add(method);
+          continue;
+        }
+        const fn = this.declareFunction(inner, declared, isDefinition);
+        cls.friendFunctions.add(fn);
+        if (isDefinition) definitions.push({ fn, node: inner });
+      }
+      return;
+    }
+    const type = this.friendClass(inner);
+    if (type.kind !== 'class') return this.error(node.row, `${inner.text} はクラスではありません。`);
+    cls.friendClasses.add(type.cls);
+  }
+
+  /** The class `friend class B;` names, which the declaration declares when no class of that name exists yet. */
+  private friendClass(node: Syntax): Type {
+    if (node.type === 'type_identifier' && !this.findName(node.text, true)) {
+      const friend = new ClassInfo(node.text, 'class');
+      friend.row = node.row;
+      this.globalScope.names.set(node.text, { kind: 'class', cls: friend });
+      return classType(friend);
+    }
+    return this.resolveTypeSpecifier(node, false, true);
   }
 
   private baseClause(cls: ClassInfo, node: Syntax, defaultAccess: Access): void {
@@ -508,6 +567,9 @@ export class Compiler extends StatementCompiler {
       if (declared.type.kind === 'array' && declared.type.length === undefined) {
         this.unsupported(declarator.row, '大きさのない配列のメンバ（柔軟な配列メンバ）');
       }
+      const isMutable = this.hasSpecifier(node, 'mutable');
+      if (isMutable && (declared.type.kind === 'reference' || isConstType(declared.type)))
+        this.error(declarator.row, `mutable は const のメンバや参照のメンバには付けられません（${name}）。`);
       const field: FieldInfo = {
         name,
         type: declared.type,
@@ -517,6 +579,7 @@ export class Compiler extends StatementCompiler {
         row: declarator.row,
         initializer,
         directInitializer,
+        isMutable,
       };
       cls.fields.push(field);
     }
