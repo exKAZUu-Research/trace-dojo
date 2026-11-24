@@ -25,7 +25,18 @@ import {
   type Type,
   withConst,
 } from '../types';
-import { ArrayStore, CObject, endLifetime, FunctionRef, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  FunctionRef,
+  holdValues,
+  Ptr,
+  Store,
+  UNINIT,
+  type Value,
+} from '../values';
 import { SequenceValue } from './containerValues';
 import type { LibraryClass } from './libraryClass';
 import { compareBytes, StringValue } from './string';
@@ -594,21 +605,62 @@ export function callbackOperands(
   }));
 }
 
+/** The position of each argument of a call of a library function, which its callables are read from. */
+export const callablePositions = new WeakMap<Expr, number>();
+
+/**
+ * The object of a class the program wrote with `operator()` (such as a lambda's closure), which a library function
+ * received as an argument, for calling it; undefined for other arguments.
+ */
+export function programCallable(arg: Expr | undefined): Expr | undefined {
+  if (!arg || arg.type.kind !== 'class' || arg.type.cls.library) return undefined;
+  const position = callablePositions.get(arg);
+  if (position === undefined) return undefined;
+  return {
+    type: unqualifiedClass(arg.type),
+    isLvalue: true,
+    row: arg.row,
+    run: (frame) => {
+      // The library function takes the callable by reference or by value.
+      const value = frame.runtime.nativeArguments.at(-1)?.[position];
+      return value instanceof Ptr ? value : new Ptr(new Box(value as Value), 0);
+    },
+  };
+}
+
+function unqualifiedClass(type: ClassType): ClassType {
+  return classType(type.cls);
+}
+
 export function predicateCallback(
   compiler: ExpressionCompiler,
   argumentType: Type,
   functions: FunctionCandidates | undefined,
   operands: CallbackOperand[],
-  row: number
+  row: number,
+  arg?: Expr
 ): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined {
   if (functions) {
     return functionCallback(compiler, functions, operands, row, true);
   }
+  const callable = programCallable(arg);
+  if (callable) return callbackRunner(compiler, operands, row, (args) => compiler.callWith(callable, args, row), true);
   if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor' && operands.length === 2) {
     const callee: Expr = { type: argumentType, row, isLvalue: false, run: () => {} };
     return callbackRunner(compiler, operands, row, (args) => compiler.callWith(callee, args, row), true);
   }
   return undefined;
+}
+
+/** Calls an argument of a class the program wrote with `operator()`, or undefined for other arguments. */
+export function callableCallback(
+  compiler: ExpressionCompiler,
+  arg: Expr,
+  operands: CallbackOperand[]
+): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined {
+  const callable = programCallable(arg);
+  if (!callable) return undefined;
+  return callbackRunner(compiler, operands, arg.row, (args) => compiler.callWith(callable, args, arg.row), false);
 }
 
 export function functionCallback(

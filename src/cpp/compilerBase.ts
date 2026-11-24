@@ -66,6 +66,8 @@ export abstract class CompilerBase {
   findName(name: string, typeOnly = false): Entity | undefined {
     const local = this.context.lookupLocal(name, typeOnly ? isTypeName : undefined);
     if (local) return local;
+    const captured = this.context.captures?.lookup(name);
+    if (captured && (!typeOnly || isTypeName(captured))) return captured;
     // A nested class's members see its own members, then those of the classes it is nested in.
     for (let outer = this.enclosingClass; outer; outer = outer.outer) {
       for (let cls: ClassInfo | undefined = outer; cls; cls = cls.base) {
@@ -615,6 +617,13 @@ export abstract class CompilerBase {
         return { name: this.conversionName(declarator), nameNode: declarator, type, function: functionDeclarator };
       }
       case 'function_declarator': {
+        // `auto f() -> int` writes the return type after the parameters.
+        const trailing = declarator.children.find((child) => child.type === 'trailing_return_type');
+        if (trailing) {
+          if (!isAuto(base))
+            this.error(declarator.row, '後置の戻り値の型（-> 型）を書くときは、前の型を auto にしてください。');
+          base = this.typeDescriptor(trailing.children[0]);
+        }
         const inner = fieldOf(declarator, 'declarator');
         const declared = inner
           ? this.applyDeclarator(base, inner)

@@ -198,6 +198,8 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The number of delete expressions destroying objects now. */
   deleteDepth = 0;
   readonly frames: Frame[] = [];
+  /** The arguments of the library functions running now, the innermost last, which their callables come from. */
+  readonly nativeArguments: unknown[][] = [];
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly steps = new StepTracker();

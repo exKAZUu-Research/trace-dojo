@@ -46,6 +46,7 @@ import { pairClass } from './associative';
 import { sequenceAddress } from './containerValues';
 import {
   assignElement,
+  callableCallback,
   type CallbackOperand,
   callbackOperands,
   constructElementFromRvalue,
@@ -58,6 +59,7 @@ import {
   moveAssignElement,
   moveValue,
   predicateCallback,
+  programCallable,
   requireMoveConstruction,
   requireMoves,
   swapElements,
@@ -338,7 +340,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     ...operands: CallbackOperand[]
   ): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined => {
     if (!arg) return undefined;
-    return predicateCallback(compiler(), unqualified(arg.type), arg.functions, operands, arg.row);
+    return predicateCallback(compiler(), unqualified(arg.type), arg.functions, operands, arg.row, arg);
   };
 
   /** Stops when an algorithm gets iterators of a weaker category than it needs, as libc++ rejects them. */
@@ -825,8 +827,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('for_each', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     const callback = args[2];
-    if (!info || args.length !== 3 || !callback.functions) return;
-    const action = functionCallback(compiler(), callback.functions, [iteratorOperand(info)], callback.row);
+    if (!info || args.length !== 3) return;
+    const action = callback.functions
+      ? functionCallback(compiler(), callback.functions, [iteratorOperand(info)], callback.row)
+      : callableCallback(compiler(), callback, [iteratorOperand(info)]);
+    if (!action) return;
     return native('for_each', params(args), VOID, ([first, last], { frame }) => {
       const values = range(first, last, info, frame);
       for (let index = 0; index < values.length; index++) action(frame, values.location(index));
@@ -1145,7 +1150,7 @@ function bitIteratorOrder(
   const proxy = iteratorOperand(info);
   const local = { type: info.element };
   const bind = (left: CallbackOperand, right: CallbackOperand): ReturnType<typeof predicateCallback> =>
-    predicateCallback(compiler, unqualified(arg.type), arg.functions, [left, right], arg.row);
+    predicateCallback(compiler, unqualified(arg.type), arg.functions, [left, right], arg.row, arg);
   const twoProxies = bind(proxy, proxy);
   const proxyLeft = bind(proxy, local);
   const proxyRight = bind(local, proxy);
@@ -1631,14 +1636,14 @@ function compileOperation(
   operands: CallbackOperand[]
 ): ElementOperation | undefined {
   const type = operation.type;
-  if (!operation.functions && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
+  const callable = programCallable(operation);
+  if (!operation.functions && !callable && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
   const { row } = operation;
   const functions = operation.functions;
-  return makeOperation(compiler, operands, row, (args) =>
-    functions
-      ? compiler.callCallback(functions, args, row)
-      : compiler.callWith({ ...operation, run: () => {} }, args, row)
-  );
+  return makeOperation(compiler, operands, row, (args) => {
+    if (functions) return compiler.callCallback(functions, args, row);
+    return compiler.callWith(callable ?? { ...operation, run: () => {} }, args, row);
+  });
 }
 
 function binaryStep(

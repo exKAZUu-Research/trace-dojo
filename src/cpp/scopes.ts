@@ -59,6 +59,15 @@ export class Scope {
   constructor(readonly conflictingDeclarations?: ReadonlyMap<string, Entity>) {}
 }
 
+/** What a lambda's body sees of the scopes around it: the variables it captures and the enclosing object. */
+export interface CaptureLookup {
+  /** What a name denotes in the enclosing scopes, as a member of the closure when the lambda captures it. */
+  lookup(name: string): Entity | undefined;
+  /** The enclosing object, which the body's `this` and implicit member accesses use, when the lambda captures it. */
+  thisObject(row: number): Expr | undefined;
+  readonly closure: ClassInfo;
+}
+
 /** What the compiler knows about the function whose body it compiles. */
 export class FunctionContext {
   readonly locals: LocalInfo[] = [];
@@ -80,11 +89,16 @@ export class FunctionContext {
 
   /** The scopes around a local class, whose names its member functions see after their own. */
   readonly outerScopes: Scope[] = [];
+  /** The `auto` return type the function declares, which every `return` must deduce the same type from. */
+  autoReturn: Type | undefined;
+  /** The captures of the lambda whose body this is. */
+  captures: CaptureLookup | undefined;
 
+  /** @param returnType The function's return type, which its first `return` decides when it is `auto`. */
   constructor(
     readonly fn: FunctionInfo | undefined,
     readonly cls: ClassInfo | undefined,
-    readonly returnType: Type
+    public returnType: Type
   ) {}
 
   /** The context of a local class's member declarations, which see the names of the function's blocks. */

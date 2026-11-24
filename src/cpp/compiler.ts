@@ -16,6 +16,8 @@ import {
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
 } from './expr';
+import { thisLocation } from './expressionCompiler';
+import { compileLambda } from './lambdas';
 import { provideProgramOperators, type ValueComparison } from './library/elements';
 import type { Library } from './library/registry';
 import {
@@ -35,7 +37,7 @@ import {
 } from './objectCompiler';
 import { overloadedOperator } from './operatorOverloads';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
-import { type Entity, FunctionContext } from './scopes';
+import { type CaptureLookup, type Entity, FunctionContext } from './scopes';
 import {
   type AutoDeduction,
   deducedType,
@@ -119,6 +121,7 @@ export class Compiler extends StatementCompiler {
   private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
   private pendingObjectUses: (() => void)[] | undefined = [];
   private readonly programComparisons = new Map<string, ValueComparison<boolean> | undefined>();
+  private readonly lambdaCaptures = new WeakMap<FunctionInfo, CaptureLookup>();
   private defaultDependencies?: {
     functions: Map<FunctionInfo, number>;
     staticMembers: Map<GlobalInfo, number>;
@@ -808,7 +811,6 @@ export class Compiler extends StatementCompiler {
       .map((child) => child.text);
     if (qualifiers.has('volatile')) this.unsupported(node.row, 'volatile');
     if (this.hasSpecifier(node, 'constexpr') && !this.context.fn) this.unsupported(node.row, 'constexpr の関数');
-    if (hasAuto(ret)) this.unsupported(node.row, '戻り値の型の auto');
     if (ret.kind === 'array') this.error(node.row, '関数は配列を返せません。');
     const params = this.parameters(fieldOf(declarator, 'parameters') as Syntax);
     const displayName = owner ? `${owner.name}::${name}` : name;
@@ -854,7 +856,7 @@ export class Compiler extends StatementCompiler {
     return Number(value.constant) !== 0;
   }
 
-  private parameters(list: Syntax): ParamInfo[] {
+  parameters(list: Syntax): ParamInfo[] {
     const params: ParamInfo[] = [];
     const declarations = list.children;
     for (const param of declarations) {
@@ -895,7 +897,7 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Completes a class once its members are declared: virtual functions, special members, and object operations. */
-  private completeClass(cls: ClassInfo, isFinalClass: boolean): void {
+  completeClass(cls: ClassInfo, isFinalClass: boolean): void {
     cls.isFinal = isFinalClass;
     if (cls.base) for (const [key, fn] of cls.base.virtuals) cls.virtuals.set(key, fn);
     for (const overloads of cls.methods.values()) {
@@ -1682,9 +1684,32 @@ export class Compiler extends StatementCompiler {
     this.compileFunctionBody(fn, node);
   }
 
+  lambdaExpression(node: Syntax): Expr {
+    return compileLambda(this, node);
+  }
+
+  /** Compiles a lambda's body as its closure type's function call operator, which sees the lambda's captures. */
+  compileLambdaBody(fn: FunctionInfo, node: Syntax, captures: CaptureLookup): void {
+    this.lambdaCaptures.set(fn, captures);
+    this.compileFunctionBody(fn, node);
+  }
+
+  /** The enclosing object a lambda's body uses: what the captured `this` points to, or the captured copy. */
+  capturedThisObject(capture: { field: FieldInfo; byCopy: boolean }, row: number): Expr {
+    const closure = classType(capture.field.owner, this.context.isConstMember);
+    const self: Expr = { type: closure, isLvalue: true, isThis: true, row, run: (frame) => thisLocation(frame) };
+    const member = this.fieldAccess(self, capture.field, row);
+    return capture.byCopy ? member : this.dereference(this.rvalue(member), row);
+  }
+
+  referenceInitializer(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Initializer {
+    return this.constructorReference(type, expr, row, true) as Initializer;
+  }
+
   private compileFunctionBody(fn: FunctionInfo, node: Syntax): void {
     const cls = fn.owner;
     const context = new FunctionContext(fn, cls, fn.isConstructor || fn.isDestructor ? VOID : fn.ret);
+    context.captures = this.lambdaCaptures.get(fn);
     // A member function of a local class sees the names of the blocks around the class.
     for (let outer = cls; outer; outer = outer.outer) {
       if (outer.localScopes) {
@@ -1728,6 +1753,11 @@ export class Compiler extends StatementCompiler {
       }
       const statements = this.compileStatements(body.children);
       context.endBody();
+      // A function whose `auto` return type no `return` statement decided returns nothing.
+      if (hasAuto(context.returnType)) {
+        context.returnType = VOID;
+        fn.ret = VOID;
+      }
       for (const { label, row, isReachable } of context.gotos) {
         if (!context.labels.has(label)) this.error(row, `ラベル ${label} はありません。`);
         if (!isReachable) this.unsupported(row, 'ループや if・switch の中のラベルへ、その外から goto で移ること');

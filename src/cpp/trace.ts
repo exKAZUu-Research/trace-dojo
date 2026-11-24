@@ -85,7 +85,9 @@ class Snapshotter {
     for (const field of owner.fields) {
       const scalar = this.scalarOf(self.values[field.index], field.type);
       if (scalar === NOT_SCALAR || scalar === undefined) continue;
-      const name = `this->${field.name}`;
+      if (field.name === '\0this') continue;
+      // A lambda's captures show as the variables they capture.
+      const name = owner.isLambda ? field.name.replace(/^\0capture /, '') : `this->${field.name}`;
       this.take(NODE_COST + name.length);
       variables.vars[name] = scalar;
     }

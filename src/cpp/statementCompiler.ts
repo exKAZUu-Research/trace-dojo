@@ -1,6 +1,6 @@
 import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
-import { AUTO, hasAuto } from './compilerBase';
+import { AUTO, hasAuto, isAuto } from './compilerBase';
 import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
@@ -297,7 +297,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'function_definition': {
         const assignment = asZeroAssignment(node);
         if (assignment) return this.compileStatementBody(assignment);
-        return this.error(node.row, '関数の中に関数は定義できません（ラムダ式は、この採点環境では使えません）。');
+        return this.error(node.row, '関数の中に関数は定義できません（ラムダ式を使ってください）。');
       }
       case 'using_declaration': {
         this.usingDeclaration(node);
@@ -1325,6 +1325,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private returnStatement(node: Syntax): Exec {
     const valueNode = node.children[0];
+    const isDeduced = hasAuto(this.context.returnType) || this.context.autoReturn !== undefined;
+    const precompiled =
+      valueNode && valueNode.type !== 'initializer_list' && isDeduced ? this.compileExpression(valueNode) : undefined;
+    if (hasAuto(this.context.returnType)) {
+      this.context.autoReturn = this.context.returnType;
+      this.deduceReturnType(precompiled, node.row);
+    } else if (this.context.autoReturn && valueNode?.type !== 'initializer_list') {
+      this.checkReturnDeduction(this.context.autoReturn, precompiled, node.row);
+    }
     const returnType = this.context.returnType;
     if (!valueNode) {
       if (returnType.kind !== 'void' && !this.context.fn?.isConstructor) {
@@ -1333,7 +1342,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return () => RETURN;
     }
     if (returnType.kind === 'void') {
-      const expr = this.compileExpression(valueNode);
+      const expr = precompiled ?? this.compileExpression(valueNode);
       if (expr.type.kind !== 'void') this.error(node.row, '戻り値の型が void の関数は値を返せません。');
       const run = this.fullExpression(expr.run);
       return (frame) => {
@@ -1341,7 +1350,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return RETURN;
       };
     }
-    const value = this.returnValue(valueNode, returnType, node.row);
+    const value = this.returnValue(valueNode, returnType, node.row, precompiled);
     const run = this.fullExpression(value);
     return (frame) => {
       frame.returnValue = run(frame);
@@ -1349,14 +1358,59 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  private returnValue(node: Syntax, returnType: Type, row: number): Eval<Value | Ptr> {
+  /**
+   * Decides an `auto` return type from the first `return` statement (C++20 [dcl.spec.auto]), whose value later ones
+   * must agree with.
+   */
+  private deduceReturnType(value: Expr | undefined, row: number): void {
+    const declared = this.context.returnType;
+    if (!value) {
+      if (declared.kind !== 'class' && declared.kind !== 'void' && !isAuto(declared))
+        this.error(row, 'auto の戻り値の型は、値を返さない return 文からは決められません。');
+      this.setReturnType(VOID);
+      return;
+    }
+    if (value.type.kind === 'void') {
+      this.setReturnType(VOID);
+      return;
+    }
+    const deduced =
+      declared.kind === 'reference'
+        ? referenceTo(this.deduceAutoReference(declared.to, value))
+        : this.deduceAuto(declared, value, row);
+    this.setReturnType(deduced);
+  }
+
+  /** Rejects a `return` whose value deduces another type than the first one did. */
+  private checkReturnDeduction(declared: Type, value: Expr | undefined, row: number): void {
+    const first = this.context.returnType;
+    let type: Type = VOID;
+    if (value && value.type.kind !== 'void')
+      type =
+        declared.kind === 'reference'
+          ? referenceTo(this.deduceAutoReference(declared.to, value))
+          : this.deduceAuto(declared, value, row);
+    if (!sameType(type, first))
+      this.error(
+        row,
+        `戻り値の型が、前の return 文で決まった ${typeName(first)} 型と、この return 文の ${typeName(type)} 型で違います。`
+      );
+  }
+
+  private setReturnType(type: Type): void {
+    this.context.returnType = type;
+    if (this.context.fn) this.context.fn.ret = type;
+  }
+
+  private returnValue(node: Syntax, returnType: Type, row: number, precompiled?: Expr): Eval<Value | Ptr> {
     if (node.type === 'initializer_list') {
+      if (hasAuto(returnType)) return this.error(row, 'auto の戻り値の型は {...} からは決められません。');
       if (returnType.kind === 'reference') return this.error(row, '参照を返す関数は {...} を返せません。');
       this.context.noteReturn(undefined);
       const initialize = this.listInitializer(returnType, node, row);
       return (frame) => initialize(frame, undefined, false, 'full-expression');
     }
-    const expr = this.compileExpression(node);
+    const expr = precompiled ?? this.compileExpression(node);
     if (returnType.kind === 'reference') {
       return this.convert(expr, returnType, row).run;
     }

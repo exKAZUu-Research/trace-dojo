@@ -18,7 +18,7 @@ import {
   type TemporaryBinding,
 } from './expr';
 import { SequenceValue } from './library/containerValues';
-import { constructElementFromRvalue, moveConstruction } from './library/elements';
+import { callablePositions, constructElementFromRvalue, moveConstruction } from './library/elements';
 import { StringValue } from './library/string';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
@@ -76,7 +76,12 @@ export function invoke(
     const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
     if (override && sameParameters(fn, override)) return invoke(frame, override, args, self, row, isCallerDestroying);
     runtime.spend();
-    return fn.native(args, { self: self?.read(), selfLocation: self, frame, row }) as Value | Ptr;
+    runtime.nativeArguments.push(args);
+    try {
+      return fn.native(args, { self: self?.read(), selfLocation: self, frame, row }) as Value | Ptr;
+    } finally {
+      runtime.nativeArguments.pop();
+    }
   }
   const compiled = fn.compiled;
   if (!compiled) throw new Error(`${fn.displayName} has no body`);
@@ -702,6 +707,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     isFunctionPointer = false
   ): MatchingOverload[] {
     const viable: MatchingOverload[] = [];
+    for (const [index, arg] of args.entries()) callablePositions.set(arg, index);
     for (const candidate of candidates) {
       const instantiated = candidate.instantiate?.(args, templateArgs);
       const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;

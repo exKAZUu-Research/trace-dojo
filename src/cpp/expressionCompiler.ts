@@ -36,7 +36,7 @@ import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
-import { hasUserType, overloadedOperator, withOverloads } from './operatorOverloads';
+import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
@@ -206,6 +206,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'compound_literal_expression': {
         return this.bracedCast(node);
       }
+      case 'lambda_expression': {
+        return this.lambdaExpression(node);
+      }
       case 'initializer_list': {
         return this.error(node.row, '{...} は、この場所では値として使えません。');
       }
@@ -322,7 +325,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         }
         if (isQualified && !this.context.cls)
           return this.error(row, `メンバ変数 ${name} を使うには、オブジェクトが要ります。`);
-        const object = this.implicitThis(row, name);
+        const object = this.implicitThis(row, name, field.owner);
         this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name, this.context.cls);
         return this.fieldAccess(object, field, row);
       }
@@ -333,7 +336,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'functions': {
         const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic);
-        const object = members.length > 0 && !this.context.isStaticContext ? this.implicitThis(row, name) : undefined;
+        const object =
+          members.length > 0 && !this.context.isStaticContext
+            ? this.implicitThis(row, name, members[0].owner)
+            : undefined;
         const owner = entity.functions.find((fn) => fn.owner && !fn.native)?.owner;
         const namingClass = owner && this.namingClass(node, owner);
         const functions: FunctionCandidates = { name, candidates: entity.functions, object, isQualified, namingClass };
@@ -387,7 +393,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** `this` as the object it points to, for a member a member function names without `this->`. */
-  private implicitThis(row: number, name: string): Expr {
+  private implicitThis(row: number, name: string, owner?: ClassInfo): Expr {
+    const { captures } = this.context;
+    if (captures && owner !== captures.closure) {
+      // A lambda's body names the members of the enclosing object through the `this` it captures.
+      const object = captures.thisObject(row);
+      if (!object) return this.error(row, `ラムダ式で this を取り込んでいないので、メンバ ${name} は使えません。`);
+      return object;
+    }
     if (this.context.isStaticContext || !this.context.cls) {
       return this.error(row, `static のメンバ関数（または関数）の中では、メンバ ${name} は使えません。`);
     }
@@ -402,7 +415,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     };
   }
 
+  /** The `this` of the code compiled now. */
+  compileThis(row: number): Expr {
+    return this.thisExpr(row);
+  }
+
   private thisExpr(row: number): Expr {
+    const { captures } = this.context;
+    if (captures) {
+      const object = captures.thisObject(row);
+      if (!object) return this.error(row, 'ラムダ式で this を取り込んでいないので、this は使えません。');
+      return this.addressOf(object, row);
+    }
     if (this.context.isStaticContext || !this.context.cls) {
       return this.error(row, 'this は、static でないメンバ関数の中でしか使えません。');
     }
@@ -594,7 +618,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => locate(run(frame) as Ptr),
-        description: field.name,
+        description: field.name.replace(/^\0capture /, ''),
         temporaryBinding: temporaryBinding && ((frame, retain) => locate(temporaryBinding(frame, retain))),
       };
     }
@@ -1858,6 +1882,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (callee.type.kind === 'class' && !callee.type.cls.library) {
         const overloaded = overloadedOperator(this, '()', [callee, ...args], row);
         if (overloaded) return overloaded.expr;
+        const calls = memberOperators(callee.type.cls, 'operator()');
+        if (calls.length > 0) this.resolve(`${typeName(callee.type)} の operator()`, calls, args, callee, row);
         return this.error(
           row,
           `${typeName(callee.type)} 型の値は関数として呼び出せません（operator() がありません）。`
@@ -1896,6 +1922,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     this.checkDefined(fn, row);
     return this.withLibraryAccess(() => this.callExpr(resolved, args, undefined, row));
   }
+
+  /** A lambda expression's closure object. */
+  abstract lambdaExpression(node: Syntax): Expr;
 
   /** The non-member operator functions an operator expression may call, as unqualified lookup finds them. */
   nonMemberOperators(name: string, _operands: Expr[]): FunctionInfo[] {
@@ -2359,7 +2388,7 @@ function signedByte(code: number): number {
 }
 
 /** The location of the object a member function runs for. */
-function thisLocation(frame: Frame): Ptr {
+export function thisLocation(frame: Frame): Ptr {
   return frame.self as Ptr;
 }
 
