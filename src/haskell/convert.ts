@@ -37,8 +37,6 @@ import type {
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
-  group: 'TransformListComp の内包表記',
-  transform: 'TransformListComp の内包表記',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
   role_annotation: '型の役割の注釈（type role）',
@@ -1981,7 +1979,7 @@ function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
       };
     } else if (stmt.kind === 'let') {
       result = { kind: 'let', decls: stmt.decls, body: rest, span };
-    } else if (stmt.kind === 'rec') {
+    } else if (stmt.kind === 'rec' || stmt.kind === 'transform') {
       throw unsupportedError(stmt.span, '修飾つきの do の中の rec');
     } else {
       const name = generatedName('bind', index);
@@ -2165,6 +2163,20 @@ function convertStatement(node: Node): Stmt {
     }
     case 'let': {
       return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span };
+    }
+    case 'transform':
+    case 'group': {
+      if (!extensions.has('TransformListComp')) {
+        throw syntaxError(span, 'then を使うには、TransformListComp の拡張が要ります。');
+      }
+      const key = field(node, 'key');
+      return {
+        kind: 'transform',
+        fn: convertExpr(required(node, node.type === 'group' ? 'classifier' : 'transformation')),
+        by: key ? convertExpr(key) : undefined,
+        group: node.type === 'group',
+        span,
+      };
     }
     case 'rec': {
       if (!extensions.has('RecursiveDo')) throw syntaxError(span, 'rec を使うには、RecursiveDo の拡張が要ります。');

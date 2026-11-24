@@ -34,6 +34,18 @@ instance Ord k => IsList (M.Map k v) where
 
 class IsLabel (x :: Symbol) a where
   fromLabel :: a
+
+the :: Eq a => [a] -> a
+the (x : xs)
+  | all (== x) xs = x
+  | otherwise = errorWithoutStackTrace "GHC.Exts.the: non-identical list"
+the [] = errorWithoutStackTrace "GHC.Exts.the: empty list"
+
+sortWith :: Ord b => (a -> b) -> [a] -> [a]
+sortWith f = sortBy (\x y -> compare (f x) (f y))
+
+groupWith :: Ord b => (a -> b) -> [a] -> [[a]]
+groupWith f xs = groupBy (\x y -> f x == f y) (sortWith f xs)
 `;
 
 /** The functions the conversion of overloaded literals calls, apart from any names the program defines. */

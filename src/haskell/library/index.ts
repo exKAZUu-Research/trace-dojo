@@ -909,7 +909,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['Item', 'none'],
       ['IsString', 'all'],
     ],
-    values: [],
+    values: ['the', 'sortWith', 'groupWith'],
   },
   'GHC.OverloadedLabels': {
     from: 'GHC.Overloaded.Internal',

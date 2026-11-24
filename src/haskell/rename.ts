@@ -1412,6 +1412,19 @@ class Renamer {
         };
       }
       case 'comprehension': {
+        if (expr.quals.some((qual) => qual.kind === 'transform'))
+          return this.renameExpr(withoutTransforms(expr), scope);
+        if (this.module.extensions.has('MonadComprehensions') && !expr.parallel) {
+          // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
+          const support = (name: string): Expr => ({ kind: 'support', name, span });
+          const stmts: Stmt[] = expr.quals.map((qual) =>
+            qual.kind === 'exp'
+              ? { ...qual, expr: { kind: 'app', fn: support('guard'), arg: qual.expr, span: qual.span } }
+              : qual
+          );
+          stmts.push({ kind: 'exp', expr: { kind: 'app', fn: support('return'), arg: expr.expr, span }, span });
+          return this.renameExpr({ kind: 'do', stmts, span }, scope);
+        }
         if (expr.parallel) return this.renameParallelComprehension(expr, scope);
         const { stmts, scope: inner } = this.renameStmts(expr.quals, scope, false);
         return { k: 'comp', expr: this.renameExpr(expr.expr, inner), quals: stmts, span };
@@ -1686,6 +1699,9 @@ class Renamer {
           for (const [name, local] of binders) scope.define(name, local);
           result.push({ k: 'bind', pat, expr, span: stmt.span });
           break;
+        }
+        case 'transform': {
+          throw compileError(stmt.span, 'then は、リストの内包表記の中にだけ書けます。');
         }
         case 'let': {
           if (isDo && isLast)
@@ -2275,6 +2291,67 @@ function withRequiredTypeArguments(binding: Extract<RBinding, { k: 'fun' }>): vo
     clause.typeBinders = [...(clause.typeBinders ?? []), ...names];
     clause.pats = clause.pats.slice(required);
   }
+}
+
+/**
+ * A comprehension with `then` qualifiers as one without: `[e | qs, then f, rs]` is `[e | vs <- f [vs | qs], rs]`,
+ * where `vs` are the variables `qs` bind; `then group` rebinds each of them to the list of its values in a group.
+ */
+function withoutTransforms(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
+  const { span } = expr;
+  const index = expr.quals.findLastIndex((qual) => qual.kind === 'transform');
+  const transform = expr.quals[index] as Extract<Stmt, { kind: 'transform' }>;
+  const before = expr.quals.slice(0, index);
+  const names: Name[] = [];
+  for (const qual of before) {
+    if (qual.kind === 'bind') collectPatNames(qual.pat, names);
+    else if (qual.kind === 'let') for (const binding of groupBindings(qual.decls)) names.push(...binding.names);
+  }
+  const unique = [...new Map(names.map((name) => [name.name, name])).values()];
+  const tupleExpr = (): Expr =>
+    unique.length === 1
+      ? { kind: 'var', name: unique[0], span }
+      : unique.length === 0
+        ? { kind: 'con', name: { name: '()', span }, span }
+        : { kind: 'tuple', elems: unique.map((name): Expr => ({ kind: 'var', name, span })), span };
+  const tuplePat = (): Pat =>
+    unique.length === 1
+      ? { kind: 'pvar', name: unique[0], span }
+      : unique.length === 0
+        ? { kind: 'pwild', span }
+        : { kind: 'ptuple', elems: unique.map((name): Pat => ({ kind: 'pvar', name, span })), span };
+  const app = (fn: Expr, arg: Expr): Expr => ({ kind: 'app', fn, arg, span });
+  const inner: Expr = { kind: 'comprehension', expr: tupleExpr(), quals: before, span };
+  let transformed = transform.by
+    ? app(app(transform.fn, { kind: 'lambda', pats: [tuplePat()], body: transform.by, span }), inner)
+    : app(transform.fn, inner);
+  if (transform.group) {
+    const group: Name = { name: ' group', span };
+    const columns: Expr[] = unique.map((name) =>
+      app(
+        app(
+          { kind: 'support', name: 'map', span },
+          { kind: 'lambda', pats: [tuplePat()], body: { kind: 'var', name, span }, span }
+        ),
+        {
+          kind: 'var',
+          name: group,
+          span,
+        }
+      )
+    );
+    const regroup: Expr = {
+      kind: 'lambda',
+      pats: [{ kind: 'pvar', name: group, span }],
+      body: columns.length === 1 ? columns[0] : { kind: 'tuple', elems: columns, span },
+      span,
+    };
+    transformed = app(app({ kind: 'support', name: 'map', span }, regroup), transformed);
+  }
+  return {
+    ...expr,
+    quals: [{ kind: 'bind', pat: tuplePat(), expr: transformed, span: transform.span }, ...expr.quals.slice(index + 1)],
+  };
 }
 
 interface PatternSynonymInfo {

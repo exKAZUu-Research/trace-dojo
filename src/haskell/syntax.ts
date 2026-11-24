@@ -186,6 +186,8 @@ export type Stmt =
   | { kind: 'bind'; pat: Pat; expr: Expr; span: Span }
   | { kind: 'let'; decls: Decl[]; span: Span }
   | { kind: 'exp'; expr: Expr; span: Span }
+  /** `then f` or `then f by e` in a list comprehension, as TransformListComp allows. */
+  | { kind: 'transform'; fn: Expr; by?: Expr; group: boolean; span: Span }
   /** `rec { ... }` in a do block, whose statements may refer to the variables they bind later, via `mfix`. */
   | { kind: 'rec'; stmts: Stmt[]; span: Span };
 
