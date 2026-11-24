@@ -14,7 +14,16 @@ import { parseRust, parseWith } from './parse';
 import { STD_SOURCE } from './stdSource';
 import { arrayTryFrom, intoConversion } from './traitConversions';
 import { TraitSolver } from './traits';
-import { allSupertraits, hasVars, resolve, shallow, substitute, type TraitDef, type Type } from './types';
+import {
+  allSupertraits,
+  hasVars,
+  resolve,
+  shallow,
+  substitute,
+  type TraitDef,
+  type TraitRef,
+  type Type,
+} from './types';
 
 let stdItems: Item[] | undefined;
 
@@ -84,7 +93,6 @@ function declareStd(program: Program, collector: ItemCollector): void {
  * The type `<Self as Trait>::Name` stands for: what a bound of `Self` sets, an iterator's item, or the type the impl
  * of the trait for `Self` gives, once `Self` is known.
  */
-// code-gauge-allow functionCognitiveComplexity -- Each kind of `Self` finds its associated types differently.
 function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type | undefined {
   const projection = type.def.projection;
   if (!projection) return undefined;
@@ -93,26 +101,36 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
   const traitArgs = type.args.slice(1);
   if (self.kind === 'var') return undefined;
   const bounds = boundsOf(self);
-  if (bounds) {
-    for (const bound of allSupertraits(bounds, self)) {
-      if (bound.trait !== trait) continue;
-      const set = bound.assoc?.get(name) ?? (name === 'Item' ? bound.item : undefined);
-      if (set) return set;
-    }
-    return undefined;
-  }
+  if (bounds) return boundAssocType(bounds, self, trait, name);
   if (name === 'Item' && (trait.builtin === 'Iterator' || trait.builtin === 'IntoIterator')) {
     const item = intoIterItem(self);
     if (item) return item;
   }
-  const builtin = builtinAssocType(solver.program, trait, name, self, traitArgs);
-  if (builtin) return builtin;
+  return builtinAssocType(trait, name, self, traitArgs) ?? implAssocType(solver, trait, name, self, traitArgs);
+}
+
+/** The associated type a bound of a type parameter, a trait object, or an `impl Trait` sets. */
+function boundAssocType(bounds: TraitRef[], self: Type, trait: TraitDef, name: string): Type | undefined {
+  for (const bound of allSupertraits(bounds, self)) {
+    if (bound.trait !== trait) continue;
+    const set = bound.assoc?.get(name) ?? (name === 'Item' ? bound.item : undefined);
+    if (set) return set;
+  }
+  return undefined;
+}
+
+/** The associated type the program's impl for `self` gives; a type not fully known yet (`MyBox<{integer}>`) settles it only when one impl can be its. */
+function implAssocType(
+  solver: TraitSolver,
+  trait: TraitDef,
+  name: string,
+  self: Type,
+  traitArgs: Type[]
+): Type | undefined {
   const { unifier } = solver;
-  // A type not fully known yet (`MyBox<{integer}>`) settles the projection only when one impl can be its.
   let found: Type | undefined;
   for (const impl of solver.program.impls) {
-    if (impl.trait?.trait !== trait) continue;
-    const assoc = impl.assocTypes.get(name);
+    const assoc = impl.trait?.trait === trait ? impl.assocTypes.get(name) : undefined;
     if (!assoc) continue;
     const snapshot = unifier.snapshot();
     const subst = solver.matchImpl(impl, self, traitArgs);
@@ -127,45 +145,55 @@ function projectionType(solver: TraitSolver, type: Type & { kind: 'adt' }): Type
 }
 
 /** The associated types of the standard library's traits for the types whose impls the interpreter knows. */
-function builtinAssocType(program: Program, trait: TraitDef, name: string, self: Type, args: Type[]): Type | undefined {
+function builtinAssocType(trait: TraitDef, name: string, self: Type, args: Type[]): Type | undefined {
   const builtin = trait.builtin;
   if (!builtin) return undefined;
-  if (name === 'Output' && OPERATOR_OUTPUTS.has(builtin)) {
-    const primitive = (type: Type | undefined): Type | undefined => {
-      const t = type && normalize(shallow(type));
-      if (t?.kind === 'ref') return primitive(t.target);
-      return t?.kind === 'int' || t?.kind === 'float' || t?.kind === 'bool' ? t : undefined;
-    };
-    const left = primitive(self);
-    // std's impls for numbers take numbers (`i32 + &i32`); one with another type on the right is the program's.
-    if (left && (args.length === 0 || primitive(args[0]))) return left;
-    if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
-    return undefined;
-  }
-  if (name === 'Target' && (builtin === 'Deref' || builtin === 'DerefMut')) {
-    if (self.kind === 'ref') return self.target;
-    if (self.kind === 'adt') {
-      const pointers = ['Box', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'];
-      if (pointers.includes(self.def.builtin ?? '')) return self.args[0];
-      if (self.def.builtin === 'String') return { kind: 'str' };
-      if (self.def.builtin === 'Vec') return { kind: 'slice', elem: self.args[0] };
-    }
-    return undefined;
-  }
-  if (name === 'Output' && (builtin === 'Index' || builtin === 'IndexMut')) {
-    const index = args[0] && normalize(shallow(args[0]));
-    const elem =
-      self.kind === 'array' || self.kind === 'slice'
-        ? self.elem
-        : self.kind === 'adt' && (self.def.builtin === 'Vec' || self.def.builtin === 'VecDeque')
-          ? self.args[0]
-          : undefined;
-    if (elem && index?.kind === 'int') return elem;
-    if (self.kind === 'adt' && (self.def.builtin === 'HashMap' || self.def.builtin === 'BTreeMap')) return self.args[1];
-    return undefined;
-  }
-  void program;
+  if (name === 'Output' && OPERATOR_OUTPUTS.has(builtin)) return operatorOutput(builtin, self, args);
+  if (name === 'Target' && (builtin === 'Deref' || builtin === 'DerefMut')) return derefTarget(self);
+  if (name === 'Output' && (builtin === 'Index' || builtin === 'IndexMut')) return indexOutput(self, args);
   return undefined;
+}
+
+function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undefined {
+  const left = primitiveOperand(self);
+  // std's impls for numbers take numbers (`i32 + &i32`); one with another type on the right is the program's.
+  if (left && (args.length === 0 || primitiveOperand(args[0]))) return left;
+  if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
+  return undefined;
+}
+
+function primitiveOperand(type: Type | undefined): Type | undefined {
+  const t = type && normalize(shallow(type));
+  if (t?.kind === 'ref') return primitiveOperand(t.target);
+  return t?.kind === 'int' || t?.kind === 'float' || t?.kind === 'bool' ? t : undefined;
+}
+
+const DEREF_POINTERS = new Set([
+  'Box',
+  'Rc',
+  'Ref',
+  'RefMut',
+  'Arc',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+]);
+
+function derefTarget(self: Type): Type | undefined {
+  if (self.kind === 'ref') return self.target;
+  if (self.kind !== 'adt') return undefined;
+  if (DEREF_POINTERS.has(self.def.builtin ?? '')) return self.args[0];
+  if (self.def.builtin === 'String') return { kind: 'str' };
+  return self.def.builtin === 'Vec' ? { kind: 'slice', elem: self.args[0] } : undefined;
+}
+
+function indexOutput(self: Type, args: Type[]): Type | undefined {
+  const index = args[0] && normalize(shallow(args[0]));
+  const sequence = self.kind === 'adt' && (self.def.builtin === 'Vec' || self.def.builtin === 'VecDeque');
+  const elem = self.kind === 'array' || self.kind === 'slice' ? self.elem : sequence ? self.args[0] : undefined;
+  if (elem && index?.kind === 'int') return elem;
+  const map = self.kind === 'adt' && (self.def.builtin === 'HashMap' || self.def.builtin === 'BTreeMap');
+  return map ? self.args[1] : undefined;
 }
 
 const OPERATOR_OUTPUTS = new Set([

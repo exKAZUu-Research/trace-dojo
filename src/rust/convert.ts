@@ -65,7 +65,6 @@ export class Converter extends ExpressionConverter {
   // -------------------------------------------------------------------------------------------------------------------
   // Items
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   protected item(node: Node, attrs?: Attributes): Item | undefined {
     const span = this.span(node);
@@ -323,7 +322,6 @@ export class Converter extends ExpressionConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Type and lifetime parameters and where clauses use distinct Rust syntax.
-  // code-gauge-allow functionNcss -- One case per kind of syntax node.
   private generics(node: Node): Generics {
     const generics: Generics = { params: [], lifetimes: [], where: [] };
     const parameters = node.childForFieldName('type_parameters');
@@ -360,37 +358,31 @@ export class Converter extends ExpressionConverter {
         defaultType: defaultType ? this.type(defaultType) : undefined,
       });
     }
+    this.whereClause(node, generics);
+    return generics;
+  }
+
+  /** Adds the predicates of an item's `where` clause to its generics. */
+  private whereClause(node: Node, generics: Generics): void {
     const where = node.namedChildren.find((child) => child.type === 'where_clause');
     for (const predicate of where?.namedChildren ?? []) {
       if (predicate.type !== 'where_predicate') continue;
       const left = this.field(predicate, 'left');
+      const bounds = predicate.childForFieldName('bounds');
       if (left.type === 'lifetime') {
         const outlives =
-          predicate
-            .childForFieldName('bounds')
-            ?.namedChildren.filter((part) => part.type === 'lifetime')
-            .map((part) => part.text) ?? [];
+          bounds?.namedChildren.filter((part) => part.type === 'lifetime').map((part) => part.text) ?? [];
         (generics.lifetimeBounds ??= []).push({ name: left.text, outlives });
         continue;
       }
-      if (left.type === 'higher_ranked_trait_bound') {
-        // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
-        const bounds = predicate.childForFieldName('bounds');
-        generics.where.push({
-          type: this.type(this.field(left, 'type')),
-          bounds: bounds ? this.bounds(bounds) : [],
-          span: this.span(predicate),
-        });
-        continue;
-      }
-      const bounds = predicate.childForFieldName('bounds');
+      // `for<'a> F: Fn(&'a T)`: the bound holds for every lifetime, which the borrow checker's own rules give.
+      const type = left.type === 'higher_ranked_trait_bound' ? this.field(left, 'type') : left;
       generics.where.push({
-        type: this.type(left),
+        type: this.type(type),
         bounds: bounds ? this.bounds(bounds) : [],
         span: this.span(predicate),
       });
     }
-    return generics;
   }
 
   private bounds(node: Node): BoundAst[] {
@@ -402,6 +394,7 @@ export class Converter extends ExpressionConverter {
     return bounds;
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of bound syntax.
   private bound(node: Node): BoundAst {
     const span = this.span(node);
     switch (node.type) {
@@ -517,7 +510,6 @@ export class Converter extends ExpressionConverter {
     return fields;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   private enumItem(node: Node, attrs: Attributes): EnumItem {
     const span = this.span(node);
     const variants: VariantAst[] = [];
@@ -556,6 +548,8 @@ export class Converter extends ExpressionConverter {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of trait member, including macro expansions.
+  // code-gauge-allow functionNcss -- One case per kind of trait member, including macro expansions.
   private traitItem(node: Node): TraitItem {
     const span = this.span(node);
     const methods: FnItem[] = [];
@@ -611,6 +605,7 @@ export class Converter extends ExpressionConverter {
   }
 
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of impl member, including macro expansions.
   private implItem(node: Node): ImplItem {
     const span = this.span(node);
     if (/^impl\b[^{]*!/.test(node.text))

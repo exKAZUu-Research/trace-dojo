@@ -102,6 +102,8 @@ export function compileWhile(c: Compiler, expr: ExprOf<'while'>): Eval {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Runs the loop and drops its iterator when it is left early, as Rust does.
+// code-gauge-allow functionNcss -- Runs the loop and drops its iterator when it is left early, as Rust does.
 export function compileFor(c: Compiler, expr: ExprOf<'for'>): Eval {
   const loopInfo = c.annotations.loops.get(expr);
   if (!loopInfo) throw new Error('Unchecked for');

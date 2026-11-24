@@ -26,6 +26,7 @@ const LEAF_TYPES = new Set(['string_literal', 'raw_string_literal', 'char_litera
 const CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
 
 /** The tokens of a token tree, inside its outer delimiters, grouped by the delimiters within. */
+// code-gauge-allow functionCognitiveComplexity -- Recovers lifetimes and repetition separators that tree-sitter splits or leaves out.
 export function tokensOf(tree: Node): Token[] {
   const leaves: (Token & { kind: 'leaf' })[] = [];
   const visit = (node: Node): void => {
@@ -82,47 +83,54 @@ export function parseParts(tokens: Token[], matcher: boolean): Part[] {
   const parts: Part[] = [];
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index];
-    if (token.kind === 'group') {
-      parts.push({ kind: 'group', open: token.open, close: token.close, parts: parseParts(token.tokens, matcher) });
-      continue;
-    }
-    if (token.type === 'metavariable') {
-      const name = token.text.slice(1);
-      if (matcher && name !== 'crate') {
-        const colon = tokens[index + 1];
-        const fragment = tokens[index + 2];
-        if (colon?.kind !== 'leaf' || colon.text !== ':' || fragment?.kind !== 'leaf') {
-          throw new MacroError(`マクロの規則の $${name} には、:expr のように種類を書いてください。`);
-        }
-        if (!FRAGMENTS.has(fragment.text)) throw new MacroError(`マクロの変数の種類 ${fragment.text} はありません。`);
-        parts.push({ kind: 'var', name, fragment: fragment.text });
-        index += 2;
-      } else {
-        parts.push({ kind: 'var', name, fragment: undefined });
-      }
-      continue;
-    }
     const next = tokens[index + 1];
-    if (token.text === '$' && next?.kind === 'group' && next.open === '(') {
-      const inner = parseParts(next.tokens, matcher);
-      let cursor = index + 2;
-      let separator: string | undefined;
-      const after = tokens[cursor];
-      const isOp = (t: Token | undefined): t is Token & { kind: 'leaf' } =>
-        t?.kind === 'leaf' && (t.text === '*' || t.text === '+' || t.text === '?');
-      if (after?.kind === 'leaf' && !(isOp(after) && !isOp(tokens[cursor + 1]))) {
-        separator = after.text;
-        cursor++;
-      }
-      const op = tokens[cursor];
-      if (!isOp(op)) throw new MacroError('マクロの繰り返し $( ... ) の後には、*、+、? のどれかを書いてください。');
-      parts.push({ kind: 'rep', parts: inner, separator, op: op.text as '*' | '+' | '?' });
-      index = cursor;
-      continue;
+    let read: [Part, number];
+    if (token.kind === 'group') {
+      read = [{ kind: 'group', open: token.open, close: token.close, parts: parseParts(token.tokens, matcher) }, index];
+    } else if (token.type === 'metavariable') {
+      read = parseVar(tokens, index, matcher);
+    } else if (token.text === '$' && next?.kind === 'group' && next.open === '(') {
+      read = parseRepetition(tokens, index, matcher);
+    } else {
+      read = [{ kind: 'token', token }, index];
     }
-    parts.push({ kind: 'token', token });
+    parts.push(read[0]);
+    index = read[1];
   }
   return parts;
+}
+
+/** `$x:expr` in a matcher, or `$x` in a transcriber, and the index of its last token. */
+function parseVar(tokens: Token[], index: number, matcher: boolean): [Part, number] {
+  const name = (tokens[index] as Token & { kind: 'leaf' }).text.slice(1);
+  if (!matcher || name === 'crate') return [{ kind: 'var', name, fragment: undefined }, index];
+  const colon = tokens[index + 1];
+  const fragment = tokens[index + 2];
+  if (colon?.kind !== 'leaf' || colon.text !== ':' || fragment?.kind !== 'leaf') {
+    throw new MacroError(`マクロの規則の $${name} には、:expr のように種類を書いてください。`);
+  }
+  if (!FRAGMENTS.has(fragment.text)) throw new MacroError(`マクロの変数の種類 ${fragment.text} はありません。`);
+  return [{ kind: 'var', name, fragment: fragment.text }, index + 2];
+}
+
+/** A repetition with its separator and operator, and the index of its last token. */
+function parseRepetition(tokens: Token[], index: number, matcher: boolean): [Part, number] {
+  const inner = parseParts((tokens[index + 1] as Token & { kind: 'group' }).tokens, matcher);
+  let cursor = index + 2;
+  let separator: string | undefined;
+  const after = tokens[cursor];
+  if (after?.kind === 'leaf' && !(isRepetitionOp(after) && !isRepetitionOp(tokens[cursor + 1]))) {
+    separator = after.text;
+    cursor++;
+  }
+  const op = tokens[cursor];
+  if (!isRepetitionOp(op))
+    throw new MacroError('マクロの繰り返し $( ... ) の後には、*、+、? のどれかを書いてください。');
+  return [{ kind: 'rep', parts: inner, separator, op: op.text as '*' | '+' | '?' }, cursor];
+}
+
+function isRepetitionOp(token: Token | undefined): token is Token & { kind: 'leaf' } {
+  return token?.kind === 'leaf' && (token.text === '*' || token.text === '+' || token.text === '?');
 }
 
 const FRAGMENTS = new Set([
@@ -167,54 +175,69 @@ export function expand(rules: MacroRule[], input: Token[], name: string): Token[
 }
 
 /** Matches parts against tokens from `start`, binding variables, and gives the position after them, or -1. */
-// code-gauge-allow functionCognitiveComplexity -- Follows rustc's macro matcher case by case.
 function matchParts(parts: Part[], tokens: Token[], start: number, bindings: Map<string, Binding>): number {
   let position = start;
   for (const [index, part] of parts.entries()) {
-    const following = parts[index + 1];
-    switch (part.kind) {
-      case 'token': {
-        const token = tokens[position];
-        if (token?.kind !== 'leaf' || token.text !== part.token.text) return -1;
-        position++;
-        break;
-      }
-      case 'group': {
-        const token = tokens[position];
-        if (token?.kind !== 'group' || token.open !== part.open) return -1;
-        if (matchParts(part.parts, token.tokens, 0, bindings) !== token.tokens.length) return -1;
-        position++;
-        break;
-      }
-      case 'var': {
-        const end = matchFragment(part.fragment ?? 'tt', tokens, position, following);
-        if (end < 0) return -1;
+    position = matchPart(part, parts[index + 1], tokens, position, bindings);
+    if (position < 0) return -1;
+  }
+  return position;
+}
+
+function matchPart(
+  part: Part,
+  following: Part | undefined,
+  tokens: Token[],
+  position: number,
+  bindings: Map<string, Binding>
+): number {
+  const token = tokens[position];
+  switch (part.kind) {
+    case 'token': {
+      return token?.kind === 'leaf' && token.text === part.token.text ? position + 1 : -1;
+    }
+    case 'group': {
+      if (token?.kind !== 'group' || token.open !== part.open) return -1;
+      return matchParts(part.parts, token.tokens, 0, bindings) === token.tokens.length ? position + 1 : -1;
+    }
+    case 'var': {
+      const end = matchFragment(part.fragment ?? 'tt', tokens, position, following);
+      if (end >= 0)
         bindings.set(part.name, { kind: 'one', tokens: tokens.slice(position, end), fragment: part.fragment ?? 'tt' });
-        position = end;
-        break;
-      }
-      case 'rep': {
-        const rounds: Map<string, Binding>[] = [];
-        for (;;) {
-          let cursor = position;
-          if (rounds.length > 0 && part.separator !== undefined) {
-            const separator = tokens[cursor];
-            if (separator?.kind !== 'leaf' || separator.text !== part.separator) break;
-            cursor++;
-          }
-          const round = new Map<string, Binding>();
-          const end = matchParts(part.parts, tokens, cursor, round);
-          if (end < 0 || (end === cursor && part.parts.length > 0)) break;
-          rounds.push(round);
-          position = end;
-          if (part.op === '?') break;
-        }
-        if (part.op === '+' && rounds.length === 0) return -1;
-        for (const name of variablesIn(part.parts)) bindings.set(name, { kind: 'rep', rounds });
-        break;
-      }
+      return end;
+    }
+    case 'rep': {
+      return matchRepetition(part, tokens, position, bindings);
     }
   }
+}
+
+/** Matches as many rounds of a repetition as the tokens hold, binding each variable to its rounds. */
+// code-gauge-allow functionCognitiveComplexity -- Follows the macro_rules repetition matcher of rustc.
+function matchRepetition(
+  part: Part & { kind: 'rep' },
+  tokens: Token[],
+  start: number,
+  bindings: Map<string, Binding>
+): number {
+  const rounds: Map<string, Binding>[] = [];
+  let position = start;
+  for (;;) {
+    let cursor = position;
+    if (rounds.length > 0 && part.separator !== undefined) {
+      const separator = tokens[cursor];
+      if (separator?.kind !== 'leaf' || separator.text !== part.separator) break;
+      cursor++;
+    }
+    const round = new Map<string, Binding>();
+    const end = matchParts(part.parts, tokens, cursor, round);
+    if (end < 0 || (end === cursor && part.parts.length > 0)) break;
+    rounds.push(round);
+    position = end;
+    if (part.op === '?') break;
+  }
+  if (part.op === '+' && rounds.length === 0) return -1;
+  for (const name of variablesIn(part.parts)) bindings.set(name, { kind: 'rep', rounds });
   return position;
 }
 
@@ -227,7 +250,6 @@ function variablesIn(parts: Part[]): string[] {
 }
 
 /** Where a fragment that starts at `start` ends, or -1 if none does. */
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of fragment.
 function matchFragment(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
   const token = tokens[start];
   switch (fragment) {
@@ -235,40 +257,52 @@ function matchFragment(fragment: string, tokens: Token[], start: number, followi
       return token ? start + 1 : -1;
     }
     case 'ident': {
-      return token?.kind === 'leaf' && /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(token.text) && token.text !== '_'
-        ? start + 1
-        : -1;
+      const isIdent =
+        token?.kind === 'leaf' && /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(token.text) && token.text !== '_';
+      return isIdent ? start + 1 : -1;
     }
     case 'lifetime': {
       return token?.kind === 'leaf' && token.type === 'lifetime' ? start + 1 : -1;
     }
     case 'literal': {
-      if (token?.kind !== 'leaf') return -1;
-      if (token.text === '-') {
-        const next = tokens[start + 1];
-        return next?.kind === 'leaf' && next.type.endsWith('_literal') ? start + 2 : -1;
-      }
-      return token.type.endsWith('_literal') || token.text === 'true' || token.text === 'false' ? start + 1 : -1;
+      return matchLiteral(tokens, start);
     }
     case 'block': {
       return token?.kind === 'group' && token.open === '{' ? start + 1 : -1;
     }
     default: {
-      const stops = new Set<string>(STOPS[fragment]);
-      if (following?.kind === 'token') stops.add(following.token.text);
-      if (following?.kind === 'rep' && following.separator) stops.add(following.separator);
-      let end = start;
-      while (end < tokens.length) {
-        const current = tokens[end];
-        if (current.kind === 'leaf' && stops.has(current.text)) break;
-        end++;
-      }
-      if (fragment === 'vis') return end;
-      return end > start ? end : -1;
+      return matchUntilStop(fragment, tokens, start, following);
     }
   }
 }
 
+/** A literal, with a `-` before a number. */
+function matchLiteral(tokens: Token[], start: number): number {
+  const token = tokens[start];
+  if (token?.kind !== 'leaf') return -1;
+  if (token.text === '-') {
+    const next = tokens[start + 1];
+    return next?.kind === 'leaf' && next.type.endsWith('_literal') ? start + 2 : -1;
+  }
+  return token.type.endsWith('_literal') || token.text === 'true' || token.text === 'false' ? start + 1 : -1;
+}
+
+/** A fragment of several tokens (`expr`, `ty`, `pat`, ...), which runs up to a token that may follow it. */
+function matchUntilStop(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
+  const stops = new Set<string>(STOPS[fragment]);
+  if (following?.kind === 'token') stops.add(following.token.text);
+  if (following?.kind === 'rep' && following.separator) stops.add(following.separator);
+  let end = start;
+  while (end < tokens.length) {
+    const current = tokens[end];
+    if (current.kind === 'leaf' && stops.has(current.text)) break;
+    end++;
+  }
+  if (fragment === 'vis') return end;
+  return end > start ? end : -1;
+}
+
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of transcriber part.
 function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
   const out: Token[] = [];
   for (const part of parts) {

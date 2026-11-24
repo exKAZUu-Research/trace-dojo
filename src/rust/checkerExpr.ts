@@ -11,8 +11,9 @@ import { checkField, checkIndex } from './checkerPlaces';
 import { constInteger } from './constExpressions';
 import { checkConstOperations } from './constLint';
 import { lowerPattern, missingPattern } from './exhaustiveness';
+import { constParamOf } from './genericArgs';
 import { isPseudo, normalize } from './infer';
-import { compileError, constParamOf } from './items';
+import { compileError } from './items';
 import { intoIterItem } from './iterTypes';
 import { RANGE_TYPES } from './traits';
 import {
@@ -244,6 +245,7 @@ function arrayExpr(c: Checker, expr: Extract<Expr, { kind: 'array' }>, expected:
   return { kind: 'array', elem, len: expr.elems.length };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc checks for the count and the Copy requirement in order.
 function arrayRepeatExpr(c: Checker, expr: Extract<Expr, { kind: 'arrayRepeat' }>, expected: Type | undefined): Type {
   const e = expected ? shallow(expected) : undefined;
   const elem = e?.kind === 'array' ? e.elem : freshVar();
@@ -370,6 +372,7 @@ function loopBroke(c: Checker, _expr: Expr): boolean {
   return loop?.broke ?? false;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Labeled blocks and loops resolve break and continue by rustc rules.
 function findLoop(c: Checker, label: string | undefined, span: Span, keyword: string): LoopContext {
   for (let index = c.body.loops.length - 1; index >= 0; index--) {
     const loop = c.body.loops[index];
@@ -448,6 +451,7 @@ function joinBranches(
   ) as Type;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Checks arms, guards and exhaustiveness in order.
 function matchExpr(c: Checker, expr: Extract<Expr, { kind: 'match' }>, expected: Type | undefined): Type {
   const scrutinee = c.expr(expr.scrutinee, undefined);
   const arms: [Expr, Type][] = [];

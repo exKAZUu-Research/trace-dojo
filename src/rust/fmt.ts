@@ -354,6 +354,30 @@ export class Formatter {
       case 'IoError': {
         return emit(ioErrorDebug(v, indent), write);
       }
+      case 'Iter': {
+        return this.iteratorText(v as IterValue, t, spec, indent, write);
+      }
+      case 'Entry':
+      case 'OccupiedEntry': {
+        return this.entryText(v as EntryValue, t, spec, indent, write);
+      }
+      default: {
+        return this.debugRuntimeAdt(v, t, spec, indent, write) ?? this.debugUserAdt(v, t, spec, indent, write);
+      }
+    }
+  }
+
+  /** The `Debug` of the types of paths, smart pointers, cells, threads, and C strings; undefined for the others. */
+  // code-gauge-allow functionNcss -- One case per runtime type of the standard library.
+  private debugRuntimeAdt(
+    v: Value,
+    t: Type & { kind: 'adt' },
+    spec: Spec,
+    indent: number | undefined,
+    write?: WriteChunk
+  ): string | undefined {
+    const { def } = t;
+    switch (def.builtin) {
       case 'Path':
       case 'PathBuf': {
         return quotedDebug(textOf(v), false, write);
@@ -424,15 +448,8 @@ export class Formatter {
             : (inner, sink) => this.debug(cell.value, t.args[0], spec, inner, sink);
         return structText(def.builtin, [['value', value]], indent, false, write);
       }
-      case 'Iter': {
-        return this.iteratorText(v as IterValue, t, spec, indent, write);
-      }
-      case 'Entry':
-      case 'OccupiedEntry': {
-        return this.entryText(v as EntryValue, t, spec, indent, write);
-      }
       default: {
-        return this.debugUserAdt(v, t, spec, indent, write);
+        return undefined;
       }
     }
   }
@@ -780,7 +797,14 @@ function errorDebug(builtin: string, value: Value, indent: number | undefined): 
 
 /** A byte as `u8::escape_ascii` writes it, which `CStr`'s `Debug` shows. */
 function escapeAscii(byte: number): string {
-  const escapes: Record<number, string> = { 9: String.raw`\t`, 10: String.raw`\n`, 13: String.raw`\r`, 34: String.raw`\"`, 39: String.raw`\'`, 92: String.raw`\\` };
+  const escapes: Record<number, string> = {
+    9: String.raw`\t`,
+    10: String.raw`\n`,
+    13: String.raw`\r`,
+    34: String.raw`\"`,
+    39: String.raw`\'`,
+    92: String.raw`\\`,
+  };
   if (escapes[byte]) return escapes[byte];
   if (byte >= 0x20 && byte < 0x7f) return String.fromCodePoint(byte);
   return `\\x${byte.toString(16).padStart(2, '0')}`;

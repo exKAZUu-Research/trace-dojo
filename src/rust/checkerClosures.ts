@@ -20,6 +20,7 @@ import {
   UNIT,
 } from './types';
 
+// code-gauge-allow functionCognitiveComplexity -- Closures and async blocks share the capture and signature checks.
 export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }>, expected: Type | undefined): Type {
   const expectedSig = expected && !expr.isAsync ? closureSignature(c, expected) : undefined;
   const parentBody = c.body;

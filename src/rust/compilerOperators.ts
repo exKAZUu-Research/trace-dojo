@@ -43,6 +43,8 @@ function compileOverloaded(c: Compiler, expr: Expr, operands: Eval[]): Eval | un
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- One case per unary operator, including overloaded ones.
+// code-gauge-allow functionNcss -- One case per unary operator, including overloaded ones.
 export function compileUnary(c: Compiler, expr: ExprOf<'unary'>): Eval {
   const overloaded = expr.op === '*' ? undefined : compileOverloaded(c, expr, [c.value(expr.operand)]);
   if (overloaded) return overloaded;

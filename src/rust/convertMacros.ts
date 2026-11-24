@@ -151,7 +151,6 @@ export abstract class MacroConverter extends PatternConverter {
   }
 
   /** A macro of the standard library that expands to a literal, as that literal; undefined for the other macros. */
-  // code-gauge-allow functionCognitiveComplexity -- One case per macro.
   // code-gauge-allow functionNcss -- One case per macro.
   protected literalMacro(node: Node): Expr | undefined {
     const span = this.span(node);
@@ -166,23 +165,10 @@ export abstract class MacroConverter extends PatternConverter {
       }
       case 'pin':
       case 'pin::pin': {
-        // `pin!(value)` pins the value in a place of its own, which lives as long as the reference to it.
-        const args = tree ? this.macroArgs(tree) : [];
-        if (args.length !== 1) syntaxError(span, 'pin! には値を1つ書いてください。');
-        const segments = ['std', 'pin', 'pin_value'].map((part) => ({ name: part, args: undefined, span }));
-        const callee: Expr = { kind: 'path', path: { segments, span }, span };
-        return { kind: 'call', callee, args: [this.expr(args[0])], span };
+        return this.pinMacro(tree, span);
       }
       case 'matches': {
-        // With a guard, `matches!(v, p if g)` is the `match` it expands to.
-        if (!tree) return undefined;
-        const { value, pattern, guard } = this.matchesParts(tree, span);
-        if (!guard) return undefined;
-        const arms: MatchArm[] = [
-          { pattern, guard, body: { kind: 'bool', value: true, span }, span },
-          { pattern: { kind: 'wild', span }, guard: undefined, body: { kind: 'bool', value: false, span }, span },
-        ];
-        return { kind: 'match', scrutinee: value, arms, endRow: span.row, span };
+        return tree && this.guardedMatches(tree, span);
       }
       case 'line': {
         return { kind: 'int', value: BigInt(span.row + 1), suffix: 'u32', span };
@@ -327,7 +313,7 @@ export abstract class MacroConverter extends PatternConverter {
         return {
           kind: 'dbg',
           args: args.map((arg) => this.expr(arg)),
-          texts: args.map(macroExpressionText),
+          texts: args.map((arg) => tokenText([arg])),
         };
       }
       default: {
@@ -367,7 +353,7 @@ export abstract class MacroConverter extends PatternConverter {
     return {
       kind: 'assert',
       cond: this.expr(cond),
-      text: macroExpressionText(cond),
+      text: tokenText([cond]),
       format: this.optionalFormatArgs(rest, span, name),
     };
   }
@@ -420,6 +406,25 @@ export abstract class MacroConverter extends PatternConverter {
       if (expr.kind !== 'array') syntaxError(span, 'vec! の書き方に誤りがあります。');
       return { kind: 'vec', elems: expr.elems };
     }) as MacroCall;
+  }
+
+  /** `pin!(value)`, which pins the value in a place of its own that lives as long as the reference to it. */
+  private pinMacro(tree: Node | undefined, span: Span): Expr {
+    const args = tree ? this.macroArgs(tree) : [];
+    if (args.length !== 1) syntaxError(span, 'pin! には値を1つ書いてください。');
+    const segments = ['std', 'pin', 'pin_value'].map((part) => ({ name: part, args: undefined, span }));
+    return { kind: 'call', callee: { kind: 'path', path: { segments, span }, span }, args: [this.expr(args[0])], span };
+  }
+
+  /** `matches!(v, p if g)` as the `match` it expands to; undefined without a guard, which the `matches` call takes. */
+  private guardedMatches(tree: Node, span: Span): Expr | undefined {
+    const { value, pattern, guard } = this.matchesParts(tree, span);
+    if (!guard) return undefined;
+    const arms: MatchArm[] = [
+      { pattern, guard, body: { kind: 'bool', value: true, span }, span },
+      { pattern: { kind: 'wild', span }, guard: undefined, body: { kind: 'bool', value: false, span }, span },
+    ];
+    return { kind: 'match', scrutinee: value, arms, endRow: span.row, span };
   }
 
   private matchesMacro(tree: Node, span: Span): MacroCall {
@@ -528,23 +533,6 @@ function firstExpression(root: Node): Node | undefined {
   return statement?.type === 'expression_statement'
     ? statement.namedChildren.find((child) => !isComment(child))
     : statement;
-}
-
-function macroExpressionText(node: Node): string {
-  let text = '';
-  let end = node.startIndex;
-  const visit = (child: Node): void => {
-    if (isComment(child)) return;
-    if (child.childCount > 0 && !child.type.endsWith('_literal')) {
-      for (const token of child.children) visit(token);
-      return;
-    }
-    if (text && child.startIndex > end) text += ' ';
-    text += child.text;
-    end = child.endIndex;
-  };
-  visit(node);
-  return text;
 }
 
 /** The text `stringify!` gives tokens: as written, with one space where spaces or newlines separate them. */

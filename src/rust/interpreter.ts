@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- The runtime entry points share one interpreter.
 import type { Span } from './ast';
 import type { Checker } from './checker';
 import { type CallSupport, type ClosureCapture, type CompiledFn, Compiler } from './compiler';

@@ -49,19 +49,12 @@ export class Unifier {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
   // code-gauge-allow functionNcss -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
     if (x === y) return true;
-    if (x.kind === 'var' && y.kind === 'var') {
-      if (x.v === y.v) return true;
-      if (x.v.literal && y.v.literal && x.v.literal !== y.v.literal) return false;
-      if (x.v.literal || (x.v.fallback && !y.v.literal)) this.bind(y.v, x);
-      else this.bind(x.v, y);
-      return true;
-    }
+    if (x.kind === 'var' && y.kind === 'var') return this.unifyVars(x, y);
     if (x.kind === 'var') return this.bindVar(x.v, y);
     if (y.kind === 'var') return this.bindVar(y.v, x);
     if (x.kind !== y.kind) return false;
@@ -75,12 +68,7 @@ export class Unifier {
         return x.elems.length === other.elems.length && x.elems.every((elem, i) => this.unify(elem, other.elems[i]));
       }
       case 'array': {
-        const other = y as typeof x;
-        if (x.lenType || other.lenType) {
-          const lengths = this.unify(x.lenType ?? constValueType(x.len), other.lenType ?? constValueType(other.len));
-          return lengths && this.unify(x.elem, other.elem);
-        }
-        return x.len === other.len && this.unify(x.elem, other.elem);
+        return this.unifyArrays(x, y as typeof x);
       }
       case 'slice': {
         return this.unify(x.elem, (y as typeof x).elem);
@@ -98,10 +86,7 @@ export class Unifier {
         return x.param === (y as typeof x).param;
       }
       case 'fn': {
-        // An `unsafe fn` item becomes only an `unsafe fn` pointer; a safe one becomes either.
-        const other = y as typeof x;
-        if ((unsafeItem(x) && isSafePointer(other)) || (unsafeItem(other) && isSafePointer(x))) return false;
-        return this.unifySignatures(x, other);
+        return this.unifyFns(x, y as typeof x);
       }
       case 'closure': {
         return x.closure.id === (y as typeof x).closure.id;
@@ -117,6 +102,27 @@ export class Unifier {
         return true;
       }
     }
+  }
+
+  private unifyVars(x: Type & { kind: 'var' }, y: Type & { kind: 'var' }): boolean {
+    if (x.v === y.v) return true;
+    if (x.v.literal && y.v.literal && x.v.literal !== y.v.literal) return false;
+    if (x.v.literal || (x.v.fallback && !y.v.literal)) this.bind(y.v, x);
+    else this.bind(x.v, y);
+    return true;
+  }
+
+  /** Arrays of the same length, which a const parameter or a variable may give. */
+  private unifyArrays(x: Type & { kind: 'array' }, y: Type & { kind: 'array' }): boolean {
+    if (!x.lenType && !y.lenType) return x.len === y.len && this.unify(x.elem, y.elem);
+    const lengths = this.unify(x.lenType ?? constValueType(x.len), y.lenType ?? constValueType(y.len));
+    return lengths && this.unify(x.elem, y.elem);
+  }
+
+  /** Functions of the same signature; an `unsafe fn` item becomes only an `unsafe fn` pointer, and a safe one either. */
+  private unifyFns(x: Type & { kind: 'fn' }, y: Type & { kind: 'fn' }): boolean {
+    if ((unsafeItem(x) && isSafePointer(y)) || (unsafeItem(y) && isSafePointer(x))) return false;
+    return this.unifySignatures(x, y);
   }
 
   private unifyDyn(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Type, { kind: 'dyn' }>): boolean {

@@ -97,6 +97,7 @@ function addBinding(names: Set<string>, name: string, pattern: Pattern): void {
  * pattern that is not a reference pattern looks through it and binds by reference, as Rust's match ergonomics do.
  */
 /** `inherited`: the outer reference of `type` is the one a default binding mode gives the field (`ref`). */
+// code-gauge-allow functionNcss -- One case per kind of pattern.
 function checkPatternPart(c: Checker, pattern: Pattern, type: Type, mode: LocalVar['mode'], inherited = false): void {
   pattern.ty = type;
   const t = normalize(shallow(type));
@@ -175,6 +176,7 @@ function rangePattern(c: Checker, pattern: Extract<Pattern, { kind: 'range' }>, 
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Follows rustc checks for slice and array patterns with a rest element.
 function slicePattern(
   c: Checker,
   pattern: Extract<Pattern, { kind: 'slice' }>,
@@ -244,6 +246,7 @@ function derefForMatch(type: Type, mode: LocalVar['mode']): { t: Type; bindingMo
   return { t, bindingMode };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Binding modes, ref and mut follow rustc rules case by case.
 function bindingPattern(
   c: Checker,
   pattern: Extract<Pattern, { kind: 'binding' }>,
@@ -540,19 +543,7 @@ function adtPattern(
   }
   c.annotations.paths.set(pattern, res);
   if (pattern.kind === 'path') {
-    if (res.kind === 'const') {
-      checkConstPattern(c, pattern, res, t);
-      return;
-    }
-    if (res.kind === 'builtinConst' && res.type.kind !== 'float') {
-      c.unifyOrError(pattern.span, t, res.type);
-      c.annotations.constPatterns.set(pattern, res.type.kind === 'char' ? '\u{10FFFF}' : integerConst(res.name));
-      return;
-    }
-    if (res.kind !== 'ctor' || res.def.variants[res.variant].shape !== 'unit') {
-      compileError(pattern.span, `${pattern.path.segments.map((s) => s.name).join('::')} はパターンに書けません。`);
-    }
-    c.unifyOrError(pattern.span, t, adt(res.def, res.typeArgs));
+    pathPattern(c, pattern, res, t);
     return;
   }
   if (res.kind !== 'ctor') {
@@ -605,4 +596,21 @@ function adtPattern(
   if (missing.length > 0 && !pattern.rest) {
     compileError(pattern.span, `パターンにフィールド ${missing.map((f) => f.name).join(', ')} が足りません。`);
   }
+}
+
+/** A path pattern: a constant, a numeric constant of the standard library (`i32::MAX`), or a unit variant or struct. */
+function pathPattern(c: Checker, pattern: Extract<Pattern, { kind: 'path' }>, res: PathRes, t: Type): void {
+  if (res.kind === 'const') {
+    checkConstPattern(c, pattern, res, t);
+    return;
+  }
+  if (res.kind === 'builtinConst' && res.type.kind !== 'float') {
+    c.unifyOrError(pattern.span, t, res.type);
+    c.annotations.constPatterns.set(pattern, res.type.kind === 'char' ? '\u{10FFFF}' : integerConst(res.name));
+    return;
+  }
+  if (res.kind !== 'ctor' || res.def.variants[res.variant].shape !== 'unit') {
+    compileError(pattern.span, `${pattern.path.segments.map((s) => s.name).join('::')} はパターンに書けません。`);
+  }
+  c.unifyOrError(pattern.span, t, adt(res.def, res.typeArgs));
 }

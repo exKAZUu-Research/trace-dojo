@@ -276,6 +276,8 @@ export class Compiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of let statement (plain, destructuring, let-else).
+  // code-gauge-allow functionNcss -- One case per kind of let statement (plain, destructuring, let-else).
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
@@ -652,6 +654,8 @@ export class Compiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Drops, places and destructuring assignment follow Rust order.
+  // code-gauge-allow functionNcss -- Drops, places and destructuring assignment follow Rust order.
   assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
     const value = this.value(expr.value);
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
@@ -697,6 +701,7 @@ export class Compiler {
     return (frame) => runtime(frame);
   }
 
+  // code-gauge-allow functionNcss -- Closures and async blocks share capture compilation.
   closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
     const info = this.annotations.closures.get(expr);
     if (!info) throw new Error('Unchecked closure');

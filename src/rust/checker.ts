@@ -593,6 +593,7 @@ export class Checker {
     }
   }
 
+  // code-gauge-allow functionNcss -- Sets up each part of a function body check in the order rustc does.
   private checkFnBody(def: FnDef, item: FnItem, body: Block): void {
     const module = def.module as Module;
     const typeParams = new Map(def.params.map((param) => [param.name, param]));
@@ -1051,30 +1052,13 @@ export class Checker {
     return merged;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
   coerce(expr: Expr, actual: Type, target: Type): void {
     const a = normalize(shallow(actual));
     const t = normalize(shallow(target));
     if (a.kind === 'never') return;
     if (this.unifier.tryUnify(a, t)) return;
     if (a.kind === 'ref' && t.kind === 'ref' && (!t.mutable || a.mutable) && this.coerceRef(expr, a, t)) return;
-    // `Pin<Box<T>>` unsizes as the `Box<T>` it holds does.
-    if (a.kind === 'adt' && a.def.builtin === 'Pin' && t.kind === 'adt' && t.def.builtin === 'Pin') {
-      this.coerce(expr, a.args[0], t.args[0]);
-      return;
-    }
-    if (a.kind === 'adt' && a.def.builtin === 'Box' && t.kind === 'adt' && t.def.builtin === 'Box') {
-      const target = shallow(t.args[0]);
-      // `Box<[T; N]>` unsizes to `Box<[T]>`, which holds the same elements.
-      const array = normalize(shallow(a.args[0]));
-      if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem)) return;
-      if (target.kind === 'dyn') {
-        this.requireDyn(a.args[0], target, expr.span);
-        if (array.kind !== 'dyn')
-          this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
-        return;
-      }
-    }
+    if (this.coerceBox(expr, a, t)) return;
     if (expr === this.iterableArgument && t.kind === 'adt' && t.def.builtin === 'Iter') {
       const item = intoIterItem(a);
       const shape = intoIterShape(this.program, a);
@@ -1087,19 +1071,7 @@ export class Checker {
         return;
       }
     }
-    // `&T` and `&mut T` become `*const T`, and `&mut T` becomes `*mut T`.
-    if (
-      a.kind === 'ref' &&
-      t.kind === 'adt' &&
-      (t.def.builtin === 'ConstPtr' || (t.def.builtin === 'MutPtr' && a.mutable)) &&
-      this.unifier.tryUnify(a.target, t.args[0])
-    ) {
-      this.setCoercion(expr, { kind: 'rawPtr' });
-      return;
-    }
-    const mutToConst =
-      a.kind === 'adt' && a.def.builtin === 'MutPtr' && t.kind === 'adt' && t.def.builtin === 'ConstPtr';
-    if (mutToConst && this.unifier.tryUnify(a.args[0], t.args[0])) return;
+    if (this.coercePointer(expr, a, t)) return;
     // Only a closure that captures nothing is a function.
     if (
       a.kind === 'closure' &&
@@ -1111,6 +1083,36 @@ export class Checker {
       return;
     }
     this.mismatch(expr.span, target, actual);
+  }
+
+  /** `Box<[T; N]>` → `Box<[T]>` and `Box<T>` → `Box<dyn Trait>`, also inside a `Pin`; false when none applies. */
+  private coerceBox(expr: Expr, a: Type, t: Type): boolean {
+    if (a.kind !== 'adt' || t.kind !== 'adt' || a.def.builtin !== t.def.builtin) return false;
+    if (a.def.builtin === 'Pin') {
+      this.coerce(expr, a.args[0], t.args[0]);
+      return true;
+    }
+    if (a.def.builtin !== 'Box') return false;
+    const target = shallow(t.args[0]);
+    const array = normalize(shallow(a.args[0]));
+    if (target.kind === 'slice' && array.kind === 'array' && this.unifier.tryUnify(array.elem, target.elem))
+      return true;
+    if (target.kind !== 'dyn') return false;
+    this.requireDyn(a.args[0], target, expr.span);
+    if (array.kind !== 'dyn')
+      this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false, trait: target.trait });
+    return true;
+  }
+
+  /** `&T` → `*const T`, `&mut T` → `*mut T`, and `*mut T` → `*const T`; false when none applies. */
+  private coercePointer(expr: Expr, a: Type, t: Type): boolean {
+    if (t.kind !== 'adt' || (t.def.builtin !== 'ConstPtr' && t.def.builtin !== 'MutPtr')) return false;
+    if (a.kind === 'ref' && (t.def.builtin === 'ConstPtr' || a.mutable) && this.unifier.tryUnify(a.target, t.args[0])) {
+      this.setCoercion(expr, { kind: 'rawPtr' });
+      return true;
+    }
+    const mutToConst = a.kind === 'adt' && a.def.builtin === 'MutPtr' && t.def.builtin === 'ConstPtr';
+    return mutToConst && this.unifier.tryUnify(a.args[0], t.args[0]);
   }
 
   /** `&T` → `&U` through derefs, `&mut T` → `&T`, and `&T` → `&dyn Trait`; false when none applies. */

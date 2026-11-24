@@ -1,9 +1,10 @@
+import { projectionOf } from './assocTypes';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { isPlaceExpr, requireMutablePlace } from './checkerPlaces';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
-import { compileError, projectionOf } from './items';
+import { compileError } from './items';
 import { derefOnce } from './methods';
 import { BOOL, freshVar, intType, ref, REF_STR, resolve, shallow, type Type, typeToString, UNIT } from './types';
 
@@ -87,6 +88,7 @@ function isOverloadable(type: Type): boolean {
  * An operator that an impl of its trait gives (`impl Add for Point`): it calls the trait's method, and its result is
  * the impl's `Output`.
  */
+// code-gauge-allow functionParameterCount -- Takes both operands, their types and spans, which every operator check needs.
 function overloadedOperator(
   c: Checker,
   expr: Expr,
@@ -156,6 +158,7 @@ function numericOperand(type: Type): Type {
   return t;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of binary operator.
 export function checkBinary(c: Checker, expr: Extract<Expr, { kind: 'binary' }>, expected: Type | undefined): Type {
   const { op } = expr;
   if (op === '&&' || op === '||') {
@@ -328,6 +331,7 @@ export function checkAssign(c: Checker, expr: Extract<Expr, { kind: 'assign' }>)
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
+// code-gauge-allow functionNcss -- Builtin and overloaded compound assignment share the checks.
 export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
   const targetType = c.expr(expr.target, undefined);
   if (!isPlaceExpr(c, expr.target))
@@ -382,6 +386,7 @@ export function checkCompoundAssign(c: Checker, expr: Extract<Expr, { kind: 'com
   return UNIT;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- References, raw references and constant promotion follow rustc case by case.
 export function refExpr(c: Checker, expr: Extract<Expr, { kind: 'ref' }>, expected: Type | undefined): Type {
   const e = expected ? normalize(shallow(expected)) : undefined;
   let inner = e?.kind === 'ref' ? e.target : undefined;

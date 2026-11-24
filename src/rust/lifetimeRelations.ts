@@ -1,4 +1,5 @@
-import type { Span } from './ast';
+import type { ExecutionBudget } from '../interpreter/limits';
+import type { Expr, Span } from './ast';
 import { normalize } from './infer';
 import type { LoanError } from './loanGraph';
 import type { Layout, RVar } from './regions';
@@ -14,6 +15,41 @@ interface NamedRegion {
   within: string[];
   /** For a parameter's lifetime, the parameter: its name and where it is declared. */
   param?: { name: string; span: Span };
+}
+
+/** What the lifetime check of a function's signature reads besides the types: its parameters' names and its bounds. */
+export interface SignatureNames {
+  params: { name: string; span: Span }[];
+  bounds: { name: string; outlives: string[] }[];
+  span: Span;
+}
+
+/** The lifetime check of a function's signature against what its body's borrows require. */
+export function signatureLifetimeError(
+  names: SignatureNames,
+  body: {
+    inputs: Layout[];
+    inputTypes: Type[];
+    receivers: number;
+    ret: { layout: Layout; type: Type };
+    outlives: readonly (readonly [RVar, RVar])[];
+    staticRegion: RVar | undefined;
+    body: Expr;
+  }
+): LoanError | undefined {
+  return checkLifetimeRelations({
+    inputs: body.inputTypes.map((type, index) => ({
+      layout: body.inputs[index],
+      type,
+      ...(index < body.receivers ? { name: 'self', span: names.span } : names.params[index - body.receivers]),
+    })),
+    ret: body.ret,
+    refSelf: body.inputTypes.slice(0, body.receivers).some((type) => shallow(type).kind === 'ref'),
+    bounds: names.bounds,
+    outlives: body.outlives,
+    staticRegion: body.staticRegion,
+    span: bodyResultSpan(body.body),
+  });
 }
 
 export interface SignatureRegions {
@@ -34,7 +70,7 @@ export interface SignatureRegions {
  * (E0621, "lifetime may not live long enough"): a reference flowing from a parameter into the return value needs the
  * parameter's lifetime to outlive the return value's.
  */
-export function checkLifetimeRelations(signature: SignatureRegions): LoanError | undefined {
+function checkLifetimeRelations(signature: SignatureRegions): LoanError | undefined {
   let anonymousCount = 0;
   const anonymous = (): string => `'#${anonymousCount++}`;
   const inputs = signature.inputs.flatMap(({ layout, type, name, span }) =>
@@ -45,12 +81,7 @@ export function checkLifetimeRelations(signature: SignatureRegions): LoanError |
   const named = [...inputs, ...ret];
   const byRegion = new Map(named.map((entry) => [entry.region, entry]));
   const relation = declaredRelation(signature, inputs);
-  const edges = new Map<RVar, RVar[]>();
-  for (const [sup, sub] of signature.outlives) {
-    const destinations = edges.get(sub);
-    if (destinations) destinations.push(sup);
-    else edges.set(sub, [sup]);
-  }
+  const edges = outlivesEdges(signature.outlives);
   for (const shorter of named) {
     for (const region of reachedNamed(shorter.region, edges, byRegion, signature.staticRegion)) {
       const longer = byRegion.get(region)!;
@@ -97,6 +128,7 @@ function namedRegions(layout: Layout, type: Type, anonymous: () => string, withi
  * Whether `longer: shorter` holds by the declared bounds, by the bounds a parameter's type implies (`&'a T<'b>` needs
  * `'b: 'a`), or by being the same lifetime or `'static`.
  */
+// code-gauge-allow functionCognitiveComplexity -- Closes the declared lifetime bounds transitively.
 function declaredRelation(
   signature: SignatureRegions,
   inputs: NamedRegion[]
@@ -167,4 +199,45 @@ function relationError(longer: NamedRegion, shorter: NamedRegion, span: Span): L
     span,
     message: `ライフタイムが足りません。${longer.name} の参照を ${shorter.name} の参照として使っていますが、${longer.name}: ${shorter.name} が宣言されていません。`,
   };
+}
+
+/**
+ * The error when a reference from a parameter must outlive `'static`, as storing it in a trait object without a lifetime
+ * (`Box<dyn Trait>`) needs.
+ */
+export function staticInputError(
+  outlives: readonly (readonly [RVar, RVar])[],
+  inputRegions: readonly RVar[][],
+  staticRegion: RVar | undefined,
+  span: Span,
+  budget: ExecutionBudget
+): LoanError | undefined {
+  if (staticRegion === undefined || inputRegions.length === 0) return undefined;
+  budget.spend(outlives.length);
+  const edges = outlivesEdges(outlives);
+  const reachable = new Set([staticRegion]);
+  for (const region of reachable) for (const next of edges.get(region) ?? []) reachable.add(next);
+  const reached = inputRegions.some((regions) =>
+    regions.some((region) => region !== staticRegion && reachable.has(region))
+  );
+  return reached
+    ? { span, message: "引数から借りた参照を、この 'static が必要なトレイトオブジェクトには保存できません。" }
+    : undefined;
+}
+
+/** For each region, the regions that must outlive it. */
+function outlivesEdges(outlives: readonly (readonly [RVar, RVar])[]): Map<RVar, RVar[]> {
+  const edges = new Map<RVar, RVar[]>();
+  for (const [sup, sub] of outlives) {
+    const destinations = edges.get(sub);
+    if (destinations) destinations.push(sup);
+    else edges.set(sub, [sup]);
+  }
+  return edges;
+}
+
+/** Where a body gives its value: its last expression or statement. */
+function bodyResultSpan(body: Expr): Span {
+  if (body.kind !== 'block') return body.span;
+  return body.tail?.span ?? body.stmts.at(-1)?.span ?? body.span;
 }

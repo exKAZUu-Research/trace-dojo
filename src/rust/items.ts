@@ -1,5 +1,14 @@
 // code-gauge-allow-file fileNcss -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
+import {
+  assocItem,
+  assocTypeOf,
+  ITERATION_TRAITS,
+  lowerAssocItemPath,
+  lowerQualifiedPath,
+  projectionDef,
+  projectionOf,
+} from './assocTypes';
 import type {
   BoundAst,
   ConstItem,
@@ -18,21 +27,28 @@ import type {
   UseItem,
   Visibility,
 } from './ast';
-import { constInteger } from './constExpressions';
+import { checkVariantNames, defaultVariant, discriminants } from './enumItems';
+import { lowerArrayType, lowerConstArg, withDefaultArgs } from './genericArgs';
 import { Unifier } from './infer';
-import { intoIterItem, iterationBound } from './iterTypes';
+import {
+  BUILTIN_ENUMS,
+  builtinStruct,
+  checkUnavailableStd,
+  renderTypeKey,
+  REQUIRED_STD_METHODS,
+  STD_TRAITS_LEARNERS_IMPLEMENT,
+  unavailableStdItem,
+} from './stdNames';
 import { TraitSolver } from './traits';
 import {
   adt,
   type AdtDef,
   allSupertraits,
-  arrayOfLength,
   type AssocTypeDef,
   BOOL,
   type BuiltinAdt,
   CHAR,
   type ConstDef,
-  constValueType,
   defaultTraitArguments,
   F32,
   F64,
@@ -40,23 +56,18 @@ import {
   freshVar,
   type ImplDef,
   INT_NAMES,
-  intMax,
-  intMin,
   intType,
   mapChildren,
   NEVER,
   newOpaque,
   newTypeParam,
-  shallow,
   STR,
   type Subst,
   substitute,
-  substituteTraitRef,
   type TraitDef,
   type TraitRef,
   type Type,
   type TypeParam,
-  typeToString,
   UNIT,
   type VariantDef,
 } from './types';
@@ -287,6 +298,7 @@ export class ItemCollector {
   }
 
   // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of item.
   collectItems(items: Item[], module: Module): void {
     for (const item of items) {
       switch (item.kind) {
@@ -429,8 +441,6 @@ export class ItemCollector {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Resolves enum declarations, variants, and discriminants in order.
-  // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
   private enumItem(item: EnumItem, module: Module): void {
     const def: AdtDef = {
       name: item.name,
@@ -449,51 +459,11 @@ export class ItemCollector {
     }
     this.program.adts.push(def);
     this.declareType(module, item.name, { kind: 'adt', def }, item.vis, item.span);
-    const deriveDefault = item.attrs.derives.find((derive) => derive.name === 'Default');
-    const defaults = item.variants.filter((variant) => variant.isDefault);
-    if (deriveDefault) {
-      if (defaults.length === 0) {
-        compileError(
-          deriveDefault.span,
-          '列挙型の #[derive(Default)] には、選択肢の1つに #[default] を付けてください。'
-        );
-      }
-      if (defaults.length > 1) compileError(defaults[1].span, '#[default] は、選択肢の1つにだけ付けてください。');
-      if (defaults[0].shape !== 'unit') {
-        compileError(defaults[0].span, '#[default] は、フィールドのない選択肢にだけ付けられます。');
-      }
-      def.defaultVariant = item.variants.indexOf(defaults[0]);
-    } else if (defaults.length > 0) {
-      compileError(defaults[0].span, '#[default] は、#[derive(Default)] を付けた列挙型の中にだけ書けます。');
-    }
-    const names = new Set<string>();
-    for (const variant of item.variants) {
-      if (names.has(variant.name)) compileError(variant.span, `列挙子 ${variant.name} が2回宣言されています。`);
-      names.add(variant.name);
-    }
-    // Discriminants are known before the bodies, since they are literals in learning programs.
-    let next = 0n;
-    const discriminants = new Set<bigint>();
-    const hasPayloadVariant = item.variants.some((variant) => variant.shape !== 'unit');
-    for (const [index, variant] of item.variants.entries()) {
-      let discriminant = next;
-      if (variant.discriminant) {
-        const literal = variant.discriminant;
-        if (hasPayloadVariant) compileError(literal.span, 'フィールドを持つ列挙型の列挙子には、値を書けません。');
-        if (literal.kind === 'int') discriminant = literal.value;
-        else if (literal.kind === 'unary' && literal.op === '-' && literal.operand.kind === 'int') {
-          discriminant = -literal.operand.value;
-        } else compileError(literal.span, '列挙子の値には、整数のリテラルを書いてください。');
-      }
-      if (discriminant < intMin('isize') || discriminant > intMax('isize')) {
-        compileError(variant.discriminant?.span ?? variant.span, `列挙子 ${variant.name} の値が isize の範囲外です。`);
-      }
-      if (discriminants.has(discriminant)) {
-        compileError(item.span, `列挙型 ${item.name} の判別値 ${discriminant} が2回使われています。`);
-      }
-      discriminants.add(discriminant);
+    def.defaultVariant = defaultVariant(item);
+    checkVariantNames(item);
+    for (const [index, discriminant] of discriminants(item).entries()) {
+      const variant = item.variants[index];
       def.variants.push({ name: variant.name, index, shape: variant.shape, fields: [], discriminant });
-      next = discriminant + 1n;
     }
     this.adtDefaults(def, module, item.generics);
     this.lowering.push(() => {
@@ -538,6 +508,7 @@ export class ItemCollector {
   }
 
   // code-gauge-allow functionNcss -- Collects traits and lowers their generic and inherited bounds together.
+  // code-gauge-allow functionCognitiveComplexity -- Declares methods, associated types and constants of a trait.
   private traitItem(item: TraitItem, module: Module): void {
     const self = newTypeParam('Self', true);
     const def: TraitDef = {
@@ -868,177 +839,6 @@ function addWherePredicates(
     type.param.bounds.push(...bounds);
   }
 }
-
-/** The traits of the standard library that learning programs implement for their own types. */
-const STD_TRAITS_LEARNERS_IMPLEMENT = new Set([
-  'Display',
-  'Future',
-  'Debug',
-  'Clone',
-  'Copy',
-  'PartialEq',
-  'Eq',
-  'PartialOrd',
-  'Ord',
-  'Default',
-  'From',
-  'Error',
-  ...['Add', 'Sub', 'Mul', 'Div', 'Rem', 'BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].flatMap((name) => [
-    name,
-    `${name}Assign`,
-  ]),
-  'Neg',
-  'Not',
-  'Index',
-  'IndexMut',
-  'Iterator',
-  'Deref',
-  'DerefMut',
-  'Drop',
-]);
-
-const REQUIRED_STD_METHODS: Record<string, string[]> = {
-  Display: ['fmt'],
-  Debug: ['fmt'],
-  Clone: ['clone'],
-  PartialEq: ['eq'],
-  PartialOrd: ['partial_cmp'],
-  Ord: ['cmp'],
-  Default: ['default'],
-  From: ['from'],
-};
-
-/** A key for an impl's self type in the standard library, naming the natives of its methods (`Vec<_>::push`). */
-// code-gauge-allow functionCognitiveComplexity -- Follows Rust's name resolution case by case.
-function renderTypeKey(type: TypeAst, generics: Generics): string {
-  const render = (t: TypeAst, useBound = true): string => {
-    switch (t.kind) {
-      case 'path': {
-        const last = t.path.segments.at(-1)!;
-        const param = generics.params.find((p) => p.name === last.name);
-        if (param && t.path.segments.length === 1) {
-          const bound = useBound ? param.bounds[0] : undefined;
-          return bound?.kind === 'trait' ? bound.path.segments.at(-1)!.name : '_';
-        }
-        return last.args ? `${last.name}<${last.args.map((arg) => render(arg, false)).join(', ')}>` : last.name;
-      }
-      case 'ref': {
-        return `&${t.mutable ? 'mut ' : ''}${render(t.target, useBound)}`;
-      }
-      case 'slice': {
-        return `[${render(t.elem, useBound)}]`;
-      }
-      case 'array': {
-        return `[${render(t.elem, useBound)}; N]`;
-      }
-      case 'tuple': {
-        return `(${t.elems.map((elem) => render(elem, useBound)).join(', ')})`;
-      }
-      default: {
-        return t.kind;
-      }
-    }
-  };
-  return render(type);
-}
-
-const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
-  String: 'String',
-  Vec: 'Vec',
-  HashMap: 'HashMap',
-  HashSet: 'HashSet',
-  BTreeMap: 'BTreeMap',
-  BTreeSet: 'BTreeSet',
-  VecDeque: 'VecDeque',
-  BinaryHeap: 'BinaryHeap',
-  Box: 'Box',
-  Reverse: 'Reverse',
-  Turtle: 'Turtle',
-  IterImpl: 'Iter',
-  Range: 'Range',
-  RangeInclusive: 'RangeInclusive',
-  RangeFrom: 'RangeFrom',
-  RangeTo: 'RangeTo',
-  RangeToInclusive: 'RangeToInclusive',
-  RangeFull: 'RangeFull',
-  Formatter: 'Formatter',
-  Stdout: 'Stdout',
-  StdoutLock: 'StdoutLock',
-  Stderr: 'Stderr',
-  StderrLock: 'StderrLock',
-  ParseIntError: 'ParseIntError',
-  ParseFloatError: 'ParseFloatError',
-  TryFromIntError: 'TryFromIntError',
-  TryFromSliceError: 'TryFromSliceError',
-  Utf8Error: 'Utf8Error',
-  FromUtf8Error: 'FromUtf8Error',
-  Entry: 'Entry',
-  OccupiedEntry: 'OccupiedEntry',
-  CaseIter: 'CaseIter',
-  EscapeDefault: 'EscapeDefault',
-  EscapeUnicode: 'EscapeUnicode',
-  ParseError: 'ParseError',
-  Unsigned: 'Unsigned',
-  Signed: 'Signed',
-  Indexed: 'Indexed',
-  TryFromError: 'TryFromError',
-  CharTryFromError: 'CharTryFromError',
-  TryFromCharError: 'TryFromCharError',
-  IterItem: 'IterItem',
-  IterShape: 'IterShape',
-  IterTarget: 'IterTarget',
-  IntoItem: 'IntoItem',
-  IntoShape: 'IntoShape',
-  ParseBoolError: 'ParseBoolError',
-  ParseCharError: 'ParseCharError',
-  Rc: 'Rc',
-  Weak: 'Weak',
-  Stdin: 'Stdin',
-  Arc: 'Arc',
-  Mutex: 'Mutex',
-  MutexGuard: 'MutexGuard',
-  RwLock: 'RwLock',
-  RwLockReadGuard: 'RwLockReadGuard',
-  RwLockWriteGuard: 'RwLockWriteGuard',
-  Sender: 'Sender',
-  Receiver: 'Receiver',
-  JoinHandle: 'JoinHandle',
-  ScopedJoinHandle: 'ScopedJoinHandle',
-  Thread: 'Thread',
-  Duration: 'Duration',
-  Scope: 'ThreadScope',
-  StdinLock: 'StdinLock',
-  BufReader: 'BufReader',
-  BufWriter: 'BufWriter',
-  File: 'File',
-  OpenOptions: 'OpenOptions',
-  Path: 'Path',
-  PathBuf: 'PathBuf',
-  RefCell: 'RefCell',
-  Ref: 'Ref',
-  RefMut: 'RefMut',
-  Cell: 'Cell',
-  ConstPtr: 'ConstPtr',
-  MutPtr: 'MutPtr',
-  Pin: 'Pin',
-  AsyncFuture: 'AsyncFuture',
-  Context: 'Context',
-  Waker: 'Waker',
-  Condvar: 'Condvar',
-  CStr: 'CStr',
-};
-
-const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
-  Poll: 'Poll',
-  ErrorKind: 'IoErrorKind',
-  Bound: 'Bound',
-  Option: 'Option',
-  ControlFlow: 'ControlFlow',
-  Result: 'Result',
-  Ordering: 'Ordering',
-  Infallible: 'Infallible',
-  IntErrorKind: 'IntErrorKind',
-};
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Name resolution
@@ -1380,12 +1180,6 @@ function scopedImport<T>(source: Entry<T>, target: Import): Entry<T> {
   return { binding: source.binding, visibleWithin };
 }
 
-function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {
-  if (name !== 'Error') return BUILTIN_STRUCTS[name];
-  if (module.name === 'fmt') return 'FmtError';
-  return module.path === 'std::io' ? 'IoError' : undefined;
-}
-
 function resolveImportedName(
   module: Module,
   entry: Import
@@ -1431,6 +1225,7 @@ export function visibilityScope(vis: Visibility, owner: Module, span: Span): Mod
 }
 
 /** The module that `pub(in path)` names, which must be the item's module or one around it (E0742). */
+// code-gauge-allow functionCognitiveComplexity -- Resolves pub(in path) by Rust rules.
 function restrictedScope(path: string[], owner: Module, span: Span): Module {
   const ancestors: Module[] = [];
   for (let module: Module | undefined = owner.namedModule; module; module = module.parent) ancestors.unshift(module);
@@ -1511,37 +1306,6 @@ export function resolveTypePath(segments: string[], module: Module, span: Span):
   return current;
 }
 
-export function unavailableStdItem(segments: string[], span: Span): never {
-  checkUnavailableStd(segments, span);
-  return compileError(span, `${segments.join('::')} は、この採点環境では使えません。`);
-}
-
-/** Rejects the modules of the standard library that touch the outside world or run concurrently (stage D). */
-function checkUnavailableStd(segments: string[], span: Span): void {
-  const [, module, name] = segments;
-  const unavailable: Record<string, string> = {
-    net: 'ネットワーク（std::net）',
-    env: '環境変数とコマンドラインの引数（std::env）',
-    time: '時刻（std::time）',
-    any: 'std::any',
-    ffi: '外部の関数との連携（std::ffi）',
-    os: 'OS の機能（std::os）',
-    alloc: 'メモリの割り当て（std::alloc）',
-    arch: 'CPU 固有の命令（std::arch）',
-    simd: 'SIMD（std::simd）',
-    borrow: 'std::borrow',
-    panic: 'std::panic',
-    hint: 'std::hint',
-  };
-  if (module === 'io' && name) compileError(span, `std::io::${name} は、この採点環境では使えません。`);
-  if (module === 'sync' && name === 'atomic')
-    compileError(span, 'アトミック型（std::sync::atomic）は、この採点環境では使えません。');
-  if (module && unavailable[module]) compileError(span, `${unavailable[module]}は、この採点環境では使えません。`);
-  if (module === 'process' && name && name !== 'exit') {
-    compileError(span, `外部のプロセス（std::process::${name}）は、この採点環境では使えません。`);
-  }
-}
-
 export function resolveTraitPath(path: PathAst, scope: TypeScope, self?: Type): TraitRef {
   const binding = resolveTypePath(
     path.segments.map((segment) => segment.name),
@@ -1587,7 +1351,6 @@ function traitArguments(def: TraitDef, written: TypeAst[], scope: TypeScope, spa
 // Lowering types
 
 // code-gauge-allow functionNcss -- Follows Rust's name resolution case by case.
-// code-gauge-allow functionCognitiveComplexity -- Each Rust type form has distinct lowering and diagnostics.
 export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   switch (ast.kind) {
     case 'path': {
@@ -1602,13 +1365,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
     }
     case 'array': {
-      const lengthParam = constParamOf(ast.len, scope);
-      if (lengthParam) return arrayOfLength(lowerType(ast.elem, scope), { kind: 'param', param: lengthParam });
-      const length = constInteger(ast.len, scope);
-      if (length === undefined || length < 0n) {
-        compileError(ast.span, '配列の長さには、整数のリテラルか定数の式を書いてください。');
-      }
-      return { kind: 'array', elem: lowerType(ast.elem, scope), len: Number(length) };
+      return lowerArrayType(ast, scope);
     }
     case 'slice': {
       return { kind: 'slice', elem: lowerType(ast.elem, scope) };
@@ -1624,29 +1381,10 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return lowerDynType(ast, scope);
     }
     case 'impl': {
-      if (scope.implParams) {
-        const param = newTypeParam(`impl ${describeBound(ast.bounds[0])}`);
-        const type: Type = { kind: 'param', param };
-        param.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
-        scope.implParams.push(param);
-        return type;
-      }
-      if (scope.returnOf) {
-        const opaque = newOpaque(scope.returnOf.params.map((param) => ({ kind: 'param', param })));
-        if (scope.returnOf.trait) opaque.method = scope.returnOf;
-        const type: Type = { kind: 'opaque', opaque };
-        opaque.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
-        return type;
-      }
-      return compileError(ast.span, 'impl Trait は、関数の引数と戻り値の型にだけ書けます。');
+      return lowerImplType(ast, scope);
     }
     case 'constArg': {
-      const param = constParamOf(ast.value, scope);
-      if (param) return { kind: 'param', param };
-      if (ast.value.kind === 'bool' || ast.value.kind === 'char') return constValueType(ast.value.value);
-      const value = constInteger(ast.value, scope);
-      if (value === undefined) compileError(ast.span, '定数の型引数には、整数のリテラルか定数の式を書いてください。');
-      return constValueType(value);
+      return lowerConstArg(ast, scope);
     }
     case 'pointer': {
       return scope.module.program.builtinType(ast.mutable ? 'MutPtr' : 'ConstPtr', [lowerType(ast.target, scope)]);
@@ -1668,6 +1406,23 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
   }
 }
 
+/** `impl Trait`: a type parameter of its own in an argument's type, or an opaque type in the return type. */
+function lowerImplType(ast: Extract<TypeAst, { kind: 'impl' }>, scope: TypeScope): Type {
+  if (scope.implParams) {
+    const param = newTypeParam(`impl ${describeBound(ast.bounds[0])}`);
+    const type: Type = { kind: 'param', param };
+    param.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
+    scope.implParams.push(param);
+    return type;
+  }
+  if (!scope.returnOf) return compileError(ast.span, 'impl Trait は、関数の引数と戻り値の型にだけ書けます。');
+  const opaque = newOpaque(scope.returnOf.params.map((param) => ({ kind: 'param', param })));
+  if (scope.returnOf.trait) opaque.method = scope.returnOf;
+  const type: Type = { kind: 'opaque', opaque };
+  opaque.bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, type));
+  return type;
+}
+
 function lowerDynType(ast: Extract<TypeAst, { kind: 'dyn' }>, scope: TypeScope): Type {
   const bounds = ast.bounds.flatMap((bound) => lowerBoundIfTrait(bound, scope, undefined));
   const auto = new Set(
@@ -1687,19 +1442,6 @@ function lowerDynType(ast: Extract<TypeAst, { kind: 'dyn' }>, scope: TypeScope):
   };
 }
 
-/** `I::Item` of a type parameter bounded by `Iterator` or `IntoIterator`. */
-function assocItem(param: TypeParam, scope: TypeScope): Type | undefined {
-  const paramType: Type = { kind: 'param', param };
-  const bound = iterationBound(paramType);
-  if (!bound) return undefined;
-  if (!bound.item && scope.assocParams) {
-    const item = newTypeParam(`${param.name}::Item`);
-    scope.assocParams.push(item);
-    bound.item = { kind: 'param', param: item };
-  }
-  return bound.item ?? intoIterItem(paramType);
-}
-
 function describeBound(bound: BoundAst): string {
   if (bound.kind === 'fn') return bound.trait;
   if (bound.kind === 'static') return "'static";
@@ -1708,6 +1450,7 @@ function describeBound(bound: BoundAst): string {
   return bound.path.segments.map((segment) => segment.name).join('::');
 }
 
+// code-gauge-allow functionNcss -- Follows Rust name resolution case by case.
 function lowerPathType(path: PathAst, scope: TypeScope): Type {
   const names = path.segments.map((segment) => segment.name);
   const last = path.segments.at(-1)!;
@@ -1750,113 +1493,6 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
       return compileError(path.span, `${names.join('::')} はモジュールで、型ではありません。`);
     }
   }
-}
-
-function lowerAssocItemPath(path: PathAst, names: string[], owner: TypeParam, scope: TypeScope): Type {
-  const last = path.segments.at(-1)!;
-  if (last.args) compileError(path.span, `${names.join('::')} には型引数を書けません。`);
-  return assocTypeOf({ kind: 'param', param: owner }, last.name, undefined, scope, path.span);
-}
-
-/** `<T as Trait>::Name` or `<T>::Name`. */
-function lowerQualifiedPath(
-  path: PathAst,
-  qualified: NonNullable<PathAst['segments'][number]['qualified']>,
-  scope: TypeScope
-): Type {
-  if (path.segments.length !== 2) compileError(path.span, '<T as Trait>:: の後には、関連型の名前を1つ書いてください。');
-  const self = lowerType(qualified.self, scope);
-  const trait = qualified.trait && resolveTraitPath(qualified.trait, scope, self);
-  return assocTypeOf(self, path.segments[1].name, trait, scope, path.span);
-}
-
-const ITERATION_TRAITS = new Set(['Iterator', 'IntoIterator', 'DoubleEndedIterator', 'ExactSizeIterator']);
-
-/**
- * The associated type `name` of a type, of the trait given or else of the bounds or the impl it has: what a bound sets
- * (`T: Add<Output = T>`), a type parameter added for it in a signature, or the projection `<T as Trait>::Name`, which
- * resolves once the type is known.
- */
-// code-gauge-allow functionCognitiveComplexity -- Follows rustc's resolution of associated types case by case.
-function assocTypeOf(self: Type, name: string, trait: TraitRef | undefined, scope: TypeScope, span: Span): Type {
-  const t = shallow(self);
-  let bound = trait;
-  if (!bound) {
-    const bounds =
-      t.kind === 'param' && t.param.isSelf && scope.implTrait
-        ? [scope.implTrait]
-        : t.kind === 'param'
-          ? t.param.bounds
-          : scope.implTrait && sameSelf(self, scope.selfType)
-            ? [scope.implTrait]
-            : [];
-    const candidates = allSupertraits(bounds, self).filter(
-      (candidate) =>
-        candidate.trait.assocTypes.has(name) || (name === 'Item' && ITERATION_TRAITS.has(candidate.trait.builtin ?? ''))
-    );
-    const traits = new Set(candidates.map((candidate) => candidate.trait));
-    if (traits.size > 1)
-      compileError(span, `関連型 ${name} が、複数のトレイトにあります（<T as Trait>::${name} と書いてください）。`);
-    bound = candidates[0];
-    if (!bound) compileError(span, `${typeToString(self)} に関連型 ${name} がありません。`);
-  }
-  if (name === 'Item' && ITERATION_TRAITS.has(bound.trait.builtin ?? '') && t.kind === 'param' && !t.param.isSelf) {
-    const item = assocItem(t.param, scope);
-    if (item) return item;
-  }
-  if (bound.item && name === 'Item') return bound.item;
-  const set = bound.assoc?.get(name);
-  if (set) return set;
-  const assoc = bound.trait.assocTypes.get(name);
-  if (!assoc) {
-    if (name === 'Item' && ITERATION_TRAITS.has(bound.trait.builtin ?? '')) return intoIterItem(self) ?? freshVar();
-    return compileError(span, `トレイト ${bound.trait.name} に関連型 ${name} がありません。`);
-  }
-  // In a signature, the associated type of a parameter's bound becomes a parameter of its own that callers infer.
-  if (
-    t.kind === 'param' &&
-    !t.param.isSelf &&
-    scope.assocParams &&
-    scope.ownParams?.includes(t.param) !== false &&
-    t.param.bounds.includes(bound)
-  ) {
-    const param = newTypeParam(`${t.param.name}::${name}`);
-    scope.assocParams.push(param);
-    (bound as { assoc?: Map<string, Type> }).assoc = new Map([
-      ...(bound.assoc ?? []),
-      [name, { kind: 'param', param }],
-    ]);
-    const projected: Type = { kind: 'param', param };
-    param.bounds = assoc.bounds.map((ref) => substituteTraitRef(ref, new Map([[bound.trait.self, self]])));
-    return projected;
-  }
-  return projectionOf(bound.trait, name, self, bound.args);
-}
-
-function sameSelf(a: Type, b: Type | undefined): boolean {
-  return b !== undefined && shallow(a) === shallow(b);
-}
-
-/** The pseudo-type that stands for an associated type of a trait on a type. */
-export function projectionDef(trait: TraitDef, name: string, module: Module): AdtDef {
-  return {
-    name: `${trait.name}::${name}`,
-    path: `${trait.path}::${name}`,
-    kind: 'struct',
-    params: [],
-    variants: [],
-    derives: new Set(),
-    span: trait.span ?? { row: 0, col: 1 },
-    builtin: 'Projection',
-    projection: { trait, name },
-    module,
-  };
-}
-
-export function projectionOf(trait: TraitDef, name: string, self: Type, args?: Type[]): Type {
-  const assoc = trait.assocTypes.get(name);
-  if (!assoc) throw new Error(`Unknown associated type ${trait.name}::${name}`);
-  return adt(assoc.projection, [self, ...(args ?? trait.params.map((param): Type => ({ kind: 'param', param })))]);
 }
 
 function lowerLocalTypeName(path: PathAst, scope: TypeScope): Type | undefined {
@@ -1922,28 +1558,6 @@ function lowerAdtPath(path: PathAst, def: AdtDef, written: Type[], scope: TypeSc
 }
 
 /** The type arguments of a type, the omitted ones that have defaults (`struct P<T = i32>`) given those. */
-function withDefaultArgs(def: AdtDef, written: Type[]): Type[] {
-  if (written.length >= def.params.length || def.builtin) return written;
-  const missing = def.params.slice(written.length);
-  if (!missing.every((param) => param.defaultType)) return written;
-  const subst = new Map(def.params.slice(0, written.length).map((param, index) => [param, written[index]]));
-  const args = [...written];
-  for (const param of missing) {
-    const type = substitute(param.defaultType as Type, subst);
-    subst.set(param, type);
-    args.push(type);
-  }
-  return args;
-}
-
-/** The const parameter an expression names (`N` of `[T; N]`), if it names one. */
-export function constParamOf(expr: Expr, scope: Pick<TypeScope, 'params'>): TypeParam | undefined {
-  const inner = expr.kind === 'block' && expr.stmts.length === 0 ? expr.tail : expr;
-  if (inner?.kind !== 'path' || inner.path.segments.length !== 1) return undefined;
-  const param = scope.params.get(inner.path.segments[0].name);
-  return param?.constType ? param : undefined;
-}
-
 /**
  * Lowers a bound that constrains the type's traits; `?Sized` and lifetime bounds lower to none, as the interpreter
  * lets type parameters be unsized and the borrow checker reads lifetimes from the types.

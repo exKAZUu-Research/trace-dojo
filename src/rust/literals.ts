@@ -132,6 +132,7 @@ function unescape(body: string, kind: LiteralKind): string | undefined {
 const SIMPLE_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', '\\': '\\', "'": "'", '"': '"', '0': '\0' };
 
 /** The text of the escape whose letter is at `index`, and the index of its last character. */
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of escape sequence.
 function readEscape(body: string, index: number, kind: LiteralKind): { text: string; last: number } | undefined {
   const next = body[index];
   if (Object.hasOwn(SIMPLE_ESCAPES, next)) return { text: SIMPLE_ESCAPES[next], last: index };

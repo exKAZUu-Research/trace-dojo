@@ -120,6 +120,8 @@ function borrowedIterItem(type: Extract<Type, { kind: 'ref' }>): Type | undefine
 }
 
 /** The shape of the iterator that `IntoIterator` makes of a value of this type. */
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of iterable type.
+// code-gauge-allow functionNcss -- One case per kind of iterable type.
 export function intoIterShape(program: Program, type: Type): Type | undefined {
   const t = normalize(shallow(type));
   const dynamic = dynIteratorTarget(t);

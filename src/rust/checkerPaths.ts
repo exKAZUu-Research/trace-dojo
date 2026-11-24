@@ -16,12 +16,12 @@ import {
   resolveTraitPath,
   resolveTypePath,
   type TypeBinding,
-  unavailableStdItem,
   type ValueBinding,
   visibilityScope,
   visibleFrom,
 } from './items';
 import { boundsOf, lookupAssociated } from './methods';
+import { unavailableStdItem } from './stdNames';
 import {
   adt,
   type AdtDef,

@@ -931,6 +931,7 @@ function patternMatches(
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Compares a value with both ends of a range pattern.
 function rangeMatches(
   pattern: Extract<Pattern, { kind: 'range' }>,
   value: Known | undefined,

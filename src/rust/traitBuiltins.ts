@@ -283,15 +283,9 @@ function operatorNumber(type: Type | undefined): (Type & { kind: 'int' | 'float'
 function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean): Answer {
   if (assign && t.kind === 'ref') return 'no';
   const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
-  if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') {
-    if (rhs?.kind === 'var')
-      return solver.unifier.tryUnify(rhs, { kind: 'ref', mutable: false, target: { kind: 'str' } }) ? 'yes' : 'no';
-    return rhs?.kind === 'ref' && normalize(shallow(rhs.target)).kind === 'str' ? 'yes' : 'no';
-  }
+  if (t.kind === 'adt' && t.def.builtin === 'String' && name === 'Add') return stringAdd(solver, rhs);
   const left = operatorNumber(t);
-  if (!left) return 'no';
-  if (left.kind === 'float' && ['BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].includes(name)) return 'no';
-  if (left.kind === 'bool' && !['BitAnd', 'BitOr', 'BitXor'].includes(name)) return 'no';
+  if (!left || !numberTakes(left, name)) return 'no';
   if (!rhs || rhs.kind === 'var') {
     if (name === 'Shl' || name === 'Shr') return 'unknown';
     return rhs ? (solver.unifier.tryUnify(rhs, left) ? 'yes' : 'no') : 'yes';
@@ -300,6 +294,20 @@ function numericOperator({ solver, t, ref }: Goal, name: string, assign: boolean
   if (!right) return 'no';
   if (name === 'Shl' || name === 'Shr') return left.kind === 'int' && right.kind === 'int' ? 'yes' : 'no';
   return solver.unifier.tryUnify(left, right) ? 'yes' : 'no';
+}
+
+/** `String + &str`, which settles a right side not known yet as `&str`. */
+function stringAdd(solver: TraitSolver, rhs: Type | undefined): Answer {
+  if (rhs?.kind === 'var') {
+    return solver.unifier.tryUnify(rhs, { kind: 'ref', mutable: false, target: { kind: 'str' } }) ? 'yes' : 'no';
+  }
+  return rhs?.kind === 'ref' && normalize(shallow(rhs.target)).kind === 'str' ? 'yes' : 'no';
+}
+
+/** Whether std implements the operator for numbers of this kind: floats have no bit operations, and `bool` only them. */
+function numberTakes(left: Type, name: string): boolean {
+  if (left.kind === 'float') return !['BitAnd', 'BitOr', 'BitXor', 'Shl', 'Shr'].includes(name);
+  return left.kind !== 'bool' || ['BitAnd', 'BitOr', 'BitXor'].includes(name);
 }
 
 /** Whether a type of the standard library (or a derive) implements one of its traits, as std's impls decide. */
@@ -333,6 +341,7 @@ function sized({ solver, t, all }: Goal): Answer {
   return t.kind === 'str' || t.kind === 'slice' || t.kind === 'dyn' ? 'no' : 'yes';
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Follows std impls of Send and Sync case by case.
 function autoTrait({ solver, t, name, all }: Goal): Answer {
   if (t.kind === 'dyn') return 'no';
   if (t.kind === 'ref') {
@@ -433,6 +442,7 @@ const NON_CLONE_ITERATORS = new Set([
   'BTreeSetIntoIterShape',
 ]);
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
 function cloneAdt(goal: Goal, t: AdtType): Answer {
   const { all } = goal;
   const d = derived(goal);

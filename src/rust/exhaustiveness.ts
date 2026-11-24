@@ -230,7 +230,9 @@ function useful(rows: Pat[][], vector: Pat[], types: Type[], budget: ExecutionBu
   }
   const domain = rangeDomain(type);
   if (domain && (head.kind === 'range' || head.kind === 'any')) {
-    return usefulInRanges(expanded, head, domain, rest, restTypes, budget, depth);
+    return usefulInRanges(expanded, head, domain, budget, (covered) =>
+      useful(covered, rest, restTypes, budget, depth + 1)
+    );
   }
   const sliceElem = sliceElementType(type);
   if (sliceElem && (head.kind === 'slice' || head.kind === 'any')) {
@@ -278,49 +280,53 @@ function usefulUnderSome(
  * Usefulness over the values of an integer type or `char`: the ends of the rows' ranges split the values into segments
  * that each row covers whole or not at all, and each segment the head covers is a constructor of its own.
  */
-// code-gauge-allow functionCognitiveComplexity -- Splits the domain at every range end, then tries each segment.
 function usefulInRanges(
   rows: Pat[][],
   head: Pat,
   domain: [bigint, bigint][],
-  rest: Pat[],
-  restTypes: Type[],
   budget: ExecutionBudget,
-  depth: number
+  usefulRest: (rows: Pat[][]) => Pat[] | undefined
 ): Pat[] | undefined {
-  const cuts = new Set<bigint>();
-  for (const row of rows) {
-    const first = row[0];
-    if (first?.kind === 'range') {
-      cuts.add(first.lo);
-      cuts.add(first.hi + 1n);
-    }
+  const cuts = rangeCuts(rows);
+  for (const [lo, hi] of segments(head, domain, cuts, budget)) {
+    const covered = rows.filter(
+      ([first]) => first?.kind === 'any' || (first?.kind === 'range' && first.lo <= lo && hi <= first.hi)
+    );
+    const witness = usefulRest(covered.map((row) => row.slice(1)));
+    if (witness) return [head.kind === 'any' && cuts.length === 0 ? ANY : { kind: 'range', lo, hi }, ...witness];
   }
-  const sortedCuts = [...cuts].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return undefined;
+}
+
+/** Where the rows' ranges start and end (one past their last value), in order. */
+function rangeCuts(rows: Pat[][]): bigint[] {
+  const cuts = new Set<bigint>();
+  for (const [first] of rows) {
+    if (first?.kind !== 'range') continue;
+    cuts.add(first.lo);
+    cuts.add(first.hi + 1n);
+  }
+  return [...cuts].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/** The segments of the domain that the head covers, split at the cuts. */
+function* segments(
+  head: Pat,
+  domain: [bigint, bigint][],
+  cuts: bigint[],
+  budget: ExecutionBudget
+): Generator<[bigint, bigint]> {
   for (const [domainLo, domainHi] of domain) {
-    let lo = head.kind === 'range' ? (head.lo > domainLo ? head.lo : domainLo) : domainLo;
-    const hi = head.kind === 'range' ? (head.hi < domainHi ? head.hi : domainHi) : domainHi;
+    let lo = head.kind === 'range' && head.lo > domainLo ? head.lo : domainLo;
+    const hi = head.kind === 'range' && head.hi < domainHi ? head.hi : domainHi;
     while (lo <= hi) {
       budget.spend();
-      const next = sortedCuts.find((cut) => cut > lo && cut <= hi);
+      const next = cuts.find((cut) => cut > lo && cut <= hi);
       const segmentHi = next === undefined ? hi : next - 1n;
-      const covered = rows.filter((row) => {
-        const first = row[0];
-        return first?.kind === 'any' || (first?.kind === 'range' && first.lo <= lo && segmentHi <= first.hi);
-      });
-      const witness = useful(
-        covered.map((row) => row.slice(1)),
-        rest,
-        restTypes,
-        budget,
-        depth + 1
-      );
-      if (witness)
-        return [head.kind === 'any' && cuts.size === 0 ? ANY : { kind: 'range', lo, hi: segmentHi }, ...witness];
+      yield [lo, segmentHi];
       lo = segmentHi + 1n;
     }
   }
-  return undefined;
 }
 
 function arrayLength(type: Type): number | undefined {
@@ -340,6 +346,8 @@ function sliceElementType(type: Type): Type | undefined {
  * constructor whose arguments are the elements; a pattern with `..` matches each length it fits in.
  */
 // code-gauge-allow functionCognitiveComplexity -- Enumerates the lengths that tell the slice patterns apart.
+// code-gauge-allow functionNcss -- Splits slice patterns by length as rustc exhaustiveness does.
+// code-gauge-allow functionParameterCount -- Splits slice patterns by length as rustc exhaustiveness does.
 function usefulInSlices(
   rows: Pat[][],
   head: Pat,
@@ -419,6 +427,7 @@ export function isIrrefutable(pattern: Pat, type: Type, budget: ExecutionBudget)
   return missingPattern([pattern], type, budget) === undefined;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern in a missing-pattern message.
 function describe(pattern: Pat, type: Type): string {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));

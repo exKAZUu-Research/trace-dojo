@@ -126,6 +126,16 @@ export function lookupMethod(
     }
     if (stepType.kind === 'var') return 'ambiguous';
   }
+  return probeIteratorMethods(program, solver, steps, name);
+}
+
+/** The methods of `Iter` that an iterator the receiver derefs to has: a bounded parameter's, the program's, or a char iterator's. */
+function probeIteratorMethods(
+  program: Program,
+  solver: TraitSolver,
+  steps: DerefStep[],
+  name: string
+): MethodMatch | 'ambiguous' | undefined {
   // A type parameter or an opaque type bounded by `Iterator` has the methods of `Iter`, and by `IntoIterator`,
   // `into_iter`.
   const bounded = steps.find((step) => {

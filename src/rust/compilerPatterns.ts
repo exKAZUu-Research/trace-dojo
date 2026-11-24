@@ -124,6 +124,7 @@ function compileProbe(c: Compiler, pattern: Pattern): PatternProbe {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Compares both ends of a range pattern.
 function rangeMatcher(c: Compiler, pattern: PatternOf<'range'>, type: Type): PatternProbe {
   const endValue = (end: Pattern | undefined): ((frame: Frame) => Value) | undefined => {
     if (!end) return undefined;
@@ -148,6 +149,7 @@ function rangeMatcher(c: Compiler, pattern: PatternOf<'range'>, type: Type): Pat
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Matches elements before and after the rest element.
 function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const rest = pattern.restIndex;
   const elems = pattern.elems.map((elem, index) => (index === rest ? undefined : compileProbe(c, elem)));
@@ -155,6 +157,9 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const restBinding = rest === undefined ? undefined : pattern.elems[rest];
   const restLocal = restBinding && c.annotations.bindings.get(restBinding);
   const restByRef = restLocal !== undefined && isRefType(restLocal.type);
+  // An element after the `..` counts from the end.
+  const offsetOf = (index: number, after: number): number =>
+    rest !== undefined && index > rest ? index - 1 + after : index;
   return (frame, value, place, bindings) => {
     const target = derefAll(value);
     const { base, start } = sliceBase(target);
@@ -162,21 +167,23 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
     if (rest === undefined ? length !== fixed : length < fixed) return false;
     const after = length - fixed;
     for (const [index, elem] of elems.entries()) {
-      if (!elem) continue;
-      const position = start + (rest !== undefined && index > rest ? index - 1 + after : index);
+      const position = start + offsetOf(index, after);
       const elemPlace = place || isPlace(value) ? () => new ElementPlace(base, position) : undefined;
-      if (!elem(frame, base[position], elemPlace, bindings)) return false;
+      if (elem && !elem(frame, base[position], elemPlace, bindings)) return false;
     }
     if (restLocal) {
       const from = start + (rest as number);
-      bindings.push(() => {
-        frame.locals[restLocal.slot] = restByRef
-          ? new SliceView(base, from, from + after, target instanceof SliceView ? target.owner : undefined)
-          : base.slice(from, from + after);
-      });
+      bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restByRef)));
     }
     return true;
   };
+}
+
+/** What `rest @ ..` binds: a view of the elements, or for a pattern on an array, an array of them. */
+function sliceRest(target: Value, base: Value[], from: number, to: number, byRef: boolean): Value {
+  return byRef
+    ? new SliceView(base, from, to, target instanceof SliceView ? target.owner : undefined)
+    : base.slice(from, to);
 }
 
 function orMatcher(c: Compiler, pattern: PatternOf<'or'>): PatternProbe {

@@ -140,6 +140,7 @@ export class SignatureInstance {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Applies the lifetime elision rules.
+  // code-gauge-allow functionNcss -- One case per kind of region layout.
   private bindOutputPart(
     declared: Type,
     actual: Layout,

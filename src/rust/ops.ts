@@ -297,7 +297,6 @@ export function valuesUnequal(type: Type, a: Value, b: Value, rhs: Type = type):
   return !valuesEqual(t, leftValue, rightValue, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boolean {
   const { def } = t;
@@ -358,25 +357,32 @@ function adtEqual(t: Type & { kind: 'adt' }, x: Value, y: Value, rhs: Type): boo
     case 'RangeTo':
     case 'RangeToInclusive':
     case 'RangeFull': {
-      const xr = x as RangeValue;
-      const yr = y as RangeValue;
-      const bound = (a: Value | undefined, b: Value | undefined): boolean =>
-        a === undefined || b === undefined ? a === b : valuesEqual(t.args[0], a, b);
-      return bound(xr.start, yr.start) && bound(xr.end, yr.end) && xr.exhausted === yr.exhausted;
+      return rangesEqual(t.args[0], x as RangeValue, y as RangeValue);
     }
     default: {
-      if (x instanceof StructValue && y instanceof StructValue) {
-        const types = fieldTypes(def, t.args, 0);
-        return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
-      }
-      if (x instanceof EnumValue && y instanceof EnumValue) {
-        if (x.variant !== y.variant) return false;
-        const types = fieldTypes(def, t.args, x.variant);
-        return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
-      }
-      return x === y;
+      return fieldsEqual(t, x, y);
     }
   }
+}
+
+function rangesEqual(elem: Type, x: RangeValue, y: RangeValue): boolean {
+  const bound = (a: Value | undefined, b: Value | undefined): boolean =>
+    a === undefined || b === undefined ? a === b : valuesEqual(elem, a, b);
+  return bound(x.start, y.start) && bound(x.end, y.end) && x.exhausted === y.exhausted;
+}
+
+/** Whether two values of a struct or an enum have equal fields, as `#[derive(PartialEq)]` compares them. */
+function fieldsEqual(t: Type & { kind: 'adt' }, x: Value, y: Value): boolean {
+  if (x instanceof StructValue && y instanceof StructValue) {
+    const types = fieldTypes(t.def, t.args, 0);
+    return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
+  }
+  if (x instanceof EnumValue && y instanceof EnumValue) {
+    if (x.variant !== y.variant) return false;
+    const types = fieldTypes(t.def, t.args, x.variant);
+    return types.every((type, index) => valuesEqual(type, x.fields[index], y.fields[index]));
+  }
+  return x === y;
 }
 
 function compareSequence(elem: Type, left: Value, right: Value, rhs: Type, method: 'eq' | 'ne' = 'eq'): boolean {
@@ -498,7 +504,6 @@ export function comparePartialValues(type: Type, a: Value, b: Value, rhs = type)
   return compareValues(type, a, b, true, rhs);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
   const { def } = t;
@@ -539,30 +544,27 @@ function compareAdt(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: bool
       return Math.sign((x as EnumValue).variant - (y as EnumValue).variant);
     }
     default: {
-      if (x instanceof StructValue && y instanceof StructValue) {
-        const types = fieldTypes(def, t.args, 0);
-        for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index], partial);
-          if (order !== 0) return order;
-        }
-        return 0;
-      }
-      if (x instanceof EnumValue && y instanceof EnumValue) {
-        if (x.variant !== y.variant) {
-          const dx = def.variants[x.variant].discriminant;
-          const dy = def.variants[y.variant].discriminant;
-          return dx < dy ? -1 : 1;
-        }
-        const types = fieldTypes(def, t.args, x.variant);
-        for (const [index, type] of types.entries()) {
-          const order = compareValues(type, x.fields[index], y.fields[index], partial);
-          if (order !== 0) return order;
-        }
-        return 0;
-      }
-      return 0;
+      return compareFields(t, x, y, partial);
     }
   }
+}
+
+/** The order of two values of a struct or an enum, as `#[derive(PartialOrd)]` compares them: variant, then fields. */
+function compareFields(t: Type & { kind: 'adt' }, x: Value, y: Value, partial: boolean): number | undefined {
+  const { def } = t;
+  if (x instanceof EnumValue && y instanceof EnumValue && x.variant !== y.variant) {
+    return def.variants[x.variant].discriminant < def.variants[y.variant].discriminant ? -1 : 1;
+  }
+  const bothStructs = x instanceof StructValue && y instanceof StructValue;
+  const bothEnums = x instanceof EnumValue && y instanceof EnumValue;
+  if (!bothStructs && !bothEnums) return 0;
+  const [xs, ys] = [x as StructValue | EnumValue, y as StructValue | EnumValue];
+  const types = fieldTypes(def, t.args, xs instanceof EnumValue ? xs.variant : 0);
+  for (const [index, type] of types.entries()) {
+    const order = compareValues(type, xs.fields[index], ys.fields[index], partial);
+    if (order !== 0) return order;
+  }
+  return 0;
 }
 
 function compareOrderedEntries(
@@ -694,7 +696,6 @@ function userClone(type: Type, value: Value): { value: Value } | undefined {
   }
 }
 
-// code-gauge-allow functionNcss -- One case per kind of value.
 function clonePart(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;
@@ -717,78 +718,94 @@ function clonePart(type: Type, value: Value): Value {
       return cloneItems(items, (item) => clonePart(t.elem, item));
     }
     case 'adt': {
-      const { def } = t;
-      switch (def.builtin) {
-        case 'String': {
-          return textOf(value);
-        }
-        case 'Vec':
-        case 'VecDeque':
-        case 'BinaryHeap': {
-          return cloneItems(value as Value[], (item) => clonePart(t.args[0], item));
-        }
-        case 'Box': {
-          return clonePart(t.args[0], value);
-        }
-        case 'Rc':
-        case 'Arc': {
-          const box = derefAll(value) as SharedBox;
-          box.strong++;
-          return box;
-        }
-        case 'Weak': {
-          const { box } = derefAll(value) as WeakRef;
-          if (box) box.weak++;
-          return new WeakRef(box);
-        }
-        case 'RefCell':
-        case 'Cell': {
-          const cell = derefAll(value) as CellBox;
-          return new CellBox(clonePart(t.args[0], cell.value));
-        }
-        case 'HashMap':
-        case 'BTreeMap':
-        case 'HashSet':
-        case 'BTreeSet': {
-          return cloneCollection(t.args, value as MapValue | SetValue);
-        }
-        case 'Range':
-        case 'RangeInclusive':
-        case 'RangeFrom':
-        case 'RangeTo':
-        case 'RangeToInclusive': {
-          const range = value as RangeValue;
-          return copyRange(range, (item) => clonePart(t.args[0], item));
-        }
-        case 'Iter': {
-          return cloneIterator(value as IterValue);
-        }
-        default: {
-          if (value instanceof StructValue) {
-            const types = fieldTypes(def, t.args, 0);
-            hooks?.allocate(types.length);
-            return new StructValue(
-              def,
-              types.map((type, index) => clonePart(type, value.fields[index]))
-            );
-          }
-          if (value instanceof EnumValue) {
-            const types = fieldTypes(def, t.args, value.variant);
-            hooks?.allocate(types.length);
-            return new EnumValue(
-              def,
-              value.variant,
-              types.map((type, index) => clonePart(type, value.fields[index]))
-            );
-          }
-          return value;
-        }
-      }
+      return cloneAdt(t, value);
     }
     default: {
       return value;
     }
   }
+}
+
+// code-gauge-allow functionNcss -- One case per kind of owning type.
+function cloneAdt(t: Type & { kind: 'adt' }, value: Value): Value {
+  const { def } = t;
+  switch (def.builtin) {
+    case 'String': {
+      return textOf(value);
+    }
+    case 'Vec':
+    case 'VecDeque':
+    case 'BinaryHeap': {
+      return cloneItems(value as Value[], (item) => clonePart(t.args[0], item));
+    }
+    case 'Box': {
+      return clonePart(t.args[0], value);
+    }
+    case 'Rc':
+    case 'Arc':
+    case 'Weak':
+    case 'RefCell':
+    case 'Cell': {
+      return cloneShared(t, derefAll(value));
+    }
+    case 'HashMap':
+    case 'BTreeMap':
+    case 'HashSet':
+    case 'BTreeSet': {
+      return cloneCollection(t.args, value as MapValue | SetValue);
+    }
+    case 'Range':
+    case 'RangeInclusive':
+    case 'RangeFrom':
+    case 'RangeTo':
+    case 'RangeToInclusive': {
+      return copyRange(value as RangeValue, (item) => clonePart(t.args[0], item));
+    }
+    case 'Iter': {
+      return cloneIterator(value as IterValue);
+    }
+    default: {
+      return cloneFields(t, value);
+    }
+  }
+}
+
+/** A clone of an `Rc` or an `Arc` (one more count), of a `Weak` (one more weak count), or of a cell's value. */
+function cloneShared(t: Type & { kind: 'adt' }, target: Value): Value {
+  if (t.def.builtin === 'Rc' || t.def.builtin === 'Arc') {
+    const box = target as SharedBox;
+    box.strong++;
+    return box;
+  }
+  if (t.def.builtin === 'Weak') {
+    const { box } = target as WeakRef;
+    if (box) box.weak++;
+    return new WeakRef(box);
+  }
+  return new CellBox(clonePart(t.args[0], (target as CellBox).value));
+}
+
+/** A clone of a struct's or an enum's value, field by field, as `#[derive(Clone)]` makes it. */
+function cloneFields(t: Type & { kind: 'adt' }, value: Value): Value {
+  const { def } = t;
+  if (value instanceof StructValue) {
+    const types = fieldTypes(def, t.args, 0);
+    hooks?.allocate(types.length);
+    return new StructValue(
+      def,
+      types.map((type, index) => clonePart(type, value.fields[index]))
+    );
+  }
+  if (value instanceof EnumValue) {
+    const types = fieldTypes(def, t.args, value.variant);
+    hooks?.allocate(types.length);
+    return new EnumValue(
+      def,
+      value.variant,
+      types.map((type, index) => clonePart(type, value.fields[index]))
+    );
+  }
+  return value;
 }
 
 /** A clone of an iterator, which goes on from where the iterator is, on its own. */

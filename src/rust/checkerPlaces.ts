@@ -1,9 +1,10 @@
 import type { LocalVar } from './annotations';
+import { projectionOf } from './assocTypes';
 import type { Expr, Span } from './ast';
 import type { Checker } from './checker';
 import { collectionKeyTraits } from './collectionBounds';
 import { normalize } from './infer';
-import { compileError, projectionOf, visibleFrom } from './items';
+import { compileError, visibleFrom } from './items';
 import { autoderefSteps, derefOnce, lookupMethod } from './methods';
 import { RANGE_TYPES } from './traits';
 import {
@@ -47,12 +48,15 @@ export function requireMutablePlace(c: Checker, place: Expr, purpose: string, de
   );
 }
 
+type PlaceRoot =
+  | { kind: 'local'; local: LocalVar }
+  | { kind: 'mutRef' }
+  | { kind: 'sharedRef' }
+  | { kind: 'temporary' };
+
 /** What a place expression is rooted in, looking through fields, indexes, and derefs. */
 // code-gauge-allow functionCognitiveComplexity -- Follows the type checking rules of rustc case by case.
-function placeRoot(
-  c: Checker,
-  place: Expr
-): { kind: 'local'; local: LocalVar } | { kind: 'mutRef' } | { kind: 'sharedRef' } | { kind: 'temporary' } {
+function placeRoot(c: Checker, place: Expr): PlaceRoot {
   switch (place.kind) {
     case 'path': {
       const res = c.annotations.paths.get(place);
@@ -75,13 +79,7 @@ function placeRoot(
       return throughDerefs(c, place.operand, index?.derefs ?? []);
     }
     case 'unary': {
-      if (place.op !== '*') return { kind: 'temporary' };
-      const type = normalize(shallow(place.operand.ty ?? UNIT));
-      if (type.kind === 'adt' && type.def.builtin === 'MutPtr') return { kind: 'mutRef' };
-      if (type.kind === 'adt' && type.def.builtin === 'ConstPtr') return { kind: 'sharedRef' };
-      const deref =
-        type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : (derefOnce(c.program, type)?.kind ?? 'own');
-      return throughDerefs(c, place.operand, [deref]);
+      return place.op === '*' ? derefRoot(c, place.operand) : { kind: 'temporary' };
     }
     case 'methodCall': {
       const type = normalize(shallow(place.ty ?? UNIT));
@@ -94,7 +92,16 @@ function placeRoot(
   }
 }
 
-function throughDerefs(c: Checker, operand: Expr, derefs: readonly DerefKind[]): ReturnType<typeof placeRoot> {
+/** The root of `*operand`: what a raw pointer points to, or what the reference or owner derefs to. */
+function derefRoot(c: Checker, operand: Expr): PlaceRoot {
+  const type = normalize(shallow(operand.ty ?? UNIT));
+  if (type.kind === 'adt' && type.def.builtin === 'MutPtr') return { kind: 'mutRef' };
+  if (type.kind === 'adt' && type.def.builtin === 'ConstPtr') return { kind: 'sharedRef' };
+  const deref = type.kind === 'ref' ? (type.mutable ? 'mutRef' : 'ref') : (derefOnce(c.program, type)?.kind ?? 'own');
+  return throughDerefs(c, operand, [deref]);
+}
+
+function throughDerefs(c: Checker, operand: Expr, derefs: readonly DerefKind[]): PlaceRoot {
   if (derefs.includes('ref')) return { kind: 'sharedRef' };
   let type = operand.ty ?? UNIT;
   for (const step of derefs) {

@@ -641,6 +641,7 @@ export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
   return result;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Compares each part of a trait reference.
 function sameTraitRef(a: TraitRef, b: TraitRef): boolean {
   if (a.trait !== b.trait || !sameTypeList(a.args, b.args)) return false;
   if (a.fnSig && b.fnSig) {
@@ -743,7 +744,6 @@ export function sameAutoTraits(a: Extract<Type, { kind: 'dyn' }>, b: Extract<Typ
 // Printing
 
 /** A type as rustc writes it in messages, with `{integer}` and `_` for variables. */
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of type.
 // code-gauge-allow functionNcss -- One case per kind of type.
 export function typeToString(type: Type): string {
   const t = shallow(type);
@@ -774,23 +774,7 @@ export function typeToString(type: Type): string {
       return `&${t.mutable ? 'mut ' : ''}${typeToString(t.target)}`;
     }
     case 'adt': {
-      if (t.def.projection) {
-        const [self, ...args] = t.args;
-        const trait =
-          args.length === 0 ? t.def.projection.trait.name : traitRefToString({ trait: t.def.projection.trait, args });
-        return `<${typeToString(self)} as ${trait}>::${t.def.projection.name}`;
-      }
-      if (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr') {
-        return `*${t.def.builtin === 'MutPtr' ? 'mut' : 'const'} ${typeToString(t.args[0])}`;
-      }
-      if (t.def.builtin === 'Iter') {
-        // An iterator is the std type its shape stands for.
-        const shape = shallow(t.args[1]);
-        return shape.kind === 'adt' ? typeToString(shape) : `impl Iterator<Item = ${typeToString(t.args[0])}>`;
-      }
-      const name = isIteratorShape(t.def) ? shapeName(t.def.name) : t.def.name;
-      if (t.args.length === 0) return name;
-      return `${name}<${t.args.map(typeToString).join(', ')}>`;
+      return adtToString(t);
     }
     case 'param': {
       return t.param.name;
@@ -799,8 +783,7 @@ export function typeToString(type: Type): string {
       return t.v.literal === 'int' ? '{integer}' : t.v.literal === 'float' ? '{float}' : '_';
     }
     case 'fn': {
-      const unsafe = t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe) ? 'unsafe ' : '';
-      return `${unsafe}fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
+      return fnToString(t);
     }
     case 'closure': {
       return 'クロージャ';
@@ -812,6 +795,31 @@ export function typeToString(type: Type): string {
       return `impl ${t.opaque.bounds.map(traitRefToString).join(' + ')}`;
     }
   }
+}
+
+function adtToString(t: Type & { kind: 'adt' }): string {
+  if (t.def.projection) {
+    const [self, ...args] = t.args;
+    const trait =
+      args.length === 0 ? t.def.projection.trait.name : traitRefToString({ trait: t.def.projection.trait, args });
+    return `<${typeToString(self)} as ${trait}>::${t.def.projection.name}`;
+  }
+  if (t.def.builtin === 'ConstPtr' || t.def.builtin === 'MutPtr') {
+    return `*${t.def.builtin === 'MutPtr' ? 'mut' : 'const'} ${typeToString(t.args[0])}`;
+  }
+  if (t.def.builtin === 'Iter') {
+    // An iterator is the std type its shape stands for.
+    const shape = shallow(t.args[1]);
+    return shape.kind === 'adt' ? typeToString(shape) : `impl Iterator<Item = ${typeToString(t.args[0])}>`;
+  }
+  const name = isIteratorShape(t.def) ? shapeName(t.def.name) : t.def.name;
+  if (t.args.length === 0) return name;
+  return `${name}<${t.args.map(typeToString).join(', ')}>`;
+}
+
+function fnToString(t: Type & { kind: 'fn' }): string {
+  const unsafe = t.isUnsafe || (t.item && 'ast' in t.item && t.item.ast?.isUnsafe) ? 'unsafe ' : '';
+  return `${unsafe}fn(${t.params.map(typeToString).join(', ')})${isUnit(t.ret) ? '' : ` -> ${typeToString(t.ret)}`}`;
 }
 
 export function traitRefToString(ref: TraitRef): string {

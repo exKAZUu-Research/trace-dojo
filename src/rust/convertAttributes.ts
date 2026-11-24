@@ -59,6 +59,24 @@ const TARGET_OPTIONS = new Set([
 ]);
 
 /** Reads the attributes on what follows them, as rustc reads them for a program built without `--test`. */
+/** The attributes that need what a single file run cannot give: other crates or files, a linker, or a target. */
+const UNAVAILABLE_ATTRIBUTES: Record<string, string> = {
+  proc_macro: '手続きマクロの定義（別のクレートが要ります）',
+  proc_macro_derive: '手続きマクロの定義（別のクレートが要ります）',
+  proc_macro_attribute: '手続きマクロの定義（別のクレートが要ります）',
+  path: '別のファイルのモジュール（#[path]）',
+  link: '外部のライブラリとのリンク',
+  link_name: '外部のライブラリとのリンク',
+  link_ordinal: '外部のライブラリとのリンク',
+  target_feature: 'CPU によって結果が変わる属性（#[target_feature]）',
+  instruction_set: 'CPU によって結果が変わる属性（#[instruction_set]）',
+  naked: 'CPU によって結果が変わる属性（#[naked]）',
+  no_std: '#[no_std]',
+  no_main: '#[no_main]',
+  global_allocator: '#[global_allocator]',
+  panic_handler: '#[panic_handler]',
+};
+
 export class AttributeReader {
   constructor(
     private readonly span: (node: Node) => Span,
@@ -82,9 +100,9 @@ export class AttributeReader {
     this.apply(node, { derives: [] }, true);
   }
 
+  /** Applies one attribute, telling whether what it is on stays. */
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of attribute.
   // code-gauge-allow functionNcss -- One case per kind of attribute.
-  /** Applies one attribute, telling whether what it is on stays. */
   private apply(node: Node, attrs: Attributes, inner: boolean): boolean {
     const attribute = node.namedChildren.find((child) => child.type === 'attribute');
     if (!attribute) return true;
@@ -130,34 +148,11 @@ export class AttributeReader {
         }
         return true;
       }
-      case 'proc_macro':
-      case 'proc_macro_derive':
-      case 'proc_macro_attribute': {
-        return unavailable(span, '手続きマクロの定義（別のクレートが要ります）');
-      }
-      case 'path': {
-        return unavailable(span, '別のファイルのモジュール（#[path]）');
-      }
-      case 'link':
-      case 'link_name':
-      case 'link_ordinal': {
-        return unavailable(span, '外部のライブラリとのリンク');
-      }
-      case 'target_feature':
-      case 'instruction_set':
-      case 'naked': {
-        return unavailable(span, `CPU によって結果が変わる属性（#[${name}]）`);
-      }
-      case 'no_std':
-      case 'no_main':
-      case 'global_allocator':
-      case 'panic_handler': {
-        return unavailable(span, `#[${name}]`);
-      }
       case 'feature': {
         return syntaxError(span, '#![feature] は、安定版の Rust では使えません（E0554）。');
       }
       default: {
+        if (Object.hasOwn(UNAVAILABLE_ATTRIBUTES, name)) unavailable(span, UNAVAILABLE_ATTRIBUTES[name]);
         if (UNSAFE_ATTRIBUTES.has(name)) {
           syntaxError(span, `#[${name}] は unsafe な属性なので、#[unsafe(${name})] と書いてください。`);
         }
@@ -194,7 +189,6 @@ export class AttributeReader {
     return this.condition(cfgTokens(tree), span);
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Evaluates the predicates that `cfg` accepts.
   /** Evaluates a `cfg` predicate as rustc does for a debug build without tests or features. */
   private condition(tokens: Node[], span: Span): boolean {
     const [head, second, third] = tokens;

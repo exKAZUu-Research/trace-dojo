@@ -4,7 +4,7 @@ import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations'
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { patternBindings } from './astWalk';
 import { normalize } from './infer';
-import { checkLifetimeRelations } from './lifetimeRelations';
+import { signatureLifetimeError, type SignatureNames, staticInputError } from './lifetimeRelations';
 import {
   type Access,
   type AccessKind,
@@ -57,13 +57,6 @@ interface ClosureSummary {
 }
 
 /** What the builders of a function and of the closures in it share. */
-/** What the lifetime check of a function's signature reads besides the types: its parameters' names and its bounds. */
-interface SignatureNames {
-  params: { name: string; span: Span }[];
-  bounds: { name: string; outlives: string[] }[];
-  span: Span;
-}
-
 interface LoanCheck {
   budget: ExecutionBudget;
   errors: LoanError[];
@@ -144,6 +137,7 @@ export class LoanBuilder {
    * Builds and checks a body whose parameters (and `self`) hold their arguments at the entry, returning the variables
    * that hold the parameters.
    */
+  // code-gauge-allow functionNcss -- Builds the entry, the body and the exit checks of a function in order.
   private build(
     params: { pattern: Pattern; type: Type | undefined }[],
     body: Expr,
@@ -177,52 +171,30 @@ export class LoanBuilder {
     if (this.current !== undefined) this.exits.push(this.current);
     this.join(this.exits);
     this.endLocals(parameterLocals, end);
-    this.checkStaticInputs([...defs, ...paramVars], body.span);
+    const inputs = [...defs, ...paramVars];
+    const regions = inputs.map((v) => this.graph.varRegions[v]);
+    const staticError = staticInputError(
+      this.graph.outlives,
+      regions,
+      this.staticRegion,
+      body.span,
+      this.shared.budget
+    );
+    if (staticError) this.shared.errors.push(staticError);
     this.graph.check(this.shared.errors);
-    if (signature) {
-      const inputs = [
-        ...receiver.map((local, index) => ({ v: defs[index], type: local.type, name: 'self', span: signature.span })),
-        ...params.map(({ type }, index) => ({
-          v: paramVars[index],
-          type: type ?? UNIT,
-          name: signature.params[index].name,
-          span: signature.params[index].span,
-        })),
-      ];
-      const error = checkLifetimeRelations({
-        inputs: inputs.map(({ v, type, name, span }) => ({ layout: this.layouts[v], type, name, span })),
+    const relationError =
+      signature &&
+      signatureLifetimeError(signature, {
+        inputs: inputs.map((v) => this.layouts[v]),
+        inputTypes: [...receiver.map((local) => local.type), ...params.map(({ type }) => type ?? UNIT)],
+        receivers: receiver.length,
         ret: { layout: this.layouts[this.returnVar], type: ret },
-        refSelf: receiver.some((local) => shallow(local.type).kind === 'ref'),
-        bounds: signature.bounds,
         outlives: this.graph.outlives,
         staticRegion: this.staticRegion,
-        span: bodyResultSpan(body),
+        body,
       });
-      if (error) this.shared.errors.push(error);
-    }
+    if (relationError) this.shared.errors.push(relationError);
     return paramVars;
-  }
-
-  private checkStaticInputs(inputs: Var[], span: Span): void {
-    const root = this.staticRegion;
-    if (root === undefined || inputs.length === 0) return;
-    const reachable = new Set([root]);
-    const edges = new Map<RVar, RVar[]>();
-    this.shared.budget.spend(this.graph.outlives.length);
-    for (const [sup, sub] of this.graph.outlives) {
-      const destinations = edges.get(sub);
-      if (destinations) destinations.push(sup);
-      else edges.set(sub, [sup]);
-    }
-    for (const region of reachable) for (const next of edges.get(region) ?? []) reachable.add(next);
-    if (
-      inputs.some((input) => this.graph.varRegions[input].some((region) => region !== root && reachable.has(region)))
-    ) {
-      this.shared.errors.push({
-        span,
-        message: "引数から借りた参照を、この 'static が必要なトレイトオブジェクトには保存できません。",
-      });
-    }
   }
 
   private universalLocal(local: LocalVar): Var {
@@ -628,6 +600,7 @@ export class LoanBuilder {
 
   /** Binds a part of a pattern to a place, which bindings take by reference in the binding mode `byRef`. */
   // code-gauge-allow functionNcss -- One case per kind of pattern.
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of pattern.
   private bindPart(binding: Binding, p: Pattern, place: Place, byRef: BindingMode): void {
     switch (p.kind) {
       case 'binding': {
@@ -1494,10 +1467,4 @@ function refTarget(type: Type | undefined): Type | undefined {
 function isReference(type: Type | undefined): boolean {
   const t = type && normalize(shallow(type));
   return t?.kind === 'ref' || (t?.kind === 'adt' && t.def.builtin !== 'Box');
-}
-
-/** Where a body gives its value: its last expression or statement. */
-function bodyResultSpan(body: Expr): Span {
-  if (body.kind !== 'block') return body.span;
-  return body.tail?.span ?? body.stmts.at(-1)?.span ?? body.span;
 }

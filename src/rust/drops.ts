@@ -52,6 +52,7 @@ export class Dropper {
   }
 
   /** Whether a value of a concrete type holds something whose drop does something. */
+  // code-gauge-allow functionNcss -- One case per kind of type.
   needsDrop(type: Type, seen: Type[] = []): boolean {
     if (!this.active) return false;
     const t = normalize(shallow(type));
@@ -122,26 +123,32 @@ export class Dropper {
     }
   }
 
+  /** An `Rc`, an `Arc`, or a `Weak` going: one count less, and the value goes with its last strong count. */
+  private dropCounted(target: Value, t: Type & { kind: 'adt' }): void {
+    if (t.def.builtin === 'Weak') {
+      const { box } = target as WeakRef;
+      if (box && box.weak > 0) box.weak--;
+      return;
+    }
+    const box = target as SharedBox;
+    if (box.strong === 0) return;
+    box.strong--;
+    if (box.strong === 0) this.drop(box.value, t.args[0]);
+  }
+
   /** Drops the elements an iterator that owns them has not yielded. */
   dropRest(iter: IterValue): void {
     if (iter.rest && iter.ownedItemType) for (const item of iter.rest()) this.drop(item, iter.ownedItemType);
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of owning type.
+  // code-gauge-allow functionNcss -- One case per kind of owning type.
   private dropAdt(value: Value, t: Type & { kind: 'adt' }): void {
     const target = isPlace(value) ? value.get() : value;
     switch (t.def.builtin) {
       case 'Rc':
-      case 'Arc': {
-        const box = target as SharedBox;
-        if (box.strong === 0) return;
-        box.strong--;
-        if (box.strong === 0) this.drop(box.value, t.args[0]);
-        return;
-      }
+      case 'Arc':
       case 'Weak': {
-        const { box } = target as WeakRef;
-        if (box && box.weak > 0) box.weak--;
+        this.dropCounted(target, t);
         return;
       }
       case 'Ref':

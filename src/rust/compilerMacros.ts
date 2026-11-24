@@ -103,6 +103,7 @@ function printMacro(c: Compiler, macro: Macro<'print'>): Eval {
   };
 }
 
+// code-gauge-allow functionNcss -- One case per kind of write target.
 function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   const target = c.read(macro.target);
   const format = macro.format ? compileFormat(c, macro.format) : () => '';

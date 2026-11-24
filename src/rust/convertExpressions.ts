@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- One converter for the expression syntax of Rust.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { BinaryOp, Block, Condition, Expr, Item, MatchArm, PathAst, Pattern, Span, Stmt, TypeAst } from './ast';
@@ -26,7 +27,6 @@ export abstract class ExpressionConverter extends MacroConverter {
   /** Whether the expressions being converted are in an `async` block, where `.await` may be written. */
   protected inAsync = false;
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of syntax node.
   // code-gauge-allow functionNcss -- One case per kind of syntax node.
   block(node: Node): Block {
     const span = this.span(node);
@@ -40,25 +40,9 @@ export abstract class ExpressionConverter extends MacroConverter {
       if (child.type === 'let_declaration') {
         stmts.push(this.letStmt(child));
       } else if (this.userMacroStatement(child)) {
-        const node = this.userMacroStatement(child) as Node;
-        const expansion = this.userMacroStatements(node);
-        stmts.push(...expansion.stmts);
-        items.push(...expansion.items);
-        if (expansion.tail) {
-          const terminated = child.type === 'expression_statement' && child.text.trimEnd().endsWith(';');
-          if (isLast && !terminated) tail = expansion.tail;
-          else stmts.push({ kind: 'expr', expr: expansion.tail, semi: terminated, span: expansion.tail.span });
-        }
+        tail = this.macroStatement(child, isLast, stmts, items) ?? tail;
       } else if (child.type === 'expression_statement') {
-        const inner = child.namedChildren.find((c) => !isComment(c)) as Node;
-        const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
-        const { attributes, target } = splitAttributes(inner);
-        if (!this.attributes.read(attributes) || !target) continue;
-        const expression = target;
-        const expr = this.expr(expression);
-        const terminated = semi || child.lastChild?.type === ';';
-        if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) tail = expr;
-        else stmts.push({ kind: 'expr', expr, semi: terminated, span: this.span(expression) });
+        tail = this.expressionStatement(child, isLast, stmts) ?? tail;
       } else if (child.type === 'empty_statement') {
         this.emptyStatement(stmts, child, children[index - 1]);
       } else if (isItem(child)) {
@@ -71,6 +55,31 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
     }
     return { kind: 'block', stmts, tail, span, endRow: node.endPosition.row, items };
+  }
+
+  /** A statement of a user macro's expansion, adding its statements and items; its value when it ends the block. */
+  private macroStatement(child: Node, isLast: boolean, stmts: Stmt[], items: Item[]): Expr | undefined {
+    const expansion = this.userMacroStatements(this.userMacroStatement(child) as Node);
+    stmts.push(...expansion.stmts);
+    items.push(...expansion.items);
+    if (!expansion.tail) return undefined;
+    const terminated = child.type === 'expression_statement' && child.text.trimEnd().endsWith(';');
+    if (isLast && !terminated) return expansion.tail;
+    stmts.push({ kind: 'expr', expr: expansion.tail, semi: terminated, span: expansion.tail.span });
+    return undefined;
+  }
+
+  /** An expression statement, added to `stmts`; its value when it ends the block without a `;`. */
+  private expressionStatement(child: Node, isLast: boolean, stmts: Stmt[]): Expr | undefined {
+    const inner = child.namedChildren.find((c) => !isComment(c)) as Node;
+    const semi = child.text.trimEnd().endsWith(';') && !inner.text.endsWith(';');
+    const { attributes, target } = splitAttributes(inner);
+    if (!this.attributes.read(attributes) || !target) return undefined;
+    const expr = this.expr(target);
+    const terminated = semi || child.lastChild?.type === ';';
+    if (isLast && !terminated && (expr.kind === 'macro' || isBlockLike(expr))) return expr;
+    stmts.push({ kind: 'expr', expr, semi: terminated, span: this.span(target) });
+    return undefined;
   }
 
   /**
@@ -88,6 +97,7 @@ export abstract class ExpressionConverter extends MacroConverter {
    * The statements and items of a block, without the comments, the inner attributes, and what `#[cfg]` removes, and
    * with the other attributes read.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Skips comments and attributes as rustc does.
   private blockChildren(node: Node): Node[] {
     const children: Node[] = [];
     for (const child of node.namedChildren) {
@@ -158,9 +168,7 @@ export abstract class ExpressionConverter extends MacroConverter {
         return this.integerLiteral(node, span);
       }
       case 'float_literal': {
-        const literal = parseFloatLiteral(node.text);
-        if (!literal) syntaxError(span, `小数の書き方（${node.text}）に誤りがあります。`);
-        return { kind: 'float', value: literal.value, f32: literal.f32, suffix: literal.suffix, span };
+        return floatLiteral(node.text, span);
       }
       case 'boolean_literal': {
         return { kind: 'bool', value: node.text === 'true', span };
@@ -196,15 +204,10 @@ export abstract class ExpressionConverter extends MacroConverter {
       case 'struct_expression': {
         return this.structExpr(node);
       }
-      case 'unsafe_block': {
-        return {
-          ...this.block(node.namedChildren.find((child) => child.type === 'block') as Node),
-          isUnsafe: true,
-          span,
-        };
-      }
-      case 'const_block': {
-        return { ...this.block(this.field(node, 'body')), isConst: true, span };
+      case 'unsafe_block':
+      case 'const_block':
+      case 'async_block': {
+        return this.specialBlock(node, span);
       }
       case 'block': {
         const label = this.label(node);
@@ -219,13 +222,6 @@ export abstract class ExpressionConverter extends MacroConverter {
       }
       case 'closure_expression': {
         return this.closure(node);
-      }
-      case 'async_block': {
-        const isMove = node.children.some((child) => child.type === 'move');
-        const body = this.inContext(true, () =>
-          this.block(node.namedChildren.find((child) => child.type === 'block') as Node)
-        );
-        return asyncBlock(body, isMove, span);
       }
       case 'await_expression': {
         if (!this.inAsync) syntaxError(span, '.await は、async 関数か async ブロックの中でしか使えません（E0728）。');
@@ -245,10 +241,25 @@ export abstract class ExpressionConverter extends MacroConverter {
     }
   }
 
+  /** `unsafe { ... }`, `const { ... }`, or `async { ... }`. */
+  private specialBlock(node: Node, span: Span): Expr {
+    const inner =
+      node.childForFieldName('body') ?? (node.namedChildren.find((child) => child.type === 'block') as Node);
+    if (node.type === 'const_block') return { ...this.block(inner), isConst: true, span };
+    if (node.type === 'unsafe_block') return { ...this.block(inner), isUnsafe: true, span };
+    const isMove = node.children.some((child) => child.type === 'move');
+    return asyncBlock(
+      this.inContext(true, () => this.block(inner)),
+      isMove,
+      span
+    );
+  }
+
   /**
    * `'a: { ... }`, which runs as `'a: loop { break 'a { ... } }`: only a `break 'a` leaves it early, and rustc rejects
    * the unlabeled `break` and `continue` that the loop would catch.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Checks break and continue targets of labeled blocks as rustc does.
   private labeledBlock(node: Node, label: string, span: Span): Expr {
     const block = this.block(node);
     const check = (expr: Expr): void => {
@@ -559,7 +570,7 @@ export abstract class ExpressionConverter extends MacroConverter {
     return { kind: 'block', stmts: [binding, ...stores], tail: undefined, span, endRow: span.row, items: [] };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per kind of assignee expression.
+  // code-gauge-allow functionNcss -- One case per kind of assignee expression.
   private assigneePattern(node: Node, stores: Stmt[]): Pattern {
     const span = this.span(node);
     switch (node.type) {
@@ -846,6 +857,12 @@ const UNSTABLE_EXPRESSIONS: Record<string, string> = {
   yield_expression: 'yield 式',
   become_expression: 'become 式',
 };
+
+function floatLiteral(text: string, span: Span): Expr {
+  const literal = parseFloatLiteral(text);
+  if (!literal) syntaxError(span, `小数の書き方（${text}）に誤りがあります。`);
+  return { kind: 'float', value: literal.value, f32: literal.f32, suffix: literal.suffix, span };
+}
 
 function asyncBlock(body: Block, isMove: boolean, span: Span): Expr {
   return { kind: 'closure', isMove, params: [], ret: undefined, body, isAsync: 'block', span };
