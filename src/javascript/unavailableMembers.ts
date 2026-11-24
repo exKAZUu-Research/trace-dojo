@@ -52,15 +52,23 @@ const unavailableSymbolNames = new Map(Object.entries(WELL_KNOWN_SYMBOLS).map(([
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
 
 /**
- * Defines reflected method properties whose calls remain unavailable, and checks unavailable reads the type checker
- * cannot resolve, such as those through `any`.
+ * Defines reflected method properties whose calls remain unavailable and `Math.random`, which a TypeScript program
+ * draws random numbers with as a Java one does, from the host's generator, and checks unavailable reads the type
+ * checker cannot resolve, such as those through `any`.
  */
 export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck {
   const { realm } = runtime;
   const symbol = realm.globals.lookup('Symbol')?.value;
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
-  defineUnavailableMethods(runtime, math, console);
+  defineUnavailableMethods(runtime, console);
+  if (math instanceof JsObject)
+    math.properties.set('random', {
+      value: runtime.newNativeFunction('random', 0, () => Math.random()),
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
   defineUnavailableRegExpStatics(runtime);
   orderBuiltinMembers(realm);
   return (value, key) => unavailableSymbolFeature(value, key, symbol);
@@ -83,11 +91,10 @@ export function rejectUnavailableMember(feature: string, row: number | undefined
   throw new CompileError([{ row: row ?? 0, message: `${feature}${separator}は、この採点環境では使えません。` }]);
 }
 
-function defineUnavailableMethods(runtime: Runtime, math: Value, console: Value): void {
+function defineUnavailableMethods(runtime: Runtime, console: Value): void {
   const { realm } = runtime;
   const array = realm.globals.lookup('Array')?.value;
   if (array instanceof JsObject) defineUnavailableMethod(runtime, array, 'fromAsync', 'Array.fromAsync', { length: 1 });
-  if (math instanceof JsObject) defineUnavailableMethod(runtime, math, 'random', 'Math.random');
   if (console instanceof JsObject)
     for (const name of consoleTimers)
       defineUnavailableMethod(runtime, console, String(name), `console.${String(name)}`, { enumerable: true });

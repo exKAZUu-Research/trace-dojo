@@ -127,21 +127,16 @@ export function libraryScope(): Scope {
 
 /** Library values that this interpreter does not run yet, with the names learners know them by. */
 const unsupportedValues: Record<string, string> = {
-  Date: 'Date（日付と時刻）',
-  WeakMap: 'WeakMap',
-  WeakSet: 'WeakSet',
   WeakRef: 'WeakRef',
   FinalizationRegistry: 'FinalizationRegistry',
   Proxy: 'Proxy',
   Reflect: 'Reflect',
   eval: 'eval',
   Function: 'Function コンストラクタ',
-  structuredClone: 'structuredClone',
   globalThis: 'globalThis',
   fetch: 'fetch などのネットワーク',
   alert: 'alert',
   prompt: 'prompt などの標準入力',
-  AggregateError: 'AggregateError',
   Buffer: 'Buffer',
 };
 

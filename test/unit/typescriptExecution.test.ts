@@ -310,13 +310,6 @@ test.each([
     'import { f } from "./other";',
     "モジュール './other' の import は、この採点環境では使えません。",
   ],
-  ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
-  ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
-  [
-    'Math.random through any',
-    'const m: any = Math;\nconsole.log(m.random());',
-    'Math.random は、この採点環境では使えません。',
-  ],
   [
     'the stack of an Error through any',
     'const e: any = new Error("oops");\nconsole.log(e.stack);',
@@ -336,11 +329,6 @@ test.each([
     'RegExp compile through any',
     'const r: any = /a/;\nr.compile("b");',
     'RegExp の compile は、この採点環境では使えません。',
-  ],
-  [
-    'Math.random through an intersection whose first member declares it too',
-    'const m: { random(): number } & Math = Math;\nm.random();',
-    'Math.random は、この採点環境では使えません。',
   ],
   [
     'the stack of an Error through a type parameter constrained to an intersection',
@@ -536,12 +524,12 @@ const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
 test('reading unavailable values and calling unavailable methods are rejected through indirection', () => {
   const sources = [
     'const {stack} = new Error("bad"); console.log(stack);',
-    'const {random} = Math; console.log(random());',
-    'const key = "random"; const {[key]: random} = Math; random();',
+    'const {time} = console; time("a");',
+    'const key = "time"; const {[key]: time} = console; time("a");',
     'const key = "stack"; const {[key]: stack} = new Error("bad");',
-    'const key = "random" as "random" | "abs"; const {[key]: selected} = Math; selected(1);',
-    'function select<K extends "random">(key: K) { const {[key]: selected} = Math; selected(); } select("random");',
-    'const key = "random"; let selected: () => number; ({[key]: selected} = Math); selected();',
+    'const key = "time" as "time" | "log"; const {[key]: selected} = console; selected("a");',
+    'function select<K extends "time">(key: K) { const {[key]: selected} = console; selected(); } select("time");',
+    'const key = "time"; let selected: (label?: string) => void; ({[key]: selected} = console); selected();',
     'const key = "stack"; let selected: string | undefined; ({[key]: selected = "none"} = new Error("bad"));',
     'console["time"]("start");',
     'function show(error: Error | TypeError) { const {stack} = error; console.log(stack); }',
@@ -627,7 +615,6 @@ test.each([
 
 test('reflected unavailable methods and error stack accessors reject invocation', () => {
   for (const source of [
-    'Object.getOwnPropertyDescriptor(Math, "random")!.value();',
     'Object.getOwnPropertyDescriptors(RegExp.prototype).compile.value!.call(/a/, "b");',
     'Object.getOwnPropertyDescriptor(console, "time")!.value("start");',
     'const e = new Error("bad"); Object.getOwnPropertyDescriptor(e, "stack")!.get!.call(e);',
