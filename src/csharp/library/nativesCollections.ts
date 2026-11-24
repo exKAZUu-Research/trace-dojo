@@ -1,12 +1,12 @@
 // code-gauge-allow-file fileNcss -- The nativesCollections module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
-import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
+import { defaultCompare, environmentOf, hashOf, runtimeTypeName, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
 import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
 import { copyValue, CsArray, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
-import { introSort } from './sort';
+import { InconsistentComparer, introSort } from './sort';
 import {
   bufferedElements,
   chargeElements,
@@ -305,7 +305,19 @@ function lastIndexOfRange(call: NativeCall, items: Value[], value: Value, start:
 }
 
 export function sortItems(call: NativeCall, items: Value[], start: number, length: number, comparer: Value): void {
-  introSort(items, start, length, guardedComparison(call, comparisonOf(call, comparer)));
+  try {
+    introSort(items, start, length, guardedComparison(call, comparisonOf(call, comparer)));
+  } catch (error) {
+    if (!(error instanceof InconsistentComparer)) throw error;
+    const comparerName =
+      comparer === undefined
+        ? `System.Collections.Generic.GenericComparer\`1[${runtimeTypeName(typeArgument(call))}]`
+        : runtimeTypeName(call.frame.runtime.runtimeTypeOf(comparer) as Type);
+    fail(
+      'System.ArgumentException',
+      `Unable to sort because the IComparer.Compare() method returns inconsistent results. Either a value does not compare equal to itself, or one value repeatedly compared to another value yields different results. IComparer: '${comparerName}'.`
+    );
+  }
 }
 
 const listNatives: Record<string, NativeMethod> = {

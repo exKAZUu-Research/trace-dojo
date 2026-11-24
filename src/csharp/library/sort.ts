@@ -2,6 +2,12 @@
  * .NET's `ArraySortHelper<T>.IntrospectiveSort` (introsort with insertion sort for small partitions and heapsort past
  * the depth limit), transcribed so that equal elements end up in .NET's order and comparers run in its sequence.
  */
+/**
+ * Thrown when a comparer's inconsistent results walk a partition past its range, where .NET's span throws the
+ * IndexOutOfRangeException that its sort reports as a bad comparer.
+ */
+export class InconsistentComparer extends Error {}
+
 export function introSort<T>(keys: T[], start: number, length: number, compare: (a: T, b: T) => number): void {
   if (length < 2) return;
   introSortRange(keys, start, length, 2 * (Math.floor(Math.log2(length)) + 1), compare);
@@ -69,10 +75,10 @@ function pickPivotAndPartition<T>(keys: T[], offset: number, length: number, com
   let left = 0;
   let right = hi - 1;
   while (left < right) {
-    while (compare(keys[offset + ++left], pivot) < 0) {
+    while (compare(keys[offset + withinPartition(++left, length)], pivot) < 0) {
       // Advance while the element is less than the pivot.
     }
-    while (compare(pivot, keys[offset + --right]) < 0) {
+    while (compare(pivot, keys[offset + withinPartition(--right, length)]) < 0) {
       // Retreat while the pivot is less than the element.
     }
     if (left >= right) break;
@@ -80,6 +86,11 @@ function pickPivotAndPartition<T>(keys: T[], offset: number, length: number, com
   }
   if (left !== hi - 1) swap(keys, offset + left, offset + hi - 1);
   return left;
+}
+
+function withinPartition(index: number, length: number): number {
+  if (index < 0 || index >= length) throw new InconsistentComparer();
+  return index;
 }
 
 function heapSort<T>(keys: T[], offset: number, length: number, compare: (a: T, b: T) => number): void {
