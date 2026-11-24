@@ -14,6 +14,7 @@ import {
   satisfiesTypeConstraint,
 } from './concepts';
 import { convertArithmetic, implicitConversion } from './conversions';
+import { CoroutineCompiler, isCoroutineCode } from './coroutineCompiler';
 import { enumeratorEntity } from './enums';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
@@ -69,7 +70,6 @@ import {
   endScope,
   type LocalDeclaration,
   type ReferenceBinding,
-  StatementCompiler,
 } from './statementCompiler';
 import { isObjectCreation } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
@@ -145,7 +145,7 @@ export interface CompiledProgram {
 }
 
 /** Compiles a translation unit of C++20 that uses the interpreter's subset of the language and its library. */
-export class Compiler extends StatementCompiler {
+export class Compiler extends CoroutineCompiler {
   readonly recordsSteps: boolean;
   private readonly atomicRows: ReadonlyMap<number, number>;
   private readonly usedAtomicRows = new Set<number>();
@@ -3235,6 +3235,10 @@ export class Compiler extends StatementCompiler {
       const body = fieldOf(node, 'body') ?? node.children.find((child) => child.type === 'try_statement');
       if (!body) return this.error(node.row, `${fn.displayName} の本体を書いてください。`);
       const isTryBlock = body.type === 'try_statement';
+      if (!isTryBlock && isCoroutineCode(body)) {
+        fn.compiled = this.coroutineFunction(fn, body);
+        return;
+      }
       const initializerList = (isTryBlock ? body : node).children.find(
         (child) => child.type === 'field_initializer_list'
       );
@@ -3967,7 +3971,12 @@ export class Compiler extends StatementCompiler {
 
   /** Whether a class is an instance of `std::initializer_list`. */
   isInitializerList(cls: ClassInfo): boolean {
-    const entity = this.libraryNamespace.scope.names.get('initializer_list');
+    return this.isLibraryInstance(cls, 'initializer_list');
+  }
+
+  /** Whether a class is an instance of a class template the library's C++ source defines. */
+  protected isLibraryInstance(cls: ClassInfo, name: string): boolean {
+    const entity = this.libraryNamespace.scope.names.get(name);
     return (
       entity?.kind === 'template' && cls.templateOrigin !== undefined && cls.templateOrigin === entity.template.program
     );
@@ -4190,8 +4199,7 @@ export class Compiler extends StatementCompiler {
   ): Expr {
     if (!expr.braced) return expr;
     return (
-      this.listReferenceValue(expr.braced, type.to, direct) ??
-      this.error(row, '参照メンバを {...} の値に束縛できません。')
+      this.listReferenceValue(expr.braced, type, direct) ?? this.error(row, '参照メンバを {...} の値に束縛できません。')
     );
   }
 

@@ -1,0 +1,32 @@
+ctor a
+move a~
+eager body a~
+promise gone
+dtor a~
+dtor a
+ctor b
+move b~
+eager body b~
+promise gone
+dtor b~
+dtor b
+main caught eager failure
+ctor p
+move p~
+dtor p
+created
+ctor local
+in try
+resumed once
+after first
+caught inside
+ctor inner
+resumed twice, done=0
+dtor inner
+dtor local
+dtor p~
+destroyed
+unhandled
+thrower done=1
+1110
+1

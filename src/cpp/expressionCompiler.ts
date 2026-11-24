@@ -122,6 +122,12 @@ type FloatingFactors = [FloatingValue, FloatingValue];
 export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Whether `auto` deduces an array from an array, as a structured binding's hidden variable does. */
   protected deducesArrays = false;
+
+  /**
+   * The expressions the interpreter has compiled, by the text of the `compiled_expression` nodes that stand for them
+   * in the code it writes.
+   */
+  private readonly compiledExpressions = new Map<string, Expr>();
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */
   private readonly literalStores = new Map<string, Box>();
   // A replacement evaluator must explicitly preserve factor evaluation, including any new side effects.
@@ -129,6 +135,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   compileExpression(node: Syntax): Expr {
     switch (node.type) {
+      case 'compiled_expression': {
+        return this.compiledExpressions.get(node.text) as Expr;
+      }
       case 'number_literal': {
         // The grammar reads a sign before a number as part of the literal; C++ reads it as a unary operator.
         const sign = /^[+-]/.exec(node.text)?.[0];
@@ -2996,7 +3005,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const binding = implicitConversion(this, arg, to, false);
       if (binding) return { ...binding, apply: () => binding.apply(arg) };
     }
-    if (to.kind === 'reference' && !isConstType(to.to)) return undefined;
+    // A braced list binds a const lvalue reference or an rvalue reference to a temporary (C++20 [dcl.init.list]p3.10).
+    if (to.kind === 'reference' && !to.isRvalue && !isConstType(to.to)) return undefined;
     const type = unqualified(nonReference(to));
     let value: Expr;
     try {
@@ -3010,10 +3020,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return sequence(rank, () => (to.kind === 'reference' ? this.materialize(value) : value));
   }
 
-  protected listReferenceValue(list: Syntax, referent: Type, direct: boolean): Expr | undefined {
+  protected listReferenceValue(
+    list: Syntax,
+    reference: Extract<Type, { kind: 'reference' }>,
+    direct: boolean
+  ): Expr | undefined {
+    const referent = reference.to;
     const target = this.singleListExpression(list);
     if (target && isReferenceRelated(target.type, referent)) return target;
-    if (isConstType(referent)) return this.listValue(unqualified(referent), list, direct);
+    if (reference.isRvalue || isConstType(referent)) return this.listValue(unqualified(referent), list, direct);
   }
 
   private singleListExpression(list: Syntax): Expr | undefined {
@@ -3036,6 +3051,25 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantInitialization: initialize.isConstant,
       constantStringLength: initialize.constantStringLength,
       isTemporaryObject: type.kind === 'class',
+    };
+  }
+
+  /** A node that stands for an expression already compiled, in code the interpreter writes. */
+  protected compiledSyntax(expr: Expr): Syntax {
+    const text = `\0compiled ${this.compiledExpressions.size}`;
+    this.compiledExpressions.set(text, expr);
+    const { row } = expr;
+    return {
+      type: 'compiled_expression',
+      text,
+      row,
+      endRow: row,
+      start: 0,
+      end: 0,
+      isNamed: true,
+      field: undefined,
+      all: [],
+      children: [],
     };
   }
 
@@ -3604,7 +3638,7 @@ function promoteBitField(expr: Expr): Expr {
 }
 
 /** Whether a class or one of its bases declares a member of a name, through its virtual bases only `withVirtual`. */
-function hasMemberNamed(cls: ClassInfo, name: string, withVirtual = true): boolean {
+export function hasMemberNamed(cls: ClassInfo, name: string, withVirtual = true): boolean {
   for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
     if (owner.ownFields.some((field) => field.name === name) || owner.methods.has(name)) return true;
     if (owner.staticFields.has(name) || owner.constants.has(name) || owner.memberTypes.has(name)) return true;

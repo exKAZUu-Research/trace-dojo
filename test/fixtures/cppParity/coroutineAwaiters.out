@@ -1,0 +1,14 @@
+a=42
+suspend? 1
+resumed 1
+before suspend? 2
+main: suspended, done=0
+resumed 2 after
+suspend? 30
+main: done=0
+resumed 30
+m.value=6
+big
+sum=6
+return_void
+main: done=1

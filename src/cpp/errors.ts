@@ -90,6 +90,8 @@ export function unsupportedMessage(feature: string): string {
 export class CppException extends Error {
   /** The number of handlers running for the exception, nested ones included. */
   handlerCount = 0;
+  /** The number of `std::exception_ptr`s that share the exception object. */
+  references = 0;
   isDestroyed = false;
 
   constructor(

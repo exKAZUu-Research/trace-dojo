@@ -210,7 +210,8 @@ export function bindRetainedTemporary(
 }
 
 /** Ends the lifetime of temporaries created since `mark`, the last first. */
-function destroyTemporaries(frame: Frame, mark: number): void {
+export function destroyTemporaries(frame: Frame, mark: number): void {
+  if (frame.retainsTemporaries) return;
   const { temporaries } = frame;
   while (temporaries.length > mark) {
     const temporary = temporaries.pop();

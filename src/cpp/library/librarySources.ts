@@ -1,6 +1,8 @@
 import { ANY } from './sources/any';
 import { BITSET } from './sources/bitset';
+import { COROUTINE } from './sources/coroutine';
 import { DISTRIBUTIONS } from './sources/distributions';
+import { EXCEPTION_PTR } from './sources/exceptionPtr';
 import { FUNCTION } from './sources/functional';
 import { INITIALIZER_LIST } from './sources/initializerList';
 import { MEMORY } from './sources/memory';
@@ -10,6 +12,7 @@ import { STRING_VIEW } from './sources/stringView';
 import { INTEGER_SEQUENCE, TUPLE } from './sources/tuple';
 import { TYPE_INFO } from './sources/typeInfo';
 import { TYPE_TRAITS } from './sources/typeTraits';
+import { UTILITY } from './sources/utility';
 import { VARIANT } from './sources/variant';
 
 /**
@@ -38,6 +41,9 @@ export const LIBRARY_SOURCES: readonly LibrarySource[] = [
   ANY,
   INITIALIZER_LIST,
   DISTRIBUTIONS,
+  COROUTINE,
+  UTILITY,
+  EXCEPTION_PTR,
 ];
 
 const SOURCE_BY_NAME = new Map(LIBRARY_SOURCES.flatMap((source) => source.names.map((name) => [name, source])));

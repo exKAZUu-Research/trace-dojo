@@ -5,6 +5,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import { byteAt } from './bytes';
+import type { Coroutine } from './coroutines';
 import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
 import { OPEN_MODE, StreamValue } from './library/iostream';
 import { utf8 } from './literals';
@@ -51,6 +52,8 @@ export class Frame implements TracedFrame {
   readonly slots: Slot[];
   returnValue: Value | Ptr = undefined;
   readonly temporaries: Temporary[] = [];
+  /** Whether the full-expressions of the frame leave their temporaries to the coroutine statement that awaits. */
+  retainsTemporaries = false;
   /** Values the frame holds outside its variables, such as an exception a handler runs for. */
   readonly pending: (Value | Ptr)[] = [];
   readonly evaluationRoots: Value[] = [];
@@ -69,7 +72,7 @@ export class Frame implements TracedFrame {
   constructor(
     readonly runtime: Runtime,
     readonly fn: FunctionInfo | undefined,
-    readonly callRow: number | undefined,
+    public callRow: number | undefined,
     slotCount: number,
     readonly self: Ptr | undefined,
     readonly compiled: CompiledFunction | undefined
@@ -201,6 +204,11 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The number of delete expressions destroying objects now. */
   deleteDepth = 0;
   readonly frames: Frame[] = [];
+  /** The coroutines whose frames are live, by the storage of their promises, which their handles' addresses point to. */
+  readonly coroutines = new Map<Store, Coroutine>();
+  readonly destroyedCoroutines = new WeakSet<Store>();
+  /** The exceptions `std::exception_ptr`s share, by the storage of their objects. */
+  readonly sharedExceptions = new Map<object, CppException>();
   /** Whether the run evaluates a constant expression while compiling, where only constexpr functions may run. */
   isConstantEvaluation = false;
   /** How many constexpr functions of the program the constant evaluation called. */
@@ -316,6 +324,10 @@ export class Runtime implements TracedRuntime<Frame> {
     return new ProgramAbort(message);
   }
 
+  isUnwinding(exception: CppException): boolean {
+    return this.unwinding.has(exception);
+  }
+
   beginHandler(exception: CppException): void {
     this.handling.push(exception);
     this.unwinding.delete(exception);
@@ -406,7 +418,7 @@ export class Runtime implements TracedRuntime<Frame> {
       reached.add(value);
       pending.push(value);
     };
-    for (const frame of this.frames) {
+    for (const frame of [...this.frames, ...[...this.coroutines.values()].map((coroutine) => coroutine.frame)]) {
       for (const slot of frame.slots) visit(slot);
       visit(frame.self);
       visit(frame.returnValue);
@@ -414,7 +426,7 @@ export class Runtime implements TracedRuntime<Frame> {
       for (const value of frame.pending) visit(value);
       for (const value of frame.evaluationRoots) visit(value);
     }
-    for (const exception of this.handling) visit(exception.value);
+    for (const exception of [...this.handling, ...this.sharedExceptions.values()]) visit(exception.value);
     for (const exception of this.unwinding) visit(exception.value);
     for (const global of this.globals) visit(global);
     while (pending.length > 0) {

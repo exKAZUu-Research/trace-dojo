@@ -1,6 +1,7 @@
 import { FileSystemError } from '../../interpreter/programIo';
 import { byteArray } from '../bytes';
 import type { ConceptInfo } from '../concepts';
+import { coroutineFunctions } from '../coroutines';
 import { CppRuntimeError, ProgramAbort, ProgramExit } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -40,6 +41,7 @@ import { cFunctions } from './cFunctions';
 import { orderingClasses, type OrderingName } from './compare';
 import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
+import { exceptionPointerFunctions } from './exceptionPointers';
 import { exceptionClasses } from './exceptions';
 import {
   FLAGS,
@@ -86,10 +88,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   new_handler: 'メモリ不足時のハンドラ（std::new_handler）',
   set_new_handler: 'メモリ不足時のハンドラ（std::set_new_handler）',
   get_new_handler: 'メモリ不足時のハンドラ（std::get_new_handler）',
-  exception_ptr: '例外へのポインタ（std::exception_ptr）',
-  current_exception: '例外へのポインタ（std::current_exception）',
-  make_exception_ptr: '例外へのポインタ（std::make_exception_ptr）',
-  rethrow_exception: '例外へのポインタ（std::rethrow_exception）',
   filesystem: 'ファイルシステム（std::filesystem）',
   thread: 'スレッド（std::thread）',
   jthread: 'スレッド（std::jthread）',
@@ -292,6 +290,8 @@ export class Library {
   }
 
   std(name: string): Entity | undefined {
+    // The interpreter's own names, which only the library's C++ source uses, are not in the SDK's headers.
+    if (name.startsWith(INTERNAL_PREFIX)) return this.stdNames.get(name);
     if (!isVisible(name, this.headers, 'std')) return undefined;
     const entity = this.stdNames.get(name);
     if (entity?.kind === 'class') this.trackDefinition(name, classType(entity.cls));
@@ -474,6 +474,8 @@ export class Library {
     for (const [name, cls] of randomEngines()) this.addStd(name, { kind: 'class', cls });
     this.addFunctions(algorithmFunctions(this), this.stdNames);
     this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
+    this.addFunctions(coroutineFunctions(), this.stdNames);
+    this.addFunctions(exceptionPointerFunctions(), this.stdNames);
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });
@@ -652,6 +654,9 @@ function callHandler(frame: Frame, handler: unknown, row: number): void {
   const [fn] = (handler as FunctionRef).candidates;
   if (fn) invoke(frame, fn, [], undefined, row);
 }
+
+/** The prefix of the names of `std` the interpreter declares for the library's C++ source. */
+const INTERNAL_PREFIX = '__builtin_';
 
 function abort(): never {
   throw new ProgramAbort('std::abort でプログラムが止まりました。');

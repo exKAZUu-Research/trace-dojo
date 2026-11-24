@@ -102,6 +102,21 @@ export function parseExpressionAt(text: string, at: Syntax): Syntax | undefined 
   }
 }
 
+/** Parses a statement the interpreter writes, which it compiles as if it were written at a row. */
+export function parseStatementAt(text: string, row: number): Syntax {
+  const prefix = 'void statement_probe() { ';
+  const tree = parser.parse(`${prefix}${text} }`);
+  if (!tree) throw new Error(`cannot parse ${text}`);
+  try {
+    const { rootNode } = tree;
+    const statement = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    if (rootNode.hasError || !statement) throw new Error(`cannot parse ${text}`);
+    return copySyntax(statement, undefined, { row, index: -prefix.length });
+  } finally {
+    tree.delete();
+  }
+}
+
 export function parseInitializerArguments(parameters: Syntax): Syntax | undefined {
   const prefix = 'void initializer_probe() { initializer_probe';
   const tree = parser.parse(`${prefix}${parameters.text}; }`);
