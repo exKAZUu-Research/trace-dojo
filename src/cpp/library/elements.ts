@@ -757,3 +757,40 @@ export function truthy(value: Value): boolean {
 }
 
 export { CObject, FunctionRef, SequenceValue, Store, StringValue };
+
+/**
+ * Calls a function object of a class the program writes with keys, as a container does with its own object of the
+ * class, which holds nothing, so that any object of the class gives the same results.
+ */
+export function functionObjectCall(
+  compiler: ExpressionCompiler,
+  keyType: Type,
+  cls: ClassInfo,
+  arity: number,
+  row = 0
+): (keys: Value[], frame: Frame) => Value {
+  if (cls.fields.length > 0)
+    return compiler.unsupported(row, `値を持つ関数オブジェクト（${cls.name}）をコンテナに使うこと`);
+  const object = new CObject(cls, []);
+  const callee: Expr = { type: classType(cls, true), isLvalue: true, row, run: () => new Ptr(new Box(object), 0) };
+  const operands: Value[][] = [];
+  const operand = (index: number): Expr => ({
+    type: withConst(keyType),
+    isLvalue: true,
+    row,
+    run: () => new Ptr(new Box((operands.at(-1) as Value[])[index]), 0),
+  });
+  const call = compiler.callWith(
+    callee,
+    Array.from({ length: arity }, (_, index) => operand(index)),
+    row
+  );
+  return (keys, frame) => {
+    operands.push(keys);
+    try {
+      return withTemporaries(frame, () => call.run(frame) as Value);
+    } finally {
+      operands.pop();
+    }
+  };
+}

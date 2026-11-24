@@ -266,6 +266,8 @@ function referenceBinding(
       });
     }
   }
+  const viaFunction = allowUser ? lvalueConversionFunction(host, expr, target) : undefined;
+  if (viaFunction) return viaFunction;
   if (!toConst) return undefined;
   const fromRvalue = !expr.isLvalue || expr.isXvalue === true;
   if (!expr.isLvalue && from.kind === 'class' && target.kind === 'class') {
@@ -280,6 +282,29 @@ function referenceBinding(
   const converted = implicitConversion(host, expr, unqualified(target), allowUser);
   if (!converted) return undefined;
   return { ...converted, reference: { toConst, fromRvalue }, apply: (e) => host.materialize(converted.apply(e)) };
+}
+
+/**
+ * Binds an lvalue reference to the lvalue a conversion function of the expression's class returns (C++20
+ * [dcl.init.ref]p5.1.2).
+ */
+function lvalueConversionFunction(host: ConversionHost, expr: Expr, target: Type): ConversionSequence | undefined {
+  const source = expr.type;
+  if (source.kind !== 'class' || source.cls.library) return undefined;
+  const viable: { fn: FunctionInfo; second: ConversionSequence }[] = [];
+  for (const fn of conversionFunctions(source.cls)) {
+    if (fn.isExplicit || fn.ret.kind !== 'reference' || fn.ret.isRvalue) continue;
+    if (isConstType(source) && !fn.isConst) continue;
+    const result: Expr = { type: fn.ret.to, isLvalue: true, row: expr.row, run: () => {} };
+    const second = referenceBinding(host, result, target, false);
+    if (second) viable.push({ fn, second });
+  }
+  const best = bestOf(viable, (a, b) => compareSequences(a.second, b.second));
+  if (!best) return undefined;
+  return sequence(Rank.UserDefined, (e) => best.second.apply(host.callConversion(e, best.fn)), {
+    user: best.fn,
+    reference: best.second.reference,
+  });
 }
 
 /** Binds an rvalue reference (`T&&`), which only an rvalue may bind: an xvalue directly, a prvalue as a temporary. */

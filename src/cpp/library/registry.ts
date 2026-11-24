@@ -67,6 +67,7 @@ import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, CONST_CHAR_PTR, generic, native, readCString } from './support';
 import { turtleClass } from './turtle';
+import { hashFunctions } from './unordered';
 import { headerOf, isCtypeFunction, isVisible } from './visibility';
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
@@ -109,7 +110,6 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   smatch: '正規表現（std::smatch）',
   locale: 'ロケール（std::locale）',
   type_index: '実行時の型の情報（std::type_index）',
-  bind: 'std::bind',
   move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
   complex: '複素数（std::complex）',
@@ -476,6 +476,7 @@ export class Library {
     this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
     this.addFunctions(coroutineFunctions(), this.stdNames);
     this.addFunctions(exceptionPointerFunctions(), this.stdNames);
+    this.addFunctions(hashFunctions(), this.stdNames);
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });

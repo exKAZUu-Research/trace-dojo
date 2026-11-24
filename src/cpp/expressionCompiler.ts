@@ -2522,11 +2522,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         if (others.length > 0) return this.error(operand.row, `${expr.functions.name} はオーバーロードされています。`);
         return functionTypeOf(fn);
       }
-      // Otherwise an lvalue gives a reference to its type.
-      return expr.isLvalue && !expr.isXvalue ? referenceTo(expr.type) : expr.type;
+      return this.decltypeOfValue(expr);
     } finally {
       this.isUnevaluated = previous;
     }
+  }
+
+  /** What `decltype` gives for an expression other than a name: a reference to an lvalue's or an xvalue's type. */
+  protected decltypeOfValue(expr: Expr): Type {
+    if (expr.isXvalue) return referenceTo(expr.type, true);
+    return expr.isLvalue ? referenceTo(expr.type) : expr.type;
   }
 
   /** `offsetof(T, member)`, the offset in bytes of a member in the objects of a standard-layout class. */
@@ -3365,6 +3370,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The value copy-initialization gives an object of a type; `isList` checks for narrowing conversions. */
   abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Initializer;
+  /** `std::hash<T>` for a type, which the program may specialize. */
+  abstract stdHash(type: Type): Type;
 
   /** The value default-initialization gives an object of a type. */
   abstract defaultInitializer(type: Type, row: number): Initializer;

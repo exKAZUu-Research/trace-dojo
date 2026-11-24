@@ -88,16 +88,16 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
   templates.push({
     name: 'unordered_map',
     instantiate: (args, row) => {
-      arity('unordered_map', args, 2, 2, row);
-      return classType(unorderedClass(library, 'unordered_map', args[0], args[1]));
+      arity('unordered_map', args, 2, 4, row);
+      return classType(unorderedClass(library, 'unordered_map', args[0], args[1], args[2], args[3]));
     },
   });
   templates.push({
     name: 'unordered_set',
     instantiate: (args, row) => {
-      arity('unordered_set', args, 1, 1, row);
+      arity('unordered_set', args, 1, 3, row);
       checkContainerElement(compiler(), `std::unordered_set<${typeName(args[0])}>`, args[0], row);
-      return classType(unorderedClass(library, 'unordered_set', args[0], undefined));
+      return classType(unorderedClass(library, 'unordered_set', args[0], undefined, args[1], args[2]));
     },
   });
   templates.push({

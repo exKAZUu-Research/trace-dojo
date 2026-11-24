@@ -364,6 +364,8 @@ export class Deduction {
   private matchInstance(pattern: Extract<Pattern, { kind: 'instance' }>, type: Type): boolean {
     if (type.kind !== 'class') return false;
     const template = this.compiler.templateOfName(pattern.name);
+    if (template instanceof Object && (template as ClassTemplateInfo).kind === 'alias')
+      return this.matchAlias(pattern, template as ClassTemplateInfo, type);
     // A derived class's base that is an instance of the template matches too.
     for (let cls: ClassInfo | undefined = type.cls; cls; cls = cls.base) {
       const args = this.compiler.instanceArguments(cls, template);
@@ -381,6 +383,34 @@ export class Deduction {
       return packName === undefined || this.bindPack(packName, args.slice(fixed.length));
     }
     return false;
+  }
+
+  /**
+   * Matches an instance of an alias template (`index_sequence<I...>`) as the type it aliases: the alias's parameters
+   * deduced from the type deduce the arguments the pattern writes.
+   */
+  private matchAlias(pattern: Extract<Pattern, { kind: 'instance' }>, alias: ClassTemplateInfo, type: Type): boolean {
+    const node = fieldOf(alias.node as Syntax, 'type') as Syntax;
+    const inner = new Deduction(this.compiler, alias.parameters);
+    const target = this.compiler.inTemplate(alias, undefined, () => inner.pattern(node, fieldOf(node, 'declarator')));
+    if (!this.compiler.inTemplate(alias, undefined, () => inner.match(target, type))) return false;
+    for (const [index, parameter] of alias.parameters.entries()) {
+      const name = parameter.name ?? '';
+      const argPattern = pattern.args[index];
+      if (!argPattern) return parameter.isPack === true;
+      if (parameter.isPack) {
+        const packName = this.trailingPack(pattern.args.slice(index));
+        return packName === undefined || this.bindPack(packName, inner.packs.get(name) ?? []);
+      }
+      if (argPattern.kind === 'valueName') {
+        const value = inner.values.get(name);
+        if (value === undefined || !this.bindValue(argPattern.name, value)) return false;
+      } else if (argPattern.kind !== 'nondeduced') {
+        const argument = inner.types.get(name);
+        if (!argument || !this.match(argPattern, argument)) return false;
+      }
+    }
+    return true;
   }
 
   /** Matches patterns against types one by one, where a trailing pack (`Args...`) takes the types left over. */

@@ -3,7 +3,6 @@ import { implicitConversion } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { withTemporaries } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   alignOf,
@@ -26,7 +25,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { Box, CObject, holdValues, Ptr, type Value } from '../values';
+import { CObject, holdValues, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
@@ -34,6 +33,7 @@ import {
   type ElementOperations,
   elementOperations,
   equalTo,
+  functionObjectCall,
   lessThan,
   requireDefaultConstruction,
   requireElementUse,
@@ -521,26 +521,8 @@ export function comparatorOrder(
  * hold nothing, so that any of them compares as the container's does.
  */
 function programComparatorOrder(compiler: ExpressionCompiler, keyType: Type, cls: ClassInfo, row: number): Order {
-  if (cls.fields.length > 0)
-    return compiler.unsupported(row, `値を持つ比べ方の関数オブジェクト（${cls.name}）をコンテナに使うこと`);
-  const object = new CObject(cls, []);
-  const callee: Expr = { type: classType(cls, true), isLvalue: true, row, run: () => new Ptr(new Box(object), 0) };
-  const operands: Value[][] = [];
-  const operand = (index: number): Expr => ({
-    type: withConst(unqualified(keyType)),
-    isLvalue: true,
-    row,
-    run: () => new Ptr(new Box((operands.at(-1) as Value[])[index]), 0),
-  });
-  const test = compiler.condition(compiler.callWith(callee, [operand(0), operand(1)], row), row);
-  const less = (a: Value, b: Value, frame: Frame): boolean => {
-    operands.push([a, b]);
-    try {
-      return withTemporaries(frame, () => test(frame));
-    } finally {
-      operands.pop();
-    }
-  };
+  const call = functionObjectCall(compiler, unqualified(keyType), cls, 2, row);
+  const less = (a: Value, b: Value, frame: Frame): boolean => Number(call([a, b], frame)) !== 0;
   return (a, b, frame) => (less(a, b, frame) ? -1 : less(b, a, frame) ? 1 : 0);
 }
 

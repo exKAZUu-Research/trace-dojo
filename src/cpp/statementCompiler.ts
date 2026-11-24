@@ -1,6 +1,6 @@
 import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
-import { AUTO, type Declared, hasAuto, isAuto } from './compilerBase';
+import { AUTO, type Declared, DECLTYPE_AUTO, hasAuto, isAuto } from './compilerBase';
 import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
@@ -1694,9 +1694,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       valueNode && valueNode.type !== 'initializer_list' && isDeduced ? this.compileExpression(valueNode) : undefined;
     if (hasAuto(this.context.returnType)) {
       this.context.autoReturn = this.context.returnType;
-      this.deduceReturnType(precompiled, node.row);
+      this.deduceReturnType(precompiled, valueNode, node.row);
     } else if (this.context.autoReturn && valueNode?.type !== 'initializer_list') {
-      this.checkReturnDeduction(this.context.autoReturn, precompiled, node.row);
+      this.checkReturnDeduction(this.context.autoReturn, precompiled, valueNode, node.row);
     }
     const returnType = this.context.returnType;
     if (!valueNode) {
@@ -1726,7 +1726,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
    * Decides an `auto` return type from the first `return` statement (C++20 [dcl.spec.auto]), whose value later ones
    * must agree with.
    */
-  private deduceReturnType(value: Expr | undefined, row: number): void {
+  private deduceReturnType(value: Expr | undefined, node: Syntax | undefined, row: number): void {
     const declared = this.context.returnType;
     if (!value) {
       if (declared.kind !== 'class' && declared.kind !== 'void' && !isAuto(declared))
@@ -1738,21 +1738,29 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.setReturnType(VOID);
       return;
     }
-    this.setReturnType(this.deducedReturnType(declared, value, row));
+    this.setReturnType(this.deducedReturnType(declared, value, node as Syntax, row));
   }
 
-  /** The return type an `auto` return type deduces from a value; `auto&&` deduces as a forwarding reference does. */
-  private deducedReturnType(declared: Type, value: Expr, row: number): Type {
+  /**
+   * The return type an `auto` return type deduces from a value: `auto&&` deduces as a forwarding reference does, and
+   * `decltype(auto)` as `decltype` of the returned expression.
+   */
+  private deducedReturnType(declared: Type, value: Expr, node: Syntax, row: number): Type {
+    if (declared.kind === 'class' && declared.cls === DECLTYPE_AUTO.cls) {
+      if (node.type === 'identifier' || node.type === 'qualified_identifier' || node.type === 'field_expression')
+        return this.decltypeOf(node);
+      return this.decltypeOfValue(value);
+    }
     if (declared.kind !== 'reference') return this.deduceAuto(declared, value, row);
     const isRvalue = declared.isRvalue === true && (!value.isLvalue || value.isXvalue === true);
     return referenceTo(this.deduceAutoReference(declared.to, value), isRvalue);
   }
 
   /** Rejects a `return` whose value deduces another type than the first one did. */
-  private checkReturnDeduction(declared: Type, value: Expr | undefined, row: number): void {
+  private checkReturnDeduction(declared: Type, value: Expr | undefined, node: Syntax | undefined, row: number): void {
     const first = this.context.returnType;
     let type: Type = VOID;
-    if (value && value.type.kind !== 'void') type = this.deducedReturnType(declared, value, row);
+    if (value && value.type.kind !== 'void') type = this.deducedReturnType(declared, value, node as Syntax, row);
     if (!sameType(type, first))
       this.error(
         row,

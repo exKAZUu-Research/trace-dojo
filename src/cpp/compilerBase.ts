@@ -658,13 +658,13 @@ export abstract class CompilerBase {
       }
       case 'placeholder_type_specifier': {
         if (!allowAuto) return this.error(node.row, 'auto は、この場所では型として使えません。');
-        return AUTO;
+        return node.children.some((child) => child.type === 'decltype') ? DECLTYPE_AUTO : AUTO;
       }
       case 'decltype': {
         const operand = node.children[0];
         if (operand?.type === 'auto') {
           if (!allowAuto) return this.error(node.row, 'decltype(auto) は、この場所では型として使えません。');
-          return AUTO;
+          return DECLTYPE_AUTO;
         }
         return this.decltypeOf(operand as Syntax);
       }
@@ -954,8 +954,8 @@ export abstract class CompilerBase {
       case 'operator_cast': {
         // A conversion function (`operator int() const`) returns the type it names.
         const type = this.conversionType(declarator);
-        const functionDeclarator = fieldOf(declarator, 'declarator') as Syntax;
-        return { name: this.conversionName(declarator), nameNode: declarator, type, function: functionDeclarator };
+        const { parameters } = conversionDeclarators(fieldOf(declarator, 'declarator') as Syntax);
+        return { name: this.conversionName(declarator), nameNode: declarator, type, function: parameters };
       }
       case 'function_declarator': {
         // `auto f() -> int` writes the return type after the parameters.
@@ -1029,10 +1029,8 @@ export abstract class CompilerBase {
   /** The type a conversion function (`operator int() const`) converts to. */
   conversionType(node: Syntax): Type {
     const base = this.specifiedType(node);
-    const inner = fieldOf(node, 'declarator');
-    // The declarator of the type (`operator int*()`) precedes the function's parameters.
-    if (inner && inner.type !== 'abstract_function_declarator') return this.applyDeclarator(base, inner).type;
-    return base;
+    const { type } = conversionDeclarators(fieldOf(node, 'declarator') as Syntax);
+    return type ? this.applyDeclarator(base, type).type : base;
   }
 
   /** The name of a conversion function, such as `operator int`. */
@@ -1085,9 +1083,11 @@ function unqualifiedInt<T extends { isConst?: boolean }>(type: T): T {
 
 /** The type that `auto` stands for until an initializer decides it. */
 export const AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('auto', 'class'));
+/** `decltype(auto)`, which deduces what `decltype` gives for its initializer. */
+export const DECLTYPE_AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('decltype(auto)', 'class'));
 
 export function isAuto(type: Type): boolean {
-  return type.kind === 'class' && type.cls === AUTO.cls;
+  return type.kind === 'class' && (type.cls === AUTO.cls || type.cls === DECLTYPE_AUTO.cls);
 }
 
 /** A template a name denotes, which the name of a class template's instance in its own scope also denotes. */
@@ -1160,4 +1160,17 @@ function declaresFunction(declaration: Syntax): boolean {
     current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
   }
   return false;
+}
+
+/**
+ * The declarators of a conversion function (`operator int*() const`): those of the type it converts to, without the
+ * innermost one, which declares the function's parameters.
+ */
+function conversionDeclarators(declarator: Syntax): { type: Syntax | undefined; parameters: Syntax | undefined } {
+  if (declarator.type === 'abstract_function_declarator') return { type: undefined, parameters: declarator };
+  const inner = declarator.children.find((child) => child.type.endsWith('declarator'));
+  if (!inner) return { type: declarator, parameters: undefined };
+  const split = conversionDeclarators(inner);
+  const all = declarator.all.flatMap((child) => (child === inner ? (split.type ? [split.type] : []) : [child]));
+  return { type: { ...declarator, all, children: all.filter((child) => child.isNamed) }, parameters: split.parameters };
 }

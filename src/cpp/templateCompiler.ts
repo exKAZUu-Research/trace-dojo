@@ -273,9 +273,23 @@ function declareClassTemplate(
   owner: ClassInfo | undefined,
   constraint: Syntax | undefined
 ): void {
-  const nameNode = fieldOf(node, 'name');
+  const written = fieldOf(node, 'name');
   const body = fieldOf(node, 'body');
-  if (!nameNode) return compiler.error(node.row, 'クラステンプレートには名前を書いてください。');
+  if (!written) return compiler.error(node.row, 'クラステンプレートには名前を書いてください。');
+  const qualifiedName = written.type === 'qualified_identifier' ? fieldOf(written, 'name') : undefined;
+  if (qualifiedName?.type === 'template_type') {
+    // `template <> struct std::hash<Point>` specializes a template of a namespace by its qualified name.
+    const template = withPlainName(written, qualifiedName, fieldOf(qualifiedName, 'name') as Syntax);
+    const info = compiler.classTemplateNamed(template);
+    if (!body) return;
+    info.specializations.push({
+      parameters,
+      node: withPlainName(node, written, qualifiedName),
+      enclosing: [...compiler.templateScopes],
+    });
+    return;
+  }
+  const nameNode = written;
   if (nameNode.type === 'template_type') {
     // `template <class T> class Box<T*>` or `template <> class Box<int>` specializes a declared template.
     const info = compiler.classTemplateNamed(fieldOf(nameNode, 'name') as Syntax);

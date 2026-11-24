@@ -3974,6 +3974,14 @@ export class Compiler extends CoroutineCompiler {
     return this.isLibraryInstance(cls, 'initializer_list');
   }
 
+  stdHash(type: Type): Type {
+    const entity = this.findStdName('hash');
+    const template = entity?.kind === 'template' ? entity.template.program : undefined;
+    if (template?.kind !== 'class')
+      return this.error(this.userRow, 'std::hash を使うには <functional> などを #include してください。');
+    return this.instantiateClassTemplate(template, [type], this.userRow);
+  }
+
   /** Whether a class is an instance of a class template the library's C++ source defines. */
   protected isLibraryInstance(cls: ClassInfo, name: string): boolean {
     const entity = this.libraryNamespace.scope.names.get(name);
