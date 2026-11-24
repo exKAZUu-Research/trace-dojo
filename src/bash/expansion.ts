@@ -480,6 +480,11 @@ export class Expander {
     expansion?: ParameterExpansion
   ): ParameterValue {
     const resolved = this.shell.resolveName(name);
+    if (!this.shell.findOwnVariable(resolved) && resolved.includes('[')) {
+      return subscript.wholeArray
+        ? { kind: 'list', values: [], star: subscript.text === '*' }
+        : { kind: 'scalar', value: undefined };
+    }
     if (subscript.wholeArray) {
       return { kind: 'list', values: this.shell.arrayValues(resolved), star: subscript.text === '*' };
     }

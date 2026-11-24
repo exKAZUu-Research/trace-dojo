@@ -28,7 +28,7 @@ import { doubleQuote, quoteReusable } from './quoting';
 import { DiscardSignal, ExitSignal } from './runtime';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
-import { ATTRIBUTE_ORDER } from './variables';
+import { ATTRIBUTE_ORDER, type Variable } from './variables';
 
 /** Applies the operator of `${name<operator>argument}` to the parameter's value. */
 // code-gauge-allow functionCognitiveComplexity -- One case per operator family of Bash's parameter expansion, each needing the expansion's context.
@@ -645,7 +645,7 @@ function transform(
       return mapValues(expander, value, inDouble, lowerCase);
     }
     case 'a': {
-      const variable = shell.findVariable(name) ?? shell.dynamicDeclaration(shell.resolveName(name));
+      const variable = resolveTransformationVariable(shell, name);
       const flags = variable ? ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('') : '';
       if (value.kind === 'list')
         return expander.valuePieces({ ...value, values: value.values.map(() => flags) }, inDouble);
@@ -676,18 +676,28 @@ function transform(
   }
 }
 
+function resolveTransformationVariable(shell: Shell, name: string): Variable | undefined {
+  const resolved = shell.resolveNameOrUndefined(name, false);
+  if (resolved === undefined) return undefined;
+  const own = shell.findOwnVariable(resolved);
+  if (own) return own;
+  return resolved.includes('[') ? undefined : shell.dynamicDeclaration(resolved);
+}
+
 /** `${x@A}`: formats a scalar or local assignment statement, or `declare -p` output for `${a[@]@A}`. */
 function assignmentText(shell: Shell, name: string, value: ParameterValue): string {
-  const variable = shell.findVariable(name) ?? shell.dynamicDeclaration(shell.resolveName(name));
+  const variable = resolveTransformationVariable(shell, name);
   if (!variable) return '';
   if (value.kind === 'list') return variable.value ? declarationText(variable) : '';
+  const targetName = variable.name;
   const flags = ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('');
   const quoted = variable.value && value.value !== undefined ? quoteReusable(value.value) : undefined;
   const { scopes, functionScopes } = shell.state;
-  const isCurrentLocal = functionScopes.length > 0 && scopes[functionScopes.at(-1) as number].get(name) === variable;
-  if (flags) return `declare -${flags} ${name}${quoted === undefined ? '' : `=${quoted}`}`;
-  if (isCurrentLocal) return `declare ${name}${quoted === undefined ? '' : `=${quoted}`}`;
-  return quoted === undefined ? '' : `${name}=${quoted}`;
+  const isCurrentLocal =
+    functionScopes.length > 0 && scopes[functionScopes.at(-1) as number].get(targetName) === variable;
+  if (flags) return `declare -${flags} ${targetName}${quoted === undefined ? '' : `=${quoted}`}`;
+  if (isCurrentLocal) return `declare ${targetName}${quoted === undefined ? '' : `=${quoted}`}`;
+  return quoted === undefined ? '' : `${targetName}=${quoted}`;
 }
 
 /**
