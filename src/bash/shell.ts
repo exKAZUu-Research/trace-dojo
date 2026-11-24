@@ -525,18 +525,24 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeCase(statement: Extract<Statement, { kind: 'case' }>): number {
-    const value = this.withRoots(() => this.leavingLine(() => this.expander.expandString(statement.value)));
-    let status = 0;
-    let falling = false;
-    for (const item of statement.items) {
-      const matches =
-        falling || item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern)));
-      if (!matches) continue;
-      status = this.runStatements(item.body);
-      if (item.terminator === ';;') return status;
-      falling = item.terminator === ';&';
-    }
-    return status;
+    return this.withRoots((roots) => {
+      const value = this.withRoots(() => this.leavingLine(() => this.expander.expandString(statement.value)));
+      roots.push(value);
+      let status = 0;
+      let falling = false;
+      for (const item of statement.items) {
+        const matches =
+          falling ||
+          item.patterns.some((pattern) =>
+            this.withRoots(() => this.expander.matches(value, this.expander.expandPattern(pattern)))
+          );
+        if (!matches) continue;
+        status = this.runStatements(item.body);
+        if (item.terminator === ';;') return status;
+        falling = item.terminator === ';&';
+      }
+      return status;
+    });
   }
 
   private executeTest(statement: Extract<Statement, { kind: 'test' }>): number {
