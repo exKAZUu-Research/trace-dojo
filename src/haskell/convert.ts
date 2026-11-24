@@ -2202,6 +2202,9 @@ function convertBlock(node: Node, span: Span): Expr {
  * Converts `M.do`, which QualifiedDo reads with the `>>=`, `>>`, and `fail` of the module `M`: `x <- e; s` as
  * `e M.>>= \x -> s`, `e; s` as `e M.>> s`, and a bind whose pattern can fail as one that calls `M.fail` then.
  */
+/** What the case of a qualified do block's bind is, whose failing alternative the renamer may drop. */
+export const QUALIFIED_DO_BIND = 'qualified do bind';
+
 function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
   if (!extensions.has('QualifiedDo'))
     throw syntaxError(span, '修飾つきの do を使うには、QualifiedDo の拡張が要ります。');
@@ -2245,26 +2248,22 @@ function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
         },
         span: stmt.span,
       };
-      const body: Expr = irrefutableSurface(stmt.pat)
-        ? {
-            kind: 'case',
-            scrutinee: varOf(name, stmt.span),
-            alts: [{ pat: stmt.pat, rhs: plainRhs(rest, span), span }],
+      // Whether the pattern can fail, which decides whether M.fail is needed, depends on its constructors, which
+      // the renamer knows: it drops the failing alternative of a pattern that cannot fail.
+      const body: Expr = {
+        kind: 'case',
+        scrutinee: varOf(name, stmt.span),
+        alts: [
+          { pat: stmt.pat, rhs: plainRhs(rest, span), span },
+          {
+            pat: { kind: 'pwild', span },
+            rhs: plainRhs({ kind: 'app', fn: qualified('fail', stmt.span), arg: failMessage, span }, span),
             span,
-          }
-        : {
-            kind: 'case',
-            scrutinee: varOf(name, stmt.span),
-            alts: [
-              { pat: stmt.pat, rhs: plainRhs(rest, span), span },
-              {
-                pat: { kind: 'pwild', span },
-                rhs: plainRhs({ kind: 'app', fn: qualified('fail', stmt.span), arg: failMessage, span }, span),
-                span,
-              },
-            ],
-            span,
-          };
+          },
+        ],
+        span,
+        what: QUALIFIED_DO_BIND,
+      };
       const lambda = lambdaOf([name], body, span);
       result = {
         kind: 'app',
@@ -2285,28 +2284,6 @@ function plainRhs(expr: Expr, span: Span): Rhs {
 }
 
 /** Whether a pattern always matches, judging by its form alone. */
-function irrefutableSurface(pat: Pat): boolean {
-  switch (pat.kind) {
-    case 'pvar':
-    case 'pwild':
-    case 'plazy': {
-      return true;
-    }
-    case 'pbang':
-    case 'psig': {
-      return irrefutableSurface(pat.pat);
-    }
-    case 'pas': {
-      return irrefutableSurface(pat.pat);
-    }
-    case 'ptuple': {
-      return pat.elems.every(irrefutableSurface);
-    }
-    default: {
-      return false;
-    }
-  }
-}
 
 function convertRecordPattern(node: Node, span: Span): Pat {
   const con = convertPattern(required(node, 'constructor'));

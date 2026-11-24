@@ -18,6 +18,7 @@ import {
   UNIT_CON,
   UNIT_TYPE,
 } from './builtinTypes';
+import { QUALIFIED_DO_BIND } from './convert';
 import {
   type ClassEntity,
   type ConInfo,
@@ -1465,10 +1466,13 @@ class Renamer {
         };
       }
       case 'case': {
+        // A qualified do block's bind needs M.fail only when its pattern can fail.
+        const alts =
+          expr.what === QUALIFIED_DO_BIND && this.irrefutable(expr.alts[0].pat) ? expr.alts.slice(0, 1) : expr.alts;
         return {
           k: 'case',
           scrutinee: this.renameExpr(expr.scrutinee, scope),
-          alts: expr.alts.map((alt) => this.renameAlt(alt, scope)),
+          alts: alts.map((alt) => this.renameAlt(alt, scope)),
           span,
           what: expr.what,
         };
@@ -2127,6 +2131,35 @@ class Renamer {
           body: this.renameType(type.body, inner),
           span,
         };
+      }
+    }
+  }
+
+  /** Whether a pattern always matches: variables, lazy patterns, and constructors of types with only one. */
+  private irrefutable(pat: Pat): boolean {
+    switch (pat.kind) {
+      case 'pvar':
+      case 'pwild':
+      case 'plazy': {
+        return true;
+      }
+      case 'pbang':
+      case 'psig':
+      case 'pas': {
+        return this.irrefutable(pat.pat);
+      }
+      case 'ptuple': {
+        return pat.elems.every((elem) => this.irrefutable(elem));
+      }
+      case 'pcon':
+      case 'precord': {
+        if (!pat.con.qualifier && this.patternSynonyms.has(pat.con.name)) return false;
+        if (this.lookupCon(pat.con).type.cons.length !== 1) return false;
+        const args = pat.kind === 'pcon' ? pat.args : pat.fields.map((field) => field.pat);
+        return args.every((arg) => this.irrefutable(arg));
+      }
+      default: {
+        return false;
       }
     }
   }
