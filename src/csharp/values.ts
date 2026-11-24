@@ -158,14 +158,23 @@ export interface VariableReference {
  */
 export function structFieldSlots(value: Value): number {
   if (value instanceof CsBox) {
-    if (value.isCharged) return 0;
-    value.isCharged = true;
+    if (value.isCharged || pendingBoxes.has(value)) return 0;
+    pendingBoxes.add(value);
     return structFieldSlots(value.value);
   }
   if (!(value instanceof CsStruct)) return 0;
   let count = value.fields.length;
   for (const field of value.fields) count += structFieldSlots(field);
   return count;
+}
+
+/** The boxes that structFieldSlots has counted, which a charge marks as charged only once it succeeds. */
+const pendingBoxes = new Set<CsBox>();
+
+/** Marks the counted boxes as charged when their charge succeeded, or forgets them when it failed. */
+export function settleBoxCharges(isCharged: boolean): void {
+  if (isCharged) for (const box of pendingBoxes) box.isCharged = true;
+  pendingBoxes.clear();
 }
 
 /** The struct fields a store of a value adds over the value it replaces, which the store is charged for. */

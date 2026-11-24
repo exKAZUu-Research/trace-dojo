@@ -31,6 +31,7 @@ import {
   CsStruct,
   freshString,
   isString,
+  settleBoxCharges,
   storeGrowth,
   UNASSIGNED,
   type Value,
@@ -202,15 +203,18 @@ export class Runtime {
    * or a box enters an `object` field, so a struct kept by any store counts against the slot limit.
    */
   chargeStore(previous: Value, next: Value): void {
-    const growth = storeGrowth(previous, next);
-    if (growth > 0) this.allocateSlots(growth);
+    this.allocateSlots(storeGrowth(previous, next));
   }
 
   /** Charges for array elements or object fields before they are allocated. */
   allocateSlots(count: number): void {
     this.allocatedSlots += count;
     this.spend(Math.ceil(count / 64));
-    if (this.allocatedSlots > LIMITS.maxSlots)
+    // The boxes counted into the charge are charged only when it succeeds, so a store retried after a caught
+    // OutOfMemoryException charges them again.
+    const isWithinLimit = this.allocatedSlots <= LIMITS.maxSlots;
+    settleBoxCharges(isWithinLimit);
+    if (!isWithinLimit)
       throw new PendingException(
         'System.OutOfMemoryException',
         "Exception of type 'System.OutOfMemoryException' was thrown."
