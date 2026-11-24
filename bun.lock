@@ -17,6 +17,7 @@
         "@codemirror/view": "6.43.15",
         "@emotion/react": "11.14.0",
         "@emotion/styled": "11.14.1",
+        "@eslint-community/regexpp": "4.12.3",
         "@lezer/highlight": "1.2.5",
         "@noble/hashes": "2.4.0",
         "@rvf/set-get": "7.0.4",
@@ -28,6 +29,7 @@
         "@willbooster/shared-lib": "11.2.1",
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "43.0.0",
+        "@willbooster/tree-sitter-c-sharp": "22.0.4",
         "@willbooster/tree-sitter-cpp": "44.0.0",
         "@willbooster/tree-sitter-dart": "22.0.4",
         "@willbooster/tree-sitter-go": "13.0.4",
@@ -289,6 +291,8 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.25.12", "", { "os": "win32", "cpu": "ia32" }, "sha512-HkqnmmBoCbCwxUKKNPBixiWDGCpQGVsrQfJoVGYLPT41XWF8lHuE5N6WhVia2n4o5QK5M4tYr21827fNhi4byQ=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
+
+    "@eslint-community/regexpp": ["@eslint-community/regexpp@4.12.3", "", {}, "sha512-R76UKbvsqI68DJJVTVyqFKqU98CN4+B+acxNfEA2IFarSzP0SjtKf/3+fFiXzTyv5Fj3PxLkGHe2wnVWWMxobQ=="],
 
     "@exodus/bytes": ["@exodus/bytes@1.16.0", "", { "peerDependencies": { "@noble/hashes": "^1.8.0 || ^2.0.0" }, "optionalPeers": ["@noble/hashes"] }, "sha512-IcpW84uEn3N7ETtNZMlxKhfl6Pec8rUNGOTBtWbK1FKhJxIFAptZyVrvVRVBimAJxJCgc3PxepxkdWWG4DVzfA=="],
 
@@ -709,6 +713,8 @@
     "@willbooster/shared-lib-react": ["@willbooster/shared-lib-react@6.3.0", "", { "peerDependencies": { "react": "~19.2.0", "react-dom": "~19.2.0" } }, "sha512-Y1n2KYTb1vLRY/cTX0KlWRtCJ9KVqCVOoXY7maPriU20eVvCbXV9cu2ROi6Ds4Om8ZS+l37EZQuEDIzxvsC0Nw=="],
 
     "@willbooster/tree-sitter-c": ["@willbooster/tree-sitter-c@43.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.1.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-nw0GTE4ydRLUEOiB2/IZBkZ+DuD4RHrpnCn8Ao24OhhBbOUypFymloBVmC1zvTUm5R+MJRZvSWIYUmO93glv1w=="],
+
+    "@willbooster/tree-sitter-c-sharp": ["@willbooster/tree-sitter-c-sharp@22.0.4", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-K2XP5N/t1WjKw1zuVGjaUrUtSMw7sILThFZrFguBN5yfNcu1wSmNxjUcXYTRXAa5zVsKjyJeHHSvYQrHN5xnqg=="],
 
     "@willbooster/tree-sitter-cpp": ["@willbooster/tree-sitter-cpp@44.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.1.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-+UL7JVz7ktczgHxdvtq4Hvi5hDo/Kb7l9kMToW/7M36vDWpVEfgt8Mx2U2rl3oFeaezKY9pRUAvIREm2SKtthQ=="],
 
