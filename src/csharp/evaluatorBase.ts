@@ -19,6 +19,7 @@ import {
   substitute,
   substitutionOf,
   type Type,
+  typeKey,
   type TypeParameterSymbol,
 } from './types';
 import {
@@ -366,13 +367,20 @@ export abstract class EvaluatorBase {
     if (type.kind !== 'named' || type.symbol.kind !== 'struct') return 0;
     const special = type.symbol.special;
     if (special === 'nullable' || (special !== undefined && SPECIAL_DEFAULTS[special] !== undefined)) return 0;
+    // Nested layouts repeat, as a struct of two fields of another does, so each construction is counted once.
+    const key = typeKey(type);
+    const known = this.slotCounts.get(key);
+    if (known !== undefined) return known;
     const substitution = substitutionOf(type);
     let count = type.symbol.instanceFieldCount;
     for (const field of type.symbol.fields) {
       if (!field.isStatic && !field.isConst) count += this.defaultSlotCount(substitute(field.type, substitution));
     }
+    this.slotCounts.set(key, count);
     return count;
   }
+
+  private readonly slotCounts = new Map<string, number>();
 }
 
 function numericKindOf(type: Type): SpecialType {

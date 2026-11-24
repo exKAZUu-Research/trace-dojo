@@ -270,11 +270,13 @@ export class Runtime {
 
   private initializeType(type: NamedType, key: string): StaticStorage {
     const symbol = type.symbol;
+    const fieldTypes = symbol.fields
+      .filter((field) => field.isStatic && !field.isConst)
+      .map((field): [number, Type] => [field.slot, substitute(field.type, substitutionOf(type))]);
+    // A static field of a struct type keeps the fields its default value allocates, charged before they exist.
+    this.allocateSlots(fieldTypes.reduce((sum, [, fieldType]) => sum + this.evaluator.defaultSlotCount(fieldType), 0));
     const values: Value[] = Array.from({ length: symbol.staticFieldCount });
-    for (const field of symbol.fields) {
-      if (field.isStatic && !field.isConst)
-        values[field.slot] = this.evaluator.defaultOf(substitute(field.type, substitutionOf(type)));
-    }
+    for (const [slot, fieldType] of fieldTypes) values[slot] = this.evaluator.defaultOf(fieldType);
     const storage = { values };
     this.statics.set(key, storage);
     if (this.initializing.has(key)) return storage;
