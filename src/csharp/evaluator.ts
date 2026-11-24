@@ -651,7 +651,7 @@ export class Evaluator extends StatementExecutor {
             info: { method: expression.method, captures: expression.method.captures, isStatic: false },
             cells: cells ?? new Map(),
             thisValue: frame.thisValue,
-            typeEnvironment: frame.typeEnvironment,
+            typeEnvironment: this.localFunctionEnvironment(frame, expression.method, entry.typeArgs),
           },
         },
       ]);
