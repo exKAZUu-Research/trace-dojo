@@ -1602,6 +1602,8 @@ function convertType(node: Node): TypeExpr {
       return { kind: 'tvar', name: node.text, span };
     }
     case 'apply': {
+      const multiplication = starProductChain(node);
+      if (multiplication) return multiplication;
       const constructor = field(node, 'constructor') ?? required(node, 'function');
       const argument = required(node, 'argument');
       if (argument.type === 'kind_application') {
@@ -1683,7 +1685,12 @@ function convertType(node: Node): TypeExpr {
     }
     case 'infix_chain':
     case 'infix': {
-      const items = chainItems(node, convertQuantifiedType);
+      // A product the grammar read as an application joins the chain, so that fixities order it with the rest.
+      const items = chainItems(node, convertQuantifiedType).flatMap((item) =>
+        item.kind === 'operand' && item.value.kind === 'tchain' && starProducts.has(item.value)
+          ? item.value.items
+          : [item]
+      );
       for (const item of items) {
         if (item.kind === 'operator' && item.op.name !== '~') requireTypeOperators(node);
         if (item.kind === 'negate') throw syntaxError(item.span, '書き方に誤りがあります。');
@@ -1711,6 +1718,48 @@ function convertType(node: Node): TypeExpr {
       throw syntaxError(span, '書き方に誤りがあります。');
     }
   }
+}
+
+/** The chains `starProductChain` makes of applications, which an enclosing chain takes the items of. */
+const starProducts = new WeakSet<TypeExpr>();
+
+/**
+ * Under NoStarIsType, `*` is GHC.TypeLits' multiplication, but the grammar reads `3 * 4` after another operator as
+ * `3` applied to `*` and `4`: the application's parts split at each `*` into a chain of products.
+ */
+function starProductChain(node: Node): TypeExpr | undefined {
+  if (extensions.has('StarIsType')) return undefined;
+  const parts: Node[] = [];
+  let head: Node = node;
+  while (head.type === 'apply') {
+    parts.unshift(required(head, 'argument'));
+    head = field(head, 'constructor') ?? required(head, 'function');
+  }
+  parts.unshift(head);
+  if (!parts.some((part) => part.type === 'star')) return undefined;
+  const span = spanOf(node);
+  const items: ChainItem<TypeExpr>[] = [];
+  let segment: Node[] = [];
+  const flush = (): void => {
+    if (segment.length === 0) throw syntaxError(span, '書き方に誤りがあります。');
+    let type = convertType(segment[0]);
+    for (const arg of segment.slice(1)) type = { kind: 'tapp', fn: type, arg: convertType(arg), span };
+    items.push({ kind: 'operand', value: type });
+    segment = [];
+  };
+  for (const part of parts) {
+    if (part.type !== 'star') {
+      segment.push(part);
+      continue;
+    }
+    flush();
+    requireTypeOperators(node);
+    items.push({ kind: 'operator', op: { name: '*', span: spanOf(part), isConstructor: false } });
+  }
+  flush();
+  const chain: TypeExpr = { kind: 'tchain', items, span };
+  starProducts.add(chain);
+  return chain;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
