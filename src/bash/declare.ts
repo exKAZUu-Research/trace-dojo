@@ -14,6 +14,7 @@ import {
   CONVERTED_BUCKETS,
   findEnclosingVariable,
   isIdentifier,
+  resolveNameInScopes,
   sortedElements,
   type Variable,
   type VariableValue,
@@ -513,6 +514,7 @@ interface PreUnsetNamerefStore extends DeclarationDestination {
   extraUnsetLink?: Variable;
   failedBase?: boolean;
   invalidBaseTarget?: string;
+  preResolved?: { resolved: string } | { cyclicName: string };
 }
 
 function declareOperand(
@@ -595,6 +597,7 @@ function declareOne(
   }
   const preUnsetStore = resolvePreUnsetNamerefStore(
     shell,
+    name,
     destination.variable,
     options,
     isLocal,
@@ -797,7 +800,7 @@ function selectDeclarationStore(
   const implicitIndexedZero =
     assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
   if (set.has('g') && implicitIndexedZero) {
-    return resolveImplicitIndexedStore(shell, builtin, preUnsetStore ? variable.name : name);
+    return resolveImplicitIndexedStore(shell, builtin, name, preUnsetStore?.preResolved);
   }
   if (preUnsetStore) {
     return { kind: 'store', storeVariable: variable, effectiveSubscript: referencedSubscript };
@@ -809,8 +812,13 @@ function selectDeclarationStore(
   return { kind: 'store', storeVariable, effectiveSubscript: referencedSubscript };
 }
 
-function resolveImplicitIndexedStore(shell: Shell, builtin: string, baseName: string): SelectedDeclarationStore {
-  const resolved = shell.resolveNameOrUndefined(baseName);
+function resolveImplicitIndexedStore(
+  shell: Shell,
+  builtin: string,
+  baseName: string,
+  preResolved?: { resolved: string } | { cyclicName: string }
+): SelectedDeclarationStore {
+  const resolved = preResolved ? unwrapPreResolvedName(shell, preResolved) : shell.resolveNameOrUndefined(baseName);
   if (resolved === undefined) return { kind: 'failed' };
   const direct = resolved.includes('[') ? shell.findOwnVariable(resolved) : undefined;
   if (!direct && !isIdentifier(resolved)) {
@@ -820,6 +828,15 @@ function resolveImplicitIndexedStore(shell: Shell, builtin: string, baseName: st
   const storeVariable = direct ?? ensureStoreVariable(shell, resolved);
   materializeRedirectedIndexedCell(storeVariable);
   return { kind: 'store', storeVariable, effectiveSubscript: '0' };
+}
+
+function unwrapPreResolvedName(
+  shell: Shell,
+  outcome: { resolved: string } | { cyclicName: string }
+): string | undefined {
+  if ('resolved' in outcome) return outcome.resolved;
+  shell.reportError(`warning: ${outcome.cyclicName}: circular name reference`);
+  return undefined;
 }
 
 function materializeRedirectedIndexedCell(variable: Variable): void {
@@ -897,6 +914,7 @@ function resolveVisibleReferentTarget(
 
 function resolvePreUnsetNamerefStore(
   shell: Shell,
+  operandName: string,
   finalLink: Variable | undefined,
   { set, unset }: Options,
   isLocal: boolean,
@@ -916,10 +934,14 @@ function resolvePreUnsetNamerefStore(
   if (referencedSubscript !== undefined) {
     return resolvePreUnsetElementStore(shell, finalLink, targetName, referencedSubscript, globalOnly);
   }
+  const variable = ensurePreUnsetScalarStore(shell, targetName, globalOnly);
+  const preResolved =
+    globalOnly && isIndexedCell(variable) ? resolveNameInScopes(shell.state.scopes, operandName) : undefined;
   return {
-    variable: ensurePreUnsetScalarStore(shell, targetName, globalOnly),
+    variable,
     finalLink,
     deferUnsetN: true,
+    ...(preResolved ? { preResolved } : {}),
   };
 }
 
