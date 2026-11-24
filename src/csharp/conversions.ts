@@ -202,7 +202,8 @@ export class Conversions {
       if (to.kind === 'named' && to.symbol === this.types.array.symbol) return true;
       return (
         to.kind === 'named' &&
-        (this.types.arrayInterfaces(from.element).some((face) => this.isVariantConvertible(face, to)) ||
+        ((from.rank === 1 &&
+          this.types.arrayInterfaces(from.element).some((face) => this.isVariantConvertible(face, to))) ||
           // The interfaces of System.Array, such as the non-generic IEnumerable.
           allInterfacesOf(this.types.array, () => []).some((face) => sameType(face, to)))
       );

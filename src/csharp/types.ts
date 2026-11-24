@@ -490,7 +490,8 @@ export function allInterfacesOf(type: Type, arrayInterfaces: (element: Type) => 
     for (const parent of interfacesOf(face)) add(parent);
   };
   if (type.kind === 'array') {
-    for (const face of arrayInterfaces(type.element)) add(face);
+    // Only a single-dimensional array implements the generic interfaces, such as IEnumerable<T>, as in .NET.
+    if (type.rank === 1) for (const face of arrayInterfaces(type.element)) add(face);
     return result;
   }
   if (type.kind === 'typeParameter') {
