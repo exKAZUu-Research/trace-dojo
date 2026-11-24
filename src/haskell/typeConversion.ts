@@ -1,4 +1,4 @@
-import { FUNCTION_TYPE, tupleType } from './builtinTypes';
+import { CONSTRAINT_KIND, FUNCTION_TYPE, tupleType, TYPE_KIND } from './builtinTypes';
 import type { ClassEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { freshKind, instantiateKind } from './kindTemplates';
@@ -117,7 +117,37 @@ export class TypeConversion {
       case 'app': {
         return this.convertAppliedType(type, vars, varKinds);
       }
+      case 'kinded': {
+        const kind = this.kindOf(type.kind, new Map());
+        return { type: this.convert(type.type, vars, varKinds, kind), kind };
+      }
     }
+  }
+
+  /** Converts a kind written as a type: `Type` (or `*`), `Constraint`, arrows, and kind variables. */
+  kindOf(type: RType, kindVars: Map<string, Kind>): Kind {
+    switch (type.k) {
+      case 'con': {
+        if (type.entity === TYPE_KIND) return STAR;
+        if (type.entity === CONSTRAINT_KIND) return CONSTRAINT;
+        break;
+      }
+      case 'fun': {
+        return kindArrow(this.kindOf(type.from, kindVars), this.kindOf(type.to, kindVars));
+      }
+      case 'var': {
+        let kind = kindVars.get(type.name);
+        if (!kind) {
+          kind = freshKindVar();
+          kindVars.set(type.name, kind);
+        }
+        return kind;
+      }
+      default: {
+        break;
+      }
+    }
+    throw unsupportedError(type.span, '型を種類として使う機能（DataKinds）');
   }
 
   private convertTuple(

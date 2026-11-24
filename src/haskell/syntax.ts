@@ -68,6 +68,8 @@ export type Expr =
   | { kind: 'recordCon'; con: QName; fields: FieldBind[]; span: Span; wildcard?: Span }
   | { kind: 'recordUpdate'; expr: Expr; fields: FieldBind[]; span: Span }
   | { kind: 'paren'; expr: Expr; span: Span }
+  /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
+  | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; span: Span }
   /** A typed hole, `_` or an unbound name starting with `_`, which GHC reports with its type. */
   | { kind: 'hole'; name: string; span: Span };
 
@@ -96,10 +98,22 @@ export type Pat =
   | { kind: 'pbang'; pat: Pat; span: Span }
   | { kind: 'plazy'; pat: Pat; span: Span }
   | { kind: 'pview'; expr: Expr; exprText: string; pat: Pat; span: Span }
-  | { kind: 'por'; alts: Pat[]; span: Span };
+  | { kind: 'por'; alts: Pat[]; span: Span }
+  /** A pattern with a type signature, `(x :: Int)`, which may bind the type variables it names. */
+  | { kind: 'psig'; pat: Pat; type: TypeExpr; span: Span };
+
+/** A type variable a `forall` or a declaration binds, with the kind it gives, as `(f :: Type -> Type)`. */
+export interface TyVarBinder {
+  name: Name;
+  kind?: TypeExpr;
+  /** Whether the binder is `{a}`, which type applications skip. */
+  inferred?: boolean;
+}
 
 export type TypeExpr =
   | { kind: 'tvar'; name: string; span: Span }
+  /** A type with a kind annotation, `(t :: k)`. */
+  | { kind: 'tkinded'; type: TypeExpr; kindSig: TypeExpr; span: Span }
   | { kind: 'tcon'; name: QName; span: Span }
   | { kind: 'tapp'; fn: TypeExpr; arg: TypeExpr; span: Span }
   | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; span: Span }
@@ -112,6 +126,8 @@ export interface SigType {
   context: Constraint[];
   type: TypeExpr;
   span: Span;
+  /** The variables of an explicit `forall`, which then scope over the definition the signature types. */
+  forall?: TyVarBinder[];
 }
 
 export interface GuardedExpr {
@@ -170,14 +186,26 @@ export type Decl =
       kind: 'data';
       name: Name;
       params: Name[];
+      /** The kinds the parameters' annotations give, by position. */
+      paramKinds?: (TypeExpr | undefined)[];
       cons: ConDecl[];
       deriving: DerivingClause[];
       span: Span;
       /** Whether the declaration is a `newtype`, whose one constructor patterns match without evaluating. */
       newtype?: boolean;
     }
-  | { kind: 'typeSyn'; name: Name; params: Name[]; type: TypeExpr; span: Span }
-  | { kind: 'class'; context: Constraint[]; name: Name; param: Name; decls: Decl[]; span: Span }
+  | { kind: 'typeSyn'; name: Name; params: Name[]; paramKinds?: (TypeExpr | undefined)[]; type: TypeExpr; span: Span }
+  | {
+      kind: 'class';
+      context: Constraint[];
+      name: Name;
+      param: Name;
+      paramKind?: TypeExpr;
+      decls: Decl[];
+      span: Span;
+    }
+  /** A standalone kind signature, `type T :: Type -> Type`. */
+  | { kind: 'kindSig'; name: Name; kindSig: TypeExpr; span: Span }
   | { kind: 'instance'; context: Constraint[]; cls: QName; type: TypeExpr; decls: Decl[]; span: Span }
   /** `default (T1, T2)`, or `default C (T1, T2)` for one class, which choose the types ambiguous variables get. */
   | { kind: 'defaultTypes'; cls?: QName; types: TypeExpr[]; span: Span }

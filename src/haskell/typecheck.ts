@@ -344,15 +344,17 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
 function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
   binding.type = type;
   for (const clause of binding.clauses) {
-    let remaining = type;
-    for (const pat of clause.pats) {
-      const param = checker.freshVar();
-      const result = checker.freshVar();
-      checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
-      checker.inferPat(pat, param);
-      remaining = result;
-    }
-    checker.checkRhs(clause.rhs, remaining);
+    checker.inPatternScope(() => {
+      let remaining = type;
+      for (const pat of clause.pats) {
+        const param = checker.freshVar();
+        const result = checker.freshVar();
+        checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
+        checker.inferPat(pat, param);
+        remaining = result;
+      }
+      checker.checkRhs(clause.rhs, remaining);
+    });
   }
 }
 

@@ -2,7 +2,17 @@ import { assert } from 'es-toolkit';
 
 import { CompileError } from '../interpreter/diagnostics';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
-import { DOUBLE_TYPE, INT_TYPE, INTEGER_TYPE, IO_TYPE, PRIMITIVE_TYPES, TURTLE_TYPE, UNIT_TYPE } from './builtinTypes';
+import {
+  CONSTRAINT_KIND,
+  DOUBLE_TYPE,
+  INT_TYPE,
+  INTEGER_TYPE,
+  IO_TYPE,
+  PRIMITIVE_TYPES,
+  TURTLE_TYPE,
+  TYPE_KIND,
+  UNIT_TYPE,
+} from './builtinTypes';
 import { ClassEnv } from './classEnv';
 import { Codegen, type CodegenSupport } from './codegen';
 import type { GlobalDef } from './core';
@@ -257,6 +267,10 @@ class LibraryCompiler {
       assertPublicExports(name, exports);
       modules.set(name, exports);
     }
+    const kinds = emptyExports();
+    for (const kind of [TYPE_KIND, CONSTRAINT_KIND])
+      kinds.types.set(kind.name, { entity: { kind: 'type', entity: kind }, children: [] });
+    modules.set('Data.Kind', kinds);
     this.markConstructorVisibility(modules);
     return modules;
   }

@@ -52,6 +52,11 @@ CONS_CON.entity.fixity = { assoc: 'infixr', prec: 5 };
 export const UNIT_TYPE: TypeEntity = { ...primType('()', 0, 'unit'), sort: 'data' };
 export const UNIT_CON = addConstructor(UNIT_TYPE, '()', []);
 
+/** The kind of types, `Type` (or `*`), which Data.Kind exports and kind signatures name. */
+export const TYPE_KIND: TypeEntity = primType('Type', 0);
+/** The kind of constraints, `Constraint`, which Data.Kind exports. */
+export const CONSTRAINT_KIND: TypeEntity = primType('Constraint', 0);
+
 export const MAX_TUPLE_SIZE = 64;
 const tupleTypes = new Map<number, TypeEntity>();
 

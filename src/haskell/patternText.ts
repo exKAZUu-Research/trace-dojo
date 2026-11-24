@@ -48,6 +48,9 @@ export function surfacePatternText(pat: Pat): string {
     case 'por': {
       return `(${pat.alts.map(surfacePatternText).join('; ')})`;
     }
+    case 'psig': {
+      return surfacePatternText(pat.pat);
+    }
   }
 }
 

@@ -519,7 +519,7 @@ export class Codegen {
         this.frame.slots.set(pat.local, slot);
         if (visible) this.addVisible(pat.local, slot);
       }
-      if (pat.k === 'as') {
+      if (pat.k === 'as' || pat.k === 'sig') {
         pending.push({ ...job, pat: pat.pat });
         continue;
       }
@@ -789,6 +789,9 @@ export class Codegen {
     switch (expr.k) {
       case 'hole': {
         throw new Error('A typed hole reached code generation');
+      }
+      case 'tyapp': {
+        return this.compileExpr(expr.expr);
       }
       case 'var': {
         return this.compileVar(expr);
@@ -1682,6 +1685,9 @@ function patternText(pat: RPat): string {
     case 'view':
     case 'or': {
       return pat.surface ? surfacePatternText(pat.surface) : '_';
+    }
+    case 'sig': {
+      return patternText(pat.pat);
     }
     case 'con': {
       if (pat.con.type.special === 'tuple') return `(${pat.args.map(patternText).join(', ')})`;

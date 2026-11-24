@@ -285,8 +285,17 @@ export class Checker {
   }
 
   sigToScheme(sig: RSigType): Scheme {
-    const names = typeVarNames([sig.type, ...sig.context]).filter((name) => !this.scopedTypes.has(name));
-    const kinds: Kind[] = names.map(() => freshKindVar());
+    const bound = new Set(sig.forall?.map((binder) => binder.name));
+    const free = typeVarNames([sig.type, ...sig.context]).filter(
+      (name) => !bound.has(name) && !this.scopedTypes.has(name)
+    );
+    if (sig.forall && free.length > 0) typeError(sig.span, `型変数 ${free[0]} がスコープにありません。`);
+    const names = sig.forall ? sig.forall.map((binder) => binder.name) : free;
+    const kindVars = new Map<string, Kind>();
+    const kinds: Kind[] = names.map((name) => {
+      const binder = sig.forall?.find((candidate) => candidate.name === name);
+      return binder?.kind ? this.typeConversion.kindOf(binder.kind, kindVars) : freshKindVar();
+    });
     const vars = new Map<string, Type>(this.scopedTypes);
     const varKinds = new Map<string, Kind>([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
     for (const [index, name] of names.entries()) {
@@ -296,9 +305,24 @@ export class Checker {
     const type = this.convertType(sig.type, vars, varKinds, STAR);
     const preds = this.convertConstraints(sig.context, vars, varKinds);
     this.checkKinds();
-    const scheme = { kinds: kinds.map(defaultKind), names, preds, type };
+    const specified = sig.forall
+      ? sig.forall.flatMap((binder, index) => (binder.inferred ? [] : [index]))
+      : typeVarNames([...sig.context, sig.type]).flatMap((name) => {
+          const index = names.indexOf(name);
+          return index === -1 ? [] : [index];
+        });
+    const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified };
     checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
+  }
+
+  kindOf(type: RType, kindVars: Map<string, Kind>): Kind {
+    return this.typeConversion.kindOf(type, kindVars);
+  }
+
+  /** The type variables an explicit `forall` of a signature binds, which scope over the definition it types. */
+  forallScope(sig: RSigType | undefined, skolems: readonly Type[]): Map<string, Type> {
+    return new Map(sig?.forall?.map((binder, index) => [binder.name, skolems[index]]));
   }
 
   convertType(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
@@ -360,6 +384,9 @@ export class Checker {
         this.holes.push({ hole: expr, type });
         return type;
       }
+      case 'tyapp': {
+        return this.inferTypeApplication(expr);
+      }
       case 'var': {
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
       }
@@ -389,7 +416,7 @@ export class Checker {
         return this.inferCase(expr);
       }
       case 'do': {
-        return this.inferDo(expr);
+        return this.inPatternScope(() => this.inferDo(expr));
       }
       case 'tuple': {
         return tap(tcon(tupleCon(expr.elems.length).type), ...expr.elems.map((elem) => this.inferExpr(elem)));
@@ -406,15 +433,19 @@ export class Checker {
         return listOf(elem);
       }
       case 'comp': {
-        for (const qual of expr.quals) this.inferQualifier(qual);
-        return listOf(this.inferExpr(expr.expr));
+        return this.inPatternScope(() => {
+          for (const qual of expr.quals) this.inferQualifier(qual);
+          return listOf(this.inferExpr(expr.expr));
+        });
       }
       case 'rsection': {
         return this.inferRightSection(expr);
       }
       case 'typed': {
         const scheme = this.sigToScheme(expr.sig);
-        expr.dictParams = this.checkAgainstScheme(scheme, (type) => this.checkExpr(expr.expr, type));
+        expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+          this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
+        );
         const instantiated = this.instantiate(scheme, expr.span, '型の注釈');
         expr.evidence = instantiated.evidence;
         return instantiated.type;
@@ -430,25 +461,101 @@ export class Checker {
     }
   }
 
+  /**
+   * Infers `e @t1 @t2`, where `e` is a variable or constructor whose scheme specifies its type variables: the type
+   * arguments instantiate them in order.
+   */
+  private inferTypeApplication(expr: Extract<RExpr, { k: 'tyapp' }>): Type {
+    const typeArgs: (RType | undefined)[] = [];
+    let head: RExpr = expr;
+    while (head.k === 'tyapp') {
+      typeArgs.unshift(head.typeArg);
+      head = head.expr;
+    }
+    const scheme =
+      head.k === 'con'
+        ? conScheme(head.con)
+        : head.k === 'var'
+          ? head.ref.kind === 'local'
+            ? head.ref.local.scheme
+            : this.globalMono.has(head.ref.entity)
+              ? undefined
+              : head.ref.entity.scheme
+          : undefined;
+    const specified = scheme?.specified ?? [];
+    if (!scheme || typeArgs.length > specified.length) {
+      typeError(expr.span, '型の適用（@）ができるのは、型シグネチャで型変数を決めた関数と構成子だけです。');
+    }
+    const args = scheme.kinds.map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
+    for (const [position, typeArg] of typeArgs.entries()) {
+      if (!typeArg) continue;
+      const index = specified[position];
+      const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
+      const type = this.convertType(typeArg, this.scopedTypes, scoped, scheme.kinds[index]);
+      this.checkKinds();
+      this.unify(args[index], type, typeArg.span, '型の適用');
+    }
+    const name = head.k === 'con' ? head.con.name : head.k === 'var' ? head.name : '';
+    const evidence = scheme.preds.map((pred) =>
+      this.want({ cls: pred.cls, type: instantiateType(pred.type, args) }, head.span, `${name} の使用`)
+    );
+    if (head.k === 'var') head.evidence = evidence;
+    const type = instantiateType(scheme.type, args);
+    head.type = type;
+    return type;
+  }
+
   private inferLambda(expr: Extract<RExpr, { k: 'lambda' }>): Type {
-    const paramTypes = expr.pats.map((pat) => {
-      const type = this.freshVar();
-      this.inferPat(pat, type);
-      return type;
+    return this.inPatternScope(() => {
+      const paramTypes = expr.pats.map((pat) => {
+        const type = this.freshVar();
+        this.inferPat(pat, type);
+        return type;
+      });
+      let result = this.inferExpr(expr.body);
+      for (const paramType of paramTypes.toReversed()) result = fnType(paramType, result);
+      return result;
     });
-    let result = this.inferExpr(expr.body);
-    for (const paramType of paramTypes.toReversed()) result = fnType(paramType, result);
-    return result;
   }
 
   private inferCase(expr: Extract<RExpr, { k: 'case' }>): Type {
     const scrutineeType = this.inferExpr(expr.scrutinee);
     const result = this.freshVar();
     for (const alt of expr.alts) {
-      this.inferPat(alt.pat, scrutineeType);
-      this.checkRhs(alt.rhs, result);
+      this.inPatternScope(() => {
+        this.inferPat(alt.pat, scrutineeType);
+        this.checkRhs(alt.rhs, result);
+      });
     }
     return result;
+  }
+
+  /** Checks `(p :: t)` against the type it matches, binding the variables of `t` not yet in scope to what they match. */
+  private checkPatternSignature(pat: Extract<RPat, { k: 'sig' }>, type: Type): void {
+    const fresh = new Map(
+      typeVarNames([pat.sigType])
+        .filter((name) => !this.scopedTypes.has(name))
+        .map((name) => [name, this.freshVar(freshKindVar(), name)] as const)
+    );
+    const vars = new Map<string, Type>([...this.scopedTypes, ...fresh]);
+    const kinds = new Map([...vars].map(([name, variable]) => [name, kindOfType(variable)]));
+    const annotated = this.convertType(pat.sigType, vars, kinds, STAR);
+    this.checkKinds();
+    this.unify(type, annotated, pat.span, 'パターンの型シグネチャ');
+    if (fresh.size > 0) this.scopedTypes = new Map([...this.scopedTypes, ...fresh]);
+  }
+
+  /**
+   * Runs the checking of a construct whose patterns may bind type variables with signatures, such as `\(x :: a) ->`,
+   * which scope over the construct only.
+   */
+  inPatternScope<T>(run: () => T): T {
+    const saved = this.scopedTypes;
+    try {
+      return run();
+    } finally {
+      this.scopedTypes = saved;
+    }
   }
 
   private inferApp(expr: Extract<RExpr, { k: 'app' }>): Type {
@@ -622,6 +729,11 @@ export class Checker {
           pending.push({ pat: pat.pat, type });
           break;
         }
+        case 'sig': {
+          this.checkPatternSignature(pat, type);
+          pending.push({ pat: pat.pat, type });
+          break;
+        }
         case 'view': {
           const result = this.freshVar();
           this.checkExpr(pat.expr, fnType(type, result), 'ビューパターンの関数');
@@ -678,12 +790,14 @@ export class Checker {
       return;
     }
     for (const branch of rhs.body.branches) {
-      for (const guard of branch.guards) {
-        if (guard.k === 'bool') this.checkExpr(guard.expr, tcon(this.builtins.bool), 'ガード');
-        else if (guard.k === 'pat') this.inferPat(guard.pat, this.inferExpr(guard.expr));
-        else this.inferBindGroup(guard.binds);
-      }
-      this.checkExpr(branch.expr, expected);
+      this.inPatternScope(() => {
+        for (const guard of branch.guards) {
+          if (guard.k === 'bool') this.checkExpr(guard.expr, tcon(this.builtins.bool), 'ガード');
+          else if (guard.k === 'pat') this.inferPat(guard.pat, this.inferExpr(guard.expr));
+          else this.inferBindGroup(guard.binds);
+        }
+        this.checkExpr(branch.expr, expected);
+      });
     }
   }
 
@@ -695,15 +809,17 @@ export class Checker {
     }
     binding.type = type;
     for (const clause of binding.clauses) {
-      let remaining = type;
-      for (const pat of clause.pats) {
-        const param = this.freshVar();
-        const result = this.freshVar();
-        this.unify(remaining, fnType(param, result), clause.span, `${bindingLabel(binding)} の引数`);
-        this.inferPat(pat, param);
-        remaining = result;
-      }
-      this.checkRhs(clause.rhs, remaining);
+      this.inPatternScope(() => {
+        let remaining = type;
+        for (const pat of clause.pats) {
+          const param = this.freshVar();
+          const result = this.freshVar();
+          this.unify(remaining, fnType(param, result), clause.span, `${bindingLabel(binding)} の引数`);
+          this.inferPat(pat, param);
+          remaining = result;
+        }
+        this.checkRhs(clause.rhs, remaining);
+      });
     }
   }
 
@@ -721,7 +837,9 @@ export class Checker {
     }
     for (const scc of dependencyOrder(implicit)) this.inferImplicit(scc);
     for (const { binding, scheme } of explicit) {
-      binding.dictParams = this.checkAgainstScheme(scheme, (type) => this.inferBindingBody(binding, type));
+      binding.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+        this.withScopedTypes(this.forallScope(binding.sig, skolems), () => this.inferBindingBody(binding, type))
+      );
     }
   }
 
@@ -1003,7 +1121,7 @@ export function conScheme(con: ConInfo): Scheme {
   const kinds = typeParamKinds(con.type);
   let type: Type = tap(tcon(con.type), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
   for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
-  return { kinds, preds: [], type };
+  return { kinds, preds: [], type, specified: kinds.map((_, index) => index) };
 }
 
 export function typeParamKinds(type: TypeEntity): Kind[] {
@@ -1018,7 +1136,8 @@ export function isFailable(pat: RPat): boolean {
     }
     case 'as':
     case 'bang':
-    case 'view': {
+    case 'view':
+    case 'sig': {
       return isFailable(pat.pat);
     }
     case 'lazy': {
@@ -1049,6 +1168,8 @@ export function typeVarNames(types: readonly RType[]): string[] {
     } else if (type.k === 'fun') {
       collect(type.from);
       collect(type.to);
+    } else if (type.k === 'kinded') {
+      collect(type.type);
     }
   };
   for (const type of types) collect(type);

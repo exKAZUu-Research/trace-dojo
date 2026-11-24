@@ -1,5 +1,15 @@
 // code-gauge-allow-file fileNcss -- The renamer resolves every construct of the language against one scope structure.
-import { CONS_CON, FUNCTION_TYPE, LIST_TYPE, NIL_CON, tupleCon, tupleType, UNIT_CON, UNIT_TYPE } from './builtinTypes';
+import {
+  CONS_CON,
+  FUNCTION_TYPE,
+  LIST_TYPE,
+  NIL_CON,
+  tupleCon,
+  tupleType,
+  TYPE_KIND,
+  UNIT_CON,
+  UNIT_TYPE,
+} from './builtinTypes';
 import {
   type ClassEntity,
   type ConInfo,
@@ -61,6 +71,8 @@ import { chargeTypeWork } from './typeWorkBudget';
 export interface RDataDecl {
   entity: TypeEntity;
   params: string[];
+  /** The kinds the parameters' annotations give, by position. */
+  paramKinds?: (RType | undefined)[];
   cons: { con: ConInfo; fields: RType[] }[];
   deriving: { type: RType; cls?: ClassEntity; strategy?: DerivingStrategy; span: Span }[];
   span: Span;
@@ -78,6 +90,7 @@ export interface RStandaloneDeriving {
 export interface RSynonymDecl {
   entity: TypeEntity;
   params: string[];
+  paramKinds?: (RType | undefined)[];
   rhs: RType;
   span: Span;
 }
@@ -85,6 +98,7 @@ export interface RSynonymDecl {
 export interface RClassDecl {
   entity: ClassEntity;
   param: string;
+  paramKind?: RType;
   supers: RConstraint[];
   methods: { entity: ValueEntity; sig: RSigType }[];
   /** The `default` signatures, which type the default implementations of their methods instead. */
@@ -108,6 +122,8 @@ export interface RModule {
   classes: RClassDecl[];
   instances: RInstanceDecl[];
   standaloneDerivings: RStandaloneDeriving[];
+  /** The standalone kind signatures, `type T :: k`, by the type or class they give the kind of. */
+  kindSigs: { entity: TypeEntity | ClassEntity; kind: RType; span: Span }[];
   /** The module's `default` declarations: one for every class, and at most one per class with NamedDefaults. */
   defaultDecls: { cls?: ClassEntity; types: RType[]; span: Span }[];
   values: RBindGroup;
@@ -251,6 +267,7 @@ class Renamer {
       instances: this.instances,
       standaloneDerivings: this.standaloneDerivings,
       defaultDecls: this.renameDefaultDecls(decls),
+      kindSigs: this.renameKindSigs(decls),
       values,
       exports: this.buildExports(),
       hasExportList: this.module.exports !== undefined,
@@ -644,7 +661,14 @@ class Renamer {
       strategy: clause.strategy,
       span: clause.span,
     }));
-    this.dataDecls.push({ entity, params: decl.params.map((param) => param.name), cons, deriving, span: decl.span });
+    this.dataDecls.push({
+      entity,
+      params: decl.params.map((param) => param.name),
+      paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
+      cons,
+      deriving,
+      span: decl.span,
+    });
   }
 
   private renameSynonym(decl: Extract<Decl, { kind: 'typeSyn' }>): void {
@@ -653,6 +677,7 @@ class Renamer {
     this.synonyms.push({
       entity: like.entity,
       params: decl.params.map((param) => param.name),
+      paramKinds: decl.paramKinds?.map((kind) => kind && this.renameKind(kind)),
       rhs: this.renameType(decl.type, params),
       span: decl.span,
     });
@@ -713,7 +738,16 @@ class Renamer {
       if (member.kind === 'sig' || member.kind === 'funClause' || member.kind === 'patBind') continue;
       throw compileError(member.span, 'クラスの中には、メソッドの型と既定の実装だけを書けます。');
     }
-    this.classes.push({ entity, param, supers, methods, defaultSigs, span: decl.span, defaults });
+    this.classes.push({
+      entity,
+      param,
+      paramKind: decl.paramKind && this.renameKind(decl.paramKind),
+      supers,
+      methods,
+      defaultSigs,
+      span: decl.span,
+      defaults,
+    });
   }
 
   private renameInstance(decl: Extract<Decl, { kind: 'instance' }>): void {
@@ -761,6 +795,19 @@ class Renamer {
       bindings.push(this.renameFunBinding(binding, { kind: 'global', entity: method }, new LocalScope()));
     }
     this.instances.push({ cls, type, context, bindings, span: decl.span });
+  }
+
+  private renameKindSigs(decls: Decl[]): RModule['kindSigs'] {
+    const seen = new Set<string>();
+    return decls.flatMap((decl) => {
+      if (decl.kind !== 'kindSig') return [];
+      const owner = this.ownTypes.get(decl.name.name);
+      if (!owner) throw compileError(decl.span, `種類のシグネチャを書いた ${decl.name.name} の宣言がありません。`);
+      if (seen.has(decl.name.name))
+        throw compileError(decl.span, `${decl.name.name} の種類のシグネチャが重複しています。`);
+      seen.add(decl.name.name);
+      return [{ entity: owner.entity, kind: this.renameKind(decl.kindSig), span: decl.span }];
+    });
   }
 
   private renameDefaultDecls(decls: Decl[]): RModule['defaultDecls'] {
@@ -939,6 +986,16 @@ class Renamer {
       }
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
+      }
+      case 'tyapp': {
+        const vars = new Set<string>();
+        if (expr.type) collectTypeVars(expr.type, vars);
+        return {
+          k: 'tyapp',
+          expr: this.renameExpr(expr.expr, scope),
+          typeArg: expr.type && this.renameType(expr.type, vars),
+          span,
+        };
       }
       case 'con': {
         return { k: 'con', con: this.lookupCon(expr.name), span };
@@ -1252,6 +1309,16 @@ class Renamer {
       case 'pbang': {
         return { k: 'bang', pat: this.renamePat(pat.pat, binders, scope), span };
       }
+      case 'psig': {
+        const vars = new Set<string>();
+        collectTypeVars(pat.type, vars);
+        return {
+          k: 'sig',
+          pat: this.renamePat(pat.pat, binders, scope),
+          sigType: this.renameType(pat.type, vars),
+          span,
+        };
+      }
       case 'plazy': {
         return { k: 'lazy', pat: this.renamePat(pat.pat, binders, scope), span };
       }
@@ -1366,11 +1433,23 @@ class Renamer {
     const vars = new Set<string>();
     collectTypeVars(sig.type, vars);
     for (const constraint of sig.context) collectTypeVars(constraint, vars);
+    const forall = sig.forall?.map((binder) => {
+      vars.add(binder.name.name);
+      return { name: binder.name.name, kind: binder.kind && this.renameKind(binder.kind), inferred: binder.inferred };
+    });
     return {
       context: sig.context.map((constraint) => this.renameType(constraint, vars)),
       type: this.renameType(sig.type, vars),
       span: sig.span,
+      ...(forall ? { forall } : {}),
     };
+  }
+
+  /** Renames a kind, whose variables need no binder. */
+  renameKind(kind: TypeExpr): RType {
+    const vars = new Set<string>();
+    collectTypeVars(kind, vars);
+    return this.renameType(kind, vars);
   }
 
   renameType(type: TypeExpr, vars: ReadonlySet<string>): RType {
@@ -1394,6 +1473,9 @@ class Renamer {
       }
       case 'ttuple': {
         return { k: 'tuple', elems: type.elems.map((elem) => this.renameType(elem, vars)), span };
+      }
+      case 'tkinded': {
+        return { k: 'kinded', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindSig), span };
       }
     }
   }
@@ -1531,7 +1613,8 @@ class Renamer {
   private renameTypeName(name: QName): RType {
     let builtin: TypeEntity | undefined;
     if (!name.qualifier) {
-      if (name.name === '()') builtin = UNIT_TYPE;
+      if (name.name === '*') builtin = TYPE_KIND;
+      else if (name.name === '()') builtin = UNIT_TYPE;
       else if (name.name === '[]') builtin = LIST_TYPE;
       else if (name.name === '->') builtin = FUNCTION_TYPE;
       else {
@@ -1583,7 +1666,8 @@ function expandRecordWildcards(pat: Pat, resolve: (name: QName) => ConInfo): Pat
     case 'pas':
     case 'pbang':
     case 'plazy':
-    case 'pview': {
+    case 'pview':
+    case 'psig': {
       return { ...pat, pat: expandRecordWildcards(pat.pat, resolve) };
     }
     case 'por': {
@@ -1734,7 +1818,8 @@ function collectPatNames(pat: Pat, into: Name[]): void {
     }
     case 'pbang':
     case 'plazy':
-    case 'pview': {
+    case 'pview':
+    case 'psig': {
       collectPatNames(pat.pat, into);
       break;
     }
@@ -1777,6 +1862,10 @@ export function collectTypeVars(type: TypeExpr, into: Set<string>): void {
       for (const elem of type.elems) collectTypeVars(elem, into);
       break;
     }
+    case 'tkinded': {
+      collectTypeVars(type.type, into);
+      break;
+    }
     default: {
       break;
     }
@@ -1800,6 +1889,9 @@ function rtypeMentions(type: RType, name: string): boolean {
     }
     case 'fun': {
       return rtypeMentions(type.from, name) || rtypeMentions(type.to, name);
+    }
+    case 'kinded': {
+      return rtypeMentions(type.type, name);
     }
   }
 }

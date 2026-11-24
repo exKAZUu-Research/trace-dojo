@@ -780,7 +780,6 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Data.List.NonEmpty': 'Data.List.NonEmpty',
   'Data.Complex': '複素数（Data.Complex）',
   'Data.Fixed': 'Data.Fixed',
-  'Data.Kind': 'Data.Kind',
   'Data.Void': 'Data.Void',
   'Data.Proxy': 'Data.Proxy',
   'Data.Typeable': 'リフレクション（Data.Typeable）',

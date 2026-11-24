@@ -48,6 +48,7 @@ export type RExpr = (
   | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span }
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
+  | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
 ) & { type?: Type };
 
 export interface RFieldBind {
@@ -79,6 +80,8 @@ export type RPat = (
   | { k: 'view'; expr: RExpr; pat: RPat; span: Span }
   /** `(p1; p2)`, which matches if any of its alternatives does; they bind no variables. */
   | { k: 'or'; alts: RPat[]; span: Span }
+  /** `(p :: t)`, whose type variables not yet in scope bind the types they match. */
+  | { k: 'sig'; pat: RPat; sigType: RType; span: Span }
 ) & { surface?: Pat };
 
 /** The patterns directly inside a pattern. */
@@ -90,7 +93,8 @@ export function rpatChildren(pat: RPat): RPat[] {
     case 'as':
     case 'bang':
     case 'lazy':
-    case 'view': {
+    case 'view':
+    case 'sig': {
       return [pat.pat];
     }
     case 'or': {
@@ -120,7 +124,9 @@ export type RType =
   | { k: 'class'; entity: ClassEntity; span: Span }
   | { k: 'tuple'; elems: RType[]; span: Span }
   | { k: 'app'; fn: RType; arg: RType; span: Span }
-  | { k: 'fun'; from: RType; to: RType; span: Span };
+  | { k: 'fun'; from: RType; to: RType; span: Span }
+  /** A type with a kind annotation, `(t :: k)`; kinds are types whose constructors are `Type` and `Constraint`. */
+  | { k: 'kinded'; type: RType; kind: RType; span: Span };
 
 export type RConstraint = RType;
 
@@ -128,6 +134,14 @@ export interface RSigType {
   context: RConstraint[];
   type: RType;
   span: Span;
+  /** The variables of an explicit `forall`, in order, which scope over the definition. */
+  forall?: RBinder[];
+}
+
+export interface RBinder {
+  name: string;
+  kind?: RType;
+  inferred?: boolean;
 }
 
 export interface RGuarded {

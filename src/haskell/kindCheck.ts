@@ -6,7 +6,19 @@ import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { rememberKind } from './kindTemplates';
 import type { RType } from './rast';
 import type { RClassDecl, RDataDecl, RModule, RSynonymDecl } from './rename';
-import { defaultKind, freshKindVar, type Kind, kindArrow, type Pred, type Scheme, STAR, type Type } from './types';
+import {
+  CONSTRAINT,
+  defaultKind,
+  freshKindVar,
+  type Kind,
+  kindArrow,
+  type Pred,
+  type Scheme,
+  showKind,
+  STAR,
+  type Type,
+  unifyKinds,
+} from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 type KindDeclaration =
@@ -15,7 +27,7 @@ type KindDeclaration =
   | { kind: 'class'; decl: RClassDecl };
 
 export function inferKinds(checker: Checker, module: RModule): void {
-  const declarations = prepareDeclarations(module);
+  const declarations = prepareDeclarations(checker, module);
   const owner = new Map<object, number>(declarations.map((entry, index) => [entry.decl.entity, index]));
   const edges = declarations.map((entry) =>
     [...kindDependencies(entry)].flatMap((entity) => {
@@ -34,21 +46,35 @@ export function inferKinds(checker: Checker, module: RModule): void {
   checker.checkKinds();
 }
 
-function prepareDeclarations(module: RModule): KindDeclaration[] {
+function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration[] {
   const declarations: KindDeclaration[] = [];
+  const annotated = (kinds: (RType | undefined)[] | undefined, count: number): Kind[] => {
+    const kindVars = new Map<string, Kind>();
+    return Array.from({ length: count }, (_, index) => {
+      const kind = kinds?.[index];
+      return kind ? checker.kindOf(kind, kindVars) : freshKindVar();
+    });
+  };
   for (const decl of module.dataDecls) {
-    const kinds = decl.params.map((): Kind => freshKindVar());
+    const kinds = annotated(decl.paramKinds, decl.params.length);
     decl.entity.kind = arrowKind(kinds, STAR);
     declarations.push({ kind: 'data', decl, kinds });
   }
   for (const decl of module.synonyms) {
-    const kinds = decl.params.map((): Kind => freshKindVar());
+    const kinds = annotated(decl.paramKinds, decl.params.length);
     decl.entity.kind = arrowKind(kinds, freshKindVar());
     declarations.push({ kind: 'synonym', decl, kinds });
   }
   for (const decl of module.classes) {
-    decl.entity.tyvarKind = freshKindVar();
+    decl.entity.tyvarKind = decl.paramKind ? checker.kindOf(decl.paramKind, new Map()) : freshKindVar();
     declarations.push({ kind: 'class', decl });
+  }
+  for (const { entity, kind, span } of module.kindSigs) {
+    const given = checker.kindOf(kind, new Map());
+    const actual = 'tyvarKind' in entity ? kindArrow(entity.tyvarKind, CONSTRAINT) : entity.kind;
+    if (!unifyKinds(actual, given)) {
+      throw compileError(span, `${entity.name} の種類が、種類のシグネチャ ${showKind(given)} と合いません。`);
+    }
   }
   return declarations;
 }
@@ -174,7 +200,11 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
   const type = checker.convertType(sig.type, vars, varKinds, STAR);
   const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
   for (const pred of checker.convertConstraints(sig.context, vars, varKinds)) preds.push(pred);
-  const scheme = { kinds, names, preds, type };
+  const order = sig.forall ? sig.forall.map((binder) => binder.name) : typeVarNames([...sig.context, sig.type]);
+  const specified = [0, ...order.flatMap((name) => (name === decl.param ? [] : [names.indexOf(name)]))].filter(
+    (index) => index >= 0
+  );
+  const scheme = { kinds, names, preds, type, specified };
   checkSchemeAmbiguity(scheme, sig.span);
   return scheme;
 }
@@ -187,6 +217,7 @@ function* typeEntities(types: readonly RType[]): Generator<TypeEntity | ClassEnt
     if (type.k === 'con' || type.k === 'class') yield type.entity;
     else if (type.k === 'app') work.push(type.fn, type.arg);
     else if (type.k === 'fun') work.push(type.from, type.to);
+    else if (type.k === 'kinded') work.push(type.type);
     else if (type.k === 'tuple') for (const elem of type.elems) work.push(elem);
   }
 }

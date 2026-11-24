@@ -31,12 +31,12 @@ import type {
   Span,
   Stmt,
   TypeExpr,
+  TyVarBinder,
 } from './syntax';
 
 /** What each node type stands for, in the message that rejects it. */
 const UNSUPPORTED_NODES: Record<string, string> = {
   abstract_family: '型族',
-  annotated: '種類の注釈つきの型変数',
   binding_list: 'パターンシノニム',
   constructor_synonym: 'パターンシノニム',
   constructor_synonyms: 'パターンシノニム',
@@ -57,10 +57,8 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   transform: 'TransformListComp の内包表記',
   implicit_parameter: '暗黙のパラメータ（?x）',
   implicit_variable: '暗黙のパラメータ（?x）',
-  inferred: '型変数の明示的な束縛',
   invisible: '型変数の明示的な束縛（@a）',
   kind_application: '種類の適用（@k）',
-  kind_signature: '種類のシグネチャ',
   label: 'ラベル（#name）',
   linear_function: '線形型（%1 ->）',
   modifier: '多重度の注釈（%1）',
@@ -70,7 +68,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   role_annotation: '型の役割の注釈（type role）',
   type_role: '型の役割の注釈（type role）',
   type_binder: 'パターンの型の束縛（@a）',
-  type_application: '型の適用（@Int）',
   type_family: '型族',
   type_family_injectivity: '型族',
   type_family_result: '型族',
@@ -80,13 +77,11 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   unboxed_unit: 'ボックス化されないタプル',
   prefix_unboxed_sum: 'ボックス化されない和型',
   prefix_unboxed_tuple: 'ボックス化されないタプル',
-  star: '種類の *',
   special: '特別な構成子の宣言',
   empty_list: "昇格したリスト（'[]）",
   pragma: 'プラグマ（{-# ... #-}）',
   cpp: 'C プリプロセッサの指令',
   via: 'deriving via',
-  quantified_variables: 'forall',
   calling_convention: '外部の関数の宣言（foreign）',
   entity: '外部の関数の宣言（foreign）',
   safety: '外部の関数の宣言（foreign）',
@@ -445,6 +440,14 @@ function convertTopDecl(node: Node): Decl[] {
     case 'deriving_instance': {
       return [convertStandaloneDeriving(node)];
     }
+    case 'kind_signature': {
+      if (!extensions.has('StandaloneKindSignatures')) {
+        throw syntaxError(spanOf(node), '独立した種類のシグネチャには、StandaloneKindSignatures の拡張が要ります。');
+      }
+      return [
+        { kind: 'kindSig', name: typeDeclName(node), kindSig: convertType(required(node, 'kind')), span: spanOf(node) },
+      ];
+    }
     case 'default_types': {
       const cls = field(node, 'class');
       if (cls && !extensions.has('NamedDefaults')) {
@@ -665,6 +668,7 @@ function convertData(node: Node): Decl {
     cons,
     deriving: convertDerivingClauses(node),
     span: spanOf(node),
+    paramKinds: typeParamKinds(node),
   };
 }
 
@@ -764,6 +768,7 @@ function convertNewtype(node: Node): Decl {
     deriving: convertDerivingClauses(node),
     span: spanOf(node),
     newtype: true,
+    paramKinds: typeParamKinds(node),
   };
 }
 
@@ -804,16 +809,54 @@ function typeDeclName(node: Node): Name {
 }
 
 function typeParams(node: Node): Name[] {
+  return typeParamBinders(node).map((binder) => binder.name);
+}
+
+/** The kinds a declaration's parameters' annotations give, or `undefined` when none has one. */
+function typeParamKinds(node: Node): (TypeExpr | undefined)[] | undefined {
+  const kinds = typeParamBinders(node).map((binder) => binder.kind);
+  return kinds.some((kind) => kind !== undefined) ? kinds : undefined;
+}
+
+function typeParamBinders(node: Node): TyVarBinder[] {
   return fields(node, 'patterns').flatMap((patterns) => {
     if (patterns.type !== 'type_params') throw unsupported(patterns);
-    return namedChildren(patterns).map((param) => {
-      if (param.type !== 'variable') {
-        rejectUnsupported(param);
-        throw unsupportedError(spanOf(param), '種類の注釈つきの型変数');
-      }
-      return plainName(param);
-    });
+    return namedChildren(patterns).map(convertBinder);
   });
+}
+
+/** A type variable binder: `a`, `(a :: k)`, or `{a}`, which a `forall` or a declaration's head binds. */
+function convertBinder(node: Node): TyVarBinder {
+  switch (node.type) {
+    case 'variable': {
+      return { name: plainName(node) };
+    }
+    case 'parens': {
+      const inner = namedChildren(node)[0];
+      if (!inner) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+      return convertBinder(inner);
+    }
+    case 'annotated': {
+      return { name: plainName(required(node, 'bind')), kind: convertKind(required(node, 'kind')) };
+    }
+    case 'inferred': {
+      const inner = field(node, 'bind') ?? namedChildren(node)[0];
+      if (!inner) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+      return { ...convertBinder(inner), inferred: true };
+    }
+    default: {
+      rejectUnsupported(node);
+      throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+    }
+  }
+}
+
+/** Converts a kind, which reads as a type: `Type`, `*`, `Constraint`, `k1 -> k2`, or a kind variable. */
+function convertKind(node: Node): TypeExpr {
+  if (!extensions.has('KindSignatures') && !extensions.has('PolyKinds')) {
+    throw syntaxError(spanOf(node), '種類の注釈を書くには、KindSignatures の拡張が要ります。');
+  }
+  return convertType(node);
 }
 
 function convertConstructor(node: Node): ConDecl {
@@ -915,6 +958,7 @@ function convertTypeSynonym(node: Node): Decl {
     kind: 'typeSyn',
     name: typeDeclName(node),
     params: typeParams(node),
+    paramKinds: typeParamKinds(node),
     type: convertQuantifiedType(typeNode),
     span: spanOf(node),
   };
@@ -928,7 +972,8 @@ function convertClass(node: Node): Decl {
       throw unsupported(child);
     }
   }
-  const params = typeParams(node);
+  const binders = typeParamBinders(node);
+  const params = binders.map((binder) => binder.name);
   if (params.length !== 1) {
     throw unsupportedError(spanOf(node), params.length === 0 ? '型変数のないクラス' : '多引数の型クラス');
   }
@@ -951,6 +996,7 @@ function convertClass(node: Node): Decl {
     context: contextNode ? convertContext(contextNode) : [],
     name: typeDeclName(node),
     param: params[0],
+    paramKind: binders[0].kind,
     decls,
     span: spanOf(node),
   };
@@ -998,6 +1044,15 @@ function convertInstance(node: Node): Decl {
 // Types
 
 function convertSigType(node: Node): SigType {
+  if (node.type === 'forall') {
+    if (!extensions.has('ExplicitForAll')) {
+      throw syntaxError(spanOf(node), 'forall を使うには、ExplicitForAll の拡張が要ります。');
+    }
+    const variables = required(node, 'variables');
+    const inner = convertSigType(required(node, 'type'));
+    if (inner.forall) throw unsupportedError(spanOf(node), '入れ子の forall');
+    return { ...inner, forall: namedChildren(variables).map(convertBinder), span: spanOf(node) };
+  }
   rejectUnsupported(node);
   if (node.type === 'context') {
     const typeNode = field(node, 'type');
@@ -1098,10 +1153,22 @@ function convertType(node: Node): TypeExpr {
     case 'unit': {
       return { kind: 'tcon', name: { name: '()', span }, span };
     }
+    case 'star': {
+      if (!extensions.has('StarIsType'))
+        throw syntaxError(span, '* を種類として使うには、StarIsType の拡張が要ります。');
+      return { kind: 'tcon', name: { name: '*', span }, span };
+    }
     case 'parens': {
       const inner = field(node, 'type') ?? namedChildren(node)[0];
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-      if (inner.type === 'signature') throw unsupportedError(span, '種類のシグネチャ');
+      if (inner.type === 'signature') {
+        return {
+          kind: 'tkinded',
+          type: convertType(required(inner, 'type')),
+          kindSig: convertKind(required(inner, 'kind')),
+          span,
+        };
+      }
       return convertQuantifiedType(inner);
     }
     case 'prefix_id': {
@@ -1149,6 +1216,14 @@ export function convertExpr(node: Node): Expr {
     case 'apply': {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
+      if (argument.type === 'type_application') {
+        if (!extensions.has('TypeApplications')) {
+          throw syntaxError(spanOf(argument), '型の適用（@）を使うには、TypeApplications の拡張が要ります。');
+        }
+        const typeNode = required(argument, 'type');
+        const type = typeNode.type === 'wildcard' ? undefined : convertType(typeNode);
+        return { kind: 'tyapp', expr: convertExpr(fn), type, span };
+      }
       rejectUnsupported(argument);
       return { kind: 'app', fn: convertExpr(fn), arg: convertExpr(argument), span };
     }
@@ -1652,7 +1727,6 @@ export function convertPattern(node: Node): Pat {
     case 'parens': {
       const inner = field(node, 'pattern');
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-      if (inner.type === 'signature') throw unsupportedError(span, 'パターンの型シグネチャ');
       return { ...convertPattern(inner), span };
     }
     case 'tuple': {
@@ -1708,7 +1782,15 @@ export function convertPattern(node: Node): Pat {
       return { kind: 'por', alts: fields(node, 'alternative').map(convertPattern), span };
     }
     case 'signature': {
-      throw unsupportedError(span, 'パターンの型シグネチャ');
+      if (!extensions.has('ScopedTypeVariables')) {
+        throw syntaxError(span, 'パターンに型シグネチャを書くには、ScopedTypeVariables の拡張が要ります。');
+      }
+      return {
+        kind: 'psig',
+        pat: convertPattern(required(node, 'pattern')),
+        type: convertType(required(node, 'type')),
+        span,
+      };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');

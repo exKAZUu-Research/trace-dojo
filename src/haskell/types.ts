@@ -245,6 +245,11 @@ export interface Scheme {
   kinds: Kind[];
   /** The names the variables had in the source, for messages. */
   names?: string[];
+  /**
+   * The variables a visible type application instantiates, in order, as `TGen` indices: those a signature names, in
+   * the order GHC specifies them. A scheme that inference found has none.
+   */
+  specified?: number[];
   preds: Pred[];
   type: Type;
 }
