@@ -1253,7 +1253,6 @@ export class Evaluator extends StatementExecutor {
     return this.stringOf(exception, exception.type, frame);
   }
 
-  /** Compares through `IComparable<T>.CompareTo` or `IComparable.CompareTo`, as `Comparer<T>.Default` does for other types. */
   /**
    * `IEquatable<T>.Equals` of a program's type that implements it for its own type, which `EqualityComparer<T>.Default`
    * calls instead of `Object.Equals`, or undefined for other values.
@@ -1270,6 +1269,7 @@ export class Evaluator extends StatementExecutor {
     return this.invoke(frame, implementation, a, [b], undefined, environmentOf(this, implementation, a)) as boolean;
   }
 
+  /** Compares through `IComparable<T>.CompareTo` or `IComparable.CompareTo`, as `Comparer<T>.Default` does for other types. */
   compareThroughInterface(a: Value, b: Value, frame: Frame): number {
     const type = this.runtime.runtimeTypeOf(a);
     const library = this.runtime.library;

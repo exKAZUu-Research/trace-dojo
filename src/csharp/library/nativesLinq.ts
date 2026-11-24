@@ -634,7 +634,6 @@ class GroupingState implements NativeState {
   }
 }
 
-/** A distinct set of keys, by the default equality or a comparer. */
 /** A set of the values a query has seen, each one it keeps charged against the slot limit, since a lazy source may yield without end. */
 function seenSet(call: NativeCall, equality: Equality): { add(value: Value): boolean; remove(value: Value): boolean } {
   const buckets = new Map<number, Value[]>();
