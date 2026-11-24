@@ -2,7 +2,7 @@ import { AwaitRequest, LISTENER_CANCELLED, YieldEachRequest } from '../awaitRepl
 import { scopedMemberName } from '../classes';
 import { DartThrow, type Frame, type Runtime } from '../runtime';
 import type { DartType } from '../types';
-import { type DartObject, type Value } from '../values';
+import { type DartObject, slotValues, type Value } from '../values';
 import { define } from './nativeSupport';
 
 type AsyncBody = (frame: Frame) => Generator<unknown, unknown, Value>;
@@ -69,7 +69,7 @@ function suspendState(
     isStar,
     *values() {
       if (!this.generator) return;
-      for (const cell of frame.locals) yield cell?.v;
+      for (const cell of frame.locals) yield* slotValues(cell);
       for (const cell of frame.captured) yield cell.v;
       yield frame.receiver;
       yield* frame.temporaries;

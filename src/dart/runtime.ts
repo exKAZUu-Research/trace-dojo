@@ -47,6 +47,7 @@ import {
   DartTypeValue,
   LateInitializer,
   NO_ARGUMENTS,
+  slotValues,
   type Value,
 } from './values';
 
@@ -79,6 +80,8 @@ export class Frame implements TracedFrame {
   readonly temporaries: Value[] = [];
   /** Whether the frame's `async` body is waiting at an `await` or `yield`, so that leaving the frame does not end it. */
   isSuspended = false;
+  /** The iteration numbers of the collection `for` elements being evaluated in a statement that awaits. */
+  readonly iterationPath: number[] = [];
 
   // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
@@ -852,7 +855,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const pending: DartObject[] = [];
     const mark = (root: Value): void => markRoot(root, reached, pending);
     for (const frame of this.frames) {
-      for (const cell of frame.locals) if (cell) mark(cell.v);
+      for (const cell of frame.locals) for (const value of slotValues(cell)) mark(value);
       for (const cell of frame.captured) mark(cell.v);
       mark(frame.receiver);
       for (const value of frame.temporaries) mark(value);

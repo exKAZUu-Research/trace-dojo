@@ -800,22 +800,24 @@ export abstract class AssignmentCompiler extends ControlCompiler {
    * A spread iterable that a later `await` follows, listed once, so that evaluating the statement again after the
    * `await` does not iterate a lazy iterable, whose iteration may run code, a second time.
    */
-  private listedBeforeAwait(element: Extract<CollectionElement, { kind: 'spread' }>, compiled: Compiled): Compiled {
-    const remember = this.precedesAwait(element)
-      ? this.rememberBeforeAwait(element, element, [{ kind: 'await' }])
-      : undefined;
-    if (!remember) return compiled;
-    const { run } = compiled;
-    return {
-      ...compiled,
-      run: (frame) =>
-        remember(frame, () => {
-          const value = run(frame);
-          if (value === undefined || value instanceof DartList) return value;
-          const { runtime } = frame;
-          return runtime.links.newList(runtime, DYNAMIC, iterableValues(runtime, value), true);
-        }),
-    };
+  private listedBeforeAwait(element: Span, compiled: Compiled): Compiled {
+    return { ...compiled, run: this.listedOnce(element, compiled.run) };
+  }
+
+  /** An iterable that a later `await` follows, listed when first evaluated, unless it is a list already. */
+  private listedOnce(element: Span, run: Eval): Eval {
+    const remember =
+      this.precedesAwait(element) || this.awaitsWithin(element)
+        ? this.rememberBeforeAwait(element, element, [{ kind: 'await' }])
+        : undefined;
+    if (!remember) return run;
+    return (frame) =>
+      remember(frame, () => {
+        const value = run(frame);
+        if (value === undefined || value instanceof DartList) return value;
+        const { runtime } = frame;
+        return runtime.links.newList(runtime, DYNAMIC, iterableValues(runtime, value), true);
+      });
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Validate both map type arguments before configuring the spread.
@@ -951,7 +953,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
-    if (this.awaitsWithin(element)) this.unsupported(element, 'コレクションの for の中の await');
     const { result, slots } = this.withScope(() =>
       element.kind === 'forInElement'
         ? this.compileForInElement(element, kind, elementContext, valueContext, types)
@@ -974,31 +975,55 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
     const iterable = this.compileExpression(element.iterable);
-    const elementType = this.elementTypeOfIterable(iterable, element.iterable);
+    const elementType = element.isAwait
+      ? this.elementTypeOfStream(iterable, element.iterable)
+      : this.elementTypeOfIterable(iterable, element.iterable);
+    const iterates = this.awaitsWithin(element);
+    const source = element.isAwait
+      ? this.streamIteratorOf(element, iterable, elementType)
+      : this.iterableSource(iterable);
     this.enterLoop(element);
     const afterSource = this.flow;
-    const savedRecords = this.recordsSteps;
-    this.recordsSteps = false;
-    const bind = this.compileForInBinding(element.binding, elementType, element);
-    this.recordsSteps = savedRecords;
-    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
+    const { bind, body, moveNext, current } = this.inCollectionLoop(() => {
+      const savedRecords = this.recordsSteps;
+      this.recordsSteps = false;
+      const binding = this.compileForInBinding(element.binding, elementType, element);
+      this.recordsSteps = savedRecords;
+      return {
+        bind: binding,
+        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
+        moveNext: element.isAwait ? this.awaitedMoveNext(element) : syncMoveNext,
+        // The stream iterator, created once, has moved past the elements of the iterations its statement runs again.
+        current: element.isAwait ? this.rememberEachIteration(element.binding) : undefined,
+      };
+    });
     types.push(...body.types);
     this.finishLoop(afterSource);
-    const source = this.iterableSource(iterable);
-    return (frame, add) => {
-      const { runtime } = frame;
-      const iterator = runtime.getProperty(source(frame), 'iterator', undefined);
-      frame.temporaries.push(iterator);
-      try {
-        while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-          bind(frame, runtime.getProperty(iterator, 'current', undefined));
-          body.run(frame, add);
-          runtime.spend();
-        }
-      } finally {
-        frame.temporaries.pop();
-      }
-    };
+    const listed = iterates && !element.isAwait ? this.listedOnce(element, source) : source;
+    const iteratorOf: Eval = element.isAwait
+      ? listed
+      : (frame) => frame.runtime.getProperty(listed(frame), 'iterator', undefined);
+    return forInElementLoop(iteratorOf, iterates, { moveNext, current, bind, body: body.run });
+  }
+
+  /** The `StreamIterator` an `await for` element reads, created once while its statement runs again after awaits. */
+  private streamIteratorOf(element: Span, stream: Compiled, elementType: DartType): Eval {
+    const resolve = this.runtimeType(elementType);
+    const create = (frame: Frame): Value =>
+      frame.runtime.links.construct(frame.runtime, '_StreamIterator', '', [stream.run(frame)], undefined, [
+        resolve(frame),
+      ]);
+    const remember = this.rememberBeforeAwait(stream, element, [{ kind: 'await' }]);
+    return remember ? (frame) => remember(frame, () => create(frame)) : create;
+  }
+
+  /** The `moveNext` of an `await for` element, which awaits each element. */
+  private awaitedMoveNext(element: Span): (frame: Frame, iterator: Value) => Value {
+    const root = this.awaitRoot;
+    if (!root || !this.fn.kind.isAsync) return this.error(element, 'await for は async の関数の中にしか書けません。');
+    const awaited = this.awaiting(root, element);
+    return (frame, iterator) =>
+      awaited(frame, () => frame.runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined));
   }
 
   private compileCountedForElement(
@@ -1010,23 +1035,32 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   ): (frame: Frame, add: AddElement) => void {
     const { initExec, loopSlots } = this.compileForInit(element);
     this.enterLoop(element);
-    const condition = element.condition ? this.compileCondition(element.condition) : undefined;
-    const afterLoop = condition?.flow.whenFalse ?? this.flow.unreachable;
-    if (condition) this.flow = condition.flow.whenTrue;
-    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
+    const iterates = this.awaitsWithin(element);
+    const { condition, afterLoop, body, updates } = this.inCollectionLoop(() => {
+      const compiledCondition = element.condition ? this.compileCondition(element.condition) : undefined;
+      const exit = compiledCondition?.flow.whenFalse ?? this.flow.unreachable;
+      if (compiledCondition) this.flow = compiledCondition.flow.whenTrue;
+      return {
+        condition: compiledCondition,
+        afterLoop: exit,
+        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
+        updates: this.withoutRemembering(() => element.updates.map((update) => this.compileExpression(update).run)),
+      };
+    });
     types.push(...body.types);
-    const updates = element.updates.map((update) => this.compileExpression(update).run);
     const test = condition?.compiled.run;
     this.finishLoop(afterLoop);
     return (frame, add) => {
       initExec?.(frame);
-      while (!test || test(frame)) {
+      eachIteration(frame, iterates, () => {
+        if (test && !test(frame)) return false;
         body.run(frame, add);
         // Each iteration has its own loop variables, which closures created in the body keep.
         for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
         for (const update of updates) update(frame);
         frame.runtime.spend();
-      }
+        return true;
+      });
     };
   }
 
@@ -1147,6 +1181,65 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 }
 
 export type { Member };
+
+/** How a collection for-in element reads its iterator and adds each element's values. */
+interface ForInElementParts {
+  moveNext: (frame: Frame, iterator: Value) => Value;
+  current: ((frame: Frame, compute: () => Value) => Value) | undefined;
+  bind: (frame: Frame, value: Value) => void;
+  body: (frame: Frame, add: AddElement) => void;
+}
+
+function forInElementLoop(
+  iteratorOf: Eval,
+  iterates: boolean,
+  { moveNext, current, bind, body }: ForInElementParts
+): (frame: Frame, add: AddElement) => void {
+  return (frame, add) => {
+    const { runtime } = frame;
+    const iterator = iteratorOf(frame);
+    frame.temporaries.push(iterator);
+    try {
+      eachIteration(frame, iterates, () => {
+        if (moveNext(frame, iterator) !== true) return false;
+        const read = (): Value => runtime.getProperty(iterator, 'current', undefined);
+        bind(frame, current ? current(frame, read) : read());
+        body(frame, add);
+        runtime.spend();
+        return true;
+      });
+    } finally {
+      frame.temporaries.pop();
+    }
+  };
+}
+
+function syncMoveNext(frame: Frame, iterator: Value): Value {
+  return frame.runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
+}
+
+/**
+ * Runs a collection `for` element's iterations until `iteration` tells it to stop. In a statement that awaits, each
+ * iteration is numbered, so that the values its expressions remember stay apart when the statement runs again.
+ */
+function eachIteration(frame: Frame, numbered: boolean, iteration: () => boolean): void {
+  if (!numbered) {
+    while (iteration()) {
+      // Each call runs one iteration.
+    }
+    return;
+  }
+  const { iterationPath } = frame;
+  const depth = iterationPath.push(0) - 1;
+  try {
+    for (let index = 0; ; index++) {
+      iterationPath[depth] = index;
+      if (!iteration()) return;
+    }
+  } finally {
+    iterationPath.length = depth;
+  }
+}
 
 function withPrepared(target: AssignableTarget, action: (frame: Frame, prepared: unknown) => Value): Eval {
   return (frame) => {

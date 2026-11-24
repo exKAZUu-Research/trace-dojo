@@ -10065,3 +10065,28 @@ Future<void> main() async {
   const typed = "import 'dart:math' deferred as m;\nm.Random? random;\nvoid main() {}";
   expect(executeProgram('dart', typed)).toMatchObject({ kind: 'compileError' });
 });
+
+test('Dart collection for elements await each element once in order', () => {
+  const program = `Future<int> later(int x) async {
+  await null;
+  print('later $x');
+  return x * 10;
+}
+Iterable<int> numbers() sync* {
+  print('numbers');
+  yield 1;
+  yield 2;
+}
+Stream<int> stream() async* {
+  yield 1;
+  yield 2;
+}
+void main() async {
+  print([for (var i = 0; i < 2; i++) await later(i), for (var x in numbers()) await later(x)]);
+  print([0, await for (var x in stream()) if (x.isOdd) await later(x) else x]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'later 0\nlater 1\nnumbers\nlater 1\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\n',
+  });
+});

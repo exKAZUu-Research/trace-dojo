@@ -36,6 +36,25 @@ export class Cell {
   constructor(public v: Value) {}
 }
 
+/**
+ * The values a statement that awaits remembers for one expression inside a collection's `for` element, one per
+ * iteration, keyed by the iteration numbers of the enclosing loops.
+ */
+export class IteratedMemo extends Cell {
+  readonly cells = new Map<string, Cell>();
+
+  constructor() {
+    super(undefined);
+  }
+}
+
+/** The values a slot holds, including those an iterated memo remembers. */
+export function* slotValues(cell: Cell | undefined): Generator<Value> {
+  if (!cell) return;
+  yield cell.v;
+  if (cell instanceof IteratedMemo) for (const inner of cell.cells.values()) yield inner.v;
+}
+
 let nextIdentity = 1;
 
 export class DartObject {

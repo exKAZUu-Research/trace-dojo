@@ -1,5 +1,14 @@
 import type { Expression, Span } from './ast';
-import { AwaitedError, type AwaitRoot, AwaitSuspension, containsAwait, rootCovers } from './awaitReplay';
+import {
+  AwaitedError,
+  type AwaitRoot,
+  AwaitSuspension,
+  containsAwait,
+  iterationKey,
+  readMemo,
+  rootCovers,
+  writeMemo,
+} from './awaitReplay';
 import { type Compiled, CompilerBase } from './compilerBase';
 import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isTop } from './types';
@@ -79,27 +88,65 @@ export abstract class AwaitCompiler extends CompilerBase {
         : undefined;
     const operand = this.compileExpression(expression.value, operandContext);
     if (operand.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
-    const slot = this.awaitSlot(root, expression);
+    const awaited = this.awaiting(root, expression);
     const { run } = operand;
-    return {
-      type: flatten(operand.type),
-      run: (frame) => {
-        const cell = frame.locals[slot];
-        if (cell instanceof AwaitedError) throw cell.error;
-        if (cell) return cell.v;
-        throw new AwaitSuspension(slot, run(frame));
-      },
-      isConst: false,
+    return { type: flatten(operand.type), run: (frame) => awaited(frame, () => run(frame)), isConst: false };
+  }
+
+  /**
+   * Waits for a value inside a statement that awaits: suspends the statement with the future `compute` gives, and
+   * once the statement runs again gives what the future completed with, or throws its error.
+   */
+  protected awaiting(root: AwaitRoot, key: object): (frame: Frame, compute: () => Value) => Value {
+    const slot = this.awaitSlot(root, key);
+    const iterated = root.iterated.has(slot);
+    return (frame, compute) => {
+      const cell = readMemo(frame, slot, iterated);
+      if (cell instanceof AwaitedError) throw cell.error;
+      if (cell) return cell.v;
+      throw new AwaitSuspension(slot, compute(), iterated ? iterationKey(frame) : undefined);
     };
+  }
+
+  /**
+   * Compiles code that runs after the code written after it, as a loop's updates run after its body, which therefore
+   * remembers nothing before the body's `await`s.
+   */
+  protected withoutRemembering<T>(compile: () => T): T {
+    const root = this.awaitRoot;
+    if (root) root.memoDepth++;
+    try {
+      return compile();
+    } finally {
+      if (root) root.memoDepth--;
+    }
+  }
+
+  /** A value remembered for each iteration of the collection `for` elements being compiled. */
+  protected rememberEachIteration(key: object): (frame: Frame, compute: () => Value) => Value {
+    const root = this.awaitRoot;
+    return root ? this.remembering(root, key) : (_frame, compute) => compute();
+  }
+
+  /** Compiles a collection `for` element's parts, whose remembered values are kept apart for each iteration. */
+  protected inCollectionLoop<T>(compile: () => T): T {
+    const root = this.awaitRoot;
+    if (root) root.loopDepth++;
+    try {
+      return compile();
+    } finally {
+      if (root) root.loopDepth--;
+    }
   }
 
   private remembering(root: AwaitRoot, key: object): (frame: Frame, compute: () => Value) => Value {
     const slot = this.awaitSlot(root, key);
+    const iterated = root.iterated.has(slot);
     return (frame, compute) => {
-      const cell = frame.locals[slot];
+      const cell = readMemo(frame, slot, iterated);
       if (cell) return cell.v;
       const value = compute();
-      frame.locals[slot] = new Cell(value);
+      writeMemo(frame, slot, iterated ? iterationKey(frame) : undefined, new Cell(value));
       return value;
     };
   }
@@ -111,6 +158,7 @@ export abstract class AwaitCompiler extends CompilerBase {
       this.fn.info.locals[slot] = { name: '\0', type: DYNAMIC };
       root.slots.push(slot);
       root.slotOf.set(node, slot);
+      if (root.loopDepth > 0) root.iterated.add(slot);
     }
     return slot;
   }

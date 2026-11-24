@@ -1,7 +1,7 @@
 import type { Span } from './ast';
 import { DartThrow, type Frame } from './runtime';
 import type { FunctionContext } from './scope';
-import { Cell, type Value } from './values';
+import { Cell, IteratedMemo, type Value } from './values';
 
 /**
  * What the body of an `async` or `async*` function yields to the code driving it: the value an `await` waits for,
@@ -30,7 +30,9 @@ export class YieldEachRequest {
 export class AwaitSuspension {
   constructor(
     readonly slot: number,
-    readonly value: Value
+    readonly value: Value,
+    /** The iteration of the collection `for` elements the `await` is in, whose value its slot keeps apart. */
+    readonly key: string | undefined
   ) {}
 }
 
@@ -54,6 +56,39 @@ export interface AwaitRoot {
   memoDepth: number;
   /** The slot of each `await` and memoized expression, so that compiling one twice reuses it. */
   slotOf: Map<object, number>;
+  /** How many collection `for` elements enclose the expression being compiled. */
+  loopDepth: number;
+  /** The slots of expressions inside collection `for` elements, which remember a value for each iteration. */
+  iterated: Set<number>;
+}
+
+export function newAwaitRoot(fn: FunctionContext, ranges: Span[], awaitStarts: number[]): AwaitRoot {
+  return { fn, ranges, awaitStarts, slots: [], memoDepth: 0, slotOf: new Map(), loopDepth: 0, iterated: new Set() };
+}
+
+/** The key of the current iteration of the collection `for` elements being evaluated, if any. */
+export function iterationKey(frame: Frame): string | undefined {
+  return frame.iterationPath.length > 0 ? frame.iterationPath.join('.') : undefined;
+}
+
+/** What a slot remembers, for the current iteration when the slot is inside collection `for` elements. */
+export function readMemo(frame: Frame, slot: number, iterated: boolean): Cell | undefined {
+  const cell = frame.locals[slot];
+  if (!iterated) return cell;
+  return cell instanceof IteratedMemo ? cell.cells.get(iterationKey(frame) ?? '') : undefined;
+}
+
+export function writeMemo(frame: Frame, slot: number, key: string | undefined, value: Cell): void {
+  if (key === undefined) {
+    frame.locals[slot] = value;
+    return;
+  }
+  let memo = frame.locals[slot];
+  if (!(memo instanceof IteratedMemo)) {
+    memo = new IteratedMemo();
+    frame.locals[slot] = memo;
+  }
+  (memo as IteratedMemo).cells.set(key, value);
 }
 
 /** Whether a statement or expression contains `await`, `await for`, or `yield` outside nested functions. */
@@ -94,7 +129,7 @@ function collectStarts(node: unknown, withYields: boolean, starts: number[]): vo
 }
 
 function suspends(node: { kind?: string; isAwait?: boolean }, withYields: boolean): boolean {
-  if (node.kind === 'await') return true;
+  if (node.kind === 'await' || (node.kind === 'forInElement' && node.isAwait === true)) return true;
   return withYields && (node.kind === 'yield' || (node.kind === 'forIn' && node.isAwait === true));
 }
 
@@ -114,7 +149,7 @@ export function* evaluateResuming<T>(
         return run();
       } catch (error) {
         if (!(error instanceof AwaitSuspension)) throw error;
-        frame.locals[error.slot] = yield* awaitOutcome(error.value);
+        writeMemo(frame, error.slot, error.key, yield* awaitOutcome(error.value));
       }
     }
   } finally {

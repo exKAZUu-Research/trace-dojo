@@ -3,10 +3,10 @@ import type { Block, CatchClause, Expression, Pattern, Span, Statement, SwitchCa
 import { localNamesIn } from './astWalk';
 import {
   AwaitRequest,
-  type AwaitRoot,
   containsSuspension,
   evaluateParts,
   LISTENER_CANCELLED,
+  newAwaitRoot,
   suspensionStarts,
   YieldEachRequest,
 } from './awaitReplay';
@@ -445,7 +445,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const ranges = heads.filter((head) => head !== undefined);
     const awaitStarts = ranges.flatMap((head) => suspensionStarts(head, false));
     if (!this.fn.kind.isAsync || awaitStarts.length === 0) return { result: compile(), slots: undefined };
-    const root: AwaitRoot = { fn: this.fn, ranges, awaitStarts, slots: [], memoDepth: 0, slotOf: new Map() };
+    const root = newAwaitRoot(this.fn, ranges, awaitStarts);
     const saved = this.awaitRoot;
     this.awaitRoot = root;
     try {
@@ -811,7 +811,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  private elementTypeOfStream(stream: Compiled, span: Span): DartType {
+  protected elementTypeOfStream(stream: Compiled, span: Span): DartType {
     const type = resolveBound(stream.type);
     if (type.kind === 'dynamic') return DYNAMIC;
     if (isNullable(type)) {

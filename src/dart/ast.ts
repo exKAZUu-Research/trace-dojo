@@ -389,7 +389,13 @@ export type CollectionElement =
       updates: Expression[];
       body: CollectionElement;
     } & Span)
-  | ({ kind: 'forInElement'; binding: ForInBinding; iterable: Expression; body: CollectionElement } & Span)
+  | ({
+      kind: 'forInElement';
+      binding: ForInBinding;
+      iterable: Expression;
+      body: CollectionElement;
+      isAwait: boolean;
+    } & Span)
   | ({ kind: 'mapEntry'; key: Expression; value: Expression; nullAwareKey: boolean; nullAwareValue: boolean } & Span);
 
 export type StringPart = string | Expression;

@@ -37,7 +37,6 @@ import {
   spanOf,
   syntaxChildrenOf,
   syntaxError,
-  unsupported,
 } from './convertBase';
 
 const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
@@ -727,8 +726,8 @@ export abstract class ExpressionConverter {
         const loop = this.convertForParts(node);
         const body = this.elementField(node, 'body');
         if (loop.kind === 'forIn') {
-          if (loop.isAwait) return unsupported(node, 'コレクションの中の await for');
-          return { kind: 'forInElement', binding: loop.binding, iterable: loop.iterable, body, ...span };
+          const { binding, iterable, isAwait } = loop;
+          return { kind: 'forInElement', binding, iterable, body, isAwait, ...span };
         }
         return { kind: 'forElement', init: loop.init, condition: loop.condition, updates: loop.updates, body, ...span };
       }
