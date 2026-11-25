@@ -6847,6 +6847,19 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8, 10]\n' });
 });
 
+test('constructs enum constants with the secondary constructors their arguments fit', () => {
+  const source = `enum class Level(val n: Int) {
+    LOW(1), MID("abc");
+    constructor(s: String) : this(s.length)
+}
+enum class Size { S(1), L("xl"); val n: Int
+    constructor(i: Int) { n = i }
+    constructor(s: String) { n = s.length + 10 }
+}
+fun main() { println(listOf(Level.MID.n, Level.LOW.n, Size.S.n, Size.L.n)); println(Size.L.name + Size.L.ordinal) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[3, 1, 1, 12]\nL1\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

@@ -1010,6 +1010,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       targets.set(ctor, call.symbol);
       return this.superInitializer(call, callRow);
     }
+    if (symbol.kind === 'enum') return this.enumSuperInitializer();
     const superclass = symbol.superclass;
     if (!superclass || superclass.cls === this.core.any) {
       if (args.length > 0) this.error(row, 'Any のコンストラクタには引数を渡せません。');
@@ -1035,6 +1036,20 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       superclass.cls.name
     );
     return this.superInitializer(call, callRow);
+  }
+
+  /** Kotlin's Enum constructor run with the name and ordinal createEnumEntries gave the constant. */
+  private enumSuperInitializer(): (frame: Frame, instance: Value) => void {
+    const enumCtor = this.core.enum.constructors[0];
+    return (frame, instance) => {
+      const native = (instance as KObject).native as { name: string; ordinal: number };
+      (enumCtor.initialize as NonNullable<FunctionSymbol['initialize']>)(
+        frame,
+        instance,
+        [native.name, native.ordinal],
+        undefined
+      );
+    };
   }
 
   private rejectDelegationCycles(targets: Map<FunctionSymbol, FunctionSymbol>): void {
@@ -1266,17 +1281,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     // createEnumEntries runs the enum's constructor, with the entry's arguments, before an entry's body initializes.
     if (symbol.kind === 'enumEntry') return undefined;
     if (symbol.kind === 'enum') {
-      const enumCtor = this.core.enum.constructors[0];
-      return (frame) => {
-        const instance = frame.thisValue as KObject;
-        const native = instance.native as { name: string; ordinal: number };
-        (enumCtor.initialize as NonNullable<FunctionSymbol['initialize']>)(
-          frame,
-          instance,
-          [native.name, native.ordinal],
-          undefined
-        );
-      };
+      const initializeEnum = this.enumSuperInitializer();
+      return (frame) => initializeEnum(frame, frame.thisValue);
     }
     const superclass = symbol.superclass;
     if (!superclass || superclass.cls === this.core.any) return undefined;
@@ -1373,13 +1379,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private createEnumEntries(
     frame: Frame,
     cls: ClassSymbol,
-    ctor: FunctionSymbol,
-    evaluators: { info: FunctionInfo; evaluate: ((frame: Frame) => Value[])[] },
+    evaluators: { info: FunctionInfo; entries: { ctor: FunctionSymbol; evaluate: (frame: Frame) => Value[] }[] },
     createList: (entries: KObject[]) => KObject
   ): void {
     const state: { values: KObject[]; entries?: KObject } = { values: [] };
     frame.runtime.enumEntries.set(cls, state);
-    const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
     // The arguments' temporaries live in slots of their own context, apart from the locals of the function running.
     const argumentFrame = new Frame(frame.runtime, evaluators.info, [], undefined, undefined);
     const roots = [state.values, argumentFrame.locals as Value[], argumentFrame.temporaries];
@@ -1389,7 +1393,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         const instance = new KObject(entryClass ?? cls);
         instance.native = { name: enumEntry.name, ordinal };
         state.values.push(instance);
-        initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
+        const { ctor, evaluate } = evaluators.entries[ordinal];
+        const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
+        initialize(frame, instance, evaluate(argumentFrame), undefined);
         entryClass?.initialize?.(frame, instance);
       }
     });
@@ -1398,7 +1404,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   /** Compiles the arguments each enum constant passes to its class's constructor, as `RED(0xFF0000)` does. */
   private compileEnumArguments(entry: ClassEntry): void {
-    const ctor = entry.constructorSymbol as FunctionSymbol;
     const context = new FunctionContext(
       undefined,
       false,
@@ -1407,9 +1412,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       undefined
     );
     const scope = new Scope(entry.scope, context);
-    const candidates: Candidate[] = [
-      { symbol: ctor, kind: 'constructor', substitution: new Map(), receiverType: undefined },
-    ];
+    // A constant calls whichever of its class's constructors its arguments fit, as `MID("abc")` calls `constructor(s)`.
+    const candidates: Candidate[] = entry.symbol.constructors.map((symbol) => ({
+      symbol,
+      kind: 'constructor',
+      substitution: new Map(),
+      receiverType: undefined,
+    }));
     const savedRecords = this.recordsSteps;
     this.recordsSteps = false;
     try {
@@ -1419,7 +1428,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           name: argument.name,
           value: argument.value,
         }));
-        return this.resolveCall(
+        const { symbol, evaluateArgs } = this.resolveCall(
           scope,
           context,
           [candidates],
@@ -1430,11 +1439,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           undefined,
           enumEntry.row,
           enumEntry.name
-        ).evaluateArgs;
+        );
+        return { ctor: symbol, evaluate: evaluateArgs };
       });
       const createList = this.enumEntriesValue();
       entry.symbol.initializeEnumEntries = (frame) =>
-        this.createEnumEntries(frame, entry.symbol, ctor, { info: context.info, evaluate: evaluators }, createList);
+        this.createEnumEntries(frame, entry.symbol, { info: context.info, entries: evaluators }, createList);
     } finally {
       this.recordsSteps = savedRecords;
     }
