@@ -98,6 +98,7 @@ const IMPLICATIONS: Record<string, string> = {
   FunctionalDependencies: '+MultiParamTypeClasses',
   MultiParamTypeClasses: '+ConstrainedClassMethods',
   TypeFamilyDependencies: '+TypeFamilies',
+  MonadComprehensions: '+ParallelListComp',
   TypeFamilies: '+MonoLocalBinds +KindSignatures +ExplicitNamespaces',
   TypeOperators: '+ExplicitNamespaces',
   PolyKinds: '+KindSignatures',
