@@ -168,7 +168,9 @@ export type TypeExpr =
   /** A function type; LinearTypes' `a %1 -> b` and `a %m -> b` give its multiplicity, which is otherwise `Many`. */
   | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; multiplicity?: Multiplicity; span: Span }
   | { kind: 'tlist'; elem: TypeExpr; span: Span }
-  | { kind: 'ttuple'; elems: TypeExpr[]; span: Span };
+  | { kind: 'ttuple'; elems: TypeExpr[]; span: Span }
+  /** A splice inside a quote's type, `$(e)`, whose expression builds that part of the tree. */
+  | { kind: 'tsplice'; expr: Expr; span: Span };
 
 export type Constraint = TypeExpr;
 

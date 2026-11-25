@@ -1722,6 +1722,15 @@ function convertQuantifiedType(features: FeatureGates<'convert'>, node: Node): T
 // code-gauge-allow functionNcss -- One case per type node kind of the grammar.
 function convertType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
   const span = spanOf(node);
+  if (node.type === 'splice') {
+    const inner = namedChildren(node)[0];
+    if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+    return {
+      kind: 'tsplice',
+      expr: convertExpr(features, inner.type === 'parens' ? required(inner, 'expression') : inner),
+      span,
+    };
+  }
   if (node.type === 'prefix_tuple') {
     return { kind: 'tcon', name: { name: node.text.replaceAll(/\s+/g, ''), span }, span };
   }

@@ -2105,6 +2105,9 @@ class Renamer {
       case 'ttuple': {
         return { k: 'tuple', elems: type.elems.map((elem) => this.renameType(elem, vars)), span };
       }
+      case 'tsplice': {
+        throw compileError(span, 'Template Haskell のスプライスを、ここには書けません。');
+      }
       case 'tkinded': {
         return { k: 'kinded', type: this.renameType(type.type, vars), kind: this.renameKind(type.kindSig), span };
       }

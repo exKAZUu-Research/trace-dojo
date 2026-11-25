@@ -488,6 +488,9 @@ export class QuoteBuilder {
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of type a quote may hold.
   private typ(type: TypeExpr): Expr {
     switch (type.kind) {
+      case 'tsplice': {
+        return type.expr;
+      }
       case 'tvar': {
         return this.call('varT', this.nameOf(type.name));
       }
