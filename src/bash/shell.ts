@@ -73,7 +73,6 @@ export class Shell implements ArithmeticHost {
   private readShift: number;
   private lineShift: number;
   private loopDepth: number;
-  private conditionDepth = 0;
 
   constructor(
     readonly runtime: Runtime,
@@ -122,12 +121,11 @@ export class Shell implements ArithmeticHost {
   }
 
   private runCondition(statements: Statement[]): number {
-    this.conditionDepth++;
-    try {
-      return this.runStatements(statements);
-    } finally {
-      this.conditionDepth--;
+    let status = 0;
+    for (const [index, statement] of statements.entries()) {
+      status = this.execute(statement, index === statements.length - 1);
     }
+    return status;
   }
 
   // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
@@ -202,9 +200,6 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeSimple(statement: Statement, guarded: boolean): number {
-    if (this.conditionDepth > 0) {
-      return this.withStatus(() => this.runSimpleBody(statement, guarded).status);
-    }
     const mark = this.runtime.steps.statementMark();
     let outcome: { status: number; stepMode: StepMode; ranFunction: boolean } = {
       status: 0,
@@ -594,11 +589,9 @@ export class Shell implements ArithmeticHost {
     this.runtime.frames.push(frame);
     const saved = {
       loop: this.loopDepth,
-      cond: this.conditionDepth,
       shift: this.lineShift,
     };
     this.loopDepth = 0;
-    this.conditionDepth = 0;
     this.lineShift = fn.lineShift;
     try {
       return this.restoringLine(() => this.execute(fn.body));
@@ -607,7 +600,6 @@ export class Shell implements ArithmeticHost {
       throw error;
     } finally {
       this.loopDepth = saved.loop;
-      this.conditionDepth = saved.cond;
       this.lineShift = saved.shift;
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
