@@ -62,7 +62,7 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     ['appendFileSync', 'a'],
   ] as const) {
     builder.method(fs, name, 3, ({ runtime, args }) => {
-      writeFile(runtime, args, defaultFlag);
+      writeFile(runtime, name, args, defaultFlag);
       return;
     });
   }
@@ -170,7 +170,11 @@ function spelledPrefixOf(runtime: Runtime, path: string, directory: string): str
 }
 
 /** `writeFileSync` and `appendFileSync`, which open the file with the flag of their options or else `defaultFlag`. */
-function writeFile(runtime: Runtime, [file, content, options]: Value[], defaultFlag: string): void {
+function writeFile(runtime: Runtime, method: string, [file, content, options]: Value[], defaultFlag: string): void {
+  // Node.js decodes the data with the encoding before writing it, which this interpreter does only for UTF-8.
+  const encoding = encodingOption(runtime, options);
+  if (runtime.unavailableMember && encoding !== undefined && encoding !== null && !isUtf8(encoding))
+    rejectUnavailableMember(`${method} の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
   const path = requirePath(runtime, file);
   const data = requireText(runtime, content, 'data');
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;

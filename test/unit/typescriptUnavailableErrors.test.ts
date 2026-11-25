@@ -182,6 +182,10 @@ test.each([
   ['const p: any = process; p.exit(0);', 'process.exit は、この採点環境では使えません。'],
   ["const fs = require('fs'); fs.readFile('a', () => {});", 'fs.readFile は、この採点環境では使えません。'],
   [
+    "const fs = require('fs'); fs.writeFileSync('a.txt', 'aGk=', 'base64');",
+    'writeFileSync の encoding: "base64" は、この採点環境では使えません。',
+  ],
+  [
     "process.stdout.write('6869', 'hex');",
     'process.stdout.write のエンコーディング指定は、この採点環境では使えません。',
   ],
