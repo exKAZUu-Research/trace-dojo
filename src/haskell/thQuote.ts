@@ -20,6 +20,29 @@ import type { Expr, Literal, Span, Stmt } from './syntax';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /**
+ * For a local the renamer binds while renaming a splice inside a quote, the variable of the quote's generated code
+ * that holds the new name of the quote's binder of that spelling: a quote inside the splice is at the same level as
+ * the binder, and names it by that new name, as GHC's does.
+ */
+const levelNames = new WeakMap<LocalVar, string>();
+
+/** The code of splices inside quotes, with the binders of the quotes around them and their new names' variables. */
+const splicesInQuotes = new WeakMap<Expr, { local: LocalVar; nameVariable: string }[]>();
+
+export function bindQuoteLevelName(local: LocalVar, nameVariable: string): void {
+  levelNames.set(local, nameVariable);
+}
+
+export function isQuoteLevelBinder(local: LocalVar): boolean {
+  return levelNames.has(local);
+}
+
+/** The binders of the quotes around a splice's code, if the code is a splice inside a quote. */
+export function quoteBindersAround(code: Expr): readonly { local: LocalVar; nameVariable: string }[] | undefined {
+  return splicesInQuotes.get(code);
+}
+
+/**
  * Builds the code of a renamed Template Haskell quote: code that builds the quote's tree with the library's functions
  * in a monad of `Quote`, as GHC does. Each variable the quote binds hygienically gets a new name from `newName` where
  * its scope starts; a binder it does not (one of a pattern quote) keeps its spelling, `mkName`.
@@ -84,6 +107,17 @@ export class QuoteBuilder {
     return expr ? this.call('Just', expr) : this.sup('Nothing');
   }
 
+  /** A splice's code, which quotes inside it may name the binders in scope here in by their new names. */
+  private spliceCode(code: Expr): Expr {
+    if (this.env.size === 0) return code;
+    const wrapped: Expr = { kind: 'paren', expr: code, span: code.span };
+    splicesInQuotes.set(
+      wrapped,
+      [...this.env].map(([local, nameVariable]) => ({ local, nameVariable }))
+    );
+    return wrapped;
+  }
+
   /** Runs `newName` for each binder, in order, then the code with the new names in scope. */
   private bindAround(binders: readonly LocalVar[], build: () => Expr): Expr {
     if (binders.length === 0) return build();
@@ -112,7 +146,7 @@ export class QuoteBuilder {
   private nameOf(ref: QRef): Expr {
     switch (ref.k) {
       case 'bound': {
-        const generated = this.env.get(ref.local);
+        const generated = this.env.get(ref.local) ?? levelNames.get(ref.local);
         return generated ? this.local(generated) : this.call('mkName', this.str(ref.local.name));
       }
       case 'global': {
@@ -207,7 +241,7 @@ export class QuoteBuilder {
         return this.call('appTypeE', this.expr(expr.expr), this.type(expr.type));
       }
       case 'splice': {
-        return expr.code;
+        return this.spliceCode(expr.code);
       }
       default: {
         throw new Error(`Unexpected quoted expression: ${expr.k}`);
@@ -388,7 +422,7 @@ export class QuoteBuilder {
         );
       }
       case 'splice': {
-        return type.code;
+        return this.spliceCode(type.code);
       }
     }
   }

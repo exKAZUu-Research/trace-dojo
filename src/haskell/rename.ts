@@ -102,7 +102,14 @@ import type {
   TyVarBinder,
 } from './syntax';
 import { THIS_MODULE } from './syntax';
-import { globalNameCode, QuoteBuilder, thString } from './thQuote';
+import {
+  bindQuoteLevelName,
+  globalNameCode,
+  isQuoteLevelBinder,
+  quoteBindersAround,
+  QuoteBuilder,
+  thString,
+} from './thQuote';
 import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
@@ -335,6 +342,8 @@ class Renamer {
   private readonly typeDataCons = new Set<string>();
   /** In quote mode, the variables the quote binds, which its scopes have besides those around the quote. */
   private quoteBinders?: Set<LocalVar>;
+  /** The namespace of each binder of a quote, which a splice inside the quote binds its name in. */
+  private readonly quoteNamespaces = new WeakMap<LocalVar, LocalNamespace>();
   /** The methods of the classes quotes declare, by name. */
   private readonly quoteClassMethods = new Map<LocalVar, Map<string, LocalVar>>();
   /** The features of the module's extensions that resolving names decides. */
@@ -1504,7 +1513,8 @@ class Renamer {
         return { k: 'app', fn: this.renameExpr(expr.fn, scope), arg: this.renameExpr(expr.arg, scope), span };
       }
       case 'paren': {
-        return this.renameExpr(expr.expr, scope);
+        const around = quoteBindersAround(expr);
+        return this.renameExpr(expr.expr, around ? this.quoteLevelScope(around, scope) : scope);
       }
       case 'chain': {
         return this.renameExpr(
@@ -2488,16 +2498,38 @@ class Renamer {
     }
   }
 
-  /** A new local, which in quote mode is a binder of the quote. */
-  private newBinder(name: string, span: Span): LocalVar {
+  /** A new local, which in quote mode is a binder of the quote, of a namespace. */
+  private newBinder(name: string, span: Span, namespace: LocalNamespace = 'value'): LocalVar {
     const local = newLocal(name, span);
     this.quoteBinders?.add(local);
+    this.quoteNamespaces.set(local, namespace);
     return local;
+  }
+
+  /**
+   * The scope of a splice's code inside quotes, where the quotes' binders are names that only quotes inside the
+   * splice may use, as their binders at the same level.
+   */
+  private quoteLevelScope(
+    binders: readonly { local: LocalVar; nameVariable: string }[],
+    scope: LocalScope
+  ): LocalScope {
+    const inner = new LocalScope(scope);
+    for (const { local, nameVariable } of binders) {
+      const marker = newLocal(local.name, local.span);
+      bindQuoteLevelName(marker, nameVariable);
+      inner.define(local.name, marker, this.quoteNamespaces.get(local) ?? 'value');
+    }
+    return inner;
   }
 
   private quoteValueRef(name: QName, scope: LocalScope, namespace: 'var' | 'value', required = false): QRef {
     const local = name.qualifier ? undefined : scope.lookup(name.name);
-    if (local) return this.quoteBinders?.has(local) ? { k: 'bound', local } : { k: 'outer', name: name.name };
+    if (local) {
+      return this.quoteBinders?.has(local) || isQuoteLevelBinder(local)
+        ? { k: 'bound', local }
+        : { k: 'outer', name: name.name };
+    }
     return this.quoteGlobal(namespace, name, required);
   }
 
@@ -2887,7 +2919,7 @@ class Renamer {
 
   private quoteForall(binders: TyVarBinder[], context: TypeExpr[], body: TypeExpr, scope: LocalScope): QType {
     const tyVars = binders.map((binder): QTyVar => {
-      const local = this.newBinder(binder.name.name, binder.name.span);
+      const local = this.newBinder(binder.name.name, binder.name.span, 'tyVar');
       return {
         local,
         flag: binder.inferred ? 'inferred' : 'specified',
@@ -2942,7 +2974,7 @@ class Renamer {
     const tyVars = params.map((param, index): QTyVar => {
       const kind = kinds?.[index];
       return {
-        local: this.newBinder(param.name, param.span),
+        local: this.newBinder(param.name, param.span, 'tyVar'),
         flag: 'required',
         ...(kind ? { kind: this.quoteKind(kind, scope) } : {}),
       };
@@ -2992,7 +3024,7 @@ class Renamer {
       values.set(name.name, this.newBinder(name.name, name.span));
     };
     const other = (name: Name, namespace: Exclude<LocalNamespace, 'value'>): LocalVar => {
-      const local = this.newBinder(name.name, name.span);
+      const local = this.newBinder(name.name, name.span, namespace);
       others.push([local, namespace]);
       return local;
     };
@@ -3136,7 +3168,7 @@ class Renamer {
   private quoteInstanceDecl(decl: Extract<Decl, { kind: 'instance' }>, scope: LocalScope): QDecl {
     if (decl.overlap) throw this.unsupportedInQuote(decl.span, 'この instance 宣言');
     const binders = this.implicitTyVars([...decl.context, ...decl.types], scope, decl.span).map((binder) =>
-      this.newBinder(binder.name.name, decl.span)
+      this.newBinder(binder.name.name, decl.span, 'tyVar')
     );
     const inner = withLocals(scope, binders, 'tyVar');
     const cls = this.quoteTypeRef(decl.cls, scope);
@@ -3316,6 +3348,12 @@ class Renamer {
   private resolveVar(name: QName, scope: LocalScope): VarRef {
     if (!name.qualifier && !name.global) {
       const local = scope.lookup(name.name);
+      if (local && isQuoteLevelBinder(local)) {
+        throw compileError(
+          name.span,
+          `${name.name} はクォートの中で束縛された名前なので、スプライスの中ではクォートの中でしか使えません。`
+        );
+      }
       if (local) return { kind: 'local', local };
     }
     const entity = this.lookupValue(name, true);
