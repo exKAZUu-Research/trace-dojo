@@ -27,7 +27,8 @@ type RolesOf = (entity: TypeEntity) => Role[];
 /**
  * The roles of a type's parameters: a parameter that only fields of representational positions use is
  * representational, one no field uses is phantom, and one a type family, a constraint, a GADT's result type, or an
- * applied type variable uses is nominal. Types that refer to each other get their roles together, growing from
+ * argument of a type variable uses is nominal (the type variable itself, as in `data T f = MkT (f Int)`, takes the
+ * role of its position, as in GHC). Types that refer to each other get their roles together, growing from
  * their least roles until none changes, so that which of them is asked first does not matter.
  */
 export function rolesOf(entity: TypeEntity): Role[] {

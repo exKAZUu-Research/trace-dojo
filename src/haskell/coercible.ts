@@ -68,9 +68,9 @@ class CoercionSolver {
       return this.defaulting ? this.unwrapToDefault(left, right, l, r, depth) : 'stuck';
     const decomposed = this.decompose(l, r, depth);
     if (decomposed) return decomposed;
-    const fromNewtype = unwrappable(l.head);
+    const fromNewtype = unwrappable(l);
     if (fromNewtype) return this.nested('unwrap', fromNewtype, this.solve(field(fromNewtype, l), right, depth + 1));
-    const toNewtype = unwrappable(r.head);
+    const toNewtype = unwrappable(r);
     if (toNewtype) return this.nested('wrap', toNewtype, this.solve(left, field(toNewtype, r), depth + 1));
     if ([...typeVarsOf(left), ...typeVarsOf(right)].some((variable) => !variable.skolem)) return 'stuck';
     const printer = new TypePrinter();
@@ -82,9 +82,9 @@ class CoercionSolver {
 
   /** In defaulting, a newtype facing an unknown type gives way to its field, which the unknown type may then be. */
   private unwrapToDefault(left: Type, right: Type, l: Applied, r: Applied, depth: number): CoercionSpec | 'stuck' {
-    const fromNewtype = flexible(r.head) ? unwrappable(l.head) : undefined;
+    const fromNewtype = flexible(r.head) ? unwrappable(l) : undefined;
     if (fromNewtype) return this.nested('unwrap', fromNewtype, this.solve(field(fromNewtype, l), right, depth + 1));
-    const toNewtype = flexible(l.head) ? unwrappable(r.head) : undefined;
+    const toNewtype = flexible(l.head) ? unwrappable(r) : undefined;
     if (toNewtype) return this.nested('wrap', toNewtype, this.solve(left, field(toNewtype, r), depth + 1));
     return 'stuck';
   }
@@ -117,7 +117,7 @@ class CoercionSolver {
     const nominalEqual = l.args.every(
       (arg, index) => (roles[index] ?? 'nominal') !== 'nominal' || typesEqual(arg, r.args[index])
     );
-    if (unwrappable(l.head) && !nominalEqual) return undefined;
+    if (unwrappable(l) && !nominalEqual) return undefined;
     const params: CoercionSpec[] = [];
     for (const [index, arg] of l.args.entries()) {
       const role = roles[index] ?? 'nominal';
@@ -142,15 +142,19 @@ function flexible(type: Type): boolean {
   return type.tag === 'tvar' && !type.skolem;
 }
 
-/** The constructor of a newtype at the head of a type, whose field `Coercible` may take the value as. */
-function unwrappable(head: Type): ConInfo | undefined {
-  if (head.tag !== 'tcon') return undefined;
+/**
+ * The constructor of a newtype at the head of a type, whose field `Coercible` may take the value as: only when the
+ * newtype has all its arguments, since a newtype not applied to them (such as `Id` in `T Id`) has no field yet.
+ */
+function unwrappable(applied: Applied): ConInfo | undefined {
+  const { head } = applied;
+  if (head.tag !== 'tcon' || applied.args.length < head.entity.arity) return undefined;
   const con = head.entity.cons.length === 1 ? head.entity.cons[0] : undefined;
   return con?.isNewtype && !con.instanceArgs ? con : undefined;
 }
 
 function isPlainData(applied: Applied): boolean {
-  return applied.head.tag === 'tcon' && !unwrappable(applied.head);
+  return applied.head.tag === 'tcon' && !unwrappable(applied);
 }
 
 function field(con: ConInfo, applied: Applied): Type {
