@@ -581,7 +581,7 @@ export class Checker {
       vars.set(name, { tag: 'tgen', index });
       varKinds.set(name, kinds[index]);
     }
-    const type = this.convertType(sig.type, vars, varKinds, STAR);
+    let type = this.convertType(sig.type, vars, varKinds, STAR);
     const preds = this.convertConstraints(sig.context, vars, varKinds);
     this.checkKinds();
     const specified = sig.forall
@@ -590,6 +590,20 @@ export class Checker {
           const index = names.indexOf(name);
           return index === -1 ? [] : [index];
         });
+    // A forall the whole type is, which a synonym or parentheses give (`type Id = forall r. r -> r`), quantifies the
+    // signature itself: its variables and context join the scheme's, as GHC reads it.
+    for (let outer = prune(type); outer.tag === 'forall'; outer = prune(type)) {
+      const start = kinds.length;
+      const gens = outer.vars.map((variable, offset): Type => ({ tag: 'tgen', index: start + offset }));
+      for (const [offset, variable] of outer.vars.entries()) {
+        kinds.push(variable.kind);
+        names.push(variable.name ?? `t${start + offset}`);
+        specified.push(start + offset);
+      }
+      const inner = substituteBound(outer, gens);
+      preds.push(...inner.preds);
+      type = inner.body;
+    }
     const required = sig.forall?.flatMap((binder, index) => (binder.required ? [index] : []));
     const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified, required };
     if (!this.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
