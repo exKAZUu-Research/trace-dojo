@@ -833,6 +833,12 @@ export class Checker {
       if (applications[position].required && !scheme.required?.includes(index)) {
         typeError(applications[position].span, '(type t) を渡せるのは、forall a -> で型を受け取る引数だけです。');
       }
+      if (!applications[position].required && scheme.required?.includes(index)) {
+        typeError(
+          applications[position].span,
+          'forall a -> で型を受け取る引数には、@ ではなく (type t) で型を渡してください。'
+        );
+      }
       const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
       const type = this.convertType(typeArg, this.scopedTypes, scoped, (args[index] as TVar).kind);
       this.checkKinds();
