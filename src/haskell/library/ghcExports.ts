@@ -18,6 +18,7 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
       "!! $ $! && * ** *> + ++ - . / /= < <$ <$> <* <*> <= <> =<< == > >= >> >>= EQ False GT Just LT Left Nothing Right True ^ ^^ abs acos acosh all and any appendFile asTypeOf asin asinh atan atan2 atanh break ceiling compare concat concatMap const cos cosh curry cycle decodeFloat div divMod drop dropWhile either elem encodeFloat enumFrom enumFromThen enumFromThenTo enumFromTo error errorWithoutStackTrace even exp exponent fail filter flip floatDigits floatRadix floatRange floor fmap foldMap foldl foldl' foldl1 foldr foldr1 fromEnum fromInteger fromIntegral fromRational fst gcd getChar getContents getLine head id init interact ioError isDenormalized isIEEE isInfinite isNaN isNegativeZero iterate last lcm length lex liftA2 lines log logBase lookup map mapM mapM_ mappend max maxBound maximum maybe mconcat mempty min minBound minimum mod negate not notElem null odd or otherwise pi pred print product properFraction pure putChar putStr putStrLn quot quotRem read readFile readIO readList readLn readParen reads readsPrec realToFrac recip rem repeat replicate return reverse round scaleFloat scanl scanl1 scanr scanr1 seq sequence sequenceA sequence_ show showChar showList showParen showString shows showsPrec significand signum sin sinh snd span splitAt sqrt subtract succ sum tail take takeWhile tan tanh toEnum toInteger toRational traverse truncate uncurry undefined unlines until unwords unzip unzip3 userError words writeFile zip zip3 zipWith zipWith3 ||",
     origins: {
       'v:!!': 'GHC.Internal.List',
+      'v:.': 'GHC.Internal.Base',
       'v:break': 'GHC.Internal.List',
       'v:cycle': 'GHC.Internal.List',
       'v:drop': 'GHC.Internal.List',
@@ -28,6 +29,7 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
       "v:foldl'": 'GHC.Internal.Data.Foldable',
       'v:foldr': 'GHC.Internal.Data.Foldable',
       'v:head': 'GHC.Internal.List',
+      'v:id': 'GHC.Internal.Base',
       'v:init': 'GHC.Internal.List',
       'v:iterate': 'GHC.Internal.List',
       'v:last': 'GHC.Internal.List',
@@ -182,7 +184,11 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
     values: 'Left Right either fromLeft fromRight isLeft isRight lefts partitionEithers rights',
     types: { Either: 'Left Right' },
   },
-  'Data.Function': { values: '$ & . applyWhen const fix flip id on', types: {} },
+  'Data.Function': {
+    values: '$ & . applyWhen const fix flip id on',
+    origins: { 'v:.': 'GHC.Internal.Base', 'v:id': 'GHC.Internal.Base' },
+    types: {},
+  },
   'Data.Ord': {
     values: '< <= > >= Down EQ GT LT clamp compare comparing getDown max min',
     fields: 'getDown',
@@ -265,7 +271,10 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
   'Text.Read': {
     values:
       '+++ <++ Char EOF Ident Number Punc String Symbol choice get lex lexP lift look minPrec parens pfail prec read readEither readList readListDefault readListPrec readListPrecDefault readMaybe readP_to_Prec readParen readPrec readPrec_to_P readPrec_to_S readS_to_Prec reads readsPrec reset step',
-    origins: { 'v:lift': 'GHC.Internal.Text.ParserCombinators.ReadPrec' },
+    origins: {
+      'v:+++': 'GHC.Internal.Text.ParserCombinators.ReadPrec',
+      'v:lift': 'GHC.Internal.Text.ParserCombinators.ReadPrec',
+    },
     types: {
       Lexeme: 'Char EOF Ident Number Punc String Symbol',
       Prec: '',
@@ -1676,6 +1685,36 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
       'v:zipWith4': 'Data.Sequence.Internal',
     },
     types: { Seq: ':<| :|> Empty', ViewL: ':< EmptyL', ViewR: ':> EmptyR' },
+  },
+  'Data.Bifunctor': {
+    values: 'bimap first second',
+    origins: { 'v:first': 'Data.Bifunctor', 'v:second': 'Data.Bifunctor' },
+    types: { Bifunctor: 'bimap first second' },
+  },
+  'Control.Category': {
+    values: '. <<< >>> id',
+    origins: { 'v:.': 'GHC.Internal.Control.Category', 'v:id': 'GHC.Internal.Control.Category' },
+    types: { Category: '. id' },
+  },
+  'Control.Arrow': {
+    values:
+      '&&& *** +++ <+> <<< <<^ >>> >>^ ArrowMonad Kleisli ^<< ^>> app arr first left leftApp loop returnA right runKleisli second zeroArrow |||',
+    fields: 'runKleisli',
+    origins: {
+      'v:+++': 'GHC.Internal.Control.Arrow',
+      'v:first': 'GHC.Internal.Control.Arrow',
+      'v:second': 'GHC.Internal.Control.Arrow',
+    },
+    types: {
+      Arrow: '&&& *** arr first second',
+      ArrowApply: 'app',
+      ArrowChoice: '+++ left right |||',
+      ArrowLoop: 'loop',
+      ArrowMonad: 'ArrowMonad',
+      ArrowPlus: '<+>',
+      ArrowZero: 'zeroArrow',
+      Kleisli: 'Kleisli runKleisli',
+    },
   },
   'Data.Void': { values: 'absurd vacuous', types: { Void: '' } },
   'Data.Complex': {

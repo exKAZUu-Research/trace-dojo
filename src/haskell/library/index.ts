@@ -1,3 +1,4 @@
+import { ARROW_SOURCE, BIFUNCTOR_SOURCE } from './arrow';
 import { BASE_CORE } from './baseCore';
 import { BASE_LIST } from './baseList';
 import { BASE_MISC } from './baseMisc';
@@ -35,6 +36,8 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   { name: 'Data.Semigroup.Internal', source: SEMIGROUP_SOURCE },
   { name: 'Data.List.NonEmpty.Internal', source: NON_EMPTY_SOURCE },
   { name: 'Data.Tree.Internal', source: TREE_SOURCE },
+  { name: 'Data.Bifunctor.Internal', source: BIFUNCTOR_SOURCE },
+  { name: 'Control.Arrow.Internal', source: ARROW_SOURCE },
   { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE + FIXED_WIDTH_LIFT },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
@@ -1216,6 +1219,30 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['ViewR', 'all'],
     ],
     values: SEQUENCE_VALUES,
+  },
+  'Data.Bifunctor': {
+    from: 'Data.Bifunctor.Internal',
+    types: [['Bifunctor', 'all']],
+    values: [],
+  },
+  'Control.Category': {
+    from: 'Control.Arrow.Internal',
+    types: [['Category', 'all']],
+    values: ['<<<', '>>>'],
+  },
+  'Control.Arrow': {
+    from: 'Control.Arrow.Internal',
+    types: [
+      ['Arrow', 'all'],
+      ['Kleisli', 'all'],
+      ['ArrowZero', 'all'],
+      ['ArrowPlus', 'all'],
+      ['ArrowChoice', 'all'],
+      ['ArrowApply', 'all'],
+      ['ArrowMonad', 'all'],
+      ['ArrowLoop', 'all'],
+    ],
+    values: ['returnA', '^>>', '>>^', '>>>', '<<<', '<<^', '^<<', 'leftApp'],
   },
   'Data.Void': { from: 'Base', types: [['Void', 'none']], values: ['absurd', 'vacuous'] },
   'Data.Complex': {

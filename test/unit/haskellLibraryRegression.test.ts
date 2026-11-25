@@ -49,6 +49,11 @@ test.each([
     '(Down (Just 1),Down True)\n',
     undefined,
   ],
+  [
+    'import Control.Arrow\nimport qualified Data.Bifunctor as B\nimport Data.List\nmain = print (map (head &&& length) . group . sort $ "abca", ((+1) *** show >>> second length) (1,2), runKleisli (Kleisli (\\x -> [x,x+1]) >>> arr (*2)) 1, (show ||| reverse) (Right "ab" :: Either Int String), loop (\\(b,xs) -> (take b xs,1:xs)) 2, B.bimap (+1) show (1,2), B.first negate (Left 3 :: Either Int Char))',
+    "([('a',2),('b',1),('c',1)],(2,1),[2,4],\"ba\",[1,1],(2,\"2\"),Left (-3))\n",
+    undefined,
+  ],
 ])('library results and exception ordering match GHC: %s', (source, stdout, uncaughtException) => {
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException });
 });
