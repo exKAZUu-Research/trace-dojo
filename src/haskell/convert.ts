@@ -2371,7 +2371,9 @@ function convertQualifiedDo(features: FeatureGates<'convert'>, node: Node, modul
         span,
       };
     } else if (stmt.kind === 'let') {
-      result = { kind: 'let', decls: stmt.decls, body: rest, span };
+      // As `let ... in rest`, whose banged (or Strict) bindings are evaluated before the rest.
+      const { decls, forced } = strictBindings(features, stmt.decls);
+      result = { kind: 'let', decls, body: forcing(forced, rest, stmt.span), span };
     } else if (stmt.kind === 'rec' || stmt.kind === 'transform') {
       throw unsupportedError(stmt.span, '修飾つきの do の中の rec');
     } else {
