@@ -314,10 +314,12 @@ class Renamer {
     this.importModules();
     this.declareTypes(this.module.decls);
     this.declareDataInstances(this.module.decls);
-    const decls = this.expandBindingWildcards(this.expandPatternSynonyms(this.module.decls), (name) => {
-      const own = name.qualifier ? undefined : this.ownValues.get(name.name);
-      return own?.con ?? this.lookupCon(name);
-    });
+    const decls = this.expandBindingWildcards(this.expandPatternSynonyms(this.module.decls), (name) =>
+      this.recordFieldNames(name, () => {
+        const own = name.qualifier ? undefined : this.ownValues.get(name.name);
+        return own?.con ?? this.lookupCon(name);
+      })
+    );
     const topBindings = this.declareValues(decls);
     this.addOwnToScope();
     this.applyTopFixities(decls);
@@ -1283,7 +1285,9 @@ class Renamer {
   // code-gauge-allow functionNcss -- Local declarations combine signatures, fixities, and bindings in one scope.
   renameLocalDecls(sourceDecls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
     const scope = new LocalScope(parent);
-    const decls = this.expandBindingWildcards(sourceDecls, (name) => this.lookupCon(name));
+    const decls = this.expandBindingWildcards(sourceDecls, (name) =>
+      this.recordFieldNames(name, () => this.lookupCon(name))
+    );
     for (const decl of decls) {
       if (decl.kind === 'data' || decl.kind === 'typeSyn' || decl.kind === 'class' || decl.kind === 'instance') {
         throw compileError(decl.span, 'data・type・class・instance の宣言は、最上位にだけ書けます。');
@@ -1964,7 +1968,13 @@ class Renamer {
    * Replaces the `..` of the record patterns of pattern bindings with the fields they bind, whose names the bindings
    * must declare before their patterns are renamed.
    */
-  private expandBindingWildcards(decls: Decl[], resolve: (name: QName) => ConInfo): Decl[] {
+  /** The fields a record pattern's `..` binds: those of a record pattern synonym, or of the constructor. */
+  private recordFieldNames(name: QName, con: () => ConInfo): readonly string[] {
+    const synonym = name.qualifier ? undefined : this.patternSynonyms.get(name.name);
+    return synonym?.fields ?? con().fieldNames ?? [];
+  }
+
+  private expandBindingWildcards(decls: Decl[], resolve: (name: QName) => readonly string[]): Decl[] {
     return decls.map((decl) =>
       decl.kind === 'patBind' ? { ...decl, pat: expandRecordWildcards(decl.pat, resolve) } : decl
     );
@@ -1999,7 +2009,9 @@ class Renamer {
         scope
       );
     }
-    const pat = expandRecordWildcards(source, (name) => this.lookupCon(name)) as typeof source;
+    const pat = expandRecordWildcards(source, (name) =>
+      this.recordFieldNames(name, () => this.lookupCon(name))
+    ) as typeof source;
     const { span } = pat;
     const con = this.lookupCon(pat.con);
     const args: RPat[] = Array.from({ length: con.arity }, () => ({ k: 'wild', span }) as RPat);
@@ -2927,14 +2939,14 @@ function isHoleName(name: QName, scope: LocalScope, lookup: (name: QName) => rea
 }
 
 /** A pattern with the `..` of its record patterns replaced by the fields it binds, as variables of the same names. */
-function expandRecordWildcards(pat: Pat, resolve: (name: QName) => ConInfo): Pat {
+function expandRecordWildcards(pat: Pat, resolve: (name: QName) => readonly string[]): Pat {
   switch (pat.kind) {
     case 'precord': {
       const fields = pat.fields.map((field) => ({ ...field, pat: expandRecordWildcards(field.pat, resolve) }));
       if (!pat.wildcard) return { ...pat, fields };
       const span = pat.wildcard;
       const named = new Set(fields.map((field) => field.field.name));
-      for (const name of resolve(pat.con).fieldNames ?? []) {
+      for (const name of resolve(pat.con)) {
         if (!named.has(name))
           fields.push({ field: { name, span }, pat: { kind: 'pvar', name: { name, span }, span }, span });
       }
