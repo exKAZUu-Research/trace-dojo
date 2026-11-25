@@ -14,3 +14,6 @@ abstract class Shape {
 }
 @logged class Square {}
 const Circle = @logged class {};
+class Built {
+  @logged constructor() {}
+}

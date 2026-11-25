@@ -86,6 +86,7 @@ function isDecoratable(node: TreeNode | null): boolean {
   return (
     node.parent?.type === 'class_body' &&
     memberKind(node) !== undefined &&
+    node.childForFieldName('name')?.text !== 'constructor' &&
     !hasToken(node, 'declare') &&
     !hasToken(node, 'abstract')
   );
