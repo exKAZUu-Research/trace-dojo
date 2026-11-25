@@ -377,6 +377,12 @@ function convertImportItem(features: ConvertContext, node: Node, exporting = fal
 }
 
 /** The name a node spells, without parentheses around an operator. */
+/** The name an infix declaration head's operator gives: a symbol, or a name in backticks, `a \`And\` b`. */
+function infixHeadName(node: Node): QName {
+  const inner = node.type === 'infix_id' ? namedChildren(node)[0] : undefined;
+  return inner ? qualifiedName(inner).name : plainName(node);
+}
+
 function plainName(node: Node): Name {
   if (node.type === 'prefix_id' || node.type === 'parenthesized_name') {
     const inner = namedChildren(node)[0];
@@ -974,7 +980,7 @@ function familyInstanceHead(features: ConvertContext, node: Node): { family: QNa
   if (head) {
     requireTypeOperators(features, head);
     return {
-      family: plainName(required(head, 'operator')),
+      family: infixHeadName(required(head, 'operator')),
       patterns: fields(head, 'operand').map((operand) => convertType(patternFeatures, operand)),
     };
   }
@@ -1125,7 +1131,7 @@ function typeDeclName(features: ConvertContext, node: Node): Name {
   const head = field(node, 'head');
   if (head) {
     requireTypeOperators(features, head);
-    return plainName(required(head, 'operator'));
+    return infixHeadName(required(head, 'operator'));
   }
   const nameNode = required(node, 'name');
   if (nameNode.type !== 'name') {
@@ -1555,7 +1561,7 @@ function convertInstance(features: ConvertContext, node: Node): Decl {
   return {
     kind: 'instance',
     context: contextNode ? convertContext(features, contextNode) : [],
-    cls: head ? plainName(nameNode) : qualifiedName(nameNode).name,
+    cls: head ? infixHeadName(nameNode) : qualifiedName(nameNode).name,
     types: types.map((node) => convertType(features, node)),
     decls,
     ...(overlap ? { overlap } : {}),
