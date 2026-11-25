@@ -1,9 +1,10 @@
 import { kotlin } from './source';
 
 /**
- * `java.util.TreeMap` and `TreeSet`, internal as programs may not name Java's classes, which Kotlin's `sortedMapOf` and `sortedSetOf` create: a map or set whose
- * iteration follows its keys' order. A TreeMap keeps its entries in a list sorted by its order, where one binary search
- * finds keys by comparing them, as the JVM's tree does; a TreeSet is the keys of a TreeMap, as the JVM's is.
+ * `java.util.TreeMap` and `TreeSet`, internal as programs may not name Java's classes, which Kotlin's `sortedMapOf`
+ * and `sortedSetOf` create: a map or set whose iteration follows its keys' order. A TreeMap keeps its entries in a list
+ * sorted by its order, where one binary search finds keys by comparing them, as the JVM's tree finds them by comparing,
+ * though with other stored keys than the tree's path visits; a TreeSet is the keys of a TreeMap, as the JVM's is.
  */
 export const SORTED_COLLECTIONS_SOURCE = kotlin`
 package java.util
