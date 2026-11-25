@@ -114,14 +114,27 @@ function readPlainArithmeticChunk(raw: string, i: number): { chunk: string; next
   if (c === "'") {
     const close = raw.indexOf("'", i + 1);
     const end = close === -1 ? raw.length : close + 1;
-    return { chunk: raw.slice(i, end), next: end };
+    return { chunk: unescapeArithmeticBackslashes(raw.slice(i, end)), next: end };
   }
   const next = raw[i + 1];
   if (c === '\\' && next !== undefined) {
-    const chunk = `${'$`\\\n'.includes(next) ? '' : '\\'}${next === '\n' ? '' : next}`;
-    return { chunk, next: i + 2 };
+    return { chunk: unescapeArithmeticEscape(next), next: i + 2 };
   }
   return { chunk: c, next: i + 1 };
+}
+
+function unescapeArithmeticBackslashes(slice: string): string {
+  if (!slice.includes('\\')) return slice;
+  let out = '';
+  for (let i = 0; i < slice.length; i++) {
+    out += slice[i] === '\\' && i + 1 < slice.length ? unescapeArithmeticEscape(slice[++i]) : slice[i];
+  }
+  return out;
+}
+
+function unescapeArithmeticEscape(next: string): string {
+  if (next === '\n') return '';
+  return '$`\\'.includes(next) ? next : `\\${next}`;
 }
 
 /**
