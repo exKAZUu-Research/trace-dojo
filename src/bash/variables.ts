@@ -327,6 +327,10 @@ export class VariableStore {
     return this.currentFunctionScopeIndex() !== undefined;
   }
 
+  get topScopeIndex(): number {
+    return this.scopes.length - 1;
+  }
+
   private currentFunctionScopeIndex(): number | undefined {
     for (let i = this.scopes.length - 1; i >= 1; i--) {
       if (this.scopes[i].kind === 'function') return i;

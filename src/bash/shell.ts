@@ -123,7 +123,7 @@ export class Shell implements ArithmeticHost, RootContext {
   // ---------------------------------------------------------------- running
 
   runProgram(program: Program): number {
-    this.runtime.frames.push({ callRow: undefined, isAtomic: false, scopeIndex: 0 });
+    this.runtime.frames.push({ callRow: undefined, isAtomic: false, store: this.store, scopeIndex: 0 });
     try {
       for (const [index, unit] of program.units.entries()) {
         this.lineShift = this.readShift;
@@ -626,7 +626,7 @@ export class Shell implements ArithmeticHost, RootContext {
     if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     const reportedRow = this.currentRow;
     const scopeIndex = this.store.pushFunctionScope(fn.name, reportedRow + 1, args);
-    const frame: Frame = { callRow, isAtomic: fn.isAtomic, scopeIndex };
+    const frame: Frame = { callRow, isAtomic: fn.isAtomic, store: this.store, scopeIndex };
     this.runtime.frames.push(frame);
     const saved = {
       loop: this.loopDepth,
@@ -682,6 +682,7 @@ export class Shell implements ArithmeticHost, RootContext {
         if (buffer.text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       },
     };
+    if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     const firstRow = body[0]?.row ?? startRow;
     const childShift = firstRow !== undefined ? firstRow - this.currentRow : this.lineShift;
     const childStore = this.store.fork(() => this.currentRow + 1);
@@ -692,24 +693,23 @@ export class Shell implements ArithmeticHost, RootContext {
       lineShift: childShift,
       readShift: childShift,
     });
+    const subshellFrame: Frame = {
+      callRow: undefined,
+      isAtomic: false,
+      store: childStore,
+      scopeIndex: childStore.topScopeIndex,
+    };
     this.captureRoots.push(buffer);
     this.runtime.registerContext(childShell);
-    let status: number;
+    this.runtime.frames.push(subshellFrame);
     try {
-      status = childShell.runStatements(body);
-    } catch (error) {
-      if (error instanceof ExitSignal || error instanceof DiscardSignal || error instanceof ReturnSignal) {
-        status = error.status;
-      } else if (error instanceof BreakSignal || error instanceof ContinueSignal) {
-        status = 0;
-      } else {
-        throw error;
-      }
+      const status = runSubshellBody(childShell, body);
+      return { output: buffer.text, status };
     } finally {
+      this.runtime.frames.pop();
       this.runtime.unregisterContext(childShell);
       this.captureRoots.pop();
     }
-    return { output: buffer.text, status };
   }
 
   // ---------------------------------------------------------------- errors & arithmetic
@@ -958,6 +958,18 @@ export class Shell implements ArithmeticHost, RootContext {
 
   splitSubscript(text: string): { name: string; subscript: string } | undefined {
     return splitSubscriptText(text);
+  }
+}
+
+function runSubshellBody(childShell: Shell, body: Statement[]): number {
+  try {
+    return childShell.runStatements(body);
+  } catch (error) {
+    if (error instanceof ExitSignal || error instanceof DiscardSignal || error instanceof ReturnSignal) {
+      return error.status;
+    }
+    if (error instanceof BreakSignal || error instanceof ContinueSignal) return 0;
+    throw error;
   }
 }
 

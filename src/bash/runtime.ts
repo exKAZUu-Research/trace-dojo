@@ -4,6 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Statement } from './ast';
+import type { VariableStore } from './variables';
 
 /** The name Bash reports the program by, in `$0` and in its error messages. */
 export const SCRIPT_NAME = 'main.sh';
@@ -23,10 +24,12 @@ export interface FunctionDefinition {
   lineShift: number;
 }
 
-/** A frame of the trace: the program's top level, or a call of a function the program defines. */
+/** A frame of the trace: the program's top level, a command substitution, or a call of a function the program defines. */
 export interface Frame extends TracedFrame {
   readonly isAtomic: boolean;
-  /** The index of the frame's own scope among the shell's scopes, which the trace reads its variables from. */
+  /** The store of the shell context executing this frame. */
+  readonly store: VariableStore;
+  /** The index of the frame's own scope among `store`'s scopes, which the trace reads its variables from. */
   readonly scopeIndex: number;
 }
 
