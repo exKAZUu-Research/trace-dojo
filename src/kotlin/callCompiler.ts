@@ -1246,9 +1246,15 @@ export abstract class CallCompiler extends CompilerCore {
   ): void {
     this.requireMemberOptIn(member, row);
     const { owner, visibility } = member;
-    // The library's internal members are the prelude's helpers, which programs, another module, cannot see.
-    if (owner && visibility === 'internal' && member.isLibrary && !this.file.isLibrary)
-      this.error(row, `${member.name} は internal なので、${owner.name} のモジュールの外からは使えません。`);
+    // The library's internal declarations are the prelude's helpers, which programs, another module, cannot see: a
+    // top-level one is no name of kotlinc's library at all.
+    if (visibility === 'internal' && member.isLibrary && !this.file.isLibrary)
+      this.error(
+        row,
+        owner
+          ? `${member.name} は internal なので、${owner.name} のモジュールの外からは使えません。`
+          : `${member.name} が見つかりません。`
+      );
     if (!owner || visibility === 'public' || visibility === 'internal') return;
     const classes = this.enclosingClasses(scope);
     if (visibility === 'private') {
