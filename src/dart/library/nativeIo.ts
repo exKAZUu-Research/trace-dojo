@@ -22,11 +22,18 @@ function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, show
     return run();
   } catch (error) {
     if (!(error instanceof FileSystemError)) throw error;
-    const [message, errno] = OS_ERRORS[error.code];
+    const { code, path: errorPath } = error;
+    // The VM reports a missing name written as a directory, as `a.txt/`, as not found, where Node.js reports EISDIR.
+    const isMissingName =
+      code === 'EISDIR' &&
+      /[^/]\/+$/u.test(errorPath) &&
+      runtime.io.files.kindOf(errorPath.replace(/\/+$/u, '')) === undefined;
+    const reported = isMissingName ? 'ENOENT' : code;
+    const [message, errno] = OS_ERRORS[reported];
     const osError = runtime.links.construct(runtime, 'OSError', '', [message, errno]);
-    const path = shownPath ?? error.path;
-    if (error.code === 'ENOENT') runtime.throwError('PathNotFoundException', '', [path, osError, failure]);
-    if (error.code === 'EEXIST') runtime.throwError('PathExistsException', '', [path, osError, failure]);
+    const path = shownPath ?? errorPath;
+    if (reported === 'ENOENT') runtime.throwError('PathNotFoundException', '', [path, osError, failure]);
+    if (reported === 'EEXIST') runtime.throwError('PathExistsException', '', [path, osError, failure]);
     return runtime.throwError('FileSystemException', '', [failure, path, osError]);
   }
 }
@@ -137,7 +144,8 @@ define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
   const text = stringArg(runtime, path, 'path');
   if (recursive === true) {
     withFileErrors(runtime, 'Creation failed', () => {
-      rejectFileAncestors(runtime, text, false);
+      // A file's ancestors end before its own name, whatever separators follow that name.
+      rejectFileAncestors(runtime, text.replace(/\/+$/u, ''), false);
       files.createDirectory(parentOf(text), true);
     });
   }
