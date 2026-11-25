@@ -1952,10 +1952,9 @@ function setBinderScheme(binder: Binder, scheme: Scheme): void {
 /** The scheme of a local whose type is polymorphic, as a rank-N parameter's is. */
 function localPolytypeScheme(local: LocalVar): Scheme | undefined {
   const type = local.type && prune(local.type);
-  // The binders of a written `forall`, which type applications take in order.
-  return type?.tag === 'forall'
-    ? { ...polytypeScheme(type), specified: type.vars.map((_, index) => index) }
-    : undefined;
+  if (type?.tag !== 'forall') return undefined;
+  const specified = type.vars.flatMap((variable, index) => (variable.inferred ? [] : [index]));
+  return { ...polytypeScheme(type), specified };
 }
 
 /** A polymorphic type inside another as a scheme, with its variables as `TGen` indices. */

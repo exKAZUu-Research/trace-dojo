@@ -192,6 +192,7 @@ export class TypeConversion {
           name: binder.name,
           skolem: true,
           bound: true,
+          ...(binder.inferred ? { inferred: true } : {}),
         }));
         const innerVars = new Map(vars);
         const innerKinds = new Map(varKinds);

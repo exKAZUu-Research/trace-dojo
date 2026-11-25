@@ -158,6 +158,8 @@ export interface TVar {
   skolem?: boolean;
   /** Whether the variable is one a `TForall` binds, which is no free variable of the types around it. */
   bound?: boolean;
+  /** Whether its `TForall` binds it as `{a}`, which visible type applications skip. */
+  inferred?: boolean;
 }
 
 export interface TCon {
