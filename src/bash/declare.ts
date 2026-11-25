@@ -1,3 +1,5 @@
+// code-gauge-allow-file fileNcss -- Keeps static, dynamic, and shadowed declaration schedules plus shared compound commit in one cohesive module.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
 import { expandBraces } from './braces';
@@ -7,6 +9,7 @@ import {
   rejectUnsupportedDeclarationListing,
   rejectUnsupportedDeclarationOperand,
   rejectUnsupportedDeclarationOptions,
+  rejectUnsupportedShadowedCompound,
 } from './capabilities';
 import { printDeclarations } from './declarePrint';
 import type { FailureContext } from './failurePolicy';
@@ -129,6 +132,43 @@ export function runDynamicDeclarationBuiltin(shell: Shell, builtin: string, args
     lastArgText: args.at(-1) ?? builtin,
   };
   return runDeclarationPlan(shell, plan);
+}
+
+/** Expands a static declaration command's arguments when a shell function shadows the builtin name. */
+export function expandShadowedDeclarationArgs(
+  shell: Shell,
+  builtin: string,
+  rawArgs: readonly (Word | Assignment)[]
+): string[] {
+  const argv = [builtin];
+  return shell.withValuesRoot(argv, () => {
+    for (const arg of rawArgs) appendShadowedArg(shell, builtin, arg, argv);
+    return argv;
+  });
+}
+
+function appendShadowedArg(shell: Shell, builtin: string, arg: Word | Assignment, argv: string[]): void {
+  if (!('append' in arg)) {
+    for (const word of shell.expander.expandWords([arg])) pushShadowedArg(argv, word);
+    return;
+  }
+  if (arg.array) rejectUnsupportedShadowedCompound(builtin);
+  for (const braced of braceExpandAssignment(shell, arg)) {
+    pushShadowedArg(argv, expandShadowedAssignmentOperand(shell, braced));
+  }
+}
+
+function pushShadowedArg(argv: string[], value: string): void {
+  argv.push(value);
+  if (argv.length - 1 > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+}
+
+function expandShadowedAssignmentOperand(shell: Shell, arg: Assignment): string {
+  const lhs = arg.subscript ? `${arg.name}[${shell.expander.expandAssignmentSubscript(arg.subscript)}]` : arg.name;
+  const rhs = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : '';
+  const text = `${lhs}${arg.append ? '+=' : '='}${rhs}`;
+  if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  return text;
 }
 
 /** Executes an ordinary `name=(...)` or `name+=(...)` compound assignment through the single compound schedule. */
@@ -554,37 +594,17 @@ function executePlannedOperand(
     }
     return true;
   }
-  if (operand.kind === 'word') {
-    const parsed = parseWordOperand(operand.text);
-    return executeScalarDeclarationOperand(
-      shell,
-      builtin,
-      {
-        name: parsed.name,
-        isSubscripted: parsed.subscript !== undefined,
-        append: parsed.append,
-        value: parsed.value,
-        rawText: operand.text,
-      },
-      set,
-      intent,
-      onMaterialize
-    );
-  }
-  return executeScalarDeclarationOperand(
-    shell,
-    builtin,
-    {
-      name: operand.name,
-      isSubscripted: operand.subscript !== undefined,
-      append: operand.append,
-      value: operand.value,
-      rawText: operand.text,
-    },
-    set,
-    intent,
-    onMaterialize
-  );
+  const normalized: NormalizedScalarOperand =
+    operand.kind === 'word'
+      ? parseWordOperand(operand.text)
+      : {
+          name: operand.name,
+          isSubscripted: operand.subscript !== undefined,
+          append: operand.append,
+          value: operand.value,
+          rawText: operand.text,
+        };
+  return executeScalarDeclarationOperand(shell, builtin, normalized, set, intent, onMaterialize);
 }
 
 interface NormalizedScalarOperand {
@@ -756,24 +776,21 @@ function planAssignsAnswer(plan: DeclarationPlan): boolean {
   });
 }
 
-function parseWordOperand(word: string): { name: string; subscript?: string; append: boolean; value?: string } {
+function parseWordOperand(word: string): NormalizedScalarOperand {
   const eqIndex = findOperandEquals(word);
   if (eqIndex === -1) {
-    const open = word.indexOf('[');
-    if (open !== -1 && open + 1 < word.length - 1 && skipSubscript(word, open) === word.length - 1) {
-      return { name: word.slice(0, open), subscript: word.slice(open + 1, -1), append: false };
-    }
-    return { name: word, append: false };
+    return { ...splitDeclareLhs(word, true), append: false, value: undefined, rawText: word };
   }
   const append = eqIndex > 0 && word[eqIndex - 1] === '+';
-  const lhsEnd = append ? eqIndex - 1 : eqIndex;
-  const lhs = word.slice(0, lhsEnd);
-  const value = word.slice(eqIndex + 1);
+  const lhs = word.slice(0, append ? eqIndex - 1 : eqIndex);
+  return { ...splitDeclareLhs(lhs, false), append, value: word.slice(eqIndex + 1), rawText: word };
+}
+
+function splitDeclareLhs(lhs: string, nonEmptySubscript: boolean): { name: string; isSubscripted: boolean } {
   const open = lhs.indexOf('[');
-  if (open !== -1 && skipSubscript(lhs, open) === lhs.length - 1) {
-    return { name: lhs.slice(0, open), subscript: lhs.slice(open + 1, -1), append, value };
-  }
-  return { name: lhs, append, value };
+  const valid =
+    open !== -1 && (!nonEmptySubscript || open + 1 < lhs.length - 1) && skipSubscript(lhs, open) === lhs.length - 1;
+  return valid ? { name: lhs.slice(0, open), isSubscripted: true } : { name: lhs, isSubscripted: false };
 }
 
 function findOperandEquals(word: string): number {

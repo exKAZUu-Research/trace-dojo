@@ -85,6 +85,11 @@ export class Expander {
     return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
   }
 
+  /** Expands an assignment's subscript in a declaration word (`a[k]=v`), joining `$*` with spaces when `IFS` is empty. */
+  expandAssignmentSubscript(word: Word): string {
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar: true }));
+  }
+
   /** Expands an assignment's value, optionally joining `$*` with spaces when `IFS` is empty (`spacedStar`). */
   expandAssignmentValue(word: Word, spacedStar = false): string {
     this.checkTilde(word.parts, true);

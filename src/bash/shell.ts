@@ -18,7 +18,12 @@ import {
   rejectUnsupportedPrefixAssignment,
 } from './capabilities';
 import { conditionalStatus } from './conditional';
-import { executeCompoundAssignment, executeDeclarationCommand, runDynamicDeclarationBuiltin } from './declare';
+import {
+  executeCompoundAssignment,
+  executeDeclarationCommand,
+  expandShadowedDeclarationArgs,
+  runDynamicDeclarationBuiltin,
+} from './declare';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
 import {
@@ -571,10 +576,10 @@ export class Shell implements ArithmeticHost, RootContext {
     conditionalStep: boolean;
     ranFunction: boolean;
   } {
+    this.expander.lastSubstitutionStatus = 0;
     const shadowingFn = this.store.getFunction(statement.name);
     if (shadowingFn) {
-      const wordArgs = statement.args.map((arg): Word => ('append' in arg ? literalAssignmentWord(arg) : arg));
-      const argv = [statement.name, ...this.expander.expandWords(wordArgs)];
+      const argv = expandShadowedDeclarationArgs(this, statement.name, statement.args);
       return this.withValuesRoot(argv, () => {
         const status = this.withTemporaryScope(statement.assignments, () =>
           this.withRedirects(statement.redirects, () => {
@@ -918,8 +923,4 @@ function runSubshellBody(childShell: Shell, body: Statement[]): number {
     if (error instanceof BreakSignal || error instanceof ContinueSignal) return 0;
     throw error;
   }
-}
-
-function literalAssignmentWord(arg: Assignment): Word {
-  return { parts: [{ kind: 'literal', text: arg.text }], row: arg.row, text: arg.text };
 }

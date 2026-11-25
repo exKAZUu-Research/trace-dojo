@@ -257,6 +257,10 @@ export function rejectUnsupportedDeclarationPrefix(builtin: string): never {
   throw new UnsupportedFeatureError(`宣言ビルトインへの前置代入（${builtin}）`);
 }
 
+export function rejectUnsupportedShadowedCompound(builtin: string): never {
+  throw new UnsupportedFeatureError(`関数で上書きされた宣言ビルトイン（${builtin}）での複合代入`);
+}
+
 export function rejectUnsupportedDeclarationListing(builtin: string): never {
   throw new UnsupportedFeatureError(`${builtin} の変数の一覧`);
 }
