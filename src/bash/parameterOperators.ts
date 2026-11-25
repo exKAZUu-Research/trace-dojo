@@ -808,7 +808,7 @@ function formatDeclarationTransform(
   const isArray =
     view.kind === 'indexed' || view.kind === 'associative' || view.attributes.has('a') || view.attributes.has('A');
   if (value.kind === 'list' && isArray) {
-    return { text: declarationText(view), isArray: true };
+    return { text: declarationText(view, (cost) => shell.runtime.spend(cost)), isArray: true };
   }
   const rawScalar = value.kind === 'list' ? value.values[0] : value.value;
   return { text: scalarAssignmentText(view, rawScalar), isArray: false };
