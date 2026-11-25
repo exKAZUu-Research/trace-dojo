@@ -83,10 +83,14 @@ fromList :: [a] -> Seq a
 fromList xs = Seq (M.fromDistinctAscList (B.zip [0 ..] xs))
 
 replicate :: Int -> a -> Seq a
-replicate n x = fromList (B.replicate n x)
+replicate n x
+  | n < 0 = error "replicate takes a nonnegative integer argument"
+  | otherwise = fromList (B.replicate n x)
 
 fromFunction :: Int -> (Int -> a) -> Seq a
-fromFunction n f = fromList (map f [0 .. n - 1])
+fromFunction n f
+  | n < 0 = error "Data.Sequence.fromFunction called with negative len"
+  | otherwise = fromList (map f [0 .. n - 1])
 
 (<|) :: a -> Seq a -> Seq a
 x <| Seq m = Seq (case M.lookupMin m of
@@ -222,6 +226,7 @@ intersperse x s = fromList (B.intersperse x (toList s))
 chunksOf :: Int -> Seq a -> Seq (Seq a)
 chunksOf n s
   | null s = empty
+  | n <= 0 = error "chunksOf: A non-empty sequence can only be broken up into positively-sized chunks."
   | otherwise = take n s <| chunksOf n (drop n s)
 
 tails :: Seq a -> Seq (Seq a)
@@ -231,13 +236,17 @@ inits :: Seq a -> Seq (Seq a)
 inits s = fromList (map fromList (B.inits (toList s)))
 
 iterateN :: Int -> (a -> a) -> a -> Seq a
-iterateN n f x = fromList (B.take n (B.iterate f x))
+iterateN n f x
+  | n < 0 = error "iterateN takes a nonnegative integer argument"
+  | otherwise = fromList (B.take n (B.iterate f x))
 
 unfoldr :: (b -> Maybe (a, b)) -> b -> Seq a
 unfoldr f b = fromList (B.unfoldr f b)
 
 replicateA :: Applicative f => Int -> f a -> f (Seq a)
-replicateA n x = fmap fromList (sequenceA (B.replicate n x))
+replicateA n x
+  | n < 0 = error "replicateA takes a nonnegative integer argument"
+  | otherwise = fmap fromList (sequenceA (B.replicate n x))
 
 replicateM :: Applicative f => Int -> f a -> f (Seq a)
 replicateM = replicateA
