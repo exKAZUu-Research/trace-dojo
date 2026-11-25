@@ -6,3 +6,4 @@
 (10,3): error TS1206: Decorators are not valid here.
 (11,3): error TS1206: Decorators are not valid here.
 (18,3): error TS1206: Decorators are not valid here.
+(21,3): error TS1206: Decorators are not valid here.

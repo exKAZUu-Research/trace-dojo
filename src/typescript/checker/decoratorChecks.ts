@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { takesNoArguments } from './callArity';
 import type { Checker } from './checker';
 import { newInferenceRun } from './inference';
-import { hasToken, named } from './syntax';
+import { hasToken, isConstructorName, named } from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -86,7 +86,7 @@ function isDecoratable(node: TreeNode | null): boolean {
   return (
     node.parent?.type === 'class_body' &&
     memberKind(node) !== undefined &&
-    node.childForFieldName('name')?.text !== 'constructor' &&
+    !isConstructorName(node.childForFieldName('name')) &&
     !hasToken(node, 'declare') &&
     !hasToken(node, 'abstract')
   );

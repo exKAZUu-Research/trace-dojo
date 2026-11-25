@@ -17,3 +17,6 @@ const Circle = @logged class {};
 class Built {
   @logged constructor() {}
 }
+class Quoted {
+  @logged 'constructor'() {}
+}
