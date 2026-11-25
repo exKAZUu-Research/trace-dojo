@@ -56,6 +56,7 @@ interface ShellContextOptions {
   readonly fd2?: OutputTarget;
   readonly lineShift?: number;
   readonly readShift?: number;
+  readonly loopDepth?: number;
 }
 
 /**
@@ -71,7 +72,7 @@ export class Shell implements ArithmeticHost {
   currentRow = 0;
   private readShift: number;
   private lineShift: number;
-  private loopDepth = 0;
+  private loopDepth: number;
   private conditionDepth = 0;
 
   constructor(
@@ -82,6 +83,7 @@ export class Shell implements ArithmeticHost {
     this.fd2 = options?.fd2 ?? runtime.io.stderr;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
+    this.loopDepth = options?.loopDepth ?? 0;
     this.store = options?.store ?? new VariableStore(runtime, () => this.currentRow + 1);
     this.store.setLineReader(() => this.currentRow + 1);
     this.failures = new FailurePolicy(
@@ -639,6 +641,7 @@ export class Shell implements ArithmeticHost {
       fd2: this.fd2,
       lineShift: childShift,
       readShift: childShift,
+      loopDepth: this.loopDepth,
     });
     const subshellFrame: Frame = {
       callRow: undefined,
@@ -780,10 +783,15 @@ function runSubshellBody(childShell: Shell, body: Statement[]): number {
   try {
     return childShell.runStatements(body);
   } catch (error) {
-    if (error instanceof ExitSignal || error instanceof DiscardSignal || error instanceof ReturnSignal) {
+    if (
+      error instanceof ExitSignal ||
+      error instanceof DiscardSignal ||
+      error instanceof ReturnSignal ||
+      error instanceof BreakSignal
+    ) {
       return error.status;
     }
-    if (error instanceof BreakSignal || error instanceof ContinueSignal) return 0;
+    if (error instanceof ContinueSignal) return 0;
     throw error;
   }
 }
