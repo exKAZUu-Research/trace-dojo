@@ -47,8 +47,10 @@ class DialectValidator {
     this.visit(this.root);
   }
 
-  private visit(node: Node, context?: Layout): void {
+  private visit(node: Node, outer?: Layout): void {
     if (isComment(node)) return;
+    // A quote's brackets delimit it, so the layout around it does not reach inside, as its own declarations' does.
+    const context = node.type === 'quote' ? undefined : outer;
     validateSyntaxNode(node, this.blockArguments, this.reserved);
     const children = node.children.filter((child): child is Node => child !== null);
     if (children.length === 0) {
