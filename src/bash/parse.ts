@@ -489,8 +489,8 @@ function skipQuotedSubstringAtom(body: string, pos: number): number {
     const close = body.indexOf("'", pos + 1);
     return close === -1 ? body.length : close;
   }
-  if (c !== '"') return pos;
+  if (c !== '"' && c !== '`') return pos;
   let end = pos + 1;
-  for (; end < body.length && body[end] !== '"'; end++) if (body[end] === '\\') end++;
+  for (; end < body.length && body[end] !== c; end++) if (body[end] === '\\') end++;
   return end;
 }

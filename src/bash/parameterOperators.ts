@@ -4,7 +4,14 @@ import { ATTRIBUTE_ORDER, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
-import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
+import {
+  appendBounded,
+  type Expander,
+  joinBounded,
+  type ParameterValue,
+  type SubscriptRef,
+  unescapeDoubleQuoted,
+} from './expansion';
 import {
   EMPTY_LIST_SEGMENT,
   FIELD_BREAK_SEGMENT,
@@ -582,38 +589,72 @@ function sliceAssociative(values: string[], start: bigint): string[] | undefined
   return values.slice(Math.max(Number(offset) - 1, 0));
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Tracks parenthesis nesting and ternary ? : pairs across literal word parts.
+interface SubstringScanState {
+  depth: number;
+  conditional: number;
+  inSingle: boolean;
+}
+
 function splitSubstring(parts: WordPart[]): {
   offset: (string | WordPart)[];
   length: (string | WordPart)[] | undefined;
 } {
   const offset: (string | WordPart)[] = [];
-  let depth = 0;
-  let conditional = 0;
+  const state: SubstringScanState = { depth: 0, conditional: 0, inSingle: false };
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') {
       offset.push(part);
       continue;
     }
-    for (let i = 0; i < part.text.length; i++) {
-      const c = part.text[i];
-      if (c === '(') depth++;
-      else if (c === ')') depth--;
-      else if (c === '?' && depth === 0) conditional++;
-      else if (c === ':' && depth === 0) {
-        if (conditional > 0) {
-          conditional--;
-          continue;
-        }
-        const before = part.text.slice(0, i);
-        if (before) offset.push(before);
-        const after = part.text.slice(i + 1);
-        return { offset, length: [...(after ? [after] : []), ...parts.slice(index + 1)] };
-      }
+    const splitAt = findSubstringSeparator(part.text, state);
+    if (splitAt === -1) {
+      offset.push(unescapeDoubleQuoted(part.text));
+      continue;
     }
-    offset.push(part.text);
+    const before = unescapeDoubleQuoted(part.text.slice(0, splitAt));
+    if (before) offset.push(before);
+    return { offset, length: unescapeSubstringRest(part.text.slice(splitAt + 1), parts.slice(index + 1)) };
   }
   return { offset, length: undefined };
+}
+
+function unescapeSubstringRest(after: string, tail: readonly WordPart[]): (string | WordPart)[] {
+  const head = unescapeDoubleQuoted(after);
+  const rest = tail.map((item): string | WordPart =>
+    item.kind === 'literal' ? unescapeDoubleQuoted(item.text) : item
+  );
+  return head ? [head, ...rest] : rest;
+}
+
+function findSubstringSeparator(text: string, state: SubstringScanState): number {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (state.inSingle) {
+      if (c === "'") state.inSingle = false;
+      continue;
+    }
+    if (c === "'") {
+      state.inSingle = true;
+      continue;
+    }
+    if (c === '\\' && '$`"\\\n'.includes(text[i + 1] ?? '')) {
+      i++;
+      continue;
+    }
+    if (updateSubstringNesting(c, state)) return i;
+  }
+  return -1;
+}
+
+function updateSubstringNesting(c: string, state: SubstringScanState): boolean {
+  if (c === '(') state.depth++;
+  else if (c === ')') state.depth = Math.max(0, state.depth - 1);
+  else if (c === '?' && state.depth === 0) state.conditional++;
+  else if (c === ':' && state.depth === 0) {
+    if (state.conditional === 0) return true;
+    state.conditional--;
+  }
+  return false;
 }
 
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
