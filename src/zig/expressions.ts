@@ -1304,8 +1304,11 @@ export abstract class ExpressionCompiler extends SemaBase {
   private addressOperand(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     const pointerType = resultType && unwrapResult(resultType);
     let operandType = pointerType?.kind === 'pointer' ? pointerType.child : undefined;
-    // A pointer to many elements points to an array of them.
-    const many = pointerType?.kind === 'pointer' && pointerType.size !== 'one' ? pointerType : undefined;
+    // A slice or many-item pointer points to an array of its elements; a C pointer takes no array literal, as in Zig.
+    const many =
+      pointerType?.kind === 'pointer' && pointerType.size !== 'one' && pointerType.size !== 'c'
+        ? pointerType
+        : undefined;
     if (many && expression.operand.kind === 'arrayInit' && !expression.operand.type) {
       operandType = arrayOf(expression.operand.elements.length, many.child, many.sentinel);
     }
@@ -1319,7 +1322,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     let operand = this.compileLocation(expression.operand, operandType);
     this.refuseComptimeVarPointer(operand, expression);
-    const valueType = many ? undefined : operandType;
+    // A pointer to many elements takes the operand's own type, which it then coerces from.
+    const valueType = pointerType?.kind === 'pointer' && pointerType.size !== 'one' ? undefined : operandType;
     if (!operand.place && valueType && operand.type !== valueType)
       operand = this.coerce(operand, valueType, expression.operand);
     return this.addressOf(operand);
