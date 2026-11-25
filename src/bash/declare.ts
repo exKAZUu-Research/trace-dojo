@@ -362,7 +362,7 @@ function buildDeclarationPlan(
       state.optionsDone = true;
       for (const braced of braceExpandAssignment(shell, arg)) {
         state.lastArgText = braced.text;
-        state.operands.push(planAssignmentOperand(shell, builtin, braced, state));
+        pushPlannedOperand(state, planAssignmentOperand(shell, builtin, braced, state));
       }
     } else {
       appendExpandedDeclareWords(shell, builtin, arg, state);
@@ -382,8 +382,13 @@ function appendExpandedDeclareWords(shell: Shell, builtin: string, arg: Word, st
     }
     if (!state.optionsDone && consumeOptionToken(builtin, word, state.options)) continue;
     state.optionsDone = true;
-    state.operands.push({ kind: 'word', text: word });
+    pushPlannedOperand(state, { kind: 'word', text: word });
   }
+}
+
+function pushPlannedOperand(state: PlanBuilderState, operand: PlannedOperand): void {
+  state.operands.push(operand);
+  if (state.operands.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
 }
 
 function createEmptyOptions(): {
@@ -442,22 +447,24 @@ function snapshotEffectiveOptions(builtin: string, rawOptions: ParsedOptions): P
   return copy;
 }
 
-function braceExpandAssignment(shell: Shell, arg: Assignment): Assignment[] {
-  if (arg.array) return [arg];
+function* braceExpandAssignment(shell: Shell, arg: Assignment): Generator<Assignment> {
+  if (arg.array) {
+    yield arg;
+    return;
+  }
   const spend = (): void => shell.runtime.spend();
   const subPartsList = arg.subscript ? expandBraces(arg.subscript.parts, spend) : [undefined];
   const valPartsList = arg.value ? expandBraces(arg.value.parts, spend) : [undefined];
-  const expanded: Assignment[] = [];
   for (const subParts of subPartsList) {
     for (const valParts of valPartsList) {
-      expanded.push({
+      spend();
+      yield {
         ...arg,
         ...(subParts && arg.subscript ? { subscript: { ...arg.subscript, parts: subParts } } : {}),
         ...(valParts && arg.value ? { value: { ...arg.value, parts: valParts } } : {}),
-      });
+      };
     }
   }
-  return expanded;
 }
 
 function planAssignmentOperand(
