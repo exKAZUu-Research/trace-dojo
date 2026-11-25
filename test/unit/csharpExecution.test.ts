@@ -195,6 +195,81 @@ test('hostile programs stop within the limits, and runs share no state', () => {
     expect(executeProgram('csharp', hashCodes)).toMatchObject({ stdout: '58225482 54267293\n33574638\n' });
 });
 
+// Console reads standard input and writes standard error, and System.IO works on the run's virtual file system, whose
+// working directory is `/`. A StreamWriter holds 1024 characters, then its FileStream 4096 bytes, as .NET's do, so
+// what a program never flushes is lost.
+test('standard input, standard error, and files behave as in .NET', () => {
+  const reading = String.raw`int n = int.Parse(Console.ReadLine()!);
+int[] xs = Console.ReadLine()!.Split(' ').Select(int.Parse).ToArray();
+Console.WriteLine($"{n} {xs.Sum()} {Console.ReadLine() == null}");
+Console.Error.WriteLine("warning");
+File.WriteAllLines("out/a.txt", xs.Select(x => $"{x * x}"));
+`;
+  expect(executeProgram('csharp', reading, { stdin: '3\n1 2 3\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: '3 6 True\n',
+    stderr:
+      "warning\nUnhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path '/out/a.txt'.\n",
+    finalFiles: {},
+  });
+  const files = String.raw`Directory.CreateDirectory("out");
+File.WriteAllLines("out/a.txt", new[] { "1", "4" });
+File.AppendAllText("out/a.txt", "9");
+Console.WriteLine(string.Join("+", File.ReadAllLines("out/a.txt")));
+var w = new StreamWriter("out/b.txt");
+w.Write(new string('x', 5000));
+Console.WriteLine($"{File.ReadAllText("out/b.txt").Length} {Path.GetExtension("out/b.txt")}");
+try { File.ReadAllText("none.txt"); } catch (FileNotFoundException e) { Console.WriteLine(e.Message); }
+using (var u = new StreamWriter("out/c.txt")) u.Write("kept");
+var lost = new StreamWriter("out/d.txt");
+lost.Write("lost");
+`;
+  expect(executeProgram('csharp', files)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: "1+4+9\n0 .txt\nCould not find file '/none.txt'.\n",
+    finalFiles: { 'out/a.txt': '1\n4\n9', 'out/b.txt': '', 'out/c.txt': 'kept', 'out/d.txt': '' },
+  });
+});
+
+// One thread runs every task: Task.Run work waits until the running code awaits, timers fire by a virtual clock, and
+// WhenAll gathers exceptions in the order the tasks faulted. A wait that nothing can end is a deadlock, an error.
+test('async methods and tasks run in a fixed order', () => {
+  const program = String.raw`var slow = Work("slow", 30);
+var fast = Work("fast", 10);
+var run = Task.Run(() => { Console.WriteLine("run"); return 7; });
+Console.WriteLine("main");
+int[] results = await Task.WhenAll(slow, fast);
+Console.WriteLine($"{string.Join(",", results)} {await run}");
+try { await Task.WhenAll(Fail("a"), Fail("b")); }
+catch (Exception e) { Console.WriteLine(e.Message); }
+await foreach (var n in Count(2)) Console.WriteLine($"n{n}");
+
+static async Task<int> Work(string name, int ms)
+{ Console.WriteLine($"{name} start"); await Task.Delay(ms); Console.WriteLine($"{name} end"); return ms; }
+
+static async Task Fail(string message)
+{ await Task.Delay(message == "a" ? 30 : 1); throw new InvalidOperationException(message); }
+
+static async IAsyncEnumerable<int> Count(int count)
+{ for (int i = 0; i < count; i++) { await Task.Delay(1); yield return i; } }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: ['slow start', 'fast start', 'main', 'run', 'fast end', 'slow end', '30,10 7', 'b', 'n0', 'n1', ''].join(
+      '\n'
+    ),
+  });
+  expect(
+    executeProgram('csharp', 'Console.WriteLine("wait");\nawait new TaskCompletionSource().Task;\n')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'wait\n',
+    uncaughtException: 'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

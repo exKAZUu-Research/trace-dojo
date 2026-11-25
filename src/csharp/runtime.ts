@@ -72,6 +72,8 @@ export interface ExceptionState {
   actualValue?: Value;
   /** The actual value itself, which `ActualValue` returns. */
   actualObject?: Value;
+  /** The file that a FileNotFoundException names, which its `ToString()` shows after its message. */
+  fileName?: string;
   /** Whether a `throw` threw the exception, after which `ToString()` would print a stack trace. */
   wasThrown: boolean;
   data?: undefined;

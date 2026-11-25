@@ -17,6 +17,7 @@ import type { BindContext } from './convertBinder';
 import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
+import { IO_SOURCE } from './library/ioSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
 import { TASKS_SOURCE } from './library/tasksSource';
 import { TURTLE_SOURCE } from './library/turtleSource';
@@ -95,7 +96,10 @@ function buildLibrary(): Library {
   };
   const compiler = new Compiler(library, {});
   // One unit, since the library's namespaces refer to each other's types.
-  const unit = parseCSharp([SYSTEM_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, TURTLE_SOURCE].join('\n'), true);
+  const unit = parseCSharp(
+    [SYSTEM_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, IO_SOURCE, TURTLE_SOURCE].join('\n'),
+    true
+  );
   const declared = compiler.declareUnit(unit, root, true);
   compiler.bindLibraryMembers(declared);
   if (compiler.diagnostics.length > 0)

@@ -292,6 +292,7 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
   const state = exception.native as ExceptionState;
   const message = evaluator.exceptionMessageOf(exception);
   let text = `${runtimeTypeName(exception.type)}${message ? `: ${message}` : ''}`;
+  if (state.fileName !== undefined) text += `\nFile name: '${state.fileName}'`;
   if (state.inner)
     text += `\n ---> ${exceptionText(evaluator, state.inner)}\n   --- End of inner exception stack trace ---`;
   return text;

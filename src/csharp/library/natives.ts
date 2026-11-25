@@ -3,6 +3,7 @@ import './nativesCore';
 import './nativesTime';
 import './nativesIndex';
 import './nativesIterators';
+import './nativesIo';
 import './nativesTasks';
 import './nativesString';
 import './nativesCollections';

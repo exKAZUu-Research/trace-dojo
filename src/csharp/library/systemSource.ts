@@ -1280,56 +1280,7 @@ namespace System.Runtime.CompilerServices {
   }
 }
 
-namespace System.IO {
-  public abstract class TextWriter : IDisposable {
-    public virtual string NewLine { get; set; }
-    public virtual void Flush();
-    public void Dispose();
-    public virtual void Write(bool value);
-    public virtual void Write(char value);
-    public virtual void Write(char[]? buffer);
-    public virtual void Write(decimal value);
-    public virtual void Write(double value);
-    public virtual void Write(int value);
-    public virtual void Write(long value);
-    public virtual void Write(object? value);
-    public virtual void Write(float value);
-    public virtual void Write(string? value);
-    public virtual void Write(string format, object? arg0);
-    public virtual void Write(string format, object? arg0, object? arg1);
-    public virtual void Write(string format, object? arg0, object? arg1, object? arg2);
-    public virtual void Write(string format, params object?[] arg);
-    public virtual void Write(uint value);
-    public virtual void Write(ulong value);
-    public virtual void WriteLine();
-    public virtual void WriteLine(bool value);
-    public virtual void WriteLine(char value);
-    public virtual void WriteLine(char[]? buffer);
-    public virtual void WriteLine(decimal value);
-    public virtual void WriteLine(double value);
-    public virtual void WriteLine(int value);
-    public virtual void WriteLine(long value);
-    public virtual void WriteLine(object? value);
-    public virtual void WriteLine(float value);
-    public virtual void WriteLine(string? value);
-    public virtual void WriteLine(string format, object? arg0);
-    public virtual void WriteLine(string format, object? arg0, object? arg1);
-    public virtual void WriteLine(string format, object? arg0, object? arg1, object? arg2);
-    public virtual void WriteLine(string format, params object?[] arg);
-    public virtual void WriteLine(uint value);
-    public virtual void WriteLine(ulong value);
-  }
-  public abstract class TextReader : IDisposable {
-    public virtual string? ReadLine();
-    public virtual int Read();
-    public virtual string ReadToEnd();
-    public void Dispose();
-  }
-}
-
-namespace System.Text {
-  public abstract class Encoding { }
-}
+namespace System.Text { public abstract class Encoding { } }
 
 `;
 

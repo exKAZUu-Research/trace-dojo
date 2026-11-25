@@ -779,10 +779,8 @@ function qualifiedPath(node: TypeNode): string[] | undefined {
 }
 
 const UNAVAILABLE_NAMESPACES: Record<string, string> = {
-  'System.IO': 'ファイルの読み書き（System.IO）',
   'System.Net': 'ネットワーク（System.Net）',
   'System.Threading': 'スレッド（System.Threading）',
-  'System.Threading.Tasks': '非同期処理（System.Threading.Tasks）',
   'System.Reflection': 'リフレクション（System.Reflection）',
   'System.Diagnostics': 'System.Diagnostics',
   'System.Runtime': 'System.Runtime',

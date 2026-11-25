@@ -1162,7 +1162,8 @@ function parseRadix(text: string, base: number, target: SpecialType): Value {
 // ---- Console and TextWriter ----
 
 /** Writes what `Write` and `WriteLine` print for their argument types and composite formats. */
-function writeText(call: NativeCall, args: Value[]): string {
+/** The text that a `Write` overload writes for its arguments, as Console and TextWriter format it. */
+export function writeText(call: NativeCall, args: Value[]): string {
   const parameters = call.method.parameters;
   if (args.length === 0) return '';
   if (parameters.length >= 2 && specialOf(parameters[0].type) === 'string' && parameters[0].name === 'format') {
@@ -1240,14 +1241,6 @@ const writers =
 defineNatives({
   'System.Console.Write': writers('stdout', false),
   'System.Console.WriteLine': writers('stdout', true),
-  'System.Console.get_Out': (call) => textWriter(call, 'stdout'),
-  'System.Console.get_Error': (call) => textWriter(call, 'stderr'),
-  'System.IO.TextWriter.Write': (call, receiver, args) =>
-    writers((receiver as CsObject).native as 'stdout', false)(call, receiver, args),
-  'System.IO.TextWriter.WriteLine': (call, receiver, args) =>
-    writers((receiver as CsObject).native as 'stdout', true)(call, receiver, args),
-  'System.IO.TextWriter.Flush': () => {},
-  'System.IO.TextWriter.Dispose': () => {},
   'System.Environment.Exit': (_call, _receiver, [code]) => {
     throw new ProgramExit(code as number);
   },
@@ -1258,24 +1251,6 @@ defineNativesKeepingStrings({
   'System.IO.TextWriter.get_NewLine': () => '\n',
   'System.Environment.get_NewLine': () => '\n',
 });
-
-const textWriters = new WeakMap<object, Record<string, CsObject>>();
-
-function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
-  const runtime = call.frame.runtime;
-  let writers = textWriters.get(runtime);
-  if (!writers) {
-    writers = {};
-    textWriters.set(runtime, writers);
-  }
-  let writer = writers[stream];
-  if (!writer) {
-    writer = new CsObject(libraryType(call, 'System.IO.TextWriter'), []);
-    writer.native = stream;
-    writers[stream] = writer;
-  }
-  return writer;
-}
 
 // ---- Exceptions ----
 
@@ -1295,6 +1270,7 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
       state.messageString = value;
     }
     if (name === 'innerException') state.inner = value as CsObject | undefined;
+    if (name === 'fileName' && isString(value)) state.fileName = stringText(value);
     if (name === 'paramName' && isString(value)) {
       state.paramName = stringText(value);
       state.paramNameString = value;
