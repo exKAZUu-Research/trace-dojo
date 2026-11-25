@@ -245,11 +245,12 @@ export abstract class StatementCompiler extends PatternCompiler {
     expected: DartType | undefined,
     isArrow: boolean
   ): Compiled {
+    // The returned expression is inferred under FutureOr of its value type, Object? and dynamic included, as the SDK
+    // does: `Future<Object?> f() async => wrap(x)` infers wrap's T as Object?. A void value type gives no context, as a
+    // synchronous return's does, and only a value type beyond the top types checks the value.
     const valueType = expected && !isTop(expected) ? expected : undefined;
-    const compiled = this.compileExpression(
-      expression,
-      valueType ? interfaceType(coreTypes.futureOr, [valueType]) : undefined
-    );
+    const context = expected && expected.kind !== 'void' ? interfaceType(coreTypes.futureOr, [expected]) : undefined;
+    const compiled = this.compileExpression(expression, context);
     const kind = compiled.type.kind;
     if (expected?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
