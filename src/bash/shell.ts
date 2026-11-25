@@ -44,10 +44,15 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
+import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
 
 export { BASH_VERSION, type FunctionDefinition, type OutputTarget } from './runtime';
 export type { CompoundElement } from './variables';
+
+type StepMode = 'statement' | 'binding' | 'skip';
+
+const CONDITION_BUILTINS = new Set<string>(['test', '[', 'true', 'false', ...TURTLE_PREDICATE_NAMES]);
 
 interface ShellContextOptions {
   readonly store?: VariableStore;
@@ -210,17 +215,23 @@ export class Shell implements ArithmeticHost {
       return this.withStatus(() => this.runSimpleBody(statement).status);
     }
     const mark = this.runtime.steps.statementMark();
-    let outcome = { status: 0, conditionalStep: false, ranFunction: false };
+    let outcome: { status: number; stepMode: StepMode; ranFunction: boolean } = {
+      status: 0,
+      stepMode: 'statement',
+      ranFunction: false,
+    };
     const status = this.withStatus(() => {
       outcome = this.runSimpleBody(statement);
       return outcome.status;
     });
-    if (outcome.conditionalStep) this.runtime.steps.stepBinding(statement.row, false);
-    else this.runtime.steps.completeStatement(statement.row, outcome.ranFunction, mark);
+    if (outcome.stepMode === 'binding') this.runtime.steps.stepBinding(statement.row, false);
+    else if (outcome.stepMode === 'statement') {
+      this.runtime.steps.completeStatement(statement.row, outcome.ranFunction, mark);
+    }
     return status;
   }
 
-  private runSimpleBody(statement: Statement): { status: number; conditionalStep: boolean; ranFunction: boolean } {
+  private runSimpleBody(statement: Statement): { status: number; stepMode: StepMode; ranFunction: boolean } {
     switch (statement.kind) {
       case 'command': {
         return this.executeCommand(statement);
@@ -231,14 +242,14 @@ export class Shell implements ArithmeticHost {
       case 'arithmetic': {
         return {
           status: this.arithmeticStatus(statement.expression, '(('),
-          conditionalStep: this.listConditionDepth > 0,
+          stepMode: this.listConditionDepth > 0 ? 'skip' : 'statement',
           ranFunction: false,
         };
       }
       case 'test': {
         return {
           status: conditionalStatus(this, statement.expression),
-          conditionalStep: this.listConditionDepth > 0,
+          stepMode: this.listConditionDepth > 0 ? 'skip' : 'statement',
           ranFunction: false,
         };
       }
@@ -462,13 +473,13 @@ export class Shell implements ArithmeticHost {
 
   private executeCommand(statement: Extract<Statement, { kind: 'command' }>): {
     status: number;
-    conditionalStep: boolean;
+    stepMode: StepMode;
     ranFunction: boolean;
   } {
     this.expander.lastSubstitutionStatus = 0;
     const argv = this.expander.expandWords(statement.words);
     if (argv.length === 0) {
-      return { status: this.executeAssignmentOnlyCommand(statement), conditionalStep: false, ranFunction: false };
+      return { status: this.executeAssignmentOnlyCommand(statement), stepMode: 'statement', ranFunction: false };
     }
     const [name, ...args] = argv;
     const lastArg = argv.at(-1) as string;
@@ -487,14 +498,14 @@ export class Shell implements ArithmeticHost {
     name: string,
     args: readonly string[],
     lastArg: string
-  ): { status: number; conditionalStep: boolean; ranFunction: boolean } {
+  ): { status: number; stepMode: StepMode; ranFunction: boolean } {
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(name);
     const status = this.withRedirects(statement.redirects, () => {
       const code = runDynamicDeclarationBuiltin(this, name, args);
       this.store.lastArgument = lastArg;
       return code;
     });
-    return { status, conditionalStep: false, ranFunction: false };
+    return { status, stepMode: 'statement', ranFunction: false };
   }
 
   private invokeOrdinaryCommand(
@@ -503,8 +514,8 @@ export class Shell implements ArithmeticHost {
     args: string[],
     lastArg: string,
     kind: 'function' | 'builtin' | 'notFound'
-  ): { status: number; conditionalStep: boolean; ranFunction: boolean } {
-    const isTestCommand = kind === 'builtin' && statement.assignments.length === 0 && (name === 'test' || name === '[');
+  ): { status: number; stepMode: StepMode; ranFunction: boolean } {
+    const isConditionBuiltin = kind === 'builtin' && statement.assignments.length === 0 && CONDITION_BUILTINS.has(name);
     const status = this.withTemporaryScope(statement.assignments, () =>
       this.withRedirects(statement.redirects, () => {
         let code = 127;
@@ -521,14 +532,14 @@ export class Shell implements ArithmeticHost {
     );
     return {
       status,
-      conditionalStep: this.listConditionDepth > 0 && isTestCommand,
+      stepMode: this.listConditionDepth > 0 && isConditionBuiltin ? 'skip' : 'statement',
       ranFunction: kind === 'function',
     };
   }
 
   private executeDeclarationStatement(statement: Extract<Statement, { kind: 'declaration' }>): {
     status: number;
-    conditionalStep: boolean;
+    stepMode: StepMode;
     ranFunction: boolean;
   } {
     this.expander.lastSubstitutionStatus = 0;
@@ -542,7 +553,7 @@ export class Shell implements ArithmeticHost {
           return code;
         })
       );
-      return { status, conditionalStep: false, ranFunction: true };
+      return { status, stepMode: 'statement', ranFunction: true };
     }
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
     const { status, assignsAnswer } = executeDeclarationCommand(
@@ -552,7 +563,7 @@ export class Shell implements ArithmeticHost {
       statement.args,
       (run) => this.withRedirects(statement.redirects, run)
     );
-    return { status, conditionalStep: !assignsAnswer, ranFunction: false };
+    return { status, stepMode: assignsAnswer ? 'statement' : 'binding', ranFunction: false };
   }
 
   private executeAssignmentOnlyCommand(statement: Extract<Statement, { kind: 'command' }>): number {

@@ -57,6 +57,11 @@ function fail(shell: Shell, name: string, message: string): never {
   throw new TurtleError(report);
 }
 
+export const TURTLE_PREDICATE_NAMES = new Set<string>([
+  ...TURTLE_METHOD_NAMES.canMoveForward,
+  ...TURTLE_METHOD_NAMES.isFrontPainted,
+]);
+
 export const TURTLE_BUILTINS: Record<string, Builtin> = { turtle_new: turtleNew };
 
 for (const [names, sign] of [
