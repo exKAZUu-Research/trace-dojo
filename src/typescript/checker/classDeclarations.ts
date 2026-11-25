@@ -6,6 +6,7 @@ import { checkDecorators } from './decoratorChecks';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
+import { checkOverrideModifiers } from './overrideModifiers';
 import { assignmentKind, hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
@@ -60,37 +61,9 @@ export class ClassDeclarationChecker {
 
   /** The `override` modifiers and decorators of the members, and the `in` and `out` annotations of the type parameters. */
   private checkModifiers(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
-    this.checkOverrideModifiers(node, members);
+    checkOverrideModifiers(this.c, node, members);
     checkVarianceAnnotations(this.c, node);
     checkDecorators(this.c, node, info);
-  }
-
-  /** A member marked `override`, including a parameter property, must override a member of the base class. */
-  private checkOverrideModifiers(node: TreeNode, members: TreeNode[]): void {
-    const ctor = this.c.classes.constructorNode(node);
-    const parameters = named(ctor?.childForFieldName('parameters') ?? ctor ?? node).filter(
-      (parameter) => ctor !== undefined && parameter.type !== 'comment'
-    );
-    const hasBase = this.c.classes.extendsClause(node) !== undefined;
-    const className = node.childForFieldName('name')?.text ?? '(Anonymous class)';
-    for (const member of [...members, ...parameters]) {
-      if (!named(member).some((child) => child.type === 'override_modifier')) continue;
-      if (!hasBase) {
-        this.c.error(
-          member,
-          `このメンバーには 'override' 修飾子を付けられません。クラス '${className}' は、ほかのクラスを継承していません。`
-        );
-        continue;
-      }
-      const name = memberName(this.c, member);
-      const isStatic = hasToken(member, 'static');
-      const base = isStatic ? this.c.classes.baseStaticType(node) : this.c.classes.baseInstanceType(node);
-      if (name === undefined || !base || isAnyLike(base) || this.c.propertyOf(base, name)) continue;
-      this.c.error(
-        member,
-        `このメンバーには 'override' 修飾子を付けられません。基底クラス '${this.c.print(this.c.classes.baseInstanceType(node) ?? base)}' で宣言されていません。`
-      );
-    }
   }
 
   private checkIndexes(node: TreeNode, info: ClassInfo): void {
