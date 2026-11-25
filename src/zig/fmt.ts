@@ -630,6 +630,12 @@ export function printValue(
         printInt(out, addressOf(value), USIZE, 16, false, options);
         return;
       }
+      // An unbounded pointer has no length to print elements to, so it prints as its address.
+      if (type.size === 'many' || type.size === 'c') {
+        appendBytes(out, utf8(`${typeName(type.child)}@`));
+        printInt(out, addressOf(value), USIZE, 16, false, options);
+        return;
+      }
       if (depth === 0) {
         appendBytes(out, utf8('{ ... }'));
         return;
