@@ -326,13 +326,16 @@ export function writeResolvedTarget(shell: Shell, target: ResolvedTarget, value:
       return { ok: true, stored: value };
     }
     case 'scalar': {
+      rejectSpecialVariableMutation(target.name, false);
       const cell = target.cell ?? shell.store.selectDestination('visible', target.name, undefined, append).cell;
       return shell.store.writeScalar(cell, value, append, evalInt, target.name);
     }
     case 'associativeElement': {
+      rejectSpecialVariableMutation(target.name, false);
       return shell.store.writeAssociativeElement(target.cell, target.key, value, append, evalInt, target.name);
     }
     case 'indexedElement': {
+      rejectSpecialVariableMutation(target.name, false);
       const cell = target.cell ?? shell.store.selectDestination('visible', target.name, undefined, append).cell;
       return shell.store.writeIndexedElement(cell, target.index, value, append, evalInt, target.name);
     }
