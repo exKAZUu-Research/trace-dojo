@@ -1,5 +1,5 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
-import { ExecutionBudget } from '../interpreter/limits';
+import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { panic } from './arith';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
@@ -13,7 +13,7 @@ import { parseZig } from './parse';
 import './library/registry';
 import { PROCESS_INIT } from './library/std';
 import { TURTLE } from './library/turtle';
-import { BranchQuotaExceeded, Frame, Runtime, ZigPanic } from './runtime';
+import { BranchQuotaExceeded, CompileTimeCallDepthExceeded, Frame, Runtime, ZigPanic } from './runtime';
 import { addDecls, FnRef, type TExpr } from './semaBase';
 import { StatementCompiler } from './statements';
 import { type Decl, type Namespace, type StructType, TYPE, type Type, typeName } from './types';
@@ -221,6 +221,11 @@ class Compiler extends StatementCompiler {
         return this.error(
           { ...expression.span, row: error.row ?? expression.span.row },
           `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${error.quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
+        );
+      if (error instanceof CompileTimeCallDepthExceeded)
+        return this.error(
+          { ...expression.span, row: error.row ?? expression.span.row },
+          `コンパイルのときの計算で、関数の呼び出しが ${LIMITS.maxCallDepth} 段の深さを超えました（この採点環境の上限です）。`
         );
       if (error instanceof ZigPanic) {
         if (error.text === 'unable to resolve comptime value')

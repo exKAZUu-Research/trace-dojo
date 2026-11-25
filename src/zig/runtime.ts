@@ -53,6 +53,14 @@ export class BranchQuotaExceeded extends Error {
   }
 }
 
+/** Calls nested deeper than the grader's call depth while the compiler evaluates code, which ends the analysis. */
+export class CompileTimeCallDepthExceeded extends Error {
+  constructor(readonly row: number | undefined) {
+    super('compile-time calls nested too deep');
+    this.name = 'CompileTimeCallDepthExceeded';
+  }
+}
+
 /** A `break`, `continue`, or `return` inside an expression, which unwinds to the construct it leaves. */
 export class Jump {
   constructor(
@@ -218,8 +226,7 @@ export class Runtime {
     run: (frame: Frame) => T
   ): T {
     if (this.frames.length >= LIMITS.maxCallDepth) {
-      // Code that the compiler runs ends at its evaluation quota first, as Zig's does for deep recursion.
-      if (this.branchCount) throw new BranchQuotaExceeded(callRow, this.branchCount.quota);
+      if (this.branchCount) throw new CompileTimeCallDepthExceeded(callRow);
       throw new StackOverflow();
     }
     const slots = fn.slotCount;
