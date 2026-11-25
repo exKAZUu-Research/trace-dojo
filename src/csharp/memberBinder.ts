@@ -1372,24 +1372,7 @@ export abstract class MemberBinder extends CallBinder {
       hasDynamicArgument &&
       !target.candidates.some((candidate) => candidate.method.kind === 'localFunction');
     if (!onDynamic && !ofDynamic && !withDynamic) return undefined;
-    // The runtime binder finds no extension methods, which C# rejects calling with `dynamic` arguments.
-    if (target.kind === 'methodGroup' && target.candidates.length === 0 && target.receiver) {
-      this.error(
-        node,
-        'CS1973',
-        `'${displayType(target.receiver.type)}' には、'${target.name}'という名前の該当するメソッドがありませんが、同じ名前の拡張メソッドがあるようです。拡張メソッドは動的ディスパッチできません。動的引数をキャストするか、または拡張メソッド構文を使用しないで拡張メソッドを呼び出すことを検討してください。`
-      );
-      return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    }
-    for (const arg of args)
-      if (arg.expression.kind === 'unbound') {
-        this.error(
-          arg.row,
-          'CS1977',
-          '最初にデリゲートまたは式ツリー型にキャストしていない場合は、ラムダ式を、動的ディスパッチされる操作の引数として使用することはできません。'
-        );
-        return { kind: 'default', type: ERROR_TYPE, row: node.row };
-      }
+    if (this.rejectsLateCall(target, args, node)) return { kind: 'default', type: ERROR_TYPE, row: node.row };
     let receiver: BoundExpression | undefined;
     let callee: Expression = node.target;
     if (onDynamic) receiver = (target as Extract<BoundExpression, { kind: 'late' }>).operands[0] as BoundExpression;
@@ -1431,6 +1414,29 @@ export abstract class MemberBinder extends CallBinder {
       ...args.map((arg, index) => this.lateArgument(arg, node.args[index])),
     ];
     return this.late(syntax, operands, context, { receiver: receiver ? 0 : undefined, isStatement: true });
+  }
+
+  /**
+   * Reports what a late-bound call cannot take: an extension method, which the runtime binder does not find (CS1973),
+   * or a lambda argument (CS1977).
+   */
+  private rejectsLateCall(target: BindResult, args: ArgumentInfo[], node: Position): boolean {
+    if (target.kind === 'methodGroup' && target.candidates.length === 0 && target.receiver) {
+      this.error(
+        node,
+        'CS1973',
+        `'${displayType(target.receiver.type)}' には、'${target.name}'という名前の該当するメソッドがありませんが、同じ名前の拡張メソッドがあるようです。拡張メソッドは動的ディスパッチできません。動的引数をキャストするか、または拡張メソッド構文を使用しないで拡張メソッドを呼び出すことを検討してください。`
+      );
+      return true;
+    }
+    const lambda = args.find((arg) => arg.expression.kind === 'unbound');
+    if (!lambda) return false;
+    this.error(
+      lambda.row,
+      'CS1977',
+      '最初にデリゲートまたは式ツリー型にキャストしていない場合は、ラムダ式を、動的ディスパッチされる操作の引数として使用することはできません。'
+    );
+    return true;
   }
 
   /**

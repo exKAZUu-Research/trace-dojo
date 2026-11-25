@@ -1655,7 +1655,6 @@ export class Evaluator extends AsyncExecutor {
    * Runs an operation on `dynamic` values: evaluates its operands in order, binds it to their runtime types (the
    * static types of operands that are not `dynamic`), and evaluates what it bound to with the operands as locals.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateLate(expression: Extract<BoundExpression, { kind: 'late' }>, frame: Frame): Value {
     const values: (Value | Reference)[] = [];
     const start = frame.temporaries.length;
@@ -1669,19 +1668,9 @@ export class Evaluator extends AsyncExecutor {
         values.push(value);
         frame.temporaries.push(value);
       }
-      const objectType = namedType(this.runtime.library.typeNamed('System.Object'));
       if (expression.receiver !== undefined && values[expression.receiver] === undefined)
         throw this.runtimeBinderError('Cannot perform runtime binding on a null reference');
-      const types = expression.operands.map((operand, index) => {
-        // A variable passed by reference binds as its declared type, which a `dynamic` one gives as `object`.
-        if (operand.kind === 'refArgument')
-          return isDynamicType(operand.type) ? objectType : frame.resolve(operand.type);
-        if (!isDynamicType(operand.type)) return frame.resolve(operand.type);
-        const value = values[index] as Value;
-        // A null value binds as the null literal does, which converts to any reference type.
-        if (value === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
-        return this.runtime.runtimeTypeOf(value) ?? objectType;
-      });
+      const types = this.lateOperandTypes(expression, values, frame);
       const target = expression.target && frame.resolve(expression.target.type);
       const binding = this.program.bindLate?.(expression, types, target);
       if (!binding) throw new Error('A dynamic operation ran without a binder');
@@ -1704,6 +1693,23 @@ export class Evaluator extends AsyncExecutor {
     } finally {
       frame.temporaries.length = start;
     }
+  }
+
+  /** The types a late-bound operation binds its operands as: the runtime types of `dynamic` values, else static types. */
+  private lateOperandTypes(
+    expression: Extract<BoundExpression, { kind: 'late' }>,
+    values: (Value | Reference)[],
+    frame: Frame
+  ): Type[] {
+    const objectType = namedType(this.runtime.library.typeNamed('System.Object'));
+    return expression.operands.map((operand, index) => {
+      // A variable passed by reference binds as its declared type, which a `dynamic` one gives as `object`.
+      if (operand.kind === 'refArgument') return isDynamicType(operand.type) ? objectType : frame.resolve(operand.type);
+      if (!isDynamicType(operand.type)) return frame.resolve(operand.type);
+      // A null value binds as the null literal does, which converts to any reference type.
+      if (values[index] === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
+      return this.runtime.runtimeTypeOf(values[index] as Value) ?? objectType;
+    });
   }
 
   private runtimeBinderError(message: string): CsThrow {

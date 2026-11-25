@@ -1699,8 +1699,28 @@ export abstract class ExpressionBinder extends LambdaBinder {
    * `Task.Yield()`, are the ones whose waits the scheduler knows.
    */
   private bindAwait(node: Extract<Expression, { kind: 'await' }>, context: BindContext): BoundExpression {
-    const { fn } = context;
     const { row } = node;
+    this.checkAwaitContext(node, context.fn);
+    const operand = this.bindTypedValue(node.operand, context);
+    if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    if (isDynamicType(operand.type)) return this.bindDynamicAwait(node, operand, context);
+    const call = (receiver: BoundExpression, name: string): BoundExpression => {
+      const group = this.bindInstanceMember(receiver, name, undefined, node, context, true);
+      if (group.kind !== 'methodGroup') return this.toValue(group, node);
+      return this.invokeMethodGroup(group, [], node);
+    };
+    const getAwaiter = call({ kind: 'compoundOperand', type: operand.type, row }, 'GetAwaiter');
+    if (getAwaiter.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    const awaiter: BoundExpression = { kind: 'compoundOperand', type: getAwaiter.type, row };
+    if (getAwaiter.type.kind !== 'named' || !getAwaiter.type.symbol.isLibrary)
+      this.unsupported(node, '独自の awaiter（`GetAwaiter`）');
+    const isCompleted = this.toValue(this.bindInstanceMember(awaiter, 'IsCompleted', undefined, node, context), node);
+    const getResult = call(awaiter, 'GetResult');
+    return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: getResult.type, row };
+  }
+
+  /** Reports an `await` outside an async function (CS4032, CS4033, CS4034) or in a `lock` (CS1996). */
+  private checkAwaitContext(node: Position, fn: BindContext['fn']): void {
     if (!fn.method.isAsync) {
       if (fn.kind === 'lambda')
         this.error(
@@ -1722,22 +1742,6 @@ export abstract class ExpressionBinder extends LambdaBinder {
         );
     }
     if (fn.lockDepth > 0) this.error(node, 'CS1996', 'lock ステートメントの本体で待機することはできません');
-    const operand = this.bindTypedValue(node.operand, context);
-    if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
-    if (isDynamicType(operand.type)) return this.bindDynamicAwait(node, operand, context);
-    const call = (receiver: BoundExpression, name: string): BoundExpression => {
-      const group = this.bindInstanceMember(receiver, name, undefined, node, context, true);
-      if (group.kind !== 'methodGroup') return this.toValue(group, node);
-      return this.invokeMethodGroup(group, [], node);
-    };
-    const getAwaiter = call({ kind: 'compoundOperand', type: operand.type, row }, 'GetAwaiter');
-    if (getAwaiter.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
-    const awaiter: BoundExpression = { kind: 'compoundOperand', type: getAwaiter.type, row };
-    if (getAwaiter.type.kind !== 'named' || !getAwaiter.type.symbol.isLibrary)
-      this.unsupported(node, '独自の awaiter（`GetAwaiter`）');
-    const isCompleted = this.toValue(this.bindInstanceMember(awaiter, 'IsCompleted', undefined, node, context), node);
-    const getResult = call(awaiter, 'GetResult');
-    return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: getResult.type, row };
   }
 
   /** `await d` of a `dynamic` value, whose awaiter, `IsCompleted`, and `GetResult()` bind when they run. */

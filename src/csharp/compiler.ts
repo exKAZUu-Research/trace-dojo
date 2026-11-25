@@ -250,16 +250,7 @@ export class Compiler extends AttributeBinder {
   }
 
   private bindLateOnce(node: LateNode, types: Type[], target: Type | undefined): LateBinding {
-    const typeContext = node.typeContext ?? {
-      namespace: [this.userRoot, this.library.root],
-      usings: [],
-      type: undefined,
-      methodTypeParameters: [],
-    };
-    const method = new MethodSymbol('<dynamic>', typeContext.type ?? this.objectType.symbol, 'method');
-    method.isStatic = true;
-    const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
-    const context: BindContext = { scope: new LocalScope(undefined, fn), fn };
+    const { method, context } = this.lateContext(node);
     const saved = this.diagnostics.length;
     this.lastInconvertibleCall = undefined;
     // The runtime binder does not look for extension methods.
@@ -288,6 +279,20 @@ export class Compiler extends AttributeBinder {
       this.diagnostics.length = saved;
       this.isLateBinding = false;
     }
+  }
+
+  /** The method that a late-bound operation binds in, in the context of the code that wrote it. */
+  private lateContext(node: LateNode): { method: MethodSymbol; context: BindContext } {
+    const typeContext = node.typeContext ?? {
+      namespace: [this.userRoot, this.library.root],
+      usings: [],
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    const method = new MethodSymbol('<dynamic>', typeContext.type ?? this.objectType.symbol, 'method');
+    method.isStatic = true;
+    const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
+    return { method, context: { scope: new LocalScope(undefined, fn), fn } };
   }
 
   /** The runtime binder's message for the compile error that binding an operation to its runtime types gave. */
