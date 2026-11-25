@@ -19,42 +19,33 @@ export const ARITHMETIC_OPERATORS: Record<string, (a: bigint, b: bigint) => bool
   '-ge': (a, b) => a >= b,
 };
 
-/** Evaluates `[[ ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad regex. */
+/** Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad regex. */
 export function conditionalStatus(shell: Shell, expression: TestExpression): number {
-  try {
-    return evaluateConditional(shell, expression) ? 0 : 1;
-  } catch (error) {
-    if (error instanceof ConditionalArithmeticError) return 1;
-    if (error instanceof RegexStatus) return 2;
-    throw error;
-  }
-}
-
-/** Evaluates `[[ expression ]]`. */
-export function evaluateConditional(shell: Shell, expression: TestExpression): boolean {
   const { expander } = shell;
   switch (expression.kind) {
     case 'word': {
-      return expander.expandString(expression.word) !== '';
+      return expander.expandString(expression.word) === '' ? 1 : 0;
     }
     case 'not': {
-      return !evaluateConditional(shell, expression.expression);
+      return conditionalStatus(shell, expression.expression) === 0 ? 1 : 0;
     }
     case 'and': {
-      return evaluateConditional(shell, expression.left) && evaluateConditional(shell, expression.right);
+      const left = conditionalStatus(shell, expression.left);
+      return left === 0 ? conditionalStatus(shell, expression.right) : left;
     }
     case 'or': {
-      return evaluateConditional(shell, expression.left) || evaluateConditional(shell, expression.right);
+      const left = conditionalStatus(shell, expression.left);
+      return left === 0 ? 0 : conditionalStatus(shell, expression.right);
     }
     case 'unary': {
-      return unaryTest(shell, expression.operator, expander.expandString(expression.operand));
+      return unaryTest(shell, expression.operator, expander.expandString(expression.operand)) ? 0 : 1;
     }
     case 'binary': {
-      return evaluateBinaryConditional(shell, expression);
+      return evaluateBinaryConditional(shell, expression) ? 0 : 1;
     }
     case 'regex': {
       const left = expander.expandString(expression.left);
-      return regexTest(shell, left, expander.expandRegex(expression.right));
+      return regexStatus(shell, left, expander.expandRegex(expression.right));
     }
   }
 }
@@ -72,22 +63,24 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
   if (operator === '>') return compareCollated(left, right) > 0;
   if (FILE_TEST_OPERATORS.has(operator)) rejectUnsupportedTestOperator(operator);
   const compare = ARITHMETIC_OPERATORS[operator];
-  return compare(conditionalNumber(shell, left), conditionalNumber(shell, right));
+  const leftNum = conditionalNumber(shell, left);
+  if (leftNum === undefined) return false;
+  const rightNum = conditionalNumber(shell, right);
+  if (rightNum === undefined) return false;
+  return compare(leftNum, rightNum);
 }
 
-class ConditionalArithmeticError extends Error {}
-
-function conditionalNumber(shell: Shell, text: string): bigint {
+function conditionalNumber(shell: Shell, text: string): bigint | undefined {
   try {
     return evaluateArithmetic(text, shell, undefined, shell.runtime.step);
   } catch (error) {
     if (error instanceof ArithmeticStoreError) {
       shell.failures.handleStoreFailure('conditional', error.failure);
-      throw new ConditionalArithmeticError();
+      return undefined;
     }
     if (!(error instanceof ArithmeticError)) throw error;
     shell.reportError(error.message);
-    throw new ConditionalArithmeticError();
+    return undefined;
   }
 }
 
@@ -133,21 +126,18 @@ function isSet(shell: Shell, operand: string): boolean {
 }
 
 /** `[[ text =~ regex ]]`, updating `BASH_REMATCH` via `VariableStore` and returning status 2 on invalid ERE. */
-function regexTest(shell: Shell, text: string, source: string): boolean {
+function regexStatus(shell: Shell, text: string, source: string): number {
   let compiled;
   try {
     compiled = compileRegex(source, shell.runtime.step);
   } catch (error) {
     if (!(error instanceof RegexSyntaxError)) throw error;
     shell.reportError(`[[: invalid regular expression \`${source}': ${error.message}`);
-    throw new RegexStatus();
+    return 2;
   }
   const match = searchRegex(compiled, text, shell.runtime.step);
   const chars = charactersOf(text);
   const elements = match ? match.map(([start, end]) => (start === -1 ? '' : chars.slice(start, end).join(''))) : [];
   shell.store.setRematch(elements);
-  return match !== undefined;
+  return match === undefined ? 1 : 0;
 }
-
-/** Ends `[[ =~ ]]` with status 2 after an invalid regular expression. */
-export class RegexStatus extends Error {}
