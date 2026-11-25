@@ -258,10 +258,11 @@ function errorUnionCheck(sema: SemaApi, type: Extract<Type, { kind: 'error_union
 function sliceIdentityCheck(sema: SemaApi, type: Extract<Type, { kind: 'pointer' }>, span: Span): Check {
   const format = formatter(sema, span);
   const many: Type = { ...type, size: 'many' };
-  return (e, a) => {
+  return (e, a, frame) => {
     const expected = e as Slice;
     const actual = a as Slice;
-    if (expected.target !== actual.target || expected.start !== actual.start) {
+    // The slices' start pointers compare as `==` compares them, by the memory they point to.
+    if (!valuesEqual(many, slicePointer(expected), slicePointer(actual), (cost) => frame.runtime.spend(cost))) {
       return {
         text: [
           ...utf8('expected slice ptr '),
