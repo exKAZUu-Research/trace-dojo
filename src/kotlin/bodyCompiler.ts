@@ -1256,6 +1256,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     context: FunctionContext
   ): ((frame: Frame) => void) | undefined {
     const { symbol, decl } = entry;
+    // createEnumEntries runs the enum's constructor, with the entry's arguments, before an entry's body initializes.
+    if (symbol.kind === 'enumEntry') return undefined;
     if (symbol.kind === 'enum') {
       const enumCtor = this.core.enum.constructors[0];
       return (frame) => {

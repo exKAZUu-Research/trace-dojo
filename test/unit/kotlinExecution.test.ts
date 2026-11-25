@@ -6449,6 +6449,16 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[1, 2]\nx\n' });
 });
 
+test('initializes an enum entry with a body once, with the arguments it passes', () => {
+  const source = `enum class P(val n: Int) {
+    X(1) { override fun d() = "x$n" };
+    init { println("init $n") }
+    abstract fun d(): String
+}
+fun main() { println(P.X.d()) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'init 1\nx1\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
