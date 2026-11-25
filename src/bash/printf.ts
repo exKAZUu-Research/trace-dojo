@@ -4,6 +4,7 @@ import { rejectUnsupportedPrintfConversion } from './capabilities';
 import { charactersOf } from './characters';
 import {
   ansicQuote,
+  ansicQuoteBytes,
   ansicShouldQuote,
   backslashQuote,
   readRadixDigits,
@@ -13,6 +14,7 @@ import {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const fatalDecoder = new TextDecoder('utf-8', { fatal: true });
 
 /** Decodes bytes as UTF-8, replacing invalid sequences as a terminal reading Bash's output shows them. */
 export function decodeBytes(bytes: number[] | Uint8Array): string {
@@ -280,15 +282,11 @@ class Printf {
 
   /** `%q` and `%Q`, the latter applying the precision to the argument before quoting it. */
   private quote(spec: Specification): void {
-    let arg = this.takeArgument() ?? '';
-    if (spec.conversion === 'Q' && spec.precision !== undefined) {
-      arg = decodeBytes(truncate(encodeText(arg), spec.precision));
-    }
-    let quoted: string;
-    if (arg === '') quoted = "''";
-    else if (ansicShouldQuote(arg)) quoted = ansicQuote(arg);
-    else if (spec.flags.includes('#')) quoted = singleQuote(arg);
-    else quoted = backslashQuote(arg, true, true);
+    const rawArg = this.takeArgument() ?? '';
+    const quoted =
+      spec.conversion === 'Q' && spec.precision !== undefined
+        ? quoteTruncatedBytes(new Uint8Array(truncate(encodeText(rawArg), spec.precision)), spec.flags.includes('#'))
+        : quotePrintfText(rawArg, spec.flags.includes('#'));
     const bytes = encodeText(quoted);
     this.push(padPrintfBytes(spec.conversion === 'Q' ? bytes : truncate(bytes, spec.precision), spec, false));
   }
@@ -312,6 +310,20 @@ function padWideCharacters(chars: string[], spec: Specification): number[] {
 
 function truncate(bytes: number[], precision: number | undefined): number[] {
   return precision === undefined || precision >= bytes.length ? bytes : bytes.slice(0, precision);
+}
+
+function quoteTruncatedBytes(raw: Uint8Array, hashFlag: boolean): string {
+  try {
+    return quotePrintfText(fatalDecoder.decode(raw), hashFlag);
+  } catch {
+    return ansicQuoteBytes(raw);
+  }
+}
+
+function quotePrintfText(arg: string, hashFlag: boolean): string {
+  if (arg === '') return "''";
+  if (ansicShouldQuote(arg)) return ansicQuote(arg);
+  return hashFlag ? singleQuote(arg) : backslashQuote(arg, true, true);
 }
 
 /**

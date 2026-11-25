@@ -37,10 +37,23 @@ export function readRadixDigits(
   return { value, count };
 }
 
-function isPrintable(c: string): boolean {
-  const code = c.codePointAt(0) as number;
-  if (code < 0x80) return code >= 0x20 && code < 0x7f;
-  return !/^[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]$/u.test(c);
+const UTF8_ENCODER = new TextEncoder();
+const FATAL_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+const NAMED_ANSIC_ESCAPES: Record<string, string> = {
+  '\u001B': 'E',
+  '\u0007': 'a',
+  '\v': 'v',
+  '\b': 'b',
+  '\f': 'f',
+  '\n': 'n',
+  '\r': 'r',
+  '\t': 't',
+};
+
+export function quoteReusable(text: string): string {
+  if (text === '') return "''";
+  if (ansicShouldQuote(text)) return ansicQuote(text);
+  return singleQuote(text);
 }
 
 export function ansicShouldQuote(text: string): boolean {
@@ -49,26 +62,60 @@ export function ansicShouldQuote(text: string): boolean {
 
 /** Formats `text` as a `$'...'` literal, escaping control and non-printable characters. */
 export function ansicQuote(text: string): string {
-  const named: Record<string, string> = {
-    '\u001B': 'E',
-    '\u0007': 'a',
-    '\v': 'v',
-    '\b': 'b',
-    '\f': 'f',
-    '\n': 'n',
-    '\r': 'r',
-    '\t': 't',
-  };
+  return ansicQuoteBytes(UTF8_ENCODER.encode(text));
+}
+
+/** Formats raw UTF-8 `bytes` as a `$'...'` literal, octal-escaping incomplete or invalid byte sequences. */
+export function ansicQuoteBytes(bytes: Uint8Array): string {
   let result = "$'";
-  for (const c of text) {
-    if (Object.hasOwn(named, c)) result += `\\${named[c]}`;
-    else if (c === '\\' || c === "'") result += `\\${c}`;
-    else if (isPrintable(c)) result += c;
-    else {
-      for (const byte of new TextEncoder().encode(c)) result += `\\${byte.toString(8).padStart(3, '0')}`;
+  for (let i = 0; i < bytes.length;) {
+    const decoded = decodeOneUtf8Char(bytes, i);
+    if (decoded) {
+      result += formatAnsicChar(decoded.char, bytes.subarray(i, i + decoded.length));
+      i += decoded.length;
+    } else {
+      result += octalEscape(bytes[i]);
+      i++;
     }
   }
   return `${result}'`;
+}
+
+function decodeOneUtf8Char(bytes: Uint8Array, start: number): { char: string; length: number } | undefined {
+  const length = utf8SequenceLength(bytes[start]);
+  if (length === 0 || start + length > bytes.length) return undefined;
+  try {
+    return { char: FATAL_UTF8_DECODER.decode(bytes.subarray(start, start + length)), length };
+  } catch {
+    return undefined;
+  }
+}
+
+function utf8SequenceLength(lead: number): number {
+  if (lead < 0x80) return 1;
+  if (lead >= 0xc2 && lead <= 0xdf) return 2;
+  if (lead >= 0xe0 && lead <= 0xef) return 3;
+  if (lead >= 0xf0 && lead <= 0xf4) return 4;
+  return 0;
+}
+
+function formatAnsicChar(c: string, rawBytes: Uint8Array): string {
+  if (Object.hasOwn(NAMED_ANSIC_ESCAPES, c)) return `\\${NAMED_ANSIC_ESCAPES[c]}`;
+  if (c === '\\' || c === "'") return `\\${c}`;
+  if (isPrintable(c)) return c;
+  let out = '';
+  for (const byte of rawBytes) out += octalEscape(byte);
+  return out;
+}
+
+function octalEscape(byte: number): string {
+  return `\\${byte.toString(8).padStart(3, '0')}`;
+}
+
+function isPrintable(c: string): boolean {
+  const code = c.codePointAt(0) as number;
+  if (code < 0x80) return code >= 0x20 && code < 0x7f;
+  return !/^[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]$/u.test(c);
 }
 
 /** Formats `text` with single quotes, closing and escaping embedded `'` characters. */
@@ -97,13 +144,6 @@ export function backslashQuote(text: string, quoteTilde: boolean, quoteBlanks: b
     first = false;
   }
   return result;
-}
-
-/** Formats `text` for `${x@Q}` so the shell reads it back as the same value. */
-export function quoteReusable(text: string): string {
-  if (text === '') return "''";
-  if (ansicShouldQuote(text)) return ansicQuote(text);
-  return singleQuote(text);
 }
 
 /** Whether `text` contains characters that unquoted shell syntax treats specially. */
