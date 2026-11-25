@@ -2466,8 +2466,9 @@ function convertRecordExpr(features: FeatureGates<'convert'>, node: Node): Expr 
     }
     const fieldNameNode = required(fieldNode, 'field');
     if (fieldNameNode.type === 'field_path') {
-      // GHC's OverloadedRecordUpdate needs RebindableSyntax, with getField and setField of the program's own.
-      throw syntaxError(spanOf(fieldNameNode), 'フィールドのパスで更新するには、RebindableSyntax の拡張が要ります。');
+      // GHC's OverloadedRecordUpdate needs RebindableSyntax, with getField and setField of the program's own, and
+      // RebindableSyntax is not available here.
+      throw unsupportedError(spanOf(fieldNameNode), '入れ子のレコードの更新（OverloadedRecordUpdate）');
     }
     rejectUnsupported(fieldNameNode);
     const fieldName = qualifiedName(fieldNameNode).name;
