@@ -699,12 +699,15 @@ function strictBindings(features: FeatureGates<'convert'>, decls: Decl[]): { dec
   const forced: string[] = [];
   const result: Decl[] = [];
   for (const decl of decls) {
+    // Under Strict, every pattern binding but a lazy one, `~p`, is strict as if it had a `!`.
     const banged =
       decl.kind === 'patBind' && decl.pat.kind === 'pbang'
         ? decl.pat.pat
-        : decl.kind === 'funClause' && decl.args.length === 0 && features.allows('strict')
-          ? ({ kind: 'pvar', name: decl.name, span: decl.span } as Pat)
-          : undefined;
+        : decl.kind === 'patBind' && features.allows('strict') && decl.pat.kind !== 'plazy'
+          ? decl.pat
+          : decl.kind === 'funClause' && decl.args.length === 0 && features.allows('strict')
+            ? ({ kind: 'pvar', name: decl.name, span: decl.span } as Pat)
+            : undefined;
     if (!banged || (decl.kind !== 'patBind' && decl.kind !== 'funClause')) {
       result.push(decl);
       continue;
