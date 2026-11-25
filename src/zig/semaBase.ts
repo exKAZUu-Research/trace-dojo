@@ -1331,7 +1331,7 @@ export abstract class SemaBase implements SemaApi {
         to,
         newArray(
           elements.map((element) => (element as TExpr).value),
-          undefined
+          to.sentinel
         ),
         span
       );
@@ -1353,7 +1353,7 @@ export abstract class SemaBase implements SemaApi {
             current = value;
             return convert(frame);
           }),
-          undefined
+          to.sentinel
         ),
       span
     );
