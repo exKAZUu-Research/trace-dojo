@@ -97,7 +97,7 @@ pub const Reader = struct {
 
     fn readMore(r: *Reader) Error!void {
         const descriptor = r.descriptor orelse return error.EndOfStream;
-        const n = readInput(descriptor, r.buffer[r.end..]);
+        const n = try readInput(descriptor, r.buffer[r.end..]);
         if (n == 0) return error.EndOfStream;
         r.end += n;
     }
@@ -197,7 +197,7 @@ pub const Reader = struct {
         while (i < buffer.len) {
             if (r.buffer.len == 0) {
                 // An unbuffered reader reads straight into the destination.
-                const n = readInput(r.descriptor orelse return i, buffer[i..]);
+                const n = try readInput(r.descriptor orelse return i, buffer[i..]);
                 if (n == 0) return i;
                 i += n;
                 continue;
@@ -458,7 +458,7 @@ pub const Reader = struct {
         while (true) {
             const data = if (r.buffer.len == 0) blk: {
                 const descriptor = r.descriptor orelse break;
-                const n = readInput(descriptor, &spare);
+                const n = try readInput(descriptor, &spare);
                 if (n == 0) break;
                 break :blk spare[0..n];
             } else r.buffer[r.seek..r.end];
@@ -893,10 +893,11 @@ function nativeMembers(fileType: Type): Record<string, () => Member> {
     readInput: call(
       'readInput',
       [USIZE, sliceOf(U8, false)],
-      () => USIZE,
+      () => errorUnionOf(errorSetOf(['ReadFailed']), USIZE),
       (frame, [descriptor, destination]) => {
         const slice = destination as Slice;
         const bytes = frame.runtime.readInput(Number(descriptor as bigint), slice.length);
+        if (!bytes) return ErrorValue.of('ReadFailed');
         for (const [index, byte] of bytes.entries()) slice.set(index, BigInt(byte));
         return BigInt(bytes.length);
       }
@@ -1020,6 +1021,6 @@ export function fileDescriptor(value: Value): number {
 
 /** The length of an open file in bytes. */
 export function openFileLength(frame: Frame, descriptor: number): bigint {
-  const file = frame.runtime.openFiles.get(descriptor);
+  const file = frame.runtime.openFileAt(descriptor);
   return BigInt(file ? byteLength(frame.runtime.io.files.readFile(file.path)) : 0);
 }

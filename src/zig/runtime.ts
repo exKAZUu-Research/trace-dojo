@@ -94,8 +94,12 @@ export class Runtime {
   private activeFrameSlots = 0;
   /** The backward branches of the analysis that evaluates code at compile time, which a run of the program lacks. */
   branchCount: BranchCount | undefined;
-  /** The files the program has opened, by the descriptor that a `std.Io.File` holds. */
-  readonly openFiles = new Map<number, OpenFile>();
+  /** What each open descriptor that a `std.Io.File` holds refers to; closing one removes it. */
+  private readonly descriptors = new Map<number, Descriptor>([
+    [0, { stream: 'stdin' }],
+    [1, { stream: 'stdout' }],
+    [2, { stream: 'stderr' }],
+  ]);
   private nextDescriptor = 3;
   private stdinBytes: Uint8Array | undefined;
   private stdinPosition = 0;
@@ -121,22 +125,35 @@ export class Runtime {
 
   openFile(file: OpenFile): number {
     const descriptor = this.nextDescriptor++;
-    this.openFiles.set(descriptor, file);
+    this.descriptors.set(descriptor, file);
     return descriptor;
   }
 
-  /** Reads up to `limit` bytes of standard input (descriptor 0) or of an open file, none at its end. */
-  readInput(descriptor: number, limit: number): Uint8Array {
+  closeDescriptor(descriptor: number): void {
+    this.descriptors.delete(descriptor);
+  }
+
+  /** The file that a descriptor refers to, when it is open and not a standard stream. */
+  openFileAt(descriptor: number): OpenFile | undefined {
+    const target = this.descriptors.get(descriptor);
+    return target && !('stream' in target) ? target : undefined;
+  }
+
+  /**
+   * Reads up to `limit` bytes of standard input or of an open file, none at its end, and `undefined` from a closed
+   * descriptor or a file opened only to write, as the OS refuses them.
+   */
+  readInput(descriptor: number, limit: number): Uint8Array | undefined {
     rejectRuntimeEffect();
-    if (descriptor === 0) {
+    if (this.streamAt(descriptor) === 'stdin') {
       this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
       const bytes = this.stdinBytes.subarray(this.stdinPosition, this.stdinPosition + limit);
       this.stdinPosition += bytes.length;
       this.spend(Math.ceil((bytes.length + 1) / 64));
       return bytes;
     }
-    const file = this.openFiles.get(descriptor);
-    if (!file?.read) return new Uint8Array();
+    const file = this.openFileAt(descriptor);
+    if (!file?.read) return undefined;
     const content = new TextEncoder().encode(file.read());
     const bytes = content.subarray(file.position, file.position + limit);
     file.position += bytes.length;
@@ -146,31 +163,36 @@ export class Runtime {
 
   /** Whether reading standard input or an open file would give no more bytes. */
   inputAtEnd(descriptor: number): boolean {
-    if (descriptor === 0) {
+    if (this.streamAt(descriptor) === 'stdin') {
       this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
       return this.stdinPosition >= this.stdinBytes.length;
     }
-    const file = this.openFiles.get(descriptor);
+    const file = this.openFileAt(descriptor);
     return !file?.read || file.position >= new TextEncoder().encode(file.read()).length;
   }
 
   /**
-   * Writes to standard output (1), standard error (2), or a file open for writing, telling whether the descriptor
-   * accepts writes: a closed descriptor or a file opened only to read does not, as the OS refuses them.
+   * Writes to standard output, standard error, or a file open for writing, telling whether the descriptor accepts
+   * writes: a closed descriptor, standard input, or a file opened only to read does not, as the OS refuses them.
    */
   writeOutput(fd: number, bytes: readonly number[]): boolean {
     rejectRuntimeEffect();
-    if (fd === 1 || fd === 2) {
-      const index = fd - 1;
+    const stream = this.streamAt(fd);
+    if (stream === 'stdout' || stream === 'stderr') {
+      const index = stream === 'stdout' ? 0 : 1;
       const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
       (index === 1 ? this.io.stderr : this.io.stdout).write(text);
       return true;
     }
-    const write = this.openFiles.get(fd)?.write;
-    if (!write) return false;
-    const file = this.openFiles.get(fd) as OpenFile;
-    write.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
+    const file = this.openFileAt(fd);
+    if (!file?.write) return false;
+    file.write.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
     return true;
+  }
+
+  private streamAt(descriptor: number): StandardStream | undefined {
+    const target = this.descriptors.get(descriptor);
+    return target && 'stream' in target ? target.stream : undefined;
   }
 
   finishOutput(): void {
@@ -224,6 +246,11 @@ export class Runtime {
 }
 
 /** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
+type StandardStream = 'stdin' | 'stdout' | 'stderr';
+
+/** What a descriptor refers to: a standard stream, or a file that the program opened. */
+type Descriptor = { readonly stream: StandardStream } | OpenFile;
+
 export interface OpenFile {
   path: string;
   read?: () => string;

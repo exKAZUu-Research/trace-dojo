@@ -282,7 +282,7 @@ function addIoMembers(): void {
         VOID,
         (frame) => {
           io.eval(frame);
-          frame.runtime.openFiles.delete(fileDescriptor(evaluate(frame)));
+          frame.runtime.closeDescriptor(fileDescriptor(evaluate(frame)));
         },
         call.span
       );
