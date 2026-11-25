@@ -49,16 +49,22 @@ function localFrameOf(caller: Frame, instance: KObject, cls: ClassSymbol, local:
   return frame;
 }
 
-/** Runs a `tailrec` function's body again in its frame with the arguments of each tail call it makes of itself. */
-function restartingOnTailCalls(run: Eval): Eval {
+/**
+ * Runs a `tailrec` function's body again in its frame with the arguments of each tail call it makes of itself. The
+ * slots after the arguments up to `hiddenEnd` hold what a call passes besides them, as a member extension's instance,
+ * which a call of the function itself passes again, so they keep their values while the body's locals start over.
+ */
+export function restartingOnTailCalls(run: Eval, hiddenEnd: number): Eval {
   return (frame) => {
     for (;;) {
       try {
         return run(frame);
       } catch (error) {
         if (!(error instanceof TailCallSignal) || error.frame !== frame) throw error;
+        const hidden = frame.locals.slice(error.args.length, hiddenEnd);
         frame.locals.fill(UNASSIGNED);
         for (const [index, value] of error.args.entries()) frame.locals[index] = value;
+        for (const [index, value] of hidden.entries()) frame.locals[error.args.length + index] = value;
         frame.runtime.spend();
       }
     }
@@ -233,7 +239,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       );
       Object.defineProperty(context, 'returnTarget', { value: context });
       context.label = symbol.name;
-      if (symbol.isTailrec && decl.body)
+      // A suspend function's calls of itself stay calls, as its body runs as a coroutine's steps.
+      if (symbol.isTailrec && decl.body && !symbol.isSuspend)
         context.tailrec = { symbol, calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)) };
       context.info.isAtomic = symbol.isAtomic;
       let base = this.withOuterReceivers(entry.scope, entry.cls?.symbol, context);
@@ -288,6 +295,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         for (const [index, variable] of variables.entries())
           variable.suspendInvocable = resolved(symbol.params[index].type).kind === 'function';
       }
+      const hiddenEnd = context.info.slotCount;
       const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
       symbol.defaultsInfo = context.info;
       if (!decl.body) {
@@ -325,7 +333,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           return UNIT;
         };
       }
-      this.finishFunction(symbol, context, defaults, body);
+      this.finishFunction(symbol, context, defaults, body, hiddenEnd);
       entry.state = 'done';
     });
   }
@@ -429,7 +437,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     symbol: FunctionSymbol,
     context: FunctionContext,
     defaults: (Eval | undefined)[],
-    body: Eval
+    body: Eval,
+    hiddenEnd: number
   ): void {
     const { info } = context;
     const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
@@ -442,7 +451,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         }
       : body;
     const none: unknown[] = [];
-    const runs = symbol.isTailrec ? restartingOnTailCalls(run) : run;
+    const runs = context.tailrec ? restartingOnTailCalls(run, hiddenEnd) : run;
     const local = this.localCapture(symbol.owner, context);
     symbol.invoke = local
       ? (caller, receiver, args, callRow) => {

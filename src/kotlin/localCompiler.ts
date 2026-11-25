@@ -2,6 +2,7 @@
 import { AnnotationCompiler } from './annotationCompiler';
 import { annotationSite } from './annotationSites';
 import type { ClassDecl, Expression, FunctionDecl, LambdaExpression, Statement } from './ast';
+import { restartingOnTailCalls } from './bodyCompiler';
 import type { Candidate } from './callCompiler';
 import {
   coerce,
@@ -28,6 +29,7 @@ import {
   type PropertySymbol,
   type VariableSymbol,
 } from './symbols';
+import { tailCallsOf } from './tailCalls';
 import { isSameType, isSubtype } from './typeRelations';
 import {
   type ClassType,
@@ -616,6 +618,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     symbol.isInline = false;
     symbol.isInfix = decl.modifiers.keywords.has('infix');
     symbol.isOperator = decl.modifiers.keywords.has('operator');
+    symbol.isTailrec = decl.modifiers.keywords.has('tailrec');
     const functionContext = new FunctionContext(context, false, decl.name, context.info.isLibrary, undefined);
     Object.defineProperty(functionContext, 'returnTarget', { value: functionContext });
     functionContext.label = decl.name;
@@ -630,6 +633,11 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     if (decl.returnType) symbol.returnType = this.resolveType(functionScope, decl.returnType);
     else if (decl.body?.kind !== 'expression') symbol.returnType = this.unitType;
     if (!decl.body) this.error(decl.row, `関数 ${decl.name} に本体を書いてください。`);
+    if (symbol.isTailrec && decl.body && !symbol.isSuspend)
+      functionContext.tailrec = {
+        symbol,
+        calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)),
+      };
     const existing = scope.functions.get(decl.name) ?? [];
     this.checkLocalOverload(existing, symbol, decl.row);
     scope.functions.set(decl.name, [...existing, symbol]);
@@ -655,6 +663,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     try {
       if (symbol.isSuspend) suspendRun = this.compileLocalSuspendBody(functionScope, functionContext, decl, symbol);
       else run = this.compileLocalFunctionBody(functionScope, functionContext, decl, symbol);
+      // A local function has no slots besides its arguments that a call passes.
+      if (run && functionContext.tailrec) run = restartingOnTailCalls(run, symbol.params.length);
     } finally {
       this.flow = outerFlow;
     }

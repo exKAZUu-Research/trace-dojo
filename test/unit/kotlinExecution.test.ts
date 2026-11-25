@@ -6653,6 +6653,26 @@ fun main() { println(listOf(apply({ it * 2 }, 3), Doubler()(4))) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8]\n' });
 });
 
+test.each([
+  [
+    'a local function',
+    'fun main() {\n    tailrec fun loop(n: Int): Int = if (n == 0) 0 else loop(n - 1)\n    println(loop(100000))\n}',
+    '0\n',
+  ],
+  [
+    'a member extension',
+    'class C(val base: Int) {\n    tailrec fun Int.up(acc: Int): Int = if (acc >= this) acc + base else up(acc + 1)\n    fun run() = 5.up(0)\n}\nfun main() { println(C(100).run()) }',
+    '105\n',
+  ],
+  [
+    'a suspend function',
+    'tailrec suspend fun loop(n: Int): Int = if (n == 0) 0 else loop(n - 1)\nsuspend fun main() { println(loop(3)) }',
+    '0\n',
+  ],
+])('runs a tailrec %s', (_kind, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G
