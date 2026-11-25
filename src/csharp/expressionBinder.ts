@@ -2050,8 +2050,10 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const name = ASSIGNMENT_OPERATOR_NAMES[operator];
     const type = target.type;
     if (!name || type.kind !== 'named' || type.symbol.special !== undefined) return undefined;
-    const find = (candidateName: string): MethodCandidate[] =>
-      this.lookupOperators(type, candidateName).filter((candidate) => !candidate.method.isStatic);
+    const find = (candidateName: string): MethodCandidate[] => {
+      const own = this.lookupOperators(type, candidateName).filter((candidate) => !candidate.method.isStatic);
+      return own.length > 0 ? own : this.lookupExtensionAssignmentOperators(type, candidateName);
+    };
     const checkedCandidates = this.checkedContext ? find(checkedOperatorName(name)) : [];
     const candidates = checkedCandidates.length > 0 ? checkedCandidates : find(name);
     if (candidates.length === 0) return undefined;
@@ -2062,13 +2064,32 @@ export abstract class ExpressionBinder extends LambdaBinder {
       row,
       target: undefined,
     }));
-    const resolved = this.resolveCall(candidates, args, undefined, row, { name, kind: 'operator' });
-    if (!resolved) return { kind: 'default', type: ERROR_TYPE, row };
+    // An extension block's operator takes the target as its receiver argument, by reference for a `ref` receiver.
+    const isExtension = candidates[0].method.extensionAssignmentOf !== undefined;
+    const receiver: ArgumentInfo = {
+      expression: target as BoundExpression,
+      name: undefined,
+      refKind: undefined,
+      row,
+      target,
+      isReceiver: true,
+    };
+    // When no instance operator applies, the assignment uses the binary operator, as `b += other` does.
+    const saved = this.diagnostics.length;
+    const resolved = this.resolveCall(candidates, isExtension ? [receiver, ...args] : args, undefined, row, {
+      name,
+      kind: 'operator',
+      isExtension,
+    });
+    if (!resolved) {
+      this.diagnostics.length = saved;
+      return undefined;
+    }
     const { method } = resolved.candidate;
     const call: BoundExpression = {
       kind: 'call',
       method,
-      receiver: target as BoundExpression,
+      receiver: isExtension ? undefined : (target as BoundExpression),
       args: resolved.args,
       typeArgs: [],
       owner: resolved.candidate.owner,

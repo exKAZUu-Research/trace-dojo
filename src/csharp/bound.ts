@@ -104,6 +104,8 @@ export type BoundExpression =
       owner: NamedType;
       /** For a static abstract property read through a type parameter, the parameter that implements it. */
       constrainedType?: Type;
+      /** For an extension property of a generic extension block, the block's type arguments. */
+      typeArgs?: Type[];
     } & Base)
   | ({ kind: 'invokeDelegate'; target: BoundExpression; args: BoundArgument[] } & Base)
   | ({

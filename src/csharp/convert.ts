@@ -19,6 +19,7 @@ import type {
   Modifier,
   Modifiers,
   NamespaceDeclaration,
+  OperatorDeclaration,
   Parameter,
   Statement,
   SwitchLabel,
@@ -738,8 +739,9 @@ export class Converter extends ExpressionConverter {
 
   /**
    * An extension block, as the methods of the enclosing static class that C# 14 lowers it to: an instance method
-   * takes the receiver as its `this` parameter, a property becomes its getter, and a static member is the class's,
-   * found through the receiver's type. The block's type parameters and constraints go to each member.
+   * takes the receiver as its `this` parameter, a property becomes its accessors, and a static member is the class's,
+   * found through the receiver's type, as an operator joins the type's operators. The block's type parameters and
+   * constraints go to each member.
    */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertExtensionBlock(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
@@ -764,64 +766,116 @@ export class Converter extends ExpressionConverter {
       .map((child) => child.text)
       .find((text) => text === 'ref' || text === 'in') as Parameter['modifier'];
     const body = parts.find((part) => part.type === 'extension_body') as Node;
+    const receiver: Parameter = {
+      name: receiverName ?? '',
+      type: receiverType,
+      modifier: receiverModifier,
+      isThis: true,
+      defaultValue: undefined,
+      ...positionOf(receiverNode),
+    };
     const members: MemberDeclaration[] = [];
     for (const memberNode of namedChildren(body)) {
       if (memberNode.type === 'comment') continue;
       for (const member of this.convertMember(memberNode, owner)) {
-        const method = this.extensionMember(member, memberNode);
-        const isStatic = method.modifiers.set.has('static');
-        if (!isStatic && !receiverName)
-          throw new CompileError([
-            {
-              row: method.row,
-              message: `CS9303: '${member.kind === 'property' ? member.name : method.name}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
-            },
-          ]);
-        const receiver: Parameter = {
-          name: receiverName as string,
-          type: receiverType,
-          modifier: receiverModifier,
-          isThis: true,
-          defaultValue: undefined,
-          ...positionOf(receiverNode),
-        };
-        const set = new Set<Modifier>([...method.modifiers.set, 'static']);
-        members.push({
-          ...method,
-          modifiers: { set, positions: method.modifiers.positions },
-          typeParameters: [...typeParameters, ...method.typeParameters],
-          constraints: [...constraints, ...method.constraints],
-          parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
-          extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
-        });
+        if (member.kind === 'operator') {
+          if (typeParameters.length > 0) unsupported(memberNode, 'ジェネリックな拡張ブロックの演算子');
+          const operand = receiverName ? { ...receiver, isThis: false } : undefined;
+          members.push(this.extensionOperator(member, memberNode, receiverType, operand));
+          continue;
+        }
+        for (const method of this.extensionMethods(member, memberNode, receiverType)) {
+          const isStatic = method.modifiers.set.has('static');
+          if (!isStatic && !receiverName)
+            throw new CompileError([
+              {
+                row: method.row,
+                message: `CS9303: '${method.extension?.property ?? method.name}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
+              },
+            ]);
+          const set = new Set<Modifier>([...method.modifiers.set, 'static']);
+          members.push({
+            ...method,
+            modifiers: { set, positions: method.modifiers.positions },
+            typeParameters: [...typeParameters, ...method.typeParameters],
+            constraints: [...constraints, ...method.constraints],
+            parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
+            extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
+          });
+        }
       }
     }
     return members;
   }
 
-  /** A member of an extension block as a method: a method itself, or a read-only property as its getter. */
-  private extensionMember(member: MemberDeclaration, node: Node): MethodDeclaration {
-    if (member.kind === 'method') return member;
-    const getter =
-      member.kind === 'property' ? member.accessors.find((accessor) => accessor.kind === 'get') : undefined;
-    if (member.kind !== 'property' || !getter || member.accessors.length > 1 || member.initializer)
-      unsupported(node, '拡張ブロックのメソッドと読み取り専用プロパティ以外のメンバー');
-    return {
-      kind: 'method',
-      modifiers: member.modifiers,
-      returnType: member.type,
-      name: `get_${member.name}`,
-      typeParameters: [],
-      constraints: [],
-      parameters: [],
-      body: getter.body,
-      bodyRow: getter.row,
-      startRow: member.row,
-      attributes: member.attributes,
-      extension: { property: member.name },
-      row: member.row,
-      column: member.column,
-    };
+  /**
+   * An operator of an extension block: a static one joins the operators of the type that the block extends, and an
+   * instance compound assignment or `++`/`--` (C# 14) takes the block's receiver first, which it changes in place.
+   */
+  private extensionOperator(
+    member: OperatorDeclaration,
+    node: Node,
+    receiverType: TypeNode,
+    receiver: Parameter | undefined
+  ): OperatorDeclaration {
+    const isInstanceAssignment =
+      (member.operator.endsWith('=') && !['==', '!=', '<=', '>='].includes(member.operator)) ||
+      ((member.operator === '++' || member.operator === '--') && member.parameters.length === 0);
+    if (!isInstanceAssignment)
+      return { ...member, extension: { staticReceiver: receiverType, receiver: receiverType } };
+    if (member.modifiers.set.has('static'))
+      throw new CompileError([
+        { row: member.row, message: "CS0106: 修飾子 'static' がこの項目に対して有効ではありません" },
+      ]);
+    if (!receiver)
+      throw new CompileError([
+        {
+          row: member.row,
+          message: `CS9303: 'operator ${member.operator}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
+        },
+      ]);
+    return { ...member, extension: { receiver: receiverType, receiverParameter: receiver } };
+  }
+
+  /** A member of an extension block as methods: a method itself, or a property as its accessors. */
+  private extensionMethods(member: MemberDeclaration, node: Node, receiverType: TypeNode): MethodDeclaration[] {
+    if (member.kind === 'method') return [member];
+    if (member.kind !== 'property') unsupported(node, '拡張ブロックのメソッド、プロパティ、演算子以外のメンバー');
+    if (!member.isExpressionBodied && member.accessors.every((accessor) => accessor.body === undefined))
+      throw new CompileError([{ row: member.row, message: 'CS9282: このメンバーは拡張ブロックでは使用できません' }]);
+    if (member.initializer) unsupported(node, '拡張ブロックのプロパティの初期化子');
+    return member.accessors.map((accessor): MethodDeclaration => {
+      const isGetter = accessor.kind === 'get';
+      const value: Parameter = {
+        name: 'value',
+        type: member.type,
+        modifier: undefined,
+        isThis: false,
+        defaultValue: undefined,
+        ...positionOf(node),
+      };
+      return {
+        kind: 'method',
+        modifiers: accessorModifiers(member.modifiers, accessor.modifiers),
+        returnType: isGetter ? member.type : { kind: 'predefinedType', name: 'void', ...positionOf(node) },
+        name: `${isGetter ? 'get' : 'set'}_${member.name}`,
+        typeParameters: [],
+        constraints: [],
+        parameters: isGetter ? [] : [value],
+        body: accessor.body,
+        bodyRow: accessor.row,
+        startRow: member.row,
+        attributes: [...(member.attributes ?? []), ...(accessor.attributes ?? [])],
+        extension: {
+          property: member.name,
+          propertyKey: `${member.row}:${member.column}`,
+          accessor: accessor.kind,
+          receiver: receiverType,
+        },
+        row: isGetter ? member.row : accessor.row,
+        column: member.column,
+      };
+    });
   }
 
   private convertModifiers(node: Node): Modifiers {
@@ -1283,4 +1337,15 @@ function rejectConstantsWithoutValues(declarators: VariableDeclarator[]): void {
   const missing = declarators.find((declarator) => !declarator.initializer);
   if (missing)
     throw new CompileError([{ row: missing.row, message: 'CS0145: const フィールドに値を指定する必要があります' }]);
+}
+
+const ACCESS_MODIFIERS: ReadonlySet<Modifier> = new Set(['public', 'private', 'protected', 'internal']);
+
+/** The modifiers of a property's accessor: the property's, with the accessor's own accessibility if it has one. */
+function accessorModifiers(property: Modifiers, accessor: Modifiers): Modifiers {
+  const own = [...accessor.set].filter((modifier) => ACCESS_MODIFIERS.has(modifier));
+  if (own.length === 0) return property;
+  const set = new Set([...property.set].filter((modifier) => !ACCESS_MODIFIERS.has(modifier)));
+  for (const modifier of own) set.add(modifier);
+  return { set, positions: new Map([...property.positions, ...accessor.positions]) };
 }

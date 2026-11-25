@@ -1029,7 +1029,7 @@ export abstract class MemberBinder extends CallBinder {
       const getters = isCallee ? [] : this.lookupExtensionProperties(name, context.fn.typeContext);
       if (getters.length > 0) {
         const group = this.extensionGroup(`get_${name}`, receiver, getters, position);
-        return this.invokeMethodGroup(group, [], position);
+        return this.extensionPropertyAccess(this.invokeMethodGroup(group, [], position));
       }
       if (extensions.length > 0) {
         return {
@@ -1483,7 +1483,28 @@ export abstract class MemberBinder extends CallBinder {
     if (isCallee) return undefined;
     const getters = this.lookupStaticExtensions(type, name, true, context.fn.typeContext);
     if (getters.length === 0) return undefined;
-    return this.invokeMethodGroup(this.extensionGroup(`get_${name}`, undefined, getters, position), [], position);
+    return this.extensionPropertyAccess(
+      this.invokeMethodGroup(this.extensionGroup(`get_${name}`, undefined, getters, position), [], position)
+    );
+  }
+
+  /**
+   * The read of an extension property with a setter, as a static property whose accessors take the getter's
+   * arguments, the receiver among them, so that an assignment calls the setter; a read-only one stays a call.
+   */
+  private extensionPropertyAccess(read: BoundExpression): BoundExpression {
+    const property = read.kind === 'call' ? read.method.extensionAccessorOf : undefined;
+    if (read.kind !== 'call' || !property?.setter) return read;
+    return {
+      kind: 'property',
+      receiver: undefined,
+      property,
+      args: read.args,
+      owner: read.owner ?? read.method.owner.declaredType,
+      typeArgs: read.typeArgs,
+      type: read.type,
+      row: read.row,
+    };
   }
 
   invokeMethodGroup(

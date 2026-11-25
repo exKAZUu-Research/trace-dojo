@@ -1353,7 +1353,7 @@ export class Evaluator extends AsyncExecutor {
         receiver,
         [...args, ...extra],
         target.row,
-        this.environmentOf(implementation, implementationOwner, [])
+        this.environmentOf(implementation, implementationOwner, target.typeArgs ?? [])
       );
       return this.boxedAsCalled(accessor, implementation, this.runtime.runtimeTypeOf(receiver), result);
     };

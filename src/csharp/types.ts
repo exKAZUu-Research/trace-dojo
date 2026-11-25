@@ -197,6 +197,13 @@ export class MethodSymbol {
   isAsync = false;
   /** For the getter of an extension block's property, the property's name, which `x.P` finds it by. */
   extensionProperty: string | undefined;
+  /**
+   * For an accessor of an extension block's property with a setter, the property, which `x.P = v` assigns as a
+   * static property whose accessors take the receiver as their first argument.
+   */
+  extensionAccessorOf: PropertySymbol | undefined;
+  /** For an extension block's instance compound assignment or `++`/`--` operator, the type of its receiver. */
+  extensionAssignmentOf: Type | undefined;
   /** For a static member of an extension block, the receiver type, whose static members it joins (`string.M()`). */
   staticExtensionOf: Type | undefined;
   /** How a method returns by reference (`ref T M()`, `ref readonly T M()`), if it does. */

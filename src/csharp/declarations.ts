@@ -6,6 +6,7 @@ import type {
   ConstraintClause,
   EventAccessorDeclaration,
   EventFieldDeclaration,
+  ExtensionMember,
   FieldDeclaration,
   IndexerDeclaration,
   MethodDeclaration,
@@ -1015,6 +1016,7 @@ export class DeclarationBinder extends BinderBase {
     method.extensionProperty = member.extension?.property;
     if (member.extension?.staticReceiver)
       method.staticExtensionOf = this.resolveType(member.extension.staticReceiver, methodContext);
+    if (member.extension?.accessor) this.declareExtensionAccessor(method, member, methodContext);
     this.collectAttributes(
       member.attributes,
       'method',
@@ -1043,6 +1045,38 @@ export class DeclarationBinder extends BinderBase {
     if (method.name === symbol.name)
       this.error(member, 'CS0542', `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`);
     this.addMethod(symbol, method, member);
+  }
+
+  /** The properties of extension blocks, by the position of their declarations. */
+  private readonly extensionProperties = new Map<string, PropertySymbol>();
+
+  /**
+   * Joins an accessor of an extension block's property to the property, which the program assigns through its
+   * setter, and reports the accessors and modifiers that an extension block's property may not have.
+   */
+  private declareExtensionAccessor(method: MethodSymbol, member: MethodDeclaration, context: TypeContext): void {
+    const extension = member.extension as ExtensionMember;
+    const name = extension.property as string;
+    const block = `${displayTypeSymbol(method.owner)}.extension(${displayType(this.resolveType(extension.receiver as TypeNode, context))})`;
+    if (extension.accessor === 'init')
+      this.error(member, 'CS9304', `'${block}.${name}': 拡張ブロックで init のみのアクセサーを宣言できません`);
+    const key = extension.propertyKey as string;
+    let property = this.extensionProperties.get(key);
+    if (!property) {
+      if (member.modifiers.set.has('required'))
+        this.error(member, 'CS0106', "修飾子 'required' がこの項目に対して有効ではありません");
+      const isGetter = extension.accessor === 'get';
+      const type = isGetter ? method.returnType : (method.parameters.at(-1)?.type ?? ERROR_TYPE);
+      property = new PropertySymbol(name, type, method.owner, false);
+      property.isStatic = true;
+      property.access = method.access;
+      property.parameters = isGetter ? method.parameters : method.parameters.slice(0, -1);
+      property.row = member.row;
+      this.extensionProperties.set(key, property);
+    }
+    if (extension.accessor === 'get') property.getter = method;
+    else property.setter = method;
+    method.extensionAccessorOf = property;
   }
 
   /** Checks where an extension method's `this` parameter may stand (C# spec §15.6.10). */
@@ -1401,8 +1435,24 @@ export class DeclarationBinder extends BinderBase {
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);
     method.parameters = this.resolveParameters(member.parameters, context, method);
+    // An extension block's operator is one of the type that the block extends.
+    const extended = member.extension?.staticReceiver
+      ? this.resolveType(member.extension.staticReceiver, context)
+      : undefined;
+    method.staticExtensionOf = extended;
     this.collectAttributes(member.attributes, 'method', method, context, { method, return: undefined });
-    const signature = `${displayTypeSymbol(symbol)}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+    const ownerName = extended
+      ? `${displayTypeSymbol(symbol)}.extension(${displayType(extended)})`
+      : displayTypeSymbol(symbol);
+    const signature = `${ownerName}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+    const receiverParameter = member.extension?.receiverParameter;
+    if (receiverParameter) {
+      // An extension block's instance operator is a static method of its class, which takes the receiver first.
+      const [receiver] = this.resolveParameters([receiverParameter], context, method);
+      method.parameters = [receiver, ...method.parameters];
+      method.isStatic = true;
+      method.extensionAssignmentOf = receiver.type;
+    }
     if (isInstanceAssignment) {
       if (!member.modifiers.set.has('public'))
         this.error(member, 'CS9308', `ユーザー定義演算子 '${signature}' は公開用として宣言する必要があります`);
@@ -1415,7 +1465,7 @@ export class DeclarationBinder extends BinderBase {
         `ユーザー定義の演算子 '${signature}' は static および public として宣言されなければなりません`
       );
     }
-    const ownType = symbol.declaredType;
+    const ownType = extended ?? symbol.declaredType;
     // An interface's static abstract operator may take a type parameter that the interface constrains to itself.
     const isOwn = (candidate: Type): boolean =>
       sameType(candidate, ownType) ||
@@ -1429,12 +1479,24 @@ export class DeclarationBinder extends BinderBase {
     if (member.operator === 'implicit' || member.operator === 'explicit') {
       this.checkConversionOperator(symbol, method, member);
     } else if (!isInstanceAssignment && !method.parameters.some((parameter) => isOwn(parameter.type))) {
+      if (extended) {
+        this.reportForeignExtensionOperator(member, isUnary);
+        return;
+      }
       const code = isUnary ? 'CS0562' : 'CS0563';
       const what = isUnary ? '単項演算子のパラメーター' : '二項演算子のパラメーターのうち 1 つ';
       this.error(member, code, `${what}は、それを含んでいる型でなければなりません`);
     }
     this.attachNative(method, member.body === undefined);
     this.addMethod(symbol, method, member);
+  }
+
+  /** Reports an extension block's operator that takes none of the extended type, as Roslyn does. */
+  private reportForeignExtensionOperator(member: Position & { operator: string }, isUnary: boolean): void {
+    if (member.operator === '++' || member.operator === '--')
+      this.error(member, 'CS9318', '++ または -- 演算子のパラメーター型は、拡張型である必要があります。');
+    else if (isUnary) this.error(member, 'CS9317', '単項演算子のパラメーターは、拡張型である必要があります。');
+    else this.error(member, 'CS9319', '2 項演算子のパラメーターの 1 つは、拡張型である必要があります。');
   }
 
   /** Checks a conversion operator's types (C# spec §15.10.4), and that the type declares no other between them. */

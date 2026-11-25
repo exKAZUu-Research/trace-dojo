@@ -322,8 +322,9 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   private argumentFits(arg: ArgumentInfo, type: Type, refKind: 'ref' | 'out' | 'in' | undefined): boolean {
+    // A receiver that is no variable still fits a `ref` receiver, which then reports it (CS1510).
     if (arg.isReceiver && refKind === 'ref')
-      return arg.target !== undefined && (sameType(arg.expression.type, type) || arg.expression.type.kind === 'error');
+      return sameType(arg.expression.type, type) || arg.expression.type.kind === 'error';
     if (refKind === 'ref' || refKind === 'out') {
       if (arg.refKind !== refKind) return false;
       if (arg.isOutVar) return true;
@@ -821,7 +822,11 @@ export abstract class CallBinder extends OperatorBinder {
       const parameter = method.parameters[parameterIndex];
       const type = applicable.argumentTypes[index];
       if (parameter.refKind === 'ref' || parameter.refKind === 'out') {
-        const target = arg.declareOut ? arg.declareOut(type) : (arg.target as BoundLValue);
+        if (arg.isReceiver && !arg.target)
+          this.error(row, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+        const target: BoundLValue = arg.declareOut
+          ? arg.declareOut(type)
+          : (arg.target ?? { kind: 'discard', type: ERROR_TYPE, row: arg.row });
         result[parameterIndex] = { kind: 'refArgument', target, refKind: parameter.refKind, type, row: arg.row };
         continue;
       }

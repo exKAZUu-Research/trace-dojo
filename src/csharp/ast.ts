@@ -411,9 +411,27 @@ export interface MethodDeclaration extends Position, Attributed {
   explicitInterface?: TypeNode;
   /**
    * A member of an extension block (`extension(int n) { ... }`), which the converter turns into a method of the
-   * enclosing static class: an extension property's getter, or a static member of the receiver's type.
+   * enclosing static class: an extension property's accessor, or a static member of the receiver's type.
    */
-  extension?: { property?: string; staticReceiver?: TypeNode };
+  extension?: ExtensionMember;
+}
+
+/** How a method of a static class stands for a member of an extension block. */
+export interface ExtensionMember {
+  /** For a property's accessor, the property's name. */
+  property?: string;
+  /** For a property's accessor, the property's position, which tells the properties of several blocks apart. */
+  propertyKey?: string;
+  /** For a property's accessor, whether it is the getter or the setter; `init` is an error there. */
+  accessor?: 'get' | 'set' | 'init';
+  /** For a property, whether it is an auto-property, which an extension block may not declare. */
+  isAuto?: boolean;
+  /** For a static member, the receiver type, whose static members it joins (`string.M()`). */
+  staticReceiver?: TypeNode;
+  /** The block's receiver type, which names the block in errors (`Ext.extension(string)`). */
+  receiver?: TypeNode;
+  /** For an instance operator (`void operator +=(int k)`), the block's receiver, which it takes first. */
+  receiverParameter?: Parameter;
 }
 
 export interface ConstructorDeclaration extends Position, Attributed {
@@ -498,6 +516,8 @@ export interface OperatorDeclaration extends Position, Attributed {
   body: Block | Expression | undefined;
   bodyRow: number;
   startRow: number;
+  /** For an operator of an extension block, the type it extends, whose operators it joins. */
+  extension?: ExtensionMember;
 }
 
 export interface EnumMember extends Position, Attributed {

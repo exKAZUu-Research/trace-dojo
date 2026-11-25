@@ -41,6 +41,8 @@ const MISSING_TOKENS: Record<string, string> = {
  * without its operand.
  */
 function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const extension = extensionMemberErrors(root);
+  if (extension.length > 0) return extension;
   const strayElse = strayElseErrors(root);
   if (strayElse) return strayElse;
   const misplaced = misplacedKeywordError(root);
@@ -56,6 +58,40 @@ function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagn
   }
   for (const error of outermostErrors(root)) diagnostics.push(...roslynErrorsOf(root, error));
   return diagnostics.toSorted((a, b) => a.row - b.row);
+}
+
+const TYPE_DECLARATION_KEYWORDS = new Set(['class', 'struct', 'interface', 'enum', 'record']);
+const NOT_IN_EXTENSION = 'CS9282: このメンバーは拡張ブロックでは使用できません';
+
+/**
+ * The errors of the members that an extension block may not declare, which the grammar does not read there: fields,
+ * events, constructors, conversion operators, nested types, and indexers, which C# 14 leaves in preview.
+ */
+function extensionMemberErrors(root: Node): SourceDiagnostic[] {
+  const diagnostics: SourceDiagnostic[] = [];
+  for (const body of root.descendantsOfType('extension_body')) {
+    for (const member of body?.namedChildren ?? []) {
+      if (!member) continue;
+      const row = member.startPosition.row;
+      const name = member.childForFieldName('name');
+      const type = member.childForFieldName('type');
+      if (member.type === 'ERROR') {
+        diagnostics.push({ row, message: NOT_IN_EXTENSION });
+      } else if (member.type === 'property_declaration' && name?.text === 'this') {
+        diagnostics.push({
+          row,
+          message:
+            "CS8652: 機能 '拡張インデクサー' は現在、プレビュー段階であり、*サポートされていません*。プレビュー機能を使用するには、'preview' 言語バージョンを使用してください。",
+        });
+      } else if (member.type === 'property_declaration' && type && TYPE_DECLARATION_KEYWORDS.has(type.text)) {
+        diagnostics.push({ row, message: NOT_IN_EXTENSION });
+      } else if (member.type === 'method_declaration' && (!name || name.isMissing || name.text === '')) {
+        diagnostics.push({ row, message: 'CS1520: メソッドは戻り値の型を持たなければなりません' });
+        diagnostics.push({ row, message: NOT_IN_EXTENSION });
+      }
+    }
+  }
+  return diagnostics;
 }
 
 const MODIFIERS = new Set([

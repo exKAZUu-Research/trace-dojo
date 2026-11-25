@@ -506,6 +506,71 @@ class Program {
   });
 });
 
+// C# 14 extension blocks declare settable properties, whose setter takes the receiver (by reference for a `ref`
+// receiver), and operators of the type they extend; members that need storage or a constructor are errors.
+test('extension blocks declare settable properties and operators', () => {
+  const program = String.raw`struct Vector {
+    public int X, Y;
+    public Vector(int x, int y) { X = x; Y = y; }
+    public override string ToString() => $"<{X}, {Y}>";
+}
+class Counter { public int N; }
+static class Ext {
+    static int created;
+    extension(Counter c) { public int Value { get => c.N; set => c.N = value; } }
+    extension(Counter) { public static int Created { get => created; set => created = value; } }
+    extension(ref Vector v) {
+        public int Sum { get => v.X + v.Y; set { v.X = value - v.Y; } }
+        public void operator +=(int k) { v.X += k; v.Y += k; }
+    }
+    extension(Vector) {
+        public static Vector operator +(Vector a, Vector b) => new Vector(a.X + b.X, a.Y + b.Y);
+        public static bool operator ==(Vector a, Vector b) => a.X == b.X && a.Y == b.Y;
+        public static bool operator !=(Vector a, Vector b) => !(a == b);
+    }
+}
+class Program {
+    static void Main() {
+        var c = new Counter();
+        c.Value = 5;
+        c.Value++;
+        Counter.Created += 2;
+        var v = new Vector(1, 2);
+        v.Sum = 10;
+        v += 1;
+        var w = v + new Vector(1, 1);
+        w += new Vector(0, 1);
+        Console.WriteLine($"{c.N} {Counter.Created} {v} {w} {v == w} {v != w}");
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '6 2 <9, 3> <10, 5> False True\n',
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'static class Ext {\n    extension(string s) {\n        public int f;\n    }\n}\nclass P { static void Main() { } }\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'CS9282: このメンバーは拡張ブロックでは使用できません' }],
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'static class Ext {\n    extension(string s) {\n        public int Len { init { } get => s.Length; }\n        public static int operator +(int a, int b) => a;\n    }\n}\nclass P { static void Main() { } }\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: "CS9304: 'Ext.extension(string).Len': 拡張ブロックで init のみのアクセサーを宣言できません" },
+      { row: 3, message: 'CS9319: 2 項演算子のパラメーターの 1 つは、拡張型である必要があります。' },
+    ],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

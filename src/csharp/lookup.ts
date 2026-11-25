@@ -1,5 +1,6 @@
 import type { NestedTypeFound, TypeContext } from './binderBase';
 import { DeclarationBinder } from './declarations';
+import type { NamespaceSymbol } from './namespaces';
 import {
   type ArrayType,
   baseTypeOf,
@@ -151,7 +152,7 @@ export class LookupBinder extends DeclarationBinder {
     return [];
   }
 
-  /** The user-defined operators of a type and its bases. */
+  /** The user-defined operators of a type and its bases, or else those that extension blocks for the type declare. */
   lookupOperators(type: Type, name: string): MethodCandidate[] {
     const result: MethodCandidate[] = [];
     if (type.kind !== 'named' && type.kind !== 'typeParameter') return result;
@@ -159,6 +160,18 @@ export class LookupBinder extends DeclarationBinder {
       for (const method of owner.symbol.methods)
         if (method.kind === 'operator' && method.name === name) result.push({ method, owner });
     }
+    if (result.length > 0 || type.kind !== 'named') return result;
+    // Operators bind without the namespaces in scope, so every static class of the program offers its extension
+    // operators, where Roslyn looks only in those in scope.
+    for (const symbol of staticClassesOf(this.userRoot))
+      for (const method of symbol.methods)
+        if (
+          method.kind === 'operator' &&
+          method.name === name &&
+          method.staticExtensionOf &&
+          sameType(method.staticExtensionOf, type)
+        )
+          result.push({ method, owner: symbol.declaredType });
     return result;
   }
 
@@ -174,9 +187,27 @@ export class LookupBinder extends DeclarationBinder {
     );
   }
 
+  /** The instance compound assignment and `++`/`--` operators that extension blocks for a type declare. */
+  lookupExtensionAssignmentOperators(type: Type, name: string): MethodCandidate[] {
+    return staticClassesOf(this.userRoot).flatMap((symbol) =>
+      symbol.methods
+        .filter(
+          (method) =>
+            method.kind === 'operator' &&
+            method.name === name &&
+            method.extensionAssignmentOf !== undefined &&
+            sameType(method.extensionAssignmentOf, type)
+        )
+        .map((method) => ({ method, owner: symbol.declaredType }))
+    );
+  }
+
   /** The getters of the extension properties of a name that the extension blocks in scope declare. */
   lookupExtensionProperties(name: string, context: TypeContext): MethodCandidate[] {
-    return this.lookupExtensionMembers(context, (method) => method.extensionProperty === name);
+    return this.lookupExtensionMembers(
+      context,
+      (method) => method.extensionProperty === name && method.name === `get_${name}`
+    );
   }
 
   /** The static members of extension blocks for a type, by name: methods, or with `property`, property getters. */
@@ -186,7 +217,9 @@ export class LookupBinder extends DeclarationBinder {
       (method) =>
         method.staticExtensionOf !== undefined &&
         sameType(method.staticExtensionOf, type) &&
-        (isProperty ? method.extensionProperty === name : method.name === name && !method.extensionProperty)
+        (isProperty
+          ? method.extensionProperty === name && method.name === `get_${name}`
+          : method.name === name && !method.extensionProperty)
     );
   }
 
@@ -291,3 +324,11 @@ function isInvocable(type: Type): boolean {
 }
 
 export { MethodSymbol, PropertySymbol, FieldSymbol };
+
+/** The static classes of a namespace and the namespaces within it, which alone may declare extension blocks. */
+function staticClassesOf(namespace: NamespaceSymbol): TypeSymbol[] {
+  return [
+    ...[...namespace.types.values()].flat().filter((symbol) => symbol.isStatic),
+    ...[...namespace.namespaces.values()].flatMap(staticClassesOf),
+  ];
+}

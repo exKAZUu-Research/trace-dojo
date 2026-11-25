@@ -307,18 +307,17 @@ export abstract class StatementBinder extends PatternBinder {
     }
     this.checkAccessorUse(target, property, setter, 'set', position, context);
     if (target.receiver && this.reportsReadonlyLocalMember(target.receiver, position)) return target as BoundLValue;
+    // An extension property takes its receiver as its first argument, by value unless the block's receiver is `ref`.
+    const extensionReceiver = setter.extensionAccessorOf && property.parameters.length > 0 ? target.args[0] : undefined;
+    const holder = target.receiver ?? (extensionReceiver?.kind === 'refArgument' ? undefined : extensionReceiver);
     if (
-      target.receiver &&
-      target.receiver.type.kind === 'named' &&
-      target.receiver.type.symbol.isValueType &&
-      !isVariable(target.receiver, false) &&
+      holder &&
+      holder.type.kind === 'named' &&
+      holder.type.symbol.isValueType &&
+      !isVariable(holder, false) &&
       use !== 'initializer'
     ) {
-      this.error(
-        position,
-        'CS1612',
-        `変数ではないため、'${this.describeValue(target.receiver)}' の戻り値を変更できません`
-      );
+      this.error(position, 'CS1612', `変数ではないため、'${this.describeValue(holder)}' の戻り値を変更できません`);
     }
     return target;
   }
