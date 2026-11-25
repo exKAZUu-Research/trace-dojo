@@ -501,6 +501,18 @@ export abstract class SemaBase implements SemaApi {
     for (const callee of instance.runtimeCallees) this.markRuntimeUse(callee);
   }
 
+  /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */
+  protected underRuntimeCondition<T>(run: () => T): T {
+    // A branch in code that the compiler runs is decided as it runs, so it is no runtime condition.
+    if (this.context.comptimeDepth > 0) return run();
+    this.context.runtimeConditionDepth++;
+    try {
+      return run();
+    } finally {
+      this.context.runtimeConditionDepth--;
+    }
+  }
+
   /** The innermost container whose scope the compiler is in, which `@This()` names. */
   protected enclosingNamespace(): Namespace {
     for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent) {

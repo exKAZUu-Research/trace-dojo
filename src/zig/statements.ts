@@ -201,18 +201,6 @@ export abstract class StatementCompiler extends CallCompiler {
     );
   }
 
-  /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */
-  private underRuntimeCondition<T>(run: () => T): T {
-    // A branch in code that the compiler runs is decided as it runs, so it is no runtime condition.
-    if (this.context.comptimeDepth > 0) return run();
-    this.context.runtimeConditionDepth++;
-    try {
-      return run();
-    } finally {
-      this.context.runtimeConditionDepth--;
-    }
-  }
-
   /** Counts an iteration that `inline for` or `inline while` unrolls, against the evaluation quota. */
   private countUnrolledIteration(span: Span): void {
     if (++this.context.evalBranches.count > this.context.evalBranches.quota)
@@ -3165,8 +3153,11 @@ export abstract class StatementCompiler extends CallCompiler {
       return handler;
     }
     const capture = this.captureBinding(expression.capture, type.errorSet, undefined);
-    const handler = this.withCapture(capture, () =>
-      this.compile(expression.handler, discarded ? undefined : (resultType ?? type.payload))
+    // The handler runs only when the operand fails, which the program decides when it runs.
+    const handler = this.underRuntimeCondition(() =>
+      this.withCapture(capture, () =>
+        this.compile(expression.handler, discarded ? undefined : (resultType ?? type.payload))
+      )
     );
     if (discarded) {
       this.rejectDiscardedError(type.payload, expression.operand);

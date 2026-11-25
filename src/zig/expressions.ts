@@ -1423,7 +1423,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     const isAnd = expression.operator === 'and';
     const leftResult = staticResultOf(left);
     if (leftResult && leftResult.value !== isAnd) return this.fixedResult(left, BOOL, !isAnd, expression);
-    const right = this.coerce(this.compile(expression.right, BOOL), BOOL, expression.right);
+    // The right side runs only when the left side lets it, a runtime condition unless the left side is known.
+    const compileRight = (): TExpr => this.coerce(this.compile(expression.right, BOOL), BOOL, expression.right);
+    const right = left.known ? compileRight() : this.underRuntimeCondition(compileRight);
     if (left.known) return right;
     const evaluateLeft = left.eval;
     const evaluateRight = right.eval;
@@ -1449,7 +1451,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     const child = left.type.child;
     // Zig does not analyze the right side of an `orelse` whose left side it knows holds a value.
     if (left.known && left.value !== NULL) return known(child, optionalPayload(left.value), expression);
-    const right = this.compile(expression.right, child);
+    const right = left.known
+      ? this.compile(expression.right, child)
+      : this.underRuntimeCondition(() => this.compile(expression.right, child));
     const type =
       right.type.kind === 'noreturn' ? child : this.peerType([known(child, undefined, expression), right], expression);
     const otherwise = this.coerce(right, type, expression.right);
