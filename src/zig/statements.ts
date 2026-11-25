@@ -213,6 +213,8 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */
   private underRuntimeCondition<T>(run: () => T): T {
+    // A branch in code that the compiler runs is decided as it runs, so it is no runtime condition.
+    if (this.comptimeDepth > 0) return run();
     this.runtimeConditionDepth++;
     try {
       return run();
@@ -793,11 +795,13 @@ export abstract class StatementCompiler extends CallCompiler {
     const row = this.stepRow(span);
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
     const [target] = expression.targets;
-    const variable = this.comptimeDepth === 0 ? this.comptimeVariableOf(target) : undefined;
-    if (variable?.comptimeCell) {
+    const variable = this.comptimeVariableOf(target);
+    // A `comptime` block inside a runtime branch still stores under the branch's condition.
+    const cell = variable?.comptimeCell;
+    if (cell && this.runtimeConditionDepth > cell.conditionDepth)
+      this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
+    if (cell && this.comptimeDepth === 0) {
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
-      if (this.runtimeConditionDepth > variable.comptimeCell.conditionDepth)
-        this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
       this.comptimeValue(
         () => {
           const exec = this.assignment(expression, span).exec;
