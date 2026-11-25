@@ -14,16 +14,7 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { createAsyncGeneratorObject } from './asyncGenerators';
-import {
-  classMetadata,
-  decorateClass,
-  decorateMembers,
-  evaluateClassDecorators,
-  type EvaluatedDecorators,
-  type MemberDefinition,
-  runInitializers,
-  shareMetadata,
-} from './decorators';
+import { decorateClassDefinition, evaluateClassDecorators, type MemberDefinition, runInitializers } from './decorators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
 import { createGeneratorObject, type Steps } from './generators';
@@ -582,7 +573,9 @@ export class Evaluator extends SuspendableStatementEvaluator {
   evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
     const { runtime } = this;
     // The class's decorators are evaluated before its heritage, in the scope around the class.
-    const decorators = evaluateClassDecorators(cls.decorators, cls.members, (expression) => this.evaluate(expression));
+    const classDecorators = evaluateClassDecorators(cls.decorators, cls.members, (expression) =>
+      this.evaluate(expression)
+    );
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
@@ -623,7 +616,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     });
-    return this.defineDecoratedMembers(cls, fn, prototype, behavior, decorators, { inferredName, binding });
+    return this.defineDecoratedMembers(cls, fn, prototype, behavior, classDecorators, { inferredName, binding });
   }
 
   /** Defines the members of a class, applies its decorators, and initializes it, returning the class decorators gave. */
@@ -632,46 +625,27 @@ export class Evaluator extends SuspendableStatementEvaluator {
     fn: JsFunction,
     prototype: JsObject,
     behavior: Extract<ClassBehavior, { kind: 'class' }>,
-    decorators: EvaluatedDecorators | undefined,
+    classDecorators: Value[] | undefined,
     { inferredName, binding }: { inferredName: Key | undefined; binding: Binding | undefined }
   ): JsFunction {
+    const { runtime } = this;
     const classScope = behavior.scope;
     const definitions: MemberDefinition[] = [];
     const staticInitializers = this.inScope(classScope, () =>
-      this.defineMembers(cls, fn, prototype, behavior, { definitions, decorators })
+      this.defineMembers(cls, fn, prototype, behavior, { definitions, isDecorated: classDecorators !== undefined })
     );
-    const decorated = decorators
-      ? this.applyDecorators(fn, behavior, definitions, decorators, staticInitializers, inferredName)
-      : { cls: fn, initializers: [] };
+    const name = cls.name || (typeof inferredName === 'string' ? inferredName : '');
+    const decorated =
+      classDecorators && decorateClassDefinition(runtime, { cls: fn, name, members: definitions, classDecorators });
+    if (decorated && decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
+    if (decorated && decorated.staticInitializers.length > 0)
+      staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn));
     // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
-    runInitializers(this.runtime, decorated.initializers, decorated.cls);
+    if (!decorated) return fn;
+    runInitializers(runtime, decorated.classInitializers, decorated.cls);
     return decorated.cls;
-  }
-
-  /**
-   * Applies TypeScript's standard decorators: those of the members, whose added initializers run on the class before
-   * its static fields and on each instance before its fields, and then the class's own.
-   */
-  private applyDecorators(
-    fn: JsFunction,
-    behavior: Extract<ClassBehavior, { kind: 'class' }>,
-    definitions: MemberDefinition[],
-    decorators: EvaluatedDecorators,
-    staticInitializers: (() => void)[],
-    inferredName: Key | undefined
-  ): { cls: JsFunction; initializers: Value[] } {
-    const { runtime } = this;
-    const metadata = classMetadata(runtime, fn);
-    const added = decorateMembers(runtime, definitions, decorators, metadata);
-    if (added.instanceMembers.length > 0) behavior.initializers = added.instanceMembers;
-    if (added.staticMembers.length > 0)
-      staticInitializers.unshift(() => runInitializers(runtime, added.staticMembers, fn));
-    const name = behavior.node.name || (typeof inferredName === 'string' ? inferredName : '');
-    const decorated = decorateClass(runtime, fn, name, decorators.classDecorators, metadata);
-    shareMetadata(decorated.cls, metadata);
-    return decorated;
   }
 
   private initializeStaticMembers(
@@ -729,7 +703,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     fn: JsFunction,
     prototype: JsObject,
     behavior: Extract<ClassBehavior, { kind: 'class' }>,
-    { definitions, decorators }: { definitions: MemberDefinition[]; decorators: EvaluatedDecorators | undefined }
+    { definitions, isDecorated }: { definitions: MemberDefinition[]; isDecorated: boolean }
   ): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
@@ -742,11 +716,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       const target = member.isStatic ? fn : prototype;
       const isPrivate = member.key.kind === 'private';
       // A member's decorators run just before its key, in the order of the class's source.
-      if (decorators && member.decorators)
-        decorators.members.set(
-          member,
-          member.decorators.map((expression) => this.evaluate(expression))
-        );
+      const decorators =
+        isDecorated && member.decorators ? member.decorators.map((expression) => this.evaluate(expression)) : undefined;
       const key = this.propertyKey(member.key);
       const name = member.key.kind === 'private' ? member.key.name : key;
       if (member.kind === 'field') {
@@ -755,11 +726,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
           : { field: this.classField(member, key, name, target, classScope), property: undefined };
         if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field, member.isTraceConstant));
         else behavior.fields.push(field);
-        definitions.push({ member, key, name, isPrivate, field, property });
+        definitions.push({ member, key, name, isPrivate, field, property, decorators });
         continue;
       }
       const property = this.defineMethod(member, key, target, classScope, behavior.fields);
-      definitions.push({ member, key, name, isPrivate, property });
+      definitions.push({ member, key, name, isPrivate, property, decorators });
     }
     return staticInitializers;
   }

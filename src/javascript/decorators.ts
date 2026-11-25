@@ -15,6 +15,9 @@ import {
 
 type DecoratedMember = Exclude<ClassMember, { kind: 'staticBlock' }>;
 
+/** The metadata object of each decorated class, which a decorated subclass's metadata inherits from. */
+const metadataOfClass = new WeakMap<JsObject, JsObject>();
+
 /** A member the class defined, with where it lives, which its decorators replace or wrap. */
 export interface MemberDefinition {
   member: DecoratedMember;
@@ -26,103 +29,94 @@ export interface MemberDefinition {
   property?: Property;
   /** The field that stores a field's value, or an auto-accessor's. */
   field?: ClassField;
+  /** What the member's decorators evaluated to, just before its key, as the standard orders them. */
+  decorators?: Value[];
 }
 
-/** The decorators a class and its members evaluated to, in source order. */
-export interface EvaluatedDecorators {
+/** A class definition its decorators apply to: the class, its name, and its members in source order. */
+export interface ClassDefinition {
+  cls: JsFunction;
+  name: string;
+  members: MemberDefinition[];
   classDecorators: Value[];
-  members: Map<ClassMember, Value[]>;
 }
 
-/** The functions decorators added with `context.addInitializer`, by when they run. */
-export interface DecoratorInitializers {
+/** The class a definition's decorators give, and the functions their `addInitializer` added, by when they run. */
+export interface DecoratedClass {
+  cls: JsFunction;
   /** Run with the class as `this` before its static fields. */
-  staticMembers: Value[];
+  staticInitializers: Value[];
   /** Run with each instance as `this` before its fields. */
-  instanceMembers: Value[];
+  instanceInitializers: Value[];
+  /** Run with the class the class decorators gave as `this`, after its static fields. */
+  classInitializers: Value[];
 }
 
 /**
- * Evaluates the decorators of a class, when it or a member has any; defining the members evaluates each member's
- * decorators then, just before its key, as the standard orders them.
+ * Evaluates the decorators of a class, when it or a member has any, before its heritage, as the standard orders them;
+ * defining the members evaluates each member's decorators just before its key.
  */
 export function evaluateClassDecorators(
   classDecorators: Expression[] | undefined,
   members: ClassMember[],
   evaluate: (expression: Expression) => Value
-): EvaluatedDecorators | undefined {
+): Value[] | undefined {
   if (!classDecorators && !members.some((member) => member.kind !== 'staticBlock' && member.decorators))
     return undefined;
-  return { classDecorators: (classDecorators ?? []).map(evaluate), members: new Map() };
+  return (classDecorators ?? []).map(evaluate);
 }
 
 /**
- * Applies the decorators of a class's members, as TypeScript's standard decorators do: the methods and accessors before
- * the fields, the static ones of each before the others, and each member's decorators from the last one written.
+ * Applies TypeScript's standard decorators to a class definition, in the one order the standard gives: the methods
+ * and accessors before the fields, the static ones of each before the others, each member's decorators from the last
+ * one written, and then the class's own, all sharing a metadata object that inherits from the nearest decorated base.
  */
-export function decorateMembers(
-  runtime: Runtime,
-  definitions: MemberDefinition[],
-  decorators: EvaluatedDecorators,
-  metadata: JsObject
-): DecoratorInitializers {
-  const initializers: DecoratorInitializers = { staticMembers: [], instanceMembers: [] };
-  const isField = (definition: MemberDefinition): boolean =>
-    definition.member.kind === 'field' && !definition.member.isAutoAccessor;
+export function decorateClassDefinition(runtime: Runtime, definition: ClassDefinition): DecoratedClass {
+  const metadata = classMetadata(runtime, definition.cls);
+  const staticInitializers: Value[] = [];
+  const instanceInitializers: Value[] = [];
+  const { members } = definition;
   const order = [
-    ...definitions.filter((definition) => !isField(definition) && definition.member.isStatic),
-    ...definitions.filter((definition) => !isField(definition) && !definition.member.isStatic),
-    ...definitions.filter((definition) => isField(definition) && definition.member.isStatic),
-    ...definitions.filter((definition) => isField(definition) && !definition.member.isStatic),
+    ...members.filter((member) => !isField(member) && member.member.isStatic),
+    ...members.filter((member) => !isField(member) && !member.member.isStatic),
+    ...members.filter((member) => isField(member) && member.member.isStatic),
+    ...members.filter((member) => isField(member) && !member.member.isStatic),
   ];
-  for (const definition of order) {
-    const applied = decorators.members.get(definition.member);
-    if (!applied) continue;
-    const added = definition.member.isStatic ? initializers.staticMembers : initializers.instanceMembers;
-    for (const decorator of applied.toReversed()) decorateMember(runtime, definition, decorator, added, metadata);
+  for (const member of order) {
+    const added = member.member.isStatic ? staticInitializers : instanceInitializers;
+    for (const decorator of (member.decorators ?? []).toReversed())
+      decorateMember(runtime, member, decorator, added, metadata);
   }
-  return initializers;
-}
-
-/** Applies a class's decorators from the last one written, returning the class each gives and what they added. */
-export function decorateClass(
-  runtime: Runtime,
-  cls: JsFunction,
-  name: string,
-  decorators: Value[],
-  metadata: JsObject
-): { cls: JsFunction; initializers: Value[] } {
-  let decorated = cls;
-  const initializers: Value[] = [];
-  for (const decorator of decorators.toReversed()) {
-    const context = decoratorContext(runtime, 'class', name, initializers, metadata);
-    const result = runtime.call(requireCallable(runtime, decorator), undefined, [decorated, context]);
+  let cls = definition.cls;
+  const classInitializers: Value[] = [];
+  for (const decorator of definition.classDecorators.toReversed()) {
+    const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
+    const result = runtime.call(requireCallable(runtime, decorator), undefined, [cls, context]);
     if (result === undefined) continue;
     if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
-    decorated = result as JsFunction;
+    cls = result as JsFunction;
   }
-  return { cls: decorated, initializers };
+  // A subclass of the class the class decorators returned inherits this metadata too.
+  metadataOfClass.set(cls, metadata);
+  return { cls, staticInitializers, instanceInitializers, classInitializers };
 }
 
-/** The metadata object of each decorated class, which a decorated subclass's metadata inherits from. */
-const metadataOfClass = new WeakMap<JsObject, JsObject>();
+/** Whether a member is a field without `accessor`, whose decorators apply after those of methods and accessors. */
+function isField(member: MemberDefinition): boolean {
+  return member.member.kind === 'field' && !member.member.isAutoAccessor;
+}
 
 /**
  * The metadata object a class's decorators share, which inherits from that of the nearest decorated superclass, as
  * `context.metadata` does under the standard.
  */
-export function classMetadata(runtime: Runtime, cls: JsFunction): JsObject {
+function classMetadata(runtime: Runtime, cls: JsFunction): JsObject {
   let parent: JsObject | null = cls.proto;
   while (parent && !metadataOfClass.has(parent)) parent = parent.proto;
   // oxlint-disable-next-line unicorn/no-null -- The metadata object of a class without a decorated base has no prototype.
   const metadata = runtime.newObject(parent ? (metadataOfClass.get(parent) ?? null) : null);
   metadataOfClass.set(cls, metadata);
   return metadata;
-}
-
-/** Records the metadata object for the class the class decorators returned, which subclasses of it inherit from. */
-export function shareMetadata(cls: JsFunction, metadata: JsObject): void {
-  metadataOfClass.set(cls, metadata);
 }
 
 /** Runs the functions decorators added, with `thisValue` as `this`. */
