@@ -641,7 +641,7 @@ export class TypeNodes {
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
     const value = this.c.scopeOf(root).lookupValue(root.text);
-    if (value && root.id === node.childForFieldName('module')?.id && namesEnumMember(node, value))
+    if (value && root.id === node.childForFieldName('module')?.id && namesEnumMember(this.c, node, value))
       return this.enumMemberTypeNamed(node, value, root.text);
     if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
       return this.namespaceMemberType(node, root);
@@ -656,7 +656,7 @@ export class TypeNodes {
   private namespaceMemberType(node: TreeNode, root: TreeNode): Type {
     const container = node.childForFieldName('module');
     const enumSymbol = container && container.id !== root.id && this.c.namespaces.qualifiedValueSymbol(container);
-    if (enumSymbol && namesEnumMember(node, enumSymbol))
+    if (enumSymbol && namesEnumMember(this.c, node, enumSymbol))
       return this.enumMemberTypeNamed(node, enumSymbol, container.text);
     const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
     if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
@@ -1195,10 +1195,11 @@ function unionAlias(symbol: Sym): UnionAlias {
 }
 
 /**
- * Whether `E.X` names a member of the enum `E`, which it does unless a namespace merged with the enum exports a type
- * named `X`, which tsc finds first.
+ * Whether `E.X` names a member of the enum `E`, which it does when `E` has the member `X`, or else when no namespace
+ * merged with the enum exports a type named `X`.
  */
-function namesEnumMember(node: TreeNode, symbol: Sym): boolean {
+function namesEnumMember(c: Checker, node: TreeNode, symbol: Sym): boolean {
   const name = node.childForFieldName('name')?.text ?? '';
-  return symbol.valueKind === 'enum' && !symbol.namespaceExports?.types.has(name);
+  if (symbol.valueKind !== 'enum') return false;
+  return c.enums.memberTypeNamed(symbol, name) !== undefined || !symbol.namespaceExports?.types.has(name);
 }

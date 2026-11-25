@@ -1,0 +1,8 @@
+(1,10): error TS2300: Duplicate identifier 'T'.
+(1,17): error TS2300: Duplicate identifier 'B'.
+(2,27): error TS2300: Duplicate identifier 'T'.
+(2,52): error TS2300: Duplicate identifier 'B'.
+(3,7): error TS2322: Type '14' is not assignable to type 'E.T'.
+(4,35): error TS2300: Duplicate identifier 'U'.
+(4,76): error TS2300: Duplicate identifier 'U'.
+(5,7): error TS2322: Type '7' is not assignable to type 'F'.

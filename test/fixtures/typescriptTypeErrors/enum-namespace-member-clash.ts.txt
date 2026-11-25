@@ -1,0 +1,6 @@
+enum E { T = 1, B }
+namespace E { export type T = number; export const B = 2; }
+const x: E.T = 14;
+namespace Outer { export enum F { U = 1 } export namespace F { export type U = number } }
+const y: Outer.F.U = 7;
+console.log(x, y);

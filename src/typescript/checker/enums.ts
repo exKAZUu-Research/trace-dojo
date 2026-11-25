@@ -100,7 +100,22 @@ export class Enums {
     for (const member of named(node.childForFieldName('body') as TreeNode)) {
       const value = member.childForFieldName('value');
       if (value) this.c.expressions.check(value);
+      if (symbol) this.checkMergedNamespaceClash(member, symbol);
     }
+  }
+
+  /** Reports a member that a namespace merged with its enum also exports, at both declarations, as tsc does. */
+  private checkMergedNamespaceClash(member: TreeNode, symbol: Sym): void {
+    const name = memberNameOf(member);
+    const exports = symbol.namespaceExports;
+    if (name === undefined || !exports) return;
+    const exported = [exports.values.get(name), exports.types.get(name)].filter((other) => other !== undefined);
+    if (exported.length === 0) return;
+    const { node, message } = duplicateError(member, name);
+    this.c.error(node, message);
+    for (const other of exported)
+      for (const declaration of [...other.valueDeclarations, ...other.typeDeclarations])
+        this.c.error(declaration.childForFieldName('name') ?? declaration, message);
   }
 
   private infoOf(symbol: Sym): EnumInfo | undefined {
