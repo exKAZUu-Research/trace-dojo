@@ -584,8 +584,7 @@ export class Expander {
     const direct = this.parameterValue(name, subscript, expansion);
     const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
     if (reference === undefined || reference === '') {
-      if (expansion.operator === undefined) this.checkIndirectReference(name, subscript?.text);
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', undefined, ctx);
+      return this.expandEmptyIndirect(expansion, subscript, reference, ctx);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
@@ -595,6 +594,21 @@ export class Expander {
       target.subscript,
       ctx
     );
+  }
+
+  private expandEmptyIndirect(
+    expansion: ParameterExpansion,
+    subscript: SubscriptRef | undefined,
+    reference: string | undefined,
+    ctx: WordContext
+  ): WordSegment[] {
+    if (reference === undefined || expansion.operator === undefined) {
+      this.checkIndirectReference(expansion.name, subscript?.text);
+    }
+    if (expansion.operator !== undefined) {
+      this.shell.discard(': invalid variable name');
+    }
+    return this.valueSegments({ kind: 'scalar', value: undefined }, ctx);
   }
 
   private finishIndirect(
