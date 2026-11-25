@@ -98,6 +98,11 @@ const IMPLICATIONS: Record<string, string> = {
   FunctionalDependencies: '+MultiParamTypeClasses',
   MultiParamTypeClasses: '+ConstrainedClassMethods',
   TypeFamilyDependencies: '+TypeFamilies',
+  UnboxedTuples: '+UnboxedSums',
+  AutoDeriveTypeable: '+DeriveDataTypeable',
+  ParallelArrays: '+ParallelListComp',
+  JavaScriptFFI: '+InterruptibleFFI',
+  ExplicitLevelImports: '-ImplicitStagePersistence',
   MonadComprehensions: '+ParallelListComp',
   TypeFamilies: '+MonoLocalBinds +KindSignatures +ExplicitNamespaces',
   TypeOperators: '+ExplicitNamespaces',
@@ -114,7 +119,7 @@ const IMPLICATIONS: Record<string, string> = {
   Strict: '+StrictData',
   StandaloneKindSignatures: '-CUSKs',
   UnliftedDatatypes: '+DataKinds +StandaloneKindSignatures',
-  LinearTypes: '+ExplicitNamespaces',
+  LinearTypes: '+ExplicitNamespaces +MonoLocalBinds',
   IncoherentInstances: '+OverlappingInstances',
 };
 
