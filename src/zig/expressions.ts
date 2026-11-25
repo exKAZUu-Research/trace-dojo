@@ -1494,7 +1494,9 @@ export abstract class ExpressionCompiler extends SemaBase {
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
-    let right = this.compile(expression.right, left.type.kind === 'null' ? undefined : unionTag(left.type));
+    // Zig gives a vector comparison's operand no result type, so `v < @splat(3)` has no type for the @splat.
+    const rightType = left.type.kind === 'null' || isVectorType(left.type) ? undefined : unionTag(left.type);
+    let right = this.compile(expression.right, rightType);
     if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
     if (left.type.kind === 'enum_literal' && right.type.kind !== 'enum_literal')
       left = this.compile(expression.left, unionTag(right.type));
