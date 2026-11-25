@@ -1321,15 +1321,9 @@ data QuasiQuoter = QuasiQuoter
   , quoteDec :: String -> Q [Dec]
   }
 
-quoteGlobalVar :: Quote m => String -> String -> m Exp
-quoteGlobalVar m occ = return (VarE (mkNameG_v (packageOf m) m occ))
+quoteGlobalVar :: Quote m => String -> String -> String -> m Exp
+quoteGlobalVar pkg m occ = return (VarE (mkNameG_v pkg m occ))
 
-quoteGlobalCon :: Quote m => String -> String -> m Exp
-quoteGlobalCon m occ = return (ConE (mkNameG_d (packageOf m) m occ))
-
-quoteGlobalType :: Quote m => String -> String -> m Type
-quoteGlobalType m occ = return (ConT (mkNameG_tc (packageOf m) m occ))
-
-packageOf :: String -> String
-packageOf m = if m == "Main" then "main" else "ghc-internal"
+quoteGlobalCon :: Quote m => String -> String -> String -> m Exp
+quoteGlobalCon pkg m occ = return (ConE (mkNameG_d pkg m occ))
 `;

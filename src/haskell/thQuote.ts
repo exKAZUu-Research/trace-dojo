@@ -237,6 +237,7 @@ export class QuoteBuilder {
       case 'global': {
         return this.call(
           ref.space === 'd' ? 'quoteGlobalCon' : 'quoteGlobalVar',
+          this.str(ref.package),
           this.str(ref.module),
           this.str(ref.name)
         );

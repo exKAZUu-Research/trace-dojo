@@ -480,7 +480,7 @@ const SET_VALUES = [
 
 const TEMPLATE_HASKELL_DECLARED = (() => {
   const internal =
-    /^(quote[A-Z]|run[A-Z]\w*Splice|runSplice|storeSplice|reportSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent|packageOf)/;
+    /^(quote[A-Z]|run[A-Z]\w*Splice|runSplice|storeSplice|reportSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent)/;
   const values = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^([a-z_][\w']*|\([^)]+\)) ::/gm)]
     .map((match) => match[1])
     .filter((name) => !internal.test(name));
