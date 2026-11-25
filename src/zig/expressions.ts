@@ -2333,7 +2333,8 @@ function cAbiType(type: Type, isReturn: boolean): boolean {
     }
     case 'struct':
     case 'union': {
-      return type.layout !== 'auto';
+      // A packed type has a C ABI only through the backing integer that `packed struct(u8)` names.
+      return type.layout === 'extern' || (type.layout === 'packed' && type.namespace.syntax?.argument !== undefined);
     }
     default: {
       return false;
