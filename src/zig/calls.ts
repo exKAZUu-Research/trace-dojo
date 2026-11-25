@@ -210,13 +210,13 @@ export abstract class CallCompiler extends ReflectionCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
-  // code-gauge-allow functionNcss -- Binds each argument to its parameter as Zig's Sema does, comptime and generic ones included.
   private compileArgument(arg: Expression, declared: Type | undefined): TExpr {
     const compiled = this.compile(arg, declared);
     return declared ? this.coerce(compiled, declared, arg) : compiled;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
+  // code-gauge-allow functionNcss -- Binds each argument to its parameter as Zig's Sema does, comptime and generic ones included.
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
