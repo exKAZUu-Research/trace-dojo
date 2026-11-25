@@ -25,8 +25,13 @@ const awaitBoundaries = new Set([
 export function awaitedType(c: Checker, type: Type, depth = 0): Type {
   if (isAnyLike(type) || depth > MAX_AWAITED_DEPTH) return type;
   if (type.kind === 'union') return mapType(type, (member) => awaitedType(c, member, depth + 1));
-  if (type.kind !== 'object') return type;
-  if (c.isLibraryType(type, 'Promise') || c.isLibraryType(type, 'PromiseLike'))
+  // A type parameter waits for what its constraint does, and an intersection for what its `then` gives.
+  if (type.kind === 'typeParameter') {
+    const constraint = c.constraintOf(type);
+    return constraint ? awaitedType(c, constraint, depth + 1) : type;
+  }
+  if (type.kind !== 'object' && type.kind !== 'intersection') return type;
+  if (type.kind === 'object' && (c.isLibraryType(type, 'Promise') || c.isLibraryType(type, 'PromiseLike')))
     return awaitedType(c, type.typeArguments?.[0] ?? unknownType, depth + 1);
   const then = c.propertyOf(type, 'then');
   const onfulfilled = then && c.signaturesOf(then.type(), 'call')[0]?.parameters[0]?.type;
