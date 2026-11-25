@@ -858,6 +858,10 @@ sourceLazy = return SourceLazy
 sourceStrict :: Quote m => m SourceStrictness
 sourceStrict = return SourceStrict
 
+-- A via deriving clause of a quote, whose via type the quote builds.
+quoteDerivVia :: Quote m => m Type -> [m Pred] -> m DerivClause
+quoteDerivVia t ps = (\via cs -> DerivClause (Just (ViaStrategy via)) cs) <$> t <*> sequenceA ps
+
 derivClause :: Quote m => Maybe DerivStrategy -> [m Pred] -> m DerivClause
 derivClause s ps = DerivClause s <$> sequenceA ps
 

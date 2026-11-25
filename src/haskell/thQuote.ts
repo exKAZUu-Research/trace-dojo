@@ -676,9 +676,14 @@ export class QuoteBuilder {
       decl.params.map((param) => param.name),
       () => {
         const cons = decl.cons.map((con) => this.con(con));
-        const derivs = decl.deriving.map((clause) =>
-          this.call('derivClause', this.nothing(), this.list([this.call('conT', this.globalName(clause.cls, 'type'))]))
-        );
+        const derivs = decl.deriving.map((clause) => {
+          const classes = this.list([this.call('conT', this.globalName(clause.cls, 'type'))]);
+          if (clause.strategy === 'via' && clause.via) return this.call('quoteDerivVia', this.typ(clause.via), classes);
+          const strategy = clause.strategy
+            ? this.just(this.sup(`${clause.strategy[0].toUpperCase()}${clause.strategy.slice(1)}Strategy`))
+            : this.nothing();
+          return this.call('derivClause', strategy, classes);
+        });
         const name = this.nameOf(decl.name.name);
         const tyVars = this.tyVars(decl.params);
         if (decl.newtype) {
