@@ -222,7 +222,8 @@ export abstract class CompilerCore {
     }
     const local = this.findClass(scope, first.name);
     const names = ref.parts.map((part) => part.name);
-    const qualified = local ? undefined : this.findQualifiedClass(names);
+    const found = local ? undefined : this.findQualifiedClass(names);
+    const qualified = found && this.canName(found) ? found : undefined;
     let cls = local ?? qualified;
     if (!cls) {
       const path = names.join('.');
@@ -394,7 +395,7 @@ export abstract class CompilerCore {
     const imported = this.file.importedClasses.get(name);
     if (imported) return imported;
     const own = this.packages.get(this.file.packageName)?.classes.get(name);
-    if (own) return own;
+    if (own && this.canName(own)) return own;
     const fromWildcard = this.findClassInPackages(name, this.file.starPackages);
     if (fromWildcard) return fromWildcard;
     const omittedJava = this.file.starPackages.filter(isJavaPath);
@@ -407,9 +408,17 @@ export abstract class CompilerCore {
   private findClassInPackages(name: string, packages: string[]): ClassSymbol | undefined {
     for (const packageName of packages) {
       const found = this.packages.get(packageName)?.classes.get(name);
-      if (found) return found;
+      if (found && this.canName(found)) return found;
     }
     return undefined;
+  }
+
+  /**
+   * Whether the code compiling may name a class: a program sees only the library's public classes, as code outside a
+   * module sees, so the internal classes that implement the library, as java.util.TreeMap, read as unknown to it.
+   */
+  protected canName(cls: ClassSymbol): boolean {
+    return this.file.isLibrary || !cls.isLibrary || cls.visibility === 'public';
   }
 
   /** The class a fully qualified name such as `kotlin.collections.List` stands for. */

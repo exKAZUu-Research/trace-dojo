@@ -383,7 +383,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     { path, row }: Import
   ): void {
     const original = path.at(-1) as string;
-    const cls = packageScope.classes.get(original);
+    const declared = packageScope.classes.get(original);
+    const cls = declared && this.canName(declared) ? declared : undefined;
     const alias = packageScope.typeAliases.get(original);
     const functions = packageScope.functions.get(original);
     const properties = packageScope.properties.get(original);

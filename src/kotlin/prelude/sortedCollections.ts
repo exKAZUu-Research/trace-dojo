@@ -1,14 +1,14 @@
 import { kotlin } from './source';
 
 /**
- * `java.util.TreeMap` and `TreeSet`, which Kotlin's `sortedMapOf` and `sortedSetOf` create: a map or set whose
+ * `java.util.TreeMap` and `TreeSet`, internal as programs may not name Java's classes, which Kotlin's `sortedMapOf` and `sortedSetOf` create: a map or set whose
  * iteration follows its keys' order. A TreeMap keeps its entries in a list sorted by its order, where one binary search
  * finds keys by comparing them, as the JVM's tree does; a TreeSet is the keys of a TreeMap, as the JVM's is.
  */
 export const SORTED_COLLECTIONS_SOURCE = kotlin`
 package java.util
 
-interface SortedMap<K, V> : MutableMap<K, V> {
+internal interface SortedMap<K, V> : MutableMap<K, V> {
     fun comparator(): Comparator<in K>?
     fun firstKey(): K
     fun lastKey(): K
@@ -17,7 +17,7 @@ interface SortedMap<K, V> : MutableMap<K, V> {
     fun subMap(fromKey: K, toKey: K): SortedMap<K, V>
 }
 
-interface SortedSet<E> : MutableSet<E> {
+internal interface SortedSet<E> : MutableSet<E> {
     fun comparator(): Comparator<in E>?
     fun first(): E
     fun last(): E
@@ -26,7 +26,7 @@ interface SortedSet<E> : MutableSet<E> {
     fun subSet(fromElement: E, toElement: E): SortedSet<E>
 }
 
-interface NavigableSet<E> : SortedSet<E> {
+internal interface NavigableSet<E> : SortedSet<E> {
     fun lower(e: E): E?
     fun floor(e: E): E?
     fun ceiling(e: E): E?
@@ -57,7 +57,7 @@ internal class TreeStore<K, V> {
  * A TreeMap, or a view of one between two bounds, as headMap, tailMap, and subMap give, which reads and writes the
  * entries of the map it views, as java.util.TreeMap's views do.
  */
-class TreeMap<K, V> private constructor(
+internal class TreeMap<K, V> private constructor(
     private val order: Comparator<in K>?,
     private val store: TreeStore<K, V>,
     private val low: OrderBound<K>?,
@@ -193,7 +193,7 @@ class TreeMap<K, V> private constructor(
 }
 
 /** java.util.AbstractMap's members, which read the map through its entries. */
-abstract class AbstractMap<K, V> : MutableMap<K, V> {
+internal abstract class AbstractMap<K, V> : MutableMap<K, V> {
     override fun isEmpty(): Boolean = size == 0
     override fun containsValue(value: V): Boolean = entries.any { it.value == value }
 
@@ -272,7 +272,7 @@ internal class TreeMapIterator<K, V, T>(
 }
 
 /** java.util.AbstractSet's members, which find elements through the set's own contains and remove. */
-abstract class AbstractSet<E> : MutableSet<E> {
+internal abstract class AbstractSet<E> : MutableSet<E> {
     override fun isEmpty(): Boolean = size == 0
     override fun containsAll(elements: Collection<E>): Boolean = elements.all { contains(it) }
 
@@ -409,7 +409,7 @@ private class TreeMapValues<K, V>(private val map: TreeMap<K, V>) : MutableColle
  * A TreeSet, or a view of one, as headSet, tailSet, subSet, and descendingSet give: the keys of a TreeMap or of a
  * view of it, in its order or in reverse, so that every view reads and writes the elements of the set it views.
  */
-class TreeSet<E> private constructor(
+internal class TreeSet<E> private constructor(
     private val map: TreeMap<E, Boolean>,
     private val isDescending: Boolean
 ) : AbstractSet<E>(), NavigableSet<E> {

@@ -938,7 +938,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     // A library package that the prelude lacks qualifies names too, which then report as unavailable.
     if (packageScope || isKnownLibraryPackage(path)) return { kind: 'package', path, scope: packageScope };
     const cls = outer.scope?.classes.get(expression.name);
-    if (cls) return { kind: 'class', cls };
+    if (cls && this.canName(cls)) return { kind: 'class', cls };
     this.rejectUnavailableLibraryReference(path, expression.row);
     return undefined;
   }
@@ -1804,15 +1804,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const functions = qualified.scope?.functions.get(name) ?? [];
     const properties = qualified.scope?.properties.get(name) ?? [];
     const levels = this.packageCallLevels(scope, functions, properties, row);
-    const cls = qualified.scope?.classes.get(name);
+    const declared = qualified.scope?.classes.get(name);
+    const cls = declared && this.canName(declared) ? declared : undefined;
     const sam = cls && this.samConstructorCall(scope, context, cls, args, typeArgs, expected);
     if (sam) return sam;
-    if (cls && !(cls.isAbstract && functions.some((symbol) => !symbol.extensionReceiver))) {
-      levels.push({
-        candidates: this.constructorCandidates(cls, row),
-        receiver: undefined,
-      });
-    }
+    // A class a program cannot construct, as java.io.BufferedReader, which only the library makes, adds no level, so
+    // that its name reports as the library's that is unavailable.
+    const constructors =
+      cls && !(cls.isAbstract && functions.some((symbol) => !symbol.extensionReceiver))
+        ? this.constructorCandidates(cls, row)
+        : [];
+    if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
     if (levels.length === 0) {
       this.rejectUnavailableLibraryReference(`${qualified.path}.${name}`, row);
       this.error(row, `${name} が見つかりません。`);
