@@ -14,7 +14,6 @@ import type {
   Span,
 } from './ast';
 import { unionTagValue } from './bufferMemory';
-import { externFieldType } from './cAbi';
 import { markRuntimeStorage } from './comptimeMemory';
 import { enumLookup } from './enumLookup';
 import { decodeFloat } from './floatEncoding';
@@ -722,7 +721,6 @@ export abstract class SemaBase implements SemaApi {
         this.resolveLayout(field.type, span, seen);
       }
       this.checkPackedBacking(type);
-      if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     } else if (type.kind === 'union') {
       const fields = this.unionFields(type);
       for (const field of fields) {
@@ -733,27 +731,10 @@ export abstract class SemaBase implements SemaApi {
         this.checkPackedUnion(fields, span);
         this.checkPackedBacking(type);
       }
-      if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     }
     if (this.resolvingFields === 0 && this.resolvingUnionFields === 0) {
       resolveTypeLayout(type, () => this.spendCompilation());
       resolveTypeSlots(type, () => this.spendCompilation());
-    }
-  }
-
-  /** Refuses a field of an extern struct or union whose type C cannot lay out, at the field's declaration. */
-  private checkExternFields(
-    type: Extract<Type, { kind: 'struct' | 'union' }>,
-    fields: readonly { type: Type }[],
-    span: Span
-  ): void {
-    const declared = type.namespace.syntax?.fields;
-    for (const [index, field] of fields.entries()) {
-      if (!externFieldType(field.type))
-        this.error(
-          declared?.[index] ?? span,
-          `extern ${type.kind} には、${typeName(field.type)} 型のフィールドは書けません。`
-        );
     }
   }
 
@@ -1020,7 +1001,7 @@ export abstract class SemaBase implements SemaApi {
           signature.returnType.kind === 'error_union' && signature.returnType.errorSet.resolved === false
             ? this.functionOf(expression, span)
             : signature;
-        if (!fnTypeCoercible(fn.params, fn.returnType, to, signature.callingConvention)) return undefined;
+        if (!fnTypeCoercible(fn.params, fn.returnType, to)) return undefined;
         return { ...expression, type: to };
       }
       case 'pointer': {
@@ -1195,7 +1176,7 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind === 'fn') {
       if (!to.isConst || to.size !== 'one' || to.child.kind !== 'fn') return undefined;
       const fn = this.functionOf(expression, span);
-      if (!fnTypeCoercible(fn.params, fn.returnType, to.child, from.callingConvention)) return undefined;
+      if (!fnTypeCoercible(fn.params, fn.returnType, to.child)) return undefined;
       return known(to, this.knownFunctionValue(expression, span), span);
     }
     if (to.size === 'c' && from.kind !== 'pointer') return this.coerceToCPointer(expression, to, span);
@@ -1649,8 +1630,7 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     if (Boolean(sourcePointer) !== Boolean(targetPointer)) return false;
     return inMemoryCoercible(from.child, to.child);
   }
-  if (from.kind === 'fn' && to.kind === 'fn')
-    return fnTypeCoercible(from.params, from.returnType, to, from.callingConvention);
+  if (from.kind === 'fn' && to.kind === 'fn') return fnTypeCoercible(from.params, from.returnType, to);
   if (from.kind === 'error_set' && to.kind === 'error_set') return errorSetIncludes(to, from);
   if (from.kind === 'error_union' && to.kind === 'error_union') {
     return errorSetIncludes(to.errorSet, from.errorSet) && inMemoryCoercible(from.payload, to.payload);
@@ -1781,14 +1761,8 @@ function elementOf(pointer: Extract<Type, { kind: 'pointer' }>): Type | undefine
   return pointer.child.kind === 'array' ? pointer.child.child : undefined;
 }
 
-function fnTypeCoercible(
-  params: readonly Type[],
-  returnType: Type,
-  fn: Extract<Type, { kind: 'fn' }>,
-  callingConvention?: 'c'
-): boolean {
+function fnTypeCoercible(params: readonly Type[], returnType: Type, fn: Extract<Type, { kind: 'fn' }>): boolean {
   return (
-    callingConvention === fn.callingConvention &&
     params.length === fn.params.length &&
     params.every((param, index) => functionValueCoercible(fn.params[index], param)) &&
     (returnType.kind === 'noreturn' || functionValueCoercible(returnType, fn.returnType))

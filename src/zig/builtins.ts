@@ -731,7 +731,6 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Keeps checked overflow arithmetic and phase-specific work accounting together.
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);

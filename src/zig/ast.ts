@@ -94,8 +94,6 @@ export interface FunctionDeclaration extends NamedSpan {
   body: Block;
   /** The row of the body's `{`, the last row of the header, where `// atomic` may stand. */
   bodyRow: number;
-  isExport: boolean;
-  callingConvention?: Expression;
   alignment?: Expression;
   addressSpace?: Expression;
 }
@@ -235,7 +233,7 @@ export type Expression = Span &
     | { kind: 'arrayType'; count?: Expression; sentinel?: Expression; child: Expression }
     | { kind: 'errorUnionType'; errorSet: Expression; payload: Expression }
     | { kind: 'errorSetType'; names: string[] }
-    | { kind: 'fnType'; params: Parameter[]; returnType: Expression; callingConvention?: Expression }
+    | { kind: 'fnType'; params: Parameter[]; returnType: Expression }
     | Container
     | { kind: 'paren'; operand: Expression }
     | { kind: 'comptime'; operand: Expression }

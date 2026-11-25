@@ -182,8 +182,6 @@ export interface FnType {
   readonly kind: 'fn';
   readonly params: readonly Type[];
   readonly returnType: Type;
-  /** `c` for `callconv(.c)`, which `export` also gives; undefined for Zig's own convention. */
-  readonly callingConvention?: 'c';
   /**
    * For a generic function, each parameter's declared type, or undefined for `anytype` and for a type that depends on an
    * earlier parameter; a `comptime` parameter, which `params` holds as anytype, keeps the type it declares.
@@ -460,16 +458,14 @@ export function errorUnionOf(errorSet: ErrorSetType, payload: Type): ErrorUnionT
 export function fnType(
   params: readonly Type[],
   returnType: Type,
-  callingConvention?: 'c',
   genericParams?: readonly (Type | undefined)[]
 ): FnType {
   const generic = genericParams?.map((param) => (param ? typeId(param) : '?')).join(',') ?? '';
-  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${callingConvention ?? ''} ${generic}`;
+  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${generic}`;
   return intern(key, () => ({
     kind: 'fn',
     params,
     returnType,
-    ...(callingConvention ? { callingConvention } : {}),
     ...(genericParams ? { genericParams } : {}),
   }));
 }
@@ -656,8 +652,7 @@ export function typeName(type: Type): string {
       return type.namespace.name;
     }
     case 'fn': {
-      const callingConvention = type.callingConvention ? `callconv(.${type.callingConvention}) ` : '';
-      return `fn (${type.params.map((param) => typeName(param)).join(', ')}) ${callingConvention}${typeName(type.returnType)}`;
+      return `fn (${type.params.map((param) => typeName(param)).join(', ')}) ${typeName(type.returnType)}`;
     }
     case 'enum_literal': {
       return '@EnumLiteral()';

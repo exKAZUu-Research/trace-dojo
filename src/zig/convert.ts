@@ -143,29 +143,29 @@ function testDeclaration(node: Node): TestDeclaration {
 }
 
 /**
- * Rejects `extern`, which declares a function or variable that another object file defines. `export`, `noinline`,
- * and `threadlocal` change only how the program links, which a run of one thread does not observe.
+ * Rejects `extern` and `export`, which link with C code; `noinline` and `threadlocal` change only how the program
+ * runs on its one thread, which a run does not observe.
  */
 function rejectExtern(node: Node): void {
   for (const child of node.children) {
     if (!child.isNamed && child.type === 'extern') unavailable(child, 'syntax:extern');
+    if (!child.isNamed && child.type === 'export') unavailable(child, 'syntax:export');
   }
 }
 
 interface Attributes {
   alignment?: Expression;
   addressSpace?: Expression;
-  callingConvention?: Expression;
 }
 
-/** `align(...)`, `addrspace(...)`, and `callconv(...)`; `linksection` names a section of the object file's format. */
+/** `align(...)` and `addrspace(...)`; `linksection` and `callconv` depend on the object file's format and the CPU. */
 function attributesOf(node: Node): Attributes {
   const attributes: Attributes = {};
   for (const child of node.namedChildren) {
     if (child.type === 'link_section') unavailable(child, 'syntax:linksection');
     else if (child.type === 'byte_alignment') attributes.alignment = onlyChild(child);
     else if (child.type === 'address_space') attributes.addressSpace = onlyChild(child);
-    else if (child.type === 'calling_convention') attributes.callingConvention = onlyChild(child);
+    else if (child.type === 'calling_convention') unavailable(child, 'syntax:callconv');
   }
   return attributes;
 }
@@ -184,8 +184,7 @@ function functionDeclaration(node: Node): FunctionDeclaration {
     ...identifierName(nameNode),
     isPub: hasToken(node, 'pub'),
     isInline: hasToken(node, 'inline'),
-    isExport: hasToken(node, 'export'),
-    params: parameters(node.childForFieldName('parameters') as Node, attributes.callingConvention !== undefined),
+    params: parameters(node.childForFieldName('parameters') as Node),
     returnType,
     inferredErrorSet,
     body: block(body),
@@ -208,13 +207,11 @@ function returnTypeOf(node: Node): { returnType: Expression; inferredErrorSet: b
   return { returnType: typeExpression(typeNode), inferredErrorSet: false };
 }
 
-function parameters(node: Node, hasCallingConvention: boolean): Parameter[] {
+function parameters(node: Node): Parameter[] {
   const result: Parameter[] = [];
   for (const child of node.namedChildren) {
     if (child.type !== 'parameter') continue;
     if (hasToken(child, '...')) {
-      // Zig rejects a variadic function unless it uses the C calling convention, for which it takes C's va_list.
-      if (hasCallingConvention) unavailable(child, 'syntax:cVarargs');
       result.push({ ...spanOf(child), name: '_', isComptime: false, isNoalias: false, isVarargs: true });
       continue;
     }
@@ -677,7 +674,7 @@ export function expression(node: Node): Expression {
       return { kind: 'errorSetType', ...span, names };
     }
     case 'function_signature': {
-      const { callingConvention, alignment, addressSpace } = attributesOf(node);
+      const { alignment, addressSpace } = attributesOf(node);
       if (alignment) unavailable(node, 'syntax:fnTypeAlign');
       if (addressSpace) unavailable(node, 'syntax:fnTypeAddrspace');
       const { returnType, inferredErrorSet } = returnTypeOf(node);
@@ -685,9 +682,8 @@ export function expression(node: Node): Expression {
       return {
         kind: 'fnType',
         ...span,
-        params: parameters(node.childForFieldName('parameters') as Node, callingConvention !== undefined),
+        params: parameters(node.childForFieldName('parameters') as Node),
         returnType,
-        callingConvention,
       };
     }
     case 'struct_declaration':

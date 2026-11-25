@@ -117,12 +117,6 @@ class Compiler extends StatementCompiler {
       argTypes.push(PROCESS_INIT);
     }
     this.runComptimeBlocks(this.file.comptimeBlocks, this.root);
-    // Zig analyzes every exported function, as the linker needs it whether or not the program calls it.
-    for (const exported of this.root.decls.values())
-      if (exported.kind === 'fn' && exported.syntax.isExport) {
-        this.declarationType(exported, exported.syntax);
-        this.instantiate(new FnRef(exported), [], exported.syntax);
-      }
     const main = this.instantiate(new FnRef(decl), argTypes, syntax);
     this.compilePendingBodies();
     this.checkMainReturn(main, syntax);

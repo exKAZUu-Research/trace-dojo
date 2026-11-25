@@ -535,8 +535,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
   private fnInfo(type: FnType, fn: StructType, span: Span): Record<string, Value> {
     const attributes = this.memberType(fn, 'Attributes', span) as StructType;
     const paramAttributes = this.memberType(fn, 'ParamAttributes', span) as StructType;
-    // The C calling convention's tag in `attrs` names the CPU and the OS, as `aarch64_aapcs_darwin` does.
-    if (type.callingConvention === 'c') this.error(span, unavailableMessage('syntax:cCallingConventionInfo'));
     const generic = type.genericParams;
     return {
       attrs: this.structValue(attributes, span, {}),

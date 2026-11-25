@@ -17,7 +17,6 @@ import {
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
 import { activeUnionIndex, packedValuesEqual, physicalUnion } from './bufferMemory';
-import { cAbiType } from './cAbi';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -272,10 +271,7 @@ export abstract class ExpressionCompiler extends SemaBase {
           if (!param.type) this.error(param, '関数の型の引数に anytype は書けません。');
           return this.compileType(param.type);
         });
-        const returnType = this.compileType(expression.returnType);
-        const callingConvention = this.callingConvention(expression.callingConvention);
-        if (callingConvention) this.checkCAbi(params, returnType, expression.params, expression);
-        return known(TYPE, fnType(params, returnType, callingConvention), expression);
+        return known(TYPE, fnType(params, this.compileType(expression.returnType)), expression);
       }
       case 'container': {
         return known(TYPE, this.containerType(expression, undefined), expression);
@@ -320,32 +316,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected addressSpace(expression: Expression): void {
     if (expression.kind !== 'enumLiteral' || expression.name !== 'generic')
       this.error(expression, unavailableMessage('syntax:addrspace'));
-  }
-
-  /** The calling convention that `callconv(.x)` names: Zig's own (`.auto`), or the C one (`.c`). */
-  protected callingConvention(expression: Expression | undefined): 'c' | undefined {
-    if (!expression) return undefined;
-    if (expression.kind === 'enumLiteral' && (expression.name === 'auto' || expression.name === 'inline'))
-      return undefined;
-    if (expression.kind === 'enumLiteral' && expression.name === 'c') return 'c';
-    return this.error(expression, unavailableMessage('syntax:callconv'));
-  }
-
-  /** Rejects the parameter and return types that the C calling convention cannot pass, as Zig does. */
-  protected checkCAbi(params: readonly Type[], returnType: Type, spans: readonly Span[], span: Span): void {
-    for (const [index, param] of params.entries()) {
-      if (param.kind !== 'anytype') this.resolveStorage(param, spans[index] ?? span);
-      if (param.kind === 'anytype' || !cAbiType(param, false))
-        this.error(spans[index] ?? span, `引数の型 ${typeName(param)} は、C の呼び出し規約の関数には使えません。`);
-    }
-    this.resolveStorage(returnType, span);
-    // Zig writes an inferred error set's return type as the function declares it.
-    const written =
-      returnType.kind === 'error_union' && returnType.errorSet.inferredFrom
-        ? `!${typeName(returnType.payload)}`
-        : typeName(returnType);
-    if (!cAbiType(returnType, true))
-      this.error(span, `戻り値の型 ${written} は、C の呼び出し規約の関数には使えません。`);
   }
 
   // Names -----------------------------------------------------------------------------------------------------------
@@ -867,8 +837,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   private functionType(expression: TExpr, span: Span): Type {
     const fn = this.functionOf(expression, span);
-    const type = expression.type;
-    return fnType(fn.params, fn.returnType, type.kind === 'fn' ? type.callingConvention : undefined);
+    return fnType(fn.params, fn.returnType);
   }
 
   knownFunctionValue(expression: TExpr, span: Span): FnValue {
@@ -1270,7 +1239,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Operators -------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps each numeric unary operation with its type checks and evaluation.
-  // code-gauge-allow functionNcss -- One case per unary operator, as Zig defines them.
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);

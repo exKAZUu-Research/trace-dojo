@@ -325,8 +325,7 @@ class AstChecker {
         if (!isDiscardName(param)) this.declare(param.name, 'function parameter', param);
         if (param.isComptime && param.isNoalias) this.error(param, 'comptime と noalias は一緒に書けません。');
       }
-      for (const attribute of [fn.alignment, fn.addressSpace, fn.callingConvention])
-        if (attribute) this.expression(attribute, 'value');
+      for (const attribute of [fn.alignment, fn.addressSpace]) if (attribute) this.expression(attribute, 'value');
       this.typeExpression(fn.returnType);
       this.blockStatements(fn.body.statements, true);
       this.checkUsed(params);
@@ -723,7 +722,6 @@ class AstChecker {
       case 'fnType': {
         for (const param of expression.params) if (param.type) this.expression(param.type, 'value');
         this.expression(expression.returnType, 'value');
-        if (expression.callingConvention) this.expression(expression.callingConvention, 'value');
         break;
       }
       case 'container': {

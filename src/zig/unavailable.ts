@@ -68,14 +68,13 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@inComptime', { what: '@inComptime（コンパイルのときかどうかの判定）' }],
   ['syntax:extern', { what: 'extern（外部で定義する関数・変数の宣言）' }],
   ['syntax:linksection', { what: 'linksection（OS ごとに書き方が異なるセクションの指定）' }],
-  ['syntax:cVarargs', { what: 'C の可変個の引数（...）' }],
   ['syntax:fnTypeAlign', { what: '関数の型の align' }],
   ['syntax:fnTypeAddrspace', { what: '関数の型の addrspace' }],
   ['syntax:asm', { what: 'インラインアセンブリ（asm）' }],
   ['syntax:packedFieldPointer', { what: 'packed struct のフィールドへのポインタの型（align(a:b:c)）' }],
   ['syntax:addrspace', { what: 'generic 以外のアドレス空間（CPU ごとに異なるもの）' }],
-  ['syntax:cCallingConventionInfo', { what: 'C の呼び出し規約の関数の型の @typeInfo（CPU と OS で値が変わるもの）' }],
-  ['syntax:callconv', { what: 'auto と c 以外の呼び出し規約（CPU ごとに異なるもの）' }],
+  ['syntax:callconv', { what: 'callconv' }],
+  ['syntax:export', { what: 'export' }],
 ]);
 
 /** The 「使えません」 diagnostic for an entry of `UNAVAILABLE`. */

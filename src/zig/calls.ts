@@ -326,7 +326,6 @@ export abstract class CallCompiler extends ReflectionCompiler {
         ? ANYTYPE
         : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
       const syntax = decl.syntax;
-      const callingConvention = syntax.isExport ? 'c' : this.callingConvention(syntax.callingConvention);
       if (syntax.alignment) alignmentOperand(this, syntax.alignment);
       if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
       if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
@@ -339,14 +338,8 @@ export abstract class CallCompiler extends ReflectionCompiler {
           },
           result
         );
-      // The C calling convention checks the type the function returns, an inferred error union included.
-      if (callingConvention) {
-        if (unknown.size > 0)
-          this.error(syntax, 'C の呼び出し規約の関数には、comptime や anytype の引数を書けません。');
-        this.checkCAbi(params, result, syntax.params, syntax);
-      }
       const isGeneric = unknown.size > 0 || result === ANYTYPE;
-      const type = fnType(params, result, callingConvention, isGeneric ? declared : undefined);
+      const type = fnType(params, result, isGeneric ? declared : undefined);
       this.declarationTypes.set(decl, type);
       return type;
     } finally {
