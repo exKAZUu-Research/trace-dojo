@@ -583,6 +583,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         return variant('error_set', { error_names: type.names ? this.names([...type.names]) : NULL });
       }
       case 'array': {
+        if (type.isVector) return variant('vector', { len: type.length, child: type.child });
         return variant('array', {
           len: type.length,
           child: type.child,
@@ -606,6 +607,8 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         });
       }
       case 'struct': {
+        if (type.namespace.syntax?.containerKind === 'opaque')
+          return variant('opaque', { decl_names: this.declNames(type) });
         const struct = nested('Struct') as StructType;
         const attributes = this.memberType(struct, 'FieldAttributes', span) as StructType;
         const fields = this.structFields(type, span);
