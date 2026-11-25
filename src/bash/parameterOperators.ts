@@ -758,9 +758,16 @@ function keyValuePairs(
 ): WordSegment[] {
   if (value.kind === 'scalar') {
     if (value.value === undefined) return [];
-    return expander.valueSegments({ kind: 'scalar', value: quoted ? quoteReusable(value.value) : value.value }, ctx);
+    return expander.valueSegments({ kind: 'scalar', value: quoteReusable(value.value) }, ctx);
   }
   if (value.values.length === 0) return expander.valueSegments({ ...value, values: [] }, ctx);
+  const view = resolveTransformationView(shell, name);
+  const isArray =
+    view !== undefined &&
+    (view.kind === 'indexed' || view.kind === 'associative' || view.attributes.has('a') || view.attributes.has('A'));
+  if (!isArray) {
+    return expander.valueSegments({ ...value, values: value.values.map(quoteReusable) }, ctx);
+  }
   const resolved = resolveTargetName(shell, name, false) ?? name;
   const keys = shell.store.readArrayKeys(resolved);
   if (!quoted) {
