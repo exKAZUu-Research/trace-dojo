@@ -270,6 +270,9 @@ export abstract class CallCompiler extends ReflectionCompiler {
       }
     }
     const instance = this.instantiate(ref, argTypes, expression, args);
+    if (!this.requiresComptime(instance.returnType, expression))
+      for (const [index, arg] of args.entries())
+        if (!params[index].isComptime) this.refuseComptimeVarReference(arg, arg.span);
     const evaluators = valueEvaluators(args);
     const row = expression.row;
     const call = runtime(
@@ -304,8 +307,8 @@ export abstract class CallCompiler extends ReflectionCompiler {
     if (!declared) return receiver;
     const type = receiver.type;
     if (declared.kind === 'pointer' && declared.size === 'one' && type === declared.child) {
-      this.refuseComptimeVarPointer(receiver, receiver.span);
       const address = this.addressOf(receiver);
+      this.refuseComptimeVarReference(address, receiver.span);
       if (address.type.kind === 'pointer' && address.type.isConst && !declared.isConst) {
         this.error(
           span,

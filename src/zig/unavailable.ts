@@ -63,8 +63,6 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@shuffle', { what: 'ベクトル（@shuffle）' }],
   ['@select', { what: 'ベクトル（@select）' }],
   ['io:nonUtf8File', { what: 'UTF-8 として正しくないバイトのファイルへの書き込み' }],
-  ['syntax:comptimeVarDestructure', { what: 'comptime var への分割代入' }],
-  ['syntax:comptimeVarPointer', { what: 'comptime var を指すポインタやスライス' }],
   ['@setRuntimeSafety(false)', { what: '@setRuntimeSafety(false)（実行時の検査を外す指定）' }],
   ['@inComptime', { what: '@inComptime（コンパイルのときかどうかの判定）' }],
   ['syntax:extern', { what: 'extern（外部で定義する関数・変数の宣言）' }],

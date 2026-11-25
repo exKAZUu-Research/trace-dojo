@@ -50,7 +50,6 @@ import {
   USIZE,
   VOID,
 } from './types';
-import { unavailableMessage } from './unavailable';
 import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -386,6 +385,7 @@ export abstract class StatementCompiler extends CallCompiler {
         value.span,
         `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
       );
+    if (!isConst && !this.runsAtCompileTime(value.span)) this.refuseComptimeVarReference(value, value.span);
     const fn = this.currentFn(value.span);
     const slot = this.localSlot();
     const binding: LocalBinding = {
@@ -523,18 +523,25 @@ export abstract class StatementCompiler extends CallCompiler {
     if (!isDiscardName(declaration)) this.scope.locals?.set(name, binding);
   }
 
-  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do. */
+  /**
+   * The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do, directly or
+   * through a constant pointer or slice known to refer into it.
+   */
   private comptimeVariableOf(target: Expression): LocalBinding | undefined {
     switch (target.kind) {
       case 'identifier': {
         const binding = this.lookup(target.name);
-        return binding?.kind === 'local' && binding.comptimeCell ? binding : undefined;
+        if (binding?.kind !== 'local') return undefined;
+        if (binding.comptimeCell) return binding;
+        const value = binding.known ? binding.value : undefined;
+        return value instanceof Pointer || value instanceof Slice ? this.comptimeVarReferences.get(value) : undefined;
       }
       case 'field':
       case 'index': {
         return this.comptimeVariableOf(target.object);
       }
-      case 'paren': {
+      case 'paren':
+      case 'deref': {
         return this.comptimeVariableOf(target.operand);
       }
       default: {
@@ -576,9 +583,16 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       const destination = target.target as Expression;
       if (destination.kind === 'identifier' && isDiscardName(destination)) return () => {};
-      // A comptime var's cell takes stores only through a single assignment, whose checks a destructure lacks.
-      if (this.comptimeVariableOf(destination))
-        this.error(destination, unavailableMessage('syntax:comptimeVarDestructure'));
+      if (this.comptimeVariableOf(destination)) {
+        const span = { row: target.row, col: target.col, endRow: target.endRow };
+        const element: Expression = {
+          ...span,
+          kind: 'index',
+          object: statement.value,
+          index: { ...span, kind: 'integer', value: BigInt(index) },
+        };
+        return this.comptimeVarElementStore(destination, element);
+      }
       const place = this.assignablePlace(destination);
       const convert = this.coerce(elementExpression, place.type, target);
       return (frame: Frame): void => {
@@ -623,9 +637,7 @@ export abstract class StatementCompiler extends CallCompiler {
         const discarded = this.compile(element).eval;
         return { store: (frame: Frame): void => void discarded(frame) };
       }
-      // A comptime var's cell takes stores only through a single assignment, whose checks a destructure lacks.
-      if (this.comptimeVariableOf(destination))
-        this.error(destination, unavailableMessage('syntax:comptimeVarDestructure'));
+      if (this.comptimeVariableOf(destination)) return { store: this.comptimeVarElementStore(destination, element) };
       const place = this.assignablePlace(destination);
       const evaluate = this.coerce(this.compile(element, place.type), place.type, element).eval;
       const locate = place.place.locate;
@@ -645,6 +657,15 @@ export abstract class StatementCompiler extends CallCompiler {
       }),
       noreturn: false,
     };
+  }
+
+  /** Stores an element into a `comptime var` as the single assignment `target = element` does, its one store path. */
+  private comptimeVarElementStore(target: Expression, element: Expression): (frame: Frame) => void {
+    const { exec } = this.assignment(
+      { ...element, kind: 'assign', operator: '=', targets: [target], value: element },
+      element
+    );
+    return (frame) => void exec(frame);
   }
 
   private destructureDeclaration(
@@ -821,6 +842,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const anonymous = this.anonymousInitAssignment(expression.value, type, place);
       if (anonymous) return { exec: this.simple(row, false, anonymous), noreturn: false };
       const value = this.coerce(this.compile(expression.value, type), type, expression.value);
+      this.refuseComptimeVarReference(value, expression.value);
       const evaluate = value.eval;
       const onlyCalls = isObjectCreation(expression.value);
       return {

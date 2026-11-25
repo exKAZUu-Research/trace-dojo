@@ -109,8 +109,8 @@ export interface Place {
    * copy while addresses and stores still reach the variable.
    */
   readonly snapshot?: boolean;
-  /** Whether the place lies in a `comptime var`, which the grader lets no pointer or slice refer into. */
-  readonly inComptimeVar?: boolean;
+  /** The `comptime var` the place lies in, whose reads and stores happen as the compiler analyzes them. */
+  readonly comptimeVar?: LocalBinding;
   /** The alignment that `align(n)` gives the variable, which a pointer to it carries. */
   readonly alignment?: number;
 }
@@ -321,6 +321,8 @@ export abstract class SemaBase implements SemaApi {
   }
 
   private readonly functionReferences = new WeakMap<Decl, FnRef>();
+  /** The `comptime var` that each pointer or slice the compiler made refers into. */
+  protected readonly comptimeVarReferences = new WeakMap<Pointer | Slice, LocalBinding>();
 
   resolveStorage(type: Type, span: Span): void {
     this.resolveLayout(type, span, new Set());
@@ -418,6 +420,29 @@ export abstract class SemaBase implements SemaApi {
       if (decl) return decl;
     }
     return undefined;
+  }
+
+  /** Whether code here reads a `comptime var` when the compiler runs it, rather than as the value where it stands. */
+  protected readsComptimeVarLive(variable: LocalBinding): boolean {
+    return this.context.comptimeDepth > 0 && (!this.context.comptimeStore || this.context.comptimeStore === variable);
+  }
+
+  /** The `comptime var` an expression lies in, or that the pointer or slice it is known to be refers into. */
+  protected comptimeVarOf(expression: TExpr): LocalBinding | undefined {
+    if (expression.place?.comptimeVar) return expression.place.comptimeVar;
+    const value = expression.known ? expression.value : undefined;
+    return value instanceof Pointer || value instanceof Slice ? this.comptimeVarReferences.get(value) : undefined;
+  }
+
+  /** Refuses a value that code running when the program runs would hold while it refers into a `comptime var`. */
+  protected refuseComptimeVarReference(value: TExpr, span: Span): void {
+    if (this.context.comptimeDepth > 0 || !value.known) return;
+    const parts = value.value instanceof ZStruct ? value.value.slots : [value.value];
+    const referred = parts.find(
+      (part) => (part instanceof Pointer || part instanceof Slice) && this.comptimeVarReferences.has(part)
+    );
+    if (referred !== undefined)
+      this.error(span, '実行時の値に、comptime var を指すポインタが入っています（実行時には使えません）。');
   }
 
   /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */

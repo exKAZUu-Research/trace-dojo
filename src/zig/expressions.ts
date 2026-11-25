@@ -148,6 +148,8 @@ const rawArithmeticOperations: Partial<Record<ExpressionOf<'binary'>['operator']
   '%': (a, b) => a % b,
 };
 
+const RUNTIME_COMPTIME_VAR_POSITION = '実行時に決まる位置で、comptime var を指すことはできません。';
+
 export abstract class ExpressionCompiler extends SemaBase {
   private readonly constants = new Map<string, Constant>();
 
@@ -342,16 +344,16 @@ export abstract class ExpressionCompiler extends SemaBase {
         isConst: false,
         locate: () => new Pointer(cell, 0),
         compileTimePointer: new Pointer(cell, 0),
-        inComptimeVar: true,
+        comptimeVar: binding,
       };
       // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
-      if (this.context.comptimeDepth > 0 && (!this.context.comptimeStore || this.context.comptimeStore === binding))
+      if (this.readsComptimeVarLive(binding))
         return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
       // A value read here is a constant of the code that stands here, which later stores must not change: its parts
       // come from a copy, while stores still reach the variable.
       return {
         ...known(binding.type, copyForStorage(cell.slots[0]), span),
-        place: { isConst: false, locate: place.locate, inComptimeVar: true, snapshot: true },
+        place: { ...place, snapshot: true },
         local: binding,
       };
     }
@@ -699,7 +701,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return {
       isConst: place.isConst,
       alignment,
-      inComptimeVar: place.inComptimeVar,
+      comptimeVar: place.comptimeVar,
       locate: (frame) => project(place.locate(frame)),
       compileTimePointer: stable && place.compileTimePointer ? project(place.compileTimePointer) : undefined,
       address: () => {
@@ -713,9 +715,26 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Pointers --------------------------------------------------------------------------------------------------------
 
-  /** Refuses a pointer or slice that would refer into a `comptime var`, which the grader keeps none of. */
-  protected refuseComptimeVarPointer(operand: TExpr, span: Span): void {
-    if (operand.place?.inComptimeVar) this.error(span, unavailableMessage('syntax:comptimeVarPointer'));
+  /**
+   * A pointer or slice into a `comptime var`, which the compiler knows and remembers the variable of, since code that
+   * runs when the program runs holds none.
+   */
+  protected comptimeVarReference(reference: TExpr, variable: LocalBinding | undefined): TExpr {
+    if (!variable || this.context.comptimeDepth > 0) return reference;
+    if (!reference.known || !(reference.value instanceof Pointer || reference.value instanceof Slice))
+      return this.error(reference.span, RUNTIME_COMPTIME_VAR_POSITION);
+    this.comptimeVarReferences.set(reference.value, variable);
+    return reference;
+  }
+
+  /** A read through a place in a `comptime var`, which takes the value where the code stands unless it runs at compile time. */
+  protected comptimeVarRead(result: TExpr, place: Place): TExpr {
+    const variable = place.comptimeVar;
+    if (!variable || this.readsComptimeVarLive(variable) || !place.compileTimePointer) return result;
+    return {
+      ...known(result.type, copyForStorage(place.compileTimePointer.load()), result.span),
+      place: { ...place, snapshot: true },
+    };
   }
 
   /** `p.*`, or a pointer that a field access or an index goes through. */
@@ -747,6 +766,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       locate: (frame) =>
         zero ? this.zeroPointer(evaluate(frame) as Pointer, type.child) : (evaluate(frame) as Pointer),
       compileTimePointer: pointer.known && pointer.value instanceof Pointer ? pointer.value : undefined,
+      comptimeVar: this.comptimeVarOf(pointer),
     };
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
@@ -754,7 +774,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       type.isConst && isConstantData(fact?.value)
         ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
         : runtime(type.child, (frame) => (evaluate(frame) as Pointer).load(), span, place);
-    return this.validateComptimeLoad(result, load);
+    return this.validateComptimeLoad(this.comptimeVarRead(result, place), load);
   }
 
   private validateComptimeLoad(expression: TExpr, load = true): TExpr {
@@ -812,6 +832,15 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   /** `&x`: a pointer to what an expression names, or to a temporary that holds its value. */
   addressOf(expression: TExpr): TExpr {
+    const address = this.placeAddress(expression);
+    const pointer = expression.place?.compileTimePointer;
+    // A place in a `comptime var` is where the compiler keeps it, which its address is known to be.
+    const fixed =
+      !address.known && pointer && expression.place?.comptimeVar ? known(address.type, pointer, address.span) : address;
+    return this.comptimeVarReference(fixed, expression.place?.comptimeVar);
+  }
+
+  private placeAddress(expression: TExpr): TExpr {
     const place = expression.place;
     const span = expression.span;
     if (expression.type.kind === 'fn' || expression.value instanceof FnRef) {
@@ -994,7 +1023,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const addressType = pointerTo(child, isConst);
     const place: Place = {
       isConst,
-      inComptimeVar: object.place?.inComptimeVar,
+      comptimeVar: this.comptimeVarOf(object),
       address: () => ({
         ...runtime(addressType, locatePointer, expression),
         staticResult: this.constantResult(
@@ -1028,7 +1057,10 @@ export abstract class ExpressionCompiler extends SemaBase {
             )
           : undefined),
     };
-    return this.validateComptimeLoad(result, load || (type.kind === 'pointer' && type.size === 'one'));
+    return this.validateComptimeLoad(
+      this.comptimeVarRead(result, place),
+      load || (type.kind === 'pointer' && type.size === 'one')
+    );
   }
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
@@ -1077,7 +1109,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     let type = operand.type;
     const start = this.coerce(this.compile(expression.start, USIZE), USIZE, expression.start);
     const end = expression.end ? this.coerce(this.compile(expression.end, USIZE), USIZE, expression.end) : undefined;
-    this.refuseComptimeVarPointer(operand, expression);
     // Slicing an array slices it where it lives, as through a pointer to it.
     let base = operand;
     if (type.kind === 'array') {
@@ -1205,6 +1236,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return new Pointer(view, 0);
     };
+    const variable = this.comptimeVarOf(loaded.operand);
+    if (variable && this.context.comptimeDepth === 0) {
+      if (!operands.every((each) => each.known)) return this.error(expression, RUNTIME_COMPTIME_VAR_POSITION);
+      const slice = known(resultType, render(operands.map((each) => each.value as Value)), expression);
+      return this.comptimeVarReference(slice, variable);
+    }
     const evaluators = valueEvaluators(operands, false);
     return {
       ...runtime(resultType, (frame) => render(evaluateHeld(frame, evaluators)), expression),
@@ -1321,7 +1358,6 @@ export abstract class ExpressionCompiler extends SemaBase {
       operandType = arrayOf(0, many.child, many.sentinel);
     }
     let operand = this.compileLocation(expression.operand, operandType);
-    this.refuseComptimeVarPointer(operand, expression);
     // A pointer to many elements takes the operand's own type, which it then coerces from.
     const valueType = pointerType?.kind === 'pointer' && pointerType.size !== 'one' ? undefined : operandType;
     if (!operand.place && valueType && operand.type !== valueType)

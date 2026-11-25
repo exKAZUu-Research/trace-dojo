@@ -10058,6 +10058,41 @@ pub fn main() void {
   expect(rows(quota)).toEqual([1]);
 });
 
+test('pointers into a comptime var read its value where they stand and store as the variable does', () => {
+  const program = `const std = @import("std");
+const S = struct { a: i32, b: [3]u8 };
+pub fn main() void {
+    comptime var s: S = .{ .a = 1, .b = .{ 1, 2, 3 } };
+    const p = &s;
+    const x = p.a;
+    p.a += 10;
+    const q = &s.b;
+    q[1] = 9;
+    const sl = s.b[0..2];
+    comptime var a: i32 = 0;
+    var y: i32 = 0;
+    y, a = .{ 7, 8 };
+    std.debug.print("{d} {d} {d} {d} {d} {d}\\n", .{ x, p.a, s.a, sl[1], a, y });
+}`;
+  expect(executeProgram('zig', program)).toMatchObject({ stderr: '1 11 11 9 8 7\n' });
+  const runtimeArgument = `fn f(p: *i32) void {
+    p.* += 1;
+}
+pub fn main() void {
+    comptime var c: i32 = 1;
+    f(&c);
+}`;
+  const runtimeStore = `pub fn main() void {
+    comptime var c: i32 = 1;
+    const p = &c;
+    var r: i32 = 0;
+    r += 1;
+    if (r > 0) p.* = 3;
+}`;
+  expect(rows(runtimeArgument)).toEqual([5]);
+  expect(rows(runtimeStore)).toEqual([5]);
+});
+
 test('standard input and files are read through std.Io.Reader into the reader buffer', () => {
   const program = `const std = @import("std");
 pub fn main(init: std.process.Init) !void {
