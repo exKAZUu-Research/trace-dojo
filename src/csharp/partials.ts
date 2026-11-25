@@ -178,6 +178,9 @@ function typeNodeKey(node: TypeNode | undefined): string {
     case 'predefinedType': {
       return node.name;
     }
+    case 'refType': {
+      return `ref ${node.isReadonly ? 'readonly ' : ''}${typeNodeKey(node.type)}`;
+    }
     case 'namedType': {
       return node.typeArgs ? `${node.name}<${node.typeArgs.map(typeNodeKey).join(', ')}>` : node.name;
     }

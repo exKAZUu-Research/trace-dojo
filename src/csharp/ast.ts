@@ -10,6 +10,8 @@ export interface Position {
 
 export type TypeNode =
   | ({ kind: 'predefinedType'; name: string } & Position)
+  /** `ref T` or `ref readonly T`, the type of a ref local or of what a method returns by reference. */
+  | ({ kind: 'refType'; type: TypeNode; isReadonly: boolean } & Position)
   | ({
       kind: 'namedType';
       name: string;
@@ -210,6 +212,8 @@ export type Expression =
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
   | ({ kind: 'typeof'; type: TypeNode } & Position)
   | ({ kind: 'sizeof'; type: TypeNode } & Position)
+  /** `ref x`, the variable that a ref local refers to or a method returns by reference. */
+  | ({ kind: 'refExpression'; operand: Expression } & Position)
   | ({ kind: 'await'; operand: Expression } & Position)
   /** `^n`, an index from the end. */
   | ({ kind: 'fromEnd'; operand: Expression } & Position)

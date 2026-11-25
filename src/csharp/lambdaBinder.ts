@@ -472,6 +472,7 @@ export abstract class LambdaBinder extends MemberBinder {
   isStatementExpression(expression: BoundExpression): boolean {
     switch (expression.kind) {
       case 'assign':
+      case 'refAssign':
       case 'compoundAssign':
       case 'increment':
       case 'call':

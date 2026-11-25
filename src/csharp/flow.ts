@@ -154,6 +154,8 @@ export class FlowAnalyzer {
         return this.expression(statement.expression, state);
       }
       case 'localDeclaration': {
+        if (statement.refTarget)
+          return assign(this.reference(statement.refTarget, state, statement.row), statement.local);
         if (!statement.value) return state;
         return assign(this.expression(statement.value, state), statement.local);
       }
@@ -178,7 +180,11 @@ export class FlowAnalyzer {
         return 'unreachable';
       }
       case 'return': {
-        const after = statement.value ? this.expression(statement.value, state) : state;
+        const after = statement.refTarget
+          ? this.reference(statement.refTarget, state, statement.row)
+          : statement.value
+            ? this.expression(statement.value, state)
+            : state;
         this.checkOutParameters(after, statement.row);
         this.jumps.returns.push(after);
         return 'unreachable';
@@ -457,6 +463,9 @@ export class FlowAnalyzer {
       case 'invokeDelegate':
       case 'conditionalAccess': {
         return this.accessExpression(expression, state);
+      }
+      case 'refAssign': {
+        return this.reference(expression.target, state, expression.row);
       }
       case 'new':
       case 'newArray':
@@ -738,10 +747,20 @@ export class FlowAnalyzer {
         const current = target.receiver ? this.expression(target.receiver, state) : state;
         return this.arguments(target.args, current);
       }
+      case 'call': {
+        return this.expression(target, state);
+      }
       default: {
         return state;
       }
     }
+  }
+
+  /** The state after taking a reference to a variable, which must be definitely assigned, as a `ref` argument is. */
+  private reference(target: BoundLValue, state: State, row: number): State {
+    const current = this.targetPrefix(target, state);
+    if (target.kind === 'local') this.read(target.local, current, row);
+    return current;
   }
 
   private assignTarget(target: BoundLValue, state: State): State {

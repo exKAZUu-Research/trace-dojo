@@ -45,6 +45,14 @@ type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
 export abstract class ExpressionBinder extends LambdaBinder {
   /** Binds a pattern against an input type, declaring its variables in the context's scope. */
   abstract bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern;
+  abstract bindRefTarget(
+    operand: Expression,
+    isReadonly: boolean,
+    context: BindContext,
+    use: 'local' | 'return'
+  ): BoundLValue;
+  abstract checkRefType(actual: Type, expected: Type, position: Position): void;
+  abstract refScopeOf(target: BoundLValue): 'return' | 'local';
 
   /** Reports a switch arm whose pattern the earlier arms handle, then adds an unguarded arm's values to them. */
   protected abstract checkArmReachable(
@@ -135,6 +143,10 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'sizeof': {
         return this.bindSizeof(node, context);
+      }
+      case 'refExpression': {
+        // A ref local's initializer, a `return ref`, and `r = ref x` take `ref x` apart; elsewhere it is not run.
+        return this.unsupported(node, 'この場所の `ref` 式');
       }
       case 'fromEnd': {
         const operand = this.bindAs(node.operand, this.intType, context);
@@ -1418,9 +1430,44 @@ export abstract class ExpressionBinder extends LambdaBinder {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  /** `r = ref x`: a ref local, or a ref parameter, refers to another variable from then on. */
+  private bindRefAssignment(
+    node: Extract<Expression, { kind: 'assign' }>,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    context: BindContext
+  ): BoundExpression {
+    const left = this.toValue(this.bindExpression(node.target, context), node.target);
+    const local =
+      left.kind === 'local' && (left.local.isRefLocal || left.local.refKind !== undefined) ? left.local : undefined;
+    const target = this.bindRefTarget(value.operand, local?.refKind === 'in', context, 'local');
+    if (!local) {
+      if (left.type.kind !== 'error') this.error(node, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    if (target.kind === 'discard') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    this.checkRefType(target.type, local.type, value);
+    // A reference may not come to refer to a variable that dies sooner than the one it referred to.
+    const localScope = local.isRefLocal ? (local.refEscapes ? 'return' : 'local') : 'return';
+    if (localScope === 'return' && this.refScopeOf(target) !== 'return') {
+      const name = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
+      this.refSafetyError(
+        node,
+        'CS8374',
+        `'${name}' を '${local.name}' に ref 割り当てすることはできません。'${name}' のエスケープ スコープが '${local.name}' より狭いためです。`
+      );
+    }
+    return { kind: 'refAssign', local, target, type: local.type, row: node.row };
+  }
+
+  private describeRefTarget(target: BoundLValue): string {
+    return target.kind === 'field' ? target.field.name : displayType(target.type);
+  }
+
   private bindAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     if (operator === '=' && node.target.kind === 'tuple') return this.bindDeconstructionAssignment(node, context);
+    if (operator === '=' && node.value.kind === 'refExpression')
+      return this.bindRefAssignment(node, node.value, context);
     if (operator === '=') {
       const target = this.bindLValue(node.target, context, 'assign');
       const value = this.bindValue(node.value, context);
@@ -1825,6 +1872,15 @@ export abstract class ExpressionBinder extends LambdaBinder {
   }
 
   private bindIncrement(node: Extract<Expression, { kind: 'increment' }>, context: BindContext): BoundExpression {
+    const readonlyRef = node.operand.kind === 'name' ? context.scope.lookup(node.operand.name)?.local : undefined;
+    if (readonlyRef?.isRefLocal && readonlyRef.refKind === 'in') {
+      this.error(
+        node,
+        'CS1059',
+        'インクリメント演算子またはデクリメント演算子のオペランドには、変数、プロパティ、またはインデクサーを指定してください'
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
     const target = this.bindLValue(node.operand, context, 'compound');
     if (target.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };

@@ -706,9 +706,11 @@ export class Converter extends ExpressionConverter {
       .map((child) => child.text);
     let modifier: Parameter['modifier'];
     for (const text of modifiers) {
-      if (text === 'scoped' || text === 'readonly') unsupported(node, `\`${text}\` 引数`);
+      // `scoped` limits how far a reference may escape, which this grader does not check.
       if (['ref', 'out', 'in', 'params'].includes(text)) modifier = text as Parameter['modifier'];
     }
+    // A `ref readonly` parameter is passed by reference and read only, as an `in` parameter is.
+    if (modifiers.includes('ref') && modifiers.includes('readonly')) modifier = 'in';
     const typeNode = field(node, 'type');
     // The grammar lets a parameter omit its type for lambdas, whose parameters convertLambda takes instead; Roslyn
     // reads the name of `int Add(int a, b)` as a type still waiting for its name.

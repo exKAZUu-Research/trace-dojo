@@ -194,6 +194,8 @@ export class MethodSymbol {
   conditionalSymbols: string[] | undefined;
   /** Whether the method is `async`, and for one, what its return type wraps: the type its `return` statements give. */
   isAsync = false;
+  /** How a method returns by reference (`ref T M()`, `ref readonly T M()`), if it does. */
+  returnsByRef: 'ref' | 'readonly' | undefined;
   async: AsyncShape | undefined;
   /** For an iterator (a body with `yield`), the type of its values and whether it returns an enumerable. */
   iterator: { elementType: Type; isEnumerable: boolean } | undefined;
@@ -289,6 +291,10 @@ export class LocalSymbol {
   /** Whether the variable is a parameter, and how it is passed. */
   isParameter = false;
   refKind: 'ref' | 'out' | 'in' | undefined;
+  /** Whether the variable is a ref local (`ref int r = ref x;`), whose slot holds a reference to another variable. */
+  isRefLocal = false;
+  /** Whether a ref local refers to a variable that outlives the method, so that the method may return it by `ref`. */
+  refEscapes = false;
   /** Whether the program can assign the variable, which `foreach` variables and `using` variables forbid. */
   isReadonly = false;
   /** What makes a readonly variable so, as Roslyn's messages name it (`foreach 繰り返し変数`, `using 変数`). */

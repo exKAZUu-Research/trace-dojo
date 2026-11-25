@@ -560,6 +560,13 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'constant', value: local.constantValue, type: local.type, row: position.row };
     }
     if (local.owner && local.owner !== context.fn.method) {
+      // A ref local refers to a variable of its method's frame, which a lambda may outlive.
+      if (local.isRefLocal)
+        this.error(
+          position,
+          'CS8175',
+          `匿名メソッド、ラムダ式、クエリ式内で ref ローカル変数 '${local.name}' は使用できません`
+        );
       local.isCaptured = true;
       for (let fn: typeof context.fn | undefined = context.fn; fn && fn.method !== local.owner; fn = fn.outer) {
         // A static lambda or local function, nested at any depth, may not capture an enclosing local.

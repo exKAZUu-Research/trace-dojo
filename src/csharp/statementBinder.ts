@@ -7,6 +7,7 @@ import type {
   Statement,
   SwitchLabel,
   SwitchSection,
+  TypeNode,
   VariableDeclarator,
 } from './ast';
 import { markOverflowChecks, type TypeContext, unavailableDotnetNamespace } from './binderBase';
@@ -147,8 +148,26 @@ export abstract class StatementBinder extends PatternBinder {
         this.checkAssignable(target.access, position, context, use);
         return target;
       }
+      case 'call': {
+        // A call of a method that returns by `ref` is the variable it returns.
+        if (target.method.returnsByRef === 'ref') return target;
+        if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
+        return { kind: 'discard', type: ERROR_TYPE, row: position.row };
+      }
       case 'local': {
         const { local } = target;
+        if (local.refKind === 'in' && use !== 'initializer') {
+          if (local.isRefLocal) this.reportNotAssignable(position, use);
+          else if (use === 'ref' || use === 'out')
+            this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+          else
+            this.error(
+              position,
+              'CS8331',
+              `変数 に割り当てることができません。'${local.name}' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。`
+            );
+          return target;
+        }
         if (local.isReadonly) {
           this.error(
             position,
@@ -988,6 +1007,7 @@ export abstract class StatementBinder extends PatternBinder {
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     context: BindContext
   ): BoundStatement {
+    if (statement.type.kind === 'refType') return this.bindRefLocals(statement, statement.type, context);
     const isVar = statement.type.kind === 'varType' && !this.findTypeInScope('var', 0, context.fn.typeContext);
     if (isVar && statement.declarators.length > 1) {
       this.error(statement, 'CS0819', '暗黙的に型指定された変数は、複数の宣言子を持つことができません');
@@ -1029,6 +1049,182 @@ export abstract class StatementBinder extends PatternBinder {
     } as BoundBlock;
   }
 
+  /** `ref int r = ref x;` and `ref readonly var r = ref x;`: locals that refer to other variables. */
+  private bindRefLocals(
+    statement: Extract<Statement, { kind: 'localDeclaration' }>,
+    refType: Extract<TypeNode, { kind: 'refType' }>,
+    context: BindContext
+  ): BoundStatement {
+    const isVar = refType.type.kind === 'varType' && !this.findTypeInScope('var', 0, context.fn.typeContext);
+    const declaredType = isVar ? undefined : this.resolveType(refType.type, context.fn.typeContext);
+    const statements = statement.declarators.map((declarator): BoundStatement => {
+      const { initializer } = declarator;
+      let target: BoundLValue | undefined;
+      if (!initializer) this.error(declarator, 'CS8174', '参照渡し変数の宣言には初期化子が必要です');
+      else if (initializer.kind === 'refExpression') {
+        target = this.bindRefTarget(initializer.operand, refType.isReadonly, context, 'local');
+        if (declaredType && target.kind !== 'discard') this.checkRefType(target.type, declaredType, initializer);
+      } else {
+        this.bindValue(initializer, context);
+        this.error(declarator, 'CS8172', '値を使用して参照渡し変数を初期化することはできません');
+      }
+      const type = declaredType ?? (target?.kind === 'discard' ? undefined : target?.type) ?? ERROR_TYPE;
+      const local = this.declareLocal(declarator.name, type, declarator, context);
+      local.isRefLocal = true;
+      local.refKind = refType.isReadonly ? 'in' : 'ref';
+      local.refEscapes = target !== undefined && target.kind !== 'discard' && this.refScopeOf(target) === 'return';
+      return {
+        kind: 'localDeclaration',
+        local,
+        value: undefined,
+        refTarget: target,
+        row: declarator.row,
+        step: 'none',
+      };
+    });
+    if (statements.length === 1)
+      return { ...(statements[0] as BoundStatement), row: statement.row, step: 'step' } as BoundStatement;
+    return {
+      kind: 'block',
+      statements,
+      capturedLocals: [],
+      locals: [],
+      row: statement.row,
+      step: 'step',
+      isDeclarationGroup: true,
+    } as BoundBlock;
+  }
+
+  /**
+   * The variable of `ref x`: one the program may assign, or for `ref readonly` any variable. A value that is no
+   * variable is an error, as Roslyn reports it for a ref local's initializer or for a `return ref`.
+   */
+  bindRefTarget(operand: Expression, isReadonly: boolean, context: BindContext, use: 'local' | 'return'): BoundLValue {
+    const bound = this.toValue(this.bindExpression(operand, context), operand);
+    const isVariable =
+      ['local', 'field', 'staticField', 'element'].includes(bound.kind) ||
+      (bound.kind === 'call' && bound.method.returnsByRef !== undefined);
+    if (bound.type.kind === 'error') return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
+    if (!isVariable) {
+      if (use === 'return')
+        this.refSafetyError(
+          operand,
+          'CS8156',
+          '参照渡しによって渡したり返したりすることができないため、このコンテキストで使用できない式があります'
+        );
+      else if (bound.kind === 'property')
+        this.error(
+          operand,
+          'CS0206',
+          '参照を返さないプロパティまたはインデクサーを out 値または ref 値として使用することはできません'
+        );
+      else this.error(operand, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+      return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
+    }
+    if (isReadonly) return bound as BoundLValue;
+    if (bound.kind === 'call' && bound.method.returnsByRef === 'readonly') {
+      this.error(operand, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+      return bound as BoundLValue;
+    }
+    return this.checkAssignable(bound, operand, context, 'ref');
+  }
+
+  /** Reports a variable of another type than a ref local's or a method's, which a reference may not convert. */
+  checkRefType(actual: Type, expected: Type, position: Position): void {
+    if (expected.kind === 'error' || actual.kind === 'error' || sameType(actual, expected)) return;
+    this.error(
+      position,
+      'CS8173',
+      `式は参照渡しで割り当てられるため、型 '${displayType(expected)}' でなければなりません`
+    );
+  }
+
+  /** How long the variable a reference refers to lives: beyond the method (`return`), or only while it runs. */
+  refScopeOf(target: BoundLValue): 'return' | 'local' {
+    switch (target.kind) {
+      case 'local': {
+        const { local } = target;
+        if (local.isRefLocal) return local.refEscapes ? 'return' : 'local';
+        return local.isParameter && (local.refKind === 'ref' || local.refKind === 'in') ? 'return' : 'local';
+      }
+      case 'field': {
+        // A field of an object lives on the heap; a field of a struct lives where the struct does.
+        if (!isValueType(target.receiver.type)) return 'return';
+        const receiver = target.receiver;
+        return ['local', 'field', 'staticField', 'element', 'call'].includes(receiver.kind)
+          ? this.refScopeOf(receiver as BoundLValue)
+          : 'local';
+      }
+      case 'staticField':
+      case 'element': {
+        return 'return';
+      }
+      case 'call': {
+        // What a method returns by reference lives as long as the variables passed to it by reference.
+        return target.args.every((arg) => arg.kind !== 'refArgument' || this.refScopeOf(arg.target) === 'return')
+          ? 'return'
+          : 'local';
+      }
+      default: {
+        return 'local';
+      }
+    }
+  }
+
+  /** Reports a `return ref` of a variable that does not outlive the method, as Roslyn names the variable. */
+  private reportRefEscape(target: BoundLValue, position: Position): void {
+    let root: BoundExpression = target as BoundExpression;
+    let isMember = false;
+    while (root.kind === 'field' && isValueType(root.receiver.type)) {
+      root = root.receiver;
+      isMember = true;
+    }
+    if (root.kind === 'local') {
+      const { local } = root;
+      if (local.isRefLocal) {
+        this.refSafetyError(
+          position,
+          'CS8157',
+          `'${local.name}' は参照渡しで返せない値に初期化されたため、参照渡しで返すことができません`
+        );
+        return;
+      }
+      if (local.isParameter) {
+        if (isMember)
+          this.refSafetyError(
+            position,
+            'CS8167',
+            `ref パラメーターでも out パラメーターでもないため、パラメーター '${local.name}' のメンバーを参照渡しで返すことはできません`
+          );
+        else
+          this.refSafetyError(
+            position,
+            'CS8166',
+            `参照 '${local.name}' は ref パラメーターではないため、パラメーターを返すことができません`
+          );
+        return;
+      }
+      if (isMember)
+        this.refSafetyError(
+          position,
+          'CS8169',
+          `ローカル変数 '${local.name}' は ref ローカル変数ではないため、そのメンバーを参照渡しで返すことはできません`
+        );
+      else
+        this.refSafetyError(
+          position,
+          'CS8168',
+          `ローカル変数 '${local.name}' は ref ローカル変数ではないため、参照渡しで返すことはできません`
+        );
+      return;
+    }
+    this.refSafetyError(
+      position,
+      'CS8156',
+      '参照渡しによって渡したり返したりすることができないため、このコンテキストで使用できない式があります'
+    );
+  }
+
   private bindDeclarator(
     declarator: VariableDeclarator,
     declaredType: Type | undefined,
@@ -1044,6 +1240,10 @@ export abstract class StatementBinder extends PatternBinder {
     }
     // The variable is in scope in its own initializer, where using it is an error of definite assignment.
     const local = this.declareLocal(declarator.name, type, declarator, context);
+    if (initializer?.kind === 'refExpression') {
+      this.error(declarator, 'CS8171', '参照を使用して値渡し変数を初期化することはできません');
+      return { kind: 'localDeclaration', local, value: undefined, row: declarator.row, step: 'none' };
+    }
     if (initializer && !value) {
       value =
         initializer.kind === 'arrayInitializer'
@@ -1489,6 +1689,29 @@ export abstract class StatementBinder extends PatternBinder {
     return { pattern, guard };
   }
 
+  /** `return ref x;` of a method that returns by reference, or a return that mixes up the two kinds of return. */
+  private bindRefReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
+    const { fn } = context;
+    const { row } = statement;
+    const written = statement.value as Expression | undefined;
+    const byRef = fn.kind !== 'lambda' ? fn.method.returnsByRef : undefined;
+    if (!byRef) {
+      this.error(statement, 'CS8149', '参照渡しの返却は、参照で返すメソッドでのみ使用できます');
+      return { kind: 'return', value: undefined, row, step: 'none' };
+    }
+    if (written?.kind !== 'refExpression') {
+      if (written) this.bindValue(written, context);
+      this.error(statement, 'CS8150', '値渡しの返却は、値渡しで返すメソッドでのみ使用できます');
+      return { kind: 'return', value: undefined, row, step: 'none' };
+    }
+    const target = this.bindRefTarget(written.operand, byRef === 'readonly', context, 'return');
+    if (target.kind !== 'discard') {
+      this.checkRefType(target.type, fn.method.returnType, written);
+      if (this.refScopeOf(target) !== 'return') this.reportRefEscape(target, written.operand);
+    }
+    return { kind: 'return', value: undefined, refTarget: target, row, step: 'none' };
+  }
+
   private bindReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
     const { fn } = context;
     if (fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出られません');
@@ -1509,6 +1732,8 @@ export abstract class StatementBinder extends PatternBinder {
       return { kind: 'return', value, row: statement.row, step: 'none' };
     }
     const describe = (): string => (fn.kind === 'lambda' ? 'ラムダ式' : this.describeMethod(fn.method));
+    const returnsByRef = fn.kind !== 'lambda' && fn.method.returnsByRef !== undefined;
+    if (statement.value?.kind === 'refExpression' || returnsByRef) return this.bindRefReturn(statement, context);
     if (!statement.value) {
       if (fn.returnType.kind !== 'void' && fn.returnType.kind !== 'error')
         this.error(statement, 'CS0126', `'${displayType(fn.returnType)}' に変換可能な型のオブジェクトが必要です`);
@@ -1627,7 +1852,7 @@ export abstract class StatementBinder extends PatternBinder {
     };
     this.applyConstraints(method.typeParameters, declaration.constraints, typeContext);
     this.methodContexts.set(method, typeContext);
-    method.returnType = this.resolveType(declaration.returnType, typeContext);
+    method.returnType = this.resolveReturnType(declaration.returnType, typeContext, method);
     method.parameters = this.resolveParameters(declaration.parameters, typeContext, undefined);
     if (declaration.parameters.some((parameter) => parameter.isThis))
       this.error(declaration, 'CS1106', '拡張メソッドは、非ジェネリック静的クラスで定義される必要があります');
@@ -1775,6 +2000,12 @@ export abstract class StatementBinder extends PatternBinder {
           body.row
         );
       }
+      // `=> ref x` returns the variable of a method that returns by reference, as `return ref x;` does.
+      if (body.kind === 'refExpression' || context.fn.method.returnsByRef)
+        return blockOf(
+          this.bindRefReturn({ kind: 'return', value: body, row: body.row, column: body.column }, context),
+          body.row
+        );
       // A `throw` expression converts to any return type.
       const value = body.kind === 'throw' ? this.bindValue(body, context) : this.bindAs(body, returnType, context);
       return blockOf({ kind: 'return', value, row: body.row, step: 'none' }, body.row);

@@ -197,6 +197,25 @@ export class BinderBase {
     if (this.diagnostics.length >= 200) throw new TooManyErrors();
   }
 
+  /** The diagnostics of reference lifetimes, which Roslyn reports after the rest of its member's binding errors. */
+  private readonly refSafetyDiagnostics = new WeakSet<object>();
+
+  /** Reports an error of a reference's lifetime (`return ref` of a local), which a member reports last. */
+  protected refSafetyError(position: Position | number, code: string, message: string): void {
+    this.error(position, code, message);
+    const diagnostic = this.diagnostics.at(-1);
+    if (diagnostic) this.refSafetyDiagnostics.add(diagnostic);
+  }
+
+  /** Moves the member's reference lifetime errors after its other binding errors, as Roslyn's separate pass orders them. */
+  protected flushRefSafetyDiagnostics(): void {
+    const late = this.diagnostics.filter((diagnostic) => this.refSafetyDiagnostics.has(diagnostic));
+    if (late.length === 0) return;
+    const rest = this.diagnostics.filter((diagnostic) => !this.refSafetyDiagnostics.has(diagnostic));
+    this.diagnostics.splice(0, this.diagnostics.length, ...rest, ...late);
+    for (const diagnostic of late) this.refSafetyDiagnostics.delete(diagnostic);
+  }
+
   /**
    * Runs a binding whose result only informs another binding, which reports the diagnostics itself: those of this one
    * are dropped, and a binding that stops compiling gives undefined.
@@ -437,11 +456,26 @@ export class BinderBase {
     );
   }
 
+  /** Resolves a method's return type, noting a method that returns by reference (`ref T`, `ref readonly T`). */
+  resolveReturnType(
+    node: TypeNode,
+    context: TypeContext,
+    method: { returnsByRef: 'ref' | 'readonly' | undefined }
+  ): Type {
+    if (node.kind !== 'refType') return this.resolveType(node, context);
+    method.returnsByRef = node.isReadonly ? 'readonly' : 'ref';
+    return this.resolveType(node.type, context);
+  }
+
   /** Resolves a type in a declaration's context, reporting the names it cannot find. */
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
       case 'predefinedType': {
         return this.resolvePredefinedType(node);
+      }
+      case 'refType': {
+        // Ref locals and methods returning by reference take the type apart; elsewhere it is not run.
+        return this.unsupported(node, 'この場所の `ref` 型');
       }
       case 'varType': {
         // `var` outside a declaration of a local names a type called `var`, which no program declares.

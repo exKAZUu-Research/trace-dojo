@@ -3,12 +3,13 @@ import type {
   BoundBlock,
   BoundCatch,
   BoundExpression,
+  BoundLValue,
   BoundStatement,
   BoundSwitchSection,
   ForeachKind,
   LabelSymbol,
 } from './bound';
-import { NULL_REFERENCE } from './evaluatorBase';
+import { NULL_REFERENCE, type Reference } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
 import { CsThrow, type ExceptionState, type Frame, ProgramExit, type Slot } from './runtime';
@@ -68,6 +69,13 @@ export abstract class StatementExecutor extends PatternMatcher {
   /** The exceptions that catch clauses are handling, which `throw;` rethrows. */
   protected readonly currentExceptions: CsThrow[] = [];
 
+  abstract referenceTo(target: BoundLValue, frame: Frame): Reference;
+
+  /** Makes a ref local refer to a variable; a lambda never captures one, so it is in its own frame's slots. */
+  bindReference(frame: Frame, local: LocalSymbol, reference: Reference): void {
+    frame.slots[local.slot] = reference;
+  }
+
   /** Runs a statement, recording its step when it completes as the trace's rules say. */
   protected withStep<T>(row: number, step: BoundStatement['step'], run: () => T): T {
     if (!this.tracing || step === 'none') return run();
@@ -112,7 +120,9 @@ export abstract class StatementExecutor extends PatternMatcher {
       }
       case 'localDeclaration': {
         this.withStep(statement.row, statement.step, () => {
-          if (statement.value)
+          if (statement.refTarget)
+            this.bindReference(frame, statement.local, this.referenceTo(statement.refTarget, frame));
+          else if (statement.value)
             this.storeLocal(frame, statement.local, copyValue(this.evaluate(statement.value, frame)));
           // A struct local without a value has its fields, which the program may assign one by one.
           else if (isStructType(statement.local.type))
@@ -146,9 +156,9 @@ export abstract class StatementExecutor extends PatternMatcher {
         return CONTINUE;
       }
       case 'return': {
-        return {
-          value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined,
-        };
+        // A method that returns by reference returns the variable itself, which its call reads or assigns.
+        if (statement.refTarget) return { value: this.referenceTo(statement.refTarget, frame) as unknown as Value };
+        return { value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined };
       }
       case 'throw': {
         return this.executeThrow(statement, frame);

@@ -981,7 +981,7 @@ export class DeclarationBinder extends BinderBase {
     method.declaration = member;
     method.callsAreRemoved = member.isRemovedPartial === true;
     const methodContext = this.methodContexts.get(method) as TypeContext;
-    method.returnType = this.resolveType(member.returnType, methodContext);
+    method.returnType = this.resolveReturnType(member.returnType, methodContext, method);
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
     method.isExtension = member.parameters[0]?.isThis === true;
     this.collectAttributes(

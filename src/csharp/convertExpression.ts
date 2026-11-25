@@ -41,7 +41,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   makeref_expression: '`__makeref`',
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
-  ref_expression: '`ref` 式',
   stackalloc_expression: '`stackalloc`',
   implicit_stackalloc_expression: '`stackalloc`',
 };
@@ -49,8 +48,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
 const UNSUPPORTED_TYPES: Record<string, string> = {
   pointer_type: 'ポインター型',
   function_pointer_type: '関数ポインター型',
-  ref_type: '`ref` 型',
-  scoped_type: '`scoped`',
 };
 
 export class ExpressionConverter {
@@ -127,6 +124,18 @@ export class ExpressionConverter {
           name: field(element, 'name')?.text,
         }));
         return { kind: 'tupleType', elements, ...position };
+      }
+      case 'ref_type': {
+        return {
+          kind: 'refType',
+          type: this.convertType(requiredField(node, 'type')),
+          isReadonly: hasToken(node, 'readonly'),
+          ...position,
+        };
+      }
+      case 'scoped_type': {
+        // `scoped` limits how far a reference may escape; this grader checks no lifetimes beyond those of locals.
+        return this.convertType(requiredField(node, 'type'));
       }
       default: {
         const what = UNSUPPORTED_TYPES[node.type];
@@ -505,6 +514,10 @@ export class ExpressionConverter {
       }
       case 'query_expression': {
         return { kind: 'query', clauses: this.convertQuery(node), ...position };
+      }
+      case 'ref_expression': {
+        const [operand] = namedChildren(node);
+        return { kind: 'refExpression', operand: this.convertExpression(operand), ...position };
       }
       default: {
         const what = UNSUPPORTED_EXPRESSIONS[node.type];

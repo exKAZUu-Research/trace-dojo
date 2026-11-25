@@ -70,6 +70,7 @@ type AccessExpression = Extract<
     kind:
       | 'constant'
       | 'local'
+      | 'refAssign'
       | 'this'
       | 'field'
       | 'staticField'
@@ -462,6 +463,7 @@ export class Evaluator extends AsyncExecutor {
       case 'property':
       case 'implicitIndex':
       case 'typeOf':
+      case 'refAssign':
       case 'compoundOperand':
       case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
@@ -535,6 +537,11 @@ export class Evaluator extends AsyncExecutor {
         for (const step of expression.setup) this.evaluate(step, frame);
         return this.evaluate(expression.access, frame);
       }
+      case 'refAssign': {
+        const reference = this.referenceTo(expression.target, frame);
+        this.bindReference(frame, expression.local, reference);
+        return reference.get();
+      }
       case 'typeOf': {
         return typeObjectOf(this.runtime, frame.resolve(expression.target));
       }
@@ -558,8 +565,11 @@ export class Evaluator extends AsyncExecutor {
       case 'call': {
         // C# removes a call of a partial method without an implementation, arguments and all.
         if (expression.method.callsAreRemoved) return undefined;
-        return this.evaluateCall(expression, frame);
+        const result = this.evaluateCall(expression, frame);
+        // A method that returns by reference returns the variable, whose value the call is where it is read.
+        return result instanceof Reference ? result.get() : result;
       }
+
       case 'invokeDelegate': {
         return this.evaluateInvokeDelegate(expression, frame);
       }
@@ -990,7 +1000,8 @@ export class Evaluator extends AsyncExecutor {
     }
   }
 
-  private referenceTo(target: BoundLValue, frame: Frame): Reference {
+  referenceTo(target: BoundLValue, frame: Frame): Reference {
+    if (target.kind === 'call') return this.evaluateCall(target, frame) as unknown as Reference;
     if (target.kind === 'local') {
       const { local } = target;
       const slot = local.owner === frame.method ? frame.slots[local.slot] : frame.captured.get(local);
@@ -1060,6 +1071,9 @@ export class Evaluator extends AsyncExecutor {
       }
       case 'discard': {
         return { get: () => {}, set: () => {} };
+      }
+      case 'call': {
+        return this.evaluateCall(target, frame) as unknown as Reference;
       }
     }
   }

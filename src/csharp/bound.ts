@@ -204,6 +204,8 @@ export type BoundExpression =
     } & Base)
   /** `typeof(T)`, the one System.Type object of a type. */
   | ({ kind: 'typeOf'; target: Type } & Base)
+  /** `r = ref x`, which makes a ref local refer to another variable, and is that variable's value. */
+  | ({ kind: 'refAssign'; local: LocalSymbol; target: BoundLValue } & Base)
   | ({
       kind: 'conditionalAccess';
       receiver: BoundExpression;
@@ -244,7 +246,7 @@ export type BoundDeconstructTarget =
 export type BoundLValue =
   | Extract<
       BoundExpression,
-      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' }
+      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' | 'call' }
     >
   | ({ kind: 'discard' } & Base);
 
@@ -366,7 +368,13 @@ export type ForeachKind =
 export type BoundStatement =
   | BoundBlock
   | ({ kind: 'expression'; expression: BoundExpression } & StatementBase)
-  | ({ kind: 'localDeclaration'; local: LocalSymbol; value: BoundExpression | undefined } & StatementBase)
+  | ({
+      kind: 'localDeclaration';
+      local: LocalSymbol;
+      value: BoundExpression | undefined;
+      /** The variable a ref local refers to, which it takes instead of a value. */
+      refTarget?: BoundLValue;
+    } & StatementBase)
   | ({
       kind: 'if';
       condition: BoundExpression;
@@ -407,7 +415,12 @@ export type BoundStatement =
     } & StatementBase)
   | ({ kind: 'break' } & StatementBase)
   | ({ kind: 'continue' } & StatementBase)
-  | ({ kind: 'return'; value: BoundExpression | undefined } & StatementBase)
+  | ({
+      kind: 'return';
+      value: BoundExpression | undefined;
+      /** The variable that a method returning by reference returns. */
+      refTarget?: BoundLValue;
+    } & StatementBase)
   | ({ kind: 'throw'; value: BoundExpression | undefined } & StatementBase)
   | ({ kind: 'try'; body: BoundBlock; catches: BoundCatch[]; finally: BoundBlock | undefined } & StatementBase)
   | ({ kind: 'labeled'; label: LabelSymbol; statement: BoundStatement } & StatementBase)

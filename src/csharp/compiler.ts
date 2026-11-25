@@ -636,6 +636,7 @@ export class Compiler extends AttributeBinder {
       markCapturedLocals(body);
       return;
     }
+    this.flushRefSafetyDiagnostics();
     this.summarizeLocalFunctions();
     this.analyzeFlow(method, body);
   }
