@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { takesNoArguments } from './callArity';
 import type { Checker } from './checker';
 import { newInferenceRun } from './inference';
 import { hasToken, named } from './syntax';
@@ -168,7 +169,7 @@ function checkDecorator(c: Checker, decorator: TreeNode, kind: DecoratedKind, ar
   if (isAnyLike(type)) return;
   const signatures = c.signaturesOf(type, 'call');
   // A decorator factory such as `() => (value, context) => {}` written without its call takes no parameter.
-  if (signatures.length > 0 && signatures.every((signature) => signature.parameters.length === 0)) {
+  if (takesNoArguments(signatures)) {
     c.error(
       expression,
       `'${expression.text}' は受け入れる引数が少なすぎるので、ここでデコレーターとして使用することができません。最初にこれを呼び出してから、'@${expression.text}()' を書き込むつもりでしたか?`

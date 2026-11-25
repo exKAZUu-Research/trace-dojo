@@ -7,6 +7,7 @@ import {
   ExpressionListFlow,
   minimumArguments,
   stringsArgumentCount,
+  takesNoArguments,
   tupleArgumentContexts,
   tupleTypeAt,
 } from './callArity';
@@ -433,7 +434,7 @@ export class Calls {
     }
     const strings = this.c.globalType('TemplateStringsArray');
     const fitting = signatures.filter((signature) => this.takesStrings(signature, strings));
-    if (fitting.length === 0 && signatures.every((signature) => signature.parameters.length === 0)) {
+    if (takesNoArguments(signatures)) {
       // The strings are the first argument, so a tag that takes none is given one more than the substitutions.
       this.c.error(template, `引数は 0 個必要ですが、${substitutions.length + 1} 個渡されています。`);
       return this.checkArgumentsOnly(substitutions, errorType);

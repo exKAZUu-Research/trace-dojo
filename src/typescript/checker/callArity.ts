@@ -131,6 +131,14 @@ export class CallArity {
 }
 
 /**
+ * Whether every signature takes no argument, so a call that always passes one, as a tagged template passes its strings
+ * and a decorator the value it decorates, fits none of them.
+ */
+export function takesNoArguments(signatures: Signature[]): boolean {
+  return signatures.length > 0 && signatures.every((signature) => signature.parameters.length === 0);
+}
+
+/**
  * 1 for a tagged template, whose strings TypeScript counts as the first argument, though its signatures are resolved
  * against the substitutions alone.
  */
