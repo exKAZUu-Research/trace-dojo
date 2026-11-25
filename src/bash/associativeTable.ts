@@ -44,7 +44,11 @@ export function readAssociativePair(
 function compoundElementPlainText(element: CompoundElement): string {
   if (typeof element === 'string') return element;
   if ('plain' in element) return element.plain;
-  return `[${element.key}]${element.append ? '+=' : '='}${element.value}`;
+  return formatKeyedCompoundElement(element.key, element.value, element.append);
+}
+
+export function formatKeyedCompoundElement(key: string, value: string, append: boolean): string {
+  return `[${key}]${append ? '+=' : '='}${value}`;
 }
 
 /** Normalizes one indexed compound element for compound array storage. */

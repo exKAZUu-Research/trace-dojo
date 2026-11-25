@@ -3,6 +3,7 @@ import {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
+  formatKeyedCompoundElement,
   IndexedTable,
   isIdentifier,
   isValidFunctionName,
@@ -40,6 +41,7 @@ export {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
+  formatKeyedCompoundElement,
   IndexedTable,
   isIdentifier,
   isValidFunctionName,
@@ -1275,7 +1277,7 @@ function resolveCompoundIndexedKey(
   evalIndex: (resolvedName: string, rawKey: string) => bigint | undefined
 ): bigint | StoreFailure {
   if (item.key === undefined) return next;
-  const shown = `[${item.key}]${item.append ? '+=' : '='}${item.value}`;
+  const shown = formatKeyedCompoundElement(item.key, item.value, item.append);
   if (item.key === '') return { ok: false, reason: 'badSubscript', message: `${shown}: bad array subscript` };
   if (item.key === '@' || item.key === '*') {
     return { ok: false, reason: 'badSubscript', message: `${shown}: cannot assign to non-numeric index` };

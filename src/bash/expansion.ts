@@ -30,7 +30,7 @@ import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { Shell } from './shell';
 import { readResolvedTarget, resolveSubscriptTarget, resolveTargetName } from './targets';
-import { type CompoundElement, isIdentifier } from './variables';
+import { type CompoundElement, formatKeyedCompoundElement, isIdentifier } from './variables';
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
@@ -791,7 +791,9 @@ function compoundItemValidationError(
     return `${prefix}${shown}: must use subscript when assigning associative array`;
   }
   if (item.key === '') {
-    const text = declared ? `[${singleQuote(item.key)}]=${singleQuote(item.value)}` : (item.rawText ?? '');
+    const text = declared
+      ? formatKeyedCompoundElement(singleQuote(item.key), singleQuote(item.value), item.append)
+      : (item.rawText ?? '');
     return `${text}: bad array subscript`;
   }
   return undefined;
