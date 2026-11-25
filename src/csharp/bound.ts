@@ -223,6 +223,8 @@ export type BoundExpression =
       /** Whether the operation may stand as a statement: a call, an assignment, or an increment. */
       isStatement: boolean;
     } & Base)
+  /** A UTF-8 string literal, a `ReadOnlySpan<byte>` over its bytes, which every evaluation shares. */
+  | ({ kind: 'utf8'; bytes: readonly number[] } & Base)
   /** `__makeref(x)`, a `TypedReference` to a variable and its type. */
   | ({ kind: 'makeRef'; target: BoundLValue } & Base)
   /** `__reftype(r)`, the `System.Type` of the variable a `TypedReference` refers to, or null for a default one. */

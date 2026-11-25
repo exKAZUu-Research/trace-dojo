@@ -287,9 +287,11 @@ export class BinderBase {
   tupleType(elements: Type[], names?: (string | undefined)[], row?: number): NamedType {
     const symbol = this.library.valueTuples.get(elements.length);
     if (!symbol) this.unsupported(0, `要素が${MAX_TUPLE_ARITY + 1}個以上のタプル`);
-    if (row !== undefined)
+    if (row !== undefined) {
+      const owner = `(${symbol.typeParameters.map((parameter) => parameter.name).join(', ')})`;
       for (const [index, element] of elements.entries())
-        this.checkTypeArgumentKind(element, `T${index + 1}`, displayTypeSymbol(symbol), row);
+        this.checkTypeArgumentKind(element, `T${index + 1}`, owner, row);
+    }
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;

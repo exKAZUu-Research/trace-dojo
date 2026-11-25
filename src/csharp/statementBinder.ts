@@ -290,11 +290,7 @@ export abstract class StatementBinder extends PatternBinder {
           row: target.row,
         };
       }
-      this.error(
-        position,
-        'CS0200',
-        `プロパティまたはインデクサー '${display}' は読み取り専用であるため、割り当てることはできません`
-      );
+      this.reportReadonlyProperty(property, display, position);
       return { kind: 'discard', type: ERROR_TYPE, row: position.row };
     }
     if (property.isInitOnly && use !== 'initializer' && !this.isInConstructorOf(property, context)) {
@@ -320,6 +316,21 @@ export abstract class StatementBinder extends PatternBinder {
       );
     }
     return target;
+  }
+
+  private reportReadonlyProperty(property: PropertySymbol, display: string, position: Position): void {
+    if (property.isRefReadonly)
+      this.error(
+        position,
+        'CS8331',
+        `プロパティ に割り当てることができません。'${property.isIndexer ? 'this' : property.name}' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。`
+      );
+    else
+      this.error(
+        position,
+        'CS0200',
+        `プロパティまたはインデクサー '${display}' は読み取り専用であるため、割り当てることはできません`
+      );
   }
 
   private setterOf(property: PropertySymbol): MethodSymbol | undefined {

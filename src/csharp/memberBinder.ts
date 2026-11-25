@@ -981,7 +981,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Rejects a member that .NET's library type has but this grader's does not. */
-  protected rejectUnknownLibraryMember(type: Type, name: string, position: Position): void {
+  protected rejectUnknownLibraryMember(type: Type, name: string, position: Position | number): void {
     const symbol =
       type.kind === 'named' ? type.symbol : type.kind === 'array' ? this.wellKnown.array.symbol : undefined;
     if (!symbol?.isLibrary) return;

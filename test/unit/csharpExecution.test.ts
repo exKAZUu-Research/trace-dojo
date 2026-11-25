@@ -374,8 +374,8 @@ class P
 });
 
 // A TypedReference refers to a variable, whose exact type `__refvalue` checks when it runs; as a ref struct, it may
-// not be boxed or captured by a lambda.
-test('typed references read and write the variables they refer to', () => {
+// not be boxed or captured by a lambda. A UTF-8 string literal is a ReadOnlySpan<byte>, another ref struct.
+test('typed references and UTF-8 string literals behave as ref structs do in .NET', () => {
   const program = String.raw`int x = 1;
 TypedReference r = __makeref(x);
 __refvalue(r, int) += 4;
@@ -385,6 +385,15 @@ try { Console.WriteLine(__refvalue(r, long)); } catch (InvalidCastException e) {
   expect(executeProgram('csharp', program)).toMatchObject({
     kind: 'executed',
     stdout: ['5 System.Int32 5', 'Specified cast is not valid.', ''].join('\n'),
+  });
+  const utf8 = String.raw`var b = "hé"u8 + "!"u8;
+Console.WriteLine($"{b.Length} {b[1]} {b.ToString()} {string.Join(",", b.ToArray())}");
+foreach (var x in b[1..]) Console.Write(x + " ");
+Console.WriteLine(System.Text.Encoding.UTF8.GetString(b));
+`;
+  expect(executeProgram('csharp', utf8)).toMatchObject({
+    kind: 'executed',
+    stdout: ['4 195 System.ReadOnlySpan<Byte>[4] 104,195,169,33', '195 169 33 hé!', ''].join('\n'),
   });
   expect(
     executeProgram(

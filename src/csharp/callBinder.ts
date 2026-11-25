@@ -1209,6 +1209,8 @@ export abstract class CallBinder extends OperatorBinder {
   /** The method whose argument did not convert, which the runtime binder's message names. */
   protected lastInconvertibleMethod: string | undefined;
 
+  protected abstract rejectUnknownLibraryMember(type: Type, name: string, position: number): void;
+
   /** Reports an argument that does not convert to its parameter's type. */
   private reportInconvertible(
     candidate: MethodCandidate,
@@ -1228,6 +1230,8 @@ export abstract class CallBinder extends OperatorBinder {
       // Converting reports why the lambda does not fit, as Roslyn reports the body's errors.
       this.convert(arg.expression, type, arg.row);
     } else if (description.isExtension && position === 0) {
+      // An extension method of .NET's that the library lacks, such as a span's, is unavailable rather than a mismatch.
+      this.rejectUnknownLibraryMember(arg.expression.type, description.name, row);
       this.error(
         row,
         'CS1929',

@@ -1135,20 +1135,23 @@ export class ExpressionConverter {
       }
       case 'string_literal': {
         let value = '';
+        let isUtf8 = false;
         for (const part of namedChildren(node)) {
-          if (part.type === 'string_literal_encoding') unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
-          value += part.type === 'escape_sequence' ? unescape(part, part.text) : part.text;
+          if (part.type === 'string_literal_encoding') isUtf8 = true;
+          else value += part.type === 'escape_sequence' ? unescape(part, part.text) : part.text;
         }
-        return { type: 'string', value };
+        return { type: isUtf8 ? 'utf8' : 'string', value };
       }
       case 'verbatim_string_literal': {
-        if (/u8$/i.test(node.text)) unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
-        return { type: 'string', value: node.text.slice(2, -1).replaceAll('""', '"') };
+        const isUtf8 = /u8$/i.test(node.text);
+        const text = isUtf8 ? node.text.slice(0, -2) : node.text;
+        return { type: isUtf8 ? 'utf8' : 'string', value: text.slice(2, -1).replaceAll('""', '"') };
       }
       case 'raw_string_literal': {
-        if (/u8$/i.test(node.text)) unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
+        const isUtf8 = /u8$/i.test(node.text);
+        const text = isUtf8 ? node.text.slice(0, -2) : node.text;
         const content = namedChildren(node).find((part) => part.type === 'raw_string_content');
-        return { type: 'string', value: rawStringValue(node, content?.text ?? '', node.text) };
+        return { type: isUtf8 ? 'utf8' : 'string', value: rawStringValue(node, content?.text ?? '', text) };
       }
       case 'boolean_literal': {
         return { type: 'bool', value: node.text === 'true' };

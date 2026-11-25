@@ -14,6 +14,7 @@ import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
 import type { IteratorState } from './iterators';
 import { formatValue } from './library/formatting';
 import { typeObjectOf } from './library/nativesCore';
+import { newSpan } from './library/nativesSpan';
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
 import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
@@ -85,6 +86,9 @@ const POINTER_KINDS: ReadonlySet<BoundExpression['kind']> = new Set([
   'fixedAddress',
 ]);
 
+/** The expressions of typed references and UTF-8 literals, which `evaluateAccess` reads. */
+const REFERENCE_KINDS: ReadonlySet<BoundExpression['kind']> = new Set(['makeRef', 'refType', 'refValue', 'utf8']);
+
 /** Whether an expression works on pointers, which unsafe code alone writes. */
 function isPointerExpression(expression: BoundExpression): expression is PointerExpression {
   return POINTER_KINDS.has(expression.kind);
@@ -108,7 +112,8 @@ type AccessExpression = Extract<
       | 'conditionalAccess'
       | 'makeRef'
       | 'refType'
-      | 'refValue';
+      | 'refValue'
+      | 'utf8';
   }
 >;
 type InvocationExpression = Extract<
@@ -483,6 +488,7 @@ export class Evaluator extends AsyncExecutor {
       return value;
     }
     if (isPointerExpression(expression)) return this.evaluatePointer(expression, frame);
+    if (REFERENCE_KINDS.has(expression.kind)) return this.evaluateAccess(expression as AccessExpression, frame);
     switch (expression.kind) {
       case 'late': {
         return this.evaluateLate(expression, frame);
@@ -498,10 +504,7 @@ export class Evaluator extends AsyncExecutor {
       case 'typeOf':
       case 'refAssign':
       case 'compoundOperand':
-      case 'conditionalAccess':
-      case 'makeRef':
-      case 'refType':
-      case 'refValue': {
+      case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
       }
       case 'call':
@@ -592,6 +595,13 @@ export class Evaluator extends AsyncExecutor {
       }
       case 'refValue': {
         return this.place(expression, frame).get();
+      }
+      case 'utf8': {
+        return newSpan(expression.type as NamedType, {
+          values: expression.bytes,
+          start: 0,
+          length: expression.bytes.length,
+        });
       }
       case 'compoundOperand': {
         return frame.operands.at(-1) as Value;

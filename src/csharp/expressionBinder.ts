@@ -424,10 +424,28 @@ export abstract class ExpressionBinder extends LambdaBinder {
       case 'bool': {
         return this.constant(value.value, this.boolType, row);
       }
+      case 'utf8': {
+        return this.utf8Literal(value.value, row);
+      }
       default: {
         return { kind: 'constant', value: undefined, type: NULL_TYPE, row };
       }
     }
+  }
+
+  /** A UTF-8 string literal, whose string must have no lone surrogate, which UTF-8 cannot encode. */
+  utf8Literal(text: string, row: number): BoundExpression {
+    const type = namedType(this.library.typeNamed('System.ReadOnlySpan', 1), [this.specialType('byte')]);
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.exec(text);
+    if (lone) {
+      const code = (lone[0].codePointAt(0) as number).toString(16).toUpperCase();
+      this.error(
+        row,
+        'CS9026',
+        `入力文字列を同等の UTF-8 バイト表現に変換できません。Unable to translate Unicode character \\\\u${code} at index ${lone.index} to specified code page.`
+      );
+    }
+    return { kind: 'utf8', bytes: [...new TextEncoder().encode(text)], type, row };
   }
 
   /** The type of an integer literal: the first of its suffix's types that holds its value. */

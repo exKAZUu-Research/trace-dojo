@@ -100,6 +100,8 @@ export type LiteralValue =
   | { type: 'real'; text: string; suffix: '' | 'f' | 'd' | 'm' }
   | { type: 'char'; value: number }
   | { type: 'string'; value: string }
+  /** A UTF-8 string literal (`"..."u8`), a `ReadOnlySpan<byte>` of the string's UTF-8 bytes. */
+  | { type: 'utf8'; value: string }
   | { type: 'bool'; value: boolean }
   | { type: 'null' };
 

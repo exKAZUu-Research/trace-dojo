@@ -1,7 +1,8 @@
 // The .NET 10 names this grader lacks, so that they are rejected as unavailable rather than reported as undefined:
 // DOTNET_TYPES is the output of scripts/csharpData/listDotnetTypes.cs, and DOTNET_MEMBERS is the output of
 // scripts/csharpData/listDotnetMembers.cs for the types the library declares, plus the extension methods that programs
-// call as members of them (String's AsSpan and AsMemory), which reflection on the type does not list.
+// call as members of them (String's AsSpan and AsMemory, and the MemoryExtensions methods of ReadOnlySpan<T>), which
+// reflection on the type does not list.
 export const DOTNET_TYPES: readonly string[] = [
   'System.AccessViolationException',
   'System.Action',
@@ -1238,6 +1239,8 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
   'System.Linq.IOrderedEnumerable`1': 'CreateOrderedEnumerable',
   'System.Math':
     'Abs,Acos,Acosh,Asin,Asinh,Atan,Atan2,Atanh,BigMul,BitDecrement,BitIncrement,Cbrt,Ceiling,Clamp,CopySign,Cos,Cosh,DivRem,E,Equals,Exp,Floor,FusedMultiplyAdd,GetHashCode,GetType,IEEERemainder,ILogB,Log,Log10,Log2,Max,MaxMagnitude,Min,MinMagnitude,PI,Pow,ReciprocalEstimate,ReciprocalSqrtEstimate,ReferenceEquals,Round,ScaleB,Sign,Sin,SinCos,Sinh,Sqrt,Tan,Tanh,Tau,ToString,Truncate',
+  'System.MemoryExtensions':
+    'AsMemory,AsSpan,BinarySearch,CommonPrefixLength,CompareTo,Contains,ContainsAny,ContainsAnyExcept,ContainsAnyExceptInRange,ContainsAnyInRange,CopyTo,Count,CountAny,EndsWith,EnumerateLines,EnumerateRunes,Equals,GetHashCode,GetType,IndexOf,IndexOfAny,IndexOfAnyExcept,IndexOfAnyExceptInRange,IndexOfAnyInRange,IsWhiteSpace,LastIndexOf,LastIndexOfAny,LastIndexOfAnyExcept,LastIndexOfAnyExceptInRange,LastIndexOfAnyInRange,Overlaps,ReferenceEquals,Replace,ReplaceAny,ReplaceAnyExcept,Reverse,SequenceCompareTo,SequenceEqual,Sort,SpanSplitEnumerator`1,Split,SplitAny,StartsWith,ToLower,ToLowerInvariant,ToString,ToUpper,ToUpperInvariant,Trim,TrimEnd,TrimStart,TryWrite,TryWriteInterpolatedStringHandler',
   'System.MidpointRounding':
     'AwayFromZero,CompareTo,Equals,Format,GetHashCode,GetName,GetNames,GetType,GetTypeCode,GetUnderlyingType,GetValues,GetValuesAsUnderlyingType,HasFlag,IsDefined,Parse,ReferenceEquals,ToEven,ToNegativeInfinity,ToObject,ToPositiveInfinity,ToString,ToZero,TryFormat,TryParse,value__',
   'System.MulticastDelegate':
@@ -1269,6 +1272,9 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Equals,GetHashCode,GetHexString,GetItems,GetString,GetType,Next,NextBytes,NextDouble,NextInt64,NextSingle,ReferenceEquals,Shared,Shuffle,ToString',
   'System.RankException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
+  'System.ReadOnlySpan`1':
+    'BinarySearch,CastUp,CommonPrefixLength,CompareTo,Contains,ContainsAny,ContainsAnyExcept,ContainsAnyExceptInRange,ContainsAnyInRange,CopyTo,Count,CountAny,Empty,EndsWith,EnumerateLines,EnumerateRunes,Enumerator,Equals,GetEnumerator,GetHashCode,GetPinnableReference,GetType,IndexOf,IndexOfAny,IndexOfAnyExcept,IndexOfAnyExceptInRange,IndexOfAnyInRange,IsEmpty,IsWhiteSpace,Item,LastIndexOf,LastIndexOfAny,LastIndexOfAnyExcept,LastIndexOfAnyExceptInRange,LastIndexOfAnyInRange,Length,Overlaps,ReferenceEquals,Replace,ReplaceAny,ReplaceAnyExcept,SequenceCompareTo,SequenceEqual,Slice,Split,SplitAny,StartsWith,ToArray,ToLower,ToLowerInvariant,ToString,ToUpper,ToUpperInvariant,Trim,TrimEnd,TrimStart,TryCopyTo,op_Equality,op_Implicit,op_Inequality',
+  'System.ReadOnlySpan`1+Enumerator': 'Current,Equals,GetHashCode,GetType,MoveNext,ReferenceEquals,ToString',
   'System.Runtime.CompilerServices.SwitchExpressionException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,UnmatchedValue',
   'System.SByte':
@@ -1328,6 +1334,8 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Assembly,AssemblyQualifiedName,Attributes,BaseType,ContainsGenericParameters,CustomAttributes,DeclaringMethod,DeclaringType,DefaultBinder,Delimiter,EmptyTypes,Equals,FilterAttribute,FilterName,FilterNameIgnoreCase,FindInterfaces,FindMembers,FullName,GenericParameterAttributes,GenericParameterPosition,GenericTypeArguments,GetArrayRank,GetConstructor,GetConstructors,GetCustomAttributes,GetCustomAttributesData,GetDefaultMembers,GetElementType,GetEnumName,GetEnumNames,GetEnumUnderlyingType,GetEnumValues,GetEnumValuesAsUnderlyingType,GetEvent,GetEvents,GetField,GetFields,GetFunctionPointerCallingConventions,GetFunctionPointerParameterTypes,GetFunctionPointerReturnType,GetGenericArguments,GetGenericParameterConstraints,GetGenericTypeDefinition,GetHashCode,GetInterface,GetInterfaceMap,GetInterfaces,GetMember,GetMembers,GetMemberWithSameMetadataDefinitionAs,GetMethod,GetMethods,GetNestedType,GetNestedTypes,GetOptionalCustomModifiers,GetProperties,GetProperty,GetRequiredCustomModifiers,GetType,GetTypeArray,GetTypeCode,GetTypeFromCLSID,GetTypeFromHandle,GetTypeFromProgID,GetTypeHandle,GUID,HasElementType,HasSameMetadataDefinitionAs,InvokeMember,IsAbstract,IsAnsiClass,IsArray,IsAssignableFrom,IsAssignableTo,IsAutoClass,IsAutoLayout,IsByRef,IsByRefLike,IsClass,IsCollectible,IsCOMObject,IsConstructedGenericType,IsContextful,IsDefined,IsEnum,IsEnumDefined,IsEquivalentTo,IsExplicitLayout,IsFunctionPointer,IsGenericMethodParameter,IsGenericParameter,IsGenericType,IsGenericTypeDefinition,IsGenericTypeParameter,IsImport,IsInstanceOfType,IsInterface,IsLayoutSequential,IsMarshalByRef,IsNested,IsNestedAssembly,IsNestedFamANDAssem,IsNestedFamily,IsNestedFamORAssem,IsNestedPrivate,IsNestedPublic,IsNotPublic,IsPointer,IsPrimitive,IsPublic,IsSealed,IsSecurityCritical,IsSecuritySafeCritical,IsSecurityTransparent,IsSerializable,IsSignatureType,IsSpecialName,IsSubclassOf,IsSZArray,IsTypeDefinition,IsUnicodeClass,IsUnmanagedFunctionPointer,IsValueType,IsVariableBoundArray,IsVisible,MakeArrayType,MakeByRefType,MakeGenericMethodParameter,MakeGenericSignatureType,MakeGenericType,MakePointerType,MemberType,MetadataToken,Missing,Module,Name,Namespace,op_Equality,op_Inequality,ReferenceEquals,ReflectedType,ReflectionOnlyGetType,StructLayoutAttribute,ToString,TypeHandle,TypeInitializer,UnderlyingSystemType',
   'System.TypeInitializationException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,TypeName',
+  'System.TypedReference':
+    'Equals,GetHashCode,GetTargetType,GetType,MakeTypedReference,ReferenceEquals,SetTypedReference,TargetTypeToken,ToObject,ToString',
   'System.UInt16':
     'Clamp,CompareTo,CreateChecked,CreateSaturating,CreateTruncating,DivRem,Equals,GetHashCode,GetType,GetTypeCode,IsEvenInteger,IsOddInteger,IsPow2,LeadingZeroCount,Log2,Max,MaxValue,Min,MinValue,Parse,PopCount,ReferenceEquals,RotateLeft,RotateRight,Sign,ToString,TrailingZeroCount,TryFormat,TryParse',
   'System.UInt32':

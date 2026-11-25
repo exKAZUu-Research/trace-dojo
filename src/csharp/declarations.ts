@@ -1195,7 +1195,11 @@ export class DeclarationBinder extends BinderBase {
     const isIndexer = member.kind === 'indexer';
     const name = isIndexer ? 'Item' : member.name;
     const shownName = isIndexer ? 'this' : name;
-    const property = new PropertySymbol(name, this.resolveType(member.type, context), symbol, isIndexer);
+    // The library declares `ref readonly` indexers, which read as values and refuse assignment as Roslyn does.
+    const isRefReadonly = this.isLibraryUnit && member.type.kind === 'refType' && member.type.isReadonly;
+    const declaredType = member.type.kind === 'refType' && isRefReadonly ? member.type.type : member.type;
+    const property = new PropertySymbol(name, this.resolveType(declaredType, context), symbol, isIndexer);
+    property.isRefReadonly = isRefReadonly;
     const modifiers = member.modifiers.set;
     property.isStatic = modifiers.has('static');
     property.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');

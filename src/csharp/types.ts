@@ -258,6 +258,8 @@ export class PropertySymbol {
   setter: MethodSymbol | undefined;
   /** Whether the setter is an `init` accessor. */
   isInitOnly = false;
+  /** Whether the property returns a `ref readonly` variable, which the program may read but not assign. */
+  isRefReadonly = false;
   isStatic = false;
   access: Accessibility = 'private';
   /** The backing field of an auto-property. */

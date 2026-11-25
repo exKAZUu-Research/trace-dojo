@@ -225,8 +225,9 @@ export abstract class OperatorBinder extends ConversionBinder {
         { fn: { typeContext: undefined } }
       );
     }
-    const pointerOperation = this.bindPointerOperator(operator, left, right, row);
-    if (pointerOperation) return pointerOperation;
+    const special =
+      this.utf8Concatenation(operator, left, right, row) ?? this.bindPointerOperator(operator, left, right, row);
+    if (special) return special;
     const userDefined = this.userOperator(OPERATOR_NAMES[operator], [left, right], row);
     if (userDefined) return userDefined;
     if (operator === '+' && (this.isString(left.type) || this.isString(right.type)))
@@ -583,6 +584,25 @@ export abstract class OperatorBinder extends ConversionBinder {
     if (leftEnum && !rightEnum && this.implicitConversionOf(right, underlying))
       return node(enumType, underlying, lift(enumType));
     return undefined;
+  }
+
+  /** `+` of UTF-8 string literals, which C# allows of literals alone and joins at compile time, not of other spans. */
+  private utf8Concatenation(
+    operator: string,
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number
+  ): BoundExpression | undefined {
+    if (operator !== '+' || (left.kind !== 'utf8' && right.kind !== 'utf8') || !sameType(left.type, right.type))
+      return undefined;
+    if (left.kind === 'utf8' && right.kind === 'utf8')
+      return { kind: 'utf8', bytes: [...left.bytes, ...right.bytes], type: left.type, row };
+    this.error(
+      row,
+      'CS9047',
+      `演算子 '+' は、UTF-8 バイト表現ではない型 '${displayType(left.type)}' および '${displayType(right.type)}' のオペランドには適用できません`
+    );
+    return { kind: 'default', type: ERROR_TYPE, row };
   }
 
   /** `+` with a string operand concatenates, calling `ToString()` on the other operand. */

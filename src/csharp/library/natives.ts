@@ -12,3 +12,4 @@ import './nativesLinq';
 import './nativesRandom';
 import './nativesRegex';
 import './nativesSorted';
+import './nativesSpan';

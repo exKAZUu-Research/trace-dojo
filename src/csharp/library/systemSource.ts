@@ -28,6 +28,25 @@ namespace System {
     public string? Namespace { get; }
     public override string ToString();
   }
+  public readonly ref struct ReadOnlySpan<T> {
+    public ReadOnlySpan(T[]? array);
+    public static ReadOnlySpan<T> Empty { get; }
+    public int Length { get; }
+    public bool IsEmpty { get; }
+    public ref readonly T this[int index] { get; }
+    public T[] ToArray();
+    public ReadOnlySpan<T> Slice(int start);
+    public ReadOnlySpan<T> Slice(int start, int length);
+    public Enumerator GetEnumerator();
+    public override string ToString();
+    public static bool operator ==(ReadOnlySpan<T> left, ReadOnlySpan<T> right);
+    public static bool operator !=(ReadOnlySpan<T> left, ReadOnlySpan<T> right);
+    public static implicit operator ReadOnlySpan<T>(T[]? array);
+    public ref struct Enumerator { public T Current { get; } public bool MoveNext(); }
+  }
+  public static class MemoryExtensions {
+    public static bool SequenceEqual<T>(this ReadOnlySpan<T> span, ReadOnlySpan<T> other) where T : IEquatable<T>;
+  }
   public ref struct TypedReference {
     public static Type GetTargetType(TypedReference value);
     public static object? ToObject(TypedReference value);
@@ -58,6 +77,7 @@ namespace System {
 
   public sealed class String : IComparable, IComparable<string?>, IEquatable<string?>, IEnumerable<char>, ICloneable {
     public static readonly string Empty = "";
+    public static implicit operator ReadOnlySpan<char>(string? value);
     public String(char c, int count);
     public String(char[]? value);
     public String(char[] value, int startIndex, int length);
@@ -1291,7 +1311,14 @@ namespace System.Runtime.CompilerServices {
   }
 }
 
-namespace System.Text { public abstract class Encoding { } }
+namespace System.Text {
+  public abstract class Encoding {
+    public static Encoding UTF8 { get; }
+    public virtual byte[] GetBytes(string s);
+    public virtual string GetString(byte[] bytes);
+    public string GetString(ReadOnlySpan<byte> bytes);
+  }
+}
 
 namespace Microsoft.CSharp.RuntimeBinder {
   public class RuntimeBinderException : Exception { public RuntimeBinderException(); public RuntimeBinderException(string? message); public RuntimeBinderException(string? message, Exception? innerException); }
