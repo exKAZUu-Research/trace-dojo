@@ -548,6 +548,10 @@ class AstChecker {
     if (this.inComptime()) this.error(span, 'すでにコンパイルのときに実行される場所なので、comptime は要りません。');
   }
 
+  private inlineKeyword(span: Span): void {
+    if (this.inComptime()) this.error(span, 'すでにコンパイルのときに実行される場所なので、inline は要りません。');
+  }
+
   // Expressions -----------------------------------------------------------------------------------------------------
 
   expression(expression: Expression, use: Use): void {
@@ -643,10 +647,12 @@ class AstChecker {
         break;
       }
       case 'while': {
+        if (expression.isInline) this.inlineKeyword(expression);
         this.whileExpression(expression);
         break;
       }
       case 'for': {
+        if (expression.isInline) this.inlineKeyword(expression);
         this.forExpression(expression);
         break;
       }
