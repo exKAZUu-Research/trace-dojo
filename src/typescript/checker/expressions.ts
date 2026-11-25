@@ -454,10 +454,22 @@ export class ExpressionChecker {
     const symbol = this.c.scopeOf(node).lookupValue(name);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
+    if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require')) return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);
     if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
     if (symbol.valueKind === 'namespace') this.c.namespaces.checkValueUse(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
+  }
+
+  /**
+   * Node.js's `require` other than called by name, which the checker types by the module it names: as a value, or
+   * through a member such as `require.resolve` or `require.call`, it could load any module.
+   */
+  private reportRequireValue(node: TreeNode): Type {
+    const parent = node.parent;
+    const property = parent?.type === 'member_expression' ? parent.childForFieldName('property') : undefined;
+    this.c.error(node, unsupportedMessage(property ? `require.${property.text}` : '呼び出し以外での require'));
+    return errorType;
   }
 
   private implicitArgumentsType(node: TreeNode): Type | undefined {

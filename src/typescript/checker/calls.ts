@@ -470,14 +470,12 @@ export class Calls {
     const library = this.c.libraryBinder.moduleScope.lookupValue('require');
     if (!library || this.c.scopeOf(callee).lookupValue('require') !== library) return undefined;
     const [id] = args;
-    const name = id?.type === 'string' ? stringValue(id) : undefined;
+    const name = id && this.c.flow.constantIndexName(id);
     const module = name === undefined ? undefined : this.c.namespaces.moduleObjectType(name);
     if (module) return this.checkArgumentsOnly(args, module);
     this.c.error(
       callee,
-      unsupportedMessage(
-        name === undefined ? '文字列リテラルで名前を書かない require' : `モジュール '${name}' の require`
-      )
+      unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
     );
     return this.checkArgumentsOnly(args, errorType);
   }

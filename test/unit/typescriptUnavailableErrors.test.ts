@@ -179,14 +179,23 @@ test.each([
 
 test.each([
   ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
-  [
-    "const id = 'fs'; const fs = require(id);",
-    '文字列リテラルで名前を書かない require は、この採点環境では使えません。',
-  ],
+  ["let id = 'fs'; const fs = require(id);", '名前が定数で決まらない require は、この採点環境では使えません。'],
   ["const fs = require('fs'); fs.statSync('.');", 'fs.statSync は、この採点環境では使えません。'],
+  ["const load = require; load('path');", '呼び出し以外での require は、この採点環境では使えません。'],
+  ["require.call(null, 'path');", 'require.call は、この採点環境では使えません。'],
+  ["const { readFile } = require('fs');", 'fs.readFile は、この採点環境では使えません。'],
+  ["import { readFile } from 'fs';", 'fs.readFile は、この採点環境では使えません。'],
+  ['const { cwd } = process;', 'process.cwd は、この採点環境では使えません。'],
   ["import * as fs from 'fs'; fs.readFile('x', () => {});", 'fs.readFile は、この採点環境では使えません。'],
   ['console.log(process.cwd());', 'process.cwd は、この採点環境では使えません。'],
   ['console.log(process.stdout.columns);', 'process.stdout.columns は、この採点環境では使えません。'],
 ])('rejects a Node.js feature the interpreter lacks before running %s', (source, message) => {
   expect(executeProgram('typescript', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
+});
+
+test('suggests the member a misspelled name of a Node.js object means, as tsc does', () => {
+  expect(executeProgram('typescript', 'console.log(process.stdout.writ);')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: "プロパティ 'writ' は型 'WriteStream' にありません。'write' のことですか？" }],
+  });
 });

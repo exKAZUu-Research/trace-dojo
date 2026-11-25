@@ -1,7 +1,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
+import { unavailableNodeMember } from './nodeLibrary';
 import type { Scope, Sym } from './scopes';
 import { named, stringValue } from './syntax';
 import {
@@ -176,11 +178,11 @@ export class Namespaces {
    * `esModuleInterop` lets a default import stand for a CommonJS module.
    */
   private isSyntheticDefault(module: Sym, name: string): boolean {
-    return (
-      name === 'default' &&
-      !module.namespaceExports?.values.has('default') &&
-      this.c.libraryBinder.ambientModules.get(module.name) === module
-    );
+    return name === 'default' && !module.namespaceExports?.values.has('default') && this.isLibraryModule(module);
+  }
+
+  private isLibraryModule(module: Sym): boolean {
+    return this.c.libraryBinder.ambientModules.get(module.name) === module;
   }
 
   /** The object of a module the library declares, as `import * as` gives it, or undefined for another module. */
@@ -218,7 +220,9 @@ export class Namespaces {
     const exports = module.namespaceExports as Scope;
     for (const specifier of named(imports)) {
       const name = specifier.childForFieldName('name');
-      if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
+      const unavailable = name && this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, name.text);
+      if (name && unavailable) this.c.error(name, unsupportedMessage(unavailable));
+      else if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
         this.c.error(name, `モジュール ${moduleName} には、エクスポートされたメンバー '${name.text}' がありません。`);
     }
   }
