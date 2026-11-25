@@ -1,0 +1,15 @@
+namespace A.B {
+  export const x = 1;
+  export function f() { return x; }
+}
+namespace A.B {
+  export const y = x + 1;
+  export class C { v = f(); }
+}
+namespace A {
+  export const z = B.y;
+}
+namespace A.B.D {
+  export const w = y * 10;
+}
+console.log(A.B.x, A.B.y, new A.B.C().v, A.z, A.B.D.w);

@@ -216,6 +216,9 @@ export class Binder {
     let outer = scope;
     let namespace: Sym | undefined;
     for (const part of namespacePath(name)) {
+      // `namespace A.B` declared again adds to the `B` that an earlier declaration's `A` exports.
+      const exported = outer.namespace?.namespaceExports?.values.get(part.text);
+      if (exported?.valueKind === 'namespace' && !outer.values.has(part.text)) outer.values.set(part.text, exported);
       namespace = outer.declareValue(part.text, 'namespace', node, part);
       if (outer.namespace) this.exportFrom(outer, namespace, 'value');
       namespace.namespaceExports ??= new Scope('block', outer, node);
