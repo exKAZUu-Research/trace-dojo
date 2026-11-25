@@ -173,6 +173,14 @@ pub const Reader = struct {
 
     pub fn discardRemaining(r: *Reader) ShortError!usize {
         var count: usize = 0;
+        if (r.buffer.len == 0) {
+            var spare: [4096]u8 = undefined;
+            while (true) {
+                const n = try readInput(r.descriptor orelse return count, &spare);
+                if (n == 0) return count;
+                count += n;
+            }
+        }
         while (true) {
             count += r.end - r.seek;
             r.seek = r.end;
@@ -277,6 +285,14 @@ pub const Reader = struct {
     }
 
     pub fn stream(r: *Reader, w: *Io.Writer, limit: Limit) StreamError!usize {
+        if (r.buffer.len == 0) {
+            // An unbuffered reader passes what it reads straight to the writer.
+            var spare: [4096]u8 = undefined;
+            const n = try readInput(r.descriptor orelse return error.EndOfStream, limit.slice(&spare));
+            if (n == 0) return error.EndOfStream;
+            try w.writeAll(spare[0..n]);
+            return n;
+        }
         if (r.seek == r.end) try r.fillMore();
         const buffer = limit.slice(r.buffer[r.seek..r.end]);
         try w.writeAll(buffer);
