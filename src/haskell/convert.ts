@@ -61,7 +61,6 @@ export const GENERIC_NODES: Record<string, string> = {
   module_id: 'a part of a module name, read with the name as text',
   constructor_synonym: 'a constructor of a COMPLETE-like list, read through its parent constructor_synonyms',
   field_pattern: 'a field of a record pattern, read through its own fields',
-  typed_hole: 'a hole, read as the name `_` of an expression',
   quoted_expression: 'the expression of a quote, which convertQuote reads when the quote holds no other kind',
 };
 
@@ -1826,7 +1825,8 @@ export function convertExpr(features: FeatureGates<'convert'>, node: Node): Expr
     case 'constructor':
     case 'qualified':
     case 'prefix_id':
-    case 'parenthesized_name': {
+    case 'parenthesized_name':
+    case 'typed_hole': {
       return convertNameExpression(node, span);
     }
     case 'quote':
