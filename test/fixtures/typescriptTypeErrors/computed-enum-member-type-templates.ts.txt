@@ -1,0 +1,4 @@
+const base = 3;
+enum Folded { A = base, B, C = `${base}`, D = `x${base}y${"z"}`, E = `n\\t${1 + 1}` }
+console.log(Folded.C, Folded.D, Folded.E, Folded.B);
+enum Bad { A = `${Math.random()}` }

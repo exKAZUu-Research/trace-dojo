@@ -204,7 +204,6 @@ export class Enums {
   }
 
   /** The value of a constant enum expression, as TypeScript's `evaluate` computes it, or undefined for another one. */
-  // code-gauge-allow functionCognitiveComplexity -- Evaluates each kind of constant expression TypeScript allows in an enum.
   // code-gauge-allow functionNcss -- Evaluates each kind of constant expression TypeScript allows in an enum.
   private evaluate(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const expression = skipParentheses(node);
@@ -217,9 +216,7 @@ export class Enums {
         return stringValue(expression);
       }
       case 'template_string': {
-        return named(expression).some((child) => child.type === 'template_substitution')
-          ? undefined
-          : decodeTemplateFragment(expression.text.slice(1, -1));
+        return this.templateValue(expression, evaluation);
       }
       case 'identifier': {
         return (
@@ -249,6 +246,24 @@ export class Enums {
         return undefined;
       }
     }
+  }
+
+  /** A template literal's string, when every substitution in it is a constant expression, as tsc evaluates it. */
+  private templateValue(template: TreeNode, evaluation: Evaluation): string | undefined {
+    let text = '';
+    let position = template.startIndex + 1;
+    for (const substitution of named(template).filter((child) => child.type === 'template_substitution')) {
+      const inner = named(substitution)[0];
+      const value = inner && this.evaluate(inner, evaluation);
+      if (value === undefined) return undefined;
+      text += decodeTemplateFragment(this.sliceOf(template, position, substitution.startIndex)) + String(value);
+      position = substitution.endIndex;
+    }
+    return text + decodeTemplateFragment(this.sliceOf(template, position, template.endIndex - 1));
+  }
+
+  private sliceOf(node: TreeNode, start: number, end: number): string {
+    return node.text.slice(start - node.startIndex, end - node.startIndex);
   }
 
   /** The value of a `const` an initializer names, when a constant expression initializes it, as tsc evaluates it. */
