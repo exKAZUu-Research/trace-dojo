@@ -1521,6 +1521,9 @@ class Renamer {
       case 'comprehension': {
         if (expr.quals.some((qual) => qual.kind === 'transform'))
           return this.renameExpr(withoutTransforms(expr), scope);
+        if (this.features.allows('monadComprehensions') && expr.parallel) {
+          return this.renameExpr(parallelMonadComprehension(expr), scope);
+        }
         if (this.features.allows('monadComprehensions') && !expr.parallel) {
           // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
           const support = (name: string): Expr => ({ kind: 'support', name, span });
@@ -2976,6 +2979,42 @@ function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): nu
 
 function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[]) => Expr | Pat): Expr | Pat {
   return items.length === 1 ? one(items[0]) : many(items);
+}
+
+/**
+ * A parallel monad comprehension, `[e | qs1 | qs2]`, as GHC desugars it: each branch a comprehension of the tuple of
+ * the variables it binds, the branches zipped with `mzip`, and `e` over their variables.
+ */
+function parallelMonadComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
+  const { span } = expr;
+  const support = (name: string): Expr => ({ kind: 'support', name, span });
+  const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
+    const names = quals.flatMap((stmt) => stmtBinders(stmt));
+    const vars: Expr[] = names.map((name) => ({ kind: 'var', name: { name: name.name, span }, span }));
+    const pats: Pat[] = names.map((name) => ({ kind: 'pvar', name, span }));
+    const tuple: Expr = vars.length === 1 ? vars[0] : { kind: 'tuple', elems: vars, span };
+    const pattern: Pat = pats.length === 1 ? pats[0] : { kind: 'ptuple', elems: pats, span };
+    return { source: { kind: 'comprehension', expr: tuple, quals, span } as Expr, pattern };
+  });
+  let source = (branches.at(-1) as (typeof branches)[number]).source;
+  let pattern = (branches.at(-1) as (typeof branches)[number]).pattern;
+  for (let index = branches.length - 2; index >= 0; index--) {
+    source = {
+      kind: 'app',
+      fn: { kind: 'app', fn: support('mzip'), arg: branches[index].source, span },
+      arg: source,
+      span,
+    };
+    pattern = { kind: 'ptuple', elems: [branches[index].pattern, pattern], span };
+  }
+  return {
+    kind: 'do',
+    stmts: [
+      { kind: 'bind', pat: pattern, expr: source, span },
+      { kind: 'exp', expr: { kind: 'app', fn: support('return'), arg: expr.expr, span }, span },
+    ],
+    span,
+  };
 }
 
 /** Adds a candidate under a key once: every table that re-exports an entity gives it, and it is one candidate. */

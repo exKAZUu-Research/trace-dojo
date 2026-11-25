@@ -239,6 +239,20 @@ instance Applicative Identity where
 instance Monad Identity where
   Identity a >>= f = f a
 
+-- MonadZip, which a parallel monad comprehension zips its branches with.
+class Monad m => MonadZip m where
+  mzip :: m a -> m b -> m (a, b)
+
+instance MonadZip [] where
+  mzip = zip
+
+instance MonadZip Maybe where
+  mzip (Just a) (Just b) = Just (a, b)
+  mzip _ _ = Nothing
+
+instance MonadZip Identity where
+  mzip (Identity a) (Identity b) = Identity (a, b)
+
 instance MonadFix Identity where
   mfix f = let x = f (runIdentity x) in x
 
