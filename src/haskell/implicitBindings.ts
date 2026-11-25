@@ -1,5 +1,5 @@
 import { compileError, unsupportedError } from './errors';
-import type { Expr, Guard, GuardedExpr, Pat, Rhs, Span, Stmt } from './syntax';
+import type { Decl, Expr, Guard, GuardedExpr, Pat, Rhs, Span, Stmt } from './syntax';
 
 /** A binding of an implicit parameter, `?x = e`. */
 export interface ImplicitBind {
@@ -68,18 +68,30 @@ export function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehe
   };
 }
 
-/** A right-hand side whose `where` binds implicit parameters, which scope over its guards and bodies. */
+/**
+ * A right-hand side whose `where` binds implicit parameters, which scope over its guards and bodies: each value is an
+ * ordinary `where` binding, shared by every guard that reads it, which the implicit bindings name.
+ */
 export function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
+  const values: Decl[] = binds.map((bind) => ({
+    kind: 'funClause',
+    name: { name: ` implicit ${bind.name}`, span: bind.span },
+    args: [],
+    rhs: { body: { kind: 'plain', expr: bind.expr }, where: [], span: bind.span },
+    span: bind.span,
+  }));
+  const named = binds.map((bind): ImplicitBind => ({
+    ...bind,
+    expr: { kind: 'var', name: { name: ` implicit ${bind.name}`, span: bind.span }, span: bind.span },
+  }));
   if (rhs.body.kind === 'plain') {
-    return {
-      ...rhs,
-      body: { kind: 'plain', expr: { kind: 'implicitLet', binds, body: rhs.body.expr, span: rhs.span } },
-    };
+    const expr: Expr = { kind: 'implicitLet', binds: named, body: rhs.body.expr, span: rhs.span };
+    return { ...rhs, where: values, body: { kind: 'plain', expr } };
   }
   const branches = rhs.body.branches.map((branch) =>
-    lowerImplicitGuards({ ...branch, guards: [implicitGuard(binds, rhs.span), ...branch.guards] })
+    lowerImplicitGuards({ ...branch, guards: [implicitGuard(named, rhs.span), ...branch.guards] })
   );
-  return { ...rhs, body: { kind: 'guarded', branches } };
+  return { ...rhs, where: values, body: { kind: 'guarded', branches } };
 }
 
 /**
