@@ -16,7 +16,12 @@ const ERRORS: Record<FileSystemErrorCode, { description: string; errno: number }
 };
 
 /** The paths that name the run's standard output streams, by the stream each names. */
-const STANDARD_STREAMS = { '/dev/stdout': 'stdout', '/dev/stderr': 'stderr' } as const;
+const STANDARD_STREAMS = {
+  '/dev/stdout': 'stdout',
+  '/dev/stderr': 'stderr',
+  '/dev/fd/1': 'stdout',
+  '/dev/fd/2': 'stderr',
+} as const;
 
 /** The modules `require` returns, by the names Node.js accepts for them. */
 const MODULE_NAMES = { fs: 'fs', 'node:fs': 'fs' } as const;
