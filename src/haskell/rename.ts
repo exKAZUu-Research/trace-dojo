@@ -29,7 +29,7 @@ import {
   type TypeEntity,
   type ValueEntity,
 } from './entities';
-import { compileError, unsupportedError } from './errors';
+import { compileError, REQUIRED_TYPE_TERM, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
 import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
@@ -108,6 +108,7 @@ import {
   isQuoteLevelBinder,
   quoteBindersAround,
   QuoteBuilder,
+  quoteLevelName,
   thString,
 } from './thQuote';
 import type { SpliceModuleNames } from './thSplice';
@@ -3211,9 +3212,12 @@ class Renamer {
   /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
   private thNameCode(expr: Extract<Expr, { kind: 'thName' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    if (expr.namespace === 'var' && !expr.name.qualifier && scope.lookup(expr.name.name)) {
-      return thCall(span, 'mkNameS', thString(span, expr.name.name));
-    }
+    const namespace: LocalNamespace = expr.namespace === 'var' ? 'value' : expr.namespace;
+    const local = expr.name.qualifier ? undefined : scope.lookup(expr.name.name, namespace);
+    // A binder of a quote around the splice this is in has its new name, as `[| x |]` there would.
+    const levelName = local && quoteLevelName(local);
+    if (levelName) return { kind: 'var', name: { name: levelName, span }, span };
+    if (local && expr.namespace === 'var') return thCall(span, 'mkNameS', thString(span, expr.name.name));
     // The types of special syntax have names of their own in GHC.
     const special = expr.namespace === 'type' && !expr.name.qualifier ? specialTypeName(expr.name.name) : undefined;
     if (special) return globalNameCode(span, 'tc', special[0], special[1]);
@@ -3457,7 +3461,12 @@ class Renamer {
     const unsupported = candidates.find((entity) => entity.unsupported);
     if (unsupported?.unsupported) throw unsupportedError(name.span, unsupported.unsupported);
     candidates = candidates.filter((entity) => entity.sort === 'con');
-    if (candidates.length === 0) throw compileError(name.span, `構成子 ${describeName(name)} がスコープにありません。`);
+    if (candidates.length === 0) {
+      if (this.features.allows('requiredTypeTerms') && this.scope.types.get(name.name).length > 0) {
+        throw unsupportedError(name.span, REQUIRED_TYPE_TERM);
+      }
+      throw compileError(name.span, `構成子 ${describeName(name)} がスコープにありません。`);
+    }
     return this.pickOne(candidates, name, 'value').con as ConInfo;
   }
 

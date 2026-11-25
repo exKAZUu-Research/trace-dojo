@@ -37,6 +37,11 @@ export function isQuoteLevelBinder(local: LocalVar): boolean {
   return levelNames.has(local);
 }
 
+/** The variable holding the new name of the quote binder a local stands for in a splice inside the quote. */
+export function quoteLevelName(local: LocalVar): string | undefined {
+  return levelNames.get(local);
+}
+
 /** The binders of the quotes around a splice's code, if the code is a splice inside a quote. */
 export function quoteBindersAround(code: Expr): readonly { local: LocalVar; nameVariable: string }[] | undefined {
   return splicesInQuotes.get(code);

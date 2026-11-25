@@ -20,7 +20,7 @@ import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasse
 import { solveCoercible } from './coercible';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
-import { compileError, unsupportedError } from './errors';
+import { compileError, REQUIRED_TYPE_TERM, unsupportedError } from './errors';
 import { freshKinds } from './kindTemplates';
 import { checkLinearUses, linearLocals } from './linearity';
 import { TypePrinter } from './prettyType';
@@ -711,6 +711,10 @@ export class Checker {
   }
 
   typeOfRef(ref: VarRef, span: Span, name: string, expr: Extract<RExpr, { k: 'var' }>): Type {
+    // A required binder, `forall a ->`, takes its type from `(type t)`; a term in its place is GHC's term-to-type
+    // mapping, which this environment does not do.
+    const scheme = ref.kind === 'local' ? ref.local.scheme : ref.entity.scheme;
+    if (scheme?.visibilities.includes('required')) throw unsupportedError(span, REQUIRED_TYPE_TERM);
     if (ref.kind === 'local') {
       const local = ref.local;
       if (local.scheme) {
@@ -2068,7 +2072,9 @@ export function typeVarNames(types: readonly RType[]): string[] {
 }
 
 export function checkSchemeAmbiguity(scheme: Scheme, span: Span, defaultable?: (index: number) => boolean): void {
-  const visible = visibleThroughFundeps(scheme, genericIndices(scheme.type));
+  // A required binder's variable, `forall a ->`, is one every caller gives.
+  const required = scheme.visibilities.flatMap((visibility, index) => (visibility === 'required' ? [index] : []));
+  const visible = visibleThroughFundeps(scheme, new Set([...genericIndices(scheme.type), ...required]));
   const ambiguous = new Set<number>();
   for (const pred of scheme.preds) {
     for (const index of genericIndices(pred.type)) {

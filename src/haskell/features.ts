@@ -71,6 +71,7 @@ export const FEATURES = {
   functionalDependencies: { phase: 'convert', any: ['FunctionalDependencies'] },
   defaultSignatures: { phase: 'convert', any: ['DefaultSignatures'] },
   requiredTypeArguments: { phase: 'convert', any: ['RequiredTypeArguments'] },
+  requiredTypeTerms: { phase: 'rename', any: ['RequiredTypeArguments'] },
   typeArgumentKeyword: { phase: 'convert', all: ['RequiredTypeArguments', 'ExplicitNamespaces'] },
   explicitForAll: { phase: 'convert', any: ['ExplicitForAll'] },
   rankNTypes: { phase: 'convert', any: ['RankNTypes'] },
