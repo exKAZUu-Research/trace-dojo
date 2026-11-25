@@ -337,7 +337,8 @@ class _File extends FileSystemEntity implements File {
     return _FileSink(this, mode._appends);
   }
   Stream<List<int>> openRead([int? start, int? end]) =>
-      Stream<List<int>>.fromFuture(Future(() => readAsBytesSync().sublist(start ?? 0, end)));
+      Stream<List<int>>.fromFuture(Future(() => readAsBytesSync().sublist(start ?? 0, end)))
+          .where((bytes) => bytes.isNotEmpty);
   external static String _read(String path, String failure);
   external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
   external static void _create(String path, bool recursive, bool exclusive);
