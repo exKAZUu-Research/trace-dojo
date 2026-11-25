@@ -823,7 +823,7 @@ class Renamer {
       }
       const own = new Set<string>(conDecl.exVars?.map((binder) => binder.name.name));
       if (conDecl.result && !conDecl.exVars) {
-        for (const type of [...conDecl.fields, conDecl.result, ...(conDecl.context ?? [])]) collectTypeVars(type, own);
+        for (const type of [...(conDecl.context ?? []), ...conDecl.fields, conDecl.result]) collectTypeVars(type, own);
       }
       const vars = new Set([...(conDecl.result ? [] : params), ...own]);
       const ownVars = conDecl.exVars

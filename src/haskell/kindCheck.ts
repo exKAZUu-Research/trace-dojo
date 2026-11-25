@@ -290,6 +290,9 @@ function inferConstructorVariables(checker: Checker, decl: RDataDecl, conDecl: R
       throw compileError(con.span ?? decl.span, `構成子 ${con.name} の型変数 ${binder.name} の種類が合いません。`);
     }
   }
+  if (conDecl.result) {
+    con.specified = ownVars.map((binder) => (vars.get(binder.name) as Extract<Type, { tag: 'tgen' }>).index);
+  }
   con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
   con.context = checker.convertConstraints(conDecl.context ?? [], vars, varKinds);
   con.equalities = resultArgs.flatMap((arg, index): [number, Type][] =>

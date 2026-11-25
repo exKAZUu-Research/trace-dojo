@@ -68,6 +68,8 @@ export interface ConInfo {
   fieldTypes: Type[];
   /** The kinds of the existential variables, which follow the data type's parameters. */
   exKinds?: Kind[];
+  /** For a GADT constructor, its variables' indices in the order its signature gives them to type applications. */
+  specified?: number[];
   /**
    * The constraints DatatypeContexts puts on the constructor: using it, to build or to match, needs them, but its
    * values hold no dictionaries for them.

@@ -1772,7 +1772,7 @@ export function conScheme(con: ConInfo): Scheme {
   );
   let type: Type = tap(tcon(con.type), ...resultArgs);
   for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
-  return { kinds, preds: con.context ?? [], type, specified: kinds.map((_, index) => index) };
+  return { kinds, preds: con.context ?? [], type, specified: con.specified ?? kinds.map((_, index) => index) };
 }
 
 export function typeParamKinds(type: TypeEntity): Kind[] {
