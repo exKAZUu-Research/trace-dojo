@@ -157,9 +157,10 @@ fun <T> Sequence<T>.filter(predicate: (T) -> Boolean): Sequence<T> = Sequence {
 
 fun <T> Sequence<T>.filterNot(predicate: (T) -> Boolean): Sequence<T> = filter { !predicate(it) }
 
-fun <T> Sequence<T>.filterIndexed(predicate: (index: Int, T) -> Boolean): Sequence<T> {
+// The index starts over at each iteration, as mapIndexed's does.
+fun <T> Sequence<T>.filterIndexed(predicate: (index: Int, T) -> Boolean): Sequence<T> = Sequence {
     var index = 0
-    return filter { predicate(index++, it) }
+    this@filterIndexed.filter { predicate(index++, it) }.iterator()
 }
 
 @Suppress("UNCHECKED_CAST")
@@ -220,7 +221,7 @@ fun <T> Sequence<T>.onEach(action: (T) -> Unit): Sequence<T> = map { action(it);
 
 fun <T> Sequence<T>.onEachIndexed(action: (index: Int, T) -> Unit): Sequence<T> = mapIndexed { index, element -> action(index, element); element }
 
-fun <T, R> Sequence<T>.flatMap(transform: (T) -> Sequence<R>): Sequence<R> = Sequence {
+@OverloadResolutionByLambdaReturnType fun <T, R> Sequence<T>.flatMap(transform: (T) -> Sequence<R>): Sequence<R> = Sequence {
     val source = iterator()
     var inner: Iterator<R>? = null
     StepIterator<R> { step ->
@@ -239,7 +240,8 @@ fun <T, R> Sequence<T>.flatMap(transform: (T) -> Sequence<R>): Sequence<R> = Seq
 }
 
 @JvmName("flatMapIterable")
-fun <T, R> Sequence<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> = flatMap { transform(it).asSequence() }
+@OverloadResolutionByLambdaReturnType fun <T, R> Sequence<T>.flatMap(transform: (T) -> Iterable<R>): Sequence<R> =
+    map { transform(it).asSequence() }.flatten()
 
 fun <T> Sequence<Sequence<T>>.flatten(): Sequence<T> = flatMap { it }
 
@@ -531,21 +533,21 @@ fun Sequence<Int>.average(): Double = toList().average()
 fun Sequence<Double>.average(): Double = toList().average()
 
 @JvmName("sumOfInt")
-inline fun <T> Sequence<T>.sumOf(selector: (T) -> Int): Int {
+@OverloadResolutionByLambdaReturnType inline fun <T> Sequence<T>.sumOf(selector: (T) -> Int): Int {
     var sum = 0
     for (element in this) sum += selector(element)
     return sum
 }
 
 @JvmName("sumOfLong")
-inline fun <T> Sequence<T>.sumOf(selector: (T) -> Long): Long {
+@OverloadResolutionByLambdaReturnType inline fun <T> Sequence<T>.sumOf(selector: (T) -> Long): Long {
     var sum = 0L
     for (element in this) sum += selector(element)
     return sum
 }
 
 @JvmName("sumOfDouble")
-inline fun <T> Sequence<T>.sumOf(selector: (T) -> Double): Double {
+@OverloadResolutionByLambdaReturnType inline fun <T> Sequence<T>.sumOf(selector: (T) -> Double): Double {
     var sum = 0.0
     for (element in this) sum += selector(element)
     return sum

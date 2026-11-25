@@ -6789,6 +6789,19 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test("runs sequences' indexed filters and overloads chosen by their lambdas' results as kotlinc does", () => {
+  const source = `fun main() {
+    val even = sequenceOf(1, 2, 3).filterIndexed { i, _ -> i % 2 == 0 }
+    println(listOf(even.toList(), even.toList()))
+    println(sequenceOf(1, 2).flatMap { listOf(it, it) }.toList())
+    println(sequenceOf(1.5, 2.25).sumOf { it })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1, 3], [1, 3]]\n[1, 1, 2, 2]\n3.75\n',
+  });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

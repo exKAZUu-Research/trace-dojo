@@ -1187,9 +1187,14 @@ export abstract class CallCompiler extends CompilerCore {
           });
     if (fitting.length === 1) return fitting[0];
     if (fitting.length === 0 && probe && !hasOpenVariables(probe) && resolved(probe).kind !== 'nothing') {
+      // A result type with variables still fits only when the lambda's result is of its class, as a Sequence fits
+      // flatMap's Sequence<R> and not its Iterable<R>.
+      const result = resolved(probe);
       const inferred = attempts.filter((_, index) => {
         const type = lambdaTypes[index];
-        return type.kind === 'function' && hasOpenVariables(type.returnType);
+        if (type.kind !== 'function' || !hasOpenVariables(type.returnType)) return false;
+        const expected = resolved(type.returnType);
+        return expected.kind !== 'class' || result.kind !== 'class' || result.cls.isSubclassOf(expected.cls);
       });
       if (inferred.length === 1) return inferred[0];
     }
