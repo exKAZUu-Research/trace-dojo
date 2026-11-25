@@ -1,13 +1,16 @@
 // code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import type { Designation, Expression, Pattern, Position } from './ast';
 import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
+import type { ArgumentInfo } from './callBinder';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext, ConversionMode } from './convertBinder';
 import { CsDecimal } from './decimal';
 import { isDelegateType } from './declarations';
 import { missingDeconstruct } from './deconstructionErrors';
 import { LambdaBinder, typeIdentityKey } from './lambdaBinder';
+import type { MethodCandidate } from './lookup';
 import { type BindResult, isNonValue, type NonValue } from './memberBinder';
+import { ASSIGNMENT_OPERATOR_NAMES, checkedOperatorName } from './natives';
 import type { Space } from './patternSpace';
 import { desugarQuery } from './queries';
 import { LocalScope } from './scopes';
@@ -521,6 +524,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
       operand.type.kind === 'error' ||
       this.implicitConversionOf(operand, this.boolType) !== undefined;
     if (!isBool(leftValue) || !isBool(rightValue)) {
+      const userDefined = this.bindUserLogical(operator, leftValue, rightValue, node.row);
+      if (userDefined) return userDefined;
       this.reportBinary(operator, leftValue, rightValue, row);
       return { kind: 'default', type: this.boolType, row: node.row };
     }
@@ -536,6 +541,44 @@ export abstract class ExpressionBinder extends LambdaBinder {
       );
     }
     return { kind: 'logical', operator, left, right, type: this.boolType, row: node.row };
+  }
+
+  /**
+   * Binds `x && y` or `x || y` on a type with user-defined `&` or `|` and `true` and `false` (C# spec §12.14.3), which
+   * evaluates as `T.false(x) ? x : T.&(x, y)` or `T.true(x) ? x : T.|(x, y)`.
+   */
+  private bindUserLogical(
+    operator: '&&' | '||',
+    leftValue: BoundExpression,
+    rightValue: BoundExpression,
+    row: number
+  ): BoundExpression | undefined {
+    if (leftValue.kind === 'unbound' || rightValue.kind === 'unbound') return undefined;
+    const combine = this.userOperator(
+      operator === '&&' ? 'op_BitwiseAnd' : 'op_BitwiseOr',
+      [leftValue, rightValue],
+      row
+    );
+    if (combine?.kind !== 'call') return undefined;
+    const type = combine.type;
+    const operand: BoundExpression = { kind: 'compoundOperand', type, row };
+    const test = this.userOperator(operator === '&&' ? 'op_False' : 'op_True', [operand], row);
+    if (test?.kind !== 'call') {
+      this.error(
+        row,
+        'CS0218',
+        `型 ('${displayType(type)}') には、演算子 true および演算子 false の宣言が含まれていなければなりません`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
+    return {
+      kind: 'userLogical',
+      left: this.convert(leftValue, type, row),
+      test,
+      combine: { ...combine, args: [operand, combine.args[1]] },
+      type,
+      row,
+    };
   }
 
   private isTuple(type: Type): type is NamedType {
@@ -705,7 +748,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (parts?.scope !== context.scope) {
       parts = {
         scope: context.scope,
-        condition: this.bindAs(node.condition, this.boolType, context),
+        condition: this.bindCondition(node.condition, context),
         whenTrue: this.bindAllowingThrow(node.whenTrue, context),
         whenFalse: this.bindAllowingThrow(node.whenFalse, context),
       };
@@ -1376,6 +1419,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return { kind: 'eventAccessor', target, isAdd: binaryOperator === '+', value, type: VOID_TYPE, row: node.row };
     }
     const value = this.bindValue(node.value, context);
+    const instanceOperator = this.bindAssignmentOperator(operator, target, [value], node.row);
+    if (instanceOperator) return instanceOperator;
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
     // `s += c` with a conditional c without a common type is `string + object` as in a binary `+`.
     const valueTarget =
@@ -1388,6 +1433,51 @@ export abstract class ExpressionBinder extends LambdaBinder {
         ? this.convert(operation, target.type, node)
         : this.compoundConversion(operation, target.type, resolvedValue, node);
     return { kind: 'compoundAssign', target, operation: converted, type: target.type, row: node.row };
+  }
+
+  /** The expression of the expression statement being bound, whose value nothing uses. */
+  protected unusedValue: Expression | undefined;
+
+  /**
+   * Binds a compound assignment or `++`/`--` to the target type's C# 14 instance operator (`void operator +=(T x)`),
+   * which changes the target in place; the expression's value is the target afterwards.
+   */
+  private bindAssignmentOperator(
+    operator: string,
+    target: BoundLValue,
+    values: BoundExpression[],
+    row: number
+  ): BoundExpression | undefined {
+    const name = ASSIGNMENT_OPERATOR_NAMES[operator];
+    const type = target.type;
+    if (!name || type.kind !== 'named' || type.symbol.special !== undefined) return undefined;
+    const find = (candidateName: string): MethodCandidate[] =>
+      this.lookupOperators(type, candidateName).filter((candidate) => !candidate.method.isStatic);
+    const checkedCandidates = this.checkedContext ? find(checkedOperatorName(name)) : [];
+    const candidates = checkedCandidates.length > 0 ? checkedCandidates : find(name);
+    if (candidates.length === 0) return undefined;
+    const args: ArgumentInfo[] = values.map((value) => ({
+      expression: value,
+      name: undefined,
+      refKind: undefined,
+      row,
+      target: undefined,
+    }));
+    const resolved = this.resolveCall(candidates, args, undefined, row, { name, kind: 'operator' });
+    if (!resolved) return { kind: 'default', type: ERROR_TYPE, row };
+    const { method } = resolved.candidate;
+    const call: BoundExpression = {
+      kind: 'call',
+      method,
+      receiver: target as BoundExpression,
+      args: resolved.args,
+      typeArgs: [],
+      owner: resolved.candidate.owner,
+      isVirtual: method.isVirtual || method.isAbstract,
+      type: VOID_TYPE,
+      row,
+    };
+    return { kind: 'sequence', locals: [], sideEffects: [call], value: target as BoundExpression, type, row };
   }
 
   /** `b += 1` on a byte converts the int result back explicitly, which C# allows when the operand converts implicitly. */
@@ -1467,6 +1557,12 @@ export abstract class ExpressionBinder extends LambdaBinder {
         row: node.row,
       };
     } else {
+      // A postfix `x++` whose value is used needs the value before the change, which an instance operator lacks.
+      const instanceOperator =
+        node.prefix || this.unusedValue === node
+          ? this.bindAssignmentOperator(node.operator, target, [], node.row)
+          : undefined;
+      if (instanceOperator) return instanceOperator;
       const userDefined = this.bindUnary(node.operator, operand, node.row);
       if (userDefined.type.kind === 'error') return userDefined;
       operation = this.convert(userDefined, target.type, node);

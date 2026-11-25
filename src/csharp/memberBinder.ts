@@ -243,6 +243,19 @@ export abstract class MemberBinder extends CallBinder {
     return this.convert(this.bindValue(node, context), type, node);
   }
 
+  /**
+   * Binds a boolean expression (C# spec §12.25), the condition of an `if`, a loop, or `?:`: a value of a type without
+   * an implicit conversion to bool is true by its type's `operator true`.
+   */
+  bindCondition(node: Expression, context: BindContext): BoundExpression {
+    const value = this.bindValue(node, context);
+    if (value.kind !== 'unbound' && value.type.kind !== 'error' && !this.implicitConversionOf(value, this.boolType)) {
+      const truth = this.userOperator('op_True', [value], node.row);
+      if (truth) return truth;
+    }
+    return this.convert(value, this.boolType, node);
+  }
+
   /** Turns what a name denotes into a value, reporting a type, a namespace, or a method group used as a value. */
   toValue(result: BindResult, position: Position): BoundExpression {
     switch (result.kind) {
@@ -1612,6 +1625,7 @@ export abstract class MemberBinder extends CallBinder {
         );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
+      this.checkRequiredMembers(type, initializer, node);
       return {
         kind: 'new',
         constructor: undefined,
@@ -1652,6 +1666,7 @@ export abstract class MemberBinder extends CallBinder {
     const constructor = resolved.candidate.method;
     if (!constructor.native && symbol.isLibrary && !constructor.declaration && !(symbol.kind === 'struct'))
       this.unsupported(node, `${displayTypeSymbol(symbol)} のコンストラクター`);
+    if (!constructor.setsRequiredMembers) this.checkRequiredMembers(type, initializer, node);
     return {
       kind: 'new',
       constructor,
@@ -1661,6 +1676,32 @@ export abstract class MemberBinder extends CallBinder {
       type,
       row: node.row,
     };
+  }
+
+  /**
+   * Reports each `required` member of a type and its bases that a creation's object initializer leaves unset (CS9035),
+   * in the order the members are declared, base members first.
+   */
+  private checkRequiredMembers(type: NamedType, initializer: Initializer | undefined, node: Position): void {
+    const assigned = new Set(
+      initializer?.kind === 'objectInitializer'
+        ? initializer.members.flatMap((member) => (member.kind === 'memberAssign' ? [member.name] : []))
+        : []
+    );
+    const chain: TypeSymbol[] = [];
+    for (let current: NamedType | undefined = type; current; current = current.symbol.baseType)
+      chain.unshift(current.symbol);
+    for (const symbol of chain) {
+      const members = [...symbol.fields, ...symbol.properties]
+        .filter((member) => member.isRequired && !assigned.has(member.name))
+        .toSorted((a, b) => a.row - b.row || a.column - b.column);
+      for (const member of members)
+        this.error(
+          node,
+          'CS9035',
+          `必要なメンバー '${displayTypeSymbol(member.owner)}.${member.name}' は、オブジェクト初期化子または属性コンストラクターに設定する必要があります。`
+        );
+    }
   }
 
   /** Binds `new D(method)`, which converts a method group or a delegate to a delegate type. */

@@ -4,7 +4,7 @@ import { isEnum, isIntegral, isNumeric } from './conversions';
 import { ConversionBinder } from './convertBinder';
 import { CsDecimal } from './decimal';
 import type { MethodCandidate } from './lookup';
-import { OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
+import { checkedOperatorName, OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
 import {
   arithmetic,
   booleanOperation,
@@ -535,13 +535,18 @@ export abstract class OperatorBinder extends ConversionBinder {
     return specialOf(type) === 'string';
   }
 
-  /** Binds a user-defined operator of either operand's type, if one applies. */
-  private userOperator(
+  /** Binds a user-defined operator of either operand's type, if one applies; a checked context prefers its checked form. */
+  protected userOperator(
     name: string | undefined,
     operands: BoundExpression[],
-    row: number
+    row: number,
+    tryChecked = true
   ): BoundExpression | undefined {
     if (!name) return undefined;
+    if (this.checkedContext && tryChecked) {
+      const checkedForm = this.userOperator(checkedOperatorName(name), operands, row, false);
+      if (checkedForm) return checkedForm;
+    }
     const candidates: MethodCandidate[] = [];
     for (const operand of operands) {
       const type = nullableUnderlying(operand.type) ?? operand.type;

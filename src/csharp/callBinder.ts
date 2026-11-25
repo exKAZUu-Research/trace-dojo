@@ -732,6 +732,14 @@ export abstract class CallBinder extends OperatorBinder {
       );
       return false;
     }
+    if (parameter.hasUnmanagedConstraint && !isUnmanagedType(arg)) {
+      this.error(
+        row,
+        'CS8377',
+        `型 '${displayType(arg)}' と、入れ子になっているあらゆるレベルのすべてのフィールドは、ジェネリック型またはメソッド '${owner}' のパラメーター '${parameter.name}' として使用するために、Null 非許容の値型でなければなりません`
+      );
+      return false;
+    }
     if (
       parameter.hasValueConstraint &&
       (!(arg.kind === 'named' && arg.symbol.isValueType) || nullableUnderlying(arg)) &&
@@ -1200,4 +1208,20 @@ function withSourceOrder(args: BoundArgument[], parameterOf: number[]): BoundArg
   const sourceOrder = [...new Set(parameterOf)];
   const isReordered = sourceOrder.some((parameterIndex, index) => index > 0 && parameterIndex < sourceOrder[index - 1]);
   return isReordered ? Object.assign(args, { sourceOrder }) : args;
+}
+
+/**
+ * Whether a type is unmanaged (C# spec §8.8): a non-nullable value type whose fields, at every level, are value types,
+ * as the `unmanaged` constraint requires.
+ */
+export function isUnmanagedType(type: Type, seen = new Set<TypeSymbol>()): boolean {
+  if (type.kind === 'typeParameter') return type.symbol.hasUnmanagedConstraint;
+  if (type.kind !== 'named' || !type.symbol.isValueType || nullableUnderlying(type)) return false;
+  if (type.symbol.kind === 'enum' || type.symbol.special !== undefined) return type.symbol.special !== 'nullable';
+  if (seen.has(type.symbol)) return true;
+  seen.add(type.symbol);
+  const substitution = substitutionOf(type);
+  return type.symbol.fields
+    .filter((field) => !field.isStatic && !field.isConst)
+    .every((field) => isUnmanagedType(substitute(field.type, substitution), seen));
 }

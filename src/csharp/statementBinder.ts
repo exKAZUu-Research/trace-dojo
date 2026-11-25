@@ -557,14 +557,14 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'empty', row, step: 'none' };
       }
       case 'if': {
-        const condition = this.bindAs(statement.condition, this.boolType, context);
+        const condition = this.bindCondition(statement.condition, context);
         const consequence = this.bindEmbedded(statement.consequence, context);
         const alternative = statement.alternative ? this.bindEmbedded(statement.alternative, context) : undefined;
         return { kind: 'if', condition, consequence, alternative, row, step: 'none' };
       }
       case 'while': {
         return this.inLoopScope(context, row, (inner) => {
-          const condition = this.bindAs(statement.condition, this.boolType, inner);
+          const condition = this.bindCondition(statement.condition, inner);
           const body = this.inLoop(inner, () => this.bindEmbedded(statement.body, inner));
           return { kind: 'while', condition, body, row, step: 'none' };
         });
@@ -572,7 +572,7 @@ export abstract class StatementBinder extends PatternBinder {
       case 'do': {
         return this.inLoopScope(context, row, (inner) => {
           const body = this.inLoop(inner, () => this.bindEmbedded(statement.body, inner));
-          const condition = this.bindAs(statement.condition, this.boolType, inner);
+          const condition = this.bindCondition(statement.condition, inner);
           return { kind: 'do', body, condition, conditionRow: statement.conditionRow, row, step: 'none' };
         });
       }
@@ -699,6 +699,7 @@ export abstract class StatementBinder extends PatternBinder {
     statement: Extract<Statement, { kind: 'expression' }>,
     context: BindContext
   ): BoundStatement {
+    this.unusedValue = statement.expression;
     const expression = this.bindValue(statement.expression, context);
     // `new();` creates an object, which a statement may do, of no type that Roslyn can find (CS8754); any other value
     // without a type is no statement (CS0201).
@@ -742,6 +743,8 @@ export abstract class StatementBinder extends PatternBinder {
 
   /** How an expression statement records its step: one that only calls or creates objects may leave it to its calls. */
   private expressionStepKind(expression: BoundExpression): StepKind {
+    // C# removes a call of a partial method without an implementation, so it records no step.
+    if (expression.kind === 'call' && expression.method.isRemovedPartial) return 'none';
     if (expression.kind === 'call' || expression.kind === 'invokeDelegate' || expression.kind === 'new')
       return 'callsOnly';
     if (
@@ -944,7 +947,7 @@ export abstract class StatementBinder extends PatternBinder {
         initializers.push({ kind: 'expression', expression: bound, row: statement.row, step: 'none' });
       }
     }
-    const condition = statement.condition ? this.bindAs(statement.condition, this.boolType, inner) : undefined;
+    const condition = statement.condition ? this.bindCondition(statement.condition, inner) : undefined;
     const updates = statement.updates.map((update) => {
       const bound = this.bindValue(update, inner);
       this.requireStatementExpression(bound, update);
@@ -1062,6 +1065,8 @@ export abstract class StatementBinder extends PatternBinder {
    */
   private requireStatementExpression(expression: BoundExpression, node: Expression): void {
     if (expression.type.kind === 'error' ? isStatementSyntax(node) : this.isStatementExpression(expression)) return;
+    // An instance compound assignment operator binds to a call followed by the target's value.
+    if (expression.kind === 'sequence' && isStatementSyntax(node)) return;
     this.error(
       node,
       'CS0201',

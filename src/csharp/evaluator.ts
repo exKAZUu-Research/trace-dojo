@@ -88,6 +88,7 @@ type OperationExpression = Extract<
       | 'unary'
       | 'binary'
       | 'logical'
+      | 'userLogical'
       | 'coalesce'
       | 'conditional'
       | 'convert'
@@ -417,6 +418,7 @@ export class Evaluator extends StatementExecutor {
       case 'unary':
       case 'binary':
       case 'logical':
+      case 'userLogical':
       case 'coalesce':
       case 'conditional':
       case 'convert':
@@ -485,6 +487,8 @@ export class Evaluator extends StatementExecutor {
   private evaluateInvocation(expression: InvocationExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'call': {
+        // C# removes a call of a partial method without an implementation, arguments and all.
+        if (expression.method.isRemovedPartial) return undefined;
         return this.evaluateCall(expression, frame);
       }
       case 'invokeDelegate': {
@@ -530,6 +534,12 @@ export class Evaluator extends StatementExecutor {
         if (expression.operator === '&&') return left && (this.evaluate(expression.right, frame) as boolean);
         return left || (this.evaluate(expression.right, frame) as boolean);
       }
+      case 'userLogical': {
+        const left = this.evaluate(expression.left, frame);
+        const { test, combine } = expression;
+        if (this.withOperand(frame, left, () => this.evaluate(test, frame))) return left;
+        return this.withOperand(frame, left, () => this.evaluate(combine, frame));
+      }
       case 'coalesce': {
         const left = this.evaluate(expression.left, frame);
         if (left === undefined) return this.evaluate(expression.right, frame);
@@ -542,6 +552,12 @@ export class Evaluator extends StatementExecutor {
           : this.evaluate(expression.whenFalse, frame);
       }
       case 'convert': {
+        if (expression.userCall) {
+          const operand = this.evaluate(expression.operand, frame);
+          if (expression.isLifted && operand === undefined) return undefined;
+          const call = expression.userCall;
+          return this.withOperand(frame, operand, () => this.evaluate(call, frame));
+        }
         return this.convertValue(
           this.evaluate(expression.operand, frame),
           expression.conversion,

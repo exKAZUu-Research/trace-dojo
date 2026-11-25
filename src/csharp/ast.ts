@@ -37,7 +37,11 @@ export type Modifier =
   | 'ref'
   | 'out'
   | 'in'
-  | 'params';
+  | 'params'
+  | 'partial'
+  | 'required'
+  | 'file'
+  | 'volatile';
 
 export interface Modifiers {
   set: ReadonlySet<Modifier>;
@@ -302,6 +306,8 @@ export type Constraint =
   | ({ kind: 'class'; nullable: boolean } & Position)
   | ({ kind: 'struct' } & Position)
   | ({ kind: 'notnull' } & Position)
+  | ({ kind: 'unmanaged' } & Position)
+  | ({ kind: 'default' } & Position)
   | ({ kind: 'new' } & Position)
   | ({ kind: 'type'; type: TypeNode } & Position);
 
@@ -323,6 +329,8 @@ export interface MethodDeclaration extends Position {
   bodyRow: number;
   /** The row where the declaration starts, from which an `// atomic` annotation may mark the method. */
   startRow: number;
+  /** A partial method with only its defining declaration, whose calls C# removes with their arguments. */
+  isRemovedPartial?: boolean;
 }
 
 export interface ConstructorDeclaration extends Position {
@@ -386,7 +394,10 @@ export interface OperatorDeclaration extends Position {
   kind: 'operator';
   modifiers: Modifiers;
   returnType: TypeNode;
+  /** The operator's token, or `implicit` or `explicit` for a conversion operator. */
   operator: string;
+  /** Whether the operator is `checked`, which a checked context uses in place of the regular one. */
+  isChecked: boolean;
   parameters: Parameter[];
   body: Block | Expression | undefined;
   bodyRow: number;

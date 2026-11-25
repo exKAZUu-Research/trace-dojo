@@ -18,7 +18,14 @@ import type {
 } from './ast';
 import { BinderBase, namespacePathOf, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
 import type { NamespaceSymbol } from './namespaces';
-import { nativeOf, OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
+import {
+  ASSIGNMENT_OPERATOR_NAMES,
+  checkedOperatorName,
+  nativeOf,
+  OPERATOR_NAMES,
+  UNARY_OPERATOR_NAMES,
+} from './natives';
+import { joinPartialMembers, joinPartialType } from './partials';
 import {
   type Accessibility,
   baseTypeOf,
@@ -42,6 +49,7 @@ import {
   TypeParameterSymbol,
   TypeSymbol,
   VOID_TYPE,
+  withoutNullable,
 } from './types';
 
 /** A type declared in source, with where its names resolve. */
@@ -201,6 +209,7 @@ export class DeclarationBinder extends BinderBase {
     outer: TypeContext,
     usingChain: UsingLevel[]
   ): void {
+    if (this.joinsPartialType(declaration, namespace, containing, usingChain)) return;
     const symbol = new TypeSymbol(
       declaration.name,
       declaration.typeKind,
@@ -272,7 +281,51 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  /**
+   * Adds a declaration to an earlier part of the same partial type, telling whether it did; a type declared twice
+   * without `partial` on both is left to the duplicate checks, which report CS0260 for the part that lacks it.
+   */
+  private joinsPartialType(
+    declaration: TypeDeclaration,
+    namespace: NamespaceSymbol,
+    containing: TypeSymbol | undefined,
+    usingChain: UsingLevel[]
+  ): boolean {
+    if (this.isLibraryUnit) return false;
+    const arity = declaration.typeParameters.length;
+    const existing = containing
+      ? containing.nestedTypes.find((other) => other.name === declaration.name && other.typeParameters.length === arity)
+      : namespace.types
+          .get(declaration.name)
+          ?.find((other) => other.typeParameters.length === arity && !other.isLibrary);
+    const first = existing && this.declaredTypes.find((type) => type.symbol === existing);
+    if (!first) return false;
+    const isPartial = declaration.modifiers.set.has('partial');
+    const wasPartial = first.declaration.modifiers.set.has('partial');
+    if (!isPartial && !wasPartial) return false;
+    if (!isPartial || !wasPartial) {
+      const lacking = isPartial ? first.declaration : declaration;
+      this.error(
+        lacking,
+        'CS0260',
+        `partial 修飾子が型 '${displayTypeSymbol(first.symbol)}' にありません。この型の別の部分宣言が存在します`
+      );
+      return true;
+    }
+    joinPartialType(first.declaration, declaration, (position, code, message) => this.error(position, code, message));
+    for (const member of declaration.members) {
+      if (member.kind === 'type') this.declareType(member, namespace, first.symbol, first.context, usingChain);
+    }
+    return true;
+  }
+
   private checkTypeModifiers(declaration: TypeDeclaration, containing: TypeSymbol | undefined): void {
+    if (declaration.modifiers.set.has('file') && containing)
+      this.error(
+        declaration,
+        'CS9054',
+        `ファイル ローカル型 '${displayTypeSymbol(containing)}.${declaration.name}' は、最上位レベルの型で定義する必要があります。'${displayTypeSymbol(containing)}.${declaration.name}' は入れ子にされた型です。`
+      );
     const modifiers = declaration.modifiers;
     if (!containing && (modifiers.set.has('private') || modifiers.set.has('protected'))) {
       this.error(
@@ -357,6 +410,15 @@ export class DeclarationBinder extends BinderBase {
   }
 
   private reportsInvalidBaseClass(symbol: TypeSymbol, node: TypeNode, baseType: NamedType, index: number): boolean {
+    if (symbol.kind === 'class' && index > 0 && symbol.declaration?.modifiers.set.has('partial') && symbol.baseType) {
+      // The parts of a partial class each name a base class of their own.
+      this.error(
+        symbol.row,
+        'CS0263',
+        `'${displayTypeSymbol(symbol)}' の partial 宣言では、異なる基底クラスを指定してはいけません`
+      );
+      return true;
+    }
     if (symbol.kind === 'class' && index > 0) {
       this.error(
         node,
@@ -493,7 +555,15 @@ export class DeclarationBinder extends BinderBase {
         );
         continue;
       }
-      for (const constraint of clause.constraints) {
+      for (const [index, constraint] of clause.constraints.entries()) {
+        if (index > 0 && ['class', 'struct', 'unmanaged', 'notnull', 'default'].includes(constraint.kind)) {
+          this.error(
+            constraint,
+            'CS0449',
+            "'class'、'struct'、'unmanaged'、'notnull'、'default' の制約を組み合わせたり、複製したりすることはできません。これらは制約リストの最初に指定する必要があります。"
+          );
+          continue;
+        }
         switch (constraint.kind) {
           case 'class': {
             parameter.hasReferenceConstraint = true;
@@ -509,6 +579,22 @@ export class DeclarationBinder extends BinderBase {
           }
           case 'notnull': {
             parameter.hasNotNullConstraint = true;
+            break;
+          }
+          case 'unmanaged': {
+            parameter.hasUnmanagedConstraint = true;
+            parameter.hasValueConstraint = true;
+            break;
+          }
+          case 'default': {
+            // `default` only tells an override's `T?` from a nullable value type, which needs no check at run time.
+            const owner = parameter.owner;
+            if (!(owner instanceof MethodSymbol) || !(owner.isOverride || owner.explicitInterface))
+              this.error(
+                constraint,
+                'CS8823',
+                "'default' 制約は、オーバーライドおよび明示的なインターフェイスの実装メソッドでのみ有効です。"
+              );
             break;
           }
           case 'type': {
@@ -558,6 +644,8 @@ export class DeclarationBinder extends BinderBase {
       this.declareDelegateInvoke(type);
       return;
     }
+    if (!this.isLibraryUnit)
+      joinPartialMembers(declaration, (position, code, message) => this.error(position, code, message));
     if (declaration.primaryParameters) this.declarePrimaryParameters(type);
     for (const member of declaration.members) {
       switch (member.kind) {
@@ -643,6 +731,8 @@ export class DeclarationBinder extends BinderBase {
     field.initializer = declarator.initializer;
     field.row = declarator.row;
     field.column = declarator.column;
+    field.isRequired = member.modifiers.set.has('required');
+    if (field.isRequired) this.checkRequiredAccess(field, declarator);
     if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
     this.checkField(type, member, declarator, field);
     this.addMember(symbol, field, declarator);
@@ -675,6 +765,7 @@ export class DeclarationBinder extends BinderBase {
         'CS0504',
         `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
       );
+    if (member.modifiers.set.has('volatile')) this.checkVolatile(declarator, field);
     if (
       symbol.kind === 'struct' &&
       !field.isStatic &&
@@ -688,6 +779,39 @@ export class DeclarationBinder extends BinderBase {
         "'struct' でフィールド初期化子を使用するには、明示的に宣言されたコンストラクターが必要です。"
       );
     }
+  }
+
+  /** Reports a required member less accessible than its type, which code creating the type could not set (CS9032). */
+  private checkRequiredAccess(member: FieldSymbol | PropertySymbol, position: Position): void {
+    if (ACCESS_RANKS[member.access] >= ACCESS_RANKS[member.owner.access]) return;
+    this.error(
+      position,
+      'CS9032',
+      `必要なメンバー '${displayTypeSymbol(member.owner)}.${member.name}' の表示を減らす、また含まれる型の '${displayTypeSymbol(member.owner)}' より小さいセッターの表示を設定することはできません。`
+    );
+  }
+
+  /** Checks a volatile field's type, which must be read and written atomically (C# spec §15.5.4). */
+  private checkVolatile(declarator: VariableDeclarator, field: FieldSymbol): void {
+    const display = `${displayTypeSymbol(field.owner)}.${declarator.name}`;
+    if (field.isReadonly)
+      this.error(
+        declarator,
+        'CS0678',
+        `'${display}': フィールドに volatile と readonly の両方を指定することはできません`
+      );
+    const { type } = field;
+    const special = type.kind === 'named' ? (type.symbol.enumUnderlying ?? type).symbol.special : undefined;
+    const allowed =
+      isReferenceType(type) ||
+      (type.kind === 'named' &&
+        ['sbyte', 'byte', 'short', 'ushort', 'int', 'uint', 'char', 'float', 'bool'].includes(special ?? ''));
+    if (!allowed && type.kind !== 'error')
+      this.error(
+        declarator,
+        'CS0677',
+        `'${display}': volatile フィールドの型を '${displayType(type)}' にすることはできません`
+      );
   }
 
   private declareEvent(
@@ -725,6 +849,7 @@ export class DeclarationBinder extends BinderBase {
       member.constraints
     );
     method.declaration = member;
+    method.isRemovedPartial = member.isRemovedPartial === true;
     const methodContext = this.methodContexts.get(method) as TypeContext;
     method.returnType = this.resolveType(member.returnType, methodContext);
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
@@ -867,6 +992,8 @@ export class DeclarationBinder extends BinderBase {
     property.isVirtual = modifiers.has('virtual');
     property.isAbstract = modifiers.has('abstract') || (symbol.kind === 'interface' && !modifiers.has('static'));
     property.isOverride = modifiers.has('override');
+    property.isRequired = modifiers.has('required');
+    if (property.isRequired) this.checkRequiredAccess(property, member);
     if (
       (property.isVirtual || property.isAbstract || property.isOverride) &&
       property.access === 'private' &&
@@ -1013,37 +1140,96 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of operator declaration.
   private declareOperator(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>
   ): void {
     const { symbol, context } = type;
     const isUnary = member.parameters.length === 1;
-    const name = (isUnary ? UNARY_OPERATOR_NAMES[member.operator] : undefined) ?? OPERATOR_NAMES[member.operator];
+    const assignmentName = ASSIGNMENT_OPERATOR_NAMES[member.operator];
+    if (member.operator.endsWith('=') && assignmentName && member.modifiers.set.has('static')) {
+      this.error(member, 'CS1020', 'オーバーロード可能な 2 項演算子が必要です');
+      return;
+    }
+    // C# 14's compound assignment and `++`/`--` operators are instance methods that change the operand in place.
+    const isInstanceAssignment =
+      assignmentName !== undefined &&
+      !member.modifiers.set.has('static') &&
+      member.parameters.length === (member.operator === '++' || member.operator === '--' ? 0 : 1);
+    const regularName = isInstanceAssignment
+      ? assignmentName
+      : ((isUnary ? UNARY_OPERATOR_NAMES[member.operator] : undefined) ?? OPERATOR_NAMES[member.operator]);
+    const name = member.isChecked ? checkedOperatorName(regularName) : regularName;
     const method = this.declareMethod(symbol, name, 'operator', member.modifiers, member, context);
     method.operatorToken = member.operator;
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);
     method.parameters = this.resolveParameters(member.parameters, context, method);
-    if (!member.modifiers.set.has('public') || !member.modifiers.set.has('static')) {
+    const signature = `${displayTypeSymbol(symbol)}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+    if (isInstanceAssignment) {
+      if (!member.modifiers.set.has('public'))
+        this.error(member, 'CS9308', `ユーザー定義演算子 '${signature}' は公開用として宣言する必要があります`);
+      if (method.returnType.kind !== 'void')
+        this.error(member.returnType, 'CS9310', 'この演算子の戻り値の型は void である必要があります');
+    } else if (!member.modifiers.set.has('public') || !member.modifiers.set.has('static')) {
       this.error(
         member,
         'CS0558',
-        `ユーザー定義の演算子 '${displayTypeSymbol(symbol)}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' は static および public として宣言されなければなりません`
+        `ユーザー定義の演算子 '${signature}' は static および public として宣言されなければなりません`
       );
     }
     const ownType = symbol.declaredType;
-    if (
-      !method.parameters.some(
-        (parameter) => sameType(parameter.type, ownType) || sameType(parameter.type, this.nullableOf(ownType))
-      )
-    ) {
+    const isOwn = (candidate: Type): boolean =>
+      sameType(candidate, ownType) || sameType(candidate, this.nullableOf(ownType));
+    if (member.operator === 'implicit' || member.operator === 'explicit') {
+      this.checkConversionOperator(symbol, method, member);
+    } else if (!isInstanceAssignment && !method.parameters.some((parameter) => isOwn(parameter.type))) {
       const code = isUnary ? 'CS0562' : 'CS0563';
       const what = isUnary ? '単項演算子のパラメーター' : '二項演算子のパラメーターのうち 1 つ';
       this.error(member, code, `${what}は、それを含んでいる型でなければなりません`);
     }
     this.attachNative(method, member.body === undefined);
     this.addMethod(symbol, method, member);
+  }
+
+  /** Checks a conversion operator's types (C# spec §15.10.4), and that the type declares no other between them. */
+  private checkConversionOperator(symbol: TypeSymbol, method: MethodSymbol, position: Position): void {
+    const ownType = symbol.declaredType;
+    const source = withoutNullable(method.parameters[0]?.type ?? ERROR_TYPE);
+    const target = withoutNullable(method.returnType);
+    const signature = `${displayTypeSymbol(symbol)}.${method.name === 'op_Implicit' ? 'implicit' : 'explicit'} operator ${displayType(method.returnType)}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+    if (!sameType(source, ownType) && !sameType(target, ownType)) {
+      this.error(position, 'CS0556', 'ユーザー定義の変換では、それを囲む型に/から変換しなければなりません');
+      return;
+    }
+    if (sameType(source, target)) {
+      this.error(position, 'CS0555', 'ユーザー定義の演算子は、型をそれ自体に変換することはできません。');
+      return;
+    }
+    const other = sameType(source, ownType) ? target : source;
+    if (other.kind === 'named' && other.symbol.kind === 'interface') {
+      this.error(
+        position,
+        'CS0552',
+        `'${signature}': インターフェイスとの間におけるユーザー定義の変換は許可されていません`
+      );
+      return;
+    }
+    if (other.kind === 'named' && (derivesFromClass(symbol, other.symbol) || derivesFromClass(other.symbol, symbol))) {
+      this.error(
+        position,
+        'CS0553',
+        `'${signature}': 基本データ型との間におけるユーザー定義の変換は許可されていません`
+      );
+      return;
+    }
+    const isConversion = (candidate: MethodSymbol): boolean =>
+      (candidate.name === 'op_Implicit' || candidate.name === 'op_Explicit') &&
+      sameType(candidate.returnType, method.returnType) &&
+      sameType(candidate.parameters[0]?.type ?? ERROR_TYPE, method.parameters[0]?.type ?? ERROR_TYPE);
+    if (symbol.methods.some(isConversion))
+      this.error(position, 'CS0557', `型 '${displayTypeSymbol(symbol)}' で重複するユーザー定義の変換です`);
   }
 
   // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
@@ -1134,7 +1320,7 @@ export class DeclarationBinder extends BinderBase {
       if (method.isStatic) this.unsupported(position, 'インターフェイスの静的メンバー');
       return;
     }
-    if (!hasBody && !method.isAbstract && !method.isExtern) {
+    if (!hasBody && !method.isAbstract && !method.isExtern && !method.isRemovedPartial) {
       this.error(
         position,
         'CS0501',
@@ -1845,6 +2031,13 @@ function displayAccessorIn(property: PropertySymbol, accessor: MethodSymbol, own
 }
 
 /** The operators C# requires to be declared together. */
+/** Whether a type has a class among its bases, which the declarations know before the binders can tell. */
+function derivesFromClass(type: TypeSymbol, base: TypeSymbol): boolean {
+  for (let current = type.baseType; current; current = current.symbol.baseType)
+    if (current.symbol === base) return true;
+  return false;
+}
+
 const OPERATOR_PAIRS: Record<string, string> = {
   '==': '!=',
   '!=': '==',
@@ -1852,6 +2045,8 @@ const OPERATOR_PAIRS: Record<string, string> = {
   '>': '<',
   '<=': '>=',
   '>=': '<=',
+  true: 'false',
+  false: 'true',
 };
 
 const ACCESS_RANKS: Record<Accessibility, number> = {

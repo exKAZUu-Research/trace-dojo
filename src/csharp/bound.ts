@@ -141,6 +141,11 @@ export type BoundExpression =
       isChecked?: boolean;
     } & Base)
   | ({ kind: 'logical'; operator: '&&' | '||'; left: BoundExpression; right: BoundExpression } & Base)
+  /**
+   * `&&` or `||` on a type with user-defined operators: when `test` (`operator false` or `true`) holds for the left
+   * value, that value; otherwise `combine` (`&` or `|`), both reading the left value as a `compoundOperand`.
+   */
+  | ({ kind: 'userLogical'; left: BoundExpression; test: BoundExpression; combine: BoundExpression } & Base)
   | ({
       kind: 'coalesce';
       left: BoundExpression;
@@ -156,7 +161,10 @@ export type BoundExpression =
       conversion: ConversionKind;
       from: Type;
       isExplicit: boolean;
-      userMethod?: MethodSymbol;
+      /** For a user-defined conversion, the operator's call on the converted operand, read as a `compoundOperand`. */
+      userCall?: BoundExpression;
+      /** Whether a user-defined conversion is lifted, so that a null operand converts to null without the call. */
+      isLifted?: boolean;
       isChecked?: boolean;
     } & Base)
   | ({ kind: 'assign'; target: BoundLValue; value: BoundExpression } & Base)

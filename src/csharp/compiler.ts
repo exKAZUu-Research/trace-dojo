@@ -151,7 +151,7 @@ export class Compiler extends StatementBinder {
         { row: 0, message: "CS5001: プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません" },
       ]);
     const types = declared.map((type) => type.symbol);
-    if (isTopLevel) types.push(entry.owner);
+    if (isTopLevel && !types.includes(entry.owner)) types.push(entry.owner);
     return { library: this.library, types, entry, isTopLevel, checkOverflow: unit.options?.checkOverflow ?? false };
   }
 
@@ -197,12 +197,16 @@ export class Compiler extends StatementBinder {
   // ---- Top-level statements ----
 
   private declareTopLevel(unit: CompilationUnit): { entry: MethodSymbol; type: TypeSymbol } {
+    // The top-level statements join a partial class Program that the program declares, as Roslyn's generated one does.
     const existing = this.userRoot.findType('Program', 0);
-    if (existing) this.unsupported(existing.row, '`partial` クラス');
-    const type = new TypeSymbol('Program', 'class', '', undefined);
-    type.baseType = this.objectType;
-    type.access = 'internal';
-    this.userRoot.addType(type);
+    if (existing && !existing.declaration?.modifiers.set.has('partial'))
+      this.error(existing.row, 'CS0260', "partial 修飾子が型 'Program' にありません。この型の別の部分宣言が存在します");
+    const type = existing ?? new TypeSymbol('Program', 'class', '', undefined);
+    if (!existing) {
+      type.baseType = this.objectType;
+      type.access = 'internal';
+      this.userRoot.addType(type);
+    }
     const returnsValue = containsValueReturn(unit.statements);
     const entry = new MethodSymbol('<Main>$', type, 'method');
     entry.isStatic = true;

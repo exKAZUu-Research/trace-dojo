@@ -92,6 +92,8 @@ export class TypeParameterSymbol {
   hasValueConstraint = false;
   hasConstructorConstraint = false;
   hasNotNullConstraint = false;
+  /** The `unmanaged` constraint, which also makes the parameter a value type. */
+  hasUnmanagedConstraint = false;
 
   constructor(
     readonly name: string,
@@ -171,6 +173,12 @@ export class MethodSymbol {
   row = 0;
   /** For an operator, its token (`+`, `==`). */
   operatorToken: string | undefined;
+  /** Whether the method is a partial method without an implementation, whose calls are removed. */
+  isRemovedPartial = false;
+  /** For an explicit interface implementation (`void IShape.Draw()`), the interface it implements a member of. */
+  explicitInterface: NamedType | undefined;
+  /** Whether a constructor has `[SetsRequiredMembers]`, which frees its callers from setting the required members. */
+  setsRequiredMembers = false;
 
   constructor(
     readonly name: string,
@@ -197,6 +205,8 @@ export class FieldSymbol {
   column = 0;
   /** Whether the field holds a primary constructor's parameter, which the program reads by the parameter's name. */
   isPrimaryParameter = false;
+  /** Whether the field is `required`, which every object creation's initializer must set. */
+  isRequired = false;
 
   constructor(
     readonly name: string,
@@ -221,6 +231,8 @@ export class PropertySymbol {
   isAbstract = false;
   isOverride = false;
   overridden: PropertySymbol | undefined;
+  /** Whether the property is `required`, which every object creation's initializer must set. */
+  isRequired = false;
   row = 0;
   /** The column of the declaration, which orders the members a record prints. */
   column = 0;
@@ -360,6 +372,11 @@ export function isSpecial(type: Type, special: SpecialType): boolean {
 
 export function specialOf(type: Type): SpecialType | undefined {
   return type.kind === 'named' ? type.symbol.special : undefined;
+}
+
+/** The type itself, or the type that it wraps when it is a `T?` of a value type. */
+export function withoutNullable(type: Type): Type {
+  return nullableUnderlying(type) ?? type;
 }
 
 /** The type that a `T?` of a value type wraps, or undefined. */

@@ -48,7 +48,6 @@ const UNSUPPORTED_STATEMENTS: Record<string, string> = {
 };
 
 const UNSUPPORTED_DECLARATIONS: Record<string, string> = {
-  conversion_operator_declaration: '変換演算子（`implicit operator`・`explicit operator`）の宣言',
   event_declaration: '`add`・`remove` を書いたイベントの宣言',
   extension_declaration: '拡張ブロック（`extension(...)`）',
 };
@@ -66,17 +65,17 @@ const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
   'override',
   'sealed',
   'new',
+  'partial',
+  'required',
+  'file',
+  'volatile',
 ]);
 
 const UNSUPPORTED_MODIFIERS: Record<string, string> = {
   async: '`async`',
   unsafe: '`unsafe`',
   extern: '`extern`',
-  volatile: '`volatile`',
   fixed: '`fixed`',
-  partial: '`partial`',
-  required: '`required`',
-  file: '`file` 修飾子',
   scoped: '`scoped`',
 };
 
@@ -167,6 +166,8 @@ const RESERVED_KEYWORDS = new Set([
  */
 function rejectKeywordIdentifiers(root: Node): void {
   for (const node of root.descendantsOfType('identifier')) {
+    // The grammar reads the `default` constraint as a type named `default`.
+    if (node?.text === 'default' && node.parent?.type === 'type_parameter_constraint') continue;
     if (node && RESERVED_KEYWORDS.has(node.text))
       throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
   }
@@ -389,17 +390,17 @@ export class Converter extends ExpressionConverter {
       const typeNode = field(constraint, 'type');
       if (typeNode) {
         if (typeNode.type === 'identifier' && typeNode.text === 'notnull') return { kind: 'notnull', ...position };
-        if (typeNode.type === 'identifier' && typeNode.text === 'unmanaged')
-          unsupported(constraint, '`unmanaged` 制約');
+        if (typeNode.type === 'identifier' && typeNode.text === 'unmanaged') return { kind: 'unmanaged', ...position };
+        if (typeNode.type === 'identifier' && typeNode.text === 'default') return { kind: 'default', ...position };
         return { kind: 'type', type: this.convertType(typeNode), ...position };
       }
       if (namedChildren(constraint).some((child) => child.type === 'constructor_constraint'))
         return { kind: 'new', ...position };
       if (hasToken(constraint, 'notnull')) return { kind: 'notnull', ...position };
-      if (hasToken(constraint, 'unmanaged')) return unsupported(constraint, '`unmanaged` 制約');
+      if (hasToken(constraint, 'unmanaged')) return { kind: 'unmanaged', ...position };
       if (hasToken(constraint, 'class')) return { kind: 'class', nullable: hasToken(constraint, '?'), ...position };
       if (hasToken(constraint, 'struct')) return { kind: 'struct', ...position };
-      if (hasToken(constraint, 'default')) return unsupported(constraint, '`default` 制約');
+      if (hasToken(constraint, 'default')) return { kind: 'default', ...position };
       return unsupported(constraint, 'この制約');
     });
     return { name: nameNode.text, constraints, ...positionOf(node) };
@@ -500,25 +501,28 @@ export class Converter extends ExpressionConverter {
           },
         ];
       }
-      case 'operator_declaration': {
+      case 'operator_declaration':
+      case 'conversion_operator_declaration': {
         const bodyNode = field(node, 'body');
-        const operatorNode = requiredField(node, 'operator');
-        if (operatorNode.type === 'true' || operatorNode.type === 'false') unsupported(node, '`true`・`false` 演算子');
-        if (operatorNode.type.endsWith('=') && !['==', '!=', '<=', '>='].includes(operatorNode.type)) {
-          unsupported(node, '複合代入演算子の宣言');
-        }
-        const parameters = this.convertParameters(requiredField(node, 'parameters'));
+        const isConversion = node.type === 'conversion_operator_declaration';
+        const operatorNode = isConversion ? undefined : requiredField(node, 'operator');
+        const operator = isConversion
+          ? hasToken(node, 'implicit')
+            ? 'implicit'
+            : 'explicit'
+          : (operatorNode as Node).type;
         return [
           {
             kind: 'operator',
             modifiers: this.convertModifiers(node),
             returnType: this.convertType(requiredField(node, 'type')),
-            operator: operatorNode.type,
-            parameters,
+            operator,
+            isChecked: hasToken(node, 'checked'),
+            parameters: this.convertParameters(requiredField(node, 'parameters')),
             body: this.convertBody(bodyNode),
             bodyRow: bodyNode?.startPosition.row ?? node.startPosition.row,
             startRow: node.startPosition.row,
-            ...positionOf(operatorNode),
+            ...positionOf(operatorNode ?? requiredField(node, 'type')),
           },
         ];
       }
