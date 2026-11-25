@@ -24,6 +24,7 @@ import type { TypeArgumentMismatch } from './typeNodes';
 import {
   anonymousObject,
   anyType,
+  baseTypeOfLiteral,
   errorType,
   functionType,
   isAnyLike,
@@ -33,6 +34,7 @@ import {
   numberType,
   type Parameter,
   type Signature,
+  stringType,
   type TupleElement,
   type Type,
   typeMembers,
@@ -470,16 +472,29 @@ export class Calls {
     if (callee.type !== 'identifier' || callee.text !== 'require') return undefined;
     const library = this.c.libraryBinder.moduleScope.lookupValue('require');
     if (!library || this.c.scopeOf(callee).lookupValue('require') !== library) return undefined;
+    // @types/node declares `require(id: string)`, whose argument count and type tsc checks first.
+    if (args.length !== 1) {
+      this.c.error(args[1] ?? callee, `引数は 1 個必要ですが、${args.length} 個渡されています。`);
+      return this.checkArgumentsOnly(args, errorType);
+    }
     const [id] = args;
+    const idType = this.c.expressions.check(id);
+    if (!this.c.relations.isAssignable(idType, stringType)) {
+      this.c.error(
+        id,
+        `型 '${this.c.print(baseTypeOfLiteral(idType))}' の引数を型 'string' のパラメーターに渡すことはできません。`
+      );
+      return errorType;
+    }
     // `require("fs" as const)` names fs as `require("fs")` does.
-    const name = id && this.c.flow.constantIndexName(withoutAssertions(id));
+    const name = this.c.flow.constantIndexName(withoutAssertions(id));
     const module = name === undefined ? undefined : this.c.namespaces.moduleObjectType(name);
-    if (module) return this.checkArgumentsOnly(args, module);
+    if (module) return module;
     this.c.error(
       callee,
       unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)
     );
-    return this.checkArgumentsOnly(args, errorType);
+    return errorType;
   }
 
   /** Whether a signature's first parameter takes the strings of a tagged template. */
