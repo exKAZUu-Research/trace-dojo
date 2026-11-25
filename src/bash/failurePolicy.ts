@@ -12,7 +12,6 @@ export type FailureContext =
   | 'declarationCompoundPhase1'
   | 'declarationFunctionCompoundPhase1'
   | 'declarationOperand'
-  | 'declarationFatalBuiltin'
   | 'regularBuiltin'
   | 'parameterRequire';
 
@@ -76,10 +75,6 @@ export class FailurePolicy {
       case 'expansion':
       case 'declarationCompoundPhase1': {
         throw new DiscardSignal(1);
-      }
-      case 'declarationFatalBuiltin': {
-        if (failure.reason === 'readonly') throw new DiscardSignal(1);
-        return false;
       }
       case 'commandPrefix':
       case 'arithmeticCommand':

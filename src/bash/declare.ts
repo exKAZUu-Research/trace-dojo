@@ -304,13 +304,14 @@ function commitPhase1Compound(
     });
     return { kind: 'failedCompound', name: arg.name, text: arg.text };
   }
-  const targetName = resolvePhase1CompoundTarget(shell, arg.name, intent, failCtx);
+  const targetName = resolvePhase1CompoundTarget(shell, builtin, arg.name, intent, failCtx);
   if (targetName === undefined) return { kind: 'failedCompound', name: arg.name, text: arg.text };
   return writePhase1CompoundToCell(shell, arg, effective, rawItems, intent, targetName, failCtx);
 }
 
 function resolvePhase1CompoundTarget(
   shell: Shell,
+  builtin: string,
   rawName: string,
   intent: DestinationIntent,
   failCtx: 'declarationFunctionCompoundPhase1' | 'declarationCompoundPhase1'
@@ -324,6 +325,11 @@ function resolvePhase1CompoundTarget(
       reason: 'invalidIdentifier',
       message: `\`${targetName}': not a valid identifier`,
     });
+    return undefined;
+  }
+  const outerRo = intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
+  if (outerRo) {
+    shell.failures.handleStoreFailure(failCtx, outerRo, builtin);
     return undefined;
   }
   return targetName;
@@ -428,7 +434,7 @@ function executePlannedOperand(
     if (operand.materializedArray) onMaterialize?.();
     if (set.has('r')) {
       const err = shell.store.applyAttributes(operand.cell, new Set<Attribute>(['r']), true);
-      if (err) return shell.failures.handleStoreFailure(builtinFailureContext(builtin), err, builtin);
+      if (err) return shell.failures.handleStoreFailure('declarationOperand', err, builtin);
     }
     return true;
   }
@@ -483,10 +489,9 @@ function executeScalarOrElementOperand(
   onMaterialize?: () => void
 ): boolean {
   const isSubscripted = op.subscriptWord !== undefined || op.subscriptText !== undefined;
-  const failCtx = builtinFailureContext(builtin);
   if (!isIdentifier(op.name)) {
     return shell.failures.handleStoreFailure(
-      failCtx,
+      'declarationOperand',
       { ok: false, reason: 'invalidIdentifier', message: `\`${op.rawText}': not a valid identifier` },
       builtin
     );
@@ -498,17 +503,27 @@ function executeScalarOrElementOperand(
     append: op.append,
     existingIsNameref: Boolean(existingForCheck?.attributes.has('n')),
   });
-  if (set.has('n')) {
-    const selected = shell.store.selectDestination(intent, op.name);
-    const bound = shell.store.bindNameref(selected.cell, op.value, shell.isInFunction);
-    if (!bound.ok) return shell.failures.handleStoreFailure(failCtx, bound, builtin);
-    if (bound.cycleWarning) shell.reportError(bound.cycleWarning);
-    return true;
-  }
+  const outerRo = intent === 'local' ? shell.store.outerReadonlyFailure(op.name) : undefined;
+  if (outerRo) return shell.failures.handleStoreFailure('declarationOperand', outerRo, builtin);
+  if (set.has('n')) return bindPlannedNamerefOperand(shell, builtin, op.name, op.value, intent);
   if (isSubscripted) {
     return executeSubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
   }
   return executeUnsubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
+}
+
+function bindPlannedNamerefOperand(
+  shell: Shell,
+  builtin: string,
+  name: string,
+  value: string | undefined,
+  intent: DestinationIntent
+): boolean {
+  const selected = shell.store.selectDestination(intent, name);
+  const bound = shell.store.bindNameref(selected.cell, value, shell.isInFunction);
+  if (!bound.ok) return shell.failures.handleStoreFailure('declarationOperand', bound, builtin);
+  if (bound.cycleWarning) shell.reportError(bound.cycleWarning);
+  return true;
 }
 
 function executeUnsubscriptedDeclaration(
@@ -519,7 +534,6 @@ function executeUnsubscriptedDeclaration(
   intent: DestinationIntent,
   onMaterialize?: () => void
 ): boolean {
-  const failCtx = builtinFailureContext(builtin);
   const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
   if (targetName === undefined) return false;
   const priorKind = priorDestinationView(shell, targetName, intent)?.kind;
@@ -535,7 +549,7 @@ function executeUnsubscriptedDeclaration(
       (expr) => shell.evaluateFatalReadonly(expr, false),
       targetName
     );
-    if (!outcome.ok) return shell.failures.handleStoreFailure(failCtx, outcome, builtin);
+    if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
   }
   return finalizeDeclaredCell(shell, builtin, selected.cell, set, wasMaterialized, onMaterialize);
 }
@@ -551,7 +565,7 @@ function resolveUnsubscriptedDeclareTarget(
   if (resolved === undefined) return undefined;
   if (!isIdentifier(resolved)) {
     shell.failures.handleStoreFailure(
-      builtinFailureContext(builtin),
+      'declarationOperand',
       { ok: false, reason: 'invalidIdentifier', message: `\`${resolved}': not a valid identifier` },
       builtin
     );
@@ -569,7 +583,6 @@ function executeSubscriptedDeclaration(
   intent: DestinationIntent,
   onMaterialize?: () => void
 ): boolean {
-  const failCtx = builtinFailureContext(builtin);
   const scopedIntent = intent === 'local' ? 'local' : 'visible';
   const prepared = prepareSubscriptedDestination(shell, builtin, op, set, scopedIntent);
   if (!prepared) return false;
@@ -585,10 +598,11 @@ function executeSubscriptedDeclaration(
     append: op.append,
   });
   if (!target) return false;
-  if (target.kind === 'invalid') return shell.failures.handleStoreFailure(failCtx, target.failure, builtin);
+  if (target.kind === 'invalid')
+    return shell.failures.handleStoreFailure('declarationOperand', target.failure, builtin);
   if (op.value !== undefined) {
     const outcome = writeResolvedTarget(shell, target, op.value, op.append);
-    if (!outcome.ok) return shell.failures.handleStoreFailure(failCtx, outcome, builtin);
+    if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
   }
   return finalizeDeclaredCell(shell, builtin, prepared.cell, set, prepared.wasMaterialized, onMaterialize);
 }
@@ -629,7 +643,7 @@ function applyPreWriteAttributes(
 ): boolean {
   const attrFailure = shell.store.applyAttributes(cell, nonReadonlyValueAttributes(set), allowReadonlyAlreadySet);
   if (!attrFailure) return true;
-  return shell.failures.handleStoreFailure(builtinFailureContext(builtin), attrFailure, builtin);
+  return shell.failures.handleStoreFailure('declarationOperand', attrFailure, builtin);
 }
 
 function finalizeDeclaredCell(
@@ -642,7 +656,7 @@ function finalizeDeclaredCell(
 ): boolean {
   if (set.has('r')) {
     const roFailure = shell.store.applyAttributes(cell, new Set<Attribute>(['r']), true);
-    if (roFailure) return shell.failures.handleStoreFailure(builtinFailureContext(builtin), roFailure, builtin);
+    if (roFailure) return shell.failures.handleStoreFailure('declarationOperand', roFailure, builtin);
   }
   const nextKind = shell.store.viewOfHandle(cell).kind;
   if (!wasMaterialized && (nextKind === 'indexed' || nextKind === 'associative')) onMaterialize?.();
@@ -651,10 +665,6 @@ function finalizeDeclaredCell(
 
 function nonReadonlyValueAttributes(set: ReadonlySet<string>): Set<Attribute> {
   return new Set<Attribute>([...set].filter((f): f is Attribute => VALUE_ATTRIBUTES.has(f) && f !== 'r'));
-}
-
-function builtinFailureContext(builtin: string): 'declarationFatalBuiltin' | 'declarationOperand' {
-  return builtin === 'readonly' || builtin === 'export' ? 'declarationFatalBuiltin' : 'declarationOperand';
 }
 
 function planAssignsAnswer(plan: DeclarationPlan): boolean {

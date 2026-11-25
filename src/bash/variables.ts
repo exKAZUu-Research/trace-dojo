@@ -756,6 +756,16 @@ export class VariableStore {
     return importedScalar === undefined ? undefined : { kind: 'scalar', value: importedScalar };
   }
 
+  /** Returns a readonly failure if creating a new local variable in the current function would shadow an outer readonly variable. */
+  outerReadonlyFailure(name: string): StoreFailure | undefined {
+    const fnIdx = this.currentFunctionScopeIndex();
+    if (fnIdx === undefined || this.scopes[fnIdx].map.has(name)) return undefined;
+    const outer = this.findOwnCell(name, fnIdx - 1);
+    return outer?.attributes.has('r')
+      ? { ok: false, reason: 'readonly', message: `${name}: readonly variable` }
+      : undefined;
+  }
+
   /** Applies declaration attributes (`a`, `A`, `i`, `r`, `x`, `l`, `u`) to `handle`, converting scalars when needed. */
   applyAttributes(
     handle: CellHandle,
@@ -763,7 +773,7 @@ export class VariableStore {
     allowReadonlyAlreadySet = true
   ): StoreFailure | undefined {
     const cell = this.getCell(handle);
-    if (!allowReadonlyAlreadySet && cell.attributes.has('r')) {
+    if (cell.attributes.has('r') && !canApplyToReadonlyCell(cell, toAdd, allowReadonlyAlreadySet)) {
       return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
     }
     const incompatible = checkIncompatibleArrayConversion(cell, toAdd);
@@ -1229,6 +1239,14 @@ function isArrayCell(cell: Cell): boolean {
     cell.attributes.has('a') ||
     cell.attributes.has('A')
   );
+}
+
+function canApplyToReadonlyCell(cell: Cell, toAdd: ReadonlySet<Attribute>, allowReadonlyAlreadySet: boolean): boolean {
+  if (!allowReadonlyAlreadySet) return false;
+  for (const attr of toAdd) {
+    if (attr !== 'r' && attr !== 'x' && !cell.attributes.has(attr)) return false;
+  }
+  return true;
 }
 
 function checkIncompatibleArrayConversion(cell: Cell, toAdd: ReadonlySet<Attribute>): string | undefined {
