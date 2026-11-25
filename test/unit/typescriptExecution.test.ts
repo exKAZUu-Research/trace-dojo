@@ -768,3 +768,14 @@ const optional: Point | undefined = { x: 2 };`;
     expect(diagnostic).toContain("プロパティ 'y' がありません");
   }
 });
+
+test.each(["'utf8'", "'utf-8'", "{ encoding: 'utf-8' }"])(
+  'reads standard input and lists files with %s',
+  (encoding) => {
+    const source = `import * as fs from 'fs';\nconsole.log(fs.readFileSync(0, ${encoding}).trim(), fs.readdirSync('.', ${encoding}));`;
+    expect(executeProgram('typescript', source, { stdin: 'hi\n', files: { 'a.txt': '' } })).toMatchObject({
+      kind: 'executed',
+      stdout: "hi [ 'a.txt' ]\n",
+    });
+  }
+);

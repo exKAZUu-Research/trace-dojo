@@ -135,7 +135,8 @@ function encodingLabel(runtime: Runtime, encoding: Value): string {
 
 /** Whether an encoding is UTF-8, the one this interpreter reads and lists text in. */
 function isUtf8(encoding: Value): boolean {
-  return typeof encoding === 'string' && ['utf8', 'utf8'].includes(encoding.toLowerCase());
+  // Node.js spells UTF-8 with or without the hyphen, in any case.
+  return typeof encoding === 'string' && encoding.toLowerCase().replace('-', '') === 'utf8';
 }
 
 /** The shortest prefix of a path, as the program spelled it, that names a directory given by its absolute path. */
