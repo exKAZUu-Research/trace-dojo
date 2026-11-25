@@ -92,9 +92,12 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
 }
 
 function readFileSync(runtime: Runtime, args: Value[]): Value {
+  const encoding = encodingOption(runtime, args[1]);
   // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
-  if (runtime.unavailableMember && !namesEncoding(runtime, args[1]))
+  if (runtime.unavailableMember && (encoding === undefined || encoding === null))
     rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
+  if (runtime.unavailableMember && !isUtf8(encoding))
+    rejectUnavailableMember(`readFileSync の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
   // File descriptor 0 is standard input.
   if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
   const path = requirePath(runtime, args[0]);
@@ -103,21 +106,36 @@ function readFileSync(runtime: Runtime, args: Value[]): Value {
   return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
 }
 
-/** The `readdirSync` option this interpreter does not run, which lists more than names as strings, if one is given. */
+/**
+ * The `readdirSync` option this interpreter does not run, if one is given: it lists names as UTF-8 strings only, not
+ * recursively, as Dirent objects, or in another encoding.
+ */
 function unavailableReaddirOption(runtime: Runtime, options: Value): string | undefined {
-  if (options === 'buffer') return 'readdirSync の encoding: "buffer"';
+  const encoding = encodingOption(runtime, options);
+  if (encoding !== undefined && encoding !== null && !isUtf8(encoding))
+    return `readdirSync の encoding: ${encodingLabel(runtime, encoding)}`;
   if (!isObject(options)) return undefined;
-  if (runtime.get(options, 'recursive') === true) return 'readdirSync の recursive';
-  if (runtime.get(options, 'withFileTypes') === true) return 'readdirSync の withFileTypes';
-  return runtime.get(options, 'encoding') === 'buffer' ? 'readdirSync の encoding: "buffer"' : undefined;
+  for (const name of ['recursive', 'withFileTypes']) {
+    const value = runtime.get(options, name);
+    if (value !== undefined && value !== false) return `readdirSync の ${name}`;
+  }
+  return undefined;
 }
 
-/** Whether `readFileSync`'s options name an encoding, as a string or an object's `encoding`, so it reads a string. */
-function namesEncoding(runtime: Runtime, options: Value): boolean {
-  if (typeof options === 'string') return true;
-  if (!isObject(options)) return false;
-  const encoding = runtime.get(options, 'encoding');
-  return encoding !== undefined && encoding !== null;
+/** The encoding an `fs` function's options give, as a string or an options object's `encoding`. */
+function encodingOption(runtime: Runtime, options: Value): Value {
+  if (typeof options === 'string') return options;
+  return isObject(options) ? runtime.get(options, 'encoding') : undefined;
+}
+
+/** An encoding as a message names it: a string in double quotes, or another value as Node.js shows it. */
+function encodingLabel(runtime: Runtime, encoding: Value): string {
+  return typeof encoding === 'string' ? `"${encoding}"` : runtime.describePlain(encoding);
+}
+
+/** Whether an encoding is UTF-8, the one this interpreter reads and lists text in. */
+function isUtf8(encoding: Value): boolean {
+  return typeof encoding === 'string' && ['utf8', 'utf8'].includes(encoding.toLowerCase());
 }
 
 /** The shortest prefix of a path, as the program spelled it, that names a directory given by its absolute path. */

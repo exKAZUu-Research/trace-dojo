@@ -185,6 +185,14 @@ test.each([
     "const fs = require('fs'); fs.readdirSync('.', { recursive: true });",
     'readdirSync の recursive は、この採点環境では使えません。',
   ],
+  [
+    "const fs = require('fs'); fs.readdirSync('.', 'hex');",
+    'readdirSync の encoding: "hex" は、この採点環境では使えません。',
+  ],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', 'base64');",
+    'readFileSync の encoding: "base64" は、この採点環境では使えません。',
+  ],
   ["let id = 'fs'; const fs = require(id);", '名前が定数で決まらない require は、この採点環境では使えません。'],
   ["const fs = require('fs'); fs.statSync('.');", 'fs.statSync は、この採点環境では使えません。'],
   ["const load = require; load('path');", '呼び出し以外での require は、この採点環境では使えません。'],
