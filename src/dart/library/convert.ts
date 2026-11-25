@@ -289,8 +289,16 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
       var length = lead < 0xC2 || lead > 0xF4 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
       if (start + length > end) end = start;
     }
+    final carried = _pending.length;
     _pending = bytes.sublist(end);
-    if (end > 0) _sink.add(_utf8Decode(bytes, _allowMalformed, 0, end));
+    if (end == 0) return;
+    try {
+      _sink.add(_utf8Decode(bytes, _allowMalformed, 0, end));
+    } on FormatException catch (error) {
+      // The SDK's decoder keeps a split character's state, so it reports a position in the chunk it was given.
+      final offset = error.offset;
+      throw FormatException(error.message, error.source, offset == null || offset < carried ? offset : offset - carried);
+    }
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);
