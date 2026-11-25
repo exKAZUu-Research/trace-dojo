@@ -32,8 +32,10 @@ function newFile(path: string): KObject {
   return file;
 }
 
-/** The path of `child` under `parent`, which Java joins with `/` unless `parent` is empty. */
-/** A File's path from its parent's and its own, normalized as java.io.File normalizes them, as the Java interpreter does. */
+/**
+ * A File's path from its parent's and its own, normalized as java.io.File normalizes them, as the Java interpreter
+ * does: an empty parent is the root.
+ */
 function joined(parent: string | undefined, child: string): string {
   if (parent === undefined) return normalizeSlashes(child);
   if (parent === '') return normalizeSlashes(`/${child}`);
