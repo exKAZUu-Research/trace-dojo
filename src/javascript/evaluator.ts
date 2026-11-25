@@ -765,19 +765,21 @@ export class Evaluator extends SuspendableStatementEvaluator {
   ): { field: ClassField; property: Property } {
     const { runtime } = this;
     const storage = `${String(key)}\0accessor\0${nextPrivateId++}\0field`;
+    // A private accessor's functions are named by its `#name`, not by the identity its key holds.
+    const name = member.key.kind === 'private' ? member.key.name : key;
     const { value } = member;
     const field: ClassField = {
       key: storage,
       isPrivate: true,
-      initialize: value ? this.fieldInitializer(value, classScope, target, key) : undefined,
+      initialize: value ? this.fieldInitializer(value, classScope, target, name) : undefined,
       stepRow: member.stepRow,
       onlyCalls: value !== undefined && isObjectCreation(value),
     };
     const property: Property = {
-      get: runtime.newNativeFunction(`get ${String(key)}`, 0, ({ runtime: caller, thisValue }) =>
+      get: runtime.newNativeFunction(`get ${String(name)}`, 0, ({ runtime: caller, thisValue }) =>
         caller.getPrivate(thisValue, storage)
       ),
-      set: runtime.newNativeFunction(`set ${String(key)}`, 1, ({ runtime: caller, thisValue, args }) => {
+      set: runtime.newNativeFunction(`set ${String(name)}`, 1, ({ runtime: caller, thisValue, args }) => {
         caller.setPrivate(thisValue, storage, args[0]);
         return;
       }),
