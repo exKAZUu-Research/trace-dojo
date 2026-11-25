@@ -212,6 +212,11 @@ export abstract class CallCompiler extends ReflectionCompiler {
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps one operation of the interpreter in one place.
   // code-gauge-allow functionNcss -- Binds each argument to its parameter as Zig's Sema does, comptime and generic ones included.
+  private compileArgument(arg: Expression, declared: Type | undefined): TExpr {
+    const compiled = this.compile(arg, declared);
+    return declared ? this.coerce(compiled, declared, arg) : compiled;
+  }
+
   private callDeclaration(
     ref: FnRef,
     receiver: TExpr | undefined,
@@ -239,11 +244,14 @@ export abstract class CallCompiler extends ReflectionCompiler {
         args.map((arg, position) => this.comptimeArgument(arg, params[position].isComptime))
       );
       declaredTypes.push(declared);
-      const compiled = isTExpr(arg) ? arg : this.compile(arg, declared);
       let bound: TExpr;
-      if (index === 0 && receiver) bound = this.bindReceiver(compiled, declared, expression);
-      else if (declared) bound = this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg);
-      else bound = compiled;
+      if (index === 0 && receiver)
+        bound = this.bindReceiver(isTExpr(arg) ? arg : this.compile(arg, declared), declared, expression);
+      else if (isTExpr(arg)) bound = declared ? this.coerce(arg, declared, arg.span) : arg;
+      else if (params[index].isComptime)
+        // Zig evaluates a comptime parameter's argument at compile time, as `comptime` before it would.
+        bound = this.comptimeValue(() => this.compileArgument(arg, declared), arg);
+      else bound = this.compileArgument(arg, declared);
       if (params[index].isComptime && !staticResultOf(bound))
         this.error(
           bound.span,
