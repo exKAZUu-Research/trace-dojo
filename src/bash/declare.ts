@@ -11,7 +11,13 @@ import { printDeclarations } from './declarePrint';
 import type { Shell } from './shell';
 import { resolveSubscriptTarget, resolveTargetName, writeResolvedTarget } from './targets';
 import { UnsupportedFeatureError } from './unsupported';
-import { type CellHandle, type CompoundElement, type DestinationIntent, isIdentifier } from './variables';
+import {
+  type CellHandle,
+  type CompoundElement,
+  type DestinationIntent,
+  isIdentifier,
+  pushCompoundElementRoots,
+} from './variables';
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -72,16 +78,19 @@ export function executeDeclarationCommand(
   rawArgs: readonly (Word | Assignment)[],
   withRedirects: <T>(run: () => T) => T
 ): { status: number; assignsAnswer: boolean } {
-  const plan = buildDeclarationPlan(shell, builtin, rawArgs);
-  let assignsAnswer = planAssignsAnswer(plan);
-  const status = withRedirects(() => {
-    const code = runDeclarationPlan(shell, plan, () => {
-      assignsAnswer = true;
+  const roots: string[] = [];
+  return shell.withValuesRoot(roots, () => {
+    const plan = buildDeclarationPlan(shell, builtin, rawArgs, roots);
+    let assignsAnswer = planAssignsAnswer(plan);
+    const status = withRedirects(() => {
+      const code = runDeclarationPlan(shell, plan, () => {
+        assignsAnswer = true;
+      });
+      shell.store.lastArgument = plan.lastArgText;
+      return code;
     });
-    shell.store.lastArgument = plan.lastArgText;
-    return code;
+    return { status, assignsAnswer };
   });
-  return { status, assignsAnswer };
 }
 
 /** Runs a declaration builtin invoked through an expanded command word (`cmd=declare; $cmd x=1`). */
@@ -110,42 +119,53 @@ export function runDynamicDeclarationBuiltin(shell: Shell, builtin: string, args
 
 // ---------------------------------------------------------------- Phase 1: plan construction & eager compound commit
 
-function buildDeclarationPlan(shell: Shell, builtin: string, rawArgs: readonly (Word | Assignment)[]): DeclarationPlan {
-  const options = createEmptyOptions();
-  const operands: PlannedOperand[] = [];
-  const state = { optionsDone: false, lastArgText: builtin };
+interface PlanBuilderState {
+  readonly options: { set: Set<string>; unset: Set<string>; hasPlusOption: boolean; invalidOption?: string };
+  readonly operands: PlannedOperand[];
+  readonly roots: string[];
+  optionsDone: boolean;
+  lastArgText: string;
+}
+
+function buildDeclarationPlan(
+  shell: Shell,
+  builtin: string,
+  rawArgs: readonly (Word | Assignment)[],
+  roots: string[]
+): DeclarationPlan {
+  const state: PlanBuilderState = {
+    options: createEmptyOptions(),
+    operands: [],
+    roots,
+    optionsDone: false,
+    lastArgText: builtin,
+  };
   for (const arg of rawArgs) {
     if ('append' in arg) {
       state.optionsDone = true;
       for (const braced of braceExpandAssignment(shell, arg)) {
         state.lastArgText = braced.text;
-        operands.push(planAssignmentOperand(shell, builtin, braced, options));
+        state.operands.push(planAssignmentOperand(shell, builtin, braced, state));
       }
     } else {
-      appendExpandedDeclareWords(shell, builtin, arg, options, operands, state);
+      appendExpandedDeclareWords(shell, builtin, arg, state);
     }
   }
-  applyBuiltinImpliedFlags(builtin, options);
-  return { builtin, options, operands, lastArgText: state.lastArgText };
+  applyBuiltinImpliedFlags(builtin, state.options);
+  return { builtin, options: state.options, operands: state.operands, lastArgText: state.lastArgText };
 }
 
-function appendExpandedDeclareWords(
-  shell: Shell,
-  builtin: string,
-  arg: Word,
-  options: { set: Set<string>; unset: Set<string>; hasPlusOption: boolean; invalidOption?: string },
-  operands: PlannedOperand[],
-  state: { optionsDone: boolean; lastArgText: string }
-): void {
+function appendExpandedDeclareWords(shell: Shell, builtin: string, arg: Word, state: PlanBuilderState): void {
   for (const word of shell.expander.expandWords([arg])) {
+    state.roots.push(word);
     state.lastArgText = word;
     if (!state.optionsDone && word === '--') {
       state.optionsDone = true;
       continue;
     }
-    if (!state.optionsDone && consumeOptionToken(builtin, word, options)) continue;
+    if (!state.optionsDone && consumeOptionToken(builtin, word, state.options)) continue;
     state.optionsDone = true;
-    operands.push({ kind: 'word', text: word });
+    state.operands.push({ kind: 'word', text: word });
   }
 }
 
@@ -227,15 +247,17 @@ function planAssignmentOperand(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  rawOptions: ParsedOptions
+  state: PlanBuilderState
 ): PlannedOperand {
-  const effective = snapshotEffectiveOptions(builtin, rawOptions);
+  const effective = snapshotEffectiveOptions(builtin, state.options);
   if (arg.array) {
     const isAssocFlag = effective.set.has('A') && !effective.set.has('a');
     const rawItems = shell.expander.expandRawCompoundItems(arg.array, isAssocFlag);
+    pushCompoundElementRoots(state.roots, rawItems);
     return commitPhase1Compound(shell, builtin, arg, effective, rawItems);
   }
   const value = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : undefined;
+  if (value !== undefined) state.roots.push(value);
   return {
     kind: 'assignment',
     name: arg.name,

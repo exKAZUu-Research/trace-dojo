@@ -64,23 +64,31 @@ export function evaluateConditional(shell: Shell, expression: TestExpression): b
       return unaryTest(shell, expression.operator, expander.expandString(expression.operand));
     }
     case 'binary': {
-      const { operator } = expression;
-      const left = expander.expandString(expression.left);
-      if (operator === '==' || operator === '=' || operator === '!=') {
-        const matched = expander.matches(left, expander.expandPattern(expression.right), true);
-        return operator === '!=' ? !matched : matched;
-      }
-      const right = expander.expandString(expression.right);
-      if (operator === '<') return compareCollated(left, right) < 0;
-      if (operator === '>') return compareCollated(left, right) > 0;
-      if (FILE_TEST_OPERATORS.has(operator)) throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
-      const compare = ARITHMETIC_OPERATORS[operator];
-      return compare(conditionalNumber(shell, left), conditionalNumber(shell, right));
+      return evaluateBinaryConditional(shell, expression);
     }
     case 'regex': {
-      return regexTest(shell, expander.expandString(expression.left), expander.expandRegex(expression.right));
+      const left = expander.expandString(expression.left);
+      return shell.withValuesRoot([left], () => regexTest(shell, left, expander.expandRegex(expression.right)));
     }
   }
+}
+
+function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpression, { kind: 'binary' }>): boolean {
+  const { expander } = shell;
+  const { operator } = expression;
+  const left = expander.expandString(expression.left);
+  return shell.withValuesRoot([left], () => {
+    if (operator === '==' || operator === '=' || operator === '!=') {
+      const matched = expander.matches(left, expander.expandPattern(expression.right), true);
+      return operator === '!=' ? !matched : matched;
+    }
+    const right = expander.expandString(expression.right);
+    if (operator === '<') return compareCollated(left, right) < 0;
+    if (operator === '>') return compareCollated(left, right) > 0;
+    if (FILE_TEST_OPERATORS.has(operator)) throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
+    const compare = ARITHMETIC_OPERATORS[operator];
+    return compare(conditionalNumber(shell, left), conditionalNumber(shell, right));
+  });
 }
 
 class ConditionalArithmeticError extends Error {}

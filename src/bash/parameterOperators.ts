@@ -52,63 +52,72 @@ export function applyOperator(
   subscript: SubscriptRef | undefined,
   ctx: WordContext
 ): WordSegment[] {
-  const operator = expansion.operator as string;
-  const { argument } = expansion;
-  switch (operator) {
-    case ':-':
-    case '-':
-    case ':=':
-    case '=':
-    case ':?':
-    case '?':
-    case ':+':
-    case '+': {
-      const colon = operator.startsWith(':');
-      const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
-      const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, ctx.inDouble));
-      const kind = operator.at(-1) as string;
-      if (kind === '+') {
-        if (isNull) return value.kind === 'list' && !value.star && ctx.inDouble ? [EMPTY_LIST_SEGMENT] : [];
-        return expandArgument(expander, argument, { inDouble: ctx.inDouble, spacedStar: true }, false);
+  const roots = parameterValueRoots(value);
+  return shell.withValuesRoot(roots, () => {
+    const operator = expansion.operator as string;
+    const { argument } = expansion;
+    switch (operator) {
+      case ':-':
+      case '-':
+      case ':=':
+      case '=':
+      case ':?':
+      case '?':
+      case ':+':
+      case '+': {
+        const colon = operator.startsWith(':');
+        const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
+        const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, ctx.inDouble));
+        const kind = operator.at(-1) as string;
+        if (kind === '+') {
+          if (isNull) return value.kind === 'list' && !value.star && ctx.inDouble ? [EMPTY_LIST_SEGMENT] : [];
+          return expandArgument(expander, argument, { inDouble: ctx.inDouble, spacedStar: true }, false, roots);
+        }
+        if (!isNull) return expander.valueSegments(value, ctx);
+        return defaultValue(expander, shell, expansion, kind, colon, name, subscript, ctx, roots);
       }
-      if (!isNull) return expander.valueSegments(value, ctx);
-      return defaultValue(expander, shell, expansion, kind, colon, name, subscript, ctx);
+      case '#':
+      case '##':
+      case '%':
+      case '%%': {
+        const pattern = expander.patternOf(expandArgument(expander, argument, ctx, true, roots));
+        return mapPatternRemoval(expander, shell, value, ctx, (text) => removePattern(text, pattern, operator, shell));
+      }
+      case '/':
+      case '//':
+      case '/#':
+      case '/%': {
+        const { pattern: patternParts, replacement } = splitReplacement(argument);
+        const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true, roots));
+        const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true, roots);
+        return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
+      }
+      case ':': {
+        return substring(expander, shell, expansion, value, name, ctx);
+      }
+      case '^':
+      case '^^':
+      case ',':
+      case ',,':
+      case '~':
+      case '~~': {
+        const pattern =
+          argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true, roots)) : '?';
+        return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
+      }
+      case '@': {
+        return transform(expander, shell, expansion, value, name, ctx);
+      }
+      default: {
+        return shell.discard(`${expansion.text}: bad substitution`);
+      }
     }
-    case '#':
-    case '##':
-    case '%':
-    case '%%': {
-      const pattern = expander.patternOf(expandArgument(expander, argument, ctx, true));
-      return mapPatternRemoval(expander, shell, value, ctx, (text) => removePattern(text, pattern, operator, shell));
-    }
-    case '/':
-    case '//':
-    case '/#':
-    case '/%': {
-      const { pattern: patternParts, replacement } = splitReplacement(argument);
-      const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true));
-      const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true);
-      return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
-    }
-    case ':': {
-      return substring(expander, shell, expansion, value, name, ctx);
-    }
-    case '^':
-    case '^^':
-    case ',':
-    case ',,':
-    case '~':
-    case '~~': {
-      const pattern = argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true)) : '?';
-      return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
-    }
-    case '@': {
-      return transform(expander, shell, expansion, value, name, ctx);
-    }
-    default: {
-      return shell.discard(`${expansion.text}: bad substitution`);
-    }
-  }
+  });
+}
+
+function parameterValueRoots(value: ParameterValue): string[] {
+  if (value.kind === 'list') return [...value.values];
+  return value.value === undefined ? [] : [value.value];
 }
 
 function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDouble: boolean): boolean {
@@ -118,21 +127,40 @@ function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDoub
   return value.values.every((element) => element === '');
 }
 
-function expandArgument(expander: Expander, parts: WordPart[], ctx: WordContext, isPattern: boolean): WordSegment[] {
+function expandArgument(
+  expander: Expander,
+  parts: WordPart[],
+  ctx: WordContext,
+  isPattern: boolean,
+  roots: string[]
+): WordSegment[] {
   if (isPattern) {
     expander.checkTilde(parts, false);
-    return expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar });
+    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar });
+    pushSegmentRoots(roots, expanded);
+    return expanded;
   }
-  if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx.spacedStar);
+  if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx.spacedStar, roots);
   const segments: WordSegment[] = [];
   for (const part of parts) {
-    if (part.kind === 'single') segments.push(textSegment(`'${part.text}'`, true, false));
-    else if (part.kind === 'double')
-      segments.push(...expander.expandParts([part], { inDouble: false, spacedStar: ctx.spacedStar }));
-    else segments.push(...expander.expandParts([part], { inDouble: true, spacedStar: ctx.spacedStar }));
+    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx.spacedStar);
+    pushSegmentRoots(roots, chunk);
+    segments.push(...chunk);
   }
   const kept = segments.filter((seg) => seg.kind !== 'emptyList');
   return kept.length === 0 ? [QUOTED_EMPTY_SEGMENT] : kept;
+}
+
+function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
+  if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
+  const inDouble = part.kind !== 'double';
+  return expander.expandParts([part], { inDouble, spacedStar });
+}
+
+function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {
+  for (const seg of segments) {
+    if (seg.kind === 'text' && seg.text !== '') roots.push(seg.text);
+  }
 }
 
 type NonEmptySegment = Exclude<WordSegment, { kind: 'emptyList' }>;
@@ -142,10 +170,15 @@ interface OperatorWordEntry {
   readonly keepsFields: boolean;
 }
 
-function expandUnquotedOperatorWord(expander: Expander, parts: WordPart[], spacedStar: boolean): WordSegment[] {
+function expandUnquotedOperatorWord(
+  expander: Expander,
+  parts: WordPart[],
+  spacedStar: boolean,
+  roots: string[]
+): WordSegment[] {
   expander.checkTilde(parts, false);
   const ifs = expander.currentIfs();
-  const entries = collectOperatorWordEntries(expander, parts, spacedStar, expander.ifsJoiner());
+  const entries = collectOperatorWordEntries(expander, parts, spacedStar, expander.ifsJoiner(), roots);
   if (ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
     return joinOperatorWordFields(ifs, entries);
   }
@@ -158,13 +191,16 @@ function collectOperatorWordEntries(
   expander: Expander,
   parts: WordPart[],
   spacedStar: boolean,
-  starJoiner: string
+  starJoiner: string,
+  roots: string[]
 ): OperatorWordEntry[] {
   const entries: OperatorWordEntry[] = [];
   const itemCtx: WordContext = { inDouble: false, spacedStar };
   for (const part of parts) {
     const keepsFields = keepsOperatorFields(part);
-    for (const seg of expander.expandParts([part], itemCtx)) {
+    const expanded = expander.expandParts([part], itemCtx);
+    pushSegmentRoots(roots, expanded);
+    for (const seg of expanded) {
       if (seg.kind === 'emptyList') continue;
       if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
         entries.push({ segment: textSegment(starJoiner, false, true), keepsFields });
@@ -241,7 +277,7 @@ function joinNonEmptyOperatorFields(fields: TextSegment[][]): WordSegment[] {
   return joined;
 }
 
-// code-gauge-allow functionParameterCount -- Default and assignment operators take expansion metadata and explicit WordContext.
+// code-gauge-allow functionParameterCount -- Default and assignment operators take expansion metadata, explicit WordContext, and GC roots.
 function defaultValue(
   expander: Expander,
   shell: Shell,
@@ -250,12 +286,19 @@ function defaultValue(
   colon: boolean,
   name: string,
   subscript: SubscriptRef | undefined,
-  ctx: WordContext
+  ctx: WordContext,
+  roots: string[]
 ): WordSegment[] {
   if (kind === '-')
-    return expandArgument(expander, expansion.argument, { inDouble: ctx.inDouble, spacedStar: true }, false);
+    return expandArgument(expander, expansion.argument, { inDouble: ctx.inDouble, spacedStar: true }, false, roots);
   if (kind === '?') return failRequireOperator(expander, shell, expansion.argument, colon, name, subscript);
-  const word = expandArgument(expander, expansion.argument, { inDouble: ctx.inDouble, spacedStar: false }, false);
+  const word = expandArgument(
+    expander,
+    expansion.argument,
+    { inDouble: ctx.inDouble, spacedStar: false },
+    false,
+    roots
+  );
   const text = expander.joinSegments(word);
   const target = resolveAssignOperatorTarget(shell, name, subscript);
   const outcome = writeResolvedTarget(shell, target, text, false);

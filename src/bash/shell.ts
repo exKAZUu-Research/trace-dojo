@@ -35,7 +35,13 @@ import {
   writeResolvedTarget,
 } from './targets';
 import { UnsupportedFeatureError } from './unsupported';
-import { type CellHandle, isIdentifier, isValidFunctionName, VariableStore } from './variables';
+import {
+  type CellHandle,
+  isIdentifier,
+  isValidFunctionName,
+  pushCompoundElementRoots,
+  VariableStore,
+} from './variables';
 
 export { BASH_VERSION, type FunctionDefinition, type OutputTarget } from './runtime';
 export type { CompoundElement } from './variables';
@@ -884,27 +890,40 @@ export class Shell implements ArithmeticHost, RootContext {
     if (assignment.append && existing && isAssoc && existing.handle) {
       return this.appendAssociativeCompound(existing.handle, assignment.array as Word[], assignment.name, context);
     }
-    const { elements, error } = this.expander.expandCompound(
-      assignment.array as Word[],
-      isAssoc,
-      false,
-      assignment.name
-    );
-    const selected = this.store.selectDestination(
-      'visible',
-      resolved,
-      isAssoc ? 'associative' : 'indexed',
-      assignment.append
-    );
-    const outcome = this.store.writeCompound(selected.cell, elements, {
-      append: assignment.append,
-      reportedName: assignment.name,
-      evalIndex: (cellHandle, rawKey) => this.evaluateCompoundIndex(cellHandle, rawKey),
-      evalInt: (expr) => this.evaluateFatalReadonly(expr, false),
-      onItemError: (msg) => this.reportError(msg),
+    return this.writeStandardCompoundAssignment(assignment, resolved, isAssoc, context);
+  }
+
+  private writeStandardCompoundAssignment(
+    assignment: Assignment,
+    resolved: string,
+    isAssoc: boolean,
+    context: 'scriptAssignment'
+  ): boolean {
+    const roots: string[] = [];
+    return this.withValuesRoot(roots, () => {
+      const { elements, error } = this.expander.expandCompound(
+        assignment.array as Word[],
+        isAssoc,
+        false,
+        assignment.name
+      );
+      pushCompoundElementRoots(roots, elements);
+      const selected = this.store.selectDestination(
+        'visible',
+        resolved,
+        isAssoc ? 'associative' : 'indexed',
+        assignment.append
+      );
+      const outcome = this.store.writeCompound(selected.cell, elements, {
+        append: assignment.append,
+        reportedName: assignment.name,
+        evalIndex: (cellHandle, rawKey) => this.evaluateCompoundIndex(cellHandle, rawKey),
+        evalInt: (expr) => this.evaluateFatalReadonly(expr, false),
+        onItemError: (msg) => this.reportError(msg),
+      });
+      if (error !== undefined) this.discard(error);
+      return outcome.ok ? true : this.failures.handleStoreFailure(context, outcome);
     });
-    if (error !== undefined) this.discard(error);
-    return outcome.ok ? true : this.failures.handleStoreFailure(context, outcome);
   }
 
   private appendAssociativeCompound(

@@ -8,6 +8,14 @@ export function isKeyedCompoundList(elements: readonly CompoundElement[]): boole
   return elements.length > 0 && typeof elements[0] !== 'string' && !('plain' in elements[0]);
 }
 
+export function pushCompoundElementRoots(roots: string[], elements: readonly CompoundElement[]): void {
+  for (const item of elements) {
+    if (typeof item === 'string') roots.push(item);
+    else if ('plain' in item) roots.push(item.plain);
+    else roots.push(item.key, item.value);
+  }
+}
+
 /** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
 export function readAssociativePair(
   elements: CompoundElement[],
