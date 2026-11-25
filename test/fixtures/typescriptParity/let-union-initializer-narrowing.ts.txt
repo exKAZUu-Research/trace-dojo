@@ -1,0 +1,8 @@
+enum Dir { Up, Down, Left }
+let z = Math.random() > 2 ? Dir.Up : Dir.Down;
+if (z === Dir.Up) { console.log('up'); } else if (z === Dir.Down) { console.log('down'); } else { const n: never = z; console.log(n); }
+let w = Math.random() > 2 ? 1 : 'a';
+w = 5;
+let u = Math.random() > 2 ? Dir.Up : Dir.Down;
+u = Dir.Left;
+console.log(w, u);

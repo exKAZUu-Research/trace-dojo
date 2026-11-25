@@ -420,7 +420,10 @@ export class StatementChecker {
     const type =
       !annotation && isConst ? this.c.expressions.expandos.constType(declarator, symbol, declared) : declared;
     this.c.expressions.setVariableType(symbol, this.c.assignments.isAutoTyped(symbol) ? anyType : type);
-    const flowType = annotation || valueType.kind === 'literal' ? this.c.flow.assignmentReduced(type, valueType) : type;
+    // A `let` starts as the members of its declared type that its initializer can be, as tsc reduces it.
+    const isReduced =
+      annotation !== undefined || valueType.kind === 'literal' || (valueType.kind === 'union' && !isConst);
+    const flowType = isReduced ? this.c.flow.assignmentReduced(type, valueType) : type;
     this.c.flow.set(key, { type: flowType, assigned: true });
   }
 
