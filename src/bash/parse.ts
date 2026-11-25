@@ -84,7 +84,7 @@ function isEmptySubscript(node: Node): boolean {
  * the text: the text is read as a double-quoted string, as Bash treats it.
  */
 // code-gauge-allow functionCognitiveComplexity -- Scans raw arithmetic text across quotes, line continuations, escapes, and shell expansions.
-function rawArithmeticPieces(raw: string): (string | WordPart)[] {
+export function rawArithmeticPieces(raw: string): (string | WordPart)[] {
   if (!/[$`"\\]/.test(raw)) return [raw];
   const text = createValidatorSourceText(raw);
   const pieces: (string | WordPart)[] = [];

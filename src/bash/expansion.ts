@@ -18,7 +18,7 @@ import {
   type WordSegment,
 } from './fields';
 import { applyOperator } from './parameterOperators';
-import { parseSubscriptWordParts } from './parse';
+import { parseSubscriptWordParts, rawArithmeticPieces } from './parse';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { quoteReusable, singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
@@ -109,12 +109,23 @@ export class Expander {
     return regex;
   }
 
-  /** Expands an indexed array's subscript into text for arithmetic evaluation. */
+  /** Expands an indexed array's subscript into text for arithmetic evaluation, preserving single-quote syntax. */
   expandSubscriptString(word: Word): string {
-    return this.joinSegments(this.expandParts(word.parts, { inDouble: true, spacedStar: false }));
+    const pieces = word.parts.map((part): string | WordPart => {
+      if (part.kind === 'single') return `'${part.text}'`;
+      if (part.kind === 'literal') return unescapeDoubleQuoted(part.text);
+      return part;
+    });
+    return this.arithmeticText({ pieces, row: word.row });
   }
 
-  /** Expands `$` expansions, command substitutions, and quotes in a runtime string subscript. */
+  /** Expands `$` expansions, command substitutions, and double quotes in a runtime indexed subscript, keeping `'...'`. */
+  expandIndexedSubscriptText(text: string): string {
+    if (!/[$`"\\]/.test(text)) return text;
+    return this.arithmeticText({ pieces: rawArithmeticPieces(text), row: this.shell.currentRow });
+  }
+
+  /** Expands `$` expansions, command substitutions, and quotes in a runtime associative key. */
   expandSubscriptText(text: string): string {
     if (!/[$`'"\\]/.test(text)) return text;
     return this.joinSegments(this.expandParts(parseSubscriptWordParts(text), DEFAULT_WORD_CONTEXT));
@@ -560,7 +571,10 @@ export class Expander {
       if (raw === '@' || raw === '*') {
         return { name: split.name, subscript: { text: raw, wholeArray: true, rawText: raw } };
       }
-      const expanded = this.expandSubscriptText(raw);
+      const resolved = resolveTargetName(this.shell, split.name, false) ?? split.name;
+      const expanded = this.shell.store.isAssociativeName(resolved)
+        ? this.expandSubscriptText(raw)
+        : this.expandIndexedSubscriptText(raw);
       return { name: split.name, subscript: { text: expanded, wholeArray: false, rawText: raw } };
     }
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);

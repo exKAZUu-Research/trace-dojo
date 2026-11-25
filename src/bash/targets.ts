@@ -288,7 +288,7 @@ function expandAssociativeSubscript(shell: Shell, input: SubscriptInput): string
 
 function expandIndexedSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandSubscriptString(input.word);
-  return input.preExpanded ? input.text : shell.expander.expandSubscriptText(input.text);
+  return input.preExpanded ? input.text : shell.expander.expandIndexedSubscriptText(input.text);
 }
 
 function invalidTarget(raw: string, reason: StoreFailure['reason'], message: string): ResolvedTarget {
