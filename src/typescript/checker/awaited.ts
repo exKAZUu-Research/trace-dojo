@@ -37,14 +37,16 @@ export function awaitedType(c: Checker, type: Type, depth = 0): Type {
 }
 
 /**
- * Reports an `await` or a `for await` outside an async function: at the top level, where only a module may wait, or
- * in a function that is not async.
+ * Reports an `await` or a `for await` outside an async function: at the top level, where only a module may wait and
+ * tsx runs none that does, or in a function that is not async.
  */
 export function checkAwaitPlace(c: Checker, node: TreeNode, isLoop: boolean): void {
   let container: TreeNode | null = node.parent;
   while (container && !awaitBoundaries.has(container.type)) container = container.parent;
   const what = isLoop ? "'for await' ループ" : "'await' 式";
-  if (!container)
+  // tsx compiles a module to CommonJS, where esbuild refuses a top-level await.
+  if (!container && c.isModule) c.error(node, `モジュールの一番外側の${what}は、この採点環境では使えません。`);
+  else if (!container)
     c.error(
       node,
       `ファイルの一番外側の${what}は、ファイルがモジュールのときしか使えませんが、このファイルには import も export もありません。モジュールにするには、空の 'export {}' を書いてください。`
