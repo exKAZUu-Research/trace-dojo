@@ -456,11 +456,13 @@ hSetBuffering :: Handle -> BufferMode -> IO ()
 hSetBuffering = primitive "hSetBuffering"
 
 hGetBuffering :: Handle -> IO BufferMode
-hGetBuffering h = return () >>= \_ -> h ${'`'}seq${'`'} return (case h of
-  HandleStdout -> LineBuffering
-  HandleStdin -> LineBuffering
-  HandleStderr -> NoBuffering
-  _ -> BlockBuffering Nothing)
+hGetBuffering h = fmap (maybe initial id) (primitive "hStoredBuffering" h)
+  where
+    initial = case h of
+      HandleStdout -> LineBuffering
+      HandleStdin -> LineBuffering
+      HandleStderr -> NoBuffering
+      _ -> BlockBuffering Nothing
 
 hSetEcho :: Handle -> Bool -> IO ()
 hSetEcho h _ = h ${'`'}seq${'`'} return ()

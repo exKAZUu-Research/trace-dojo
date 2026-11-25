@@ -555,7 +555,7 @@ strict('chr', 1, ([a]) => {
   return String.fromCodePoint(Number(code));
 });
 
-function showSignedInt(value: bigint): string {
+export function showSignedInt(value: bigint): string {
   return value < 0n ? `(${value})` : String(value);
 }
 
@@ -792,31 +792,6 @@ define(
         return unit();
       },
       [handle]
-    )
-);
-define(
-  'hSetBuffering',
-  2,
-  [],
-  ([handle, mode], runtime) =>
-    new IOPrim(
-      'hSetBuffering',
-      () => {
-        runtime.machine.force(handle);
-        const buffering = runtime.machine.force(mode) as ConValue;
-        if (buffering.con.name === 'BlockBuffering') {
-          const size = runtime.machine.force(buffering.fields[0]) as ConValue;
-          if (size.con.name === 'Just') {
-            const count = runtime.machine.force(size.fields[0]) as bigint;
-            if (count <= 0n)
-              throw new HaskellException(
-                `hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`
-              );
-          }
-        }
-        return unit();
-      },
-      [handle, mode]
     )
 );
 define('divZeroError', 0, [], () => {

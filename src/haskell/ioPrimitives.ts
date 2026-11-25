@@ -3,7 +3,7 @@ import { CONS_CON } from './builtinTypes';
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
 import { cons, NIL, nullary, RunNext, TailCall, unpackString } from './machine';
-import { bool, define, forceString, outputHandles, unit } from './primitives';
+import { bool, define, forceString, outputHandles, showSignedInt, unit } from './primitives';
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
 
@@ -27,6 +27,8 @@ interface OpenHandle {
   writer?: FileWriter;
   /** `semiClosed` after `hGetContents`, which reads the rest lazily. */
   state: 'open' | 'semiClosed' | 'closed';
+  /** The `BufferMode` `hSetBuffering` gave, which `hGetBuffering` reports. */
+  buffering?: Slot;
 }
 
 interface HandleTable {
@@ -170,6 +172,31 @@ define('hClose', 1, [], ([handle], runtime) =>
     const { entry } = handleOf(handle, runtime);
     entry.state = 'closed';
     return unit();
+  })
+);
+
+define('hSetBuffering', 2, [], ([handle, mode], runtime) =>
+  ioAction('hSetBuffering', [handle, mode], () => {
+    const { entry } = handleOf(handle, runtime);
+    const buffering = runtime.machine.force(mode) as ConValue;
+    if (buffering.con.name === 'BlockBuffering') {
+      const size = runtime.machine.force(buffering.fields[0]) as ConValue;
+      if (size.con.name === 'Just') {
+        const count = runtime.machine.force(size.fields[0]) as bigint;
+        if (count <= 0n)
+          throw new HaskellException(`hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`);
+      }
+    }
+    entry.buffering = mode;
+    return unit();
+  })
+);
+
+define('hStoredBuffering', 1, [], ([handle], runtime) =>
+  ioAction('hStoredBuffering', [handle], () => {
+    const { buffering } = handleOf(handle, runtime).entry;
+    const maybe = ioSupport.maybe as { nothing: ConInfo; just: ConInfo };
+    return buffering ? new ConValue(maybe.just, [buffering]) : nullary(maybe.nothing);
   })
 );
 
