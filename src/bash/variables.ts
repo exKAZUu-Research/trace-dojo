@@ -1026,7 +1026,6 @@ export class VariableStore {
     return { ok: true, stored: prep.value };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Writes keyed and plain elements into associative or indexed containers with Bash's partial-commit rules.
   private writeCompoundCell(cell: Cell, elements: CompoundElement[], hooks: CompoundWriteHooks): StoreOutcome {
     const target = writableCellOrFailure(cell, hooks.reportedName);
     if (!target.ok) return target;
@@ -1043,22 +1042,19 @@ export class VariableStore {
     let next = hooks.append ? maxElementIndex(map) + 1n : 0n;
     for (const rawElement of elements) {
       const item = unpackIndexedElement(rawElement);
-      const index = item.key === undefined ? next : hooks.evalIndex(cell.name, item.key);
-      if (index === undefined) {
-        const shown = `[${item.key ?? ''}]${item.append ? '+=' : '='}${item.value}`;
-        return { ok: false, reason: 'badSubscript', message: `${shown}: bad array subscript` };
-      }
+      const resolved = resolveCompoundIndexedKey(cell.name, item, next, hooks.evalIndex);
+      if (typeof resolved !== 'bigint') return resolved;
       const prep = this.prepareConvertedString(
         cell,
         item.value,
-        item.append ? (map.get(index) ?? '') : '',
+        item.append ? (map.get(resolved) ?? '') : '',
         item.append,
         hooks.evalInt
       );
       if (!prep.ok) return prep;
-      if (!map.has(index)) this.runtime.allocateSlots(1);
-      map.set(index, prep.value);
-      next = index + 1n;
+      if (!map.has(resolved)) this.runtime.allocateSlots(1);
+      map.set(resolved, prep.value);
+      next = resolved + 1n;
     }
     return { ok: true, stored: '' };
   }
@@ -1276,6 +1272,22 @@ function convertForCell(
   const evaluated = evalInt(rawValue);
   if (evaluated === undefined) return undefined;
   return String(BigInt.asIntN(64, evaluated));
+}
+
+function resolveCompoundIndexedKey(
+  cellName: string,
+  item: { key: string | undefined; value: string; append: boolean },
+  next: bigint,
+  evalIndex: (resolvedName: string, rawKey: string) => bigint | undefined
+): bigint | StoreFailure {
+  if (item.key === undefined) return next;
+  const shown = `[${item.key}]${item.append ? '+=' : '='}${item.value}`;
+  if (item.key === '') return { ok: false, reason: 'badSubscript', message: `${shown}: bad array subscript` };
+  if (item.key === '@' || item.key === '*') {
+    return { ok: false, reason: 'badSubscript', message: `${shown}: cannot assign to non-numeric index` };
+  }
+  const index = evalIndex(cellName, item.key);
+  return index ?? { ok: false, reason: 'badSubscript', message: `${shown}: bad array subscript` };
 }
 
 function isArrayCell(cell: Cell): boolean {
