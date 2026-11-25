@@ -50,6 +50,7 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -575,6 +576,9 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       const destination = target.target as Expression;
       if (destination.kind === 'identifier' && isDiscardName(destination)) return () => {};
+      // A comptime var's cell takes stores only through a single assignment, whose checks a destructure lacks.
+      if (this.comptimeVariableOf(destination))
+        this.error(destination, unavailableMessage('syntax:comptimeVarDestructure'));
       const place = this.assignablePlace(destination);
       const convert = this.coerce(elementExpression, place.type, target);
       return (frame: Frame): void => {
@@ -619,6 +623,9 @@ export abstract class StatementCompiler extends CallCompiler {
         const discarded = this.compile(element).eval;
         return { store: (frame: Frame): void => void discarded(frame) };
       }
+      // A comptime var's cell takes stores only through a single assignment, whose checks a destructure lacks.
+      if (this.comptimeVariableOf(destination))
+        this.error(destination, unavailableMessage('syntax:comptimeVarDestructure'));
       const place = this.assignablePlace(destination);
       const evaluate = this.coerce(this.compile(element, place.type), place.type, element).eval;
       const locate = place.place.locate;
