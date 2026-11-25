@@ -922,6 +922,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         if (property && !isAccessor(property)) property.hiddenTraceConstant = true;
       }
     });
+    runInitializers(runtime, field.initializers ?? [], target);
   }
 
   // code-gauge-allow functionNcss -- Parameter binding, field initialization, and constructor returns share the constructing frame and its cleanup.

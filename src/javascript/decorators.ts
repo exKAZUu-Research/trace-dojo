@@ -140,7 +140,9 @@ function decorateMember(
 ): void {
   const { member, property, field } = definition;
   const kind = member.kind === 'field' ? (member.isAutoAccessor ? 'accessor' : 'field') : member.kind;
-  const context = decoratorContext(runtime, kind, definition.name, initializers, metadata, definition);
+  // A field's decorators add initializers that run right after the field is defined on each instance or the class.
+  const added = kind === 'field' && field ? (field.initializers ??= []) : initializers;
+  const context = decoratorContext(runtime, kind, definition.name, added, metadata, definition);
   const callable = requireCallable(runtime, decorator);
   if (kind === 'field') {
     const initializer = runtime.call(callable, undefined, [undefined, context]);
@@ -213,7 +215,7 @@ function decoratorContext(
     initializers.push(requireCallable(caller, args[0]));
     return;
   });
-  if (kind !== 'field') runtime.createDataProperty(context, 'addInitializer', addInitializer);
+  runtime.createDataProperty(context, 'addInitializer', addInitializer);
   return context;
 }
 

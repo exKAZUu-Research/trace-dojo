@@ -180,6 +180,8 @@ export interface ClassField {
   property?: Property;
   /** The functions decorators added that the initial value passes through, in the order they were added. */
   transforms?: Value[];
+  /** The functions the field's decorators added with `addInitializer`, run once the field is defined. */
+  initializers?: Value[];
 }
 
 export class JsFunction extends JsObject {
