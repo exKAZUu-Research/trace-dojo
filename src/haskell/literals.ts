@@ -54,6 +54,8 @@ const SINGLE_ESCAPES: Record<string, number> = {
 
 const MAX_CODE_POINT = 0x10_ff_ff;
 const STRING_GAP_WHITESPACE = /^[\t\n\v\f\r ]+$/;
+const WHITESPACE_ONLY = /^[\t\n\v\f\r ]*$/;
+const LEADING_WHITESPACE = /^[\t\n\v\f\r ]*/;
 
 export type NumberLiteralOptions = FeatureGates<'convert'>;
 
@@ -128,19 +130,26 @@ export function parseStringLiteral(text: string, span: Span, multiline = false):
 }
 
 /**
- * Reads a `"""` string as GHC's MultilineStrings does: it joins string gaps, removes the indentation the lines after
- * the first share, empties lines of only whitespace, and drops the newline after the opening quotes and the one
- * before the closing quotes, before it reads escapes.
+ * Reads a `"""` string as GHC's MultilineStrings does (GHC.Parser.String's `lexMultilineString`): on the source text,
+ * before it reads escapes, it joins string gaps, splits lines, expands leading tabs, removes the indentation the
+ * lines after the first share, empties those lines of only whitespace, and drops a leading and a trailing newline.
  */
 function readMultilineString(text: string, span: Span): string[] {
   if (text.length < 6 || !text.endsWith('"""')) throw syntaxError(span, 'リテラルの区切りの書き方に誤りがあります。');
-  const body = text.slice(3, -3).replaceAll(/\\[\t\n\v\f\r ]+\\/g, '');
-  const lines = body.split(/\r?\n/).map((line) => line.replace(/^[\t ]+/, (indent) => expandTabs(indent)));
-  const rest = lines.slice(1).filter((line) => /\S/.test(line));
-  const common = rest.length === 0 ? 0 : Math.min(...rest.map((line) => /^ */.exec(line)![0].length));
+  const lines = text
+    .slice(3, -3)
+    .replaceAll(/\\[\t\n\v\f\r ]+\\/g, '')
+    .split(/\r\n|[\n\r\f]/)
+    .map((line) => line.replace(/^[\t ]+/, (indent) => expandTabs(indent)));
+  const indents = lines
+    .slice(1)
+    .filter((line) => !WHITESPACE_ONLY.test(line))
+    .map((line) => LEADING_WHITESPACE.exec(line)![0].length);
+  const common = indents.length === 0 ? 0 : Math.min(...indents);
   const trimmed = lines.map((line, index) => {
-    const dedented = index === 0 ? line : line.slice(Math.min(common, /^ */.exec(line)![0].length));
-    return /\S/.test(dedented) ? dedented : '';
+    if (index === 0) return line;
+    const dedented = line.slice(common);
+    return WHITESPACE_ONLY.test(dedented) ? '' : dedented;
   });
   let joined = trimmed.join('\n');
   if (joined.startsWith('\n')) joined = joined.slice(1);
