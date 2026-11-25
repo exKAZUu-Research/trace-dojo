@@ -103,7 +103,8 @@ function sdkMembersOf(cls: ClassInfo): readonly [string, string, string] | undef
 }
 
 function hasName(names: string, name: string): boolean {
-  return ` ${names} `.includes(` ${name} `);
+  // The table does not record unnamed constructors, which an empty name would otherwise match.
+  return name !== '' && ` ${names} `.includes(` ${name} `);
 }
 
 /**
