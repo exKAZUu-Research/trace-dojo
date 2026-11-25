@@ -179,7 +179,7 @@ function defaultValue(
   ctx: WordContext
 ): WordSegment[] {
   if (kind === '-') return expandArgument(expander, expansion.argument, ctx, false);
-  if (kind === '?') return failRequireOperator(expander, shell, expansion.argument, colon, name, subscript);
+  if (kind === '?') return failRequireOperator(expander, shell, expansion, colon);
   const word = expandArgument(
     expander,
     expansion.argument,
@@ -194,21 +194,15 @@ function defaultValue(
   return expander.valueSegments({ kind: 'scalar', value: stored }, ctx, expansion.text);
 }
 
-function failRequireOperator(
-  expander: Expander,
-  shell: Shell,
-  argument: WordPart[],
-  colon: boolean,
-  name: string,
-  subscript: SubscriptRef | undefined
-): never {
+function failRequireOperator(expander: Expander, shell: Shell, expansion: ParameterExpansion, colon: boolean): never {
+  const { argument } = expansion;
   const message =
     argument.length === 0
       ? colon
         ? 'parameter null or not set'
         : 'parameter not set'
       : expandErrorWord(expander, shell, argument);
-  expander.failParameter(subscript === undefined ? name : `${name}[${subscript.rawText}]`, message);
+  expander.failParameter(writtenParameterLabel(expansion), message);
 }
 
 function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: SubscriptRef | undefined): ResolvedTarget {
@@ -408,7 +402,7 @@ function substring(
     return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
   }
   const scalarTarget = value.kind === 'scalar' ? value.value : scalarWholeArrayText(shell, name, value);
-  const targetLabel = substringTargetLabel(expansion);
+  const targetLabel = writtenParameterLabel(expansion);
   const evaluate = (parts: (string | WordPart)[]): bigint => {
     const expanded = expander.arithmeticText({ pieces: parts, row: shell.currentRow }, true, true);
     return shell.evaluateText(expanded, targetLabel, true);
@@ -436,7 +430,7 @@ function substring(
   );
 }
 
-function substringTargetLabel(expansion: ParameterExpansion): string {
+function writtenParameterLabel(expansion: ParameterExpansion): string {
   const prefix = expansion.prefix ?? '';
   const sub = expansion.subscript ? `[${expansion.subscript.text}]` : '';
   return `${prefix}${expansion.name}${sub}`;
