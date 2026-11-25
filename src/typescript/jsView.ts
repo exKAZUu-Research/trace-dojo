@@ -61,6 +61,14 @@ interface Part {
   fieldName: string | null | undefined;
 }
 
+const exportedPatternTypes = new Set([
+  'object_pattern',
+  'array_pattern',
+  'pair_pattern',
+  'assignment_pattern',
+  'rest_pattern',
+]);
+
 /** The kinds of names a namespace exports as properties that its declarations read and write. */
 const exportedVariableKinds = new Set(['let', 'const', 'var', 'declared']);
 
@@ -414,8 +422,12 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
   const assignments = declaration.namedChildren.flatMap((declarator) => {
     const name = declarator?.childForFieldName('name');
     const value = declarator?.childForFieldName('value');
-    if (!declarator || name?.type !== 'identifier' || !value) return [];
-    return [assignment(declarator, memberReference(name, namespaceName, nameOf(name)), view(value, binder))];
+    if (!declarator || !name || !value) return [];
+    const target =
+      name.type === 'identifier'
+        ? memberReference(name, namespaceName, nameOf(name))
+        : exportedPattern(name, namespaceName, binder);
+    return [assignment(declarator, target, view(value, binder))];
   });
   if (assignments.length <= 1) return assignments.map((expression) => expressionStatement(declaration, expression));
   const parts = assignments.flatMap((part, index) => [
@@ -423,6 +435,45 @@ function exportedVariables(declaration: TreeNode, namespaceName: string, binder:
     { node: part, fieldName: undefined },
   ]);
   return [expressionStatement(declaration, assemble(declaration, 'sequence_expression', parts))];
+}
+
+/**
+ * A destructuring pattern that an exported declaration binds, as the assignment pattern TypeScript compiles it to,
+ * which assigns the namespace's properties: `{ a, b = 1 }` becomes `{ a: N.a, b: N.b = 1 }`, and the names elsewhere in
+ * it read as the namespace's properties already.
+ */
+function exportedPattern(node: TreeNode, namespaceName: string, binder: Binder): ViewNode {
+  const property = (name: TreeNode, value: ViewNode): ViewNode =>
+    assemble(node, 'pair_pattern', [
+      { node: leaf(name, 'property_identifier', name.text), fieldName: 'key' },
+      { node: token(node, ':'), fieldName: undefined },
+      { node: value, fieldName: 'value' },
+    ]);
+  if (node.type === 'shorthand_property_identifier_pattern')
+    return property(node, memberReference(node, namespaceName, nameOf(node)));
+  const left = node.childForFieldName('left');
+  const right = node.childForFieldName('right');
+  if (node.type === 'object_assignment_pattern' && left?.type === 'shorthand_property_identifier_pattern' && right)
+    return property(
+      left,
+      assemble(node, 'assignment_pattern', [
+        { node: memberReference(left, namespaceName, nameOf(left)), fieldName: 'left' },
+        { node: token(node, '='), fieldName: undefined },
+        { node: view(right, binder), fieldName: 'right' },
+      ])
+    );
+  if (!exportedPatternTypes.has(node.type)) return view(node, binder);
+  return assemble(
+    node,
+    node.type,
+    node.children.flatMap((child, index) => {
+      if (!child || child.type === 'comment') return [];
+      const fieldName = node.fieldNameForChild(index);
+      const viewed =
+        !child.isNamed || fieldName === 'key' ? view(child, binder) : exportedPattern(child, namespaceName, binder);
+      return [{ node: viewed, fieldName }];
+    })
+  );
 }
 
 /** `var B = ((B) => { ... })(A.B || {}); A.B = B;` for a namespace `B` that the namespace `A` exports. */
