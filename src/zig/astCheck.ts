@@ -123,6 +123,10 @@ class AstChecker {
   /** Whether an error other than an unused or never-mutated local, a pointless discard, or unreachable code arose. */
   fatal = false;
   private scope: Scope | undefined;
+  /** Whether the statement being checked is the first of a function's or a branch's body. */
+  private hintable = false;
+  /** The blocks that are the bodies of conditional branches and loops. */
+  private readonly branchBodies = new WeakSet<Expression>();
   private functionDepth = 0;
 
   constructor(private readonly budget: ExecutionBudget) {}
@@ -324,7 +328,7 @@ class AstChecker {
       for (const attribute of [fn.alignment, fn.addressSpace, fn.callingConvention])
         if (attribute) this.expression(attribute, 'value');
       this.typeExpression(fn.returnType);
-      this.blockStatements(fn.body.statements);
+      this.blockStatements(fn.body.statements, true);
       this.checkUsed(params);
     } catch (error) {
       if (error !== FATAL) throw error;
@@ -447,13 +451,15 @@ class AstChecker {
 
   // Statements ------------------------------------------------------------------------------------------------------
 
-  private blockStatements(statements: readonly Statement[]): void {
+  /** @param opensBranch Whether the block is a function's or a branch's body, whose first statement may hint it. */
+  private blockStatements(statements: readonly Statement[], opensBranch = false): void {
     let diverted = false;
-    for (const statement of statements) {
+    for (const [index, statement] of statements.entries()) {
       if (diverted) {
         this.minorError(statement, 'この文には、決して実行がたどり着きません。');
         diverted = false;
       }
+      this.hintable = opensBranch && index === 0;
       this.statement(statement);
       if (statement.kind === 'expression' && divertsControl(statement.expression)) diverted = true;
     }
@@ -615,13 +621,13 @@ class AstChecker {
         this.expression(expression.condition, expression.capture?.byPointer ? 'ref' : 'value');
         this.withBlock(() => {
           this.capture(expression.capture);
-          this.expression(expression.consequent, 'value');
+          this.branchBody(expression.consequent);
         });
         if (expression.otherwise) {
           const otherwise = expression.otherwise;
           this.withBlock(() => {
             this.capture(expression.elseCapture);
-            this.expression(otherwise, 'value');
+            this.branchBody(otherwise);
           });
         }
         break;
@@ -761,6 +767,8 @@ class AstChecker {
   }
 
   private builtinCall(expression: Extract<Expression, { kind: 'builtinCall' }>): void {
+    if (expression.name === '@branchHint' && !this.hintable)
+      this.error(expression, '@branchHint は、関数か条件の分岐の最初の文に書いてください。');
     if (expression.name === '@import') {
       const [path] = expression.args;
       if (expression.args.length !== 1 || path.kind !== 'string') {
@@ -789,13 +797,20 @@ class AstChecker {
   }
 
   private blockExpression(expression: Extract<Expression, { kind: 'block' }>): void {
+    const opensBranch = this.branchBodies.has(expression);
     if (!expression.label) {
-      this.withBlock(() => this.blockStatements(expression.statements));
+      this.withBlock(() => this.blockStatements(expression.statements, opensBranch));
       return;
     }
     this.withLabel(expression.label, 'block', false, () =>
-      this.withBlock(() => this.blockStatements(expression.statements))
+      this.withBlock(() => this.blockStatements(expression.statements, opensBranch))
     );
+  }
+
+  /** The body of a conditional branch or a loop, whose first statement may be `@branchHint`. */
+  private branchBody(body: Expression): void {
+    if (body.kind === 'block') this.branchBodies.add(body);
+    this.expression(body, 'value');
   }
 
   private withLabel(label: Label, target: LabelScope['target'], isLoop: boolean, run: () => void): void {
@@ -825,7 +840,7 @@ class AstChecker {
       this.withBlock(() => {
         this.capture(expression.capture);
         if (expression.continueExpression) this.expression(expression.continueExpression, 'value');
-        this.expression(expression.body, 'value');
+        this.branchBody(expression.body);
       });
     };
     const loop: LoopScope = { kind: 'loop', parent: this.scope };
@@ -870,7 +885,7 @@ class AstChecker {
     const body = (): void => {
       this.withBlock(() => {
         for (const capture of expression.captures) this.capture(capture);
-        this.expression(expression.body, 'value');
+        this.branchBody(expression.body);
       });
     };
     const loop: LoopScope = { kind: 'loop', parent: this.scope };
@@ -906,7 +921,7 @@ class AstChecker {
           }
           this.capture(each.capture);
           this.capture(each.tagCapture);
-          this.expression(each.body, 'value');
+          this.branchBody(each.body);
         });
       }
     };

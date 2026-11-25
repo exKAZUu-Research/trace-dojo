@@ -292,7 +292,16 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { name, args } = expression;
     // The grader runs as a Debug build does: it keeps every safety check, and evaluates floats strictly.
     this.builtinArity(expression, name === '@prefetch' ? 2 : 1);
-    const compiled = args.map((arg) => this.compile(arg));
+    // Each takes a value of std.builtin's type for it, which an enum literal such as `.cold` names.
+    const parameter = { '@branchHint': 'BranchHint', '@setFloatMode': 'FloatMode', '@prefetch': 'PrefetchOptions' }[
+      name as '@branchHint' | '@setFloatMode' | '@prefetch'
+    ] as string | undefined;
+    const compiled = args.map((arg, index) => {
+      const lastArgument = index === args.length - 1;
+      if (!parameter || !lastArgument) return this.compile(arg);
+      const type = this.langMember(parameter, expression);
+      return this.coerce(this.compile(arg, type), type, arg);
+    });
     if (name === '@setRuntimeSafety' && staticResultOf(compiled[0])?.value === false)
       this.error(expression, unavailableMessage('@setRuntimeSafety(false)'));
     return known(VOID, undefined, expression);
