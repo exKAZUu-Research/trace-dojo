@@ -1,0 +1,4 @@
+(2,15): error TS2476: A const enum member can only be accessed using a string literal.
+(4,15): error TS2476: A const enum member can only be accessed using a string literal.
+(6,15): error TS2476: A const enum member can only be accessed using a string literal.
+(7,31): error TS2476: A const enum member can only be accessed using a string literal.

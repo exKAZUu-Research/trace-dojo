@@ -85,7 +85,13 @@ export class Enums {
 
   /** A `const enum` has no object to use as a value, only members to read, which TypeScript compiles to their values. */
   checkConstEnumUse(node: TreeNode, symbol: Sym): void {
-    if (!isConstEnum(symbol) || isAllowedConstEnumUse(node)) return;
+    if (!isConstEnum(symbol)) return;
+    const index = node.parent?.type === 'subscript_expression' ? node.parent.childForFieldName('index') : undefined;
+    if (index && node.parent?.childForFieldName('object')?.id === node.id && !isStringLiteralIndex(index)) {
+      this.c.error(index, "'const' enum のメンバーには、文字列リテラルでしかアクセスできません。");
+      return;
+    }
+    if (isAllowedConstEnumUse(node)) return;
     this.c.error(
       node,
       "'const' enum は、プロパティやインデックスのアクセス式、import 宣言やエクスポート代入の右辺、型のクエリーでしか使えません。"
@@ -431,4 +437,12 @@ function isNumericName(name: TreeNode): boolean {
   if (name.type !== 'string') return false;
   const text = stringValue(name);
   return Number.isFinite(Number(text)) && String(Number(text)) === text;
+}
+
+/** Whether an index is a string literal, or a template literal without substitutions, not in parentheses. */
+function isStringLiteralIndex(index: TreeNode): boolean {
+  return (
+    index.type === 'string' ||
+    (index.type === 'template_string' && !named(index).some((child) => child.type === 'template_substitution'))
+  );
 }
