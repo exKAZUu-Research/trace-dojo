@@ -1966,16 +1966,16 @@ class Renamer {
     }
   }
 
-  /**
-   * Replaces the `..` of the record patterns of pattern bindings with the fields they bind, whose names the bindings
-   * must declare before their patterns are renamed.
-   */
   /** The fields a record pattern's `..` binds: those of a record pattern synonym, or of the constructor. */
   private recordFieldNames(name: QName, con: () => ConInfo): readonly string[] {
     const synonym = name.qualifier ? undefined : this.patternSynonyms.get(name.name);
     return synonym?.fields ?? con().fieldNames ?? [];
   }
 
+  /**
+   * Replaces the `..` of the record patterns of pattern bindings with the fields they bind, whose names the bindings
+   * must declare before their patterns are renamed.
+   */
   private expandBindingWildcards(decls: Decl[], resolve: (name: QName) => readonly string[]): Decl[] {
     return decls.map((decl) =>
       decl.kind === 'patBind' ? { ...decl, pat: expandRecordWildcards(decl.pat, resolve) } : decl

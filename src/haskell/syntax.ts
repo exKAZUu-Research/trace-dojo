@@ -221,7 +221,7 @@ export type Stmt =
 export interface ConDecl {
   name: Name;
   fields: TypeExpr[];
-  /** The positions of the fields marked `!`, which only the library may declare. */
+  /** The positions of the strict fields: those marked `!`, and under StrictData those not marked `~`. */
   strictFields?: number[];
   /** The field names of a record constructor, one per field. */
   fieldNames?: Name[];
