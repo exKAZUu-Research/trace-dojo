@@ -437,7 +437,9 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
   const name =
     declaration.type === 'import_alias' ? declaration.namedChildren[0] : declaration.childForFieldName('name');
   const statements = [view(declaration, binder)];
-  if (name) statements.push(unstepped(exportAssignment(declaration, namespaceName, nameOf(name))));
+  // An import alias of a type only declares no value, so there is nothing to export.
+  if (name && statements[0].type !== 'empty_statement')
+    statements.push(unstepped(exportAssignment(declaration, namespaceName, nameOf(name))));
   return statements;
 }
 

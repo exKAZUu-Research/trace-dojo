@@ -18,15 +18,19 @@ export function isInstantiatedNamespace(symbol: Sym): boolean {
 
 /** Whether a namespace block's body has code to run, rather than only types and namespaces of types. */
 export function blockHasRuntimeCode(body: TreeNode): boolean {
-  return body.namedChildren.some((child) => {
-    if (!child || child.type === 'comment') return false;
-    const declaration = child.type === 'export_statement' ? child.childForFieldName('declaration') : child;
-    if (!declaration || erasedStatementTypes.has(declaration.type)) return false;
-    const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
-    if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
-    const innerBody = inner.childForFieldName('body');
-    return innerBody !== null && blockHasRuntimeCode(innerBody);
-  });
+  return body.namedChildren.some((child) => child !== null && statementHasRuntimeCode(child));
+}
+
+function statementHasRuntimeCode(statement: TreeNode): boolean {
+  if (statement.type === 'comment') return false;
+  const declaration = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
+  if (!declaration || erasedStatementTypes.has(declaration.type)) return false;
+  // tsc counts an import alias only when it is exported.
+  if (declaration.type === 'import_alias') return statement.type === 'export_statement';
+  const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
+  if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
+  const innerBody = inner.childForFieldName('body');
+  return innerBody !== null && blockHasRuntimeCode(innerBody);
 }
 
 /** Whether a declaration is in an ambient context, as in `declare namespace`, which declares without code to run. */
