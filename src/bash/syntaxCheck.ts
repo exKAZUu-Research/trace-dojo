@@ -93,8 +93,7 @@ export function inspectUnescapedBackquoteBody(body: string, row: number): Backqu
   const text = `${'\n'.repeat(row)}${body}\n`;
   const { error } = checkBashSyntax(text);
   if (!error || error === 'unknown') return undefined;
-  const messages =
-    error.near === undefined ? [error.text] : [error.text, `syntax error near \`${formatSyntaxToken(error.near)}'`];
+  const messages = error.near === undefined ? [error.text] : [error.text, `syntax error near \`${error.near}'`];
   const shows = (messages.at(-1) as string).startsWith('syntax error near');
   return { row: error.row, messages, ...(shows ? { line: text.split('\n')[error.row] } : {}) };
 }
@@ -910,7 +909,7 @@ class ShellGrammarValidator {
     } else {
       near = trailingLineToken(source, after) ?? '(';
     }
-    this.text.fail(this.text.rowAt(singleCloseIndex), `syntax error near \`${formatSyntaxToken(near)}'`);
+    this.text.fail(this.text.rowAt(singleCloseIndex), `syntax error near \`${near}'`);
   }
 
   private parseLoopBodyGroup(allowsBraceBody: boolean): void {
