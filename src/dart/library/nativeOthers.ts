@@ -164,12 +164,27 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 
 // dart:io
 
+/** A standard sink's writes, which fail once it is closed, except for empty text, which the VM's sink never passes on. */
 function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
   const isError = isStderr(receiver);
-  if (closedSinks.get(runtime)?.has(isError)) runtime.throwError('StateError', '', ['StreamSink is closed']);
   const channel = isError ? runtime.io.stderr : runtime.io.stdout;
-  return { write: (text: string) => channel.write(text, encodableText) };
+  return {
+    write: (text: string) => {
+      if (text === '') return;
+      requireOpen(runtime, isError);
+      channel.write(text, encodableText);
+    },
+  };
 }
+
+function requireOpen(runtime: Runtime, isError: boolean): void {
+  if (closedSinks.get(runtime)?.has(isError)) runtime.throwError('StateError', '', ['StreamSink is closed']);
+}
+
+define('Stdout._requireOpen', (runtime, receiver) => {
+  requireOpen(runtime, isStderr(receiver));
+  return;
+});
 
 function isStderr(receiver: Value): boolean {
   return (receiver as DartObject).fields[0] === true;

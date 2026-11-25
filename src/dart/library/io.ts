@@ -154,6 +154,8 @@ class Stdout implements IOSink {
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
   external void writeCharCode(int charCode);
   void add(List<int> data) {
+    // Bytes reach the sink even when there are none, so adding fails once it is closed.
+    _requireOpen();
     // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
     write(_textOfBytes(data));
   }
@@ -170,6 +172,7 @@ class Stdout implements IOSink {
   }
   Future get done => _closed.future;
   external void _close();
+  external void _requireOpen();
 }
 
 final Stdout stdout = Stdout._(false);
