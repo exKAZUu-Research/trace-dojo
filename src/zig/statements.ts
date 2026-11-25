@@ -807,7 +807,8 @@ export abstract class StatementCompiler extends CallCompiler {
       const value =
         discarded.kind === 'catch' ? this.compileCatch(discarded, undefined, true) : this.compile(expression.value);
       this.rejectDiscardedError(value.type, expression.value);
-      const evaluate = value.eval;
+      // Zig does not load a variable that `_ = x;` discards, which a comptime block may name though x is a runtime one.
+      const evaluate = discarded.kind === 'identifier' ? () => {} : value.eval;
       return {
         exec: this.simple(row, isCallOnly(expression.value), (frame) => void evaluate(frame)),
         noreturn: value.type.kind === 'noreturn',
