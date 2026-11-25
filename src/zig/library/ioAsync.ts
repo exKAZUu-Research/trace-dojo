@@ -43,14 +43,15 @@ export function startedCall(sema: SemaApi, functionArg: Expression, argsArg: Exp
   });
 }
 
-/** `io.async(function, args)` and `io.concurrent(function, args)`. */
+/** `io.async(function, args)` and `io.concurrent(function, args)`, or `std.Io.async(io, function, args)` and the like. */
 export function asyncMember(name: 'async' | 'concurrent'): () => Member {
   return fnMember(`Io.${name}`, (sema, call) => {
-    const [functionArg, argsArg] = expectArgs(sema, call, 2, name);
+    const args = expectArgs(sema, call, call.receiver ? 2 : 3, name);
+    const [functionArg, argsArg] = args.slice(-2);
+    const io = call.receiver ?? compileArgs(sema, [args[0]], [IO_TYPE()])[0];
     const result = startedCall(sema, functionArg, argsArg, call.span);
     const future = futureType(result.type);
-    const receiver = call.receiver;
-    const evaluateIo = receiver?.eval;
+    const evaluateIo = io.eval;
     const evaluate = result.eval;
     const type = name === 'async' ? future : errorUnionOf(errorSetOf(['ConcurrencyUnavailable']), future);
     return runtime(
