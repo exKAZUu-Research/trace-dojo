@@ -178,7 +178,6 @@ export abstract class StatementCompiler extends PatternCompiler {
   /** The annotation rows that mark a function, so that any other one is reported as misplaced. */
   protected readonly usedAtomicRows = new Set<number>();
 
-  /** Whether a function returning `type` must end with a `return`, because `null` is not a value of the type. */
   /**
    * Whether a function declared to return `declared` must end with a `return` of a value, because `null` is not a
    * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
