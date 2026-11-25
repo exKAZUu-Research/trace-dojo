@@ -26,7 +26,6 @@ import { type ClassType, isNonNullClass, type KType, resolved } from './types';
 import { uninitializedCheck } from './uninitialized';
 import { KObject, UNIT, type Value } from './values';
 
-/** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
 /** A class declared in a function body: the context of what it captures, and where its declaration stores that. */
 export interface LocalClass {
   context: FunctionContext;
@@ -66,6 +65,7 @@ function restartingOnTailCalls(run: Eval): Eval {
   };
 }
 
+/** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
 export abstract class BodyCompiler extends DeclarationCompiler {
   // Phase 4: bodies.
 
@@ -955,7 +955,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         caller.runtime.call(context.info, caller, captured, instance, args, callRow, run, enclosing);
       });
     }
-    this.rejectDelegationCycles(entry, targets);
+    this.rejectDelegationCycles(targets);
   }
 
   /** The constructor a `constructor(...)` delegates to: another of its class's with `this(...)`, or the superclass's. */
@@ -1023,7 +1023,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return this.superInitializer(call, callRow);
   }
 
-  private rejectDelegationCycles(entry: ClassEntry, targets: Map<FunctionSymbol, FunctionSymbol>): void {
+  private rejectDelegationCycles(targets: Map<FunctionSymbol, FunctionSymbol>): void {
     for (const start of targets.keys()) {
       const seen = new Set<FunctionSymbol>();
       for (let current: FunctionSymbol | undefined = start; current; current = targets.get(current)) {
@@ -1031,7 +1031,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         seen.add(current);
       }
     }
-    void entry;
   }
 
   /** The contexts of `constructor(...)` bodies, by their classes, where a `val` without an initializer may get its value. */

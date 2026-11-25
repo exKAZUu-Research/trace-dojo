@@ -2536,11 +2536,11 @@ const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arr
 
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 
-/** `s.isNullOrEmpty()` and `s.isNullOrBlank()` are false only for a receiver that is not null, as their contracts say. */
 function isOperator({ symbol }: { symbol: FunctionSymbol }): boolean {
   return symbol.isOperator;
 }
 
+/** `s.isNullOrEmpty()` and `s.isNullOrBlank()` are false only for a receiver that is not null, as their contracts say. */
 function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined): Compiled['narrowing'] {
   const { symbol } = call;
   const isNullCheck = symbol.isLibrary && (symbol.name === 'isNullOrEmpty' || symbol.name === 'isNullOrBlank');
