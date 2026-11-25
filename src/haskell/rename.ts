@@ -35,13 +35,27 @@ import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
 import { TH_NAME_MODULES } from './library/thNames';
-import { LocalScope } from './localScope';
+import { type LocalNamespace, LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { NEWTYPE_STRICT_FIELDS } from './newtypes';
 import type {
   Binder,
   LocalVar,
+  QBody,
+  QClause,
+  QCon,
+  QDecl,
+  QDecls,
+  QExpr,
+  QFieldExp,
+  QGuarded,
+  QMatch,
+  QPat,
+  QQuote,
   QRef,
+  QStmt,
+  QType,
+  QTyVar,
   RAlt,
   RBinder,
   RBindGroup,
@@ -63,10 +77,12 @@ import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
   ChainItem,
+  ConDecl,
   Decl,
   DerivingStrategy,
   Expr,
   FieldBind,
+  Guard,
   Import,
   ImportItem,
   Module,
@@ -75,6 +91,7 @@ import type {
   OverlapMode,
   Pat,
   QName,
+  QuoteBody,
   Rhs,
   Role,
   SigType,
@@ -82,10 +99,10 @@ import type {
   Stmt,
   TypeEquation,
   TypeExpr,
+  TyVarBinder,
 } from './syntax';
 import { THIS_MODULE } from './syntax';
 import { globalNameCode, QuoteBuilder, thString } from './thQuote';
-import { type QuoteGlobals, type QuoteNamespace, QuoteRenamer } from './thRename';
 import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
@@ -316,6 +333,10 @@ class Renamer {
   private readonly patternSynonyms = new Map<string, PatternSynonymInfo>();
   /** The constructors of the module's `type data` declarations, which are types without a tick or DataKinds. */
   private readonly typeDataCons = new Set<string>();
+  /** In quote mode, the variables the quote binds, which its scopes have besides those around the quote. */
+  private quoteBinders?: Set<LocalVar>;
+  /** The methods of the classes quotes declare, by name. */
+  private readonly quoteClassMethods = new Map<LocalVar, Map<string, LocalVar>>();
   /** The features of the module's extensions that resolving names decides. */
   private readonly features: FeatureGates<'rename'>;
 
@@ -2030,11 +2051,13 @@ class Renamer {
     return entity.con ? { k: 'con', con: entity.con, span } : { k: 'var', ref: { kind: 'global', entity }, name, span };
   }
 
-  private fixityOf(op: Operator, scope: LocalScope): Fixity {
-    if (!op.qualifier && !op.isConstructor) {
-      const local = scope.lookup(op.name);
+  /** The fixity of an operator in scope: a local's, or in quote mode, one a quote refers to outside it. */
+  private fixityOf(op: Operator, scope: LocalScope | undefined): Fixity {
+    if (!op.qualifier) {
+      const local = scope?.lookup(op.name, op.isConstructor ? 'con' : 'value');
       if (local) return local.fixity ?? DEFAULT_FIXITY;
     }
+    if (this.quoteBinders) return this.quoteFixity(op);
     if (op.isConstructor && !op.qualifier && this.patternSynonyms.has(op.name)) return DEFAULT_FIXITY;
     const entity = op.isConstructor ? this.lookupCon(op).entity : this.lookupValue(op, true);
     return entity.fixity ?? DEFAULT_FIXITY;
@@ -2127,11 +2150,7 @@ class Renamer {
       }
       case 'pchain': {
         return this.renamePat(
-          resolvePatChain(pat.items, span, (op) =>
-            !op.qualifier && this.patternSynonyms.has(op.name)
-              ? DEFAULT_FIXITY
-              : (this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY)
-          ),
+          resolvePatChain(pat.items, span, (op) => this.fixityOf(op, scope)),
           binders,
           scope
         );
@@ -2206,11 +2225,14 @@ class Renamer {
     return { k: 'con', con, args, order, span };
   }
 
-  private bindPatVar(name: Name, binders: Map<string, LocalVar>): LocalVar {
+  /** The variable a pattern binds: a new one, or the one a declaration group `declared` for its name. */
+  private bindPatVar(name: Name, binders: Map<string, LocalVar>, declared?: ReadonlyMap<string, LocalVar>): LocalVar {
+    const local = declared?.get(name.name);
+    if (local) return local;
     if (binders.has(name.name)) throw compileError(name.span, `パターンの中で ${name.name} が重複しています。`);
-    const local = newLocal(name.name, name.span);
-    binders.set(name.name, local);
-    return local;
+    const created = this.newBinder(name.name, name.span);
+    binders.set(name.name, created);
+    return created;
   }
 
   renameSigType(sig: SigType): RSigType {
@@ -2391,24 +2413,678 @@ class Renamer {
   }
 
   /**
-   * The code a quote builds: its body renamed in the quote's scope, then built into calls of the library's functions
-   * that build its tree. A typed quote also has its expression, which only gives the quote its type.
+   * The code a quote builds: its body renamed in quote mode, then built into calls of the library's functions that
+   * build its tree. A typed quote also has its expression as the module's code has it, which gives the quote its type.
    */
   private quoteCode(expr: Extract<Expr, { kind: 'quote' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    const globals: QuoteGlobals = {
-      lookup: (namespace, name, required) => this.quoteGlobal(namespace, name, required),
-      fixity: (op) => this.quoteFixity(op),
-      support: (name, at) => {
-        const entity = this.supportValue(name, at);
-        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
-      },
-      newLocal,
-    };
-    const built = new QuoteBuilder(span).build(new QuoteRenamer(globals).quote(expr.body, scope));
-    if (!expr.typed || expr.body.kind !== 'exp') return built;
-    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr.body.expr, span };
+    const built = new QuoteBuilder(span).build(this.renameQuote(expr.body, scope));
+    if (!expr.witness) return built;
+    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr.witness, span };
     return thCall(span, 'typedQuote', typer, built);
+  }
+
+  /**
+   * Renames a quote in quote mode, in the scope it is written in: the same scopes, lookups, fixities, and binder
+   * collection as the module's code, with each name annotated with its stage, a binder of the quote, a variable
+   * around it (which the tree holds lifted), a global name, or an unbound one. Quote mode applies none of the
+   * syntax's desugarings, so the tree keeps what the quote wrote.
+   */
+  private renameQuote(body: QuoteBody, scope: LocalScope): QQuote {
+    const saved = this.quoteBinders;
+    this.quoteBinders = new Set();
+    try {
+      switch (body.kind) {
+        case 'exp': {
+          return { k: 'exp', expr: this.quoteExpr(body.expr, scope) };
+        }
+        case 'pat': {
+          return { k: 'pat', pat: this.quotePat(body.pat, new Map(), scope) };
+        }
+        case 'type': {
+          return { k: 'type', type: this.quoteType(body.type, scope) };
+        }
+        case 'decs': {
+          return { k: 'decs', decls: this.quoteDeclGroup(body.decls, scope).decls };
+        }
+      }
+    } finally {
+      this.quoteBinders = saved;
+    }
+  }
+
+  /** A new local, which in quote mode is a binder of the quote. */
+  private newBinder(name: string, span: Span): LocalVar {
+    const local = newLocal(name, span);
+    this.quoteBinders?.add(local);
+    return local;
+  }
+
+  private quoteValueRef(name: QName, scope: LocalScope, namespace: 'var' | 'value', required = false): QRef {
+    const local = name.qualifier ? undefined : scope.lookup(name.name);
+    if (local) return this.quoteBinders?.has(local) ? { k: 'bound', local } : { k: 'outer', name: name.name };
+    return this.quoteGlobal(namespace, name, required);
+  }
+
+  private quoteConRef(name: QName, scope: LocalScope, required: boolean): QRef {
+    const local = name.qualifier ? undefined : scope.lookup(name.name, 'con');
+    return local ? { k: 'bound', local } : this.quoteGlobal('con', name, required);
+  }
+
+  private quoteTypeRef(name: QName, scope: LocalScope): QRef {
+    const local = name.qualifier ? undefined : scope.lookup(name.name, 'type');
+    return local ? { k: 'bound', local } : this.quoteGlobal('type', name, true);
+  }
+
+  private quoteTyVarRef(name: string, scope: LocalScope): QRef {
+    const local = scope.lookup(name, 'tyVar');
+    return local ? { k: 'bound', local } : { k: 'unbound', name };
+  }
+
+  private unsupportedInQuote(span: Span, what: string): Error {
+    return unsupportedError(span, `Template Haskell のクォートの中の${what}`);
+  }
+
+  // code-gauge-allow functionNcss -- One short case per expression kind a quote may hold.
+  private quoteExpr(expr: Expr, scope: LocalScope): QExpr {
+    switch (expr.kind) {
+      case 'var': {
+        return { k: 'var', ref: this.quoteValueRef(expr.name, scope, 'var') };
+      }
+      case 'con': {
+        return { k: 'con', ref: this.quoteConRef(expr.name, scope, false) };
+      }
+      case 'lit': {
+        return { k: 'lit', lit: expr.lit };
+      }
+      case 'app': {
+        return { k: 'app', fn: this.quoteExpr(expr.fn, scope), arg: this.quoteExpr(expr.arg, scope) };
+      }
+      case 'paren': {
+        return this.quoteExpr(expr.expr, scope);
+      }
+      case 'chain': {
+        return this.quoteExpr(
+          resolveExprChain(expr.items, expr.span, (op) => this.fixityOf(op, scope)),
+          scope
+        );
+      }
+      case 'binop': {
+        const op = this.quoteOperator(expr.op, scope);
+        return { k: 'infix', left: this.quoteExpr(expr.left, scope), op, right: this.quoteExpr(expr.right, scope) };
+      }
+      case 'neg': {
+        const entity = this.supportValue('negate', expr.span);
+        const negate: QExpr = {
+          k: 'var',
+          ref: { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name },
+        };
+        return { k: 'app', fn: negate, arg: this.quoteExpr(expr.expr, scope) };
+      }
+      case 'leftSection': {
+        return { k: 'infix', left: this.quoteExpr(expr.left, scope), op: this.quoteOperator(expr.op, scope) };
+      }
+      case 'rightSection': {
+        return { k: 'infix', op: this.quoteOperator(expr.op, scope), right: this.quoteExpr(expr.right, scope) };
+      }
+      case 'lambda': {
+        const sugar = this.quoteLambdaSugar(expr, scope);
+        if (sugar) return sugar;
+        const binders = new Map<string, LocalVar>();
+        const pats = expr.pats.map((pat) => this.quotePat(pat, binders, scope));
+        return { k: 'lambda', pats, body: this.quoteExpr(expr.body, withLocals(scope, binders.values())) };
+      }
+      case 'let': {
+        const group = this.quoteDeclGroup(expr.decls, scope);
+        return { k: 'let', decls: group.decls, body: this.quoteExpr(expr.body, group.scope) };
+      }
+      case 'if': {
+        return {
+          k: 'if',
+          cond: this.quoteExpr(expr.cond, scope),
+          ifTrue: this.quoteExpr(expr.ifTrue, scope),
+          ifFalse: this.quoteExpr(expr.ifFalse, scope),
+        };
+      }
+      case 'case': {
+        return this.quoteCase(expr, scope);
+      }
+      case 'do': {
+        return { k: 'do', stmts: this.quoteStmts(expr.stmts, scope).stmts };
+      }
+      case 'tuple':
+      case 'list': {
+        if (expr.kind === 'list' && expr.elems.length === 0) {
+          return { k: 'con', ref: this.quoteConRef({ name: '[]', span: expr.span }, scope, true) };
+        }
+        return { k: expr.kind, elems: expr.elems.map((elem) => this.quoteExpr(elem, scope)) };
+      }
+      default: {
+        return this.quoteOtherExpr(expr, scope);
+      }
+    }
+  }
+
+  /** Sequences, comprehensions, signatures, records, type applications, and splices in a quote. */
+  private quoteOtherExpr(expr: Expr, scope: LocalScope): QExpr {
+    switch (expr.kind) {
+      case 'arith': {
+        return {
+          k: 'arith',
+          from: this.quoteExpr(expr.from, scope),
+          next: expr.next && this.quoteExpr(expr.next, scope),
+          to: expr.to && this.quoteExpr(expr.to, scope),
+        };
+      }
+      case 'comprehension': {
+        if (expr.parallel) throw this.unsupportedInQuote(expr.span, '並列の内包表記');
+        const final: Stmt = { kind: 'exp', expr: expr.expr, span: expr.span };
+        return { k: 'comp', stmts: this.quoteStmts([...expr.quals, final], scope).stmts };
+      }
+      case 'typed': {
+        return { k: 'sig', expr: this.quoteExpr(expr.expr, scope), type: this.quoteSigType(expr.sig, scope) };
+      }
+      case 'recordCon': {
+        if (expr.wildcard) throw this.unsupportedInQuote(expr.span, 'レコードのワイルドカード');
+        return {
+          k: 'recordCon',
+          con: this.quoteConRef(expr.con, scope, true),
+          fields: this.quoteFieldExps(expr.fields, scope),
+        };
+      }
+      case 'recordUpdate': {
+        return {
+          k: 'recordUpdate',
+          expr: this.quoteExpr(expr.expr, scope),
+          fields: this.quoteFieldExps(expr.fields, scope),
+        };
+      }
+      case 'tyapp': {
+        if (!expr.type) throw this.unsupportedInQuote(expr.span, '型の適用 @_');
+        return { k: 'tyapp', expr: this.quoteExpr(expr.expr, scope), type: this.quoteType(expr.type, scope) };
+      }
+      case 'thSplice': {
+        return { k: 'splice', code: expr.expr };
+      }
+      default: {
+        throw this.unsupportedInQuote(expr.span, 'この式');
+      }
+    }
+  }
+
+  private quoteOperator(op: Operator, scope: LocalScope): QExpr {
+    return op.isConstructor
+      ? { k: 'con', ref: this.quoteConRef(op, scope, false) }
+      : { k: 'var', ref: this.quoteValueRef(op, scope, 'var') };
+  }
+
+  private quoteFieldExps(fields: FieldBind[], scope: LocalScope): QFieldExp[] {
+    return fields.map((field) => ({
+      field: this.quoteValueRef(field.field, scope, 'value', true),
+      value: this.quoteExpr(field.value, scope),
+    }));
+  }
+
+  /** `\case` and tuple sections, which the conversion writes as lambdas of generated variables. */
+  private quoteLambdaSugar(expr: Extract<Expr, { kind: 'lambda' }>, scope: LocalScope): QExpr | undefined {
+    const generated = expr.pats.map((pat) =>
+      pat.kind === 'pvar' && pat.name.name.includes(' ') ? pat.name.name : undefined
+    );
+    if (!generated.every(Boolean)) return undefined;
+    const { body } = expr;
+    if (body.kind === 'case' && body.what === String.raw`\case`) {
+      return { k: 'lamCase', alts: body.alts.map((alt) => this.quoteMatch(alt, scope)) };
+    }
+    if (body.kind === 'tuple') {
+      const elems = body.elems.map((elem) =>
+        elem.kind === 'var' && generated.includes(elem.name.name) ? undefined : this.quoteExpr(elem, scope)
+      );
+      return { k: 'tupleSection', elems };
+    }
+    return undefined;
+  }
+
+  private quoteCase(expr: Extract<Expr, { kind: 'case' }>, scope: LocalScope): QExpr {
+    if (expr.what === 'multi-way if') {
+      const rhs = expr.alts[0]?.rhs;
+      if (rhs?.body.kind !== 'guarded') throw compileError(expr.span, '書き方に誤りがあります。');
+      return {
+        k: 'multiIf',
+        branches: rhs.body.branches.map((branch) => this.quoteGuarded(branch.guards, branch.expr, scope)),
+      };
+    }
+    const alts = expr.alts.map((alt) => this.quoteMatch(alt, scope));
+    if (expr.what === String.raw`\case` && expr.scrutinee.kind === 'var') return { k: 'lamCase', alts };
+    return { k: 'case', scrutinee: this.quoteExpr(expr.scrutinee, scope), alts };
+  }
+
+  private quoteMatch(alt: Alt, scope: LocalScope): QMatch {
+    const binders = new Map<string, LocalVar>();
+    const pat = this.quotePat(alt.pat, binders, scope);
+    return { pat, ...this.quoteRhs(alt.rhs, withLocals(scope, binders.values())) };
+  }
+
+  /** A right side, whose guards and bodies see its `where` bindings. */
+  private quoteRhs(rhs: Rhs, scope: LocalScope): { body: QBody; where: QDecls } {
+    const where = this.quoteDeclGroup(rhs.where, scope);
+    if (rhs.body.kind === 'plain') {
+      return { body: { k: 'plain', expr: this.quoteExpr(rhs.body.expr, where.scope) }, where: where.decls };
+    }
+    const branches = rhs.body.branches.map((branch) => this.quoteGuarded(branch.guards, branch.expr, where.scope));
+    return { body: { k: 'guarded', branches }, where: where.decls };
+  }
+
+  /** Guards, each of which sees the variables the guards before it bind, as the guarded expression does. */
+  private quoteGuarded(guards: Guard[], expr: Expr, scope: LocalScope): QGuarded {
+    const stmts = guards.map((guard): Stmt => {
+      if (guard.kind === 'bool') return { kind: 'exp', expr: guard.expr, span: guard.span };
+      if (guard.kind === 'let') return { kind: 'let', decls: guard.decls, span: guard.span };
+      return { kind: 'bind', pat: guard.pat, expr: guard.expr, span: guard.span };
+    });
+    const renamed = this.quoteStmts(stmts, scope);
+    return { guards: renamed.stmts, expr: this.quoteExpr(expr, renamed.scope) };
+  }
+
+  /**
+   * Statements, each of which sees the variables the statements before it bind: a bind's expression is outside its
+   * own pattern's scope, and a `let`'s declarations are inside their own.
+   */
+  private quoteStmts(source: Stmt[], parent: LocalScope): { stmts: QStmt[]; scope: LocalScope } {
+    let scope = parent;
+    const stmts: QStmt[] = [];
+    for (const stmt of source) {
+      switch (stmt.kind) {
+        case 'bind': {
+          const expr = this.quoteExpr(stmt.expr, scope);
+          const binders = new Map<string, LocalVar>();
+          const pat = this.quotePat(stmt.pat, binders, scope);
+          scope = withLocals(scope, binders.values());
+          stmts.push({ k: 'bind', pat, expr });
+          break;
+        }
+        case 'let': {
+          const group = this.quoteDeclGroup(stmt.decls, scope);
+          scope = group.scope;
+          stmts.push({ k: 'let', decls: group.decls });
+          break;
+        }
+        case 'exp': {
+          stmts.push({ k: 'exp', expr: this.quoteExpr(stmt.expr, scope) });
+          break;
+        }
+        default: {
+          throw this.unsupportedInQuote(stmt.span, 'この文');
+        }
+      }
+    }
+    return { stmts, scope };
+  }
+
+  /**
+   * A quoted pattern, whose variables go into `binders`, or are the ones `declared` has when a declaration group
+   * declared them. A view pattern's expression sees the variables bound to its left, not those of its own pattern or
+   * after it.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- One short case per pattern kind a quote may hold.
+  // code-gauge-allow functionNcss -- One short case per pattern kind a quote may hold.
+  private quotePat(
+    pat: Pat,
+    binders: Map<string, LocalVar>,
+    scope: LocalScope,
+    declared?: ReadonlyMap<string, LocalVar>
+  ): QPat {
+    const sub = (inner: Pat): QPat => this.quotePat(inner, binders, scope, declared);
+    switch (pat.kind) {
+      case 'pvar': {
+        return { k: 'var', local: this.bindPatVar(pat.name, binders, declared) };
+      }
+      case 'pwild': {
+        return { k: 'wild' };
+      }
+      case 'plit': {
+        return { k: 'lit', lit: pat.lit, negative: pat.negative };
+      }
+      case 'pcon': {
+        if (!pat.con.qualifier && pat.con.name === '()' && pat.args.length === 0) return { k: 'tuple', elems: [] };
+        return { k: 'con', con: this.quoteConRef(pat.con, scope, true), args: pat.args.map(sub) };
+      }
+      case 'ptuple':
+      case 'plist': {
+        return { k: pat.kind === 'ptuple' ? 'tuple' : 'list', elems: pat.elems.map(sub) };
+      }
+      case 'pas': {
+        const local = this.bindPatVar(pat.name, binders, declared);
+        return { k: 'as', local, pat: sub(pat.pat) };
+      }
+      case 'precord': {
+        if (pat.wildcard) throw this.unsupportedInQuote(pat.span, 'レコードのワイルドカード');
+        const fields = pat.fields.map((field) => ({
+          field: this.quoteValueRef(field.field, scope, 'value', true),
+          pat: sub(field.pat),
+        }));
+        return { k: 'record', con: this.quoteConRef(pat.con, scope, true), fields };
+      }
+      case 'pchain': {
+        const operators = new Set(pat.items.flatMap((item) => (item.kind === 'operator' ? [item.op] : [])));
+        const infix = (node: Pat): QPat => {
+          if (node.kind !== 'pcon' || !operators.has(node.con as Operator)) return sub(node);
+          const left = infix(node.args[0]);
+          return { k: 'infix', left, con: this.quoteConRef(node.con, scope, true), right: infix(node.args[1]) };
+        };
+        return infix(resolvePatChain(pat.items, pat.span, (op) => this.fixityOf(op, scope)));
+      }
+      case 'pbang':
+      case 'plazy': {
+        return { k: pat.kind === 'pbang' ? 'bang' : 'lazy', pat: sub(pat.pat) };
+      }
+      case 'pview': {
+        const expr = this.quoteExpr(pat.expr, withLocals(scope, binders.values()));
+        return { k: 'view', expr, pat: sub(pat.pat) };
+      }
+      case 'psig': {
+        return { k: 'sig', pat: sub(pat.pat), type: this.quoteType(pat.type, scope) };
+      }
+      default: {
+        throw this.unsupportedInQuote(pat.span, 'このパターン');
+      }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- One case per kind of type a quote may hold.
+  // code-gauge-allow functionNcss -- One case per kind of type a quote may hold.
+  private quoteType(type: TypeExpr, scope: LocalScope): QType {
+    switch (type.kind) {
+      case 'tsplice': {
+        return { k: 'splice', code: type.expr };
+      }
+      case 'tvar': {
+        return { k: 'var', ref: this.quoteTyVarRef(type.name, scope) };
+      }
+      case 'tcon': {
+        const { name } = type.name;
+        if (!type.name.qualifier && name === '[]') return { k: 'list' };
+        if (!type.name.qualifier && name === '->') return { k: 'arrow' };
+        const tuple = /^\((,*)\)$/.exec(name);
+        if (!type.name.qualifier && tuple) return { k: 'tupleCon', arity: tuple[1].length + (tuple[1] ? 1 : 0) };
+        return { k: 'con', ref: this.quoteTypeRef(type.name, scope) };
+      }
+      case 'tapp': {
+        return { k: 'app', fn: this.quoteType(type.fn, scope), arg: this.quoteType(type.arg, scope) };
+      }
+      case 'tfun': {
+        if (type.multiplicity) throw this.unsupportedInQuote(type.span, '線形型の矢印');
+        const from: QType = { k: 'app', fn: { k: 'arrow' }, arg: this.quoteType(type.from, scope) };
+        return { k: 'app', fn: from, arg: this.quoteType(type.to, scope) };
+      }
+      case 'tlist': {
+        return { k: 'app', fn: { k: 'list' }, arg: this.quoteType(type.elem, scope) };
+      }
+      case 'ttuple': {
+        let result: QType = { k: 'tupleCon', arity: type.elems.length };
+        for (const elem of type.elems) result = { k: 'app', fn: result, arg: this.quoteType(elem, scope) };
+        return result;
+      }
+      case 'tlit': {
+        return { k: 'lit', value: type.value };
+      }
+      case 'tforall': {
+        return this.quoteForall(type.binders, type.context, type.body, scope);
+      }
+      default: {
+        throw this.unsupportedInQuote(type.span, 'この型');
+      }
+    }
+  }
+
+  /** A signature's type, quantified over the variables it names that nothing outside binds, as GHC gives it. */
+  private quoteSigType(sig: SigType, scope: LocalScope): QType {
+    const binders = sig.forall ?? this.implicitTyVars([...sig.context, sig.type], scope, sig.span);
+    if (binders.length === 0 && sig.context.length === 0) return this.quoteType(sig.type, scope);
+    return this.quoteForall(binders, sig.context, sig.type, scope);
+  }
+
+  /** The type variables types name that nothing in scope binds, in order, as binders. */
+  private implicitTyVars(types: TypeExpr[], scope: LocalScope, span: Span): TyVarBinder[] {
+    const names = new Set<string>();
+    for (const type of types) collectTypeVars(type, names);
+    return [...names].filter((name) => !scope.lookup(name, 'tyVar')).map((name) => ({ name: { name, span } }));
+  }
+
+  private quoteForall(binders: TyVarBinder[], context: TypeExpr[], body: TypeExpr, scope: LocalScope): QType {
+    const tyVars = binders.map((binder): QTyVar => {
+      const local = this.newBinder(binder.name.name, binder.name.span);
+      return {
+        local,
+        flag: binder.inferred ? 'inferred' : 'specified',
+        star: binder.kind && this.quoteStarKind(binder.kind),
+      };
+    });
+    const inner = withLocals(
+      scope,
+      tyVars.map((tyVar) => tyVar.local),
+      'tyVar'
+    );
+    return {
+      k: 'forall',
+      binders: tyVars,
+      context: context.map((constraint) => this.quoteType(constraint, inner)),
+      body: this.quoteType(body, inner),
+    };
+  }
+
+  /** Whether a binder's kind is `Type`, the one kind the trees of quotes hold. */
+  private quoteStarKind(kind: TypeExpr): true {
+    if (kind.kind === 'tcon' && (kind.name.name === 'Type' || kind.name.name === '*')) return true;
+    throw this.unsupportedInQuote(kind.span, 'この種類の注釈');
+  }
+
+  /** The type variables a declaration's head binds, each of which it requires, with the scope they are in. */
+  private quoteHeadTyVars(params: Name[], scope: LocalScope): { params: QTyVar[]; scope: LocalScope } {
+    const tyVars = params.map((param): QTyVar => ({ local: this.newBinder(param.name, param.span), flag: 'required' }));
+    return {
+      params: tyVars,
+      scope: withLocals(
+        scope,
+        tyVars.map((tyVar) => tyVar.local),
+        'tyVar'
+      ),
+    };
+  }
+
+  /**
+   * A quoted group of declarations, which see what each other binds, as the code after the group does, with the
+   * fixities the group declares. Its variables are those the module's binding groups collect, with its types,
+   * constructors, record fields, and class methods, all of which GHC gives new names, in the order of their names.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- One short case per kind of declaration that binds names.
+  private quoteDeclGroup(decls: Decl[], parent: LocalScope): { decls: QDecls; scope: LocalScope } {
+    const values = new Map<string, LocalVar>();
+    const others: [LocalVar, LocalNamespace][] = [];
+    const value = (name: Name): void => {
+      if (values.has(name.name)) throw compileError(name.span, `${name.name} が重複して定義されています。`);
+      values.set(name.name, this.newBinder(name.name, name.span));
+    };
+    const other = (name: Name, namespace: LocalNamespace): LocalVar => {
+      const local = this.newBinder(name.name, name.span);
+      others.push([local, namespace]);
+      return local;
+    };
+    for (const binding of groupBindings(decls)) for (const name of binding.names) value(name);
+    for (const decl of decls) {
+      if (decl.kind === 'data') {
+        other(decl.name, 'type');
+        for (const con of decl.cons) other(con.name, 'con');
+        for (const field of decl.cons.flatMap((con) => con.fieldNames ?? [])) if (!values.has(field.name)) value(field);
+      } else if (decl.kind === 'typeSyn') other(decl.name, 'type');
+      else if (decl.kind === 'class') {
+        const cls = other(decl.name, 'type');
+        const names = decl.decls.flatMap((member) => (member.kind === 'sig' ? member.names : []));
+        for (const name of names) value(name);
+        this.quoteClassMethods.set(cls, new Map(names.map((name) => [name.name, values.get(name.name) as LocalVar])));
+      }
+    }
+    const cons = new Map(others.flatMap(([local, namespace]) => (namespace === 'con' ? [[local.name, local]] : [])));
+    applyLocalFixities(decls, (name) => values.get(name) ?? cons.get(name));
+    const scope = new LocalScope(parent);
+    for (const local of values.values()) scope.define(local.name, local);
+    for (const [local, namespace] of others) scope.define(local.name, local, namespace);
+    const renamed = this.quoteBindings(decls, scope, (name) => this.quoteValueRef(name, scope, 'var'), values);
+    const binders = [...values.values(), ...others.map(([local]) => local)].toSorted((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    );
+    return { decls: { binders, decls: renamed }, scope };
+  }
+
+  /**
+   * Quoted declarations: equations (consecutive ones of a function together), signatures, fixities, and the
+   * declarations of types, classes, and instances. `nameOf` gives what an equation or signature defines.
+   */
+  private quoteBindings(
+    decls: Decl[],
+    scope: LocalScope,
+    nameOf: (name: Name) => QRef,
+    declared?: ReadonlyMap<string, LocalVar>
+  ): QDecl[] {
+    const result: QDecl[] = [];
+    for (let index = 0; index < decls.length; index++) {
+      const decl = decls[index];
+      if (decl.kind !== 'funClause') {
+        result.push(...this.quoteDecl(decl, scope, nameOf, declared));
+        continue;
+      }
+      const clauses = [decl];
+      while (decls[index + 1]?.kind === 'funClause' && (decls[index + 1] as typeof decl).name.name === decl.name.name) {
+        clauses.push(decls[++index] as typeof decl);
+      }
+      const quoted = clauses.map((clause) => this.quoteClause(clause, scope));
+      result.push({ k: 'fun', name: nameOf(decl.name), clauses: quoted });
+    }
+    return result;
+  }
+
+  private quoteClause(clause: Extract<Decl, { kind: 'funClause' }>, scope: LocalScope): QClause {
+    const binders = new Map<string, LocalVar>();
+    const pats = clause.args.map((arg) => this.quotePat(arg, binders, scope));
+    return { pats, ...this.quoteRhs(clause.rhs, withLocals(scope, binders.values())) };
+  }
+
+  private quoteDecl(
+    decl: Decl,
+    scope: LocalScope,
+    nameOf: (name: Name) => QRef,
+    declared?: ReadonlyMap<string, LocalVar>
+  ): QDecl[] {
+    switch (decl.kind) {
+      case 'sig': {
+        const type = this.quoteSigType(decl.sig, scope);
+        return decl.names.map((name): QDecl => ({ k: 'sig', name: nameOf(name), type }));
+      }
+      case 'patBind': {
+        const pat = this.quotePat(decl.pat, new Map(), scope, declared);
+        return [{ k: 'val', pat, ...this.quoteRhs(decl.rhs, scope) }];
+      }
+      case 'fixity': {
+        return decl.ops.map((op): QDecl => {
+          const local = scope.lookup(op.name) ?? scope.lookup(op.name, 'con');
+          const name: QRef = local ? { k: 'bound', local } : { k: 'unbound', name: op.name };
+          return { k: 'fixity', assoc: decl.assoc, prec: decl.prec, name };
+        });
+      }
+      case 'data': {
+        return [this.quoteDataDecl(decl, scope)];
+      }
+      case 'typeSyn': {
+        const head = this.quoteHeadTyVars(decl.params, scope);
+        const type = this.quoteType(decl.type, head.scope);
+        return [{ k: 'tySyn', name: this.quoteTypeRef(decl.name, scope), params: head.params, type }];
+      }
+      case 'class': {
+        return [this.quoteClassDecl(decl, scope)];
+      }
+      case 'instance': {
+        return [this.quoteInstanceDecl(decl, scope)];
+      }
+      default: {
+        throw this.unsupportedInQuote(decl.span, 'この宣言');
+      }
+    }
+  }
+
+  private quoteDataDecl(decl: Extract<Decl, { kind: 'data' }>, scope: LocalScope): QDecl {
+    if (decl.instanceOf || decl.kindSig) throw this.unsupportedInQuote(decl.span, 'この data 宣言');
+    const head = this.quoteHeadTyVars(decl.params, scope);
+    return {
+      k: 'data',
+      flavour: decl.typeData ? 'typeData' : decl.newtype ? 'newtype' : 'data',
+      context: (decl.datatypeContext ?? []).map((constraint) => this.quoteType(constraint, head.scope)),
+      name: this.quoteTypeRef(decl.name, scope),
+      params: head.params,
+      cons: decl.cons.map((con) => this.quoteCon(con, head.scope)),
+      deriving: decl.deriving.map((clause) => ({
+        strategy: clause.strategy,
+        via: clause.via && this.quoteType(clause.via, head.scope),
+        cls: { k: 'con', ref: this.quoteTypeRef(clause.cls, scope) },
+      })),
+    };
+  }
+
+  private quoteCon(con: ConDecl, scope: LocalScope): QCon {
+    if (con.exVars || con.context || con.result) throw this.unsupportedInQuote(con.span, 'この構成子');
+    const fields = con.fields.map((type, index) => {
+      const fieldName = con.fieldNames?.[index];
+      return {
+        name: fieldName && this.quoteValueRef(fieldName, scope, 'value', true),
+        strict: con.strictFields?.includes(index) ?? false,
+        type: this.quoteType(type, scope),
+      };
+    });
+    return { name: this.quoteConRef(con.name, scope, true), fields, infix: con.isInfix && !con.fieldNames };
+  }
+
+  private quoteClassDecl(decl: Extract<Decl, { kind: 'class' }>, scope: LocalScope): QDecl {
+    if (decl.paramKinds?.some(Boolean)) throw this.unsupportedInQuote(decl.span, 'この class 宣言');
+    const head = this.quoteHeadTyVars(decl.params, scope);
+    const tyVar = (name: Name): QRef => this.quoteTyVarRef(name.name, head.scope);
+    return {
+      k: 'class',
+      context: decl.context.map((constraint) => this.quoteType(constraint, head.scope)),
+      name: this.quoteTypeRef(decl.name, scope),
+      params: head.params,
+      fundeps: decl.fundeps.map((fundep) => ({ from: fundep.from.map(tyVar), to: fundep.to.map(tyVar) })),
+      decls: this.quoteBindings(decl.decls, head.scope, (name) => this.quoteValueRef(name, head.scope, 'var')),
+    };
+  }
+
+  private quoteInstanceDecl(decl: Extract<Decl, { kind: 'instance' }>, scope: LocalScope): QDecl {
+    if (decl.overlap) throw this.unsupportedInQuote(decl.span, 'この instance 宣言');
+    const binders = this.implicitTyVars([...decl.context, ...decl.types], scope, decl.span).map((binder) =>
+      this.newBinder(binder.name.name, decl.span)
+    );
+    const inner = withLocals(scope, binders, 'tyVar');
+    const cls = this.quoteTypeRef(decl.cls, scope);
+    let head: QType = { k: 'con', ref: cls };
+    for (const type of decl.types) head = { k: 'app', fn: head, arg: this.quoteType(type, inner) };
+    return {
+      k: 'instance',
+      binders,
+      context: decl.context.map((constraint) => this.quoteType(constraint, inner)),
+      head,
+      decls: this.quoteBindings(decl.decls, inner, (name) => this.quoteMethodRef(cls, decl.cls, name)),
+    };
+  }
+
+  /** The method an instance's equation defines: of the quote's own class, or of a class outside the quote. */
+  private quoteMethodRef(cls: QRef, className: QName, name: Name): QRef {
+    if (cls.k === 'bound') {
+      const local = this.quoteClassMethods.get(cls.local)?.get(name.name);
+      if (!local) throw compileError(name.span, `クラス ${className.name} には、メソッド ${name.name} がありません。`);
+      return { k: 'bound', local };
+    }
+    const found = cls.k === 'global' && this.typeExists(className) ? this.lookupType(className) : undefined;
+    const method =
+      found?.kind === 'class' ? found.entity.methods.find((entity) => entity.name === name.name) : undefined;
+    if (method) return { k: 'global', space: 'v', module: this.thModule('v', method), name: method.name };
+    return this.quoteGlobal('var', name, false);
   }
 
   /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
@@ -3080,6 +3756,16 @@ function addCandidate<T>(map: Map<string, T[]>, key: string, item: T, identity: 
   map.set(key, list);
 }
 
+/** The namespaces of global names a quote refers to; `value` has constructors besides variables and fields. */
+type QuoteNamespace = 'var' | 'value' | 'con' | 'type';
+
+/** A scope that has locals besides those of its parent. */
+function withLocals(parent: LocalScope, locals: Iterable<LocalVar>, namespace: LocalNamespace = 'value'): LocalScope {
+  const scope = new LocalScope(parent);
+  for (const local of locals) scope.define(local.name, local, namespace);
+  return scope;
+}
+
 /** Local declarations whose variables are declared, with the fixities they declare, before their bindings renamed. */
 interface LocalDecls {
   decls: Decl[];
@@ -3314,7 +4000,8 @@ function groupBindings(decls: Decl[]): RawBinding[] {
   return bindings;
 }
 
-function collectPatNames(pat: Pat, into: Name[]): void {
+/** Collects the variables a pattern binds, in order. */
+export function collectPatNames(pat: Pat, into: Name[]): void {
   switch (pat.kind) {
     case 'pvar': {
       into.push(pat.name);

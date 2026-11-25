@@ -6,9 +6,9 @@ import type { Fixity } from './entities';
 import { compileError } from './errors';
 import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
-import type { Decl, Span } from './syntax';
+import { collectPatNames } from './rename';
+import type { Decl, Name, Span } from './syntax';
 import { SpliceNames, type SpliceSyntax } from './thDecode';
-import { patternNames } from './thRename';
 
 /** A splice of a program, which runs while the program compiles: `$(e)`, `$$(e)`, a declaration, or `[q|...|]`. */
 export interface SpliceSite {
@@ -87,7 +87,9 @@ export function spliceModuleNames(module: string, decls: Decl[]): SpliceModuleNa
         break;
       }
       case 'patBind': {
-        for (const name of patternNames(decl.pat)) values.add(name.name);
+        const names: Name[] = [];
+        collectPatNames(decl.pat, names);
+        for (const name of names) values.add(name.name);
         break;
       }
       case 'fixity': {

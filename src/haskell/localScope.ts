@@ -4,6 +4,12 @@ import { Map as PersistentMap } from 'immutable';
 import type { LocalVar } from './rast';
 import { chargeTypeWork } from './typeWorkBudget';
 
+/**
+ * The namespaces of local names: variables, and the constructors, types, and type variables that only a Template
+ * Haskell quote's declarations bind locally.
+ */
+export type LocalNamespace = 'value' | 'con' | 'type' | 'tyVar';
+
 export class LocalScope {
   private readonly own = new Map<string, LocalVar>();
   private bindings: PersistentMap<string, LocalVar>;
@@ -14,19 +20,26 @@ export class LocalScope {
     this.bindings = parent?.bindings ?? PersistentMap<string, LocalVar>();
   }
 
+  /** The variables this scope defines itself. */
   get vars(): ReadonlyMap<string, LocalVar> {
     return this.own;
   }
 
-  define(name: string, local: LocalVar): void {
+  define(name: string, local: LocalVar, namespace: LocalNamespace = 'value'): void {
     assert(!this.sealed, 'Define all bindings before creating child scopes');
     chargeTypeWork();
-    this.own.set(name, local);
-    this.bindings = this.bindings.set(name, local);
+    const key = keyOf(name, namespace);
+    if (namespace === 'value') this.own.set(name, local);
+    this.bindings = this.bindings.set(key, local);
   }
 
-  lookup(name: string): LocalVar | undefined {
+  lookup(name: string, namespace: LocalNamespace = 'value'): LocalVar | undefined {
     chargeTypeWork();
-    return this.bindings.get(name);
+    return this.bindings.get(keyOf(name, namespace));
   }
+}
+
+/** The key of a name in a namespace: the other namespaces' keys have a space after a word, which no variable has. */
+function keyOf(name: string, namespace: LocalNamespace): string {
+  return namespace === 'value' ? name : `${namespace} ${name}`;
 }

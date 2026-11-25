@@ -327,9 +327,9 @@ export function isConstraintType(type: RType): boolean {
 }
 
 /**
- * A name in a renamed Template Haskell quote: a binder of the quote, a variable of the code around it (whose value
- * the tree holds lifted), a global name with the module GHC defines it in, or a name nothing binds, which the code
- * the tree is spliced into binds.
+ * A name in a Template Haskell quote, which the renamer's quote mode annotates with its stage: a binder of the quote,
+ * a variable of the code around it (whose value the tree holds lifted), a global name with the module GHC defines it
+ * in, or a name nothing binds, which the code the tree is spliced into binds.
  */
 export type QRef =
   | { k: 'bound'; local: LocalVar }

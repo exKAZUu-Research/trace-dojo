@@ -2317,7 +2317,9 @@ function convertQuote(outer: ConvertContext, node: Node, span: Span): Expr {
       }
     }
   };
-  return { kind: 'quote', body: body(), typed: node.type === 'typed_quote', span };
+  const quoted = body();
+  if (node.type !== 'typed_quote' || quoted.kind !== 'exp') return { kind: 'quote', body: quoted, span };
+  return { kind: 'quote', body: quoted, witness: convertExpr(outer, namedChildren(inner)[0]), span };
 }
 
 function requireRecordDot(features: ConvertContext, span: Span): void {

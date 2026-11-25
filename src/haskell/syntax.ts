@@ -96,10 +96,12 @@ export type Expr =
   /** A quoted name, `'f` or `''T`, as Template Haskell's `Name` of what it names. */
   | { kind: 'thName'; name: QName; namespace: 'var' | 'con' | 'type'; span: Span }
   /**
-   * A Template Haskell quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]` (`typed`), whose body
-   * the renamer renames in the quote's scope before it becomes code that builds the body's tree.
+   * A Template Haskell quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`, whose body the renamer
+   * renames in the quote's scope before it becomes code that builds the body's tree. The body keeps its literals
+   * unoverloaded, as the tree holds them; a typed quote's `witness` is its expression as the module's code has it,
+   * which gives the quote its type.
    */
-  | { kind: 'quote'; body: QuoteBody; typed?: boolean; span: Span }
+  | { kind: 'quote'; body: QuoteBody; witness?: Expr; span: Span }
   /** A splice inside a quote, `$(e)`, whose expression builds that part of the tree. */
   | { kind: 'thSplice'; expr: Expr; span: Span };
 

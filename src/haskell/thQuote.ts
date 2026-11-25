@@ -21,7 +21,7 @@ import { chargeTypeWork } from './typeWorkBudget';
 /**
  * Builds the code of a renamed Template Haskell quote: code that builds the quote's tree with the library's functions
  * in a monad of `Quote`, as GHC does. Each variable the quote binds hygienically gets a new name from `newName` where
- * its scope starts; a binder it does not (one of a pattern quote, a class's method) keeps its spelling, `mkName`.
+ * its scope starts; a binder it does not (one of a pattern quote) keeps its spelling, `mkName`.
  */
 export class QuoteBuilder {
   /** The variables of the generated code that hold the new names of the quote's binders in scope. */
