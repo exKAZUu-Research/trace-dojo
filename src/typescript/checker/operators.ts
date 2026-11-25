@@ -519,7 +519,8 @@ export class OperatorChecker {
     if (!typeNode || isConstAssertion(node)) return this.constAssertion(node, expression, contextual, check);
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = check(expression, target);
-    const widened = this.c.widen(source);
+    // tsc compares the base type of a literal, so `mode as "write"` is accepted for a `"read"` constant too.
+    const widened = this.c.widen(mapType(source, baseTypeOfLiteral));
     if (!this.c.relations.isRelated(target, widened, 'comparable')) {
       const reported = this.c.diagnostics.length;
       this.c.expressions.checkAssertedArrayLiterals(expression, source, target);

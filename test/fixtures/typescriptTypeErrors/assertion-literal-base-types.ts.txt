@@ -1,0 +1,13 @@
+const mode = "read" as const;
+const other = mode as "write";
+const s = "ok" as const;
+const t2 = s as "fail";
+const n = 1 as const;
+const m = n as 2;
+const b = true as const;
+const c = b as false;
+const bad = mode as number;
+enum E { A = 1, B = 2 }
+const e = E.A as E.B;
+const f = { x: 1 } as { y: string };
+console.log(other, t2, m, c, bad, e, f);
