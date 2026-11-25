@@ -440,8 +440,13 @@ export class StatementChecker {
     if (kind === 'const') return;
     const key = `s${symbol.id}`;
     if (!annotation) {
-      // `let x;` follows the types assigned to it, starting as `undefined`.
       this.c.expressions.setVariableType(symbol, anyType);
+      if (!this.c.assignments.isAutoTyped(symbol)) {
+        const name = declarator.childForFieldName('name') as TreeNode;
+        this.c.error(name, `変数 ${symbol.name} の型が暗黙に any になります。`);
+        return;
+      }
+      // `let x;` follows the types assigned to it, starting as `undefined`.
       this.c.flow.set(key, { type: undefinedType, assigned: kind === 'var' });
       return;
     }

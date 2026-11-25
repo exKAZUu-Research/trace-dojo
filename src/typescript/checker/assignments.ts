@@ -190,7 +190,9 @@ export class AssignmentChecker {
       (declaration.parent?.type !== 'variable_declaration' &&
         declaration.parent?.childForFieldName('kind')?.text !== 'let') ||
       declaration.childForFieldName('name')?.type !== 'identifier' ||
-      declaration.childForFieldName('type')
+      declaration.childForFieldName('type') ||
+      // Other code may assign an exported variable, so its type cannot follow its assignments here.
+      declaration.parent?.parent?.type === 'export_statement'
     )
       return false;
     const value = declaration.childForFieldName('value');

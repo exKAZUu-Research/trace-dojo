@@ -1,0 +1,7 @@
+namespace N { export let v; export var y, z = 3; export let n = undefined; export let m = null; }
+export let w;
+export let k = null;
+let u;
+var x;
+u = 1; x = "a";
+console.log(N.v, N.y, N.z, N.n, N.m, w, k, u, x);
