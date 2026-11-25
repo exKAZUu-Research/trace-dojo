@@ -16,6 +16,7 @@ import {
   shortestDecimal,
 } from './floats';
 import { spendMemory } from './memoryAccounting';
+import { POINTER_OPERATIONS, pointerShapeOf } from './semaBase';
 import { type EnumType, type StructField, type Type, typeName, type UnionType, USIZE } from './types';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText } from './utf8';
 import {
@@ -441,9 +442,18 @@ function isU8(child: Type): boolean {
 function isByteString(type: Type): boolean {
   if (type.kind === 'pointer') {
     if (type.size === 'slice') return isU8(type.child);
+    // A many-item or C pointer prints up to where std.mem.span ends it: its sentinel, or C's 0.
+    if (type.size === 'many' || type.size === 'c') return isU8(type.child) && sentinelOf(type) !== undefined;
     return type.child.kind === 'array' && isU8(type.child.child);
   }
   return type.kind === 'array' && isU8(type.child);
+}
+
+/** Where `std.mem.span` ends an unbounded pointer: at its sentinel, and a C pointer at 0. */
+function sentinelOf(type: Extract<Type, { kind: 'pointer' }>): Value | undefined {
+  const { span } = POINTER_OPERATIONS[pointerShapeOf(type)];
+  if (span === 'always') return 0n;
+  return span === 'sentinel' ? type.sentinel?.value : undefined;
 }
 
 // Printing ------------------------------------------------------------------------------------------------------------
@@ -497,13 +507,13 @@ export function printValue(
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
         // A byte string in hexadecimal, which Zig asserts has no width or precision.
         forbidOptions(options);
-        const bytes = stringBytes(value);
+        const bytes = stringBytes(value, type);
         checkFormatSize(out, out.length + bytes.length * 2);
         for (const byte of bytes) for (const digit of hexDigits(byte, upper)) out.push(digit);
         return;
       }
       case 's': {
-        return alignBuffer(out, stringBytes(value), options);
+        return alignBuffer(out, stringBytes(value, type), options);
       }
       case 'e':
       case 'E': {
@@ -679,8 +689,8 @@ const SPECIAL_SPECIFIERS = new Map<
     'q',
     {
       accepts: isByteString,
-      print: (out, value) => {
-        const bytes = stringBytes(value);
+      print: (out, value, type) => {
+        const bytes = stringBytes(value, type);
         checkFormatSize(out, out.length + bytes.length + 2);
         out.push(0x22);
         appendEscapedString(out, bytes);
@@ -706,9 +716,9 @@ const SPECIAL_SPECIFIERS = new Map<
     'b64',
     {
       accepts: isByteString,
-      print: (out, value, _type, options) => {
+      print: (out, value, type, options) => {
         forbidOptions(options);
-        const bytes = base64Bytes(stringBytes(value));
+        const bytes = base64Bytes(stringBytes(value, type));
         checkFormatSize(out, out.length + bytes.length);
         appendBuffer(out, bytes, 4);
       },
@@ -811,8 +821,14 @@ interface ByteView extends Iterable<number> {
   readonly source?: Slice;
 }
 
-export function stringBytes(value: Value): ByteView {
-  const source = value instanceof Pointer ? (value.load() as ZArray) : (value as Slice | ZArray);
+export function stringBytes(value: Value, type?: Type): ByteView {
+  const end = type?.kind === 'pointer' && type.size !== 'one' && type.size !== 'slice' ? sentinelOf(type) : undefined;
+  const source =
+    end === undefined
+      ? value instanceof Pointer
+        ? (value.load() as ZArray)
+        : (value as Slice | ZArray)
+      : sentinelSlice(value as Pointer, end);
   return byteView(
     source.length,
     (index) => {
@@ -821,6 +837,17 @@ export function stringBytes(value: Value): ByteView {
     },
     source instanceof Slice ? source : new Slice(source, source.offset, source.lengthValue)
   );
+}
+
+/** The bytes from a many-item or C pointer up to the value that ends them. */
+function sentinelSlice(pointer: Pointer, end: Value): Slice {
+  const { target, index } = pointer;
+  let length = 0;
+  while (index + length < target.slots.length && target.slots[index + length] !== end) {
+    spendMemory();
+    length++;
+  }
+  return new Slice(target, index, length);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.
