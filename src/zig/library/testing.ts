@@ -107,15 +107,37 @@ fn expectEqualInner(comptime T: type, expected: T, actual: T) !void {
 
         .@"union" => |@"union"| if (@"union".backing_integer) |Int| {
             try expectEqual(@as(Int, @bitCast(expected)), @as(Int, @bitCast(actual)));
-        } else {
-            const Tag = @"union".tag_type orelse @compileError("byteSwapAllFields expects packed, extern, or tagged union");
-            try expectEqual(@as(Tag, expected), @as(Tag, actual));
-            switch (expected) {
-                inline else => |expected_payload, tag| {
-                    const actual_payload = @field(actual, @tagName(tag));
-                    try expectEqual(expected_payload, actual_payload);
-                },
-            }
+        } else switch (@"union".layout) {
+            .@"packed" => {
+                const Int = @Int(.unsigned, @bitSizeOf(T));
+                try expectEqual(@as(Int, @bitCast(expected)), @as(Int, @bitCast(actual)));
+            },
+            .@"extern" => {
+                const first_size = @bitSizeOf(@"union".field_types[0]);
+                inline for (@"union".field_types) |field_type| {
+                    if (@bitSizeOf(field_type) != first_size) {
+                        @compileError("Unable to compare extern unions with varying field sizes for type " ++ @typeName(T));
+                    }
+                }
+                const FieldInt = @Int(.unsigned, first_size);
+                const expected_field = @field(expected, @"union".field_names[0]);
+                const actual_field = @field(actual, @"union".field_names[0]);
+                return expectEqual(
+                    @as(FieldInt, @bitCast(expected_field)),
+                    @as(FieldInt, @bitCast(actual_field)),
+                );
+            },
+            .auto => {
+                const Tag = @"union".tag_type orelse @compileError("byteSwapAllFields expects packed, extern, or tagged union");
+
+                try expectEqual(@as(Tag, expected), @as(Tag, actual));
+                switch (expected) {
+                    inline else => |expected_payload, tag| {
+                        const actual_payload = @field(actual, @tagName(tag));
+                        try expectEqual(expected_payload, actual_payload);
+                    },
+                }
+            },
         },
 
         .optional => {
