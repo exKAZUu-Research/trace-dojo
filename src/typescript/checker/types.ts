@@ -399,13 +399,17 @@ const literalPrimitives: Record<LiteralKind, Type> = {
 
 /** The primitive type of a literal's value. */
 export function primitiveOfLiteral(type: LiteralType): Type {
-  if (type.enumMember) return type.enumMember.base();
   return literalPrimitives[typeof type.value as LiteralKind];
+}
+
+/** The type a literal widens to: an enum member's enum, or else the primitive of its value. */
+export function widenedLiteralType(type: LiteralType): Type {
+  return type.enumMember ? type.enumMember.base() : primitiveOfLiteral(type);
 }
 
 export function baseTypeOfLiteral(type: Type): Type {
   if (isTemplateOrStringMapping(type)) return stringType;
-  return type.kind === 'literal' && typeof type.value !== 'symbol' ? primitiveOfLiteral(type) : type;
+  return type.kind === 'literal' && typeof type.value !== 'symbol' ? widenedLiteralType(type) : type;
 }
 
 export function isIntrinsic(type: Type, name: IntrinsicName): boolean {

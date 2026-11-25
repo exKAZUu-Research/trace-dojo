@@ -76,6 +76,7 @@ import {
   unionOf,
   type UnionType,
   unknownType,
+  widenedLiteralType,
   withAlias,
 } from './types';
 import { couldContainTypeVariables } from './typeVariables';
@@ -1203,7 +1204,7 @@ export class Checker {
 
   /** The type a literal has once a mutable location widens it. */
   widenLiteral(type: Type): Type {
-    if (type.kind === 'literal' && type.fresh) return primitiveOfLiteral(type);
+    if (type.kind === 'literal' && type.fresh) return widenedLiteralType(type);
     if (type.kind === 'union' && type.types.some((member) => member.kind === 'literal' && member.fresh)) {
       return unionOf(type.types.map((member) => this.widenLiteral(member)));
     }
