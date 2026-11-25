@@ -506,6 +506,8 @@ export class ProgramConverter extends ExpressionConverter {
         }
         if (accessorOf(member)) fail(member, 'constructor を getter や setter にはできません。');
         if (ctor) fail(member, 'constructor は1つしか書けません。');
+        // A constructor's decorators are rejected as any member's are; TypeScript's checker reports them misplaced.
+        this.decoratorsOf(member);
         ctor = this.functionNode(member, 'classConstructor', name);
       }
     } finally {
