@@ -2468,6 +2468,15 @@ class Renamer {
 
   private typeFixityOf(op: Operator): Fixity {
     if (op.name === '~' && !op.qualifier) return EQUALITY_CLASS.fixity as Fixity;
+    // A promoted constructor, the list's cons among them, has the fixity of the constructor.
+    if (op.name === ':' && !op.qualifier) return CONS_CON.entity.fixity ?? { assoc: 'infixr', prec: 5 };
+    if (
+      this.features.allows('promotion') &&
+      !this.typeExists(op) &&
+      this.valuesNamed(op).some((e) => e.sort === 'con')
+    ) {
+      return this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY;
+    }
     const own = op.qualifier ? undefined : this.ownTypes.get(op.name);
     const entity = own ?? this.lookupType(op);
     return entity.entity.fixity ?? DEFAULT_FIXITY;
@@ -2524,6 +2533,8 @@ class Renamer {
     if (!name.qualifier && name.name === '~') return { k: 'class', entity: EQUALITY_CLASS, span: name.span };
     if (!name.qualifier) {
       if (name.name === '*' && this.features.allows('starIsType')) builtin = TYPE_KIND;
+      // The list's cons in a type, `t ': ts` (or `t : ts`), is its promoted constructor.
+      else if (name.name === ':' && this.features.allows('promotion')) builtin = promotedType(CONS_CON);
       else if (name.name === '()') builtin = UNIT_TYPE;
       else if (name.name === '[]') builtin = LIST_TYPE;
       else if (name.name === '->') builtin = FUNCTION_TYPE;
