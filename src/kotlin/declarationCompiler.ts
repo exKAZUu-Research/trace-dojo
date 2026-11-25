@@ -832,6 +832,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.checkDuplicateFunction(cls.constructors, ctor, member.row);
     if (!member.delegation && entry.decl.primaryConstructor)
       this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で主コンストラクタに委譲してください。');
+    // An enum's constructors call Enum's, which only its constants' declarations give the arguments of.
+    if (member.delegation?.kind === 'super' && cls.kind === 'enum')
+      this.error(member.delegation.row, 'enum のコンストラクタからは super(...) を呼べません。');
     if (member.delegation?.kind === 'super' && entry.decl.primaryConstructor)
       this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で委譲してください。');
     cls.constructors.push(ctor);
