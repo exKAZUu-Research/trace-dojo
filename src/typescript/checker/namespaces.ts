@@ -18,8 +18,6 @@ import {
   type Type,
 } from './types';
 
-/** The declarations that declare only types, which leave a namespace without an object at run time. */
-
 /**
  * Namespaces: the object a namespace's exported values make, the types it exports, and the checks of its declarations.
  */
