@@ -1,0 +1,143 @@
+== 
+bool(false)
+== b:0;
+bool(false)
+== b:1;
+bool(true)
+== i:5
+
+Warning: unserialize(): Error at offset 0 of 3 bytes in /main.php on line 8
+bool(false)
+== i:5;junk
+
+Warning: unserialize(): Extra data starting at offset 4 of 8 bytes in /main.php on line 8
+int(5)
+== x
+
+Warning: unserialize(): Error at offset 0 of 1 bytes in /main.php on line 8
+bool(false)
+== s:5:"abc";
+
+Warning: unserialize(): Error at offset 10 of 10 bytes in /main.php on line 8
+bool(false)
+== s:3:"abc"
+
+Warning: unserialize(): Error at offset 9 of 9 bytes in /main.php on line 8
+bool(false)
+== a:2:{i:0;i:1;}
+
+Warning: unserialize(): Unexpected end of serialized data in /main.php on line 8
+
+Warning: unserialize(): Error at offset 13 of 14 bytes in /main.php on line 8
+bool(false)
+== a:1:{i:0;i:1;
+
+Warning: unserialize(): Error at offset 13 of 13 bytes in /main.php on line 8
+bool(false)
+== a:1:{b:1;i:1;}
+
+Warning: unserialize(): Error at offset 9 of 14 bytes in /main.php on line 8
+bool(false)
+== O:7:"Unknown":1:{s:1:"a";i:1;}
+object(__PHP_Incomplete_Class)#1 (2) {
+  ["__PHP_Incomplete_Class_Name"]=>
+  string(7) "Unknown"
+  ["a"]=>
+  int(1)
+}
+== O:5:"Known":1:{s:1:"v";i:7;}
+object(Known)#1 (1) {
+  ["v"]=>
+  int(7)
+}
+== O:5:"Known":1:{s:1:"w";i:7;}
+
+Deprecated: Creation of dynamic property Known::$w is deprecated in /main.php on line 8
+object(Known)#1 (2) {
+  ["v"]=>
+  int(1)
+  ["w"]=>
+  int(7)
+}
+== d:0.5;
+float(0.5)
+== d:1e3;
+float(1000)
+== d:.5;
+float(0.5)
+== N;
+NULL
+== i:+3;
+int(3)
+== i:99999999999999999999;
+
+Warning: unserialize(): Numerical result out of range in /main.php on line 8
+int(9223372036854775807)
+== E:11:"Suit:Hearts";
+
+Warning: unserialize(): Class 'Suit' not found in /main.php on line 8
+
+Warning: unserialize(): Error at offset 0 of 19 bytes in /main.php on line 8
+bool(false)
+== E:5:"Known";
+
+Warning: unserialize(): Invalid enum name 'Known' (missing colon) in /main.php on line 8
+
+Warning: unserialize(): Error at offset 0 of 12 bytes in /main.php on line 8
+bool(false)
+== r:1;
+
+Warning: unserialize(): Error at offset 4 of 4 bytes in /main.php on line 8
+bool(false)
+== a:1:{i:0;R:1;}
+array(1) {
+  [0]=>
+  *RECURSION*
+}
+== a:2:{i:0;i:1;i:1;R:2;}
+array(2) {
+  [0]=>
+  &int(1)
+  [1]=>
+  &int(1)
+}
+== a:2:{i:0;i:1;i:1;r:2;}
+
+Warning: unserialize(): Error at offset 21 of 22 bytes in /main.php on line 8
+bool(false)
+== a:1:{s:1:"5";i:1;}
+array(1) {
+  [5]=>
+  int(1)
+}
+== O:8:"stdClass":1:{i:0;i:1;}
+object(stdClass)#1 (1) {
+  ["0"]=>
+  int(1)
+}
+== a:-1:{}
+
+Warning: unserialize(): Error at offset 0 of 7 bytes in /main.php on line 8
+bool(false)
+object(__PHP_Incomplete_Class)#1 (2) {
+  ["__PHP_Incomplete_Class_Name"]=>
+  string(5) "Known"
+  ["v"]=>
+  int(7)
+}
+object(Known)#1 (1) {
+  ["v"]=>
+  int(7)
+}
+array(1) {
+  [0]=>
+  object(__PHP_Incomplete_Class)#1 (1) {
+    ["__PHP_Incomplete_Class_Name"]=>
+    string(5) "Known"
+  }
+}
+unserialize(): Option "allowed_classes" must be of type array|bool, int given
+O:7:"Unknown":1:{s:1:"a";i:1;}
+string(22) "__PHP_Incomplete_Class"
+bool(true)
+bool(false)

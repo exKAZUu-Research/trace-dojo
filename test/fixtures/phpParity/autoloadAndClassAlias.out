@@ -1,0 +1,65 @@
+autoload(Foo)
+bool(false)
+bool(false)
+autoload(Bar)
+bool(false)
+autoload(IFoo)
+bool(false)
+autoload(Nope)
+bool(false)
+autoload(Zed)
+bool(false)
+
+Warning: Undefined variable $x in /main.php on line 11
+bool(false)
+autoload(Missing)
+Error: Class "Missing" not found
+autoload(Missing2)
+Class "Missing2" not found
+autoload(Missing3)
+Class "Missing3" not found
+autoload(1abc)
+bool(false)
+Array
+(
+    [0] => Closure Object
+        (
+            [name] => {closure:/main.php:2}
+            [file] => /main.php
+            [line] => 2
+            [parameter] => Array
+                (
+                    [$class] => <required>
+                )
+
+        )
+
+)
+first(Q)
+autoload(Q)
+second(Q)
+bool(false)
+bool(true)
+bool(false)
+int(2)
+first(Called)
+autoload(Called)
+first(Ser)
+autoload(Ser)
+object(__PHP_Incomplete_Class)#5 (1) {
+  ["__PHP_Incomplete_Class_Name"]=>
+  string(3) "Ser"
+}
+bool(true)
+string(4) "Base"
+bool(true)
+bool(true)
+
+Warning: Cannot redeclare class Alias (previously declared in /main.php:26) in /main.php on line 28
+bool(false)
+first(NoSuch)
+autoload(NoSuch)
+
+Warning: Class "NoSuch" not found in /main.php on line 29
+bool(false)
+bool(true)

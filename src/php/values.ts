@@ -3,7 +3,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
 import { ArrayTable, detachArrayTable } from './arrayTable';
-import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
+import type { AttributeAst, ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import {
   hasProofParent,
@@ -788,6 +788,8 @@ export interface Param {
   implicitNullable?: boolean;
   nativeDefault?: string;
   nativeNullType?: string;
+  /** Whether `#[\SensitiveParameter]` hides the argument in stack traces. */
+  sensitive?: true;
 }
 
 export type TypeDecl =
@@ -893,6 +895,9 @@ export interface ClassConst {
   evaluate?: () => Value;
   evaluating?: boolean;
   type?: TypeDecl;
+  /** Whether the constant is an enum case, whose value is the case's object. */
+  isCase?: true;
+  attributes?: AttributeAst[];
 }
 
 export type ClassKind = 'class' | 'interface' | 'trait' | 'enum';

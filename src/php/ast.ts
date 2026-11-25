@@ -1,5 +1,5 @@
 import type { Constant } from './constantDefaults';
-import type { Param, TypeDecl, Visibility } from './values';
+import type { Param, TypeDecl, Value, Visibility } from './values';
 
 /** A name a program refers to, resolved against its namespace and `use` imports. */
 export interface ResolvedName {
@@ -89,6 +89,10 @@ export type Expr = { row: number } & (
   | { k: 'match'; subject: Expr; arms: MatchArm[]; jumpTable?: boolean }
   | { k: 'print'; e: Expr }
   | { k: 'pipe'; l: Expr; r: Expr }
+  | { k: 'yield'; key?: Expr; value?: Expr; byRef: boolean }
+  | { k: 'yieldFrom'; e: Expr }
+  /** A value a generator evaluated before it suspended, which the rest of the expression uses after it resumes. */
+  | { k: 'held'; v: Value }
   | { k: 'unsupported'; what: string }
 );
 
@@ -107,8 +111,11 @@ export interface SwitchCase {
   row: number;
 }
 
-/** Every statement carries the 0-based row where it starts, at which it records its step. */
-export type Stmt = { row: number } & (
+/**
+ * Every statement carries the 0-based row where it starts, at which it records its step. A generator's statement whose
+ * own expressions or loop header contain a `yield` is marked as suspending, which runs them step by step.
+ */
+export type Stmt = { row: number; suspends?: true } & (
   | { k: 'expr'; e: Expr; onlyCalls: boolean }
   | { k: 'echo'; args: Expr[] }
   | { k: 'inline'; text: string }
@@ -135,14 +142,25 @@ export type Stmt = { row: number } & (
   | { k: 'unset'; targets: Expr[] }
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
-  | { k: 'const'; items: { name: string; value: Expr; opcodeRow: number }[] }
+  | { k: 'const'; items: { name: string; value: Expr; opcodeRow: number; attributes?: AttributeAst[] }[] }
   | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }
+  /** A tick of `declare(ticks=every)`, counted `count` times, which calls the tick functions every `every` ticks. */
+  | { k: 'tick'; every: number; count: number }
 );
+
+/** An attribute (`#[Name(args)]`), whose arguments only reflection, which this environment lacks, evaluates. */
+export interface AttributeAst {
+  /** The fully qualified class name, without a leading backslash. */
+  name: string;
+  args: { name?: string; value: Expr }[];
+  row: number;
+}
 
 export interface FunctionDecl {
   name: string;
+  attributes?: AttributeAst[];
   isPropertyHook?: boolean;
   params: ParamDecl[];
   returnType?: TypeDecl;
@@ -166,10 +184,13 @@ export interface FunctionDecl {
   className?: string;
   /** Whether the declaration is a closure or an arrow function. */
   isClosure: boolean;
+  /** Whether the body contains `yield`, so that a call returns a Generator that runs the body. */
+  isGenerator?: boolean;
 }
 
 export interface PropertyDeclAst {
   name: string;
+  attributes?: AttributeAst[];
   visibility: Visibility;
   setVisibility?: Visibility;
   isStatic: boolean;
@@ -230,13 +251,26 @@ export interface ClassDecl {
   name: string;
   /** The name `get_class` and `::class` give an anonymous class, which holds a NUL byte, the file, and the line. */
   fullName?: string;
-  kind: 'class' | 'interface' | 'trait';
+  kind: 'class' | 'interface' | 'trait' | 'enum';
+  attributes?: AttributeAst[];
+  /** The type of an enum's case values, which a pure enum lacks. */
+  backingType?: 'int' | 'string';
   parent?: string;
   interfaces: string[];
   isAbstract: boolean;
   isFinal: boolean;
   isReadonly: boolean;
-  consts: { name: string; value: Expr; visibility: Visibility; isFinal: boolean; row: number; type?: TypeDecl }[];
+  /** The constants and enum cases in declaration order; a case of a pure enum has a `null` placeholder value. */
+  consts: {
+    name: string;
+    value: Expr;
+    visibility: Visibility;
+    isFinal: boolean;
+    row: number;
+    type?: TypeDecl;
+    isCase?: true;
+    attributes?: AttributeAst[];
+  }[];
   props: PropertyDeclAst[];
   methods: MethodDeclAst[];
   traits: { names: string[]; rules: TraitRule[]; row: number }[];

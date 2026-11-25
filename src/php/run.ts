@@ -5,17 +5,26 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
 import { dec } from './bytes';
-import { callValue } from './callables';
+import { callValue, consumeInvokedResult } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
-import { E_DEPRECATED, E_ERROR, E_WARNING, emitError, throwableLocation } from './errors';
+import {
+  E_DEPRECATED,
+  E_ERROR,
+  E_WARNING,
+  emitError,
+  readThrowableSlot,
+  recordFatalError,
+  throwableLocation,
+} from './errors';
 import { throwableText, traceText } from './exceptions';
 import { releaseDropped, releaseGlobalObject } from './garbage';
 import { holderCounts } from './holderCounts';
+import { endAllBuffers } from './outputControl';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { mayDestruct, runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpObject } from './values';
+import { PhpArray, PhpObject } from './values';
 
 import './library';
 
@@ -39,6 +48,9 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
   return withRuntime(runtime, () => {
     resetCallStack();
     bootstrap();
+    // PHP's CLI passes the script's path as the only command-line argument.
+    runtime.globalRef('argv').v = PhpArray.list([SCRIPT_PATH]);
+    runtime.globalRef('argc').v = 1n;
     runtime.program = parsed.program;
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
@@ -50,8 +62,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       });
       onEnd?.(runtime.globalFrame);
       runtime.world.recordFinalTurtles();
-      // A rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
-      if (!rejectedRuns.has(runtime)) uncaughtException = shutdown(runtime) ?? uncaughtException;
+      uncaughtException = shutDownRequest(runtime) ?? uncaughtException;
     } finally {
       runtime.flush();
     }
@@ -100,7 +111,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOut
     const trace = traceText(error.record ? [error.record] : []);
     restoreStack(runtime);
     const message = `Fatal error: ${error.message} in ${SCRIPT_PATH} on line ${(error.row ?? 0) + 1}\nStack trace:\n${trace}`;
-    runtime.echo(`\n${message}\n`);
+    runtime.displayError(`\n${message}\n`);
     return { kind: 'failure', failure: dec(message) };
   }
   if (error instanceof FatalError) {
@@ -109,7 +120,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOut
     restoreStack(runtime);
     const file = error.row < 0 ? 'Unknown' : SCRIPT_PATH;
     const message = `Fatal error: ${error.message ? `${error.message} in ${file} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
-    if (error.message) runtime.echo(`\n${message}\n`);
+    if (error.message) runtime.displayError(`\n${message}\n`);
     return { kind: 'failure', failure: dec(message) };
   }
   throw error;
@@ -164,7 +175,8 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
     try {
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
-      if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.echo(`\n${message}\n`);
+      recordFatalError(`Uncaught ${text}\n  thrown`, Number(readThrowableSlot(object, 'line') ?? 1n) - 1);
+      if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.displayError(`\n${message}\n`);
       return { kind: 'failure', failure: dec(message) };
     } catch (error) {
       if (!(error instanceof PhpThrow)) return report(runtime, error);
@@ -172,6 +184,50 @@ function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
       object = error.object;
     }
   }
+}
+
+/**
+ * Ends the run as PHP's request shutdown does: shutdown functions, destructors, then closing the output buffers. A
+ * rejection of an unsupported feature ends the run outside PHP, so PHP's shutdown does not run after it.
+ */
+function shutDownRequest(runtime: Runtime): string | undefined {
+  const shutdownFailure = rejectedRuns.has(runtime) ? undefined : callShutdownFunctions(runtime);
+  if (rejectedRuns.has(runtime)) {
+    for (const buffer of runtime.outputBuffers.splice(0)) runtime.echo(buffer.data);
+    return shutdownFailure;
+  }
+  const failure = shutdown(runtime) ?? shutdownFailure;
+  const handlerException = endAllBuffers(runtime);
+  return failure ?? (handlerException && dec(`Uncaught ${throwableText(handlerException.object)}`));
+}
+
+/**
+ * Calls the functions `register_shutdown_function` registered, including those they register, until one exits or ends
+ * with an error.
+ */
+function callShutdownFunctions(runtime: Runtime): string | undefined {
+  const functions = runtime.shutdownFunctions;
+  for (let index = 0; index < functions.length; index++) {
+    const { callback, args } = functions[index];
+    try {
+      asInternal(() =>
+        consumeInvokedResult(
+          () =>
+            callValue(
+              callback,
+              args.map((v) => ({ v })),
+              undefined
+            ),
+          () => {}
+        )
+      );
+    } catch (error) {
+      restoreStack(runtime);
+      const outcome = report(runtime, error);
+      if (outcome.kind !== 'handled') return outcome.failure;
+    }
+  }
+  return undefined;
 }
 
 /** Releases file-scope statics, symbol-table objects, then the remaining object handles. */
@@ -200,6 +256,11 @@ function shutdownObjects(runtime: Runtime): string | undefined {
   if (globalStep.stop) return globalStep.failure;
   for (const object of runtime.objectsInShutdownOrder()) {
     if (object.destructed) continue;
+    const native = object.internal as { destructAtShutdown?: () => void } | undefined;
+    if (native?.destructAtShutdown) {
+      const step = guardShutdownStep(runtime, () => native.destructAtShutdown?.());
+      if (step.stop) return step.failure;
+    }
     const destructor = object.cls.findMethod('__destruct');
     object.destructed = true;
     if (!destructor) continue;

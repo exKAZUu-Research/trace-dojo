@@ -55,6 +55,20 @@ const CALL_EXPRESSIONS = new Set([
 ]);
 const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>(['mcall', 'scall', 'new', 'newAnon', 'assignRef']);
 
+/** The statements after which PHP runs no tick under `declare(ticks=N)`. */
+const UNTICKED_STATEMENTS = new Set([
+  'function_definition',
+  'class_declaration',
+  'interface_declaration',
+  'trait_declaration',
+  'enum_declaration',
+  'empty_statement',
+  'compound_statement',
+  'named_label_statement',
+  'comment',
+  'declare_statement',
+]);
+
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly declaredFunctions = new Map<string, readonly Param[]>();
@@ -156,7 +170,55 @@ export class Converter extends DeclarationConverter {
     return statements;
   }
 
+  /** The `ticks` value of the `declare` in effect, 0 when none is. */
+  private ticks = 0;
+
+  /**
+   * Converts a statement, followed by the ticks PHP runs after it under `declare(ticks=N)`: one after each statement
+   * (an `echo`, `global`, `static` or `unset` list counts each item), but none after declarations, blocks, empty
+   * statements, `if`, and `switch`.
+   */
   private statement(node: Node, topLevel: boolean): Stmt[] {
+    const statements = this.untickedStatement(node, topLevel);
+    if (this.ticks === 0 || UNTICKED_STATEMENTS.has(node.type)) return statements;
+    const every = this.ticks;
+    return statements.flatMap((statement): Stmt[] => {
+      const tick = (count: number): Stmt => ({ k: 'tick', every, count, row: statement.row });
+      switch (statement.k) {
+        case 'echo': {
+          return statement.args.flatMap((arg) => [{ k: 'echo', args: [arg], row: statement.row }, tick(1)]);
+        }
+        case 'global': {
+          return [statement, tick(statement.names.length)];
+        }
+        case 'static': {
+          return [statement, tick(statement.vars.length)];
+        }
+        case 'unset': {
+          return [statement, tick(statement.targets.length)];
+        }
+        case 'func':
+        case 'class':
+        case 'nop':
+        case 'block':
+        case 'label':
+        case 'if':
+        case 'switch': {
+          return [statement];
+        }
+        default: {
+          return [statement, tick(1)];
+        }
+      }
+    });
+  }
+
+  /** The tick after a `declare` statement, under the `ticks` value in effect after it. */
+  private declareTick(row: number): Stmt[] {
+    return this.ticks > 0 ? [{ k: 'tick', every: this.ticks, count: 1, row }] : [];
+  }
+
+  private untickedStatement(node: Node, topLevel: boolean): Stmt[] {
     const row = node.startPosition.row;
     switch (node.type) {
       case 'expression_statement': {
@@ -281,43 +343,41 @@ export class Converter extends DeclarationConverter {
           }
           this.declaredFunctions.set(key, decl.params);
         }
-        return [{ k: 'func', decl, row }];
+        return [{ k: 'func', decl, row: decl.row }];
       }
       case 'class_declaration':
       case 'interface_declaration':
-      case 'trait_declaration': {
-        this.declareSymbol(node, 'class', this.nameText(node.childForFieldName('name') as Node));
-        return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
-      }
+      case 'trait_declaration':
       case 'enum_declaration': {
-        this.checkUnscopedModifiers(node);
-        if (this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
-        this.unsupported(node, '列挙型（enum）');
-        break;
+        this.declareSymbol(node, 'class', this.nameText(node.childForFieldName('name') as Node));
+        const decl = this.classDecl(node, false, topLevel);
+        return [{ k: 'class', decl, row: decl.row }];
       }
       case 'const_declaration': {
         this.checkUnscopedModifiers(node);
         if (!topLevel || isPlainBlockChild(node)) this.error(node, 'syntax error, unexpected token "const"');
         let declarationRow: number | undefined;
         let opcodeRow: number | undefined;
-        const items = node.namedChildren
-          .filter((child) => child.type === 'const_element')
-          .map((child) => {
-            const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            const name = this.declaredIdentifier(nameNode);
-            const word = lower(name);
-            if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
-            if (
-              MAGIC_RUNTIME.has(word.toUpperCase()) ||
-              ['__line__', '__file__', '__dir__', '__namespace__', '__property__'].includes(word)
-            )
-              this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
-            this.declareSymbol(nameNode, 'const', name);
-            declarationRow ??= nameNode.startPosition.row;
-            const value = this.constantExpr(valueNode, true);
-            opcodeRow = this.constantCompileRow(value, opcodeRow ?? declarationRow);
-            return { name: this.qualify(name), value, opcodeRow };
-          });
+        const elements = node.namedChildren.filter((child) => child.type === 'const_element');
+        const attributes = this.attributeList(node, { targets: ['constant'] });
+        if (attributes && elements.length > 1)
+          this.error(elements[0], 'Cannot apply attributes to multiple constants at once');
+        const items = elements.map((child) => {
+          const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
+          const name = this.declaredIdentifier(nameNode);
+          const word = lower(name);
+          if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
+          if (
+            MAGIC_RUNTIME.has(word.toUpperCase()) ||
+            ['__line__', '__file__', '__dir__', '__namespace__', '__property__'].includes(word)
+          )
+            this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
+          this.declareSymbol(nameNode, 'const', name);
+          declarationRow ??= nameNode.startPosition.row;
+          const value = this.constantExpr(valueNode, true);
+          opcodeRow = this.constantCompileRow(value, opcodeRow ?? declarationRow);
+          return { name: this.qualify(name), value, opcodeRow, attributes };
+        });
         return [{ k: 'const', items, row: declarationRow ?? row }];
       }
       case 'named_label_statement': {
@@ -540,7 +600,7 @@ export class Converter extends DeclarationConverter {
   private returnStatement(node: Node): Stmt {
     const argument = node.namedChildren.find((child) => child.type !== 'comment');
     const row = node.startPosition.row;
-    const type = this.fn.returnType;
+    const type = this.fn.isGenerator ? undefined : this.fn.returnType;
     if (type?.k === 'named' && !type.nullable) {
       if (argument) this.checkVoidReturn(argument);
       if (type.name === 'never') {
@@ -593,6 +653,7 @@ export class Converter extends DeclarationConverter {
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
+    let ticks: number | undefined;
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
       const name = (directive.childForFieldName('name') as Node).text;
       const key = lower(name);
@@ -646,7 +707,9 @@ export class Converter extends DeclarationConverter {
           message: 'declare(encoding=...) ignored because Zend multibyte feature is turned off by settings',
           row: node.startPosition.row,
         });
-      } else if (key !== 'ticks') {
+      } else if (key === 'ticks') {
+        ticks = this.ticksValue(valueNode, value);
+      } else {
         this.notices.push({
           level: 'Warning',
           message: `Unsupported declare '${name}'`,
@@ -654,8 +717,36 @@ export class Converter extends DeclarationConverter {
         });
       }
     }
+    return this.declareBody(node, ticks);
+  }
+
+  private ticksValue(valueNode: Node, value: Expr): number {
+    if (value.k !== 'lit' || typeof value.v !== 'bigint') this.unsupported(valueNode, '整数以外の declare(ticks)');
+    return Number(value.v);
+  }
+
+  /**
+   * Converts the statements a `declare` applies to: the rest of the file for `declare(...);`, else its body. A `ticks`
+   * value applies to them, and the `declare` ticks once after them under the value then in effect.
+   */
+  private declareBody(node: Node, ticks: number | undefined): Stmt[] {
     const body = node.namedChildren.filter((child) => child.type !== 'declare_directive' && child.type !== 'comment');
-    return this.blockOf(body);
+    const row = node.startPosition.row;
+    if (ticks === undefined) return [...this.blockOf(body), ...this.declareTick(row)];
+    const closing = node.children.findIndex((child) => child.type === ')');
+    if (node.children[closing + 1]?.type === ';') {
+      this.ticks = ticks;
+      return this.declareTick(row);
+    }
+    const outer = this.ticks;
+    this.ticks = ticks;
+    let statements: Stmt[];
+    try {
+      statements = this.blockOf(body);
+    } finally {
+      this.ticks = outer;
+    }
+    return [...statements, ...this.declareTick(row)];
   }
 
   private selectNamespaceStyle(node: Node, root: Node, body: Node | null): void {
@@ -1167,8 +1258,7 @@ export class Converter extends DeclarationConverter {
         break;
       }
       case 'yield_expression': {
-        this.unsupported(node, 'ジェネレータ（yield）');
-        break;
+        return this.yieldExpression(node);
       }
       case 'include_expression':
       case 'include_once_expression':
@@ -1189,6 +1279,22 @@ export class Converter extends DeclarationConverter {
         this.error(node, '書き方に誤りがあります。');
       }
     }
+  }
+
+  private yieldExpression(node: Node): Expr {
+    const row = node.startPosition.row;
+    if (this.constantInitializer) this.error(node, 'Constant expression contains invalid operations');
+    if (!this.fn.isFunction) this.error(node, 'The "yield" expression can only be used inside a function');
+    const operand = semanticChildren(node)[0] as Node | undefined;
+    if (node.children.some((child) => child.type === 'yield from'))
+      return { k: 'yieldFrom', e: this.expr(operand as Node), row };
+    if (!operand) return { k: 'yield', byRef: false, row };
+    const parts = operand.namedChildren.filter((child) => child.type !== 'comment');
+    const key = parts.length === 2 ? this.expr(parts[0]) : undefined;
+    const valueNode = parts.at(-1) as Node;
+    const value =
+      this.fn.byRefReturn && REFERENCEABLE_NODES.has(valueNode.type) ? this.writable(valueNode) : this.expr(valueNode);
+    return { k: 'yield', key, value, byRef: this.fn.byRefReturn === true, row };
   }
 
   private compileRuntimeCall(node: Node): Expr {
@@ -2408,3 +2514,12 @@ function parserScalar(expression: Expr): string | bigint | number | undefined {
   if (left === undefined || right === undefined) return undefined;
   return `${typeof left === 'number' ? formatFloat(left) : left}${typeof right === 'number' ? formatFloat(right) : right}`;
 }
+
+/** The syntax a by-reference generator yields a reference to; it yields other values by value, with a notice. */
+const REFERENCEABLE_NODES = new Set([
+  'variable_name',
+  'dynamic_variable_name',
+  'subscript_expression',
+  'member_access_expression',
+  'scoped_property_access_expression',
+]);

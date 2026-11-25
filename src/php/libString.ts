@@ -8,13 +8,14 @@ import { callStack } from './calls';
 import { debugType, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
-import { writeStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isCtypeSpace, isUtf8Ctype } from './libLocale';
+import { writeToStream } from './libStream';
 import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markDeprecated } from './native';
 import { toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
 import { shuffle } from './shuffle';
 import { formatPrintf } from './sprintf';
+import { openStream } from './streams';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
 import { UnsupportedFeatureError } from './unsupported';
@@ -1035,8 +1036,8 @@ function levenshtein(a: string, b: string, insert: bigint, replace: bigint, remo
 }
 
 defineFunction('vfprintf(resource $stream, string $format, array $values): int', ({ args }) => {
-  const stream = args[0] as PhpObject;
-  const text = formatPrintf(s(args[1]), args[2] as PhpArray, (output) => writeStream(stream, output));
+  openStream(args[0], 'vfprintf');
+  const text = formatPrintf(s(args[1]), args[2] as PhpArray, (output) => writeToStream(args[0], output, 'vfprintf'));
   return BigInt(text.length);
 });
 defineFunction('metaphone(string $string, int $max_phonemes = 0): string', ({ args }) => {
@@ -1278,30 +1279,3 @@ for (const [name, pattern] of [
     return pattern.test(value) && (isUtf8Ctype() || /^[\0-\u007F]*$/.test(value));
   });
 }
-
-// Paths, which these functions handle as strings without touching any file ------------------------------------------
-
-defineFunction('basename(string $path, string $suffix = ""): string', ({ args }) => {
-  let path = s(args[0]).replace(/\/+$/, '');
-  path = path.slice(path.lastIndexOf('/') + 1);
-  const suffix = args[1] === undefined ? '' : s(args[1]);
-  if (suffix !== '' && path.endsWith(suffix) && path !== suffix) path = path.slice(0, -suffix.length);
-  return path;
-});
-// code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-defineFunction('dirname(string $path, int $levels = 1): string', ({ args }) => {
-  const path = s(args[0]);
-  const levels = (args[1] as bigint | undefined) ?? 1n;
-  if (levels < 1n) throwError('ValueError', 'dirname(): Argument #2 ($levels) must be greater than or equal to 1');
-  if (path === '') return '';
-  let end = path.length;
-  for (let level = 0n; level < levels; level++) {
-    rt().spend();
-    while (end > 0 && path[end - 1] === '/') end--;
-    if (end === 0) return path.startsWith('/') ? '/' : '.';
-    end = path.lastIndexOf('/', end - 1);
-    if (end === -1) return '.';
-  }
-  while (end > 0 && path[end - 1] === '/') end--;
-  return end === 0 ? '/' : path.slice(0, end);
-});

@@ -1,25 +1,45 @@
 import { warn } from './errors';
+import { rt } from './runtime';
 import { trimmedSignificantDigits } from './strings';
 import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, UNDEFINED_RESULT, type Value } from './values';
 
-/** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
-export function formatFloat(value: number, precision = 14): string {
+/** The type of a resource, which PHP names `Unknown` once the program closes it. */
+export function resourceType(object: PhpObject): 'stream' | 'Unknown' {
+  return (object.internal as { isClosed?: boolean } | undefined)?.isClosed ? 'Unknown' : 'stream';
+}
+
+/** Formats a float as PHP's `echo` does, with the significant digits of the `precision` setting (14 by default). */
+export function formatFloat(value: number, precision = rt()?.precision ?? 14): string {
+  return gcvt(value, precision === 0 ? 1 : precision, 'E');
+}
+
+/**
+ * Formats a float as `var_dump` and `json_encode` do, with the significant digits of the `serialize_precision` setting,
+ * whose default -1 asks for the shortest digits that read back. `literalZero` keeps a precision of 0, which
+ * `json_encode` and `serialize` pass to PHP's `zend_gcvt` as it is while the others format with 1 digit.
+ */
+export function formatFloatRepr(
+  value: number,
+  exponentChar = 'E',
+  zeroFraction = false,
+  { precision = rt()?.serializePrecision ?? -1, literalZero = false } = {}
+): string {
+  const text = gcvt(value, precision === 0 && !literalZero ? 1 : precision, exponentChar);
+  if (zeroFraction && Number.isFinite(value) && !/[.eE]/.test(text)) return `${text}.0`;
+  return text;
+}
+
+/** Formats a float as `zend_gcvt` does with `precision` significant digits, or the shortest that read back when negative. */
+function gcvt(value: number, precision: number, exponentChar: string): string {
   if (Number.isNaN(value)) return 'NAN';
   if (!Number.isFinite(value)) return value > 0 ? 'INF' : '-INF';
   if (value === 0) return Object.is(value, -0) ? '-0' : '0';
-  const { digits, exponent } = trimmedSignificantDigits(value, precision);
-  return layoutDigits(value < 0, digits, exponent + 1, precision, 'E');
-}
-
-/** Formats a float as `var_dump` and `json_encode` do, with the shortest digits that read back (`serialize_precision=-1`). */
-export function formatFloatRepr(value: number, exponentChar = 'E', zeroFraction = false): string {
-  if (Number.isNaN(value)) return 'NAN';
-  if (!Number.isFinite(value)) return value > 0 ? 'INF' : '-INF';
-  if (value === 0) return `${Object.is(value, -0) ? '-0' : '0'}${zeroFraction ? '.0' : ''}`;
-  const [digits, exponent] = shortestDigits(value);
-  const text = layoutDigits(value < 0, digits, exponent + 1, 17, exponentChar);
-  if (zeroFraction && !/[.eEN]/.test(text)) return `${text}.0`;
-  return text;
+  if (precision < 0) {
+    const [digits, exponent] = shortestDigits(value);
+    return layoutDigits(value < 0, digits, exponent + 1, 17, exponentChar);
+  }
+  const { digits, exponent } = trimmedSignificantDigits(value, Math.max(precision, 1));
+  return layoutDigits(value < 0, digits, exponent + 1, precision, exponentChar);
 }
 
 function shortestDigits(value: number): [string, number] {
@@ -143,7 +163,8 @@ export function getType(value: Value): string {
   if (value === UNDEFINED_RESULT) return 'unknown type';
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].gettype;
   if (value instanceof PhpArray) return 'array';
-  return value.isResource ? 'resource' : 'object';
+  if (!value.isResource) return 'object';
+  return resourceType(value) === 'stream' ? 'resource' : 'resource (closed)';
 }
 
 /** The type name in error messages and `get_debug_type`. */
@@ -153,7 +174,7 @@ export function debugType(value: Value): string {
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].debug;
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;
-  if (object.isResource) return 'resource (stream)';
+  if (object.isResource) return resourceType(object) === 'stream' ? 'resource (stream)' : 'resource (closed)';
   return object.cls.name;
 }
 

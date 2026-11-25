@@ -6,7 +6,7 @@ import { throwError } from './errors';
 import { consumeExpression, ev, isCompiledVariable, prepareOperand, withSilence } from './interp';
 import { strictEquals } from './operators';
 import { rt, type Runtime } from './runtime';
-import { deref, Ref, type Value } from './values';
+import { deref, enumCaseName, PhpObject, Ref, type Value } from './values';
 
 // code-gauge-allow functionCognitiveComplexity -- Evaluates match conditions in order while preserving the subject slot.
 export function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
@@ -54,6 +54,7 @@ function readMatchTemporary(runtime: Runtime, e: Expr): Value | Ref {
   return value;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Formats each kind of value as PHP's message does.
 function matchCaseText(value: Value | Ref): string {
   if (value instanceof Ref) {
     if (value.isRef) return matchTypeText(value.v);
@@ -69,6 +70,7 @@ function matchCaseText(value: Value | Ref): string {
   }
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (value === null) return 'NULL';
+  if (value instanceof PhpObject && value.cls.kind === 'enum') return enumCaseName(value);
   return matchTypeText(value);
 }
 

@@ -20,6 +20,16 @@ defineClass({
   kind: 'interface',
   methods: [{ signature: 'cases(): array', isStatic: true, impl: () => new PhpArray() }],
 });
+defineClass({
+  name: 'BackedEnum',
+  kind: 'interface',
+  interfaces: ['UnitEnum'],
+  methods: ['from(string|int $value): static', 'tryFrom(string|int $value): ?static'].map((signature) => ({
+    signature,
+    isStatic: true,
+    impl: () => null,
+  })),
+});
 defineClass({ name: 'stdClass' });
 defineClass({ name: 'Traversable', kind: 'interface' });
 defineClass({

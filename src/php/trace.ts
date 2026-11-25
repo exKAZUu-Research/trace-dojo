@@ -50,13 +50,20 @@ function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): Trac
   runtime.budget.checkClock();
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, ref] of frame.vars) {
-    if (name === 'GLOBALS') continue;
+    if (name === 'GLOBALS' || isUnnamedArgumentVariable(runtime, frame, name)) continue;
     addVariable(variables, `$${dec(name)}`, ref.v, withContext);
   }
   if (!withContext) return variables;
   contextProperties(variables, frame);
   staticVariables(variables, runtime);
   return variables;
+}
+
+/** Whether a variable is `$argv` or `$argc`, which PHP defines, in a main program that never names it. */
+function isUnnamedArgumentVariable(runtime: Runtime, frame: Frame, name: string): boolean {
+  return (
+    (name === 'argv' || name === 'argc') && frame === runtime.globalFrame && !runtime.compiledNames(frame).has(name)
+  );
 }
 
 function contextProperties(variables: TraceVariables, frame: Frame): void {

@@ -133,6 +133,7 @@ class JsonEncoder {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
@@ -159,7 +160,10 @@ class JsonEncoder {
     }
     if (value instanceof PhpObject) {
       if (value.isResource) return this.fail(8);
-      if (value.cls.kind === 'enum') return this.fail(11);
+      if (value.cls.kind === 'enum') {
+        const backingValue = value.props.get('value');
+        return backingValue === undefined ? this.fail(11) : this.encode(backingValue as Value, level);
+      }
     }
     const serializable = rt().classes.get('jsonserializable') as PhpClass;
     if (value instanceof PhpArray || !value.cls.isSubclassOf(serializable)) return this.encodeContainer(value, level);
@@ -217,7 +221,7 @@ class JsonEncoder {
   }
 
   private encodeFloat(value: number): string {
-    const text = formatFloatRepr(value, 'e');
+    const text = formatFloatRepr(value, 'e', false, { literalZero: true });
     if (has(this.flags, 1024n) && Number.isInteger(value) && !/[.e]/.test(text)) return `${text}.0`;
     return text;
   }

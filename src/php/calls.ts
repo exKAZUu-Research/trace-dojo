@@ -2,6 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
+import { hideSensitiveArguments, reportCallAttributes } from './attributeEffects';
 import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
 import {
@@ -97,6 +98,8 @@ export interface CallRecord {
   named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
   row: number | undefined;
+  /** The parameters of a function with `#[\SensitiveParameter]` ones, whose arguments traces hide. */
+  sensitiveParams?: readonly Param[];
 }
 
 export type StatementCompletion =
@@ -115,6 +118,50 @@ export function setBodyRunner(
 ): void {
   runBody = run;
   runStatementList = runList;
+}
+
+/** Makes the Generator object a call to a generator function returns, which the generators module provides. */
+let createGenerator: (frame: Frame, record: CallRecord) => PhpObject = () => {
+  throw new Error('Generators are not loaded');
+};
+
+export function setGeneratorFactory(create: (frame: Frame, record: CallRecord) => PhpObject): void {
+  createGenerator = create;
+}
+
+/** Runs `run` in a generator's frame, which the call stack holds as a call made at `record.row`. */
+export function runInFrame<T>(frame: Frame, record: CallRecord, run: () => T): T {
+  const runtime = rt();
+  if (runtime.depth >= LIMITS.maxCallDepth) throw new FatalError(MEMORY_EXHAUSTED, runtime.row, true);
+  const outerNative = nativeDepth;
+  const outerNativeCalls = runtime.nativeCalls;
+  const outerReleaseMode = runtime.nativeReleaseMode;
+  const savedRow = runtime.row;
+  runtime.frames.push(frame);
+  callStack.push(record);
+  runtime.depth++;
+  nativeDepth = 0;
+  runtime.nativeCalls = 0;
+  runtime.nativeReleaseMode = 'ordinary';
+  try {
+    return run();
+  } finally {
+    nativeDepth = outerNative;
+    runtime.nativeCalls = outerNativeCalls;
+    runtime.nativeReleaseMode = outerReleaseMode;
+    runtime.depth--;
+    callStack.pop();
+    runtime.frames.pop();
+    runtime.row = savedRow;
+  }
+}
+
+/** Releases the locals of a generator's frame once the generator finishes or is destroyed. */
+export function releaseGeneratorFrame(frame: Frame, failure?: unknown): void {
+  const runtime = rt();
+  for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
+  for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
+  releaseFrame(runtime, runtime.frame, frame, null, false, failure instanceof PhpThrow ? failure : undefined);
 }
 
 /** The fatal error PHP reports when endless recursion uses up its memory, growing its stack by a 2 MiB page. */
@@ -143,11 +190,13 @@ setCallCapture(() =>
 );
 
 export function callArguments(record: CallRecord): Value[] {
-  if (record.boundFrame) return frameArguments(record.boundFrame);
-  return record.args.map((value, index) => {
-    const ref = record.argumentRefs?.[index];
-    return ref ? ref.v : value;
-  });
+  const values = record.boundFrame
+    ? frameArguments(record.boundFrame)
+    : record.args.map((value, index) => {
+        const ref = record.argumentRefs?.[index];
+        return ref ? ref.v : value;
+      });
+  return record.sensitiveParams ? hideSensitiveArguments(values, record.sensitiveParams) : values;
 }
 
 export function frameArguments(frame: Frame): Value[] {
@@ -652,6 +701,11 @@ function callerIsStrict(): boolean {
   return rt().strictTypes && nativeDepth === 0;
 }
 
+/** Whether the code that called the running native function declared strict_types. */
+export function nativeCallerIsStrict(): boolean {
+  return rt().strictTypes && nativeDepth === 1;
+}
+
 // User functions -----------------------------------------------------------------------------------------------------
 
 interface UserCallState {
@@ -668,6 +722,8 @@ interface UserCallState {
   outerNativeCalls: number;
   outerReleaseMode: Runtime['nativeReleaseMode'];
   bound: boolean;
+  /** The Generator a call to a generator function returns, which keeps the frame instead of releasing it. */
+  generator?: PhpObject;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Dispatches ordinary user function bodies directly to execList to avoid an extra host frame.
@@ -679,6 +735,7 @@ export function invokeUser(
   row: number | undefined,
   discardResult: boolean
 ): Value {
+  reportCallAttributes(target, fn, args, discardResult);
   const saved = enterUserCall(target, fn, args, row);
   let returned: Value = null;
   let failure: unknown;
@@ -686,6 +743,12 @@ export function invokeUser(
   try {
     bindUserCall(saved, fn, args, row);
     saved.bound = true;
+    if (saved.decl.isGenerator) {
+      saved.generator = createGenerator(saved.frame, saved.record);
+      saved.runtime.lastReturnRef = undefined;
+      returned = discardResult ? null : saved.generator;
+      return returned;
+    }
     let bodyResult: Value;
     if (!saved.decl.arrowBody && !saved.frame.thisObj) {
       const completion = runStatementList(saved.decl.body);
@@ -805,6 +868,10 @@ function exitUserCall(saved: UserCallState, returned: Value, failure: unknown, f
   runtime.depth--;
   callStack.pop();
   runtime.frames.pop();
+  if (saved.generator) {
+    exitGeneratorCall(saved, saved.generator, returned);
+    return;
+  }
   for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
   for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
   runtime.row = savedRow;
@@ -812,6 +879,15 @@ function exitUserCall(saved: UserCallState, returned: Value, failure: unknown, f
   if (!failed || failure instanceof PhpThrow || failure instanceof ExitSignal)
     releaseFrame(runtime, caller, frame, returned, outerNative > 0, failure instanceof PhpThrow ? failure : undefined);
   else for (const ref of frame.vars.values()) ref.rc--;
+}
+
+/** Hands the Generator a generator function's call returns to its caller, keeping the call's frame for it. */
+function exitGeneratorCall(saved: UserCallState, generator: PhpObject, returned: Value): void {
+  const { runtime, caller, decl, savedRow, outerNative } = saved;
+  runtime.row = savedRow;
+  if (decl.isAtomic) runtime.steps.completeAtomicCall();
+  if (returned === null) runtime.release([generator]);
+  else ((outerNative > 0 ? runtime.nativeHeld.at(-1) : undefined) ?? caller.temporaries).push(generator);
 }
 
 interface UserArgumentSlots {
@@ -839,6 +915,7 @@ function recordForUserCall(target: CallTarget, received: UserArgumentSlots, row:
   );
   if (received.extraNamed.length > 0)
     record.named = received.extraNamed.map(({ name, argument }) => [name, argument.ref?.v ?? argument.v]);
+  if (target.fn.params.some((param) => param.sensitive)) record.sensitiveParams = target.fn.params;
   return record;
 }
 

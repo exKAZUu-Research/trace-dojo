@@ -66,6 +66,22 @@ function compile(name: string, pattern: string): Compiled | undefined {
   return compiled;
 }
 
+/**
+ * Whether a PCRE pattern matches a subject, for callers such as the filter extension that run PCRE without the preg
+ * functions and so leave `preg_last_error()` as it was; undefined for a bad pattern, after its warning.
+ */
+export function patternMatches(functionName: string, pattern: string, subject: string): boolean | undefined {
+  const compiled = compile(functionName, pattern);
+  if (!compiled) return undefined;
+  const runtime = rt();
+  const lastError = runtime.lastPregError;
+  try {
+    return matchesOf(compiled, subject).next().done !== true;
+  } finally {
+    runtime.lastPregError = lastError;
+  }
+}
+
 // Matching -------------------------------------------------------------------------------------------------------------
 
 interface Match {

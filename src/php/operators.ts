@@ -324,7 +324,7 @@ function floatStringToInt(text: string, value: number, pending?: PhpThrow): bigi
 }
 
 export function formatFloatForMessage(value: number): string {
-  return formatFloatRepr(value);
+  return formatFloatRepr(value, 'E', false, { precision: -1 });
 }
 
 export function mergeArrayUnion(target: PhpArray, right: PhpArray): PhpArray {
@@ -663,6 +663,7 @@ function compareObjectScalar(
   tryString: ObjectString = objectToString
 ): number {
   const other = deref(slot);
+  if (object.cls.kind === 'enum') return 1;
   const uncast = objectOnLeft ? 1 : -1;
   let cast: Value;
   if (typeof other === 'string' && object.cls.findMethod('__tostring')) {

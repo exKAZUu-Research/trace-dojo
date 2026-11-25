@@ -1,0 +1,109 @@
+object(T)#1 (4) {
+  ["n"]=>
+  int(5)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(9)
+  ["q":protected]=>
+  int(2)
+}
+object(T)#1 (4) {
+  ["n"]=>
+  int(0)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(9)
+  ["q":protected]=>
+  int(2)
+}
+object(T)#1 (4) {
+  ["n"]=>
+  int(0)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(1)
+  ["q":protected]=>
+  int(9)
+}
+object(T)#1 (4) {
+  ["n"]=>
+  int(0)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(1)
+  ["q":protected]=>
+  int(9)
+}
+
+Deprecated: Creation of dynamic property T::$z is deprecated in /main.php on line 7
+object(T)#1 (5) {
+  ["n"]=>
+  int(0)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(1)
+  ["q":protected]=>
+  int(2)
+  ["z"]=>
+  int(9)
+}
+bool(true)
+
+Deprecated: Creation of dynamic property T::$dyn is deprecated in /main.php on line 9
+O:1:"T":4:{s:1:"n";i:3;s:4:"~T~p";i:1;s:4:"~*~q";i:2;s:3:"dyn";a:1:{i:0;i:1;}}
+a:4:{s:5:"users";a:2:{i:0;a:2:{s:4:"name";s:1:"A";s:3:"age";i:30;}i:1;a:2:{s:4:"name";s:1:"B";s:3:"age";i:25;}}s:5:"count";i:2;s:2:"ok";b:1;s:5:"ratio";d:0.75;}
+160
+bool(true)
+array(1) {
+  [0]=>
+  object(__PHP_Incomplete_Class)#1 (2) {
+    ["__PHP_Incomplete_Class_Name"]=>
+    string(1) "T"
+    ["n"]=>
+    int(1)
+  }
+}
+
+Warning: unserialize(): Extra data starting at offset 4 of 5 bytes in /main.php on line 16
+int(1)
+
+Warning: unserialize(): Extra data starting at offset 24 of 25 bytes in /main.php on line 17
+object(T)#1 (4) {
+  ["n"]=>
+  int(5)
+  ["s"]=>
+  string(0) ""
+  ["p":"T":private]=>
+  int(1)
+  ["q":protected]=>
+  int(2)
+}
+
+Warning: unserialize(): Error at offset 7 of 7 bytes in /main.php on line 18
+bool(false)
+
+Warning: unserialize(): Error at offset 8 of 12 bytes in /main.php on line 19
+bool(false)
+
+Warning: unserialize(): Error at offset 7 of 12 bytes in /main.php on line 20
+bool(false)
+
+Warning: unserialize(): Error at offset 11 of 11 bytes in /main.php on line 21
+bool(false)
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  ["a"]=>
+  &array(1) {
+    [0]=>
+    *RECURSION*
+  }
+}
+bool(true)

@@ -1,0 +1,82 @@
+enum(Suit::Hearts)
+array(2) {
+  [0]=>
+  enum(Suit::Hearts)
+  [1]=>
+  enum(Suit::Spades)
+}
+array(2) {
+  [0]=>
+  enum(Status::Active)
+  [1]=>
+  enum(Status::Inactive)
+}
+Suit Enum:string
+(
+    [name] => Hearts
+    [value] => H
+)
+
+Status Enum
+(
+    [name] => Active
+)
+
+array (
+  0 => 
+  \Suit::Spades,
+  'k' => 
+  \Status::Inactive,
+)
+HeartsH #Red #Black
+bool(true)
+NULL
+enum(Suit::Spades)
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+bool(true)
+bool(false)
+bool(false)
+bool(false)
+bool(true)
+Suit Suit
+bool(true)
+bool(false)
+array(3) {
+  ["HasColor"]=>
+  string(8) "HasColor"
+  ["UnitEnum"]=>
+  string(8) "UnitEnum"
+  ["BackedEnum"]=>
+  string(10) "BackedEnum"
+}
+{"0":"H","w":"S"}
+bool(false)
+string(46) "Non-backed enums have no default serialization"
+bool(true)
+int(1)
+array(2) {
+  ["Hearts"]=>
+  string(1) "H"
+  ["Spades"]=>
+  string(1) "S"
+}
+ValueError: "X" is not a valid backing value for enum Suit
+ValueError: "it's" is not a valid backing value for enum Suit
+enum(Level::High)
+NULL
+7 is not a valid backing value for enum Level
+Level::from(): Argument #1 ($value) must be of type int, string given
+Error: Cannot modify readonly property Suit::$name
+Error: Cannot create dynamic property Suit::$extra
+Error: Cannot instantiate enum Suit
+Error: Trying to clone an uncloneable object of class Suit
+Error: Object of class Suit could not be converted to string
+TypeError: Cannot access offset of type Suit on array
+Error: Call to undefined method Status::from()
+H Spades Hearts
+int(2)
+Duplicate value in enum Dup for cases A and B
+Unhandled match case Status::Inactive

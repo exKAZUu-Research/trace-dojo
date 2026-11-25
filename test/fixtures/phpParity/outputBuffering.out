@@ -1,0 +1,62 @@
+56
+<h1>A &amp; B</h1>
+<ul>
+  <li>1</li>
+  <li>2</li>
+</ul>
+string(15) "bint(2)
+int(1)
+"
+string(16) "abint(2)
+int(1)
+"
+written past the buffer
+buffered
+
+Notice: ob_end_flush(): Failed to delete and flush buffer. No buffer to delete or flush in /main.php on line 29
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+int(0)
+[callback]
+<1:12345><4:6>
+Array
+(
+    [0] => default output handler
+    [1] => {closure:/main.php:45}
+)
+Array
+(
+    [0] => Array
+        (
+            [name] => default output handler
+            [type] => 0
+            [flags] => 112
+            [level] => 0
+            [chunk_size] => 0
+            [buffer_size] => 16384
+            [buffer_used] => 0
+        )
+
+    [1] => Array
+        (
+            [name] => {closure:/main.php:45}
+            [type] => 1
+            [flags] => 113
+            [level] => 1
+            [chunk_size] => 10
+            [buffer_size] => 4096
+            [buffer_used] => 0
+        )
+
+)
+
+Notice: ob_end_clean(): Failed to discard buffer of default output handler (0) in /main.php on line 53
+bool(false)
+
+Deprecated: ob_end_flush(): Producing output from user output handler {closure:/main.php:54} is deprecated in /main.php on line 56
+OUTPUT FROM A HANDLER IS DEPRECATED
+passed along
+caught handler failed
+CLOSED AT THE END

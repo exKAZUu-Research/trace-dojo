@@ -94,6 +94,7 @@
     "@willbooster/wb": "23.6.1",
     "@willbooster/web-tree-sitter": "23.1.0",
     "at-decorators": "7.1.4",
+    "bcryptjs": "3.0.3",
     "codemirror": "6.0.2",
     "csv-parse": "7.0.3",
     "dayjs": "1.11.23",

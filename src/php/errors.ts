@@ -32,14 +32,14 @@ export function reportUncaughtWarning(object: PhpObject): void {
     } catch (error) {
       if (!(error instanceof PhpThrow)) throw error;
       if (show()) {
-        runtime.echo(
+        runtime.displayError(
           `\nWarning: Uncaught ${error.object.cls.name} in exception handling during call to ${object.cls.name}::__toString() in ${throwableLocation(error.object)}\n`
         );
       }
       const value = readThrowableSlot(object, throwableKey(object, 'string'));
       text = typeof value === 'string' ? value : '';
     }
-    if (show()) runtime.echo(`\nWarning: Uncaught ${text}\n  thrown in ${throwableLocation(object)}\n`);
+    if (show()) runtime.displayError(`\nWarning: Uncaught ${text}\n  thrown in ${throwableLocation(object)}\n`);
   } finally {
     runtime.thrown = suspended === object ? undefined : suspended;
     runtime.held.pop();
@@ -150,6 +150,11 @@ export function lastError(): ReportedError | undefined {
   return lastErrors.get(rt());
 }
 
+/** Records the fatal error that ended the program, which shutdown functions read with `error_get_last`. */
+export function recordFatalError(message: string, row: number): void {
+  lastErrors.set(rt(), { level: E_ERROR, message, row });
+}
+
 export function clearLastError(): void {
   lastErrors.delete(rt());
 }
@@ -204,7 +209,7 @@ export function emitError(level: bigint, message: string, row = rt().diagnosticR
   if (level === E_USER_ERROR) throw new FatalError(reported ? message : '', row);
   if (!reported) return;
   const name = LEVEL_NAMES.get(level) ?? 'Warning';
-  runtime.echo(`\n${name}: ${message} in ${errorFile(row)} on line ${Math.max(row + 1, 0)}\n`);
+  runtime.displayError(`\n${name}: ${message} in ${errorFile(row)} on line ${Math.max(row + 1, 0)}\n`);
 }
 
 /** The file PHP names for an error on `row`: none while no script code runs, as at shutdown, which a negative row marks. */

@@ -1,0 +1,32 @@
+
+Deprecated: Function f() is deprecated since 1.2, use g() in /main.php on line 29
+1
+
+Warning: The return value of function save() should either be used or intentionally ignored by casting it as (void), the result tells whether it worked in /main.php on line 30
+saving
+saving
+saving
+
+Deprecated: Creation of dynamic property Plain::$x is deprecated in /main.php on line 36
+child
+Deprecated: Constant Child::OLD is deprecated in /main.php on line 37
+1
+Deprecated: Method Child::legacy() is deprecated, no more in /main.php on line 37
+2
+
+Deprecated: Enum case Mode::Old is deprecated since 2.0 in /main.php on line 38
+enum(Mode::Old)
+enum(Mode::New)
+
+Deprecated: Trait Helper used by UsesHelper is deprecated, t in /main.php on line 40
+help
+#0 /main.php(44): login('bob', Object(SensitiveParameterValue))
+#1 {main}
+array(2) {
+  [0]=>
+  string(3) "bob"
+  [1]=>
+  object(SensitiveParameterValue)#6 (0) {
+  }
+}
+string(6) "hidden"

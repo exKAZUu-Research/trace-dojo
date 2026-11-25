@@ -6,7 +6,7 @@ import { deprecated, throwError, warn } from './errors';
 import { isCtypeSpace, isUtf8Ctype } from './libLocale';
 import { defineFunction } from './native';
 import { rt } from './runtime';
-import { INT_MAX, INT_MIN, PhpArray, type Value } from './values';
+import { INT_MAX, INT_MIN, type NativeContext, PhpArray, type Value } from './values';
 
 const s = (value: Value): string => value as string;
 
@@ -50,21 +50,31 @@ defineFunction('strtok(string $string, ?string $token = null): string|false', ({
 defineFunction(
   String.raw`str_getcsv(string $string, string $separator = ",", string $enclosure = '"', string $escape = '\'): array`,
   ({ args }) => {
-    const separator = args[1] === undefined ? ',' : s(args[1]);
-    const enclosure = args[2] === undefined ? '"' : s(args[2]);
-    if (separator.length !== 1)
-      throwError('ValueError', 'str_getcsv(): Argument #2 ($separator) must be a single character');
-    if (enclosure.length !== 1)
-      throwError('ValueError', 'str_getcsv(): Argument #3 ($enclosure) must be a single character');
-    if (args[3] === undefined) {
-      deprecated('str_getcsv(): the $escape parameter must be provided as its default value will change');
-    } else if (s(args[3]).length > 1) {
-      throwError('ValueError', 'str_getcsv(): Argument #4 ($escape) must be empty or a single character');
-    }
-    const escape = args[3] === undefined ? '\\' : s(args[3]) || undefined;
+    const { separator, enclosure, escape } = csvOptions('str_getcsv', args, 1);
     return PhpArray.list(parseCsv(s(args[0]), separator, enclosure, escape));
   }
 );
+
+/** The separator, enclosure, and escape arguments of a CSV function from `args[first]` on, checked as PHP does. */
+export function csvOptions(
+  name: string,
+  args: Value[],
+  first: number
+): { separator: string; enclosure: string; escape: string | undefined } {
+  const separator = args[first] === undefined ? ',' : s(args[first]);
+  const enclosure = args[first + 1] === undefined ? '"' : s(args[first + 1]);
+  if (separator.length !== 1)
+    throwError('ValueError', `${name}(): Argument #${first + 1} ($separator) must be a single character`);
+  if (enclosure.length !== 1)
+    throwError('ValueError', `${name}(): Argument #${first + 2} ($enclosure) must be a single character`);
+  const escapeArg = args[first + 2];
+  if (escapeArg === undefined) {
+    deprecated(`${name}(): the $escape parameter must be provided as its default value will change`);
+  } else if (s(escapeArg).length > 1) {
+    throwError('ValueError', `${name}(): Argument #${first + 3} ($escape) must be empty or a single character`);
+  }
+  return { separator, enclosure, escape: escapeArg === undefined ? '\\' : s(escapeArg) || undefined };
+}
 
 interface CsvCursor {
   text: string;
@@ -76,29 +86,40 @@ interface CsvCursor {
   index: number;
   /** The length of the character at `index` as the C library's mblen measures it: 0 at the limit, -1 when invalid. */
   charLength: number;
+  /** The next line of the stream being read, which an enclosed field continues into. */
+  nextLine: (() => string | undefined) | undefined;
 }
 
-/** Splits a CSV line as php_fgetcsv does, which the C library's locale makes skip whole multibyte characters. */
+/**
+ * Splits a CSV line as php_fgetcsv does, which the C library's locale makes skip whole multibyte characters, reading
+ * the next line from `nextLine` while an enclosed field continues past the line's end.
+ */
 // code-gauge-allow functionCognitiveComplexity -- Tracks field text, enclosure state and escapes in a single forward scan.
-function parseCsv(text: string, delimiter: string, enclosure: string, escape: string | undefined): (string | null)[] {
+export function parseCsv(
+  text: string,
+  delimiter: string,
+  enclosure: string,
+  escape: string | undefined,
+  nextLine?: () => string | undefined
+): (string | null)[] {
   const limit = withoutLineBreak(text, text.length);
-  const cursor: CsvCursor = { text, limit, delimiter, enclosure, escape, index: 0, charLength: 0 };
+  const cursor: CsvCursor = { text, limit, delimiter, enclosure, escape, index: 0, charLength: 0, nextLine };
   const values: string[] = [];
   do {
     cursor.charLength = csvCharLength(cursor);
     if (cursor.charLength === 1) {
       let ahead = cursor.index;
-      while (text[ahead] !== delimiter && isCtypeSpace(byteAt(text, ahead))) ahead++;
-      if (text[ahead] === enclosure && ahead < limit) cursor.index = ahead;
+      while (cursor.text[ahead] !== delimiter && isCtypeSpace(byteAt(cursor.text, ahead))) ahead++;
+      if (cursor.text[ahead] === enclosure && ahead < cursor.limit) cursor.index = ahead;
     }
-    if (values.length === 0 && cursor.index === limit) return [null];
-    if (cursor.charLength !== 0 && text[cursor.index] === enclosure) values.push(enclosedCsvField(cursor));
+    if (values.length === 0 && cursor.index === cursor.limit) return [null];
+    if (cursor.charLength !== 0 && cursor.text[cursor.index] === enclosure) values.push(enclosedCsvField(cursor));
     else {
       const start = cursor.index;
       skipToDelimiter(cursor);
-      const field = text.slice(start, cursor.index);
+      const field = cursor.text.slice(start, cursor.index);
       values.push(field.slice(0, withoutLineBreak(field, field.length)));
-      if (text[cursor.index] === delimiter) cursor.index++;
+      if (cursor.text[cursor.index] === delimiter) cursor.index++;
     }
   } while (cursor.charLength > 0);
   return values;
@@ -126,10 +147,7 @@ function enclosedCsvField(cursor: CsvCursor): string {
 /** Reads the character at the cursor in an enclosed field, returning whether the enclosed part ended. */
 function readEnclosedChar(cursor: CsvCursor, field: EnclosedField): boolean {
   const { text } = cursor;
-  if (cursor.charLength === 0) {
-    endEnclosedField(cursor, field);
-    return true;
-  }
+  if (cursor.charLength === 0) return !endEnclosedField(cursor, field);
   const single = cursor.charLength === 1 || cursor.charLength === -1;
   if (field.state === 'enclosure') {
     if (!single || text[cursor.index] !== cursor.enclosure) {
@@ -151,16 +169,29 @@ function readEnclosedChar(cursor: CsvCursor, field: EnclosedField): boolean {
   return false;
 }
 
-/** Ends a field at the limit; an unterminated field keeps its line break, and a read past the limit is undone. */
-function endEnclosedField(cursor: CsvCursor, field: EnclosedField): void {
+/**
+ * Ends a field at the limit, returning whether it continues on the next line; an unterminated field keeps its line
+ * break, and a read past the limit is undone.
+ */
+function endEnclosedField(cursor: CsvCursor, field: EnclosedField): boolean {
   const { text } = cursor;
   if (field.state === 'enclosure') field.text += text.slice(field.hunk, cursor.index - 1);
   else {
     if (field.state === 'escaped' || field.hunk !== cursor.limit) field.text += text.slice(field.hunk, cursor.index);
     field.text += text.slice(cursor.limit);
+    const line = cursor.nextLine?.();
+    if (line !== undefined) {
+      cursor.text = line;
+      cursor.limit = withoutLineBreak(line, line.length);
+      cursor.index = 0;
+      field.hunk = 0;
+      field.state = 'plain';
+      return true;
+    }
     if (cursor.index > cursor.limit) cursor.index--;
   }
   field.hunk = cursor.index;
+  return false;
 }
 
 function skipToDelimiter(cursor: CsvCursor): void {
@@ -187,20 +218,25 @@ function withoutLineBreak(text: string, end: number): number {
 
 // Scanning, which reads both strings only up to their first NUL byte, as PHP's C code does ----------------------------
 
-defineFunction('sscanf(string $string, string $format, mixed &...$vars): array|int|null', ({ args, refs }) => {
+defineFunction('sscanf(string $string, string $format, mixed &...$vars): array|int|null', ({ args, refs }) =>
+  scanArguments(s(args[0]), { args, refs })
+);
+
+/** Scans a string with the format in `args[1]` into the references after it, as `sscanf` and `fscanf` do. */
+export function scanArguments(input: string, { args, refs }: Pick<NativeContext, 'args' | 'refs'>): Value {
   const format = untilNul(s(args[1]));
   const varCount = args.length - 2;
   const total = validateScanFormat(format, varCount);
   const results = new PhpArray();
   if (varCount === 0) for (let index = 0; index < total; index++) results.append(null);
-  const scan = scanString(untilNul(s(args[0])), format);
+  const scan = scanString(untilNul(input), format);
   for (const [index, value] of scan.values) {
     if (varCount === 0) results.set(BigInt(index), value);
     else refs[index + 2]?.assign(value);
   }
   if (scan.underflow && scan.conversions === 0) return varCount === 0 ? null : -1n;
   return varCount === 0 ? results : BigInt(scan.conversions);
-});
+}
 
 interface ScanSpec {
   suppress: boolean;

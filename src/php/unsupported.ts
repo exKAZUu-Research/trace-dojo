@@ -15,7 +15,6 @@ const SUPERGLOBALS = new Set(['_GET', '_POST', '_SERVER', '_ENV', '_COOKIE', '_F
 
 export function unavailableVariable(name: string): string | undefined {
   if (SUPERGLOBALS.has(name)) return `スーパーグローバル変数 $${name}`;
-  if (name === 'argv' || name === 'argc') return `コマンドライン引数 $${name}`;
 }
 
 export function checkedDynamicVariable(name: string): string {

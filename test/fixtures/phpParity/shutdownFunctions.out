@@ -1,0 +1,7 @@
+[main
+shutdown 1 2 level=1
+via printf
+handler thrown in shutdown
+after the exception
+destruct level 1
+]

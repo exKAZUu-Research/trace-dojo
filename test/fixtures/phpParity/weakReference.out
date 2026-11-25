@@ -1,0 +1,26 @@
+bool(true)
+object(WeakReference)#2 (1) {
+  ["object"]=>
+  object(stdClass)#1 (0) {
+  }
+}
+bool(true)
+NULL
+bool(true)
+NULL
+Direct instantiation of WeakReference is not allowed, use WeakReference::create instead
+Trying to clone an uncloneable object of class WeakReference
+Serialization of 'WeakReference' is not allowed
+NULL
+WeakReference Object
+(
+    [object] => 
+)
+
+\WeakReference::__set_state(array(
+))
+bool(true)
+string(2) "{}"
+array(0) {
+}
+Cannot create dynamic property WeakReference::$foo

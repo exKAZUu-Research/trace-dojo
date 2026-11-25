@@ -7,6 +7,7 @@ import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableEx
 import * as classesModule from './classes';
 import { classConstant, findDeclaredClass, findMemberClass, requireClassScope } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
+import { advanceClock } from './dateSupport';
 import {
   deprecated,
   E_ALL,
@@ -34,23 +35,17 @@ import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, cloneObject, deprecatedConstant, iterate, rejectUnsupportedConstant } from './interp';
 import { isCtypeSpace } from './libLocale';
-import {
-  defineAlias,
-  defineConstant,
-  defineFunction,
-  defineRuntimeConstant,
-  markDirectOnly,
-  markReferenceForwarding,
-} from './native';
+import { defineAlias, defineConstant, defineFunction, markDirectOnly, markReferenceForwarding } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
+import { isStream, type Stream } from './streams';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, isClosure, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, isClosure, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -189,7 +184,10 @@ defineFunction(
     return args[1] === true ? syntax : isCallable(value);
   }
 );
-defineFunction('is_resource(mixed $value): bool', ({ args }) => isStream(args[0]));
+defineFunction(
+  'is_resource(mixed $value): bool',
+  ({ args }) => isStream(args[0]) && !(args[0].internal as Stream).isClosed
+);
 defineFunction('intval(mixed $value, int $base = 10): int', ({ args }) => {
   const [value, base = 10n] = args;
   if (typeof value === 'string' && base !== 10n) return parseIntBase(value, Number(BigInt.asIntN(32, base as bigint)));
@@ -494,37 +492,39 @@ function memberQueryClass(target: Value, operation: 'method_exists' | 'property_
 }
 
 defineFunction('class_exists(string $class, bool $autoload = true): bool', ({ args }) => {
-  const cls = findDeclaredClass(args[0] as string);
+  const cls = findDeclaredClass(args[0] as string, args[1] !== false);
   return cls?.kind === 'class' || cls?.kind === 'enum';
 });
 defineFunction(
   'interface_exists(string $interface, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'interface'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'interface'
 );
 defineFunction(
   'trait_exists(string $trait, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'trait'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'trait'
 );
 defineFunction(
   'enum_exists(string $enum, bool $autoload = true): bool',
-  ({ args }) => findDeclaredClass(args[0] as string)?.kind === 'enum'
+  ({ args }) => findDeclaredClass(args[0] as string, args[1] !== false)?.kind === 'enum'
 );
 defineFunction('is_a(mixed $object_or_class, string $class, bool $allow_string = false): bool', ({ args }) => {
   const [value, className, allowString] = args;
+  const cls =
+    value instanceof PhpObject
+      ? value.cls
+      : typeof value === 'string' && allowString === true
+        ? findMemberClass(value)
+        : undefined;
   const target = findDeclaredClass(className as string);
-  if (!target) return false;
-  if (value instanceof PhpObject) return value.cls.isSubclassOf(target);
-  if (typeof value === 'string' && allowString === true) return findMemberClass(value)?.isSubclassOf(target) ?? false;
-  return false;
+  return target !== undefined && cls !== undefined && cls.isSubclassOf(target);
 });
 defineFunction('is_subclass_of(mixed $object_or_class, string $class, bool $allow_string = true): bool', ({ args }) => {
   const [value, className, allowString = true] = args;
-  const target = findDeclaredClass(className as string);
-  if (!target) return false;
   let cls;
   if (value instanceof PhpObject) cls = value.cls;
   else if (typeof value === 'string' && allowString === true) cls = findMemberClass(value);
-  return cls !== undefined && cls !== target && cls.isSubclassOf(target);
+  const target = findDeclaredClass(className as string);
+  return target !== undefined && cls !== undefined && cls !== target && cls.isSubclassOf(target);
 });
 for (const [name, related] of [
   ['class_implements', (cls: PhpClass) => cls.interfaces],
@@ -675,7 +675,10 @@ defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {
   // While `@` silences errors, PHP reports only the fatal levels (E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR,
   // E_USER_ERROR, E_RECOVERABLE_ERROR).
   const previous = runtime.silence > 0 ? runtime.errorReporting & 4437n : runtime.errorReporting;
-  if (args[0] !== undefined && args[0] !== null) runtime.errorReporting = args[0] as bigint;
+  if (args[0] !== undefined && args[0] !== null) {
+    runtime.errorReporting = args[0] as bigint;
+    runtime.iniSettings.set('error_reporting', String(runtime.errorReporting));
+  }
   return previous;
 });
 defineFunction(
@@ -704,10 +707,12 @@ defineFunction('phpversion(?string $extension = null): string|false', ({ args })
 defineFunction('php_sapi_name(): string|false', () => 'cli');
 defineFunction('sleep(int $seconds): int', ({ args }) => {
   checkDelay(args[0] as bigint, 'sleep', 'seconds');
+  advanceClock(Number(args[0] as bigint) * 1_000_000);
   return 0n;
 });
 defineFunction('usleep(int $microseconds): void', ({ args }) => {
   checkDelay(args[0] as bigint, 'usleep', 'microseconds');
+  advanceClock(Number(args[0] as bigint));
   return null;
 });
 defineFunction('gc_enabled(): bool', () => rt().gcEnabled);
@@ -728,46 +733,6 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
   return null;
 });
 
-// Standard streams ---------------------------------------------------------------------------------------------------
-
-const streamClass = new PhpClass('(stream)');
-
-/** A standard stream, which PHP's CLI predefines as the resources STDIN, STDOUT, and STDERR. */
-function isStream(value: Value): value is PhpObject {
-  return value instanceof PhpObject && value.cls === streamClass;
-}
-
-const streams: [string, number][] = [
-  ['STDIN', 1],
-  ['STDOUT', 2],
-  ['STDERR', 3],
-];
-for (const [name, id] of streams) {
-  defineRuntimeConstant(name, () => {
-    const stream = new PhpObject(streamClass, id);
-    stream.internal = name;
-    return stream;
-  });
-}
-
-export function writeStream(stream: PhpObject, text: string): bigint {
-  if (stream.internal === 'STDOUT') rt().echo(text);
-  else if (stream.internal === 'STDERR') rt().echoError(text);
-  else throw new UnsupportedFeatureError('標準入力への書き込み');
-  return BigInt(text.length);
-}
-
-defineFunction('fwrite(resource $stream, string $data, ?int $length = null): int|false', ({ args }) => {
-  const stream = args[0] as PhpObject;
-  const data = args[1] as string;
-  const length = args[2] === undefined || args[2] === null ? data.length : Number(args[2]);
-  return writeStream(stream, data.slice(0, Math.max(length, 0)));
-});
-defineAlias('fputs', 'fwrite');
-defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int', ({ args }) => {
-  const stream = args[0] as PhpObject;
-  return BigInt(formatPrintf(args[1] as string, args.slice(2), (output) => writeStream(stream, output)).length);
-});
 function checkArgumentFunction(name: string, dynamic: boolean | undefined): void {
   if (!rt().frame.fn) {
     const message =

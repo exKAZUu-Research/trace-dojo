@@ -1,0 +1,198 @@
+object(DateTime)#1 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.250000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+DateTime Object
+(
+    [date] => 2024-01-31 10:20:30.250000
+    [timezone_type] => 3
+    [timezone] => UTC
+)
+
+{"date":"2024-01-31 10:20:30.250000","timezone_type":3,"timezone":"UTC"}
+\DateTime::__set_state(array(
+   'date' => '2024-01-31 10:20:30.250000',
+   'timezone_type' => 3,
+   'timezone' => 'UTC',
+))
+array(3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.250000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+array(0) {
+}
+object(DateTime)#2 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.000000"
+  ["timezone_type"]=>
+  int(1)
+  ["timezone"]=>
+  string(6) "+09:00"
+}
+object(DateTime)#2 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.000000"
+  ["timezone_type"]=>
+  int(2)
+  ["timezone"]=>
+  string(1) "Z"
+}
+object(DateTime)#2 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.000000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+object(DateTime)#2 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 10:20:30.000000"
+  ["timezone_type"]=>
+  int(2)
+  ["timezone"]=>
+  string(3) "GMT"
+}
+object(DateTime)#2 (3) {
+  ["date"]=>
+  string(26) "1970-01-02 00:00:00.000000"
+  ["timezone_type"]=>
+  int(1)
+  ["timezone"]=>
+  string(6) "+00:00"
+}
+object(DateTimeImmutable)#2 (3) {
+  ["date"]=>
+  string(26) "2024-01-31 00:00:00.000000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(10) "Asia/Tokyo"
+}
+object(DateTimeZone)#2 (2) {
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(10) "Asia/Tokyo"
+}
+object(DateTimeZone)#2 (2) {
+  ["timezone_type"]=>
+  int(1)
+  ["timezone"]=>
+  string(6) "+09:00"
+}
+object(DateTimeZone)#2 (2) {
+  ["timezone_type"]=>
+  int(2)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+object(DateTimeZone)#2 (2) {
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(10) "asia/tokyo"
+}
+object(DateInterval)#4 (10) {
+  ["y"]=>
+  int(0)
+  ["m"]=>
+  int(2)
+  ["d"]=>
+  int(14)
+  ["h"]=>
+  int(12)
+  ["i"]=>
+  int(0)
+  ["s"]=>
+  int(0)
+  ["f"]=>
+  float(0)
+  ["invert"]=>
+  int(0)
+  ["days"]=>
+  int(74)
+  ["from_string"]=>
+  bool(false)
+}
+DateInterval Object
+(
+    [y] => 0
+    [m] => 2
+    [d] => 14
+    [h] => 12
+    [i] => 0
+    [s] => 0
+    [f] => 0
+    [invert] => 0
+    [days] => 74
+    [from_string] => 
+)
+
+{"y":0,"m":2,"d":14,"h":12,"i":0,"s":0,"f":0,"invert":0,"days":74,"from_string":false}
+object(DateInterval)#2 (10) {
+  ["y"]=>
+  int(1)
+  ["m"]=>
+  int(2)
+  ["d"]=>
+  int(3)
+  ["h"]=>
+  int(4)
+  ["i"]=>
+  int(5)
+  ["s"]=>
+  int(6)
+  ["f"]=>
+  float(0)
+  ["invert"]=>
+  int(0)
+  ["days"]=>
+  bool(false)
+  ["from_string"]=>
+  bool(false)
+}
+DateMalformedStringException: Failed to parse time string (helloworld) at position 0 (h): The timezone could not be found in the database
+DateMalformedStringException: Failed to parse time string (invalid date) at position 0 (i): The timezone could not be found in the database
+DateMalformedStringException: Failed to parse time string (2024-13-45) at position 6 (3): Unexpected character
+DateInvalidTimeZoneException: DateTimeZone::__construct(): Unknown or bad timezone (Mars/Base)
+DateMalformedIntervalStringException: Unknown or bad format (P1X)
+bool(false)
+DateMalformedStringException: DateTime::modify(): Failed to parse time string (garbage text) at position 0 (g): The timezone could not be found in the database
+
+Warning: date_modify(): Failed to parse time string (nonsense) at position 0 (n): The timezone could not be found in the database in /main.php on line 33
+bool(false)
+bool(false)
+array(4) {
+  ["warning_count"]=>
+  int(1)
+  ["warnings"]=>
+  array(1) {
+    [10]=>
+    string(27) "The parsed date was invalid"
+  }
+  ["error_count"]=>
+  int(1)
+  ["errors"]=>
+  array(1) {
+    [10]=>
+    string(13) "Trailing data"
+  }
+}
+object(DateTime)#5 (3) {
+  ["date"]=>
+  string(26) "2024-02-10 11:12:13.000000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+2024-08-15

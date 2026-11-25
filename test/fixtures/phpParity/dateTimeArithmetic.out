@@ -1,0 +1,109 @@
+2024-03-02 10:00:00
+2024-03-02
+2022-12-29 19:54:54
+2024-03-15T08:30:00+09:00 2024-03-16T20:30:00+09:00 JST Asia/Tokyo +09:00
+1710459000 32400 Asia/Tokyo
+2024-03-14 23:30:00 UTC
+2024-03-14 19:30:00 EDT 1
+359 0 11 24 15 30 0 359 +  % 00-11-24 15:30:00 000000 0 %x
+-359 days 1
+bool(true)
+bool(false)
+bool(false)
+bool(true)
+string(4) "2024"
+2024-01-01 2024-01-02
+2023-03-02 02:02:01
+1971-01-01T00:00:00+00:00
+2024-01-01 Monday 01 2024
+2000-02-29 | +1 day => 2000-03-01 00:00:00 Wed
+2000-02-29 | -1 month => 2000-01-29 00:00:00 Sat
+2000-02-29 | +1 year => 2001-03-01 00:00:00 Thu
+2000-02-29 | last day of next month => 2000-03-31 00:00:00 Fri
+2000-02-29 | first monday of january => 2000-01-03 00:00:00 Mon
+2000-02-29 | next sunday => 2000-03-05 00:00:00 Sun
+2000-02-29 | midnight => 2000-02-29 00:00:00 Tue
+2000-02-29 | noon => 2000-02-29 12:00:00 Tue
+2000-02-29 | +1 week 2 days 4 hours => 2000-03-09 04:00:00 Thu
+1999-12-31 23:59:59 | +1 day => 2000-01-01 23:59:59 Sat
+1999-12-31 23:59:59 | -1 month => 1999-12-01 23:59:59 Wed
+1999-12-31 23:59:59 | +1 year => 2000-12-31 23:59:59 Sun
+1999-12-31 23:59:59 | last day of next month => 2000-01-31 23:59:59 Mon
+1999-12-31 23:59:59 | first monday of january => 1999-01-04 00:00:00 Mon
+1999-12-31 23:59:59 | next sunday => 2000-01-02 00:00:00 Sun
+1999-12-31 23:59:59 | midnight => 1999-12-31 00:00:00 Fri
+1999-12-31 23:59:59 | noon => 1999-12-31 12:00:00 Fri
+1999-12-31 23:59:59 | +1 week 2 days 4 hours => 2000-01-10 03:59:59 Mon
+2024-03-31 | +1 day => 2024-04-01 00:00:00 Mon
+2024-03-31 | -1 month => 2024-03-02 00:00:00 Sat
+2024-03-31 | +1 year => 2025-03-31 00:00:00 Mon
+2024-03-31 | last day of next month => 2024-04-30 00:00:00 Tue
+2024-03-31 | first monday of january => 2024-01-01 00:00:00 Mon
+2024-03-31 | next sunday => 2024-04-07 00:00:00 Sun
+2024-03-31 | midnight => 2024-03-31 00:00:00 Sun
+2024-03-31 | noon => 2024-03-31 12:00:00 Sun
+2024-03-31 | +1 week 2 days 4 hours => 2024-04-09 04:00:00 Tue
+age 23
+- 1 2 31
++ 0 30 30
+- 1 1 30
++ 0 9 0 0
+17 17 days
+2023-12-24
+Thursday 1970
+2024-01-11
+int(31)
+{"when":{"date":"2024-01-02 03:04:05.000000","timezone_type":3,"timezone":"UTC"}}
+DateTimeZone Object
+(
+    [timezone_type] => 3
+    [timezone] => Europe/Paris
+)
+
+object(DateTime)#18 (3) {
+  ["date"]=>
+  string(26) "2024-06-15 12:00:00.000000"
+  ["timezone_type"]=>
+  int(1)
+  ["timezone"]=>
+  string(6) "+05:30"
+}
+object(DateTime)#18 (3) {
+  ["date"]=>
+  string(26) "2024-08-15 00:00:00.000000"
+  ["timezone_type"]=>
+  int(3)
+  ["timezone"]=>
+  string(3) "UTC"
+}
+string(10) "2025-01-01"
+bool(false)
+array(4) {
+  ["warning_count"]=>
+  int(0)
+  ["warnings"]=>
+  array(0) {
+  }
+  ["error_count"]=>
+  int(3)
+  ["errors"]=>
+  array(2) {
+    [0]=>
+    string(36) "A four digit year could not be found"
+    [3]=>
+    string(43) "Not enough data available to satisfy format"
+  }
+}
+2009-02-15
+2024-06-15T12:23:45+00:00
+123456 123
+15:15
+hi 2030 MyDate
+bool(true)
+DateTimeImmutable
+32400
+1 31 14 1 15th
+
+Warning: date_interval_create_from_date_string(): Unknown or bad format (xyzzyx) at position 0 (x): The timezone could not be found in the database in /main.php on line 74
+bool(false)
+DateMalformedIntervalStringException: Unknown or bad format (xyzzyx) at position 0 (x): The timezone could not be found in the database

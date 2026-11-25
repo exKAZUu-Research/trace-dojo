@@ -13,6 +13,7 @@ import {
 } from './assignment';
 import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
+import { reportGlobalConstantDeprecation } from './attributeEffects';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -403,6 +404,13 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'unsupported': {
       throwError('Error', e.what);
     }
+    case 'held': {
+      return e.v;
+    }
+    case 'yield':
+    case 'yieldFrom': {
+      throw new Error('A yield runs only as a step of its generator');
+    }
   }
 }
 
@@ -579,6 +587,8 @@ function readPropertyOperand(object: Value, name: Value, row: number, mode: Read
       return null;
     });
   }
+  if (runtime.frame.constantExpression && object.cls.kind !== 'enum')
+    throwError('Error', 'Fetching properties on non-enums in constant expressions is not allowed');
   const key = toStr(name);
   runtime.row = row;
   if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
@@ -915,8 +925,6 @@ function* iterateObject(
 
 /** The constants that describe the machine running PHP, which differ between this grader and a learner's PHP. */
 const ENVIRONMENT_CONSTANTS = new Set([
-  'PHP_OS',
-  'PHP_OS_FAMILY',
   'PHP_BINARY',
   'PHP_BINDIR',
   'PHP_LIBDIR',
@@ -956,6 +964,7 @@ export function rejectUnsupportedConstant(name: string): void {
 export function deprecatedConstant(name: string, value: Value): Value {
   const message = constantDeprecation(name);
   if (message) deprecated(message);
+  reportGlobalConstantDeprecation(constantKey(name), name);
   return value;
 }
 

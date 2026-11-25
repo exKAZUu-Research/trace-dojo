@@ -24,6 +24,9 @@ export function callIteratorMethod(iterator: PhpObject, method: IteratorMethod):
 }
 
 function invokeIteratorMethod(iterator: PhpObject, method: IteratorMethod): Value {
+  // PHP's engine resumes a generator itself rather than through the Generator methods, which traces would show.
+  const engine = iterator.internal as { engineIteration?: (method: IteratorMethod) => Value } | undefined;
+  if (engine?.engineIteration) return engine.engineIteration(method);
   return usesNativeRecursiveIterator(iterator.cls)
     ? callMethod(iterator, method, [], rt().row, { inline: true })
     : callMethod(iterator, method, []);
@@ -91,11 +94,15 @@ function acquireDirectIterator(object: PhpObject, byRef: boolean): AcquiredItera
         writable?: () => PhpArray;
         fixedIterator?: (owner: PhpObject) => PhpObject;
         prepareEngineIteration?: () => void;
+        beforeEngineIteration?: (byRef: boolean) => void;
+        currentRef?: () => Ref;
       }
     | undefined;
   if (object.cls.isSubclassOf(iteratorClass)) {
+    internal?.beforeEngineIteration?.(byRef);
     if (
       byRef &&
+      typeof internal?.currentRef !== 'function' &&
       (typeof internal?.writable !== 'function' ||
         !iteratorMethods.every((name) => object.cls.findMethod(name)?.fn.kind === 'native'))
     )
@@ -104,7 +111,7 @@ function acquireDirectIterator(object: PhpObject, byRef: boolean): AcquiredItera
     const handle = newEngineIterator(object);
     return { iterator: object, handle };
   }
-  if (internal?.fixedIterator && object.cls.findMethod('getiterator')?.scope.name === 'SplFixedArray') {
+  if (internal?.fixedIterator && object.cls.findMethod('getiterator')?.fn.kind === 'native') {
     if (byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
     const iterator = internal.fixedIterator(object);
     return { iterator, handle: iterator };

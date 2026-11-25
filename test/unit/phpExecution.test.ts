@@ -250,8 +250,6 @@ test('counts decoded PHP output against the shared limit', () => {
 });
 
 test.each([
-  ['an enum', '<?php\nenum Suit { case Hearts; }', '列挙型（enum）'],
-  ['a generator', '<?php\nfunction g() { yield 1; }', 'ジェネレータ（yield）'],
   ['include', "<?php\ninclude 'a.php';", 'include・require'],
   ['a superglobal', '<?php\necho $_GET["x"];', '$_GET'],
 ])('rejects %s with a message in Japanese', (_name, program, what) => {
@@ -264,11 +262,11 @@ test.each([
 });
 
 test('stops at a runtime feature the grader rejects, keeping the output before it', () => {
-  const execution = run('<?php\necho "start\\n";\n$f = fopen("a.txt", "r");\necho "never";');
+  const execution = run('<?php\necho "start\\n";\n$f = stat("a.txt");\necho "never";');
   expect(execution).toMatchObject({
     kind: 'executed',
     stdout: 'start\n',
-    uncaughtException: 'ファイルの読み書き（fopen）は、この採点環境では使えません。',
+    uncaughtException: 'ファイルの読み書き（stat）は、この採点環境では使えません。',
   });
 });
 
@@ -277,14 +275,13 @@ test.each([
   ['_FILES', 'isset(${$name});', 'スーパーグローバル変数'],
   ['_SERVER', '$$name = 1;', 'スーパーグローバル変数'],
   ['_GET', 'unset($$name);', 'スーパーグローバル変数'],
-  ['argv', 'echo ${$name};', 'コマンドライン引数'],
-  ['argc', 'echo $GLOBALS[$name];', 'コマンドライン引数'],
+  ['_COOKIE', 'echo $GLOBALS[$name];', 'スーパーグローバル変数'],
   ['_GET', '$value = 1; $$name =& $value;', 'スーパーグローバル変数'],
-  ['argv', '$values = [1]; [&$$name] = $values;', 'コマンドライン引数'],
+  ['_ENV', '$values = [1]; [&$$name] = $values;', 'スーパーグローバル変数'],
   ['_POST', '$values = [1]; foreach ($values as &$$name) {}', 'スーパーグローバル変数'],
   ['_GET', 'extract([$name => 1]);', 'スーパーグローバル変数'],
-  ['argc', 'global $$name;', 'コマンドライン引数'],
-  ['argv', 'compact([[$name]]);', 'コマンドライン引数'],
+  ['_SESSION', 'global $$name;', 'スーパーグローバル変数'],
+  ['_REQUEST', 'compact([[$name]]);', 'スーパーグローバル変数'],
 ])('rejects indirect access to $%s through %s', (name, action, label) => {
   expect(run(`<?php $name = '${name}'; echo 'before'; ${action} echo 'after';`)).toMatchObject({
     kind: 'executed',
@@ -942,17 +939,10 @@ test.each([
 });
 
 test.each([
-  '<?php file_put_contents("a.txt","x",FILE_APPEND|LOCK_EX);',
   '<?php mb_strlen("abc","sjis");',
-  '<?php echo defined("PHP_OS") ? "y" : "n";',
-  '<?php echo defined("SEEK_SET") ? "y" : "n";',
-  '<?php echo constant("PHP_OS");',
-  '<?php echo defined("DateTimeInterface::ATOM") ? "y" : "n";',
-  '<?php var_dump(method_exists("DateTime", "format"));',
-  '<?php echo constant("DateTime::ATOM");',
-  '<?php var_dump(is_subclass_of("DateTime", "DateTimeInterface"));',
-  '<?php var_dump(interface_exists("DateTimeInterface"));',
-  '<?php var_dump(class_exists("Attribute"));',
+  '<?php echo defined("PHP_BINARY") ? "y" : "n";',
+  '<?php echo constant("PHP_BINARY");',
+  '<?php var_dump(class_exists("ReflectionAttribute"));',
 ])('unsupported arguments produce the unsupported-feature message: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
@@ -3434,8 +3424,8 @@ test.each(['static', '?static'])('rejects %s parameter types independently of re
 });
 
 test.each([
-  ['fopen', 'fopen("file.txt", "r")'],
-  ['file_get_contents', 'file_get_contents("file.txt")'],
+  ['stat', 'stat("file.txt")'],
+  ['tempnam', 'tempnam("/", "x")'],
 ])('reports unsupported %s from a replacement throwable stringifier', (name, expression) => {
   const program = `<?php
     class First extends Exception { function __toString(): string { throw new Second(); } }
@@ -5370,11 +5360,6 @@ test('reports accurate rows for first-statement syntax errors', () => {
 });
 
 test('rejects unsupported functions without spurious undefined-variable warnings on out-parameters', () => {
-  expect(run('<?php fscanf(STDIN, "%d", $n); echo $n;')).toMatchObject({
-    kind: 'executed',
-    stdout: '',
-    uncaughtException: '標準入力の読み込み（fscanf）は、この採点環境では使えません。',
-  });
   expect(run('<?php exec("ls", $out, $rc);')).toMatchObject({
     kind: 'executed',
     stdout: '',
@@ -6096,21 +6081,21 @@ test('a returned local becomes a GC root before the other locals are freed', () 
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {
   expect(
     run(
-      '<?php\nclass D { function __destruct() { $this->undefinedMethod(); } }\n$d = new D;\necho "start\\n";\n$x = serialize([1]);\n'
+      '<?php\nclass D { function __destruct() { $this->undefinedMethod(); } }\n$d = new D;\necho "start\\n";\n$x = getenv("HOME");\n'
     )
   ).toMatchObject({
     kind: 'executed',
     stdout: 'start\n',
-    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+    uncaughtException: '環境変数（getenv）は、この採点環境では使えません。',
   });
   expect(
     run(
-      '<?php class D { function __destruct() { echo "dtor;"; throw new Exception("late"); } } $d = new D; set_exception_handler(function ($e) { echo "handler;"; serialize(1); }); throw new Exception("first");'
+      '<?php class D { function __destruct() { echo "dtor;"; throw new Exception("late"); } } $d = new D; set_exception_handler(function ($e) { echo "handler;"; getenv("HOME"); }); throw new Exception("first");'
     )
   ).toMatchObject({
     kind: 'executed',
     stdout: 'handler;',
-    uncaughtException: '直列化（serialize）は、この採点環境では使えません。',
+    uncaughtException: '環境変数（getenv）は、この採点環境では使えません。',
   });
 });
 
@@ -6369,4 +6354,82 @@ foreach (['a', 'b', 'c'] as $f) {
       )
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+});
+
+test('reads standard input through streams and readline as PHP buffers them', () => {
+  const program = String.raw`<?php
+    $n = (int) trim(fgets(STDIN));
+    $sum = array_sum(explode(' ', trim(fgets(STDIN))));
+    fscanf(STDIN, "%d %s", $age, $name);
+    echo $n, ';', $sum, ';', $age, ';', $name, ';', $argc, ';', $argv[0], "\n";
+    while (($line = fgets(STDIN)) !== false) echo '[', rtrim($line), ']';
+    var_dump(feof(STDIN), readline('> '));`;
+  expect(executeProgram('php', program, { stdin: '3\n1 2 3\n20 bob\nx\ny' })).toMatchObject({
+    kind: 'executed',
+    stdout: '3;6;20;bob;1;/main.php\n[x][y]> bool(true)\nbool(false)\n',
+  });
+  expect(
+    executeProgram('php', '<?php $a = readline("Name: "); echo strtoupper($a), "|", fgets(STDIN);', {
+      stdin: 'ann\nrest\n',
+    })
+  ).toMatchObject({ kind: 'executed', stdout: 'Name: ann\nANN|rest\n' });
+});
+
+test('reads and writes files of the run by bytes and reports failures as PHP does', () => {
+  const program = String.raw`<?php
+    $fp = fopen('data/in.csv', 'r');
+    while (($row = fgetcsv($fp, null, ',', '"', '\\')) !== false) echo implode('|', $row), ';';
+    fclose($fp);
+    var_dump($fp);
+    $out = fopen('out.txt', 'w+');
+    fwrite($out, "日本\n");
+    fseek($out, 0, SEEK_END);
+    fwrite($out, "語");
+    rewind($out);
+    var_dump(fread($out, 3), ftell($out));
+    file_put_contents('out.txt', ['!', 1], FILE_APPEND);
+    var_dump(file('out.txt', FILE_IGNORE_NEW_LINES), fopen('none.txt', 'r'), unlink('data/in.csv'));
+    fwrite(STDERR, "err\n");`;
+  expect(executeProgram('php', program, { files: { 'data/in.csv': 'a,"b\nc"\n1,2\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: `a|b\nc;1|2;resource(5) of type (Unknown)
+string(3) "日"
+int(3)
+
+Warning: fopen(none.txt): Failed to open stream: No such file or directory in /main.php on line 13
+array(2) {
+  [0]=>
+  string(6) "日本"
+  [1]=>
+  string(5) "語!1"
+}
+bool(false)
+bool(true)
+`,
+    stderr: 'err\n',
+    finalFiles: { 'out.txt': '日本\n語!1' },
+  });
+});
+
+test('iterates files with SplFileObject as its flags make PHP read lines', () => {
+  const program = String.raw`<?php
+    $f = new SplFileObject('data.csv');
+    foreach ($f as $k => $line) echo $k, json_encode($line), ' ';
+    $f->setFlags(SplFileObject::READ_CSV | SplFileObject::SKIP_EMPTY | SplFileObject::READ_AHEAD | SplFileObject::DROP_NEW_LINE);
+    foreach ($f as $k => $row) echo $k, json_encode($row), ' ';
+    $f->setFlags(SplFileObject::SKIP_EMPTY);
+    foreach ($f as $k => $line) echo $k, json_encode($line), ' ';
+    $f->seek(3);
+    echo $f->key(), json_encode($f->current()), "\n";
+    $out = new SplTempFileObject();
+    $out->fputcsv(['a b', 'c'], ',', '"', '');
+    $out->rewind();
+    foreach ($out as $k => $line) echo $k, json_encode($line);
+    try { new SplFileObject('none.txt'); } catch (RuntimeException $e) { echo "\n", $e->getMessage(); }`;
+  expect(executeProgram('php', program, { files: { 'data.csv': 'id,name\n1,Al\n\n2,"B b"\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: String.raw`0"id,name\n" 1"1,Al\n" 2"\n" 3"2,\"B b\"\n" 4"" 0["id","name"] 1["1","Al"] 3["2","B b"] 0"id,name\n" 1"1,Al\n" 2"\n" 3"2,\"B b\"\n" 4false 3"2,\"B b\"\n"
+0"\"a b\",c\n"
+SplFileObject::__construct(none.txt): Failed to open stream: No such file or directory`,
+  });
 });

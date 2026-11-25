@@ -4,7 +4,7 @@ import { nestedBodies } from './astAnalysis';
 import { callMethod, consumeInvokedResult } from './callables';
 import { declForKey, nativePropertySlot, objectPropertyKeys, propNameOf, snapshotDynamicProperties } from './classes';
 import type { Constant } from './constantDefaults';
-import { formatFloat, formatFloatRepr } from './conversions';
+import { formatFloat, formatFloatRepr, resourceType } from './conversions';
 import {
   type CleanupException,
   deprecated,
@@ -315,7 +315,9 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
   }
   if (value instanceof PhpObject && value.cls.name === '(stream)') return `Resource id #${value.id}`;
   if (value instanceof PhpObject) {
-    const header = `${value.cls.name} ${value.cls.kind === 'enum' ? 'Enum' : 'Object'}\n`;
+    const backing = value.cls.decl?.backingType;
+    const kind = value.cls.kind === 'enum' ? `Enum${backing ? `:${backing}` : ''}` : 'Object';
+    const header = `${value.cls.name} ${kind}\n`;
     if (state.active.has(value)) return `${header} *RECURSION*`;
     state.active.add(value);
     try {
@@ -391,7 +393,7 @@ function dumpValue(value: Value, level: number, state: Inspection, write: (text:
     }
   }
   if (value instanceof PhpObject) {
-    if (value.isResource) return write(`${pad}resource(${value.id}) of type (stream)\n`);
+    if (value.isResource) return write(`${pad}resource(${value.id}) of type (${resourceType(value)})\n`);
     if (value.cls.kind === 'enum') return write(`${pad}enum(${enumCaseName(value)})\n`);
   }
   if (state.active.has(value)) return write(`${indent}*RECURSION*\n`);
@@ -490,7 +492,7 @@ function exportValue(value: Value, level: number, state: Inspection): string {
     }
   }
   const object = value as PhpObject;
-  if (object.cls.kind === 'enum') return `\\${enumCaseName(object)}`;
+  if (object.cls.kind === 'enum') return `${lead}\\${enumCaseName(object)}`;
   if (state.active.has(object)) return circularExport();
   state.active.add(object);
   try {

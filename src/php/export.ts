@@ -263,7 +263,7 @@ function tryFoldConcat(expr: Expr): string | undefined {
   if (expr.k === 'lit') {
     if (typeof expr.v === 'string') return expr.v;
     if (typeof expr.v === 'bigint') return expr.v.toString();
-    if (typeof expr.v === 'number') return formatFloat(expr.v);
+    if (typeof expr.v === 'number') return formatFloat(expr.v, 14);
     return undefined;
   }
   if (expr.k !== 'bin' || expr.op !== '.') return undefined;
@@ -611,7 +611,7 @@ function exportLiteral(value: null | boolean | bigint | number | string): string
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'number') return formatFloatRepr(value, 'E', true);
+  if (typeof value === 'number') return formatFloatRepr(value, 'E', true, { precision: -1 });
   if (hasControlByte(value)) return `"${exportDoubleQuoted(value)}"`;
   return `'${value.replaceAll(/['\\]/g, String.raw`\$&`)}'`;
 }
