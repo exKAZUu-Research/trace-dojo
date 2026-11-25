@@ -135,7 +135,9 @@ export class Runtime {
 
   closeDescriptor(descriptor: number): void {
     const entry = this.descriptors.get(descriptor);
-    if (entry) entry.closed = true;
+    // Closing a closed descriptor is the use after free that a Debug build's close asserts against.
+    if (!entry || entry.closed) throw new ZigPanic('reached unreachable code');
+    entry.closed = true;
   }
 
   /** The file that a descriptor refers to, when it is open and not a standard stream. */
