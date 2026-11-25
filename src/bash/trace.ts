@@ -38,7 +38,7 @@ function variablesOf(runtime: Runtime, frame: Frame): TraceVariables {
     if (!resolved || resolved.kind === 'unset') continue;
     addVariable(runtime, variables, view.name, resolved);
     if (view.attributes.has('n') && resolved.kind === 'associative') {
-      for (const [key, element] of resolved.associativeEntries ?? []) {
+      for (const [key, element] of resolved.associative?.entries() ?? []) {
         if (!turtleNode(runtime, element)) define(variables.vars, `${view.name}[${key}]`, element);
       }
     }
@@ -83,7 +83,7 @@ function addVariable(runtime: Runtime, variables: TraceVariables, name: string, 
     define(variables.referenceVars, name, { kind: 'array', entries });
     return;
   }
-  for (const [key, element] of view.associativeEntries ?? []) {
+  for (const [key, element] of view.associative?.entries() ?? []) {
     define(entries, key, turtleNode(runtime, element) ?? { kind: 'value', value: element });
   }
   define(variables.referenceVars, name, { kind: 'object', entries });

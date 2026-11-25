@@ -10,6 +10,7 @@ import {
   maxElementIndex,
   pushCompoundElementRoots,
   readAssociativePair,
+  type ReadonlyAssociativeTable,
   sortedElements,
   unpackIndexedElement,
 } from './associativeTable';
@@ -37,6 +38,7 @@ export {
   maxElementIndex,
   pushCompoundElementRoots,
   readAssociativePair,
+  type ReadonlyAssociativeTable,
   sortedElements,
   unpackIndexedElement,
 };
@@ -83,7 +85,7 @@ export interface VariableView {
   readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
   readonly scalar?: string;
   readonly indexed?: ReadonlyMap<bigint, string>;
-  readonly associativeEntries?: readonly [string, string][];
+  readonly associative?: ReadonlyAssociativeTable;
   readonly isSystem: boolean;
   readonly userAssigned: boolean;
   readonly nullReference: boolean;
@@ -491,7 +493,7 @@ export class VariableStore {
     if (!cell.value) return { ...base, kind: 'unset' };
     if (cell.value.kind === 'scalar') return { ...base, kind: 'scalar', scalar: cell.value.value };
     if (cell.value.kind === 'indexed') return { ...base, kind: 'indexed', indexed: cell.value.elements };
-    return { ...base, kind: 'associative', associativeEntries: cell.value.table.entries() };
+    return { ...base, kind: 'associative', associative: cell.value.table };
   }
 
   // ---------------------------------------------------------------- dynamic descriptors & reads
@@ -622,6 +624,17 @@ export class VariableStore {
     }
     this.checkPostDereferenceAccess(resolvedName);
     return undefined;
+  }
+
+  readArrayLength(resolvedName: string): number {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell?.value) return cellElementCount(cell.value);
+    if (this.isDynamic(resolvedName)) {
+      if (SCALAR_DYNAMIC_VARIABLES.has(resolvedName)) return 1;
+      return this.readDynamicElements(resolvedName)?.size ?? 0;
+    }
+    this.checkPostDereferenceAccess(resolvedName);
+    return 0;
   }
 
   readArrayValues(resolvedName: string): string[] {
@@ -1226,10 +1239,7 @@ function* cellStrings(value: CellValue): Iterable<string> {
     yield* value.elements.values();
     return;
   }
-  for (const [k, v] of value.table.entries()) {
-    yield k;
-    yield v;
-  }
+  yield* value.table.rawStrings();
 }
 
 function isArrayCell(cell: Cell): boolean {
@@ -1274,6 +1284,11 @@ function cellElementAt(value: CellValue, index: bigint): string | undefined {
   if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
   if (value.kind === 'associative') return value.table.get(String(index));
   return value.elements.get(index);
+}
+
+function cellElementCount(value: CellValue): number {
+  if (value.kind === 'scalar') return 1;
+  return value.kind === 'indexed' ? value.elements.size : value.table.size;
 }
 
 function cellElementValues(value: CellValue): string[] {

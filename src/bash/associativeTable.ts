@@ -92,12 +92,17 @@ export const CONVERTED_BUCKETS = 128;
 
 const UTF8_ENCODER = new TextEncoder();
 
+export interface ReadonlyAssociativeTable {
+  readonly size: number;
+  entries(): readonly [string, string][];
+}
+
 /**
  * Sparse power-of-two chained hash table matching Bash 5.3 associative-array key order:
  * buckets are visited in ascending index order, new keys prepend to their bucket, and capacity quadruples
  * when entry count reaches twice the bucket capacity. Only non-empty buckets are allocated.
  */
-export class AssociativeTable {
+export class AssociativeTable implements ReadonlyAssociativeTable {
   private buckets = new Map<number, BucketEntry[]>();
   private capacity: number;
   private count = 0;
@@ -164,6 +169,15 @@ export class AssociativeTable {
       .flatMap((bucketIndex) =>
         (this.buckets.get(bucketIndex) as BucketEntry[]).map(({ key, value }): [string, string] => [key, value])
       );
+  }
+
+  *rawStrings(): Iterable<string> {
+    for (const bucket of this.buckets.values()) {
+      for (const { key, value } of bucket) {
+        yield key;
+        yield value;
+      }
+    }
   }
 
   clone(): AssociativeTable {

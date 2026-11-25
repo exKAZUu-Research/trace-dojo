@@ -43,7 +43,7 @@ export function declarationText(view: VariableView): string {
       .join(' ');
     return `${prefix}=(${body})`;
   }
-  const body = (view.associativeEntries as readonly [string, string][])
+  const body = (view.associative?.entries() ?? [])
     .map(([key, element]) => `[${quoteKey(key)}]=${quoteValue(element)} `)
     .join('');
   return `${prefix}=(${body})`;

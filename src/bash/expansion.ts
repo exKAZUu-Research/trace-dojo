@@ -392,13 +392,27 @@ export class Expander {
     }
     const subscript = expansion.subscript ? this.subscriptRef(name, expansion.subscript) : undefined;
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, ctx);
+    if (expansion.prefix === '#') return this.expandLength(name, subscript, expansion, ctx);
     const value = this.parameterValue(name, subscript, expansion);
-    if (expansion.prefix === '#') return this.valueSegments(lengthOf(value), ctx);
     if (expansion.operator === undefined) {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
       return this.valueSegments(value, ctx);
     }
     return applyOperator(this, this.shell, expansion, value, name, subscript, ctx);
+  }
+
+  private expandLength(
+    name: string,
+    subscript: SubscriptRef | undefined,
+    expansion: ParameterExpansion,
+    ctx: WordContext
+  ): WordSegment[] {
+    if (subscript?.wholeArray) {
+      const resolved = resolveTargetName(this.shell, name);
+      const count = resolved === undefined ? 0 : this.shell.store.readArrayLength(resolved);
+      return this.valueSegments({ kind: 'scalar', value: String(count) }, ctx);
+    }
+    return this.valueSegments(lengthOf(this.parameterValue(name, subscript, expansion)), ctx);
   }
 
   private elementLengthValue(expansion: ParameterExpansion): ParameterValue {

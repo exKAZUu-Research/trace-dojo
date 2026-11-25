@@ -373,7 +373,7 @@ export function isResolvedTargetSet(shell: Shell, target: ResolvedTarget): boole
     return false;
   }
   if (target.kind === 'wholeArray') {
-    return shell.store.readArrayValues(target.name).length > 0;
+    return shell.store.readArrayLength(target.name) > 0;
   }
   if (target.kind === 'scalar') {
     const own: VariableView | undefined = shell.store.ownView(target.name);
