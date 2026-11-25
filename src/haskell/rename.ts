@@ -1522,7 +1522,10 @@ class Renamer {
         if (expr.quals.some((qual) => qual.kind === 'transform'))
           return this.renameExpr(withoutTransforms(expr), scope);
         if (this.features.allows('monadComprehensions') && expr.parallel) {
-          return this.renameExpr(parallelMonadComprehension(expr), scope);
+          return this.renameExpr(
+            parallelMonadComprehension(expr, (name) => this.recordFieldNames(name, () => this.lookupCon(name))),
+            scope
+          );
         }
         if (this.features.allows('monadComprehensions') && !expr.parallel) {
           // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
@@ -2985,16 +2988,41 @@ function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[])
  * A parallel monad comprehension, `[e | qs1 | qs2]`, as GHC desugars it: each branch a comprehension of the tuple of
  * the variables it binds, the branches zipped with `mzip`, and `e` over their variables.
  */
-function parallelMonadComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
+function parallelMonadComprehension(
+  expr: Extract<Expr, { kind: 'comprehension' }>,
+  recordFields: (con: QName) => readonly string[]
+): Expr {
   const { span } = expr;
   const support = (name: string): Expr => ({ kind: 'support', name, span });
-  const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
+  const unit: Name = { name: '()', span };
+  const branches = [expr.quals, ...(expr.parallel ?? [])].map((written) => {
+    // A record wildcard's fields are among the names the branch binds.
+    const quals = written.map((stmt): Stmt => {
+      if (stmt.kind === 'bind') return { ...stmt, pat: expandRecordWildcards(stmt.pat, recordFields) };
+      if (stmt.kind !== 'let') return stmt;
+      return {
+        ...stmt,
+        decls: stmt.decls.map((decl) =>
+          decl.kind === 'patBind' ? { ...decl, pat: expandRecordWildcards(decl.pat, recordFields) } : decl
+        ),
+      };
+    });
     // A name a later qualifier binds again is the later one's.
     const names = [...new Map(quals.flatMap((stmt) => stmtBinders(stmt)).map((name) => [name.name, name])).values()];
     const vars: Expr[] = names.map((name) => ({ kind: 'var', name: { name: name.name, span }, span }));
     const pats: Pat[] = names.map((name) => ({ kind: 'pvar', name, span }));
-    const tuple: Expr = vars.length === 1 ? vars[0] : { kind: 'tuple', elems: vars, span };
-    const pattern: Pat = pats.length === 1 ? pats[0] : { kind: 'ptuple', elems: pats, span };
+    const tuple: Expr =
+      vars.length === 0
+        ? { kind: 'con', name: unit, span }
+        : vars.length === 1
+          ? vars[0]
+          : { kind: 'tuple', elems: vars, span };
+    const pattern: Pat =
+      pats.length === 0
+        ? { kind: 'pcon', con: unit, args: [], span }
+        : pats.length === 1
+          ? pats[0]
+          : { kind: 'ptuple', elems: pats, span };
     return { source: { kind: 'comprehension', expr: tuple, quals, span } as Expr, pattern };
   });
   let source = (branches.at(-1) as (typeof branches)[number]).source;
