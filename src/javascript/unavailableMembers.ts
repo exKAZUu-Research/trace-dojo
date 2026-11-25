@@ -9,12 +9,10 @@ export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => str
 
 /**
  * The well-known symbols whose protocols a TypeScript program may not replace, which leaves those that the syntax of
- * iteration and `using` relies on.
+ * iteration relies on; `using`, which relies on `Symbol.dispose`, has no library types to check it with.
  */
 export const unavailableWellKnownSymbols = new Set([
-  ...Object.keys(WELL_KNOWN_SYMBOLS).filter(
-    (name) => !['iterator', 'asyncIterator', 'dispose', 'asyncDispose'].includes(name)
-  ),
+  ...Object.keys(WELL_KNOWN_SYMBOLS).filter((name) => !['iterator', 'asyncIterator'].includes(name)),
   'isConcatSpreadable',
   'match',
   'matchAll',
