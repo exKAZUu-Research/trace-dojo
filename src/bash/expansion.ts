@@ -147,7 +147,7 @@ export class Expander {
         const key = this.joinSegments(this.expandParts(keyed.key, SUBSCRIPT_WORD_CONTEXT));
         this.checkTilde(keyed.value, true);
         const value = this.joinSegments(
-          this.expandParts(keyed.value, { inDouble: false, spacedStar: false, inAssignmentRhs: true })
+          this.expandParts(keyed.value, { inDouble: false, spacedStar: !isAssociative, inAssignmentRhs: true })
         );
         pushMeteredItem(elements, { key, value, append: keyed.append, rawText: word.text }, this.shell.runtime.step);
         continue;
