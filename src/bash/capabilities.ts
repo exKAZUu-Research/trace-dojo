@@ -396,6 +396,9 @@ export function rejectUnsupportedDeclarationOperand(
   if (effectiveSet.has('n') && (flags.isCompound || flags.append)) {
     throw new UnsupportedFeatureError(`${builtin} -n での複合代入・追記`);
   }
+  if ((effectiveSet.has('a') || effectiveSet.has('A')) && flags.hasScalarValue) {
+    throw new UnsupportedFeatureError(`配列変数（${name}）へのスカラー宣言代入`);
+  }
   if (flags.hasEnclosingTempBinding) {
     throw new UnsupportedFeatureError(`前置代入された変数（${name}）の宣言`);
   }
