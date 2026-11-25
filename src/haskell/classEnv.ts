@@ -103,7 +103,9 @@ function overlapping(instance: InstanceInfo): boolean {
 
 /** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */
 export function hasConstructorHead(type: Type): boolean {
-  return splitApp(type).head.tag === 'tcon';
+  const { head } = splitApp(type);
+  // A type family's application that has not reduced is no constructor yet: what it reduces to may still be learned.
+  return head.tag === 'tcon' && head.entity.sort !== 'family';
 }
 
 /** The superclass constraint a constraint implies: the class's superclass at the position, at its type. */
