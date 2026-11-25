@@ -1085,7 +1085,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     context: FunctionContext,
     row: number,
     qualifier?: SuperExpression
-  ): { receiver: Eval; cls: ClassSymbol; supertypes: ClassType[] } {
+  ): { receiver: Eval; instance: ReceiverSymbol; cls: ClassSymbol; supertypes: ClassType[] } {
     const label = qualifier?.label;
     const receiver = this.receiversOf(scope).find(
       (candidate) => candidate.cls !== undefined && (label === undefined || candidate.label === label)
@@ -1100,7 +1100,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (!direct) this.error(row, `${typeToString(named)} は ${cls.name} の直接の親ではありません。`);
       supertypes = [direct];
     }
-    return { receiver: this.receiverAccess(context, receiver), cls, supertypes };
+    return { receiver: this.receiverAccess(context, receiver), instance: receiver, cls, supertypes };
   }
 
   // Calls.
@@ -1833,12 +1833,29 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
-    const { receiver, supertypes } = this.superOf(scope, context, row, qualifier);
+    const { receiver, instance, supertypes } = this.superOf(scope, context, row, qualifier);
+    // A member extension called through super, as `super.f()` in `override fun Int.f()`, takes its receiver from the
+    // implicit receivers, and the instance as the receiver of its class.
+    const extensionReceivers = new Map<FunctionSymbol, Compiled>();
     const candidates = supertypes
       .flatMap((type) => this.memberCandidates(type, name))
       .filter((candidate) => !candidate.symbol.isAbstract)
-      // Through super, a subclass may use the protected members of its parent.
-      .map((candidate) => ({ ...candidate, receiverType: undefined }));
+      .flatMap((candidate): Candidate[] => {
+        const { symbol, substitution } = candidate;
+        const declared = symbol.extensionReceiver && substitute(symbol.extensionReceiver, substitution);
+        // Through super, a subclass may use the protected members of its parent.
+        if (!declared) return [{ ...candidate, receiverType: undefined }];
+        const extension = this.receiversOf(scope).find((implicit) =>
+          matchExtensionReceiver(symbol.typeParameters, declared, this.receiverTypeOf(implicit))
+        );
+        if (!extension) return [];
+        extensionReceivers.set(symbol, {
+          type: this.receiverTypeOf(extension),
+          repr: reprOf(this.core, extension.type),
+          eval: this.receiverAccess(context, extension),
+        });
+        return [{ ...candidate, kind: 'extension', receiverType: undefined, dispatch: instance }];
+      });
     if (candidates.length === 0) this.error(row, `super には ${name} がありません。`);
     const resolvedCall = this.resolveCall(
       scope,
@@ -1848,7 +1865,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       hasTrailingLambda,
       typeArgs,
       expected,
-      undefined,
+      (candidate) => extensionReceivers.get(candidate.symbol),
       row,
       name
     );
@@ -1856,7 +1873,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     // `super.f()` calls the superclass's implementation itself, without dispatching on the instance's class.
     const symbol = resolvedCall.symbol;
     const { nonVirtualCall } = resolvedCall;
-    const receiverEval = convertRepr(receiver, 'ref', resolvedCall.receiverRepr);
+    const extension = extensionReceivers.get(symbol);
+    const receiverEval = extension
+      ? convertRepr(extension.eval, extension.repr, resolvedCall.receiverRepr)
+      : convertRepr(receiver, 'ref', resolvedCall.receiverRepr);
     return {
       type: resolvedCall.type,
       repr: resolvedCall.repr,
