@@ -524,8 +524,8 @@ function executeUnsubscriptedDeclaration(
   if (targetName === undefined) return false;
   const priorKind = priorDestinationView(shell, targetName, intent)?.kind;
   const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
-  const createsArray = set.has('a') || set.has('A');
-  const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, !createsArray);
+  const declaredArrayKind = set.has('A') ? 'associative' : set.has('a') ? 'indexed' : undefined;
+  const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, declaredArrayKind);
   if (!applyPreWriteAttributes(shell, builtin, selected.cell, set, op.value === undefined)) return false;
   if (op.value !== undefined) {
     const outcome = shell.store.writeScalar(
@@ -606,8 +606,9 @@ function prepareSubscriptedDestination(
   const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
   const existingAssoc = priorView?.kind === 'associative' || priorView?.attributes.has('A') === true;
   const isAssoc = set.has('A') || (existingAssoc && !set.has('a'));
-  const containerKind = op.value === undefined ? undefined : isAssoc ? 'associative' : 'indexed';
-  const selected = shell.store.selectDestination(scopedIntent, targetName, containerKind, op.append, false);
+  const arrayKind = isAssoc ? 'associative' : 'indexed';
+  const containerKind = op.value === undefined ? undefined : arrayKind;
+  const selected = shell.store.selectDestination(scopedIntent, targetName, containerKind, op.append, arrayKind);
   const effectiveSet = isAssoc ? set : new Set([...set, 'a']);
   if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return undefined;
   return { cell: selected.cell, wasMaterialized };

@@ -687,25 +687,28 @@ export class VariableStore {
     name: string,
     initialContainer?: 'indexed' | 'associative',
     checkAppendHostEnv = false,
-    allowTempImport = initialContainer === undefined
+    declaredArrayKind?: 'indexed' | 'associative'
   ): DestinationSelection {
-    if (intent === 'local') return this.selectLocalDestination(name, initialContainer, allowTempImport);
+    if (intent === 'local') return this.selectLocalDestination(name, initialContainer, declaredArrayKind);
     return this.selectScopedDestination(intent, name, initialContainer, checkAppendHostEnv);
   }
 
   private selectLocalDestination(
     name: string,
     initialContainer?: 'indexed' | 'associative',
-    allowTempImport = initialContainer === undefined
+    declaredArrayKind?: 'indexed' | 'associative'
   ): DestinationSelection {
     const fnIdx = this.currentFunctionScopeIndex();
     if (fnIdx === undefined) throw new Error('local destination requested outside function');
     const localMap = this.scopes[fnIdx].map;
     const existing = localMap.get(name);
     if (existing) return { scope: 'local', name, cell: this.toHandle(existing), created: false };
-    const tempOrigin = allowTempImport ? this.findTempPrefixAbove(fnIdx, name) : undefined;
-    const initialValue = this.createInitialContainer(initialContainer, tempOrigin?.scalar);
-    const attrs = containerAttributes(initialContainer, Boolean(tempOrigin));
+    const tempOrigin = this.findTempPrefixAbove(fnIdx, name);
+    const effectiveContainer = initialContainer ?? (tempOrigin ? declaredArrayKind : undefined);
+    const importedScalar =
+      effectiveContainer === undefined && declaredArrayKind === undefined ? tempOrigin?.scalar : undefined;
+    const initialValue = this.createInitialContainer(effectiveContainer, importedScalar);
+    const attrs = containerAttributes(effectiveContainer ?? declaredArrayKind, Boolean(tempOrigin));
     const created = this.allocateCell(name, initialValue, attrs, false, Boolean(tempOrigin));
     localMap.set(name, created);
     return {
@@ -1199,9 +1202,9 @@ export class VariableStore {
 }
 
 function containerAttributes(kind: 'indexed' | 'associative' | undefined, hasTempOrigin: boolean): Attribute[] {
-  if (kind === 'associative') return ['A'];
-  if (kind === 'indexed') return ['a'];
-  return hasTempOrigin ? ['x'] : [];
+  const attrs: Attribute[] = kind === 'associative' ? ['A'] : kind === 'indexed' ? ['a'] : [];
+  if (hasTempOrigin) attrs.push('x');
+  return attrs;
 }
 
 function* cellStrings(value: CellValue): Iterable<string> {
