@@ -15,6 +15,13 @@ String _textOfBytes(List<int> bytes) {
   }
 }
 
+/** Rejects an encoding other than UTF-8 for the run's files and standard streams, which hold text. */
+void _requireUtf8(Encoding encoding) {
+  if (encoding.name != "utf-8") {
+    throw UnsupportedError("UTF-8 以外の encoding によるファイルと標準入出力の読み書きは、この採点環境では使えません。");
+  }
+}
+
 Never _rejectBytes() => throw UnsupportedError("UTF-8 でないバイト列の書き込みは、この採点環境では使えません。");
 
 /** The bytes a sink is given in parts, whose last character may continue in its next part. */
@@ -174,6 +181,7 @@ class Stdin extends Stream<List<int>> {
   bool get lineMode => throw const StdinException("Error getting terminal line mode", _notTerminal);
   set lineMode(bool enabled) => throw const StdinException("Error setting terminal line mode", _notTerminal);
   String? readLineSync({Encoding encoding = utf8, bool retainNewlines = false}) {
+    _requireUtf8(encoding);
     _checkOpen();
     return _readLine(retainNewlines);
   }
@@ -361,13 +369,18 @@ class _File extends FileSystemEntity implements File {
   Future<File> copy(String newPath) => Future(() => copySync(newPath));
   int lengthSync() => utf8.encode(_read(path, "Cannot retrieve length of file")).length;
   Future<int> length() => Future(lengthSync);
-  String readAsStringSync({Encoding encoding = utf8}) => _read(path, "Cannot open file");
+  String readAsStringSync({Encoding encoding = utf8}) {
+    _requireUtf8(encoding);
+    return _read(path, "Cannot open file");
+  }
   Future<String> readAsString({Encoding encoding = utf8}) => Future(() => readAsStringSync(encoding: encoding));
-  List<String> readAsLinesSync({Encoding encoding = utf8}) => const LineSplitter().convert(readAsStringSync());
+  List<String> readAsLinesSync({Encoding encoding = utf8}) =>
+      const LineSplitter().convert(readAsStringSync(encoding: encoding));
   Future<List<String>> readAsLines({Encoding encoding = utf8}) => Future(() => readAsLinesSync(encoding: encoding));
   List<int> readAsBytesSync() => utf8.encode(readAsStringSync());
   Future<List<int>> readAsBytes() => Future(readAsBytesSync);
   void writeAsStringSync(String contents, {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) {
+    _requireUtf8(encoding);
     if (mode == FileMode.read) {
       // The VM opens the file to read, which only an empty write leaves unchanged without an error.
       _read(path, "Cannot open file");
@@ -379,7 +392,7 @@ class _File extends FileSystemEntity implements File {
   Future<File> writeAsString(String contents,
           {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) =>
       Future(() {
-        writeAsStringSync(contents, mode: mode);
+        writeAsStringSync(contents, mode: mode, encoding: encoding);
         return this;
       });
   void writeAsBytesSync(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) {
@@ -393,6 +406,7 @@ class _File extends FileSystemEntity implements File {
     if (mode != FileMode.write && mode != FileMode.append && mode != FileMode.writeOnly && mode != FileMode.writeOnlyAppend) {
       throw ArgumentError("Invalid file mode for this operation");
     }
+    _requireUtf8(encoding);
     return _IOSinkImpl(_FileStreamConsumer(this, mode._appends), encoding);
   }
   Stream<List<int>> openRead([int? start, int? end]) => Stream<List<int>>.fromFuture(Future(() {
