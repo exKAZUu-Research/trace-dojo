@@ -102,9 +102,12 @@ Seq m |> x = Seq (case M.lookupMax m of
   Nothing -> M.singleton 0 x
   Just (k, _) -> M.insert (k + 1) x m)
 
+-- Renumbers the smaller side, so that concatenations in any association take n log n in total.
 (><) :: Seq a -> Seq a -> Seq a
 Seq a >< Seq b = case (M.lookupMax a, M.lookupMin b) of
-  (Just (hi, _), Just (lo, _)) -> Seq (M.union a (M.mapKeysMonotonic (\k -> k - lo + hi + 1) b))
+  (Just (hi, _), Just (lo, _))
+    | M.size a < M.size b -> Seq (M.union (M.mapKeysMonotonic (\k -> k - hi + lo - 1) a) b)
+    | otherwise -> Seq (M.union a (M.mapKeysMonotonic (\k -> k - lo + hi + 1) b))
   (Nothing, _) -> Seq b
   _ -> Seq a
 
