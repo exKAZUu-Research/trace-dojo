@@ -2989,7 +2989,8 @@ function parallelMonadComprehension(expr: Extract<Expr, { kind: 'comprehension' 
   const { span } = expr;
   const support = (name: string): Expr => ({ kind: 'support', name, span });
   const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
-    const names = quals.flatMap((stmt) => stmtBinders(stmt));
+    // A name a later qualifier binds again is the later one's.
+    const names = [...new Map(quals.flatMap((stmt) => stmtBinders(stmt)).map((name) => [name.name, name])).values()];
     const vars: Expr[] = names.map((name) => ({ kind: 'var', name: { name: name.name, span }, span }));
     const pats: Pat[] = names.map((name) => ({ kind: 'pvar', name, span }));
     const tuple: Expr = vars.length === 1 ? vars[0] : { kind: 'tuple', elems: vars, span };
