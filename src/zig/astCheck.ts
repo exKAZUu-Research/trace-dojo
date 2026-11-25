@@ -459,7 +459,13 @@ class AstChecker {
         this.minorError(statement, 'この文には、決して実行がたどり着きません。');
         diverted = false;
       }
-      this.hintable = opensBranch && index === 0;
+      // Only the first statement itself may be the hint, not a call or a declaration it stands in.
+      this.hintable =
+        opensBranch &&
+        index === 0 &&
+        statement.kind === 'expression' &&
+        statement.expression.kind === 'builtinCall' &&
+        statement.expression.name === '@branchHint';
       this.statement(statement);
       if (statement.kind === 'expression' && divertsControl(statement.expression)) diverted = true;
     }
