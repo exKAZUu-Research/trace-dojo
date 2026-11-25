@@ -650,13 +650,7 @@ export class FunctionChecker {
       ['function_signature', 'function_declaration', 'method_signature', 'method_definition'].includes(next.type)
     ) {
       if (this.matchingOverloadNames(node, next)) {
-        if (hasToken(next, 'static') !== hasToken(node, 'static'))
-          this.c.error(nextName ?? next, 'オーバーロードの static 修飾子は一致しなければいけません。');
-        if ((node.parent?.type === 'export_statement') !== (next.parent?.type === 'export_statement'))
-          this.c.error(
-            node.childForFieldName('name') ?? node,
-            'オーバーロードのシグネチャはすべてがエクスポート済みであるか、またはエクスポート済みでない必要があります。'
-          );
+        this.checkOverloadModifiers(node, next);
         return;
       }
       const implementation = node.type === 'function_signature' ? 'function_declaration' : 'method_definition';
@@ -667,6 +661,19 @@ export class FunctionChecker {
       }
     }
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
+  }
+  /** An overload and the declaration after it, which must agree on being static and on being exported. */
+  private checkOverloadModifiers(node: TreeNode, next: TreeNode): void {
+    if (hasToken(next, 'static') !== hasToken(node, 'static'))
+      this.c.error(
+        next.childForFieldName('name') ?? next,
+        'オーバーロードの static 修飾子は一致しなければいけません。'
+      );
+    if ((node.parent?.type === 'export_statement') !== (next.parent?.type === 'export_statement'))
+      this.c.error(
+        node.childForFieldName('name') ?? node,
+        'オーバーロードのシグネチャはすべてがエクスポート済みであるか、またはエクスポート済みでない必要があります。'
+      );
   }
 
   private declaresSameMethod(node: TreeNode, other: TreeNode): boolean {
