@@ -48,7 +48,9 @@ interface MatchResult {
 
 internal class MatchGroups(private val list: List<MatchGroup?>, private val names: Map<String, Int>) :
     MatchNamedGroupCollection, Collection<MatchGroup?> by list {
-    override fun get(index: Int): MatchGroup? = list.getOrNull(index)
+    // As java.util.regex.Matcher.group, which throws for a group the pattern lacks.
+    override fun get(index: Int): MatchGroup? =
+        if (index < 0 || index >= list.size) throw IndexOutOfBoundsException("No group \$index") else list[index]
     override fun get(name: String): MatchGroup? {
         val index = names[name] ?: throw IllegalArgumentException("No group with name <\$name>")
         return list[index]
