@@ -516,13 +516,15 @@ export interface CompiledProgram {
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = (library ??= compileLibrary());
-  const splices = findProgramSplices(source);
-  if (splices && splices.sites.length > 0) {
-    assert(spliceRunner, 'No runner of Template Haskell splices is set');
-    source = expandSplices(source, splices.header, splices.sites, spliceRunner);
-  }
   return withCompilationBudget(() => {
-    const parsed = parseHaskell(source);
+    // Splices run within the program's budget: each splice's program compiles on the budget that is left.
+    const splices = findProgramSplices(source);
+    let expanded = source;
+    if (splices && splices.sites.length > 0) {
+      assert(spliceRunner, 'No runner of Template Haskell splices is set');
+      expanded = expandSplices(source, splices.header, splices.sites, spliceRunner);
+    }
+    const parsed = parseHaskell(expanded);
     const renamed = renameModule(parsed, {
       modules: lib.modules,
       implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),

@@ -1,8 +1,8 @@
-import { ExecutionLimitError } from '../interpreter/limits';
 import { type ClassEntity, type ConInfo, nextId, type TypeEntity, type ValueEntity } from './entities';
 import { compileError } from './errors';
 import { rememberKind } from './kindTemplates';
 import { freshKindVar, type Kind, kindArrow, setMultiplicityArrows, simpleKind, STAR, type Type } from './types';
+import { chargeTypeWork } from './typeWorkBudget';
 
 /** The module that owns the primitive types and the special syntax types (lists, tuples, unit, functions). */
 export const BUILTIN_MODULE = 'GHC.Types';
@@ -300,16 +300,16 @@ function boolKind(): Kind {
   return { tag: 'data', entity: (comparisonCons as { bool: ConInfo[] }).bool[0].type, args: [] };
 }
 
-/** The most bits a type-level natural number may have, which bounds the work of `*` and `^` on them. */
-const MAX_NATURAL_BITS = 1_000_000;
-
 function bitLength(value: bigint): number {
   return value === 0n ? 0 : value.toString(2).length;
 }
 
-/** Stops a type-level computation whose result would exceed the size type-level numbers may have. */
-function boundNaturalBits(bits: number): void {
-  if (bits > MAX_NATURAL_BITS) throw new ExecutionLimitError('operations');
+/** The bits a unit of the compilation budget pays for, when a type-level number operation produces a result. */
+const BITS_PER_UNIT = 8;
+
+/** Charges the compilation budget for a type-level result of `bits` bits, before computing it. */
+function chargeNaturalBits(bits: number): void {
+  chargeTypeWork(Math.ceil(bits / BITS_PER_UNIT));
 }
 
 const naturalOperands = [NATURAL_KIND, NATURAL_KIND];
@@ -318,13 +318,13 @@ const naturalOperands = [NATURAL_KIND, NATURAL_KIND];
 export const TYPE_LIT_FAMILIES: Record<string, TypeEntity> = {
   '+': builtinFamily('+', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) + (b as bigint))),
   '*': builtinFamily('*', naturalOperands, NATURAL_KIND, ([a, b]) => {
-    boundNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
+    chargeNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
     return natural((a as bigint) * (b as bigint));
   }),
   '-': builtinFamily('-', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) - (b as bigint))),
   '^': builtinFamily('^', naturalOperands, NATURAL_KIND, ([a, b]) => {
     const [base, exponent] = [a as bigint, b as bigint];
-    if (base > 1n) boundNaturalBits(Number(BigInt(bitLength(base) - 1) * exponent));
+    if (base > 1n) chargeNaturalBits(Number(BigInt(bitLength(base) - 1) * exponent));
     return natural(base ** exponent);
   }),
   Div: builtinFamily('Div', naturalOperands, NATURAL_KIND, ([a, b]) =>
