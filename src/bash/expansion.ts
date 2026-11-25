@@ -345,7 +345,7 @@ export class Expander {
       ...(ctx.inQuotedOperatorWord ? { inQuotedOperatorWord: true } : {}),
       ...(ctx.inSubscript ? { inSubscript: true } : {}),
     });
-    if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];
+    if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [EMPTY_LIST_SEGMENT];
     const kept = inner.filter((seg) => seg.kind !== 'emptyList');
     if (kept.length === 0) return [QUOTED_EMPTY_SEGMENT];
     if (kept.every(isBreakSegment)) return kept;
