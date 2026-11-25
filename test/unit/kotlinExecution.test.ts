@@ -6624,6 +6624,13 @@ fun main() { println(Service("u").run()); println(shared.twice(3)) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'hello u1\n6\n' });
 });
 
+test('reads FunctionN types as the function types kotlinc reads them as', () => {
+  const source = `fun apply(f: Function1<Int, Int>, x: Int) = f(x)
+class Doubler : Function1<Int, Int> { override fun invoke(p1: Int) = p1 * 2 }
+fun main() { println(listOf(apply({ it * 2 }, 3), Doubler()(4))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

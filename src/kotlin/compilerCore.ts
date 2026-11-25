@@ -64,6 +64,8 @@ export const DEFAULT_IMPORTS = [
   'kotlin.text',
   'java.lang',
   'kotlin.jvm',
+  // Where the prelude declares Function0 to Function22, which kotlinc names without an import as kotlin's built-ins.
+  'kotlin.jvm.functions',
 ];
 
 /** The names a file sees beyond its own scopes: its package, its imports, and the default imports. */
@@ -252,6 +254,17 @@ export abstract class CompilerCore {
     }
     this.checkNestedAccessible(scope, cls, ref.row);
     this.requireOptIn(cls.optInMarkers, cls.name, ref.row);
+    // A program's FunctionN<P..., R> is the function type (P...) -> R, as kotlinc reads it, which lambdas then fit.
+    const arity = this.core.functionInterfaces.indexOf(cls);
+    const types = args.flatMap((argument) => (argument.variance === 'star' ? [] : [argument.type]));
+    if (arity !== -1 && !this.file.isLibrary && types.length === args.length)
+      return {
+        kind: 'function',
+        receiver: undefined,
+        params: types.slice(0, -1),
+        returnType: types.at(-1) as KType,
+        nullable: ref.nullable,
+      };
     return { kind: 'class', cls, args, nullable: ref.nullable };
   }
 
