@@ -10215,3 +10215,76 @@ pub fn main() void {
     );
   });
 });
+
+describe('the C calling convention and extern containers accept the types Zig 0.17.1 accepts', () => {
+  const declarations = `const E8 = enum(u8) { a };
+const E0 = enum { a };
+const Ex = extern struct { a: u8 };
+const P8 = packed struct(u8) { a: u8 };
+const P3 = packed struct(u3) { a: u3 };
+const PU8 = packed union { a: u8, b: i8 };
+const Auto = struct { a: u8 };`;
+  // Whether `zig run` accepts each type as a C parameter, an extern struct's field, and a C return type.
+  const types: [type: string, accepted: string][] = [
+    ['u0', '111'],
+    ['i0', '000'],
+    ['u1', '000'],
+    ['u7', '000'],
+    ['u8', '111'],
+    ['i16', '111'],
+    ['u24', '000'],
+    ['u32', '111'],
+    ['u64', '111'],
+    ['u128', '111'],
+    ['u256', '000'],
+    ['usize', '111'],
+    ['isize', '111'],
+    ['f16', '111'],
+    ['f32', '111'],
+    ['f64', '111'],
+    ['f80', '000'],
+    ['f128', '111'],
+    ['bool', '111'],
+    ['void', '011'],
+    ['@Vector(4, f32)', '101'],
+    ['@Vector(3, u8)', '101'],
+    ['@Vector(2, bool)', '101'],
+    ['[2]u8', '010'],
+    ['?*u8', '111'],
+    ['*u8', '111'],
+    ['[*]u8', '111'],
+    ['[*c]u8', '111'],
+    ['[]u8', '000'],
+    ['?u8', '000'],
+    ['*anyopaque', '111'],
+    ['?*anyopaque', '111'],
+    ['*const fn () callconv(.c) void', '111'],
+    ['?*const fn () callconv(.c) void', '111'],
+    ['*const fn () void', '000'],
+    ['E8', '111'],
+    ['E0', '000'],
+    ['Ex', '111'],
+    ['P8', '111'],
+    ['P3', '000'],
+    ['PU8', '000'],
+    ['Auto', '000'],
+    ['anyerror!u8', '000'],
+    ['noreturn', '000'],
+    ['c_int', '111'],
+    ['c_longdouble', '111'],
+    ['?[*]u8', '111'],
+    ['*[2]u8', '111'],
+  ];
+  const uses = [
+    (type: string) => `fn f(x: ${type}) callconv(.c) void { _ = x; } pub fn main() void { _ = &f; }`,
+    (type: string) => `const S = extern struct { x: ${type} }; pub fn main() void { _ = @sizeOf(S); }`,
+    (type: string) => `fn f() callconv(.c) ${type} { return undefined; } pub fn main() void { _ = &f; }`,
+  ];
+  test.each(
+    types.flatMap(([type, accepted]) =>
+      uses.map((use, index) => ({ type, use, accepts: accepted[index] === '1', index }))
+    )
+  )('$type in use $index', ({ type, use, accepts }) => {
+    expect(executeProgram('zig', `${declarations}\n${use(type)}`).kind).toBe(accepts ? 'executed' : 'compileError');
+  });
+});
