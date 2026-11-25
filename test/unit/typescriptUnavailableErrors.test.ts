@@ -181,6 +181,10 @@ test.each([
   ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
   ["const fs = require('fs', 'utf8');", '引数は 1 個必要ですが、2 個渡されています。'],
   ['const fs = require(1);', "型 'number' の引数を型 'string' のパラメーターに渡すことはできません。"],
+  [
+    "const fs: any = require('fs'); fs.readdirSync('.', { recursive: true });",
+    'readdirSync の recursive は、この採点環境では使えません。',
+  ],
   ["let id = 'fs'; const fs = require(id);", '名前が定数で決まらない require は、この採点環境では使えません。'],
   ["const fs = require('fs'); fs.statSync('.');", 'fs.statSync は、この採点環境では使えません。'],
   ["const load = require; load('path');", '呼び出し以外での require は、この採点環境では使えません。'],

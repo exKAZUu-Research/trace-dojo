@@ -80,6 +80,8 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     return recursive && created !== undefined ? spelledPrefixOf(runtime, path, created) : undefined;
   });
   builder.method(fs, 'readdirSync', 2, ({ runtime, args }) => {
+    const unavailable = unavailableReaddirOption(runtime, args[1]);
+    if (runtime.unavailableMember && unavailable) rejectUnavailableMember(unavailable, runtime.currentRow);
     const path = requirePath(runtime, args[0]);
     return runtime.newArray(withErrors(runtime, 'scandir', path, () => runtime.io.files.list(path)));
   });
@@ -98,6 +100,15 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     withErrors(runtime, 'rename', from, () => runtime.io.files.rename(from, to), to);
     return;
   });
+}
+
+/** The `readdirSync` option this interpreter does not run, which lists more than names as strings, if one is given. */
+function unavailableReaddirOption(runtime: Runtime, options: Value): string | undefined {
+  if (options === 'buffer') return 'readdirSync の encoding: "buffer"';
+  if (!isObject(options)) return undefined;
+  if (runtime.get(options, 'recursive') === true) return 'readdirSync の recursive';
+  if (runtime.get(options, 'withFileTypes') === true) return 'readdirSync の withFileTypes';
+  return runtime.get(options, 'encoding') === 'buffer' ? 'readdirSync の encoding: "buffer"' : undefined;
 }
 
 /** Whether `readFileSync`'s options name an encoding, as a string or an object's `encoding`, so it reads a string. */
