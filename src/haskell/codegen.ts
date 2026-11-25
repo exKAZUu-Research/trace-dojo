@@ -32,19 +32,8 @@ import { matchesWithoutEvaluating } from './newtypes';
 import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
-import {
-  type LocalVar,
-  type RAlt,
-  type RBindGroup,
-  type RBinding,
-  type RClause,
-  type RExpr,
-  type RGuard,
-  type RPat,
-  rpatLocals,
-  type RRhs,
-  type RStmt,
-} from './rast';
+import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
+import { rpatLocals } from './rastChildren';
 import { RecursionBudget } from './recursionBudget';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';

@@ -1,5 +1,6 @@
 import type { ValueEntity } from './entities';
-import { type LocalVar, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs, type RStmt } from './rast';
+import type { LocalVar, RBinding, RExpr, RPat, RRhs, RStmt } from './rast';
+import { type RChildren, rexprChildren, rpatChildren, rstmtChildren } from './rastChildren';
 
 type Key = LocalVar | ValueEntity;
 
@@ -89,9 +90,9 @@ function collectBindingRefs(binding: RBinding, visit: (node: VarNode) => void): 
 function collectPatRefs(pat: RPat, visit: (node: VarNode) => void): void {
   const pending = [pat];
   while (pending.length > 0) {
-    const current = pending.pop() as RPat;
-    if (current.k === 'view') collectExprRefs(current.expr, visit);
-    pending.push(...rpatChildren(current));
+    const { exprs, pats } = rpatChildren(pending.pop() as RPat);
+    for (const expr of exprs) collectExprRefs(expr, visit);
+    pending.push(...pats);
   }
 }
 
@@ -113,108 +114,17 @@ function collectRhsRefs(rhs: RRhs, visit: (node: VarNode) => void): void {
 }
 
 export function forEachVar(stmts: RStmt[], visit: (node: VarNode) => void): void {
-  for (const stmt of stmts) {
-    if (stmt.k === 'let') for (const binding of stmt.binds.bindings) collectBindingRefs(binding, visit);
-    else {
-      if (stmt.k === 'bind') collectPatRefs(stmt.pat, visit);
-      collectExprRefs(stmt.expr, visit);
-    }
-  }
+  for (const stmt of stmts) collectChildRefs(rstmtChildren(stmt), visit);
 }
 
 function collectExprRefs(expr: RExpr, visit: (node: VarNode) => void): void {
   if (expr.k === 'var') visit(expr);
-  for (const pat of exprPatterns(expr)) collectPatRefs(pat, visit);
-  const { exprs, bindings, rhss } = childrenOf(expr);
-  for (const child of exprs) collectExprRefs(child, visit);
-  for (const binding of bindings) collectBindingRefs(binding, visit);
-  for (const rhs of rhss) collectRhsRefs(rhs, visit);
+  collectChildRefs(rexprChildren(expr), visit);
 }
 
-/** The patterns an expression binds directly, whose view patterns may refer to other bindings. */
-function exprPatterns(expr: RExpr): RPat[] {
-  switch (expr.k) {
-    case 'lambda': {
-      return expr.pats;
-    }
-    case 'case': {
-      return expr.alts.map((alt) => alt.pat);
-    }
-    case 'do':
-    case 'comp': {
-      return (expr.k === 'do' ? expr.stmts : expr.quals).flatMap((stmt) => (stmt.k === 'bind' ? [stmt.pat] : []));
-    }
-    default: {
-      return [];
-    }
-  }
-}
-
-// code-gauge-allow functionNcss -- One case per expression kind that nests others.
-function childrenOf(expr: RExpr): { exprs: RExpr[]; bindings: RBinding[]; rhss: RRhs[] } {
-  const none = { exprs: [] as RExpr[], bindings: [] as RBinding[], rhss: [] as RRhs[] };
-  switch (expr.k) {
-    case 'app': {
-      return { ...none, exprs: [expr.fn, expr.arg] };
-    }
-    case 'lambda': {
-      return { ...none, exprs: [expr.body] };
-    }
-    case 'let': {
-      return { ...none, exprs: [expr.body], bindings: expr.binds.bindings };
-    }
-    case 'if': {
-      return { ...none, exprs: [expr.cond, expr.ifTrue, expr.ifFalse] };
-    }
-    case 'case': {
-      return { ...none, exprs: [expr.scrutinee], rhss: expr.alts.map((alt) => alt.rhs) };
-    }
-    case 'do':
-    case 'comp': {
-      const stmts = expr.k === 'do' ? expr.stmts : expr.quals;
-      return {
-        ...none,
-        exprs: [
-          ...stmts.flatMap((stmt) => (stmt.k === 'let' ? [] : [stmt.expr])),
-          ...(expr.k === 'comp' ? [expr.expr] : []),
-        ],
-        bindings: stmts.flatMap((stmt) => (stmt.k === 'let' ? stmt.binds.bindings : [])),
-      };
-    }
-    case 'tuple':
-    case 'list': {
-      return { ...none, exprs: expr.elems };
-    }
-    case 'arith': {
-      return { ...none, exprs: [expr.from, expr.next, expr.to].filter((part): part is RExpr => part !== undefined) };
-    }
-    case 'rsection': {
-      return { ...none, exprs: [expr.op, expr.right] };
-    }
-    case 'typed':
-    case 'tyapp':
-    case 'projection':
-    case 'poly': {
-      return { ...none, exprs: [expr.expr] };
-    }
-    case 'implicitLet': {
-      return { ...none, exprs: [...expr.binds.map((bind) => bind.expr), expr.body] };
-    }
-    case 'recordCon': {
-      return { ...none, exprs: expr.fields.map((field) => field.value) };
-    }
-    case 'recordUpdate': {
-      return { ...none, exprs: [expr.expr, ...expr.fields.map((field) => field.value)] };
-    }
-    case 'var':
-    case 'con':
-    case 'lit':
-    case 'hole':
-    case 'implicit': {
-      return none;
-    }
-    default: {
-      return expr satisfies never;
-    }
-  }
+function collectChildRefs(children: RChildren, visit: (node: VarNode) => void): void {
+  for (const pat of children.pats) collectPatRefs(pat, visit);
+  for (const expr of children.exprs) collectExprRefs(expr, visit);
+  for (const binding of children.bindings) collectBindingRefs(binding, visit);
+  for (const rhs of children.rhss) collectRhsRefs(rhs, visit);
 }

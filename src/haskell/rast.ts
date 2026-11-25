@@ -118,39 +118,6 @@ export type RPat = (
   | { k: 'sig'; pat: RPat; sigType: RType; span: Span }
 ) & { surface?: Pat };
 
-export function rpatChildren(pat: RPat): RPat[] {
-  switch (pat.k) {
-    case 'con': {
-      return pat.args;
-    }
-    case 'as':
-    case 'bang':
-    case 'lazy':
-    case 'view':
-    case 'sig': {
-      return [pat.pat];
-    }
-    case 'or': {
-      return pat.alts;
-    }
-    default: {
-      return [];
-    }
-  }
-}
-
-/** The variables a pattern binds, in order. */
-export function rpatLocals(pat: RPat): LocalVar[] {
-  const result: LocalVar[] = [];
-  const pending = [pat];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current.k === 'var' || current.k === 'as') result.push(current.local);
-    pending.push(...rpatChildren(current).toReversed());
-  }
-  return result;
-}
-
 export type RType =
   | { k: 'var'; name: string; span: Span }
   | { k: 'con'; entity: TypeEntity; span: Span }

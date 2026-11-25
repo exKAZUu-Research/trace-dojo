@@ -72,7 +72,8 @@ import type {
   RType,
   VarRef,
 } from './rast';
-import { rpatChildren, rpatLocals, substituteRType } from './rast';
+import { substituteRType } from './rast';
+import { rpatChildren, rpatLocals } from './rastChildren';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
@@ -102,6 +103,7 @@ import type {
   TyVarBinder,
 } from './syntax';
 import { THIS_MODULE } from './syntax';
+import { mapPatChildren } from './syntaxChildren';
 import { globalNameCode, QuoteBuilder, thString } from './thQuote';
 import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
@@ -3991,53 +3993,17 @@ function isHoleName(name: QName, scope: LocalScope, lookup: (name: QName) => rea
 
 /** A pattern with the `..` of its record patterns replaced by the fields it binds, as variables of the same names. */
 function expandRecordWildcards(pat: Pat, resolve: (name: QName) => readonly string[]): Pat {
-  switch (pat.kind) {
-    case 'precord': {
-      const fields = pat.fields.map((field) => ({ ...field, pat: expandRecordWildcards(field.pat, resolve) }));
-      if (!pat.wildcard) return { ...pat, fields };
-      const span = pat.wildcard;
-      const named = new Set(fields.map((field) => field.field.name));
-      for (const name of resolve(pat.con)) {
-        if (!named.has(name)) {
-          fields.push({
-            field: { name, span },
-            pat: { kind: 'pvar', name: { name, span }, span },
-            span,
-            byWildcard: true,
-          });
-        }
-      }
-      return { ...pat, fields, wildcard: undefined };
-    }
-    case 'pcon': {
-      return { ...pat, args: pat.args.map((arg) => expandRecordWildcards(arg, resolve)) };
-    }
-    case 'ptuple':
-    case 'plist': {
-      return { ...pat, elems: pat.elems.map((elem) => expandRecordWildcards(elem, resolve)) };
-    }
-    case 'pas':
-    case 'pbang':
-    case 'plazy':
-    case 'pview':
-    case 'psig': {
-      return { ...pat, pat: expandRecordWildcards(pat.pat, resolve) };
-    }
-    case 'por': {
-      return { ...pat, alts: pat.alts.map((alt) => expandRecordWildcards(alt, resolve)) };
-    }
-    case 'pchain': {
-      return {
-        ...pat,
-        items: pat.items.map((item) =>
-          item.kind === 'operand' ? { ...item, value: expandRecordWildcards(item.value, resolve) } : item
-        ),
-      };
-    }
-    default: {
-      return pat;
+  const expanded = mapPatChildren(pat, { pat: (inner) => expandRecordWildcards(inner, resolve), expr: (expr) => expr });
+  if (expanded.kind !== 'precord' || !expanded.wildcard) return expanded;
+  const span = expanded.wildcard;
+  const fields = [...expanded.fields];
+  const named = new Set(fields.map((field) => field.field.name));
+  for (const name of resolve(expanded.con)) {
+    if (!named.has(name)) {
+      fields.push({ field: { name, span }, pat: { kind: 'pvar', name: { name, span }, span }, span, byWildcard: true });
     }
   }
+  return { ...expanded, fields, wildcard: undefined };
 }
 
 function patternSignatures(
@@ -4186,7 +4152,7 @@ function replacePatLocals(pat: RPat, locals: ReadonlyMap<string, LocalVar>): voi
   while (pending.length > 0) {
     const current = pending.pop()!;
     if (current.k === 'var' || current.k === 'as') current.local = locals.get(current.local.name) as LocalVar;
-    pending.push(...rpatChildren(current).toReversed());
+    pending.push(...rpatChildren(current).pats.toReversed());
   }
 }
 
