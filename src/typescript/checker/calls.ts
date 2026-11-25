@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { unsupportedMessage } from '../unsupported';
 import {
   CallArity,
   ExpressionListFlow,
@@ -132,6 +133,8 @@ export class Calls {
     const typeArguments = this.typeArguments.written(node);
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
+    const required = this.requiredModule(callee, args);
+    if (required) return required;
     const optional = node.childForFieldName('optional_chain') !== null;
     if (this.isEvolvingPush(callee)) {
       if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
@@ -456,6 +459,27 @@ export class Calls {
           this.c.silently(() => this.c.expressions.check(substitution))
         );
     return resolution?.returnType ?? errorType;
+  }
+
+  /**
+   * `require("fs")`, Node.js's `require` of a module this interpreter provides, which is that module as `import * as`
+   * gives it; any other module, or one a string literal does not name, is rejected before the program runs.
+   */
+  private requiredModule(callee: TreeNode, args: TreeNode[]): Type | undefined {
+    if (callee.type !== 'identifier' || callee.text !== 'require') return undefined;
+    const library = this.c.libraryBinder.moduleScope.lookupValue('require');
+    if (!library || this.c.scopeOf(callee).lookupValue('require') !== library) return undefined;
+    const [id] = args;
+    const name = id?.type === 'string' ? stringValue(id) : undefined;
+    const module = name === undefined ? undefined : this.c.namespaces.moduleObjectType(name);
+    if (module) return this.checkArgumentsOnly(args, module);
+    this.c.error(
+      callee,
+      unsupportedMessage(
+        name === undefined ? '文字列リテラルで名前を書かない require' : `モジュール '${name}' の require`
+      )
+    );
+    return this.checkArgumentsOnly(args, errorType);
   }
 
   /** Whether a signature's first parameter takes the strings of a tagged template. */

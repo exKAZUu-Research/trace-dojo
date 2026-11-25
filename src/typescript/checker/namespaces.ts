@@ -183,6 +183,12 @@ export class Namespaces {
     );
   }
 
+  /** The object of a module the library declares, as `import * as` gives it, or undefined for another module. */
+  moduleObjectType(name: string): Type | undefined {
+    const module = this.c.libraryBinder.ambientModules.get(name);
+    return module && this.objectType(module);
+  }
+
   private moduleNamed(name: string): Sym | undefined {
     return this.c.libraryBinder.ambientModules.get(name) ?? this.c.binder.ambientModules.get(name);
   }

@@ -380,7 +380,26 @@ export class MemberChecker {
     );
   }
 
+  /** Whether a type is a Node.js object: the `fs` module, `process`, or one of its streams. */
+  private isNodeObject(type: Type): boolean {
+    const { namespaces, libraryBinder, typeNodes } = this.c;
+    if (type === namespaces.moduleObjectType('fs') || type === namespaces.moduleObjectType('node:fs')) return true;
+    const types = libraryBinder.moduleScope.lookupValue('NodeJS')?.namespaceExports?.types;
+    // An interface with a `this` type is used through a reference to it.
+    const target = type.kind === 'object' && type.objectKind === 'reference' ? type.target : type;
+    return ['Process', 'WriteStream', 'WritableStream', 'ReadStream'].some((name) => {
+      const symbol = types?.get(name);
+      return symbol !== undefined && target === typeNodes.declaredTypeOf(symbol);
+    });
+  }
+
   private reportMissingProperty(node: TreeNode, name: string, type: Type): void {
+    const object = node.parent?.childForFieldName('object');
+    if (object && this.isNodeObject(type)) {
+      // @types/node declares more of Node.js than this interpreter runs, which tsc would accept.
+      this.c.error(node, unsupportedMessage(`${object.text}.${name}`));
+      return;
+    }
     const apparent = this.c.apparentType(type);
     const classInfo = apparent.kind === 'object' ? (apparent.classInfo ?? apparent.target?.classInfo) : undefined;
     if (

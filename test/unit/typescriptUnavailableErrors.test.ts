@@ -176,3 +176,17 @@ test.each([
 ])('variance annotations are checked as tsc checks them: %s', (source, kind) => {
   expect(executeProgram('typescript', source)).toMatchObject({ kind });
 });
+
+test.each([
+  ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
+  [
+    "const id = 'fs'; const fs = require(id);",
+    '文字列リテラルで名前を書かない require は、この採点環境では使えません。',
+  ],
+  ["const fs = require('fs'); fs.statSync('.');", 'fs.statSync は、この採点環境では使えません。'],
+  ["import * as fs from 'fs'; fs.readFile('x', () => {});", 'fs.readFile は、この採点環境では使えません。'],
+  ['console.log(process.cwd());', 'process.cwd は、この採点環境では使えません。'],
+  ['console.log(process.stdout.columns);', 'process.stdout.columns は、この採点環境では使えません。'],
+])('rejects a Node.js feature the interpreter lacks before running %s', (source, message) => {
+  expect(executeProgram('typescript', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
+});
