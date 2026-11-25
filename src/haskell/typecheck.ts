@@ -669,14 +669,14 @@ function derivingStrategy(
       Lift: ['deriveLift', 'DeriveLift'],
     } as const
   )[cls.name as 'Functor'] as readonly [FeatureOf<'typecheck'>, string] | undefined;
-  const extension = derive?.[1];
-  if (derive && !features.allows(derive[0])) {
-    throw compileError(span, `${cls.name} を deriving するには、${extension} の拡張が要ります。`);
-  }
   try {
+    if (derive && !features.allows(derive[0])) {
+      throw compileError(span, `${cls.name} を deriving するには、${derive[1]} の拡張が要ります。`);
+    }
     checkDerivable(decl, cls, span);
   } catch (error) {
-    // A newtype takes its representation's instance when stock deriving cannot apply, unless stock was asked for.
+    // A newtype takes its representation's instance when stock deriving cannot apply, its extension off included,
+    // unless stock was asked for.
     if (!(error instanceof CompileError) || strategy !== undefined || !isNewtype) throw error;
     if (!features.allows('newtypeByDefault')) throw error;
     return 'newtype';
