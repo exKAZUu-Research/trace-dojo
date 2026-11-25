@@ -2,6 +2,7 @@
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import { branchesType } from './contextTypes';
 import { ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
@@ -1157,6 +1158,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let whenFalse = before;
     let after: Flow | undefined;
     let resultType: DartType | undefined;
+    const bodyTypes: DartType[] = [];
     const compiledCases = cases.map((switchCase) => {
       this.flow = whenFalse;
       const { result, slots } = this.withScope(() => {
@@ -1171,6 +1173,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       });
       after = after ? Flow.join(after, this.flow) : this.flow;
       const bodyType = result.body.type;
+      bodyTypes.push(bodyType);
       if (!(bodyType.kind === 'never' && !bodyType.nullable))
         resultType = resultType ? upperBound(resultType, bodyType) : bodyType;
       return { ...result, slots };
@@ -1183,7 +1186,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       false
     );
     this.flow = after ?? before;
-    const type = resultType ?? { kind: 'never', nullable: false };
+    const type = resultType ? branchesType(resultType, bodyTypes, context) : NEVER;
     const test = subject.run;
     return {
       type,

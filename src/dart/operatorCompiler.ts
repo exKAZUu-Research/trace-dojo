@@ -1,6 +1,6 @@
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { isDoubleContext } from './contextTypes';
+import { branchesType, isDoubleContext } from './contextTypes';
 import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
 import {
   BITWISE_OPERATORS,
@@ -278,7 +278,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     this.flow = Flow.join(whenNonNull, this.flow);
     const leftRun = left.run;
     const rightRun = right.run;
-    const type = upperBound(left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type), right.type);
+    const nonNullLeft = left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type);
+    const type = branchesType(upperBound(nonNullLeft, right.type), [nonNullLeft, right.type], context);
     return {
       type,
       run: (frame) => {
@@ -305,12 +306,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     this.flow = flow.whenFalse;
     const otherwise = this.instantiateInContext(this.compileExpression(expression.alternative, context), context);
     this.flow = Flow.join(afterThen, this.flow);
-    const type =
+    const bound =
       then.type.kind === 'never' && !then.type.nullable
         ? otherwise.type
         : otherwise.type.kind === 'never' && !otherwise.type.nullable
           ? then.type
           : upperBound(then.type, otherwise.type);
+    const type = branchesType(bound, [then.type, otherwise.type], context);
     const conditionRun = condition.run;
     const thenRun = then.run;
     const otherwiseRun = otherwise.run;

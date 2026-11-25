@@ -1,6 +1,6 @@
 import type { ClassInfo } from './classes';
 import { closeInferenceHoles, containsInferenceHole, INFERENCE_HOLE, isInferenceHole } from './typeInference';
-import { coreTypes, type DartType, DYNAMIC, interfaceType, resolveBound, upperBound } from './types';
+import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, resolveBound, upperBound } from './types';
 
 export function isDoubleContext(context: DartType): boolean {
   const base = context.kind === 'interface' ? context : undefined;
@@ -25,6 +25,16 @@ export function mapTypesOfContext(context: DartType | undefined): [DartType, Dar
   const base = resolveBound(context);
   if (base.kind !== 'interface' || base.cls !== coreTypes.map) return undefined;
   return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
+}
+
+/**
+ * The type of an expression that gives one of its branches' values (a conditional, `??`, or a switch expression):
+ * their upper bound, or the context when that bound does not fit the context but every branch does, as the SDK infers
+ * `FutureOr<int> y = b ? 1 : f();`, whose bound is Object.
+ */
+export function branchesType(bound: DartType, branches: DartType[], context: DartType | undefined): DartType {
+  if (!context || containsInferenceHole(context) || isSubtype(bound, context)) return bound;
+  return branches.every((branch) => isSubtype(branch, context)) ? context : bound;
 }
 
 export function inferElementType(types: DartType[]): DartType {
