@@ -431,7 +431,7 @@ openFile :: FilePath -> IOMode -> IO Handle
 openFile path mode = primitive "openFile" path (primConTag mode)
 
 withFile :: FilePath -> IOMode -> (Handle -> IO r) -> IO r
-withFile path mode = bracket (openFile path mode) hClose
+withFile path mode = bracket (modifyIOError (\(IOError h t _ d e f) -> IOError h t "withFile" d e f) (openFile path mode)) hClose
 
 hClose :: Handle -> IO ()
 hClose = primitive "hClose"
