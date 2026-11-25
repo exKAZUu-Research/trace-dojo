@@ -448,7 +448,8 @@ function isByteString(type: Type): boolean {
   if (type.kind === 'pointer') {
     if (type.size === 'slice') return isU8(type.child);
     // A many-item or C pointer prints up to where std.mem.span ends it: its sentinel, or C's 0.
-    if (type.size === 'many' || type.size === 'c') return isU8(type.child) && sentinelOf(type) !== undefined;
+    // Zig spans it as a `[:0]const u8`, so another sentinel does not do.
+    if (type.size === 'many' || type.size === 'c') return isU8(type.child) && sentinelOf(type) === 0n;
     return type.child.kind === 'array' && isU8(type.child.child);
   }
   return type.kind === 'array' && isU8(type.child);
