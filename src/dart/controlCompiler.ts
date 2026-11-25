@@ -35,6 +35,7 @@ import {
   futureValueType,
   interfaceType,
   isNullable,
+  isObject,
   isSubtype,
   iterableElementOf,
   NEVER,
@@ -421,7 +422,8 @@ export abstract class ControlCompiler extends StatementCompiler {
         : this.compileGenBlock(functionBody.block, false);
     if (functionBody.kind === 'block' && this.flow.reachable) {
       this.fn.returnTypes?.push(NULL);
-      const valueType = expectedReturn ? futureValueType(expectedReturn) : undefined;
+      // A function declared to return Object completes a Future<Object?>, yet must still return a value.
+      const valueType = expectedReturn && (isObject(expectedReturn) ? expectedReturn : futureValueType(expectedReturn));
       if (declared && valueType && this.requiresReturn(valueType)) {
         this.error(
           { row: functionBody.block.row },

@@ -1199,7 +1199,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       if (
         expected &&
         expected.kind !== 'void' &&
-        !isTop(expected) &&
+        expected.kind !== 'dynamic' &&
         expected.kind !== 'null' &&
         !this.fn.kind.isConstructor
       ) {
