@@ -1983,4 +1983,5 @@ export const PUBLIC_STD_MEMBERS: Record<string, readonly string[]> = {
 // Fields of Zig 0.17.1's library structs that the grader leaves out of a struct it provides.
 export const PUBLIC_STD_FIELDS: Record<string, readonly string[]> = {
   'Io.File.Stat': ['inode', 'nlink', 'size', 'permissions', 'kind', 'atime', 'mtime', 'ctime', 'block_size'],
+  'Io.Reader': ['vtable', 'buffer', 'seek', 'end'],
 };

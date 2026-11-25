@@ -28,10 +28,6 @@ import {
   LIMITED_ALLOC_ERROR,
   limitOf,
   ownBytes,
-  READ_FAILED,
-  ReadError,
-  readerValue,
-  ReaderView,
   receiverMethod,
   SLICE,
   UNLIMITED,
@@ -203,25 +199,14 @@ function openPath(
   mode: number,
   flags: { create: boolean; truncate: boolean; exclusive: boolean }
 ): Value {
-  const files = frame.runtime.io.files;
-  const writes = mode !== 0;
-  const directory = files.kindOf(target) === 'directory';
-  if (directory && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
-  if (directory) {
-    const descriptor = frame.runtime.openFile({ content: noText, directory: true });
-    return handle('file', { fd: descriptor });
-  }
   const create = flags.create ? (flags.exclusive ? 'exclusive' : 'always') : 'never';
-  const write = writes
-    ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
-    : undefined;
-  const content = files.openForReading(target);
-  const descriptor = frame.runtime.openFile({ content, read: mode === 1 ? undefined : content, write });
-  return handle('file', { fd: descriptor });
-}
-
-function noText(): string {
-  return '';
+  if (flags.create && frame.runtime.io.files.kindOf(target) === 'directory')
+    throw new FileSystemError('EISDIR', target);
+  const opened = frame.runtime.io.files.openHandle(target, {
+    read: mode !== 1,
+    write: mode === 0 ? undefined : { create, truncate: flags.create && flags.truncate, append: false },
+  });
+  return handle('file', { fd: frame.runtime.openFile(opened) });
 }
 
 /** Adds the `std.Io.Dir` members, which need the `std.Io` and `std.Io.File` types that std.ts declares. */
@@ -279,12 +264,13 @@ export function addDirMembers(io: Type, file: StructType, fileWriteError: ErrorS
     readFile: dirMethod(
       'readFile',
       [io, CONST_U8_SLICE, SLICE],
-      errorUnionOf(mergeErrorSets(DIR_ERROR, READ_FAILED), SLICE),
-      (frame, dir, [, path, buffer]) =>
-        readWholeFile(frame, joined(dir, text(path, frame)), (reader) => {
-          const destination = buffer as Slice;
-          return new Slice(destination.target, destination.start, reader.readSliceShort(destination));
-        })
+      errorUnionOf(mergeErrorSets(DIR_ERROR, errorSetOf(['ReadFailed'])), SLICE),
+      (frame, dir, [, path, buffer]) => {
+        const destination = buffer as Slice;
+        const bytes = wholeFileBytes(frame, joined(dir, text(path, frame))).subarray(0, destination.length);
+        for (const [index, byte] of bytes.entries()) destination.set(index, BigInt(byte));
+        return new Slice(destination.target, destination.start, bytes.length);
+      }
     ),
     deleteFile: dirMethod('deleteFile', [io, CONST_U8_SLICE], errorUnionOf(FS_ERROR, VOID), (frame, dir, [, path]) => {
       frame.runtime.io.files.remove(joined(dir, text(path, frame)), 'file');
@@ -356,33 +342,20 @@ function readFileAlloc(sema: SemaApi, call: NativeCall): TExpr {
     errorUnionOf(mergeErrorSets(DIR_ERROR, LIMITED_ALLOC_ERROR), SLICE),
     (frame) => {
       const [directory, , name, gpa, count] = evaluators.map((evaluate) => evaluate(frame));
-      return attempt(() =>
-        readWholeFile(frame, joined(dirPath(directory), text(name, frame)), (reader) =>
-          ownBytes(
-            frame,
-            gpa,
-            reader.remaining((count as bigint) === UNLIMITED ? Number.POSITIVE_INFINITY : limitOf(count))
-          )
-        )
-      );
+      return attempt(() => {
+        const bytes = wholeFileBytes(frame, joined(dirPath(directory), text(name, frame)));
+        // Zig reads up to the limit and fails when the file reaches it.
+        if ((count as bigint) !== UNLIMITED && bytes.length >= limitOf(count)) return ErrorValue.of('StreamTooLong');
+        return ownBytes(frame, gpa, [...bytes]);
+      });
     },
     call.span
   );
 }
 
-/** Reads an opened file through an unbuffered reader, as `readFile` and `readFileAlloc` do, closing it after. */
-function readWholeFile(frame: Frame, target: string, read: (reader: ReaderView) => Value): Value {
-  const opened = openPath(frame, target, 0, { create: false, truncate: false, exclusive: false });
-  const descriptor = (opened as NativeHandle).state.fd as number;
-  try {
-    return read(new ReaderView(readerValue(new Slice({ slots: [] }, 0, 0), descriptor), frame));
-  } catch (error) {
-    // Zig reports the reason a read failed, which in the run's files is only that the path is a directory.
-    if (error instanceof ReadError && error.error === 'ReadFailed') return ErrorValue.of('IsDir');
-    throw error;
-  } finally {
-    frame.runtime.closeDescriptor(descriptor);
-  }
+/** The bytes of a whole file, as `readFile` and `readFileAlloc` read them. */
+function wholeFileBytes(frame: Frame, target: string): Uint8Array {
+  return new TextEncoder().encode(frame.runtime.io.files.readFile(target));
 }
 
 // Descriptors ---------------------------------------------------------------------------------------------------------
@@ -395,5 +368,5 @@ export function fileDescriptor(value: Value): number {
 /** The length of an open file in bytes. */
 export function openFileLength(frame: Frame, descriptor: number): bigint {
   const file = frame.runtime.openFileAt(descriptor);
-  return BigInt(file ? byteLength(file.content()) : 0);
+  return BigInt(file ? byteLength(file.content) : 0);
 }

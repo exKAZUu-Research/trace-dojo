@@ -84,6 +84,8 @@ export class OutputChannel {
   private pendingHighSurrogate = '';
   /** Whether the program closed the stream, after which what it writes there is lost. */
   isClosed = false;
+  /** The bytes of a character that a write of bytes left partly written, for a language that writes bytes. */
+  private decoder: TextDecoder | undefined;
 
   /** @param written The length written to every channel of the run, which shares one limit. */
   constructor(
@@ -97,6 +99,17 @@ export class OutputChannel {
     if (this.written.length > LIMITS.maxOutputLength) throw new ExecutionLimitError('output');
     const transformed = transform ? transform(text) : text;
     this.text += this.encoding === 'jvm-utf8' ? this.encodeJvmChunk(transformed) : transformed;
+  }
+
+  /** Writes UTF-8 bytes as the text they decode to, keeping a partly written character for the next write. */
+  writeBytes(bytes: Uint8Array): void {
+    this.decoder ??= new TextDecoder('utf-8', { ignoreBOM: true });
+    this.write(this.decoder.decode(bytes, { stream: true }));
+  }
+
+  /** Writes what a partly written character left, at close or when the program ends. */
+  finishBytes(): void {
+    if (this.decoder) this.write(this.decoder.decode());
   }
 
   private encodeJvmChunk(text: string): string {
@@ -169,6 +182,27 @@ export class TextReader {
     }
   }
 
+  /**
+   * The text from the current position up to and including the next `delimiter`, or up to the end when none follows,
+   * without reading it.
+   */
+  peekThrough(delimiter: string): string {
+    for (;;) {
+      const { text } = this;
+      const end = text.indexOf(delimiter, this.position);
+      if (end !== -1 || !this.refill?.()) {
+        const piece = text.slice(this.position, end === -1 ? text.length : end + delimiter.length);
+        this.budget.spend(Math.ceil((piece.length + 1) / 64));
+        return piece;
+      }
+    }
+  }
+
+  /** Reads `length` code units that a peek returned. */
+  skip(length: number): void {
+    this.position += length;
+  }
+
   readRest(): string {
     while (this.refill?.()) {
       // Each refill adds a part until none remains.
@@ -217,23 +251,60 @@ class DirectoryNode {
   readonly children = new Map<string, FileNode | DirectoryNode>();
 }
 
-/** A file opened for writing, which keeps writing to the same file after it is renamed or deleted, as on POSIX. */
+/**
+ * An open file, which keeps reading and writing the same file after it is renamed or deleted, as on POSIX. A handle
+ * from `open` writes; one from `openHandle` reads, writes, or both, as its program asked.
+ */
 export class FileHandle {
+  /** Whether the program closed the handle, after which it neither reads nor writes. */
+  isClosed = false;
+  /** The file's text read from its start, when the handle is open for reading. */
+  readonly reader: TextReader | undefined;
   /** Where the next write goes, or `undefined` for the end of the file. */
   private position: number | undefined;
+  /** The bytes of a character that a write of bytes left partly written. */
+  private decoder: TextDecoder | undefined;
 
   constructor(
     private readonly files: VirtualFileSystem,
     private readonly node: FileNode,
-    append: boolean
+    append: boolean,
+    readonly canWrite = true,
+    reader?: TextReader
   ) {
     this.position = append ? undefined : 0;
+    this.reader = reader;
+  }
+
+  /** The file's text as it is now. */
+  get content(): string {
+    return this.node.content;
   }
 
   write(text: string): void {
     this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
   }
+
+  /**
+   * Writes UTF-8 bytes as the text they decode to, keeping a partly written character for the next write. The file
+   * holds text, so bytes that are not UTF-8 throw a `TypeError`.
+   */
+  writeBytes(bytes: Uint8Array): void {
+    this.decoder ??= new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+    this.write(this.decoder.decode(bytes, { stream: true }));
+  }
+
+  /** Closes the handle, writing what a partly written character left, which throws a `TypeError` as `writeBytes` does. */
+  close(): void {
+    this.isClosed = true;
+    if (this.decoder) this.write(this.decoder.decode());
+  }
+}
+
+/** A directory opened as a file, which opens for reading as POSIX allows, though each read of it fails. */
+export class DirectoryHandle {
+  isClosed = false;
 }
 
 type FileSystemNode = FileNode | DirectoryNode;
@@ -303,6 +374,25 @@ export class VirtualFileSystem {
       node.content = '';
     }
     return new FileHandle(this, node, mode.append);
+  }
+
+  /**
+   * Opens a file to read, to write with `write`'s mode, or both, as POSIX `open` does: a directory opens only to read,
+   * and a file opened to read reads its text as it is when read.
+   */
+  openHandle(path: string, access: { read: boolean; write?: OpenMode }): FileHandle | DirectoryHandle {
+    if (this.kindOf(path) === 'directory') {
+      if (access.write) throw new FileSystemError('EISDIR', path);
+      return new DirectoryHandle();
+    }
+    if (access.write) {
+      const handle = this.open(path, access.write);
+      if (!access.read) return handle;
+      const node = this.fileNodeOf(path);
+      return new FileHandle(this, node, access.write.append, true, new TextReader(() => node.content, this.budget));
+    }
+    const node = this.fileNodeOf(path);
+    return new FileHandle(this, node, false, false, new TextReader(() => node.content, this.budget));
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
