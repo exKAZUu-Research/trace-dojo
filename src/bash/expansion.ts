@@ -336,7 +336,9 @@ export class Expander {
     this.spend();
     switch (part.kind) {
       case 'literal': {
-        return ctx.inDouble ? [textSegment(unescapeDoubleQuoted(part.text), true, false)] : literalSegments(part.text);
+        return ctx.inDouble
+          ? [textSegment(unescapeDoubleQuoted(part.text, ctx.inOperatorWord), true, false)]
+          : literalSegments(part.text);
       }
       case 'single':
       case 'ansiC': {
@@ -951,8 +953,9 @@ function literalSegments(text: string): TextSegment[] {
   return fragments;
 }
 
-export function unescapeDoubleQuoted(text: string): string {
-  return text.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
+export function unescapeDoubleQuoted(text: string, inOperatorWord = false): string {
+  const pattern = inOperatorWord ? /\\([$`"\\}\n])/g : /\\([$`"\\\n])/g;
+  return text.replaceAll(pattern, (_, c: string) => (c === '\n' ? '' : c));
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Splits a word at its [key]= prefix across literal and expanded parts.
