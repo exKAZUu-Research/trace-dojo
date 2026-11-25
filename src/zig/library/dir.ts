@@ -219,7 +219,6 @@ function noText(): string {
 }
 
 /** Adds the `std.Io.Dir` members, which need the `std.Io` and `std.Io.File` types that std.ts declares. */
-// code-gauge-allow functionNcss -- Declares the members of one library type, each a short closure.
 export function addDirMembers(io: Type, file: StructType, fileWriteError: ErrorSetType): void {
   const openError = errorUnionOf(DIR_ERROR, file);
   addMembers(DIR, {
@@ -275,21 +274,11 @@ export function addDirMembers(io: Type, file: StructType, fileWriteError: ErrorS
       'readFile',
       [io, CONST_U8_SLICE, SLICE],
       errorUnionOf(mergeErrorSets(DIR_ERROR, READ_FAILED), SLICE),
-      (frame, dir, [, path, buffer]) => {
-        const opened = openPath(frame, joined(dir, text(path, frame)), 0, {
-          create: false,
-          truncate: false,
-          exclusive: false,
-        });
-        const descriptor = (opened as NativeHandle).state.fd as number;
-        try {
-          const reader = new ReaderView(readerValue(new Slice({ slots: [] }, 0, 0), descriptor), frame);
+      (frame, dir, [, path, buffer]) =>
+        readWholeFile(frame, joined(dir, text(path, frame)), (reader) => {
           const destination = buffer as Slice;
           return new Slice(destination.target, destination.start, reader.readSliceShort(destination));
-        } finally {
-          frame.runtime.closeDescriptor(descriptor);
-        }
-      }
+        })
     ),
     deleteFile: dirMethod('deleteFile', [io, CONST_U8_SLICE], errorUnionOf(FS_ERROR, VOID), (frame, dir, [, path]) => {
       frame.runtime.io.files.remove(joined(dir, text(path, frame)), 'file');
@@ -361,31 +350,33 @@ function readFileAlloc(sema: SemaApi, call: NativeCall): TExpr {
     errorUnionOf(mergeErrorSets(DIR_ERROR, LIMITED_ALLOC_ERROR), SLICE),
     (frame) => {
       const [directory, , name, gpa, count] = evaluators.map((evaluate) => evaluate(frame));
-      return attempt(() => {
-        const opened = openPath(frame, joined(dirPath(directory), text(name, frame)), 0, {
-          create: false,
-          truncate: false,
-          exclusive: false,
-        });
-        const descriptor = (opened as NativeHandle).state.fd as number;
-        try {
-          const reader = new ReaderView(readerValue(new Slice({ slots: [] }, 0, 0), descriptor), frame);
-          let bytes: number[];
-          try {
-            bytes = reader.remaining((count as bigint) === UNLIMITED ? Number.POSITIVE_INFINITY : limitOf(count));
-          } catch (error) {
-            // Zig reports the reason a read failed, which in the run's files is only that the path is a directory.
-            if (error instanceof ReadError && error.error === 'ReadFailed') return ErrorValue.of('IsDir');
-            throw error;
-          }
-          return ownBytes(frame, gpa, bytes);
-        } finally {
-          frame.runtime.closeDescriptor(descriptor);
-        }
-      });
+      return attempt(() =>
+        readWholeFile(frame, joined(dirPath(directory), text(name, frame)), (reader) =>
+          ownBytes(
+            frame,
+            gpa,
+            reader.remaining((count as bigint) === UNLIMITED ? Number.POSITIVE_INFINITY : limitOf(count))
+          )
+        )
+      );
     },
     call.span
   );
+}
+
+/** Reads an opened file through an unbuffered reader, as `readFile` and `readFileAlloc` do, closing it after. */
+function readWholeFile(frame: Frame, target: string, read: (reader: ReaderView) => Value): Value {
+  const opened = openPath(frame, target, 0, { create: false, truncate: false, exclusive: false });
+  const descriptor = (opened as NativeHandle).state.fd as number;
+  try {
+    return read(new ReaderView(readerValue(new Slice({ slots: [] }, 0, 0), descriptor), frame));
+  } catch (error) {
+    // Zig reports the reason a read failed, which in the run's files is only that the path is a directory.
+    if (error instanceof ReadError && error.error === 'ReadFailed') return ErrorValue.of('IsDir');
+    throw error;
+  } finally {
+    frame.runtime.closeDescriptor(descriptor);
+  }
 }
 
 // Descriptors ---------------------------------------------------------------------------------------------------------
