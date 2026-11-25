@@ -291,7 +291,8 @@ export abstract class CallCompiler extends OperatorCompiler {
       this.error(expression, 'loadLibrary には引数を渡せません。');
     }
     return {
-      type: interfaceType(coreTypes.future, [VOID]),
+      // The SDK types it Future<dynamic>, whose value is null.
+      type: interfaceType(coreTypes.future, [DYNAMIC]),
       run: (frame) => {
         const { runtime } = frame;
         const load = runtime.links.classNamed('_DeferredLoading').staticMembers.get('load');
