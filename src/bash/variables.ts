@@ -428,7 +428,7 @@ export class VariableStore {
     if (!found || !found.cell.attributes.has('n')) return name;
     const target = found.cell.value?.kind === 'scalar' ? found.cell.value.value : '';
     this.guardCompoundRead(target);
-    const targetFound = this.findOwnCellWithScope(target, found.scopeIndex - 1);
+    const targetFound = this.findOwnCellWithScope(target);
     rejectUnsupportedNamerefDereference(name, target, targetFound ? cellShapeOf(targetFound.cell) : undefined);
     return target;
   }
@@ -842,10 +842,7 @@ export class VariableStore {
     if (!view.attributes.has('n')) return view;
     const ref = view.scalar ?? '';
     if (!isIdentifier(ref)) return undefined;
-    const found = this.findOwnCellWithScope(view.name, maxScopeIndex);
-    const searchBelow = found ? found.scopeIndex - 1 : maxScopeIndex - 1;
-    if (searchBelow < 0) return undefined;
-    const target = this.findOwnCell(ref, searchBelow);
+    const target = this.findOwnCell(ref, maxScopeIndex);
     return target && !target.attributes.has('n') ? this.cellToView(target) : undefined;
   }
 
