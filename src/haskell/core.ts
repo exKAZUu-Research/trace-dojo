@@ -63,7 +63,6 @@ export interface LamCore {
 export interface CaseCore {
   k: 'case';
   scrut: Core;
-  /** The slot that receives the evaluated scrutinee, if any. */
   bindIndex?: number;
   /**
    * The alternatives by constructor tag, each with the slots its fields go to (-1 for unused fields), and those its
@@ -88,7 +87,6 @@ export type IOStmt =
       kind: 'bind';
       row: number;
       expr: Core;
-      /** The slot that receives the action's result. */
       slot: number;
       /** Code that matches the result against the pattern and binds its variables, if it is not a variable. */
       matcher?: Core;
@@ -112,7 +110,6 @@ export interface IODoCore {
   bindingRow?: number;
   /** The lambda's bound names, whose instantiated slots determine whether they store answers. */
   bindingNames?: string[];
-  /** The variables visible when the block starts. */
   entryVisible: VisibleScope;
 }
 

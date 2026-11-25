@@ -5,10 +5,7 @@ import type { ConInfo, InstanceInfo } from './entities';
 import type { RunCatching, RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
 
-/**
- * A value in weak head normal form: an integer (`Int` and `Integer` as bigints), a floating-point number, a
- * character (one code point), a constructor application, a function, an `IO` action, a class dictionary, or a turtle.
- */
+/** A value in weak head normal form. `Int` and `Integer` are bigints, and a character is one code point. */
 export type Value = bigint | number | string | ConValue | FunValue | IOAction | Dict | TurtleValue;
 
 export type Slot = Value | Thunk | TypedSlot;
@@ -82,7 +79,6 @@ export class PrimFn {
   }
 }
 
-/** A function applied to fewer arguments than it takes. */
 export class Partial {
   constructor(
     readonly fn: Closure | PrimFn,
@@ -124,7 +120,6 @@ export class Thunk {
     this.target = undefined;
   }
 
-  /** Makes this thunk take another thunk's value instead of computing its own. */
   redirect(target: Thunk): void {
     this.state = 'pending';
     this.code = undefined;
@@ -141,7 +136,6 @@ export class Thunk {
   }
 }
 
-/** An `IO` action, which only running it performs. */
 export type IOAction = IOReturn | IOBind | IOThen | IOPrim | IODo | IOCall;
 
 export class IOReturn {
@@ -230,12 +224,10 @@ export function isFunction(value: Value): value is FunValue {
  */
 export type ExceptionCause =
   | { kind: 'value'; value: Slot }
-  /** An arithmetic failure, by the constructor of `ArithException` it is. */
   | { kind: 'arith'; error: ArithError }
   | { kind: 'pattern' }
   | { kind: 'io'; type: string; location: string; file?: string; description: string };
 
-/** The constructors of `ArithException`. */
 export type ArithError =
   | 'Overflow'
   | 'Underflow'
@@ -255,7 +247,6 @@ export class HaskellException extends Error {
   }
 }
 
-/** A mutable reference, `IORef a`, which holds a value until the program writes another. */
 export class RefValue {
   constructor(public value: Slot) {}
 }

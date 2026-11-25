@@ -48,7 +48,6 @@ export function strict(name: string, arity: number, fn: (args: Value[], runtime:
 let boolCons: { false: ConInfo; true: ConInfo } | undefined;
 let orderingCons: ConInfo[] | undefined;
 
-/** Registers the library's `Bool` and `Ordering`, which primitives return. */
 export function setPrimitiveTypes(bool: ConInfo[], ordering: ConInfo[]): void {
   boolCons = { false: bool[0], true: bool[1] };
   orderingCons = ordering;
@@ -166,9 +165,6 @@ function floorMod(a: bigint, b: bigint): bigint {
   return r !== 0n && r < 0n !== b < 0n ? r + b : r;
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Int and Integer
-
 // code-gauge-allow functionCognitiveComplexity -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
 // code-gauge-allow functionNcss -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
 function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint) => bigint): void {
@@ -257,7 +253,6 @@ strict('wordShiftR', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : (a as bigint) >
 strict('wordPopCount', 1, ([a]) => BigInt(countOnes(a as bigint)));
 strict('integerToInt', 1, ([a]) => wrapInt(a as bigint));
 strict('intToInteger', 1, ([a]) => a);
-// Bits
 strict('intRotate', 2, ([a, b]) => wrapInt(rotate64(a as bigint, b as bigint)));
 strict('wordRotate', 2, ([a, b]) => rotate64(a as bigint, b as bigint));
 strict('leadingZeros64', 1, ([a]) => {
@@ -314,9 +309,6 @@ strict('integerPopCount', 1, ([a]) => {
   const count = countOnes(value < 0n ? -value : value);
   return BigInt(value < 0n ? -count : count);
 });
-
-// ---------------------------------------------------------------------------------------------------------------
-// Double and Float
 
 // code-gauge-allow functionNcss -- One definition per floating-point primitive.
 function defineFloating(prefix: 'double' | 'float', round: (value: number) => number): void {
@@ -575,9 +567,6 @@ function generateDigits(r: bigint, s: bigint, mUp: bigint, mDn: bigint): number[
   }
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Characters
-
 strict('charEq', 2, ([a, b]) => bool(a === b));
 strict('charLt', 2, ([a, b]) =>
   bool(((a as string).codePointAt(0) as number) < ((b as string).codePointAt(0) as number))
@@ -710,9 +699,6 @@ strict('toTitle', 1, ([a]) => {
   return TITLE_CASES[char] ?? greekIotaUpper(char) ?? singleCase(char, char.toUpperCase());
 });
 
-// ---------------------------------------------------------------------------------------------------------------
-// Showing and reading numbers
-
 define('readDecimal', 1, [], ([text], runtime) => BigInt(forceString(text, runtime)));
 define('plainDecimal', 1, [], ([text], runtime) => {
   const plain = plainNumber(text, runtime, false);
@@ -766,9 +752,6 @@ function decimalRatio({ digits, exponent }: DecimalParts, runtime: Runtime): [bi
 define('readHexText', 1, [], ([text], runtime) => BigInt(`0x${forceString(text, runtime)}`));
 define('readOctText', 1, [], ([text], runtime) => BigInt(`0o${forceString(text, runtime)}`));
 
-// ---------------------------------------------------------------------------------------------------------------
-// Control
-
 define('seq', 2, [0], ([, b]) => b);
 define('error', 1, [], ([message], runtime) => {
   throw haskellError(forceString(message, runtime));
@@ -779,9 +762,6 @@ define('errorEmptyList', 1, [], ([name], runtime) => {
 strict('primConTag', 1, ([a]) => BigInt((a as ConValue).con.tag));
 strict('primConCount', 1, ([a]) => BigInt((a as ConValue).con.type.cons.length));
 strict('primConAt', 2, ([a, n]) => nullary((a as ConValue).con.type.cons[Number(n as bigint)]));
-
-// ---------------------------------------------------------------------------------------------------------------
-// IO
 
 define('ioReturn', 1, [], ([a]) => new IOReturn(a));
 define('ioBind', 2, [], ([m, k]) => new IOBind(m, k));
@@ -847,8 +827,6 @@ define(
       [message]
     )
 );
-// ---------------------------------------------------------------------------------------------------------------
-// Turtles
 
 function turtleOf(slot: Slot, runtime: Runtime): TurtleValue {
   return runtime.machine.force(slot) as TurtleValue;

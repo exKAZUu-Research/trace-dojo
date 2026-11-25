@@ -72,11 +72,7 @@ function uncaughtMessage(runtime: Runtime, error: HaskellException): string | un
   }
 }
 
-/**
- * Runs a program's `main` to its end or to an exception that escapes it.
- *
- * @param onEnd Called when the program ends, with the entry point's frame while it still shows its variables.
- */
+/** @param onEnd Called when the program ends, with the entry point's frame while it still shows its variables. */
 export function runProgram(
   runtime: Runtime,
   program: CompiledProgram,

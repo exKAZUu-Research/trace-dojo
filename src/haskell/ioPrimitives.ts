@@ -13,12 +13,10 @@ import { bool, define, forceString, showSignedInt, unit, writeString } from './p
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
 
-/** The library's values that primitives and the program's run call: exceptions' values and messages. */
 export const ioSupport: {
   maybe?: { nothing: ConInfo; just: ConInfo };
   /** `primException kind message ioType location file`, the exception value of a built-in failure. */
   exception?: GlobalDef;
-  /** `primDisplayException`, the message of an exception the program throws. */
   display?: GlobalDef;
   /** `primIsExit`, whether an exception is an `ExitCode`, which ends the program without a message. */
   isExit?: GlobalDef;
@@ -34,8 +32,8 @@ interface HandleStreams {
 }
 
 /**
- * A handle of a run, one of its standard streams or a file it opened, which decides as GHC's does whether each
- * operation is legal. A handle that both reads and writes has one position, its reader's, which writes advance too.
+ * Decides as GHC's handles do whether each operation is legal. A handle that both reads and writes has one position,
+ * its reader's, which writes advance too.
  */
 class Handle {
   /** `semiClosed` after `hGetContents`, which reads the rest lazily. */
@@ -310,7 +308,6 @@ function openStreams(path: string, mode: number, runtime: Runtime): HandleStream
 
 let fileHandleCon: ConInfo | undefined;
 
-/** Registers the library's constructors that primitives build: `Handle`'s file handle and `Maybe`'s. */
 export function setIOConstructors(fileHandle: ConInfo, maybe: { nothing: ConInfo; just: ConInfo }): void {
   fileHandleCon = fileHandle;
   ioSupport.maybe = maybe;
@@ -405,8 +402,6 @@ define('hGetContents', 1, [], ([handle], runtime) =>
   ioAction('hGetContents', [handle], () => handleOf(handle, runtime).readContents(runtime))
 );
 
-// Program arguments
-
 /** The arguments `getArgs` gives while `withArgs` runs an action, by run; a run starts with none. */
 const programArgs = new WeakMap<Runtime, Slot>();
 
@@ -419,13 +414,10 @@ define('setArgs', 1, [], ([args], runtime) =>
   })
 );
 
-// Exceptions
-
 define('throwSome', 1, [], ([exception]) => {
   throw new HaskellException('', { kind: 'value', value: exception });
 });
 
-/** Runs an action, and if an exception escapes it, the handler with the exception's value. */
 define('catchSome', 2, [], ([action, handler], runtime) =>
   ioAction(
     'catch',
@@ -442,7 +434,6 @@ define('catchSome', 2, [], ([action, handler], runtime) =>
   )
 );
 
-/** The `SomeException` value of an exception: the one the program threw, or one for a built-in failure. */
 export function exceptionValue(error: HaskellException, runtime: Runtime): Slot {
   const { cause } = error;
   if (cause?.kind === 'value') return cause.value;
@@ -486,8 +477,6 @@ define('thNewUnique', 1, [], (_, runtime) =>
   })
 );
 
-// Mutable references and the ST monad
-
 define('newIORef', 1, [], ([value]) => ioAction('newIORef', [value], () => new RefValue(value)));
 define('readIORef', 1, [], ([ref], runtime) =>
   ioAction('readIORef', [ref], () => (runtime.machine.force(ref) as RefValue).value)
@@ -515,8 +504,6 @@ define('interleaveIO', 1, [], ([action], runtime) =>
 
 /** Runs an action whose effects only its own references see, as `runST` does. */
 define('runIOPure', 1, [], ([action]) => new RunPure(action));
-
-// Debugging
 
 define('trace', 2, [], ([message, value], runtime) => {
   runtime.beginEffect();

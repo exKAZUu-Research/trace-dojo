@@ -127,7 +127,6 @@ export class RunNext {
   constructor(readonly action: Slot) {}
 }
 
-/** What `catch` runs: an action, and the handler action an exception escaping it runs instead. */
 export class RunCatching {
   constructor(
     readonly action: Slot,
