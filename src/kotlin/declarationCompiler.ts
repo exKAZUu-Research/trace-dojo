@@ -1927,7 +1927,7 @@ function nativeParameterText(param: ParameterDecl): string {
   return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;
 }
 
-/** What an import names that this environment cannot run, by the feature it stands for. */
+/** The function a class declares itself, not inherits, of a name and a number of parameters. */
 function declaredFunction(symbol: ClassSymbol, name: string, paramCount: number): FunctionSymbol | undefined {
   return symbol.members
     .get(name)
