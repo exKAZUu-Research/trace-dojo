@@ -626,9 +626,9 @@ export class Expander {
     if (value.star && inDouble) return this.quotedStarSegments(value.values);
     if (value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
-    const separator = this.separatorOf(value, ctx);
+    const separator = value.values.length > 1 ? this.separatorOf(value, ctx) : undefined;
     for (const [index, element] of value.values.entries()) {
-      if (index > 0) segments.push(separator);
+      if (index > 0 && separator) segments.push(separator);
       segments.push(listElementSegment(element, inDouble));
     }
     if (inDouble && value.values.length > 0) segments.unshift(QUOTED_EMPTY_SEGMENT);
@@ -637,16 +637,21 @@ export class Expander {
 
   private quotedStarSegments(values: readonly string[]): WordSegment[] {
     if (values.length === 0) return [QUOTED_EMPTY_SEGMENT];
-    const joined = joinMetered(values, this.ifsJoiner(), (cost) => this.spend(cost));
+    const joiner = values.length > 1 ? this.ifsJoiner() : '';
+    const joined = joinMetered(values, joiner, (cost) => this.spend(cost));
     return [textSegment(joined, true, false)];
   }
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
-    const ifsJoiner = this.ifsJoiner();
     if (!value.star) {
-      const kind = value.transformed && ctx.inAssignmentRhs ? 'star' : value.positional ? 'positional' : 'field';
-      return breakSegment(kind, ifsJoiner, ctx.inDouble);
+      if (value.transformed && ctx.inAssignmentRhs) {
+        const ifsJoiner = this.ifsJoiner();
+        return breakSegment(ifsJoiner === '' ? 'field' : 'star', ifsJoiner, ctx.inDouble);
+      }
+      const rawJoiner = this.shell.store.readScalar('IFS') === '' ? '' : ' ';
+      return breakSegment(value.positional ? 'positional' : 'field', rawJoiner, ctx.inDouble);
     }
+    const ifsJoiner = this.ifsJoiner();
     const spaceEmptyIfs = ctx.spacedStar && (Boolean(value.positional) || Boolean(ctx.spacedArrayStar));
     return spaceEmptyIfs && ifsJoiner === ''
       ? breakSegment('field', ifsJoiner, ctx.inDouble)
@@ -710,7 +715,10 @@ export class Expander {
   }
 
   splitFields(segments: readonly WordSegment[]): TextSegment[][] {
-    return splitWordSegments(segments, this.currentIfs());
+    const needsIfs = segments.some(
+      (seg) => (seg.kind === 'break' && !seg.quoted) || (seg.kind === 'text' && seg.split && seg.text !== '')
+    );
+    return splitWordSegments(segments, needsIfs ? this.currentIfs() : ' \t\n');
   }
 
   finishField(field: readonly TextSegment[]): string {

@@ -118,8 +118,9 @@ function hasNoTargetValues(value: ParameterValue): boolean {
 
 function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDouble: boolean): boolean {
   if (value.kind === 'scalar') return (value.value ?? '') === '';
+  if (value.values.length <= 1) return (value.values[0] ?? '') === '';
   const sep = value.star && inDouble ? expander.ifsJoiner() : ' ';
-  if (value.values.length > 1 && sep !== '') return false;
+  if (sep !== '') return false;
   return value.values.every((element) => element === '');
 }
 
@@ -774,6 +775,9 @@ function scalarPositionalDeclarationSegment(
   ctx: WordContext
 ): WordSegment {
   const spend = (cost?: number): void => shell.runtime.spend(cost);
+  if (quotedValues.length <= 1) {
+    return textSegment(appendMetered('set -- ', quotedValues[0] ?? '', spend), ctx.inDouble, false);
+  }
   const ifsJoiner = expander.ifsJoiner();
   const joiner = !isStar || (!ctx.inDouble && ctx.spacedStar && ifsJoiner === '') ? ifsJoiner || ' ' : ifsJoiner;
   const joined = joinMetered(quotedValues, joiner, spend);
