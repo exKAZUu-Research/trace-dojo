@@ -582,8 +582,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.cls.symbol.name
       );
       const ctor = entry.cls.constructorSymbol;
-      // The header's names do not reach the instance it builds, as in Kotlin.
-      const headerScope = new Scope(entry.cls.scope, context);
+      // The header's names do not reach the instance it builds, as in Kotlin, but an inner class's do reach the
+      // instances of the classes around it.
+      const headerScope = new Scope(this.withOuterReceivers(entry.cls.scope, entry.cls.symbol, context), context);
       for (const [index, param] of (ctor?.params ?? []).entries()) {
         const declaration = entry.cls.decl.primaryConstructor?.params[index];
         const variable = this.newParameter(
@@ -1246,7 +1247,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   protected mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean {
     if (!symbol.owner || symbol.slot === undefined) return false;
     const entry = this.entryOfProperty.get(symbol);
-    if (!entry || entry.decl.initializer || entry.decl.delegate) return false;
+    // A lateinit property is read whenever the code says, which throws at run time when nothing assigned it yet.
+    if (!entry || entry.decl.initializer || entry.decl.delegate || symbol.isLateinit) return false;
     const owner = this.entryOfClass.get(symbol.owner) as ClassEntry;
     if (this.secondaryConstructorContexts.get(context) === owner && !owner.decl.primaryConstructor) return true;
     return this.initializerContexts.get(owner) === context;
