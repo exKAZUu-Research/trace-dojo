@@ -480,7 +480,8 @@ export class Checker {
           equation.kinds.map((kind, index) => bindings[index] ?? this.freshVar(kind))
         );
       }
-      if (family.closed && equation.lhs.every((pattern, index) => couldMatch(pattern, args[index]))) return undefined;
+      // The whole head at once, so that a variable it repeats stands for one type in every argument.
+      if (family.closed && couldMatch(tap(tcon(family), ...equation.lhs), tap(tcon(family), ...args))) return undefined;
     }
     return undefined;
   }
@@ -685,8 +686,8 @@ export class Checker {
   }
 
   checkExpr(expr: RExpr, expected: Type, context?: string): void {
-    if (expr.k === 'lambda' && functionParts(expected)?.multiplicity) {
-      this.checkLinearLambda(expr, expected, context);
+    if (expr.k === 'lambda' && checksParameters(expected, expr.pats.length)) {
+      this.checkLambda(expr, expected, context);
       return;
     }
     const actual = this.inferExpr(expr);
@@ -885,7 +886,11 @@ export class Checker {
   }
 
   /** Checks a lambda against a function type of LinearTypes, whose linear arguments it must use exactly once. */
-  private checkLinearLambda(expr: Extract<RExpr, { k: 'lambda' }>, expected: Type, context?: string): void {
+  /**
+   * Checks a lambda against a function type parameter by parameter, so that a parameter of a polymorphic type binds
+   * a polymorphic variable and one of a linear arrow is checked to be used once.
+   */
+  private checkLambda(expr: Extract<RExpr, { k: 'lambda' }>, expected: Type, context?: string): void {
     this.inPatternScope(() => {
       let remaining = expected;
       const linear: LocalVar[] = [];
@@ -1756,6 +1761,21 @@ export function polytypeScheme(type: TForall): Scheme {
     preds,
     type: body,
   };
+}
+
+/**
+ * Whether a lambda of `arity` parameters checks against `expected` one parameter at a time: when one of them has a
+ * linear arrow or a polymorphic type, which inferring the lambda first would lose.
+ */
+function checksParameters(expected: Type, arity: number): boolean {
+  let remaining = prune(expected);
+  for (let index = 0; index < arity; index++) {
+    const parts = functionParts(remaining);
+    if (!parts) return false;
+    if (parts.multiplicity || prune(parts.param).tag === 'forall') return true;
+    remaining = prune(parts.result);
+  }
+  return false;
 }
 
 export function conScheme(con: ConInfo): Scheme {
