@@ -153,7 +153,7 @@ function expandArgument(
 function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
-  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true });
+  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true, inQuotedOperatorWord: true });
 }
 
 function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {

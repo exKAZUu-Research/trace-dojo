@@ -338,7 +338,7 @@ export class Expander {
     switch (part.kind) {
       case 'literal': {
         return ctx.inDouble
-          ? [textSegment(unescapeDoubleQuoted(part.text, ctx.inOperatorWord), true, false)]
+          ? [textSegment(unescapeDoubleQuoted(part.text, ctx.inQuotedOperatorWord), true, false)]
           : literalSegments(part.text);
       }
       case 'single':
@@ -366,6 +366,7 @@ export class Expander {
       inDouble: true,
       spacedStar: ctx.spacedStar,
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
+      ...(ctx.inQuotedOperatorWord ? { inQuotedOperatorWord: true } : {}),
     });
     if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];
     const kept = inner.filter((seg) => seg.kind !== 'emptyList');

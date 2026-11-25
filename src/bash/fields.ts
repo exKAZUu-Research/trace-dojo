@@ -5,6 +5,7 @@ export interface WordContext {
   readonly spacedStar: boolean;
   readonly inAssignmentValue?: boolean;
   readonly inOperatorWord?: boolean;
+  readonly inQuotedOperatorWord?: boolean;
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };
