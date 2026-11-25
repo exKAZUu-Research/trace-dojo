@@ -43,7 +43,6 @@ export function readAssociativePair(
     };
   }
   const key = compoundElementPlainText(element);
-  const rawKey = typeof element === 'string' ? element : (element.rawText ?? key);
   const next = elements[index + 1];
   const value = next === undefined ? '' : compoundElementPlainText(next);
   return {
@@ -51,7 +50,7 @@ export function readAssociativePair(
     value,
     append: false,
     consumedNext: true,
-    ...(key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
+    ...(key === '' ? { error: "'': bad array subscript" } : {}),
   };
 }
 
@@ -95,7 +94,7 @@ export class IndexedTable extends Map<bigint, string> implements ReadonlyIndexed
   }
 
   override set(key: bigint, value: string): this {
-    this.revision++;
+    if (this.get(key) !== value) this.revision++;
     return super.set(key, value);
   }
 
@@ -160,8 +159,10 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
       .get(hash & (this.capacity - 1))
       ?.find((entry) => entry.hash === hash && entry.key === key);
     if (existing) {
-      existing.value = value;
-      this.revision++;
+      if (existing.value !== value) {
+        existing.value = value;
+        this.revision++;
+      }
       return;
     }
     if (this.count >= this.capacity * 2) this.rehash();
