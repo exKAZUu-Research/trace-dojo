@@ -1,4 +1,3 @@
-import { CompileError } from '../interpreter/diagnostics';
 import { compileError, unsupportedError } from './errors';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -13,7 +12,15 @@ export function preprocess(source: string): string {
 
 interface Macro {
   params?: string[];
-  body: string;
+  body: Token[];
+}
+
+interface Token {
+  kind: 'name' | 'space' | 'newline' | 'comment' | 'other';
+  text: string;
+  row: number;
+  /** Whether the name was met inside the expansion of its own macro, after which C never expands it ("blue paint"). */
+  painted?: boolean;
 }
 
 /** The versions `MIN_VERSION_...` compares with: those GHC 9.14.1 comes with. */
@@ -25,6 +32,10 @@ const PACKAGE_VERSIONS: Record<string, number[]> = {
 
 /** Macros that tell the operating system or the CPU, which this environment does not let a program depend on. */
 const PLATFORM_MACRO = /^\w+_(HOST|BUILD|TARGET)_(OS|ARCH)$/;
+
+const DIRECTIVE = /^\s*#\s*([A-Za-z]+)?(.*)$/;
+
+const UNCLOSED_CALL = 'マクロの呼び出しの ) がありません。';
 
 interface Conditional {
   /** Whether the lines of the current branch are kept. */
@@ -38,62 +49,42 @@ interface Conditional {
 }
 
 class Preprocessor {
-  private readonly macros = new Map<string, Macro>([
-    ['__GLASGOW_HASKELL__', { body: '914' }],
-    ['__GLASGOW_HASKELL_FULL_VERSION__', { body: '"9.14.1"' }],
-    ['__GLASGOW_HASKELL_PATCHLEVEL1__', { body: '1' }],
-    ['__FILE__', { body: '"Main.hs"' }],
+  readonly macros = new Map<string, Macro>([
+    ['__GLASGOW_HASKELL__', { body: tokenize('914', 0) }],
+    ['__GLASGOW_HASKELL_FULL_VERSION__', { body: tokenize('"9.14.1"', 0) }],
+    ['__GLASGOW_HASKELL_PATCHLEVEL1__', { body: tokenize('1', 0) }],
+    ['__FILE__', { body: tokenize('"Main.hs"', 0) }],
   ]);
 
-  private row = 0;
-  private inBlockComment = 0;
+  /** The row that `__LINE__` and errors refer to. */
+  row = 0;
 
   run(source: string): string {
-    const lines = source.split('\n');
-    const output: string[] = [];
+    const lexer = new Lexer(source, true, 0);
     const stack: Conditional[] = [];
-    for (let index = 0; index < lines.length; index++) {
-      this.row = index;
-      let line = lines[index];
-      const directive = /^\s*#\s*([A-Za-z]+)?(.*)$/.exec(line);
-      if (directive && this.inBlockComment === 0) {
-        // A directive continues onto the next line after a backslash.
-        let rest = directive[2];
-        let joined = 0;
-        while (rest.endsWith('\\') && index + 1 < lines.length) {
-          rest = rest.slice(0, -1) + lines[++index];
-          joined++;
-        }
-        const active = stack.every((item) => item.active);
-        this.directive(directive[1] ?? '', rest.trim(), stack, active);
-        output.push(...Array.from({ length: joined + 1 }, () => ''));
-        continue;
+    let output = '';
+    while (!lexer.done) {
+      this.row = lexer.row;
+      const directive = DIRECTIVE.exec(lexer.peekLine());
+      if (directive) {
+        const { rest, newlines } = lexer.skipDirective(directive[2]);
+        this.directive(
+          directive[1] ?? '',
+          rest.trim(),
+          stack,
+          stack.every((item) => item.active)
+        );
+        output += '\n'.repeat(newlines);
+      } else if (stack.every((item) => item.active)) {
+        // A macro call's arguments continue onto the code lines after it until its `)`.
+        output += new Expansion(this, lexer.line(), false, () => lexer.codeLine()).run();
+      } else if (lexer.skipLine()) {
+        output += '\n';
       }
-      if (!stack.every((item) => item.active)) {
-        output.push('');
-        continue;
-      }
-      // A macro call's arguments continue onto the code lines after it until its `)`.
-      const comment = this.inBlockComment;
-      let joined = 0;
-      for (;;) {
-        try {
-          line = this.expandLine(line);
-          break;
-        } catch (error) {
-          const next = lines[index + 1];
-          if (!isUnclosedCall(error) || next === undefined || /^\s*#/.test(next)) throw error;
-          this.inBlockComment = comment;
-          line += `\n${next}`;
-          index++;
-          joined++;
-        }
-      }
-      output.push(line, ...Array.from({ length: Math.max(joined - (line.split('\n').length - 1), 0) }, () => ''));
     }
     const open = stack.at(-1);
     if (open) throw this.error(open.row, '#if に対応する #endif がありません。');
-    return output.join('\n');
+    return output;
   }
 
   private directive(name: string, rest: string, stack: Conditional[], active: boolean): void {
@@ -140,7 +131,8 @@ class Preprocessor {
         if (!match) throw this.error(this.row, '#define の書き方に誤りがあります。');
         this.checkPlatform(match[1]);
         const params = match[2] === undefined ? undefined : match[3].split(',').map((param) => param.trim());
-        this.macros.set(match[1], { ...(params ? { params: params.filter(Boolean) } : {}), body: match[4] });
+        const body = tokenize(match[4], this.row);
+        this.macros.set(match[1], { ...(params ? { params: params.filter(Boolean) } : {}), body });
         return;
       }
       case 'undef': {
@@ -183,7 +175,7 @@ class Preprocessor {
     return this.macros.has(name) || name === '__LINE__';
   }
 
-  private checkPlatform(name: string): void {
+  checkPlatform(name: string): void {
     if (PLATFORM_MACRO.test(name)) {
       throw unsupportedError(this.row, `OS や CPU の種類による切り替え（${name}）`);
     }
@@ -199,211 +191,430 @@ class Preprocessor {
         return this.isDefined(name) ? '1' : '0';
       }
     );
-    const expanded = this.expand(withDefined, new Set(), true);
+    const expanded = new Expansion(this, tokenize(withDefined, this.row), true).run();
     const error = (message: string): Error => this.error(this.row, message);
     return evaluateCondition(new ConditionParser(expanded, error).parse(), error).value !== 0n;
   }
 
-  /** Expands the macros of a line of code, outside its strings, characters, and comments. */
-  private expandLine(line: string): string {
-    let result = '';
-    let index = 0;
-    let code = '';
-    const flush = (): void => {
-      result += this.expand(code, new Set(), false);
-      code = '';
-    };
-    while (index < line.length) {
-      if (this.inBlockComment > 0) {
-        const start = index;
-        while (index < line.length && this.inBlockComment > 0) {
-          if (line.startsWith('{-', index)) {
-            this.inBlockComment++;
-            index += 2;
-          } else if (line.startsWith('-}', index)) {
-            this.inBlockComment--;
-            index += 2;
-          } else index++;
-        }
-        result += line.slice(start, index);
-        continue;
-      }
-      const char = line[index];
-      if (line.startsWith('{-', index)) {
-        flush();
-        this.inBlockComment = 1;
-        result += '{-';
-        index += 2;
-        continue;
-      }
-      if (line.startsWith('--', index) && /^--+(?![!#$%&*+./<=>?@\\^|~:])/.test(line.slice(index))) {
-        flush();
-        result += line.slice(index);
-        break;
-      }
-      if (char === '"' || isCharacterLiteral(line, index, code)) {
-        // A literal stays in the code, which a macro call's arguments may hold; expansion copies it as it is.
-        const end = literalEnd(line, index);
-        code += line.slice(index, end);
-        index = end;
-        continue;
-      }
-      code += char;
-      index++;
-    }
-    flush();
-    return result;
-  }
-
-  /** Expands the macros of a piece of code; a macro being expanded is not expanded again inside itself. */
-  private expand(code: string, active: Set<string>, condition: boolean): string {
-    let text = code;
-    let result = '';
-    let index = 0;
-    while (index < text.length) {
-      if (text[index] === '"' || isCharacterLiteral(text, index, result)) {
-        const end = literalEnd(text, index);
-        result += text.slice(index, end);
-        index = end;
-        continue;
-      }
-      const match = /^[A-Za-z_][\w']*/.exec(text.slice(index));
-      if (!match || (index > 0 && /[\w']/.test(text[index - 1]))) {
-        result += text[index];
-        index++;
-        continue;
-      }
-      const name = match[0];
-      index += name.length;
-      if (condition) this.checkPlatform(name);
-      const expanded = this.expandName(name, text, index, active, condition);
-      chargeTypeWork(expanded.text.length);
-      // As C rescans a replacement with the code after it, a function-like macro's name that ends the replacement
-      // takes the arguments that follow it.
-      const tail = /(?<![\w'])[A-Za-z_][\w']*$/.exec(expanded.text);
-      const follower = tail && tail[0] !== name && !active.has(tail[0]) ? this.macros.get(tail[0]) : undefined;
-      if (follower?.params && /^\s*\(/.test(text.slice(expanded.end))) {
-        result += expanded.text.slice(0, tail?.index);
-        text = (tail?.[0] ?? '') + text.slice(expanded.end);
-        index = 0;
-        continue;
-      }
-      result += expanded.text;
-      index = expanded.end;
-    }
-    return result;
-  }
-
-  /** What a name in code expands to, with where the code after it, past a macro call's arguments, starts. */
-  private expandName(
-    name: string,
-    text: string,
-    index: number,
-    active: Set<string>,
-    condition: boolean
-  ): { text: string; end: number } {
-    if (name === '__LINE__') return { text: String(this.row + 1), end: index };
-    const version = /^MIN_VERSION_(\w+)$/.exec(name);
-    const macro = active.has(name) ? undefined : this.macros.get(name);
-    if (!macro && !version) return { text: condition ? '0' : name, end: index };
-    if (macro && !macro.params) {
-      return { text: this.blocking(active, name, () => this.expand(macro.body, active, condition)), end: index };
-    }
-    const call = /^\s*\(/.exec(text.slice(index));
-    if (!call) return { text: name, end: index };
-    const { args, end } = splitArguments(text, index + call[0].length - 1, (message) => this.error(this.row, message));
-    if (version) {
-      // In code, GHC's macro is a comparison, which Haskell reads as a Bool.
-      const satisfied = this.minVersion(version[1], args);
-      return { text: condition ? String(satisfied) : satisfied === 1 ? 'True' : 'False', end };
-    }
-    const params = (macro as Macro).params ?? [];
-    if (params.length !== args.length) {
-      throw this.error(this.row, `マクロ ${name} には、引数を ${params.length} 個書いてください。`);
-    }
-    // As C does, each argument is expanded in full first, under the macros being expanded around the call, and the
-    // body with the results in it is then expanded again with this macro blocked.
-    const expandedArgs = args.map((arg) => this.expand(arg.trim(), active, condition));
-    const body = (macro as Macro).body.replaceAll(/[A-Za-z_]\w*/g, (word) => {
-      const position = params.indexOf(word);
-      return position === -1 ? word : expandedArgs[position];
-    });
-    return { text: this.blocking(active, name, () => this.expand(body, active, condition)), end };
-  }
-
-  /** Expands with a macro blocked, in the one set of the macros being expanded, which nested expansions share. */
-  private blocking(active: Set<string>, name: string, expand: () => string): string {
-    active.add(name);
-    try {
-      return expand();
-    } finally {
-      active.delete(name);
-    }
-  }
-
-  private minVersion(packageName: string, args: string[]): number {
-    const version = PACKAGE_VERSIONS[packageName];
-    if (!version) throw this.error(this.row, `パッケージ ${packageName} の版のマクロはありません。`);
-    const wanted = args.map((arg) => Number.parseInt(this.expand(arg, new Set(), true).trim(), 10));
-    for (const [position, part] of wanted.entries()) {
-      const have = version[position] ?? 0;
-      if (have !== part) return have > part ? 1 : 0;
-    }
-    return 1;
-  }
-
-  private error(row: number, message: string): Error {
+  error(row: number, message: string): Error {
     return compileError(row, message);
   }
 }
 
-/** Whether a character literal starts at a position: a `'` that does not end a name such as `x'`. */
-function isCharacterLiteral(text: string, index: number, before: string): boolean {
-  return text[index] === "'" && /^'(\\.[^']*|[^\\'])'/.test(text.slice(index)) && !/[\w']$/.test(before);
+/** A run of tokens being read: the input, a macro's replacement, an argument being expanded, or tokens put back. */
+interface Frame {
+  tokens: Token[];
+  position: number;
+  /** The macro whose replacement the frame holds, which is not expanded while the frame is open. */
+  macro?: string;
+  /** Whether the frame holds an argument expanded on its own, whose end ends the expansion of the argument. */
+  argument?: boolean;
 }
 
-/** Where a string or character literal starting at a position ends. */
-function literalEnd(line: string, start: number): number {
-  const quote = line[start];
-  let index = start + 1;
-  while (index < line.length && line[index] !== quote) index += line[index] === '\\' ? 2 : 1;
-  return Math.min(index + 1, line.length);
+/** Where expanded tokens go; in a condition, a name that is no macro becomes `0`. */
+interface Sink {
+  tokens: Token[];
+  condition: boolean;
 }
 
-/** The arguments of a macro call whose `(` is at a position, split at the commas outside parentheses. */
-function splitArguments(
-  text: string,
-  open: number,
-  error: (message: string) => Error
-): { args: string[]; end: number } {
-  const args: string[] = [];
-  let depth = 0;
-  let current = '';
-  for (let index = open + 1; index < text.length; index++) {
-    const char = text[index];
-    if (char === '"' || isCharacterLiteral(text, index, current)) {
-      const end = literalEnd(text, index);
-      current += text.slice(index, end);
-      index = end - 1;
-      continue;
-    }
-    if (char === '(') depth++;
-    if (char === ')' && depth-- === 0) {
-      args.push(current);
-      return { args: args.length === 1 && args[0].trim() === '' ? [] : args, end: index + 1 };
-    }
-    if (char === ',' && depth === 0) {
-      args.push(current);
-      current = '';
-    } else current += char;
+/** A call of a function-like macro, or of `MIN_VERSION_...`, whose arguments are being expanded. */
+interface Call {
+  name: string;
+  macro?: Macro;
+  version?: string;
+  args: Token[][];
+  expanded: Token[][];
+}
+
+/**
+ * The expansion of macros in a run of tokens, by C's rules: a function-like macro's arguments are expanded each on
+ * its own first, and the replacement is then read again, with the tokens after it, while the macro is disabled. The
+ * frames being read form an explicit stack rather than nested calls, so a replacement ending in a function-like
+ * macro's name takes the arguments that follow it, and the input may supply further lines to an unclosed call.
+ */
+class Expansion {
+  private readonly frames: Frame[];
+  private readonly sinks: Sink[];
+  private readonly calls: Call[] = [];
+  /** The macros of the open frames. */
+  private readonly disabled = new Set<string>();
+  /** The newlines inside calls, which follow the line the calls end in so that later rows keep their numbers. */
+  private skippedRows = 0;
+
+  constructor(
+    private readonly preprocessor: Preprocessor,
+    tokens: Token[],
+    condition: boolean,
+    private readonly continuation?: () => Token[] | undefined
+  ) {
+    this.frames = [{ tokens, position: 0 }];
+    this.sinks = [{ tokens: [], condition }];
   }
-  throw error(UNCLOSED_CALL);
+
+  run(): string {
+    for (;;) {
+      const frame = this.frames.at(-1) as Frame;
+      if (frame.position < frame.tokens.length) {
+        this.examine(frame.tokens[frame.position++], this.frames.length === 1);
+      } else if (this.frames.length === 1) {
+        return this.sinks[0].tokens.map((token) => token.text).join('') + '\n'.repeat(this.skippedRows);
+      } else {
+        this.close();
+        if (frame.argument) this.finishArgument();
+      }
+    }
+  }
+
+  private get condition(): boolean {
+    return (this.sinks.at(-1) as Sink).condition;
+  }
+
+  private examine(token: Token, fromInput: boolean): void {
+    if (token.kind !== 'name') {
+      this.emit(token);
+      return;
+    }
+    const { preprocessor } = this;
+    if (fromInput) preprocessor.row = token.row;
+    const name = token.text;
+    if (this.condition) preprocessor.checkPlatform(name);
+    if (name === '__LINE__') {
+      this.emit({ kind: 'other', text: String(preprocessor.row + 1), row: token.row });
+      return;
+    }
+    const macro = token.painted ? undefined : preprocessor.macros.get(name);
+    if (macro && this.disabled.has(name)) {
+      token.painted = true;
+      this.emitName(token, false);
+      return;
+    }
+    const version = /^MIN_VERSION_(\w+)$/.exec(name)?.[1];
+    if (!macro && version === undefined) {
+      this.emitName(token, false);
+    } else if (macro && !macro.params) {
+      chargeTypeWork(1 + macro.body.length);
+      this.open(
+        name,
+        macro.body.map((bodyToken) => ({ ...bodyToken }))
+      );
+    } else if (this.takeOpenParen()) {
+      this.call({
+        name,
+        ...(version === undefined ? { macro } : { version }),
+        args: this.collectArguments(),
+        expanded: [],
+      });
+    } else {
+      this.emitName(token, true);
+    }
+  }
+
+  /** Emits a name that is not expanded, which a condition reads as `0` unless it may yet be a call. */
+  private emitName(token: Token, functionLike: boolean): void {
+    this.emit(this.condition && !functionLike ? { kind: 'other', text: '0', row: token.row } : token);
+  }
+
+  private emit(token: Token): void {
+    (this.sinks.at(-1) as Sink).tokens.push(token);
+  }
+
+  private open(macro: string, tokens: Token[]): void {
+    this.frames.push({ tokens, position: 0, macro });
+    this.disabled.add(macro);
+  }
+
+  private close(): void {
+    const { macro } = this.frames.pop() as Frame;
+    if (macro !== undefined) this.disabled.delete(macro);
+  }
+
+  /**
+   * The next token, past the frames that have ended; none at the end of an argument, or at the end of the input when
+   * no more lines are wanted or there are none.
+   */
+  private read(moreLines: boolean): Token | undefined {
+    for (;;) {
+      const frame = this.frames.at(-1) as Frame;
+      if (frame.position < frame.tokens.length) return frame.tokens[frame.position++];
+      if (frame.argument) return undefined;
+      if (this.frames.length > 1) {
+        this.close();
+      } else {
+        const line = moreLines ? this.continuation?.() : undefined;
+        if (!line) return undefined;
+        frame.tokens = line;
+        frame.position = 0;
+      }
+    }
+  }
+
+  /** Reads the `(` of a call after a function-like macro's name, or puts back what follows the name. */
+  private takeOpenParen(): boolean {
+    const skipped: Token[] = [];
+    for (;;) {
+      const token = this.read(false);
+      if (token?.kind === 'space') {
+        skipped.push(token);
+        continue;
+      }
+      if (token?.kind === 'other' && token.text === '(') return true;
+      if (token) skipped.push(token);
+      if (skipped.length > 0) this.frames.push({ tokens: skipped, position: 0 });
+      return false;
+    }
+  }
+
+  /** The arguments of a call after its `(`, split at the commas outside parentheses and trimmed. */
+  private collectArguments(): Token[][] {
+    const args: Token[][] = [];
+    let current: Token[] = [];
+    let depth = 0;
+    for (;;) {
+      const token = this.readArgumentToken();
+      const punctuation = token.kind === 'other' ? token.text : '';
+      if (punctuation === ')' && depth-- === 0) {
+        args.push(trimSpaces(current));
+        return args.length === 1 && args[0].length === 0 ? [] : args;
+      }
+      if (punctuation === ',' && depth === 0) {
+        args.push(trimSpaces(current));
+        current = [];
+        continue;
+      }
+      if (punctuation === '(') depth++;
+      current.push(token);
+    }
+  }
+
+  /** The next token of a call's arguments, where a newline or a comment is a space. */
+  private readArgumentToken(): Token {
+    const token = this.read(true);
+    if (!token) throw this.preprocessor.error(this.preprocessor.row, UNCLOSED_CALL);
+    if (token.kind !== 'newline' && token.kind !== 'comment') return token;
+    this.skippedRows += token.text.split('\n').length - 1;
+    return { kind: 'space', text: ' ', row: token.row };
+  }
+
+  private call(call: Call): void {
+    const { name, macro, version, args } = call;
+    if (version !== undefined && !Object.hasOwn(PACKAGE_VERSIONS, version)) {
+      throw this.preprocessor.error(this.preprocessor.row, `パッケージ ${version} の版のマクロはありません。`);
+    }
+    const params = macro?.params ?? [];
+    if (macro && params.length !== args.length) {
+      throw this.preprocessor.error(
+        this.preprocessor.row,
+        `マクロ ${name} には、引数を ${params.length} 個書いてください。`
+      );
+    }
+    chargeTypeWork(1 + args.reduce((total, arg) => total + arg.length, 0));
+    if (args.length === 0) {
+      this.finishCall(call);
+    } else {
+      this.calls.push(call);
+      this.expandArgument(call);
+    }
+  }
+
+  /** Starts expanding the next argument of a call on its own, under the macros disabled around the call. */
+  private expandArgument(call: Call): void {
+    // In code, GHC's `MIN_VERSION_...` is a comparison whose arguments are integers, as in a condition.
+    this.sinks.push({ tokens: [], condition: call.version !== undefined || this.condition });
+    this.frames.push({ tokens: call.args[call.expanded.length], position: 0, argument: true });
+  }
+
+  private finishArgument(): void {
+    const call = this.calls.at(-1) as Call;
+    call.expanded.push((this.sinks.pop() as Sink).tokens);
+    if (call.expanded.length < call.args.length) {
+      this.expandArgument(call);
+    } else {
+      this.calls.pop();
+      this.finishCall(call);
+    }
+  }
+
+  private finishCall({ name, macro, version, expanded }: Call): void {
+    const { row } = this.preprocessor;
+    if (version !== undefined) {
+      const wanted = expanded.map((arg) =>
+        Number.parseInt(
+          arg
+            .map((token) => token.text)
+            .join('')
+            .trim(),
+          10
+        )
+      );
+      const satisfied = satisfiesVersion(PACKAGE_VERSIONS[version], wanted);
+      // In code, GHC's macro is a comparison, which Haskell reads as a Bool.
+      this.emit({
+        kind: 'other',
+        text: this.condition ? String(Number(satisfied)) : satisfied ? 'True' : 'False',
+        row,
+      });
+      return;
+    }
+    const { params = [], body } = macro as Macro;
+    const argOf = (token: Token): Token[] | undefined =>
+      token.kind === 'name' ? expanded[params.indexOf(token.text)] : undefined;
+    chargeTypeWork(1 + body.reduce((total, token) => total + (argOf(token)?.length ?? 1), 0));
+    this.open(
+      name,
+      body.flatMap((token) => (argOf(token) ?? [token]).map((replacement) => ({ ...replacement })))
+    );
+  }
 }
 
-const UNCLOSED_CALL = 'マクロの呼び出しの ) がありません。';
+function satisfiesVersion(version: number[], wanted: number[]): boolean {
+  for (const [position, part] of wanted.entries()) {
+    const have = version[position] ?? 0;
+    if (have !== part) return have > part;
+  }
+  return true;
+}
 
-function isUnclosedCall(error: unknown): boolean {
-  return error instanceof CompileError && error.diagnostics[0]?.message === UNCLOSED_CALL;
+function trimSpaces(tokens: Token[]): Token[] {
+  let start = 0;
+  let end = tokens.length;
+  while (start < end && tokens[start].kind === 'space') start++;
+  while (end > start && tokens[end - 1].kind === 'space') end--;
+  return tokens.slice(start, end);
+}
+
+/** The tokens of a macro's body or a condition, where `--` and `{-` are no comments. */
+function tokenize(text: string, row: number): Token[] {
+  const lexer = new Lexer(text, false, row);
+  const tokens: Token[] = [];
+  while (!lexer.done) tokens.push(...lexer.line());
+  return tokens;
+}
+
+const LINE_COMMENT = /--+(?![!#$%&*+./<=>?@\\^|~:])/y;
+/** A character literal, unless its `'` ends a name such as `x'`, which the caller checks. */
+const CHARACTER = /'(?:\\.[^'\n]*|[^\\'\n])'/y;
+/** A name, a number or a `'` with the name characters after it, or spaces. */
+const WORD = /[A-Za-z_][\w']*|[\d'][\w']*|[^\S\n]+/y;
+
+/** Reads the tokens of a text line by line; in code, Haskell's comments are tokens copied as they are. */
+class Lexer {
+  position = 0;
+
+  constructor(
+    private readonly text: string,
+    private readonly comments: boolean,
+    public row: number
+  ) {}
+
+  get done(): boolean {
+    return this.position >= this.text.length;
+  }
+
+  /** Skips a directive's lines, which a backslash continues, with its text after the name and the newlines skipped. */
+  skipDirective(firstRest: string): { rest: string; newlines: number } {
+    let rest = firstRest;
+    let more = this.skipLine();
+    let newlines = Number(more);
+    while (rest.endsWith('\\') && more) {
+      rest = rest.slice(0, -1) + this.peekLine();
+      more = this.skipLine();
+      newlines += Number(more);
+    }
+    return { rest, newlines };
+  }
+
+  /** The tokens of the line ahead unless it is a directive or there is none. */
+  codeLine(): Token[] | undefined {
+    return this.done || /^\s*#/.test(this.peekLine()) ? undefined : this.line();
+  }
+
+  /** The line ahead, without its newline. */
+  peekLine(): string {
+    const end = this.text.indexOf('\n', this.position);
+    return this.text.slice(this.position, end === -1 ? undefined : end);
+  }
+
+  /** Skips the line ahead, telling whether a newline ended it. */
+  skipLine(): boolean {
+    const end = this.text.indexOf('\n', this.position);
+    this.position = end === -1 ? this.text.length : end + 1;
+    if (end === -1) return false;
+    this.row++;
+    return true;
+  }
+
+  /** The tokens of the line ahead through its newline, past the newlines of a block comment. */
+  line(): Token[] {
+    const tokens: Token[] = [];
+    while (!this.done) {
+      const start = this.position;
+      const kind = this.scan();
+      const token: Token = { kind, text: this.text.slice(start, this.position), row: this.row };
+      tokens.push(token);
+      if (kind === 'newline') {
+        this.row++;
+        break;
+      }
+      if (kind === 'comment') this.row += token.text.split('\n').length - 1;
+    }
+    return tokens;
+  }
+
+  private scan(): Token['kind'] {
+    const { text, position } = this;
+    if (this.comments && text.startsWith('{-', position)) {
+      this.position = blockCommentEnd(text, position);
+      return 'comment';
+    }
+    if (this.comments && matchEnd(LINE_COMMENT, text, position) !== undefined) {
+      const end = text.indexOf('\n', position);
+      this.position = end === -1 ? text.length : end;
+      return 'comment';
+    }
+    if (text[position] === '"') {
+      this.position = stringEnd(text, position);
+      return 'other';
+    }
+    const character = /[\w']/.test(text[position - 1] ?? '') ? undefined : matchEnd(CHARACTER, text, position);
+    const end = character ?? matchEnd(WORD, text, position);
+    if (end === undefined) {
+      this.position = position + 1;
+      return text[position] === '\n' ? 'newline' : 'other';
+    }
+    this.position = end;
+    if (character !== undefined) return 'other';
+    return /[A-Za-z_]/.test(text[position]) ? 'name' : /\s/.test(text[position]) ? 'space' : 'other';
+  }
+}
+
+function matchEnd(pattern: RegExp, text: string, position: number): number | undefined {
+  pattern.lastIndex = position;
+  return pattern.test(text) ? pattern.lastIndex : undefined;
+}
+
+/** Where a block comment starting at a position ends, after the `-}` matching its `{-` among nested ones. */
+function blockCommentEnd(text: string, start: number): number {
+  let depth = 1;
+  let index = start + 2;
+  while (index < text.length && depth > 0) {
+    if (text.startsWith('{-', index)) {
+      depth++;
+      index += 2;
+    } else if (text.startsWith('-}', index)) {
+      depth--;
+      index += 2;
+    } else index++;
+  }
+  return index;
+}
+
+/** Where a string literal starting at a position ends: after its closing `"`, or at the end of its line. */
+function stringEnd(text: string, start: number): number {
+  let index = start + 1;
+  while (index < text.length && text[index] !== '"' && text[index] !== '\n') {
+    index += text[index] === '\\' && text[index + 1] !== '\n' ? 2 : 1;
+  }
+  return text[index] === '"' ? index + 1 : Math.min(index, text.length);
 }
 
 /**
