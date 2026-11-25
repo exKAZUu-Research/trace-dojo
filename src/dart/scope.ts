@@ -97,6 +97,12 @@ export class FunctionContext {
   switchDepth = 0;
   assignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
   capturedAssignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
+  /**
+   * The `return;` statements of a function literal that its context's nullable value type allows, which a `return`
+   * with a value in the same function rules out, as the SDK requires.
+   */
+  readonly contextBareReturns: Span[] = [];
+  returnsValue = false;
   /** The type of the value each `return` gives, collected to infer a closure's return type. */
   returnTypes: DartType[] | undefined;
   /** For `sync*` functions, the type of the elements `yield` gives. */

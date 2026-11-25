@@ -150,6 +150,10 @@ export abstract class StatementCompiler extends PatternCompiler {
           return completion?.kind === 'return' ? completion.value : undefined;
         };
       }
+      if (fn.returnsValue) {
+        for (const bare of fn.contextBareReturns)
+          this.error(bare, 'この関数は値を return するので、return にも値が必要です。');
+      }
       const returnType = spec.returnType ?? this.inferredReturnType(fn, spec);
       return { fn, returnType, run, bind: binders, usesTypeEnv: true };
     } finally {
@@ -1218,17 +1222,18 @@ export abstract class StatementCompiler extends PatternCompiler {
         expected.kind !== 'void' &&
         expected.kind !== 'dynamic' &&
         expected.kind !== 'null' &&
-        // A function literal's return type comes from its context, which `return;` fits when it allows null.
-        (this.fn.kind.returnType !== undefined || !isNullable(expected)) &&
         !this.fn.kind.isConstructor
       ) {
-        this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
+        // A function literal's return type comes from its context, which `return;` fits when it allows null.
+        if (this.fn.kind.returnType === undefined && isNullable(expected)) this.fn.contextBareReturns.push(statement);
+        else this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
       }
       this.flow = this.flow.unreachable;
       const completion: Completion = { kind: 'return', value: undefined };
       return () => completion;
     }
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
+    this.fn.returnsValue = true;
     const compiled = this.fn.kind.isAsync
       ? this.compileAsyncReturnValue(statement.value, expected, false)
       : this.compileReturnValue(statement.value, expected ?? this.fn.contextReturn, false);
