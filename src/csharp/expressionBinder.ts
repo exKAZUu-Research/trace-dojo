@@ -78,6 +78,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
       case 'aliasQualified': {
         return this.bindAliasQualified(node, context);
       }
+      case 'checked': {
+        return this.inCheckedContext(node.isChecked, () => this.bindExpression(node.operand, context));
+      }
       case 'predefinedTypeName': {
         return {
           kind: 'typeRef',

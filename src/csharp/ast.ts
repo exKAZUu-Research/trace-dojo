@@ -168,6 +168,10 @@ export type Expression =
       returnType: TypeNode | undefined;
       /** Whether a query clause stands for the lambda, whose conversion errors Roslyn reports without CS1662. */
       isQuery?: true;
+      /** An anonymous method written without a parameter list (`delegate { }`), which fits any parameters but `out`. */
+      omitsParameters?: true;
+      /** Whether `delegate (...) { }` wrote it rather than `=>`, which some messages name differently. */
+      isAnonymousMethod?: true;
     } & Position)
   | ({ kind: 'default'; type: TypeNode | undefined } & Position)
   | ({ kind: 'declaration'; type: TypeNode; designation: Designation } & Position)
@@ -175,7 +179,9 @@ export type Expression =
   | ({ kind: 'switch'; value: Expression; arms: SwitchArm[] } & Position)
   | ({ kind: 'throw'; value: Expression } & Position)
   | ({ kind: 'with'; value: Expression; members: MemberInitializer[] } & Position)
-  | ({ kind: 'query'; clauses: QueryClause[] } & Position);
+  | ({ kind: 'query'; clauses: QueryClause[] } & Position)
+  /** `checked(...)` or `unchecked(...)`, which sets whether integral arithmetic inside throws on overflow. */
+  | ({ kind: 'checked'; isChecked: boolean; operand: Expression } & Position);
 
 export type ArrayInitializer = { kind: 'arrayInitializer'; elements: (Expression | ArrayInitializer)[] } & Position;
 
@@ -241,7 +247,14 @@ export type Statement =
   | Block
   | ({ kind: 'empty' } & Position)
   | ({ kind: 'expression'; expression: Expression } & Position)
-  | ({ kind: 'localDeclaration'; isConst: boolean; type: TypeNode; declarators: VariableDeclarator[] } & Position)
+  | ({
+      kind: 'localDeclaration';
+      isConst: boolean;
+      type: TypeNode;
+      declarators: VariableDeclarator[];
+      /** A `using` declaration (`using var r = ...;`), which disposes its variables at the end of the enclosing block. */
+      using?: 'using' | 'await using';
+    } & Position)
   | ({ kind: 'deconstruction'; designation: Designation; value: Expression } & Position)
   | ({ kind: 'localFunction'; declaration: MethodDeclaration } & Position)
   | ({ kind: 'if'; condition: Expression; consequence: Statement; alternative: Statement | undefined } & Position)
@@ -263,7 +276,22 @@ export type Statement =
   | ({ kind: 'continue' } & Position)
   | ({ kind: 'return'; value: Expression | undefined } & Position)
   | ({ kind: 'throw'; value: Expression | undefined } & Position)
-  | ({ kind: 'try'; body: Block; catches: CatchClause[]; finally: Block | undefined } & Position);
+  | ({ kind: 'try'; body: Block; catches: CatchClause[]; finally: Block | undefined } & Position)
+  | ({ kind: 'checked'; isChecked: boolean; body: Block } & Position)
+  | ({ kind: 'lock'; value: Expression; body: Statement } & Position)
+  | ({ kind: 'goto'; target: GotoTarget } & Position)
+  | ({ kind: 'labeled'; label: string; statement: Statement } & Position)
+  | ({
+      kind: 'using';
+      /** The declared resources, or the expression whose value is the resource. */
+      resource:
+        | { kind: 'declaration'; type: TypeNode; declarators: VariableDeclarator[] }
+        | { kind: 'expression'; value: Expression };
+      body: Statement;
+      isAwait: boolean;
+    } & Position);
+
+export type GotoTarget = { kind: 'label'; name: string } | { kind: 'case'; value: Expression } | { kind: 'default' };
 
 export interface TypeParameterDeclaration extends Position {
   name: string;

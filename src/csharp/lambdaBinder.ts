@@ -42,14 +42,7 @@ export abstract class LambdaBinder extends MemberBinder {
 
   private readonly lambdaCache = new Map<
     Expression,
-    Map<
-      string,
-      {
-        result: BoundExpression | undefined;
-        diagnostics: SourceDiagnostic[];
-        returnType: Type | undefined;
-      }
-    >
+    Map<string, { result: BoundExpression | undefined; diagnostics: SourceDiagnostic[]; returnType: Type | undefined }>
   >();
 
   protected naturalTypeOf(expression: Unbound): Type | undefined {
@@ -65,7 +58,7 @@ export abstract class LambdaBinder extends MemberBinder {
       );
     }
     if (node.kind === 'lambda') {
-      if (node.parameters.some((parameter) => !parameter.type)) return undefined;
+      if (node.omitsParameters || node.parameters.some((parameter) => !parameter.type)) return undefined;
       const context = expression.context as BindContext;
       const parameterTypes = node.parameters.map((parameter) =>
         this.resolveType(parameter.type as NonNullable<LambdaParameter['type']>, context.fn.typeContext)
@@ -112,8 +105,9 @@ export abstract class LambdaBinder extends MemberBinder {
     }
     const node = expression.node;
     if (node.kind !== 'lambda') return undefined;
-    if (node.parameters.length !== parameterTypes.length) return undefined;
-    return this.bindLambda(node, expression.context as BindContext, undefined, parameterTypes, undefined, false)
+    const lambda = node.omitsParameters ? withParameters(node, parameterTypes.length, []) : node;
+    if (lambda.parameters.length !== parameterTypes.length) return undefined;
+    return this.bindLambda(lambda, expression.context as BindContext, undefined, parameterTypes, undefined, false)
       .returnType;
   }
 
@@ -128,17 +122,36 @@ export abstract class LambdaBinder extends MemberBinder {
   }
 
   protected bindLambdaTo(
-    node: LambdaExpression,
+    written: LambdaExpression,
     context: BindContext,
     target: Type,
     report: boolean
   ): BoundExpression | undefined {
     const invoke = this.delegateInvokeOf(target);
+    const what = written.isAnonymousMethod ? '匿名メソッド' : 'ラムダ式';
     if (!invoke) {
       if (report && target.kind !== 'error')
-        this.error(node, 'CS1660', `ラムダ式 はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`);
+        this.error(
+          written,
+          'CS1660',
+          `${what} はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`
+        );
       return undefined;
     }
+    if (written.omitsParameters && invoke.refKinds.includes('out')) {
+      if (report)
+        this.error(
+          written,
+          'CS1688',
+          `パラメーター リストに out パラメーターが含まれるため、パラメーター リストなしの匿名メソッドをデリゲート型 '${displayType(target)}' に変換できません`
+        );
+      return undefined;
+    }
+    // A `delegate { }` without a parameter list takes the delegate's parameters under names no code can use.
+    const node = written.omitsParameters
+      ? (this.anonymousMethodShapes.get(written)?.get(invoke.parameterTypes.length) ??
+        this.shapeAnonymousMethod(written, invoke.parameterTypes.length, invoke.refKinds))
+      : written;
     if (invoke.parameterTypes.length !== node.parameters.length) {
       if (report)
         this.error(
@@ -148,20 +161,42 @@ export abstract class LambdaBinder extends MemberBinder {
         );
       return undefined;
     }
-    for (const [index, parameter] of node.parameters.entries()) {
-      if (!parameter.type) continue;
+    const mismatches = node.parameters.flatMap((parameter, index) => {
+      if (!parameter.type) return [];
       const declared = this.resolveType(parameter.type, context.fn.typeContext);
-      if (!sameType(declared, invoke.parameterTypes[index])) {
-        if (report)
-          this.error(
-            parameter,
-            'CS1678',
-            `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
-          );
-        return undefined;
-      }
+      return sameType(declared, invoke.parameterTypes[index]) ? [] : [{ parameter, index, declared }];
+    });
+    if (mismatches.length > 0) {
+      if (!report) return undefined;
+      this.error(
+        node,
+        'CS1661',
+        `パラメーター型がデリゲート パラメーター型と一致しないため、${what} を型 '${displayType(target)}' に変換することはできません`
+      );
+      for (const { parameter, index, declared } of mismatches)
+        this.error(
+          parameter,
+          'CS1678',
+          `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
+        );
+      return undefined;
     }
     return this.bindLambda(node, context, target as NamedType, invoke.parameterTypes, invoke.returnType, report).result;
+  }
+
+  /** The anonymous methods without parameter lists, with the parameters given them for each count, kept for the cache. */
+  private readonly anonymousMethodShapes = new Map<LambdaExpression, Map<number, LambdaExpression>>();
+
+  private shapeAnonymousMethod(
+    node: LambdaExpression,
+    count: number,
+    refKinds: ('ref' | 'out' | 'in' | undefined)[]
+  ): LambdaExpression {
+    const shaped = withParameters(node, count, refKinds);
+    const shapes = this.anonymousMethodShapes.get(node) ?? new Map<number, LambdaExpression>();
+    shapes.set(count, shaped);
+    this.anonymousMethodShapes.set(node, shapes);
+    return shaped;
   }
 
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
@@ -394,4 +429,20 @@ export abstract class LambdaBinder extends MemberBinder {
  */
 export function typeIdentityKey(type: Type): string {
   return `${typeKey(type)}:${displayType(type)}`;
+}
+
+/** An anonymous method without a parameter list, given parameters that no code can name. */
+function withParameters(
+  node: LambdaExpression,
+  count: number,
+  refKinds: ('ref' | 'out' | 'in' | undefined)[]
+): LambdaExpression {
+  const parameters = Array.from({ length: count }, (_, index) => ({
+    name: `\0anonymous${index}`,
+    type: undefined,
+    modifier: refKinds[index],
+    row: node.row,
+    column: node.column,
+  }));
+  return { ...node, parameters };
 }

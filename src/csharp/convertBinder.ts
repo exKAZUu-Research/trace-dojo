@@ -232,6 +232,7 @@ export abstract class ConversionBinder extends LookupBinder {
       const value = expression.value as NumericValue;
       if (
         isExplicit &&
+        this.checkedContext !== false &&
         from !== 'decimal' &&
         targetUnderlying !== 'decimal' &&
         !this.constantFits(value, from, targetUnderlying)

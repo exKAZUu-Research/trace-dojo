@@ -122,7 +122,14 @@ export type BoundExpression =
       isVirtual: boolean;
     } & Base)
   | ({ kind: 'lambda'; lambda: LambdaInfo } & Base)
-  | ({ kind: 'unary'; operator: string; operand: BoundExpression; operandKind: OperandKind; isLifted: boolean } & Base)
+  | ({
+      kind: 'unary';
+      operator: string;
+      operand: BoundExpression;
+      operandKind: OperandKind;
+      isLifted: boolean;
+      isChecked?: boolean;
+    } & Base)
   | ({
       kind: 'binary';
       operator: string;
@@ -130,6 +137,8 @@ export type BoundExpression =
       right: BoundExpression;
       operandKind: OperandKind;
       isLifted: boolean;
+      /** Whether integral overflow throws, as in a `checked` context; undefined follows the program's default. */
+      isChecked?: boolean;
     } & Base)
   | ({ kind: 'logical'; operator: '&&' | '||'; left: BoundExpression; right: BoundExpression } & Base)
   | ({
@@ -148,6 +157,7 @@ export type BoundExpression =
       from: Type;
       isExplicit: boolean;
       userMethod?: MethodSymbol;
+      isChecked?: boolean;
     } & Base)
   | ({ kind: 'assign'; target: BoundLValue; value: BoundExpression } & Base)
   | ({
@@ -231,6 +241,16 @@ export type BoundPattern =
       properties: { members: (FieldSymbol | PropertySymbol)[]; owners: NamedType[]; pattern: BoundPattern }[];
       local: LocalSymbol | undefined;
     };
+
+/** A label that `goto` statements jump to. */
+export class LabelSymbol {
+  isUsed = false;
+
+  constructor(
+    readonly name: string,
+    readonly row: number
+  ) {}
+}
 
 /** How a statement records its step in a trace. */
 export type StepKind =
@@ -335,4 +355,19 @@ export type BoundStatement =
   | ({ kind: 'return'; value: BoundExpression | undefined } & StatementBase)
   | ({ kind: 'throw'; value: BoundExpression | undefined } & StatementBase)
   | ({ kind: 'try'; body: BoundBlock; catches: BoundCatch[]; finally: BoundBlock | undefined } & StatementBase)
+  | ({ kind: 'labeled'; label: LabelSymbol; statement: BoundStatement } & StatementBase)
+  /**
+   * A jump to a label, or with `goto case` and `goto default` to a section of the enclosing switch; undefined for a
+   * `goto case` whose label the switch lacks, which is reported and jumps nowhere.
+   */
+  | ({ kind: 'goto'; target: LabelSymbol | BoundSwitchSection | undefined } & StatementBase)
+  | ({ kind: 'lock'; value: BoundExpression; body: BoundStatement } & StatementBase)
+  /** Runs its body, then disposes the resource its local holds, if not null, through `IDisposable.Dispose`. */
+  | ({
+      kind: 'using';
+      local: LocalSymbol;
+      body: BoundStatement;
+      dispose: MethodSymbol;
+      disposable: NamedType;
+    } & StatementBase)
   | ({ kind: 'empty' } & StatementBase);

@@ -108,10 +108,10 @@ export abstract class OperatorBinder extends ConversionBinder {
     if (operand.kind === 'constant' && !isLifted && operand.value !== undefined) {
       if (kind === 'bool') return this.constant(!(operand.value as boolean), type, row);
       if (kind !== 'enum') {
-        // Constant expressions are evaluated in checked mode, as binary ones are in foldBinary.
+        // Constant expressions are evaluated in checked mode outside `unchecked`, as binary ones are in foldBinary.
         try {
           return this.constant(
-            unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue, true),
+            unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue, this.checkedContext !== false),
             type,
             row
           );
@@ -331,7 +331,7 @@ export abstract class OperatorBinder extends ConversionBinder {
       this.error(row, 'CS0020', '定数 0 による除算です');
       return node;
     }
-    return this.constant(arithmetic(operator, operandKind, left, right, true), node.type, row);
+    return this.constant(arithmetic(operator, operandKind, left, right, this.checkedContext !== false), node.type, row);
   }
 
   /** The operand kind that binary numeric promotion chooses for two numeric types, if any. */

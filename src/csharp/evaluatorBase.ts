@@ -183,7 +183,8 @@ export abstract class EvaluatorBase {
 
   // ---- Conversions ----
 
-  convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type): Value {
+  /** Converts a value; `isChecked` makes a numeric conversion's integral overflow throw, as `checked` does. */
+  convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type, isChecked = false): Value {
     switch (conversion) {
       case 'identity':
       case 'reference':
@@ -194,7 +195,7 @@ export abstract class EvaluatorBase {
       case 'numeric':
       case 'enumNumeric': {
         if (value === undefined) throw NULL_REFERENCE();
-        return convertNumeric(value as NumericValue, numericKindOf(from), numericKindOf(to));
+        return convertNumeric(value as NumericValue, numericKindOf(from), numericKindOf(to), isChecked);
       }
       case 'referenceCheck': {
         if (value === undefined || this.isInstanceOf(value, to)) return value;
@@ -209,10 +210,10 @@ export abstract class EvaluatorBase {
         return this.unbox(value, to);
       }
       case 'nullableUnwrap': {
-        return this.unwrapNullable(value, from, to);
+        return this.unwrapNullable(value, from, to, isChecked);
       }
       case 'nullableLifted': {
-        return this.convertLifted(value, from, to);
+        return this.convertLifted(value, from, to, isChecked);
       }
       case 'tuple': {
         return this.convertTuple(value as CsStruct, from as NamedType, to as NamedType);
@@ -231,22 +232,22 @@ export abstract class EvaluatorBase {
     return new CsBox(boxedType, copyValue(value));
   }
 
-  private unwrapNullable(value: Value, from: Type, to: Type): Value {
+  private unwrapNullable(value: Value, from: Type, to: Type, isChecked: boolean): Value {
     if (value === undefined)
       throw new PendingException('System.InvalidOperationException', 'Nullable object must have a value.');
     const underlying = nullableUnderlying(from) as Type;
     return sameType(underlying, to)
       ? value
-      : convertNumeric(value as NumericValue, numericKindOf(underlying), numericKindOf(to));
+      : convertNumeric(value as NumericValue, numericKindOf(underlying), numericKindOf(to), isChecked);
   }
 
-  private convertLifted(value: Value, from: Type, to: Type): Value {
+  private convertLifted(value: Value, from: Type, to: Type, isChecked: boolean): Value {
     if (value === undefined) return undefined;
     const fromType = nullableUnderlying(from) ?? from;
     const toType = nullableUnderlying(to) ?? to;
     if (sameType(fromType, toType)) return value;
     if (value instanceof CsBox) return this.unbox(value, to);
-    return convertNumeric(value as NumericValue, numericKindOf(fromType), numericKindOf(toType));
+    return convertNumeric(value as NumericValue, numericKindOf(fromType), numericKindOf(toType), isChecked);
   }
 
   private convertTuple(tuple: CsStruct, from: NamedType, to: NamedType): Value {

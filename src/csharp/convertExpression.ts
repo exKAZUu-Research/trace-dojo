@@ -36,8 +36,6 @@ import {
 
 /** The syntax of each stage C or D expression node, named for learners. */
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  anonymous_method_expression: '`delegate` による匿名メソッド',
-  checked_expression: '`checked`・`unchecked` 式',
   makeref_expression: '`__makeref`',
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
@@ -432,6 +430,17 @@ export class ExpressionConverter {
       case 'lambda_expression': {
         return this.convertLambda(node);
       }
+      case 'anonymous_method_expression': {
+        return this.convertAnonymousMethod(node);
+      }
+      case 'checked_expression': {
+        return {
+          kind: 'checked',
+          isChecked: hasToken(node, 'checked'),
+          operand: this.convertExpression(namedChildren(node)[0]),
+          ...position,
+        };
+      }
       case 'switch_expression': {
         return this.convertSwitchExpression(node);
       }
@@ -651,6 +660,43 @@ export class ExpressionConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private convertAnonymousMethod(node: Node): Expression {
+    const modifiers = new Set(
+      namedChildren(node)
+        .filter((child) => child.type === 'modifier')
+        .map((child) => child.text)
+    );
+    if (modifiers.has('async')) unsupported(node, '`async` の匿名メソッド');
+    const parametersNode = field(node, 'parameters');
+    const body = namedChildren(node).find((child) => child.type === 'block') as Node;
+    return {
+      kind: 'lambda',
+      parameters: parametersNode ? this.convertLambdaParameters(parametersNode) : [],
+      body: this.convertBlockNode(body),
+      isStatic: modifiers.has('static'),
+      returnType: undefined,
+      isAnonymousMethod: true,
+      ...(parametersNode ? {} : { omitsParameters: true as const }),
+      ...positionOf(node),
+    };
+  }
+
+  private convertLambdaParameters(node: Node): LambdaParameter[] {
+    return namedChildren(node).map((parameter) => {
+      if (parameter.type !== 'parameter') unsupported(parameter, '属性');
+      const typeNode = field(parameter, 'type');
+      const modifier = namedChildren(parameter).find((child) => child.type === 'modifier')?.text;
+      if (modifier !== undefined && !['ref', 'out', 'in'].includes(modifier))
+        unsupported(parameter, `ラムダ式の引数の \`${modifier}\``);
+      return {
+        name: requiredField(parameter, 'name').text,
+        type: typeNode ? this.convertType(typeNode) : undefined,
+        modifier: modifier as LambdaParameter['modifier'],
+        ...positionOf(parameter),
+      };
+    });
+  }
+
   private convertLambda(node: Node): Expression {
     const modifiers = new Set(
       childrenOf(node)
@@ -669,19 +715,7 @@ export class ExpressionConverter {
           ...positionOf(parameterNode),
         });
       } else if (parameterNode.type === 'parameter_list') {
-        for (const parameter of namedChildren(parameterNode)) {
-          if (parameter.type !== 'parameter') unsupported(parameter, '属性');
-          const typeNode = field(parameter, 'type');
-          const modifier = namedChildren(parameter).find((child) => child.type === 'modifier')?.text;
-          if (modifier !== undefined && !['ref', 'out', 'in'].includes(modifier))
-            unsupported(parameter, `ラムダ式の引数の \`${modifier}\``);
-          parameters.push({
-            name: requiredField(parameter, 'name').text,
-            type: typeNode ? this.convertType(typeNode) : undefined,
-            modifier: modifier as LambdaParameter['modifier'],
-            ...positionOf(parameter),
-          });
-        }
+        parameters.push(...this.convertLambdaParameters(parameterNode));
       }
     }
     const mixed = parameters.find((parameter) => (parameter.type === undefined) !== (parameters[0].type === undefined));

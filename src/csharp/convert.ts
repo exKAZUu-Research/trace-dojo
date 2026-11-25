@@ -42,13 +42,8 @@ import {
 import { ExpressionConverter } from './convertExpression';
 
 const UNSUPPORTED_STATEMENTS: Record<string, string> = {
-  checked_statement: '`checked`・`unchecked` ブロック',
   fixed_statement: '`fixed` 文',
-  goto_statement: '`goto` 文',
-  labeled_statement: 'ラベル付きの文',
-  lock_statement: '`lock` 文',
   unsafe_statement: '`unsafe` ブロック',
-  using_statement: '`using` 文',
   yield_statement: '`yield` 文',
 };
 
@@ -791,6 +786,34 @@ export class Converter extends ExpressionConverter {
       case 'try_statement': {
         return this.convertTry(node);
       }
+      case 'checked_statement': {
+        return {
+          kind: 'checked',
+          isChecked: hasToken(node, 'checked'),
+          body: this.convertBlockNode(parts[0]),
+          ...position,
+        };
+      }
+      case 'lock_statement': {
+        return {
+          kind: 'lock',
+          value: this.convertExpression(parts[0]),
+          body: this.convertEmbedded(parts[1]),
+          ...position,
+        };
+      }
+      case 'goto_statement': {
+        if (hasToken(node, 'case'))
+          return { kind: 'goto', target: { kind: 'case', value: this.convertExpression(parts[0]) }, ...position };
+        if (hasToken(node, 'default')) return { kind: 'goto', target: { kind: 'default' }, ...position };
+        return { kind: 'goto', target: { kind: 'label', name: parts[0].text }, ...position };
+      }
+      case 'labeled_statement': {
+        return { kind: 'labeled', label: parts[0].text, statement: this.convertEmbedded(parts[1]), ...position };
+      }
+      case 'using_statement': {
+        return this.convertUsingStatement(node);
+      }
       default: {
         const what = UNSUPPORTED_STATEMENTS[node.type];
         if (what) unsupported(node, what);
@@ -799,6 +822,16 @@ export class Converter extends ExpressionConverter {
         ]);
       }
     }
+  }
+
+  private convertUsingStatement(node: Node): Statement {
+    const body = this.convertEmbedded(requiredField(node, 'body'));
+    const resourceNode = namedChildren(node).find((child) => !sameNode(child, field(node, 'body'))) as Node;
+    const resource =
+      resourceNode.type === 'variable_declaration'
+        ? { kind: 'declaration' as const, ...this.convertVariableDeclaration(resourceNode) }
+        : { kind: 'expression' as const, value: this.convertExpression(resourceNode) };
+    return { kind: 'using', resource, body, isAwait: hasToken(node, 'await'), ...positionOf(node) };
   }
 
   /** Converts the statement that an `if`, a loop, or `else` contains, which cannot be a declaration. */
@@ -818,7 +851,7 @@ export class Converter extends ExpressionConverter {
     const modifiers = namedChildren(node)
       .filter((child) => child.type === 'modifier')
       .map((child) => child.text);
-    if (hasToken(node, 'using')) unsupported(node, '`using` 宣言');
+    const using = hasToken(node, 'using') ? (hasToken(node, 'await') ? 'await using' : 'using') : undefined;
     for (const text of modifiers) if (text !== 'const') unsupported(node, `\`${text}\` のローカル変数`);
     const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
     const deconstruction = namedChildren(declarationNode).find(
@@ -839,7 +872,14 @@ export class Converter extends ExpressionConverter {
     }
     const { type, declarators } = this.convertVariableDeclaration(declarationNode);
     if (modifiers.includes('const')) rejectConstantsWithoutValues(declarators);
-    return { kind: 'localDeclaration', isConst: modifiers.includes('const'), type, declarators, ...positionOf(node) };
+    return {
+      kind: 'localDeclaration',
+      isConst: modifiers.includes('const'),
+      type,
+      declarators,
+      ...(using ? { using } : {}),
+      ...positionOf(node),
+    };
   }
 
   protected convertVariableDeclaration(node: Node): { type: TypeNode; declarators: VariableDeclarator[] } {

@@ -73,22 +73,16 @@ type SwitchSection = Extract<BoundStatement, { kind: 'switch' }>['sections'][num
 type LoopStatement = Extract<BoundStatement, { kind: 'while' | 'do' | 'for' | 'foreach' }>;
 type AccessExpression = Extract<
   BoundExpression,
-  {
-    kind: 'field' | 'element' | 'call' | 'property' | 'invokeDelegate' | 'conditionalAccess';
-  }
+  { kind: 'field' | 'element' | 'call' | 'property' | 'invokeDelegate' | 'conditionalAccess' }
 >;
 type CreationExpression = Extract<BoundExpression, { kind: 'new' | 'newArray' | 'newDelegate' | 'lambda' | 'with' }>;
 type OperatorExpression = Extract<
   BoundExpression,
-  {
-    kind: 'unary' | 'convert' | 'as' | 'throw' | 'binary' | 'logical' | 'is' | 'coalesce' | 'conditional' | 'switch';
-  }
+  { kind: 'unary' | 'convert' | 'as' | 'throw' | 'binary' | 'logical' | 'is' | 'coalesce' | 'conditional' | 'switch' }
 >;
 type AssignmentExpression = Extract<
   BoundExpression,
-  {
-    kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor';
-  }
+  { kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor' }
 >;
 
 /** A jump out of statements, with the state it carries to where it goes. */
@@ -109,6 +103,8 @@ export class FlowAnalyzer {
   private outParameters: LocalSymbol[] = [];
   /** The locals of the function being analyzed, which a call that never returns leaves assigned. */
   private functionLocals: LocalSymbol[] = [];
+  /** The states that the `goto`s analyzed so far carry to each label or switch section. */
+  private readonly gotoStates = new Map<object, State[]>();
 
   constructor(private readonly diagnostics: FlowDiagnostics) {}
 
@@ -193,6 +189,24 @@ export class FlowAnalyzer {
       }
       case 'try': {
         return this.tryStatement(statement, state);
+      }
+      case 'labeled': {
+        // A label is reached by falling into it and by the `goto`s before it; one after it carries its state at least.
+        const entry = intersectAll(state, this.gotoStates.get(statement.label) ?? []);
+        return this.statement(statement.statement, entry);
+      }
+      case 'goto': {
+        if (!statement.target) return state;
+        const states = this.gotoStates.get(statement.target) ?? [];
+        states.push(state);
+        this.gotoStates.set(statement.target, states);
+        return 'unreachable';
+      }
+      case 'lock': {
+        return this.statement(statement.body, this.expression(statement.value, state));
+      }
+      case 'using': {
+        return this.statement(statement.body, state);
       }
     }
   }
@@ -291,7 +305,9 @@ export class FlowAnalyzer {
     };
     let hasDefault = false;
     for (const [index, section] of statement.sections.entries()) {
-      const { entry, coversAll } = this.sectionEntry(section, afterValue);
+      const matched = this.sectionEntry(section, afterValue);
+      const { coversAll } = matched;
+      const entry = intersectAll(matched.entry, this.gotoStates.get(section) ?? []);
       if (coversAll) hasDefault = true;
       if (this.statements(section.statements, entry) !== 'unreachable') {
         const label = section.labels.at(-1);

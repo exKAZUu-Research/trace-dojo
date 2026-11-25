@@ -1,5 +1,13 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import type { BoundBlock, BoundCatch, BoundExpression, BoundStatement, BoundSwitchSection, ForeachKind } from './bound';
+import type {
+  BoundBlock,
+  BoundCatch,
+  BoundExpression,
+  BoundStatement,
+  BoundSwitchSection,
+  ForeachKind,
+  LabelSymbol,
+} from './bound';
 import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
@@ -12,7 +20,26 @@ const CONTINUE = Symbol('continue');
 interface ReturnCompletion {
   value: Value;
 }
-export type Completion = undefined | typeof BREAK | typeof CONTINUE | ReturnCompletion;
+/** A `goto` on its way to the block or switch that holds its target. */
+class GotoCompletion {
+  constructor(readonly target: LabelSymbol | BoundSwitchSection) {}
+}
+export type Completion = undefined | typeof BREAK | typeof CONTINUE | ReturnCompletion | GotoCompletion;
+
+/** The index of each label among a statement list's statements, for the lists that `goto` has jumped in. */
+const labelIndices = new WeakMap<BoundStatement[], Map<LabelSymbol | BoundSwitchSection, number>>();
+
+/** Where a label stands among a list of statements, or undefined when the list does not hold it. */
+function labelIndexIn(statements: BoundStatement[], target: LabelSymbol | BoundSwitchSection): number | undefined {
+  let indices = labelIndices.get(statements);
+  if (!indices) {
+    indices = new Map();
+    for (const [index, statement] of statements.entries())
+      for (let inner = statement; inner.kind === 'labeled'; inner = inner.statement) indices.set(inner.label, index);
+    labelIndices.set(statements, indices);
+  }
+  return indices.get(target);
+}
 
 /** That a loop goes on to its next iteration. */
 const NEXT = Symbol('next');
@@ -43,13 +70,21 @@ export abstract class StatementExecutor extends PatternMatcher {
    * body (`isBody`), which the frame holds until the method exits, where the end of the program reads its locals.
    */
   executeBlock(block: BoundBlock, frame: Frame, isBody = false): Completion {
-    return this.inScope(frame, isBody ? [] : block.locals, block.capturedLocals, () => {
-      for (const statement of block.statements) {
-        const completion = this.execute(statement, frame);
-        if (completion !== undefined) return completion;
-      }
-      return;
-    });
+    return this.inScope(frame, isBody ? [] : block.locals, block.capturedLocals, () =>
+      this.runStatements(block.statements, frame, 0)
+    );
+  }
+
+  /** Runs statements from an index, going on from a label of theirs that a `goto` among them jumps to. */
+  private runStatements(statements: BoundStatement[], frame: Frame, start: number): Completion {
+    for (let index = start; index < statements.length; index++) {
+      const completion = this.execute(statements[index], frame);
+      if (completion === undefined) continue;
+      const target = completion instanceof GotoCompletion ? labelIndexIn(statements, completion.target) : undefined;
+      if (target === undefined) return completion;
+      index = target - 1;
+    }
+    return undefined;
   }
 
   // code-gauge-allow functionNcss -- One case per kind of statement.
@@ -111,6 +146,38 @@ export abstract class StatementExecutor extends PatternMatcher {
       }
       case 'try': {
         return this.executeTry(statement, frame);
+      }
+      case 'labeled': {
+        return this.execute(statement.statement, frame);
+      }
+      case 'goto': {
+        return new GotoCompletion(statement.target as LabelSymbol | BoundSwitchSection);
+      }
+      case 'lock': {
+        // Monitor.Enter rejects null; with one thread, taking the lock never waits.
+        if (this.evaluate(statement.value, frame) === undefined)
+          throw new PendingException('System.ArgumentNullException', 'Value cannot be null.');
+        return this.execute(statement.body, frame);
+      }
+      case 'using': {
+        return this.executeUsing(statement, frame);
+      }
+    }
+  }
+
+  private executeUsing(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Completion {
+    let isExiting = false;
+    try {
+      return this.execute(statement.body, frame);
+    } catch (error) {
+      // `Environment.Exit` ends the process without disposing, as it skips finally blocks.
+      isExiting = error instanceof ProgramExit;
+      throw error;
+    } finally {
+      const resource = this.readLocal(frame, statement.local);
+      if (!isExiting && resource !== undefined) {
+        const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
+        this.invokeWithoutArguments(frame, dispose, resource, statement.row, this.runtime.runtimeTypeOf(resource));
       }
     }
   }
@@ -272,12 +339,19 @@ export abstract class StatementExecutor extends PatternMatcher {
       statement.sections.flatMap((section) => section.locals),
       [],
       () => {
-        const chosen = this.chooseSection(statement.sections, value, frame);
-        if (!chosen) return;
-        for (const inner of chosen.statements) {
-          const completion = this.execute(inner, frame);
+        let section = this.chooseSection(statement.sections, value, frame);
+        let start = 0;
+        while (section) {
+          const completion = this.runStatements(section.statements, frame, start);
           if (completion === BREAK) return;
-          if (completion !== undefined) return completion;
+          if (!(completion instanceof GotoCompletion)) return completion;
+          // `goto case` and `goto default` go to a section of this switch; `goto` to a label in another section.
+          const { target } = completion;
+          section = statement.sections.find(
+            (candidate) => candidate === target || labelIndexIn(candidate.statements, target) !== undefined
+          );
+          if (!section) return completion;
+          start = section === target ? 0 : (labelIndexIn(section.statements, target) as number);
         }
         return;
       }
@@ -357,10 +431,7 @@ export abstract class StatementExecutor extends PatternMatcher {
   }
 
   /** The try statements whose bodies are running, innermost last, with their catch clauses. */
-  private readonly handlers: {
-    statement: Extract<BoundStatement, { kind: 'try' }>;
-    frame: Frame;
-  }[] = [];
+  private readonly handlers: { statement: Extract<BoundStatement, { kind: 'try' }>; frame: Frame }[] = [];
 
   /** How many of the handlers outside a running catch filter an exception the filter throws cannot reach, as .NET discards it at the filter. */
   private filterFloor = 0;

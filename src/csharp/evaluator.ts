@@ -180,7 +180,9 @@ export class Evaluator extends StatementExecutor {
     try {
       if (method.kind === 'constructor') this.runConstructorPrologue(frame, method);
       const completion = this.executeBlock(body, frame, true);
-      return completion !== undefined && typeof completion === 'object' ? completion.value : undefined;
+      return completion !== undefined && typeof completion === 'object' && 'value' in completion
+        ? completion.value
+        : undefined;
     } finally {
       this.runtime.popFrame();
     }
@@ -544,7 +546,8 @@ export class Evaluator extends StatementExecutor {
           this.evaluate(expression.operand, frame),
           expression.conversion,
           frame.resolve(expression.from),
-          frame.resolve(expression.type)
+          frame.resolve(expression.type),
+          expression.isChecked ?? this.program.checkOverflow
         );
       }
       case 'is': {
@@ -1185,15 +1188,17 @@ export class Evaluator extends StatementExecutor {
         return stepNumeric(underlying, operand as NumericValue, expression.operator === '++' ? 1 : -1);
       return unaryNumeric('~', underlying as never, operand as NumericValue);
     }
+    const isChecked = expression.isChecked ?? this.program.checkOverflow;
     if (expression.operator === '++' || expression.operator === '--') {
       const type = nullableUnderlying(expression.type) ?? expression.type;
       return stepNumeric(
         specialOf(type) as SpecialType,
         operand as NumericValue,
-        expression.operator === '++' ? 1 : -1
+        expression.operator === '++' ? 1 : -1,
+        isChecked
       );
     }
-    return unaryNumeric(expression.operator, expression.operandKind, operand as NumericValue);
+    return unaryNumeric(expression.operator, expression.operandKind, operand as NumericValue, isChecked);
   }
 
   private evaluateBinary(expression: BinaryExpression, frame: Frame): Value {
@@ -1210,7 +1215,13 @@ export class Evaluator extends StatementExecutor {
     if (operandKind === 'enum') return this.enumBinary(expression, left as NumericValue, right as NumericValue);
     if (COMPARISONS.has(operator))
       return compareNumeric(operator, operandKind, left as NumericValue, right as NumericValue);
-    return arithmetic(operator, operandKind, left as NumericValue, right as NumericValue);
+    return arithmetic(
+      operator,
+      operandKind,
+      left as NumericValue,
+      right as NumericValue,
+      expression.isChecked ?? this.program.checkOverflow
+    );
   }
 
   private enumBinary(expression: BinaryExpression, left: NumericValue, right: NumericValue): Value {

@@ -9,7 +9,7 @@ import type {
   SwitchSection,
   VariableDeclarator,
 } from './ast';
-import { type TypeContext, unavailableDotnetNamespace } from './binderBase';
+import { markOverflowChecks, type TypeContext, unavailableDotnetNamespace } from './binderBase';
 import type {
   BoundBlock,
   BoundCatch,
@@ -20,6 +20,7 @@ import type {
   ForeachKind,
   StepKind,
 } from './bound';
+import { LabelSymbol } from './bound';
 import type { BindContext } from './convertBinder';
 import { constantText } from './convertBinder';
 import type { MemberLookup } from './lookup';
@@ -27,7 +28,7 @@ import { propertyDisplay } from './memberBinder';
 import { PatternBinder } from './patternBinder';
 import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
-import { FunctionScope, LocalScope } from './scopes';
+import { FunctionScope, LocalScope, type PendingSwitch } from './scopes';
 import {
   displayType,
   displayTypeSymbol,
@@ -126,7 +127,7 @@ export abstract class StatementBinder extends PatternBinder {
     let holder = receiver;
     while (holder.kind === 'field' && isValueType(holder.type)) holder = holder.receiver;
     if (holder.kind !== 'local' || !holder.local.isReadonly || !isValueType(holder.type)) return false;
-    const reason = (holder.local as { readonlyReason?: string }).readonlyReason ?? 'foreach 繰り返し変数';
+    const reason = holder.local.readonlyReason;
     this.error(position, 'CS1654', `'${holder.local.name}' のメンバーは '${reason}' であるため変更できません`);
     return true;
   }
@@ -146,7 +147,7 @@ export abstract class StatementBinder extends PatternBinder {
           this.error(
             position,
             'CS1656',
-            `'${local.name}' は '${(local as { readonlyReason?: string }).readonlyReason ?? 'foreach 繰り返し変数'}' であるため、これに割り当てることはできません`
+            `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
           );
         }
         return target;
@@ -399,15 +400,137 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** Makes a block's names known from its start: local functions to call, and locals that may not be used before their declarations. */
-  protected predeclare(statements: Statement[], context: BindContext): void {
+  protected predeclare(statements: Statement[], context: BindContext, labelScope = context.scope): void {
+    this.declareLabels(statements, labelScope);
     for (const statement of statements) {
       for (const name of namesDeclaredInBlock(statement)) context.scope.declaredLater.add(name);
       if (statement.kind === 'localFunction') this.declareLocalFunction(statement.declaration, context);
     }
   }
 
+  /** Declares the labels of a block's statements, reporting one that the block or an enclosing block already has. */
+  private declareLabels(statements: Statement[], scope: LocalScope): void {
+    for (let statement of statements) {
+      while (statement.kind === 'labeled') {
+        const { label } = statement;
+        const duplicate = [...scope.chain()].some((outer) => outer.owner === scope.owner && outer.labels.has(label));
+        if (duplicate && scope.labels.has(label)) this.error(statement, 'CS0140', `ラベル '${label}' が重複しています`);
+        else if (duplicate)
+          this.error(statement, 'CS0158', `ラベル '${label}' は、同じ名前を持つ外側のラベルをシャドウします`);
+        else scope.labels.set(label, new LabelSymbol(label, statement.row));
+        statement = statement.statement;
+      }
+    }
+  }
+
+  /**
+   * Binds a block's statements. A `using` declaration disposes its variables when the block ends, so the statements
+   * after it form the body that it disposes them after, as `using (...) { rest }` would (C# spec §13.14).
+   */
   protected bindStatements(statements: Statement[], context: BindContext): BoundStatement[] {
-    return statements.map((statement) => this.bindStatement(statement, context));
+    const index = statements.findIndex((statement) => statement.kind === 'localDeclaration' && statement.using);
+    if (index === -1) return statements.map((statement) => this.bindStatement(statement, context));
+    const declaration = statements[index] as Extract<Statement, { kind: 'localDeclaration' }>;
+    const before = statements.slice(0, index).map((statement) => this.bindStatement(statement, context));
+    const resources = this.bindUsingResources(
+      { kind: 'declaration', type: declaration.type, declarators: declaration.declarators },
+      declaration,
+      context
+    );
+    const rest = statements.slice(index + 1);
+    const restRow = rest[0]?.row ?? declaration.row;
+    const body: BoundBlock = {
+      kind: 'block',
+      statements: this.bindStatements(rest, context),
+      capturedLocals: [],
+      locals: [],
+      row: restRow,
+      step: 'none',
+    };
+    return [...before, ...this.nestUsings(resources, body)];
+  }
+
+  private bindUsingStatement(statement: Extract<Statement, { kind: 'using' }>, context: BindContext): BoundStatement {
+    const scope = new LocalScope(context.scope, context.fn);
+    const inner: BindContext = { scope, fn: context.fn };
+    const resources = this.bindUsingResources(statement.resource, statement, inner);
+    const body = this.bindEmbedded(statement.body, inner);
+    return {
+      kind: 'block',
+      statements: this.nestUsings(resources, body),
+      capturedLocals: [],
+      locals: scope.locals,
+      row: statement.row,
+      step: 'none',
+    };
+  }
+
+  /** Binds the resources of a `using` statement or declaration: each declared variable, or a hidden one for a value. */
+  private bindUsingResources(
+    resource: Extract<Statement, { kind: 'using' }>['resource'],
+    position: Position,
+    context: BindContext
+  ): { declaration: BoundStatement; local: LocalSymbol }[] {
+    if (resource.kind === 'expression') {
+      const value = this.bindTypedValue(resource.value, context);
+      const local = new LocalSymbol('\0using', value.type, position.row, position.column);
+      local.isHidden = true;
+      context.fn.addLocal(local);
+      this.checkDisposable(value.type, resource.value);
+      return [{ declaration: { kind: 'localDeclaration', local, value, row: position.row, step: 'callsOnly' }, local }];
+    }
+    return resource.declarators.map((declarator) => {
+      if (!declarator.initializer)
+        this.error(declarator, 'CS0210', 'fixed または using ステートメントの宣言の中に、初期化子を指定してください');
+      const declaration = this.bindLocalDeclaration(
+        { kind: 'localDeclaration', isConst: false, type: resource.type, declarators: [declarator], ...position },
+        context
+      );
+      const local = context.scope.variables.get(declarator.name) as LocalSymbol;
+      local.isReadonly = true;
+      local.readonlyReason = 'using 変数';
+      this.checkDisposable(local.type, declarator);
+      return { declaration: { ...declaration, row: declarator.row }, local };
+    });
+  }
+
+  /** Reports a resource type that converts to no `IDisposable`, which `using` needs to dispose it. */
+  private checkDisposable(type: Type, position: Position): void {
+    if (type.kind === 'error' || type.kind === 'null') return;
+    const disposable = this.library.typeNamed('System.IDisposable').declaredType;
+    if (this.conversions.implicit(type, disposable) !== undefined) return;
+    this.error(
+      position,
+      'CS1674',
+      `'${displayType(type)}': using ステートメントで使用される型は 'System.IDisposable' を実装する必要があります。`
+    );
+  }
+
+  /** The declarations of the resources, each followed by the `using` that disposes it after the rest. */
+  private nestUsings(
+    resources: { declaration: BoundStatement; local: LocalSymbol }[],
+    body: BoundStatement
+  ): BoundStatement[] {
+    let inner: BoundStatement[] = [body];
+    for (const { declaration, local } of resources.toReversed()) {
+      const disposable = this.library.typeNamed('System.IDisposable');
+      inner = [
+        declaration,
+        {
+          kind: 'using',
+          local,
+          body:
+            inner.length === 1
+              ? inner[0]
+              : { kind: 'block', statements: inner, capturedLocals: [], locals: [], row: body.row, step: 'none' },
+          dispose: disposable.methods.find((method) => method.name === 'Dispose') as MethodSymbol,
+          disposable: disposable.declaredType,
+          row: declaration.row,
+          step: 'none',
+        },
+      ];
+    }
+    return inner;
   }
 
   // code-gauge-allow functionNcss -- One case per kind of statement.
@@ -484,7 +607,92 @@ export abstract class StatementBinder extends PatternBinder {
       case 'try': {
         return this.bindTry(statement, context);
       }
+      case 'labeled': {
+        const label = this.findLabel(statement.label, context) as LabelSymbol;
+        return {
+          kind: 'labeled',
+          label,
+          statement: this.bindStatement(statement.statement, context),
+          row,
+          step: 'none',
+        };
+      }
+      case 'goto': {
+        return this.bindGoto(statement, context);
+      }
+      case 'lock': {
+        return this.bindLock(statement, context);
+      }
+      case 'checked': {
+        return this.inCheckedContext(statement.isChecked, () => this.bindBlock(statement.body, context));
+      }
+      case 'using': {
+        return this.bindUsingStatement(statement, context);
+      }
     }
+  }
+
+  /** The label of a name that a `goto` in the context may jump to: one of its block's or an enclosing block's. */
+  private findLabel(name: string, context: BindContext): LabelSymbol | undefined {
+    for (const scope of context.scope.chain()) {
+      if (scope.owner !== context.fn) return undefined;
+      const label = scope.labels.get(name);
+      if (label) return label;
+    }
+    return undefined;
+  }
+
+  private bindGoto(statement: Extract<Statement, { kind: 'goto' }>, context: BindContext): BoundStatement {
+    const { row, target } = statement;
+    const missing = (text: string): BoundStatement => {
+      this.error(
+        target.kind === 'case' ? target.value : { row, column: statement.column + 5 },
+        'CS0159',
+        `goto ステートメントのスコープに '${text}' というラベルはありません`
+      );
+      return { kind: 'empty', row, step: 'none' };
+    };
+    if (context.fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出られません');
+    if (target.kind === 'label') {
+      const label = this.findLabel(target.name, context);
+      if (!label) return missing(target.name);
+      label.isUsed = true;
+      return { kind: 'goto', target: label, row, step: 'none' };
+    }
+    const pending = context.fn.switches.at(-1);
+    if (!pending) {
+      this.error(statement, 'CS0153', 'goto は switch ステートメント内でのみ有効です');
+      return { kind: 'empty', row, step: 'none' };
+    }
+    const bound: Extract<BoundStatement, { kind: 'goto' }> = { kind: 'goto', target: undefined, row, step: 'none' };
+    if (target.kind === 'default') {
+      pending.gotos.push({ statement: bound, value: undefined, row, text: 'default:' });
+      return bound;
+    }
+    const value = this.bindAs(target.value, pending.governingType, context);
+    if (value.kind !== 'constant') {
+      if (value.type.kind !== 'error') this.error(target.value, 'CS0150', '定数値が必要です');
+      return { kind: 'empty', row, step: 'none' };
+    }
+    pending.gotos.push({
+      statement: bound,
+      value: value.value,
+      row: target.value.row,
+      text: `case ${labelText(value.value, value.type)}:`,
+    });
+    return bound;
+  }
+
+  private bindLock(statement: Extract<Statement, { kind: 'lock' }>, context: BindContext): BoundStatement {
+    const value = this.bindTypedValue(statement.value, context);
+    if (value.type.kind !== 'error' && !isReferenceType(value.type) && value.type.kind !== 'null')
+      this.error(
+        statement.value,
+        'CS0185',
+        `'${displayType(value.type)}' は lock ステートメントによって要求された参照型ではありません`
+      );
+    const body = this.bindEmbedded(statement.body, context);
+    return { kind: 'lock', value, body, row: statement.row, step: 'none' };
   }
 
   private bindExpressionStatement(
@@ -814,7 +1022,6 @@ export abstract class StatementBinder extends PatternBinder {
       };
       for (const local of scope.locals) {
         local.isReadonly = true;
-        (local as { readonlyReason?: string }).readonlyReason = 'foreach 繰り返し変数';
       }
     } else if (statement.variable.kind === 'discard') {
       variable = new LocalSymbol('\0element', elementType, statement.row, statement.column);
@@ -823,7 +1030,6 @@ export abstract class StatementBinder extends PatternBinder {
     } else {
       variable = this.declareLocal(statement.variable.name, declaredType, statement.variable, inner);
       variable.isReadonly = true;
-      (variable as { readonlyReason?: string }).readonlyReason = 'foreach 繰り返し変数';
       if (!sameType(declaredType, elementType)) {
         elementConversion = this.convert(
           { kind: 'compoundOperand', type: elementType, row: statement.row },
@@ -972,7 +1178,9 @@ export abstract class StatementBinder extends PatternBinder {
     temporary.isHidden = true;
     context.fn.addLocal(temporary);
     const seen: SwitchLabelsSeen = { constants: [], hasDefault: false, handled: [] };
+    const pending: PendingSwitch = { governingType: value.type, gotos: [] };
     context.fn.breakDepth++;
+    context.fn.switches.push(pending);
     let sections: BoundSwitchSection[];
     try {
       sections = statement.sections.map((section) => {
@@ -980,7 +1188,8 @@ export abstract class StatementBinder extends PatternBinder {
         const sectionContext: BindContext = { scope: sectionScope, fn: context.fn };
         const labels = section.labels.map((label) => this.bindSwitchLabel(label, value, sectionContext, seen));
         const patternLocals = new Set(sectionScope.locals);
-        this.predeclare(section.statements, sectionContext);
+        // Labels in a section belong to the switch block, which every section's `goto` may reach.
+        this.predeclare(section.statements, sectionContext, scope);
         const statements = this.bindStatements(section.statements, sectionContext);
         // The sections of a switch share one scope for the locals their statements declare (C# spec §13.8.3), while
         // the variables of a case's patterns belong to its section.
@@ -995,12 +1204,33 @@ export abstract class StatementBinder extends PatternBinder {
       });
     } finally {
       context.fn.breakDepth--;
+      context.fn.switches.pop();
     }
+    this.aimSwitchGotos(pending, sections);
     // Roslyn closes a switch without `default` whose unguarded patterns together match every value of its input.
     const isComplete =
       value.type.kind !== 'error' &&
       this.patternSpaces.isSubsumed(seen.handled, { kind: 'any', local: undefined, inputType: value.type });
     return { kind: 'switch', value, sections, temporary, isComplete, row: statement.row, step: 'none' };
+  }
+
+  /** Points each `goto case` and `goto default` of a switch at the section with that label. */
+  private aimSwitchGotos(pending: PendingSwitch, sections: BoundSwitchSection[]): void {
+    for (const jump of pending.gotos) {
+      const target = sections.find((section) =>
+        section.labels.some((label) => {
+          if (label === 'default') return jump.value === undefined && jump.text === 'default:';
+          const constant = label.guard ? undefined : this.constantOfPattern(label.pattern);
+          return (
+            constant?.kind === 'constant' &&
+            jump.text !== 'default:' &&
+            constantKey(constant.value) === constantKey(jump.value)
+          );
+        })
+      );
+      if (target) jump.statement.target = target;
+      else this.error(jump.row, 'CS0159', `goto ステートメントのスコープに '${jump.text}' というラベルはありません`);
+    }
   }
 
   /** Binds a case label, reporting a duplicate constant or default and a case that an earlier one covers. */
@@ -1197,6 +1427,8 @@ export abstract class StatementBinder extends PatternBinder {
     const inner: BindContext = { scope, fn };
     for (const parameter of method.parameters) this.declareParameter(parameter, inner);
     method.body = this.bindMethodBody(declaration.body, inner, method.returnType);
+    // A local function written in a `checked` or `unchecked` block is in its context, as lambdas are.
+    if (this.checkedContext !== undefined) markOverflowChecks(method.body, this.checkedContext);
     method.captures = [...fn.captures];
     this.recordCaptureList(fn, (captures) => {
       method.captures = captures;

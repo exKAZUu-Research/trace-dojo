@@ -245,6 +245,8 @@ export class LocalSymbol {
   refKind: 'ref' | 'out' | 'in' | undefined;
   /** Whether the program can assign the variable, which `foreach` variables and `using` variables forbid. */
   isReadonly = false;
+  /** What makes a readonly variable so, as Roslyn's messages name it (`foreach 繰り返し変数`, `using 変数`). */
+  readonlyReason = 'foreach 繰り返し変数';
   /** Whether the program read the variable, for the warning-free checks that need it. */
   isUsed = false;
   /** The function that declares the variable. */

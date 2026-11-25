@@ -55,6 +55,8 @@ export interface CompiledProgram {
   entry: MethodSymbol;
   /** Whether the entry is the method of the top-level statements, whose locals the trace shows as `Main`'s. */
   isTopLevel: boolean;
+  /** Whether integral overflow throws outside `checked` and `unchecked`, as `CheckForOverflowUnderflow` makes it. */
+  checkOverflow: boolean;
 }
 
 let libraryCache: Library | undefined;
@@ -150,7 +152,7 @@ export class Compiler extends StatementBinder {
       ]);
     const types = declared.map((type) => type.symbol);
     if (isTopLevel) types.push(entry.owner);
-    return { library: this.library, types, entry, isTopLevel };
+    return { library: this.library, types, entry, isTopLevel, checkOverflow: unit.options?.checkOverflow ?? false };
   }
 
   /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
@@ -836,6 +838,14 @@ function containsValueReturn(statements: Statement[]): boolean {
       case 'switch': {
         return statement.sections.some((section) => section.statements.some(visit));
       }
+      case 'checked':
+      case 'lock':
+      case 'using': {
+        return visit(statement.body);
+      }
+      case 'labeled': {
+        return visit(statement.statement);
+      }
       case 'try': {
         return (
           visit(statement.body) ||
@@ -868,8 +878,14 @@ function markCapturedLocals(block: BoundBlock): void {
         break;
       }
       case 'while':
-      case 'do': {
+      case 'do':
+      case 'lock':
+      case 'using': {
         visit(statement.body);
+        break;
+      }
+      case 'labeled': {
+        visit(statement.statement);
         break;
       }
       case 'for': {

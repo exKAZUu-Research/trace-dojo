@@ -1,5 +1,6 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Position, TypeNode, UsingDirective } from './ast';
+import type { LambdaInfo } from './bound';
 import { Conversions, type WellKnownTypes } from './conversions';
 import { IMPLICIT_USINGS, NamespaceSymbol } from './namespaces';
 import {
@@ -108,6 +109,27 @@ function usingPath(node: TypeNode): string[] | undefined {
     return left ? [...left, node.name] : undefined;
   }
   return undefined;
+}
+
+/** The operations whose overflow a `checked` context makes throw. */
+const OVERFLOW_CHECKED_KINDS = new Set(['binary', 'unary', 'convert']);
+
+/** Marks the operations of a bound tree that no inner context marked, descending into the lambdas it contains. */
+export function markOverflowChecks(node: unknown, isChecked: boolean, seen = new Set<object>()): void {
+  if (typeof node !== 'object' || node === null || seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) markOverflowChecks(item, isChecked, seen);
+    return;
+  }
+  if (Object.getPrototypeOf(node) !== Object.prototype) return;
+  const record = node as Record<string, unknown> & { kind?: string; isChecked?: boolean };
+  if (record.kind && OVERFLOW_CHECKED_KINDS.has(record.kind) && record.isChecked === undefined)
+    record.isChecked = isChecked;
+  if (record.kind === 'lambda') markOverflowChecks((record.lambda as LambdaInfo).method.body, isChecked, seen);
+  for (const [key, value] of Object.entries(record)) {
+    if (key !== 'type' && key !== 'node' && key !== 'context') markOverflowChecks(value, isChecked, seen);
+  }
 }
 
 /** The library's namespaces and the types the compiler knows by role, shared by every compilation. */
@@ -239,6 +261,28 @@ export class BinderBase {
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;
+  }
+
+  /**
+   * Whether the arithmetic being bound is in a `checked` (true) or an `unchecked` (false) context, or in neither, where
+   * constants are checked and the rest follows the program's `CheckForOverflowUnderflow`.
+   */
+  checkedContext: boolean | undefined;
+
+  /**
+   * Binds in a `checked` or `unchecked` context, marking the integral operations and conversions that the binding made
+   * and that no inner context marked, which is lexical, as C# spec §12.8.20 says: lambdas written inside it are in it.
+   */
+  inCheckedContext<T>(isChecked: boolean, bind: () => T): T {
+    const saved = this.checkedContext;
+    this.checkedContext = isChecked;
+    try {
+      const result = bind();
+      markOverflowChecks(result, isChecked);
+      return result;
+    } finally {
+      this.checkedContext = saved;
+    }
   }
 
   /** Whether the program imports the implicit global usings of a file-based app, as it does unless it turns them off. */
