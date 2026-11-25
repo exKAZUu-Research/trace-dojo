@@ -242,6 +242,11 @@ function suspendCall(
   }) as unknown as Value;
 }
 
+/** Whether an argument's spread fits its parameter: a spread argument goes only to a vararg parameter, as kotlinc requires. */
+function spreadFits(argument: ArgumentSyntax, param: ParameterSymbol): boolean {
+  return argument.isSpread !== true || param.isVararg;
+}
+
 /** Whether an argument passes a vararg parameter's array, spread as `*array` or named. */
 function passesArray(argument: ArgumentSyntax, param: ParameterSymbol): boolean {
   return argument.isSpread === true || (argument.name !== undefined && param.isVararg);
@@ -851,8 +856,7 @@ export abstract class CallCompiler extends CompilerCore {
         if (value.kind === 'lambda' ? !this.lambdaFits(value, paramType) : !this.referenceFits(paramType)) return false;
         continue;
       }
-      // A spread argument goes only to a vararg parameter, as kotlinc requires.
-      if (args[index].isSpread === true && !param.isVararg) return false;
+      if (!spreadFits(args[index], param)) return false;
       if (passesArray(args[index], param)) {
         if (!this.acceptsArgument(compiled, this.varargArrayOf(param, paramType))) return false;
         continue;

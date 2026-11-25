@@ -1213,12 +1213,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.checkLateinitType(symbol.type, decl.row);
     }
     if (keywords.has('const')) {
-      const type = symbol.type && resolved(symbol.type);
-      const isConstantType =
-        type?.kind === 'class' &&
-        !type.nullable &&
-        (this.core.primitives.has(type.cls) || type.cls === this.core.string);
-      if (type && !isConstantType) this.error(decl.row, 'const val の型は、基本型か String にしてください。');
+      if (symbol.type && !this.isConstantType(symbol.type))
+        this.error(decl.row, 'const val の型は、基本型か String にしてください。');
       if (owner && !owner.isObject) this.error(decl.row, 'const val は、トップレベルか object の中にだけ書けます。');
       if (decl.isVar) this.error(decl.row, 'const は val にだけ付けられます。');
       if (decl.getter?.body || decl.delegate) this.error(decl.row, 'const val には get や by を書けません。');
@@ -1228,6 +1224,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     if (decl.typeParameters.some((param) => param.isReified))
       this.error(decl.row, 'reified な型引数は、インライン関数にだけ書けます。');
+  }
+
+  /** Whether a type can be a constant's, as kotlinc requires of a const val: a non-null primitive type or String. */
+  protected isConstantType(type: KType): boolean {
+    const actual = resolved(type);
+    return (
+      actual.kind === 'class' &&
+      !actual.nullable &&
+      (this.core.primitives.has(actual.cls) || actual.cls === this.core.string)
+    );
   }
 
   protected checkLateinitType(type: KType | undefined, row: number): void {
