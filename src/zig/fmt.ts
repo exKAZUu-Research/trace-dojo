@@ -273,6 +273,9 @@ export interface TypeInfo {
   unionFields(type: UnionType): { name: string; type: Type }[];
 }
 
+/** The specifiers that Zig's `printValue` applies to each element of a vector. */
+const VECTOR_SPECIFIERS = new Set(['d', 'b', 'o', 'x', 'X']);
+
 /** Reports the compile errors `printValue` gives for a specifier and a type, as Zig does before running. */
 export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions: boolean, depth = MAX_DEPTH): void {
   const invalid = (): never => {
@@ -281,6 +284,8 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
   const kind = type.kind;
   if (kind === 'enum') info.enumFields(type);
   if (type.kind === 'array' && type.isVector && spec !== 'any' && spec !== '') {
+    // Zig prints a vector element by element only for the number specifiers.
+    if (!VECTOR_SPECIFIERS.has(spec)) invalid();
     checkFormat(spec, type.child, info, hasOptions, depth);
     return;
   }
