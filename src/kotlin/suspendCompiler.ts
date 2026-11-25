@@ -931,6 +931,8 @@ function returnsAsContinues(node: unknown, label: string): unknown {
     return { kind: 'continue', row: (node as { row: number }).row, label };
   if (expression.kind === 'lambda' && expression.label === label) return node;
   if (expression.kind === 'call' && expression.callee?.name === label) return node;
+  // Only the syntax tree's own objects are copied: a Set of modifiers or another value stays as it is.
+  if (Object.getPrototypeOf(node) !== Object.prototype) return node;
   return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, returnsAsContinues(value, label)]));
 }
 

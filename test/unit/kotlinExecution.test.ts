@@ -6860,6 +6860,13 @@ fun main() { println(listOf(Level.MID.n, Level.LOW.n, Size.S.n, Size.L.n)); prin
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[3, 1, 1, 12]\nL1\n' });
 });
 
+test('runs declarations inside forEach and repeat lambdas that suspend', () => {
+  const source = `fun main() {
+    println(sequence { listOf(1, 2, 3).forEach { if (it == 2) return@forEach; val sq = it * it; yield(sq) } }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 9]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G
