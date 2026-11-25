@@ -484,6 +484,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     let base = object;
     let type = object.type;
+    const vector = isVectorType(type) || (type.kind === 'pointer' && type.size === 'one' && isVectorType(type.child));
+    if (vector) return this.error(expression, `${typeName(type)} 型は、フィールドを参照できません。`);
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
