@@ -1257,16 +1257,22 @@ function isSpecialSyntax(occ: string): boolean {
 
 /** The finite decimal a fraction is, `2.25` for 9/4, or `undefined` when it has none. */
 function decimalOf(numerator: bigint, denominator: bigint): string | undefined {
+  // The decimal has as many digits as the larger count of 2s and 5s in the denominator, paid for before it is built.
   let rest = denominator;
-  while (rest % 2n === 0n) rest /= 2n;
-  while (rest % 5n === 0n) rest /= 5n;
-  if (rest !== 1n) return undefined;
-  let digits = 0;
-  let scale = 1n;
-  while (scale % denominator !== 0n) {
-    scale *= 10n;
-    digits++;
+  let twos = 0;
+  let fives = 0;
+  for (; rest % 2n === 0n; twos++) {
+    chargeTypeWork();
+    rest /= 2n;
   }
+  for (; rest % 5n === 0n; fives++) {
+    chargeTypeWork();
+    rest /= 5n;
+  }
+  if (rest !== 1n) return undefined;
+  const digits = Math.max(twos, fives);
+  chargeTypeWork(digits);
+  const scale = 10n ** BigInt(digits);
   const scaled = numerator * (scale / denominator);
   const whole = scaled / scale;
   const fraction = (scaled % scale).toString().padStart(digits, '0');
