@@ -19,9 +19,15 @@ import { returnRepr, runtimeClassOf } from './dispatch';
 import { lambdaValue } from './lambdaValue';
 import { type ClassReference, classReference } from './natives/reflection';
 import { mentionsReified, runtimeType } from './reified';
-import { type Frame, MISSING, type Suspension } from './runtime';
+import { type Frame, type LocalEnv, localEnvOf, MISSING, type Suspension } from './runtime';
 import type { Exec } from './statementCompiler';
-import { type ClassSymbol, FunctionSymbol, type ParameterSymbol, type PropertySymbol } from './symbols';
+import {
+  type ClassSymbol,
+  FunctionSymbol,
+  type ParameterSymbol,
+  type PropertySymbol,
+  type VariableSymbol,
+} from './symbols';
 import { isSameType, isSubtype } from './typeRelations';
 import {
   type ClassType,
@@ -631,6 +637,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       false
     );
     const envSlot = envVariable.slot;
+    symbol.localEnv = envVariable;
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     this.forgetAssignedIn(
@@ -647,10 +654,13 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     }
     const build = this.captureBuilder(context, functionContext);
     symbol.defaultsInfo = functionContext.info;
-    bindLocalFunction(symbol, { declaringInfo: context.info, info: functionContext.info, envSlot }, run, suspendRun);
-    return (frame) => {
-      frame.locals[envSlot] = build(frame) as unknown as Value;
-    };
+    bindLocalFunction(
+      symbol,
+      { declaringInfo: context.info, info: functionContext.info, envVariable },
+      run,
+      suspendRun
+    );
+    return storeLocalEnv(envSlot, build);
   }
 
   // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
@@ -786,23 +796,18 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       decl.row,
       false
     );
-    const local = { context: captureContext, declaringInfo: context.info, envSlot: envVariable.slot };
+    const local = { context: captureContext, declaringInfo: context.info, envVariable };
     const entries = this.declareClassInScope(decl, scope, isAnonymous, (declared) => {
       for (const each of declared) {
         if (each !== declared[0] && !each.symbol.isInner)
           this.error(each.decl.row, 'ローカルクラスの中には、inner でないクラスを宣言できません。');
         this.localClasses.set(each.symbol, local);
+        each.symbol.localEnv = envVariable;
       }
     });
     this.compileClassesInScope(entries);
     const build = this.captureBuilder(context, captureContext);
-    const { slot } = envVariable;
-    return {
-      entry: entries[0],
-      store: (frame) => {
-        frame.locals[slot] = build(frame) as unknown as Value;
-      },
-    };
+    return { entry: entries[0], store: storeLocalEnv(envVariable.slot, build) };
   }
 
   protected abstract compileLocalSuspendBody(
@@ -850,16 +855,32 @@ const LOCAL_FORBIDDEN_MODIFIERS = new Set([
   'companion',
 ]);
 
+/**
+ * Runs the declaration of a local function or class: it stores what it makes before building what the code captures,
+ * so that the code, which captures it to call itself, sees it.
+ */
+function storeLocalEnv(slot: number, build: (frame: Frame) => unknown[]): Exec {
+  return (frame) => {
+    const env: LocalEnv = { captured: [], declaring: frame };
+    frame.locals[slot] = env as unknown as Value;
+    env.captured = build(frame);
+  };
+}
+
 /** A local function's calls, which run its body with what its declaration captured in the frame that ran it. */
 function bindLocalFunction(
   symbol: FunctionSymbol,
-  { declaringInfo, info, envSlot }: { declaringInfo: Frame['info']; info: Frame['info']; envSlot: number },
+  {
+    declaringInfo,
+    info,
+    envVariable,
+  }: { declaringInfo: Frame['info']; info: Frame['info']; envVariable: VariableSymbol },
   run: Eval | undefined,
   suspendRun: ((frame: Frame) => Suspension) | undefined
 ): void {
   const declared = (caller: Frame): { declaring: Frame; env: unknown[] } => {
-    const declaring = declaringFrame(caller, declaringInfo);
-    return { declaring, env: declaring.locals[envSlot] as unknown as unknown[] };
+    const { captured, declaring } = localEnvOf(caller, envVariable, declaringInfo, envVariable.slot);
+    return { declaring, env: captured };
   };
   if (suspendRun) {
     symbol.invokeSuspend = (caller, receiver, args, callRow) => {
@@ -873,14 +894,6 @@ function bindLocalFunction(
     const { declaring, env } = declared(caller);
     return caller.runtime.call(info, caller, env, receiver, args, callRow, body, declaring);
   };
-}
-
-/** The frame of the function or lambda that declared a local function, which created the caller's frame. */
-function declaringFrame(caller: Frame, info: Frame['info']): Frame {
-  for (let frame: Frame | undefined = caller; frame; frame = frame.enclosing) {
-    if (frame.info === info) return frame;
-  }
-  throw new Error('A local function was called from outside the function that declares it');
 }
 
 /** The candidates that are not overridden by another one, as a class's override hides what it overrides. */

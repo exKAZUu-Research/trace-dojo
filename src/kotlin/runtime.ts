@@ -36,6 +36,30 @@ export interface FunctionInfo {
   isLambda: boolean;
   /** Whether `this` is an instance of a class of the program, whose properties the trace shows as `this.x`. */
   showsThis: boolean;
+  /**
+   * For the local functions and classes the code calls or creates from a lambda or another function, the index in the
+   * frame's captures of what their declaration made, keyed by the variable that holds it where they are declared.
+   */
+  localEnvs?: Map<unknown, number>;
+}
+
+/** What running the declaration of a local function or class makes: what its code captures, and the frame running it. */
+export interface LocalEnv {
+  captured: unknown[];
+  declaring: Frame;
+}
+
+/**
+ * What the declaration of a local function or class made, as the frame calling it sees it: what the caller's code
+ * captured, as a lambda that outlives the declaring block does, or the slot of the declaring frame the caller runs in.
+ */
+export function localEnvOf(caller: Frame, key: unknown, declaringInfo: FunctionInfo, slot: number): LocalEnv {
+  const index = caller.info.localEnvs?.get(key);
+  if (index !== undefined) return caller.captured[index] as LocalEnv;
+  for (let frame: Frame | undefined = caller; frame; frame = frame.enclosing) {
+    if (frame.info === declaringInfo) return frame.locals[slot] as unknown as LocalEnv;
+  }
+  throw new Error('A local function or class was used outside the code that declares it');
 }
 
 export type Invoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;

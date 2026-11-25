@@ -1268,6 +1268,10 @@ export abstract class CallCompiler extends CompilerCore {
       return convertRepr(argument.eval, argument.repr, reprOf(this.core, type));
     });
     const dispatchEval = candidate.dispatch && this.receiverAccess(context, candidate.dispatch);
+    this.useLocalEnv(
+      context,
+      symbol.localEnv ?? (candidate.kind === 'constructor' ? symbol.owner?.localEnv : undefined)
+    );
     const reifiedTypes = symbol.typeParameters
       .filter((param) => param.isReified)
       .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));

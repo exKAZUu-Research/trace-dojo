@@ -6459,6 +6459,21 @@ fun main() { println(P.X.d()) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'init 1\nx1\n' });
 });
 
+test('keeps what local functions and classes captured in lambdas that outlive the block declaring them', () => {
+  const source = `fun main() {
+    val xs = mutableListOf<() -> Int>()
+    for (i in 1..2) {
+        class K { fun v() = i }
+        fun fact(k: Int): Int {
+            return if (k <= 1) i else k * fact(k - 1)
+        }
+        xs.add { K().v() * 100 + fact(3) }
+    }
+    println(xs.map { it() })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[106, 212]\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

@@ -661,6 +661,16 @@ export abstract class CompilerCore {
     return (frame) => frame.captured[index] as Frame;
   }
 
+  /**
+   * Makes code that calls a local function or creates a local class elsewhere than where it is declared capture what
+   * the declaration made, as it captures a variable, so that a lambda outliving the declaring block keeps it.
+   */
+  protected useLocalEnv(context: FunctionContext, envVariable: VariableSymbol | undefined): void {
+    if (!envVariable || envVariable.owner === context) return;
+    const index = context.captureIndex(envVariable);
+    (context.info.localEnvs ??= new Map()).set(envVariable, index);
+  }
+
   /** Builds what a lambda captures, as the function creating it sees each captured thing. */
   protected captureBuilder(outer: FunctionContext, lambda: FunctionContext): (frame: Frame) => unknown[] {
     const readers = lambda.captures.map((source): ((frame: Frame) => unknown) => {

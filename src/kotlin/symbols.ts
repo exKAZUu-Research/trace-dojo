@@ -42,6 +42,8 @@ export interface EnumEntrySymbol {
 }
 
 export class ClassSymbol {
+  /** For a class declared in a function body, the variable holding what its declaration made, which creating it reads. */
+  localEnv: VariableSymbol | undefined;
   typeParameters: TypeParameterSymbol[] = [];
   superclass: ClassType | undefined;
   interfaces: ClassType[] = [];
@@ -190,6 +192,8 @@ interface MemberBase {
 export class FunctionSymbol implements MemberBase {
   readonly kind = 'function';
   owner: ClassSymbol | undefined;
+  /** For a function declared in a function body, the variable holding what its declaration made, which calls read. */
+  localEnv: VariableSymbol | undefined;
   extensionReceiver: KType | undefined;
   typeParameters: TypeParameterSymbol[] = [];
   params: ParameterSymbol[] = [];

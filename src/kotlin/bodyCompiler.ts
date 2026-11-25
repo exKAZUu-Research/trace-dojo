@@ -17,7 +17,7 @@ import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
 import { propertyRepr, returnRepr } from './dispatch';
 import { setReifiedAccess } from './reified';
-import { Frame, type FunctionInfo, MISSING, UNASSIGNED } from './runtime';
+import { Frame, type FunctionInfo, localEnvOf, MISSING, UNASSIGNED } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
 import { TailCallSignal, tailCallsOf } from './tailCalls';
@@ -27,28 +27,23 @@ import { uninitializedCheck } from './uninitialized';
 import { KObject, UNIT, type Value } from './values';
 
 /** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
+/** A class declared in a function body: the context of what it captures, and where its declaration stores that. */
+export interface LocalClass {
+  context: FunctionContext;
+  declaringInfo: FunctionInfo;
+  envVariable: VariableSymbol;
+}
+
 /**
  * The frame of what a class declared in a function body captured for an instance, made when the instance is first
- * initialized from what the declaration stored in the frame that ran it, which a caller's frames lead to.
+ * initialized from what the declaration made, as the code creating the instance sees it.
  */
-function localFrameOf(
-  caller: Frame,
-  instance: KObject,
-  cls: ClassSymbol,
-  local: { context: FunctionContext; declaringInfo: FunctionInfo; envSlot: number }
-): Frame {
+function localFrameOf(caller: Frame, instance: KObject, cls: ClassSymbol, local: LocalClass): Frame {
   const existing = instance.localFrames?.get(cls) as Frame | undefined;
   if (existing) return existing;
-  let declaring: Frame | undefined = caller;
-  while (declaring && declaring.info !== local.declaringInfo) declaring = declaring.enclosing;
-  if (!declaring) throw new Error(`The class ${cls.name} was used outside the code that declares it`);
-  const frame = new Frame(
-    caller.runtime,
-    local.context.info,
-    declaring.locals[local.envSlot] as unknown as unknown[],
-    instance,
-    undefined
-  );
+  const { envVariable } = local;
+  const { captured, declaring } = localEnvOf(caller, envVariable, local.declaringInfo, envVariable.slot);
+  const frame = new Frame(caller.runtime, local.context.info, captured, instance, undefined);
   frame.enclosing = declaring;
   instance.localFrames ??= new Map();
   instance.localFrames.set(cls, frame);
@@ -107,10 +102,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private readonly classesCompiledInScope = new Set<ClassEntry>();
 
   /** What a class declared in a function body captures, which its members read when they run. */
-  protected readonly localClasses = new Map<
-    ClassSymbol,
-    { context: FunctionContext; declaringInfo: FunctionInfo; envSlot: number }
-  >();
+  protected readonly localClasses = new Map<ClassSymbol, LocalClass>();
 
   /**
    * Compiles the classes a function body or an object expression declares, there, with the bodies of their members,
