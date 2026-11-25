@@ -598,7 +598,7 @@ export class Expander {
         segments.push(
           textSegment(element, inDouble, !inDouble, {
             ...(!inDouble && !value.star ? { atListElement: true } : {}),
-            ...(!inDouble && value.transformed ? { transformedList: true } : {}),
+            ...(!inDouble ? { fromList: true } : {}),
           })
         );
       }

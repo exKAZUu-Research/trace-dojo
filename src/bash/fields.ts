@@ -14,7 +14,7 @@ export interface TextSegment {
   readonly split: boolean;
   readonly atListElement?: boolean;
   readonly operatorNull?: boolean;
-  readonly transformedList?: boolean;
+  readonly fromList?: boolean;
 }
 
 export interface BreakSegment {
@@ -38,7 +38,7 @@ export function textSegment(
   text: string,
   quoted: boolean,
   split: boolean,
-  extra?: { atListElement?: boolean; operatorNull?: boolean; transformedList?: boolean }
+  extra?: { atListElement?: boolean; operatorNull?: boolean; fromList?: boolean }
 ): TextSegment {
   return { kind: 'text', text, quoted, split, ...extra };
 }
@@ -82,7 +82,7 @@ class SplitterState {
       this.afterListWhite = false;
       this.afterDelimiter = false;
     } else if (segment.text !== '') {
-      this.splitText(segment.text, Boolean(segment.transformedList));
+      this.splitText(segment.text, Boolean(segment.fromList));
     } else if (segment.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
       this.started = true;
       this.afterWhite = false;
@@ -123,7 +123,7 @@ class SplitterState {
     this.started = false;
   }
 
-  private splitText(text: string, transformedList: boolean): void {
+  private splitText(text: string, fromList: boolean): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
@@ -136,18 +136,18 @@ class SplitterState {
       }
       if (run) this.field.push(textSegment(run, false, false));
       run = '';
-      this.separate(c, transformedList);
+      this.separate(c, fromList);
     }
     if (run) this.field.push(textSegment(run, false, false));
   }
 
-  private separate(c: string, transformedList = false): void {
+  private separate(c: string, fromList = false): void {
     if (c === ' ' || c === '\t' || c === '\n') {
       if (this.started) {
         this.end();
         this.afterWhite = true;
       } else if (!this.afterDelimiter) {
-        if (transformedList) this.afterWhite = true;
+        if (fromList) this.afterWhite = true;
         else this.afterListWhite = true;
       }
       return;
