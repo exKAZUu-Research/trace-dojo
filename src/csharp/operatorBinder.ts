@@ -14,12 +14,16 @@ import {
   PendingException,
   unaryNumeric,
 } from './numeric';
+import { sizeOf } from './pointers';
 import {
   displayType,
   ERROR_TYPE,
+  isPointerType,
   isReferenceType,
+  isVoidPointer,
   type NamedType,
   nullableUnderlying,
+  pointeeOf,
   sameType,
   specialOf,
   type SpecialType,
@@ -140,6 +144,48 @@ export abstract class OperatorBinder extends ConversionBinder {
    */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  /**
+   * The pointer operators of C# spec §24.6: a pointer plus or minus an integer, the difference of two pointers, and
+   * comparisons of pointers (or a pointer and null) by address. `void*` has none but the comparisons (CS0242).
+   */
+  private bindPointerOperator(
+    operator: string,
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number
+  ): BoundExpression | undefined {
+    const leftPointer = isPointerType(left.type);
+    const rightPointer = isPointerType(right.type);
+    if (!leftPointer && !rightPointer) return undefined;
+    if (['==', '!=', '<', '>', '<=', '>='].includes(operator)) {
+      if (!isPointerOperand(left) || !isPointerOperand(right)) return undefined;
+      return { kind: 'pointerCompare', operator, left, right, type: this.boolType, row };
+    }
+    if (operator !== '+' && operator !== '-') return undefined;
+    const pointer = leftPointer ? left : right;
+    const other = leftPointer ? right : left;
+    if (isVoidPointer(pointer.type)) {
+      this.error(row, 'CS0242', '問題の操作は void ポインターで定義されていません');
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
+    const elementSize = sizeOf(pointeeOf(pointer.type) as Type);
+    if (operator === '-' && leftPointer && rightPointer) {
+      if (!sameType(left.type, right.type)) return undefined;
+      return { kind: 'pointerDiff', left, right, elementSize, type: this.specialType('long'), row };
+    }
+    if (!isIntegral(other.type) || specialOf(other.type) === 'char' || (operator === '-' && !leftPointer))
+      return undefined;
+    return {
+      kind: 'pointerArith',
+      pointer,
+      offset: other,
+      elementSize,
+      isSubtract: operator === '-',
+      type: pointer.type,
+      row,
+    };
+  }
+
   bindBinary(
     operator: string,
     left: BoundExpression,
@@ -148,16 +194,9 @@ export abstract class OperatorBinder extends ConversionBinder {
     shownOperator = operator
   ): BoundExpression {
     if (left.type.kind === 'error' || right.type.kind === 'error')
-      return {
-        kind: 'binary',
-        operator,
-        left,
-        right,
-        operandKind: 'int',
-        isLifted: false,
-        type: ERROR_TYPE,
-        row,
-      };
+      return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+    const pointerOperation = this.bindPointerOperator(operator, left, right, row);
+    if (pointerOperation) return pointerOperation;
     const userDefined = this.userOperator(OPERATOR_NAMES[operator], [left, right], row);
     if (userDefined) return userDefined;
     if (operator === '+' && (this.isString(left.type) || this.isString(right.type)))
@@ -626,4 +665,9 @@ function isNonNegativeIntConstant(operand: BoundExpression): boolean {
     return false;
   const value = operand.value as number | bigint;
   return value >= 0;
+}
+
+/** Whether an operand may be compared as a pointer: a pointer, or null. */
+function isPointerOperand(operand: BoundExpression): boolean {
+  return isPointerType(operand.type) || operand.type.kind === 'null';
 }

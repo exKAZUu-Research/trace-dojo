@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import type { Designation, Expression, Pattern, Position, TypeNode } from './ast';
 import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
 import type { ArgumentInfo } from './callBinder';
@@ -12,6 +11,8 @@ import type { MethodCandidate } from './lookup';
 import { type BindResult, isNonValue, type NonValue } from './memberBinder';
 import { ASSIGNMENT_OPERATOR_NAMES, checkedOperatorName } from './natives';
 import type { Space } from './patternSpace';
+// code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
+import { sizeOf } from './pointers';
 import { desugarQuery } from './queries';
 import { LocalScope } from './scopes';
 import {
@@ -19,8 +20,10 @@ import {
   displayType,
   ERROR_TYPE,
   FieldSymbol,
+  isPointerType,
   isReferenceType,
   isValueType,
+  isVoidPointer,
   LocalSymbol,
   MethodSymbol,
   type NamedType,
@@ -28,6 +31,7 @@ import {
   NULL_TYPE,
   nullableUnderlying,
   type ParameterSymbol,
+  pointeeOf,
   PropertySymbol,
   sameType,
   specialOf,
@@ -38,6 +42,7 @@ import {
   VOID_TYPE,
 } from './types';
 import type { CsObject } from './values';
+import { isFixedVariable } from './variables';
 
 type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
 
@@ -125,6 +130,11 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'elementAccess': {
         const target = this.bindTypedValue(node.target, context);
+        // `p[i]` is `*(p + i)`.
+        if (isPointerType(target.type) && node.args.length === 1) {
+          const index = this.bindValue(node.args[0].value, context);
+          return this.dereference(this.bindBinary('+', target, index, node.row), node);
+        }
         return (
           this.bindImplicitIndexOrRange(target, node, context) ??
           this.bindElementAccess(target, node.args, node, context)
@@ -143,6 +153,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'sizeof': {
         return this.bindSizeof(node, context);
+      }
+      case 'addressOf': {
+        return this.bindAddressOf(node, context, false);
+      }
+      case 'deref': {
+        if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+        return this.dereference(this.bindValue(node.operand, context), node);
+      }
+      case 'stackalloc': {
+        if (!node.isUnsafe) return this.unsupported(node, 'Span への `stackalloc`');
+        return this.bindStackalloc(node, undefined, context);
       }
       case 'refExpression': {
         // A ref local's initializer, a `return ref`, and `r = ref x` take `ref x` apart; elsewhere it is not run.
@@ -1595,6 +1616,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const type = this.resolveType(node.type, context.fn.typeContext);
     const size = sizeOfType(type);
     if (size !== undefined) return this.constant(size, this.intType, node.row);
+    // In unsafe code, sizeof gives any unmanaged type's size, as .NET lays it out.
+    if (node.isUnsafe && type.kind === 'named' && (isPointerType(type) || isValueType(type)))
+      return this.constant(sizeOf(type), this.intType, node.row);
     if (type.kind !== 'error')
       this.error(
         node,
@@ -1602,6 +1626,81 @@ export abstract class ExpressionBinder extends LambdaBinder {
         `'${displayType(type)}' には定義済みのサイズが指定されていないため、sizeof は unsafe コンテキストでのみ使用できます`
       );
     return { kind: 'default', type: this.intType, row: node.row };
+  }
+
+  pointerTo(type: Type): NamedType {
+    return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Pointer', 1), [type]);
+  }
+
+  /** `*p`, the variable a pointer points to. */
+  dereference(pointer: BoundExpression, position: Position): BoundExpression {
+    if (pointer.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    if (!isPointerType(pointer.type)) {
+      this.error(position, 'CS0193', '* または -> 演算子はポインターに対して使用してください');
+      return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    }
+    if (isVoidPointer(pointer.type)) {
+      this.error(position, 'CS0242', '問題の操作は void ポインターで定義されていません');
+      return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    }
+    return { kind: 'deref', pointer, type: pointeeOf(pointer.type) as Type, row: position.row };
+  }
+
+  /**
+   * `&x` of a variable, or of a method for a function pointer. Only a fixed variable (a local, or a field of a struct
+   * that is one, or what a pointer points to) has an address outside a `fixed` statement's initializer (CS0212),
+   * which takes the address of a movable one only (CS0213).
+   */
+  bindAddressOf(node: Extract<Expression, { kind: 'addressOf' }>, context: BindContext, inFixed: boolean): BindResult {
+    if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+    const bound = this.bindExpression(node.operand, context);
+    if (bound.kind === 'methodGroup') return bound;
+    const value = this.toValue(bound, node.operand);
+    if (value.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    if (!['local', 'field', 'staticField', 'element', 'deref'].includes(value.kind)) {
+      this.error(node, 'CS0211', '式のアドレスを取得できません');
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    if (value.kind === 'local' && value.local.owner !== context.fn.method) {
+      this.error(
+        node,
+        'CS1686',
+        `ローカル '${value.local.name}' またはそのメンバーは、アドレスを与えることも、匿名メソッドまたはラムダ式の内部で使用されることもできません`
+      );
+    }
+    const isFixed = isFixedVariable(value);
+    if (!isFixed && !inFixed)
+      this.error(node, 'CS0212', 'fixed ステートメントの初期化子内の fixed でない式のアドレスのみを取得できます');
+    if (isFixed && inFixed)
+      this.error(
+        node,
+        'CS0213',
+        '既に fixed が使用されている式のアドレスを取得するために、fixed ステートメントを使用することはできません'
+      );
+    return { kind: 'addressOf', target: value as BoundLValue, type: this.pointerTo(value.type), row: node.row };
+  }
+
+  /** `stackalloc T[n]` or `stackalloc[] { ... }`, as a pointer to a new buffer of its elements. */
+  bindStackalloc(
+    node: Extract<Expression, { kind: 'stackalloc' }>,
+    targetElement: Type | undefined,
+    context: BindContext
+  ): BoundExpression {
+    const values = node.initializer?.map((value) => this.bindValue(value, context));
+    let elementType = node.elementType ? this.resolveType(node.elementType, context.fn.typeContext) : targetElement;
+    elementType ??= this.bestCommonType(values ?? []) ?? ERROR_TYPE;
+    const element = elementType;
+    const length = node.count
+      ? this.bindAs(node.count, this.intType, context)
+      : this.constant(values?.length ?? 0, this.intType, node.row);
+    return {
+      kind: 'stackalloc',
+      elementType: element,
+      length,
+      values: values?.map((value, index) => this.convert(value, element, node.initializer?.[index] ?? node)),
+      type: this.pointerTo(element),
+      row: node.row,
+    };
   }
 
   /** `new T(args)` of a library struct whose constructor takes exactly the arguments' types. */
@@ -1888,7 +1987,14 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const special = specialOf(underlying);
     const isNumericTarget = (special !== undefined && isNumeric(underlying)) || isEnum(underlying);
     let operation: BoundExpression;
-    if (isNumericTarget) {
+    if (isPointerType(target.type))
+      operation = this.bindBinary(
+        node.operator === '++' ? '+' : '-',
+        operand,
+        this.constant(1, this.intType, node.row),
+        node.row
+      );
+    else if (isNumericTarget) {
       operation = {
         kind: 'unary',
         operator: node.operator,

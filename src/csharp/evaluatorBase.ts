@@ -5,9 +5,11 @@ import type { ConversionKind, Conversions } from './conversions';
 import { CsDecimal } from './decimal';
 import { convertNumeric, type NumericValue, PendingException } from './numeric';
 import { runtimeTypeName } from './objects';
+import { CsPointer } from './pointers';
 import type { Frame, Runtime, Slot } from './runtime';
 import {
   baseTypeOf,
+  isPointerType,
   isReferenceType,
   type LocalSymbol,
   type MethodSymbol,
@@ -221,7 +223,21 @@ export abstract class EvaluatorBase {
       case 'userDefined': {
         throw new Error('User-defined conversions are not supported');
       }
+      case 'pointer': {
+        return this.convertPointer(value, from, to);
+      }
     }
+  }
+
+  /** A pointer as another pointer type, as its address, or an address as a pointer into the storage there. */
+  private convertPointer(value: Value, from: Type, to: Type): Value {
+    if (isPointerType(from) && isPointerType(to)) return value;
+    if (isPointerType(from)) {
+      const address = value instanceof CsPointer ? value.address : 0n;
+      return convertNumeric(address, 'ulong', numericKindOf(to), false);
+    }
+    const address = BigInt.asUintN(64, typeof value === 'bigint' ? value : BigInt(value as number));
+    return this.runtime.memory.pointerAt(address);
   }
 
   box(value: Value, from: Type): Value {

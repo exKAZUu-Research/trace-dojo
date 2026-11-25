@@ -1,4 +1,5 @@
 import type { BoundExpression } from './bound';
+import { isValueType } from './types';
 
 /**
  * Whether an expression denotes a variable, whose struct a member assignment or a method call changes in place: a
@@ -10,6 +11,7 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'local':
     case 'this':
     case 'element':
+    case 'deref':
     case 'compoundOperand': {
       return true;
     }
@@ -25,6 +27,28 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
       return (
         !(receiver.kind === 'named' && receiver.symbol.isValueType) || isVariable(expression.receiver, readonlyIsValue)
       );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/**
+ * Whether a variable is fixed, so that `&` takes its address without a `fixed` statement: a local or value parameter,
+ * a field of a struct that is fixed, or what a pointer points to (C# spec §24.4).
+ */
+export function isFixedVariable(expression: BoundExpression): boolean {
+  switch (expression.kind) {
+    case 'local': {
+      // A ref parameter or ref local may refer to a movable variable.
+      return expression.local.refKind === undefined;
+    }
+    case 'deref': {
+      return true;
+    }
+    case 'field': {
+      return isValueType(expression.receiver.type) && isFixedVariable(expression.receiver);
     }
     default: {
       return false;

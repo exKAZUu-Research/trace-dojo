@@ -181,6 +181,12 @@ function typeNodeKey(node: TypeNode | undefined): string {
     case 'refType': {
       return `ref ${node.isReadonly ? 'readonly ' : ''}${typeNodeKey(node.type)}`;
     }
+    case 'pointerType': {
+      return `${typeNodeKey(node.element)}*`;
+    }
+    case 'functionPointerType': {
+      return `delegate*<${[...node.parameters, node.returnType].map((part) => typeNodeKey(part)).join(',')}>`;
+    }
     case 'namedType': {
       return node.typeArgs ? `${node.name}<${node.typeArgs.map(typeNodeKey).join(', ')}>` : node.name;
     }

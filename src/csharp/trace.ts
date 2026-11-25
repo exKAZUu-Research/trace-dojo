@@ -14,6 +14,7 @@ import { formatFloat } from './format';
 import type { EnumerableState } from './library/iteration';
 import { enumText, exceptionMessage, isExceptionState } from './objects';
 import { parseCSharp } from './parse';
+import { CsPointer } from './pointers';
 import { type Frame, type NativeState, Runtime } from './runtime';
 import {
   type ArrayType,
@@ -227,6 +228,8 @@ const NOT_SCALAR = Symbol('notScalar');
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;
   if (value instanceof CsBox) return scalarOf(value.value, value.type);
+  // A pointer shows its virtual address, as the hexadecimal text a debugger shows.
+  if (value instanceof CsPointer) return shownText(value.text);
   // A null variable shows no value, as a null String in the Java interpreter's traces; arrays show null elements.
   if (value === undefined) return NOT_SCALAR;
   if (underlying.kind === 'array') {
@@ -336,7 +339,12 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   if (value === undefined) return NULL_NODE;
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) return { kind: 'value', value: scalar as TraceScalar };
-  if (typeof value !== 'object' || value instanceof CsDecimal || value instanceof CsString)
+  if (
+    typeof value !== 'object' ||
+    value instanceof CsDecimal ||
+    value instanceof CsString ||
+    value instanceof CsPointer
+  )
     return { kind: 'value', value: shownText(String(value)) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);

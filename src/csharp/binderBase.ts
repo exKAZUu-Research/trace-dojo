@@ -467,6 +467,15 @@ export class BinderBase {
     return this.resolveType(node.type, context);
   }
 
+  /** Reports a pointer outside an unsafe context (CS0214). */
+  reportOutsideUnsafe(position: Position | number): void {
+    this.error(
+      position,
+      'CS0214',
+      'ポインターおよび固定サイズ バッファーは、unsafe コンテキストでのみ使用することができます'
+    );
+  }
+
   /** Resolves a type in a declaration's context, reporting the names it cannot find. */
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
@@ -476,6 +485,23 @@ export class BinderBase {
       case 'refType': {
         // Ref locals and methods returning by reference take the type apart; elsewhere it is not run.
         return this.unsupported(node, 'この場所の `ref` 型');
+      }
+      case 'pointerType': {
+        if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+        const element =
+          node.element.kind === 'predefinedType' && node.element.name === 'void'
+            ? namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Void'))
+            : this.resolveType(node.element, context);
+        return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Pointer', 1), [element]);
+      }
+      case 'functionPointerType': {
+        // A function pointer of managed calling convention calls as the delegate of its signature does.
+        if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+        const parameters = node.parameters.map((parameter) => this.resolveType(parameter, context));
+        const returnType = this.resolveType(node.returnType, context);
+        return returnType.kind === 'void'
+          ? namedType(this.library.typeNamed('System.Action', parameters.length), parameters)
+          : namedType(this.library.typeNamed('System.Func', parameters.length + 1), [...parameters, returnType]);
       }
       case 'varType': {
         // `var` outside a declaration of a local names a type called `var`, which no program declares.

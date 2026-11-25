@@ -6,6 +6,7 @@ import { type CompiledProgram, compileProgram } from './compiler';
 import { Evaluator } from './evaluator';
 import { runtimeTypeName } from './objects';
 import { parseCSharp } from './parse';
+import { PointerRangeError } from './pointers';
 import { type CsThrow, Frame, ProgramExit, Runtime } from './runtime';
 import { DeadlockError, type TaskState, UnhandledAsyncException } from './tasks';
 import { arrayType, namedType, type TypeSymbol } from './types';
@@ -83,6 +84,7 @@ function runEntry(evaluator: Evaluator): string | undefined {
   } catch (error) {
     if (error instanceof ProgramExit) return undefined;
     if (error instanceof DeadlockError) return error.message;
+    if (error instanceof PointerRangeError) return error.message;
     if (error instanceof UnhandledAsyncException) return describeUncaught(evaluator, error.thrown);
     if (evaluator.isStackOverflow(error)) {
       runtime.io.stderr.write('Stack overflow.\n');

@@ -16,7 +16,7 @@ export function parseCSharp(source: string, isLibrary = false): CompilationUnit 
     parser,
     parenthesizeExpressionStatements(text),
     MISSING_TOKEN_NAMES,
-    (root) => ({ ...new Converter(isLibrary).convertCompilationUnit(root), options }),
+    (root) => ({ ...new Converter(isLibrary, options?.allowUnsafe ?? false).convertCompilationUnit(root), options }),
     { locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors) }
   );
 }

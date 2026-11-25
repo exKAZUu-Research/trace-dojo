@@ -4,6 +4,15 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { Position } from './ast';
 
 /** Rejects syntax that this grader does not run. */
+/** Whether a node is in an unsafe context: an `unsafe` block, or a declaration with the `unsafe` modifier. */
+export function inUnsafeContext(node: Node): boolean {
+  for (let current: Node | null = node; current; current = current.parent) {
+    if (current.type === 'unsafe_statement') return true;
+    if (current.namedChildren.some((child) => child?.type === 'modifier' && child.text === 'unsafe')) return true;
+  }
+  return false;
+}
+
 export function unsupported(node: Node | Position, what: string): never {
   const row = 'startPosition' in node ? node.startPosition.row : node.row;
   throw new CompileError([{ row, message: `${what}は、この採点環境では使えません。` }]);

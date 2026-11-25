@@ -206,6 +206,26 @@ export type BoundExpression =
   | ({ kind: 'typeOf'; target: Type } & Base)
   /** `r = ref x`, which makes a ref local refer to another variable, and is that variable's value. */
   | ({ kind: 'refAssign'; local: LocalSymbol; target: BoundLValue } & Base)
+  /** `&x`: a pointer to a variable, decomposed into the storage it lies in and its offset there. */
+  | ({ kind: 'addressOf'; target: BoundLValue } & Base)
+  /** `*p`, the variable a pointer points to, of the pointer's element type. */
+  | ({ kind: 'deref'; pointer: BoundExpression } & Base)
+  /** `p + n` or `p - n`, which moves a pointer by n elements of `elementSize` bytes. */
+  | ({
+      kind: 'pointerArith';
+      pointer: BoundExpression;
+      offset: BoundExpression;
+      elementSize: number;
+      isSubtract: boolean;
+    } & Base)
+  /** `p - q`, the number of elements between two pointers, as a long. */
+  | ({ kind: 'pointerDiff'; left: BoundExpression; right: BoundExpression; elementSize: number } & Base)
+  /** A comparison of two pointers by the addresses they hold. */
+  | ({ kind: 'pointerCompare'; operator: string; left: BoundExpression; right: BoundExpression } & Base)
+  /** `stackalloc T[n]`, a new buffer of n elements, with an initializer's values. */
+  | ({ kind: 'stackalloc'; elementType: Type; length: BoundExpression; values: BoundExpression[] | undefined } & Base)
+  /** A `fixed` statement's array or string, as a pointer to its first element, null for a null or empty one. */
+  | ({ kind: 'fixedAddress'; value: BoundExpression; isString: boolean } & Base)
   | ({
       kind: 'conditionalAccess';
       receiver: BoundExpression;
@@ -246,7 +266,7 @@ export type BoundDeconstructTarget =
 export type BoundLValue =
   | Extract<
       BoundExpression,
-      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' | 'call' }
+      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' | 'call' | 'deref' }
     >
   | ({ kind: 'discard' } & Base);
 

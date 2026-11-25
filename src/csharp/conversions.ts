@@ -1,8 +1,10 @@
 import {
   allInterfacesOf,
   baseTypeOf,
+  isPointerType,
   isReferenceType,
   isValueType,
+  isVoidPointer,
   type NamedType,
   nullableUnderlying,
   sameType,
@@ -33,7 +35,9 @@ export type ConversionKind =
   /** A type parameter's value to a type it converts to, which boxes a value type at run time. */
   | 'typeParameterBox'
   /** A value to a type parameter, which unboxes or checks at run time. */
-  | 'typeParameterUnbox';
+  | 'typeParameterUnbox'
+  /** Between pointer types, or between a pointer and an integer, which keeps the address. */
+  | 'pointer';
 
 /** The types that conversions and operators know by role. */
 export interface WellKnownTypes {
@@ -119,6 +123,9 @@ export class Conversions {
   implicit(from: Type, to: Type): ConversionKind | undefined {
     if (to.kind === 'error' || from.kind === 'error' || sameType(from, to)) return 'identity';
     if (from.kind === 'null') return acceptsNullType(to) ? 'nullLiteral' : undefined;
+    // Any pointer converts to `void*`; a pointer converts to nothing else implicitly, `object` included.
+    if (isPointerType(from) || isPointerType(to))
+      return isPointerType(from) && isVoidPointer(to) ? 'pointer' : undefined;
     if (isImplicitNumeric(from, to)) return 'numeric';
     const toUnderlying = nullableUnderlying(to);
     if (toUnderlying) {
@@ -143,6 +150,11 @@ export class Conversions {
   explicit(from: Type, to: Type): ConversionKind | undefined {
     const implicit = this.implicit(from, to);
     if (implicit) return implicit;
+    if (isPointerType(from) || isPointerType(to)) {
+      const isPointerOrIntegral = (type: Type): boolean =>
+        isPointerType(type) || (isIntegral(type) && specialOf(type) !== 'char');
+      return isPointerOrIntegral(from) && isPointerOrIntegral(to) ? 'pointer' : undefined;
+    }
     const numeric = explicitNumeric(from, to);
     if (numeric) return numeric;
     const fromUnderlying = nullableUnderlying(from);

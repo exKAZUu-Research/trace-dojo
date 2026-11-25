@@ -270,6 +270,74 @@ static async IAsyncEnumerable<int> Count(int count)
   });
 });
 
+// Unsafe code, with `AllowUnsafeBlocks`, reads and writes through pointers to locals, fixed arrays and strings, stack
+// buffers, and struct fields, reinterpreting bytes little-endian as .NET does; without it, `unsafe` is CS0227.
+test('unsafe code runs with pointers, fixed, and stackalloc', () => {
+  const program = String.raw`#:property AllowUnsafeBlocks=true
+unsafe
+{
+    int x = 5;
+    int* p = &x;
+    *p += 2;
+    Console.WriteLine($"{x} {*p} {p == &x} {p != null}");
+    int[] a = { 1, 2, 3, 4 };
+    fixed (int* q = a)
+    {
+        int* r = q + 1;
+        *r = 20;
+        r++;
+        r[1] = 40;
+        Console.WriteLine($"{*q} {q[1]} {*(q + 2)} {r - q} {r > q}");
+        for (int* s = q; s < q + a.Length; s++) *s *= 10;
+    }
+    Console.WriteLine(string.Join(",", a));
+    int* buf = stackalloc int[3];
+    for (int i = 0; i < 3; i++) buf[i] = i * i;
+    Console.WriteLine(buf[0] + buf[1] + buf[2]);
+    Point pt = new Point { X = 1, Y = 2 };
+    Point* pp = &pt;
+    pp->X = 9;
+    (*pp).Y = 8;
+    Console.WriteLine($"{pt.X} {pt.Y} {pp->X + pp->Y}");
+    Console.WriteLine($"{sizeof(Point)} {sizeof(int*) } {sizeof(long)}");
+    fixed (char* c = "hello") Console.WriteLine(c[1]);
+    byte* bp = (byte*)&x;
+    Console.WriteLine(bp[0]);
+    void* vp = &x;
+    Console.WriteLine(*(int*)vp);
+    delegate*<int, int> f = &Twice;
+    Console.WriteLine(f(21));
+    int** pp2 = &p;
+    **pp2 = 100;
+    Console.WriteLine(x);
+}
+static int Twice(int v) => v * 2;
+struct Point { public int X; public int Y; }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: [
+      '7 7 True True',
+      '1 20 3 2 True',
+      '10,200,30,400',
+      '5',
+      '9 8 17',
+      '8 8 8',
+      'e',
+      '7',
+      '7',
+      '42',
+      '100',
+      '',
+    ].join('\n'),
+  });
+  expect(executeProgram('csharp', 'unsafe { int x = 1; }\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'CS0227: アンセーフ コードは /unsafe でコンパイルした場合のみ有効です' }],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

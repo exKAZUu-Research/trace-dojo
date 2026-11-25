@@ -1272,6 +1272,9 @@ namespace System.Runtime.CompilerServices {
   public enum MethodImplOptions { Unmanaged = 4, NoInlining = 8, ForwardRef = 16, Synchronized = 32, NoOptimization = 64, PreserveSig = 128, AggressiveInlining = 256, AggressiveOptimization = 512, InternalCall = 4096 }
   [AttributeUsage(AttributeTargets.Method, Inherited = false)]
   public sealed class ModuleInitializerAttribute : Attribute { public ModuleInitializerAttribute(); }
+  /** The type of a pointer \`T*\`, which no program names; \`void*\` points to \`__Void\`. */
+  public sealed class __Pointer<T> { }
+  public sealed class __Void { }
   public static class RuntimeHelpers { public static T[] GetSubArray<T>(T[] array, Range range); }
   public sealed class SwitchExpressionException : InvalidOperationException {
     public SwitchExpressionException();

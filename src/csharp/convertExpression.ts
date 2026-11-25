@@ -28,6 +28,7 @@ import {
   field,
   fieldChildren,
   hasToken,
+  inUnsafeContext,
   namedChildren,
   positionOf,
   requiredField,
@@ -41,18 +42,17 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   makeref_expression: '`__makeref`',
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
-  stackalloc_expression: '`stackalloc`',
-  implicit_stackalloc_expression: '`stackalloc`',
 };
 
-const UNSUPPORTED_TYPES: Record<string, string> = {
-  pointer_type: 'ポインター型',
-  function_pointer_type: '関数ポインター型',
-};
+const UNSUPPORTED_TYPES: Record<string, string> = {};
 
 export class ExpressionConverter {
   /** @param isLibrary Whether the source is this grader's own library declarations, which use more syntax. */
-  constructor(protected readonly isLibrary: boolean) {}
+  /** @param allowsUnsafe Whether the program is built with `AllowUnsafeBlocks`, without which `unsafe` is an error. */
+  constructor(
+    protected readonly isLibrary: boolean,
+    protected readonly allowsUnsafe = false
+  ) {}
 
   /** Converts the body of a block, provided by the statement converter. */
   protected convertBlockNode(_node: Node): Block {
@@ -130,6 +130,27 @@ export class ExpressionConverter {
           kind: 'refType',
           type: this.convertType(requiredField(node, 'type')),
           isReadonly: hasToken(node, 'readonly'),
+          ...position,
+        };
+      }
+      case 'pointer_type': {
+        return {
+          kind: 'pointerType',
+          element: this.convertType(requiredField(node, 'type')),
+          isUnsafe: this.isLibrary || inUnsafeContext(node),
+          ...position,
+        };
+      }
+      case 'function_pointer_type': {
+        const convention = namedChildren(node).find((child) => child.type === 'calling_convention');
+        if (convention && convention.text !== 'managed') unsupported(node, 'アンマネージ関数ポインター');
+        return {
+          kind: 'functionPointerType',
+          parameters: namedChildren(node)
+            .filter((child) => child.type === 'function_pointer_parameter')
+            .map((child) => this.convertType(requiredField(child, 'type'))),
+          returnType: this.convertType(requiredField(node, 'returns')),
+          isUnsafe: inUnsafeContext(node),
           ...position,
         };
       }
@@ -275,7 +296,11 @@ export class ExpressionConverter {
       }
       case 'member_access_expression': {
         const targetNode = requiredField(node, 'expression');
-        const target = this.convertOperand(targetNode);
+        const operand = this.convertOperand(targetNode);
+        // `p->X` is `(*p).X`.
+        const target: Expression = childrenOf(node).some((child) => child.type === '->')
+          ? { kind: 'deref', operand, isUnsafe: inUnsafeContext(node), ...position }
+          : operand;
         return this.memberAccess(target, requiredField(node, 'name'), position);
       }
       case 'member_binding_expression': {
@@ -483,7 +508,12 @@ export class ExpressionConverter {
         return { kind: 'typeof', type: this.convertType(requiredField(node, 'type')), ...position };
       }
       case 'sizeof_expression': {
-        return { kind: 'sizeof', type: this.convertType(requiredField(node, 'type')), ...position };
+        return {
+          kind: 'sizeof',
+          type: this.convertType(requiredField(node, 'type')),
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
       }
       case 'range_expression': {
         const children = childrenOf(node);
@@ -514,6 +544,23 @@ export class ExpressionConverter {
       }
       case 'query_expression': {
         return { kind: 'query', clauses: this.convertQuery(node), ...position };
+      }
+      case 'stackalloc_expression':
+      case 'implicit_stackalloc_expression': {
+        const arrayType = field(node, 'type');
+        const rank = arrayType ? field(arrayType, 'rank') : undefined;
+        const lengthNode = rank ? namedChildren(rank)[0] : undefined;
+        const initializer = namedChildren(node).find((child) => child.type === 'initializer_expression');
+        return {
+          kind: 'stackalloc',
+          elementType: arrayType ? this.convertType(requiredField(arrayType, 'type')) : undefined,
+          count: lengthNode ? this.convertExpression(lengthNode) : undefined,
+          initializer: initializer
+            ? namedChildren(initializer).map((value) => this.convertExpression(value))
+            : undefined,
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
       }
       case 'ref_expression': {
         const [operand] = namedChildren(node);
@@ -556,11 +603,14 @@ export class ExpressionConverter {
       case '^': {
         return { kind: 'fromEnd', operand: this.convertExpression(operand), ...position };
       }
-      case '&': {
-        return unsupported(node, 'アドレス演算子（`&`）');
-      }
+      case '&':
       case '*': {
-        return unsupported(node, 'ポインターの間接参照（`*`）');
+        return {
+          kind: operator === '&' ? 'addressOf' : 'deref',
+          operand: this.convertExpression(operand),
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
       }
       default: {
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);

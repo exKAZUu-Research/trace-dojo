@@ -7,6 +7,7 @@ import type { BoundExpression } from './bound';
 import type { Evaluator } from './evaluator';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
+import { PointerMemory } from './pointers';
 import { TaskScheduler } from './tasks';
 import {
   baseTypeOf,
@@ -123,6 +124,8 @@ export class Runtime {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
   readonly scheduler = new TaskScheduler(() => this.spend());
+  /** The storage that pointers point into, with the virtual addresses that unsafe code sees. */
+  readonly memory = new PointerMemory();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   /** The static fields of each constructed type, keyed by the type's identity. */

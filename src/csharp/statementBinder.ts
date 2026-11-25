@@ -37,6 +37,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   type FieldSymbol,
+  isPointerType,
   isReferenceType,
   isValueType,
   LocalSymbol,
@@ -45,6 +46,7 @@ import {
   namedType,
   nullableUnderlying,
   type ParameterSymbol,
+  pointeeOf,
   type PropertySymbol,
   sameType,
   specialOf,
@@ -146,6 +148,9 @@ export abstract class StatementBinder extends PatternBinder {
     switch (target.kind) {
       case 'implicitIndex': {
         this.checkAssignable(target.access, position, context, use);
+        return target;
+      }
+      case 'deref': {
         return target;
       }
       case 'call': {
@@ -673,7 +678,58 @@ export abstract class StatementBinder extends PatternBinder {
       case 'yield': {
         return this.bindYield(statement, context);
       }
+      case 'unsafe': {
+        return this.bindBlock(statement.body, context);
+      }
+      case 'fixed': {
+        return this.bindFixed(statement, context);
+      }
     }
+  }
+
+  /**
+   * `fixed (T* p = a, q = &o.f) body`: pointers to an array's first element, a string's first character, or a
+   * movable variable, which stay valid in the body, and which the body may not assign.
+   */
+  private bindFixed(statement: Extract<Statement, { kind: 'fixed' }>, context: BindContext): BoundStatement {
+    const scope = new LocalScope(context.scope, context.fn);
+    const inner: BindContext = { scope, fn: context.fn };
+    const declaredType = this.resolveType(statement.type, context.fn.typeContext);
+    const declarations = statement.declarators.map((declarator): BoundStatement => {
+      const { initializer } = declarator;
+      let value: BoundExpression | undefined;
+      if (!initializer || initializer.kind === 'arrayInitializer')
+        this.error(declarator, 'CS0210', 'fixed または using ステートメントの宣言の中に、初期化子を指定してください');
+      else if (initializer.kind === 'addressOf')
+        value = this.toValue(this.bindAddressOf(initializer, inner, true), initializer);
+      else {
+        const bound = this.bindValue(initializer, inner);
+        if (bound.type.kind === 'array' || specialOf(bound.type) === 'string') {
+          const element = bound.type.kind === 'array' ? bound.type.element : this.specialType('char');
+          value = {
+            kind: 'fixedAddress',
+            value: bound,
+            isString: bound.type.kind !== 'array',
+            type: this.pointerTo(element),
+            row: bound.row,
+          };
+        } else value = bound;
+      }
+      if (value) value = this.convert(value, declaredType, initializer ?? declarator);
+      const local = this.declareLocal(declarator.name, declaredType, declarator, inner);
+      local.isReadonly = true;
+      local.readonlyReason = '固定変数';
+      return { kind: 'localDeclaration', local, value, row: declarator.row, step: 'step' };
+    });
+    const body = this.bindEmbedded(statement.body, inner);
+    return {
+      kind: 'block',
+      statements: [...declarations, body],
+      capturedLocals: [],
+      locals: scope.locals,
+      row: statement.row,
+      step: 'none',
+    };
   }
 
   /**
@@ -1008,6 +1064,12 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     if (statement.type.kind === 'refType') return this.bindRefLocals(statement, statement.type, context);
+    // `var s = stackalloc ...` makes a Span, which this grader does not run.
+    if (
+      statement.type.kind === 'varType' &&
+      statement.declarators.some((declarator) => declarator.initializer?.kind === 'stackalloc')
+    )
+      this.unsupported(statement, 'Span への `stackalloc`');
     const isVar = statement.type.kind === 'varType' && !this.findTypeInScope('var', 0, context.fn.typeContext);
     if (isVar && statement.declarators.length > 1) {
       this.error(statement, 'CS0819', '暗黙的に型指定された変数は、複数の宣言子を持つことができません');
@@ -1240,6 +1302,12 @@ export abstract class StatementBinder extends PatternBinder {
     }
     // The variable is in scope in its own initializer, where using it is an error of definite assignment.
     const local = this.declareLocal(declarator.name, type, declarator, context);
+    if (initializer?.kind === 'stackalloc' && declaredType && isPointerType(declaredType))
+      value = this.convert(
+        this.bindStackalloc(initializer, pointeeOf(declaredType), context),
+        declaredType,
+        initializer
+      );
     if (initializer?.kind === 'refExpression') {
       this.error(declarator, 'CS8171', '参照を使用して値渡し変数を初期化することはできません');
       return { kind: 'localDeclaration', local, value: undefined, row: declarator.row, step: 'none' };

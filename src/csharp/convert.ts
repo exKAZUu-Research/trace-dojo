@@ -42,12 +42,10 @@ import {
 } from './convertBase';
 import { ExpressionConverter } from './convertExpression';
 
-const UNSUPPORTED_STATEMENTS: Record<string, string> = {
-  fixed_statement: '`fixed` 文',
-  unsafe_statement: '`unsafe` ブロック',
-};
+const UNSUPPORTED_STATEMENTS: Record<string, string> = {};
 
 const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
+  'unsafe',
   'public',
   'private',
   'protected',
@@ -67,12 +65,7 @@ const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
   'async',
 ]);
 
-const UNSUPPORTED_MODIFIERS: Record<string, string> = {
-  unsafe: '`unsafe`',
-  extern: '`extern`',
-  fixed: '`fixed`',
-  scoped: '`scoped`',
-};
+const UNSUPPORTED_MODIFIERS: Record<string, string> = { extern: '`extern`', fixed: '`fixed`', scoped: '`scoped`' };
 
 /** C#'s reserved keywords, which are identifiers only with an `@` prefix. */
 const RESERVED_KEYWORDS = new Set([
@@ -168,10 +161,25 @@ function rejectKeywordIdentifiers(root: Node): void {
   }
 }
 
+/** Reports each `unsafe` of a program built without `AllowUnsafeBlocks`, as Roslyn does (CS0227). */
+function rejectUnsafe(root: Node): void {
+  const rows = [
+    ...root.descendantsOfType('unsafe_statement'),
+    ...root.descendantsOfType('modifier').filter((node) => node?.text === 'unsafe'),
+  ]
+    .map((node) => node?.startPosition.row as number)
+    .toSorted((a, b) => a - b);
+  if (rows.length === 0) return;
+  throw new CompileError(
+    rows.map((row) => ({ row, message: 'CS0227: アンセーフ コードは /unsafe でコンパイルした場合のみ有効です' }))
+  );
+}
+
 /** Converts tree-sitter's C# tree into the program's syntax tree. */
 export class Converter extends ExpressionConverter {
   convertCompilationUnit(root: Node): CompilationUnit {
     if (!this.isLibrary) rejectKeywordIdentifiers(root);
+    if (!this.isLibrary && !this.allowsUnsafe) rejectUnsafe(root);
     const unit: CompilationUnit = { usings: [], statements: [], members: [], sourceRows: root.endPosition.row + 1 };
     for (const child of namedChildren(root)) {
       switch (child.type) {
@@ -958,6 +966,14 @@ export class Converter extends ExpressionConverter {
       }
       case 'yield_statement': {
         return { kind: 'yield', value: parts[0] ? this.convertExpression(parts[0]) : undefined, ...position };
+      }
+      case 'unsafe_statement': {
+        return { kind: 'unsafe', body: this.convertBlockNode(parts[0]), ...position };
+      }
+      case 'fixed_statement': {
+        const declaration = parts.find((part) => part.type === 'variable_declaration') as Node;
+        const { type, declarators } = this.convertVariableDeclaration(declaration);
+        return { kind: 'fixed', type, declarators, body: this.convertStatement(parts.at(-1) as Node), ...position };
       }
       default: {
         const what = UNSUPPORTED_STATEMENTS[node.type];

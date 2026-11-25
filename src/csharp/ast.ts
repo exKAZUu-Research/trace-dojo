@@ -12,6 +12,10 @@ export type TypeNode =
   | ({ kind: 'predefinedType'; name: string } & Position)
   /** `ref T` or `ref readonly T`, the type of a ref local or of what a method returns by reference. */
   | ({ kind: 'refType'; type: TypeNode; isReadonly: boolean } & Position)
+  /** `T*`, whose use outside an unsafe context is an error. */
+  | ({ kind: 'pointerType'; element: TypeNode; isUnsafe: boolean } & Position)
+  /** `delegate*<A, R>`, a function pointer of managed calling convention. */
+  | ({ kind: 'functionPointerType'; parameters: TypeNode[]; returnType: TypeNode; isUnsafe: boolean } & Position)
   | ({
       kind: 'namedType';
       name: string;
@@ -28,6 +32,7 @@ export type TypeNode =
   | ({ kind: 'varType' } & Position);
 
 export type Modifier =
+  | 'unsafe'
   | 'public'
   | 'private'
   | 'protected'
@@ -211,9 +216,21 @@ export type Expression =
   | ({ kind: 'with'; value: Expression; members: MemberInitializer[] } & Position)
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
   | ({ kind: 'typeof'; type: TypeNode } & Position)
-  | ({ kind: 'sizeof'; type: TypeNode } & Position)
+  | ({ kind: 'sizeof'; type: TypeNode; isUnsafe?: boolean } & Position)
   /** `ref x`, the variable that a ref local refers to or a method returns by reference. */
   | ({ kind: 'refExpression'; operand: Expression } & Position)
+  /** `&x`, the address of a variable, or of a method for a function pointer. */
+  | ({ kind: 'addressOf'; operand: Expression; isUnsafe: boolean } & Position)
+  /** `*p`, the variable a pointer points to; `p->X` is `(*p).X`. */
+  | ({ kind: 'deref'; operand: Expression; isUnsafe: boolean } & Position)
+  /** `stackalloc T[n]` or `stackalloc[] { ... }`, a buffer on the stack. */
+  | ({
+      kind: 'stackalloc';
+      elementType: TypeNode | undefined;
+      count: Expression | undefined;
+      initializer: Expression[] | undefined;
+      isUnsafe: boolean;
+    } & Position)
   | ({ kind: 'await'; operand: Expression } & Position)
   /** `^n`, an index from the end. */
   | ({ kind: 'fromEnd'; operand: Expression } & Position)
@@ -299,6 +316,8 @@ export type Statement =
       using?: 'using' | 'await using';
     } & Position)
   | ({ kind: 'deconstruction'; designation: Designation; value: Expression } & Position)
+  | ({ kind: 'unsafe'; body: Block } & Position)
+  | ({ kind: 'fixed'; type: TypeNode; declarators: VariableDeclarator[]; body: Statement } & Position)
   | ({ kind: 'localFunction'; declaration: MethodDeclaration } & Position)
   | ({ kind: 'if'; condition: Expression; consequence: Statement; alternative: Statement | undefined } & Position)
   | ({ kind: 'while'; condition: Expression; body: Statement } & Position)
