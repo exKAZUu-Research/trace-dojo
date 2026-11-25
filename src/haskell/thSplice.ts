@@ -102,6 +102,11 @@ export function spliceModuleNames(module: string, decls: Decl[]): SpliceModuleNa
       case 'class': {
         types.add(decl.name.name);
         for (const member of decl.decls.flatMap((d) => (d.kind === 'sig' ? d.names : []))) values.add(member.name);
+        // A class's methods may have their fixities declared in its body.
+        for (const member of decl.decls) {
+          if (member.kind !== 'fixity') continue;
+          for (const op of member.ops) fixities.set(op.name, { assoc: member.assoc, prec: member.prec });
+        }
         break;
       }
       case 'typeSyn':
