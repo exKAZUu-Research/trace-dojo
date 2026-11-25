@@ -73,6 +73,7 @@ type AccessExpression = Extract<
       | 'staticField'
       | 'element'
       | 'property'
+      | 'implicitIndex'
       | 'compoundOperand'
       | 'conditionalAccess';
   }
@@ -400,6 +401,7 @@ export class Evaluator extends StatementExecutor {
       case 'staticField':
       case 'element':
       case 'property':
+      case 'implicitIndex':
       case 'compoundOperand':
       case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
@@ -468,6 +470,10 @@ export class Evaluator extends StatementExecutor {
       }
       case 'property': {
         return this.propertyPlace(expression, frame).get();
+      }
+      case 'implicitIndex': {
+        for (const step of expression.setup) this.evaluate(step, frame);
+        return this.evaluate(expression.access, frame);
       }
       case 'compoundOperand': {
         return frame.operands.at(-1) as Value;
@@ -932,6 +938,10 @@ export class Evaluator extends StatementExecutor {
   /** The storage an lvalue names, with its receiver and indices evaluated once. */
   place(target: BoundLValue, frame: Frame): Place {
     switch (target.kind) {
+      case 'implicitIndex': {
+        for (const step of target.setup) this.evaluate(step, frame);
+        return this.place(target.access as BoundLValue, frame);
+      }
       case 'local': {
         const { local } = target;
         return { get: () => this.readLocal(frame, local), set: (value) => this.storeLocal(frame, local, value) };

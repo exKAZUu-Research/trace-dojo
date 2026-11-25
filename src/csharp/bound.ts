@@ -210,6 +210,11 @@ export type BoundExpression =
   | ({ kind: 'eventAccessor'; target: BoundLValue; isAdd: boolean; value: BoundExpression } & Base)
   | ({ kind: 'sequence'; locals: LocalSymbol[]; sideEffects: BoundExpression[]; value: BoundExpression } & Base)
   /**
+   * `x[^i]` or `x[a..b]` through a type's Length or Count: `setup` stores the receiver and the index in hidden `locals`,
+   * then `access` reads them; an access that is a variable stays one, so `x[^1] = v` and `x[^1] += v` store through it.
+   */
+  | ({ kind: 'implicitIndex'; setup: BoundExpression[]; access: BoundExpression; locals: LocalSymbol[] } & Base)
+  /**
    * An expression whose type comes from where it is used: a lambda, a method group, `new()`, a collection expression,
    * `default`, or a switch or conditional expression without a natural type. Converting it to a type binds it.
    */
@@ -222,7 +227,10 @@ export type BoundDeconstructTarget =
 
 /** An expression that names storage: a variable, a field, an array element, or a property or indexer. */
 export type BoundLValue =
-  | Extract<BoundExpression, { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' }>
+  | Extract<
+      BoundExpression,
+      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' }
+    >
   | ({ kind: 'discard' } & Base);
 
 export type BoundPattern =

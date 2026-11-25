@@ -16,6 +16,9 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'staticField': {
       return !(readonlyIsValue && expression.field.isReadonly);
     }
+    case 'implicitIndex': {
+      return isVariable(expression.access, readonlyIsValue);
+    }
     case 'field': {
       if (readonlyIsValue && expression.field.isReadonly) return false;
       const receiver = expression.receiver.type;

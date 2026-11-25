@@ -464,6 +464,9 @@ export class FlowAnalyzer {
       case 'switch': {
         return this.operatorExpression(expression, state);
       }
+      case 'implicitIndex': {
+        return this.expression(expression.access, this.expressions(expression.setup, state));
+      }
       case 'userLogical': {
         // The right operand runs only when the test fails, so it assigns nothing definitely.
         const left = this.expression(expression.left, state);

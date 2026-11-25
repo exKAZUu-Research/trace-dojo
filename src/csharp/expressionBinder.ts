@@ -117,7 +117,26 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'elementAccess': {
         const target = this.bindTypedValue(node.target, context);
-        return this.bindElementAccess(target, node.args, node, context);
+        return (
+          this.bindImplicitIndexOrRange(target, node, context) ??
+          this.bindElementAccess(target, node.args, node, context)
+        );
+      }
+      case 'fromEnd': {
+        const operand = this.bindAs(node.operand, this.intType, context);
+        return this.libraryCreation('System.Index', [operand, this.constant(true, this.boolType, row)], node);
+      }
+      case 'range': {
+        const index = namedType(this.library.typeNamed('System.Index'));
+        const end = (written: Expression | undefined, fromEnd: boolean): BoundExpression =>
+          written
+            ? this.bindAs(written, index, context)
+            : this.libraryCreation(
+                'System.Index',
+                [this.constant(0, this.intType, row), this.constant(fromEnd, this.boolType, row)],
+                node
+              );
+        return this.libraryCreation('System.Range', [end(node.start, false), end(node.end, true)], node);
       }
       case 'tuple': {
         return this.bindTuple(node, context);
@@ -1453,6 +1472,157 @@ export abstract class ExpressionBinder extends LambdaBinder {
         ? this.convert(operation, target.type, node)
         : this.compoundConversion(operation, target.type, resolvedValue, node);
     return { kind: 'compoundAssign', target, operation: converted, type: target.type, row: node.row };
+  }
+
+  /** `new T(args)` of a library struct whose constructor takes exactly the arguments' types. */
+  private libraryCreation(fullName: string, args: BoundExpression[], node: Position): BoundExpression {
+    const type = namedType(this.library.typeNamed(fullName));
+    const constructor = type.symbol.constructors.find(
+      (candidate) =>
+        candidate.parameters.length === args.length &&
+        candidate.parameters.every((parameter, index) => sameType(parameter.type, args[index].type))
+    );
+    return { kind: 'new', constructor, objectType: type, args, initializer: undefined, type, row: node.row };
+  }
+
+  /**
+   * Binds `x[^i]` and `x[a..b]` on a type without an indexer that takes an Index or a Range, by C# spec §12.8.12's
+   * implicit support: the receiver and the index are evaluated once into hidden locals, and the access becomes
+   * `x[i.GetOffset(x.Length)]` (or `Count`), and for a range `x.Slice(offset, length)`, `Substring` on a string, or
+   * `RuntimeHelpers.GetSubArray` on an array.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of receiver of the C# rule.
+  private bindImplicitIndexOrRange(
+    target: BoundExpression,
+    node: Extract<Expression, { kind: 'elementAccess' }>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    const [arg] = node.args;
+    if (node.args.length !== 1 || arg.name || arg.modifier || target.type.kind === 'error') return undefined;
+    const syntax = arg.value;
+    if (
+      syntax.kind !== 'fromEnd' &&
+      syntax.kind !== 'range' &&
+      syntax.kind !== 'name' &&
+      syntax.kind !== 'memberAccess'
+    )
+      return undefined;
+    const indexType = namedType(this.library.typeNamed('System.Index'));
+    const rangeType = namedType(this.library.typeNamed('System.Range'));
+    const isIndexOrRange = (type: Type): boolean => sameType(type, indexType) || sameType(type, rangeType);
+    if (syntax.kind === 'name' || syntax.kind === 'memberAccess') {
+      const peeked = this.quietly(() => this.bindValue(syntax, context));
+      if (!peeked || !isIndexOrRange(peeked.type)) return undefined;
+    }
+    // A type whose own indexer takes the Index or the Range uses it.
+    const indexers = target.type.kind === 'array' ? [] : this.lookupIndexers(target.type, context.fn.typeContext);
+    if (
+      indexers.some(
+        (indexer) => indexer.property.parameters.length === 1 && isIndexOrRange(indexer.property.parameters[0].type)
+      )
+    )
+      return undefined;
+    const value = this.bindValue(syntax, context);
+    if (!isIndexOrRange(value.type)) return undefined;
+    const isRange = sameType(value.type, rangeType);
+    const scope = new LocalScope(context.scope, context.fn);
+    const inner: BindContext = { scope, fn: context.fn };
+    const locals: LocalSymbol[] = [];
+    const setup: BoundExpression[] = [];
+    const hold = (name: string, held: BoundExpression): Expression => {
+      const local = new LocalSymbol(`\0${name}`, held.type, node.row, node.column);
+      local.isHidden = true;
+      context.fn.addLocal(local);
+      scope.variables.set(local.name, local);
+      locals.push(local);
+      setup.push({
+        kind: 'assign',
+        target: { kind: 'local', local, type: held.type, row: node.row },
+        value: held,
+        type: held.type,
+        row: node.row,
+      });
+      return { kind: 'name', name: local.name, typeArgs: undefined, row: node.row, column: node.column };
+    };
+    const position = { row: node.row, column: node.column };
+    const receiver = hold('receiver', target);
+    const index = hold('index', value);
+    const member = (on: Expression, name: string): Expression => ({
+      kind: 'memberAccess',
+      target: on,
+      name,
+      typeArgs: undefined,
+      nameRow: node.row,
+      ...position,
+    });
+    const call = (callee: Expression, args: Expression[]): Expression => ({
+      kind: 'invocation',
+      target: callee,
+      args: args.map((argument) => ({ name: undefined, modifier: undefined, value: argument, ...position })),
+      ...position,
+    });
+    const isArray = target.type.kind === 'array';
+    const isString = specialOf(target.type) === 'string';
+    const lengthName =
+      isArray || isString || this.lookupMember(target.type, 'Length', context.fn.typeContext).found?.kind === 'property'
+        ? 'Length'
+        : 'Count';
+    if (this.lookupMember(target.type, lengthName, context.fn.typeContext).found?.kind !== 'property' && !isArray) {
+      this.error(
+        node,
+        'CS0021',
+        `角かっこ [] 付きインデックスを '${displayType(target.type)}' 型の式に適用することはできません`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    let access: BoundExpression;
+    if (!isRange) {
+      const offset = call(member(index, 'GetOffset'), [member(receiver, lengthName)]);
+      access = this.bindValue(
+        {
+          kind: 'elementAccess',
+          target: receiver,
+          args: [{ name: undefined, modifier: undefined, value: offset, ...position }],
+          ...position,
+        },
+        inner
+      );
+    } else if (isArray) {
+      const helpers: Expression = {
+        kind: 'memberAccess',
+        target: member(
+          member(
+            member(
+              { kind: 'aliasQualified', alias: 'global', name: 'System', typeArgs: undefined, ...position },
+              'Runtime'
+            ),
+            'CompilerServices'
+          ),
+          'RuntimeHelpers'
+        ),
+        name: 'GetSubArray',
+        typeArgs: undefined,
+        nameRow: node.row,
+        ...position,
+      };
+      access = this.bindValue(call(helpers, [receiver, index]), inner);
+    } else {
+      // Roslyn computes both ends' offsets and passes their difference, leaving a reversed range to the slice method.
+      const length = hold('length', this.bindValue(member(receiver, lengthName), inner));
+      const start = hold('start', this.bindValue(call(member(member(index, 'Start'), 'GetOffset'), [length]), inner));
+      const end = hold('end', this.bindValue(call(member(member(index, 'End'), 'GetOffset'), [length]), inner));
+      const difference: Expression = {
+        kind: 'binary',
+        operator: '-',
+        left: end,
+        right: start,
+        operatorRow: node.row,
+        ...position,
+      };
+      access = this.bindValue(call(member(receiver, isString ? 'Substring' : 'Slice'), [start, difference]), inner);
+    }
+    if (access.type.kind === 'error') return access;
+    return { kind: 'implicitIndex', setup, access, locals, type: access.type, row: node.row };
   }
 
   /** The expression of the expression statement being bound, whose value nothing uses. */

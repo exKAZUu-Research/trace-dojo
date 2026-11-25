@@ -141,6 +141,10 @@ export abstract class StatementBinder extends PatternBinder {
     use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
   ): BoundLValue {
     switch (target.kind) {
+      case 'implicitIndex': {
+        this.checkAssignable(target.access, position, context, use);
+        return target;
+      }
       case 'local': {
         const { local } = target;
         if (local.isReadonly) {

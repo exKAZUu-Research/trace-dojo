@@ -457,6 +457,39 @@ namespace System {
   public enum MidpointRounding { ToEven = 0, AwayFromZero = 1, ToZero = 2, ToNegativeInfinity = 3, ToPositiveInfinity = 4 }
   public enum DayOfWeek { Sunday = 0, Monday = 1, Tuesday = 2, Wednesday = 3, Thursday = 4, Friday = 5, Saturday = 6 }
 
+  public readonly struct Index : IEquatable<Index> {
+    private readonly int _value;
+    public Index(int value, bool fromEnd = false);
+    public static Index Start { get; }
+    public static Index End { get; }
+    public static Index FromStart(int value);
+    public static Index FromEnd(int value);
+    public int Value { get; }
+    public bool IsFromEnd { get; }
+    public int GetOffset(int length);
+    public override bool Equals(object? value);
+    public bool Equals(Index other);
+    public override int GetHashCode();
+    public static implicit operator Index(int value);
+    public override string ToString();
+  }
+
+  public readonly struct Range : IEquatable<Range> {
+    private readonly Index _start;
+    private readonly Index _end;
+    public Range(Index start, Index end);
+    public Index Start { get; }
+    public Index End { get; }
+    public static Range All { get; }
+    public static Range StartAt(Index start);
+    public static Range EndAt(Index end);
+    public (int Offset, int Length) GetOffsetAndLength(int length);
+    public override bool Equals(object? value);
+    public bool Equals(Range other);
+    public override int GetHashCode();
+    public override string ToString();
+  }
+
   public struct HashCode {
     public static int Combine<T1>(T1 value1);
     public static int Combine<T1, T2>(T1 value1, T2 value2);
@@ -1137,6 +1170,7 @@ namespace System {
 }
 
 namespace System.Runtime.CompilerServices {
+  public static class RuntimeHelpers { public static T[] GetSubArray<T>(T[] array, Range range); }
   public sealed class SwitchExpressionException : InvalidOperationException {
     public SwitchExpressionException();
     public SwitchExpressionException(object? unmatchedValue);

@@ -184,6 +184,10 @@ export type Expression =
   | ({ kind: 'throw'; value: Expression } & Position)
   | ({ kind: 'with'; value: Expression; members: MemberInitializer[] } & Position)
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
+  /** `^n`, an index from the end. */
+  | ({ kind: 'fromEnd'; operand: Expression } & Position)
+  /** `a..b`, a range whose omitted ends are the start and the end. */
+  | ({ kind: 'range'; start: Expression | undefined; end: Expression | undefined } & Position)
   /** `checked(...)` or `unchecked(...)`, which sets whether integral arithmetic inside throws on overflow. */
   | ({ kind: 'checked'; isChecked: boolean; operand: Expression } & Position);
 

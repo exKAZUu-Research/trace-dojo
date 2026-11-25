@@ -39,7 +39,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   makeref_expression: '`__makeref`',
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
-  range_expression: '範囲（`..`）',
   ref_expression: '`ref` 式',
   sizeof_expression: '`sizeof`',
   typeof_expression: '`typeof`',
@@ -433,6 +432,18 @@ export class ExpressionConverter {
       case 'anonymous_method_expression': {
         return this.convertAnonymousMethod(node);
       }
+      case 'range_expression': {
+        const children = childrenOf(node);
+        const dots = children.findIndex((child) => child.type === '..');
+        const start = children.slice(0, dots).find((child) => child.isNamed);
+        const end = children.slice(dots + 1).find((child) => child.isNamed);
+        return {
+          kind: 'range',
+          start: start ? this.convertExpression(start) : undefined,
+          end: end ? this.convertExpression(end) : undefined,
+          ...position,
+        };
+      }
       case 'checked_expression': {
         return {
           kind: 'checked',
@@ -486,7 +497,7 @@ export class ExpressionConverter {
         return { kind: 'unary', operator, operand: this.convertExpression(operand), ...position };
       }
       case '^': {
-        return unsupported(node, '末尾からの添字（`^`）');
+        return { kind: 'fromEnd', operand: this.convertExpression(operand), ...position };
       }
       case '&': {
         return unsupported(node, 'アドレス演算子（`&`）');

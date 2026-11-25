@@ -196,11 +196,11 @@ test('hostile programs stop within the limits, and runs share no state', () => {
 });
 
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
-  expect(executeProgram('csharp', 'int[] a = { 1, 2 };\nConsole.WriteLine(a[^1]);\n')).toEqual({
+  expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',
-    diagnostics: [{ row: 1, message: '末尾からの添字（`^`）は、この採点環境では使えません。' }],
+    diagnostics: [{ row: 1, message: 'ネットワーク（System.Net）は、この採点環境では使えません。' }],
   });
-  expect(executeProgram('csharp', 'Console.WriteLine(Console.ReadLine());\n')).toMatchObject({
+  expect(executeProgram('csharp', 'new Thread(() => { }).Start();\n')).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 0, message: expect.stringContaining('この採点環境では使えません。') }],
   });
