@@ -143,6 +143,7 @@ export abstract class ConversionBinder extends LookupBinder {
    * The conversion operators of the source's and the target's types that apply (§10.5.4): those whose types the
    * value and the target convert from and to, and the lifted forms of those between value types.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private conversionCandidates(expression: BoundExpression, target: Type, isExplicit: boolean): UserConversion[] {
     const source = expression.type;
     const owners = [withoutNullable(source), withoutNullable(target)].filter(
@@ -275,6 +276,8 @@ export abstract class ConversionBinder extends LookupBinder {
     };
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   convert(
     expression: BoundExpression,
     target: Type,

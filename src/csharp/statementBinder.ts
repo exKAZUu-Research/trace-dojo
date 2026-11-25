@@ -720,6 +720,7 @@ export abstract class StatementBinder extends PatternBinder {
    * `fixed (T* p = a, q = &o.f) body`: pointers to an array's first element, a string's first character, or a
    * movable variable, which stay valid in the body, and which the body may not assign.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindFixed(statement: Extract<Statement, { kind: 'fixed' }>, context: BindContext): BoundStatement {
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
@@ -1141,6 +1142,7 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** `ref int r = ref x;` and `ref readonly var r = ref x;`: locals that refer to other variables. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindRefLocals(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     refType: Extract<TypeNode, { kind: 'refType' }>,
@@ -1231,6 +1233,7 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** How long the variable a reference refers to lives: beyond the method (`return`), or only while it runs. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   refScopeOf(target: BoundLValue): 'return' | 'local' {
     switch (target.kind) {
       case 'local': {
@@ -1604,6 +1607,8 @@ export abstract class StatementBinder extends PatternBinder {
     return this.lookupMember(type, name, context.fn.typeContext).found?.kind === 'methods';
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private enumeratorPattern(
     type: Type,
     position: Position,
@@ -1816,6 +1821,8 @@ export abstract class StatementBinder extends PatternBinder {
     return { kind: 'return', value: undefined, refTarget: target, row, step: 'none' };
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
     const { fn } = context;
     if (fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出られません');
@@ -1873,6 +1880,7 @@ export abstract class StatementBinder extends PatternBinder {
   protected abstract methodDisplay(method: MethodSymbol): string;
 
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindTry(statement: Extract<Statement, { kind: 'try' }>, context: BindContext): BoundStatement {
     if (statement.catches.length > 0) context.fn.tryWithCatchDepth++;
     let body: BoundBlock;

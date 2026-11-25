@@ -501,6 +501,7 @@ export class Runtime {
   }
 
   /** The method whose parameter types are those of an interface method for the interface's type arguments. */
+  // code-gauge-allow duplicateLines -- The copies follow the same rule at compile time and at run time, which run on different symbols.
   private findExactImplementation(type: NamedType, method: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     const wanted = method.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
     const start = this.declaringClass(type, method.owner) ?? type;

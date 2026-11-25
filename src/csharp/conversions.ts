@@ -123,6 +123,7 @@ export class Conversions {
   constructor(private readonly types: WellKnownTypes) {}
 
   /** The implicit conversion from one type to another, if any, not counting conversions of constants. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   implicit(from: Type, to: Type): ConversionKind | undefined {
     if (to.kind === 'error' || from.kind === 'error' || sameType(from, to)) return 'identity';
     if (from.kind === 'null') return acceptsNullType(to) ? 'nullLiteral' : undefined;
@@ -154,6 +155,7 @@ export class Conversions {
   }
 
   /** The explicit conversion from one type to another that a cast performs, which includes the implicit ones. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   explicit(from: Type, to: Type): ConversionKind | undefined {
     const implicit = this.implicit(from, to);
     if (implicit) return implicit;

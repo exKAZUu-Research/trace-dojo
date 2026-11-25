@@ -1594,6 +1594,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
   }
 
   /** `x op= y`: an event's accessor, a C# 14 instance operator, or `x = (T)(x op y)` (C# spec §12.21.4). */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindCompoundAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     const binaryOperator = operator.slice(0, -1);
@@ -1853,6 +1854,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { value, isRange: sameType(value.type, rangeType) };
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindImplicitIndexOrRange(
     target: BoundExpression,
     node: Extract<Expression, { kind: 'elementAccess' }>,
@@ -2058,6 +2060,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { kind: 'compoundAssign', target, operation: coalesce, type: resultType, row: node.row };
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindIncrement(node: Extract<Expression, { kind: 'increment' }>, context: BindContext): BoundExpression {
     const readonlyRef = node.operand.kind === 'name' ? context.scope.lookup(node.operand.name)?.local : undefined;
     if (readonlyRef?.isRefLocal && readonlyRef.refKind === 'in') {

@@ -329,7 +329,8 @@ export function compareNumeric(operator: string, kind: OperandKind, left: Numeri
 }
 
 // code-gauge-allow duplicateLines -- Each interpreter maps comparison operators on its own.
-function relation(operator: string, order: number): boolean {
+/** Whether a comparison operator holds for an order: negative, zero, or positive as the left is less, equal, or more. */
+export function relation(operator: string, order: number): boolean {
   switch (operator) {
     case '==': {
       return order === 0;

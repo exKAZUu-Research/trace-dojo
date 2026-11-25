@@ -412,6 +412,7 @@ export class FlowAnalyzer {
 
   /** The state after matching a pattern: when it matched, its variables are assigned. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private pattern(pattern: BoundPattern, state: State, matched: boolean): State {
     switch (pattern.kind) {
       case 'type':

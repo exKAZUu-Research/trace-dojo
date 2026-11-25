@@ -136,6 +136,7 @@ export class Compiler extends AttributeBinder {
     super(library);
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   compile(unit: CompilationUnit): CompiledProgram {
     let entry: MethodSymbol | undefined;
     let isTopLevel = false;
@@ -282,6 +283,7 @@ export class Compiler extends AttributeBinder {
   }
 
   /** The runtime binder's message for the compile error that binding an operation to its runtime types gave. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private runtimeBinderMessage(text: string): string {
     const code = /^(CS\d+): /.exec(text)?.[1];
     const quoted = [...text.matchAll(/'([^']*)'/g)].map((match) => match[1]);
@@ -475,6 +477,7 @@ export class Compiler extends AttributeBinder {
 
   /** Binds the initializers of a type's fields, which run as one block before a constructor's body. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindFieldInitializers(symbol: TypeSymbol, context: TypeContext, isStatic: boolean): BoundBlock | undefined {
     const fields = symbol.fields.filter(
       (field) => field.isStatic === isStatic && !field.isConst && field.initializer !== undefined

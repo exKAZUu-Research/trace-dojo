@@ -24,6 +24,7 @@ import {
   convertNumeric,
   type NumericValue,
   PendingException,
+  relation,
   stepNumeric,
   unaryNumeric,
 } from './numeric';
@@ -537,6 +538,7 @@ export class Evaluator extends AsyncExecutor {
   }
 
   /** Evaluates an expression that reads a value or a variable. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private evaluateAccess(expression: AccessExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'constant': {
@@ -628,6 +630,7 @@ export class Evaluator extends AsyncExecutor {
 
   /** Evaluates an expression that operates on the values of its operands. */
   // code-gauge-allow functionNcss -- One case per kind of operation.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateOperation(expression: OperationExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'unary': {
@@ -1047,6 +1050,7 @@ export class Evaluator extends AsyncExecutor {
   }
 
   /** The storage an lvalue names, with its receiver and indices evaluated once. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   place(target: BoundLValue, frame: Frame): Place {
     switch (target.kind) {
       case 'implicitIndex': {
@@ -1119,6 +1123,7 @@ export class Evaluator extends AsyncExecutor {
 
   /** Evaluates the pointer operations of unsafe code. */
   // code-gauge-allow functionNcss -- One case per kind of pointer operation.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluatePointer(expression: PointerExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'addressOf': {
@@ -1141,26 +1146,7 @@ export class Evaluator extends AsyncExecutor {
       case 'pointerCompare': {
         const left = (this.evaluate(expression.left, frame) as CsPointer | undefined)?.address ?? 0n;
         const right = (this.evaluate(expression.right, frame) as CsPointer | undefined)?.address ?? 0n;
-        switch (expression.operator) {
-          case '==': {
-            return left === right;
-          }
-          case '!=': {
-            return left !== right;
-          }
-          case '<': {
-            return left < right;
-          }
-          case '>': {
-            return left > right;
-          }
-          case '<=': {
-            return left <= right;
-          }
-          default: {
-            return left >= right;
-          }
-        }
+        return relation(expression.operator, left < right ? -1 : left > right ? 1 : 0);
       }
       case 'stackalloc': {
         const length = Number(this.evaluate(expression.length, frame));
@@ -1213,6 +1199,7 @@ export class Evaluator extends AsyncExecutor {
   }
 
   /** The pointer of `&x`: the block of storage the variable lies in, and its offset there. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private addressOf(target: BoundLValue, frame: Frame): CsPointer {
     switch (target.kind) {
       case 'local': {
@@ -1635,6 +1622,7 @@ export class Evaluator extends AsyncExecutor {
    * Runs an operation on `dynamic` values: evaluates its operands in order, binds it to their runtime types (the
    * static types of operands that are not `dynamic`), and evaluates what it bound to with the operands as locals.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateLate(expression: Extract<BoundExpression, { kind: 'late' }>, frame: Frame): Value {
     const values: Value[] = [];
     const start = frame.temporaries.length;

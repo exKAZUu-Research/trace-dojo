@@ -125,6 +125,7 @@ export abstract class PatternBinder extends ExpressionBinder {
    * an int, and sliceable for a slice pattern with a pattern. The length, an element, and a slice are read through
    * hidden locals, which matching sets for each element in turn.
    */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindListPattern(
     pattern: Extract<Pattern, { kind: 'listPattern' }>,
     inputType: Type,

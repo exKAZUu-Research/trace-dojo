@@ -600,6 +600,7 @@ export class DeclarationBinder extends BinderBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   protected applyConstraints(
     parameters: TypeParameterSymbol[],
     clauses: ConstraintClause[],
@@ -932,6 +933,7 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** Declares an event with `add` and `remove` accessors, which `+=` and `-=` call in place of a delegate field. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private declareEventAccessors(type: DeclaredType, member: EventAccessorDeclaration): void {
     const { symbol, context } = type;
     const field = new FieldSymbol(member.name, this.resolveType(member.type, context), symbol);
@@ -1081,6 +1083,7 @@ export class DeclarationBinder extends BinderBase {
     this.methodContexts.set(constructor, context);
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private declareConstructor(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
@@ -1324,6 +1327,7 @@ export class DeclarationBinder extends BinderBase {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of operator declaration.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private declareOperator(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>
@@ -1877,6 +1881,7 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  // code-gauge-allow duplicateLines -- The copies follow the same rule at compile time and at run time, which run on different symbols.
   private libraryImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     const wanted = member.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
@@ -1979,6 +1984,7 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private resolvePropertyOverride(property: PropertySymbol, symbol: TypeSymbol): void {
     if (!property.isOverride) return;
     for (let current = symbol.baseType; current; current = baseTypeOf(current)) {
@@ -2051,6 +2057,7 @@ export class DeclarationBinder extends BinderBase {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private unimplementedAbstracts(symbol: TypeSymbol): string[] {
     const missing: string[] = [];
     const implemented = new Set<MethodSymbol | PropertySymbol>();
@@ -2190,6 +2197,7 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** Reports an interface property's accessor that the implementing property lacks, or implements as `init` for `set`. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private checkAccessorImplementations(
     symbol: TypeSymbol,
     member: PropertySymbol,

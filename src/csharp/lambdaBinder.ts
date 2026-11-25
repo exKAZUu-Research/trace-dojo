@@ -123,6 +123,7 @@ export abstract class LambdaBinder extends MemberBinder {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected bindLambdaTo(
     written: LambdaExpression,
     context: BindContext,
@@ -242,6 +243,8 @@ export abstract class LambdaBinder extends MemberBinder {
   }
 
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected bindLambda(
     node: LambdaExpression,
     outer: BindContext,

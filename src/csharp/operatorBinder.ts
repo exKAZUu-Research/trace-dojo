@@ -155,6 +155,7 @@ export abstract class OperatorBinder extends ConversionBinder {
    * The pointer operators of C# spec §24.6: a pointer plus or minus an integer, the difference of two pointers, and
    * comparisons of pointers (or a pointer and null) by address. `void*` has none but the comparisons (CS0242).
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindPointerOperator(
     operator: string,
     left: BoundExpression,
@@ -193,6 +194,8 @@ export abstract class OperatorBinder extends ConversionBinder {
     };
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindBinary(
     operator: string,
     left: BoundExpression,
@@ -615,6 +618,7 @@ export abstract class OperatorBinder extends ConversionBinder {
   }
 
   /** Binds a user-defined operator of either operand's type, if one applies; a checked context prefers its checked form. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected userOperator(
     name: string | undefined,
     operands: BoundExpression[],

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- The types module keeps the symbols and types that every stage shares together.
 import type {
   ArrayInitializer,
   ConstructorDeclaration,
@@ -629,6 +630,8 @@ export function pointeeOf(type: Type): Type | undefined {
   return type.kind === 'named' && isPointerType(type) ? type.args[0] : undefined;
 }
 
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function displayType(type: Type, qualified = false, annotated = false): string {
   const mark = annotated && 'isAnnotated' in type && type.isAnnotated ? '?' : '';
   switch (type.kind) {

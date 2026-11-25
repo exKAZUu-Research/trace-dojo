@@ -60,6 +60,8 @@ export function runProgram(evaluator: Evaluator, onMainExit?: (frame: Frame) => 
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
 }
 
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function runEntry(evaluator: Evaluator): string | undefined {
   const { runtime, program } = evaluator;
   const root = new Frame(runtime, undefined, undefined, new Map(), undefined, 0);

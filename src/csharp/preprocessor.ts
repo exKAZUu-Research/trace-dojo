@@ -123,6 +123,7 @@ class Preprocessor {
   }
 
   /** Runs one directive, the text after its `#`; a `#!` on the first line, at its start, is a shebang. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private directive(body: string, row: number, startsLine: boolean): void {
     if (row === 0 && startsLine && body.startsWith('!')) return;
     const name = /^\s*([a-z]*)/.exec(body)?.[1] ?? '';
@@ -241,6 +242,7 @@ function isBranchActive(conditional: Conditional): boolean {
  * Applies a `#:` directive of a file-based app. Only `#:property` sets what the compiler does; the others bring in
  * NuGet packages, other projects, or another SDK, which a run cannot reach.
  */
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 function applyFileDirective(text: string, row: number, options: BuildOptions): void {
   const [kind, ...parts] = text.trim().split(/\s+/);
   const value = parts.join(' ');

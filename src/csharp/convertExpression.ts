@@ -60,6 +60,7 @@ export class ExpressionConverter {
   }
 
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   convertType(node: Node): TypeNode {
     const position = positionOf(node);
     switch (node.type) {
@@ -492,6 +493,8 @@ export class ExpressionConverter {
     }
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertOtherExpression(node: Node): Expression {
     const position = positionOf(node);
     switch (node.type) {

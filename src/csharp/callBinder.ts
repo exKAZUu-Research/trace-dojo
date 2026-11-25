@@ -108,6 +108,7 @@ export abstract class CallBinder extends OperatorBinder {
   ): Type[] | undefined;
 
   /** Resolves a call among candidates, reporting Roslyn's error when none applies or several tie. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   resolveCall(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],

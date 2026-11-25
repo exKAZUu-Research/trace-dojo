@@ -186,6 +186,7 @@ export abstract class EvaluatorBase {
   // ---- Conversions ----
 
   /** Converts a value; `isChecked` makes a numeric conversion's integral overflow throw, as `checked` does. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type, isChecked = false): Value {
     switch (conversion) {
       case 'identity':

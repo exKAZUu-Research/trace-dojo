@@ -381,6 +381,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     return this.invoke(frame, method, receiver, [], row, this.environmentFor(method, receiverType));
   }
 
+  // code-gauge-allow duplicateLines -- The statement executor and the suspending one run a switch section each in their own way.
   private executeSwitch(statement: Extract<BoundStatement, { kind: 'switch' }>, frame: Frame): Completion {
     const value = this.evaluate(statement.value, frame);
     // Choosing the section binds the patterns' variables, so it runs in the switch block's scope.

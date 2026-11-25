@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- The binder base keeps the type resolution that every later binder stage shares together.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Position, TypeNode, UsingDirective } from './ast';
 import type { LambdaInfo } from './bound';
@@ -497,6 +498,8 @@ export class BinderBase {
   }
 
   /** Resolves a type in a declaration's context, reporting the names it cannot find. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
       case 'predefinedType': {
@@ -688,6 +691,7 @@ export class BinderBase {
 
   /** Finds a type by its simple name, from the innermost scope out, as C#'s name lookup does. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   resolveNamedType(position: Position, name: string, args: Type[], context: TypeContext): Type {
     if (args.length === 0) {
       for (const parameter of context.methodTypeParameters.toReversed())

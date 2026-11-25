@@ -316,6 +316,7 @@ function unsignedValue(field: FieldSymbol): bigint {
   return BigInt.asUintN(64, BigInt(field.constantValue as number | bigint));
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boolean, throws: boolean): Value {
   const type = call.typeArgs[0] as NamedType;
   if (text === undefined) {

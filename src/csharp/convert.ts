@@ -740,6 +740,7 @@ export class Converter extends ExpressionConverter {
    * takes the receiver as its `this` parameter, a property becomes its getter, and a static member is the class's,
    * found through the receiver's type. The block's type parameters and constraints go to each member.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertExtensionBlock(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     if (!owner.modifiers.set.has('static') || owner.typeParameters.length > 0)
       throw new CompileError([
@@ -940,6 +941,7 @@ export class Converter extends ExpressionConverter {
   }
 
   /** The statements beyond the ones learners write first: `checked`, `lock`, `goto`, labels, `using`, `yield`, `unsafe`. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private convertLessCommonStatement(node: Node): Statement {
     const position = positionOf(node);
     const parts = namedChildren(node);

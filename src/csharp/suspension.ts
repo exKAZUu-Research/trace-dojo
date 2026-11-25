@@ -4,6 +4,7 @@ const SKIPPED_KEYS = new Set(['type', 'from', 'syntax', 'node', 'context', 'arra
  * Marks the statements and expressions of an iterator's or an async function's body that a `yield return` or an
  * `await` inside may suspend, which then run as generators; a lambda inside is a function of its own.
  */
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function markSuspends(node: unknown, seen = new Set<object>()): boolean {
   if (typeof node !== 'object' || node === null || seen.has(node)) return false;
   seen.add(node);

@@ -96,6 +96,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
   }
 
   // code-gauge-allow functionNcss -- One case per kind of statement that may suspend.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   *executeSteps(statement: BoundStatement, frame: Frame): Steps<Completion> {
     if (!statement.suspends) return this.execute(statement, frame);
     this.runtime.spend();

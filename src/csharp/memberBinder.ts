@@ -309,6 +309,8 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a simple name: a local, a member of an enclosing type, a type, or a namespace. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindSimpleName(name: string, typeArgs: TypeNode[] | undefined, position: Position, context: BindContext): BindResult {
     const local = this.bindLocalName(name, typeArgs, position, context);
     if (local) return local;
@@ -353,6 +355,7 @@ export abstract class MemberBinder extends CallBinder {
    * Binds a static member that `using static` imports: the methods of every imported type join one method group, and
    * extension methods stay out of it, as C# spec §14.5.4 says.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindStaticImport(
     name: string,
     typeArgs: Type[] | undefined,
@@ -554,6 +557,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** A local variable, recording that a lambda or local function captures it from an enclosing function. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected localReference(local: LocalSymbol, position: Position, context: BindContext): BoundExpression {
     // A local constant is its value, which any function may use, static ones included, without capturing it.
     if (local.isConst) {
@@ -840,6 +844,8 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a static member of a type, or a nested type. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindStaticMember(
     type: Type,
     name: string,
@@ -990,6 +996,7 @@ export abstract class MemberBinder extends CallBinder {
 
   /** Binds an instance member of a value, or an extension method that takes it. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   bindInstanceMember(
     receiver: BoundExpression,
     name: string,
@@ -1287,6 +1294,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a call: of a method group, a delegate, or `nameof`. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
       return this.bindNameof(node, context);
@@ -1334,6 +1342,7 @@ export abstract class MemberBinder extends CallBinder {
    * A call that binds when it runs: a method of a `dynamic` value, or a method called with a `dynamic` argument,
    * whose overload is chosen by the arguments' runtime types (C# spec §12.3.3).
    */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private lateInvocation(
     node: Extract<Expression, { kind: 'invocation' }>,
     target: BindResult,

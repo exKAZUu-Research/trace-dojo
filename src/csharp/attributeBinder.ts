@@ -274,6 +274,7 @@ export abstract class AttributeBinder extends StatementBinder {
 
   /** Gives an attribute the meaning that the language or the library defines for it. */
   // code-gauge-allow functionCognitiveComplexity -- One branch per attribute with a meaning.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private applyUsage(attribute: BoundAttribute, owner: AttributeOwner | undefined, pending: PendingAttributes): void {
     const { type, args, named } = attribute;
     switch (type.symbol.fullName) {

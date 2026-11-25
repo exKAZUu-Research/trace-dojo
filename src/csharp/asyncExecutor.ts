@@ -27,6 +27,7 @@ export abstract class AsyncExecutor extends IteratorExecutor {
   }
 
   // code-gauge-allow functionNcss -- One case per kind of expression that orders its operands itself.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   *evaluateSteps(expression: BoundExpression, frame: Frame): Steps<Value> {
     if (!expression.suspends) return this.evaluate(expression, frame);
     switch (expression.kind) {

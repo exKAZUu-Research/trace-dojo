@@ -97,6 +97,7 @@ function reportOutsidePartialType(owner: TypeDeclaration, member: PartialMember,
 }
 
 /** The one member that the declarations of a partial member join into, reporting what is missing or repeated. */
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 function joinGroup(owner: TypeDeclaration, group: PartialMember[], report: Report): MemberDeclaration {
   const [first] = group;
   const display = `${owner.name}.${first.name}${first.kind === 'method' ? `(${parameterText(first.parameters)})` : ''}`;

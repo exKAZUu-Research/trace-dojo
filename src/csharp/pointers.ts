@@ -235,6 +235,7 @@ function writeWithin(holder: Value, holderType: Type, inner: number, type: Type,
 }
 
 /** The little-endian bytes of a value, as .NET stores it on the machines it runs on. */
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
 function encode(value: Value, type: Type): Uint8Array {
   const layout = layoutOf(type);
   const bytes = new Uint8Array(layout.size);
@@ -287,6 +288,8 @@ function encode(value: Value, type: Type): Uint8Array {
   throw new PointerRangeError();
 }
 
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow duplicateLines -- Each interpreter decodes the bytes of its own numeric types.
 function decode(bytes: Uint8Array, type: Type): Value {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   switch (primitiveOf(type)) {
