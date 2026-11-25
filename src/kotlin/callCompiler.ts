@@ -1360,6 +1360,9 @@ export abstract class CallCompiler extends CompilerCore {
     if (argument.value.kind === 'reference') {
       const reference = this.compileExpression(scope, context, argument.value, lambdaType ?? elementType);
       if (sam) return this.samWrap(reference, sam, resolved(elementType));
+      // Relating the reference's type to the parameter's gives the call's type variables their types, as `R` of
+      // `map(String::length)`; acceptsArgument checks the argument later.
+      isSubtype(reference.type, elementType);
       return reference;
     }
     const compiled = this.compileLambda(

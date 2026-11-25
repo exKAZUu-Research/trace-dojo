@@ -6439,6 +6439,16 @@ test("reads the variables of the enclosing function in local classes' initialize
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[7, 8, 14]\n' });
 });
 
+test('infers the result types of calls from the callable references they pass', () => {
+  const source = `fun len(s: String) = s.length
+fun main() {
+    println(listOf("a", "bb").map(String::length))
+    println(listOf("a", "bb").map(::len))
+    println(" x ".let(String::trim))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[1, 2]\nx\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
