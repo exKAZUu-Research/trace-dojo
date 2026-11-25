@@ -50,6 +50,7 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -809,8 +810,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const variable = this.comptimeVariableOf(target);
     // A `comptime` block inside a runtime branch still stores under the branch's condition.
     const cell = variable?.comptimeCell;
-    if (cell && this.context.runtimeConditionDepth > cell.conditionDepth)
+    if (cell && this.context.runtimeConditionDepth > cell.conditionDepth) {
+      // A function whose result exists only at compile time runs its loops then, which the grader analyzes only once.
+      if (this.runsAtCompileTime(span)) this.error(expression, unavailableMessage('syntax:comptimeVarInComptimeLoop'));
       this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
+    }
     if (cell && this.context.comptimeDepth === 0) {
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       this.comptimeValue(

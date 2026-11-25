@@ -64,6 +64,10 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@select', { what: 'ベクトル（@select）' }],
   ['io:nonAsciiDelimiter', { what: 'ASCII 以外のバイトでの区切り' }],
   ['io:nonUtf8File', { what: 'UTF-8 として正しくないバイトのファイルへの書き込み' }],
+  [
+    'syntax:comptimeVarInComptimeLoop',
+    { what: '型を返す関数などコンパイルのときに実行する関数のループや分岐の中での comptime var の更新' },
+  ],
   ['@setRuntimeSafety(false)', { what: '@setRuntimeSafety(false)（実行時の検査を外す指定）' }],
   ['@inComptime', { what: '@inComptime（コンパイルのときかどうかの判定）' }],
   ['syntax:extern', { what: 'extern（外部で定義する関数・変数の宣言）' }],
