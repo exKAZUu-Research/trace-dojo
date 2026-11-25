@@ -13,7 +13,7 @@ import {
 } from './awaitSteps';
 import { type Compiled, CompilerBase, type Eval } from './compilerBase';
 import type { Frame } from './runtime';
-import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype, isTop } from './types';
+import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype } from './types';
 import type { Cell } from './values';
 
 /** A compiled expression that awaits, which runs only through its generator. */
@@ -120,9 +120,7 @@ export abstract class AwaitCompiler extends CompilerBase {
     if (root?.fn !== this.fn || !rootCovers(root, expression))
       return this.error(expression, 'ここでは await を使えません。');
     const operandContext =
-      context && context.kind !== 'dynamic' && !isTop(context)
-        ? interfaceType(coreTypes.futureOr, [context])
-        : undefined;
+      context && context.kind !== 'dynamic' ? interfaceType(coreTypes.futureOr, [context]) : undefined;
     const { result: operand, steps } = this.compileWithSteps(expression.value, () =>
       this.compileExpression(expression.value, operandContext)
     );
