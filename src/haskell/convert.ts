@@ -8,6 +8,7 @@ import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
 import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
 import { sourceColumns } from './sourceCoordinates';
+import { lowerStrictBindings } from './strictLowering';
 import type {
   Alt,
   ChainItem,
@@ -184,7 +185,7 @@ export function convertModule(
     extensions,
     exports: header ? convertExports(features, header) : undefined,
     imports,
-    decls,
+    decls: lowerStrictBindings(features, decls),
     span: spanOf(root),
   };
 }
@@ -618,24 +619,8 @@ function convertRhs(features: ConvertContext, node: Node, separator: '=' | '->')
   const matches = fields(node, 'match');
   if (matches.length === 0) throw syntaxError(spanOf(node), `「${separator}」が足りません。`);
   const whereNode = field(node, 'binds');
-  const { decls: where, forced } = strictBindings(
-    features,
-    whereNode ? convertLocalBinds(features, field(whereNode, 'binds')) : []
-  );
-  const rhs = convertRhsBody(features, node, separator, matches, where);
-  if (forced.length === 0) return rhs;
-  // The banged bindings of a where are evaluated before the guards are.
-  const span = rhs.span;
-  if (rhs.body.kind === 'plain') return { ...rhs, body: { kind: 'plain', expr: forcing(forced, rhs.body.expr, span) } };
-  const truth: Expr = { kind: 'con', name: { name: 'True', span }, span };
-  const guard: Guard = { kind: 'bool', expr: forcing(forced, truth, span), span };
-  return {
-    ...rhs,
-    body: {
-      kind: 'guarded',
-      branches: rhs.body.branches.map((branch) => ({ ...branch, guards: [guard, ...branch.guards] })),
-    },
-  };
+  const where = whereNode ? convertLocalBinds(features, field(whereNode, 'binds')) : [];
+  return convertRhsBody(features, node, separator, matches, where);
 }
 
 function convertRhsBody(
@@ -680,9 +665,7 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
       return [{ kind: 'bool', expr: convertExpr(features, namedChildren(node)[0] ?? node), span }];
     }
     case 'let': {
-      const { decls, forced } = strictBindings(features, convertLocalBinds(features, field(node, 'binds')));
-      const guard: Guard = { kind: 'let', decls, span };
-      return forced.length === 0 ? [guard] : [guard, { kind: 'bool', expr: forcing(forced, trueOf(span), span), span }];
+      return [{ kind: 'let', decls: convertLocalBinds(features, field(node, 'binds')), span }];
     }
     case 'pattern_guard': {
       if (!features.allows('patternGuards')) {
@@ -703,93 +686,10 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
   }
 }
 
-function trueOf(span: Span): Expr {
-  return { kind: 'con', name: { name: 'True', span }, span };
-}
-
-/** A `let` qualifier of a comprehension, followed by a guard that evaluates its banged bindings. */
-function withForcedQualifier(features: ConvertContext, stmt: Stmt): Stmt[] {
-  if (stmt.kind !== 'let') return [stmt];
-  const { decls, forced } = strictBindings(features, stmt.decls);
-  if (forced.length === 0) return [stmt];
-  return [
-    { kind: 'let', decls, span: stmt.span },
-    { kind: 'exp', expr: forcing(forced, trueOf(stmt.span), stmt.span), span: stmt.span },
-  ];
-}
-
 /** Under Strict, a pattern that binds is matched strictly, as if it had a `!`, unless it is lazy, `~p`. */
 function strictPattern(features: ConvertContext, pat: Pat): Pat {
   if (!features.allows('strict') || pat.kind === 'plazy' || pat.kind === 'pbang') return pat;
   return { kind: 'pbang', pat, span: pat.span };
-}
-
-/**
- * The bindings of a `let` or `where`, with the ones a `!` makes strict (all of the variable bindings under Strict)
- * and the variables whose values must be evaluated before the body: `!x = e` evaluates `x`, and `!(a, b) = e`
- * binds a new variable to `e` to evaluate, which the pattern then matches.
- */
-function strictBindings(features: ConvertContext, decls: Decl[]): { decls: Decl[]; forced: string[] } {
-  const forced: string[] = [];
-  const result: Decl[] = [];
-  for (const decl of decls) {
-    // Under Strict, every pattern binding but a lazy one, `~p`, is strict as if it had a `!`.
-    const banged =
-      decl.kind === 'patBind' && decl.pat.kind === 'pbang'
-        ? decl.pat.pat
-        : decl.kind === 'patBind' && features.allows('strict') && decl.pat.kind !== 'plazy'
-          ? decl.pat
-          : decl.kind === 'funClause' && decl.args.length === 0 && features.allows('strict')
-            ? ({ kind: 'pvar', name: decl.name, span: decl.span } as Pat)
-            : undefined;
-    if (!banged || (decl.kind !== 'patBind' && decl.kind !== 'funClause')) {
-      result.push(decl);
-      continue;
-    }
-    if (banged.kind === 'pvar') {
-      forced.push(banged.name.name);
-      result.push({ kind: 'funClause', name: banged.name, args: [], rhs: decl.rhs, span: decl.span });
-      continue;
-    }
-    // Forcing a variable of the whole pattern matches all of it, even when the program uses none of its variables.
-    const name = generatedName('strict', forced.length);
-    forced.push(name);
-    result.push({
-      kind: 'patBind',
-      pat: { kind: 'pas', name: { name, span: decl.span }, pat: banged, span: decl.span },
-      rhs: decl.rhs,
-      span: decl.span,
-    });
-  }
-  return { decls: result, forced };
-}
-
-/** An expression that evaluates variables before it gives its value, `x `seq` e`. */
-function forcing(names: string[], expr: Expr, span: Span): Expr {
-  let result = expr;
-  for (const name of names.toReversed()) {
-    const seq: Expr = { kind: 'support', name: 'seq', span };
-    result = { kind: 'app', fn: { kind: 'app', fn: seq, arg: varOf(name, span), span }, arg: result, span };
-  }
-  return result;
-}
-
-/** A `let` statement of a `do` block, followed by one that evaluates its banged bindings. */
-function withForcedLets(features: ConvertContext, stmt: Stmt): Stmt[] {
-  if (stmt.kind !== 'let') return [stmt];
-  const { decls, forced } = strictBindings(features, stmt.decls);
-  if (forced.length === 0) return [stmt];
-  const unit: Expr = { kind: 'con', name: { name: '()', span: stmt.span }, span: stmt.span };
-  const done: Expr = {
-    kind: 'app',
-    fn: { kind: 'support', name: 'return', span: stmt.span },
-    arg: unit,
-    span: stmt.span,
-  };
-  return [
-    { kind: 'let', decls, span: stmt.span },
-    { kind: 'exp', expr: forcing(forced, done, stmt.span), span: stmt.span },
-  ];
 }
 
 function convertLocalBinds(features: ConvertContext, node: Node | undefined): Decl[] {
@@ -2122,11 +2022,10 @@ export function convertExpr(features: ConvertContext, node: Node): Expr {
           span,
         };
       }
-      const { decls, forced } = strictBindings(features, convertLocalBinds(features, bindsNode));
       return {
         kind: 'let',
-        decls,
-        body: forcing(forced, convertExpr(features, required(node, 'expression')), span),
+        decls: convertLocalBinds(features, bindsNode),
+        body: convertExpr(features, required(node, 'expression')),
         span,
       };
     }
@@ -2219,9 +2118,7 @@ function convertCollection(features: ConvertContext, node: Node, span: Span): Ex
     }
     case 'list_comprehension': {
       const branches = fields(node, 'qualifiers').map((qualifiers) =>
-        fields(qualifiers, 'qualifier').flatMap((node) =>
-          withForcedQualifier(features, convertStatement(features, node))
-        )
+        fields(qualifiers, 'qualifier').map((node) => convertStatement(features, node))
       );
       if (branches.length > 1 && !features.allows('parallelListComp')) {
         throw syntaxError(span, '並列の内包表記を使うには、ParallelListComp の拡張が要ります。');
@@ -2445,9 +2342,7 @@ function convertBlock(features: ConvertContext, node: Node, span: Span): Expr {
     case 'do': {
       const doModule = namedChildren(node).find((child) => child.type === 'do_module');
       if (doModule) return convertQualifiedDo(features, node, moduleName(required(doModule, 'module')), span);
-      const statements = fields(node, 'statement').flatMap((child) =>
-        withForcedLets(features, convertStatement(features, child))
-      );
+      const statements = fields(node, 'statement').map((child) => convertStatement(features, child));
       if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
       if (hasToken(node, 'mdo')) {
         if (!features.allows('recursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
@@ -2499,9 +2394,7 @@ function convertQualifiedDo(features: ConvertContext, node: Node, module: string
         span,
       };
     } else if (stmt.kind === 'let') {
-      // As `let ... in rest`, whose banged (or Strict) bindings are evaluated before the rest.
-      const { decls, forced } = strictBindings(features, stmt.decls);
-      result = { kind: 'let', decls, body: forcing(forced, rest, stmt.span), span };
+      result = { kind: 'let', decls: stmt.decls, body: rest, span };
     } else if (stmt.kind === 'rec' || stmt.kind === 'transform') {
       throw unsupportedError(stmt.span, '修飾つきの do の中の rec');
     } else {
