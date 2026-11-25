@@ -540,11 +540,20 @@ export class Expander {
       if (expansion.operator !== undefined) this.shell.discard(`${expansion.text}: bad substitution`);
       const resolved = resolveTargetName(this.shell, name);
       const keys = this.shell.store.readArrayKeys(resolved);
-      return this.valueSegments({ kind: 'list', values: keys, star: subscript.text === '*' }, ctx, expansion.text);
+      return this.valueSegments(
+        { kind: 'list', values: keys, star: subscript.text === '*', transformed: true },
+        ctx,
+        expansion.text
+      );
     }
     if ((expansion.operator === '*' || expansion.operator === '@') && expansion.argument.length === 0) {
       return this.valueSegments(
-        { kind: 'list', values: this.shell.store.namesWithPrefix(name), star: expansion.operator === '*' },
+        {
+          kind: 'list',
+          values: this.shell.store.namesWithPrefix(name),
+          star: expansion.operator === '*',
+          transformed: true,
+        },
         ctx,
         expansion.text
       );
@@ -634,7 +643,10 @@ export class Expander {
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
     const ifsJoiner = this.ifsJoiner();
-    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner, ctx.inDouble);
+    if (!value.star) {
+      const kind = value.transformed && ctx.inAssignmentRhs ? 'star' : value.positional ? 'positional' : 'field';
+      return breakSegment(kind, ifsJoiner, ctx.inDouble);
+    }
     const spaceEmptyIfs = ctx.spacedStar && (Boolean(value.positional) || Boolean(ctx.spacedArrayStar));
     return spaceEmptyIfs && ifsJoiner === ''
       ? breakSegment('field', ifsJoiner, ctx.inDouble)
@@ -642,13 +654,19 @@ export class Expander {
   }
 
   ifsJoiner(): string {
-    const ifs = this.shell.store.readScalar('IFS');
+    const ifs = this.readIfs();
     if (ifs === undefined) return ' ';
     return charactersOf(ifs)[0] ?? '';
   }
 
   currentIfs(): string {
-    return this.shell.store.readScalar('IFS') ?? ' \t\n';
+    return this.readIfs() ?? ' \t\n';
+  }
+
+  private readIfs(): string | undefined {
+    const ifs = this.shell.store.readScalar('IFS');
+    if (ifs !== undefined && /\P{ASCII}/u.test(ifs)) rejectUnsupportedExpansion('nonAsciiIfs');
+    return ifs;
   }
 
   // ---------------------------------------------------------------- splitting & joining

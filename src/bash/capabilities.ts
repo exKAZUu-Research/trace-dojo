@@ -470,7 +470,14 @@ export function rejectUnsupportedBracketClass(): never {
   throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
 }
 
-export type UnsupportedExpansionKind = 'tilde' | 'pid' | 'bgPid' | 'initialLastArg' | 'extglob' | 'promptTransform';
+export type UnsupportedExpansionKind =
+  | 'tilde'
+  | 'pid'
+  | 'bgPid'
+  | 'initialLastArg'
+  | 'extglob'
+  | 'promptTransform'
+  | 'nonAsciiIfs';
 
 const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
   tilde: '~ の展開',
@@ -479,6 +486,7 @@ const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
   initialLastArg: 'Bash のパス（最初の $_）',
   extglob: '拡張パターン（@( ... ) など）',
   promptTransform: 'プロンプトの展開（${x@P}）',
+  nonAsciiIfs: 'ASCII 以外の文字を含む IFS',
 };
 
 export function rejectUnsupportedExpansion(kind: UnsupportedExpansionKind): never {

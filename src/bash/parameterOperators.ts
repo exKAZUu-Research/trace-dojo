@@ -692,7 +692,7 @@ function attributeTransformSegments(
   const flags = view ? ATTRIBUTE_ORDER.filter((attribute) => view.attributes.has(attribute)).join('') : '';
   if (value.kind === 'list') {
     const values = view?.kind === 'unset' ? (flags === '' ? [] : [flags]) : value.values.map(() => flags);
-    return expander.valueSegments({ ...value, values }, ctx);
+    return expander.valueSegments({ ...value, values, transformed: true }, ctx);
   }
   return value.value === undefined && !view ? [] : expander.valueSegments({ kind: 'scalar', value: flags }, ctx);
 }
@@ -840,12 +840,12 @@ function keyValuePairs(
   if (value.values.length === 0) return expander.valueSegments({ ...value, values: [] }, ctx);
   const resolved = resolveTargetName(shell, name);
   if (!shell.store.isArrayName(resolved)) {
-    return expander.valueSegments({ ...value, values: value.values.map(quoteReusable) }, ctx);
+    return expander.valueSegments({ ...value, values: value.values.map(quoteReusable), transformed: true }, ctx);
   }
   const keys = shell.store.readArrayKeys(resolved);
   if (!quoted) {
     return expander.valueSegments(
-      { ...value, values: value.values.flatMap((element, index) => [keys[index], element]) },
+      { ...value, values: value.values.flatMap((element, index) => [keys[index], element]), transformed: true },
       ctx
     );
   }
