@@ -38,7 +38,7 @@ export const KNOWN_EXTENSIONS = new Set(
 export const UNGATED_EXTENSIONS = new Set(
   `OverlappingInstances IncoherentInstances MonoLocalBinds DeepSubsumption RelaxedPolyRec
   ForeignFunctionInterface UnliftedNewtypes UnliftedDatatypes TypeInType DisambiguateRecordFields DoAndIfThenElse
-  ConstraintKinds TypeData ApplicativeDo DeriveDataTypeable DeriveGeneric TypeSynonymInstances FlexibleContexts
+  ConstraintKinds TypeData DeriveDataTypeable DeriveGeneric TypeSynonymInstances FlexibleContexts
   FlexibleInstances ConstrainedClassMethods PostfixOperators LiberalTypeSynonyms ImpredicativeTypes RelaxedLayout
   TraditionalRecordSyntax PartialTypeSignatures NamedWildCards EmptyDataDeriving QuantifiedConstraints
   ImportQualifiedPost CUSKs FieldSelectors ExtendedLiterals ListTuplePuns ImplicitStagePersistence
@@ -235,11 +235,21 @@ export const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
   UnliftedFFITypes: '外部の関数の宣言（UnliftedFFITypes）',
   InterruptibleFFI: '外部の関数の宣言（InterruptibleFFI）',
   CApiFFI: '外部の関数の宣言（CApiFFI）',
+  ApplicativeDo: 'Applicative による do の読み替え（ApplicativeDo）',
+};
+
+/** What turning off each extension this environment always keeps on changes, for its message. */
+const UNSUPPORTED_NEGATIONS: Record<string, string> = {
+  FieldSelectors: 'フィールドのセレクタを作らない設定（NoFieldSelectors）',
 };
 
 function rejectUnsupportedExtension(item: string, row: number): void {
   const name = canonical(item.startsWith('No') && isKnown(item.slice(2)) ? item.slice(2) : item);
-  if (item.startsWith('No') && isKnown(item.slice(2))) return;
+  if (item.startsWith('No') && isKnown(item.slice(2))) {
+    const negated = UNSUPPORTED_NEGATIONS[name];
+    if (negated) throw unsupportedError(row, negated);
+    return;
+  }
   const what = UNSUPPORTED_EXTENSIONS[name];
   if (what) throw unsupportedError(row, what);
 }
