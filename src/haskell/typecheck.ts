@@ -507,7 +507,12 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   for (const decl of module.dataDecls) {
     for (const { cls, span, strategy, via } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
-      const special = decl.cons.find(({ con }) => con.exKinds)?.con;
+      // A constructor in GADT syntax has existential variables, a context, or a specific result type only when it says
+      // so; one that reads like a plain constructor derives as one, as in GHC.
+      const special = decl.cons.find(
+        ({ con }) =>
+          (con.exKinds?.length ?? 0) > 0 || (con.context?.length ?? 0) > 0 || (con.equalities?.length ?? 0) > 0
+      )?.con;
       if (special) {
         throw compileError(
           span,

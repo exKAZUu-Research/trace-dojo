@@ -1058,7 +1058,33 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
       throw unsupported(child);
     }
   }
-  const constructor = required(node, 'constructor');
+  const constructorsNode = field(node, 'constructors');
+  let con: ConDecl;
+  if (constructorsNode?.type === 'gadt_constructors') {
+    if (!features.allows('gadtSyntax')) {
+      throw syntaxError(spanOf(constructorsNode), 'GADT の構文を使うには、GADTSyntax の拡張が要ります。');
+    }
+    const cons = fields(constructorsNode, 'constructor').flatMap((node) => convertGadtConstructor(features, node));
+    if (cons.length !== 1 || cons[0].fields.length !== 1) {
+      throw syntaxError(spanOf(constructorsNode), 'newtype には、フィールドが 1 つの構成子を 1 つだけ書いてください。');
+    }
+    con = cons[0];
+  } else {
+    con = convertNewtypeConstructor(features, required(node, 'constructor'));
+  }
+  return {
+    kind: 'data',
+    name: typeDeclName(features, node),
+    params: isInstance ? [] : typeParams(features, node),
+    cons: [con],
+    deriving: convertDerivingClauses(features, node),
+    span: spanOf(node),
+    newtype: true,
+    paramKinds: isInstance ? undefined : typeParamKinds(features, node),
+  };
+}
+
+function convertNewtypeConstructor(features: FeatureGates<'convert'>, constructor: Node): ConDecl {
   const fieldNode = required(constructor, 'field');
   let con: ConDecl;
   if (fieldNode.type === 'record') {
@@ -1080,16 +1106,7 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
       span: spanOf(constructor),
     };
   }
-  return {
-    kind: 'data',
-    name: typeDeclName(features, node),
-    params: isInstance ? [] : typeParams(features, node),
-    cons: [con],
-    deriving: convertDerivingClauses(features, node),
-    span: spanOf(node),
-    newtype: true,
-    paramKinds: isInstance ? undefined : typeParamKinds(features, node),
-  };
+  return con;
 }
 
 function convertNewtypeField(features: FeatureGates<'convert'>, node: Node): TypeExpr {
