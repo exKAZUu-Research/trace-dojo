@@ -472,6 +472,7 @@ class AstChecker {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Mirrors one AstGen check over the constructs it covers.
+  // code-gauge-allow functionNcss -- Mirrors one AstGen check over the constructs it covers.
   private statement(statement: Statement): void {
     this.budget.spend();
     switch (statement.kind) {
