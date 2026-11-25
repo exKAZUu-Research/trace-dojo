@@ -140,8 +140,9 @@ class Printf {
   }
 
   private push(bytes: ArrayLike<number>): void {
+    if (bytes.length > 0) this.host.spend(Math.ceil(bytes.length / 256));
+    if (this.out.length + bytes.length > LIMITS.maxStringLength) throw new ExecutionLimitError('output');
     for (let i = 0; i < bytes.length; i++) this.out.push(bytes[i]);
-    if (this.out.length > LIMITS.maxStringLength) throw new ExecutionLimitError('output');
   }
 
   private takeArgument(): string | undefined {
@@ -238,11 +239,11 @@ class Printf {
   private format(spec: Specification): void {
     const { conversion, precision } = spec;
     if ('diouxX'.includes(conversion)) {
-      this.push(encodeText(formatInteger(this.integer(conversion === 'd' || conversion === 'i'), spec)));
+      this.push(encodeText(formatInteger(this.integer(conversion === 'd' || conversion === 'i'), spec, this.host)));
     } else if ('eEfFgGaA'.includes(conversion)) {
       const arg = this.takeArgument();
       const value = arg === undefined ? 0 : parseFloatArgument(arg, this.host, this.conversionError);
-      this.push(encodeText(formatFloat(value, spec)));
+      this.push(encodeText(formatFloat(value, spec, this.host)));
     } else if (conversion === 'C' || (conversion === 'c' && spec.wide)) {
       this.formatWideChar(spec);
     } else if (conversion === 'S' || (conversion === 's' && spec.wide)) {
@@ -419,13 +420,8 @@ function parseHexFloat(text: string): number {
   return sign === '-' ? -value : value;
 }
 
-/** Groups the digits of an integer by thousands with commas, as the `'` flag does in `en_US.UTF-8`. */
-function groupThousands(digits: string): string {
-  return digits.replaceAll(/\B(?=(\d{3})+$)/g, ',');
-}
-
 // code-gauge-allow functionCognitiveComplexity -- C's rules for the integer conversions: sign, precision, grouping, and alternate prefixes.
-function formatInteger(value: bigint, spec: Specification): string {
+function formatInteger(value: bigint, spec: Specification, host: PrintfHost): string {
   const { flags, precision, conversion } = spec;
   const negative = (conversion === 'd' || conversion === 'i') && value < 0n;
   const magnitude = negative ? -value : value;
@@ -433,8 +429,11 @@ function formatInteger(value: bigint, spec: Specification): string {
   let digits = magnitude.toString(base);
   if (conversion === 'X') digits = digits.toUpperCase();
   if (precision === 0 && magnitude === 0n) digits = '';
-  if (precision !== undefined) digits = digits.padStart(precision, '0');
-  if (flags.includes("'") && base === 10) digits = groupThousands(digits);
+  if (precision !== undefined) {
+    if (precision > digits.length) host.spend(Math.ceil(precision / 256));
+    digits = digits.padStart(precision, '0');
+  }
+  if (flags.includes("'") && base === 10) digits = groupThousands(digits, host);
   let prefix = '';
   if (negative) prefix = '-';
   else if ((conversion === 'd' || conversion === 'i') && flags.includes('+')) prefix = '+';
@@ -456,11 +455,11 @@ function padNumber(prefix: string, digits: string, spec: Specification, zeroAllo
 }
 
 /** A floating-point conversion, which the `'` flag groups by thousands as `en_US.UTF-8` does. */
-function formatFloat(value: number, spec: Specification): string {
+function formatFloat(value: number, spec: Specification, host: PrintfHost): string {
   const groups = spec.flags.includes("'") && 'fFgG'.includes(spec.conversion);
   let text = formatFloatField({ ...spec, width: groups ? undefined : spec.width }, value);
   if (groups && /^[-+ ]?\d/.test(text) && !/e/i.test(text)) {
-    text = text.replace(/\d+/, (digits) => groupThousands(digits));
+    text = text.replace(/\d+/, (digits) => groupThousands(digits, host));
   }
   const width = spec.width ?? 0;
   if (text.length >= width) return text;
@@ -470,4 +469,15 @@ function formatFloat(value: number, spec: Specification): string {
     return sign + text.slice(sign.length).padStart(width - sign.length, '0');
   }
   return text.padStart(width, ' ');
+}
+
+/** Groups the digits of an integer by thousands with commas in linear time, as the `'` flag does in `en_US.UTF-8`. */
+function groupThousands(digits: string, host: PrintfHost): string {
+  if (digits.length <= 3) return digits;
+  host.spend(Math.ceil(digits.length / 256));
+  const head = digits.length % 3;
+  const groups: string[] = [];
+  if (head > 0) groups.push(digits.slice(0, head));
+  for (let i = head; i < digits.length; i += 3) groups.push(digits.slice(i, i + 3));
+  return groups.join(',');
 }
