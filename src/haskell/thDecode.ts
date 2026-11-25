@@ -1,5 +1,7 @@
 import { CONS_CON } from './builtinTypes';
 import { unsupportedError } from './errors';
+import type { FeatureGates } from './features';
+import { overloadedList, overloadedListPattern, overloadedSequence } from './overloadedLists';
 import { define, forceString, unit } from './primitives';
 import type { Runtime } from './runtime';
 import type {
@@ -112,8 +114,14 @@ const UNAVAILABLE = {
  * node at the splice's span. A new name a splice binds at its top level keeps its spelling, so the program refers to
  * it; one it binds inside gets a spelling of its own.
  */
-export function decodeSplice(runtime: Runtime, result: Slot, span: Span, names: SpliceNames): SpliceSyntax {
-  return new SpliceDecoder(runtime, span, names).splice(result);
+export function decodeSplice(
+  runtime: Runtime,
+  result: Slot,
+  span: Span,
+  names: SpliceNames,
+  site: FeatureGates<'convert'>
+): SpliceSyntax {
+  return new SpliceDecoder(runtime, span, names, site).splice(result);
 }
 
 class SpliceDecoder {
@@ -123,7 +131,8 @@ class SpliceDecoder {
   constructor(
     private readonly runtime: Runtime,
     private readonly span: Span,
-    private readonly names: SpliceNames
+    private readonly names: SpliceNames,
+    private readonly site: FeatureGates<'convert'>
   ) {}
 
   splice(slot: Slot): SpliceSyntax {
@@ -545,23 +554,30 @@ class SpliceDecoder {
       case 'ArithSeqE': {
         const range = this.con(f[0]);
         const parts = range.fields.map((part) => this.exp(part));
-        switch (range.con.name) {
-          case 'FromR': {
-            return { kind: 'arith', from: parts[0], span };
-          }
-          case 'FromThenR': {
-            return { kind: 'arith', from: parts[0], next: parts[1], span };
-          }
-          case 'FromToR': {
-            return { kind: 'arith', from: parts[0], to: parts[1], span };
-          }
-          default: {
-            return { kind: 'arith', from: parts[0], next: parts[1], to: parts[2], span };
-          }
-        }
+        const [next, to] =
+          range.con.name === 'FromR'
+            ? []
+            : range.con.name === 'FromThenR'
+              ? [parts[1]]
+              : range.con.name === 'FromToR'
+                ? [undefined, parts[1]]
+                : [parts[1], parts[2]];
+        const sequence: Extract<Expr, { kind: 'arith' }> = {
+          kind: 'arith',
+          from: parts[0],
+          ...(next ? { next } : {}),
+          ...(to ? { to } : {}),
+          span,
+        };
+        return this.site.allows('overloadedLists') ? overloadedSequence(sequence) : sequence;
       }
       case 'ListE': {
-        return { kind: 'list', elems: this.list(f[0]).map((elem) => this.exp(elem)), span };
+        const list: Extract<Expr, { kind: 'list' }> = {
+          kind: 'list',
+          elems: this.list(f[0]).map((elem) => this.exp(elem)),
+          span,
+        };
+        return this.site.allows('overloadedLists') ? overloadedList(list) : list;
       }
       case 'SigE': {
         return { kind: 'typed', expr: this.exp(f[0]), sig: this.sigType(f[1]), span };
@@ -802,7 +818,12 @@ class SpliceDecoder {
         return { kind: 'precord', con: this.ref(f[0], 'con'), fields, span };
       }
       case 'ListP': {
-        return { kind: 'plist', elems: this.list(f[0]).map((elem) => this.pat(elem)), span };
+        const list: Extract<Pat, { kind: 'plist' }> = {
+          kind: 'plist',
+          elems: this.list(f[0]).map((elem) => this.pat(elem)),
+          span,
+        };
+        return this.site.allows('overloadedLists') ? overloadedListPattern(list) : list;
       }
       case 'SigP': {
         return { kind: 'psig', pat: this.pat(f[0]), type: this.type(f[1]), span };
@@ -1245,8 +1266,10 @@ class SpliceDecoder {
     }
   }
 
+  /** Whether a field is strict: marked `!`, or under the splice site's StrictData not marked `~`. */
   private isStrict(slot: Slot): boolean {
-    return this.con(this.con(slot).fields[1]).con.name === 'SourceStrict';
+    const strictness = this.con(this.con(slot).fields[1]).con.name;
+    return strictness === 'SourceStrict' || (strictness !== 'SourceLazy' && this.site.allows('strictData'));
   }
 }
 

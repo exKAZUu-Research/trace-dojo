@@ -5,6 +5,7 @@ import { convertDeclarationsBeforeSplices, spanOf } from './convert';
 import type { Fixity } from './entities';
 import { compileError } from './errors';
 import type { Extensions } from './extensions';
+import type { FeatureGates } from './features';
 import type { Decl, Span } from './syntax';
 import { SpliceNames, type SpliceSyntax } from './thDecode';
 import { patternNames } from './thRename';
@@ -143,7 +144,9 @@ export type SpliceRunner = (
   program: string,
   span: Span,
   names: SpliceNames,
-  module: SpliceModuleNames
+  module: SpliceModuleNames,
+  /** The extensions of the program the splice is in, which give the syntax it makes its meaning there. */
+  site: FeatureGates<'convert'>
 ) => {
   result: SpliceSyntax;
   printed: string;
@@ -176,7 +179,7 @@ export function runSplices(
     const padded = [' '.repeat(site.column + 2) + lines[0], ...lines.slice(1).map((line) => `  ${line}`)].join('\n');
     const program = `${header}\nimport qualified Language.Haskell.TH.Runner as SpliceRunner\nmain :: IO ()\nmain = SpliceRunner.${site.runner} (\n${padded}\n  )\n`;
     try {
-      const output = run(program, site.span, names, module);
+      const output = run(program, site.span, names, module, extensions.gates('convert'));
       printed += output.printed;
       printedError += output.printedError;
       grafts.set(site.key, output.result);

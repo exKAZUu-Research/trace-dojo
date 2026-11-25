@@ -460,9 +460,9 @@ export function compileProgram(
       module: parsed,
       printed: compileOutput,
       printedError: compileErrorOutput,
-    } = parseProgram(preprocessProgram(source), (program, span, names, module) => {
+    } = parseProgram(preprocessProgram(source), (program, span, names, module, site) => {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      return spliceRunner(program, span, names, module);
+      return spliceRunner(program, span, names, module, site);
     });
     const renamed = renameModule(parsed, {
       modules: lib.modules,

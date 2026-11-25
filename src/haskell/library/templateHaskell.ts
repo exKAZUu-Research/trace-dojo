@@ -682,6 +682,18 @@ fromToE a b = arithSeqE (FromToR <$> a <*> b)
 fromThenToE :: Quote m => m Exp -> m Exp -> m Exp -> m Exp
 fromThenToE a b c = arithSeqE (FromThenToR <$> a <*> b <*> c)
 
+fromR :: Quote m => m Exp -> m Range
+fromR a = FromR <$> a
+
+fromThenR :: Quote m => m Exp -> m Exp -> m Range
+fromThenR a b = FromThenR <$> a <*> b
+
+fromToR :: Quote m => m Exp -> m Exp -> m Range
+fromToR a b = FromToR <$> a <*> b
+
+fromThenToR :: Quote m => m Exp -> m Exp -> m Exp -> m Range
+fromThenToR a b c = FromThenToR <$> a <*> b <*> c
+
 listE :: Quote m => [m Exp] -> m Exp
 listE es = ListE <$> sequenceA es
 
