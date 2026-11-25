@@ -1293,25 +1293,21 @@ export abstract class ExpressionCompiler extends SemaBase {
   private addressOperand(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     const pointerType = resultType && unwrapResult(resultType);
     let operandType = pointerType?.kind === 'pointer' ? pointerType.child : undefined;
-    if (
-      pointerType?.kind === 'pointer' &&
-      pointerType.size === 'slice' &&
-      expression.operand.kind === 'arrayInit' &&
-      !expression.operand.type
-    ) {
-      operandType = arrayOf(expression.operand.elements.length, pointerType.child, pointerType.sentinel);
+    // A pointer to many elements points to an array of them.
+    const many = pointerType?.kind === 'pointer' && pointerType.size !== 'one' ? pointerType : undefined;
+    if (many && expression.operand.kind === 'arrayInit' && !expression.operand.type) {
+      operandType = arrayOf(expression.operand.elements.length, many.child, many.sentinel);
     }
     if (
-      pointerType?.kind === 'pointer' &&
-      pointerType.size === 'slice' &&
+      many &&
       expression.operand.kind === 'structInit' &&
       !expression.operand.type &&
       expression.operand.fields.length === 0
     ) {
-      operandType = arrayOf(0, pointerType.child, pointerType.sentinel);
+      operandType = arrayOf(0, many.child, many.sentinel);
     }
     let operand = this.compileLocation(expression.operand, operandType);
-    const valueType = pointerType?.kind === 'pointer' && pointerType.size === 'slice' ? undefined : operandType;
+    const valueType = many ? undefined : operandType;
     if (!operand.place && valueType && operand.type !== valueType)
       operand = this.coerce(operand, valueType, expression.operand);
     return this.addressOf(operand);

@@ -37,6 +37,7 @@ import { type BranchCount, type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
 import {
   arrayOf,
+  type ArrayType,
   BOOL,
   COMPTIME_FLOAT,
   COMPTIME_INT,
@@ -55,6 +56,7 @@ import {
   NULL_TYPE,
   optionalOf,
   pointerTo,
+  type PointerType,
   sameSentinel,
   Sentinel,
   sliceOf,
@@ -1157,77 +1159,68 @@ export abstract class SemaBase implements SemaApi {
     }
     if (to.size === 'c' && from.kind !== 'pointer') return this.coerceToCPointer(expression, to, span);
     if (from.kind !== 'pointer') return undefined;
-    if (!pointerQualifiersCoercible(from, to)) return undefined;
-    const empty =
-      to.size === 'slice' &&
-      to.sentinel === undefined &&
-      from.size === 'one' &&
-      from.child.kind === 'array' &&
-      from.child.length === 0n;
+    const rule = pointerCoercionOf(from, to);
+    if (!rule || !pointerQualifiersCoercible(from, to)) return undefined;
+    const array = from.child.kind === 'array' ? from.child : undefined;
+    // A constant empty array converts to a pointer to variables, which it has no element to break.
+    const empty = rule.element === 'arrayChild' && to.sentinel === undefined && array?.length === 0n;
     if (from.isConst && !to.isConst && !empty) return undefined;
-    if (from.size === to.size) {
-      if (!pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
-      if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
-      return { ...expression, type: to };
-    }
-    const many = this.coerceToManyPointer(expression, from, to);
-    if (many) return many;
-    // `*[N]T` to `[]T`
-    if (from.size === 'one' && to.size === 'slice' && from.child.kind === 'array') {
-      const array = from.child;
-      if (!pointerChildCoercible(array.child, to.child, to.isConst || empty)) return undefined;
-      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
-      const { length } = array;
-      return {
-        ...this.derived(expression, to, (value) => {
-          const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
-          return new Slice(view, view.offset, length);
-        }),
-        knownLength: expression.known ? length : expression.knownLength,
-      };
-    }
-    return undefined;
+    const source = rule.element === 'arrayChild' ? (array as ArrayType) : from;
+    if (!pointerChildCoercible(source.child, to.child, to.isConst || empty)) return undefined;
+    const sentinelHolds =
+      rule.sentinel === 'none' ||
+      sameSentinel(source.sentinel, to.sentinel) ||
+      (rule.sentinel === 'target' && to.sentinel === undefined);
+    return sentinelHolds ? this.convertPointer(expression, from, to, rule.convert) : undefined;
   }
 
-  /** `*[N]T` to `[*]T` or `[*c]T`, and a C pointer to and from the other single-item and many-item pointers. */
-  // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's pointer coercion in turn.
-  private coerceToManyPointer(
+  private convertPointer(
     expression: TExpr,
     from: Extract<Type, { kind: 'pointer' }>,
-    to: Extract<Type, { kind: 'pointer' }>
-  ): TExpr | undefined {
-    if (from.size === 'one' && from.child.kind === 'array' && (to.size === 'many' || to.size === 'c')) {
-      const array = from.child;
-      if (!pointerChildCoercible(array.child, to.child, to.isConst)) return undefined;
-      if (to.sentinel !== undefined && !sameSentinel(array.sentinel, to.sentinel)) return undefined;
-      return this.derived(expression, to, (value) => {
-        const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
-        return new Pointer(view, view.offset);
-      });
+    to: Extract<Type, { kind: 'pointer' }>,
+    convert: PointerConversion
+  ): TExpr {
+    switch (convert) {
+      case 'retype': {
+        return { ...expression, type: to };
+      }
+      case 'fromC': {
+        return this.derived(expression, to, (value) =>
+          value === NULL ? panic('cast causes pointer to be null') : value
+        );
+      }
+      case 'sliceToMany': {
+        return this.derived(expression, to, (value) => new Pointer((value as Slice).target, (value as Slice).start));
+      }
+      case 'arrayToMany': {
+        const array = from.child as ArrayType;
+        return this.derived(expression, to, (value) => {
+          const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+          return new Pointer(view, view.offset);
+        });
+      }
+      case 'arrayToSlice': {
+        const array = from.child as ArrayType;
+        const { length } = array;
+        return {
+          ...this.derived(expression, to, (value) => {
+            const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+            return new Slice(view, view.offset, length);
+          }),
+          knownLength: expression.known ? length : expression.knownLength,
+        };
+      }
     }
-    // `[:s]T` to `[*:s]T` or `[*c]T`, which point to the slice's first element; Zig refuses a slice without sentinel.
-    if (from.size === 'slice' && from.sentinel !== undefined) {
-      const sentinelHolds = to.size === 'c' || (to.size === 'many' && sameSentinel(from.sentinel, to.sentinel));
-      if (!sentinelHolds || !pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
-      return this.derived(expression, to, (value) => new Pointer((value as Slice).target, (value as Slice).start));
-    }
-    const cPointer =
-      (to.size === 'c' && (from.size === 'one' || from.size === 'many')) ||
-      (from.size === 'c' && (to.size === 'one' || to.size === 'many'));
-    if (!cPointer || !pointerChildCoercible(from.child, to.child, to.isConst)) return undefined;
-    if (from.size !== 'c') return { ...expression, type: to };
-    return this.derived(expression, to, (value) => (value === NULL ? panic('cast causes pointer to be null') : value));
   }
 
   /** `null` or an optional pointer to `[*c]T`, which holds null itself. */
   private coerceToCPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'null') return known(to, NULL, span);
-    if (from.kind !== 'optional' || from.child.kind !== 'pointer' || from.child.size === 'slice') return undefined;
-    // Only a pointer whose value stays as it is converts: Zig refuses `?*[N]T`, whose array would need its first element.
-    const child = from.child;
-    if (child.size === 'one' && child.child.kind === 'array' && child.child !== to.child) return undefined;
-    return this.tryCoerce({ ...expression, type: child }, to, span) && { ...expression, type: to };
+    if (from.kind !== 'optional' || from.child.kind !== 'pointer') return undefined;
+    // Only a pointer whose value stays as it is converts, since the optional's null stays null.
+    if (pointerCoercionOf(from.child, to)?.convert !== 'retype') return undefined;
+    return this.tryCoerce({ ...expression, type: from.child }, to, span) && { ...expression, type: to };
   }
 
   /** A function value that the compiler knows, as a runtime function pointer. */
@@ -1638,7 +1631,7 @@ function pointerQualifiersCoercible(
   to: Extract<Type, { kind: 'pointer' }>
 ): boolean {
   if (from.isVolatile && !to.isVolatile) return false;
-  if ((from.allowZero || from.size === 'c') && !(to.allowZero || to.size === 'c')) return false;
+  if (from.allowZero && !(to.allowZero || to.size === 'c')) return false;
   if (from.alignment === undefined && to.alignment === undefined) return true;
   const fromChild =
     from.size === 'one' && from.child.kind === 'array' && to.size !== 'one' ? from.child.child : from.child;
@@ -1709,7 +1702,19 @@ function peerMemoryType(a: Type, b: Type, isConst: boolean): Type | undefined {
 }
 
 function pointerChildCoercible(from: Type, to: Type, isConst: boolean): boolean {
-  return inMemoryCoercible(from, to) && (isConst || inMemoryCoercible(to, from));
+  return inMemoryCoercible(from, to) && (isConst || inMemoryCoercible(to, from) || dropsArraySentinel(from, to));
+}
+
+/** Whether `to` is the array `from` without its sentinel, which a write through a pointer cannot reach. */
+function dropsArraySentinel(from: Type, to: Type): boolean {
+  return (
+    from.kind === 'array' &&
+    to.kind === 'array' &&
+    from.sentinel !== undefined &&
+    to.sentinel === undefined &&
+    from.length === to.length &&
+    from.child === to.child
+  );
 }
 
 function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Sentinel | undefined {
@@ -1983,4 +1988,55 @@ function holdsStorage(storage: Slots, target: Slots): boolean {
         (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
     )
   );
+}
+
+type PointerConversion = 'retype' | 'fromC' | 'sliceToMany' | 'arrayToMany' | 'arrayToSlice';
+
+/**
+ * How a pointer coerces to a pointer of another or the same size: which element type must coerce (the pointer's
+ * child, or the element of the array it points to), what the target's sentinel must match ('target': the source's
+ * sentinel when the target has one; 'exact': the source's sentinel, which the target must have), and how the value
+ * changes.
+ */
+interface PointerCoercion {
+  readonly element: 'child' | 'arrayChild';
+  readonly sentinel: 'none' | 'target' | 'exact';
+  readonly convert: PointerConversion;
+}
+
+/** The source's shape that Zig's pointer coercions tell apart: a pointer to an array, and a slice with a sentinel. */
+type PointerShape = 'one' | 'array' | 'many' | 'slice' | 'sentinelSlice' | 'c';
+
+const SAME_SIZE: PointerCoercion = { element: 'child', sentinel: 'target', convert: 'retype' };
+
+/** Zig's coercions between pointers, by the source's shape and the target's size; a pair not listed is refused. */
+const POINTER_COERCIONS: Partial<Record<`${PointerShape} ${PointerType['size']}`, PointerCoercion>> = {
+  'one one': SAME_SIZE,
+  'array one': SAME_SIZE,
+  'many many': SAME_SIZE,
+  'slice slice': SAME_SIZE,
+  'sentinelSlice slice': SAME_SIZE,
+  'c c': SAME_SIZE,
+  'one c': { element: 'child', sentinel: 'none', convert: 'retype' },
+  'many c': { element: 'child', sentinel: 'none', convert: 'retype' },
+  'c one': { element: 'child', sentinel: 'none', convert: 'fromC' },
+  'c many': { element: 'child', sentinel: 'none', convert: 'fromC' },
+  'array many': { element: 'arrayChild', sentinel: 'target', convert: 'arrayToMany' },
+  'array c': { element: 'arrayChild', sentinel: 'none', convert: 'arrayToMany' },
+  'array slice': { element: 'arrayChild', sentinel: 'target', convert: 'arrayToSlice' },
+  // Zig refuses a slice without a sentinel, whose end the many-item pointer could not find.
+  'sentinelSlice many': { element: 'child', sentinel: 'exact', convert: 'sliceToMany' },
+  'sentinelSlice c': { element: 'child', sentinel: 'none', convert: 'sliceToMany' },
+};
+
+function pointerCoercionOf(from: PointerType, to: PointerType): PointerCoercion | undefined {
+  // `*[N]T` converts by its elements, except to `[*c][N]T`, which takes it as the single-item pointer it is.
+  const wholeArray = to.size === 'c' && pointerChildCoercible(from.child, to.child, to.isConst);
+  const shape: PointerShape =
+    from.size === 'one' && from.child.kind === 'array' && !wholeArray
+      ? 'array'
+      : from.size === 'slice' && from.sentinel !== undefined
+        ? 'sentinelSlice'
+        : from.size;
+  return POINTER_COERCIONS[`${shape} ${to.size}`];
 }

@@ -10136,3 +10136,65 @@ pub fn main() !void {
     uncaughtException: 'error: TestExpectedEqual',
   });
 });
+
+describe('pointers coerce between sizes as Zig 0.17.1 allows', () => {
+  const sources: [name: string, declarations: string, operand: string][] = [
+    ['*u8', 'var x: u8 = 65;', '&x'],
+    ['*const u8', 'const x: u8 = 65;', '&x'],
+    ['*[2:0]u8', 'var a = [_:0]u8{ 65, 66 };', '&a'],
+    ['*[2]u8', 'var a = [_]u8{ 65, 66 };', '&a'],
+    ['[*]u8', 'var a = [_]u8{ 65, 66 }; const m: [*]u8 = &a;', 'm'],
+    ['[*:0]u8', 'var a = [_:0]u8{ 65, 66 }; const m: [*:0]u8 = &a;', 'm'],
+    ['[]u8', 'var a = [_]u8{ 65, 66 }; const sl: []u8 = &a;', 'sl'],
+    ['[:0]u8', 'var a = [_:0]u8{ 65, 66 }; const sl: [:0]u8 = &a;', 'sl'],
+    ['[*c]u8', 'var a = [_]u8{ 65, 66 }; const cp: [*c]u8 = &a;', 'cp'],
+    ['?*u8', 'var x: u8 = 65; const o: ?*u8 = &x;', 'o'],
+    ['?*[2]u8', 'var a = [_]u8{ 65, 66 }; const o: ?*[2]u8 = &a;', 'o'],
+    ['?[*]u8', 'var a = [_]u8{ 65, 66 }; const o: ?[*]u8 = &a;', 'o'],
+    ['*const [0]u8', '', '&[_]u8{}'],
+  ];
+  const targets = [
+    '*u8',
+    '*const u8',
+    '[*]u8',
+    '[*:0]u8',
+    '[]u8',
+    '[:0]u8',
+    '[]const u8',
+    '[*c]u8',
+    '*[2]u8',
+    '[*c][2]u8',
+    '[*]const u8',
+  ];
+  // Whether a source converts to each of `targets`, as `zig run` reports.
+  const allowed: Record<string, string> = {
+    '*u8': '11000001000',
+    '*const u8': '01000000000',
+    '*[2:0]u8': '00111111111',
+    '*[2]u8': '00101011111',
+    '[*]u8': '00100001001',
+    '[*:0]u8': '00110001001',
+    '[]u8': '00001010000',
+    '[:0]u8': '00011111000',
+    '[*c]u8': '11110001001',
+    '?*u8': '00000001000',
+    '?*[2]u8': '00000000010',
+    '?[*]u8': '00000001000',
+    '*const [0]u8': '00101011001',
+  };
+  test.each(
+    sources.flatMap(([name, declarations, operand]) =>
+      targets.map((target, index) => ({ name, declarations, operand, target, converts: allowed[name][index] === '1' }))
+    )
+  )('$name to $target', ({ declarations, operand, target, converts }) => {
+    const program = `const std = @import("std");
+pub fn main() void {
+    ${declarations}
+    const y: ${target} = ${operand};
+    std.debug.print("{s}", .{@typeName(@TypeOf(y))});
+}`;
+    expect(executeProgram('zig', program)).toMatchObject(
+      converts ? { kind: 'executed', stderr: target } : { kind: 'compileError' }
+    );
+  });
+});
