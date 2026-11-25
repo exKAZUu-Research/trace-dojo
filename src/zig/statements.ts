@@ -121,6 +121,8 @@ interface JumpTarget {
   readonly operandType?: Type;
   broken: boolean;
   continued?: boolean;
+  /** For an inline loop, the runtime-condition depth where it unrolls, which its `continue` must not be under more of. */
+  readonly unrollDepth?: number;
 }
 
 interface BreakSite {
@@ -1141,6 +1143,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const target = this.findTarget(expression.label, expression.kind, expression);
     const { id } = target;
     if (expression.kind === 'continue') {
+      // An inline loop decides each iteration while it unrolls, so a runtime condition cannot choose to continue it.
+      if (target.unrollDepth !== undefined && this.context.runtimeConditionDepth > target.unrollDepth)
+        this.error(expression, 'inline のループの continue が、実行時に決まる条件の中にあります。');
       target.continued = true;
       if (target.kind === 'switch') {
         const operand = this.coerce(
@@ -1891,6 +1896,7 @@ export abstract class StatementCompiler extends CallCompiler {
       resultType: asStatement ? undefined : resultType,
       breaks: [],
       broken: false,
+      unrollDepth: this.context.runtimeConditionDepth,
     };
     const iterations: { body: Exec; continuation?: Exec }[] = [];
     let noreturn = false;
@@ -2291,6 +2297,7 @@ export abstract class StatementCompiler extends CallCompiler {
       resultType: asStatement ? undefined : resultType,
       breaks: [],
       broken: false,
+      unrollDepth: this.context.runtimeConditionDepth,
     };
     const row = this.stepRow(expression);
     const iterations: {
