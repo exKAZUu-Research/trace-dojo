@@ -77,10 +77,10 @@ const newTargetBoundaries = new Set([
 
 export type CheckExpression = (node: TreeNode, contextual?: Type) => Type;
 
-/** Checks expressions, computing their types and narrowing the references their conditions test. */
 /** The kinds of names a use before their declaration reads before they are initialized, as tsc reports. */
 const usedBeforeDeclarationKinds = new Set(['let', 'const', 'class', 'enum', 'parameter']);
 
+/** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
   private observedTypes?: Map<number, Type | undefined>;
   readonly calls: Calls;

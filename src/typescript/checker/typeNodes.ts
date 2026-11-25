@@ -82,10 +82,10 @@ export interface TypeArgumentMismatch {
   constraint: Type;
 }
 
-/** Resolves the types the program writes: annotations, type references, and type declarations. */
 /** The clauses whose names a class implements or an interface extends. */
 const heritageClauses = new Set(['implements_clause', 'extends_type_clause']);
 
+/** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
   private readonly librarySymbols = new Map<string, LiteralType>();

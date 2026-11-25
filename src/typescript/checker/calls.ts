@@ -77,7 +77,6 @@ interface CallableShape {
 
 const functionExpressionTypes = new Set(['arrow_function', 'function_expression', 'generator_function']);
 
-/** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
 /** The kinds of names whose type tsc takes as declared explicitly, which an assertion call may go through. */
 const explicitlyTypedKinds = new Set(['class', 'function', 'namespace', 'enum']);
 /** The declarations of a namespace's exports whose type tsc takes as declared explicitly. */
@@ -90,6 +89,7 @@ const explicitlyTypedDeclarations = new Set([
   'enum_declaration',
 ]);
 
+/** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
 export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();

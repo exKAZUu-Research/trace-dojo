@@ -92,7 +92,6 @@ export function isGeneratorFunction(node: TreeNode): boolean {
   return node.type.startsWith('generator_function') || (node.type === 'method_definition' && hasToken(node, '*'));
 }
 
-/** Checks function expressions and bodies, inferring the types they return. */
 /** The declarations that may follow an overload: another overload or its implementation. */
 const overloadFollowerTypes = new Set([
   'function_signature',
@@ -102,6 +101,7 @@ const overloadFollowerTypes = new Set([
   'method_definition',
 ]);
 
+/** Checks function expressions and bodies, inferring the types they return. */
 export class FunctionChecker {
   /** The functions whose bodies are being checked, innermost last. */
   readonly contexts: FunctionContext[] = [];
