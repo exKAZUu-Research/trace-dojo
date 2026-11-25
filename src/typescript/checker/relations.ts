@@ -782,7 +782,8 @@ export class Relations {
     }
     const byElements = this.elementsRelated(source, target, relation);
     if (byElements !== undefined) return byElements;
-    if (this.violatesAnnotatedVariance(source, target, relation)) return false;
+    const byVariance = this.annotatedVarianceRelation(source, target, relation);
+    if (byVariance !== undefined) return byVariance;
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
     if (
@@ -811,21 +812,27 @@ export class Relations {
   }
 
   /**
-   * Whether two instantiations of a generic class, interface, or alias are unrelated by the variance the `in` and
-   * `out` annotations of its type parameters declare, as tsc relates them before their members.
+   * How two instantiations of a generic class, interface, or alias are related by the variance the `in` and `out`
+   * annotations of its type parameters declare, as tsc relates them before their members: unrelated when an argument
+   * breaks its annotation, related when every parameter is annotated and none does, and otherwise left to the members.
    */
-  private violatesAnnotatedVariance(source: Type, target: ObjectType, relation: Relation): boolean {
-    if (this.ignoresVariance > 0 || source.kind !== 'object') return false;
+  private annotatedVarianceRelation(source: Type, target: ObjectType, relation: Relation): boolean | undefined {
+    if (this.ignoresVariance > 0 || source.kind !== 'object') return undefined;
     const generic = this.instantiationsOfOneGeneric(source, target);
-    if (!generic) return false;
+    if (!generic) return undefined;
     const { parameters, sourceArguments, targetArguments } = generic;
-    return parameters.some((parameter, index) => {
+    let isEveryAnnotated = true;
+    for (const [index, parameter] of parameters.entries()) {
       const [from, to] = [sourceArguments[index], targetArguments[index]];
-      if (!parameter.variance || !from || !to) return false;
+      if (!parameter.variance || !from || !to) {
+        isEveryAnnotated = false;
+        continue;
+      }
       const covariant = parameter.variance === 'in' || this.isRelated(from, to, relation);
       const contravariant = parameter.variance === 'out' || this.isRelated(to, from, relation);
-      return !(covariant && contravariant);
-    });
+      if (!(covariant && contravariant)) return false;
+    }
+    return isEveryAnnotated ? true : undefined;
   }
 
   /** The type parameters and arguments of two instantiations of the same generic class, interface, or alias. */

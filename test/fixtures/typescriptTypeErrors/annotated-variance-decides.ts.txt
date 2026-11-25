@@ -1,0 +1,12 @@
+interface Foo<in T> { m(x: T): void }
+interface Wrapper<out T> { inner: Foo<T> }
+declare const w: Wrapper<string>;
+const w2: Wrapper<string | number> = w;
+const w3: Wrapper<number> = w;
+interface Box<in out T> { v: T }
+const b: Box<string> = { v: "a" };
+const b2: Box<string | number> = b;
+type R<out T> = { get: () => T };
+const r: R<"a"> = { get: () => "a" };
+const r2: R<string> = r;
+console.log(w2 === w, b2, r2.get());
