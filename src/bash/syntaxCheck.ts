@@ -859,6 +859,7 @@ class ShellGrammarValidator {
 
   private parseWordListForHeader(variable: ShellToken): boolean {
     if (variable.kind !== 'word') this.failUnexpected(variable);
+    if (!isIdentifier(variable.value)) this.maskWordToken(variable);
     this.advance();
     const hadNewline = this.consumeNewlines();
     const afterName = this.peek();
@@ -994,7 +995,10 @@ class ShellGrammarValidator {
   private parseFunctionKeywordForm(): void {
     this.advance();
     const fnName = this.peek();
-    if (fnName.kind !== 'word') this.failUnexpected(fnName);
+    if (fnName.kind !== 'word' || this.isKeywordToken(fnName)) this.failUnexpected(fnName);
+    if (DECLARATION_NAMES.has(fnName.value) || !isIdentifier(fnName.value)) {
+      this.maskWordToken(fnName);
+    }
     this.advance();
     if (this.hasOperator(this.peek(), '(')) {
       this.advance();
@@ -1036,14 +1040,24 @@ class ShellGrammarValidator {
       if (commandName === undefined && !isAssignmentWord(token.value)) {
         commandName = token.value;
       }
-      if (position === 0 && this.hasOperator(this.peek(), '(')) {
-        if (DECLARATION_NAMES.has(token.value)) this.text.declarationFunctionStarts.push(token.start);
+      if (position === 0 && commandName !== undefined && this.hasOperator(this.peek(), '(')) {
+        if (DECLARATION_NAMES.has(token.value) || !isIdentifier(token.value)) {
+          this.maskWordToken(token);
+        }
         this.advance();
         if (!this.hasOperator(this.peek(), ')')) this.failUnexpected(this.peek());
         this.advance();
         this.parseFunctionBody();
         return;
       }
+    }
+  }
+
+  private maskWordToken(token: ShellToken): void {
+    const { source } = this.text;
+    for (let i = token.start; i < token.end; i++) {
+      if (source[i] === '\n' || (source[i] === '\\' && source[i + 1] === '\n')) continue;
+      this.text.declarationFunctionStarts.push(i);
     }
   }
 

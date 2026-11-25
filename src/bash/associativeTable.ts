@@ -247,7 +247,7 @@ export function isIdentifier(text: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text);
 }
 
-/** Whether a function's name is non-empty, contains no `$`, and is not purely digits. */
+/** Whether a function's name is non-empty, unquoted/unexpanded, and not purely digits. */
 export function isValidFunctionName(name: string): boolean {
-  return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
+  return name !== '' && !/[$`'"\\]/.test(name) && !/^[0-9]+$/.test(name);
 }

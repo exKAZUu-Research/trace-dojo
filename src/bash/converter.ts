@@ -493,11 +493,15 @@ export class Converter {
     const row = node.startPosition.row;
     if (node.childForFieldName('keyword')?.type === 'select') this.unsupported(node, 'select');
     const hasIn = node.children.some((child) => child.type === 'in');
+    const varNode = node.childForFieldName('variable');
+    const variable = varNode
+      ? this.analyzed.originalSource.slice(varNode.startIndex, varNode.endIndex).replaceAll('\\\n', '')
+      : '';
     return {
       row,
       lineRow: row,
       kind: 'for',
-      variable: node.childForFieldName('variable')?.text ?? '',
+      variable,
       values: hasIn ? this.fieldNodes(node, 'value').map((value) => this.word(value)) : undefined,
       body: this.body(node.childForFieldName('body') as Node),
     };
@@ -533,7 +537,9 @@ export class Converter {
       }
     }
     const nameNode = node.childForFieldName('name');
-    const name = nameNode ? this.restoreQuotes(nameNode.text, nameNode.startIndex) : '';
+    const name = nameNode
+      ? this.analyzed.originalSource.slice(nameNode.startIndex, nameNode.endIndex).replaceAll('\\\n', '')
+      : '';
     if (Object.hasOwn(DECLARATION_OPTIONS, name)) {
       this.unsupported(node, 'shadowedDeclarationFunction', name);
     }
