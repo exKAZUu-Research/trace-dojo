@@ -695,6 +695,7 @@ instance Traversable Down where
 
 instance Semigroup a => Semigroup (Down a) where
   Down x <> Down y = Down (x <> y)
+  stimes n (Down x) = Down (stimes n x)
 
 instance Monoid a => Monoid (Down a) where
   mempty = Down mempty

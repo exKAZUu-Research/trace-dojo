@@ -245,6 +245,12 @@ stimesIdempotentMonoid n x = case compare n 0 of
   EQ -> mempty
   GT -> x
 
+stimesMonoid :: (Integral b, Monoid a) => b -> a -> a
+stimesMonoid n x = case compare n 0 of
+  LT -> errorWithoutStackTrace "stimesMonoid: negative multiplier"
+  EQ -> mempty
+  GT -> stimesBySquaring mappend n x
+
 -- By repeated squaring, as base's stimesDefault and stimesMonoid are.
 stimesBySquaring :: Integral b => (a -> a -> a) -> b -> a -> a
 stimesBySquaring op y0 x0 = f x0 y0
@@ -271,6 +277,12 @@ class Semigroup a => Monoid a where
 
 instance Semigroup [a] where
   (<>) = (++)
+  stimes n x
+    | n < 0 = errorWithoutStackTrace "stimes: [], negative multiplier"
+    | otherwise = rep n
+    where
+      rep 0 = []
+      rep i = x ++ rep (i - 1)
 
 instance Monoid [a] where
   mempty = []
@@ -279,12 +291,18 @@ instance Semigroup Ordering where
   LT <> _ = LT
   EQ <> y = y
   GT <> _ = GT
+  stimes n x = case compare n 0 of
+    LT -> errorWithoutStackTrace "stimes: Ordering, negative multiplier"
+    EQ -> EQ
+    GT -> x
 
 instance Monoid Ordering where
   mempty = EQ
 
 instance Semigroup () where
   _ <> _ = ()
+  sconcat _ = ()
+  stimes _ _ = ()
 
 instance Monoid () where
   mempty = ()
@@ -293,12 +311,18 @@ instance Semigroup a => Semigroup (Maybe a) where
   Nothing <> b = b
   a <> Nothing = a
   Just a <> Just b = Just (a <> b)
+  stimes _ Nothing = Nothing
+  stimes n (Just a) = case compare n 0 of
+    LT -> errorWithoutStackTrace "stimes: Maybe, negative multiplier"
+    EQ -> Nothing
+    GT -> Just (stimes n a)
 
 instance Semigroup a => Monoid (Maybe a) where
   mempty = Nothing
 
 instance Semigroup b => Semigroup (a -> b) where
   f <> g = \x -> f x <> g x
+  stimes n f e = stimes n (f e)
 
 instance Monoid b => Monoid (a -> b) where
   mempty _ = mempty
@@ -306,6 +330,9 @@ instance Monoid b => Monoid (a -> b) where
 instance Semigroup (Either a b) where
   Left _ <> b = b
   a <> _ = a
+  stimes n x
+    | n <= 0 = errorWithoutStackTrace "stimes: positive multiplier expected"
+    | otherwise = x
 
 
 concatMapList :: (a -> [b]) -> [a] -> [b]

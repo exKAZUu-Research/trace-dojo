@@ -56,6 +56,18 @@ newtype Endo a = Endo { appEndo :: a -> a }
 
 instance Semigroup (Endo a) where
   Endo f <> Endo g = Endo (f . g)
+  stimes !n0 (Endo e) = Endo (\a0 ->
+    case n0 of
+      _ | n0 < 0 -> stimesEndoError
+      0 -> a0
+      1 -> e a0
+      _ -> go n0 a0)
+    where
+      go !0 a = a
+      go n a = e (go (n - 1) a)
+
+stimesEndoError :: a
+stimesEndoError = errorWithoutStackTrace "stimes (for Endo): negative multiplier"
 
 instance Monoid (Endo a) where
   mempty = Endo id
@@ -133,6 +145,7 @@ newtype First a = First { getFirst :: Maybe a } deriving (Eq, Ord, Show, Read)
 instance Semigroup (First a) where
   First Nothing <> b = b
   a <> _ = a
+  stimes = stimesIdempotentMonoid
 
 instance Monoid (First a) where
   mempty = First Nothing
@@ -151,6 +164,7 @@ newtype Last a = Last { getLast :: Maybe a } deriving (Eq, Ord, Show, Read)
 instance Semigroup (Last a) where
   a <> Last Nothing = a
   _ <> b = b
+  stimes = stimesIdempotentMonoid
 
 instance Monoid (Last a) where
   mempty = Last Nothing
@@ -177,6 +191,7 @@ instance Show (f a) => Show (Alt f a) where
 
 instance Alternative f => Semigroup (Alt f a) where
   Alt a <> Alt b = Alt (a <|> b)
+  stimes = stimesMonoid
 
 instance Alternative f => Monoid (Alt f a) where
   mempty = Alt empty
@@ -434,12 +449,6 @@ stimesIdempotent :: Integral b => b -> a -> a
 stimesIdempotent n x
   | n <= 0 = errorWithoutStackTrace "stimesIdempotent: positive multiplier expected"
   | otherwise = x
-
-stimesMonoid :: (Integral b, Monoid a) => b -> a -> a
-stimesMonoid n x = case compare n 0 of
-  LT -> errorWithoutStackTrace "stimesMonoid: negative multiplier"
-  EQ -> mempty
-  GT -> stimesBySquaring mappend n x
 `;
 
 /** `Data.List.NonEmpty`'s functions, whose names are those of the list functions they mirror. */
