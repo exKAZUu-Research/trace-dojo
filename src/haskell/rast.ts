@@ -45,7 +45,6 @@ export type RExpr = (
       k: 'do';
       stmts: RStmt[];
       span: Span;
-      /** The `Monad` dictionary of the block's monad. */
       monad?: Evidence;
     }
   | { k: 'tuple'; elems: RExpr[]; span: Span }
@@ -102,19 +101,15 @@ export type RPat = (
       dictParams?: DictParam[];
     }
   | { k: 'as'; local: LocalVar; pat: RPat; span: Span }
-  /** `!p`, which evaluates the value before matching it. */
   | { k: 'bang'; pat: RPat; span: Span }
-  /** `~p`, which always matches and matches its pattern only when a variable of it is used. */
   | { k: 'lazy'; pat: RPat; span: Span }
-  /** `(f -> p)`, which matches the result of applying the function to the value. */
   | { k: 'view'; expr: RExpr; pat: RPat; span: Span }
-  /** `(p1; p2)`, which matches if any of its alternatives does; they bind no variables. */
+  /** The alternatives of `(p1; p2)` bind no variables. */
   | { k: 'or'; alts: RPat[]; span: Span }
   /** `(p :: t)`, whose type variables not yet in scope bind the types they match. */
   | { k: 'sig'; pat: RPat; sigType: RType; span: Span }
 ) & { surface?: Pat };
 
-/** The patterns directly inside a pattern. */
 export function rpatChildren(pat: RPat): RPat[] {
   switch (pat.k) {
     case 'con': {
@@ -261,7 +256,6 @@ export function directClassConstraint(constraint: RType): { cls: ClassEntity; ty
   return { cls: head.entity, type, span: constraint.span };
 }
 
-/** Replaces the type variables of a type by name. */
 export function substituteRType(type: RType, substitution: ReadonlyMap<string, RType>): RType {
   switch (type.k) {
     case 'var': {
@@ -394,7 +388,6 @@ export type QType =
 export interface QTyVar {
   local: LocalVar;
   flag: 'specified' | 'inferred' | 'required';
-  /** The kind the binder's annotation gives it. */
   kind?: QType;
 }
 
@@ -464,7 +457,6 @@ export interface QDeriving {
   cls: QType;
 }
 
-/** A renamed quote: of an expression, a pattern, a type, or declarations. */
 export type QQuote =
   | { k: 'exp'; expr: QExpr }
   | { k: 'pat'; pat: QPat }

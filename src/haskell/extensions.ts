@@ -135,7 +135,6 @@ export class Extensions {
     for (const item of items) if (!Object.hasOwn(LANGUAGES, item)) this.apply(item, true);
   }
 
-  /** The gates of the features `phase` decides. */
   gates<P extends Phase>(_phase: P): FeatureGates<P> {
     return { allows: (feature: FeatureOf<P>) => featureAllowed(feature, this.enabled) };
   }

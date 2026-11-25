@@ -282,7 +282,6 @@ function inferTypeDeclaration(checker: Checker, entry: Extract<KindDeclaration, 
   }
 }
 
-/** The kinds of a class's parameters, in order. */
 export function classParamKinds(cls: ClassEntity): Kind[] {
   return cls.packed ? parameterKinds(cls.packed.kind) : [cls.tyvarKind];
 }

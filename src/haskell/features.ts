@@ -1,4 +1,3 @@
-/** The phases of compiling a module, each of which decides the features it owns. */
 export type Phase = 'parse' | 'convert' | 'rename' | 'typecheck';
 
 /**
@@ -11,12 +10,8 @@ interface FeatureGate {
   all?: readonly string[];
 }
 
-/**
- * Every feature that an extension switches, with the extensions it needs and the phase that decides it. A phase asks
- * only through {@link FeatureGates.allows}, which accepts only the features of its phase.
- */
+/** A phase asks only through {@link FeatureGates.allows}, which accepts only the features of its phase. */
 export const FEATURES = {
-  // Reading the source.
   extendedGrammar: {
     phase: 'parse',
     any: [
@@ -38,7 +33,6 @@ export const FEATURES = {
   declarationQuotes: { phase: 'parse', any: ['TemplateHaskell', 'TemplateHaskellQuotes'] },
   blockArguments: { phase: 'parse', any: ['BlockArguments'] },
   recursiveDoKeywords: { phase: 'parse', any: ['RecursiveDo'] },
-  // Converting the parse tree.
   unicodeSyntax: { phase: 'convert', any: ['UnicodeSyntax'] },
   namedDefaults: { phase: 'convert', any: ['NamedDefaults'] },
   levelImports: { phase: 'convert', any: ['ExplicitLevelImports'] },
@@ -106,7 +100,6 @@ export const FEATURES = {
   binaryLiterals: { phase: 'convert', any: ['BinaryLiterals'] },
   hexFloatLiterals: { phase: 'convert', any: ['HexFloatLiterals'] },
   numDecimals: { phase: 'convert', any: ['NumDecimals'] },
-  // Resolving names.
   implicitPrelude: { phase: 'rename', any: ['ImplicitPrelude'] },
   duplicateRecordFields: { phase: 'rename', any: ['DuplicateRecordFields'] },
   ambiguousClassMethods: { phase: 'rename', any: ['AllowAmbiguousTypes'] },
@@ -115,7 +108,6 @@ export const FEATURES = {
   starIsType: { phase: 'rename', any: ['StarIsType'] },
   starOperator: { phase: 'rename', any: ['TypeOperators'] },
   promotion: { phase: 'rename', any: ['DataKinds'] },
-  // Checking types.
   ambiguousTypes: { phase: 'typecheck', any: ['AllowAmbiguousTypes'] },
   monomorphismRestriction: { phase: 'typecheck', any: ['MonomorphismRestriction'] },
   polyKinds: { phase: 'typecheck', any: ['PolyKinds'] },
@@ -134,17 +126,14 @@ export const FEATURES = {
 
 export type Feature = keyof typeof FEATURES;
 
-/** The features a phase decides. */
 export type FeatureOf<P extends Phase> = {
   [F in Feature]: (typeof FEATURES)[F]['phase'] extends P ? F : never;
 }[Feature];
 
-/** The features of one phase, which that phase receives and asks. */
 export interface FeatureGates<P extends Phase> {
   allows(feature: FeatureOf<P>): boolean;
 }
 
-/** Whether the resolved extensions `enabled` turn a feature on. */
 export function featureAllowed(feature: Feature, enabled: ReadonlySet<string>): boolean {
   const gate: FeatureGate = FEATURES[feature];
   if (gate.all) return gate.all.every((name) => enabled.has(name));

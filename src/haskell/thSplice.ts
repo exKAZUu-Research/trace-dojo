@@ -10,14 +10,11 @@ import { collectPatNames } from './rename';
 import type { Decl, Name, Span } from './syntax';
 import { SpliceNames, type SpliceSyntax } from './thDecode';
 
-/** A splice of a program, which runs while the program compiles: `$(e)`, `$$(e)`, a declaration, or `[q|...|]`. */
 export interface SpliceSite {
   /** The splice's node's start, by which the conversion finds what the splice gives. */
   key: number;
   span: Span;
-  /** How the program that runs the splice gives its result: as declarations, a typed expression, or any tree. */
   runner: 'runSplice' | 'runDecSplice' | 'runTypedSplice';
-  /** The code that builds the tree, with the column its first line starts at. */
   code: string;
   column: number;
 }
@@ -72,7 +69,6 @@ function spliceSite(node: Node): SpliceSite {
   return { ...base, runner, code: inner.text, column: inner.startPosition.column };
 }
 
-/** The table of the names a module's declarations define. */
 // code-gauge-allow functionCognitiveComplexity -- One short case per kind of declaration that defines names.
 // code-gauge-allow functionNcss -- One short case per kind of declaration that defines names.
 export function spliceModuleNames(module: string, decls: Decl[]): SpliceModuleNames {
@@ -126,7 +122,6 @@ export function spliceModuleNames(module: string, decls: Decl[]): SpliceModuleNa
   return { module, values, constructors, types, fixities };
 }
 
-/** The text of a program's header: its pragmas and imports, which the program that runs a splice keeps. */
 export function spliceHeader(root: Node): string {
   const lines: string[] = [];
   for (const child of root.namedChildren) {
@@ -138,10 +133,6 @@ export function spliceHeader(root: Node): string {
   return lines.join('\n');
 }
 
-/**
- * How a splice's program runs, given the names of the module the splice is in: what its tree gives as syntax at the
- * splice's span, and what it printed.
- */
 export type SpliceRunner = (
   program: string,
   span: Span,

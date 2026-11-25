@@ -6,7 +6,6 @@ import { rolesOf } from './roles';
 import type { Span } from './syntax';
 import { instantiateType, type Pred, prune, splitApp, type Type, typesEqual, typeVarsOf, zonk } from './types';
 
-/** What solving `Coercible` needs of the type checker: reducing type families and unifying types. */
 export interface CoercionChecker {
   reduceFamilies(type: Type): Type;
   unify(a: Type, b: Type, span: Span, context: string): void;
@@ -18,10 +17,8 @@ interface Applied {
 }
 
 /**
- * Solves `Coercible a b` by how values of the two types are represented: the same types, a given constraint, a
- * newtype and its field, or applications of the same type whose arguments convert as the type's roles allow. Types
- * not yet known leave the constraint for later, which `undefined` stands for; `defaulting`, once nothing else can
- * decide them, makes an unknown type the other side's when that is no newtype, as GHC's defaulting does.
+ * Types not yet known leave the constraint for later, which `undefined` stands for; `defaulting`, once nothing else
+ * can decide them, makes an unknown type the other side's when that is no newtype, as GHC's defaulting does.
  */
 export function solveCoercible(
   checker: CoercionChecker,

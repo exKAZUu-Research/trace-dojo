@@ -43,7 +43,7 @@ import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
 
-/** The library compiled once per process: its modules, instances, and the entities the compiler refers to. */
+/** Compiled once per process. */
 interface Library {
   modules: Map<string, ExportTable>;
   env: ClassEnv;

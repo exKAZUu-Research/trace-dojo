@@ -4,7 +4,6 @@ import { rememberKind } from './kindTemplates';
 import { freshKindVar, type Kind, kindArrow, setMultiplicityArrows, simpleKind, STAR, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
-/** The module that owns the primitive types and the special syntax types (lists, tuples, unit, functions). */
 export const BUILTIN_MODULE = 'GHC.Types';
 
 function primType(name: string, arity: number, special?: TypeEntity['special']): TypeEntity {
@@ -41,16 +40,12 @@ export const IO_TYPE = primType('IO', 1);
 export const TURTLE_TYPE = primType('Turtle', 0);
 export const FUNCTION_TYPE = primType('->', 2, 'function');
 
-/** The kind of multiplicities, which LinearTypes' arrows take: `One` and `Many`. */
 export const MULTIPLICITY_TYPE = primType('Multiplicity', 0);
 export const MULTIPLICITY_KIND: Kind = { tag: 'data', entity: MULTIPLICITY_TYPE, args: [] };
 export const ONE_TYPE: TypeEntity = { ...primType('One', 0), kind: MULTIPLICITY_KIND };
 export const MANY_TYPE: TypeEntity = { ...primType('Many', 0), kind: MULTIPLICITY_KIND };
 
-/**
- * The arrow of a multiplicity other than `Many`, `FUN m a b`, which `a %1 -> b` and `a %m -> b` write; an arrow of
- * `Many` is the ordinary function type.
- */
+/** The arrow of a multiplicity other than `Many`; an arrow of `Many` is the ordinary function type. */
 export const MULTIPLICITY_FUNCTION_TYPE: TypeEntity = {
   ...primType('FUN', 3),
   kind: kindArrow(MULTIPLICITY_KIND, simpleKind(2)),
@@ -93,9 +88,7 @@ export const EQUALITY_CLASS: ClassEntity = {
   rememberKind(EQUALITY_TYPES, EQUALITY_TYPES.kind);
 }
 
-/** The kind of type-level strings, which field names, labels, and DataKinds' string literals have. */
 export const SYMBOL_TYPE: TypeEntity = primType('Symbol', 0);
-/** The kind of type-level natural numbers, which DataKinds' number literals have. */
 export const NATURAL_TYPE: TypeEntity = primType('Natural', 0);
 
 const symbols = new Map<string, TypeEntity>();
@@ -160,7 +153,6 @@ HAS_FIELD_TYPES.kind = kindArrow(
   kindArrow(STAR, kindArrow(STAR, STAR))
 );
 
-/** The types `Coercible a b` packs: two types of the same representation. */
 export const COERCIBLE_TYPES: TypeEntity = { ...primType('Coercible', 2), special: 'classArguments' };
 COERCIBLE_TYPES.kind = kindArrow(STAR, kindArrow(STAR, STAR));
 
@@ -193,9 +185,7 @@ export const IMPLICIT_CLASS: ClassEntity = {
 };
 IMPLICIT_TYPES.kind = kindArrow({ tag: 'data', entity: SYMBOL_TYPE, args: [] }, kindArrow(STAR, STAR));
 
-/** The kind of types, `Type` (or `*`), which Data.Kind exports and kind signatures name. */
 export const TYPE_KIND: TypeEntity = primType('Type', 0);
-/** The kind of constraints, `Constraint`, which Data.Kind exports. */
 export const CONSTRAINT_KIND: TypeEntity = primType('Constraint', 0);
 
 export const MAX_TUPLE_SIZE = 64;
@@ -221,7 +211,6 @@ export function tupleCon(size: number): ConInfo {
   return tupleType(size).cons[0];
 }
 
-/** A mutable reference, which Data.IORef's functions read and write. */
 export const IOREF_TYPE: TypeEntity = primType('IORef', 1);
 
 export const PRIMITIVE_TYPES = [
@@ -314,7 +303,6 @@ function chargeNaturalBits(bits: number): void {
 
 const naturalOperands = [NATURAL_KIND, NATURAL_KIND];
 
-/** GHC.TypeLits' type families, by name. */
 export const TYPE_LIT_FAMILIES: Record<string, TypeEntity> = {
   '+': builtinFamily('+', naturalOperands, NATURAL_KIND, ([a, b]) => {
     chargeNaturalBits(Math.max(bitLength(a as bigint), bitLength(b as bigint)) + 1);

@@ -24,7 +24,6 @@ export const DERIVABLE_CLASSES = [
 /** The classes of type constructors, which GHC derives from how each field's type uses the last type parameter. */
 export const FUNCTOR_LIKE_CLASSES: ReadonlySet<string> = new Set(['Functor', 'Foldable', 'Traversable']);
 
-/** The precedence of function application, which derived `Show` and `Read` compare against. */
 const APP_PREC = 10;
 
 type Support = (name: string) => ValueEntity;
@@ -36,7 +35,6 @@ interface FieldComparison {
   combine: string;
 }
 
-/** Builds the method bindings of a derived instance, as GHC's deriving mechanism defines them. */
 export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Support): RBinding[] {
   const builder = new Builder(decl.span, support, cls);
   const cons = decl.cons.map((conDecl) => conDecl.con);
@@ -99,7 +97,6 @@ class FieldShapes {
     return type.tag === 'tap' && (this.mentions(type.fn) || this.mentions(type.arg));
   }
 
-  /** The parts of a field type: a function's argument and result, a tuple's elements, or a constructor's arguments. */
   shape(
     type: Type,
     className: string
@@ -469,7 +466,6 @@ class Builder {
     return { k: 'con', con, span: this.span };
   }
 
-  /** A library constructor by name, such as `True`. */
   conNamed(name: string): RExpr {
     return this.con(this.support(name).con as ConInfo);
   }
@@ -497,12 +493,10 @@ class Builder {
     return { k: 'lambda', pats: [this.pvar(local)], body, span: this.span };
   }
 
-  /** Composes functions left to right as `f . g . h`. */
   compose(parts: RExpr[]): RExpr {
     return this.foldRight(parts, (part, rest) => this.call('.', part, rest));
   }
 
-  /** Combines items from the right: `f(a, f(b, c))` for `[a, b, c]`. */
   foldRight(items: RExpr[], combine: (item: RExpr, rest: RExpr) => RExpr): RExpr {
     let result = items.at(-1) as RExpr;
     for (let index = items.length - 2; index >= 0; index--) result = combine(items[index], result);
@@ -593,7 +587,6 @@ function isOperator(name: string): boolean {
   return !/^[\p{L}_]/u.test(name);
 }
 
-/** A constructor's or field's name as it appears in prefix position: operators in parentheses. */
 function prefixName(name: string): string {
   return isOperator(name) ? `(${name})` : name;
 }
@@ -676,7 +669,6 @@ function deriveReadClause(builder: Builder, cons: ConInfo[]): RClause {
   return builder.clause([builder.pvar(d)], body);
 }
 
-/** One constructor's reader, which reads tokens and fields in sequence through `readsBind`. */
 // code-gauge-allow functionCognitiveComplexity -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
 // code-gauge-allow functionNcss -- The branches follow the Haskell report's rules for reading prefix, infix, and record constructors.
 function deriveReadAlternative(builder: Builder, con: ConInfo, d: LocalVar): RExpr {

@@ -67,7 +67,6 @@ export function defaultKind(kind: Kind): Kind {
   return defaultKindExcept(kind, new Set());
 }
 
-/** Defaults the kind variables of a kind as {@link defaultKind} does, but those in `keep`. */
 export function defaultKindExcept(kind: Kind, keep: ReadonlySet<Kind>): Kind {
   return mapGraph<Kind>(kind, pruneKind, kindChildren, (node, mapped) => {
     if (node.tag === 'kvar' && keep.has(node)) return node;
@@ -250,7 +249,6 @@ export function typeParts(type: Type): Type[] {
   return [];
 }
 
-/** Replaces the variables a `TForall` binds, as instantiating or comparing it does. */
 export function substituteBound(type: TForall, replacements: readonly Type[]): { body: Type; preds: Pred[] } {
   const indices = new Map(type.vars.map((variable, index) => [variable, index]));
   const replace = (inner: Type): Type =>
@@ -372,10 +370,6 @@ export function quantifyType(type: Type, vars: readonly TVar[]): Type {
 type UnificationFailure = 'mismatch' | 'occurs' | 'kind' | 'escape';
 type BindVariable = (variable: TVar, type: Type) => undefined | Exclude<UnificationFailure, 'mismatch'>;
 
-/**
- * Unifies two types. A pair where either side applies a type family goes to `family`, which reduces or defers it,
- * instead of being compared by its parts.
- */
 let multiplicityArrows: { fun: TypeEntity; arrow: TypeEntity; many: TypeEntity } | undefined;
 
 /** Registers LinearTypes' arrow `FUN m a b`, which unifies with the ordinary arrow when `m` is `Many`. */
@@ -419,6 +413,10 @@ function multiplicityPairs(x: Type, y: Type): [Type, Type][] | undefined {
   return undefined;
 }
 
+/**
+ * A pair where either side applies a type family goes to `family`, which reduces or defers it, instead of being compared
+ * by its parts.
+ */
 export function unifyTypes(
   a: Type,
   b: Type,

@@ -140,7 +140,6 @@ interface FamilyGiven {
 /** What a given equality assumes, undone when its scope ends: a rigid variable's binding, or a family's reduction. */
 type Assumption = TVar | FamilyGiven;
 
-/** The state of a construct whose patterns may give existential types, constraints, and GADT equalities. */
 interface PatternScope {
   outer: number;
   /** The wanted constraints outside the scope, set once a pattern gives something the scope solves under. */
@@ -148,7 +147,6 @@ interface PatternScope {
   givens: { pred: Pred; evidence: Evidence }[];
   /** The rigid types GADT equalities stand for in the scope. */
   assumed: Assumption[];
-  /** What the message of a constraint the scope cannot solve suggests. */
   hint?: string;
 }
 
@@ -179,7 +177,6 @@ export class Checker {
   private scopedTypes: ReadonlyMap<string, Type> = new Map();
   /** The types an ambiguous type variable may default to, in order, which a `default` declaration replaces. */
   defaultTypes: Type[] | undefined;
-  /** The candidates of `default C (...)` declarations, by class. */
   readonly namedDefaults = new Map<ClassEntity, Type[]>();
   set polyKinds(value: boolean) {
     this.typeConversion.polyKinds = value;
@@ -192,11 +189,8 @@ export class Checker {
   /** The given equalities on family applications in scope, which reduce those applications. */
   private readonly familyGivens: FamilyGiven[] = [];
   private readonly matchingGivens = new Set<FamilyGiven>();
-  /** Whether AllowAmbiguousTypes lets a signature have variables only its constraints mention. */
   allowAmbiguousTypes = false;
-  /** Whether a binding without arguments or a signature stays monomorphic, as the monomorphism restriction says. */
   monomorphismRestriction = true;
-  /** Whether ExtendedDefaultRules relaxes defaulting as GHCi does. */
   extendedDefaults = false;
   /** The overlap mode of the module's instances that name none: OverlappingInstances' or IncoherentInstances'. */
   defaultOverlap: OverlapMode | undefined;
@@ -979,7 +973,6 @@ export class Checker {
     }
   }
 
-  /** Checks the body of `let ?x = e in body` under the implicit parameters the bindings give it. */
   private withImplicitBindings<T>(expr: Extract<RExpr, { k: 'implicitLet' }>, body: () => T): T {
     const params = expr.binds.map((bind) =>
       newDictParam({
@@ -1048,7 +1041,6 @@ export class Checker {
     return type;
   }
 
-  /** Checks an expression against its signature, `e :: sig`, giving the signature's scheme. */
   private checkTyped(expr: Extract<RExpr, { k: 'typed' }>): Scheme {
     const scheme = this.sigToScheme(expr.sig);
     expr.dictParams = this.skolemise(scheme, (type, skolems) =>
@@ -1611,8 +1603,6 @@ export class Checker {
   }
 
   /**
-   * Checks a function's clauses against its type, each by the check rule of a lambda.
-   *
    * @param signature The signature's scheme and its rigid types, which the type variables `@a` of the clauses bind, in
    * the order of the signature's visible binders.
    */

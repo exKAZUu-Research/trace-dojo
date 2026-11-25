@@ -11,7 +11,6 @@ import {
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
-/** The instances visible to a module: the library's, and the module's own. */
 export class ClassEnv {
   private readonly own = new Map<ClassEntity, InstanceInfo[]>();
 
@@ -108,7 +107,6 @@ export function hasConstructorHead(type: Type): boolean {
   return head.tag === 'tcon' && head.entity.sort !== 'family';
 }
 
-/** The superclass constraint a constraint implies: the class's superclass at the position, at its type. */
 export function superPred(pred: Pred, index: number): Pred {
   const cls = pred.cls.supers[index];
   const template = pred.cls.superTypes?.[index];
@@ -117,12 +115,10 @@ export function superPred(pred: Pred, index: number): Pred {
   return { cls, type: instantiateType(template, args) };
 }
 
-/** Whether a constraint implies another through its superclasses. */
 export function impliedBySuperclasses(given: Pred, pred: Pred): boolean {
   return superclassPath(given, pred) !== undefined;
 }
 
-/** Whether a given constraint implies another through its superclasses, giving the evidence if it does. */
 export function entailByGivens(
   givens: readonly { pred: Pred; evidence: Evidence }[],
   pred: Pred
@@ -142,9 +138,7 @@ interface SuperclassStep {
   parent: SuperclassStep | undefined;
 }
 
-/** The superclass positions that lead from a constraint to another it implies, if it does. */
 function superclassPath(given: Pred, pred: Pred): number[] | undefined {
-  // The constraints reached so far, by class.
   const seen = new Map<ClassEntity, Pred[]>();
   const work: { pred: Pred; step: SuperclassStep | undefined }[] = [{ pred: given, step: undefined }];
   while (work.length > 0) {
