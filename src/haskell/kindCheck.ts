@@ -3,7 +3,7 @@ import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './e
 import { compileError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
-import { rememberKind } from './kindTemplates';
+import { instantiateKind, rememberKind } from './kindTemplates';
 import {
   CONSTRAINT_SYNONYMS,
   directClassConstraint,
@@ -12,7 +12,7 @@ import {
   type RType,
   SYNONYM_RHS,
 } from './rast';
-import type { RClassDecl, RConDecl, RDataDecl, RModule, RSynonymDecl, RTypeEquation } from './rename';
+import type { RClassDecl, RConDecl, RDataDecl, RModule, RSynonymDecl, RTypeEquation, RTypeFamily } from './rename';
 import {
   CONSTRAINT,
   defaultKind,
@@ -34,12 +34,15 @@ import { chargeTypeWork } from './typeWorkBudget';
 type KindDeclaration =
   | { kind: 'data'; decl: RDataDecl; kinds: Kind[] }
   | { kind: 'synonym'; decl: RSynonymDecl; kinds: Kind[] }
-  | { kind: 'class'; decl: RClassDecl };
+  | { kind: 'class'; decl: RClassDecl }
+  | { kind: 'family'; decl: RTypeFamily & { equations: RTypeEquation[] } };
 
 export function inferKinds(checker: Checker, module: RModule): void {
   prepareFamilies(checker, module);
   for (const decl of module.synonyms) SYNONYM_RHS.set(decl.entity, { params: decl.params, rhs: decl.rhs });
   const declarations = prepareDeclarations(checker, module);
+  // An open family's declared kind is generalized as is; a closed family's, once its equations decide it.
+  for (const family of module.typeFamilies) if (!family.equations) rememberKind(family.entity, family.entity.kind);
   const owner = new Map<object, number>(declarations.map((entry, index) => [entry.decl.entity, index]));
   const edges = declarations.map((entry) =>
     [...kindDependencies(entry)].flatMap((entity) => {
@@ -54,8 +57,11 @@ export function inferKinds(checker: Checker, module: RModule): void {
     );
   defaultDeclarations(declarations, checker.polyKinds);
   for (const decl of module.dataDecls) if (decl.instanceArgs) inferDataInstance(checker, decl);
-  inferFamilyEquations(checker, module);
-  for (const family of module.typeFamilies) if (family.equations) family.entity.kind = defaultKind(family.entity.kind);
+  for (const equation of module.typeInstances) {
+    const converted = convertEquation(checker, equation);
+    checker.checkKinds();
+    converted.kinds = converted.kinds.map(defaultKind);
+  }
   for (const decl of module.dataDecls)
     for (const derivation of decl.deriving) derivation.cls = checker.derivingClass(derivation.type);
   checker.checkKinds();
@@ -63,12 +69,11 @@ export function inferKinds(checker: Checker, module: RModule): void {
 
 /**
  * Gives type families and data families their kinds, which their declarations state: a parameter or result without
- * an annotation has kind `Type`.
+ * an annotation has kind `Type`, but a closed family's, which its equations decide.
  */
 function prepareFamilies(checker: Checker, module: RModule): void {
   for (const family of module.typeFamilies) {
     const kindVars = new Map<string, Kind>();
-    // A closed family's equations decide the kinds it does not write, as GHC infers them; an open family's are Type.
     const unwritten = (): Kind => (family.equations ? freshKindVar() : STAR);
     const params = family.params.map((_, index) => {
       const kind = family.paramKinds?.[index];
@@ -85,7 +90,7 @@ function inferDataInstance(checker: Checker, decl: RDataDecl): void {
   const kinds = decl.params.map((): Kind => freshKindVar());
   const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
-  const familyKinds = parameterKinds(decl.entity.kind);
+  const familyKinds = parameterKinds(instantiateKind(decl.entity, decl.entity.kind).kind);
   const args = (decl.instanceArgs ?? []).map((arg, index) =>
     checker.convertType(arg, vars, varKinds, familyKinds[index])
   );
@@ -98,33 +103,25 @@ function inferDataInstance(checker: Checker, decl: RDataDecl): void {
   for (const { con } of decl.cons) con.instanceKinds = (con.instanceKinds ?? []).map(defaultKind);
 }
 
-/** Converts the equations of type families: a closed family's in order, then the open families' instances. */
-function inferFamilyEquations(checker: Checker, module: RModule): void {
-  const convert = (equation: RTypeEquation): { kinds: Kind[]; lhs: Type[]; rhs: Type } => {
-    const kinds = equation.vars.map((): Kind => freshKindVar());
-    const vars = new Map<string, Type>(equation.vars.map((name, index) => [name, { tag: 'tgen', index }]));
-    const varKinds = new Map<string, Kind>(equation.vars.map((name, index) => [name, kinds[index]]));
-    const familyKinds = parameterKinds(equation.family.kind);
-    let resultKind = equation.family.kind;
-    for (let index = 0; index < familyKinds.length; index++) resultKind = (resultKind as { tag: 'arrow'; to: Kind }).to;
-    const lhs = equation.patterns.map((pattern, index) =>
-      checker.convertType(pattern, vars, varKinds, familyKinds[index])
-    );
-    const rhs = checker.convertType(equation.rhs, vars, varKinds, resultKind);
-    checker.checkKinds();
-    const converted = { kinds, lhs, rhs };
-    (equation.family.equations ??= []).push(converted);
-    return converted;
-  };
-  // A closed family's equations together decide the kinds it does not write, which are then defaulted.
-  for (const family of module.typeFamilies) {
-    const converted = (family.equations ?? []).map(convert);
-    for (const equation of converted) equation.kinds = equation.kinds.map(defaultKind);
-  }
-  for (const equation of module.typeInstances) {
-    const converted = convert(equation);
-    converted.kinds = converted.kinds.map(defaultKind);
-  }
+/**
+ * Converts an equation of a type family, at a fresh instance of the family's kind once that kind is generalized, so
+ * that the instances of an open family of a polymorphic kind may each take their own kinds.
+ */
+function convertEquation(checker: Checker, equation: RTypeEquation): { kinds: Kind[]; lhs: Type[]; rhs: Type } {
+  const kinds = equation.vars.map((): Kind => freshKindVar());
+  const vars = new Map<string, Type>(equation.vars.map((name, index) => [name, { tag: 'tgen', index }]));
+  const varKinds = new Map<string, Kind>(equation.vars.map((name, index) => [name, kinds[index]]));
+  const familyKind = instantiateKind(equation.family, equation.family.kind).kind;
+  const familyKinds = parameterKinds(familyKind);
+  let resultKind = familyKind;
+  for (let index = 0; index < familyKinds.length; index++) resultKind = (resultKind as { tag: 'arrow'; to: Kind }).to;
+  const lhs = equation.patterns.map((pattern, index) =>
+    checker.convertType(pattern, vars, varKinds, familyKinds[index])
+  );
+  const rhs = checker.convertType(equation.rhs, vars, varKinds, resultKind);
+  const converted = { kinds, lhs, rhs };
+  (equation.family.equations ??= []).push(converted);
+  return converted;
 }
 
 function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration[] {
@@ -156,6 +153,10 @@ function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration
     } else decl.entity.tyvarKind = kinds[0];
     declarations.push({ kind: 'class', decl });
   }
+  for (const decl of module.typeFamilies) {
+    const { equations } = decl;
+    if (equations) declarations.push({ kind: 'family', decl: { ...decl, equations } });
+  }
   for (const { entity, kind, span } of module.kindSigs) {
     if (kind.k === 'forall' && 'sort' in entity) entity.kindSpecified = true;
     const given = checker.kindOf(kind, new Map());
@@ -173,7 +174,9 @@ function kindDependencies(entry: KindDeclaration): Set<object> {
   if (entry.kind === 'data') {
     for (const con of entry.decl.cons) work.push(...con.fields, ...(con.context ?? []));
   } else if (entry.kind === 'synonym') work.push(entry.decl.rhs);
-  else {
+  else if (entry.kind === 'family') {
+    for (const equation of entry.decl.equations) work.push(...equation.patterns, equation.rhs);
+  } else {
     work.push(...entry.decl.supers);
     for (const method of entry.decl.methods) work.push(method.sig.type, ...method.sig.context);
   }
@@ -187,6 +190,8 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
   for (const entry of group) {
     if (entry.kind === 'data') inferTypeDeclaration(checker, entry);
     else if (entry.kind === 'class') inferClass(checker, entry.decl);
+    // A closed family's equations together decide the kinds it does not write, as GHC infers them.
+    else if (entry.kind === 'family') for (const equation of entry.decl.equations) convertEquation(checker, equation);
   }
   checker.checkKinds(true);
   for (const entry of group) {
@@ -201,7 +206,7 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
 
 /**
  * Gives the kind variables nothing determined the kind `Type`, as Haskell 98 does; with PolyKinds, a data type,
- * synonym, or class keeps them, so that its kind is polymorphic.
+ * synonym, class, or closed type family keeps them, so that its kind is polymorphic.
  */
 function defaultDeclarations(group: KindDeclaration[], polyKinds: boolean): void {
   for (const entry of group) {
@@ -214,11 +219,16 @@ function defaultDeclarations(group: KindDeclaration[], polyKinds: boolean): void
         const scheme = method.entity.scheme as Scheme;
         scheme.kinds = scheme.kinds.map(defaultKind);
       }
-    } else if (!polyKinds) entry.decl.entity.kind = defaultKind(entry.decl.entity.kind);
+    } else if (!polyKinds) {
+      entry.decl.entity.kind = defaultKind(entry.decl.entity.kind);
+      if (entry.kind === 'family') {
+        for (const equation of entry.decl.entity.equations ?? []) equation.kinds = equation.kinds.map(defaultKind);
+      }
+    }
   }
 }
 
-function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, { kind: 'class' }>): void {
+function inferTypeDeclaration(checker: Checker, entry: Extract<KindDeclaration, { kind: 'data' | 'synonym' }>): void {
   const { decl, kinds } = entry;
   const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));

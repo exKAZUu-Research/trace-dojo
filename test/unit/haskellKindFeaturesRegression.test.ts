@@ -61,6 +61,31 @@ test.each(accepted)('monomorphic kind inference remains supported: %s', (_name, 
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
 });
 
+const polymorphicFamilies = [
+  [
+    'closedFamilyKind',
+    "{-# LANGUAGE DataKinds, TypeFamilies, UndecidableInstances #-}\nimport GHC.TypeLits\nimport Data.Proxy\ntype family Length xs where\n  Length '[] = 0\n  Length (x ': xs) = 1 + Length xs\nmain=print(natVal(Proxy::Proxy(Length '[1,2,3])))",
+    '3\n',
+  ],
+  [
+    'closedFamilyKinds',
+    '{-# LANGUAGE TypeFamilies #-}\nimport Data.Proxy\ntype family Id a where Id a=a\nx::Proxy(Id Maybe)\nx=Proxy\ny::Id Int\ny=1\nmain=print y',
+    '1\n',
+  ],
+  [
+    'openFamilyKinds',
+    '{-# LANGUAGE TypeFamilies #-}\nimport Data.Proxy\ntype family F(a::k)::k\ntype instance F a=a\nx::Proxy(F Maybe)\nx=Proxy\ny::F Int\ny=1\nmain=print y',
+    '1\n',
+  ],
+] as const;
+
+test.each(polymorphicFamilies)(
+  'type families take kinds polymorphic per use as in GHC: %s',
+  (_name, source, stdout) => {
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
+  }
+);
+
 const rejected = [
   ['invalidConcreteKind', 'data S a=S a\nx::S Maybe\nx=undefined\nmain=putStrLn "ok"'],
   ['invalidApplication', 'data App f a=App(f a)\nx::App Maybe Maybe\nx=undefined\nmain=putStrLn "ok"'],
