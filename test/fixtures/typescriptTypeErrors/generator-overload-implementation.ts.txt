@@ -1,0 +1,10 @@
+function gen(x: number): Generator<number>;
+function gen(x: string): Generator<number>;
+function* gen(x: any): Generator<number> {
+  yield Number(x);
+}
+function other(): Generator<number>;
+function* wrong(): Generator<number> {
+  yield 1;
+}
+console.log([...gen(2)], [...gen("3")], [...wrong()]);

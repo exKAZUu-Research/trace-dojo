@@ -93,6 +93,15 @@ export function isGeneratorFunction(node: TreeNode): boolean {
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
+/** The declarations that may follow an overload: another overload or its implementation. */
+const overloadFollowerTypes = new Set([
+  'function_signature',
+  'function_declaration',
+  'generator_function_declaration',
+  'method_signature',
+  'method_definition',
+]);
+
 export class FunctionChecker {
   /** The functions whose bodies are being checked, innermost last. */
   readonly contexts: FunctionContext[] = [];
@@ -646,16 +655,16 @@ export class FunctionChecker {
     // An optional method needs no implementation, unless a later declaration of the method follows.
     if (hasToken(node, '?') && !later.some((sibling) => this.declaresSameMethod(node, sibling))) return;
     const nextName = next?.childForFieldName('name');
-    if (
-      next &&
-      ['function_signature', 'function_declaration', 'method_signature', 'method_definition'].includes(next.type)
-    ) {
+    if (next && overloadFollowerTypes.has(next.type)) {
       if (this.matchingOverloadNames(node, next)) {
         this.checkOverloadModifiers(node, next);
         return;
       }
-      const implementation = node.type === 'function_signature' ? 'function_declaration' : 'method_definition';
-      if (next.type === implementation) {
+      const implementations =
+        node.type === 'function_signature'
+          ? ['function_declaration', 'generator_function_declaration']
+          : ['method_definition'];
+      if (implementations.includes(next.type)) {
         const expected = node.childForFieldName('name')?.text;
         this.c.error(nextName ?? next, `実装の名前は '${expected}' でなければいけません。`);
         return;
@@ -663,6 +672,7 @@ export class FunctionChecker {
     }
     this.c.error(node.childForFieldName('name') ?? node, '関数の実装がないか、宣言の直後にありません。');
   }
+
   /** An overload and the declaration after it, which must agree on being static and on being exported. */
   private checkOverloadModifiers(node: TreeNode, next: TreeNode): void {
     if (hasToken(next, 'static') !== hasToken(node, 'static'))
