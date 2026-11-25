@@ -600,7 +600,7 @@ export class Expander {
     if (value.star && inDouble) return this.quotedStarSegments(value.values);
     if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
-    const separator = this.separatorOf(value, ctx.spacedStar);
+    const separator = this.separatorOf(value, ctx.spacedStar, inDouble);
     for (const [index, element] of value.values.entries()) {
       if (index > 0) segments.push(separator);
       segments.push(listElementSegment(element, inDouble));
@@ -615,12 +615,16 @@ export class Expander {
     return [textSegment(joined, true, false)];
   }
 
-  private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, spacedStar: boolean): WordSegment {
+  private separatorOf(
+    value: Extract<ParameterValue, { kind: 'list' }>,
+    spacedStar: boolean,
+    inDouble: boolean
+  ): WordSegment {
     const ifsJoiner = this.ifsJoiner();
-    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner);
+    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner, inDouble);
     return value.positional && spacedStar && ifsJoiner === ''
-      ? breakSegment('field', ifsJoiner)
-      : breakSegment('star', ifsJoiner);
+      ? breakSegment('field', ifsJoiner, inDouble)
+      : breakSegment('star', ifsJoiner, inDouble);
   }
 
   ifsJoiner(): string {
@@ -787,7 +791,7 @@ function scalarValueSegments(value: string | undefined, inDouble: boolean): Word
 
 function listElementSegment(element: string, inDouble: boolean): TextSegment {
   if (inDouble && element === '') return QUOTED_EMPTY_SEGMENT;
-  return textSegment(element, inDouble, !inDouble);
+  return textSegment(element, inDouble, !inDouble, !inDouble);
 }
 
 function lengthOf(value: ParameterValue): ParameterValue {

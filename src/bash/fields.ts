@@ -16,12 +16,14 @@ export interface TextSegment {
   readonly text: string;
   readonly quoted: boolean;
   readonly split: boolean;
+  readonly fromList?: boolean;
 }
 
 export interface BreakSegment {
   readonly kind: 'break';
   readonly breakKind: 'field' | 'positional' | 'star';
   readonly ifsJoiner?: string;
+  readonly quoted?: boolean;
 }
 
 export interface EmptyListSegment {
@@ -33,12 +35,17 @@ export type WordSegment = TextSegment | BreakSegment | EmptyListSegment;
 export const EMPTY_LIST_SEGMENT: EmptyListSegment = { kind: 'emptyList' };
 export const QUOTED_EMPTY_SEGMENT: TextSegment = { kind: 'text', text: '', quoted: true, split: false };
 
-export function breakSegment(breakKind: BreakSegment['breakKind'], ifsJoiner?: string): BreakSegment {
-  return ifsJoiner === undefined ? { kind: 'break', breakKind } : { kind: 'break', breakKind, ifsJoiner };
+export function breakSegment(breakKind: BreakSegment['breakKind'], ifsJoiner?: string, quoted?: boolean): BreakSegment {
+  return {
+    kind: 'break',
+    breakKind,
+    ...(ifsJoiner === undefined ? {} : { ifsJoiner }),
+    ...(quoted ? { quoted: true } : {}),
+  };
 }
 
-export function textSegment(text: string, quoted: boolean, split: boolean): TextSegment {
-  return { kind: 'text', text, quoted, split };
+export function textSegment(text: string, quoted: boolean, split: boolean, fromList?: boolean): TextSegment {
+  return fromList ? { kind: 'text', text, quoted, split, fromList: true } : { kind: 'text', text, quoted, split };
 }
 
 export function isBreakSegment(segment: WordSegment): segment is BreakSegment {
@@ -60,22 +67,27 @@ class SplitterState {
   private field: TextSegment[] = [];
   private started = false;
   private afterWhite = false;
+  private afterListWhite = false;
   private afterDelimiter = false;
+  private readonly hasNonWhitePrimaryIfs: boolean;
 
-  constructor(private readonly ifs: string) {}
+  constructor(private readonly ifs: string) {
+    this.hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
+  }
 
   add(segment: WordSegment): void {
     if (segment.kind === 'emptyList') return;
     if (segment.kind === 'break') {
-      this.onFieldBreak(segment.breakKind);
+      this.onFieldBreak(segment);
     } else if (!segment.split || this.ifs === '') {
       if (segment.text === '' && !segment.quoted) return;
       this.field.push({ ...segment, split: false });
       this.started = true;
       this.afterWhite = false;
+      this.afterListWhite = false;
       this.afterDelimiter = false;
     } else if (segment.text !== '') {
-      this.splitText(segment.text);
+      this.splitText(segment.text, Boolean(segment.fromList));
     }
   }
 
@@ -84,9 +96,24 @@ class SplitterState {
     return this.fields;
   }
 
-  private onFieldBreak(breakKind: BreakSegment['breakKind']): void {
+  private onFieldBreak(segment: BreakSegment): void {
+    if (segment.quoted) {
+      if (this.started) this.end();
+      this.afterWhite = true;
+      this.afterListWhite = false;
+      this.afterDelimiter = false;
+      return;
+    }
     if (this.ifs === '') {
-      if (breakKind !== 'star' && this.started) this.end();
+      if (this.started) this.end();
+      return;
+    }
+    if (this.afterListWhite) {
+      this.afterWhite = true;
+      this.afterListWhite = false;
+    }
+    if (this.hasNonWhitePrimaryIfs) {
+      this.separate(this.ifs[0]);
       return;
     }
     if (this.started) {
@@ -103,34 +130,39 @@ class SplitterState {
     this.started = false;
   }
 
-  private splitText(text: string): void {
+  private splitText(text: string, fromList: boolean): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
         run += c;
         this.started = true;
         this.afterWhite = false;
+        this.afterListWhite = false;
         this.afterDelimiter = false;
         continue;
       }
       if (run) this.field.push(textSegment(run, false, false));
       run = '';
-      this.separate(c);
+      this.separate(c, fromList);
     }
     if (run) this.field.push(textSegment(run, false, false));
   }
 
-  private separate(c: string): void {
+  private separate(c: string, fromList = false): void {
     if (c === ' ' || c === '\t' || c === '\n') {
       if (this.started) {
         this.end();
         this.afterWhite = true;
+      } else if (!this.afterDelimiter) {
+        if (fromList) this.afterWhite = true;
+        else this.afterListWhite = true;
       }
       return;
     }
     if (this.started) this.end();
     else if (!this.afterWhite) this.fields.push([]);
     this.afterWhite = false;
+    this.afterListWhite = false;
     this.afterDelimiter = true;
   }
 }
