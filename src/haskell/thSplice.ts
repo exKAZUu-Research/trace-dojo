@@ -65,6 +65,19 @@ function topLevelNames(root: Node): ModuleNames {
           inner?.childForFieldName('name') ?? inner?.namedChildren.find((child) => child?.type === 'constructor');
         if (conName) names.constructors.add(conName.text.trim());
       }
+      // Record fields and class methods are values the declaration defines too.
+      for (const field of decl.descendantsOfType('field')) {
+        for (const fieldName of field?.childrenForFieldName('name') ?? []) {
+          if (fieldName) names.values.add(fieldName.text.trim());
+        }
+      }
+      if (decl.type === 'class') {
+        for (const signature of decl.descendantsOfType('signature')) {
+          const single = signature?.childForFieldName('name');
+          const list = signature?.childForFieldName('names')?.childrenForFieldName('name') ?? [];
+          for (const method of single ? [single] : list) if (method) names.values.add(method.text.trim());
+        }
+      }
     }
   }
   return names;
