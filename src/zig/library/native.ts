@@ -92,6 +92,11 @@ export function addMembers(type: { namespace: Namespace }, members: Record<strin
   }
 }
 
+/** Whether Zig's library declares the member publicly, which this grader then reports as one it does not run. */
+export function isPublicStdMember(namespace: string, member: string): boolean {
+  return publicMembers(namespace)?.includes(member) === true;
+}
+
 function publicMembers(name: string): readonly string[] | undefined {
   const base = name.split('(')[0];
   return Object.hasOwn(PUBLIC_STD_MEMBERS, base) ? PUBLIC_STD_MEMBERS[base] : undefined;

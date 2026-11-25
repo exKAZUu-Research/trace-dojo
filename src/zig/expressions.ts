@@ -31,6 +31,7 @@ import {
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { isPublicStdMember } from './library/native';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
@@ -535,6 +536,11 @@ export abstract class ExpressionCompiler extends SemaBase {
       const hasField = this.fieldIndexes(this.unionFields(type)).has(name);
       if (hasField && type.tagType) return this.typeMember(type.tagType, name, span);
     }
+    if (
+      (type.kind === 'struct' || type.kind === 'enum' || type.kind === 'union') &&
+      isPublicStdMember(type.namespace.name, name)
+    )
+      return this.error(span, `${type.namespace.name}.${name}は、この採点環境では使えません。`);
     return this.error(span, `${typeName(type)} には、「${name}」という宣言がありません。`);
   }
 
