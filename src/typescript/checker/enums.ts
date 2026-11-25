@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { numberArithmetic } from '../../javascript/expressionEvaluator';
 import { decodeTemplateFragment } from '../../javascript/literals';
+import { isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
 import { hasToken, isWithin, named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
@@ -101,7 +102,8 @@ export class Enums {
       const value = member.childForFieldName('value');
       const type = value && this.c.expressions.check(value);
       const name = memberNameOf(member);
-      const isComputed = name !== undefined && info?.members.get(name)?.value === undefined;
+      // An ambient enum's computed member is reported as not constant instead.
+      const isComputed = name !== undefined && info?.members.get(name)?.value === undefined && !isAmbient(member);
       if (value && type && isComputed && !this.c.relations.isAssignable(type, numberType))
         this.c.error(
           value,
@@ -190,10 +192,12 @@ export class Enums {
     const initializer = memberNode.childForFieldName('value');
     if (initializer) {
       const value = this.evaluate(initializer, context);
-      if (value === undefined && context.isConst)
+      if (value === undefined && (context.isConst || isAmbient(memberNode)))
         context.errors.push({
           node: initializer,
-          message: 'const enum のメンバーの初期値は、定数式でなければいけません。',
+          message: context.isConst
+            ? 'const enum のメンバーの初期値は、定数式でなければいけません。'
+            : 'アンビエントの enum 宣言では、メンバーの初期値は定数式でなければいけません。',
         });
       return value;
     }

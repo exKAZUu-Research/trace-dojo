@@ -1,0 +1,7 @@
+declare const s: string;
+declare enum E { A = Math.random() }
+declare enum F { A = s }
+declare enum G { A = 1n }
+declare enum H { A = 1 + 1, B = "x" }
+declare const enum I { A = Math.random() }
+console.log(1);

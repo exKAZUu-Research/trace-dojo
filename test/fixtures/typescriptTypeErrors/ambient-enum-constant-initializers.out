@@ -1,0 +1,4 @@
+(2,22): error TS1066: In ambient enum declarations member initializer must be constant expression.
+(3,22): error TS1066: In ambient enum declarations member initializer must be constant expression.
+(4,22): error TS1066: In ambient enum declarations member initializer must be constant expression.
+(6,28): error TS2474: const enum member initializers must be constant expressions.

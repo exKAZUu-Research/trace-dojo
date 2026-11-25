@@ -37,10 +37,12 @@ export function isAmbient(node: TreeNode): boolean {
 }
 
 /**
- * Whether the checker checks a declaration under `declare`, which has no code to check except a namespace's and the
- * implicit types of its variables.
+ * Whether the checker checks a declaration under `declare`, which has no code to check except a namespace's, the
+ * implicit types of its variables, and the constant initializers of its enums.
  */
 export function isCheckedAmbientDeclaration(node: TreeNode): boolean {
   const declaration = ['export_statement', 'expression_statement'].includes(node.type) ? node.namedChildren[0] : node;
-  return ['internal_module', 'module', 'lexical_declaration', 'variable_declaration'].includes(declaration?.type ?? '');
+  return ['internal_module', 'module', 'lexical_declaration', 'variable_declaration', 'enum_declaration'].includes(
+    declaration?.type ?? ''
+  );
 }
