@@ -92,11 +92,7 @@ export const FILE_STAT: StructType = nativeStruct(
     { name: 'kind', type: FILE_KIND, hasDefault: false },
   ],
   // The run's files have no inodes, permissions, or timestamps of their own.
-  {
-    kind: 'fileStat',
-    args: [],
-    leftOutFields: ['inode', 'nlink', 'permissions', 'atime', 'mtime', 'ctime', 'block_size'],
-  }
+  { kind: 'fileStat', args: [] }
 );
 
 function kindValue(name: 'directory' | 'file' | 'unknown'): bigint {

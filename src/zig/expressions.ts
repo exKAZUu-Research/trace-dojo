@@ -565,7 +565,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       if (this.findDecl(type, name)) {
         this.error(span, `「${name}」はフィールドではなく宣言です。呼び出すときは ${name}(...) と書きます。`);
       }
-      if (type.native?.leftOutFields?.includes(name))
+      if (type.native && isPublicStdMember(type.namespace.name, name))
         return this.error(span, `${typeName(type)}.${name}は、この採点環境では使えません。`);
       return this.error(span, `${typeName(type)} 型には、フィールド「${name}」がありません。`);
     }

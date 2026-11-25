@@ -4,6 +4,7 @@ import { BuiltinCompiler } from './builtins';
 import { constantText } from './constantText';
 import { bitSizeOf } from './layout';
 import { langNamespace } from './library/lang';
+import { isPublicStdField, leftOutStdField } from './library/native';
 import { known, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
@@ -175,7 +176,12 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
 
   /** A field of Zig's type that the grader leaves out, which reflection may not answer for differently than Zig. */
   private refuseLeftOutField(type: Type, name: string, span: Span): void {
-    if (type.kind === 'struct' && type.native?.leftOutFields?.includes(name))
+    if (
+      type.kind === 'struct' &&
+      type.native &&
+      isPublicStdField(type.namespace.name, name) &&
+      !this.fieldNames(type, span).includes(name)
+    )
       this.error(span, `${typeName(type)}.${name}は、この採点環境では使えません。`);
   }
 
@@ -502,7 +508,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         if (type.namespace.syntax?.containerKind === 'opaque')
           return this.error(span, unavailableMessage('@typeInfo:opaque'));
         // A native type that leaves out some of Zig's fields cannot list them all.
-        const leftOut = type.native?.leftOutFields?.[0];
+        const leftOut = type.native && leftOutStdField(type.namespace.name, this.structFields(type, span));
         if (leftOut !== undefined) this.refuseLeftOutField(type, leftOut, span);
         const struct = nested('Struct') as StructType;
         const attributes = this.memberType(struct, 'FieldAttributes', span) as StructType;

@@ -33,7 +33,7 @@ import {
   type Value,
   type ZStruct,
 } from '../values';
-import { PUBLIC_STD_MEMBERS } from './publicMembers';
+import { PUBLIC_STD_FIELDS, PUBLIC_STD_MEMBERS } from './publicMembers';
 
 /** A declaration's type and value, which a native namespace resolves on first use. */
 export interface Member {
@@ -92,14 +92,35 @@ export function addMembers(type: { namespace: Namespace }, members: Record<strin
   }
 }
 
-/** Whether Zig's library declares the member publicly, which this grader then reports as one it does not run. */
+/**
+ * Whether Zig's library type has the name, as a public declaration or a field, which this grader then reports as one
+ * it does not run when it does not provide it.
+ */
 export function isPublicStdMember(namespace: string, member: string): boolean {
-  return publicMembers(namespace)?.includes(member) === true;
+  return publicMembers(namespace)?.includes(member) === true || isPublicStdField(namespace, member);
+}
+
+export function isPublicStdField(namespace: string, field: string): boolean {
+  return publicFields(namespace).includes(field);
+}
+
+/** The first field of Zig's library type that the grader's type of the same name leaves out. */
+export function leftOutStdField(namespace: string, fields: readonly { name: string }[]): string | undefined {
+  return publicFields(namespace).find((name) => !fields.some((field) => field.name === name));
 }
 
 function publicMembers(name: string): readonly string[] | undefined {
-  const base = name.split('(')[0];
+  const base = baseName(name);
   return Object.hasOwn(PUBLIC_STD_MEMBERS, base) ? PUBLIC_STD_MEMBERS[base] : undefined;
+}
+
+function publicFields(name: string): readonly string[] {
+  const base = baseName(name);
+  return Object.hasOwn(PUBLIC_STD_FIELDS, base) ? PUBLIC_STD_FIELDS[base] : [];
+}
+
+function baseName(name: string): string {
+  return name.split('(')[0];
 }
 
 /** A namespace member that is a type. */
