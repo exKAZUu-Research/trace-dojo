@@ -1,4 +1,5 @@
 import { compileError, unsupportedError } from './errors';
+import { RecursionBudget } from './recursionBudget';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /**
@@ -691,6 +692,9 @@ class ConditionParser {
     this.tokens = text.match(CONDITION_TOKEN) ?? [];
   }
 
+  /** How deep the condition nests, which a deep condition from a macro may not exceed. */
+  private readonly depth = new RecursionBudget();
+
   parse(): Condition {
     const condition = this.ternary();
     if (this.position < this.tokens.length) throw this.error(`#if の式 ${this.tokens.join(' ')} に誤りがあります。`);
@@ -698,6 +702,10 @@ class ConditionParser {
   }
 
   private ternary(): Condition {
+    return this.depth.run(() => this.ternaryAtDepth());
+  }
+
+  private ternaryAtDepth(): Condition {
     const test = this.binary(0);
     if (this.tokens[this.position] !== '?') return test;
     this.position++;
@@ -718,6 +726,10 @@ class ConditionParser {
   }
 
   private unary(): Condition {
+    return this.depth.run(() => this.unaryAtDepth());
+  }
+
+  private unaryAtDepth(): Condition {
     const token = this.tokens[this.position++];
     switch (token) {
       case '!':
@@ -786,8 +798,12 @@ const truth = (value: boolean): CInteger => ({ value: value ? 1n : 0n, unsigned:
  * Evaluates a parsed `#if` expression with C's rules: `&&`, `||`, and `?:` evaluate only the operands they select;
  * an operand with an unsigned type makes the other unsigned too.
  */
-function evaluateCondition(condition: Condition, error: (message: string) => Error): CInteger {
-  const evaluate = (node: Condition): CInteger => evaluateCondition(node, error);
+function evaluateCondition(
+  condition: Condition,
+  error: (message: string) => Error,
+  depth = new RecursionBudget()
+): CInteger {
+  const evaluate = (node: Condition): CInteger => depth.run(() => evaluateCondition(node, error, depth));
   switch (condition.k) {
     case 'integer': {
       return condition.integer;
