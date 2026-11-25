@@ -269,7 +269,8 @@ define('hGetContents', 1, [], ([handle], runtime) =>
     const { entry } = handleOf(handle, runtime);
     const reader = readerOf(entry, 'hGetContents');
     entry.state = 'semiClosed';
-    return lazyContents(entry, reader, runtime);
+    // Nothing is read until the string is forced, the first character included.
+    return new Thunk(undefined, undefined, () => lazyContents(entry, reader, runtime));
   })
 );
 
