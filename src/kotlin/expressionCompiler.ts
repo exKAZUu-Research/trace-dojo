@@ -534,8 +534,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (staticMember) return staticMember;
     const property = this.topLevelPlainProperty(name);
     if (property) return this.readTopLevelProperty(context, property, row);
-    const enumClass = this.file.importedEnumEntries.get(name);
-    if (enumClass) return this.readEnumEntry(enumClass, name);
+    const imported = this.file.importedEnumEntries.get(name);
+    if (imported) return this.readEnumEntry(imported.owner, imported.entry);
     const cls = this.findClass(scope, name);
     if (cls) this.checkNestedAccessible(scope, cls, row);
     const value = cls && this.classAsValue(cls, row);

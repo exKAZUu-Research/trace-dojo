@@ -6624,6 +6624,14 @@ fun main() { println(Service("u").run()); println(shared.twice(3)) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'hello u1\n6\n' });
 });
 
+test('reads enum entries imported under an alias', () => {
+  const source = `package demo
+import demo.Color.GREEN as G
+enum class Color { RED, GREEN }
+fun main() { println(listOf(G, G == Color.GREEN)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[GREEN, true]\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

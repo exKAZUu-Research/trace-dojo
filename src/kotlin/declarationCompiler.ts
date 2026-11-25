@@ -371,7 +371,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** `import a.Owner.*`, which imports an object's members, an enum's entries, and the nested classes. */
   private importClassMembers(context: FileContext, owner: ClassSymbol): void {
     for (const [name, nested] of owner.nested) context.importedClasses.set(name, nested);
-    for (const entry of owner.enumEntries) context.importedEnumEntries.set(entry.name, owner);
+    for (const entry of owner.enumEntries) context.importedEnumEntries.set(entry.name, { owner, entry: entry.name });
     if (owner.isObject) for (const [name, members] of owner.members) this.importObjectMembers(context, name, members);
   }
 
@@ -413,7 +413,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       return;
     }
     if (owner?.kind === 'enum' && owner.enumEntries.some((entry) => entry.name === original)) {
-      context.importedEnumEntries.set(name, owner);
+      context.importedEnumEntries.set(name, { owner, entry: original });
       return;
     }
     // The program's own classes declare their members after the first pass of the imports, which the second resolves.
