@@ -31,6 +31,7 @@ import {
   SCRIPT_NAME,
   type ShellState,
 } from './runtime';
+import { populateTemporaryScope } from './temporaryScope';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   advanceRandomState,
@@ -38,12 +39,14 @@ import {
   AssociativeTable,
   buildDynamicDeclaration,
   callStackElements,
+  cloneDynamicAttributes,
   cloneScope,
   collectReachableStrings,
   type CompoundElement,
   deriveSubshellSeed,
   DYNAMIC_VARIABLES,
   dynamicArrayLength,
+  ensureDynamicAttributes,
   ensureIndexedElements,
   ensureWritable,
   ENVIRONMENT_VARIABLES,
@@ -582,46 +585,12 @@ export class Shell implements ArithmeticHost {
     this.state.scopes.push(scope);
     this.activeDeclarationPrefix = forDeclaration ? scope : undefined;
     try {
-      if (!this.populateTemporaryScope(scope, assignments)) return 1;
+      if (!populateTemporaryScope(this, scope, assignments)) return 1;
       return run();
     } finally {
       this.activeDeclarationPrefix = prevPrefix;
       this.removeScope(scope);
     }
-  }
-
-  private populateTemporaryScope(scope: Scope, assignments: Assignment[]): boolean {
-    for (const assignment of assignments) {
-      if (assignment.subscript || assignment.array) {
-        // Bash assigns array elements before a command in the shell itself.
-        if (!this.performAssignment(assignment)) return false;
-        continue;
-      }
-      const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-      if (this.findOwnVariable(assignment.name)?.attributes.has('r')) {
-        // Bash reports the assignment and runs the command without it.
-        this.reportError(`${assignment.name}: readonly variable`);
-        continue;
-      }
-      const combined = this.combineTemporaryValue(assignment.name, value, assignment.append);
-      scope.set(assignment.name, {
-        name: assignment.name,
-        value: { kind: 'scalar', value: combined },
-        attributes: new Set(['x']),
-        fromTempEnv: true,
-      });
-    }
-    return true;
-  }
-
-  private combineTemporaryValue(name: string, value: string, append: boolean): string {
-    if (!append) return value;
-    const base = this.scalarValue(name) ?? '';
-    const variable = this.findVariable(name);
-    const raw = variable?.attributes.has('i')
-      ? String(BigInt.asIntN(64, this.evaluateFatalReadonly(base || '0') + this.evaluateFatalReadonly(value)))
-      : base + value;
-    return variable ? applyCaseAttributes(variable, raw) : raw;
   }
 
   private removeScope(scope: Scope): void {
@@ -743,6 +712,7 @@ export class Shell implements ArithmeticHost {
       lastRandom: 0,
       subshellDraws: 0,
       unsetDynamic: new Set(parent.unsetDynamic),
+      dynamicAttributes: cloneDynamicAttributes(parent.dynamicAttributes),
       unsetEnv: new Set(parent.unsetEnv),
       subshellLevel: parent.subshellLevel + 1,
       fd1: capture,
@@ -1019,8 +989,9 @@ export class Shell implements ArithmeticHost {
    * Assigns a dynamic variable as Bash does, telling whether the name is one: `RANDOM` takes a seed, `BASH_SUBSHELL` a
    * new level, and the others ignore the value, since Bash computes them when they are read.
    */
-  assignDynamic(name: string, value: string): boolean {
+  assignDynamic(name: string, value: string, allowReadonly = false): boolean {
     if (!this.isDynamic(name)) return false;
+    if (!allowReadonly && this.isReadonlyDynamic(name)) return !this.rejectDynamicReadonly(name);
     if (name === 'RANDOM') this.seedRandom(value);
     if (name === 'BASH_SUBSHELL') this.state.subshellLevel = Number(legalNumber(value) ?? 0n);
     this.lastStored = value;
@@ -1033,7 +1004,8 @@ export class Shell implements ArithmeticHost {
     return buildDynamicDeclaration(
       name,
       SCALAR_DYNAMIC_VARIABLES.has(name) ? this.dynamicValue(name) : undefined,
-      this.dynamicElements(name)
+      this.dynamicElements(name),
+      this.state.dynamicAttributes.get(name)
     );
   }
 
@@ -1043,6 +1015,20 @@ export class Shell implements ArithmeticHost {
 
   isScalarDynamic(name: string): boolean {
     return this.isDynamic(name) && SCALAR_DYNAMIC_VARIABLES.has(name);
+  }
+
+  isReadonlyDynamic(name: string): boolean {
+    return this.isDynamic(name) && this.state.dynamicAttributes.get(name)?.has('r') === true;
+  }
+
+  ensureDynamicAttributeCell(name: string): Variable {
+    return { name, value: undefined, attributes: ensureDynamicAttributes(this.state, name) };
+  }
+
+  private rejectDynamicReadonly(name: string): boolean {
+    this.readonlyFailure = true;
+    this.reportError(`${name}: readonly variable`);
+    return true;
   }
 
   /** Bash's `RANDOM`: Park and Miller's generator, folded to 15 bits, never repeating the last value. */
@@ -1154,7 +1140,7 @@ export class Shell implements ArithmeticHost {
     if (direct) return this.assignScalarTo(direct, value, append);
     const split = this.splitSubscript(resolved);
     if (split) return this.assignReferencedElement(split, value, append);
-    if (this.assignDynamic(resolved, value)) return true;
+    if (this.isDynamic(resolved)) return this.assignDynamic(resolved, value);
     let variable = this.findVariable(resolved, false);
     if (!variable) {
       if (append && this.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
@@ -1225,7 +1211,10 @@ export class Shell implements ArithmeticHost {
         attributes: new Set(),
       };
     const ok = this.assignElementTo(target, subscript, value, append, evaluated, name);
-    if (ok && !existing) this.state.scopes[0].set(name, target);
+    if (ok && !existing) {
+      this.state.dynamicAttributes.delete(name);
+      this.state.scopes[0].set(name, target);
+    }
     return ok;
   }
 
@@ -1313,23 +1302,34 @@ export class Shell implements ArithmeticHost {
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
-    if (this.isDynamic(name) && !this.isScalarDynamic(name)) return true;
-    let variable = this.findOwnVariable(name);
-    if (!isIdentifier(name) && !variable) {
+    if (this.isDynamic(name) && !this.isScalarDynamic(name)) {
+      return !this.isReadonlyDynamic(name) || !this.rejectDynamicReadonly(name);
+    }
+    const existing = this.findOwnVariable(name);
+    if (!isIdentifier(name) && !existing) {
       this.reportError(`\`${name}': not a valid identifier`);
       return false;
     }
-    if (variable && this.rejectReadonlyElement(variable, name)) return false;
-    if (!variable) {
-      if (this.isScalarDynamic(name)) {
-        variable = this.dynamicDeclaration(name) as Variable;
-      } else {
-        if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-        variable = { name, value: undefined, attributes: new Set() };
+    if (existing && this.rejectReadonlyElement(existing, name)) return false;
+    const variable = existing ?? this.createCompoundTarget(name, append);
+    return variable ? this.assignCompoundTo(variable, elements, append, name) : false;
+  }
+
+  private createCompoundTarget(name: string, append: boolean): Variable | undefined {
+    if (this.isScalarDynamic(name)) {
+      if (this.isReadonlyDynamic(name)) {
+        this.rejectDynamicReadonly(name);
+        return undefined;
       }
+      const variable = this.dynamicDeclaration(name) as Variable;
+      this.state.dynamicAttributes.delete(name);
       this.state.scopes[0].set(name, variable);
+      return variable;
     }
-    return this.assignCompoundTo(variable, elements, append, name);
+    if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    const variable: Variable = { name, value: undefined, attributes: new Set() };
+    this.state.scopes[0].set(name, variable);
+    return variable;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.

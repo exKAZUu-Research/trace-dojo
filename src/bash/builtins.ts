@@ -289,6 +289,10 @@ function unsetSpecialOrMissingElement(
 ): boolean {
   if (shell.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   if (!shell.isDynamic(resolved)) return true;
+  if (shell.isReadonlyDynamic(resolved)) {
+    shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
+    return false;
+  }
   if (PERMANENT_DYNAMIC_VARIABLES.has(resolved)) {
     shell.reportError(`unset: ${resolved}: cannot unset`);
     return false;

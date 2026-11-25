@@ -2,6 +2,7 @@
 import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
 import { expandBraces } from './braces';
+import { type PrefixedDeclareHooks, tryDeclarePrefixed } from './declarePrefixed';
 import { printDeclarations } from './declarePrint';
 import { DiscardSignal } from './runtime';
 import type { CompoundElement, Shell } from './shell';
@@ -50,6 +51,8 @@ const OPTIONS: Record<string, string> = {
 };
 
 /** The options a declaration builtin got: the attributes it sets with `-` and removes with `+`. */
+export type DeclarationOptions = Options;
+
 interface Options {
   set: Set<string>;
   unset: Set<string>;
@@ -375,6 +378,7 @@ function resolveCompoundExisting(
     const origin = resolveLocalOrigin(shell, localScope, targetName, set.has('I'));
     return origin ? createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed') : undefined;
   }
+  if (shell.isReadonlyDynamic(targetName)) return shell.ensureDynamicAttributeCell(targetName);
   return set.has('g') || set.has('n') ? scopes[0].get(targetName) : shell.findVariable(targetName, false);
 }
 
@@ -567,7 +571,6 @@ function completeLocalElementLinkCompound(
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
 function declareOne(
   shell: Shell,
   builtin: string,
@@ -581,11 +584,17 @@ function declareOne(
   const isSubscripted =
     parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
   if (rejectOperandHeader(shell, builtin, name, operand, parsed, isSubscripted)) return false;
-  if (!isLocal && materializeOrHandleDynamic(shell, operand, parsed, options, isSubscripted)) return true;
+  const dynamicOutcome = !isLocal
+    ? materializeOrHandleDynamic(shell, builtin, name, operand, parsed, options, isSubscripted)
+    : 'notDynamic';
+  if (dynamicOutcome !== 'notDynamic') return dynamicOutcome === 'handled';
   const assignMode = resolveAssignMode(operand, parsed);
-  const tempVar =
-    !isLocal && (builtin === 'export' || builtin === 'readonly') ? shell.declarationPrefixVariable(name) : undefined;
-  if (tempVar) return declarePrefixed(shell, builtin, name, tempVar, operand, parsed, options);
+  const prefixed = tryDeclarePrefixed(shell, builtin, name, operand, parsed, options, {
+    isLocal,
+    isSubscripted,
+    hooks: buildPrefixedHooks(),
+  });
+  if (prefixed !== undefined) return prefixed;
   const pendingRef = checkPendingNameref(shell, builtin, name, operand, parsed, { options, isLocal, isSubscripted });
   if (pendingRef === false) return false;
   const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
@@ -667,6 +676,7 @@ function applyDeclaredAttributes(
     destination.referencedSubscript === undefined &&
     !options.set.has('A') &&
     !destination.variable.attributes.has('A');
+  if (isSubscripted) convertSubscriptedNameref(shell, destination.variable, options);
   return applyAttributes(
     shell,
     builtin,
@@ -677,6 +687,17 @@ function applyDeclaredAttributes(
     Boolean(preUnsetStore?.deferUnsetN),
     isCompound(operand)
   );
+}
+
+function convertSubscriptedNameref(shell: Shell, variable: Variable, { set, unset }: Options): void {
+  if (!variable.attributes.has('n') || conversionError(variable, set, unset, true)) return;
+  variable.attributes.delete('n');
+  if (!unset.has('n') && !set.has('g')) {
+    shell.reportError(`warning: ${variable.name}: removing nameref attribute`);
+  }
+  variable.value = set.has('A')
+    ? { kind: 'associative', table: new AssociativeTable() }
+    : { kind: 'indexed', elements: new Map() };
 }
 
 function applyReferentArrayKind(
@@ -1215,139 +1236,77 @@ function expandDeclaredSubscript(shell: Shell, variable: Variable, rawSubscript:
   return expanded === '' && rawSubscript !== '' && !isAssoc ? '0' : expanded;
 }
 
-/**
- * Executes an `export` or `readonly` operand naming a prefix binding (`x=temp export ...`) immediately against both
- * the temporary prefix binding and the nearest enclosing variable cell, matching Bash 5.3's per-operand semantics.
- */
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, prefix cell, raw/parsed operand, and options.
-function declarePrefixed(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  tempVar: Variable,
-  operand: DeclarationArgument,
-  parsed: { append: boolean; value?: string } | undefined,
-  options: Options
-): boolean {
-  const assigns = hasValue(operand, parsed);
-  let enclosing = shell.findEnclosingForPrefix(name);
-  if (
-    checkReadonlyConflict(shell, builtin, name, tempVar.attributes.has('r') ? tempVar : enclosing, options, assigns)
-  ) {
-    return false;
-  }
-  if (enclosing?.attributes.has('n')) {
-    return applyPrefixedTempOnly(shell, builtin, tempVar, operand, parsed, options, assigns);
-  }
-  const ensureEnclosing = (): Variable => {
-    if (!enclosing) {
-      enclosing = { name, value: undefined, attributes: new Set() };
-      shell.state.scopes[0].set(name, enclosing);
-    }
-    return enclosing;
+function buildPrefixedHooks(): PrefixedDeclareHooks {
+  return {
+    resolveTargetName: (shell, name, options) =>
+      resolveDeclaredTarget(shell, name, options.set, options.unset, false, false).targetName,
+    hasValue,
+    isCompound,
+    findOperandEquals,
+    checkReadonlyConflict,
+    applyAttributes,
+    assignLocally,
   };
-  if (!assignPrefixedOperand(shell, builtin, tempVar, ensureEnclosing, operand, parsed, options)) return false;
-  return propagatePrefixedAttributes(shell, builtin, tempVar, ensureEnclosing, operand, options, assigns);
 }
 
-// code-gauge-allow functionParameterCount -- Carries shell, builtin, temporary cell, lazy enclosing cell, raw/parsed operand, and options.
-function assignPrefixedOperand(
-  shell: Shell,
-  builtin: string,
-  tempVar: Variable,
-  ensureEnclosing: () => Variable,
-  operand: DeclarationArgument,
-  parsed: { append: boolean; value?: string } | undefined,
-  options: Options
-): boolean {
-  if (parsed?.value !== undefined) {
-    if (!shell.assignScalarTo(ensureEnclosing(), parsed.value, parsed.append)) return false;
-    tempVar.value = { kind: 'scalar', value: parsed.value };
-    return true;
-  }
-  if (typeof operand === 'string') return true;
-  if (operand.array) {
-    const target = ensureEnclosing();
-    return applyAttributes(shell, builtin, target, options, true, false) && assignLocally(shell, target, operand);
-  }
-  if (operand.value === undefined && findOperandEquals(operand.text) === -1) return true;
-  const rhs = operand.value
-    ? shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word))
-    : '';
-  if (!shell.assignScalarTo(ensureEnclosing(), rhs, operand.append)) return false;
-  tempVar.value = { kind: 'scalar', value: rhs };
-  return true;
-}
-
-// code-gauge-allow functionParameterCount -- Carries shell, builtin, temporary cell, lazy enclosing cell, operand, options, and assigns flag.
-function propagatePrefixedAttributes(
-  shell: Shell,
-  builtin: string,
-  tempVar: Variable,
-  ensureEnclosing: () => Variable,
-  operand: DeclarationArgument,
-  options: Options,
-  assigns: boolean
-): boolean {
-  if (options.set.has('x')) tempVar.attributes.add('x');
-  if (options.unset.has('x')) tempVar.attributes.delete('x');
-  if (options.set.has('r')) tempVar.attributes.add('r');
-  if (options.unset.has('x')) return true;
-  const target = ensureEnclosing();
-  if (!isCompound(operand) && !applyAttributes(shell, builtin, target, options, assigns, false)) return false;
-  if (tempVar.value?.kind === 'scalar' && !shell.assignScalarTo(target, tempVar.value.value, false)) return false;
-  for (const attr of tempVar.attributes) target.attributes.add(attr);
-  return true;
-}
-
-// code-gauge-allow functionParameterCount -- Updates only the temporary prefix cell when an enclosing nameref must stay intact.
-function applyPrefixedTempOnly(
-  shell: Shell,
-  builtin: string,
-  tempVar: Variable,
-  operand: DeclarationArgument,
-  parsed: { append: boolean; value?: string } | undefined,
-  options: Options,
-  assigns: boolean
-): boolean {
-  if (!applyAttributes(shell, builtin, tempVar, options, assigns || isCompound(operand), false)) return false;
-  let ok = true;
-  if (parsed?.value !== undefined) ok = shell.assignScalarTo(tempVar, parsed.value, parsed.append);
-  else if (typeof operand !== 'string') ok = assignLocally(shell, tempVar, operand);
-  if (options.set.has('r')) tempVar.attributes.add('r');
-  return ok;
-}
-
+// code-gauge-allow functionParameterCount -- Handles dynamic variable materialization, readonly checks, and persistent attributes.
 function materializeOrHandleDynamic(
   shell: Shell,
+  builtin: string,
+  operandName: string,
   operand: DeclarationArgument,
   parsed: { name: string; subscript?: string; value?: string } | undefined,
   options: Options,
   isSubscripted: boolean
-): boolean {
-  const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
-  if (!shell.isDynamic(name)) return false;
+): 'notDynamic' | 'handled' | 'failed' {
+  const name =
+    !options.set.has('n') && !options.unset.has('n') && !isSubscripted
+      ? resolveDeclaredTarget(
+          shell,
+          operandName,
+          effectiveTargetSet(options),
+          options.unset,
+          false,
+          options.set.has('g')
+        ).targetName
+      : operandName;
+  if (!shell.isDynamic(name)) return 'notDynamic';
+  const dynCell = shell.ensureDynamicAttributeCell(name);
+  if (checkReadonlyConflict(shell, builtin, name, dynCell, options, hasValue(operand, parsed))) return 'failed';
+  if (options.set.has('n')) {
+    if (dynCell.attributes.has('a')) {
+      shell.reportError(`${builtin}: ${name}: reference variable cannot be an array`);
+      return 'failed';
+    }
+    shell.state.dynamicAttributes.delete(name);
+    return 'notDynamic';
+  }
   const convertsToArray =
     shell.isScalarDynamic(name) &&
-    !options.set.has('n') &&
     (options.set.has('a') || options.set.has('A') || isSubscripted || isCompound(operand));
   if (convertsToArray) {
     shell.state.scopes[0].set(name, materializeDeclaredScalarDynamic(shell, name, options.set, isSubscripted));
-    return false;
+    return 'notDynamic';
   }
-  return declareDynamic(shell, operand, parsed);
+  return declareDynamic(shell, builtin, name, dynCell, operand, parsed, options) ? 'handled' : 'failed';
 }
 
 /** A global declaration of a dynamic variable, which assigns it as an assignment word does and keeps it dynamic. */
+// code-gauge-allow functionParameterCount -- Applies attributes, initial value, and readonly state to a dynamic variable cell.
 function declareDynamic(
   shell: Shell,
+  builtin: string,
+  name: string,
+  dynCell: Variable,
   operand: DeclarationArgument,
-  parsed: { name: string; value?: string } | undefined
+  parsed: { name: string; value?: string } | undefined,
+  options: Options
 ): boolean {
-  const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
+  if (!applyAttributes(shell, builtin, dynCell, options, false, isCompound(operand))) return false;
   const value =
     typeof operand === 'string' ? parsed?.value : operand.value && shell.expander.expandAssignmentValue(operand.value);
-  if (value !== undefined) shell.assignDynamic(name, value);
+  if (value !== undefined) shell.assignDynamic(name, value, true);
+  if (options.set.has('r')) dynCell.attributes.add('r');
   return true;
 }
 
@@ -1530,7 +1489,9 @@ function materializeDeclaredScalarDynamic(
   if ((set.has('a') || set.has('A')) && !isSubscripted) {
     shell.scalarValue(name);
   }
-  return shell.dynamicDeclaration(name) as Variable;
+  const variable = shell.dynamicDeclaration(name) as Variable;
+  shell.state.dynamicAttributes.delete(name);
+  return variable;
 }
 
 interface LocalOrigin {
@@ -1609,7 +1570,9 @@ function resolveElementStoreVariable(
   unset: Set<string>,
   isSubscripted: boolean
 ): Variable {
-  const storeName = isSubscripted ? resolveDeclaredTarget(shell, name, set, unset, true, false).targetName : targetName;
+  const storeName = isSubscripted
+    ? resolveDeclaredTarget(shell, name, set, unset, false, false).targetName
+    : targetName;
   return ensureStoreVariable(shell, storeName);
 }
 
@@ -1654,7 +1617,7 @@ function resolveDeclaredTarget(
   globalOnly = set.has('g'),
   localScope?: Map<string, Variable>
 ): { targetName: string; referencedSubscript?: string } {
-  if (set.has('n') || (globalOnly && isSubscripted)) return { targetName: name };
+  if (set.has('n') || isSubscripted) return { targetName: name };
   if (localScope && !localScope.has(name)) return { targetName: name };
   if (unset.has('n')) {
     if (localScope) return { targetName: resolveLocalElementNamerefTarget(shell, name) ?? name };
@@ -1705,6 +1668,7 @@ function findFinalNamerefLink(shell: Shell, start: Variable, globalOnly: boolean
 }
 
 function isReadonlyGlobal(shell: Shell, name: string): boolean {
+  if (shell.isReadonlyDynamic(name)) return true;
   const variable = shell.findVariable(name, false);
   return variable?.attributes.has('r') === true && shell.state.scopes[0].get(name) === variable;
 }

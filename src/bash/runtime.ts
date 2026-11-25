@@ -4,7 +4,13 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Statement } from './ast';
-import { type CallFrameEntry, createInitialGlobalScope, initialRandomSeed, type Scope } from './variables';
+import {
+  type Attribute,
+  type CallFrameEntry,
+  createInitialGlobalScope,
+  initialRandomSeed,
+  type Scope,
+} from './variables';
 
 /** The name Bash reports the program by, in `$0` and in its error messages. */
 export const SCRIPT_NAME = 'main.sh';
@@ -42,6 +48,7 @@ export interface ShellState {
   subshellDraws: number;
   /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
   unsetDynamic: Set<string>;
+  dynamicAttributes: Map<string, Set<Attribute>>;
   /** Host environment variable names explicitly cleared by `unset`, which then read as unset rather than unsupported. */
   unsetEnv: Set<string>;
   subshellLevel: number;
@@ -64,6 +71,7 @@ export function createInitialShellState(runtime: Runtime): ShellState {
     lastRandom: 0,
     subshellDraws: 0,
     unsetDynamic: new Set(),
+    dynamicAttributes: new Map(),
     unsetEnv: new Set(),
     subshellLevel: 0,
     fd1: runtime.io.stdout,

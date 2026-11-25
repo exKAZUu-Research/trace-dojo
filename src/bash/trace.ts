@@ -10,6 +10,7 @@ import { type OutputTarget, Shell } from './shell';
 import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
 import {
+  cloneDynamicAttributes,
   cloneScope,
   isIdentifier,
   popFuncname,
@@ -184,6 +185,7 @@ function withObservedScopes<T>(shell: Shell, maxScope: number, run: () => T): T 
     funcname,
     pipeStatus: new Map(savedState.pipeStatus),
     unsetDynamic: new Set(savedState.unsetDynamic),
+    dynamicAttributes: cloneDynamicAttributes(savedState.dynamicAttributes),
     unsetEnv: new Set(savedState.unsetEnv),
     fd1: silentAbort,
     fd2: silentAbort,

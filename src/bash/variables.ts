@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps Bash variable cells, associative tables, scopes, and dynamic variable state together.
 import { capitalize, lowerCase, upperCase } from './characters';
 
 /** Variable attribute flags recognized by `declare` and listed by `declare -p`. */
@@ -306,12 +307,20 @@ export function findEnclosingVariable(scopes: Scope[], excludedScope: Scope, nam
 
 /** Unsets a dynamic or scoped variable `target`, returning an error message when it cannot be unset. */
 export function unsetNamedVariable(
-  state: { scopes: Scope[]; functionScopes: number[]; unsetDynamic: Set<string>; unsetEnv: Set<string> },
+  state: {
+    scopes: Scope[];
+    functionScopes: number[];
+    unsetDynamic: Set<string>;
+    dynamicAttributes: Map<string, Set<Attribute>>;
+    unsetEnv: Set<string>;
+  },
   target: string,
   isDynamic: boolean
 ): string | undefined {
   if (isDynamic) {
+    if (state.dynamicAttributes.get(target)?.has('r')) return `unset: ${target}: cannot unset: readonly variable`;
     if (PERMANENT_DYNAMIC_VARIABLES.has(target)) return `unset: ${target}: cannot unset`;
+    state.dynamicAttributes.delete(target);
     state.unsetDynamic.add(target);
     return undefined;
   }
@@ -429,28 +438,57 @@ export const DYNAMIC_VARIABLES = new Set([
 
 export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
 
+export function cloneDynamicAttributes(
+  source: ReadonlyMap<string, ReadonlySet<Attribute>>
+): Map<string, Set<Attribute>> {
+  const copy = new Map<string, Set<Attribute>>();
+  for (const [name, attributes] of source) copy.set(name, new Set(attributes));
+  return copy;
+}
+
+export function ensureDynamicAttributes(
+  state: { dynamicAttributes: Map<string, Set<Attribute>> },
+  name: string
+): Set<Attribute> {
+  let attributes = state.dynamicAttributes.get(name);
+  if (!attributes) {
+    attributes = defaultDynamicAttributes(name);
+    state.dynamicAttributes.set(name, attributes);
+  }
+  return attributes;
+}
+
 /** Formats a dynamic variable cell for `declare -p` and `${v@a}` / `${v@A}`. */
 export function buildDynamicDeclaration(
   name: string,
   scalarValue: string | undefined,
-  elements: ReadonlyMap<bigint, string> | undefined
+  elements: ReadonlyMap<bigint, string> | undefined,
+  configuredAttributes?: ReadonlySet<Attribute>
 ): Variable | undefined {
+  const attributes = new Set(configuredAttributes ?? defaultDynamicAttributes(name));
   if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
     return {
       name,
-      attributes: new Set<Attribute>(name === 'RANDOM' ? ['i'] : []),
+      attributes,
       value: { kind: 'scalar', value: scalarValue as string },
     };
   }
-  if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) return undefined;
+  if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) {
+    return configuredAttributes ? { name, attributes, value: undefined } : undefined;
+  }
   return {
     name,
-    attributes: new Set(['a']),
+    attributes,
     value: {
       kind: 'indexed',
       elements: new Map(elements),
     },
   };
+}
+
+function defaultDynamicAttributes(name: string): Set<Attribute> {
+  if (name === 'RANDOM') return new Set(['i']);
+  return SCALAR_DYNAMIC_VARIABLES.has(name) ? new Set() : new Set(['a']);
 }
 
 /** Dynamic variables that `unset` refuses to remove. */
