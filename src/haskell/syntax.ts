@@ -161,7 +161,8 @@ export type TypeExpr =
   | { kind: 'tchain'; items: ChainItem<TypeExpr>[]; span: Span }
   /** A polymorphic type inside another, `forall a. C a => t`, as RankNTypes allows. */
   | { kind: 'tforall'; binders: TyVarBinder[]; context: Constraint[]; body: TypeExpr; span: Span }
-  | { kind: 'tcon'; name: QName; span: Span }
+  /** A type name; `star` marks the `*` token, which is the kind Type or multiplication as StarIsType decides. */
+  | { kind: 'tcon'; name: QName; star?: boolean; span: Span }
   | { kind: 'tapp'; fn: TypeExpr; arg: TypeExpr; span: Span }
   /** A function type; LinearTypes' `a %1 -> b` and `a %m -> b` give its multiplicity, which is otherwise `Many`. */
   | { kind: 'tfun'; from: TypeExpr; to: TypeExpr; multiplicity?: Multiplicity; span: Span }

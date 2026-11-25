@@ -18,7 +18,7 @@ import {
   UNIT_CON,
   UNIT_TYPE,
 } from './builtinTypes';
-import { QUALIFIED_DO_BIND } from './convert';
+import { hasStarArgument, QUALIFIED_DO_BIND } from './convert';
 import {
   type ClassEntity,
   type ConInfo,
@@ -31,6 +31,7 @@ import {
 import { compileError, unsupportedError } from './errors';
 import { ExportTableBuilder } from './exportTable';
 import type { Extensions } from './extensions';
+import type { FeatureGates } from './features';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
 import { TH_NAME_MODULES } from './library/thNames';
 import { LocalScope } from './localScope';
@@ -58,6 +59,7 @@ import { rpatChildren, rpatLocals, substituteRType } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
+  ChainItem,
   Decl,
   DerivingStrategy,
   Expr,
@@ -298,11 +300,15 @@ class Renamer {
   private readonly declaredCons = new Map<Decl, ConInfo[]>();
   /** The pattern synonyms, by name, with the names of the functions that match and build their values. */
   private readonly patternSynonyms = new Map<string, PatternSynonymInfo>();
+  /** The features of the module's extensions that resolving names decides. */
+  private readonly features: FeatureGates<'rename'>;
 
   constructor(
     private readonly module: Module,
     private readonly options: RenameOptions
-  ) {}
+  ) {
+    this.features = module.extensions.gates('rename');
+  }
 
   run(): RModule {
     this.importModules();
@@ -658,7 +664,7 @@ class Renamer {
       existing?.sort === 'field' &&
       entity.sort === 'field' &&
       existing.field?.type !== entity.field?.type &&
-      this.module.extensions.has('DuplicateRecordFields')
+      this.features.allows('duplicateRecordFields')
     ) {
       this.duplicateFields.push(entity);
       return;
@@ -916,7 +922,7 @@ class Renamer {
           defaultSigs.push({ entity: this.defaultSignatureMethod(entity, name, defaultSigs), sig });
         continue;
       }
-      const ambiguousAllowed = this.module.extensions.has('AllowAmbiguousTypes');
+      const ambiguousAllowed = this.features.allows('ambiguousClassMethods');
       if (!ambiguousAllowed && params.length > 0 && !params.some((param) => rtypeMentions(sig.type, param))) {
         throw compileError(
           member.span,
@@ -1002,7 +1008,7 @@ class Renamer {
     for (const member of decls) {
       if (member.kind === 'fixity') throw compileError(member.span, 'インスタンスの中には、結合性を宣言できません。');
       if (member.kind !== 'sig') continue;
-      if (!this.module.extensions.has('InstanceSigs')) {
+      if (!this.features.allows('instanceSigs')) {
         throw compileError(member.span, 'インスタンスの中に型シグネチャを書くには、InstanceSigs の拡張が要ります。');
       }
       for (const name of member.names) {
@@ -1499,7 +1505,7 @@ class Renamer {
       case 'comprehension': {
         if (expr.quals.some((qual) => qual.kind === 'transform'))
           return this.renameExpr(withoutTransforms(expr), scope);
-        if (this.module.extensions.has('MonadComprehensions') && !expr.parallel) {
+        if (this.features.allows('monadComprehensions') && !expr.parallel) {
           // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
           const support = (name: string): Expr => ({ kind: 'support', name, span });
           const stmts: Stmt[] = expr.quals.map((qual) =>
@@ -2036,9 +2042,14 @@ class Renamer {
         return { k: 'var', name: type.name, span };
       }
       case 'tcon': {
+        if (type.star && !this.features.allows('starIsType')) {
+          throw compileError(span, '* を種類として使うには、StarIsType の拡張が要ります。');
+        }
         return this.renameTypeName(type.name);
       }
       case 'tapp': {
+        const product = this.starProduct(type);
+        if (product) return this.renameType({ kind: 'tchain', items: product, span }, vars);
         return { k: 'app', fn: this.renameType(type.fn, vars), arg: this.renameType(type.arg, vars), span };
       }
       case 'tfun': {
@@ -2114,8 +2125,12 @@ class Renamer {
         };
       }
       case 'tchain': {
+        // A product the grammar read as an application joins the chain, so that fixities order it with the rest.
+        const items = type.items.flatMap((item) =>
+          item.kind === 'operand' ? (this.starProduct(item.value) ?? [item]) : [item]
+        );
         return this.renameType(
-          resolveTypeChain(type.items, span, (op) => this.typeFixityOf(op)),
+          resolveTypeChain(items, span, (op) => this.typeFixityOf(op)),
           vars
         );
       }
@@ -2416,11 +2431,48 @@ class Renamer {
     );
   }
 
+  /**
+   * Under NoStarIsType, `*` is GHC.TypeLits' multiplication, but the grammar reads `3 * 4` after another operator as
+   * `3` applied to `*` and `4`: the application's parts split at each `*` into the items of a chain of products.
+   */
+  private starProduct(type: TypeExpr): ChainItem<TypeExpr>[] | undefined {
+    if (this.features.allows('starIsType') || !hasStarArgument(type)) return undefined;
+    const parts: TypeExpr[] = [];
+    let head = type;
+    while (head.kind === 'tapp') {
+      parts.unshift(head.arg);
+      head = head.fn;
+    }
+    parts.unshift(head);
+    const items: ChainItem<TypeExpr>[] = [];
+    let segment: TypeExpr[] = [];
+    const flush = (): void => {
+      if (segment.length === 0) throw compileError(type.span, '書き方に誤りがあります。');
+      let operand = segment[0];
+      for (const arg of segment.slice(1)) operand = { kind: 'tapp', fn: operand, arg, span: type.span };
+      items.push({ kind: 'operand', value: operand });
+      segment = [];
+    };
+    for (const part of parts) {
+      if (part.kind !== 'tcon' || !part.star) {
+        segment.push(part);
+        continue;
+      }
+      flush();
+      if (!this.features.allows('starOperator')) {
+        throw compileError(part.span, '演算子の型を使うには、TypeOperators の拡張が要ります。');
+      }
+      items.push({ kind: 'operator', op: { name: '*', span: part.span, isConstructor: false } });
+    }
+    flush();
+    return items;
+  }
+
   private renameTypeName(name: QName): RType {
     let builtin: TypeEntity | undefined;
     if (!name.qualifier && name.name === '~') return { k: 'class', entity: EQUALITY_CLASS, span: name.span };
     if (!name.qualifier) {
-      if (name.name === '*' && this.module.extensions.has('StarIsType')) builtin = TYPE_KIND;
+      if (name.name === '*' && this.features.allows('starIsType')) builtin = TYPE_KIND;
       else if (name.name === '()') builtin = UNIT_TYPE;
       else if (name.name === '[]') builtin = LIST_TYPE;
       else if (name.name === '->') builtin = FUNCTION_TYPE;
@@ -2434,7 +2486,7 @@ class Renamer {
     }
     if (builtin) return { k: 'con', entity: builtin, span: name.span };
     if (
-      this.module.extensions.has('DataKinds') &&
+      this.features.allows('promotion') &&
       !this.typeExists(name) &&
       this.valuesNamed(name).some((entity) => entity.sort === 'con')
     ) {

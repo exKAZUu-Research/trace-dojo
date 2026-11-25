@@ -1,4 +1,5 @@
 import { compileError as syntaxError } from './errors';
+import type { FeatureGates } from './features';
 import type { Span } from './syntax';
 
 /** The ASCII control characters' names in escapes, by code point. */
@@ -55,9 +56,7 @@ const MAX_CODE_POINT = 0x10_ff_ff;
 const STRING_GAP_WHITESPACE = /^[\t\n\v\f\r ]+$/;
 
 /** The language extensions that change how number literals read. */
-export interface NumberLiteralOptions {
-  has(extension: 'NumericUnderscores' | 'BinaryLiterals' | 'HexFloatLiterals' | 'NumDecimals'): boolean;
-}
+export type NumberLiteralOptions = FeatureGates<'convert'>;
 
 export type NumberLiteral = { kind: 'int'; value: bigint } | { kind: 'frac'; value: number; text: string };
 
@@ -68,13 +67,13 @@ export type NumberLiteral = { kind: 'int'; value: bigint } | { kind: 'frac'; val
 export function parseNumberLiteral(source: string, span: Span, options: NumberLiteralOptions): NumberLiteral {
   let text = source;
   if (text.includes('_')) {
-    if (!options.has('NumericUnderscores')) {
+    if (!options.allows('numericUnderscores')) {
       throw syntaxError(span, '数の区切りの _ を使うには、NumericUnderscores の拡張が要ります。');
     }
     text = text.replaceAll('_', '');
   }
   if (/^0[bB]/.test(text)) {
-    if (!options.has('BinaryLiterals'))
+    if (!options.allows('binaryLiterals'))
       throw syntaxError(span, '2進数のリテラルを使うには、BinaryLiterals の拡張が要ります。');
     if (!/^0[bB][01]+$/.test(text)) throw syntaxError(span, '書き方に誤りがあります。');
     return { kind: 'int', value: BigInt(`0b${text.slice(2)}`) };
@@ -82,7 +81,7 @@ export function parseNumberLiteral(source: string, span: Span, options: NumberLi
   if (/^0[oO][0-7]+$/.test(text)) return { kind: 'int', value: BigInt(`0o${text.slice(2)}`) };
   if (/^0[xX][\dA-Fa-f]+$/.test(text)) return { kind: 'int', value: BigInt(`0x${text.slice(2)}`) };
   if (/^0[xX]/.test(text)) {
-    if (!options.has('HexFloatLiterals')) {
+    if (!options.allows('hexFloatLiterals')) {
       throw syntaxError(span, '16進数の小数を使うには、HexFloatLiterals の拡張が要ります。');
     }
     text = hexFloatToDecimal(text, span);
@@ -90,7 +89,7 @@ export function parseNumberLiteral(source: string, span: Span, options: NumberLi
   if (/^\d+$/.test(text)) return { kind: 'int', value: BigInt(text) };
   const match = /^(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) throw syntaxError(span, '書き方に誤りがあります。');
-  if (options.has('NumDecimals')) {
+  if (options.allows('numDecimals')) {
     const fraction = match[2] ?? '';
     const exponent = Number(match[3] ?? '0') - fraction.length;
     const digits = `${match[1]}${fraction}`.replace(/^0+(?=\d)/, '');

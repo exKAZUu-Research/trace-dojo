@@ -525,7 +525,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const parsed = parseHaskell(source);
     const renamed = renameModule(parsed, {
       modules: lib.modules,
-      implicitPrelude: parsed.extensions.has('ImplicitPrelude'),
+      implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),
       unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
       weakValues: lib.weakValues,
       weakTypes: lib.weakTypes,

@@ -5,6 +5,7 @@ import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
+import type { FeatureOf } from './features';
 import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
@@ -61,15 +62,16 @@ export interface TypecheckOptions {
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
   const checker = new Checker(options.env, options.builtins);
   // The library declares functions such as getField whose callers choose a variable by a type application.
-  checker.allowAmbiguousTypes = !options.isProgram || module.extensions.has('AllowAmbiguousTypes');
-  checker.polyKinds = module.extensions.has('PolyKinds');
+  const features = module.extensions.gates('typecheck');
+  checker.allowAmbiguousTypes = !options.isProgram || features.allows('ambiguousTypes');
+  checker.polyKinds = features.allows('polyKinds');
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
   checkRoleAnnotations(module);
-  for (const decl of module.classes) defineClassMethods(decl, module.extensions.has('UndecidableSuperClasses'));
+  for (const decl of module.classes) defineClassMethods(decl, features.allows('undecidableSuperClasses'));
   const instanceDecls = module.instances.map(
-    (decl) => declareInstance(checker, decl, module.name, module.extensions.has('UndecidableInstances')).declared
+    (decl) => declareInstance(checker, decl, module.name, features.allows('undecidableInstances')).declared
   );
   const derived = [
     ...deriveInstances(checker, module, options),
@@ -117,7 +119,7 @@ function checkRoleAnnotations(module: RModule): void {
 }
 
 function applyDefaultDecls(checker: Checker, module: RModule): void {
-  checker.extendedDefaults = module.extensions.has('ExtendedDefaultRules');
+  checker.extendedDefaults = module.extensions.gates('typecheck').allows('extendedDefaultRules');
   for (const decl of module.defaultDecls) {
     const types = decl.types.map((type) => {
       const converted = checker.convertType(type, new Map(), new Map(), decl.cls ? decl.cls.tyvarKind : STAR);
@@ -618,7 +620,7 @@ function deriveStandaloneInstances(checker: Checker, module: RModule, options: T
       bindings: [],
       span: standalone.span,
     };
-    const undecidable = module.extensions.has('UndecidableInstances');
+    const undecidable = module.extensions.gates('typecheck').allows('undecidableInstances');
     if (standalone.strategy === 'via') {
       return declareInstance(checker, instanceDecl, module.name, undecidable, standalone.via).declared;
     }
@@ -646,6 +648,7 @@ function derivingStrategy(
   span: Span
 ): DerivingHow {
   if (strategy === 'anyclass' || strategy === 'via') return strategy;
+  const features = module.extensions.gates('typecheck');
   const isNewtype = decl.cons.length === 1 && decl.cons[0].con.isNewtype === true;
   if (strategy === 'newtype') {
     if (!isNewtype) {
@@ -655,19 +658,22 @@ function derivingStrategy(
   }
   const stock = options.builtins.derivableClasses.has(cls);
   if (!stock) {
-    if (strategy === undefined && module.extensions.has('DeriveAnyClass')) return 'anyclass';
+    if (strategy === undefined && features.allows('anyclassByDefault')) return 'anyclass';
     if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
       throw unsupportedError(span, `${cls.name} の deriving`);
-    if (strategy === undefined && isNewtype && module.extensions.has('GeneralizedNewtypeDeriving')) return 'newtype';
+    if (strategy === undefined && isNewtype && features.allows('newtypeByDefault')) return 'newtype';
     throw compileError(span, `クラス ${cls.name} は deriving できません。`);
   }
-  const extension = {
-    Functor: 'DeriveFunctor',
-    Foldable: 'DeriveFoldable',
-    Traversable: 'DeriveTraversable',
-    Lift: 'DeriveLift',
-  }[cls.name];
-  if (extension && !module.extensions.has(extension)) {
+  const derive = (
+    {
+      Functor: ['deriveFunctor', 'DeriveFunctor'],
+      Foldable: ['deriveFoldable', 'DeriveFoldable'],
+      Traversable: ['deriveTraversable', 'DeriveTraversable'],
+      Lift: ['deriveLift', 'DeriveLift'],
+    } as const
+  )[cls.name as 'Functor'] as readonly [FeatureOf<'typecheck'>, string] | undefined;
+  const extension = derive?.[1];
+  if (derive && !features.allows(derive[0])) {
     throw compileError(span, `${cls.name} を deriving するには、${extension} の拡張が要ります。`);
   }
   checkDerivable(decl, cls, span);

@@ -4,27 +4,13 @@ import { convertModule } from './convert';
 import { preprocess } from './cpp';
 import { validateDialect } from './dialect';
 import { Extensions, readExtensions } from './extensions';
+import type { FeatureGates } from './features';
 import type { Module } from './syntax';
 import { collectSplices, spliceHeader, type SpliceSite } from './thSplice';
 
 const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm');
 /** The grammar with the lexical syntax of the extensions GHC2021 lacks, which a program reads with when it enables one. */
 const extendedParser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell.wasm');
-
-/** The extensions whose syntax only the extended grammar reads. */
-export const LEXICAL_EXTENSIONS = [
-  'TemplateHaskell',
-  'TemplateHaskellQuotes',
-  'QuasiQuotes',
-  'OverloadedRecordDot',
-  'OverloadedRecordUpdate',
-  'RecursiveDo',
-  'PatternSynonyms',
-  'UnboxedTuples',
-  'UnboxedSums',
-  'MagicHash',
-  'OverloadedLabels',
-];
 
 const MISSING_TOKEN_NAMES: Record<string, string> = {
   variable: '名前',
@@ -42,12 +28,17 @@ export function parseHaskell(source: string, defaultName = 'Main', library = fal
   const extensions = library
     ? new Extensions(['TypeFamilies', 'DataKinds', 'RoleAnnotations'])
     : readExtensions(source);
-  const extended = LEXICAL_EXTENSIONS.some((name) => extensions.has(name));
-  const text = withDeclarationQuoteBraces(extensions, !library && extensions.has('CPP') ? preprocess(source) : source);
-  return parseSource(extended ? extendedParser : parser, text, MISSING_TOKEN_NAMES, (root) => {
-    if (!library) validateDialect(root, extensions);
-    return convertModule(root, extensions, defaultName);
-  });
+  const features = extensions.gates('parse');
+  const text = withDeclarationQuoteBraces(features, !library && features.allows('cpp') ? preprocess(source) : source);
+  return parseSource(
+    features.allows('extendedGrammar') ? extendedParser : parser,
+    text,
+    MISSING_TOKEN_NAMES,
+    (root) => {
+      if (!library) validateDialect(root, extensions);
+      return convertModule(root, extensions, defaultName);
+    }
+  );
 }
 
 /**
@@ -55,9 +46,9 @@ export function parseHaskell(source: string, defaultName = 'Main', library = fal
  * the programs that run them keep.
  */
 export function findProgramSplices(source: string): { sites: SpliceSite[]; header: string } | undefined {
-  const extensions = readExtensions(source);
-  if (!extensions.has('TemplateHaskell') && !extensions.has('QuasiQuotes')) return undefined;
-  return parseSource(extendedParser, withDeclarationQuoteBraces(extensions, source), MISSING_TOKEN_NAMES, (root) => ({
+  const features = readExtensions(source).gates('parse');
+  if (!features.allows('splices')) return undefined;
+  return parseSource(extendedParser, withDeclarationQuoteBraces(features, source), MISSING_TOKEN_NAMES, (root) => ({
     sites: collectSplices(root),
     header: spliceHeader(root),
   }));
@@ -68,8 +59,8 @@ export function findProgramSplices(source: string): { sites: SpliceSite[]; heade
  * reads where its layout fails (a first declaration on the quote's line): each goes in place of a space where there
  * is one, so that rows and columns stay.
  */
-function withDeclarationQuoteBraces(extensions: Extensions, source: string): string {
-  if (!extensions.has('TemplateHaskell') && !extensions.has('TemplateHaskellQuotes')) return source;
+function withDeclarationQuoteBraces(features: FeatureGates<'parse'>, source: string): string {
+  if (!features.allows('declarationQuotes')) return source;
   let result = source;
   let from = 0;
   for (;;) {

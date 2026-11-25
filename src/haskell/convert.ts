@@ -4,7 +4,8 @@ import type { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import { unboxedSumConName, unboxedTupleName } from './builtinTypes';
 import { compileError as syntaxError, unsupportedError } from './errors';
-import { Extensions } from './extensions';
+import type { Extensions } from './extensions';
+import type { FeatureGates } from './features';
 import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
 import { sourceColumns } from './sourceCoordinates';
 import type {
@@ -111,13 +112,10 @@ function hasToken(node: Node, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }
 
-/** The language extensions of the module being converted. */
-let extensions = new Extensions();
-
 /** Converts a module's parse tree into the surface syntax, rejecting syntax this environment does not support. */
-export function convertModule(root: Node, moduleExtensions: Extensions, defaultName = 'Main'): Module {
-  extensions = moduleExtensions;
-  checkPragmas(root);
+export function convertModule(root: Node, extensions: Extensions, defaultName = 'Main'): Module {
+  const features = extensions.gates('convert');
+  checkPragmas(features, root);
   const header = namedChildren(root).find((child) => child.type === 'header');
   const importsNode = field(root, 'imports');
   const declarationsNode = field(root, 'declarations');
@@ -125,7 +123,7 @@ export function convertModule(root: Node, moduleExtensions: Extensions, defaultN
   const imports = importsNode
     ? fields(importsNode, 'import')
         .filter((node) => field(node, 'level')?.text.trim() !== 'splice')
-        .map(convertImport)
+        .map((node) => convertImport(features, node))
     : [];
   const decls: Decl[] = [];
   if (declarationsNode) {
@@ -133,26 +131,26 @@ export function convertModule(root: Node, moduleExtensions: Extensions, defaultN
       if (child.type === 'import') {
         throw syntaxError(spanOf(child), 'import は、宣言より前に書いてください。');
       }
-      decls.push(...convertTopDecl(child));
+      decls.push(...convertTopDecl(features, child));
     }
   }
   return {
     name: header ? moduleName(required(header, 'module')) : defaultName,
     extensions,
-    exports: header ? convertExports(header) : undefined,
+    exports: header ? convertExports(features, header) : undefined,
     imports,
     decls,
     span: spanOf(root),
   };
 }
 
-function checkPragmas(root: Node): void {
+function checkPragmas(features: FeatureGates<'convert'>, root: Node): void {
   const cpp = root.descendantsOfType('cpp')[0];
   if (cpp) throw syntaxError(spanOf(cpp), '書き方に誤りがあります。');
   for (const pragma of root.descendantsOfType('pragma')) {
     if (pragma) checkPragma(pragma);
   }
-  if (!extensions.has('UnicodeSyntax')) {
+  if (!features.allows('unicodeSyntax')) {
     const unicode = root.descendantsOfType(UNICODE_TOKENS)[0];
     if (unicode)
       throw syntaxError(spanOf(unicode), `Unicode の記号 ${unicode.type} を使うには、UnicodeSyntax の拡張が要ります。`);
@@ -241,7 +239,7 @@ function moduleName(node: Node): string {
   return node.text.replaceAll(/\s+/g, '').replace(/\.$/, '');
 }
 
-function convertExports(header: Node): ImportItem[] | undefined {
+function convertExports(features: FeatureGates<'convert'>, header: Node): ImportItem[] | undefined {
   const exportsNode = field(header, 'exports');
   if (!exportsNode) return undefined;
   const items: ImportItem[] = [];
@@ -251,11 +249,11 @@ function convertExports(header: Node): ImportItem[] | undefined {
       const module = required(child, 'module');
       items.push({ kind: 'module', name: { name: moduleName(module), span: spanOf(child) } });
     } else if (child.type === 'default_export') {
-      if (!extensions.has('NamedDefaults')) {
+      if (!features.allows('namedDefaults')) {
         throw syntaxError(spanOf(child), 'default の export には、NamedDefaults の拡張が要ります。');
       }
     } else if (child.type === 'export') {
-      items.push(convertImportItem(child, true));
+      items.push(convertImportItem(features, child, true));
     }
   }
   return items;
@@ -264,14 +262,14 @@ function convertExports(header: Node): ImportItem[] | undefined {
 /** The modules of the containers package, which `import "containers"` may name. */
 const CONTAINERS_MODULES = /^Data\.(Map|Set|IntMap|IntSet|Sequence|Tree|Graph|Containers)(\.|$)/;
 
-function convertImport(node: Node): Import {
+function convertImport(features: FeatureGates<'convert'>, node: Node): Import {
   const level = field(node, 'level');
-  if (level && !extensions.has('ExplicitLevelImports')) {
+  if (level && !features.allows('levelImports')) {
     throw syntaxError(spanOf(level), 'import に段階を書くには、ExplicitLevelImports の拡張が要ります。');
   }
   const packageNode = field(node, 'package');
   if (packageNode) {
-    if (!extensions.has('PackageImports')) {
+    if (!features.allows('packageImports')) {
       throw syntaxError(spanOf(packageNode), 'パッケージを指定した import には、PackageImports の拡張が要ります。');
     }
     const name = packageNode.text.slice(1, -1);
@@ -283,7 +281,7 @@ function convertImport(node: Node): Import {
       throw syntaxError(spanOf(packageNode), `モジュール ${module} は、パッケージ ${name} にはありません。`);
     }
   }
-  if (hasToken(node, 'safe') && !['Safe', 'Trustworthy', 'Unsafe'].some((name) => extensions.has(name))) {
+  if (hasToken(node, 'safe') && !features.allows('safeImports')) {
     throw syntaxError(spanOf(node), 'safe を付けた import には、Safe・Trustworthy・Unsafe のどれかの拡張が要ります。');
   }
   const namesNode = field(node, 'names');
@@ -293,15 +291,15 @@ function convertImport(node: Node): Import {
     qualified: hasToken(node, 'qualified'),
     alias: aliasNode ? moduleName(aliasNode) : undefined,
     hiding: hasToken(node, 'hiding') || (namesNode !== undefined && hasToken(namesNode, 'hiding')),
-    items: namesNode ? fields(namesNode, 'name').map((node) => convertImportItem(node)) : undefined,
+    items: namesNode ? fields(namesNode, 'name').map((node) => convertImportItem(features, node)) : undefined,
     span: spanOf(node),
   };
 }
 
-function convertImportItem(node: Node, exporting = false): ImportItem {
+function convertImportItem(features: FeatureGates<'convert'>, node: Node, exporting = false): ImportItem {
   const nameOf = (name: Node): QName => (exporting ? qualifiedName(name).name : plainName(name));
   const namespace = field(node, 'namespace');
-  if (namespace && !extensions.has('ExplicitNamespaces') && !extensions.has('TypeOperators')) {
+  if (namespace && !features.allows('namespaceKeyword')) {
     throw syntaxError(spanOf(namespace), 'type・data の名前空間を書くには、ExplicitNamespaces の拡張が要ります。');
   }
   const variable = field(node, 'variable');
@@ -387,85 +385,90 @@ function convertOperator(node: Node): Operator {
 // ---------------------------------------------------------------------------------------------------------------
 // Declarations
 
-function convertTopDecl(node: Node): Decl[] {
+function convertTopDecl(features: FeatureGates<'convert'>, node: Node): Decl[] {
   // Pragmas among declarations only guide the compiler, which checkPragmas has checked.
   if (node.type === 'pragma') return [];
   rejectUnsupported(node);
   switch (node.type) {
     case 'data_type': {
-      return [convertData(node)];
+      return [convertData(features, node)];
     }
     case 'newtype': {
-      return [convertNewtype(node)];
+      return [convertNewtype(features, node)];
     }
     case 'deriving_instance': {
-      return [convertStandaloneDeriving(node)];
+      return [convertStandaloneDeriving(features, node)];
     }
     case 'role_annotation': {
-      return [convertRoleAnnotation(node)];
+      return [convertRoleAnnotation(features, node)];
     }
     case 'pattern_synonym': {
-      return [convertPatternSynonym(node)];
+      return [convertPatternSynonym(features, node)];
     }
     case 'kind_signature': {
-      if (!extensions.has('StandaloneKindSignatures')) {
+      if (!features.allows('standaloneKindSignatures')) {
         throw syntaxError(spanOf(node), '独立した種類のシグネチャには、StandaloneKindSignatures の拡張が要ります。');
       }
       return [
-        { kind: 'kindSig', name: typeDeclName(node), kindSig: convertType(required(node, 'kind')), span: spanOf(node) },
+        {
+          kind: 'kindSig',
+          name: typeDeclName(features, node),
+          kindSig: convertType(features, required(node, 'kind')),
+          span: spanOf(node),
+        },
       ];
     }
     case 'default_types': {
       const cls = field(node, 'class');
-      if (cls && !extensions.has('NamedDefaults')) {
+      if (cls && !features.allows('namedDefaults')) {
         throw syntaxError(spanOf(cls), 'クラスを指定した default 宣言には、NamedDefaults の拡張が要ります。');
       }
       return [
         {
           kind: 'defaultTypes',
           cls: cls ? qualifiedName(cls).name : undefined,
-          types: fields(node, 'type').map(convertType),
+          types: fields(node, 'type').map((node) => convertType(features, node)),
           span: spanOf(node),
         },
       ];
     }
     case 'type_synonym': {
-      return [convertTypeSynonym(node)];
+      return [convertTypeSynonym(features, node)];
     }
     case 'type_family':
     case 'type_instance':
     case 'data_family':
     case 'data_instance': {
-      return [convertFamilyDecl(node)];
+      return [convertFamilyDecl(features, node)];
     }
     case 'class': {
-      return convertClassWithFamilies(node);
+      return convertClassWithFamilies(features, node);
     }
     case 'instance': {
-      return convertInstanceWithFamilies(node);
+      return convertInstanceWithFamilies(features, node);
     }
     default: {
-      return convertDecl(node);
+      return convertDecl(features, node);
     }
   }
 }
 
 /** Converts a declaration that may appear in a `let`, a `where`, a class, an instance, or at the top level. */
-function convertDecl(node: Node): Decl[] {
+function convertDecl(features: FeatureGates<'convert'>, node: Node): Decl[] {
   if (node.type === 'pragma') return [];
   rejectUnsupported(node);
   switch (node.type) {
     case 'signature': {
-      return [convertSignature(node)];
+      return [convertSignature(features, node)];
     }
     case 'fixity': {
       return [convertFixity(node)];
     }
     case 'function': {
-      return [convertFunction(node)];
+      return [convertFunction(features, node)];
     }
     case 'bind': {
-      return [convertBind(node)];
+      return [convertBind(features, node)];
     }
     case 'data_type':
     case 'type_synonym':
@@ -479,7 +482,7 @@ function convertDecl(node: Node): Decl[] {
   }
 }
 
-function convertSignature(node: Node): Decl {
+function convertSignature(features: FeatureGates<'convert'>, node: Node): Decl {
   const namesNode = field(node, 'names');
   const nameNode = field(node, 'name');
   for (const name of ['synonym', 'kind', 'pattern', 'constraint', 'expression']) {
@@ -489,7 +492,7 @@ function convertSignature(node: Node): Decl {
   const names = namesNode ? fields(namesNode, 'name').map(plainName) : nameNode ? [plainName(nameNode)] : [];
   if (names.length === 0) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   const span = spanOf(node);
-  return { kind: 'sig', names, sig: { ...convertSigType(required(node, 'type')), span }, span };
+  return { kind: 'sig', names, sig: { ...convertSigType(features, required(node, 'type')), span }, span };
 }
 
 function convertFixity(node: Node): Decl {
@@ -511,12 +514,12 @@ function convertFixity(node: Node): Decl {
   return { kind: 'fixity', assoc: assocNode.type as 'infix' | 'infixl' | 'infixr', prec, ops, span: spanOf(node) };
 }
 
-function convertFunction(node: Node): Decl {
+function convertFunction(features: FeatureGates<'convert'>, node: Node): Decl {
   for (const name of ['parameter', 'result', 'arrow']) {
     if (field(node, name)) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   }
   const head = field(node, 'head');
-  const rhs = convertRhs(node, '=');
+  const rhs = convertRhs(features, node, '=');
   if (head) {
     // An operator or backticked function defined infix: `x .+ y = ...`, possibly with more arguments after `(x .+ y)`.
     const operator = field(head, 'operator') ?? fields(head, 'operator')[0];
@@ -524,10 +527,10 @@ function convertFunction(node: Node): Decl {
     const op = convertOperator(operator);
     if (op.qualifier) throw syntaxError(spanOf(operator), '修飾された名前は、ここには書けません。');
     if (op.isConstructor) throw syntaxError(spanOf(operator), '構成子は、関数として定義できません。');
-    const left = strictPattern(convertPattern(required(head, 'left_operand')));
-    const right = strictPattern(convertPattern(required(head, 'right_operand')));
+    const left = strictPattern(features, convertPattern(features, required(head, 'left_operand')));
+    const right = strictPattern(features, convertPattern(features, required(head, 'right_operand')));
     const extra = fields(node, 'patterns').flatMap((patterns) =>
-      namedChildren(patterns).map((child) => strictPattern(convertPattern(child)))
+      namedChildren(patterns).map((child) => strictPattern(features, convertPattern(features, child)))
     );
     return {
       kind: 'funClause',
@@ -539,18 +542,18 @@ function convertFunction(node: Node): Decl {
   }
   const nameNode = required(node, 'name');
   const patterns = fields(node, 'patterns').flatMap((patternsNode) =>
-    namedChildren(patternsNode).map((child) => strictPattern(convertPattern(child)))
+    namedChildren(patternsNode).map((child) => strictPattern(features, convertPattern(features, child)))
   );
   return { kind: 'funClause', name: plainName(nameNode), args: patterns, rhs, span: spanOf(node) };
 }
 
-function convertBind(node: Node): Decl {
+function convertBind(features: FeatureGates<'convert'>, node: Node): Decl {
   const implicitName = field(node, 'implicit');
   if (implicitName) throw syntaxError(spanOf(implicitName), '暗黙のパラメータは、let ... in の中でだけ束縛できます。');
   const multiplicity = field(node, 'multiplicity');
   if (multiplicity) throw unsupported(multiplicity);
   if (field(node, 'arrow')) throw syntaxError(spanOf(node), '<- は、do の中にだけ書けます。');
-  const rhs = convertRhs(node, '=');
+  const rhs = convertRhs(features, node, '=');
   const nameNode = field(node, 'name');
   if (nameNode) {
     if (nameNode.type === 'prefix_id') {
@@ -559,17 +562,20 @@ function convertBind(node: Node): Decl {
     }
     return { kind: 'funClause', name: plainName(nameNode), args: [], rhs, span: spanOf(node) };
   }
-  const pattern = convertPattern(required(node, 'pattern'));
+  const pattern = convertPattern(features, required(node, 'pattern'));
   if (pattern.kind === 'pvar') return { kind: 'funClause', name: pattern.name, args: [], rhs, span: spanOf(node) };
   return { kind: 'patBind', pat: pattern, rhs, span: spanOf(node) };
 }
 
-function convertRhs(node: Node, separator: '=' | '->'): Rhs {
+function convertRhs(features: FeatureGates<'convert'>, node: Node, separator: '=' | '->'): Rhs {
   const matches = fields(node, 'match');
   if (matches.length === 0) throw syntaxError(spanOf(node), `「${separator}」が足りません。`);
   const whereNode = field(node, 'binds');
-  const { decls: where, forced } = strictBindings(whereNode ? convertLocalBinds(field(whereNode, 'binds')) : []);
-  const rhs = convertRhsBody(node, separator, matches, where);
+  const { decls: where, forced } = strictBindings(
+    features,
+    whereNode ? convertLocalBinds(features, field(whereNode, 'binds')) : []
+  );
+  const rhs = convertRhsBody(features, node, separator, matches, where);
   if (forced.length === 0) return rhs;
   // The banged bindings of a where are evaluated before the guards are.
   const span = rhs.span;
@@ -585,21 +591,27 @@ function convertRhs(node: Node, separator: '=' | '->'): Rhs {
   };
 }
 
-function convertRhsBody(node: Node, separator: '=' | '->', matches: Node[], where: Decl[]): Rhs {
+function convertRhsBody(
+  features: FeatureGates<'convert'>,
+  node: Node,
+  separator: '=' | '->',
+  matches: Node[],
+  where: Decl[]
+): Rhs {
   const first = matches[0];
   const last = matches.at(-1) as Node;
   const span = { ...spanOf(first), endRow: spanOf(last).endRow, endCol: spanOf(last).endCol };
   if (matches.length === 1 && !field(first, 'guards')) {
     checkSeparator(first, separator);
-    return { body: { kind: 'plain', expr: convertExpr(required(first, 'expression')) }, where, span };
+    return { body: { kind: 'plain', expr: convertExpr(features, required(first, 'expression')) }, where, span };
   }
   const branches: GuardedExpr[] = matches.map((match) => {
     checkSeparator(match, separator);
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
     return {
-      guards: fields(guardsNode, 'guard').map(convertGuard),
-      expr: convertExpr(required(match, 'expression')),
+      guards: fields(guardsNode, 'guard').map((node) => convertGuard(features, node)),
+      expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
     };
   });
@@ -612,23 +624,23 @@ function checkSeparator(match: Node, separator: '=' | '->'): void {
   }
 }
 
-function convertGuard(node: Node): Guard {
+function convertGuard(features: FeatureGates<'convert'>, node: Node): Guard {
   rejectUnsupported(node);
   switch (node.type) {
     case 'boolean': {
-      return { kind: 'bool', expr: convertExpr(namedChildren(node)[0] ?? node), span: spanOf(node) };
+      return { kind: 'bool', expr: convertExpr(features, namedChildren(node)[0] ?? node), span: spanOf(node) };
     }
     case 'let': {
-      return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span: spanOf(node) };
+      return { kind: 'let', decls: convertLocalBinds(features, field(node, 'binds')), span: spanOf(node) };
     }
     case 'pattern_guard': {
-      if (!extensions.has('PatternGuards')) {
+      if (!features.allows('patternGuards')) {
         throw syntaxError(spanOf(node), 'パターンガードを使うには、PatternGuards の拡張が要ります。');
       }
       return {
         kind: 'pat',
-        pat: convertPattern(required(node, 'pattern')),
-        expr: convertExpr(required(node, 'expression')),
+        pat: convertPattern(features, required(node, 'pattern')),
+        expr: convertExpr(features, required(node, 'expression')),
         span: spanOf(node),
       };
     }
@@ -639,8 +651,8 @@ function convertGuard(node: Node): Guard {
 }
 
 /** Under Strict, a pattern that binds is matched strictly, as if it had a `!`, unless it is lazy, `~p`. */
-function strictPattern(pat: Pat): Pat {
-  if (!extensions.has('Strict') || pat.kind === 'plazy' || pat.kind === 'pbang') return pat;
+function strictPattern(features: FeatureGates<'convert'>, pat: Pat): Pat {
+  if (!features.allows('strict') || pat.kind === 'plazy' || pat.kind === 'pbang') return pat;
   return { kind: 'pbang', pat, span: pat.span };
 }
 
@@ -649,14 +661,14 @@ function strictPattern(pat: Pat): Pat {
  * and the variables whose values must be evaluated before the body: `!x = e` evaluates `x`, and `!(a, b) = e`
  * binds a new variable to `e` to evaluate, which the pattern then matches.
  */
-function strictBindings(decls: Decl[]): { decls: Decl[]; forced: string[] } {
+function strictBindings(features: FeatureGates<'convert'>, decls: Decl[]): { decls: Decl[]; forced: string[] } {
   const forced: string[] = [];
   const result: Decl[] = [];
   for (const decl of decls) {
     const banged =
       decl.kind === 'patBind' && decl.pat.kind === 'pbang'
         ? decl.pat.pat
-        : decl.kind === 'funClause' && decl.args.length === 0 && extensions.has('Strict')
+        : decl.kind === 'funClause' && decl.args.length === 0 && features.allows('strict')
           ? ({ kind: 'pvar', name: decl.name, span: decl.span } as Pat)
           : undefined;
     if (!banged || (decl.kind !== 'patBind' && decl.kind !== 'funClause')) {
@@ -694,9 +706,9 @@ function forcing(names: string[], expr: Expr, span: Span): Expr {
 }
 
 /** A `let` statement of a `do` block, followed by one that evaluates its banged bindings. */
-function withForcedLets(stmt: Stmt): Stmt[] {
+function withForcedLets(features: FeatureGates<'convert'>, stmt: Stmt): Stmt[] {
   if (stmt.kind !== 'let') return [stmt];
-  const { decls, forced } = strictBindings(stmt.decls);
+  const { decls, forced } = strictBindings(features, stmt.decls);
   if (forced.length === 0) return [stmt];
   const unit: Expr = { kind: 'con', name: { name: '()', span: stmt.span }, span: stmt.span };
   const done: Expr = {
@@ -711,48 +723,49 @@ function withForcedLets(stmt: Stmt): Stmt[] {
   ];
 }
 
-function convertLocalBinds(node: Node | undefined): Decl[] {
+function convertLocalBinds(features: FeatureGates<'convert'>, node: Node | undefined): Decl[] {
   if (!node) return [];
-  return namedChildren(node).flatMap((child) => convertDecl(child));
+  return namedChildren(node).flatMap((child) => convertDecl(features, child));
 }
 
-function convertData(node: Node, isInstance = false): Decl {
+function convertData(features: FeatureGates<'convert'>, node: Node, isInstance = false): Decl {
   const forallNode = field(node, 'forall');
   if (forallNode) throw unsupported(forallNode);
   const contextNode = field(node, 'context');
-  if (contextNode && !extensions.has('DatatypeContexts')) {
+  if (contextNode && !features.allows('datatypeContexts')) {
     throw syntaxError(spanOf(contextNode), 'data 宣言に文脈を書くには、DatatypeContexts の拡張が要ります。');
   }
   const kindNode = field(node, 'kind');
   const constructorsNode = field(node, 'constructors');
   let cons: ConDecl[] = [];
   if (constructorsNode?.type === 'gadt_constructors') {
-    if (!extensions.has('GADTSyntax')) {
+    if (!features.allows('gadtSyntax')) {
       throw syntaxError(spanOf(constructorsNode), 'GADT の構文を使うには、GADTSyntax の拡張が要ります。');
     }
-    cons = fields(constructorsNode, 'constructor').flatMap(convertGadtConstructor);
-  } else if (constructorsNode) cons = fields(constructorsNode, 'constructor').map(convertConstructor);
-  if (cons.length === 0 && !constructorsNode && !extensions.has('EmptyDataDecls')) {
+    cons = fields(constructorsNode, 'constructor').flatMap((node) => convertGadtConstructor(features, node));
+  } else if (constructorsNode)
+    cons = fields(constructorsNode, 'constructor').map((node) => convertConstructor(features, node));
+  if (cons.length === 0 && !constructorsNode && !features.allows('emptyDataDecls')) {
     throw syntaxError(spanOf(node), '構成子のない data 宣言には、EmptyDataDecls の拡張が要ります。');
   }
   return {
-    ...(kindNode ? { kindSig: convertKind(kindNode) } : {}),
+    ...(kindNode ? { kindSig: convertKind(features, kindNode) } : {}),
     ...(hasInvisibleBinder(node) ? { invisibleBinders: true } : {}),
     kind: 'data',
-    name: typeDeclName(node),
-    params: isInstance ? [] : typeParams(node),
-    ...(contextNode ? { datatypeContext: convertContext(contextNode) } : {}),
+    name: typeDeclName(features, node),
+    params: isInstance ? [] : typeParams(features, node),
+    ...(contextNode ? { datatypeContext: convertContext(features, contextNode) } : {}),
     cons,
-    deriving: convertDerivingClauses(node),
+    deriving: convertDerivingClauses(features, node),
     span: spanOf(node),
-    paramKinds: isInstance ? undefined : typeParamKinds(node),
+    paramKinds: isInstance ? undefined : typeParamKinds(features, node),
   };
 }
 
-function convertDerivingClauses(node: Node): DerivingClause[] {
+function convertDerivingClauses(features: FeatureGates<'convert'>, node: Node): DerivingClause[] {
   const deriving: DerivingClause[] = [];
   for (const derivingNode of fields(node, 'deriving')) {
-    const { strategy, via } = derivingStrategy(derivingNode);
+    const { strategy, via } = derivingStrategy(features, derivingNode);
     const classes = required(derivingNode, 'classes');
     for (const cls of derivingClasses(classes)) deriving.push({ cls, strategy, via, span: cls.span });
   }
@@ -760,23 +773,26 @@ function convertDerivingClauses(node: Node): DerivingClause[] {
 }
 
 /** The strategy a `deriving` clause or standalone declaration names, if any. */
-function derivingStrategy(node: Node): { strategy?: DerivingStrategy; via?: TypeExpr } {
+function derivingStrategy(
+  features: FeatureGates<'convert'>,
+  node: Node
+): { strategy?: DerivingStrategy; via?: TypeExpr } {
   const via = field(node, 'via');
   if (via) {
-    if (!extensions.has('DerivingVia'))
+    if (!features.allows('derivingVia'))
       throw syntaxError(spanOf(via), 'deriving via を使うには、DerivingVia の拡張が要ります。');
-    return { strategy: 'via', via: convertType(required(via, 'type')) };
+    return { strategy: 'via', via: convertType(features, required(via, 'type')) };
   }
   const strategyNode = field(node, 'strategy');
   if (!strategyNode) return {};
-  if (!extensions.has('DerivingStrategies')) {
+  if (!features.allows('derivingStrategies')) {
     throw syntaxError(spanOf(strategyNode), 'deriving の戦略を書くには、DerivingStrategies の拡張が要ります。');
   }
   const strategy = strategyNode.text.trim() as DerivingStrategy;
-  if (strategy === 'anyclass' && !extensions.has('DeriveAnyClass')) {
+  if (strategy === 'anyclass' && !features.allows('anyclassStrategy')) {
     throw syntaxError(spanOf(strategyNode), 'deriving anyclass を使うには、DeriveAnyClass の拡張が要ります。');
   }
-  if (strategy === 'newtype' && !extensions.has('GeneralizedNewtypeDeriving')) {
+  if (strategy === 'newtype' && !features.allows('newtypeStrategy')) {
     throw syntaxError(
       spanOf(strategyNode),
       'deriving newtype を使うには、GeneralizedNewtypeDeriving の拡張が要ります。'
@@ -797,8 +813,8 @@ function convertMultiplicity(node: Node | null | undefined): Multiplicity {
 }
 
 /** Converts `type role T nominal _`. */
-function convertRoleAnnotation(node: Node): Decl {
-  if (!extensions.has('RoleAnnotations')) {
+function convertRoleAnnotation(features: FeatureGates<'convert'>, node: Node): Decl {
+  if (!features.allows('roleAnnotations')) {
     throw syntaxError(spanOf(node), '型の役割の注釈には、RoleAnnotations の拡張が要ります。');
   }
   const roles = fields(node, 'role').map((roleNode) => {
@@ -808,15 +824,15 @@ function convertRoleAnnotation(node: Node): Decl {
   return { kind: 'roleAnnotation', name: qualifiedName(required(node, 'type')).name, roles, span: spanOf(node) };
 }
 
-function convertStandaloneDeriving(node: Node): Decl {
-  if (!extensions.has('StandaloneDeriving')) {
+function convertStandaloneDeriving(features: FeatureGates<'convert'>, node: Node): Decl {
+  if (!features.allows('standaloneDeriving')) {
     throw syntaxError(spanOf(node), '独立した deriving 宣言を使うには、StandaloneDeriving の拡張が要ります。');
   }
   for (const name of ['forall', 'head']) {
     const child = field(node, name);
     if (child) throw unsupported(child);
   }
-  const { strategy, via } = derivingStrategy(node);
+  const { strategy, via } = derivingStrategy(features, node);
   const contextNode = field(node, 'context');
   const nameNode = required(node, 'name');
   const types = fields(node, 'patterns').flatMap((patternsNode) => namedChildren(patternsNode));
@@ -825,9 +841,9 @@ function convertStandaloneDeriving(node: Node): Decl {
   }
   return {
     kind: 'standaloneDeriving',
-    context: contextNode ? convertContext(contextNode) : [],
+    context: contextNode ? convertContext(features, contextNode) : [],
     cls: qualifiedName(nameNode).name,
-    type: convertType(types[0]),
+    type: convertType(features, types[0]),
     strategy,
     via,
     span: spanOf(node),
@@ -835,8 +851,8 @@ function convertStandaloneDeriving(node: Node): Decl {
 }
 
 /** Converts `pattern P x = p` and its variants, and `pattern P :: t`. */
-function convertPatternSynonym(node: Node): Decl {
-  if (!extensions.has('PatternSynonyms')) {
+function convertPatternSynonym(features: FeatureGates<'convert'>, node: Node): Decl {
+  if (!features.allows('patternSynonyms')) {
     throw syntaxError(spanOf(node), 'パターンシノニムを使うには、PatternSynonyms の拡張が要ります。');
   }
   const span = spanOf(node);
@@ -845,7 +861,7 @@ function convertPatternSynonym(node: Node): Decl {
   if (inner.type === 'signature') {
     const synonym = required(inner, 'synonym');
     const names = synonym.type === 'binding_list' ? fields(synonym, 'name').map(plainName) : [plainName(synonym)];
-    return { kind: 'patSynSig', names, sig: { ...convertSigType(required(inner, 'type')), span }, span };
+    return { kind: 'patSynSig', names, sig: { ...convertSigType(features, required(inner, 'type')), span }, span };
   }
   const head = convertPatternSynonymHead(required(inner, 'synonym'));
   const constructors = field(inner, 'constructors');
@@ -856,7 +872,7 @@ function convertPatternSynonym(node: Node): Decl {
           kind: 'funClause',
           name: pattern.name,
           args: pattern.params.map((param): Pat => ({ kind: 'pvar', name: param, span: param.span })),
-          rhs: convertRhs(clause, '='),
+          rhs: convertRhs(features, clause, '='),
           span: spanOf(clause),
         };
       })
@@ -864,7 +880,7 @@ function convertPatternSynonym(node: Node): Decl {
   return {
     kind: 'patSyn',
     ...head,
-    pattern: convertPattern(required(inner, 'pattern')),
+    pattern: convertPattern(features, required(inner, 'pattern')),
     direction: builder ? 'explicit' : hasToken(inner, '<-') ? 'unidirectional' : 'bidirectional',
     builder,
     span,
@@ -900,34 +916,37 @@ function convertPatternSynonymHead(node: Node): { name: Name; params: Name[]; fi
 
 /** Converts the declarations of type families and data families, and their instances. */
 /** Converts `type family F a`, with its result kind and injectivity, or a closed family with its equations. */
-function convertTypeFamily(node: Node, span: Span): Decl {
+function convertTypeFamily(features: FeatureGates<'convert'>, node: Node, span: Span): Decl {
   const equationsNode = field(node, 'closed_family');
   const resultNode = namedChildren(node).find((child) => child.type === 'type_family_result');
-  const params = typeParams(node);
+  const params = typeParams(features, node);
   const kindNode = field(node, 'kind');
-  let resultKind = kindNode ? convertKind(kindNode) : undefined;
+  let resultKind = kindNode ? convertKind(features, kindNode) : undefined;
   const result = resultNode ? required(resultNode, 'result') : undefined;
-  if (result && (result.type === 'parens' || result.type === 'annotated')) resultKind = convertBinder(result).kind;
+  if (result && (result.type === 'parens' || result.type === 'annotated'))
+    resultKind = convertBinder(features, result).kind;
   if (equationsNode?.type === 'abstract_family') {
     throw syntaxError(spanOf(equationsNode), '中身を書かない閉じた型族は、hs-boot ファイルにだけ書けます。');
   }
   return {
     kind: 'typeFamily',
-    name: typeDeclName(node),
+    name: typeDeclName(features, node),
     params,
-    paramKinds: typeParamKinds(node),
+    paramKinds: typeParamKinds(features, node),
     resultKind,
-    equations: equationsNode ? fields(equationsNode, 'equation').map(convertEquation) : undefined,
-    injective: familyInjectivity(node, params),
+    equations: equationsNode
+      ? fields(equationsNode, 'equation').map((node) => convertEquation(features, node))
+      : undefined,
+    injective: familyInjectivity(features, node, params),
     span,
   };
 }
 
 /** The positions of the arguments an injectivity annotation, `= r | r -> a`, says a family's result determines. */
-function familyInjectivity(node: Node, params: Name[]): number[] | undefined {
+function familyInjectivity(features: FeatureGates<'convert'>, node: Node, params: Name[]): number[] | undefined {
   const injectivityNode = namedChildren(node).find((child) => child.type === 'type_family_injectivity');
   if (!injectivityNode) return undefined;
-  if (!extensions.has('TypeFamilyDependencies')) {
+  if (!features.allows('typeFamilyDependencies')) {
     throw syntaxError(spanOf(injectivityNode), '単射の注釈には、TypeFamilyDependencies の拡張が要ります。');
   }
   return fields(injectivityNode, 'determined').map((determined) => {
@@ -937,37 +956,41 @@ function familyInjectivity(node: Node, params: Name[]): number[] | undefined {
   });
 }
 
-function convertFamilyDecl(node: Node): Decl {
-  if (!extensions.has('TypeFamilies')) {
+function convertFamilyDecl(features: FeatureGates<'convert'>, node: Node): Decl {
+  if (!features.allows('typeFamilies')) {
     throw syntaxError(spanOf(node), '型族やデータ族を使うには、TypeFamilies の拡張が要ります。');
   }
   const span = spanOf(node);
   switch (node.type) {
     case 'type_family': {
-      return convertTypeFamily(node, span);
+      return convertTypeFamily(features, node, span);
     }
     case 'type_instance': {
-      return { kind: 'typeInstance', ...convertEquation(node) };
+      return { kind: 'typeInstance', ...convertEquation(features, node) };
     }
     case 'data_family': {
       const kindNode = field(node, 'kind');
       return {
         kind: 'dataFamily',
-        name: typeDeclName(node),
-        params: typeParams(node),
-        paramKinds: typeParamKinds(node),
-        kindSig: kindNode ? convertKind(kindNode) : undefined,
+        name: typeDeclName(features, node),
+        params: typeParams(features, node),
+        paramKinds: typeParamKinds(features, node),
+        kindSig: kindNode ? convertKind(features, kindNode) : undefined,
         span,
       };
     }
     default: {
       const inner = namedChildren(node)[0];
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-      const decl = inner.type === 'newtype' ? convertNewtype(inner, true) : convertData(inner, true);
+      const decl =
+        inner.type === 'newtype' ? convertNewtype(features, inner, true) : convertData(features, inner, true);
       if (decl.kind !== 'data') throw syntaxError(span, '書き方に誤りがあります。');
       return {
         ...decl,
-        instanceOf: { family: qualifiedName(required(inner, 'name')).name, patterns: instancePatterns(inner) },
+        instanceOf: {
+          family: qualifiedName(required(inner, 'name')).name,
+          patterns: instancePatterns(features, inner),
+        },
         span,
       };
     }
@@ -975,23 +998,25 @@ function convertFamilyDecl(node: Node): Decl {
 }
 
 /** An equation of a type family: `F Int = Bool` in a closed family, or `type instance F Int = Bool`. */
-function convertEquation(node: Node): TypeEquation {
+function convertEquation(features: FeatureGates<'convert'>, node: Node): TypeEquation {
   const nameNode = required(node, 'name');
   const rhsNode = unnamedFieldChildren(node).at(-1);
   if (!rhsNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   return {
     family: qualifiedName(nameNode).name,
-    patterns: instancePatterns(node),
-    rhs: convertType(rhsNode),
+    patterns: instancePatterns(features, node),
+    rhs: convertType(features, rhsNode),
     span: spanOf(node),
   };
 }
 
-function instancePatterns(node: Node): TypeExpr[] {
-  return fields(node, 'patterns').flatMap((patterns) => namedChildren(patterns).map(convertType));
+function instancePatterns(features: FeatureGates<'convert'>, node: Node): TypeExpr[] {
+  return fields(node, 'patterns').flatMap((patterns) =>
+    namedChildren(patterns).map((node) => convertType(features, node))
+  );
 }
 
-function convertNewtype(node: Node, isInstance = false): Decl {
+function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstance = false): Decl {
   for (const name of ['context', 'forall', 'kind']) {
     const child = field(node, name);
     if (child) {
@@ -1006,7 +1031,7 @@ function convertNewtype(node: Node, isInstance = false): Decl {
     const fieldDecl = required(fieldNode, 'field');
     con = {
       name: plainName(required(constructor, 'name')),
-      fields: [convertNewtypeField(required(fieldDecl, 'type'))],
+      fields: [convertNewtypeField(features, required(fieldDecl, 'type'))],
       fieldNames: [plainName(required(fieldDecl, 'name'))],
       isInfix: false,
       span: spanOf(constructor),
@@ -1016,28 +1041,28 @@ function convertNewtype(node: Node, isInstance = false): Decl {
     if (!typeNode) throw syntaxError(spanOf(fieldNode), '書き方に誤りがあります。');
     con = {
       name: plainName(required(constructor, 'name')),
-      fields: [convertNewtypeField(typeNode)],
+      fields: [convertNewtypeField(features, typeNode)],
       isInfix: false,
       span: spanOf(constructor),
     };
   }
   return {
     kind: 'data',
-    name: typeDeclName(node),
-    params: isInstance ? [] : typeParams(node),
+    name: typeDeclName(features, node),
+    params: isInstance ? [] : typeParams(features, node),
     cons: [con],
-    deriving: convertDerivingClauses(node),
+    deriving: convertDerivingClauses(features, node),
     span: spanOf(node),
     newtype: true,
-    paramKinds: isInstance ? undefined : typeParamKinds(node),
+    paramKinds: isInstance ? undefined : typeParamKinds(features, node),
   };
 }
 
-function convertNewtypeField(node: Node): TypeExpr {
+function convertNewtypeField(features: FeatureGates<'convert'>, node: Node): TypeExpr {
   if (node.type === 'strict_field' || node.type === 'lazy_field') {
     throw syntaxError(spanOf(node), 'newtype の構成子のフィールドには、! や ~ を付けられません。');
   }
-  return convertFieldType(node);
+  return convertFieldType(features, node);
 }
 
 function derivingClasses(node: Node): QName[] {
@@ -1060,41 +1085,49 @@ function derivingClasses(node: Node): QName[] {
   }
 }
 
-function typeDeclName(node: Node): Name {
+function typeDeclName(features: FeatureGates<'convert'>, node: Node): Name {
   const head = field(node, 'head');
   if (head) {
-    requireTypeOperators(head);
+    requireTypeOperators(features, head);
     return plainName(required(head, 'operator'));
   }
   const nameNode = required(node, 'name');
   if (nameNode.type !== 'name') {
     rejectUnsupported(nameNode);
-    requireTypeOperators(nameNode);
+    requireTypeOperators(features, nameNode);
   }
   return plainName(nameNode);
 }
 
-function requireImplicitParams(span: Span): void {
-  if (!extensions.has('ImplicitParams'))
+function requireImplicitParams(features: FeatureGates<'convert'>, span: Span): void {
+  if (!features.allows('implicitParams'))
     throw syntaxError(span, '暗黙のパラメータを使うには、ImplicitParams の拡張が要ります。');
 }
 
-function requireDataKinds(span: Span): void {
-  if (!extensions.has('DataKinds'))
+function requireDataKinds(features: FeatureGates<'convert'>, span: Span): void {
+  if (!features.allows('promotedSyntax'))
     throw syntaxError(span, '型の中で構成子やリテラルを使うには、DataKinds の拡張が要ります。');
 }
 
 /** Converts what a tick promotes: a constructor, `'[]`, a list `'[a, b]`, or a tuple `'(a, b)`. */
-function convertPromoted(inner: Node, span: Span): TypeExpr {
+function convertPromoted(features: FeatureGates<'convert'>, inner: Node, span: Span): TypeExpr {
   switch (inner.type) {
     case 'empty_list': {
       return { kind: 'tpromoted', name: { name: '[]', span }, span };
     }
     case 'list': {
-      return { kind: 'tpromotedList', elems: fields(inner, 'element').map(convertType), span };
+      return {
+        kind: 'tpromotedList',
+        elems: fields(inner, 'element').map((node) => convertType(features, node)),
+        span,
+      };
     }
     case 'tuple': {
-      return { kind: 'tpromotedTuple', elems: fields(inner, 'element').map(convertType), span };
+      return {
+        kind: 'tpromotedTuple',
+        elems: fields(inner, 'element').map((node) => convertType(features, node)),
+        span,
+      };
     }
     case 'unit': {
       return { kind: 'tpromoted', name: { name: '()', span }, span };
@@ -1105,25 +1138,25 @@ function convertPromoted(inner: Node, span: Span): TypeExpr {
   }
 }
 
-function requireTypeOperators(node: Node): void {
-  if (!extensions.has('TypeOperators')) {
+function requireTypeOperators(features: FeatureGates<'convert'>, node: Node): void {
+  if (!features.allows('typeOperators')) {
     throw syntaxError(spanOf(node), '演算子の型を使うには、TypeOperators の拡張が要ります。');
   }
 }
 
-function typeParams(node: Node): Name[] {
-  return typeParamBinders(node).map((binder) => binder.name);
+function typeParams(features: FeatureGates<'convert'>, node: Node): Name[] {
+  return typeParamBinders(features, node).map((binder) => binder.name);
 }
 
 /** The kinds a declaration's parameters' annotations give, or `undefined` when none has one. */
-function typeParamKinds(node: Node): (TypeExpr | undefined)[] | undefined {
-  const kinds = typeParamBinders(node).map((binder) => binder.kind);
+function typeParamKinds(features: FeatureGates<'convert'>, node: Node): (TypeExpr | undefined)[] | undefined {
+  const kinds = typeParamBinders(features, node).map((binder) => binder.kind);
   return kinds.some((kind) => kind !== undefined) ? kinds : undefined;
 }
 
-function typeParamBinders(node: Node): TyVarBinder[] {
+function typeParamBinders(features: FeatureGates<'convert'>, node: Node): TyVarBinder[] {
   const head = field(node, 'head');
-  const headBinders = head ? fields(head, 'bind').map(convertBinder) : [];
+  const headBinders = head ? fields(head, 'bind').map((node) => convertBinder(features, node)) : [];
   return [
     ...headBinders,
     ...fields(node, 'patterns').flatMap((patterns) => {
@@ -1132,10 +1165,10 @@ function typeParamBinders(node: Node): TyVarBinder[] {
       return namedChildren(patterns)
         .filter((param) => {
           if (param.type !== 'invisible') return true;
-          requireTypeAbstractions(spanOf(param));
+          requireTypeAbstractions(features, spanOf(param));
           return false;
         })
-        .map(convertBinder);
+        .map((node) => convertBinder(features, node));
     }),
   ];
 }
@@ -1146,14 +1179,14 @@ function hasInvisibleBinder(node: Node): boolean {
   );
 }
 
-function requireTypeAbstractions(span: Span): void {
-  if (!extensions.has('TypeAbstractions')) {
+function requireTypeAbstractions(features: FeatureGates<'convert'>, span: Span): void {
+  if (!features.allows('typeAbstractions')) {
     throw syntaxError(span, '@ による型変数の束縛には、TypeAbstractions の拡張が要ります。');
   }
 }
 
 /** A type variable binder: `a`, `(a :: k)`, or `{a}`, which a `forall` or a declaration's head binds. */
-function convertBinder(node: Node): TyVarBinder {
+function convertBinder(features: FeatureGates<'convert'>, node: Node): TyVarBinder {
   switch (node.type) {
     case 'variable': {
       return { name: plainName(node) };
@@ -1161,15 +1194,15 @@ function convertBinder(node: Node): TyVarBinder {
     case 'parens': {
       const inner = namedChildren(node)[0];
       if (!inner) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
-      return convertBinder(inner);
+      return convertBinder(features, inner);
     }
     case 'annotated': {
-      return { name: plainName(required(node, 'bind')), kind: convertKind(required(node, 'kind')) };
+      return { name: plainName(required(node, 'bind')), kind: convertKind(features, required(node, 'kind')) };
     }
     case 'inferred': {
       const inner = field(node, 'bind') ?? namedChildren(node)[0];
       if (!inner) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
-      return { ...convertBinder(inner), inferred: true };
+      return { ...convertBinder(features, inner), inferred: true };
     }
     default: {
       rejectUnsupported(node);
@@ -1179,36 +1212,40 @@ function convertBinder(node: Node): TyVarBinder {
 }
 
 /** Converts a kind, which reads as a type: `Type`, `*`, `Constraint`, `k1 -> k2`, or a kind variable. */
-function convertKind(node: Node): TypeExpr {
-  if (!extensions.has('KindSignatures') && !extensions.has('PolyKinds')) {
+function convertKind(features: FeatureGates<'convert'>, node: Node): TypeExpr {
+  if (!features.allows('kindSignatures')) {
     throw syntaxError(spanOf(node), '種類の注釈を書くには、KindSignatures の拡張が要ります。');
   }
-  return convertType(node);
+  return convertType(features, node);
 }
 
 /** A constructor with its existential variables and constraints, `forall a. Show a => MkT a`. */
-function convertConstructor(node: Node): ConDecl {
+function convertConstructor(features: FeatureGates<'convert'>, node: Node): ConDecl {
   const forallNode = field(node, 'forall');
   const contextNode = field(node, 'context');
-  const converted = convertConstructorBody(node);
+  const converted = convertConstructorBody(features, node);
   if (!forallNode && !contextNode) return converted;
-  if (!extensions.has('ExistentialQuantification') && !extensions.has('GADTs')) {
+  if (!features.allows('existentials')) {
     throw syntaxError(spanOf(node), '存在型の構成子には、ExistentialQuantification の拡張が要ります。');
   }
   return {
     ...converted,
-    exVars: forallNode ? namedChildren(required(forallNode, 'variables')).map(convertBinder) : [],
-    context: contextNode ? convertContext(contextNode) : [],
+    exVars: forallNode
+      ? namedChildren(required(forallNode, 'variables')).map((node) => convertBinder(features, node))
+      : [],
+    context: contextNode ? convertContext(features, contextNode) : [],
   };
 }
 
 /** Converts `C1, C2 :: forall a. ctx => t1 -> t2 -> T a`, a constructor declared by its signature. */
-function convertGadtConstructor(node: Node): ConDecl[] {
+function convertGadtConstructor(features: FeatureGates<'convert'>, node: Node): ConDecl[] {
   const forallNode = field(node, 'forall');
   const contextNode = field(node, 'context');
   const typeNode = required(node, 'type');
-  const exVars = forallNode ? namedChildren(required(forallNode, 'variables')).map(convertBinder) : undefined;
-  const context = contextNode ? convertContext(contextNode) : [];
+  const exVars = forallNode
+    ? namedChildren(required(forallNode, 'variables')).map((node) => convertBinder(features, node))
+    : undefined;
+  const context = contextNode ? convertContext(features, contextNode) : [];
   let fieldTypes: TypeExpr[] = [];
   let fieldNames: Name[] | undefined;
   const strictFields: number[] = [];
@@ -1218,24 +1255,24 @@ function convertGadtConstructor(node: Node): ConDecl[] {
     for (const fieldNode of fields(required(typeNode, 'fields'), 'field')) {
       const fieldType = required(fieldNode, 'type');
       for (const nameNode of fields(fieldNode, 'name')) {
-        if (isStrictField(fieldType)) strictFields.push(fieldTypes.length);
+        if (isStrictField(features, fieldType)) strictFields.push(fieldTypes.length);
         fieldNames.push(plainName(nameNode));
-        fieldTypes.push(convertFieldType(fieldType));
+        fieldTypes.push(convertFieldType(features, fieldType));
       }
     }
-    result = convertType(required(typeNode, 'type'));
+    result = convertType(features, required(typeNode, 'type'));
   } else {
     let current = typeNode.type === 'prefix' ? required(typeNode, 'type') : typeNode;
     // A constructor's fields are linear, so an arrow of a multiplicity separates them like any other.
     while (current.type === 'function' || current.type === 'linear_function') {
       const parameter = required(current, 'parameter');
-      if (isStrictField(parameter)) strictFields.push(fieldTypes.length);
-      fieldTypes.push(convertFieldType(parameter));
+      if (isStrictField(features, parameter)) strictFields.push(fieldTypes.length);
+      fieldTypes.push(convertFieldType(features, parameter));
       current = required(current, 'result');
     }
     if (current.type === 'context' || current.type === 'forall')
       throw unsupportedError(spanOf(current), '入れ子の forall');
-    result = convertType(current);
+    result = convertType(features, current);
   }
   return fields(node, 'name').map((nameNode) => ({
     name: plainName(nameNode),
@@ -1250,7 +1287,7 @@ function convertGadtConstructor(node: Node): ConDecl[] {
   }));
 }
 
-function convertConstructorBody(node: Node): ConDecl {
+function convertConstructorBody(features: FeatureGates<'convert'>, node: Node): ConDecl {
   const inner = required(node, 'constructor');
   rejectUnsupported(inner);
   if (inner.type === 'special') {
@@ -1262,7 +1299,7 @@ function convertConstructorBody(node: Node): ConDecl {
   }
   switch (inner.type) {
     case 'prefix': {
-      return convertPrefixConstructor(inner);
+      return convertPrefixConstructor(features, inner);
     }
     case 'infix': {
       const operator = fields(inner, 'operator')[0];
@@ -1271,13 +1308,13 @@ function convertConstructorBody(node: Node): ConDecl {
       if (!op.isConstructor) throw syntaxError(spanOf(operator), '構成子の演算子は「:」で始めてください。');
       return {
         name: { name: op.name, span: op.span },
-        ...constructorFields([required(inner, 'left_operand'), required(inner, 'right_operand')]),
+        ...constructorFields(features, [required(inner, 'left_operand'), required(inner, 'right_operand')]),
         isInfix: true,
         span: spanOf(inner),
       };
     }
     case 'record': {
-      return convertRecordConstructor(inner);
+      return convertRecordConstructor(features, inner);
     }
     default: {
       throw syntaxError(spanOf(inner), '書き方に誤りがあります。');
@@ -1285,7 +1322,7 @@ function convertConstructorBody(node: Node): ConDecl {
   }
 }
 
-function convertRecordConstructor(node: Node): ConDecl {
+function convertRecordConstructor(features: FeatureGates<'convert'>, node: Node): ConDecl {
   const nameNode = required(node, 'name');
   const fieldsNode = field(node, 'fields');
   const fieldTypes: TypeExpr[] = [];
@@ -1293,9 +1330,9 @@ function convertRecordConstructor(node: Node): ConDecl {
   const strictFields: number[] = [];
   for (const fieldNode of fieldsNode ? fields(fieldsNode, 'field') : []) {
     const typeNode = required(fieldNode, 'type');
-    const type = convertFieldType(typeNode);
+    const type = convertFieldType(features, typeNode);
     for (const nameNode2 of fields(fieldNode, 'name')) {
-      if (isStrictField(typeNode)) strictFields.push(fieldTypes.length);
+      if (isStrictField(features, typeNode)) strictFields.push(fieldTypes.length);
       fieldNames.push(plainName(nameNode2));
       fieldTypes.push(type);
     }
@@ -1310,48 +1347,51 @@ function convertRecordConstructor(node: Node): ConDecl {
   };
 }
 
-function convertPrefixConstructor(node: Node): ConDecl {
+function convertPrefixConstructor(features: FeatureGates<'convert'>, node: Node): ConDecl {
   if (field(node, 'type')) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
   const fieldNodes = fields(node, 'field');
   return {
     name: plainName(required(node, 'name')),
-    ...constructorFields(fieldNodes),
+    ...constructorFields(features, fieldNodes),
     isInfix: false,
     span: spanOf(node),
   };
 }
 
-function constructorFields(nodes: Node[]): Pick<ConDecl, 'fields' | 'strictFields'> {
-  const strictFields = nodes.flatMap((node, index) => (isStrictField(node) ? [index] : []));
-  return { fields: nodes.map(convertFieldType), ...(strictFields.length > 0 ? { strictFields } : {}) };
+function constructorFields(features: FeatureGates<'convert'>, nodes: Node[]): Pick<ConDecl, 'fields' | 'strictFields'> {
+  const strictFields = nodes.flatMap((node, index) => (isStrictField(features, node) ? [index] : []));
+  return {
+    fields: nodes.map((node) => convertFieldType(features, node)),
+    ...(strictFields.length > 0 ? { strictFields } : {}),
+  };
 }
 
-function convertFieldType(node: Node): TypeExpr {
-  if (node.type === 'strict_field') return convertType(required(node, 'type'));
+function convertFieldType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
+  if (node.type === 'strict_field') return convertType(features, required(node, 'type'));
   if (node.type === 'lazy_field') {
-    if (!extensions.has('StrictData')) {
+    if (!features.allows('strictData')) {
       throw syntaxError(spanOf(node), 'フィールドに ~ を付けるには、StrictData の拡張が要ります。');
     }
-    return convertType(required(node, 'type'));
+    return convertType(features, required(node, 'type'));
   }
   rejectUnsupported(node);
-  return convertType(node);
+  return convertType(features, node);
 }
 
 /** Whether constructing a value evaluates a field first: one marked `!`, or any not marked `~` under StrictData. */
-function isStrictField(node: Node): boolean {
-  return node.type === 'strict_field' || (extensions.has('StrictData') && node.type !== 'lazy_field');
+function isStrictField(features: FeatureGates<'convert'>, node: Node): boolean {
+  return node.type === 'strict_field' || (features.allows('strictData') && node.type !== 'lazy_field');
 }
 
-function convertTypeSynonym(node: Node): Decl {
+function convertTypeSynonym(features: FeatureGates<'convert'>, node: Node): Decl {
   const typeNode = required(node, 'type');
   if (typeNode.type === 'signature') throw unsupported(typeNode);
   return {
     kind: 'typeSyn',
-    name: typeDeclName(node),
-    params: typeParams(node),
-    paramKinds: typeParamKinds(node),
-    type: convertQuantifiedType(typeNode),
+    name: typeDeclName(features, node),
+    params: typeParams(features, node),
+    paramKinds: typeParamKinds(features, node),
+    type: convertQuantifiedType(features, typeNode),
     span: spanOf(node),
   };
 }
@@ -1363,12 +1403,12 @@ const FAMILY_NODES = new Set(['type_family', 'data_family', 'type_instance', 'da
  * Converts a class with its associated families, which become top-level families of the class; a `type instance`
  * in the class is its family's default, which instances that leave it out use.
  */
-function convertClassWithFamilies(node: Node): Decl[] {
-  const cls = convertClass(node);
+function convertClassWithFamilies(features: FeatureGates<'convert'>, node: Node): Decl[] {
+  const cls = convertClass(features, node);
   if (cls.kind !== 'class') return [cls];
   const decls: Decl[] = [cls];
   for (const member of familyMembers(node)) {
-    const decl = convertFamilyDecl(member);
+    const decl = convertFamilyDecl(features, member);
     if (decl.kind === 'typeInstance') decls.push({ ...decl, defaultOf: cls.name.name });
     else if (decl.kind === 'typeFamily' || decl.kind === 'dataFamily')
       decls.push({ ...decl, associatedWith: cls.name.name });
@@ -1377,15 +1417,15 @@ function convertClassWithFamilies(node: Node): Decl[] {
   return decls;
 }
 
-function convertInstanceWithFamilies(node: Node): Decl[] {
-  const instance = convertInstance(node);
+function convertInstanceWithFamilies(features: FeatureGates<'convert'>, node: Node): Decl[] {
+  const instance = convertInstance(features, node);
   return [
     instance,
     ...familyMembers(node).map((member) => {
       if (member.type !== 'type_instance' && member.type !== 'data_instance') {
         throw syntaxError(spanOf(member), 'インスタンスの中には、型族やデータ族の宣言は書けません。');
       }
-      return convertFamilyDecl(member);
+      return convertFamilyDecl(features, member);
     }),
   ];
 }
@@ -1397,14 +1437,14 @@ function familyMembers(node: Node): Node[] {
     : [];
 }
 
-function convertClass(node: Node): Decl {
-  const binders = typeParamBinders(node);
+function convertClass(features: FeatureGates<'convert'>, node: Node): Decl {
+  const binders = typeParamBinders(features, node);
   const params = binders.map((binder) => binder.name);
-  if (params.length !== 1 && !extensions.has('MultiParamTypeClasses')) {
+  if (params.length !== 1 && !features.allows('multiParamClasses')) {
     throw syntaxError(spanOf(node), '型引数が1つでないクラスには、MultiParamTypeClasses の拡張が要ります。');
   }
   const fundepsNode = field(node, 'fundeps');
-  if (fundepsNode && !extensions.has('FunctionalDependencies')) {
+  if (fundepsNode && !features.allows('functionalDependencies')) {
     throw syntaxError(spanOf(fundepsNode), '関数従属性を書くには、FunctionalDependencies の拡張が要ります。');
   }
   const fundeps = (fundepsNode ? fields(fundepsNode, 'fundep') : []).map((fundep) => ({
@@ -1417,19 +1457,19 @@ function convertClass(node: Node): Decl {
     ? fields(declarationsNode, 'declaration').flatMap((child) => {
         if (FAMILY_NODES.has(child.type)) return [];
         if (child.type === 'default_signature') {
-          if (!extensions.has('DefaultSignatures')) {
+          if (!features.allows('defaultSignatures')) {
             throw syntaxError(spanOf(child), 'default のシグネチャを使うには、DefaultSignatures の拡張が要ります。');
           }
-          return [{ ...convertSignature(required(child, 'signature')), isDefault: true } as Decl];
+          return [{ ...convertSignature(features, required(child, 'signature')), isDefault: true } as Decl];
         }
         rejectUnsupported(child);
-        return convertDecl(child);
+        return convertDecl(features, child);
       })
     : [];
   return {
     kind: 'class',
-    context: contextNode ? convertContext(contextNode) : [],
-    name: typeDeclName(node),
+    context: contextNode ? convertContext(features, contextNode) : [],
+    name: typeDeclName(features, node),
     params,
     paramKinds: binders.some((binder) => binder.kind) ? binders.map((binder) => binder.kind) : undefined,
     fundeps,
@@ -1438,7 +1478,7 @@ function convertClass(node: Node): Decl {
   };
 }
 
-function convertInstance(node: Node): Decl {
+function convertInstance(features: FeatureGates<'convert'>, node: Node): Decl {
   for (const name of ['forall', 'kind', 'head']) {
     const child = field(node, name);
     if (child) {
@@ -1456,7 +1496,7 @@ function convertInstance(node: Node): Decl {
     ? fields(declarationsNode, 'declaration').flatMap((child) => {
         if (FAMILY_NODES.has(child.type)) return [];
         rejectUnsupported(child);
-        return convertDecl(child);
+        return convertDecl(features, child);
       })
     : [];
   const overlap = namedChildren(node)
@@ -1467,9 +1507,9 @@ function convertInstance(node: Node): Decl {
     );
   return {
     kind: 'instance',
-    context: contextNode ? convertContext(contextNode) : [],
+    context: contextNode ? convertContext(features, contextNode) : [],
     cls: qualifiedName(nameNode).name,
-    types: types.map(convertType),
+    types: types.map((node) => convertType(features, node)),
     decls,
     ...(overlap ? { overlap } : {}),
     // GHC reports an instance at its head, from the context to the type.
@@ -1484,58 +1524,62 @@ function convertInstance(node: Node): Decl {
 // ---------------------------------------------------------------------------------------------------------------
 // Types
 
-function convertSigType(node: Node): SigType {
+function convertSigType(features: FeatureGates<'convert'>, node: Node): SigType {
   if (node.type === 'forall_required') {
-    if (!extensions.has('RequiredTypeArguments')) {
+    if (!features.allows('requiredTypeArguments')) {
       throw syntaxError(spanOf(node), 'forall a -> を使うには、RequiredTypeArguments の拡張が要ります。');
     }
     const variables = required(node, 'variables');
-    const inner = convertSigType(required(node, 'type'));
+    const inner = convertSigType(features, required(node, 'type'));
     if (inner.forall) throw unsupportedError(spanOf(node), '入れ子の forall');
     return {
       ...inner,
-      forall: namedChildren(variables).map((binder) => ({ ...convertBinder(binder), required: true })),
+      forall: namedChildren(variables).map((binder) => ({ ...convertBinder(features, binder), required: true })),
       span: spanOf(node),
     };
   }
   if (node.type === 'forall') {
-    if (!extensions.has('ExplicitForAll')) {
+    if (!features.allows('explicitForAll')) {
       throw syntaxError(spanOf(node), 'forall を使うには、ExplicitForAll の拡張が要ります。');
     }
     const variables = required(node, 'variables');
-    const inner = convertSigType(required(node, 'type'));
+    const inner = convertSigType(features, required(node, 'type'));
     if (inner.forall) throw unsupportedError(spanOf(node), '入れ子の forall');
-    return { ...inner, forall: namedChildren(variables).map(convertBinder), span: spanOf(node) };
+    return {
+      ...inner,
+      forall: namedChildren(variables).map((node) => convertBinder(features, node)),
+      span: spanOf(node),
+    };
   }
   rejectUnsupported(node);
   if (node.type === 'context') {
     const typeNode = field(node, 'type');
     if (!typeNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
-    const inner = convertSigType(typeNode);
+    const inner = convertSigType(features, typeNode);
     if (inner.context.length > 0) {
-      return { context: [...convertContext(node), ...inner.context], type: inner.type, span: spanOf(node) };
+      return { context: [...convertContext(features, node), ...inner.context], type: inner.type, span: spanOf(node) };
     }
-    return { context: convertContext(node), type: inner.type, span: spanOf(node) };
+    return { context: convertContext(features, node), type: inner.type, span: spanOf(node) };
   }
-  return { context: [], type: convertQuantifiedType(node), span: spanOf(node) };
+  return { context: [], type: convertQuantifiedType(features, node), span: spanOf(node) };
 }
 
-function convertContext(node: Node): Constraint[] {
+function convertContext(features: FeatureGates<'convert'>, node: Node): Constraint[] {
   const constraint = field(node, 'constraint');
   if (constraint) throw syntaxError(spanOf(constraint), '書き方に誤りがあります。');
   const contextNode = required(node, 'context');
-  return constraintsOf(contextNode);
+  return constraintsOf(features, contextNode);
 }
 
-function constraintsOf(node: Node): Constraint[] {
+function constraintsOf(features: FeatureGates<'convert'>, node: Node): Constraint[] {
   rejectUnsupported(node);
   switch (node.type) {
     case 'tuple': {
-      return namedChildren(node).flatMap(constraintsOf);
+      return namedChildren(node).flatMap((node) => constraintsOf(features, node));
     }
     case 'parens': {
       const inner = namedChildren(node)[0];
-      return inner ? constraintsOf(inner) : [];
+      return inner ? constraintsOf(features, inner) : [];
     }
     case 'unit': {
       return [];
@@ -1544,18 +1588,18 @@ function constraintsOf(node: Node): Constraint[] {
     case 'name':
     case 'qualified':
     case 'variable': {
-      return [convertType(node)];
+      return [convertType(features, node)];
     }
     case 'infix_chain': {
-      return [convertType(node)];
+      return [convertType(features, node)];
     }
     case 'implicit_parameter': {
-      requireImplicitParams(spanOf(node));
+      requireImplicitParams(features, spanOf(node));
       return [
         {
           kind: 'timplicit',
           name: required(node, 'name').text.slice(1),
-          type: convertType(required(node, 'type')),
+          type: convertType(features, required(node, 'type')),
           span: spanOf(node),
         },
       ];
@@ -1567,26 +1611,26 @@ function constraintsOf(node: Node): Constraint[] {
 }
 
 /** Converts a type that may be polymorphic itself, `forall a. C a => t`, as a function's argument may be. */
-function convertQuantifiedType(node: Node): TypeExpr {
+function convertQuantifiedType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
   if (node.type === 'forall' || node.type === 'context') {
-    if (!extensions.has('RankNTypes')) {
+    if (!features.allows('rankNTypes')) {
       throw syntaxError(spanOf(node), '型の内側の forall や制約には、RankNTypes の拡張が要ります。');
     }
-    const sig = convertSigType(node);
+    const sig = convertSigType(features, node);
     return { kind: 'tforall', binders: sig.forall ?? [], context: sig.context, body: sig.type, span: spanOf(node) };
   }
   rejectUnsupported(node);
-  return convertType(node);
+  return convertType(features, node);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per type node kind of the grammar.
 // code-gauge-allow functionNcss -- One case per type node kind of the grammar.
-function convertType(node: Node): TypeExpr {
+function convertType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
   const span = spanOf(node);
   if (node.type === 'prefix_tuple') {
     return { kind: 'tcon', name: { name: node.text.replaceAll(/\s+/g, ''), span }, span };
   }
-  if (node.type === 'forall') return convertQuantifiedType(node);
+  if (node.type === 'forall') return convertQuantifiedType(features, node);
   rejectUnsupported(node);
   switch (node.type) {
     case 'prefix_list': {
@@ -1602,36 +1646,39 @@ function convertType(node: Node): TypeExpr {
       return { kind: 'tvar', name: node.text, span };
     }
     case 'apply': {
-      const multiplication = starProductChain(node);
-      if (multiplication) return multiplication;
       const constructor = field(node, 'constructor') ?? required(node, 'function');
       const argument = required(node, 'argument');
       if (argument.type === 'kind_application') {
-        requireTypeAbstractions(spanOf(argument));
+        requireTypeAbstractions(features, spanOf(argument));
         return {
           kind: 'tkindapp',
-          type: convertType(constructor),
-          kindArg: convertKind(required(argument, 'type')),
+          type: convertType(features, constructor),
+          kindArg: convertKind(features, required(argument, 'type')),
           span,
         };
       }
-      return { kind: 'tapp', fn: convertType(constructor), arg: convertType(argument), span };
+      return { kind: 'tapp', fn: convertType(features, constructor), arg: convertType(features, argument), span };
     }
     case 'function': {
       const parameter = required(node, 'parameter');
       const result = required(node, 'result');
-      return { kind: 'tfun', from: convertQuantifiedType(parameter), to: convertQuantifiedType(result), span };
+      return {
+        kind: 'tfun',
+        from: convertQuantifiedType(features, parameter),
+        to: convertQuantifiedType(features, result),
+        span,
+      };
     }
     case 'linear_function': {
-      if (!extensions.has('LinearTypes')) {
+      if (!features.allows('linearTypes')) {
         throw syntaxError(span, '線形型の矢印を使うには、LinearTypes の拡張が要ります。');
       }
       const parameter = required(node, 'parameter');
       const result = required(node, 'result');
       return {
         kind: 'tfun',
-        from: convertQuantifiedType(parameter),
-        to: convertQuantifiedType(result),
+        from: convertQuantifiedType(features, parameter),
+        to: convertQuantifiedType(features, result),
         multiplicity: convertMultiplicity(field(node, 'multiplicity')),
         span,
       };
@@ -1639,12 +1686,12 @@ function convertType(node: Node): TypeExpr {
     case 'list': {
       const elements = fields(node, 'element');
       if (elements.length !== 1) throw unsupportedError(span, "昇格したリストの型（'[a, b]）");
-      return { kind: 'tlist', elem: convertType(elements[0]), span };
+      return { kind: 'tlist', elem: convertType(features, elements[0]), span };
     }
     case 'tuple': {
       const elements = fields(node, 'element');
       if (elements.length < 2) throw unsupportedError(span, 'タプルの型の節');
-      return { kind: 'ttuple', elems: elements.map(convertType), span };
+      return { kind: 'ttuple', elems: elements.map((node) => convertType(features, node)), span };
     }
     case 'unit': {
       return { kind: 'tcon', name: { name: '()', span }, span };
@@ -1654,15 +1701,14 @@ function convertType(node: Node): TypeExpr {
     case 'unboxed_sum':
     case 'prefix_unboxed_tuple':
     case 'prefix_unboxed_sum': {
-      const { name, elems } = unboxedParts(node, true);
+      const { name, elems } = unboxedParts(features, node, true);
       let type: TypeExpr = { kind: 'tcon', name: { name, span }, span };
-      for (const elem of elems) type = { kind: 'tapp', fn: type, arg: convertType(elem), span };
+      for (const elem of elems) type = { kind: 'tapp', fn: type, arg: convertType(features, elem), span };
       return type;
     }
     case 'star': {
-      if (!extensions.has('StarIsType'))
-        throw syntaxError(span, '* を種類として使うには、StarIsType の拡張が要ります。');
-      return { kind: 'tcon', name: { name: '*', span }, span };
+      // Whether `*` is the kind Type (StarIsType) or GHC.TypeLits' multiplication, the renamer decides.
+      return { kind: 'tcon', name: { name: '*', span }, star: true, span };
     }
     case 'parens': {
       const inner = field(node, 'type') ?? namedChildren(node)[0];
@@ -1670,43 +1716,41 @@ function convertType(node: Node): TypeExpr {
       if (inner.type === 'signature') {
         return {
           kind: 'tkinded',
-          type: convertType(required(inner, 'type')),
-          kindSig: convertKind(required(inner, 'kind')),
+          type: convertType(features, required(inner, 'type')),
+          kindSig: convertKind(features, required(inner, 'kind')),
           span,
         };
       }
-      return convertQuantifiedType(inner);
+      const type = convertQuantifiedType(features, inner);
+      // An application with `*` in it may be a product the renamer splits; a one-operand chain keeps the parentheses
+      // so that the product never joins an enclosing chain.
+      return hasStarArgument(type) ? { kind: 'tchain', items: [{ kind: 'operand', value: type }], span } : type;
     }
     case 'prefix_id': {
       const inner = namedChildren(node)[0];
       if (inner?.text === '->') return { kind: 'tcon', name: { name: '->', span }, span };
-      if (inner?.text !== '~') requireTypeOperators(node);
+      if (inner?.text !== '~') requireTypeOperators(features, node);
       return { kind: 'tcon', name: qualifiedName(inner ?? node).name, span };
     }
     case 'infix_chain':
     case 'infix': {
-      // A product the grammar read as an application joins the chain, so that fixities order it with the rest.
-      const items = chainItems(node, convertQuantifiedType).flatMap((item) =>
-        item.kind === 'operand' && item.value.kind === 'tchain' && starProducts.has(item.value)
-          ? item.value.items
-          : [item]
-      );
+      const items = chainItems(features, node, (operand) => convertQuantifiedType(features, operand));
       for (const item of items) {
-        if (item.kind === 'operator' && item.op.name !== '~') requireTypeOperators(node);
+        if (item.kind === 'operator' && item.op.name !== '~') requireTypeOperators(features, node);
         if (item.kind === 'negate') throw syntaxError(item.span, '書き方に誤りがあります。');
       }
       return { kind: 'tchain', items, span };
     }
     case 'literal': {
-      requireDataKinds(span);
-      const literal = convertLiteral(namedChildren(node)[0] ?? node);
+      requireDataKinds(features, span);
+      const literal = convertLiteral(features, namedChildren(node)[0] ?? node);
       if (literal.kind === 'int') return { kind: 'tlit', value: literal.value, span };
       if (literal.kind === 'string') return { kind: 'tlit', value: literal.value.join(''), span };
       throw unsupportedError(span, 'この形の型のリテラル');
     }
     case 'promoted': {
-      requireDataKinds(span);
-      return convertPromoted(namedChildren(node)[0] ?? node, span);
+      requireDataKinds(features, span);
+      return convertPromoted(features, namedChildren(node)[0] ?? node, span);
     }
     case 'wildcard': {
       throw unsupportedError(span, '型の中の _（PartialTypeSignatures）');
@@ -1720,53 +1764,21 @@ function convertType(node: Node): TypeExpr {
   }
 }
 
-/** The chains `starProductChain` makes of applications, which an enclosing chain takes the items of. */
-const starProducts = new WeakSet<TypeExpr>();
-
-/**
- * Under NoStarIsType, `*` is GHC.TypeLits' multiplication, but the grammar reads `3 * 4` after another operator as
- * `3` applied to `*` and `4`: the application's parts split at each `*` into a chain of products.
- */
-function starProductChain(node: Node): TypeExpr | undefined {
-  if (extensions.has('StarIsType')) return undefined;
-  const parts: Node[] = [];
-  let head: Node = node;
-  while (head.type === 'apply') {
-    parts.unshift(required(head, 'argument'));
-    head = field(head, 'constructor') ?? required(head, 'function');
+/** Whether a type is an application with the `*` token among its parts. */
+export function hasStarArgument(type: TypeExpr): boolean {
+  let head = type;
+  while (head.kind === 'tapp') {
+    if (head.arg.kind === 'tcon' && head.arg.star) return true;
+    head = head.fn;
   }
-  parts.unshift(head);
-  if (!parts.some((part) => part.type === 'star')) return undefined;
-  const span = spanOf(node);
-  const items: ChainItem<TypeExpr>[] = [];
-  let segment: Node[] = [];
-  const flush = (): void => {
-    if (segment.length === 0) throw syntaxError(span, '書き方に誤りがあります。');
-    let type = convertType(segment[0]);
-    for (const arg of segment.slice(1)) type = { kind: 'tapp', fn: type, arg: convertType(arg), span };
-    items.push({ kind: 'operand', value: type });
-    segment = [];
-  };
-  for (const part of parts) {
-    if (part.type !== 'star') {
-      segment.push(part);
-      continue;
-    }
-    flush();
-    requireTypeOperators(node);
-    items.push({ kind: 'operator', op: { name: '*', span: spanOf(part), isConstructor: false } });
-  }
-  flush();
-  const chain: TypeExpr = { kind: 'tchain', items, span };
-  starProducts.add(chain);
-  return chain;
+  return head !== type && head.kind === 'tcon' && head.star === true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Expressions
 
 // code-gauge-allow functionNcss -- One short case per expression node kind of the grammar.
-export function convertExpr(node: Node): Expr {
+export function convertExpr(features: FeatureGates<'convert'>, node: Node): Expr {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
@@ -1779,10 +1791,10 @@ export function convertExpr(node: Node): Expr {
     }
     case 'quote':
     case 'typed_quote': {
-      return convertQuote(node, span);
+      return convertQuote(features, node, span);
     }
     case 'th_quoted_name': {
-      requireTemplateHaskell(span, 'TemplateHaskellQuotes');
+      requireTemplateHaskell(features, span, true);
       const typeNode = field(node, 'type');
       const nameNode = typeNode ?? required(node, 'name');
       const { name, isConstructor } = qualifiedName(nameNode);
@@ -1793,17 +1805,17 @@ export function convertExpr(node: Node): Expr {
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
       return {
         kind: 'thSplice',
-        expr: convertExpr(inner.type === 'parens' ? required(inner, 'expression') : inner),
+        expr: convertExpr(features, inner.type === 'parens' ? required(inner, 'expression') : inner),
         span,
       };
     }
     case 'literal': {
-      const literal: Expr = { kind: 'lit', lit: convertLiteral(namedChildren(node)[0] ?? node), span };
-      if (literal.lit.kind !== 'string' || !extensions.has('OverloadedStrings')) return literal;
+      const literal: Expr = { kind: 'lit', lit: convertLiteral(features, namedChildren(node)[0] ?? node), span };
+      if (literal.lit.kind !== 'string' || !features.allows('overloadedStrings')) return literal;
       return { kind: 'app', fn: { kind: 'support', name: 'overloadedFromString', span }, arg: literal, span };
     }
     case 'label': {
-      if (!extensions.has('OverloadedLabels'))
+      if (!features.allows('overloadedLabels'))
         throw syntaxError(span, 'ラベルを使うには、OverloadedLabels の拡張が要ります。');
       return {
         kind: 'tyapp',
@@ -1816,7 +1828,7 @@ export function convertExpr(node: Node): Expr {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
       if (argument.type === 'explicit_type') {
-        if (!extensions.has('RequiredTypeArguments') || !extensions.has('ExplicitNamespaces')) {
+        if (!features.allows('typeArgumentKeyword')) {
           throw syntaxError(
             spanOf(argument),
             '(type t) を使うには、RequiredTypeArguments と ExplicitNamespaces の拡張が要ります。'
@@ -1824,36 +1836,40 @@ export function convertExpr(node: Node): Expr {
         }
         return {
           kind: 'tyapp',
-          expr: convertExpr(fn),
-          type: convertType(required(argument, 'type')),
+          expr: convertExpr(features, fn),
+          type: convertType(features, required(argument, 'type')),
           required: true,
           span,
         };
       }
       if (argument.type === 'type_application') {
-        if (!extensions.has('TypeApplications')) {
+        if (!features.allows('typeApplications')) {
           throw syntaxError(spanOf(argument), '型の適用（@）を使うには、TypeApplications の拡張が要ります。');
         }
         const typeNode = required(argument, 'type');
-        const type = typeNode.type === 'wildcard' ? undefined : convertType(typeNode);
-        return { kind: 'tyapp', expr: convertExpr(fn), type, span };
+        const type = typeNode.type === 'wildcard' ? undefined : convertType(features, typeNode);
+        return { kind: 'tyapp', expr: convertExpr(features, fn), type, span };
       }
       rejectUnsupported(argument);
-      return { kind: 'app', fn: convertExpr(fn), arg: convertExpr(argument), span };
+      return { kind: 'app', fn: convertExpr(features, fn), arg: convertExpr(features, argument), span };
     }
     case 'operator_chain': {
-      return { kind: 'chain', items: chainItems(node, convertExpr), span };
+      return {
+        kind: 'chain',
+        items: chainItems(features, node, (operand) => convertExpr(features, operand), true),
+        span,
+      };
     }
     case 'parens': {
       const inner = field(node, 'expression');
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-      return { kind: 'paren', expr: convertExpr(inner), span };
+      return { kind: 'paren', expr: convertExpr(features, inner), span };
     }
     case 'tuple':
     case 'list':
     case 'arithmetic_sequence':
     case 'list_comprehension': {
-      return convertCollection(node, span);
+      return convertCollection(features, node, span);
     }
     case 'unit': {
       return { kind: 'con', name: { name: '()', span }, span };
@@ -1862,9 +1878,9 @@ export function convertExpr(node: Node): Expr {
     case 'unboxed_tuple':
     case 'unboxed_sum':
     case 'prefix_unboxed_tuple': {
-      const { name, elems } = unboxedParts(node, false);
+      const { name, elems } = unboxedParts(features, node, false);
       let expr: Expr = { kind: 'con', name: { name, span }, span };
-      for (const elem of elems) expr = { kind: 'app', fn: expr, arg: convertExpr(elem), span };
+      for (const elem of elems) expr = { kind: 'app', fn: expr, arg: convertExpr(features, elem), span };
       return expr;
     }
     case 'prefix_tuple': {
@@ -1872,43 +1888,45 @@ export function convertExpr(node: Node): Expr {
     }
     case 'left_section':
     case 'right_section': {
-      return convertSection(node, span);
+      return convertSection(features, node, span);
     }
     case 'lambda': {
-      const patterns = namedChildren(required(node, 'patterns')).map((child) => strictPattern(convertPattern(child)));
-      return { kind: 'lambda', pats: patterns, body: convertExpr(required(node, 'expression')), span };
+      const patterns = namedChildren(required(node, 'patterns')).map((child) =>
+        strictPattern(features, convertPattern(features, child))
+      );
+      return { kind: 'lambda', pats: patterns, body: convertExpr(features, required(node, 'expression')), span };
     }
     case 'conditional': {
       return {
         kind: 'if',
-        cond: convertExpr(required(node, 'if')),
-        ifTrue: convertExpr(required(node, 'then')),
-        ifFalse: convertExpr(required(node, 'else')),
+        cond: convertExpr(features, required(node, 'if')),
+        ifTrue: convertExpr(features, required(node, 'then')),
+        ifFalse: convertExpr(features, required(node, 'else')),
         span,
       };
     }
     case 'case':
     case 'do': {
-      return convertBlock(node, span);
+      return convertBlock(features, node, span);
     }
     case 'lambda_case':
     case 'lambda_cases': {
-      return convertLambdaCase(node, span);
+      return convertLambdaCase(features, node, span);
     }
     case 'multi_way_if': {
-      return convertMultiWayIf(node, span);
+      return convertMultiWayIf(features, node, span);
     }
     case 'projection': {
-      requireRecordDot(span);
+      requireRecordDot(features, span);
       return {
         kind: 'projection',
-        expr: convertExpr(required(node, 'expression')),
+        expr: convertExpr(features, required(node, 'expression')),
         field: fieldLabel(required(node, 'field')),
         span,
       };
     }
     case 'projection_selector': {
-      requireRecordDot(span);
+      requireRecordDot(features, span);
       const name = generatedName('record', 0);
       const fields = fieldsOfSelector(node);
       let body: Expr = varOf(name, span);
@@ -1919,7 +1937,7 @@ export function convertExpr(node: Node): Expr {
       const bindsNode = field(node, 'binds');
       const implicitBinds = bindsNode ? namedChildren(bindsNode).filter((decl) => field(decl, 'implicit')) : [];
       if (implicitBinds.length > 0) {
-        requireImplicitParams(span);
+        requireImplicitParams(features, span);
         if (implicitBinds.length !== namedChildren(bindsNode as Node).length) {
           throw syntaxError(span, '暗黙のパラメータの束縛と、ふつうの束縛は、同じ let には書けません。');
         }
@@ -1927,33 +1945,33 @@ export function convertExpr(node: Node): Expr {
           kind: 'implicitLet',
           binds: implicitBinds.map((decl) => ({
             name: (field(decl, 'implicit') as Node).text.slice(1),
-            expr: convertExpr(required(required(decl, 'match'), 'expression')),
+            expr: convertExpr(features, required(required(decl, 'match'), 'expression')),
             span: spanOf(decl),
           })),
-          body: convertExpr(required(node, 'expression')),
+          body: convertExpr(features, required(node, 'expression')),
           span,
         };
       }
-      const { decls, forced } = strictBindings(convertLocalBinds(bindsNode));
+      const { decls, forced } = strictBindings(features, convertLocalBinds(features, bindsNode));
       return {
         kind: 'let',
         decls,
-        body: forcing(forced, convertExpr(required(node, 'expression')), span),
+        body: forcing(forced, convertExpr(features, required(node, 'expression')), span),
         span,
       };
     }
     case 'implicit_variable': {
-      requireImplicitParams(span);
+      requireImplicitParams(features, span);
       return { kind: 'implicit', name: node.text.slice(1), span };
     }
     case 'record': {
-      return convertRecordExpr(node);
+      return convertRecordExpr(features, node);
     }
     case 'signature': {
       const expression = field(node, 'expression');
       const type = field(node, 'type');
       if (!expression || !type) throw syntaxError(span, '書き方に誤りがあります。');
-      return { kind: 'typed', expr: convertExpr(expression), sig: convertSigType(type), span };
+      return { kind: 'typed', expr: convertExpr(features, expression), sig: convertSigType(features, type), span };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
@@ -1967,11 +1985,11 @@ function convertNameExpression(node: Node, span: Span): Expr {
   return isConstructor || name.name.startsWith(':') ? { kind: 'con', name, span } : { kind: 'var', name, span };
 }
 
-function convertSection(node: Node, span: Span): Expr {
+function convertSection(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
   if (node.type === 'left_section') {
     return {
       kind: 'leftSection',
-      left: convertExpr(required(node, 'left_operand')),
+      left: convertExpr(features, required(node, 'left_operand')),
       op: convertOperator(required(node, 'operator')),
       span,
     };
@@ -1981,19 +1999,23 @@ function convertSection(node: Node, span: Span): Expr {
   return {
     kind: 'rightSection',
     op: convertOperator(operator),
-    right: convertExpr(required(node, 'right_operand')),
+    right: convertExpr(features, required(node, 'right_operand')),
     span,
   };
 }
 
-function convertCollection(node: Node, span: Span): Expr {
+function convertCollection(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
   switch (node.type) {
     case 'tuple': {
-      return convertTupleExpr(node, span);
+      return convertTupleExpr(features, node, span);
     }
     case 'list': {
-      const list: Expr = { kind: 'list', elems: fields(node, 'element').map(convertExpr), span };
-      if (!extensions.has('OverloadedLists')) return list;
+      const list: Expr = {
+        kind: 'list',
+        elems: fields(node, 'element').map((node) => convertExpr(features, node)),
+        span,
+      };
+      if (!features.allows('overloadedLists')) return list;
       const count: Expr = { kind: 'lit', lit: { kind: 'int', value: BigInt(list.elems.length) }, span };
       const fromListN: Expr = { kind: 'support', name: 'overloadedFromListN', span };
       return { kind: 'app', fn: { kind: 'app', fn: fromListN, arg: count, span }, arg: list, span };
@@ -2003,24 +2025,24 @@ function convertCollection(node: Node, span: Span): Expr {
       const to = field(node, 'to');
       const sequence: Expr = {
         kind: 'arith',
-        from: convertExpr(required(node, 'from')),
-        next: step ? convertExpr(step) : undefined,
-        to: to ? convertExpr(to) : undefined,
+        from: convertExpr(features, required(node, 'from')),
+        next: step ? convertExpr(features, step) : undefined,
+        to: to ? convertExpr(features, to) : undefined,
         span,
       };
-      if (!extensions.has('OverloadedLists')) return sequence;
+      if (!features.allows('overloadedLists')) return sequence;
       return { kind: 'app', fn: { kind: 'support', name: 'overloadedFromList', span }, arg: sequence, span };
     }
     case 'list_comprehension': {
       const branches = fields(node, 'qualifiers').map((qualifiers) =>
-        fields(qualifiers, 'qualifier').map(convertStatement)
+        fields(qualifiers, 'qualifier').map((node) => convertStatement(features, node))
       );
-      if (branches.length > 1 && !extensions.has('ParallelListComp')) {
+      if (branches.length > 1 && !features.allows('parallelListComp')) {
         throw syntaxError(span, '並列の内包表記を使うには、ParallelListComp の拡張が要ります。');
       }
       return {
         kind: 'comprehension',
-        expr: convertExpr(required(node, 'expression')),
+        expr: convertExpr(features, required(node, 'expression')),
         quals: branches[0] ?? [],
         span,
         ...(branches.length > 1 ? { parallel: branches.slice(1) } : {}),
@@ -2033,16 +2055,16 @@ function convertCollection(node: Node, span: Span): Expr {
 }
 
 /** A tuple, or a tuple section such as `(, x)`, which is a function of the missing elements. */
-function convertTupleExpr(node: Node, span: Span): Expr {
+function convertTupleExpr(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
   const slots: (Expr | undefined)[] = [undefined];
   for (let index = 0; index < node.childCount; index++) {
     const child = node.child(index);
     if (!child || isComment(child)) continue;
     if (child.type === ',') slots.push(undefined);
-    else if (node.fieldNameForChild(index) === 'element') slots[slots.length - 1] = convertExpr(child);
+    else if (node.fieldNameForChild(index) === 'element') slots[slots.length - 1] = convertExpr(features, child);
   }
   if (slots.every((slot) => slot !== undefined)) return { kind: 'tuple', elems: slots as Expr[], span };
-  if (!extensions.has('TupleSections')) {
+  if (!features.allows('tupleSections')) {
     throw syntaxError(span, 'タプルの節を使うには、TupleSections の拡張が要ります。');
   }
   const pats: Pat[] = [];
@@ -2064,25 +2086,25 @@ export function generatedName(purpose: string, index: number): string {
 }
 
 /** Converts `\case` into a lambda of a `case`, and `\cases` into one of a `case` of a tuple of its parameters. */
-function convertLambdaCase(node: Node, span: Span): Expr {
+function convertLambdaCase(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
   const what = node.type === 'lambda_case' ? String.raw`\case` : String.raw`\cases`;
-  if (!extensions.has('LambdaCase')) throw syntaxError(span, `${what} を使うには、LambdaCase の拡張が要ります。`);
+  if (!features.allows('lambdaCase')) throw syntaxError(span, `${what} を使うには、LambdaCase の拡張が要ります。`);
   const alternatives = field(node, 'alternatives');
   const alternativeNodes = alternatives ? fields(alternatives, 'alternative') : [];
   if (node.type === 'lambda_case') {
-    if (alternativeNodes.length === 0 && !extensions.has('EmptyCase')) {
+    if (alternativeNodes.length === 0 && !features.allows('emptyCase')) {
       throw syntaxError(span, String.raw`選択肢のない \case を使うには、EmptyCase の拡張が要ります。`);
     }
     const name = generatedName('case', 0);
-    const alts = alternativeNodes.map(convertAlternative);
+    const alts = alternativeNodes.map((node) => convertAlternative(features, node));
     return lambdaOf([name], { kind: 'case', scrutinee: varOf(name, span), alts, span, what }, span);
   }
   const clauses = alternativeNodes.map((alternative) => {
     const patternsNode = field(alternative, 'patterns');
     const pats = patternsNode
-      ? namedChildren(patternsNode).map(convertPattern)
-      : [convertPattern(required(alternative, 'pattern'))];
-    return { pats, rhs: convertRhs(alternative, '->'), span: spanOf(alternative) };
+      ? namedChildren(patternsNode).map((node) => convertPattern(features, node))
+      : [convertPattern(features, required(alternative, 'pattern'))];
+    return { pats, rhs: convertRhs(features, alternative, '->'), span: spanOf(alternative) };
   });
   const arity = clauses[0]?.pats.length ?? 0;
   if (arity === 0) throw unsupportedError(span, String.raw`引数のない \cases`);
@@ -2104,16 +2126,16 @@ function convertLambdaCase(node: Node, span: Span): Expr {
 }
 
 /** Converts a multi-way `if` into a `case` of `()` whose only alternative has the guards. */
-function convertMultiWayIf(node: Node, span: Span): Expr {
-  if (!extensions.has('MultiWayIf'))
+function convertMultiWayIf(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
+  if (!features.allows('multiWayIf'))
     throw syntaxError(span, '複数の分岐の if を使うには、MultiWayIf の拡張が要ります。');
   const branches: GuardedExpr[] = fields(node, 'match').map((match) => {
     checkSeparator(match, '->');
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
     return {
-      guards: fields(guardsNode, 'guard').map(convertGuard),
-      expr: convertExpr(required(match, 'expression')),
+      guards: fields(guardsNode, 'guard').map((node) => convertGuard(features, node)),
+      expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
     };
   });
@@ -2131,10 +2153,10 @@ function convertMultiWayIf(node: Node, span: Span): Expr {
  * The constructor (or, in a type, the type) an unboxed tuple or sum names, with its parts: `(# a, b #)` is `(#,#)`
  * applied to `a` and `b`; `(# | x #)` is the second alternative of two, `(#|_#)`, applied to `x`.
  */
-function unboxedParts(node: Node, inType: boolean): { name: string; elems: Node[] } {
+function unboxedParts(features: FeatureGates<'convert'>, node: Node, inType: boolean): { name: string; elems: Node[] } {
   const span = spanOf(node);
   const sum = node.type === 'unboxed_sum' || node.type === 'prefix_unboxed_sum';
-  if (!extensions.has(sum ? 'UnboxedSums' : 'UnboxedTuples')) {
+  if (!features.allows(sum ? 'unboxedSums' : 'unboxedTuples')) {
     const extension = sum ? 'UnboxedSums' : 'UnboxedTuples';
     throw syntaxError(span, `ボックス化されない${sum ? '和型' : 'タプル'}を使うには、${extension} の拡張が要ります。`);
   }
@@ -2152,30 +2174,30 @@ function unboxedParts(node: Node, inType: boolean): { name: string; elems: Node[
   return { name: unboxedSumConName(before, bars + 1), elems };
 }
 
-function requireTemplateHaskell(span: Span, quotes?: string): void {
-  if (!extensions.has('TemplateHaskell') && !(quotes && extensions.has(quotes))) {
+function requireTemplateHaskell(features: FeatureGates<'convert'>, span: Span, quotes = false): void {
+  if (!features.allows(quotes ? 'templateHaskellQuotes' : 'templateHaskell')) {
     throw syntaxError(span, 'Template Haskell を使うには、TemplateHaskell の拡張が要ります。');
   }
 }
 
 /** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`, into code building its tree. */
-function convertQuote(node: Node, span: Span): Expr {
-  requireTemplateHaskell(span, 'TemplateHaskellQuotes');
+function convertQuote(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
+  requireTemplateHaskell(features, span, true);
   const builder = new QuoteBuilder(span);
   const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
   if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
   switch (inner.type) {
     case 'quoted_pattern': {
-      return builder.pattern(convertPattern(namedChildren(inner)[0]));
+      return builder.pattern(convertPattern(features, namedChildren(inner)[0]));
     }
     case 'quoted_type': {
-      return builder.type(convertType(namedChildren(inner)[0]));
+      return builder.type(convertType(features, namedChildren(inner)[0]));
     }
     case 'quoted_decls': {
-      return builder.declarations(fields(inner, 'declaration').flatMap(convertTopDecl));
+      return builder.declarations(fields(inner, 'declaration').flatMap((node) => convertTopDecl(features, node)));
     }
     default: {
-      const expr = convertExpr(namedChildren(inner)[0]);
+      const expr = convertExpr(features, namedChildren(inner)[0]);
       const built = builder.expression(expr);
       if (node.type !== 'typed_quote') return built;
       // The typed quote's function only gives the type of its expression, which it never runs.
@@ -2190,8 +2212,8 @@ function convertQuote(node: Node, span: Span): Expr {
   }
 }
 
-function requireRecordDot(span: Span): void {
-  if (!extensions.has('OverloadedRecordDot')) {
+function requireRecordDot(features: FeatureGates<'convert'>, span: Span): void {
+  if (!features.allows('overloadedRecordDot')) {
     throw syntaxError(span, 'レコードのドット記法を使うには、OverloadedRecordDot の拡張が要ります。');
   }
 }
@@ -2218,29 +2240,31 @@ function lambdaOf(names: string[], body: Expr, span: Span): Expr {
   };
 }
 
-function convertBlock(node: Node, span: Span): Expr {
+function convertBlock(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
   switch (node.type) {
     case 'case': {
       const scrutinee = unnamedFieldChildren(node)[0];
       if (!scrutinee) throw syntaxError(span, '書き方に誤りがあります。');
       const alternatives = field(node, 'alternatives');
-      if ((!alternatives || fields(alternatives, 'alternative').length === 0) && !extensions.has('EmptyCase')) {
+      if ((!alternatives || fields(alternatives, 'alternative').length === 0) && !features.allows('emptyCase')) {
         throw syntaxError(span, '選択肢のない case を使うには、EmptyCase の拡張が要ります。');
       }
       return {
         kind: 'case',
-        scrutinee: convertExpr(scrutinee),
-        alts: alternatives ? fields(alternatives, 'alternative').map(convertAlternative) : [],
+        scrutinee: convertExpr(features, scrutinee),
+        alts: alternatives ? fields(alternatives, 'alternative').map((node) => convertAlternative(features, node)) : [],
         span,
       };
     }
     case 'do': {
       const doModule = namedChildren(node).find((child) => child.type === 'do_module');
-      if (doModule) return convertQualifiedDo(node, moduleName(required(doModule, 'module')), span);
-      const statements = fields(node, 'statement').flatMap((child) => withForcedLets(convertStatement(child)));
+      if (doModule) return convertQualifiedDo(features, node, moduleName(required(doModule, 'module')), span);
+      const statements = fields(node, 'statement').flatMap((child) =>
+        withForcedLets(features, convertStatement(features, child))
+      );
       if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
       if (hasToken(node, 'mdo')) {
-        if (!extensions.has('RecursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
+        if (!features.allows('recursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
         const last = statements.at(-1) as Stmt;
         const rest = statements.slice(0, -1);
         return { kind: 'do', stmts: rest.length > 0 ? [{ kind: 'rec', stmts: rest, span }, last] : [last], span };
@@ -2260,11 +2284,11 @@ function convertBlock(node: Node, span: Span): Expr {
 /** What the case of a qualified do block's bind is, whose failing alternative the renamer may drop. */
 export const QUALIFIED_DO_BIND = 'qualified do bind';
 
-function convertQualifiedDo(node: Node, module: string, span: Span): Expr {
-  if (!extensions.has('QualifiedDo'))
+function convertQualifiedDo(features: FeatureGates<'convert'>, node: Node, module: string, span: Span): Expr {
+  if (!features.allows('qualifiedDo'))
     throw syntaxError(span, '修飾つきの do を使うには、QualifiedDo の拡張が要ります。');
   if (hasToken(node, 'mdo')) throw unsupportedError(span, '修飾つきの mdo');
-  const statements = fields(node, 'statement').map(convertStatement);
+  const statements = fields(node, 'statement').map((node) => convertStatement(features, node));
   if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
   const qualified = (name: string, at: Span): Expr => ({
     kind: 'var',
@@ -2340,15 +2364,15 @@ function plainRhs(expr: Expr, span: Span): Rhs {
 
 /** Whether a pattern always matches, judging by its form alone. */
 
-function convertRecordPattern(node: Node, span: Span): Pat {
-  const con = convertPattern(required(node, 'constructor'));
+function convertRecordPattern(features: FeatureGates<'convert'>, node: Node, span: Span): Pat {
+  const con = convertPattern(features, required(node, 'constructor'));
   if (con.kind !== 'pcon' || con.args.length > 0) throw syntaxError(span, '書き方に誤りがあります。');
   let wildcard: Span | undefined;
   const fieldPatterns = fields(node, 'field').flatMap((fieldNode) => {
     rejectUnsupported(fieldNode);
     const wildcardNode = namedChildren(fieldNode).find((child) => child.type === 'wildcard');
     if (wildcardNode) {
-      wildcard = recordWildcard(wildcardNode);
+      wildcard = recordWildcard(features, wildcardNode);
       return [];
     }
     const fieldName = qualifiedName(required(fieldNode, 'field')).name;
@@ -2358,10 +2382,10 @@ function convertRecordPattern(node: Node, span: Span): Pat {
       {
         field: fieldName,
         pat: pattern
-          ? convertPattern(pattern)
+          ? convertPattern(features, pattern)
           : ({
               kind: 'pvar',
-              name: { name: punnedName(fieldName, fieldSpan), span: fieldSpan },
+              name: { name: punnedName(features, fieldName, fieldSpan), span: fieldSpan },
               span: fieldSpan,
             } as Pat),
         span: fieldSpan,
@@ -2372,21 +2396,21 @@ function convertRecordPattern(node: Node, span: Span): Pat {
 }
 
 /** The variable a punned field `x` (or `M.x`) binds or reads, which requires NamedFieldPuns. */
-function punnedName(field: QName, span: Span): string {
-  if (!extensions.has('NamedFieldPuns')) {
+function punnedName(features: FeatureGates<'convert'>, field: QName, span: Span): string {
+  if (!features.allows('namedFieldPuns')) {
     throw syntaxError(span, 'フィールド名だけを書くには、NamedFieldPuns の拡張が要ります。');
   }
   return field.name;
 }
 
-function recordWildcard(node: Node): Span {
-  if (!extensions.has('RecordWildCards')) {
+function recordWildcard(features: FeatureGates<'convert'>, node: Node): Span {
+  if (!features.allows('recordWildCards')) {
     throw syntaxError(spanOf(node), 'レコードの .. を使うには、RecordWildCards の拡張が要ります。');
   }
   return spanOf(node);
 }
 
-function convertRecordExpr(node: Node): Expr {
+function convertRecordExpr(features: FeatureGates<'convert'>, node: Node): Expr {
   const span = spanOf(node);
   const target = required(node, 'expression');
   let wildcard: Span | undefined;
@@ -2395,7 +2419,7 @@ function convertRecordExpr(node: Node): Expr {
     if (fieldNode.type !== 'field_update') throw syntaxError(spanOf(fieldNode), '書き方に誤りがあります。');
     const wildcardNode = namedChildren(fieldNode).find((child) => child.type === 'wildcard');
     if (wildcardNode) {
-      wildcard = recordWildcard(wildcardNode);
+      wildcard = recordWildcard(features, wildcardNode);
       return [];
     }
     const fieldNameNode = required(fieldNode, 'field');
@@ -2410,35 +2434,35 @@ function convertRecordExpr(node: Node): Expr {
     return [
       {
         field: fieldName,
-        value: value ? convertExpr(value) : varOf(punnedName(fieldName, fieldSpan), fieldSpan),
+        value: value ? convertExpr(features, value) : varOf(punnedName(features, fieldName, fieldSpan), fieldSpan),
         span: fieldSpan,
       },
     ];
   });
-  const converted = convertExpr(target);
+  const converted = convertExpr(features, target);
   if (converted.kind === 'con') return { kind: 'recordCon', con: converted.name, fields: fieldBinds, span, wildcard };
   if (wildcard) throw syntaxError(wildcard, 'レコードの更新には、.. は書けません。');
   if (fieldBinds.length === 0) throw syntaxError(span, 'レコードの更新には、項目を1つ以上書いてください。');
   return { kind: 'recordUpdate', expr: converted, fields: fieldBinds, span };
 }
 
-function convertAlternative(node: Node): Alt {
+function convertAlternative(features: FeatureGates<'convert'>, node: Node): Alt {
   if (field(node, 'patterns')) throw unsupported(node);
   return {
-    pat: strictPattern(convertPattern(required(node, 'pattern'))),
-    rhs: convertRhs(node, '->'),
+    pat: strictPattern(features, convertPattern(features, required(node, 'pattern'))),
+    rhs: convertRhs(features, node, '->'),
     span: spanOf(node),
   };
 }
 
 /** Converts a statement of a `do` block or a qualifier of a list comprehension. */
-function convertStatement(node: Node): Stmt {
+function convertStatement(features: FeatureGates<'convert'>, node: Node): Stmt {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
     case 'exp':
     case 'boolean': {
-      return { kind: 'exp', expr: convertExpr(namedChildren(node)[0] ?? node), span };
+      return { kind: 'exp', expr: convertExpr(features, namedChildren(node)[0] ?? node), span };
     }
     case 'bind':
     case 'generator': {
@@ -2447,29 +2471,29 @@ function convertStatement(node: Node): Stmt {
       }
       const patternNode = field(node, 'pattern') ?? field(node, 'name');
       if (!patternNode) throw syntaxError(span, '書き方に誤りがあります。');
-      const pat = strictPattern(convertPattern(patternNode));
-      return { kind: 'bind', pat, expr: convertExpr(required(node, 'expression')), span };
+      const pat = strictPattern(features, convertPattern(features, patternNode));
+      return { kind: 'bind', pat, expr: convertExpr(features, required(node, 'expression')), span };
     }
     case 'let': {
-      return { kind: 'let', decls: convertLocalBinds(field(node, 'binds')), span };
+      return { kind: 'let', decls: convertLocalBinds(features, field(node, 'binds')), span };
     }
     case 'transform':
     case 'group': {
-      if (!extensions.has('TransformListComp')) {
+      if (!features.allows('transformListComp')) {
         throw syntaxError(span, 'then を使うには、TransformListComp の拡張が要ります。');
       }
       const key = field(node, 'key');
       return {
         kind: 'transform',
-        fn: convertExpr(required(node, node.type === 'group' ? 'classifier' : 'transformation')),
-        by: key ? convertExpr(key) : undefined,
+        fn: convertExpr(features, required(node, node.type === 'group' ? 'classifier' : 'transformation')),
+        by: key ? convertExpr(features, key) : undefined,
         group: node.type === 'group',
         span,
       };
     }
     case 'rec': {
-      if (!extensions.has('RecursiveDo')) throw syntaxError(span, 'rec を使うには、RecursiveDo の拡張が要ります。');
-      return { kind: 'rec', stmts: fields(node, 'statement').map(convertStatement), span };
+      if (!features.allows('recursiveDo')) throw syntaxError(span, 'rec を使うには、RecursiveDo の拡張が要ります。');
+      return { kind: 'rec', stmts: fields(node, 'statement').map((node) => convertStatement(features, node)), span };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
@@ -2477,14 +2501,19 @@ function convertStatement(node: Node): Stmt {
   }
 }
 
-function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainItem<T>[] {
+function chainItems<T>(
+  features: FeatureGates<'convert'>,
+  node: Node,
+  convertOperand: (operand: Node) => T,
+  expressions = false
+): ChainItem<T>[] {
   const items: ChainItem<T>[] = [];
   for (let index = 0; index < node.childCount; index++) {
     const child = node.child(index);
     if (!child || isComment(child)) continue;
     const fieldName = node.fieldNameForChild(index);
-    const negated = fieldName === 'operator' ? tightNegation(child, node.child(index + 1)) : undefined;
-    if (negated && convertOperand === (convertExpr as unknown)) {
+    const negated = fieldName === 'operator' ? tightNegation(features, child, node.child(index + 1)) : undefined;
+    if (negated && expressions) {
       // NegativeLiterals and LexicalNegation read `f -1` as `f (-1)`: the minus belongs to what follows it.
       const operand = negated as unknown as T;
       const previous = items.at(-1);
@@ -2505,7 +2534,7 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
       items.push({ kind: 'negate', span: spanOf(child) });
     } else if (fieldName === 'operator') {
       if (child.type === 'promoted') {
-        requireDataKinds(spanOf(child));
+        requireDataKinds(features, spanOf(child));
         const inner = namedChildren(child)[0] ?? child;
         items.push({ kind: 'operator', op: { ...convertOperator(inner), promoted: true } });
         continue;
@@ -2523,28 +2552,28 @@ function chainItems<T>(node: Node, convertOperand: (operand: Node) => T): ChainI
  * The negation a minus right before its operand stands for, as NegativeLiterals reads `-1` and LexicalNegation reads
  * `-x`, when the minus is not right after another token.
  */
-function tightNegation(operator: Node, next: Node | null): Expr | undefined {
+function tightNegation(features: FeatureGates<'convert'>, operator: Node, next: Node | null): Expr | undefined {
   if (!next || operator.text !== '-' || next.startIndex !== operator.endIndex) return undefined;
   const before = operator.tree.rootNode.text[operator.startIndex - 1] ?? ' ';
   if (!/[\s([,;]/.test(before)) return undefined;
   const isNumber = next.type === 'literal' && ['integer', 'float'].includes(namedChildren(next)[0]?.type ?? '');
-  if (!(extensions.has('LexicalNegation') || (isNumber && extensions.has('NegativeLiterals')))) return undefined;
+  if (!(features.allows('lexicalNegation') || (isNumber && features.allows('negativeLiterals')))) return undefined;
   const span = { ...spanOf(operator), endRow: spanOf(next).endRow, endCol: spanOf(next).endCol };
-  const operand = convertExpr(next);
+  const operand = convertExpr(features, next);
   if (operand.kind === 'lit' && operand.lit.kind === 'int') {
     return { kind: 'lit', lit: { kind: 'int', value: -operand.lit.value }, span };
   }
   return { kind: 'paren', expr: { kind: 'neg', expr: operand, span }, span };
 }
 
-function convertLiteral(node: Node): SourceLiteral {
+function convertLiteral(features: FeatureGates<'convert'>, node: Node): SourceLiteral {
   const span = spanOf(node);
   // MagicHash's literals are values of the machine's own types, Int# and the like, whose size depends on the CPU.
   if (node.text.endsWith('#')) throw unsupportedError(span, `ボックス化されない値のリテラル（${node.text}）`);
   switch (node.type) {
     case 'integer':
     case 'float': {
-      const literal = parseNumberLiteral(node.text, span, extensions);
+      const literal = parseNumberLiteral(node.text, span, features);
       return literal.kind === 'int' ? { ...literal, text: node.text } : literal;
     }
     case 'char': {
@@ -2553,7 +2582,7 @@ function convertLiteral(node: Node): SourceLiteral {
     case 'string': {
       return {
         kind: 'string',
-        value: parseStringLiteral(node.text, span, extensions.has('MultilineStrings')),
+        value: parseStringLiteral(node.text, span, features.allows('multilineStrings')),
         text: node.text,
       };
     }
@@ -2567,7 +2596,7 @@ function convertLiteral(node: Node): SourceLiteral {
 // Patterns
 
 // code-gauge-allow functionNcss -- One short case per pattern node kind of the grammar.
-export function convertPattern(node: Node): Pat {
+export function convertPattern(features: FeatureGates<'convert'>, node: Node): Pat {
   rejectUnsupported(node);
   const span = spanOf(node);
   switch (node.type) {
@@ -2575,8 +2604,8 @@ export function convertPattern(node: Node): Pat {
       return { kind: 'pwild', span };
     }
     case 'literal': {
-      const lit = convertLiteral(namedChildren(node)[0] ?? node);
-      if (lit.kind === 'string' && extensions.has('OverloadedStrings')) {
+      const lit = convertLiteral(features, namedChildren(node)[0] ?? node);
+      if (lit.kind === 'string' && features.allows('overloadedStrings')) {
         // GHC matches an overloaded string by (==) with the literal's value at the pattern's type.
         const matches: Expr = {
           kind: 'app',
@@ -2596,7 +2625,7 @@ export function convertPattern(node: Node): Pat {
     }
     case 'negation': {
       const number = required(node, 'number');
-      return { kind: 'plit', lit: convertLiteral(number), negative: true, span };
+      return { kind: 'plit', lit: convertLiteral(features, number), negative: true, span };
     }
     case 'variable':
     case 'constructor':
@@ -2611,18 +2640,18 @@ export function convertPattern(node: Node): Pat {
       const fn = required(node, 'function');
       const argument = required(node, 'argument');
       rejectUnsupported(argument);
-      const head = convertPattern(fn);
+      const head = convertPattern(features, fn);
       if (head.kind !== 'pcon') throw syntaxError(span, 'パターンの中で、関数は呼び出せません。');
-      return { kind: 'pcon', con: head.con, args: [...head.args, convertPattern(argument)], span };
+      return { kind: 'pcon', con: head.con, args: [...head.args, convertPattern(features, argument)], span };
     }
     case 'parens': {
       const inner = field(node, 'pattern');
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-      return { ...convertPattern(inner), span };
+      return { ...convertPattern(features, inner), span };
     }
     case 'tuple': {
       const elements = fields(node, 'element');
-      return { kind: 'ptuple', elems: elements.map(convertPattern), span };
+      return { kind: 'ptuple', elems: elements.map((node) => convertPattern(features, node)), span };
     }
     case 'unit': {
       return { kind: 'pcon', con: { name: '()', span }, args: [], span };
@@ -2630,15 +2659,19 @@ export function convertPattern(node: Node): Pat {
     case 'unboxed_unit':
     case 'unboxed_tuple':
     case 'unboxed_sum': {
-      const { name, elems } = unboxedParts(node, false);
-      return { kind: 'pcon', con: { name, span }, args: elems.map(convertPattern), span };
+      const { name, elems } = unboxedParts(features, node, false);
+      return { kind: 'pcon', con: { name, span }, args: elems.map((node) => convertPattern(features, node)), span };
     }
     case 'prefix_tuple': {
       return { kind: 'pcon', con: { name: node.text.replaceAll(/\s+/g, ''), span }, args: [], span };
     }
     case 'list': {
-      const list: Pat = { kind: 'plist', elems: fields(node, 'element').map(convertPattern), span };
-      if (!extensions.has('OverloadedLists')) return list;
+      const list: Pat = {
+        kind: 'plist',
+        elems: fields(node, 'element').map((node) => convertPattern(features, node)),
+        span,
+      };
+      if (!features.allows('overloadedLists')) return list;
       return {
         kind: 'pview',
         expr: { kind: 'support', name: 'overloadedToList', span },
@@ -2651,55 +2684,59 @@ export function convertPattern(node: Node): Pat {
       return {
         kind: 'pas',
         name: plainName(required(node, 'bind')),
-        pat: convertPattern(required(node, 'pattern')),
+        pat: convertPattern(features, required(node, 'pattern')),
         span,
       };
     }
     case 'record': {
-      return convertRecordPattern(node, span);
+      return convertRecordPattern(features, node, span);
     }
     case 'infix_chain': {
-      return { kind: 'pchain', items: chainItems(node, convertPattern), span };
+      return {
+        kind: 'pchain',
+        items: chainItems(features, node, (operand) => convertPattern(features, operand)),
+        span,
+      };
     }
     case 'strict': {
-      if (!extensions.has('BangPatterns'))
+      if (!features.allows('bangPatterns'))
         throw syntaxError(span, '! のパターンを使うには、BangPatterns の拡張が要ります。');
-      return { kind: 'pbang', pat: convertPattern(required(node, 'pattern')), span };
+      return { kind: 'pbang', pat: convertPattern(features, required(node, 'pattern')), span };
     }
     case 'irrefutable': {
-      return { kind: 'plazy', pat: convertPattern(required(node, 'pattern')), span };
+      return { kind: 'plazy', pat: convertPattern(features, required(node, 'pattern')), span };
     }
     case 'view_pattern': {
-      if (!extensions.has('ViewPatterns'))
+      if (!features.allows('viewPatterns'))
         throw syntaxError(span, 'ビューパターンを使うには、ViewPatterns の拡張が要ります。');
       const expression = required(node, 'expression');
       return {
         kind: 'pview',
-        expr: convertExpr(expression),
+        expr: convertExpr(features, expression),
         exprText: expression.text,
-        pat: convertPattern(required(node, 'pattern')),
+        pat: convertPattern(features, required(node, 'pattern')),
         span,
       };
     }
     case 'or_pattern': {
-      if (!extensions.has('OrPatterns'))
+      if (!features.allows('orPatterns'))
         throw syntaxError(span, 'or パターンを使うには、OrPatterns の拡張が要ります。');
-      return { kind: 'por', alts: fields(node, 'alternative').map(convertPattern), span };
+      return { kind: 'por', alts: fields(node, 'alternative').map((node) => convertPattern(features, node)), span };
     }
     case 'type_binder': {
-      requireTypeAbstractions(span);
+      requireTypeAbstractions(features, span);
       const typeNode = required(node, 'type');
       if (typeNode.type !== 'variable') throw unsupportedError(span, 'この形の型の束縛');
       return { kind: 'ptybinder', name: plainName(typeNode), span };
     }
     case 'signature': {
-      if (!extensions.has('ScopedTypeVariables')) {
+      if (!features.allows('patternSignatures')) {
         throw syntaxError(span, 'パターンに型シグネチャを書くには、ScopedTypeVariables の拡張が要ります。');
       }
       return {
         kind: 'psig',
-        pat: convertPattern(required(node, 'pattern')),
-        type: convertType(required(node, 'type')),
+        pat: convertPattern(features, required(node, 'pattern')),
+        type: convertType(features, required(node, 'type')),
         span,
       };
     }

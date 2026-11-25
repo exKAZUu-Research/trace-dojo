@@ -1,4 +1,5 @@
 import { compileError, unsupportedError } from './errors';
+import { featureAllowed, type FeatureGates, type FeatureOf, type Phase } from './features';
 
 /**
  * The language extensions GHC 9.14 knows, which `{-# LANGUAGE #-}` may name. A name outside this list is an error, as
@@ -101,9 +102,12 @@ const IMPLICATIONS: Record<string, string> = {
   IncoherentInstances: '+OverlappingInstances',
 };
 
-/** The extensions a program turned on, starting from GHC's default language, GHC2021. */
+/**
+ * The extensions a program turned on, starting from GHC's default language, GHC2021: resolved once, with every
+ * implication, and read-only afterwards. Each phase asks it only through the gates of that phase's features.
+ */
 export class Extensions {
-  private readonly enabled: Set<string>;
+  private readonly enabled = new Set<string>();
 
   /**
    * @param items The `LANGUAGE` items in order, such as `LambdaCase`, `NoImplicitPrelude`, or `GHC2024`. A language
@@ -111,12 +115,13 @@ export class Extensions {
    */
   constructor(items: readonly string[] = []) {
     const language = items.findLast((item) => Object.hasOwn(LANGUAGES, item)) ?? 'GHC2021';
-    this.enabled = new Set(words(LANGUAGES[language]));
+    for (const name of words(LANGUAGES[language])) this.enabled.add(name);
     for (const item of items) if (!Object.hasOwn(LANGUAGES, item)) this.apply(item, true);
   }
 
-  has(name: string): boolean {
-    return this.enabled.has(canonical(name));
+  /** The gates of the features `phase` decides. */
+  gates<P extends Phase>(_phase: P): FeatureGates<P> {
+    return { allows: (feature: FeatureOf<P>) => featureAllowed(feature, this.enabled) };
   }
 
   /**

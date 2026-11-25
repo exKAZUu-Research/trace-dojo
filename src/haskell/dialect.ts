@@ -26,8 +26,9 @@ interface Layout {
 
 export function validateDialect(root: Node, extensions: Extensions): void {
   const reserved = new Set(reservedNames);
-  if (extensions.has('RecursiveDo')) for (const name of ['rec', 'mdo']) reserved.add(name);
-  new DialectValidator(root, extensions.has('BlockArguments'), reserved).run();
+  const features = extensions.gates('parse');
+  if (features.allows('recursiveDoKeywords')) for (const name of ['rec', 'mdo']) reserved.add(name);
+  new DialectValidator(root, features.allows('blockArguments'), reserved).run();
 }
 
 class DialectValidator {
