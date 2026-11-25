@@ -732,7 +732,7 @@ export abstract class ExpressionConverter {
   }
 
   /** Reads a declaration's modifiers, rejecting those that Kotlin/JVM does not accept or this environment does not run. */
-  convertModifiers(node: Node | undefined, allowsValueClass = false): Modifiers {
+  convertModifiers(node: Node | undefined, target?: ModifierTarget, allowsValueClass = false): Modifiers {
     const keywords = new Set<string>();
     const annotations: Modifiers['annotations'] = [];
     let contextParameters: Modifiers['contextParameters'];
@@ -761,6 +761,9 @@ export abstract class ExpressionConverter {
       if (!this.isLibrary && keyword === 'external') throw unavailable(child, '外部の関数の宣言（external）');
       if (keyword === 'expect' || keyword === 'actual')
         throw syntaxError(child, `${keyword} 修飾子は、マルチプラットフォームのプロジェクトでだけ使えます。`);
+      const targets = MODIFIER_TARGETS[keyword];
+      if (!this.isLibrary && target && targets && !targets.includes(target))
+        throw syntaxError(child, `${keyword} 修飾子は、${TARGET_NAMES[target]}には付けられません。`);
       if (keywords.has(keyword)) throw syntaxError(child, `${keyword} 修飾子が2回書かれています。`);
       keywords.add(keyword);
     }
@@ -779,6 +782,75 @@ export abstract class ExpressionConverter {
     return convertAnnotation(node, (argument) => this.convertArgument(argument));
   }
 }
+
+/** The kinds of declarations whose modifiers kotlinc checks against the kinds each modifier applies to. */
+export type ModifierTarget =
+  | 'class'
+  | 'object'
+  | 'companion'
+  | 'function'
+  | 'property'
+  | 'accessor'
+  | 'parameter'
+  | 'classParameter'
+  | 'constructor'
+  | 'typeAlias'
+  | 'enumEntry';
+
+const TARGET_NAMES: Record<ModifierTarget, string> = {
+  class: 'クラス',
+  object: 'object',
+  companion: 'companion object',
+  function: '関数',
+  property: 'プロパティ',
+  accessor: 'get・set',
+  parameter: '関数の引数',
+  classParameter: 'コンストラクタの引数',
+  constructor: 'コンストラクタ',
+  typeAlias: '型の別名',
+  enumEntry: '列挙定数',
+};
+
+const VISIBLE: ModifierTarget[] = [
+  'class',
+  'object',
+  'companion',
+  'function',
+  'property',
+  'accessor',
+  'classParameter',
+  'constructor',
+  'typeAlias',
+];
+
+/** The kinds of declarations each modifier applies to, as kotlinc's "modifier is not applicable to" rules say. */
+const MODIFIER_TARGETS: Record<string, ModifierTarget[]> = {
+  public: VISIBLE,
+  private: VISIBLE,
+  protected: VISIBLE,
+  internal: VISIBLE,
+  open: ['class', 'function', 'property', 'classParameter'],
+  abstract: ['class', 'function', 'property', 'classParameter'],
+  final: ['class', 'function', 'property', 'classParameter'],
+  override: ['function', 'property', 'classParameter'],
+  data: ['class', 'object'],
+  sealed: ['class'],
+  enum: ['class'],
+  annotation: ['class'],
+  inner: ['class'],
+  value: ['class'],
+  companion: ['companion'],
+  operator: ['function'],
+  infix: ['function'],
+  tailrec: ['function'],
+  suspend: ['function'],
+  inline: ['function', 'property', 'accessor'],
+  noinline: ['parameter'],
+  crossinline: ['parameter'],
+  vararg: ['parameter', 'classParameter'],
+  const: ['property'],
+  lateinit: ['property'],
+};
 
 /** Modifiers that contradict each other, which kotlinc rejects together. */
 const EXCLUSIVE_MODIFIERS = [

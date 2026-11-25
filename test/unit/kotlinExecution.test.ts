@@ -6595,6 +6595,14 @@ test.each([
 });
 
 test.each([
+  ['a modifier of classes on a function', 'sealed fun f() = 1\nfun main() { println(f()) }', false],
+  ['a modifier of functions on a class', 'suspend class A\nfun main() { println(1) }', false],
+  ['a getter less visible than its property', 'class A { var x = 0; private get }\nfun main() { println(1) }', false],
+  [
+    'modifiers on the declarations they apply to',
+    'data object O\nclass D { companion object { const val K = 1 } }\nfun main() { println(listOf(O, D.K)) }',
+    true,
+  ],
   [
     'an annotation with arguments on a class',
     'annotation class A(val s: String)\n@A("x") class C\nfun main() { println(1) }',

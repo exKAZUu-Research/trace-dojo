@@ -26,6 +26,7 @@ import type {
   TypeAliasDecl,
   TypeParameterDecl,
 } from './ast';
+import { VISIBILITY_KEYWORDS } from './ast';
 import { ExpressionConverter } from './convertExpression';
 import {
   firstOfType,
@@ -39,6 +40,10 @@ import {
 } from './convertSupport';
 
 const NO_MODIFIERS = new Set<string>();
+
+function visibilityOf(keywords: ReadonlySet<string>): string {
+  return VISIBILITY_KEYWORDS.find((keyword) => keywords.has(keyword)) ?? 'public';
+}
 
 /**
  * Rejects a setter on the getter's line after an expression body without `;`, as kotlinc reads `get() = c set(v) {}`
@@ -139,7 +144,7 @@ export class Converter extends ExpressionConverter {
       kind: 'typeAlias',
       row: rowOf(node),
       name: identifierName(required(node.childForFieldName('type'))),
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers')),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'typeAlias'),
       typeParameters: this.convertTypeParameterList(firstOfType(node, 'type_parameters')),
       type: this.convertType(typeNode),
     };
@@ -192,7 +197,7 @@ export class Converter extends ExpressionConverter {
     let modifiers: Modifiers = { keywords: NO_MODIFIERS, annotations: [] };
     for (const child of named(node)) {
       if (child.type === 'parameter_modifiers') {
-        modifiers = this.convertModifiers(child);
+        modifiers = this.convertModifiers(child, 'parameter');
         continue;
       }
       if (child.type === 'parameter') {
@@ -217,7 +222,7 @@ export class Converter extends ExpressionConverter {
   // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private convertFunction(node: Node, isTopLevel: boolean): FunctionDecl {
     const parts = named(node);
-    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'));
+    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'), 'function');
     const nameNode = required(node.childForFieldName('name'));
     const parametersNode = required(firstOfType(node, 'function_value_parameters'));
     const bodyNode = firstOfType(node, 'function_body');
@@ -265,7 +270,7 @@ export class Converter extends ExpressionConverter {
 
   private convertProperty(node: Node, isTopLevel: boolean): PropertyDecl {
     const parts = named(node);
-    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'));
+    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'), 'property');
     const variable = required(firstOfType(node, 'variable_declaration'));
     const declared = this.convertVariableDeclaration(variable);
     if (declared.name === undefined) throw syntaxError(variable, '_ は変数の名前に使えません。');
@@ -282,6 +287,11 @@ export class Converter extends ExpressionConverter {
     if (getterNode && setterNode) checkAccessorsSeparated(node, getterNode, setterNode);
     if (!isTopLevel && this.isLocal && (getterNode || setterNode))
       throw syntaxError(node, 'ローカル変数には get・set を書けません。');
+    const getter = getterNode ? this.convertAccessor(getterNode) : undefined;
+    // A getter is as visible as its property, as kotlinc requires.
+    const getterVisibility = getter && VISIBILITY_KEYWORDS.find((keyword) => getter.modifiers.keywords.has(keyword));
+    if (!this.isLibrary && getterVisibility && getterVisibility !== visibilityOf(modifiers.keywords))
+      throw syntaxError(required(getterNode), 'get の公開範囲は、プロパティと同じにしてください。');
     return {
       kind: 'property',
       row: rowOf(node),
@@ -296,7 +306,7 @@ export class Converter extends ExpressionConverter {
       ),
       initializer: initializerNode ? this.convertExpression(initializerNode) : undefined,
       delegate: delegateNode ? this.convertExpression(named(delegateNode)[0]) : undefined,
-      getter: getterNode ? this.convertAccessor(getterNode) : undefined,
+      getter,
       setter: setterNode ? this.convertAccessor(setterNode) : undefined,
     };
   }
@@ -309,7 +319,7 @@ export class Converter extends ExpressionConverter {
     const bodyNode = firstOfType(node, 'function_body');
     return {
       row: rowOf(node),
-      modifiers: this.convertModifiers(modifiersNode),
+      modifiers: this.convertModifiers(modifiersNode, 'accessor'),
       parameterName: parameterNode ? identifierName(parameterNode) : undefined,
       type: typeNode ? this.convertType(typeNode) : undefined,
       body: bodyNode ? this.withLocal(true, () => this.convertFunctionBody(bodyNode)) : undefined,
@@ -320,6 +330,7 @@ export class Converter extends ExpressionConverter {
     const modifiersNode = firstOfType(node, 'modifiers');
     const modifiers = this.convertModifiers(
       modifiersNode,
+      node.type === 'object_declaration' ? 'object' : 'class',
       node.type === 'class_declaration' && !hasToken(node, 'interface')
     );
     const classKind: ClassKind =
@@ -409,7 +420,7 @@ export class Converter extends ExpressionConverter {
     const params = (parametersNode ? namedOfType(parametersNode, 'class_parameter') : []).map(
       (parameter): ClassParameterDecl => {
         const parts = named(parameter);
-        const parameterModifiers = this.convertModifiers(firstOfType(parameter, 'modifiers'));
+        const parameterModifiers = this.convertModifiers(firstOfType(parameter, 'modifiers'), 'classParameter');
         const nameNode = required(parts.find((part) => part.type === 'identifier'));
         const typeNode = parts.find((part) => isTypeNode(part));
         const defaultNode = parts.find((part) => part !== nameNode && part !== typeNode && part.type !== 'modifiers');
@@ -423,7 +434,7 @@ export class Converter extends ExpressionConverter {
         };
       }
     );
-    return { row: rowOf(node), params, modifiers: this.convertModifiers(modifiersNode) };
+    return { row: rowOf(node), params, modifiers: this.convertModifiers(modifiersNode, 'constructor') };
   }
 
   private convertSupers(node: Node | undefined): SuperSpec[] {
@@ -489,7 +500,7 @@ export class Converter extends ExpressionConverter {
     const bodyNode = firstOfType(node, 'class_body');
     return {
       row: rowOf(node),
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers')),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'enumEntry'),
       name: identifierName(required(parts.find((part) => part.type === 'identifier'))),
       args: argumentsNode
         ? namedOfType(argumentsNode, 'value_argument').map((argument) => this.convertArgument(argument))
@@ -539,7 +550,7 @@ export class Converter extends ExpressionConverter {
       classKind: 'companion',
       name: nameNode ? identifierName(nameNode) : 'Companion',
       isFunInterface: false,
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers')),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'companion'),
       typeParameters: [],
       primaryConstructor: undefined,
       supers: this.convertSupers(firstOfType(node, 'delegation_specifiers')),
@@ -554,7 +565,7 @@ export class Converter extends ExpressionConverter {
       kind: 'constructor',
       row: rowOf(node),
       headerEndRow: rowOf(bodyNode ?? node),
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers')),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'constructor'),
       params: this.convertParameters(firstOfType(node, 'function_value_parameters')),
       delegation: delegationNode
         ? {
