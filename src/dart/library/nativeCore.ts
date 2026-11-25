@@ -7,7 +7,15 @@ import { coreTypes, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
-import { define, defineConstructor, forEachValue, intArg, iterableValues, stringArg } from './nativeSupport';
+import {
+  closedSinks,
+  define,
+  defineConstructor,
+  forEachValue,
+  intArg,
+  iterableValues,
+  stringArg,
+} from './nativeSupport';
 import { sameVmType, vmTypeHash } from './vmTypeHash';
 
 // Object
@@ -361,7 +369,10 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
 // Top-level functions
 
 define('print', (runtime, _receiver, [value]) => {
-  runtime.io.stdout.write(`${stringOf(runtime, value)}\n`, encodableText);
+  const text = `${stringOf(runtime, value)}\n`;
+  // The VM's print still converts its argument once stdout is closed, and then drops the text.
+  if (closedSinks.get(runtime)?.has(false)) return;
+  runtime.io.stdout.write(text, encodableText);
   return;
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));

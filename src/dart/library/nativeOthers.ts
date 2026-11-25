@@ -5,7 +5,7 @@ import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { toDouble } from './nativeNumbers';
 import { characterOf } from './nativeStrings';
-import { define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
+import { closedSinks, define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
 
 // dart:math
 
@@ -165,10 +165,22 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 // dart:io
 
 function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
-  const isError = (receiver as DartObject).fields[0] === true;
+  const isError = isStderr(receiver);
+  if (closedSinks.get(runtime)?.has(isError)) runtime.throwError('StateError', '', ['StreamSink is closed']);
   const channel = isError ? runtime.io.stderr : runtime.io.stdout;
   return { write: (text: string) => channel.write(text, encodableText) };
 }
+
+function isStderr(receiver: Value): boolean {
+  return (receiver as DartObject).fields[0] === true;
+}
+
+define('Stdout._close', (runtime, receiver) => {
+  const closed = closedSinks.get(runtime) ?? new Set<boolean>();
+  closed.add(isStderr(receiver));
+  closedSinks.set(runtime, closed);
+  return;
+});
 
 define('Stdout.write', (runtime, receiver, [value]) => {
   sinkOf(runtime, receiver).write(stringOf(runtime, value));
