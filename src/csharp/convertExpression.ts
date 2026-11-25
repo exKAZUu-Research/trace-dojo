@@ -910,9 +910,17 @@ export class ExpressionConverter {
       case 'recursive_pattern': {
         return this.convertRecursivePattern(node);
       }
-      case 'list_pattern':
+      case 'list_pattern': {
+        const nameNode = field(node, 'name');
+        return {
+          kind: 'listPattern',
+          elements: parts.filter((part) => !sameNode(part, nameNode)).map((part) => this.convertPattern(part)),
+          designation: nameNode ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) } : undefined,
+          ...position,
+        };
+      }
       case 'slice_pattern': {
-        return unsupported(node, 'リスト パターン（`[1, .., 3]`）');
+        return { kind: 'slicePattern', pattern: parts[0] ? this.convertPattern(parts[0]) : undefined, ...position };
       }
       default: {
         // An expression in a pattern position, such as a constant without the constant_pattern wrapper.

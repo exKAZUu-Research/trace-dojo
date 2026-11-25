@@ -1,14 +1,15 @@
-import type { Designation, Pattern, Position, Subpattern } from './ast';
+import type { Designation, Expression, Pattern, Position, Subpattern } from './ast';
 import type { BoundExpression, BoundPattern, OperandKind } from './bound';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext } from './convertBinder';
 import { ExpressionBinder } from './expressionBinder';
 import { PatternSpaces, type Space } from './patternSpace';
+import { LocalScope } from './scopes';
 import {
   displayType,
   ERROR_TYPE,
   type FieldSymbol,
-  type LocalSymbol,
+  LocalSymbol,
   type MethodSymbol,
   type NamedType,
   nullableUnderlying,
@@ -105,7 +106,115 @@ export abstract class PatternBinder extends ExpressionBinder {
       case 'recursivePattern': {
         return this.bindRecursivePattern(pattern, inputType, context);
       }
+      case 'listPattern': {
+        return this.bindListPattern(pattern, inputType, context);
+      }
+      case 'slicePattern': {
+        this.error(
+          pattern,
+          'CS8980',
+          'スライス パターンは、1 回限り、リスト パターン内で直接使用される可能性があります。'
+        );
+        return { kind: 'any', local: undefined, inputType };
+      }
     }
+  }
+
+  /**
+   * Binds a list pattern (C# spec §11.2.11): its input must be countable through `Length` or `Count` and indexable by
+   * an int, and sliceable for a slice pattern with a pattern. The length, an element, and a slice are read through
+   * hidden locals, which matching sets for each element in turn.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one part of the C# rule.
+  private bindListPattern(
+    pattern: Extract<Pattern, { kind: 'listPattern' }>,
+    inputType: Type,
+    context: BindContext
+  ): BoundPattern {
+    const position = { row: pattern.row, column: pattern.column };
+    const type = nullableUnderlying(inputType) ?? inputType;
+    const scope = new LocalScope(context.scope, context.fn);
+    const inner: BindContext = { scope, fn: context.fn };
+    const hidden = (name: string, localType: Type): LocalSymbol => {
+      const local = new LocalSymbol(`\0${name}`, localType, pattern.row, pattern.column);
+      local.isHidden = true;
+      context.fn.addLocal(local);
+      scope.variables.set(local.name, local);
+      return local;
+    };
+    const list = hidden('list', type);
+    const index = hidden('index', this.intType);
+    const start = hidden('start', this.intType);
+    const end = hidden('end', this.intType);
+    const name = (local: LocalSymbol): Expression => ({
+      kind: 'name',
+      name: local.name,
+      typeArgs: undefined,
+      ...position,
+    });
+    const member = (memberName: string): Expression => ({
+      kind: 'memberAccess',
+      target: name(list),
+      name: memberName,
+      typeArgs: undefined,
+      nameRow: pattern.row,
+      ...position,
+    });
+    const access = (value: Expression): Expression => ({
+      kind: 'elementAccess',
+      target: name(list),
+      args: [{ name: undefined, modifier: undefined, value, ...position }],
+      ...position,
+    });
+    const isCountable = (memberName: string): boolean => {
+      const { found } = this.lookupMember(type, memberName, context.fn.typeContext);
+      return found?.kind === 'property' && specialOf(found.property.type) === 'int';
+    };
+    const lengthName =
+      type.kind === 'array' || isCountable('Length') ? 'Length' : isCountable('Count') ? 'Count' : undefined;
+    if (!lengthName && type.kind !== 'error') {
+      this.error(
+        pattern,
+        'CS8985',
+        `リスト パターンは、型 '${displayType(type)}' の値には使用できません。適切な 'Length' または 'Count' プロパティが見つかりませんでした。`
+      );
+    }
+    const length = lengthName
+      ? this.bindValue(member(lengthName), inner)
+      : { kind: 'default' as const, type: ERROR_TYPE, row: pattern.row };
+    const element = this.bindValue(access(name(index)), inner);
+    const slices = pattern.elements.filter((sub) => sub.kind === 'slicePattern');
+    for (const extra of slices.slice(1))
+      this.error(extra, 'CS8980', 'スライス パターンは、1 回限り、リスト パターン内で直接使用される可能性があります。');
+    const sliceAt = pattern.elements.findIndex((sub) => sub.kind === 'slicePattern');
+    const bindElements = (elements: Pattern[]): BoundPattern[] =>
+      elements.filter((sub) => sub.kind !== 'slicePattern').map((sub) => this.bindPattern(sub, element.type, context));
+    const before = bindElements(sliceAt === -1 ? pattern.elements : pattern.elements.slice(0, sliceAt));
+    const sliceNode =
+      sliceAt === -1 ? undefined : (pattern.elements[sliceAt] as Extract<Pattern, { kind: 'slicePattern' }>);
+    let slice: Extract<BoundPattern, { kind: 'list' }>['slice'];
+    if (sliceNode?.pattern) {
+      const range: Expression = { kind: 'range', start: name(start), end: name(end), ...position };
+      const value = this.bindValue(access(range), inner);
+      slice = { value, pattern: this.bindPattern(sliceNode.pattern, value.type, context) };
+    }
+    const after = sliceAt === -1 ? [] : bindElements(pattern.elements.slice(sliceAt + 1));
+    const local = pattern.designation ? this.patternVariable(pattern.designation, type, context) : undefined;
+    return {
+      kind: 'list',
+      inputType,
+      list,
+      index,
+      start,
+      end,
+      length,
+      element,
+      before,
+      after,
+      hasSlice: sliceAt !== -1,
+      slice,
+      local,
+    };
   }
 
   /** Set inside `not` and `or`, where a pattern may not declare variables. */

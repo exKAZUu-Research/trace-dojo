@@ -1510,10 +1510,23 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const indexType = namedType(this.library.typeNamed('System.Index'));
     const rangeType = namedType(this.library.typeNamed('System.Range'));
     const isIndexOrRange = (type: Type): boolean => sameType(type, indexType) || sameType(type, rangeType);
+    let isRangeSyntax = syntax.kind === 'range';
     if (syntax.kind === 'name' || syntax.kind === 'memberAccess') {
       const peeked = this.quietly(() => this.bindValue(syntax, context));
       if (!peeked || !isIndexOrRange(peeked.type)) return undefined;
+      isRangeSyntax = sameType(peeked.type, rangeType);
     }
+    // Without a slice method, or an int indexer, the access binds as written, which reports the argument's type.
+    const isSliceable =
+      target.type.kind === 'array' ||
+      specialOf(target.type) === 'string' ||
+      (isRangeSyntax
+        ? this.lookupMember(target.type, 'Slice', context.fn.typeContext, 0, true).found?.kind === 'methods'
+        : this.lookupIndexers(target.type, context.fn.typeContext).some(
+            (indexer) =>
+              indexer.property.parameters.length === 1 && specialOf(indexer.property.parameters[0].type) === 'int'
+          ));
+    if (!isSliceable) return undefined;
     // A type whose own indexer takes the Index or the Range uses it.
     const indexers = target.type.kind === 'array' ? [] : this.lookupIndexers(target.type, context.fn.typeContext);
     if (

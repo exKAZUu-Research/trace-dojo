@@ -415,6 +415,12 @@ export class FlowAnalyzer {
       case 'or': {
         return state;
       }
+      case 'list': {
+        if (!matched) return state;
+        let current = pattern.local ? assign(state, pattern.local) : state;
+        for (const sub of [...pattern.before, ...pattern.after]) current = this.pattern(sub, current, true);
+        return pattern.slice ? this.pattern(pattern.slice.pattern, current, true) : current;
+      }
       case 'recursive': {
         if (!matched) return state;
         let current = pattern.local ? assign(state, pattern.local) : state;

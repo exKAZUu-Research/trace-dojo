@@ -235,6 +235,24 @@ export type BoundLValue =
 
 export type BoundPattern =
   | { kind: 'constant'; value: BoundExpression; inputType: Type; type: Type }
+  | {
+      kind: 'list';
+      inputType: Type;
+      /** The hidden locals that `length`, `element`, and `slice` read: the input, an index, and a slice's ends. */
+      list: LocalSymbol;
+      index: LocalSymbol;
+      start: LocalSymbol;
+      end: LocalSymbol;
+      length: BoundExpression;
+      element: BoundExpression;
+      /** The patterns before and after a slice pattern, or all of them when there is none. */
+      before: BoundPattern[];
+      after: BoundPattern[];
+      hasSlice: boolean;
+      /** The slice and the pattern it must match, for a slice pattern with a pattern. */
+      slice: { value: BoundExpression; pattern: BoundPattern } | undefined;
+      local: LocalSymbol | undefined;
+    }
   | { kind: 'type'; testType: Type; local: LocalSymbol | undefined; inputType: Type }
   | { kind: 'any'; local: LocalSymbol | undefined; inputType: Type }
   | {

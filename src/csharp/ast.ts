@@ -210,6 +210,10 @@ export type Pattern =
   | ({ kind: 'notPattern'; pattern: Pattern } & Position)
   | ({ kind: 'andPattern'; left: Pattern; right: Pattern } & Position)
   | ({ kind: 'orPattern'; left: Pattern; right: Pattern } & Position)
+  /** `[p1, .. rest, p2]`, which matches a countable, indexable value by its elements. */
+  | ({ kind: 'listPattern'; elements: Pattern[]; designation: Designation | undefined } & Position)
+  /** `..` or `.. p` in a list pattern, which matches the elements between the patterns before and after it. */
+  | ({ kind: 'slicePattern'; pattern: Pattern | undefined } & Position)
   | ({
       kind: 'recursivePattern';
       type: TypeNode | undefined;

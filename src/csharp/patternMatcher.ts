@@ -66,7 +66,32 @@ export abstract class PatternMatcher extends EvaluatorBase {
       case 'recursive': {
         return this.matchesRecursive(pattern, value, frame);
       }
+      case 'list': {
+        return this.matchesList(pattern, value, frame);
+      }
     }
+  }
+
+  /** Matches a list pattern: a value of the length it needs whose elements, and slice, match their patterns. */
+  private matchesList(pattern: Extract<BoundPattern, { kind: 'list' }>, value: Value, frame: Frame): boolean {
+    if (value === undefined) return false;
+    this.storeLocal(frame, pattern.list, value);
+    const length = this.evaluate(pattern.length, frame) as number;
+    const fixed = pattern.before.length + pattern.after.length;
+    if (pattern.hasSlice ? length < fixed : length !== fixed) return false;
+    const elementMatches = (sub: BoundPattern, index: number): boolean => {
+      this.storeLocal(frame, pattern.index, index);
+      return this.matches(sub, this.evaluate(pattern.element, frame), frame);
+    };
+    if (!pattern.before.every((sub, index) => elementMatches(sub, index))) return false;
+    if (!pattern.after.every((sub, index) => elementMatches(sub, length - pattern.after.length + index))) return false;
+    if (pattern.slice) {
+      this.storeLocal(frame, pattern.start, pattern.before.length);
+      this.storeLocal(frame, pattern.end, length - pattern.after.length);
+      if (!this.matches(pattern.slice.pattern, this.evaluate(pattern.slice.value, frame), frame)) return false;
+    }
+    if (pattern.local) this.storeLocal(frame, pattern.local, value);
+    return true;
   }
 
   private matchesConstant(pattern: Extract<BoundPattern, { kind: 'constant' }>, value: Value, frame: Frame): boolean {
