@@ -2,6 +2,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { isExplainedError } from '../interpreter/treeSitter';
+import { ansicQuote, ansicShouldQuote } from './quoting';
 
 /** The words that Bash reads as reserved words in a command's position, which then end a construct. */
 export const CLOSING_RESERVED_WORDS = new Set(['then', 'else', 'elif', 'fi', 'do', 'done', 'esac', '}', ']]', 'in']);
@@ -35,9 +36,14 @@ export function syntaxErrorMessage(bashMessage: string): string {
   return `構文エラーです（${bashMessage}）。`;
 }
 
+/** Formats a syntax-error token as ANSI-C `$'...'` when it contains non-printable characters, matching Bash 5.3. */
+export function formatSyntaxToken(token: string): string {
+  return ansicShouldQuote(token) ? ansicQuote(token) : token;
+}
+
 /** The message for a reserved word or an operator where Bash expects none. */
 export function unexpectedTokenMessage(token: string): string {
-  return syntaxErrorMessage(`syntax error near unexpected token \`${token}'`);
+  return syntaxErrorMessage(`syntax error near unexpected token \`${formatSyntaxToken(token)}'`);
 }
 
 /** Bash's syntax error for the first error a tree shows, located at its row. */

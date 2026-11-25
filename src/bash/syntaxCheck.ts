@@ -10,7 +10,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { skipSubscript } from './arithmetic';
 import type { BackquoteSyntaxError } from './ast';
 import { parseConditional } from './conditionalSyntax';
-import { syntaxErrorMessage } from './syntaxErrors';
+import { formatSyntaxToken, syntaxErrorMessage } from './syntaxErrors';
 import {
   arithmeticEnd,
   type BashSyntaxError,
@@ -92,7 +92,8 @@ export function inspectUnescapedBackquoteBody(body: string, row: number): Backqu
   const text = `${'\n'.repeat(row)}${body}\n`;
   const { error } = checkBashSyntax(text);
   if (!error || error === 'unknown') return undefined;
-  const messages = error.near === undefined ? [error.text] : [error.text, `syntax error near \`${error.near}'`];
+  const messages =
+    error.near === undefined ? [error.text] : [error.text, `syntax error near \`${formatSyntaxToken(error.near)}'`];
   const shows = (messages.at(-1) as string).startsWith('syntax error near');
   return { row: error.row, messages, ...(shows ? { line: text.split('\n')[error.row] } : {}) };
 }
@@ -561,7 +562,7 @@ class ShellTokenStream {
       if (inner.kind === 'eof') this.text.unclosed(openIndex, ')');
       if (inner.kind === 'operator' && inner.value === ')') return this.position;
       if (inner.kind === 'operator') {
-        const shown = inner.value === '((' ? '(' : inner.value;
+        const shown = inner.value === '((' ? '(' : formatSyntaxToken(inner.value);
         this.text.fail(inner.row, `syntax error near unexpected token \`${shown}'`);
       }
     }
@@ -1127,7 +1128,7 @@ class ShellGrammarValidator {
 
   private failUnexpected(token: ShellToken): never {
     if (token.kind === 'eof') this.failAtEof();
-    const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : token.value;
+    const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : formatSyntaxToken(token.value);
     const suffix = this.insideSubstitution && !this.hasOperator(token, ')') ? " while looking for matching `)'" : '';
     this.text.fail(token.row, `syntax error near unexpected token \`${shown}'${suffix}`);
   }

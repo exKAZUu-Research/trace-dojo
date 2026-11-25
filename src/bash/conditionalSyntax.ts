@@ -3,6 +3,7 @@
  */
 
 import { charactersOf } from './characters';
+import { formatSyntaxToken } from './syntaxErrors';
 import {
   type BashSyntaxError,
   skipBalanced,
@@ -91,7 +92,7 @@ class ConditionalValidator {
       if (first.kind === 'close') {
         if (atGroupStart) this.abort(first.row, "expected `)'");
         const near = immediateTokenAfterClose(this.text.source, this.cursor) ?? first.value;
-        this.text.fail(first.row, `syntax error near \`${near}'`);
+        this.text.fail(first.row, `syntax error near \`${formatSyntaxToken(near)}'`);
       }
       if (this.isPunct('(')) {
         this.parseOr(true);
@@ -160,7 +161,7 @@ class ConditionalValidator {
   private displayCurrent(): string {
     if (this.current.kind === 'newline') return 'newline';
     if (this.current.kind === 'eof') return 'EOF';
-    return this.current.value;
+    return formatSyntaxToken(this.current.value);
   }
 
   private scan(context: LexContext): void {
