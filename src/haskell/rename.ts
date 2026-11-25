@@ -3263,7 +3263,8 @@ class Renamer {
   /** The fixity of a global operator a quote applies, which an operator nothing defines lacks. */
   private quoteFixity(op: Operator): Fixity {
     const outer = this.options.spliceModule;
-    if (outer && !op.qualifier && (op.isConstructor ? outer.constructors : outer.values).has(op.name)) {
+    const own = outer && (!op.qualifier || op.qualifier === outer.module);
+    if (own && (op.isConstructor ? outer.constructors : outer.values).has(op.name)) {
       return outer.fixities.get(op.name) ?? DEFAULT_FIXITY;
     }
     if (op.isConstructor) {
