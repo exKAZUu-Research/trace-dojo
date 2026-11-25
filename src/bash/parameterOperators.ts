@@ -324,8 +324,8 @@ function appendUnquotedReplacement(
   let literalStart = 0;
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i];
-    if (c === '\\' && i + 1 < raw.length && raw[i + 1] === '&') {
-      text = appendMetered(appendMetered(text, raw.slice(literalStart, i), spend), '&', spend);
+    if (c === '\\' && i + 1 < raw.length && (raw[i + 1] === '&' || raw[i + 1] === '\\')) {
+      text = appendMetered(appendMetered(text, raw.slice(literalStart, i), spend), raw[i + 1], spend);
       i++;
       literalStart = i + 1;
     } else if (c === '&') {
