@@ -71,6 +71,7 @@ export type Frame =
   | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
+  | { k: 'pureIO' }
   | { k: 'catch'; handle: (error: HaskellException) => Slot; refs: Slot[] }
   | { k: 'ioBind'; next: Slot }
   | { k: 'ioThen'; next: Slot }
@@ -136,7 +137,12 @@ export class RunCatching {
   ) {}
 }
 
-export type PrimResult = Slot | TailCall;
+/** What `runST` gives: an action whose result is the primitive's value, run on the machine's own stack. */
+export class RunPure {
+  constructor(readonly action: Slot) {}
+}
+
+export type PrimResult = Slot | TailCall | RunPure;
 
 /**
  * Evaluates Core with an explicit stack, so that deep recursion in a program does not exhaust the host's stack.
@@ -503,8 +509,14 @@ export class Machine {
     this.stack.pop();
     this.runtime.spend();
     const result = frame.prim.fn(frame.args, this.runtime);
-    if (result instanceof TailCall) state.applyTo(result.fn, result.args);
-    else state.enter(result);
+    if (result instanceof TailCall) {
+      state.applyTo(result.fn, result.args);
+    } else if (result instanceof RunPure) {
+      this.stack.push({ k: 'pureIO' }, { k: 'runIO' });
+      state.enter(result.action);
+    } else {
+      state.enter(result);
+    }
   }
 
   // code-gauge-allow functionNcss -- One short case per kind of frame a value returns to.
@@ -742,6 +754,10 @@ export class Machine {
         return false;
       }
       case 'catch': {
+        return false;
+      }
+      case 'pureIO': {
+        state.enter(state.value);
         return false;
       }
       case 'ioBind': {

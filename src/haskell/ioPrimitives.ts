@@ -8,7 +8,7 @@ import {
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
 import type { RunNext } from './machine';
-import { cons, NIL, nullary, RunCatching, TailCall, unpackString } from './machine';
+import { cons, NIL, nullary, RunCatching, RunPure, TailCall, unpackString } from './machine';
 import { bool, define, forceString, showSignedInt, unit, writeString } from './primitives';
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
@@ -514,7 +514,7 @@ define('interleaveIO', 1, [], ([action], runtime) =>
 );
 
 /** Runs an action whose effects only its own references see, as `runST` does. */
-define('runIOPure', 1, [], ([action], runtime) => runtime.machine.runIOValue(action));
+define('runIOPure', 1, [], ([action]) => new RunPure(action));
 
 // Debugging
 
