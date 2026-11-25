@@ -970,9 +970,16 @@ export class Codegen {
   }
 
   private compileApp(expr: Extract<RExpr, { k: 'app' }>): Core {
+    if (expr.evidence?.length) {
+      return {
+        k: 'app',
+        fn: this.compileApp({ ...expr, evidence: undefined }),
+        args: expr.evidence.map((item) => this.compileEvidence(item)),
+      };
+    }
     const args: RExpr[] = [];
     let head: RExpr = expr;
-    while (head.k === 'app') {
+    while (head.k === 'app' && (head === expr || !head.evidence?.length)) {
       args.unshift(head.arg);
       head = head.fn;
     }
@@ -1648,7 +1655,7 @@ function stripDollar(expr: RExpr, support: CodegenSupport): RExpr {
   if (inner.k === 'app' && inner.fn.k === 'app') {
     const op = inner.fn.fn;
     if (op.k === 'var' && op.ref.kind === 'global' && op.ref.entity === support.value('$')) {
-      return { k: 'app', fn: inner.fn.arg, arg: inner.arg, span: inner.span };
+      return { k: 'app', fn: inner.fn.arg, arg: inner.arg, span: inner.span, evidence: inner.evidence };
     }
   }
   return inner;

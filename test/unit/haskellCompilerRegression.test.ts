@@ -1347,3 +1347,12 @@ test.each([
   if (stdout === undefined) expect(result.kind).toBe('compileError');
   else expect(result).toMatchObject({ kind: 'executed', stdout });
 });
+
+test.each([
+  ['main = let ?x = (5 :: Int) in print (?x + 1 :: Int)', '6\n'],
+  ['main = let ?x = (5 :: Int) in let f :: Int; f = ?x in print f', '5\n'],
+  ['main = let ?x = (5 :: Int) in let ?x = ?x + 1 in print (?x :: Int)', '6\n'],
+])('an implicit parameter bound outside a signature is given inside it: %s', (body, stdout) => {
+  const result = executeProgram('haskell', `{-# LANGUAGE ImplicitParams #-}\n${body}\n`);
+  expect(result).toMatchObject({ kind: 'executed', stdout });
+});

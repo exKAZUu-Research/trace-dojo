@@ -6,7 +6,7 @@ import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import type { FeatureOf } from './features';
-import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
+import { type Builtins, Checker, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
 import type { RBinding, RExpr, RType } from './rast';
@@ -239,29 +239,21 @@ function instanceTypeSize(type: Type, vars: Map<number, number>): number {
 }
 
 function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): void {
-  const skolems = info.kinds.map((kind, index) => freshSkolem(kind, checker.level + 1, `t${index}`));
-  const head = instantiateType(info.head, skolems);
-  info.contextParams = info.context.map((pred) =>
-    newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
-  );
-  const givens = info.contextParams.map((param) => ({
-    pred: param.pred,
-    evidence: { kind: 'param', param } as Evidence,
-  }));
-  info.supers = info.cls.supers.map((sup, index) => {
-    let evidence: Evidence | undefined;
-    checker.checkAgainstScheme(
-      { kinds: [], visibilities: [], preds: [], type: head },
-      () => {
-        evidence = checker.want(
-          superPred({ cls: info.cls, type: head }, index),
-          span,
-          `インスタンス ${info.cls.name} のスーパークラス ${sup.name}`
-        );
-      },
-      givens
+  const scheme: Scheme = {
+    kinds: info.kinds,
+    visibilities: info.kinds.map((): Visibility => 'specified'),
+    names: info.kinds.map((_, index) => `t${index}`),
+    preds: info.context,
+    type: info.head,
+  };
+  info.contextParams = checker.skolemise(scheme, (head) => {
+    info.supers = info.cls.supers.map((sup, index) =>
+      checker.want(
+        superPred({ cls: info.cls, type: head }, index),
+        span,
+        `インスタンス ${info.cls.name} のスーパークラス ${sup.name}`
+      )
     );
-    return evidence as Evidence;
   });
 }
 
@@ -288,31 +280,22 @@ function checkInstanceMethods(
       span: binding.span,
     };
     info.methods[index] = implementation;
-    const skolems = info.kinds.map((kind, position) =>
-      freshSkolem(kind, checker.level + 1, declared.typeNames[position])
-    );
-    const head = instantiateType(info.head, skolems);
-    const contextParams = info.context.map((pred) =>
-      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
-    );
     const methodScheme = method.scheme as Scheme;
-    const classArgs = info.cls.packed ? splitApp(head).args : [head];
-    const rest: Scheme = {
-      kinds: methodScheme.kinds.slice(classArgs.length),
-      visibilities: methodScheme.visibilities.slice(classArgs.length),
-      names: methodScheme.names?.slice(classArgs.length),
-      preds: methodScheme.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, classArgs) })),
-      type: shiftGens(methodScheme.type, classArgs),
-    };
-    const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
-    const scoped = new Map(declared.typeNames.map((name, position) => [name, skolems[position]]));
-    const ownParams = checker.withScopedTypes(scoped, () =>
-      checker.checkAgainstScheme(rest, (type) => checkClauses(checker, binding, type), givens)
+    const scheme = instanceMethodScheme(
+      info,
+      declared.typeNames,
+      methodScheme,
+      info.cls.packed ? splitApp(info.head).args : [info.head]
+    );
+    const dictParams = checker.skolemise(scheme, (type, skolems) =>
+      checker.withScopedTypes(new Map(declared.typeNames.map((name, position) => [name, skolems[position]])), () =>
+        checker.checkClauses(binding, type, 'メソッドの引数')
+      )
     );
     const implementationBinding: RBinding = {
       ...binding,
       binder: { kind: 'global', entity: implementation },
-      dictParams: [...contextParams, ...ownParams],
+      dictParams,
     };
     bindings.push(implementationBinding);
   }
@@ -334,76 +317,56 @@ function coercedMethods(
   return cls.methods.map((method, index) => {
     const implementation: ValueEntity = { id: nextId(), name: method.name, module: info.module, sort: 'var', span };
     info.methods[index] = implementation;
-    const skolems = info.kinds.map((kind, position) =>
-      freshSkolem(kind, checker.level + 1, declared.typeNames[position])
-    );
-    const head = instantiateType(info.head, skolems);
-    const rep = instantiateType(repTemplate, skolems);
-    const contextParams = info.context.map((pred) =>
-      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
-    );
     const methodScheme = method.scheme as Scheme;
-    const ownPreds = methodScheme.preds.slice(1);
-    if (ownPreds.some((pred) => mentionsGen(pred.type, 0))) {
+    if (methodScheme.preds.slice(1).some((pred) => mentionsGen(pred.type, 0))) {
       throw unsupportedError(
         span,
         `クラスの型に制約を付けたメソッド ${method.name} を持つクラスの、coerce による deriving`
       );
     }
-    const shifted = (classArg: Type): Scheme => ({
-      kinds: methodScheme.kinds.slice(1),
-      visibilities: methodScheme.visibilities.slice(1),
-      names: methodScheme.names?.slice(1),
-      preds: ownPreds.map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, [classArg]) })),
-      type: shiftGens(methodScheme.type, [classArg]),
-    });
-    const rest = shifted(head);
-    const repScheme = shifted(rep);
-    const givens = contextParams.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence }));
+    const scheme = instanceMethodScheme(info, declared.typeNames, methodScheme, [info.head]);
+    const repScheme = instanceMethodScheme(info, declared.typeNames, methodScheme, [repTemplate]);
     let body: RExpr | undefined;
     let bodyType: Type | undefined;
     const origin = `${cls.name} の deriving`;
-    const ownParams = checker.checkAgainstScheme(
-      rest,
-      (type, ownSkolems) => {
-        const repType = instantiateType(repScheme.type, ownSkolems);
-        const classEvidence = checker.want({ cls, type: rep }, span, origin);
-        const ownEvidence = repScheme.preds.map((pred) =>
-          checker.want({ cls: pred.cls, type: instantiateType(pred.type, ownSkolems) }, span, origin)
-        );
-        const coercible = checker.want(
-          { cls: COERCIBLE_CLASS, type: tap(tcon(COERCIBLE_TYPES), repType, type) },
-          span,
-          origin
-        );
-        const methodExpr: RExpr = {
-          k: 'var',
-          ref: { kind: 'global', entity: method },
-          name: method.name,
-          span,
-          evidence: [classEvidence, ...ownEvidence],
-          type: repType,
-        };
-        const coerceExpr: RExpr = {
-          k: 'var',
-          ref: { kind: 'global', entity: coerce },
-          name: 'coerce',
-          span,
-          evidence: [coercible],
-          type: tap(tcon(FUNCTION_TYPE), repType, type),
-        };
-        body = { k: 'app', fn: coerceExpr, arg: methodExpr, span, type };
-        bodyType = type;
-      },
-      givens
-    );
+    const dictParams = checker.skolemise(scheme, (type, skolems) => {
+      const rep = instantiateType(repTemplate, skolems);
+      const repType = instantiateType(repScheme.type, skolems);
+      const classEvidence = checker.want({ cls, type: rep }, span, origin);
+      const ownEvidence = repScheme.preds
+        .slice(info.context.length)
+        .map((pred) => checker.want({ cls: pred.cls, type: instantiateType(pred.type, skolems) }, span, origin));
+      const coercible = checker.want(
+        { cls: COERCIBLE_CLASS, type: tap(tcon(COERCIBLE_TYPES), repType, type) },
+        span,
+        origin
+      );
+      const methodExpr: RExpr = {
+        k: 'var',
+        ref: { kind: 'global', entity: method },
+        name: method.name,
+        span,
+        evidence: [classEvidence, ...ownEvidence],
+        type: repType,
+      };
+      const coerceExpr: RExpr = {
+        k: 'var',
+        ref: { kind: 'global', entity: coerce },
+        name: 'coerce',
+        span,
+        evidence: [coercible],
+        type: tap(tcon(FUNCTION_TYPE), repType, type),
+      };
+      body = { k: 'app', fn: coerceExpr, arg: methodExpr, span, type };
+      bodyType = type;
+    });
     return {
       k: 'fun',
       binder: { kind: 'global', entity: implementation },
       clauses: [{ pats: [], rhs: { body: { k: 'plain', expr: body as RExpr }, where: { bindings: [] }, span }, span }],
       span,
       type: bodyType,
-      dictParams: [...contextParams, ...ownParams],
+      dictParams,
     } satisfies RBinding;
   });
 }
@@ -442,15 +405,33 @@ function genericDefaultBindings(declared: DeclaredInstance): RBinding[] {
   });
 }
 
-/** Replaces a method scheme's class parameters with the instance's types, renumbering the method's own variables. */
-function shiftGens(type: Type, classArgs: readonly Type[]): Type {
-  return mapType(type, (node) =>
-    node.tag === 'tgen'
-      ? node.index < classArgs.length
-        ? classArgs[node.index]
-        : { tag: 'tgen', index: node.index - classArgs.length }
-      : node
-  );
+/**
+ * A method's scheme at an instance: the instance's variables and context, then the method's own variables and
+ * constraints, with `classArgs`, types in the instance's variables, for the class's parameters.
+ */
+function instanceMethodScheme(
+  info: InstanceInfo,
+  typeNames: readonly string[],
+  method: Scheme,
+  classArgs: readonly Type[]
+): Scheme {
+  const offset = info.kinds.length - classArgs.length;
+  const shift = (type: Type): Type =>
+    mapType(type, (node) =>
+      node.tag === 'tgen'
+        ? node.index < classArgs.length
+          ? classArgs[node.index]
+          : { tag: 'tgen', index: node.index + offset }
+        : node
+    );
+  const own = method.kinds.slice(classArgs.length);
+  return {
+    kinds: [...info.kinds, ...own],
+    visibilities: [...info.kinds.map((): Visibility => 'specified'), ...method.visibilities.slice(classArgs.length)],
+    names: [...typeNames, ...own.map((_, index) => method.names?.[classArgs.length + index] ?? 'a')],
+    preds: [...info.context, ...method.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shift(pred.type) }))],
+    type: shift(method.type),
+  };
 }
 
 function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
@@ -462,9 +443,9 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     const generic = decl.entity.genericDefaults?.get(index);
     if (generic) {
       const scheme = generic.scheme as Scheme;
-      const params = checker.checkAgainstScheme(scheme, (type, skolems) =>
+      const params = checker.skolemise(scheme, (type, skolems) =>
         checker.withScopedTypes(new Map(decl.params.map((name, index) => [name, skolems[index]])), () =>
-          checkClauses(checker, binding, type)
+          checker.checkClauses(binding, type, 'メソッドの引数')
         )
       );
       result.push({ ...binding, binder: { kind: 'global', entity: generic }, dictParams: params });
@@ -478,9 +459,9 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
       span: binding.span,
     };
     decl.entity.defaults[index] = implementation;
-    const params = checker.checkAgainstScheme(method.scheme as Scheme, (type, skolems) =>
+    const params = checker.skolemise(method.scheme as Scheme, (type, skolems) =>
       checker.withScopedTypes(new Map(decl.params.map((name, index) => [name, skolems[index]])), () =>
-        checkClauses(checker, binding, type)
+        checker.checkClauses(binding, type, 'メソッドの引数')
       )
     );
     const implementationBinding: RBinding = {
@@ -491,21 +472,6 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     result.push(implementationBinding);
   }
   return result;
-}
-
-function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
-  binding.type = type;
-  for (const clause of binding.clauses) {
-    checker.inPatternScope(() => {
-      let remaining = type;
-      for (const pat of clause.pats) {
-        const { param, result } = checker.splitFunction(remaining, clause.span, 'メソッドの引数');
-        checker.inferPat(pat, param);
-        remaining = result;
-      }
-      checker.checkRhs(clause.rhs, remaining);
-    });
-  }
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.

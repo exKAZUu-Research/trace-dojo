@@ -33,7 +33,8 @@ export type RExpr = (
       evidence?: Evidence[];
     }
   | { k: 'lit'; lit: Literal; span: Span; evidence?: Evidence }
-  | { k: 'app'; fn: RExpr; arg: RExpr; span: Span }
+  /** `evidence` is what the application's polymorphic result takes once instantiated, which applies to it. */
+  | { k: 'app'; fn: RExpr; arg: RExpr; span: Span; evidence?: Evidence[] }
   | { k: 'lambda'; pats: RPat[]; body: RExpr; span: Span }
   | { k: 'let'; binds: RBindGroup; body: RExpr; span: Span }
   | { k: 'if'; cond: RExpr; ifTrue: RExpr; ifFalse: RExpr; span: Span }

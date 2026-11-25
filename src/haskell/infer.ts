@@ -20,7 +20,7 @@ import { type ClassEnv, entailByGivens, hasConstructorHead, impliedBySuperclasse
 import { solveCoercible } from './coercible';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
-import { compileError } from './errors';
+import { compileError, unsupportedError } from './errors';
 import { freshKinds } from './kindTemplates';
 import { checkLinearUses, linearLocals } from './linearity';
 import { TypePrinter } from './prettyType';
@@ -114,7 +114,7 @@ export function setLiteralClasses(nat: ClassEntity, symbol: ClassEntity): void {
   literalClasses = { nat, symbol };
 }
 
-export function newDictParam(pred: Pred): DictParam {
+function newDictParam(pred: Pred): DictParam {
   return { id: nextParamId++, pred };
 }
 
@@ -148,6 +148,8 @@ interface PatternScope {
   givens: { pred: Pred; evidence: Evidence }[];
   /** The rigid types GADT equalities stand for in the scope. */
   assumed: Assumption[];
+  /** What the message of a constraint the scope cannot solve suggests. */
+  hint?: string;
 }
 
 export class Checker {
@@ -315,7 +317,8 @@ export class Checker {
 
   /**
    * Solves a constraint of a class the checker knows itself: type-level literals, implicit parameters, constraints
-   * written as types, `Coercible`, `HasField`, and equalities. `retained` leaves the constraint for later, `again`
+   * written as types, `Coercible`, `HasField`, and equalities. `retained` leaves the constraint for later (an implicit
+   * parameter's for the `let ?x` around the scope that wants it), `again`
    * looks at it once more as the class it turned out to be, and `undefined` leaves it to givens and instances.
    */
   private solveBuiltin(
@@ -380,12 +383,12 @@ export class Checker {
   private solveImplicit(
     hole: EvidenceHole,
     givens: readonly { pred: Pred; evidence: Evidence }[]
-  ): 'solved' | undefined {
+  ): 'solved' | 'retained' {
     const [name, type] = splitApp(hole.pred.type).args;
     const given = givens.find(
       (candidate) => candidate.pred.cls === IMPLICIT_CLASS && typesEqual(splitApp(candidate.pred.type).args[0], name)
     );
-    if (!given) return undefined;
+    if (!given) return 'retained';
     this.unify(type, splitApp(given.pred.type).args[1], hole.span, `暗黙のパラメータ（${hole.origin}）`);
     hole.solution = given.evidence;
     return 'solved';
@@ -585,6 +588,7 @@ export class Checker {
         continue;
       }
       for (const hole of retained) {
+        if (hole.pred.cls === IMPLICIT_CLASS) this.noInstance(hole);
         if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
       for (const [variable, holes] of holesByVariable(retained)) {
@@ -725,10 +729,10 @@ export class Checker {
   }
 
   /**
-   * Checks an expression against the type its context expects. Each form passes the expected type into the parts
-   * whose types it decides, so that a lambda anywhere among them binds its parameters at the expected parameter
-   * types, polymorphic or linear as they may be; a form with nothing to pass, or an expected type without the form's
-   * shape, is inferred and its type unified with the expected one.
+   * Checks an expression against the type its context expects, which has no outer `forall` (`checkPoly` skolemises
+   * one). Every form has a check rule: most pass the expected type, or the parts of it they decide, into their
+   * subexpressions, so that a lambda anywhere among them binds its parameters at the expected parameter types,
+   * polymorphic or linear as they may be; the others infer their types and unify them with the expected one.
    */
   checkExpr(expr: RExpr, expected: Type, context?: string): void {
     this.recursion.run(() => {
@@ -738,8 +742,8 @@ export class Checker {
   }
 
   /**
-   * Checks an expression against a type that may be polymorphic, `forall a. C a => t`, as GHC does at rigid type
-   * variables, giving the expression to put in its place: one that takes the dictionaries of the type's constraints.
+   * Checks an expression against a type that may be polymorphic, `forall a. C a => t`, by skolemising it, giving the
+   * expression to put in its place: one that takes the dictionaries of the type's constraints.
    */
   checkPoly(expr: RExpr, expected: Type, context?: string): RExpr {
     const type = prune(expected);
@@ -747,8 +751,11 @@ export class Checker {
       this.checkExpr(expr, expected, context);
       return expr;
     }
-    const dictParams = this.checkAgainstScheme(polytypeScheme(type), (rho) => this.checkExpr(expr, rho, context));
-    return dictParams.length > 0 ? { k: 'poly', expr, dictParams, span: expr.span } : expr;
+    let checked = expr;
+    const dictParams = this.skolemise(polytypeScheme(type), (rho) => {
+      checked = this.checkPoly(expr, rho, context);
+    });
+    return dictParams.length > 0 ? { k: 'poly', expr: checked, dictParams, span: expr.span } : checked;
   }
 
   /** Checks an expression by its form's check rule, or returns false when the form infers its type instead. */
@@ -757,7 +764,10 @@ export class Checker {
     switch (expr.k) {
       case 'lambda': {
         if (!functionParts(this.reduceFamilies(expected))) return false;
-        this.checkLambda(expr, expected, context);
+        this.checkMatch(expr.pats, expected, expr.span, context ?? 'ラムダ式', (result) => {
+          expr.body = this.checkPoly(expr.body, result, context);
+          return { body: { k: 'plain', expr: expr.body }, where: { bindings: [] }, span: expr.span };
+        });
         return true;
       }
       case 'let': {
@@ -794,13 +804,15 @@ export class Checker {
       case 'tuple': {
         const args = this.expectedArgs(expected, tupleCon(expr.elems.length).type, expr.elems.length);
         if (!args) return false;
-        for (const [index, elem] of expr.elems.entries()) this.checkExpr(elem, args[index], context);
+        for (const [index, elem] of expr.elems.entries())
+          expr.elems[index] = this.checkPoly(elem, args[index], context);
         return true;
       }
       case 'list': {
         const [elem] = this.expectedArgs(expected, LIST_TYPE, 1) ?? [];
         if (!elem) return false;
-        for (const item of expr.elems) this.checkExpr(item, elem, 'リストの要素');
+        for (const [index, item] of expr.elems.entries())
+          expr.elems[index] = this.checkPoly(item, elem, 'リストの要素');
         return true;
       }
       case 'comp': {
@@ -809,7 +821,18 @@ export class Checker {
         this.inPatternScope(() => this.checkComprehension(expr, elem));
         return true;
       }
-      default: {
+      case 'hole':
+      case 'var':
+      case 'con':
+      case 'lit':
+      case 'tyapp':
+      case 'implicit':
+      case 'projection':
+      case 'arith':
+      case 'rsection':
+      case 'typed':
+      case 'recordCon':
+      case 'recordUpdate': {
         return false;
       }
     }
@@ -952,10 +975,11 @@ export class Checker {
       })
     );
     expr.dictParams = params;
-    return this.withGivens(
-      params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
-      body
-    );
+    return this.inPatternScope((scope) => {
+      this.enterImplication(scope);
+      for (const param of params) this.assumeGiven(scope, param);
+      return body();
+    });
   }
 
   private checkComprehension(expr: Extract<RExpr, { k: 'comp' }>, elem: Type): void {
@@ -1014,31 +1038,10 @@ export class Checker {
   /** Checks an expression against its signature, `e :: sig`, giving the signature's scheme. */
   private checkTyped(expr: Extract<RExpr, { k: 'typed' }>): Scheme {
     const scheme = this.sigToScheme(expr.sig);
-    expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+    expr.dictParams = this.skolemise(scheme, (type, skolems) =>
       this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
     );
     return scheme;
-  }
-
-  /**
-   * Checks a lambda against a function type parameter by parameter, so that a parameter of a polymorphic type binds
-   * a polymorphic variable and one of a linear arrow is checked to be used once; the body is checked against the rest.
-   */
-  private checkLambda(expr: Extract<RExpr, { k: 'lambda' }>, expected: Type, context?: string): void {
-    this.inPatternScope(() => {
-      let remaining = expected;
-      const linear: LocalVar[] = [];
-      for (const pat of expr.pats) {
-        const { param, result, multiplicity } = this.splitFunction(remaining, expr.span, context ?? 'ラムダ式');
-        this.inferPat(pat, param);
-        if (multiplicity) linear.push(...linearLocals(pat));
-        remaining = result;
-      }
-      expr.body = this.checkPoly(expr.body, remaining, context);
-      const body = { body: { k: 'plain', expr: expr.body } as const, where: { bindings: [] }, span: expr.span };
-      if (linear.length > 0) checkLinearUses(linear, body);
-    });
-    expr.type = expected;
   }
 
   private inferLambda(expr: Extract<RExpr, { k: 'lambda' }>): Type {
@@ -1103,13 +1106,13 @@ export class Checker {
    * Runs the checking of a construct whose patterns may bind type variables with signatures, such as `\(x :: a) ->`,
    * which scope over the construct only.
    */
-  inPatternScope<T>(run: () => T): T {
+  inPatternScope<T>(run: (scope: PatternScope) => T): T {
     const saved = this.scopedTypes;
     const scope: PatternScope = { outer: this.level, givens: [], assumed: [] };
     this.patternScopes.push(scope);
     let completed = false;
     try {
-      const result = run();
+      const result = run(scope);
       completed = true;
       return result;
     } finally {
@@ -1127,12 +1130,10 @@ export class Checker {
   }
 
   /**
-   * Starts solving the constraints of the current pattern scope apart, under what its patterns give: existential
-   * types, constraints, and GADT equalities.
+   * Starts solving the constraints of a pattern scope apart, under what it gives: existential types, constraints, and
+   * GADT equalities.
    */
-  private enterImplication(span: Span): PatternScope {
-    const scope = this.patternScopes.at(-1);
-    if (!scope) typeError(span, 'この場所では、存在型や GADT の構成子のパターンは使えません。');
+  private enterImplication(scope: PatternScope): PatternScope {
     if (!scope.savedWanted) {
       scope.savedWanted = this.wanted;
       this.wanted = [];
@@ -1154,7 +1155,10 @@ export class Checker {
       }
       const vars = [...typeVarsOf(hole.pred.type)];
       if (vars.some((variable) => variable.skolem && variable.level > scope.outer)) {
-        typeError(hole.span, `${new TypePrinter().showPred(hole.pred)} を導けません（${hole.origin}）。`);
+        typeError(
+          hole.span,
+          `${new TypePrinter().showPred(hole.pred)} を導けません（${hole.origin}）。${scope.hint ?? ''}`
+        );
       }
       for (const variable of vars) if (variable.level > scope.outer) variable.level = scope.outer;
       deferred.push(hole);
@@ -1178,12 +1182,15 @@ export class Checker {
       for (const { app, param } of pending) app.arg = this.checkPoly(app.arg, param, argumentContext(app.fn));
       pending.length = 0;
     };
+    let previous: RExpr = head;
     for (const app of spine) {
+      type = this.instantiateResult(previous, type);
       let parts = functionParts(prune(type));
       if (!parts && pending.length > 0) {
         // The arguments before may decide the function type here: `id caller (\f -> ...)` passes `caller`'s
         // polymorphic parameter to the lambda only once `id caller` is checked.
         checkPending();
+        type = this.instantiateResult(previous, type);
         parts = functionParts(prune(type));
       }
       if (parts) {
@@ -1196,10 +1203,28 @@ export class Checker {
         type = result;
       }
       app.type = type;
+      previous = app;
     }
-    if (expected) this.unify(type, expected.type, expr.span, expected.context);
+    if (expected) {
+      const result = prune(expected.type).tag === 'forall' ? type : this.instantiateResult(expr, type);
+      this.unify(result, expected.type, expr.span, expected.context);
+    }
     checkPending();
-    return type;
+    return expr.type as Type;
+  }
+
+  /**
+   * Instantiates the polymorphic type an application gives, `forall a. C a => t`, where the application takes another
+   * argument or meets the type its context expects, as GHC does: the application then takes the dictionaries of the
+   * constraints.
+   */
+  private instantiateResult(application: RExpr, type: Type): Type {
+    const polymorphic = prune(type);
+    if (polymorphic.tag !== 'forall' || application.k !== 'app') return type;
+    const instantiated = this.instantiate(polytypeScheme(polymorphic), application.span, '関数の適用の結果');
+    application.evidence = [...(application.evidence ?? []), ...instantiated.evidence];
+    application.type = instantiated.type;
+    return this.instantiateResult(application, instantiated.type);
   }
 
   private inferRightSection(expr: Extract<RExpr, { k: 'rsection' }>): Type {
@@ -1283,7 +1308,9 @@ export class Checker {
    */
   private matchConstructorVariables(pat: Extract<RPat, { k: 'con' }>, type: Type): Type[] {
     const { con, span } = pat;
-    const scope = this.enterImplication(span);
+    const current = this.patternScopes.at(-1);
+    if (!current) typeError(span, 'この場所では、存在型や GADT の構成子のパターンは使えません。');
+    const scope = this.enterImplication(current);
     const args = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
     this.unify(tap(tcon(con.type), ...args), type, span, `構成子 ${con.name} のパターン`);
     const existentials = (con.exKinds ?? []).map((kind) => freshSkolem(kind, this.level, 'a'));
@@ -1315,10 +1342,7 @@ export class Checker {
     pat.dictParams = (con.context ?? []).map((pred) =>
       newDictParam({ cls: pred.cls, type: instantiateType(pred.type, all) })
     );
-    for (const param of pat.dictParams) {
-      scope.assumed.push(...this.assumeEquality(param.pred));
-      scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
-    }
+    for (const param of pat.dictParams) this.assumeGiven(scope, param);
     return con.fieldTypes.map((fieldType) => instantiateType(fieldType, all));
   }
 
@@ -1527,49 +1551,6 @@ export class Checker {
     }
   }
 
-  /**
-   * @param signature The signature's scheme and its rigid types, which the type variables `@a` of the clauses bind, in
-   * the order the signature specifies its variables.
-   */
-  private inferBindingBody(
-    binding: RBinding,
-    type: Type,
-    signature?: { scheme: Scheme; skolems: readonly Type[] }
-  ): void {
-    if (binding.k === 'pat') {
-      this.inferPat(binding.pat, type);
-      this.checkRhs(binding.rhs, type);
-      return;
-    }
-    binding.type = type;
-    for (const clause of binding.clauses) {
-      const bound = new Map<string, Type>();
-      for (const [position, name] of (clause.typeBinders ?? []).entries()) {
-        const index = signature && visibleBinders(signature.scheme.visibilities)[position];
-        if (index === undefined) typeError(clause.span, '@ で型変数を束縛するには、型シグネチャに forall が要ります。');
-        if (name !== '_') bound.set(name, signature?.skolems[index] as Type);
-      }
-      this.withScopedTypes(bound, () =>
-        this.inPatternScope(() => {
-          let remaining = type;
-          const linear: LocalVar[] = [];
-          for (const pat of clause.pats) {
-            const { param, result, multiplicity } = this.splitFunction(
-              remaining,
-              clause.span,
-              `${bindingLabel(binding)} の引数`
-            );
-            this.inferPat(pat, param);
-            if (multiplicity) linear.push(...linearLocals(pat));
-            remaining = result;
-          }
-          this.checkRhs(clause.rhs, remaining);
-          if (linear.length > 0) checkLinearUses(linear, clause.rhs);
-        })
-      );
-    }
-  }
-
   inferBindGroup(group: RBindGroup): void {
     const explicit: { binding: Extract<RBinding, { k: 'fun' }>; scheme: Scheme }[] = [];
     const implicit: RBinding[] = [];
@@ -1584,9 +1565,9 @@ export class Checker {
     }
     for (const scc of dependencyOrder(implicit)) this.inferImplicit(scc);
     for (const { binding, scheme } of explicit) {
-      binding.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+      binding.dictParams = this.skolemise(scheme, (type, skolems) =>
         this.withScopedTypes(this.forallScope(binding.sig, skolems), () =>
-          this.inferBindingBody(binding, type, { scheme, skolems })
+          this.checkClauses(binding, type, `${bindingLabel(binding)} の引数`, { scheme, skolems })
         )
       );
     }
@@ -1601,7 +1582,7 @@ export class Checker {
     for (const binding of bindings) {
       const type = monoTypes.get(binding) as Type;
       if (binding.k === 'pat') this.checkRhs(binding.rhs, type);
-      else this.inferBindingBody(binding, type);
+      else this.checkClauses(binding, type, `${bindingLabel(binding)} の引数`);
     }
     this.level = outer;
     const inner = this.wanted;
@@ -1613,6 +1594,71 @@ export class Checker {
     const params = this.makeDictParams(kept);
     for (const binding of bindings) this.generalizeBinding(binding, monoTypes.get(binding) as Type, params, outer);
     this.wanted.push(...deferred);
+  }
+
+  /**
+   * Checks a function's clauses against its type, each by the check rule of a lambda.
+   *
+   * @param signature The signature's scheme and its rigid types, which the type variables `@a` of the clauses bind, in
+   * the order of the signature's visible binders.
+   */
+  checkClauses(
+    binding: Extract<RBinding, { k: 'fun' }>,
+    type: Type,
+    context: string,
+    signature?: { scheme: Scheme; skolems: readonly Type[] }
+  ): void {
+    binding.type = type;
+    for (const clause of binding.clauses) {
+      const bound = new Map<string, Type>();
+      for (const [position, name] of (clause.typeBinders ?? []).entries()) {
+        const index = signature && visibleBinders(signature.scheme.visibilities)[position];
+        if (index === undefined) typeError(clause.span, '@ で型変数を束縛するには、型シグネチャに forall が要ります。');
+        if (name !== '_') bound.set(name, signature?.skolems[index] as Type);
+      }
+      this.withScopedTypes(bound, () =>
+        this.checkMatch(clause.pats, type, clause.span, context, (result) => {
+          this.checkRhs(clause.rhs, result);
+          return clause.rhs;
+        })
+      );
+    }
+  }
+
+  /**
+   * The check rule of a lambda, which the clauses of a function share: binds the patterns at the parameter types of
+   * `expected`, polymorphic as they may be, checks the body against the rest, and checks that the parameters of linear
+   * arrows are used once. A `forall` between the parameters is skolemised; the dictionaries of one with a context
+   * would have to be taken between the parameters, which the clauses cannot.
+   */
+  private checkMatch(
+    pats: readonly RPat[],
+    expected: Type,
+    span: Span,
+    context: string,
+    body: (result: Type) => RRhs
+  ): void {
+    const linear: LocalVar[] = [];
+    const bind = (start: number, type: Type): void => {
+      let remaining = type;
+      for (let index = start; index < pats.length; index++) {
+        const polymorphic = prune(remaining);
+        if (polymorphic.tag === 'forall') {
+          if (polymorphic.preds.length > 0) {
+            throw unsupportedError(pats[index].span, '文脈付きの forall の後ろの引数をパターンで受け取る定義');
+          }
+          this.skolemise(polytypeScheme(polymorphic), (rho) => bind(index, rho));
+          return;
+        }
+        const { param, result, multiplicity } = this.splitFunction(remaining, span, context);
+        this.inferPat(pats[index], param);
+        if (multiplicity) linear.push(...linearLocals(pats[index]));
+        remaining = result;
+      }
+      const rhs = body(remaining);
+      if (linear.length > 0) checkLinearUses(linear, rhs);
+    };
+    this.inPatternScope(() => bind(0, expected));
   }
 
   private assignMonoTypes(bindings: RBinding[]): Map<RBinding, Type> {
@@ -1699,7 +1745,7 @@ export class Checker {
       if (sig) {
         const inferred = local.scheme;
         const declared = this.sigToScheme(sig);
-        this.checkAgainstScheme(declared, (type) =>
+        this.skolemise(declared, (type) =>
           this.unify(this.instantiate(inferred, sig.span, local.name).type, type, sig.span)
         );
         local.scheme = declared;
@@ -1785,72 +1831,30 @@ export class Checker {
     );
   }
 
-  checkAgainstScheme(
-    scheme: Scheme,
-    check: (type: Type, skolems: readonly Type[]) => void,
-    extraGivens: { pred: Pred; evidence: Evidence }[] = []
-  ): DictParam[] {
-    const outer = this.level;
-    this.level++;
-    const skolems = scheme.kinds.map((kind, index) => freshSkolem(kind, this.level, scheme.names?.[index] ?? 'a'));
-    const type = instantiateType(scheme.type, skolems);
-    const params = scheme.preds.map((pred) =>
-      newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
-    );
-    const assumed = [...extraGivens.map((given) => given.pred), ...params.map((param) => param.pred)].flatMap((pred) =>
-      this.assumeEquality(pred)
-    );
-    const givens = [
-      ...extraGivens,
-      ...params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
-    ];
-    const saved = this.wanted;
-    this.wanted = [];
-    check(type, skolems);
-    this.level = outer;
-    const inner = this.wanted;
-    this.wanted = saved;
-    const { retained, deferred } = this.simplify(inner, outer, givens);
-    for (const hole of retained) {
-      const evidence = entailByGivens(givens, hole.pred);
-      if (evidence) {
-        hole.solution = evidence;
-        continue;
-      }
-      const vars = [...typeVarsOf(hole.pred.type)];
-      if (vars.every((variable) => !variable.skolem)) {
-        for (const variable of vars) if (variable.level > outer) variable.level = outer;
-        deferred.push(hole);
-        continue;
-      }
-      const printer = new TypePrinter();
-      typeError(
-        hole.span,
-        `${printer.showPred(hole.pred)} を導けません（${hole.origin}）。型シグネチャの文脈に制約を加えてください。`
+  /**
+   * Checks against a polymorphic type, `forall vars. preds => type`, by skolemising it: `check` sees its type with
+   * rigid variables for its own, in a pattern scope that gives its constraints, whose dictionaries are returned. Only
+   * the outermost quantifier is skolemised, as GHC's simplified subsumption does; the check rules skolemise the ones
+   * they meet inside.
+   */
+  skolemise(scheme: Scheme, check: (type: Type, skolems: readonly Type[]) => void): DictParam[] {
+    return this.inPatternScope((scope) => {
+      this.enterImplication(scope);
+      scope.hint = '型シグネチャの文脈に制約を加えてください。';
+      const skolems = scheme.kinds.map((kind, index) => freshSkolem(kind, this.level, scheme.names?.[index] ?? 'a'));
+      const params = scheme.preds.map((pred) =>
+        newDictParam({ cls: pred.cls, type: instantiateType(pred.type, skolems) })
       );
-    }
-    for (const assumption of assumed) this.undoAssumption(assumption);
-    this.wanted.push(...deferred);
-    return params;
+      for (const param of params) this.assumeGiven(scope, param);
+      check(instantiateType(scheme.type, skolems), skolems);
+      return params;
+    });
   }
 
-  /** Checks a construct under given constraints, solving what it wants with them, as `let ?x = e` does. */
-  private withGivens<T>(givens: { pred: Pred; evidence: Evidence }[], run: () => T): T {
-    const outer = this.level;
-    const saved = this.wanted;
-    this.wanted = [];
-    this.level++;
-    const result = run();
-    this.level = outer;
-    const inner = this.wanted;
-    this.wanted = saved;
-    const { retained, deferred } = this.simplify(inner, outer, givens);
-    for (const hole of [...retained, ...deferred]) {
-      const evidence = entailByGivens(givens, hole.pred);
-      if (evidence) hole.solution = evidence;
-      else this.wanted.push(hole);
-    }
-    return result;
+  /** Gives a constraint in a pattern scope, assuming it while the scope is checked if it is an equality. */
+  private assumeGiven(scope: PatternScope, param: DictParam): void {
+    scope.assumed.push(...this.assumeEquality(param.pred));
+    scope.givens.push({ pred: param.pred, evidence: { kind: 'param', param } });
   }
 
   /**
