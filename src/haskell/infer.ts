@@ -127,7 +127,6 @@ export function typeError(span: Span, message: string): never {
   throw compileError(span, message);
 }
 
-/** The state of a construct whose patterns may give existential types, constraints, and GADT equalities. */
 /** A given equality on a family application, `F a ~ Bool`, under which the application reduces to the other side. */
 interface FamilyGiven {
   family: TypeEntity;
@@ -138,6 +137,7 @@ interface FamilyGiven {
 /** What a given equality assumes, undone when its scope ends: a rigid variable's binding, or a family's reduction. */
 type Assumption = TVar | FamilyGiven;
 
+/** The state of a construct whose patterns may give existential types, constraints, and GADT equalities. */
 interface PatternScope {
   outer: number;
   /** The wanted constraints outside the scope, set once a pattern gives something the scope solves under. */
@@ -923,10 +923,7 @@ export class Checker {
         return this.inferRightSection(expr);
       }
       case 'typed': {
-        const scheme = this.sigToScheme(expr.sig);
-        expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
-          this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
-        );
+        const scheme = this.checkTyped(expr);
         const instantiated = this.instantiate(scheme, expr.span, '型の注釈');
         expr.evidence = instantiated.evidence;
         return instantiated.type;
@@ -979,6 +976,15 @@ export class Checker {
    * Infers `e @t1 @t2`, where `e` is a variable or constructor whose scheme specifies its type variables: the type
    * arguments instantiate them in order.
    */
+  /** Checks an expression against its signature, `e :: sig`, giving the signature's scheme. */
+  private checkTyped(expr: Extract<RExpr, { k: 'typed' }>): Scheme {
+    const scheme = this.sigToScheme(expr.sig);
+    expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+      this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
+    );
+    return scheme;
+  }
+
   private inferTypeApplication(expr: Extract<RExpr, { k: 'tyapp' }>): Type {
     const applications: Extract<RExpr, { k: 'tyapp' }>[] = [];
     let head: RExpr = expr;
@@ -996,7 +1002,9 @@ export class Checker {
             : this.globalMono.has(head.ref.entity)
               ? undefined
               : head.ref.entity.scheme
-          : undefined;
+          : head.k === 'typed'
+            ? this.checkTyped(head)
+            : undefined;
     const specified = scheme?.specified ?? [];
     if (!scheme || typeArgs.length > specified.length) {
       typeError(expr.span, '型の適用（@）ができるのは、型シグネチャで型変数を決めた関数と構成子だけです。');
@@ -1024,7 +1032,7 @@ export class Checker {
     const evidence = scheme.preds.map((pred) =>
       this.want({ cls: pred.cls, type: instantiateType(pred.type, args) }, head.span, `${name} の使用`)
     );
-    if (head.k === 'var' || (head.k === 'con' && evidence.length > 0)) head.evidence = evidence;
+    if (head.k === 'var' || head.k === 'typed' || (head.k === 'con' && evidence.length > 0)) head.evidence = evidence;
     const type = instantiateType(scheme.type, args);
     head.type = type;
     return type;
