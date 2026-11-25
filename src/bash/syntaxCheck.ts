@@ -24,8 +24,6 @@ import {
 } from './syntaxWords';
 import { isIdentifier } from './variables';
 
-const MAX_ARITHMETIC_PASSES = 50;
-
 export interface AnalyzedBashSource {
   readonly originalSource: string;
   readonly grammarSource: string;
@@ -192,12 +190,15 @@ function resolveDeferredArithmeticRegions(
   const deferredArithmetic = new Map<number, string>();
   if (regions.length === 0) return { grammarSource: source, deferredArithmetic };
   let text = source;
-  for (let pass = 0; pass < MAX_ARITHMETIC_PASSES; pass++) {
+  for (;;) {
     const tree = parser.parse(text);
     if (!tree) throw new Error('The parser returned no tree');
     try {
       const failing = findFirstFailingRegion(tree.rootNode, regions, deferredArithmetic);
       if (!failing) break;
+      if (deferredArithmetic.has(failing.start)) {
+        throw new Error(`Deferred arithmetic region at ${failing.start} was selected twice`);
+      }
       const original = source.slice(failing.start, failing.end);
       deferredArithmetic.set(failing.start, original);
       const blank = blankDeferredSlice(original, failing.keepsSemicolons);
