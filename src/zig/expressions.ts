@@ -2030,16 +2030,24 @@ export abstract class ExpressionCompiler extends SemaBase {
         read: (value) => ((value as Pointer).load() as ZArray).values(),
       };
     }
-    // A slice known at compile time has a known length, as Zig reads it for `++`.
-    const known = type.kind === 'pointer' && type.size === 'slice' ? staticResultOf(operand) : undefined;
+    // A slice known at compile time has a known length, as Zig reads it for `++`; so does a comptime var's slice,
+    // whose value the compiler holds as it analyzes the code.
+    const variablePlace = operand.place?.comptimeVar ? operand.place.compileTimePointer : undefined;
+    const known =
+      type.kind === 'pointer' && type.size === 'slice'
+        ? (staticResultOf(operand) ?? (variablePlace && { value: variablePlace.load() }))
+        : undefined;
     if (type.kind === 'pointer' && known) {
+      const length = (known.value as Slice).lengthValue;
       return {
         child: type.child,
-        length: (known.value as Slice).lengthValue,
+        length,
         sentinel: type.sentinel,
         viaPointer: true,
         read: (value) => {
           const slice = value as Slice;
+          // Code that a `comptime` block runs after it changes the variable sees another length than its analysis.
+          if (slice.lengthValue !== length) panic('unable to resolve comptime value');
           return Array.from({ length: slice.length }, (_, index) => slice.get(index));
         },
       };
