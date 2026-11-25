@@ -1021,36 +1021,47 @@ function convertFamilyDecl(features: FeatureGates<'convert'>, node: Node): Decl 
       const decl =
         inner.type === 'newtype' ? convertNewtype(features, inner, true) : convertData(features, inner, true);
       if (decl.kind !== 'data') throw syntaxError(span, '書き方に誤りがあります。');
-      return {
-        ...decl,
-        instanceOf: {
-          family: qualifiedName(required(inner, 'name')).name,
-          patterns: instancePatterns(features, inner),
-        },
-        span,
-      };
+      return { ...decl, instanceOf: familyInstanceHead(features, inner), span };
     }
   }
 }
 
 /** An equation of a type family: `F Int = Bool` in a closed family, or `type instance F Int = Bool`. */
 function convertEquation(features: FeatureGates<'convert'>, node: Node): TypeEquation {
-  const nameNode = required(node, 'name');
   const rhsNode = unnamedFieldChildren(node).at(-1);
   if (!rhsNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
-  return {
-    family: qualifiedName(nameNode).name,
-    patterns: instancePatterns(features, node),
-    rhs: convertType(features, rhsNode),
-    span: spanOf(node),
-  };
+  return { ...familyInstanceHead(features, node), rhs: convertType(features, rhsNode), span: spanOf(node) };
 }
 
-function instancePatterns(features: FeatureGates<'convert'>, node: Node): TypeExpr[] {
-  return fields(node, 'patterns').flatMap((patterns) =>
-    namedChildren(patterns).map((node) => convertType(features, node))
-  );
+/**
+ * The family and argument patterns of an equation or instance, written prefix (`F a b`) or infix (`a ++ b`); a `_` in
+ * them matches anything, as a variable nothing else names.
+ */
+function familyInstanceHead(features: FeatureGates<'convert'>, node: Node): { family: QName; patterns: TypeExpr[] } {
+  const saved = typeWildcards;
+  typeWildcards = { count: 0 };
+  try {
+    const head = field(node, 'head');
+    if (head) {
+      requireTypeOperators(features, head);
+      return {
+        family: plainName(required(head, 'operator')),
+        patterns: fields(head, 'operand').map((operand) => convertType(features, operand)),
+      };
+    }
+    return {
+      family: qualifiedName(required(node, 'name')).name,
+      patterns: fields(node, 'patterns').flatMap((patterns) =>
+        namedChildren(patterns).map((child) => convertType(features, child))
+      ),
+    };
+  } finally {
+    typeWildcards = saved;
+  }
 }
+
+/** Set while the patterns of a family's equation or instance convert, whose `_`s are variables of their own. */
+let typeWildcards: { count: number } | undefined;
 
 function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstance = false): Decl {
   for (const name of ['context', 'forall', 'kind']) {
@@ -1247,7 +1258,13 @@ function typeParamKinds(features: FeatureGates<'convert'>, node: Node): (TypeExp
 
 function typeParamBinders(features: FeatureGates<'convert'>, node: Node): TyVarBinder[] {
   const head = field(node, 'head');
-  const headBinders = head ? fields(head, 'bind').map((node) => convertBinder(features, node)) : [];
+  // An infix head's operands, `a ++ b` or `(a :: k) ++ (b :: k)`, in the order they are written.
+  const operator = head && field(head, 'operator');
+  const headBinders = head
+    ? namedChildren(head)
+        .filter((child) => child.id !== operator?.id)
+        .map((child) => convertBinder(features, child))
+    : [];
   return [
     ...headBinders,
     ...fields(node, 'patterns').flatMap((patterns) => {
@@ -1859,6 +1876,7 @@ function convertType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
       return convertPromoted(features, namedChildren(node)[0] ?? node, span);
     }
     case 'wildcard': {
+      if (typeWildcards) return { kind: 'tvar', name: ` _${typeWildcards.count++}`, span };
       throw unsupportedError(span, '型の中の _（PartialTypeSignatures）');
     }
     case 'signature': {
