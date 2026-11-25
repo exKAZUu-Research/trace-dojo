@@ -500,7 +500,7 @@ export class Evaluator extends StatementExecutor {
     switch (expression.kind) {
       case 'call': {
         // C# removes a call of a partial method without an implementation, arguments and all.
-        if (expression.method.isRemovedPartial) return undefined;
+        if (expression.method.callsAreRemoved) return undefined;
         return this.evaluateCall(expression, frame);
       }
       case 'invokeDelegate': {

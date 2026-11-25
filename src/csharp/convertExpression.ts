@@ -6,6 +6,8 @@ import { CompileError } from '../interpreter/diagnostics';
 import type {
   Argument,
   ArrayInitializer,
+  Attributed,
+  AttributeNode,
   Block,
   CollectionElement,
   Designation,
@@ -140,6 +142,36 @@ export class ExpressionConverter {
     const [name, typeArgs] =
       nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
     return { alias: requiredField(node, 'alias').text, name, typeArgs };
+  }
+
+  /** The attributes of a declaration's attribute lists, as a property to spread into its syntax, if it has any. */
+  protected attributed(node: Node): Attributed {
+    const attributes = namedChildren(node)
+      .filter((child) => child.type === 'attribute_list')
+      .flatMap((list) => this.convertAttributeList(list));
+    return attributes.length > 0 ? { attributes } : {};
+  }
+
+  protected convertAttributeList(list: Node): AttributeNode[] {
+    const target = namedChildren(list).find((child) => child.type === 'attribute_target_specifier');
+    const targetName = target ? childrenOf(target)[0].text : undefined;
+    return namedChildren(list)
+      .filter((child) => child.type === 'attribute')
+      .map((attribute) => this.convertAttribute(attribute, targetName));
+  }
+
+  protected convertAttribute(node: Node, target: string | undefined): AttributeNode {
+    const args: Argument[] = [];
+    const assignments: AttributeNode['assignments'] = [];
+    const list = namedChildren(node).find((child) => child.type === 'attribute_argument_list');
+    for (const arg of list ? namedChildren(list) : []) {
+      const nameNode = field(arg, 'name');
+      const valueNode = namedChildren(arg).find((child) => !sameNode(child, nameNode)) as Node;
+      const value = this.convertExpression(valueNode);
+      if (nameNode && hasToken(arg, '=')) assignments.push({ name: nameNode.text, value, ...positionOf(nameNode) });
+      else args.push({ name: nameNode?.text, modifier: undefined, value, text: valueNode.text, ...positionOf(arg) });
+    }
+    return { name: this.convertType(requiredField(node, 'name')), args, assignments, target, ...positionOf(node) };
   }
 
   protected genericParts(node: Node): [string, TypeNode[]] {
@@ -704,7 +736,6 @@ export class ExpressionConverter {
 
   private convertLambdaParameters(node: Node): LambdaParameter[] {
     return namedChildren(node).map((parameter) => {
-      if (parameter.type !== 'parameter') unsupported(parameter, '属性');
       const typeNode = field(parameter, 'type');
       const modifier = namedChildren(parameter).find((child) => child.type === 'modifier')?.text;
       if (modifier !== undefined && !['ref', 'out', 'in'].includes(modifier))
@@ -725,7 +756,6 @@ export class ExpressionConverter {
         .map((child) => child.text)
     );
     if (modifiers.has('async')) unsupported(node, '`async` のラムダ式');
-    if (childrenOf(node).some((child) => child.type === 'attribute_list')) unsupported(node, '属性');
     const parameters: LambdaParameter[] = [];
     for (const parameterNode of fieldChildren(node, 'parameters')) {
       if (parameterNode.type === 'implicit_parameter') {
@@ -753,6 +783,7 @@ export class ExpressionConverter {
     const returnTypeNode = field(node, 'type');
     return {
       kind: 'lambda',
+      ...this.attributed(node),
       parameters,
       body: bodyNode.type === 'block' ? this.convertBlockNode(bodyNode) : this.convertExpression(bodyNode),
       isStatic: modifiers.has('static'),

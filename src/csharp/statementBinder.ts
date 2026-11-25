@@ -748,7 +748,7 @@ export abstract class StatementBinder extends PatternBinder {
   /** How an expression statement records its step: one that only calls or creates objects may leave it to its calls. */
   private expressionStepKind(expression: BoundExpression): StepKind {
     // C# removes a call of a partial method without an implementation, so it records no step.
-    if (expression.kind === 'call' && expression.method.isRemovedPartial) return 'none';
+    if (expression.kind === 'call' && expression.method.callsAreRemoved) return 'none';
     if (expression.kind === 'call' || expression.kind === 'invokeDelegate' || expression.kind === 'new')
       return 'callsOnly';
     if (
@@ -1410,8 +1410,16 @@ export abstract class StatementBinder extends PatternBinder {
     }
     context.scope.localFunctions.set(declaration.name, method);
     this.localFunctionScopes.set(method, context.scope);
+    // A local function's attributes bind with its declaration, before the calls that their meaning changes.
+    this.collectAttributes(declaration.attributes, 'method', method, typeContext, { method, return: undefined });
+    this.bindPendingAttributes();
+    if (method.conditionalSymbols && method.returnType.kind === 'void')
+      method.callsAreRemoved = !method.conditionalSymbols.some((name) => this.definedSymbols.has(name));
     return method;
   }
+
+  /** The program's defined preprocessing symbols, which the compiler provides. */
+  abstract definedSymbols: ReadonlySet<string>;
 
   protected abstract typeParameterClass(): typeof TypeParameterSymbol;
 

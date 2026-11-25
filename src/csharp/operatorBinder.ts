@@ -9,6 +9,7 @@ import {
   arithmetic,
   booleanOperation,
   compareNumeric,
+  convertNumeric,
   type NumericValue,
   PendingException,
   unaryNumeric,
@@ -296,12 +297,8 @@ export abstract class OperatorBinder extends ConversionBinder {
     try {
       if (operandKind === 'bool')
         return this.constant(booleanOperation(operator, left.value as boolean, right.value as boolean), node.type, row);
-      if (
-        operandKind === 'string' ||
-        operandKind === 'object' ||
-        operandKind === 'enum' ||
-        operandKind === 'delegate'
-      ) {
+      if (operandKind === 'enum') return this.foldEnum(node, left.value as NumericValue, right.value as NumericValue);
+      if (operandKind === 'string' || operandKind === 'object' || operandKind === 'delegate') {
         if (operandKind === 'string' && EQUALITY.has(operator))
           return this.constant((left.value === right.value) === (operator === '=='), node.type, row);
         return node;
@@ -312,6 +309,22 @@ export abstract class OperatorBinder extends ConversionBinder {
       this.error(row, 'CS0220', 'この操作はチェック モードでコンパイルしたときにオーバーフローします');
       return node;
     }
+  }
+
+  /** An operation on enum constants, which C# folds as one on their underlying values, as `Read | Write`. */
+  private foldEnum(
+    node: Extract<BoundExpression, { kind: 'binary' }>,
+    left: NumericValue,
+    right: NumericValue
+  ): BoundExpression {
+    const enumType = [node.left.type, node.right.type].find(isEnum) as NamedType | undefined;
+    const underlying = enumType ? specialOf(enumType.symbol.enumUnderlying as Type) : undefined;
+    if (!underlying) return node;
+    const kind = ['long', 'ulong', 'uint'].includes(underlying) ? (underlying as OperandKind) : 'int';
+    if (EQUALITY.has(node.operator) || RELATIONAL.has(node.operator))
+      return this.constant(compareNumeric(node.operator, kind, left, right), node.type, node.row);
+    const value = arithmetic(node.operator, kind, left, right, this.checkedContext !== false);
+    return this.constant(convertNumeric(value, kind, underlying), node.type, node.row);
   }
 
   private foldNumeric(
@@ -474,16 +487,17 @@ export abstract class OperatorBinder extends ConversionBinder {
     const enumType = (leftEnum ? leftType : rightType) as NamedType;
     const underlying = enumType.symbol.enumUnderlying as NamedType;
     const lift = (type: Type): Type => (isLifted ? this.nullableOf(type) : type);
-    const node = (leftOperandType: Type, rightOperandType: Type, resultType: Type): BoundExpression => ({
-      kind: 'binary',
-      operator,
-      left: this.convert(left, lift(leftOperandType), row),
-      right: this.convert(right, lift(rightOperandType), row),
-      operandKind: 'enum',
-      isLifted,
-      type: resultType,
-      row,
-    });
+    const node = (leftOperandType: Type, rightOperandType: Type, resultType: Type): BoundExpression =>
+      this.foldBinary({
+        kind: 'binary',
+        operator,
+        left: this.convert(left, lift(leftOperandType), row),
+        right: this.convert(right, lift(rightOperandType), row),
+        operandKind: 'enum',
+        isLifted,
+        type: resultType,
+        row,
+      });
     const isCompatible = (): boolean =>
       sameType(leftType, rightType) ||
       (leftEnum && this.implicitConversionOf(right, enumType) !== undefined) ||

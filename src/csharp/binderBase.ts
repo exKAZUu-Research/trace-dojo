@@ -626,6 +626,8 @@ export class BinderBase {
     const alias = args.length === 0 ? context.aliases?.get(name) : undefined;
     if (alias?.kind === 'type') return alias.type;
     const found = this.findTypeInScope(name, args.length, context);
+    if (found?.obsoleteError !== undefined)
+      this.error(position, 'CS0619', `'${displayTypeSymbol(found)}' は旧形式です ('${found.obsoleteError}')`);
     if (found) return this.construct(position, found, args);
     if (inaccessible) {
       this.reportInaccessibleType(position, inaccessible.symbol);

@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- The declarations module keeps one stage of the C# interpreter together.
 import type {
   Accessor,
+  AttributeNode,
   CompilationUnit,
   ConstraintClause,
   EventAccessorDeclaration,
@@ -19,6 +20,7 @@ import type {
   UsingDirective,
   VariableDeclarator,
 } from './ast';
+import type { AttributeOwner, AttributeTarget, PendingAttributes } from './attributeBinder';
 import { BinderBase, namespacePathOf, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
 import type { NamespaceSymbol } from './namespaces';
 import {
@@ -74,6 +76,21 @@ export class DeclarationBinder extends BinderBase {
   /** The contexts of the methods' signatures and bodies, which include their type parameters. */
   readonly methodContexts = new Map<MethodSymbol, TypeContext>();
   protected isLibraryUnit = false;
+  /** The attributes of the declarations, which the compiler binds once every type is declared. */
+  readonly pendingAttributes: PendingAttributes[] = [];
+
+  /** Keeps a declaration's attributes for binding, with the targets their specifiers may name instead. */
+  protected collectAttributes(
+    attributes: AttributeNode[] | undefined,
+    target: AttributeTarget,
+    owner: AttributeOwner | undefined,
+    context: TypeContext,
+    specifiers: PendingAttributes['specifiers'],
+    parameters?: readonly ParameterSymbol[]
+  ): void {
+    if (attributes && attributes.length > 0)
+      this.pendingAttributes.push({ attributes, target, owner, context, specifiers, parameters });
+  }
 
   /** Declares every type of a unit and its members, in the order that inheritance needs. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
@@ -277,6 +294,11 @@ export class DeclarationBinder extends BinderBase {
     }
     const context: TypeContext = { namespace: outer.namespace, usings: [], type: symbol, methodTypeParameters: [] };
     const declared = { symbol, declaration, context };
+    this.collectAttributes(declaration.attributes, typeTarget(declaration), symbol, context, { type: symbol });
+    for (const [index, parameter] of declaration.typeParameters.entries())
+      this.collectAttributes(parameter.attributes, 'genericParameter', symbol.typeParameters[index], context, {
+        typevar: symbol.typeParameters[index],
+      });
     this.declaredTypes.push(declared);
     this.namespaceUsings.set(declared, usingChain);
     for (const member of declaration.members) {
@@ -316,6 +338,9 @@ export class DeclarationBinder extends BinderBase {
       return true;
     }
     joinPartialType(first.declaration, declaration, (position, code, message) => this.error(position, code, message));
+    this.collectAttributes(declaration.attributes, typeTarget(declaration), first.symbol, first.context, {
+      type: first.symbol,
+    });
     for (const member of declaration.members) {
       if (member.kind === 'type') this.declareType(member, namespace, first.symbol, first.context, usingChain);
     }
@@ -740,6 +765,7 @@ export class DeclarationBinder extends BinderBase {
     field.column = declarator.column;
     field.isRequired = member.modifiers.set.has('required');
     if (field.isRequired) this.checkRequiredAccess(field, declarator);
+    this.collectAttributes(member.attributes, 'field', field, context, { field });
     if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
     this.checkField(type, member, declarator, field);
     this.addMember(symbol, field, declarator);
@@ -830,6 +856,7 @@ export class DeclarationBinder extends BinderBase {
     field.isEvent = true;
     field.isStatic = member.modifiers.set.has('static');
     field.access = accessibilityOf(member.modifiers, 'private');
+    this.collectAttributes(member.attributes, 'event', field, context, { event: field, field, method: undefined });
     field.initializer = declarator.initializer;
     field.row = declarator.row;
     field.column = declarator.column;
@@ -934,6 +961,7 @@ export class DeclarationBinder extends BinderBase {
       return method;
     };
     field.eventAccessors = { add: accessor('add', member.add), remove: accessor('remove', member.remove) };
+    this.collectAttributes(member.attributes, 'event', field, context, { event: field, method: undefined });
     this.addMember(symbol, field, member);
     symbol.fields.push(field);
   }
@@ -951,11 +979,23 @@ export class DeclarationBinder extends BinderBase {
       member.constraints
     );
     method.declaration = member;
-    method.isRemovedPartial = member.isRemovedPartial === true;
+    method.callsAreRemoved = member.isRemovedPartial === true;
     const methodContext = this.methodContexts.get(method) as TypeContext;
     method.returnType = this.resolveType(member.returnType, methodContext);
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
     method.isExtension = member.parameters[0]?.isThis === true;
+    this.collectAttributes(
+      member.attributes,
+      'method',
+      method,
+      methodContext,
+      { method, return: undefined },
+      method.parameters
+    );
+    for (const [index, parameter] of member.typeParameters.entries())
+      this.collectAttributes(parameter.attributes, 'genericParameter', method.typeParameters[index], methodContext, {
+        typevar: method.typeParameters[index],
+      });
     if (member.explicitInterface) {
       method.explicitInterface = this.explicitInterfaceOf(
         type,
@@ -1013,6 +1053,7 @@ export class DeclarationBinder extends BinderBase {
       field.initializer = member.value;
       field.row = member.row;
       field.column = member.column;
+      this.collectAttributes(member.attributes, 'field', field, type.context, { field });
       this.addMember(symbol, field, member);
       symbol.fields.push(field);
     }
@@ -1061,6 +1102,7 @@ export class DeclarationBinder extends BinderBase {
       );
     }
     constructor.parameters = this.resolveParameters(member.parameters, context, constructor);
+    this.collectAttributes(member.attributes, 'constructor', constructor, context, { method: constructor });
     if (isStatic && member.parameters.length > 0)
       this.error(
         member,
@@ -1168,6 +1210,10 @@ export class DeclarationBinder extends BinderBase {
       );
     }
     if (isAuto) this.declareBackingField(symbol, property, member);
+    this.collectAttributes(member.attributes, 'property', property, context, {
+      property,
+      field: property.backingField,
+    });
     for (const accessor of member.accessors) this.declareAccessor(type, property, accessor, member.modifiers);
     if (
       member.accessors.filter((accessor) => accessor.kind === 'get').length > 1 ||
@@ -1234,6 +1280,11 @@ export class DeclarationBinder extends BinderBase {
     method.parameters = [...property.parameters];
     if (!isGetter) method.parameters.push({ name: 'value', type: property.type, refKind: undefined, isParams: false });
     this.methodContexts.set(method, context);
+    this.collectAttributes(accessor.attributes, 'method', method, context, {
+      method,
+      return: undefined,
+      param: undefined,
+    });
     method.declaration = accessor.body
       ? ({ kind: 'method', body: accessor.body, bodyRow: accessor.row, row: accessor.row } as never)
       : undefined;
@@ -1287,6 +1338,7 @@ export class DeclarationBinder extends BinderBase {
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);
     method.parameters = this.resolveParameters(member.parameters, context, method);
+    this.collectAttributes(member.attributes, 'method', method, context, { method, return: undefined });
     const signature = `${displayTypeSymbol(symbol)}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
     if (isInstanceAssignment) {
       if (!member.modifiers.set.has('public'))
@@ -1470,7 +1522,7 @@ export class DeclarationBinder extends BinderBase {
       }
       return;
     }
-    if (!hasBody && !method.isAbstract && !method.isExtern && !method.isRemovedPartial) {
+    if (!hasBody && !method.isAbstract && !method.isExtern && !method.callsAreRemoved) {
       this.error(
         position,
         'CS0501',
@@ -1514,7 +1566,7 @@ export class DeclarationBinder extends BinderBase {
           this.error(parameter, 'CS0225', 'params パラメーターには有効なコレクションの種類が必要です');
       }
       if (parameter.isThis && method) this.checkExtensionReceiver(parameter, type, method, index);
-      result.push({
+      const symbol: ParameterSymbol = {
         name: parameter.name,
         type,
         refKind:
@@ -1525,7 +1577,17 @@ export class DeclarationBinder extends BinderBase {
         defaultSyntax: parameter.defaultValue,
         defaultContext: parameter.defaultValue ? context : undefined,
         position: parameter,
-      });
+      };
+      // A record's or a primary constructor's parameter may also aim its attributes at the property or field it makes.
+      this.collectAttributes(
+        parameter.attributes,
+        'parameter',
+        symbol,
+        context,
+        { param: symbol, property: undefined, field: undefined },
+        result
+      );
+      result.push(symbol);
     }
     return result;
   }
@@ -2228,6 +2290,11 @@ function displayAccessorIn(property: PropertySymbol, accessor: MethodSymbol, own
 }
 
 /** The operators C# requires to be declared together. */
+/** The kind of declaration of a type, which its attributes' `[AttributeUsage]` must allow. */
+function typeTarget(declaration: TypeDeclaration): AttributeTarget {
+  return declaration.typeKind;
+}
+
 /** Whether a type has a class among its bases, which the declarations know before the binders can tell. */
 function derivesFromClass(type: TypeSymbol, base: TypeSymbol): boolean {
   for (let current = type.baseType; current; current = current.symbol.baseType)

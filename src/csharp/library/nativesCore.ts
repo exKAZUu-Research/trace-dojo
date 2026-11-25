@@ -322,13 +322,25 @@ function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boole
     if (throws) failNull('value');
     return undefined;
   }
-  const trimmed = text.trim();
-  const member = type.symbol.fields.find(
-    (field) =>
-      field.isConst && (ignoreCase ? field.name.toLowerCase() === trimmed.toLowerCase() : field.name === trimmed)
-  );
-  if (member) return member.constantValue as Value;
-  if (/^[+-]?\d+$/.test(trimmed)) return Number(trimmed);
+  // .NET reads a list of names as the bitwise OR of their members, with or without `[Flags]`.
+  let combined: bigint | undefined = 0n;
+  for (const part of text.split(',')) {
+    const trimmed = part.trim();
+    const member = type.symbol.fields.find(
+      (field) =>
+        field.isConst && (ignoreCase ? field.name.toLowerCase() === trimmed.toLowerCase() : field.name === trimmed)
+    );
+    if (member) combined |= BigInt(member.constantValue as number | bigint);
+    else if (/^[+-]?\d+$/.test(trimmed)) combined |= BigInt(trimmed);
+    else {
+      combined = undefined;
+      break;
+    }
+  }
+  if (combined !== undefined) {
+    const special = (type.symbol.enumUnderlying as NamedType).symbol.special as SpecialType;
+    return special === 'long' || special === 'ulong' ? combined : Number(combined);
+  }
   if (throws) fail('System.ArgumentException', `Requested value '${text}' was not found.`);
   return undefined;
 }

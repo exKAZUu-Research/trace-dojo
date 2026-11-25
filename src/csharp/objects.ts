@@ -77,10 +77,34 @@ export function unboxed(value: Value): Value {
   return value instanceof CsBox ? value.value : plainString(value);
 }
 
-/** The member name of an enum value, or its number when no member has it. */
+/** The member name of an enum value, or its number when no member has it, or for `[Flags]` the names of its bits. */
 export function enumText(type: NamedType, value: Value): string {
   const member = type.symbol.fields.find((field) => field.isConst && sameNumber(field.constantValue, value));
-  return member ? member.name : String(value);
+  if (member) return member.name;
+  return type.symbol.isFlags ? flagsText(type, value) : String(value);
+}
+
+/**
+ * An enum value as `ToString("F")` gives it: its member's name, or the names of the members whose bits make it up, as
+ * `Red, Green`, even without `[Flags]`, or its number when no members make it up.
+ */
+export function flagsText(type: NamedType, value: Value): string {
+  const exact = type.symbol.fields.find((field) => field.isConst && sameNumber(field.constantValue, value));
+  if (exact) return exact.name;
+  const number = BigInt(value as number | bigint);
+  if (number === 0n) return String(value);
+  const members = type.symbol.fields
+    .filter((field) => field.isConst && BigInt(field.constantValue as number | bigint) !== 0n)
+    .map((field) => ({ name: field.name, bits: BigInt(field.constantValue as number | bigint) }))
+    .toSorted((a, b) => (a.bits < b.bits ? 1 : a.bits > b.bits ? -1 : 0));
+  let rest = number;
+  const names: string[] = [];
+  for (const member of members) {
+    if ((rest & member.bits) !== member.bits) continue;
+    rest &= ~member.bits;
+    names.unshift(member.name);
+  }
+  return rest === 0n ? names.join(', ') : String(value);
 }
 
 function sameNumber(a: unknown, b: unknown): boolean {

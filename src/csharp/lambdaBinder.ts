@@ -199,6 +199,11 @@ export abstract class LambdaBinder extends MemberBinder {
     return shaped;
   }
 
+  private readonly lambdasWithAttributes = new Set<LambdaExpression>();
+
+  /** Binds the attributes collected since the last time, which the compiler provides. */
+  protected abstract bindPendingAttributes(): void;
+
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
   protected bindLambda(
     node: LambdaExpression,
@@ -215,6 +220,15 @@ export abstract class LambdaBinder extends MemberBinder {
     if (cached && !report) return { result: cached.result, returnType: cached.returnType };
     const savedDiagnostics = this.diagnostics.length;
     const context = this.lambdaContext(node, outer, parameterTypes, returnType);
+    // A lambda binds once for each delegate type it may convert to, but its attributes once.
+    if (node.attributes && !this.lambdasWithAttributes.has(node)) {
+      this.lambdasWithAttributes.add(node);
+      this.collectAttributes(node.attributes, 'method', context.fn.method, outer.fn.typeContext, {
+        method: context.fn.method,
+        return: undefined,
+      });
+      this.bindPendingAttributes();
+    }
     const method = context.fn.method;
     const { body, inferred } = this.bindLambdaBodyGuarded(node, context, returnType, report);
     method.body = body;

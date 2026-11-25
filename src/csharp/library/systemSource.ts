@@ -490,6 +490,38 @@ namespace System {
     public override string ToString();
   }
 
+  public abstract class Attribute { protected Attribute(); }
+  [Flags]
+  public enum AttributeTargets { Assembly = 1, Module = 2, Class = 4, Struct = 8, Enum = 16, Constructor = 32, Method = 64, Property = 128, Field = 256, Event = 512, Interface = 1024, Parameter = 2048, Delegate = 4096, ReturnValue = 8192, GenericParameter = 16384, All = 32767 }
+  [AttributeUsage(AttributeTargets.Class, Inherited = true)]
+  public sealed class AttributeUsageAttribute : Attribute {
+    public AttributeUsageAttribute(AttributeTargets validOn);
+    public bool AllowMultiple { get; set; }
+    public bool Inherited { get; set; }
+    public AttributeTargets ValidOn { get; }
+  }
+  [AttributeUsage(AttributeTargets.Enum, Inherited = false)]
+  public class FlagsAttribute : Attribute { public FlagsAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Event | AttributeTargets.Interface | AttributeTargets.Delegate, Inherited = false)]
+  public sealed class ObsoleteAttribute : Attribute {
+    public ObsoleteAttribute();
+    public ObsoleteAttribute(string? message);
+    public ObsoleteAttribute(string? message, bool error);
+    public string? Message { get; }
+    public bool IsError { get; }
+    public string? DiagnosticId { get; set; }
+    public string? UrlFormat { get; set; }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Delegate, Inherited = false)]
+  public sealed class SerializableAttribute : Attribute { public SerializableAttribute(); }
+  [AttributeUsage(AttributeTargets.Field, Inherited = false)]
+  public sealed class NonSerializedAttribute : Attribute { public NonSerializedAttribute(); }
+  [AttributeUsage(AttributeTargets.All, Inherited = true)]
+  public sealed class CLSCompliantAttribute : Attribute {
+    public CLSCompliantAttribute(bool isCompliant);
+    public bool IsCompliant { get; }
+  }
+
   public struct HashCode {
     public static int Combine<T1>(T1 value1);
     public static int Combine<T1, T2>(T1 value1, T2 value2);
@@ -1169,7 +1201,77 @@ namespace System {
   }
 }
 
+namespace System.Diagnostics {
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
+  public sealed class ConditionalAttribute : Attribute {
+    public ConditionalAttribute(string conditionString);
+    public string ConditionString { get; }
+  }
+  [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Delegate, AllowMultiple = true)]
+  public sealed class DebuggerDisplayAttribute : Attribute {
+    public DebuggerDisplayAttribute(string? value);
+    public string Value { get; }
+    public string? Name { get; set; }
+    public string? Type { get; set; }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Constructor | AttributeTargets.Method, Inherited = false)]
+  public sealed class DebuggerStepThroughAttribute : Attribute { public DebuggerStepThroughAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
+  public sealed class DebuggerHiddenAttribute : Attribute { public DebuggerHiddenAttribute(); }
+}
+
+namespace System.Diagnostics.CodeAnalysis {
+  [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false, Inherited = false)]
+  public sealed class SetsRequiredMembersAttribute : Attribute { public SetsRequiredMembersAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property | AttributeTargets.ReturnValue, Inherited = false)]
+  public sealed class NotNullAttribute : Attribute { public NotNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property | AttributeTargets.ReturnValue, Inherited = false)]
+  public sealed class MaybeNullAttribute : Attribute { public MaybeNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]
+  public sealed class AllowNullAttribute : Attribute { public AllowNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]
+  public sealed class DisallowNullAttribute : Attribute { public DisallowNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class NotNullWhenAttribute : Attribute {
+    public NotNullWhenAttribute(bool returnValue);
+    public bool ReturnValue { get; }
+  }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class MaybeNullWhenAttribute : Attribute {
+    public MaybeNullWhenAttribute(bool returnValue);
+    public bool ReturnValue { get; }
+  }
+  [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+  public sealed class DoesNotReturnAttribute : Attribute { public DoesNotReturnAttribute(); }
+  [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Event, Inherited = false, AllowMultiple = false)]
+  public sealed class ExcludeFromCodeCoverageAttribute : Attribute {
+    public ExcludeFromCodeCoverageAttribute();
+    public string? Justification { get; set; }
+  }
+}
+
 namespace System.Runtime.CompilerServices {
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerMemberNameAttribute : Attribute { public CallerMemberNameAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerLineNumberAttribute : Attribute { public CallerLineNumberAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerFilePathAttribute : Attribute { public CallerFilePathAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+  public sealed class CallerArgumentExpressionAttribute : Attribute {
+    public CallerArgumentExpressionAttribute(string parameterName);
+    public string ParameterName { get; }
+  }
+  [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method, Inherited = false)]
+  public sealed class MethodImplAttribute : Attribute {
+    public MethodImplAttribute();
+    public MethodImplAttribute(MethodImplOptions methodImplOptions);
+    public MethodImplOptions Value { get; }
+  }
+  [Flags]
+  public enum MethodImplOptions { Unmanaged = 4, NoInlining = 8, ForwardRef = 16, Synchronized = 32, NoOptimization = 64, PreserveSig = 128, AggressiveInlining = 256, AggressiveOptimization = 512, InternalCall = 4096 }
+  [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+  public sealed class ModuleInitializerAttribute : Attribute { public ModuleInitializerAttribute(); }
   public static class RuntimeHelpers { public static T[] GetSubArray<T>(T[] array, Range range); }
   public sealed class SwitchExpressionException : InvalidOperationException {
     public SwitchExpressionException();

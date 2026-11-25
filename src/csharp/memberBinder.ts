@@ -17,7 +17,7 @@ import {
   isReferenceType,
   isValueType,
   LocalSymbol,
-  type MethodSymbol,
+  MethodSymbol,
   type NamedType,
   namedType,
   nullableUnderlying,
@@ -27,7 +27,7 @@ import {
   substitute,
   substitutionOf,
   type Type,
-  type TypeSymbol,
+  TypeSymbol,
 } from './types';
 import { isKnownLibraryMember } from './unavailable';
 
@@ -324,10 +324,14 @@ export abstract class MemberBinder extends CallBinder {
     if (alias?.kind === 'type') return { kind: 'typeRef', type: alias.type, row: position.row };
     if (alias) return { kind: 'namespaceRef', path: alias.path, namespaces: alias.namespaces, row: position.row };
     const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
+    // A call leaves out a type that a using imports, which is not invocable, for a method that `using static` imports.
+    const imported =
+      !symbol || (isCallee && symbol.isLibrary)
+        ? this.bindStaticImport(name, resolvedTypeArgs, isCallee, position, context)
+        : undefined;
+    if (imported?.kind === 'methodGroup' || (imported && !symbol)) return imported;
     if (symbol)
       return { kind: 'typeRef', type: this.construct(position, symbol, resolvedTypeArgs ?? []), row: position.row };
-    const imported = this.bindStaticImport(name, resolvedTypeArgs, isCallee, position, context);
-    if (imported) return imported;
     const namespaces = this.namespacesAt([name]);
     if (namespaces.length > 0 && !typeArgs)
       return { kind: 'namespaceRef', path: [name], namespaces, row: position.row };
@@ -647,6 +651,18 @@ export abstract class MemberBinder extends CallBinder {
     }
   }
 
+  /** Reports a use of a member or type that `[Obsolete(message, true)]` makes an error (CS0619). */
+  protected checkObsolete(member: MethodSymbol | FieldSymbol | PropertySymbol | TypeSymbol, position: Position): void {
+    if (member.obsoleteError === undefined) return;
+    const name =
+      member instanceof MethodSymbol
+        ? displayMethod(member)
+        : member instanceof TypeSymbol
+          ? displayTypeSymbol(member)
+          : `${displayTypeSymbol(member.owner)}.${member.name}`;
+    this.error(position, 'CS0619', `'${name}' は旧形式です ('${member.obsoleteError}')`);
+  }
+
   /** A field or property of a receiver, or a static one when the receiver is undefined. */
   protected memberAccessOn(
     receiver: BoundExpression | undefined,
@@ -655,6 +671,7 @@ export abstract class MemberBinder extends CallBinder {
     context: BindContext
   ): BoundExpression {
     const substitution = substitutionOf(found.owner);
+    this.checkObsolete(found.kind === 'field' ? found.field : found.property, position);
     if (found.kind === 'field') {
       const { field } = found;
       const type = substitute(field.type, substitution);
@@ -1386,6 +1403,7 @@ export abstract class MemberBinder extends CallBinder {
     // `base.M()` calls the implementation that the base class has, which may override the method found by name.
     const method =
       group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
+    this.checkObsolete(method, node);
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
     const returnType = this.covariantReturn(group, method) ?? substitute(method.returnType, substitution);
     const constrained = group.constrainedType ? { constrainedType: group.constrainedType } : {};
@@ -1724,6 +1742,7 @@ export abstract class MemberBinder extends CallBinder {
     if (!constructor.native && symbol.isLibrary && !constructor.declaration && !(symbol.kind === 'struct'))
       this.unsupported(node, `${displayTypeSymbol(symbol)} のコンストラクター`);
     if (!constructor.setsRequiredMembers) this.checkRequiredMembers(type, initializer, node);
+    this.checkObsolete(constructor, node);
     return {
       kind: 'new',
       constructor,

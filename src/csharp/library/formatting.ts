@@ -1,7 +1,7 @@
 import type { Evaluator } from '../evaluator';
 import { CULTURE, formatNumber, type NumericKind } from '../format';
 import { PendingException } from '../numeric';
-import { enumText, stringOf, unboxed } from '../objects';
+import { enumText, flagsText, stringOf, unboxed } from '../objects';
 import type { Frame } from '../runtime';
 import { type NamedType, nullableUnderlying, type Type } from '../types';
 import { CsBox, CsStruct, type Value } from '../values';
@@ -95,28 +95,6 @@ function formatEnum(type: NamedType, value: Value, format: string): string {
       );
     }
   }
-}
-
-/**
- * An enum value as `ToString("F")` gives it: its member's name, or the names of the members whose bits make it up, as
- * `Red, Green`, even without `[Flags]`, or its number when no members make it up.
- */
-function flagsText(type: NamedType, value: Value): string {
-  const exact = enumText(type, value);
-  const number = BigInt(value as number | bigint);
-  if (exact !== String(value) || number === 0n) return exact;
-  const members = type.symbol.fields
-    .filter((field) => field.isConst && BigInt(field.constantValue as number | bigint) !== 0n)
-    .map((field) => ({ name: field.name, bits: BigInt(field.constantValue as number | bigint) }))
-    .toSorted((a, b) => (a.bits < b.bits ? 1 : a.bits > b.bits ? -1 : 0));
-  let rest = number;
-  const names: string[] = [];
-  for (const member of members) {
-    if ((rest & member.bits) !== member.bits) continue;
-    rest &= ~member.bits;
-    names.unshift(member.name);
-  }
-  return rest === 0n ? names.join(', ') : String(value);
 }
 
 /**

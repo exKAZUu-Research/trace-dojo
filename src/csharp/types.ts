@@ -8,6 +8,7 @@ import type {
   PropertyDeclaration,
   TypeDeclaration,
 } from './ast';
+import type { CallerInfo } from './attributeBinder';
 import type { TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression } from './bound';
 import type { NativeMethod } from './natives';
@@ -119,6 +120,8 @@ export interface ParameterSymbol {
   defaultSyntax?: Expression;
   /** The names in scope where the default value is written, such as the declaring type's constants. */
   defaultContext?: TypeContext;
+  /** What a `[Caller...]` attribute makes an omitted argument receive. */
+  callerInfo?: CallerInfo;
   position?: Position;
 }
 
@@ -173,8 +176,17 @@ export class MethodSymbol {
   row = 0;
   /** For an operator, its token (`+`, `==`). */
   operatorToken: string | undefined;
-  /** Whether the method is a partial method without an implementation, whose calls are removed. */
-  isRemovedPartial = false;
+  /**
+   * Whether C# removes the method's calls, arguments and all: a partial method without an implementation, or a
+   * `[Conditional]` method whose symbols the program does not define.
+   */
+  callsAreRemoved = false;
+  /** The symbols of the method's `[Conditional]` attributes. */
+  conditionalSymbols: string[] | undefined;
+  /** Whether `[ModuleInitializer]` runs the method before the entry point. */
+  isModuleInitializer = false;
+  /** The message of an `[Obsolete(message, true)]` attribute, which makes every use an error (CS0619). */
+  obsoleteError: string | undefined;
   /** For an explicit interface implementation (`void IShape.Draw()`), the interface it implements a member of. */
   explicitInterface: NamedType | undefined;
   /** Whether the method is an event's `add` or `remove` accessor, which no name finds. */
@@ -209,6 +221,7 @@ export class FieldSymbol {
   isPrimaryParameter = false;
   /** Whether the field is `required`, which every object creation's initializer must set. */
   isRequired = false;
+  obsoleteError: string | undefined;
   /** For an event with `add` and `remove` accessors, which it uses in place of a delegate field. */
   eventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
 
@@ -237,6 +250,7 @@ export class PropertySymbol {
   overridden: PropertySymbol | undefined;
   /** Whether the property is `required`, which every object creation's initializer must set. */
   isRequired = false;
+  obsoleteError: string | undefined;
   /** For an explicit interface implementation (`int IShape.Area { get; }`), the interface. */
   explicitInterface: NamedType | undefined;
   row = 0;
@@ -324,6 +338,11 @@ export class TypeSymbol {
   runtimeNameOverride: string | undefined;
   /** How Roslyn shows an anonymous type, such as `<anonymous type: int X>`. */
   anonymousDisplay: string | undefined;
+  /** Whether an enum has `[Flags]`, which prints a combination of members by their names. */
+  isFlags = false;
+  obsoleteError: string | undefined;
+  /** For an attribute class, the declarations its `[AttributeUsage]` allows it on, as AttributeTargets bits. */
+  attributeUsage: { validOn: number; allowMultiple: boolean } | undefined;
   row = 0;
 
   constructor(

@@ -10,6 +10,7 @@ import type {
   Position,
   Statement,
 } from './ast';
+import { AttributeBinder } from './attributeBinder';
 import type { Library, TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression, BoundStatement } from './bound';
 import type { BindContext } from './convertBinder';
@@ -21,7 +22,7 @@ import { TURTLE_SOURCE } from './library/turtleSource';
 import { NamespaceSymbol } from './namespaces';
 import { parseCSharp } from './parse';
 import { FunctionScope, LocalScope } from './scopes';
-import { isObjectCreation, StatementBinder } from './statementBinder';
+import { isObjectCreation } from './statementBinder';
 import {
   arrayType,
   displayMethod,
@@ -108,7 +109,7 @@ export function compileProgram(unit: CompilationUnit, options: CompileOptions = 
   return compiler.compile(unit);
 }
 
-export class Compiler extends StatementBinder {
+export class Compiler extends AttributeBinder {
   /** The rows whose `// atomic` annotations a declaration claimed. */
   private readonly claimedAtomicRows = new Set<number>();
   private readonly constantsInProgress = new Set<FieldSymbol>();
@@ -129,6 +130,13 @@ export class Compiler extends StatementBinder {
       declared = this.declareUnit(unit, this.userRoot, false);
       this.checkStructLayouts(declared);
       const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
+      this.collectAttributes(unit.attributes, 'assembly', undefined, this.rootContext(unit), {
+        assembly: undefined,
+        module: undefined,
+      });
+      this.definedSymbols = new Set(unit.options?.symbols);
+      this.bindPendingAttributes();
+      this.removeConditionalCalls(declared);
       // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
       if (this.diagnostics.length > 0) return;
       for (const type of declared) this.bindTypeMembers(type);
@@ -184,6 +192,7 @@ export class Compiler extends StatementBinder {
 
   /** Binds the constants and default parameter values of the library, whose methods have no bodies. */
   bindLibraryMembers(declared: DeclaredType[]): void {
+    this.bindPendingAttributes();
     for (const type of declared) {
       for (const field of type.symbol.fields) if (field.isConst) this.constantValueOf(field);
       for (const method of [...type.symbol.methods, ...type.symbol.constructors]) {
@@ -192,6 +201,26 @@ export class Compiler extends StatementBinder {
       }
       type.symbol.staticInitializer = this.bindFieldInitializers(type.symbol, type.context, true);
     }
+  }
+
+  /** The context of the attributes of the whole program, `[assembly: ...]`, which see its global names. */
+  private rootContext(unit: CompilationUnit): TypeContext {
+    const context: TypeContext = {
+      namespace: [this.userRoot, this.library.root],
+      usings: [],
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    this.importInto(context, [], unit.usings);
+    return context;
+  }
+
+  /** Removes the calls of `[Conditional]` methods none of whose symbols the program defines (C# spec §23.5.3). */
+  private removeConditionalCalls(declared: DeclaredType[]): void {
+    for (const { symbol } of declared)
+      for (const method of symbol.methods)
+        if (method.conditionalSymbols && method.returnType.kind === 'void')
+          method.callsAreRemoved = !method.conditionalSymbols.some((name) => this.definedSymbols.has(name));
   }
 
   // ---- Top-level statements ----
@@ -336,6 +365,7 @@ export class Compiler extends StatementBinder {
     }
     const statements: BoundStatement[] = [];
     for (const field of fields) {
+      this.callerMember = field.property?.name ?? field.name;
       const initializer = field.initializer as NonNullable<FieldSymbol['initializer']>;
       const value =
         initializer.kind === 'arrayInitializer'
@@ -379,6 +409,7 @@ export class Compiler extends StatementBinder {
     const { symbol, context } = type;
     const declaration = constructor.declaration as ConstructorDeclaration | undefined;
     if (constructor.native) return;
+    this.callerMember = constructor.name;
     const fn = new FunctionScope(
       constructor,
       undefined,
@@ -536,6 +567,8 @@ export class Compiler extends StatementBinder {
     body: MethodDeclaration['body'],
     declaration: MethodDeclaration | undefined
   ): void {
+    this.callerMember =
+      method.property?.name ?? (method.isEventAccessor ? method.name.replace(/^(add|remove)_/, '') : method.name);
     const thisType = method.isStatic ? undefined : method.owner.declaredType;
     const fn = new FunctionScope(
       method,
@@ -754,12 +787,12 @@ export class Compiler extends StatementBinder {
     const underlying = owner.enumUnderlying as NamedType;
     const isBig = underlying.symbol.special === 'long' || underlying.symbol.special === 'ulong';
     if (field.initializer) {
+      // The member's value may combine other members of its enum, as `All = Read | Write`, which is a constant of it.
+      const asEnum = this.quietly(() => this.bindValue(field.initializer as Expression, context));
+      if (asEnum?.kind === 'constant' && asEnum.type.kind === 'named' && asEnum.type.symbol === owner)
+        return asEnum.value;
       const value = this.bindAs(field.initializer as Expression, underlying, context);
       if (value.kind !== 'constant') {
-        // The member's value may refer to other members of its enum, which convert to the underlying type.
-        const asEnum = this.bindValue(field.initializer as Expression, context);
-        if (asEnum.kind === 'constant' && asEnum.type.kind === 'named' && asEnum.type.symbol === owner)
-          return asEnum.value;
         if (value.type.kind !== 'error')
           this.error(
             field.row,

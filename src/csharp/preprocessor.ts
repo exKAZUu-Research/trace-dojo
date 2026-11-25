@@ -21,6 +21,8 @@ export interface BuildOptions {
   /** `CheckForOverflowUnderflow`, which makes integer arithmetic checked by default. */
   checkOverflow: boolean;
   implicitUsings: boolean;
+  /** The symbols defined at the end of the file, which `[Conditional]` methods test. */
+  symbols: string[];
 }
 
 export interface PreprocessedSource {
@@ -68,7 +70,7 @@ interface Conditional {
 export function preprocess(source: string): PreprocessedSource {
   const lines = source.split('\n');
   const symbols = new Set(PREDEFINED_SYMBOLS);
-  const options: BuildOptions = { allowUnsafe: false, checkOverflow: false, implicitUsings: true };
+  const options: BuildOptions = { allowUnsafe: false, checkOverflow: false, implicitUsings: true, symbols: [] };
   const diagnostics: SourceDiagnostic[] = [];
   const conditionals: Conditional[] = [];
   const regions: number[] = [];
@@ -197,6 +199,7 @@ export function preprocess(source: string): PreprocessedSource {
   if (regions.length > 0) diagnostics.push({ row: end - 1, message: 'CS1038: #endregion ディレクティブが必要です' });
   if (conditionals.length > 0) diagnostics.push({ row: end - 1, message: 'CS1027: #endif ディレクティブ が必要です' });
   if (diagnostics.length > 0) throw new CompileError(diagnostics.map(({ row, message }) => ({ row, message })));
+  options.symbols = [...symbols];
   return { text: lines.join('\n'), options };
 }
 

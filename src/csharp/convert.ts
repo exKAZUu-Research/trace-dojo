@@ -5,6 +5,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type {
   Accessor,
   Argument,
+  AttributeNode,
   Block,
   CatchClause,
   CompilationUnit,
@@ -181,6 +182,12 @@ export class Converter extends ExpressionConverter {
           unit.usings.push(this.convertUsing(child));
           break;
         }
+        case 'global_attribute': {
+          const target = childrenOf(child).find((part) => part.type === 'assembly' || part.type === 'module')?.text;
+          for (const attribute of namedChildren(child).filter((part) => part.type === 'attribute'))
+            (unit.attributes ??= []).push(this.convertAttribute(attribute, target));
+          break;
+        }
         case 'global_statement': {
           if (unit.members.length > 0) {
             throw new CompileError([
@@ -258,7 +265,13 @@ export class Converter extends ExpressionConverter {
         return unsupported(node, '`extern alias`');
       }
       case 'global_attribute': {
-        return unsupported(node, '属性');
+        throw new CompileError([
+          {
+            row: node.startPosition.row,
+            message:
+              'CS1730: アセンブリおよびモジュールの属性は、すべての using 句の後に指定し、ファイルで定義されているすべての型の前に指定する必要があります',
+          },
+        ]);
       }
       case 'file_scoped_namespace_declaration': {
         throw new CompileError([
@@ -287,7 +300,6 @@ export class Converter extends ExpressionConverter {
 
   // code-gauge-allow functionNcss -- Each kind of type declaration keeps its parts in different children.
   private convertTypeDeclaration(node: Node): TypeDeclaration {
-    this.rejectAttributes(node);
     const typeKind =
       node.type === 'record_declaration'
         ? hasToken(node, 'struct')
@@ -311,6 +323,7 @@ export class Converter extends ExpressionConverter {
       delegateReturnType: undefined,
       delegateParameters: [],
       endRow: node.endPosition.row,
+      ...this.attributed(node),
       ...positionOf(requiredField(node, 'name')),
     };
     for (const child of namedChildren(node)) {
@@ -362,20 +375,24 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertEnumMember(node: Node): EnumMember {
-    this.rejectAttributes(node);
     const valueNode = field(node, 'value');
     return {
       name: requiredField(node, 'name').text,
       value: valueNode ? this.convertExpression(valueNode) : undefined,
+      ...this.attributed(node),
       ...positionOf(node),
     };
   }
 
   private convertTypeParameters(node: Node): TypeParameterDeclaration[] {
     return namedChildren(node).map((parameter) => {
-      this.rejectAttributes(parameter);
       const variance = hasToken(parameter, 'out') ? 'out' : hasToken(parameter, 'in') ? 'in' : undefined;
-      return { name: requiredField(parameter, 'name').text, variance, ...positionOf(parameter) };
+      return {
+        name: requiredField(parameter, 'name').text,
+        variance,
+        ...this.attributed(parameter),
+        ...positionOf(parameter),
+      };
     });
   }
 
@@ -408,7 +425,13 @@ export class Converter extends ExpressionConverter {
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     const what = UNSUPPORTED_DECLARATIONS[node.type];
     if (what) unsupported(node, what);
-    this.rejectAttributes(node);
+    const attributes = this.attributed(node);
+    return this.convertMemberWithoutAttributes(node, owner).map((member) => ({ ...member, ...attributes }));
+  }
+
+  // code-gauge-allow functionNcss -- One case per kind of member declaration.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private convertMemberWithoutAttributes(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     if (
       node.type !== 'field_declaration' &&
       node.type !== 'event_field_declaration' &&
@@ -574,7 +597,6 @@ export class Converter extends ExpressionConverter {
       return accessor ? this.convertBody(field(accessor, 'body')) : undefined;
     };
     for (const accessor of accessors) {
-      this.rejectAttributes(accessor);
       if (!['add', 'remove'].includes(requiredField(accessor, 'name').text))
         throw new CompileError([
           { row: accessor.startPosition.row, message: 'CS1055: add または remove アクセサーが必要です' },
@@ -626,7 +648,6 @@ export class Converter extends ExpressionConverter {
 
   private convertAccessors(node: Node): Accessor[] {
     return namedChildren(node).map((accessor) => {
-      this.rejectAttributes(accessor);
       const kind = requiredField(accessor, 'name').text;
       if (!['get', 'set', 'init'].includes(kind)) {
         throw new CompileError([
@@ -637,6 +658,7 @@ export class Converter extends ExpressionConverter {
         kind: kind as Accessor['kind'],
         modifiers: this.convertModifiers(accessor),
         body: this.convertBody(field(accessor, 'body')),
+        ...this.attributed(accessor),
         ...positionOf(accessor),
       };
     });
@@ -651,6 +673,8 @@ export class Converter extends ExpressionConverter {
   protected convertParameters(node: Node): Parameter[] {
     const parameters: Parameter[] = [];
     const children = childrenOf(node);
+    // The grammar keeps the attributes of a `params` parameter before its parts in the list.
+    let pending: AttributeNode[] = [];
     for (let index = 0; index < children.length; index++) {
       const child = children[index];
       if (child.type === 'parameter') {
@@ -665,18 +689,19 @@ export class Converter extends ExpressionConverter {
           modifier: 'params',
           isThis: false,
           defaultValue: undefined,
+          ...(pending.length > 0 ? { attributes: pending } : {}),
           ...positionOf(nameNode),
         });
+        pending = [];
         index += 2;
       } else if (child.type === 'attribute_list') {
-        unsupported(child, '属性');
+        pending.push(...this.convertAttributeList(child));
       }
     }
     return parameters;
   }
 
   private convertParameter(node: Node): Parameter {
-    this.rejectAttributes(node);
     const modifiers = namedChildren(node)
       .filter((child) => child.type === 'modifier')
       .map((child) => child.text);
@@ -690,7 +715,11 @@ export class Converter extends ExpressionConverter {
     // reads the name of `int Add(int a, b)` as a type still waiting for its name.
     if (!typeNode) throw new CompileError([{ row: node.endPosition.row, message: 'CS1001: 識別子がありません' }]);
     const defaultNode = namedChildren(node).find(
-      (child) => !sameNode(child, typeNode) && !sameNode(child, field(node, 'name')) && child.type !== 'modifier'
+      (child) =>
+        !sameNode(child, typeNode) &&
+        !sameNode(child, field(node, 'name')) &&
+        child.type !== 'modifier' &&
+        child.type !== 'attribute_list'
     );
     return {
       name: requiredField(node, 'name').text,
@@ -698,6 +727,7 @@ export class Converter extends ExpressionConverter {
       modifier,
       isThis: modifiers.includes('this'),
       defaultValue: defaultNode ? this.convertExpression(defaultNode) : undefined,
+      ...this.attributed(node),
       ...positionOf(node),
     };
   }
@@ -720,11 +750,6 @@ export class Converter extends ExpressionConverter {
       positions.set(text as Modifier, positionOf(child));
     }
     return { set, positions };
-  }
-
-  private rejectAttributes(node: Node): void {
-    const attributes = namedChildren(node).find((child) => child.type === 'attribute_list');
-    if (attributes) unsupported(attributes, '属性');
   }
 
   protected override convertBlockNode(node: Node): Block {
@@ -755,8 +780,11 @@ export class Converter extends ExpressionConverter {
         return this.convertLocalDeclaration(node);
       }
       case 'local_function_statement': {
-        this.rejectAttributes(node);
-        return { kind: 'localFunction', declaration: this.convertMethod(node), ...position };
+        return {
+          kind: 'localFunction',
+          declaration: { ...this.convertMethod(node), ...this.attributed(node) },
+          ...position,
+        };
       }
       case 'if_statement': {
         const alternative = field(node, 'alternative');

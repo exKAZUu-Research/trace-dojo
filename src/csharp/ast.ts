@@ -55,7 +55,22 @@ export interface Modifiers {
   positions: ReadonlyMap<Modifier, Position>;
 }
 
-export interface Parameter extends Position {
+/** An attribute (`[Obsolete("x")]`), with the target its list names (`[return: ...]`, `[field: ...]`), if any. */
+export interface AttributeNode extends Position {
+  name: TypeNode;
+  /** The positional arguments and the named ones (`x: 1`), which go to the attribute's constructor. */
+  args: Argument[];
+  /** The field and property assignments (`X = 1`). */
+  assignments: { name: string; value: Expression; row: number; column: number }[];
+  target: string | undefined;
+}
+
+/** A declaration's attributes, which binding checks and gives their meaning. */
+export interface Attributed {
+  attributes?: AttributeNode[];
+}
+
+export interface Parameter extends Position, Attributed {
   name: string;
   type: TypeNode | undefined;
   modifier: 'ref' | 'out' | 'in' | 'params' | undefined;
@@ -172,6 +187,7 @@ export type Expression =
   | ({ kind: 'is'; operand: Expression; pattern: Pattern } & Position)
   | ({
       kind: 'lambda';
+      attributes?: AttributeNode[];
       parameters: LambdaParameter[];
       body: Expression | Block;
       isStatic: boolean;
@@ -313,7 +329,7 @@ export type Statement =
 
 export type GotoTarget = { kind: 'label'; name: string } | { kind: 'case'; value: Expression } | { kind: 'default' };
 
-export interface TypeParameterDeclaration extends Position {
+export interface TypeParameterDeclaration extends Position, Attributed {
   name: string;
   variance: 'in' | 'out' | undefined;
 }
@@ -332,7 +348,7 @@ export interface ConstraintClause extends Position {
   constraints: Constraint[];
 }
 
-export interface MethodDeclaration extends Position {
+export interface MethodDeclaration extends Position, Attributed {
   kind: 'method';
   modifiers: Modifiers;
   returnType: TypeNode;
@@ -351,7 +367,7 @@ export interface MethodDeclaration extends Position {
   explicitInterface?: TypeNode;
 }
 
-export interface ConstructorDeclaration extends Position {
+export interface ConstructorDeclaration extends Position, Attributed {
   kind: 'constructor';
   modifiers: Modifiers;
   name: string;
@@ -362,26 +378,26 @@ export interface ConstructorDeclaration extends Position {
   startRow: number;
 }
 
-export interface DestructorDeclaration extends Position {
+export interface DestructorDeclaration extends Position, Attributed {
   kind: 'destructor';
   name: string;
   body: Block | Expression | undefined;
 }
 
-export interface FieldDeclaration extends Position {
+export interface FieldDeclaration extends Position, Attributed {
   kind: 'field';
   modifiers: Modifiers;
   type: TypeNode;
   declarators: VariableDeclarator[];
 }
 
-export interface Accessor extends Position {
+export interface Accessor extends Position, Attributed {
   kind: 'get' | 'set' | 'init';
   modifiers: Modifiers;
   body: Block | Expression | undefined;
 }
 
-export interface PropertyDeclaration extends Position {
+export interface PropertyDeclaration extends Position, Attributed {
   kind: 'property';
   modifiers: Modifiers;
   type: TypeNode;
@@ -394,7 +410,7 @@ export interface PropertyDeclaration extends Position {
   explicitInterface?: TypeNode;
 }
 
-export interface IndexerDeclaration extends Position {
+export interface IndexerDeclaration extends Position, Attributed {
   kind: 'indexer';
   modifiers: Modifiers;
   type: TypeNode;
@@ -404,7 +420,7 @@ export interface IndexerDeclaration extends Position {
 }
 
 /** An event with its own `add` and `remove` accessors, which keeps no delegate field. */
-export interface EventAccessorDeclaration extends Position {
+export interface EventAccessorDeclaration extends Position, Attributed {
   kind: 'eventAccessors';
   modifiers: Modifiers;
   type: TypeNode;
@@ -414,14 +430,14 @@ export interface EventAccessorDeclaration extends Position {
   explicitInterface?: TypeNode;
 }
 
-export interface EventFieldDeclaration extends Position {
+export interface EventFieldDeclaration extends Position, Attributed {
   kind: 'event';
   modifiers: Modifiers;
   type: TypeNode;
   declarators: VariableDeclarator[];
 }
 
-export interface OperatorDeclaration extends Position {
+export interface OperatorDeclaration extends Position, Attributed {
   kind: 'operator';
   modifiers: Modifiers;
   returnType: TypeNode;
@@ -435,12 +451,12 @@ export interface OperatorDeclaration extends Position {
   startRow: number;
 }
 
-export interface EnumMember extends Position {
+export interface EnumMember extends Position, Attributed {
   name: string;
   value: Expression | undefined;
 }
 
-export interface TypeDeclaration extends Position {
+export interface TypeDeclaration extends Position, Attributed {
   kind: 'type';
   typeKind: 'class' | 'struct' | 'interface' | 'enum' | 'delegate';
   isRecord: boolean;
@@ -496,4 +512,6 @@ export interface CompilationUnit {
   sourceRows: number;
   /** The compiler options that the program's `#:property` directives set; the library has none. */
   options?: BuildOptions;
+  /** The `[assembly: ...]` and `[module: ...]` attributes. */
+  attributes?: AttributeNode[];
 }

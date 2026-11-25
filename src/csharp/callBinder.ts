@@ -27,6 +27,9 @@ import {
 import { type DotnetOverload, dotnetOverloadsOf } from './unavailable';
 
 /** An argument as written, bound to its natural type or left unbound until its parameter's type is known. */
+/** The path that `[CallerFilePath]` gives, which stands for the program's file, whose real path no run has. */
+const CALLER_FILE_PATH = '/Program.cs';
+
 export interface ArgumentInfo {
   expression: BoundExpression;
   name: string | undefined;
@@ -843,6 +846,26 @@ export abstract class CallBinder extends OperatorBinder {
     row: number
   ): BoundExpression {
     const type = substitute(parameter.type, substitution);
+    const info = parameter.callerInfo;
+    if (info && parameter.defaultSyntax) {
+      switch (info.kind) {
+        case 'MemberName': {
+          return this.constant(this.callerMember, type, row);
+        }
+        case 'LineNumber': {
+          return this.convert(this.constant(row + 1, this.intType, row), type, row);
+        }
+        case 'FilePath': {
+          return this.constant(CALLER_FILE_PATH, type, row);
+        }
+        case 'ArgumentExpression': {
+          const index = method.parameters.findIndex((other) => other.name === info.parameterName);
+          const text = index === -1 ? undefined : args[parameterOf.indexOf(index)]?.text;
+          if (text !== undefined) return this.constant(text, type, row);
+          break;
+        }
+      }
+    }
     const callerArgument = this.callerArgumentExpression(method, parameter, args, parameterOf);
     return callerArgument === undefined
       ? this.defaultArgument(parameter, type, row)
@@ -863,6 +886,9 @@ export abstract class CallBinder extends OperatorBinder {
       return undefined;
     return args[parameterOf.indexOf(0)]?.text;
   }
+
+  /** The name of the member whose body is being bound, which `[CallerMemberName]` gives. */
+  protected callerMember = '';
 
   /** The value of an omitted optional argument. */
   protected abstract defaultArgument(
