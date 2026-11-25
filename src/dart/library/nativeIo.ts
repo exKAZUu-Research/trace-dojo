@@ -46,8 +46,15 @@ function intList(runtime: Runtime, values: number[]): Value {
 const pendingBytes = new WeakMap<Runtime, number[]>();
 
 define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
-  pendingBytes.delete(runtime);
   const { reader } = runtime.io.stdin;
+  if (pendingBytes.get(runtime)?.length) {
+    // The line starts inside the character readByteSync began, which the VM fails to decode, dropping the line.
+    pendingBytes.delete(runtime);
+    for (let character = reader.read(); character !== undefined && character !== '\n'; character = reader.read()) {
+      // Each character of the line is dropped.
+    }
+    return runtime.throwError('FormatException', '', ['Unexpected extension byte', undefined, 0n]);
+  }
   if (reader.isAtEnd) return;
   let line = '';
   for (let character = reader.read(); character !== undefined; character = reader.read()) {
@@ -74,8 +81,9 @@ define('Stdin._readByte', (runtime) => {
 });
 
 define('Stdin._readRest', (runtime) => {
+  const pending = pendingBytes.get(runtime) ?? [];
   pendingBytes.delete(runtime);
-  return intList(runtime, [...new TextEncoder().encode(runtime.io.stdin.reader.readRest())]);
+  return intList(runtime, [...pending, ...new TextEncoder().encode(runtime.io.stdin.reader.readRest())]);
 });
 
 define('_sleep', (runtime, _self, [milliseconds]) => {
