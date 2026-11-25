@@ -1711,8 +1711,7 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
       ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
       : sliceOf(child, isConst, sentinel);
   }
-  // A C pointer takes in any other pointer; otherwise the sizes must agree.
-  const size = a.size === b.size ? a.size : a.size === 'c' || b.size === 'c' ? 'c' : undefined;
+  const size = a.size === b.size ? a.size : (retypedSize(a, b) ?? retypedSize(b, a));
   const child = size && peerMemoryType(a.child, b.child, isConst);
   if (!size || !child) return undefined;
   const alignment =
@@ -1726,6 +1725,11 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
     alignment,
     sentinel,
   });
+}
+
+/** The size two pointers of different sizes share: the one that the other converts to without changing its value. */
+function retypedSize(from: PointerType, to: PointerType): PointerType['size'] | undefined {
+  return POINTER_COERCIONS[`${pointerShapeOf(from, true)} ${to.size}`]?.convert === 'retype' ? to.size : undefined;
 }
 
 function peerMemoryType(a: Type, b: Type, isConst: boolean): Type | undefined {
