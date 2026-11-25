@@ -723,7 +723,8 @@ export class VariableStore {
     const outerFound = isIdentifier(target) ? this.findOwnCellWithScope(target, (fnIdx as number) - 1) : undefined;
     rejectUnsupportedNamerefTarget(name, target, outerFound ? cellShapeOf(outerFound.cell) : undefined);
     if (!isIdentifier(target)) {
-      return { ok: false, reason: 'invalidIdentifier', message: `\`${target}': not a valid identifier` };
+      const detail = target === '' ? 'not a valid identifier' : 'invalid variable name for name reference';
+      return { ok: false, reason: 'invalidIdentifier', message: `\`${target}': ${detail}` };
     }
     this.chargeString(target);
     this.runtime.allocateSlots(1);
