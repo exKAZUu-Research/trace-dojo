@@ -173,6 +173,7 @@ class StrictLowering {
       }
       case 'neg':
       case 'paren':
+      case 'quoteLevel':
       case 'typed':
       case 'tyapp':
       case 'projection':

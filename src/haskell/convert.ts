@@ -7,7 +7,6 @@ import { compileError as syntaxError, unsupportedError } from './errors';
 import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
 import {
-  type ImplicitBind,
   implicitGuard,
   implicitStmt,
   lowerImplicitComprehension,
@@ -37,6 +36,7 @@ import type {
   FieldBind,
   Guard,
   GuardedExpr,
+  ImplicitBind,
   Import,
   ImportItem,
   Module,

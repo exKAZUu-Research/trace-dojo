@@ -1,4 +1,5 @@
 import type { Extensions } from './extensions';
+import type { LocalNamespace } from './localScope';
 
 /** A source range: 0-based rows and columns, the end column exclusive. */
 export interface Span {
@@ -92,7 +93,12 @@ export type Expr =
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; required?: boolean; span: Span }
   | { kind: 'implicit'; name: string; span: Span }
   /** `let ?x = e in body`, which gives the body the implicit parameters. */
-  | { kind: 'implicitLet'; binds: { name: string; expr: Expr; span: Span }[]; body: Expr; span: Span }
+  | { kind: 'implicitLet'; binds: ImplicitBind[]; body: Expr; span: Span }
+  /**
+   * The code of a splice inside quotes, in which quotes may name the quotes' binders at their level: each binder's
+   * spelling, namespace, and the variable of the quote's code that holds its new name.
+   */
+  | { kind: 'quoteLevel'; expr: Expr; binders: QuoteLevelBinder[]; span: Span }
   /** `e.field`, which OverloadedRecordDot reads as `getField @"field" e`. */
   | { kind: 'projection'; expr: Expr; field: string; span: Span }
   /** A library value that code the conversion generates refers to, whatever the program's scope has. */
@@ -211,7 +217,7 @@ export interface GuardedExpr {
 
 export type Guard =
   | { kind: 'bool'; expr: Expr; span: Span }
-  | { kind: 'let'; decls: Decl[]; span: Span }
+  | { kind: 'let'; decls: Decl[]; span: Span; implicit?: ImplicitBind[] }
   | { kind: 'pat'; pat: Pat; expr: Expr; span: Span };
 
 export interface Rhs {
@@ -228,7 +234,7 @@ export interface Alt {
 
 export type Stmt =
   | { kind: 'bind'; pat: Pat; expr: Expr; span: Span }
-  | { kind: 'let'; decls: Decl[]; span: Span }
+  | { kind: 'let'; decls: Decl[]; span: Span; implicit?: ImplicitBind[] }
   | { kind: 'exp'; expr: Expr; span: Span }
   /** `then f` or `then f by e` in a list comprehension, as TransformListComp allows. */
   | { kind: 'transform'; fn: Expr; by?: Expr; group: boolean; span: Span }
@@ -421,3 +427,16 @@ export interface Module {
 export type Multiplicity = { kind: 'one' } | { kind: 'many' } | { kind: 'var'; name: string; span: Span };
 
 export type OverlapMode = 'OVERLAPPING' | 'OVERLAPPABLE' | 'OVERLAPS' | 'INCOHERENT';
+
+/** A binding of an implicit parameter, `?x = e`. */
+export interface ImplicitBind {
+  name: string;
+  expr: Expr;
+  span: Span;
+}
+
+export interface QuoteLevelBinder {
+  name: string;
+  namespace: LocalNamespace;
+  nameVariable: string;
+}

@@ -1,4 +1,5 @@
 import type { ClassEntity, ConInfo, DictParam, Evidence, FieldInfo, Fixity, TypeEntity, ValueEntity } from './entities';
+import type { LocalNamespace } from './localScope';
 import type { Expr, Literal, Pat, Span } from './syntax';
 import type { Scheme, Type } from './types';
 
@@ -10,6 +11,13 @@ export interface LocalVar {
   /** The variable's type while its binding is being checked, then its generalized scheme. */
   type?: Type;
   scheme?: Scheme;
+  /** For a binder of a quote, the namespace it binds in. */
+  namespace?: LocalNamespace;
+  /**
+   * For a name a splice inside a quote binds to a binder of the quote, the variable of the quote's code holding the
+   * binder's new name, which quotes in the splice name it by.
+   */
+  quoteLevelName?: string;
 }
 
 export type VarRef = { kind: 'local'; local: LocalVar } | { kind: 'global'; entity: ValueEntity };

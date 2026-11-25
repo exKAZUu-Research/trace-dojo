@@ -1,32 +1,16 @@
 import { compileError, unsupportedError } from './errors';
-import type { Decl, Expr, Guard, GuardedExpr, Pat, Rhs, Span, Stmt } from './syntax';
-
-export interface ImplicitBind {
-  name: string;
-  expr: Expr;
-  span: Span;
-}
-
-/**
- * The implicit-parameter groups of `let` statements and guards, which scope over what follows them; the converter
- * marks them here and lowers them, before anything else sees them, into `let ?x = e in ...` around what follows.
- */
-const implicitGroups = new WeakMap<Stmt | Guard, ImplicitBind[]>();
+import type { Decl, Expr, Guard, GuardedExpr, ImplicitBind, Pat, Rhs, Span, Stmt } from './syntax';
 
 export function implicitStmt(binds: ImplicitBind[], span: Span): Stmt {
-  const stmt: Stmt = { kind: 'let', decls: [], span };
-  implicitGroups.set(stmt, binds);
-  return stmt;
+  return { kind: 'let', decls: [], span, implicit: binds };
 }
 
 export function implicitGuard(binds: ImplicitBind[], span: Span): Guard {
-  const guard: Guard = { kind: 'let', decls: [], span };
-  implicitGroups.set(guard, binds);
-  return guard;
+  return { kind: 'let', decls: [], span, implicit: binds };
 }
 
 export function lowerImplicitStmts(stmts: Stmt[], what: 'do' | 'mdo' | 'rec' | 'qualifiedDo'): Stmt[] {
-  const index = stmts.findIndex((stmt) => implicitGroups.has(stmt));
+  const index = stmts.findIndex((stmt) => isImplicit(stmt));
   if (index === -1) return stmts;
   const stmt = stmts[index];
   if (what !== 'do') {
@@ -45,7 +29,7 @@ export function lowerImplicitStmts(stmts: Stmt[], what: 'do' | 'mdo' | 'rec' | '
  */
 export function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
   const branches = [expr.quals, ...(expr.parallel ?? [])];
-  const marked = branches.flat().find((stmt) => implicitGroups.has(stmt));
+  const marked = branches.flat().find((stmt) => isImplicit(stmt));
   if (!marked) return expr;
   if (expr.parallel || expr.quals.some((stmt) => stmt.kind === 'transform')) {
     throw unsupportedError(marked.span, '並列の内包表記や then と一緒の、暗黙のパラメータの束縛');
@@ -102,7 +86,7 @@ export function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
  * guard matches, so that the branch still falls through to the next as GHC's does.
  */
 export function lowerImplicitGuards(branch: GuardedExpr): GuardedExpr {
-  const index = branch.guards.findIndex((guard) => implicitGroups.has(guard));
+  const index = branch.guards.findIndex((guard) => isImplicit(guard));
   if (index === -1) return branch;
   const { span } = branch.guards[index];
   const result = ` implicit${index}`;
@@ -144,7 +128,7 @@ function guardsAsList(guards: Guard[], expr: Expr): Expr {
       };
     }
     case 'let': {
-      return implicitGroups.has(guard)
+      return isImplicit(guard)
         ? implicitLet(guard, next)
         : { kind: 'let', decls: guard.decls, body: next, span: guard.span };
     }
@@ -155,5 +139,14 @@ function guardsAsList(guards: Guard[], expr: Expr): Expr {
 }
 
 function implicitLet(marked: Stmt | Guard, body: Expr): Expr {
-  return { kind: 'implicitLet', binds: implicitGroups.get(marked) as ImplicitBind[], body, span: marked.span };
+  return {
+    kind: 'implicitLet',
+    binds: (marked as Extract<Stmt, { kind: 'let' }>).implicit as ImplicitBind[],
+    body,
+    span: marked.span,
+  };
+}
+
+function isImplicit(item: Stmt | Guard): boolean {
+  return item.kind === 'let' && item.implicit !== undefined;
 }

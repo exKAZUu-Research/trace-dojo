@@ -102,15 +102,7 @@ import type {
   TyVarBinder,
 } from './syntax';
 import { THIS_MODULE } from './syntax';
-import {
-  bindQuoteLevelName,
-  globalNameCode,
-  isQuoteLevelBinder,
-  quoteBindersAround,
-  QuoteBuilder,
-  quoteLevelName,
-  thString,
-} from './thQuote';
+import { globalNameCode, QuoteBuilder, thString } from './thQuote';
 import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
@@ -339,8 +331,6 @@ class Renamer {
   private readonly typeDataCons = new Set<string>();
   /** In quote mode, the variables the quote binds, which its scopes have besides those around the quote. */
   private quoteBinders?: Set<LocalVar>;
-  /** The namespace of each binder of a quote, which a splice inside the quote binds its name in. */
-  private readonly quoteNamespaces = new WeakMap<LocalVar, LocalNamespace>();
   private readonly quoteClassMethods = new Map<LocalVar, Map<string, LocalVar>>();
   private readonly features: FeatureGates<'rename'>;
 
@@ -1514,8 +1504,10 @@ class Renamer {
         return { k: 'app', fn: this.renameExpr(expr.fn, scope), arg: this.renameExpr(expr.arg, scope), span };
       }
       case 'paren': {
-        const around = quoteBindersAround(expr);
-        return this.renameExpr(expr.expr, around ? this.quoteLevelScope(around, scope) : scope);
+        return this.renameExpr(expr.expr, scope);
+      }
+      case 'quoteLevel': {
+        return this.renameExpr(expr.expr, this.quoteLevelScope(expr, scope));
       }
       case 'chain': {
         return this.renameExpr(
@@ -2502,7 +2494,7 @@ class Renamer {
   private newBinder(name: string, span: Span, namespace: LocalNamespace = 'value'): LocalVar {
     const local = newLocal(name, span);
     this.quoteBinders?.add(local);
-    this.quoteNamespaces.set(local, namespace);
+    local.namespace = namespace;
     return local;
   }
 
@@ -2510,15 +2502,10 @@ class Renamer {
    * The scope of a splice's code inside quotes, where the quotes' binders are names that only quotes inside the
    * splice may use, as their binders at the same level.
    */
-  private quoteLevelScope(
-    binders: readonly { local: LocalVar; nameVariable: string }[],
-    scope: LocalScope
-  ): LocalScope {
+  private quoteLevelScope(expr: Extract<Expr, { kind: 'quoteLevel' }>, scope: LocalScope): LocalScope {
     const inner = new LocalScope(scope);
-    for (const { local, nameVariable } of binders) {
-      const marker = newLocal(local.name, local.span);
-      bindQuoteLevelName(marker, nameVariable);
-      inner.define(local.name, marker, this.quoteNamespaces.get(local) ?? 'value');
+    for (const { name, namespace, nameVariable } of expr.binders) {
+      inner.define(name, { ...newLocal(name, expr.span), quoteLevelName: nameVariable }, namespace);
     }
     return inner;
   }
@@ -2526,7 +2513,7 @@ class Renamer {
   private quoteValueRef(name: QName, scope: LocalScope, namespace: 'var' | 'value', required = false): QRef {
     const local = name.qualifier ? undefined : scope.lookup(name.name);
     if (local) {
-      return this.quoteBinders?.has(local) || isQuoteLevelBinder(local)
+      return this.quoteBinders?.has(local) || local.quoteLevelName !== undefined
         ? { k: 'bound', local }
         : { k: 'outer', name: name.name };
     }
@@ -3207,7 +3194,7 @@ class Renamer {
     const namespace: LocalNamespace = expr.namespace === 'var' ? 'value' : expr.namespace;
     const local = expr.name.qualifier ? undefined : scope.lookup(expr.name.name, namespace);
     // A binder of a quote around the splice this is in has its new name, as `[| x |]` there would.
-    const levelName = local && quoteLevelName(local);
+    const levelName = local?.quoteLevelName;
     if (levelName) return { kind: 'var', name: { name: levelName, span }, span };
     if (local && expr.namespace === 'var') return thCall(span, 'mkNameS', thString(span, expr.name.name));
     // The types of special syntax have names of their own in GHC.
@@ -3357,7 +3344,7 @@ class Renamer {
   private resolveVar(name: QName, scope: LocalScope): VarRef {
     if (!name.qualifier && !name.global) {
       const local = scope.lookup(name.name);
-      if (local && isQuoteLevelBinder(local)) {
+      if (local && local.quoteLevelName !== undefined) {
         throw compileError(
           name.span,
           `${name.name} はクォートの中で束縛された名前なので、スプライスの中ではクォートの中でしか使えません。`
