@@ -1,0 +1,6 @@
+const obj = { n: 'O', t(this: { n: string }, s: TemplateStringsArray): string { return this.n + s[0]; } };
+console.log(obj.t`x`);
+class K { n = 'K'; t(this: K, s: TemplateStringsArray): string { return this.n + s[0]; } }
+console.log(new K().t`x`);
+const loose = obj.t;
+console.log(String.raw`a${1}b`);

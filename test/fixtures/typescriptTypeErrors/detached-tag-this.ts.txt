@@ -1,0 +1,3 @@
+const obj = { n: 'O', t(this: { n: string }, s: TemplateStringsArray): string { return this.n + s[0]; } };
+const loose = obj.t;
+console.log(loose`x`);

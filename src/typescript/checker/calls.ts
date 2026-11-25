@@ -437,7 +437,13 @@ export class Calls {
       .filter((part) => part.type === 'template_substitution')
       .map((part) => named(part)[0]);
     const isStringRaw = this.isStringRawTag(callee);
-    const calleeType = this.c.expressions.check(callee);
+    // A tag read from an object is called with it as `this`, as a method call is.
+    const reference = withoutAssertions(callee);
+    const access =
+      reference.type === 'member_expression' || reference.type === 'subscript_expression'
+        ? this.c.expressions.checkMemberCallee(callee, reference)
+        : undefined;
+    const calleeType = access?.type ?? this.c.expressions.check(callee);
     const typeArguments = this.typeArguments.written(node);
     if (calleeType === errorType) return this.checkArgumentsOnly(substitutions, errorType);
     if (isAnyLike(calleeType)) return this.untypedCall(node, substitutions, typeArguments);
@@ -465,8 +471,11 @@ export class Calls {
       signature.parameters[0]?.rest ? signature : { ...signature, parameters: signature.parameters.slice(1) }
     );
     const resolution = isStringRaw
-      ? this.resolveWithTextConversions(node, callee, rest, substitutions, { typeArguments })
-      : this.resolve(node, callee, rest, substitutions, typeArguments, undefined);
+      ? this.resolveWithTextConversions(node, callee, rest, substitutions, {
+          typeArguments,
+          receiver: access?.receiver,
+        })
+      : this.resolve(node, callee, rest, substitutions, typeArguments, undefined, access?.receiver);
     if (isStringRaw)
       for (const substitution of substitutions)
         this.c.expressions.checkFunctionText(

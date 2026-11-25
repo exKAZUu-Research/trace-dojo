@@ -1,0 +1,1 @@
+(3,13): error TS2684: The 'this' context of type 'void' is not assignable to method's 'this' of type '{ n: string; }'.
