@@ -833,22 +833,34 @@ function evaluateCondition(
 
 /** Whether an expression has an unsigned type, which C decides without evaluating it. */
 function isUnsigned(condition: Condition): boolean {
-  switch (condition.k) {
-    case 'integer': {
-      return condition.integer.unsigned;
-    }
-    case 'unary': {
-      return condition.op !== '!' && isUnsigned(condition.operand);
-    }
-    case 'conditional': {
-      return isUnsigned(condition.ifTrue) || isUnsigned(condition.ifFalse);
-    }
-    case 'binary': {
-      if (['||', '&&', '==', '!=', '<', '>', '<=', '>='].includes(condition.op)) return false;
-      if (condition.op === '<<' || condition.op === '>>') return isUnsigned(condition.left);
-      return isUnsigned(condition.left) || isUnsigned(condition.right);
+  // A stack, not recursion: a macro can build a condition far deeper than JavaScript's call stack.
+  const pending = [condition];
+  for (let part = pending.pop(); part; part = pending.pop()) {
+    switch (part.k) {
+      case 'integer': {
+        if (part.integer.unsigned) return true;
+        break;
+      }
+      case 'unary': {
+        if (part.op !== '!') pending.push(part.operand);
+        break;
+      }
+      case 'conditional': {
+        pending.push(part.ifTrue, part.ifFalse);
+        break;
+      }
+      case 'binary': {
+        if (['||', '&&', '==', '!=', '<', '>', '<=', '>='].includes(part.op)) break;
+        pending.push(part.left);
+        if (part.op !== '<<' && part.op !== '>>') pending.push(part.right);
+        break;
+      }
+      default: {
+        part satisfies never;
+      }
     }
   }
+  return false;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per C operator.
