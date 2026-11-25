@@ -536,8 +536,9 @@ function executeUnsubscriptedDeclaration(
 ): boolean {
   const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
   if (targetName === undefined) return false;
-  const priorKind = priorDestinationView(shell, targetName, intent)?.kind;
-  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
+  const priorView = priorDestinationView(shell, targetName, intent);
+  if (builtin === 'readonly' && op.value === undefined && priorView?.attributes.has('r')) return true;
+  const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
   const declaredArrayKind = set.has('A') ? 'associative' : set.has('a') ? 'indexed' : undefined;
   const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, declaredArrayKind);
   if (!applyPreWriteAttributes(shell, builtin, selected.cell, set, op.value === undefined)) return false;
