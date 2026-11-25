@@ -505,6 +505,8 @@ export function printValue(
         if (kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, base, upper, options);
         if (kind === 'float' || kind === 'comptime_float')
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
+        // A vector prints each element in the base, as an aggregate does below.
+        if (kind === 'array' && type.isVector) break;
         // A byte string in hexadecimal, which Zig asserts has no width or precision.
         forbidOptions(options);
         const bytes = stringBytes(value, type);
