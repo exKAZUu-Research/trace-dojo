@@ -2336,13 +2336,13 @@ function convertBlock(features: FeatureGates<'convert'>, node: Node, span: Span)
   }
 }
 
+/** What the case of a qualified do block's bind is, whose failing alternative the renamer may drop. */
+export const QUALIFIED_DO_BIND = 'qualified do bind';
+
 /**
  * Converts `M.do`, which QualifiedDo reads with the `>>=`, `>>`, and `fail` of the module `M`: `x <- e; s` as
  * `e M.>>= \x -> s`, `e; s` as `e M.>> s`, and a bind whose pattern can fail as one that calls `M.fail` then.
  */
-/** What the case of a qualified do block's bind is, whose failing alternative the renamer may drop. */
-export const QUALIFIED_DO_BIND = 'qualified do bind';
-
 function convertQualifiedDo(features: FeatureGates<'convert'>, node: Node, module: string, span: Span): Expr {
   if (!features.allows('qualifiedDo'))
     throw syntaxError(span, '修飾つきの do を使うには、QualifiedDo の拡張が要ります。');
@@ -2420,8 +2420,6 @@ const PROGRAM_SOURCE = 'Main.hs';
 function plainRhs(expr: Expr, span: Span): Rhs {
   return { body: { kind: 'plain', expr }, where: [], span };
 }
-
-/** Whether a pattern always matches, judging by its form alone. */
 
 function convertRecordPattern(features: FeatureGates<'convert'>, node: Node, span: Span): Pat {
   const con = convertPattern(features, required(node, 'constructor'));
