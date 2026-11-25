@@ -841,6 +841,7 @@ class Renamer {
         ? conDecl.exVars.map((binder) => ({
             name: binder.name.name,
             kind: binder.kind && this.renameKind(binder.kind),
+            ...(binder.inferred ? { inferred: true } : {}),
           }))
         : [...own].map((name) => ({ name }));
       return {

@@ -303,7 +303,10 @@ function inferConstructorVariables(checker: Checker, decl: RDataDecl, conDecl: R
     }
   }
   if (conDecl.result) {
-    con.specified = ownVars.map((binder) => (vars.get(binder.name) as Extract<Type, { tag: 'tgen' }>).index);
+    // A binder written in braces, `{b}`, is inferred: type applications skip it, as GHC's do.
+    con.specified = ownVars
+      .filter((binder) => !binder.inferred)
+      .map((binder) => (vars.get(binder.name) as Extract<Type, { tag: 'tgen' }>).index);
   }
   con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
   con.context = checker.convertConstraints(conDecl.context ?? [], vars, varKinds);
