@@ -652,6 +652,11 @@ export class FunctionChecker {
       if (this.matchingOverloadNames(node, next)) {
         if (hasToken(next, 'static') !== hasToken(node, 'static'))
           this.c.error(nextName ?? next, 'オーバーロードの static 修飾子は一致しなければいけません。');
+        if ((node.parent?.type === 'export_statement') !== (next.parent?.type === 'export_statement'))
+          this.c.error(
+            node.childForFieldName('name') ?? node,
+            'オーバーロードのシグネチャはすべてがエクスポート済みであるか、またはエクスポート済みでない必要があります。'
+          );
         return;
       }
       const implementation = node.type === 'function_signature' ? 'function_declaration' : 'method_definition';
