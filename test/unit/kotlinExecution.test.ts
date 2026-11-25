@@ -6546,6 +6546,19 @@ test('looks keys up in sorted sets and maps within the operation limit', () => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '5000\n' });
 });
 
+test("gives regexes Kotlin/JVM's options, escapes, and errors", () => {
+  const source = `fun main() {
+    println(Regex("É", RegexOption.IGNORE_CASE).matches("é"))
+    println(Regex("b", RegexOption.IGNORE_CASE).options.size)
+    println(Regex(Regex.escape("a\\\\Eb")).matches("a\\\\Eb"))
+    try { Regex("a").find("aaa", 9) } catch (e: Exception) { println(e) }
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n1\ntrue\njava.lang.IndexOutOfBoundsException: Illegal start index\n',
+  });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

@@ -79,7 +79,9 @@ external class Regex {
     external constructor(pattern: String, option: RegexOption)
     external constructor(pattern: String, options: Set<RegexOption>)
     external val pattern: String
-    external val options: Set<RegexOption>
+    // A set however the options are given, as Kotlin/JVM's Regex keeps them.
+    val options: Set<RegexOption> get() = optionList().toSet()
+    internal external fun optionList(): List<RegexOption>
     internal external fun matchData(input: String, startIndex: Int, isWhole: Boolean): IntArray?
     internal external fun groupNameArray(): Array<String>
     internal fun groupNames(): Map<String, Int> =
@@ -88,8 +90,8 @@ external class Regex {
     external fun replaceFirst(input: CharSequence, replacement: String): String
 
     fun find(input: CharSequence, startIndex: Int = 0): MatchResult? {
-        if (startIndex < 0 || startIndex > input.length)
-            throw IndexOutOfBoundsException("Start index out of bounds: $startIndex, input length: \${input.length}")
+        // Kotlin/JVM's find leaves the check to java.util.regex.Matcher.find, whose message this is.
+        if (startIndex < 0 || startIndex > input.length) throw IndexOutOfBoundsException("Illegal start index")
         val text = input.toString()
         val data = matchData(text, startIndex, false) ?: return null
         return MatcherMatchResult(this, text, data, groupNames())
@@ -148,7 +150,9 @@ external class Regex {
 
     companion object {
         fun fromLiteral(literal: String): Regex = Regex(literal, RegexOption.LITERAL)
-        fun escape(literal: String): String = "\\\\Q" + literal + "\\\\E"
+        // java.util.regex.Pattern.quote, which ends the quotation around each \\E the literal holds.
+        fun escape(literal: String): String =
+            "\\\\Q" + literal.replace("\\\\E", "\\\\E\\\\\\\\E\\\\Q") + "\\\\E"
         external fun escapeReplacement(literal: String): String
     }
 }

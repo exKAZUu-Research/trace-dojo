@@ -16,18 +16,23 @@ interface CompiledRegex {
 
 /** The embedded flags of `java.util.regex.Pattern` that each `RegexOption` sets. */
 const OPTION_FLAGS: Record<string, string> = {
-  IGNORE_CASE: 'i',
+  // Kotlin/JVM's Regex adds UNICODE_CASE to IGNORE_CASE, so that case folds beyond ASCII.
+  IGNORE_CASE: 'iu',
   MULTILINE: 'm',
   UNIX_LINES: 'd',
   COMMENTS: 'x',
   DOT_MATCHES_ALL: 's',
 };
 
-function optionNames(options: Value): string[] {
+/** The options a Regex was given: none, one, or a set of them. */
+function optionValues(options: Value): Value[] {
   if (options === NULL) return [];
-  if (options instanceof KObject && options.native?.name !== undefined) return [options.native.name as string];
-  const entries = (options as KObject).store?.entries ?? [];
-  return entries.map((entry) => ((entry.key as KObject).native?.name as string) ?? '');
+  if (options instanceof KObject && options.native?.name !== undefined) return [options];
+  return ((options as KObject).store?.entries ?? []).map((entry) => entry.key);
+}
+
+function optionNames(options: Value): string[] {
+  return optionValues(options).map((option) => ((option as KObject).native?.name as string) ?? '');
 }
 
 function compile(frame: Frame, pattern: string, options: Value): CompiledRegex {
@@ -77,7 +82,9 @@ defineNative('kotlin.text.Regex.<init>(String, Set<RegexOption>)', (frame, recei
   initialize(frame, receiver, pattern, options);
 });
 defineNativeProperty('kotlin.text.Regex.pattern', (_frame, receiver) => regexOf(receiver).pattern);
-defineNativeProperty('kotlin.text.Regex.options', (_frame, receiver) => regexOf(receiver).options);
+defineNative('kotlin.text.Regex.optionList()', (frame, receiver) =>
+  newItems(frame, 'kotlin.collections.ArrayList', optionValues(regexOf(receiver).options))
+);
 
 defineNative('kotlin.text.Regex.matchData(String, Int, Boolean)', (frame, receiver, [input, startIndex, isWhole]) => {
   const regex = regexOf(receiver);
