@@ -16,6 +16,7 @@ import {
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
 import { activeUnionIndex, packedValuesEqual, physicalUnion } from './bufferMemory';
+import { cAbiType } from './cAbi';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -29,7 +30,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
@@ -345,9 +346,11 @@ export abstract class ExpressionCompiler extends SemaBase {
   /** Rejects the parameter and return types that the C calling convention cannot pass, as Zig does. */
   protected checkCAbi(params: readonly Type[], returnType: Type, spans: readonly Span[], span: Span): void {
     for (const [index, param] of params.entries()) {
+      if (param.kind !== 'anytype') this.resolveStorage(param, spans[index] ?? span);
       if (param.kind === 'anytype' || !cAbiType(param, false))
         this.error(spans[index] ?? span, `引数の型 ${typeName(param)} は、C の呼び出し規約の関数には使えません。`);
     }
+    this.resolveStorage(returnType, span);
     if (!cAbiType(returnType, true))
       this.error(span, `戻り値の型 ${typeName(returnType)} は、C の呼び出し規約の関数には使えません。`);
   }
@@ -2313,46 +2316,6 @@ function hasSentinel(type: Type): boolean {
 }
 
 /** Whether a value of a type passes as it does in C, as `callconv(.c)` requires of parameters and results. */
-const C_INTEGER_BITS = new Set([8, 16, 32, 64, 128]);
-
-function cAbiType(type: Type, isReturn: boolean): boolean {
-  switch (type.kind) {
-    case 'int': {
-      return C_INTEGER_BITS.has(type.bits);
-    }
-    case 'float':
-    case 'bool': {
-      return true;
-    }
-    case 'void':
-    case 'noreturn': {
-      return isReturn;
-    }
-    case 'pointer': {
-      return type.size !== 'slice';
-    }
-    case 'optional': {
-      return type.child.kind === 'pointer' && type.child.size !== 'slice';
-    }
-    case 'enum': {
-      return type.namespace.syntax?.argument !== undefined;
-    }
-    case 'struct':
-    case 'union': {
-      // A packed type has a C ABI only through the backing integer that `packed struct(u8)` names, of a C width.
-      return (
-        type.layout === 'extern' ||
-        (type.layout === 'packed' &&
-          type.namespace.syntax?.argument !== undefined &&
-          C_INTEGER_BITS.has(bitSizeOf(type)))
-      );
-    }
-    default: {
-      return false;
-    }
-  }
-}
-
 /** A many-item or C pointer's value, which must not be null. */
 function manyPointer(value: Value): Pointer {
   if (!(value instanceof Pointer)) throw new MemoryFault();
