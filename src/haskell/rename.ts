@@ -36,6 +36,7 @@ import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, se
 import { TH_NAME_MODULES } from './library/thNames';
 import { LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
+import { NEWTYPE_STRICT_FIELDS } from './newtypes';
 import type {
   Binder,
   LocalVar,
@@ -706,8 +707,7 @@ class Renamer {
         fieldNames: conDecl.fieldNames?.map((fieldName) => fieldName.name),
         isInfix: conDecl.isInfix,
         fieldTypes: [],
-        // A newtype's value is its field at run time in GHC: evaluating the box evaluates the field.
-        strictFields: decl.newtype ? [0] : conDecl.strictFields,
+        strictFields: decl.newtype ? [...NEWTYPE_STRICT_FIELDS] : conDecl.strictFields,
         span: conDecl.span,
         ...(decl.newtype ? { isNewtype: true } : {}),
       };

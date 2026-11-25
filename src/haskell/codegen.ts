@@ -28,6 +28,7 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
+import { matchesWithoutEvaluating } from './newtypes';
 import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
@@ -565,7 +566,7 @@ export class Codegen {
         continue;
       }
       const fields: Plan[] = [];
-      if (pat.con.isNewtype) {
+      if (matchesWithoutEvaluating(pat.con)) {
         const fieldSlot = this.frame.alloc();
         target[index] = { k: 'newtype', slot, fieldSlot, fields };
         pending.push({ pat: pat.args[0], slot: fieldSlot, target: fields, index: 0 });

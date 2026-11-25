@@ -1,6 +1,7 @@
 import { FUNCTION_TYPE, IO_TYPE } from './builtinTypes';
 import type { CoercionSpec } from './entities';
 import { TailCall } from './machine';
+import { newtypeBox } from './newtypes';
 import { define, type Primitive } from './primitives';
 import type { Runtime } from './runtime';
 import { prune, splitApp, type Type } from './types';
@@ -56,12 +57,7 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
       if ((spec.k === 'unwrap') === forward) {
         return lazily(() => convert(spec.inner, (force(value) as ConValue).fields[0], forward, leaves, runtime));
       }
-      // A newtype's value is its field's, so evaluating the box evaluates the field, as its constructor does.
-      return lazily(() => {
-        const field = convert(spec.inner, value, forward, leaves, runtime);
-        force(field);
-        return new ConValue(spec.con, [field]);
-      });
+      return lazily(() => newtypeBox(spec.con, convert(spec.inner, value, forward, leaves, runtime), force));
     }
     case 'fun': {
       return lazily(() => {
