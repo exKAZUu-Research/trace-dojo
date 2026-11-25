@@ -13,6 +13,7 @@ import {
   SYNONYM_RHS,
 } from './rast';
 import type { RClassDecl, RConDecl, RDataDecl, RModule, RSynonymDecl, RTypeEquation, RTypeFamily } from './rename';
+import { binderVisibility } from './typeConversion';
 import {
   CONSTRAINT,
   defaultKind,
@@ -28,6 +29,7 @@ import {
   tcon,
   type Type,
   unifyKinds,
+  type Visibility,
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -158,8 +160,14 @@ function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration
     if (equations) declarations.push({ kind: 'family', decl: { ...decl, equations } });
   }
   for (const { entity, kind, span } of module.kindSigs) {
-    if (kind.k === 'forall' && 'sort' in entity) entity.kindSpecified = true;
-    const given = checker.kindOf(kind, new Map());
+    const kindVars = new Map<string, Kind>();
+    const given = checker.kindOf(kind, kindVars);
+    if (kind.k === 'forall' && 'sort' in entity) {
+      entity.kindBinders = kind.binders.map((binder) => ({
+        kind: kindVars.get(binder.name) as Kind,
+        visibility: binderVisibility(binder),
+      }));
+    }
     const actual = 'tyvarKind' in entity ? arrowKind(classParamKinds(entity), CONSTRAINT) : (entity as TypeEntity).kind;
     if (!unifyKinds(actual, given)) {
       throw compileError(span, `${entity.name} の種類が、種類のシグネチャ ${showKind(given)} と合いません。`);
@@ -195,8 +203,14 @@ function inferGroup(checker: Checker, group: KindDeclaration[]): void {
   }
   checker.checkKinds(true);
   for (const entry of group) {
-    if (entry.kind !== 'class') rememberKind(entry.decl.entity, entry.decl.entity.kind);
-    else {
+    if (entry.kind !== 'class') {
+      const { entity } = entry.decl;
+      rememberKind(
+        entity,
+        entity.kind,
+        entity.kindBinders?.map((binder) => binder.kind)
+      );
+    } else {
       rememberKind(entry.decl.entity, entry.decl.entity.tyvarKind);
       const { packed } = entry.decl.entity;
       if (packed) rememberKind(packed, packed.kind);
@@ -313,10 +327,10 @@ function inferConstructorVariables(checker: Checker, decl: RDataDecl, conDecl: R
     }
   }
   if (conDecl.result) {
-    // A binder written in braces, `{b}`, is inferred: type applications skip it, as GHC's do.
-    con.specified = ownVars
-      .filter((binder) => !binder.inferred)
-      .map((binder) => (vars.get(binder.name) as Extract<Type, { tag: 'tgen' }>).index);
+    con.binders = ownVars.map((binder) => ({
+      index: (vars.get(binder.name) as Extract<Type, { tag: 'tgen' }>).index,
+      visibility: binderVisibility(binder),
+    }));
   }
   con.fieldTypes = conDecl.fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
   con.context = checker.convertConstraints(conDecl.context ?? [], vars, varKinds);
@@ -394,7 +408,16 @@ function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSy
 
 function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
   const { params } = decl;
-  const names = [...params, ...typeVarNames([sig.type, ...sig.context]).filter((name) => !params.includes(name))];
+  // The class's parameters come first, then the method's own variables in the order its signature specifies them.
+  const own = sig.forall ? sig.forall.map((binder) => binder.name) : typeVarNames([...sig.context, sig.type]);
+  const names = [...params];
+  const visibilities = params.map((): Visibility => 'specified');
+  for (const name of [...own, ...typeVarNames([sig.type, ...sig.context])]) {
+    if (names.includes(name)) continue;
+    const binder = sig.forall?.find((candidate) => candidate.name === name);
+    names.push(name);
+    visibilities.push(binder ? binderVisibility(binder) : sig.forall ? 'inferred' : 'specified');
+  }
   const paramKinds = classParamKinds(decl.entity);
   const kinds: Kind[] = names.map((_, index) => paramKinds[index] ?? freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
@@ -404,12 +427,7 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
   const { packed } = decl.entity;
   const preds: Pred[] = [{ cls: decl.entity, type: packed ? tap(tcon(packed), ...classArgs) : classArgs[0] }];
   for (const pred of checker.convertConstraints(sig.context, vars, varKinds)) preds.push(pred);
-  const order = sig.forall ? sig.forall.map((binder) => binder.name) : typeVarNames([...sig.context, sig.type]);
-  const specified = [
-    ...params.keys(),
-    ...order.flatMap((name) => (params.includes(name) ? [] : [names.indexOf(name)])),
-  ].filter((index) => index >= 0);
-  const scheme = { kinds, names, preds, type, specified };
+  const scheme = { kinds, visibilities, names, preds, type };
   if (!checker.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
   return scheme;
 }

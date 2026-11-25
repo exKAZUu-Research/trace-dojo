@@ -41,7 +41,7 @@ import {
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type { OverlapMode, Span } from './syntax';
-import { constraintPreds, TypeConversion } from './typeConversion';
+import { binderVisibility, constraintPreds, TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
 import {
   couldMatch,
@@ -72,11 +72,14 @@ import {
   type TForall,
   type TVar,
   type Type,
+  typeArgumentTargets,
   typeChildren,
   typesEqual,
   typeVarsOf,
   unifyKinds,
   unifyTypes,
+  type Visibility,
+  visibleBinders,
   zonk,
 } from './types';
 
@@ -617,11 +620,13 @@ export class Checker {
 
   sigToScheme(sig: RSigType): Scheme {
     const bound = new Set(sig.forall?.map((binder) => binder.name));
-    const free = typeVarNames([sig.type, ...sig.context]).filter(
+    // An implicitly quantified variable is specified in the order it first occurs, the context included, as in GHC.
+    const free = typeVarNames([...sig.context, sig.type]).filter(
       (name) => !bound.has(name) && !this.scopedTypes.has(name)
     );
     if (sig.forall && free.length > 0) typeError(sig.span, `型変数 ${free[0]} がスコープにありません。`);
     const names = sig.forall ? sig.forall.map((binder) => binder.name) : free;
+    const visibilities = sig.forall ? sig.forall.map(binderVisibility) : free.map((): Visibility => 'specified');
     const kindVars = new Map<string, Kind>();
     const kinds: Kind[] = names.map((name) => {
       const binder = sig.forall?.find((candidate) => candidate.name === name);
@@ -636,12 +641,6 @@ export class Checker {
     let type = this.convertType(sig.type, vars, varKinds, STAR);
     const preds = this.convertConstraints(sig.context, vars, varKinds);
     this.checkKinds();
-    const specified = sig.forall
-      ? sig.forall.flatMap((binder, index) => (binder.inferred ? [] : [index]))
-      : typeVarNames([...sig.context, sig.type]).flatMap((name) => {
-          const index = names.indexOf(name);
-          return index === -1 ? [] : [index];
-        });
     // A forall the whole type is, which a synonym or parentheses give (`type Id = forall r. r -> r`), quantifies the
     // signature itself: its variables and context join the scheme's, as GHC reads it.
     for (let outer = prune(type); outer.tag === 'forall'; outer = prune(type)) {
@@ -650,24 +649,16 @@ export class Checker {
       for (const [offset, variable] of outer.vars.entries()) {
         kinds.push(variable.kind);
         names.push(variable.name ?? `t${start + offset}`);
-        specified.push(start + offset);
+        visibilities.push(variable.visibility ?? 'specified');
       }
       const inner = substituteBound(outer, gens);
       preds.push(...inner.preds);
       type = inner.body;
     }
-    const required = sig.forall?.flatMap((binder, index) => (binder.required ? [index] : []));
     // A kind variable the signature names (`k` in `forall k (a :: k).`) stays a variable of the scheme's kinds, which
     // each use instantiates afresh; other unknown kinds default to Type.
     const named = new Set([...kindVars.values()].map(pruneKind));
-    const scheme = {
-      kinds: kinds.map((kind) => defaultKindExcept(kind, named)),
-      names,
-      preds,
-      type,
-      specified,
-      required,
-    };
+    const scheme = { kinds: kinds.map((kind) => defaultKindExcept(kind, named)), visibilities, names, preds, type };
     if (!this.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
   }
@@ -973,18 +964,9 @@ export class Checker {
   }
 
   /**
-   * Infers `e @t1 @t2`, where `e` is a variable or constructor whose scheme specifies its type variables: the type
-   * arguments instantiate them in order.
+   * Infers `e @t1 @t2`, where `e` is a variable, a constructor, or `(e :: sig)`, whose scheme's visible binders the
+   * type arguments instantiate in order.
    */
-  /** Checks an expression against its signature, `e :: sig`, giving the signature's scheme. */
-  private checkTyped(expr: Extract<RExpr, { k: 'typed' }>): Scheme {
-    const scheme = this.sigToScheme(expr.sig);
-    expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
-      this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
-    );
-    return scheme;
-  }
-
   private inferTypeApplication(expr: Extract<RExpr, { k: 'tyapp' }>): Type {
     const applications: Extract<RExpr, { k: 'tyapp' }>[] = [];
     let head: RExpr = expr;
@@ -1005,22 +987,13 @@ export class Checker {
           : head.k === 'typed'
             ? this.checkTyped(head)
             : undefined;
-    const specified = scheme?.specified ?? [];
-    if (!scheme || typeArgs.length > specified.length) {
+    const targets = scheme && typeArgumentTargets(scheme.visibilities, applications);
+    if (!scheme || !targets) {
       typeError(expr.span, '型の適用（@）ができるのは、型シグネチャで型変数を決めた関数と構成子だけです。');
     }
     const args = freshKinds(scheme.kinds).map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
     for (const [position, typeArg] of typeArgs.entries()) {
-      const index = specified[position];
-      if (applications[position].required && !scheme.required?.includes(index)) {
-        typeError(applications[position].span, '(type t) を渡せるのは、forall a -> で型を受け取る引数だけです。');
-      }
-      if (!applications[position].required && scheme.required?.includes(index)) {
-        typeError(
-          applications[position].span,
-          'forall a -> で型を受け取る引数には、@ ではなく (type t) で型を渡してください。'
-        );
-      }
+      const index = targets[position];
       // A wildcard (`@_` or `(type _)`) leaves the variable for inference.
       if (!typeArg) continue;
       const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
@@ -1036,6 +1009,15 @@ export class Checker {
     const type = instantiateType(scheme.type, args);
     head.type = type;
     return type;
+  }
+
+  /** Checks an expression against its signature, `e :: sig`, giving the signature's scheme. */
+  private checkTyped(expr: Extract<RExpr, { k: 'typed' }>): Scheme {
+    const scheme = this.sigToScheme(expr.sig);
+    expr.dictParams = this.checkAgainstScheme(scheme, (type, skolems) =>
+      this.withScopedTypes(this.forallScope(expr.sig, skolems), () => this.checkExpr(expr.expr, type))
+    );
+    return scheme;
   }
 
   /**
@@ -1563,7 +1545,7 @@ export class Checker {
     for (const clause of binding.clauses) {
       const bound = new Map<string, Type>();
       for (const [position, name] of (clause.typeBinders ?? []).entries()) {
-        const index = signature?.scheme.specified?.[position];
+        const index = signature && visibleBinders(signature.scheme.visibilities)[position];
         if (index === undefined) typeError(clause.span, '@ で型変数を束縛するには、型シグネチャに forall が要ります。');
         if (name !== '_') bound.set(name, signature?.skolems[index] as Type);
       }
@@ -1750,6 +1732,7 @@ export class Checker {
     for (const param of params) add(param.pred.type);
     const scheme = {
       kinds: vars.map((variable) => defaultKind(variable.kind)),
+      visibilities: vars.map((): Visibility => 'inferred'),
       names: vars.map((variable) => variable.name ?? 'a'),
       preds: params.map((param) => ({ cls: param.pred.cls, type: quantifyType(param.pred.type, vars) })),
       type: quantifyType(zonked, vars),
@@ -1960,9 +1943,7 @@ function setBinderScheme(binder: Binder, scheme: Scheme): void {
 /** The scheme of a local whose type is polymorphic, as a rank-N parameter's is. */
 function localPolytypeScheme(local: LocalVar): Scheme | undefined {
   const type = local.type && prune(local.type);
-  if (type?.tag !== 'forall') return undefined;
-  const specified = type.vars.flatMap((variable, index) => (variable.inferred ? [] : [index]));
-  return { ...polytypeScheme(type), specified };
+  return type?.tag === 'forall' ? polytypeScheme(type) : undefined;
 }
 
 /** A polymorphic type inside another as a scheme, with its variables as `TGen` indices. */
@@ -1971,18 +1952,24 @@ export function polytypeScheme(type: TForall): Scheme {
   const { body, preds } = substituteBound(type, generics);
   return {
     kinds: type.vars.map((variable) => variable.kind),
+    visibilities: type.vars.map((variable) => variable.visibility ?? 'specified'),
     names: type.vars.map((variable) => variable.name ?? 'a'),
     preds,
     type: body,
   };
 }
 
+/**
+ * A constructor's scheme: the data type's parameters, then the constructor's existential variables, all specified; a
+ * GADT constructor quantifies its signature's variables instead, in their written order, before the parameters its
+ * result type fixes.
+ */
 export function conScheme(con: ConInfo): Scheme {
   if (con.instanceArgs) {
     const kinds = con.instanceKinds ?? [];
     let type: Type = tap(tcon(con.type), ...con.instanceArgs);
     for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
-    return { kinds, preds: [], type, specified: kinds.map((_, index) => index) };
+    return { kinds, visibilities: kinds.map((): Visibility => 'specified'), preds: [], type };
   }
   const params = typeParamKinds(con.type);
   const kinds = [...params, ...(con.exKinds ?? [])];
@@ -1991,7 +1978,20 @@ export function conScheme(con: ConInfo): Scheme {
   );
   let type: Type = tap(tcon(con.type), ...resultArgs);
   for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
-  return { kinds, preds: con.context ?? [], type, specified: con.specified ?? kinds.map((_, index) => index) };
+  const preds = con.context ?? [];
+  if (!con.binders) return { kinds, visibilities: kinds.map((): Visibility => 'specified'), preds, type };
+  const order = [
+    ...con.binders.map((binder) => binder.index),
+    ...kinds.keys().filter((index) => !con.binders?.some((binder) => binder.index === index)),
+  ];
+  const renumbered: Type[] = [];
+  for (const [position, index] of order.entries()) renumbered[index] = { tag: 'tgen', index: position };
+  return {
+    kinds: order.map((index) => kinds[index]),
+    visibilities: order.map((_, position) => con.binders?.[position]?.visibility ?? 'inferred'),
+    preds: preds.map((pred) => ({ cls: pred.cls, type: instantiateType(pred.type, renumbered) })),
+    type: instantiateType(type, renumbered),
+  };
 }
 
 export function typeParamKinds(type: TypeEntity): Kind[] {

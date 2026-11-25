@@ -13,7 +13,7 @@ import {
 import type { ClassEntity, ConInfo, TypeEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { freshKind, instantiateKind, rememberKind } from './kindTemplates';
-import { directClassConstraint, expandSynonymHead, type RConstraint, type RType } from './rast';
+import { directClassConstraint, expandSynonymHead, type RBinder, type RConstraint, type RType } from './rast';
 import type { Span } from './syntax';
 import {
   CONSTRAINT,
@@ -32,7 +32,9 @@ import {
   tcon,
   type TVar,
   type Type,
+  typeArgumentTargets,
   unifyKinds,
+  type Visibility,
 } from './types';
 
 const promotedKinds = new WeakSet<TypeEntity>();
@@ -170,26 +172,14 @@ export class TypeConversion {
         }
         return { type: tap(tcon(FUNCTION_TYPE), from, to), kind: STAR };
       }
-      case 'con':
-      case 'app': {
-        return this.convertAppliedType(type, vars, varKinds);
-      }
       case 'kinded': {
         const kind = this.kindOf(type.kind, new Map());
         return { type: this.convert(type.type, vars, varKinds, kind), kind };
       }
-      case 'kindapp': {
-        let base: RType = type.type;
-        while (base.k === 'app' || base.k === 'kindapp') base = base.k === 'app' ? base.fn : base.type;
-        if (base.k !== 'con' || !base.entity.kindSpecified) {
-          throw compileError(type.span, '種類の変数を決めていない型には、@ で種類を渡せません。');
-        }
-        const head = this.convertTypeKind(type.type, vars, varKinds);
-        const parameter = pruneKind(head.kind);
-        if (parameter.tag !== 'arrow' || !unifyKinds(parameter.from, this.kindOf(type.kind, new Map()))) {
-          throw compileError(type.span, '型の種類（カインド）が合いません（種類の適用）。');
-        }
-        return head;
+      case 'kindapp':
+      case 'con':
+      case 'app': {
+        return this.convertAppliedType(type, vars, varKinds);
       }
       case 'forall': {
         const kindVars = new Map<string, Kind>();
@@ -201,7 +191,7 @@ export class TypeConversion {
           name: binder.name,
           skolem: true,
           bound: true,
-          ...(binder.inferred ? { inferred: true } : {}),
+          visibility: binderVisibility(binder),
         }));
         const innerVars = new Map(vars);
         const innerKinds = new Map(varKinds);
@@ -339,7 +329,12 @@ export class TypeConversion {
       args.unshift(head.arg);
       head = head.fn;
     }
-    if (head.k === 'con' && head.entity.sort === 'synonym' && !head.entity.synonym) {
+    const kindArgs: Extract<RType, { k: 'kindapp' }>[] = [];
+    for (; head.k === 'kindapp'; head = head.type) kindArgs.unshift(head);
+    if (kindArgs.length > 0 && head.k !== 'con') {
+      throw compileError(type.span, '種類の変数を決めていない型には、@ で種類を渡せません。');
+    }
+    if (head.k === 'con' && head.entity.sort === 'synonym' && !head.entity.synonym && kindArgs.length === 0) {
       // A synonym of constraints stands for what it is written as.
       const expanded = expandSynonymHead(type);
       if (expanded !== type) return this.convertTypeKind(expanded, vars, varKinds);
@@ -349,7 +344,7 @@ export class TypeConversion {
       if (args.length < entity.arity) {
         throw compileError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
       }
-      const appliedKind = this.instantiateKind(entity, entity.kind, head.span);
+      const appliedKind = this.headKind(entity, entity.kind, head.span, kindArgs);
       const paramKinds = parameterKinds(appliedKind).slice(0, entity.arity);
       const synonymArgs = args
         .slice(0, entity.arity)
@@ -373,14 +368,36 @@ export class TypeConversion {
       head.k === 'con'
         ? {
             type: tcon(head.entity) as Type,
-            kind: this.instantiateKind(
+            kind: this.headKind(
               head.entity,
               head.entity.promotedFrom ? this.promotedKind(head.entity) : head.entity.kind,
-              head.span
+              head.span,
+              kindArgs
             ),
           }
         : this.convertTypeKind(head, vars, varKinds);
     return this.applyTypeArgs(converted, args, vars, varKinds);
+  }
+
+  /** The kind of a type constructor at a use, whose kind applications `T @k` set the variables its kind signature binds. */
+  private headKind(
+    entity: TypeEntity,
+    kind: Kind,
+    span: Span,
+    kindArgs: readonly Extract<RType, { k: 'kindapp' }>[]
+  ): Kind {
+    const instance = this.instantiateKindBinders(entity, kind, span);
+    if (kindArgs.length === 0) return instance.kind;
+    const targets = typeArgumentTargets(entity.kindBinders?.map((binder) => binder.visibility) ?? [], kindArgs);
+    if (!targets) {
+      throw compileError((kindArgs.at(-1) as RType).span, '種類の変数を決めていない型には、@ で種類を渡せません。');
+    }
+    for (const [position, kindArg] of kindArgs.entries()) {
+      if (!unifyKinds(instance.binders[targets[position]], this.kindOf(kindArg.kind, new Map()))) {
+        throw compileError(kindArg.span, '型の種類（カインド）が合いません（種類の適用）。');
+      }
+    }
+    return instance.kind;
   }
 
   private applyTypeArgs(
@@ -416,9 +433,13 @@ export class TypeConversion {
   }
 
   private instantiateKind(owner: object, kind: Kind, span: Span): Kind {
+    return this.instantiateKindBinders(owner, kind, span).kind;
+  }
+
+  private instantiateKindBinders(owner: object, kind: Kind, span: Span): { kind: Kind; binders: Kind[] } {
     const instance = instantiateKind(owner, kind);
-    if (instance.variables.length > 0) this.kindInstances.push({ kind: instance.kind, expected: kind, span });
-    return instance.kind;
+    if (instance.polymorphic) this.kindInstances.push({ kind: instance.kind, expected: kind, span });
+    return instance;
   }
 
   private markUnsupported(span: Span, feature = '制約を型として扱う機能（ConstraintKinds）'): void {
@@ -436,6 +457,12 @@ function expandConstraintSynonyms(context: readonly RConstraint[]): RConstraint[
     else result.push(constraint);
   }
   return result;
+}
+
+/** The visibility a written binder gives its variable: `{a}` inferred, `forall a ->` required, otherwise specified. */
+export function binderVisibility(binder: RBinder): Visibility {
+  if (binder.inferred) return 'inferred';
+  return binder.required ? 'required' : 'specified';
 }
 
 /**

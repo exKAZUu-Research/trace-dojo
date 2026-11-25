@@ -1,6 +1,8 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ClassEntity, TypeEntity } from './entities';
+import { compileError } from './errors';
 import { instantiateKind } from './kindTemplates';
+import type { Span } from './syntax';
 import { mapGraph, walkGraph, walkGraphPairs } from './typeGraph';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -158,8 +160,8 @@ export interface TVar {
   skolem?: boolean;
   /** Whether the variable is one a `TForall` binds, which is no free variable of the types around it. */
   bound?: boolean;
-  /** Whether its `TForall` binds it as `{a}`, which visible type applications skip. */
-  inferred?: boolean;
+  /** How a visible type argument reaches the variable, which a `TForall` binds. */
+  visibility?: Visibility;
 }
 
 export interface TCon {
@@ -307,20 +309,52 @@ export interface Pred {
   type: Type;
 }
 
-/** A type scheme: `forall vars. preds => type`, where the type refers to its variables by `TGen` index. */
+/**
+ * How a quantified variable takes a visible argument, as GHC classifies binders: `@t` gives a specified one (written in
+ * a `forall`, or implicitly quantified in a signature), `(type t)` or a plain type argument a required one
+ * (`forall a ->`), and none an inferred one (`forall {a}`, or quantified by generalization).
+ */
+export type Visibility = 'specified' | 'inferred' | 'required';
+
+/**
+ * A type scheme: `forall vars. preds => type`, where the type refers to its variables by `TGen` index, in the order
+ * the scheme quantifies them.
+ */
 export interface Scheme {
   kinds: Kind[];
+  /** The visibility of each variable, by `TGen` index. */
+  visibilities: Visibility[];
   /** The names the variables had in the source, for messages. */
   names?: string[];
-  /**
-   * The variables a visible type application instantiates, in order, as `TGen` indices: those a signature names, in
-   * the order GHC specifies them. A scheme that inference found has none.
-   */
-  specified?: number[];
-  /** The variables of `forall a ->` binders, as `TGen` indices, which only `(type t)` arguments instantiate. */
-  required?: number[];
   preds: Pred[];
   type: Type;
+}
+
+/** The binders, as indices in quantification order, that visible type arguments supply in turn: all but the inferred. */
+export function visibleBinders(visibilities: readonly Visibility[]): number[] {
+  return visibilities.flatMap((visibility, index) => (visibility === 'inferred' ? [] : [index]));
+}
+
+/**
+ * The binders that visible type arguments, `@t` or `(type t)` (`required`), supply in turn, or `undefined` when there
+ * are more arguments than binders to take them.
+ */
+export function typeArgumentTargets(
+  visibilities: readonly Visibility[],
+  args: readonly { required?: boolean; span: Span }[]
+): number[] | undefined {
+  const visible = visibleBinders(visibilities);
+  if (args.length > visible.length) return undefined;
+  return args.map((arg, position) => {
+    const index = visible[position];
+    if (arg.required && visibilities[index] !== 'required') {
+      throw compileError(arg.span, '(type t) を渡せるのは、forall a -> で型を受け取る引数だけです。');
+    }
+    if (!arg.required && visibilities[index] === 'required') {
+      throw compileError(arg.span, 'forall a -> で型を受け取る引数には、@ ではなく (type t) で型を渡してください。');
+    }
+    return index;
+  });
 }
 
 export function instantiateType(type: Type, args: readonly Type[]): Type {

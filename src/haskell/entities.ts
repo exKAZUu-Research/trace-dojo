@@ -1,5 +1,5 @@
 import type { Span } from './syntax';
-import type { Kind, Pred, Scheme, Type } from './types';
+import type { Kind, Pred, Scheme, Type, Visibility } from './types';
 
 let nextEntityId = 0;
 
@@ -38,8 +38,8 @@ export interface TypeEntity {
   fixity?: Fixity;
   /** For a type-level literal, the string or number it is. */
   literal?: string | bigint;
-  /** Whether a standalone kind signature specifies the type's kind variables with `forall`, which `T @k` sets. */
-  kindSpecified?: boolean;
+  /** The variables the `forall` of a standalone kind signature binds, in order, which kind applications `T @k` set. */
+  kindBinders?: { kind: Kind; visibility: Visibility }[];
   /**
    * The roles of a data type's parameters, as far as they are known: what `Coercible` needs of two applications of
    * the type to convert one to the other, argument by argument.
@@ -70,8 +70,8 @@ export interface ConInfo {
   fieldTypes: Type[];
   /** The kinds of the existential variables, which follow the data type's parameters. */
   exKinds?: Kind[];
-  /** For a GADT constructor, its variables' indices in the order its signature gives them to type applications. */
-  specified?: number[];
+  /** For a GADT constructor, the variables its signature quantifies, in order, as `TGen` indices with visibilities. */
+  binders?: { index: number; visibility: Visibility }[];
   /**
    * The constraints DatatypeContexts puts on the constructor: using it, to build or to match, needs them, but its
    * values hold no dictionaries for them.

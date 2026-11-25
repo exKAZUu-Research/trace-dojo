@@ -32,6 +32,7 @@ import {
   tcon,
   type Type,
   unifyKinds,
+  type Visibility,
   zonk,
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -152,7 +153,12 @@ function defineConstructors(decl: RDataDecl): void {
     }
     field.fieldType = first;
     const { kinds, head: recordType } = declHead(decl);
-    field.entity.scheme = { kinds, preds: [], type: tap(tcon(FUNCTION_TYPE), recordType, first) };
+    field.entity.scheme = {
+      kinds,
+      visibilities: kinds.map((): Visibility => 'inferred'),
+      preds: [],
+      type: tap(tcon(FUNCTION_TYPE), recordType, first),
+    };
   }
 }
 
@@ -245,7 +251,7 @@ function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): 
   info.supers = info.cls.supers.map((sup, index) => {
     let evidence: Evidence | undefined;
     checker.checkAgainstScheme(
-      { kinds: [], preds: [], type: head },
+      { kinds: [], visibilities: [], preds: [], type: head },
       () => {
         evidence = checker.want(
           superPred({ cls: info.cls, type: head }, index),
@@ -293,6 +299,7 @@ function checkInstanceMethods(
     const classArgs = info.cls.packed ? splitApp(head).args : [head];
     const rest: Scheme = {
       kinds: methodScheme.kinds.slice(classArgs.length),
+      visibilities: methodScheme.visibilities.slice(classArgs.length),
       names: methodScheme.names?.slice(classArgs.length),
       preds: methodScheme.preds.slice(1).map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, classArgs) })),
       type: shiftGens(methodScheme.type, classArgs),
@@ -345,6 +352,7 @@ function coercedMethods(
     }
     const shifted = (classArg: Type): Scheme => ({
       kinds: methodScheme.kinds.slice(1),
+      visibilities: methodScheme.visibilities.slice(1),
       names: methodScheme.names?.slice(1),
       preds: ownPreds.map((pred) => ({ cls: pred.cls, type: shiftGens(pred.type, [classArg]) })),
       type: shiftGens(methodScheme.type, [classArg]),

@@ -1,17 +1,27 @@
 import { mapGraph } from './typeGraph';
 import { freshKindVar, type Kind, kindArrow, type KindVar, pruneKind } from './types';
 
-const templates = new WeakMap<object, Kind>();
+/** A kind-polymorphic owner's kind, with the kinds of the variables its kind signature binds, in order. */
+const templates = new WeakMap<object, { kind: Kind; binders: Kind[] }>();
 
-export function rememberKind(owner: object, kind: Kind): void {
-  const instance = freshKind(kind);
-  if (instance.variables.length > 0) templates.set(owner, instance.kind);
-  else templates.delete(owner);
+export function rememberKind(owner: object, kind: Kind, binders: readonly Kind[] = []): void {
+  if (freshKind(kind).variables.length === 0) {
+    templates.delete(owner);
+    return;
+  }
+  const [template, ...templateBinders] = freshKinds([kind, ...binders]);
+  templates.set(owner, { kind: template, binders: templateBinders });
 }
 
-export function instantiateKind(owner: object, kind: Kind): { kind: Kind; variables: KindVar[] } {
+/**
+ * A fresh instance of an owner's kind, with the instance's kinds of the binders `rememberKind` was given, which kind
+ * applications set.
+ */
+export function instantiateKind(owner: object, kind: Kind): { kind: Kind; polymorphic: boolean; binders: Kind[] } {
   const template = templates.get(owner);
-  return template ? freshKind(template) : { kind, variables: [] };
+  if (!template) return { kind, polymorphic: false, binders: [] };
+  const [instance, ...binders] = freshKinds([template.kind, ...template.binders]);
+  return { kind: instance, polymorphic: true, binders };
 }
 
 export function freshKind(kind: Kind): { kind: Kind; variables: KindVar[] } {
