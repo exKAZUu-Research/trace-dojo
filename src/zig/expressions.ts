@@ -112,6 +112,7 @@ import {
   ErrorValue,
   FnValue,
   hasAggregateStorage,
+  hasUndefinedHeader,
   markConstantStorage,
   NULL,
   optionalPayload,
@@ -2057,6 +2058,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         ? (staticResultOf(operand) ?? (variablePlace && { value: variablePlace.load() }))
         : undefined;
     if (type.kind === 'pointer' && known) {
+      if (hasUndefinedHeader(known.value)) return this.error(span, 'undefined のヘッダーは参照できません。');
       const length = (known.value as Slice).lengthValue;
       return {
         child: type.child,
