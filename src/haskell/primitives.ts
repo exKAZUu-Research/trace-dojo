@@ -68,6 +68,15 @@ strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
 
 export const unit = (): Value => nullary(UNIT_CON);
 
+/**
+ * Checks that a handle is still open before output goes to it, which the handle table of ioPrimitives.ts, the owner of
+ * handles, provides: stdout for putStr and putStrLn, any handle for hFlush.
+ */
+export const outputHandles: {
+  checkStdout: (runtime: Runtime, location: string) => void;
+  checkHandle: (handle: Slot, runtime: Runtime, location: string) => void;
+} = { checkStdout: () => {}, checkHandle: () => {} };
+
 export function tuple(...items: Slot[]): Value {
   return new ConValue(tupleCon(items.length), items);
 }
@@ -749,6 +758,7 @@ define(
     new IOPrim(
       'putStr',
       () => {
+        outputHandles.checkStdout(runtime, 'hPutStr');
         writeLazily(text, runtime, 'stdout', '');
         return unit();
       },
@@ -763,6 +773,7 @@ define(
     new IOPrim(
       'putStrLn',
       () => {
+        outputHandles.checkStdout(runtime, 'hPutStr');
         writeLazily(text, runtime, 'stdout', '\n');
         return unit();
       },
@@ -777,7 +788,7 @@ define(
     new IOPrim(
       'hFlush',
       () => {
-        runtime.machine.force(handle);
+        outputHandles.checkHandle(handle, runtime, 'hFlush');
         return unit();
       },
       [handle]

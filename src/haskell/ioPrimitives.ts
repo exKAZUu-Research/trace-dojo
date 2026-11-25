@@ -3,7 +3,7 @@ import { CONS_CON } from './builtinTypes';
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
 import { cons, NIL, nullary, RunNext, TailCall, unpackString } from './machine';
-import { bool, define, forceString, unit } from './primitives';
+import { bool, define, forceString, outputHandles, unit } from './primitives';
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
 
@@ -99,6 +99,10 @@ function checkUsable(entry: OpenHandle, location: string, reading: boolean): voi
     throw ioError('IllegalOperation', location, entry.name, 'handle is semi-closed');
   }
 }
+
+outputHandles.checkStdout = (runtime, location) => checkUsable(tableOf(runtime).stdout, location, false);
+outputHandles.checkHandle = (handle, runtime, location) =>
+  checkUsable(handleOf(handle, runtime).entry, location, false);
 
 function fileSystemError(error: unknown, location: string, path: string): never {
   if (!(error instanceof FileSystemError)) throw error;
