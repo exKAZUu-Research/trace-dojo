@@ -816,9 +816,22 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
     }
     if (cell && this.context.comptimeDepth === 0) {
+      const stored =
+        expression.operator === '=' ? this.comptimeStoredValue(target, expression.value, variable) : undefined;
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       this.comptimeValue(
         () => {
+          if (stored) {
+            const { place } = this.assignablePlace(target);
+            return runtime(
+              VOID,
+              (frame) => {
+                const pointer = place.locate(frame);
+                storeInto(pointer.target, pointer.index, stored.eval(frame));
+              },
+              expression
+            );
+          }
           const exec = this.assignment(expression, span).exec;
           return runtime(VOID, (frame) => void exec(frame), expression);
         },
@@ -875,6 +888,18 @@ export abstract class StatementCompiler extends CallCompiler {
       }),
       noreturn: false,
     };
+  }
+
+  /**
+   * The value `=` stores into a `comptime var`, which Zig analyzes where the assignment stands, so it must be known at
+   * compile time: a call to a runtime function gives a runtime value even when its arguments are known.
+   */
+  private comptimeStoredValue(target: Expression, value: Expression, variable: LocalBinding): TExpr {
+    const { type } = this.compile(target);
+    const stored = this.coerce(this.compile(value, type), type, value);
+    if (!staticResultOf(stored))
+      this.error(value, `実行時に決まる値は、comptime var「${variable.name}」には入れられません。`);
+    return stored;
   }
 
   private rejectDiscardedError(type: Type, span: Span): void {
