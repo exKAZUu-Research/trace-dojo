@@ -169,10 +169,11 @@ export function expandSplices(
       throw compileError(site.row, `Template Haskell のスプライスを実行できません。${detail}`);
     }
   });
+  const texts = uniqueNames(codes, outsideSplices(source, sites));
   let result = source;
   // From the last site back, so that the offsets of the earlier ones stay.
   for (const [index, site] of sites.entries().toArray().toReversed()) {
-    const text = uniqueNames(codes[index]);
+    const text = texts[index];
     const spliceLines = source.slice(site.start, site.end).split('\n');
     const replacement = site.runner === 'runDecSplice' ? text : `(${text})`;
     // Tabs stay, so that the layout reads the same column for the text after the splice.
@@ -183,21 +184,51 @@ export function expandSplices(
   return { source: result, printed };
 }
 
-/**
- * Names the new names of a splice's code: each by its own name when no other name of the code has it (another new
- * name, or a plain one such as mkName gives), and with its number otherwise, as `x_1`. The library marks them as `\u0001name\u0002number\u0003`.
- */
-function uniqueNames(text: string): string {
-  const pattern = /\u0001([^\u0002]*)\u0002(\d+)\u0003/g;
-  const numbers = new Map<string, Set<string>>();
-  for (const match of text.matchAll(pattern)) {
-    const set = numbers.get(match[1]) ?? new Set();
-    set.add(match[2]);
-    numbers.set(match[1], set);
+function outsideSplices(source: string, sites: readonly SpliceSite[]): string {
+  let text = '';
+  let from = 0;
+  for (const site of sites) {
+    text += `${source.slice(from, site.start)} `;
+    from = site.end;
   }
-  // A plain name (from mkName, or the program's own) of the same text would capture a new name written plainly.
-  const plain = new Set(text.replaceAll(pattern, ' ').match(/[\w']+/g));
-  return text.replaceAll(pattern, (_, name: string, number: string) =>
-    ((numbers.get(name)?.size ?? 0) > 1 || plain.has(name)) && /^[\w']+$/.test(name) ? `${name}_${number}` : name
+  return text + source.slice(from);
+}
+
+/**
+ * Names the new names of the splices' code across the module: each by its own name when no other new name has it
+ * and no plain name (from mkName, or the program's own) does, and with a number otherwise, as `x_1`, that no other
+ * name has. A splice's program numbers its new names afresh, so a new name is the splice it comes from with its
+ * number. The library marks them as `\u0001name\u0002number\u0003`.
+ */
+function uniqueNames(codes: readonly string[], program: string): string[] {
+  // oxlint-disable-next-line no-control-regex -- The library marks new names with control characters, which no source text has.
+  const pattern = /\u0001([^\u0002]*)\u0002(\d+)\u0003/g;
+  const identities = new Map<string, Set<string>>();
+  for (const [index, code] of codes.entries()) {
+    for (const match of code.matchAll(pattern)) {
+      const set = identities.get(match[1]) ?? new Set();
+      set.add(`${index}:${match[2]}`);
+      identities.set(match[1], set);
+    }
+  }
+  // A plain name of the same text would capture a new name written plainly.
+  const plainText = [program, ...codes.map((code) => code.replaceAll(pattern, ' '))].join(' ');
+  const taken = new Set(plainText.match(/[\w']+/g));
+  const renamed = new Map<string, string>();
+  const numbered: [string, string][] = [];
+  for (const [name, ids] of identities) {
+    if (!/^[\w']+$/.test(name) || (ids.size === 1 && !taken.has(name))) {
+      for (const id of ids) renamed.set(`${id}:${name}`, name);
+      taken.add(name);
+    } else for (const id of ids) numbered.push([name, id]);
+  }
+  for (const [name, id] of numbered) {
+    let number = Number(id.split(':')[1]);
+    while (taken.has(`${name}_${number}`)) number++;
+    taken.add(`${name}_${number}`);
+    renamed.set(`${id}:${name}`, `${name}_${number}`);
+  }
+  return codes.map((code, index) =>
+    code.replaceAll(pattern, (_, name: string, number: string) => renamed.get(`${index}:${number}:${name}`) ?? name)
   );
 }
