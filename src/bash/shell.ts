@@ -432,7 +432,8 @@ export class Shell implements ArithmeticHost {
     let falling = false;
     for (const item of statement.items) {
       const matches =
-        falling || item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern)));
+        falling ||
+        item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern, true)));
       if (!matches) continue;
       status = this.runStatements(item.body);
       if (item.terminator === ';;') return status;

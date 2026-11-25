@@ -104,9 +104,10 @@ export class Expander {
   }
 
   /** Expands a word into a glob pattern, quoting characters protected by quotes. */
-  expandPattern(word: Word): string {
+  expandPattern(word: Word, firstWordOnly = false): string {
     this.checkTilde(word.parts, false);
-    return this.patternOf(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
+    const segments = this.expandParts(word.parts, DEFAULT_WORD_CONTEXT);
+    return this.patternOf(firstWordOnly ? firstWordSegments(segments) : segments);
   }
 
   /** Expands the right side of `=~` into an ERE, escaping characters protected by quotes. */
@@ -726,6 +727,11 @@ export function isListExpansionSyntax(expansion: ParameterExpansion): boolean {
     (expansion.operator === '*' || expansion.operator === '@') &&
     expansion.argument.length === 0
   );
+}
+
+function firstWordSegments(segments: readonly WordSegment[]): readonly WordSegment[] {
+  const breakIndex = segments.findIndex((seg) => seg.kind === 'break' && seg.breakKind !== 'star');
+  return breakIndex === -1 ? segments : segments.slice(0, breakIndex);
 }
 
 function compoundItemValidationError(
