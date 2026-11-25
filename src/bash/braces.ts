@@ -1,4 +1,5 @@
-import type { WordPart } from './ast';
+import { isIdentifier } from './associativeTable';
+import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf } from './characters';
 
 /** A character of a word that brace expansion may read (or a term of a sequence), or a part it passes over as a whole. */
@@ -31,13 +32,77 @@ function tokensOf(parts: WordPart[]): Token[] {
 function partsOf(tokens: Token[]): WordPart[] {
   const parts: WordPart[] = [];
   for (const token of tokens) {
-    const text = token.kind === 'char' ? token.c : token.part.kind === 'literal' ? token.part.text : undefined;
-    const last = parts.at(-1);
-    if (text !== undefined && last?.kind === 'literal') last.text += text;
-    else if (text !== undefined) parts.push({ kind: 'literal', text });
-    else parts.push((token as Extract<Token, { kind: 'opaque' }>).part);
+    if (token.kind === 'char') appendCharToken(parts, token.c);
+    else appendOpaquePart(parts, token.part);
   }
   return parts;
+}
+
+function appendCharToken(parts: WordPart[], text: string): void {
+  if (text === '') return;
+  const last = parts.at(-1);
+  if (tryExtendParameter(parts, last, text) || tryPromoteTrailingDollar(parts, last, text)) return;
+  if (last?.kind === 'literal') last.text += text;
+  else parts.push({ kind: 'literal', text });
+}
+
+function tryExtendParameter(parts: WordPart[], last: WordPart | undefined, text: string): boolean {
+  if (!canExtendIdentifierParameter(last)) return false;
+  const match = /^([A-Za-z0-9_]+)(.*)$/s.exec(text);
+  if (!match) return false;
+  last.name += match[1];
+  last.text = `$${last.name}`;
+  if (match[2] !== '') parts.push({ kind: 'literal', text: match[2] });
+  return true;
+}
+
+function tryPromoteTrailingDollar(parts: WordPart[], last: WordPart | undefined, text: string): boolean {
+  if (last?.kind !== 'literal' || !hasTrailingUnescapedDollar(last.text)) return false;
+  const started = startDollarParameter(text);
+  if (!started) return false;
+  last.text = last.text.slice(0, -1);
+  if (last.text === '') parts.pop();
+  parts.push(started.parameter);
+  if (started.rest !== '') parts.push({ kind: 'literal', text: started.rest });
+  return true;
+}
+
+function canExtendIdentifierParameter(part: WordPart | undefined): part is ParameterExpansion {
+  return (
+    part?.kind === 'parameter' &&
+    !part.braced &&
+    part.operator === undefined &&
+    part.prefix === undefined &&
+    part.subscript === undefined &&
+    isIdentifier(part.name)
+  );
+}
+
+function hasTrailingUnescapedDollar(text: string): boolean {
+  if (!text.endsWith('$')) return false;
+  let backslashes = 0;
+  for (let i = text.length - 2; i >= 0 && text[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 0;
+}
+
+function startDollarParameter(text: string): { parameter: ParameterExpansion; rest: string } | undefined {
+  const match = /^([A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$-])(.*)$/s.exec(text);
+  if (!match) return undefined;
+  const [, name, rest] = match;
+  return {
+    parameter: { kind: 'parameter', name, argument: [], text: `$${name}`, braced: false },
+    rest,
+  };
+}
+
+function appendOpaquePart(parts: WordPart[], part: WordPart): void {
+  const last = parts.at(-1);
+  if (part.kind === 'literal') {
+    if (last?.kind === 'literal') last.text += part.text;
+    else parts.push({ kind: 'literal', text: part.text });
+    return;
+  }
+  parts.push(part.kind === 'parameter' ? { ...part, argument: [...part.argument] } : part);
 }
 
 const isChar = (token: Token | undefined, c: string): boolean => token?.kind === 'char' && token.c === c;
