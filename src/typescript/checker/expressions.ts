@@ -77,6 +77,9 @@ const newTargetBoundaries = new Set([
 export type CheckExpression = (node: TreeNode, contextual?: Type) => Type;
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
+/** The kinds of names a use before their declaration reads before they are initialized, as tsc reports. */
+const usedBeforeDeclarationKinds = new Set(['let', 'const', 'class', 'enum', 'parameter']);
+
 export class ExpressionChecker {
   private observedTypes?: Map<number, Type | undefined>;
   readonly calls: Calls;
@@ -703,13 +706,7 @@ export class ExpressionChecker {
       this.checkParameterUseOfBodyFunction(node, symbol);
       return;
     }
-    if (
-      symbol.valueKind !== 'let' &&
-      symbol.valueKind !== 'const' &&
-      symbol.valueKind !== 'class' &&
-      symbol.valueKind !== 'parameter'
-    )
-      return;
+    if (!usedBeforeDeclarationKinds.has(symbol.valueKind ?? '')) return;
     const declaration = symbol.valueDeclaration;
     if (!declaration || this.c.isLibrary(declaration)) return;
     if (!this.beforeBindingInitialized(node, symbol, declaration)) return;
@@ -725,7 +722,7 @@ export class ExpressionChecker {
       }
       if (current.type === 'field_definition' && !hasToken(current, 'static')) return;
     }
-    const kind = symbol.valueKind === 'class' ? 'クラス' : '変数';
+    const kind = symbol.valueKind === 'class' ? 'クラス' : symbol.valueKind === 'enum' ? '列挙型' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
   }
 

@@ -1,0 +1,5 @@
+console.log(E.A);
+function f() { return E.B; }
+enum E { A = 1, B = E.A + 1 }
+enum E { C = E.B + 1 }
+console.log(E.C, f());
