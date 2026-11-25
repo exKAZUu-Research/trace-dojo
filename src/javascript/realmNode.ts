@@ -35,11 +35,23 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
   for (const name of ['stdout', 'stderr'] as const) {
     const stream = new JsObject(builder.realm.objectPrototype);
     builder.method(stream, 'write', 1, ({ runtime, args }) => {
+      const unavailable = unavailableWriteArgument(`process.${name}.write`, args.slice(1));
+      if (runtime.unavailableMember && unavailable) rejectUnavailableMember(unavailable, runtime.currentRow);
       runtime.io[name].write(requireText(runtime, args[0], 'chunk'));
       return true;
     });
     builder.constant(process, name, stream);
   }
+}
+
+/**
+ * What a stream's `write` is given after its text that this interpreter does not run, if anything: an encoding other
+ * than UTF-8, which Node.js decodes the text with, or the callback Node.js calls once the text is written.
+ */
+function unavailableWriteArgument(method: string, rest: Value[]): string | undefined {
+  const [encoding, callback] = isObject(rest[0]) ? [undefined, rest[0]] : rest;
+  if (encoding !== undefined && encoding !== null && !isUtf8(encoding)) return `${method} のエンコーディング指定`;
+  return callback === undefined ? undefined : `${method} のコールバック`;
 }
 
 function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {

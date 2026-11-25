@@ -179,6 +179,12 @@ test.each([
 
 test.each([
   ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
+  [
+    "process.stdout.write('6869', 'hex');",
+    'process.stdout.write のエンコーディング指定は、この採点環境では使えません。',
+  ],
+  ["process.stdout.write('x', () => {});", 'process.stdout.write のコールバックは、この採点環境では使えません。'],
+  ['console.log(typeof Symbol.dispose);', 'Symbol.dispose などの well-known シンボルは、この採点環境では使えません。'],
   ["const fs = require('fs', 'utf8');", '引数は 1 個必要ですが、2 個渡されています。'],
   ['const fs = require(1);', "型 'number' の引数を型 'string' のパラメーターに渡すことはできません。"],
   [
