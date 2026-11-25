@@ -6,6 +6,7 @@ import type { Checker } from './checker';
 import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
 import type { Scope, Sym } from './scopes';
+import { spellingSuggestion } from './spelling';
 import { named, stringValue } from './syntax';
 import {
   anonymousObject,
@@ -206,8 +207,20 @@ export class Namespaces {
       const unavailable = name && this.isLibraryModule(module) && unavailableNodeMember(`"${module.name}"`, name.text);
       if (name && unavailable) this.c.error(name, unsupportedMessage(unavailable));
       else if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
-        this.c.error(name, `モジュール ${moduleName} には、エクスポートされたメンバー '${name.text}' がありません。`);
+        this.reportMissingImport(name, exports, moduleName);
     }
+  }
+
+  /** A name a module does not export, with the export tsc suggests for a misspelling of one. */
+  private reportMissingImport(name: TreeNode, exports: Scope, moduleName: string): void {
+    const candidates = new Set([...exports.values.keys(), ...exports.types.keys()]);
+    const suggestion = spellingSuggestion(name.text, candidates, this.c.budget);
+    this.c.error(
+      name,
+      suggestion
+        ? `'${name.text}' という名前のエクスポートされたメンバーが ${moduleName} に含まれていません。候補: '${suggestion}'`
+        : `モジュール ${moduleName} には、エクスポートされたメンバー '${name.text}' がありません。`
+    );
   }
 
   /** The symbol of the type a qualified name such as `N.T` or `A.B.T` names, through the namespaces of its path. */

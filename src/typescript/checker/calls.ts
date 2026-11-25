@@ -471,7 +471,8 @@ export class Calls {
     const library = this.c.libraryBinder.moduleScope.lookupValue('require');
     if (!library || this.c.scopeOf(callee).lookupValue('require') !== library) return undefined;
     const [id] = args;
-    const name = id && this.c.flow.constantIndexName(id);
+    // `require("fs" as const)` names fs as `require("fs")` does.
+    const name = id && this.c.flow.constantIndexName(withoutAssertions(id));
     const module = name === undefined ? undefined : this.c.namespaces.moduleObjectType(name);
     if (module) return this.checkArgumentsOnly(args, module);
     this.c.error(
