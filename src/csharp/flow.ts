@@ -464,6 +464,9 @@ export class FlowAnalyzer {
       case 'conditionalAccess': {
         return this.accessExpression(expression, state);
       }
+      case 'late': {
+        return this.expressions(expression.operands, state);
+      }
       case 'refAssign': {
         return this.reference(expression.target, state, expression.row);
       }

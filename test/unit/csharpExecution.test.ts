@@ -338,6 +338,41 @@ struct Point { public int X; public int Y; }
   });
 });
 
+// A `dynamic` operation binds when it runs, to the types of the values: overloads, operators, and members, with the
+// runtime binder's messages for what does not bind. The runtime binder finds no extension methods.
+test('dynamic values bind at run time as .NET binds them', () => {
+  const program = String.raw`dynamic a = 3, s = "x";
+dynamic p = new P { X = 2 };
+p.X = p.X * 3;
+a += 10;
+a++;
+Console.WriteLine($"{s + a} {p.Show(5)} {p.Show("v")} {a == 14} {Math.Max(a, 100)}");
+try { s.Missing(); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { Console.WriteLine(a - s); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { int k = s; } catch (Exception e) { Console.WriteLine(e.Message); }
+dynamic none = null;
+none.ToString();
+class P
+{ public int X { get; set; } public string Show(string v) => "s:" + v; public string Show(int v) => "i:" + v; }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'x14 i:5 s:v True 100',
+      "'string' does not contain a definition for 'Missing'",
+      "Operator '-' cannot be applied to operands of type 'int' and 'string'",
+      "Cannot implicitly convert type 'string' to 'int'",
+      '',
+    ].join('\n'),
+    uncaughtException:
+      'Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: Cannot perform runtime binding on a null reference',
+  });
+  expect(executeProgram('csharp', 'dynamic d = new List<int>();\nd.Select(x => x);\n')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('CS1977') }],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

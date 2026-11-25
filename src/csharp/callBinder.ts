@@ -147,6 +147,14 @@ export abstract class CallBinder extends OperatorBinder {
       if (args.some((arg) => arg.expression.type.kind === 'error' && arg.expression.kind !== 'unbound'))
         return undefined;
       const [first, second] = this.tiedCandidates(mostDerived, args);
+      // The runtime binder names them by their full type names and with `params`.
+      this.lastAmbiguity = [first, second].map(({ candidate }) => {
+        const parameters = candidate.method.parameters.map(
+          (parameter) =>
+            `${parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitutionOf(candidate.owner)))}`
+        );
+        return `${candidate.owner.symbol.fullName.replace(/`\d+$/, '')}.${candidate.method.name}(${parameters.join(', ')})`;
+      });
       this.error(
         row,
         'CS0121',
@@ -1193,6 +1201,12 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
+  /** The two methods of the last ambiguous call, as the runtime binder's message names them. */
+  protected lastAmbiguity: string[] | undefined;
+
+  /** The method whose argument did not convert, which the runtime binder's message names. */
+  protected lastInconvertibleMethod: string | undefined;
+
   /** Reports an argument that does not convert to its parameter's type. */
   private reportInconvertible(
     candidate: MethodCandidate,
@@ -1218,6 +1232,7 @@ export abstract class CallBinder extends OperatorBinder {
         `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(candidate.method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
       );
     } else {
+      this.lastInconvertibleMethod = displayMethodIn(candidate.method, candidate.owner);
       this.error(
         arg.row,
         'CS1503',

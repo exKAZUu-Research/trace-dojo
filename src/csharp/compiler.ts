@@ -13,7 +13,7 @@ import type {
 import { AttributeBinder } from './attributeBinder';
 import type { Library, TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression, BoundStatement } from './bound';
-import type { BindContext } from './convertBinder';
+import { type BindContext, lateOperandName } from './convertBinder';
 import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
@@ -61,7 +61,14 @@ export interface CompiledProgram {
   isTopLevel: boolean;
   /** Whether integral overflow throws outside `checked` and `unchecked`, as `CheckForOverflowUnderflow` makes it. */
   checkOverflow: boolean;
+  /** Binds an operation on `dynamic` values to its operands' types when it runs, as the runtime binder does. */
+  bindLate?: (node: LateNode, types: Type[]) => LateBinding;
 }
+
+type LateNode = Extract<BoundExpression, { kind: 'late' }>;
+
+/** A late-bound operation bound to its operands' types: the expression to evaluate, or the runtime binder's error. */
+export type LateBinding = { bound: BoundExpression; method: MethodSymbol } | { message: string };
 
 let libraryCache: Library | undefined;
 
@@ -166,7 +173,14 @@ export class Compiler extends AttributeBinder {
       ]);
     const types = declared.map((type) => type.symbol);
     if (isTopLevel && !types.includes(entry.owner)) types.push(entry.owner);
-    return { library: this.library, types, entry, isTopLevel, checkOverflow: unit.options?.checkOverflow ?? false };
+    return {
+      library: this.library,
+      types,
+      entry,
+      isTopLevel,
+      checkOverflow: unit.options?.checkOverflow ?? false,
+      bindLate: (node, operandTypes) => this.bindLate(node, operandTypes),
+    };
   }
 
   /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
@@ -210,6 +224,112 @@ export class Compiler extends AttributeBinder {
   }
 
   /** The context of the attributes of the whole program, `[assembly: ...]`, which see its global names. */
+  private readonly lateBindings = new WeakMap<LateNode, Map<string, LateBinding>>();
+
+  /**
+   * Binds a late-bound operation with its operands as hidden locals of the given types, in the context of the code
+   * that wrote it, once per site and types. Its compile errors become the runtime binder's messages.
+   */
+  private bindLate(node: LateNode, types: Type[]): LateBinding {
+    let bySite = this.lateBindings.get(node);
+    if (!bySite) {
+      bySite = new Map();
+      this.lateBindings.set(node, bySite);
+    }
+    const key = types.map((type) => displayType(type, true)).join('|');
+    let binding = bySite.get(key);
+    if (!binding) {
+      binding = this.bindLateOnce(node, types);
+      bySite.set(key, binding);
+    }
+    return binding;
+  }
+
+  private bindLateOnce(node: LateNode, types: Type[]): LateBinding {
+    const typeContext = node.typeContext ?? {
+      namespace: [this.userRoot, this.library.root],
+      usings: [],
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    const method = new MethodSymbol('<dynamic>', typeContext.type ?? this.objectType.symbol, 'method');
+    method.isStatic = true;
+    const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
+    const context: BindContext = { scope: new LocalScope(undefined, fn), fn };
+    const saved = this.diagnostics.length;
+    this.lastInconvertibleMethod = undefined;
+    // The runtime binder does not look for extension methods.
+    this.isLateBinding = true;
+    try {
+      for (const [index, type] of types.entries())
+        this.declareLocal(lateOperandName(index), type, node.syntax, context).isHidden = true;
+      let bound = this.bindValue(node.syntax, context);
+      if (node.target)
+        bound = this.convert(bound, node.target.type, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
+      else if (bound.type.kind !== 'void' && bound.type.kind !== 'error')
+        bound = this.convert(bound, this.dynamicType, node.syntax);
+      const diagnostic = this.diagnostics[saved];
+      if (diagnostic) return { message: this.runtimeBinderMessage(diagnostic.message) };
+      return { bound, method };
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return { message: this.runtimeBinderMessage(error.diagnostics.at(-1)?.message ?? '') };
+    } finally {
+      this.diagnostics.length = saved;
+      this.isLateBinding = false;
+    }
+  }
+
+  /** The runtime binder's message for the compile error that binding an operation to its runtime types gave. */
+  private runtimeBinderMessage(text: string): string {
+    const code = /^(CS\d+): /.exec(text)?.[1];
+    const quoted = [...text.matchAll(/'([^']*)'/g)].map((match) => match[1]);
+    switch (code) {
+      case 'CS1061':
+      case 'CS0117': {
+        return `'${quoted[0]}' does not contain a definition for '${quoted[1]}'`;
+      }
+      case 'CS0122': {
+        return `'${quoted[0]}' is inaccessible due to its protection level`;
+      }
+      case 'CS1501': {
+        const count = /引数 (\d+) /.exec(text)?.[1];
+        return `No overload for method '${quoted[0]}' takes ${count} arguments`;
+      }
+      case 'CS0121': {
+        const [first, second] = this.lastAmbiguity ?? [];
+        return `The call is ambiguous between the following methods or properties: '${first}' and '${second}'`;
+      }
+      case 'CS1503': {
+        return `The best overloaded method match for '${this.lastInconvertibleMethod ?? ''}' has some invalid arguments`;
+      }
+      case 'CS0019': {
+        return `Operator '${quoted[0]}' cannot be applied to operands of type '${quoted[1]}' and '${quoted[2]}'`;
+      }
+      case 'CS0023': {
+        return `Operator '${quoted[0]}' cannot be applied to operand of type '${quoted[1]}'`;
+      }
+      case 'CS0029': {
+        return `Cannot implicitly convert type '${quoted[0]}' to '${quoted[1]}'`;
+      }
+      case 'CS0266': {
+        return `Cannot implicitly convert type '${quoted[0]}' to '${quoted[1]}'. An explicit conversion exists (are you missing a cast?)`;
+      }
+      case 'CS0030': {
+        return `Cannot convert type '${quoted[0]}' to '${quoted[1]}'`;
+      }
+      case 'CS0021': {
+        return `Cannot apply indexing with [] to an expression of type '${quoted[0]}'`;
+      }
+      case 'CS0200': {
+        return `Property or indexer '${quoted[0]}' cannot be assigned to -- it is read only`;
+      }
+      default: {
+        return text.replace(/^CS\d+: /, '');
+      }
+    }
+  }
+
   private rootContext(unit: CompilationUnit): TypeContext {
     const context: TypeContext = {
       namespace: [this.userRoot, this.library.root],

@@ -164,6 +164,9 @@ export class LookupBinder extends DeclarationBinder {
 
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  /** Whether the binder binds a `dynamic` operation as it runs, where the runtime binder finds no extension methods. */
+  protected isLateBinding = false;
+
   lookupExtensionMethods(name: string, context: TypeContext): MethodCandidate[] {
     // An extension property's getter is found by the property's name only.
     return this.lookupExtensionMembers(
@@ -192,6 +195,7 @@ export class LookupBinder extends DeclarationBinder {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private lookupExtensionMembers(context: TypeContext, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
     const result: MethodCandidate[] = [];
+    if (this.isLateBinding) return result;
     const visit = (types: Map<string, TypeSymbol[]>): void => {
       for (const list of types.values()) {
         for (const symbol of list) {

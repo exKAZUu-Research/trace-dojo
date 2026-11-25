@@ -1,4 +1,5 @@
-import type { Position } from './ast';
+import type { Expression, Position } from './ast';
+import type { TypeContext } from './binderBase';
 import type { BoundExpression } from './bound';
 import { type ConversionKind, INTEGRAL_RANGES, isEnum, isNumeric } from './conversions';
 import { CsDecimal } from './decimal';
@@ -8,6 +9,7 @@ import type { FunctionScope, LocalScope } from './scopes';
 import {
   displayType,
   ERROR_TYPE,
+  isDynamicType,
   isReferenceType,
   isValueType,
   type MethodSymbol,
@@ -40,6 +42,18 @@ export interface UserConversion {
 
 /** How a conversion happens, which decides its diagnostics. */
 export type ConversionMode = 'implicit' | 'explicit';
+
+/** What a late-bound operation needs besides its syntax and operands. */
+export interface LateOptions {
+  receiver?: number;
+  target?: { type: Type; isExplicit: boolean };
+  isStatement?: boolean;
+}
+
+/** The name of a late-bound operation's operand, which the binder declares as a hidden local when the operation runs. */
+export function lateOperandName(index: number): string {
+  return `\0d${index}`;
+}
 
 /** Converts bound expressions to types, folding constants and reporting conversions that do not exist. */
 export abstract class ConversionBinder extends LookupBinder {
@@ -229,6 +243,37 @@ export abstract class ConversionBinder extends LookupBinder {
   }
 
   /** Converts an expression to a type, reporting Roslyn's error when the conversion does not exist. */
+  /** The syntax of a late-bound operation's operand. */
+  lateOperand(index: number, position: Position): Expression {
+    return {
+      kind: 'name',
+      name: lateOperandName(index),
+      typeArgs: undefined,
+      row: position.row,
+      column: position.column,
+    };
+  }
+
+  /** An operation on `dynamic` values, which binds to the values' types when it runs. */
+  late(
+    syntax: Expression,
+    operands: BoundExpression[],
+    context: { fn: { typeContext: TypeContext | undefined } },
+    options: LateOptions = {}
+  ): BoundExpression {
+    return {
+      kind: 'late',
+      syntax,
+      operands,
+      receiver: options.receiver,
+      target: options.target,
+      typeContext: context.fn.typeContext,
+      isStatement: options.isStatement ?? false,
+      type: options.target?.type ?? this.dynamicType,
+      row: syntax.row,
+    };
+  }
+
   convert(
     expression: BoundExpression,
     target: Type,
@@ -248,6 +293,16 @@ export abstract class ConversionBinder extends LookupBinder {
     if (expression.type.kind === 'void') {
       this.error(row, 'CS0029', `型 'void' を '${displayType(target, true)}' に暗黙的に変換できません`);
       return { ...expression, type: ERROR_TYPE };
+    }
+    // A `dynamic` value converts to another type by its runtime type, as the runtime binder decides.
+    if (isDynamicType(expression.type) && !isDynamicType(target) && !sameType(target, this.objectType)) {
+      const at = { row, column: typeof position === 'number' ? 0 : position.column };
+      return this.late(
+        this.lateOperand(0, at),
+        [expression],
+        { fn: { typeContext: undefined } },
+        { target: { type: target, isExplicit: mode === 'explicit' } }
+      );
     }
     const implicit = this.standardImplicitOf(expression, target);
     const standard = implicit ?? (mode === 'explicit' ? this.conversions.explicit(expression.type, target) : undefined);

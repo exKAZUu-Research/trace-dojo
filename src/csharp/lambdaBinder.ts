@@ -471,6 +471,9 @@ export abstract class LambdaBinder extends MemberBinder {
   /** Whether an expression may stand as a statement: an assignment, a call, an increment, `new`, or `await`. */
   isStatementExpression(expression: BoundExpression): boolean {
     switch (expression.kind) {
+      case 'late': {
+        return expression.isStatement;
+      }
       case 'assign':
       case 'refAssign':
       case 'compoundAssign':

@@ -18,6 +18,7 @@ import { sizeOf } from './pointers';
 import {
   displayType,
   ERROR_TYPE,
+  isDynamicType,
   isPointerType,
   isReferenceType,
   isVoidPointer,
@@ -61,6 +62,14 @@ export abstract class OperatorBinder extends ConversionBinder {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindUnary(operator: string, operand: BoundExpression, row: number): BoundExpression {
     if (operand.type.kind === 'error') return { ...operand, type: ERROR_TYPE };
+    if (isDynamicType(operand.type)) {
+      const position = { row, column: 0 };
+      return this.late(
+        { kind: 'unary', operator: operator as '-', operand: this.lateOperand(0, position), ...position },
+        [operand],
+        { fn: { typeContext: undefined } }
+      );
+    }
     const userDefined = this.userOperator(UNARY_OPERATOR_NAMES[operator], [operand], row);
     if (userDefined) return userDefined;
     const underlying = nullableUnderlying(operand.type);
@@ -195,6 +204,25 @@ export abstract class OperatorBinder extends ConversionBinder {
   ): BoundExpression {
     if (left.type.kind === 'error' || right.type.kind === 'error')
       return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+    if (
+      (isDynamicType(left.type) || isDynamicType(right.type)) &&
+      left.kind !== 'unbound' &&
+      right.kind !== 'unbound'
+    ) {
+      const position = { row, column: 0 };
+      return this.late(
+        {
+          kind: 'binary',
+          operator,
+          left: this.lateOperand(0, position),
+          right: this.lateOperand(1, position),
+          operatorRow: row,
+          ...position,
+        },
+        [left, right],
+        { fn: { typeContext: undefined } }
+      );
+    }
     const pointerOperation = this.bindPointerOperator(operator, left, right, row);
     if (pointerOperation) return pointerOperation;
     const userDefined = this.userOperator(OPERATOR_NAMES[operator], [left, right], row);

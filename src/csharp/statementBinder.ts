@@ -37,6 +37,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   type FieldSymbol,
+  isDynamicType,
   isPointerType,
   isReferenceType,
   isValueType,
@@ -1437,7 +1438,16 @@ export abstract class StatementBinder extends PatternBinder {
   // code-gauge-allow functionNcss -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
-    const collection = this.bindTypedValue(statement.collection, context);
+    let collection = this.bindTypedValue(statement.collection, context);
+    // A `dynamic` collection is enumerated as an `IEnumerable`, whose elements are `dynamic` (C# spec §13.9.5).
+    const isDynamicCollection = isDynamicType(collection.type);
+    if (isDynamicCollection)
+      collection = this.convert(
+        collection,
+        namedType(this.library.typeNamed('System.Collections.IEnumerable')),
+        statement.collection,
+        'explicit'
+      );
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
     let iteration: ForeachKind;
@@ -1473,7 +1483,7 @@ export abstract class StatementBinder extends PatternBinder {
         elementType = ERROR_TYPE;
       } else {
         iteration = found.iteration;
-        elementType = found.elementType;
+        elementType = isDynamicCollection ? this.dynamicType : found.elementType;
       }
     }
     const isVar = statement.type.kind === 'varType';

@@ -1,6 +1,7 @@
 import {
   allInterfacesOf,
   baseTypeOf,
+  isDynamicType,
   isPointerType,
   isReferenceType,
   isValueType,
@@ -18,6 +19,8 @@ import {
 /** How a value of one type becomes a value of another, which decides what the evaluator does with it. */
 export type ConversionKind =
   | 'identity'
+  /** From `dynamic` to another type, which the value's runtime type decides. */
+  | 'dynamic'
   | 'numeric'
   | 'reference'
   /** A reference conversion that checks the value's runtime type, as a downcast does. */
@@ -123,6 +126,10 @@ export class Conversions {
   implicit(from: Type, to: Type): ConversionKind | undefined {
     if (to.kind === 'error' || from.kind === 'error' || sameType(from, to)) return 'identity';
     if (from.kind === 'null') return acceptsNullType(to) ? 'nullLiteral' : undefined;
+    // `dynamic` converts as `object` does to it, and implicitly to any type, checked at run time.
+    if (isDynamicType(to)) return this.implicit(from, this.types.object);
+    if (isDynamicType(from))
+      return sameType(to, this.types.object) ? 'reference' : isPointerType(to) ? undefined : 'dynamic';
     // Any pointer converts to `void*`; a pointer converts to nothing else implicitly, `object` included.
     if (isPointerType(from) || isPointerType(to))
       return isPointerType(from) && isVoidPointer(to) ? 'pointer' : undefined;

@@ -14,6 +14,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   FieldSymbol,
+  isDynamicType,
   isReferenceType,
   isValueType,
   LocalSymbol,
@@ -782,6 +783,9 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    // A member of a `dynamic` value is found when the access runs, on the value's type.
+    if (isDynamicType(receiver.type) && receiver.kind !== 'unbound')
+      return this.late({ ...node, target: this.lateOperand(0, node.target) }, [receiver], context, { receiver: 0 });
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(
         position,
@@ -1290,6 +1294,8 @@ export abstract class MemberBinder extends CallBinder {
     const target = this.bindExpression(node.target, context);
     this.isBindingCallee = false;
     const args = this.bindArguments(node.args, context);
+    const late = this.lateInvocation(node, target, args, context);
+    if (late) return late;
     if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node);
     if (target.kind === 'typeRef' || target.kind === 'namespaceRef' || target.kind === 'discard') {
       if (target.kind === 'typeRef') {
@@ -1322,6 +1328,78 @@ export abstract class MemberBinder extends CallBinder {
     );
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
     return { kind: 'invokeDelegate', target, args: resolved.args, type: invoke.returnType, row: node.row };
+  }
+
+  /**
+   * A call that binds when it runs: a method of a `dynamic` value, or a method called with a `dynamic` argument,
+   * whose overload is chosen by the arguments' runtime types (C# spec §12.3.3).
+   */
+  private lateInvocation(
+    node: Extract<Expression, { kind: 'invocation' }>,
+    target: BindResult,
+    args: ArgumentInfo[],
+    context: BindContext
+  ): BoundExpression | undefined {
+    const onDynamic = target.kind === 'late' && node.target.kind === 'memberAccess';
+    const withDynamic =
+      target.kind === 'methodGroup' &&
+      args.some((arg) => arg.expression.kind !== 'unbound' && isDynamicType(arg.expression.type)) &&
+      !target.candidates.some((candidate) => candidate.method.kind === 'localFunction') &&
+      args.every((arg) => arg.refKind === undefined);
+    if (!onDynamic && !withDynamic) return undefined;
+    // The runtime binder finds no extension methods, which C# rejects calling with `dynamic` arguments.
+    if (target.kind === 'methodGroup' && target.candidates.length === 0 && target.receiver) {
+      this.error(
+        node,
+        'CS1973',
+        `'${displayType(target.receiver.type)}' には、'${target.name}'という名前の該当するメソッドがありませんが、同じ名前の拡張メソッドがあるようです。拡張メソッドは動的ディスパッチできません。動的引数をキャストするか、または拡張メソッド構文を使用しないで拡張メソッドを呼び出すことを検討してください。`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    for (const arg of args)
+      if (arg.expression.kind === 'unbound') {
+        this.error(
+          arg.row,
+          'CS1977',
+          '最初にデリゲートまたは式ツリー型にキャストしていない場合は、ラムダ式を、動的ディスパッチされる操作の引数として使用することはできません。'
+        );
+        return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      }
+    let receiver: BoundExpression | undefined;
+    let callee: Expression = node.target;
+    if (onDynamic) receiver = (target as Extract<BoundExpression, { kind: 'late' }>).operands[0];
+    else if (target.kind === 'methodGroup' && target.receiver && target.candidates.some((c) => !c.method.isStatic))
+      receiver = target.receiver;
+    if (receiver) {
+      const name = node.target.kind === 'memberAccess' ? node.target.name : (target as { name: string }).name;
+      const typeArgs =
+        node.target.kind === 'memberAccess' || node.target.kind === 'name' ? node.target.typeArgs : undefined;
+      callee = {
+        kind: 'memberAccess',
+        target: this.lateOperand(0, node.target),
+        name,
+        typeArgs,
+        nameRow: node.target.row,
+        row: node.target.row,
+        column: node.target.column,
+      };
+    }
+    const offset = receiver ? 1 : 0;
+    const syntax: Expression = {
+      kind: 'invocation',
+      target: callee,
+      args: args.map((arg, index) => ({
+        name: arg.name,
+        modifier: undefined,
+        value: this.lateOperand(index + offset, { row: arg.row, column: 0 }),
+        row: arg.row,
+        column: 0,
+      })),
+      row: node.row,
+      column: node.column,
+    };
+    const operands = [...(receiver ? [receiver] : []), ...args.map((arg) => arg.expression)];
+    return this.late(syntax, operands, context, { receiver: receiver ? 0 : undefined, isStatement: true });
   }
 
   private bindNameof(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {

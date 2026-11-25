@@ -20,6 +20,7 @@ import {
   displayType,
   ERROR_TYPE,
   FieldSymbol,
+  isDynamicType,
   isPointerType,
   isReferenceType,
   isValueType,
@@ -135,6 +136,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
           const index = this.bindValue(node.args[0].value, context);
           return this.dereference(this.bindBinary('+', target, index, node.row), node);
         }
+        const late = this.lateElementAccess(node, target, context);
+        if (late) return late;
         return (
           this.bindImplicitIndexOrRange(target, node, context) ??
           this.bindElementAccess(target, node.args, node, context)
@@ -1451,6 +1454,43 @@ export abstract class ExpressionBinder extends LambdaBinder {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  /** `d[i]` of a `dynamic` value or with a `dynamic` index, whose indexer is found when it runs. */
+  private lateElementAccess(
+    node: Extract<Expression, { kind: 'elementAccess' }>,
+    target: BoundExpression,
+    context: BindContext
+  ): BoundExpression | undefined {
+    if (target.type.kind === 'error' || node.args.some((arg) => arg.modifier !== undefined)) return undefined;
+    const peek = node.args.map((arg) => this.quietly(() => this.bindValue(arg.value, context)));
+    if (!isDynamicType(target.type) && !peek.some((value) => value && isDynamicType(value.type))) return undefined;
+    const indices = node.args.map((arg) => this.bindValue(arg.value, context));
+    const syntax: Expression = {
+      ...node,
+      target: this.lateOperand(0, node.target),
+      args: node.args.map((arg, index) => ({ ...arg, value: this.lateOperand(index + 1, arg) })),
+    };
+    return this.late(syntax, [target, ...indices], context, { receiver: 0 });
+  }
+
+  /** `d.X = v`, `d[i] += v`: an assignment to a member of a `dynamic` value, which binds when it runs. */
+  private lateAssignment(
+    node: Extract<Expression, { kind: 'assign' }>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    if (node.target.kind !== 'memberAccess' && node.target.kind !== 'elementAccess') return undefined;
+    const probe = this.quietly(() => this.bindExpression(node.target, context));
+    if (probe?.kind !== 'late') return undefined;
+    const target = this.bindExpression(node.target, context) as Extract<BoundExpression, { kind: 'late' }>;
+    const value = this.bindValue(node.value, context);
+    if (value.kind === 'unbound') return undefined;
+    const syntax: Expression = {
+      ...node,
+      target: target.syntax,
+      value: this.lateOperand(target.operands.length, node.value),
+    };
+    return this.late(syntax, [...target.operands, value], context, { receiver: 0, isStatement: true });
+  }
+
   /** `r = ref x`: a ref local, or a ref parameter, refers to another variable from then on. */
   private bindRefAssignment(
     node: Extract<Expression, { kind: 'assign' }>,
@@ -1487,6 +1527,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
   private bindAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     if (operator === '=' && node.target.kind === 'tuple') return this.bindDeconstructionAssignment(node, context);
+    const lateAssignment = this.lateAssignment(node, context);
+    if (lateAssignment) return lateAssignment;
     if (operator === '=' && node.value.kind === 'refExpression')
       return this.bindRefAssignment(node, node.value, context);
     if (operator === '=') {
@@ -1980,8 +2022,21 @@ export abstract class ExpressionBinder extends LambdaBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
+    if (node.operand.kind === 'memberAccess' || node.operand.kind === 'elementAccess') {
+      const probe = this.quietly(() => this.bindExpression(node.operand, context));
+      if (probe?.kind === 'late') {
+        const late = this.bindExpression(node.operand, context) as Extract<BoundExpression, { kind: 'late' }>;
+        return this.late({ ...node, operand: late.syntax }, late.operands, context, { receiver: 0, isStatement: true });
+      }
+    }
     const target = this.bindLValue(node.operand, context, 'compound');
     if (target.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    if (isDynamicType(target.type)) {
+      const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
+      const one = this.constant(1, this.intType, node.row);
+      const operation = this.bindBinary(node.operator === '++' ? '+' : '-', operand, one, node.row);
+      return { kind: 'increment', target, isPrefix: node.prefix, operation, type: target.type, row: node.row };
+    }
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
     const underlying = nullableUnderlying(target.type) ?? target.type;
     const special = specialOf(underlying);

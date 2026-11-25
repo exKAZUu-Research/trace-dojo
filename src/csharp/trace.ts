@@ -20,6 +20,7 @@ import {
   type ArrayType,
   baseTypeOf,
   type FieldSymbol,
+  isDynamicType,
   type NamedType,
   nullableUnderlying,
   substitute,
@@ -245,6 +246,8 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     ) as TraceItemVariable[string];
   }
   if (underlying.kind !== 'named') return NOT_SCALAR;
+  // A `dynamic` variable shows its value as an `object` variable does.
+  if (isDynamicType(underlying) && isString(value)) return shownText(stringText(value));
   if (underlying.symbol.kind === 'enum') return shownText(enumText(underlying, value));
   switch (underlying.symbol.special) {
     case 'bool': {

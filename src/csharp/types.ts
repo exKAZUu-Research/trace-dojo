@@ -609,6 +609,11 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
  * A type as Roslyn's messages show it; `qualified` adds the namespaces, and `annotated` the `?` of a nullable reference
  * type, which Roslyn shows for the types that declarations write.
  */
+/** Whether a type is `dynamic`, which the library's hidden `__Dynamic` stands for. */
+export function isDynamicType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isLibrary && type.symbol.name === '__Dynamic';
+}
+
 /** Whether a type is a pointer type `T*`, which the library's hidden `__Pointer<T>` stands for. */
 export function isPointerType(type: Type): boolean {
   return type.kind === 'named' && type.symbol.isLibrary && type.symbol.name === '__Pointer';
@@ -629,6 +634,7 @@ export function displayType(type: Type, qualified = false, annotated = false): s
   const mark = annotated && 'isAnnotated' in type && type.isAnnotated ? '?' : '';
   switch (type.kind) {
     case 'named': {
+      if (isDynamicType(type)) return 'dynamic';
       if (isPointerType(type))
         return `${isVoidPointer(type) ? 'void' : displayType(pointeeOf(type) as Type, qualified, annotated)}*`;
       const keyword = type.symbol.special ? KEYWORD_NAMES[type.symbol.special] : undefined;

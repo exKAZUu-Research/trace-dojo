@@ -1275,6 +1275,8 @@ namespace System.Runtime.CompilerServices {
   /** The type of a pointer \`T*\`, which no program names; \`void*\` points to \`__Void\`. */
   public sealed class __Pointer<T> { }
   public sealed class __Void { }
+  /** The type \`dynamic\`, which no program names this way; its values are objects bound at run time. */
+  public sealed class __Dynamic { }
   public static class RuntimeHelpers { public static T[] GetSubArray<T>(T[] array, Range range); }
   public sealed class SwitchExpressionException : InvalidOperationException {
     public SwitchExpressionException();
@@ -1284,6 +1286,10 @@ namespace System.Runtime.CompilerServices {
 }
 
 namespace System.Text { public abstract class Encoding { } }
+
+namespace Microsoft.CSharp.RuntimeBinder {
+  public class RuntimeBinderException : Exception { public RuntimeBinderException(); public RuntimeBinderException(string? message); public RuntimeBinderException(string? message, Exception? innerException); }
+}
 
 `;
 

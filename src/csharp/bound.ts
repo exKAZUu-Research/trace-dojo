@@ -1,5 +1,6 @@
 import type { Expression } from './ast';
 /** The bound tree: the program after name resolution, overload resolution, and type checking, which the evaluator runs. */
+import type { TypeContext } from './binderBase';
 import type { ConversionKind } from './conversions';
 import type { ArrayType, FieldSymbol, LocalSymbol, MethodSymbol, NamedType, PropertySymbol, Type } from './types';
 
@@ -204,6 +205,24 @@ export type BoundExpression =
     } & Base)
   /** `typeof(T)`, the one System.Type object of a type. */
   | ({ kind: 'typeOf'; target: Type } & Base)
+  /**
+   * An operation on `dynamic` values, which binds when it runs: the syntax names its operands `\0d0`, `\0d1`, ...,
+   * which take the types of the values (or the static types of operands that are not `dynamic`), and binds in the
+   * context of the code that wrote it.
+   */
+  | ({
+      kind: 'late';
+      syntax: Expression;
+      operands: BoundExpression[];
+      /** The operand whose null value fails as a receiver does, before binding. */
+      receiver: number | undefined;
+      /** For a conversion of a `dynamic` value, the type it converts to. */
+      target: { type: Type; isExplicit: boolean } | undefined;
+      /** Where the operation was written, whose names it sees; a conversion needs none. */
+      typeContext: TypeContext | undefined;
+      /** Whether the operation may stand as a statement: a call, an assignment, or an increment. */
+      isStatement: boolean;
+    } & Base)
   /** `r = ref x`, which makes a ref local refer to another variable, and is that variable's value. */
   | ({ kind: 'refAssign'; local: LocalSymbol; target: BoundLValue } & Base)
   /** `&x`: a pointer to a variable, decomposed into the storage it lies in and its offset there. */

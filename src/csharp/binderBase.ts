@@ -456,6 +456,11 @@ export class BinderBase {
     );
   }
 
+  /** `dynamic`, whose operations bind at run time to the types of the values. */
+  get dynamicType(): NamedType {
+    return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Dynamic'));
+  }
+
   /** Resolves a method's return type, noting a method that returns by reference (`ref T`, `ref readonly T`). */
   resolveReturnType(
     node: TypeNode,
@@ -508,7 +513,8 @@ export class BinderBase {
         return this.resolveNamedType(node, 'var', [], context);
       }
       case 'namedType': {
-        if (node.name === 'dynamic' && !node.typeArgs) this.unsupported(node, '`dynamic`');
+        if (node.name === 'dynamic' && !node.typeArgs && !this.findTypeInScope('dynamic', 0, context))
+          return this.dynamicType;
         if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
         const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
         return this.resolveNamedType(node, node.name, args, context);
@@ -546,7 +552,7 @@ export class BinderBase {
     if (special === 'void') return VOID_TYPE;
     if (special) return this.specialType(special);
     if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
-    if (node.name === 'dynamic') this.unsupported(node, '`dynamic`');
+    if (node.name === 'dynamic') return this.dynamicType;
     return ERROR_TYPE;
   }
 

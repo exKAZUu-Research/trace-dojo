@@ -33,11 +33,13 @@ import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtim
 import {
   type ArrayType,
   baseTypeOf,
+  isDynamicType,
   isValueType,
   type LocalSymbol,
   type MethodSymbol,
   type NamedType,
   namedType,
+  NULL_TYPE,
   nullableUnderlying,
   specialOf,
   type SpecialType,
@@ -461,6 +463,9 @@ export class Evaluator extends AsyncExecutor {
       return value;
     }
     switch (expression.kind) {
+      case 'late': {
+        return this.evaluateLate(expression, frame);
+      }
       case 'addressOf':
       case 'deref':
       case 'pointerArith':
@@ -1615,6 +1620,56 @@ export class Evaluator extends AsyncExecutor {
         | string
         | undefined) ?? ''
     );
+  }
+
+  /**
+   * Runs an operation on `dynamic` values: evaluates its operands in order, binds it to their runtime types (the
+   * static types of operands that are not `dynamic`), and evaluates what it bound to with the operands as locals.
+   */
+  private evaluateLate(expression: Extract<BoundExpression, { kind: 'late' }>, frame: Frame): Value {
+    const values: Value[] = [];
+    const start = frame.temporaries.length;
+    try {
+      for (const operand of expression.operands) {
+        const value = copyValue(this.evaluate(operand, frame));
+        values.push(value);
+        frame.temporaries.push(value);
+      }
+      const objectType = namedType(this.runtime.library.typeNamed('System.Object'));
+      if (expression.receiver !== undefined && values[expression.receiver] === undefined)
+        throw this.runtimeBinderError('Cannot perform runtime binding on a null reference');
+      const types = expression.operands.map((operand, index) => {
+        if (!isDynamicType(operand.type)) return frame.resolve(operand.type);
+        const value = values[index];
+        // A null value binds as the null literal does, which converts to any reference type.
+        if (value === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
+        return this.runtime.runtimeTypeOf(value) ?? objectType;
+      });
+      const binding = this.program.bindLate?.(expression, types);
+      if (!binding) throw new Error('A dynamic operation ran without a binder');
+      if ('message' in binding) throw this.runtimeBinderError(binding.message);
+      const { bound, method } = binding;
+      const inner = new Frame(
+        this.runtime,
+        method,
+        frame.thisValue,
+        frame.typeEnvironment,
+        expression.row,
+        method.locals.length
+      );
+      for (const [index, local] of method.locals.entries()) {
+        const value = values[index];
+        // An operand bound as a value type takes the value out of its box.
+        inner.slots[local.slot] = value instanceof CsBox && isValueType(local.type) ? copyValue(value.value) : value;
+      }
+      return this.evaluate(bound, inner);
+    } finally {
+      frame.temporaries.length = start;
+    }
+  }
+
+  private runtimeBinderError(message: string): CsThrow {
+    return new CsThrow(this.runtime.createException('Microsoft.CSharp.RuntimeBinder.RuntimeBinderException', message));
   }
 
   /** The text of an exception that escaped the program: its `ToString()`, as .NET prints it after "Unhandled exception.". */
