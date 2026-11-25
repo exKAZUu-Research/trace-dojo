@@ -25,9 +25,7 @@ function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, show
     const { code, path: errorPath } = error;
     // The VM reports a missing name written as a directory, as `a.txt/`, as not found, where Node.js reports EISDIR.
     const isMissingName =
-      code === 'EISDIR' &&
-      /[^/]\/+$/u.test(errorPath) &&
-      runtime.io.files.kindOf(errorPath.replace(/\/+$/u, '')) === undefined;
+      /[^/]\/+$/u.test(errorPath) && runtime.io.files.kindOf(errorPath.replace(/\/+$/u, '')) === undefined;
     const reported = isMissingName ? 'ENOENT' : code;
     const [message, errno] = OS_ERRORS[reported];
     const osError = runtime.links.construct(runtime, 'OSError', '', [message, errno]);
