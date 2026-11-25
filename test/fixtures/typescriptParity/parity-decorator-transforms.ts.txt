@@ -1,0 +1,11 @@
+const t1 = (_v: undefined, _c: ClassFieldDecoratorContext) => (v: number) => { console.log('t1'); return v + 1; };
+const t2 = (_v: undefined, _c: ClassFieldDecoratorContext) => (v: number) => { console.log('t2'); return v * 10; };
+const a1 = (_v: unknown, _c: ClassAccessorDecoratorContext) => ({ init: (v: number) => v + 1 });
+const a2 = (_v: unknown, _c: ClassAccessorDecoratorContext) => ({ init: (v: number) => v * 10 });
+class A {
+  @t1 @t2 x = 1;
+  @a1 @a2 accessor y = 1;
+  @t1 @t2 static s = 1;
+}
+const a = new A();
+console.log(a.x, a.y, A.s);

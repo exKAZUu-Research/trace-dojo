@@ -191,8 +191,9 @@ function requireFunction(runtime: Runtime, value: Value): JsFunction {
   return value as JsFunction;
 }
 
+/** Decorators are applied from the last one written, and their initializers transform the value from the first one. */
 function addTransform(field: ClassField | undefined, transform: Value): void {
-  if (field) (field.transforms ??= []).push(transform);
+  if (field) (field.transforms ??= []).unshift(transform);
 }
 
 function decoratorContext(
