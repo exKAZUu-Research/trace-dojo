@@ -518,6 +518,9 @@ export interface OperatorDeclaration extends Position, Attributed {
   startRow: number;
   /** For an operator of an extension block, the type it extends, whose operators it joins. */
   extension?: ExtensionMember;
+  /** A generic extension block's type parameters, which its operators take as a generic method does. */
+  typeParameters?: TypeParameterDeclaration[];
+  constraints?: ConstraintClause[];
 }
 
 export interface EnumMember extends Position, Attributed {

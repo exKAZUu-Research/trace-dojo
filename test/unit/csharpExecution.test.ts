@@ -644,6 +644,62 @@ class Program {
   });
 });
 
+// A generic extension block's operators infer the block's type arguments from the operands; extension operators come
+// from the namespaces in scope; and a readonly field is a `ref` receiver only in its type's constructor.
+test('extension operators infer generic blocks, follow the namespaces in scope, and guard readonly receivers', () => {
+  const program = String.raw`using Ops;
+var box = new Box<string>("a") + new Box<string>("b");
+var pair = new Pair<int, string>(2, "x") * 3;
+Console.WriteLine($"{box.Value} {pair.First} {pair.Second} {(-new Box<int>(4)).Value}");
+public record Box<T>(T Value);
+public record Pair<A, B>(A First, B Second);
+namespace Ops
+{
+    public static class BoxOps
+    {
+        extension<T>(Box<T>)
+        {
+            public static Box<T> operator +(Box<T> x, Box<T> y) => new Box<T>((T)(object)($"{x.Value}{y.Value}"));
+            public static Box<T> operator -(Box<T> x) => x;
+        }
+        extension<A, B>(Pair<A, B>)
+        { public static Pair<A, B> operator *(Pair<A, B> p, int n) => new Pair<A, B>(p.First, p.Second); }
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({ kind: 'executed', stdout: 'ab 2 x 4\n' });
+  expect(executeProgram('csharp', program.replace('using Ops;', ''))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 1,
+        message: "CS0019: 演算子 '+' を 'Box<string>' と 'Box<string>' 型のオペランドに適用することはできません",
+      },
+      {
+        row: 2,
+        message: "CS0019: 演算子 '*' を 'Pair<int, string>' と 'int' 型のオペランドに適用することはできません",
+      },
+      { row: 3, message: "CS0023: 演算子 '-' は 'Box<int>' 型のオペランドに適用できません" },
+    ],
+  });
+  const receiver = String.raw`new Holder().Bump();
+public struct S { public int N; }
+public class Holder
+{ public readonly S Value; public Holder() { Value.Inc(); } public void Bump() => Value.Inc(); }
+public static class Ext { extension(ref S s) { public void Inc() { s.N++; } } }
+`;
+  expect(executeProgram('csharp', receiver)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 3,
+        message:
+          'CS0192: 読み取り専用フィールドを ref 値または out 値として使用することはできません (コンストラクターでは可)',
+      },
+    ],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

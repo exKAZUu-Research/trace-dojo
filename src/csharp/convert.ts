@@ -791,9 +791,8 @@ export class Converter extends ExpressionConverter {
     const { receiver, typeParameters, constraints } = block;
     const receiverType = receiver.type as TypeNode;
     if (member.kind === 'operator') {
-      if (typeParameters.length > 0) unsupported(node, 'ジェネリックな拡張ブロックの演算子');
       const operand = block.hasReceiverName ? { ...receiver, isThis: false } : undefined;
-      return [this.extensionOperator(member, node, receiverType, operand)];
+      return [{ ...this.extensionOperator(member, node, receiverType, operand), typeParameters, constraints }];
     }
     return this.extensionMethods(member, node, receiverType).map((method) => {
       const isStatic = method.modifiers.set.has('static');

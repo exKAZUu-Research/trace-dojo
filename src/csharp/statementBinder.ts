@@ -650,8 +650,12 @@ export abstract class StatementBinder extends PatternBinder {
     return inner;
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of statement.
   bindStatement(statement: Statement, context: BindContext): BoundStatement {
+    return this.withOperatorScope(context.fn.typeContext, () => this.bindStatementOfKind(statement, context));
+  }
+
+  // code-gauge-allow functionNcss -- One case per kind of statement.
+  private bindStatementOfKind(statement: Statement, context: BindContext): BoundStatement {
     const row = statement.row;
     switch (statement.kind) {
       case 'block': {

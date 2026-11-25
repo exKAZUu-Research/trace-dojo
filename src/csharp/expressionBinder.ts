@@ -73,11 +73,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
   private readonly anonymousTypes = new Map<string, TypeSymbol>();
 
   bindExpression(node: Expression, context: BindContext): BindResult {
-    return (
-      this.bindPrimaryExpression(node, context) ??
-      this.bindCreationExpression(node, context) ??
-      this.bindOperatorExpression(node, context) ??
-      this.bindOtherExpression(node, context)
+    return this.withOperatorScope(
+      context.fn.typeContext,
+      () =>
+        this.bindPrimaryExpression(node, context) ??
+        this.bindCreationExpression(node, context) ??
+        this.bindOperatorExpression(node, context) ??
+        this.bindOtherExpression(node, context)
     );
   }
 
@@ -2127,7 +2129,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
       method,
       receiver: isExtension ? undefined : (target as BoundExpression),
       args: resolved.args,
-      typeArgs: [],
+      typeArgs: resolved.typeArgs,
       owner: resolved.candidate.owner,
       isVirtual: method.isVirtual || method.isAbstract,
       type: VOID_TYPE,

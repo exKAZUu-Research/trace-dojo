@@ -1,6 +1,5 @@
 import type { NestedTypeFound, TypeContext } from './binderBase';
 import { DeclarationBinder } from './declarations';
-import type { NamespaceSymbol } from './namespaces';
 import {
   type ArrayType,
   baseTypeOf,
@@ -161,28 +160,37 @@ export class LookupBinder extends DeclarationBinder {
         if (method.kind === 'operator' && method.name === name) result.push({ method, owner });
     }
     if (result.length > 0 || type.kind !== 'named') return result;
-    return this.extensionOperators(
-      name,
-      (method) => method.staticExtensionOf !== undefined && sameType(method.staticExtensionOf, type)
-    );
+    return this.extensionOperators(name, (method) => extendsType(method, method.staticExtensionOf, type));
   }
 
-  /**
-   * The operators of a name that the program's extension blocks declare. Operators bind without the namespaces in
-   * scope, so every static class of the program offers them, where Roslyn looks only in those in scope.
-   */
+  /** The operators of a name that the extension blocks in scope of the code being bound declare. */
   private extensionOperators(name: string, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
-    return staticClassesOf(this.userRoot).flatMap((symbol) =>
-      symbol.methods
-        .filter((method) => method.kind === 'operator' && method.name === name && matches(method))
-        .map((method) => ({ method, owner: symbol.declaredType }))
+    return this.lookupExtensionMembers(
+      this.operatorScope,
+      (method) => method.kind === 'operator' && method.name === name && matches(method)
     );
   }
 
-  /** The extension methods by name that the namespaces in scope declare in their static classes. */
   /** Whether the binder binds a `dynamic` operation as it runs, where the runtime binder finds no extension methods. */
   protected isLateBinding = false;
 
+  /**
+   * Where the code being bound is written, whose namespaces in scope offer extension operators; operators bind without
+   * a context of their own, so binding a statement or an expression sets it with {@link withOperatorScope}.
+   */
+  private operatorScope: TypeContext = { namespace: [], usings: [], type: undefined, methodTypeParameters: [] };
+
+  protected withOperatorScope<T>(scope: TypeContext, bind: () => T): T {
+    const enclosing = this.operatorScope;
+    this.operatorScope = scope;
+    try {
+      return bind();
+    } finally {
+      this.operatorScope = enclosing;
+    }
+  }
+
+  /** The extension methods by name that the namespaces in scope declare in their static classes. */
   lookupExtensionMethods(name: string, context: TypeContext): MethodCandidate[] {
     // An extension property's getter is found by the property's name only.
     return this.lookupExtensionMembers(
@@ -193,10 +201,7 @@ export class LookupBinder extends DeclarationBinder {
 
   /** The instance compound assignment and `++`/`--` operators that extension blocks for a type declare. */
   lookupExtensionAssignmentOperators(type: Type, name: string): MethodCandidate[] {
-    return this.extensionOperators(
-      name,
-      (method) => method.extensionAssignmentOf !== undefined && sameType(method.extensionAssignmentOf, type)
-    );
+    return this.extensionOperators(name, (method) => extendsType(method, method.extensionAssignmentOf, type));
   }
 
   /** The getters of the extension properties of a name that the extension blocks in scope declare. */
@@ -322,10 +327,12 @@ function isInvocable(type: Type): boolean {
 
 export { MethodSymbol, PropertySymbol, FieldSymbol };
 
-/** The static classes of a namespace and the namespaces within it, which alone may declare extension blocks. */
-function staticClassesOf(namespace: NamespaceSymbol): TypeSymbol[] {
-  return [
-    ...[...namespace.types.values()].flat().filter((symbol) => symbol.isStatic),
-    ...[...namespace.namespaces.values()].flatMap(staticClassesOf),
-  ];
+/**
+ * Whether an extension block's member extends a type: the block's type exactly, or for a generic block, a type of the
+ * same definition, whose type arguments the call infers.
+ */
+function extendsType(method: MethodSymbol, extended: Type | undefined, type: Type): boolean {
+  if (!extended) return false;
+  if (method.typeParameters.length === 0) return sameType(extended, type);
+  return extended.kind === 'named' && type.kind === 'named' && extended.symbol === type.symbol;
 }

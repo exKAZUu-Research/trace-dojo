@@ -737,12 +737,15 @@ export class DeclarationBinder extends BinderBase {
     for (const method of operators) {
       const pair = method.operatorToken ? OPERATOR_PAIRS[method.operatorToken] : undefined;
       if (!pair) continue;
-      const hasPair = operators.some(
-        (other) =>
-          other.operatorToken === pair &&
-          other.parameters.length === method.parameters.length &&
-          other.parameters.every((parameter, index) => sameType(parameter.type, method.parameters[index].type))
-      );
+      // The operators of a generic extension block each take its type parameters as their own.
+      const hasPair = operators.some((other) => {
+        if (other.operatorToken !== pair || other.parameters.length !== method.parameters.length) return false;
+        if (other.typeParameters.length !== method.typeParameters.length) return false;
+        const substitution = this.methodSubstitution(other, method);
+        return other.parameters.every((parameter, index) =>
+          sameType(substitute(parameter.type, substitution), method.parameters[index].type)
+        );
+      });
       if (!hasPair)
         this.error(
           method.row ?? 0,
@@ -1412,7 +1415,7 @@ export class DeclarationBinder extends BinderBase {
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>
   ): void {
-    const { symbol, context } = type;
+    const { symbol } = type;
     const isUnary = member.parameters.length === 1;
     const assignmentName = ASSIGNMENT_OPERATOR_NAMES[member.operator];
     if (member.operator.endsWith('=') && assignmentName && member.modifiers.set.has('static')) {
@@ -1428,7 +1431,17 @@ export class DeclarationBinder extends BinderBase {
       ? assignmentName
       : ((isUnary ? UNARY_OPERATOR_NAMES[member.operator] : undefined) ?? OPERATOR_NAMES[member.operator]);
     const name = member.isChecked ? checkedOperatorName(regularName) : regularName;
-    const method = this.declareMethod(symbol, name, 'operator', member.modifiers, member, context);
+    const method = this.declareMethod(
+      symbol,
+      name,
+      'operator',
+      member.modifiers,
+      member,
+      type.context,
+      member.typeParameters,
+      member.constraints
+    );
+    const context = this.methodContexts.get(method) as TypeContext;
     method.operatorToken = member.operator;
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);

@@ -1313,7 +1313,7 @@ export abstract class MemberBinder extends CallBinder {
     const args = this.bindArguments(node.args, context);
     const late = this.lateInvocation(node, target, args, context);
     if (late) return late;
-    if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node);
+    if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node, context);
     if (target.kind === 'typeRef' || target.kind === 'namespaceRef' || target.kind === 'discard') {
       if (target.kind === 'typeRef') {
         // Roslyn names the type by its definition, as `List<T>`.
@@ -1562,10 +1562,12 @@ export abstract class MemberBinder extends CallBinder {
     };
   }
 
+  /** @param context Where the call is written, which decides whether a readonly field may be a `ref` receiver. */
   invokeMethodGroup(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     args: ArgumentInfo[],
-    node: Position
+    node: Position,
+    context?: BindContext
   ): BoundExpression {
     const description: CallDescription = { name: group.name, kind: 'method' };
     if (group.candidates.length > 0) {
@@ -1593,6 +1595,13 @@ export abstract class MemberBinder extends CallBinder {
       isExtension: true,
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    // A `ref` receiver writes the field, which a readonly one allows only in its type's constructor (CS0192, CS0199).
+    if (
+      context &&
+      resolved.candidate.method.parameters[0]?.refKind === 'ref' &&
+      (receiver.kind === 'field' || receiver.kind === 'staticField')
+    )
+      this.checkAssignable(receiver, node, context, 'ref');
     return this.callNode({ ...group, receiver: undefined }, resolved, node);
   }
 
@@ -1775,14 +1784,20 @@ export abstract class MemberBinder extends CallBinder {
       row,
       target: undefined,
     }));
-    const applicable = candidates.filter(
-      (candidate) =>
-        candidate.method.parameters.length === operands.length &&
-        operands.every(
-          (operand, index) =>
-            this.implicitConversionOf(operand, this.operatorParameterType(candidate, index)) !== undefined
-        )
-    );
+    const applicable = candidates.filter((candidate) => {
+      if (candidate.method.parameters.length !== operands.length) return false;
+      // A generic extension block's operator applies once its type arguments are inferred from the operands.
+      const { typeParameters } = candidate.method;
+      const typeArgs =
+        typeParameters.length > 0 ? this.inferTypeArguments(candidate, args, operands.keys().toArray(), false) : [];
+      if (!typeArgs) return false;
+      const substitution = this.callSubstitution(candidate, typeArgs);
+      return operands.every(
+        (operand, index) =>
+          this.implicitConversionOf(operand, substitute(candidate.method.parameters[index].type, substitution)) !==
+          undefined
+      );
+    });
     if (applicable.length === 0) return undefined;
     const resolved = this.resolveCall(applicable, args, undefined, row, {
       name: candidates[0].method.name,
@@ -1800,10 +1815,10 @@ export abstract class MemberBinder extends CallBinder {
       method,
       receiver: undefined,
       args: resolved.args,
-      typeArgs: [],
+      typeArgs: resolved.typeArgs,
       owner: resolved.candidate.owner,
       isVirtual: false,
-      type: substitute(method.returnType, substitutionOf(resolved.candidate.owner)),
+      type: substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs)),
       ...(constrainedType ? { constrainedType } : {}),
       row,
     };
