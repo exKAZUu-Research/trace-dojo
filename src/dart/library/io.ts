@@ -432,9 +432,7 @@ class _FileSink implements IOSink {
     } catch (error, stackTrace) {
       _openError = error;
       _openStackTrace = stackTrace;
-      Future(() {
-        if (!_openErrorTaken) Future<void>.error(error, stackTrace);
-      });
+      _reportUnhandledLater();
     }
   }
   Encoding get encoding => utf8;
@@ -466,18 +464,33 @@ class _FileSink implements IOSink {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
   }
   Future addStream(Stream<List<int>> stream) {
-    _openErrorTaken = true;
-    return stream.forEach(add).then((_) => _reportUnwritten());
+    if (_failed) _openErrorTaken = true;
+    return stream.forEach(add).then((_) {
+      if (_failed) _reportOpenError();
+    });
   }
   Future flush() {
     if (!_failed) return Future(_writeBuffered);
-    // A program that flushes or closes the sink gets its failure there, not as an unhandled error.
+    if (!_unwrittenSinceReport) {
+      // A flush with nothing to write resolves, and the failure waits for a later close or flush.
+      _flushesWaiting++;
+      return Future(() {
+        _flushesWaiting--;
+        _reportUnhandledLater();
+      });
+    }
     _openErrorTaken = true;
-    return Future(_reportUnwritten);
+    return Future(_reportOpenError);
   }
-  /** Fails the operation that carries data written to a sink whose file could not be opened. */
-  void _reportUnwritten() {
-    if (!_unwrittenSinceReport) return;
+  int _flushesWaiting = 0;
+  /** Reports the failure to open as unhandled unless a flush, addStream, or close takes it first. */
+  void _reportUnhandledLater() {
+    Future(() {
+      if (!_openErrorTaken && _flushesWaiting == 0) Future<void>.error(_openError!, _openStackTrace);
+    });
+  }
+  /** Fails the operation that carries the data of a sink whose file could not be opened. */
+  void _reportOpenError() {
     _unwrittenSinceReport = false;
     Error.throwWithStackTrace(_openError!, _openStackTrace ?? StackTrace.empty);
   }
