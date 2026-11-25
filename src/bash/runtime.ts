@@ -86,6 +86,7 @@ export class Runtime implements TracedRuntime<Frame> {
   };
   private readonly turtles = new Map<string, TurtleState>();
   private nextTurtle = 1;
+  private turtleRevision = 0;
   private slots = 0;
 
   constructor(input?: ProgramInput) {
@@ -111,6 +112,15 @@ export class Runtime implements TracedRuntime<Frame> {
 
   commitTurtle(handle: string, turtle: TurtleState): void {
     this.turtles.set(handle, turtle);
+    this.turtleRevision++;
+  }
+
+  get turtleEpoch(): number {
+    return this.turtleRevision;
+  }
+
+  bumpTurtleEpoch(): void {
+    this.turtleRevision++;
   }
 
   /** Whether `text` is a turtle handle created in this run, whether still alive or removed. */

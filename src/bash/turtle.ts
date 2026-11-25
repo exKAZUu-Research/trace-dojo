@@ -122,6 +122,7 @@ for (const [names, sign] of [
   for (const name of names) {
     TURTLE_BUILTINS[name] = (shell, args) => {
       const error = shell.runtime.world.move(turtleArgument(shell, args, name), sign);
+      shell.runtime.bumpTurtleEpoch();
       if (error) fail(shell, name, error);
       return 0;
     };
@@ -149,6 +150,7 @@ for (const name of TURTLE_METHOD_NAMES.isFrontPainted) {
 for (const name of TURTLE_METHOD_NAMES.remove) {
   TURTLE_BUILTINS[name] = (shell, args) => {
     shell.runtime.world.remove(turtleArgument(shell, args, name));
+    shell.runtime.bumpTurtleEpoch();
     return 0;
   };
 }

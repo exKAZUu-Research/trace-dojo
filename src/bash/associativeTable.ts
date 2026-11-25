@@ -83,8 +83,37 @@ export const ASSOCIATIVE_BUCKETS = 1024;
 
 const UTF8_ENCODER = new TextEncoder();
 
+export interface ReadonlyIndexedTable extends ReadonlyMap<bigint, string> {
+  readonly version: number;
+}
+
+export class IndexedTable extends Map<bigint, string> implements ReadonlyIndexedTable {
+  private revision = 0;
+
+  get version(): number {
+    return this.revision;
+  }
+
+  override set(key: bigint, value: string): this {
+    this.revision++;
+    return super.set(key, value);
+  }
+
+  override delete(key: bigint): boolean {
+    const removed = super.delete(key);
+    if (removed) this.revision++;
+    return removed;
+  }
+
+  override clear(): void {
+    if (this.size > 0) this.revision++;
+    super.clear();
+  }
+}
+
 export interface ReadonlyAssociativeTable {
   readonly size: number;
+  readonly version: number;
   entries(): readonly [string, string][];
 }
 
@@ -97,6 +126,7 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
   private buckets = new Map<number, BucketEntry[]>();
   private capacity: number;
   private count = 0;
+  private revision = 0;
 
   constructor(capacity = ASSOCIATIVE_BUCKETS) {
     this.capacity = capacity;
@@ -108,6 +138,10 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
 
   get size(): number {
     return this.count;
+  }
+
+  get version(): number {
+    return this.revision;
   }
 
   get(key: string): string | undefined {
@@ -127,6 +161,7 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
       ?.find((entry) => entry.hash === hash && entry.key === key);
     if (existing) {
       existing.value = value;
+      this.revision++;
       return;
     }
     if (this.count >= this.capacity * 2) this.rehash();
@@ -135,6 +170,7 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
     if (bucket) bucket.unshift({ key, value, hash });
     else this.buckets.set(bucketIndex, [{ key, value, hash }]);
     this.count++;
+    this.revision++;
   }
 
   delete(key: string): void {
@@ -147,9 +183,11 @@ export class AssociativeTable implements ReadonlyAssociativeTable {
     bucket.splice(position, 1);
     if (bucket.length === 0) this.buckets.delete(bucketIndex);
     this.count--;
+    this.revision++;
   }
 
   clear(): void {
+    if (this.count > 0) this.revision++;
     this.buckets.clear();
     this.count = 0;
   }

@@ -3,11 +3,13 @@ import {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
+  IndexedTable,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
   readAssociativePair,
   type ReadonlyAssociativeTable,
+  type ReadonlyIndexedTable,
   sortedElements,
   unpackIndexedElement,
 } from './associativeTable';
@@ -38,11 +40,13 @@ export {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
+  IndexedTable,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
   readAssociativePair,
   type ReadonlyAssociativeTable,
+  type ReadonlyIndexedTable,
   sortedElements,
   unpackIndexedElement,
 };
@@ -50,7 +54,7 @@ export { type Attribute, ATTRIBUTE_ORDER, DYNAMIC_VARIABLES, ENVIRONMENT_VARIABL
 
 type CellValue =
   | { kind: 'scalar'; value: string }
-  | { kind: 'indexed'; elements: Map<bigint, string> }
+  | { kind: 'indexed'; elements: IndexedTable }
   | { kind: 'associative'; table: AssociativeTable };
 
 interface Cell {
@@ -78,7 +82,7 @@ export interface VariableView {
   readonly attributes: ReadonlySet<Attribute>;
   readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
   readonly scalar?: string;
-  readonly indexed?: ReadonlyMap<bigint, string>;
+  readonly indexed?: ReadonlyIndexedTable;
   readonly associative?: ReadonlyAssociativeTable;
   readonly isSystem: boolean;
   readonly userAssigned: boolean;
@@ -245,7 +249,9 @@ export class VariableStore {
       'BASH_VERSINFO',
       {
         kind: 'indexed',
-        elements: new Map(['5', '3', '0', '1', 'release', 'x86_64-pc-linux-gnu'].map((v, i) => [BigInt(i), v])),
+        elements: new IndexedTable(
+          ['5', '3', '0', '1', 'release', 'x86_64-pc-linux-gnu'].map((v, i) => [BigInt(i), v])
+        ),
       },
       ['a', 'r']
     );
@@ -903,14 +909,14 @@ export class VariableStore {
     return this.readDynamicElements(name)?.get(0n);
   }
 
-  private readDynamicElements(name: string): Map<bigint, string> | undefined {
+  private readDynamicElements(name: string): IndexedTable | undefined {
     if (name === 'BASH_REMATCH') {
-      return this.rematch ? new Map(this.rematch.map((v, i) => [BigInt(i), v])) : undefined;
+      return this.rematch ? new IndexedTable(this.rematch.map((v, i) => [BigInt(i), v])) : undefined;
     }
     if (name === 'FUNCNAME') {
       if (this.calls.length === 0) return undefined;
       const items = [...this.calls.toReversed().map((c) => c.name), 'main'];
-      return new Map(items.map((v, i) => [BigInt(i), v]));
+      return new IndexedTable(items.map((v, i) => [BigInt(i), v]));
     }
     return undefined;
   }
@@ -1027,7 +1033,7 @@ export class VariableStore {
     if (cell.value?.kind === 'associative' || cell.attributes.has('A')) {
       return this.writeAssociativeCompound(cell, elements, hooks, label);
     }
-    const map = hooks.append ? this.ensureIndexedMap(cell) : new Map<bigint, string>();
+    const map = hooks.append ? this.ensureIndexedMap(cell) : new IndexedTable();
     if (!hooks.append) {
       cell.value = { kind: 'indexed', elements: map };
       cell.attributes.add('a');
@@ -1146,9 +1152,9 @@ export class VariableStore {
     return cell.value.table;
   }
 
-  private ensureIndexedMap(cell: Cell): Map<bigint, string> {
+  private ensureIndexedMap(cell: Cell): IndexedTable {
     if (cell.value?.kind === 'indexed') return cell.value.elements;
-    const elements = new Map<bigint, string>();
+    const elements = new IndexedTable();
     if (cell.value?.kind === 'scalar') {
       this.runtime.allocateSlots(1);
       elements.set(0n, cell.value.value);
@@ -1188,7 +1194,7 @@ function cloneCellEager(cell: Cell, spend: (cost?: number) => void, allocateSlot
     clonedValue = { kind: 'scalar', value: cell.value.value };
   } else if (cell.value?.kind === 'indexed') {
     chargeStoreCopy(cell.value.elements.size + 1, spend, allocateSlots);
-    clonedValue = { kind: 'indexed', elements: new Map(cell.value.elements) };
+    clonedValue = { kind: 'indexed', elements: new IndexedTable(cell.value.elements) };
   } else if (cell.value?.kind === 'associative') {
     chargeStoreCopy(cell.value.table.size + 1, spend, allocateSlots);
     clonedValue = { kind: 'associative', table: cell.value.table.clone() };
@@ -1213,7 +1219,7 @@ function cellShapeOf(cell: Cell): ExistingCellShape {
 }
 
 function createInitialContainer(kind: 'indexed' | 'associative' | undefined): CellValue | undefined {
-  if (kind === 'indexed') return { kind: 'indexed', elements: new Map() };
+  if (kind === 'indexed') return { kind: 'indexed', elements: new IndexedTable() };
   if (kind === 'associative') return { kind: 'associative', table: new AssociativeTable() };
   return undefined;
 }
