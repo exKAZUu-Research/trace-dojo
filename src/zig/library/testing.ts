@@ -471,7 +471,8 @@ function visibleLine(line: readonly number[]): number[] {
 
 /** Zig's failPrintIndicatorLine: the line holding the index, and a caret under it. */
 function indicatorLine(source: readonly number[], index: number): number[] {
-  const begin = source.lastIndexOf(10, index - 1) + 1;
+  // lastIndexOf clamps a negative start to 0, where it would find a newline at the index itself.
+  const begin = index === 0 ? 0 : source.lastIndexOf(10, index - 1) + 1;
   const found = source.indexOf(10, index);
   const end = found === -1 ? source.length : found;
   const caret =
