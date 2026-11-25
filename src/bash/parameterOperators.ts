@@ -342,11 +342,9 @@ function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: Subs
       ? resolveScalarTarget(shell, name, true)
       : resolveSubscriptTarget(shell, {
           name,
-          subscript: {
-            kind: 'text',
-            text: subscript.text === '' && subscript.rawText !== '' ? '0' : subscript.text,
-            preExpanded: true,
-          },
+          subscript: subscript.word
+            ? { kind: 'word', word: subscript.word, unquoteAnsiC: true }
+            : { kind: 'text', text: subscript.rawText, preExpanded: false },
           operation: 'write',
         });
   if (!target) shell.discard(`${name}: circular name reference`);

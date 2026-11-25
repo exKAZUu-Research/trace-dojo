@@ -36,6 +36,7 @@ export interface SubscriptRef {
   readonly text: string;
   readonly wholeArray: boolean;
   readonly rawText: string;
+  readonly word?: Word;
 }
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
@@ -469,12 +470,12 @@ export class Expander {
 
   private subscriptRef(name: string, subscript: Word): SubscriptRef {
     const raw = subscript.text;
-    if (raw === '@' || raw === '*') return { text: raw, wholeArray: true, rawText: raw };
+    if (raw === '@' || raw === '*') return { text: raw, wholeArray: true, rawText: raw, word: subscript };
     const resolved = resolveTargetName(this.shell, name, false) ?? name;
     const text = this.shell.store.isAssociativeName(resolved)
       ? this.expandAssociativeKey(subscript)
       : this.expandSubscriptString(subscript, true);
-    return { text, wholeArray: false, rawText: raw };
+    return { text, wholeArray: false, rawText: raw, word: subscript };
   }
 
   parameterValue(name: string, subscript: SubscriptRef | undefined, expansion?: ParameterExpansion): ParameterValue {
