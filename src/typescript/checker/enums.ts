@@ -1,6 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { numberArithmetic } from '../../javascript/expressionEvaluator';
+import { decodeTemplateFragment } from '../../javascript/literals';
 import type { Checker } from './checker';
 import type { Sym } from './scopes';
 import { hasToken, isWithin, named, numberValue, propertyNameText, skipParentheses, stringValue } from './syntax';
@@ -201,7 +202,7 @@ export class Enums {
       case 'template_string': {
         return named(expression).some((child) => child.type === 'template_substitution')
           ? undefined
-          : expression.text.slice(1, -1);
+          : decodeTemplateFragment(expression.text.slice(1, -1));
       }
       case 'identifier': {
         return (

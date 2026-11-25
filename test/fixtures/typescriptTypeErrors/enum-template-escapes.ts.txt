@@ -1,0 +1,8 @@
+enum K { T = `\t` }
+function f(x: "\t") { return x.length; }
+console.log(f(K.T));
+enum G { A = `a\nb`, B = `\u0041` }
+const g: "a\nb" = G.A;
+const h: "A" = G.B;
+const bad: "x" = G.B;
+console.log(JSON.stringify(g), h);
