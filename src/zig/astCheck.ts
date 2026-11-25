@@ -516,6 +516,8 @@ class AstChecker {
 
   private localVariable(statement: Extract<Statement, { kind: 'var' }>): void {
     if (statement.isComptime) this.comptimeKeyword(statement);
+    if (statement.isComptime && statement.isConst)
+      this.error(statement, 'comptime const は冗長です（初期化の式を comptime で囲んでください）。');
     if (statement.alignment) this.expression(statement.alignment, 'value');
     if (statement.type) this.typeExpression(statement.type);
     const { value } = statement;
