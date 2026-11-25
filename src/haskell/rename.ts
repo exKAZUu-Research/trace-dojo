@@ -706,7 +706,8 @@ class Renamer {
         fieldNames: conDecl.fieldNames?.map((fieldName) => fieldName.name),
         isInfix: conDecl.isInfix,
         fieldTypes: [],
-        strictFields: conDecl.strictFields,
+        // A newtype's value is its field at run time in GHC: evaluating the box evaluates the field.
+        strictFields: decl.newtype ? [0] : conDecl.strictFields,
         span: conDecl.span,
         ...(decl.newtype ? { isNewtype: true } : {}),
       };
