@@ -14,7 +14,7 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { assignmentTargets, localNamesIn } from './astWalk';
-import type { AwaitRequest, YieldEachRequest } from './awaitSteps';
+import { type AwaitRequest, containsAwait, type YieldEachRequest } from './awaitSteps';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
@@ -633,6 +633,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     declaredType: DartType | undefined,
     isFinal: boolean
   ): Compiled {
+    // The SDK rejects it too: the initializer runs when the variable is first read, outside any await.
+    if (containsAwait(expression))
+      return this.error(expression, 'late のローカル変数の初期値には await を書けません。');
     const span = at(expression);
     const compiled = this.compileFunction({
       name,
