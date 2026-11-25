@@ -6596,6 +6596,11 @@ test.each([
   ],
   ['a type that may be null', 'const val Y: Int? = 1\nfun main() { println(Y) }', false],
   ['a lateinit Boolean', 'class A { lateinit var b: Boolean }\nfun main() { println(1) }', false],
+  [
+    'an override whose extension receiver differs',
+    'open class B { open fun String.f() = "b" }\nclass S : B() { override fun Int.f() = "s" }\nfun main() { println(1) }',
+    false,
+  ],
   ['a type that is not primitive', 'const val X: Any = 1\nfun main() { println(X) }', false],
 ])('compiles const vals of %s only as kotlinc does', (_name, source, compiles) => {
   expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
@@ -6756,6 +6761,31 @@ test.each([
     '{1=a, 2=b, 3=c}\n',
   ],
 ])('runs %s as kotlinc does', (_name, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  [
+    'a member extension on an explicit receiver',
+    'class Ctx(val name: String) { fun Ctx.label() = this.name + this@Ctx.name }\nfun main() { with(Ctx("A")) { println(Ctx("B").label()) } }',
+    'BA\n',
+  ],
+  [
+    'a member property called through its invoke operator',
+    'class Adder(val base: Int) { operator fun invoke(x: Int) = base + x }\nclass Holder { val adder = Adder(100) }\nfun main() { println(Holder().adder(1)) }',
+    '101\n',
+  ],
+  [
+    'an override of a generic function',
+    'interface Mapper { fun <T> map(x: T): String }\nclass M : Mapper { override fun <T> map(x: T): String = "m$x" }\nfun main() { println(M().map(1)) }',
+    'm1\n',
+  ],
+  [
+    'a not operator',
+    'class Money(val cents: Int) { operator fun not() = cents == 0 }\nfun main() { println(!Money(5)) }',
+    'false\n',
+  ],
+])('calls %s as kotlinc does', (_name, source, stdout) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 

@@ -1589,7 +1589,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   private memberCallLevels(scope: Scope, receiver: Compiled, name: string, row: number, explicit = false): CallLevel[] {
     const memberType = nonNull(receiver.type);
-    const members = this.memberCandidates(memberType, name);
+    // A member extension takes the call's receiver as its extension receiver, and an implicit receiver as the instance
+    // of its class, so it comes from the extensions in scope, not from the receiver's members.
+    const members = this.memberCandidates(memberType, name).filter(({ symbol }) => !symbol.extensionReceiver);
     const memberProperty = this.membersOf<PropertySymbol>(memberType, name, 'property')[0];
     const memberLevels: CallLevel[] = members.length === 0 ? [] : [{ candidates: members, receiver }];
     // Only the instance an initializer builds may be uninitialized: an implicit `this`, or an object, which is one.
@@ -1679,7 +1681,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     mayBeUninitialized = false
   ): FunctionValueCandidate | undefined {
     const { symbol } = property;
-    if (symbol.type && resolved(substitute(symbol.type, property.substitution)).kind !== 'function') return undefined;
+    // A property holding a function, or a value that an invoke operator calls, as `holder.adder(1)` does.
+    const type = symbol.type && resolved(substitute(symbol.type, property.substitution));
+    if (type && type.kind !== 'function' && (symbol.name === 'invoke' || !this.hasInvokeOperator(scope, type, row)))
+      return undefined;
     return {
       specificity: symbol.extensionReceiver ? extensionPropertySpecificity(property) : undefined,
       functionValue: (context) => {
