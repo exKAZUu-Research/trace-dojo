@@ -431,10 +431,14 @@ define('catchSome', 2, [], ([action, handler], runtime) =>
     'catch',
     [action, handler],
     () =>
-      new RunCatching(action, (error) => {
-        const exception = exceptionValue(error, runtime);
-        return new Thunk(undefined, undefined, () => new TailCall(runtime.machine.force(handler), [exception]));
-      })
+      new RunCatching(
+        action,
+        (error) => {
+          const exception = exceptionValue(error, runtime);
+          return new Thunk(undefined, undefined, () => new TailCall(runtime.machine.force(handler), [exception]));
+        },
+        [handler]
+      )
   )
 );
 

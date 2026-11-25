@@ -71,7 +71,7 @@ export type Frame =
   | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
-  | { k: 'catch'; handle: (error: HaskellException) => Slot }
+  | { k: 'catch'; handle: (error: HaskellException) => Slot; refs: Slot[] }
   | { k: 'ioBind'; next: Slot }
   | { k: 'ioThen'; next: Slot }
   | DoFrame
@@ -130,7 +130,9 @@ export class RunNext {
 export class RunCatching {
   constructor(
     readonly action: Slot,
-    readonly handle: (error: HaskellException) => Slot
+    readonly handle: (error: HaskellException) => Slot,
+    /** The slots the handler uses, which stay reachable while the action runs. */
+    readonly refs: Slot[]
   ) {}
 }
 
@@ -717,7 +719,7 @@ export class Machine {
         this.stack.push({ k: 'runIO' });
         state.enter(result.action);
       } else if (result instanceof RunCatching) {
-        this.stack.push({ k: 'catch', handle: result.handle }, { k: 'runIO' });
+        this.stack.push({ k: 'catch', handle: result.handle, refs: result.refs }, { k: 'runIO' });
         state.enter(result.action);
       } else {
         state.ioResult(result);

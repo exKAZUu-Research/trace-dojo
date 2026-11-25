@@ -169,6 +169,7 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
+  else if (frame.k === 'catch') for (const ref of frame.refs) push(ref);
   else if (frame.k === 'do' && !frame.tailCalled) {
     if (!frame.discardResult) push(frame.result);
     pushPreparedActions(frame.prefix, push, frame.index);
