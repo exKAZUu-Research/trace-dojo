@@ -1270,6 +1270,12 @@ function hasInvisibleBinder(node: Node): boolean {
   );
 }
 
+function requireTypeApplications(features: FeatureGates<'convert'>, span: Span): void {
+  if (!features.allows('typeApplications')) {
+    throw syntaxError(span, '型の適用（@）を使うには、TypeApplications の拡張が要ります。');
+  }
+}
+
 function requireTypeAbstractions(features: FeatureGates<'convert'>, span: Span): void {
   if (!features.allows('typeAbstractions')) {
     throw syntaxError(span, '@ による型変数の束縛には、TypeAbstractions の拡張が要ります。');
@@ -1740,7 +1746,7 @@ function convertType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
       const constructor = field(node, 'constructor') ?? required(node, 'function');
       const argument = required(node, 'argument');
       if (argument.type === 'kind_application') {
-        requireTypeAbstractions(features, spanOf(argument));
+        requireTypeApplications(features, spanOf(argument));
         return {
           kind: 'tkindapp',
           type: convertType(features, constructor),
@@ -1940,9 +1946,7 @@ export function convertExpr(features: FeatureGates<'convert'>, node: Node): Expr
         };
       }
       if (argument.type === 'type_application') {
-        if (!features.allows('typeApplications')) {
-          throw syntaxError(spanOf(argument), '型の適用（@）を使うには、TypeApplications の拡張が要ります。');
-        }
+        requireTypeApplications(features, spanOf(argument));
         const typeNode = required(argument, 'type');
         const type = typeNode.type === 'wildcard' ? undefined : convertType(features, typeNode);
         return { kind: 'tyapp', expr: convertExpr(features, fn), type, span };
