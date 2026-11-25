@@ -519,7 +519,6 @@ function powi(x: bigint, y: bigint, type: IntType, spend: (cost: number) => void
   return accumulator;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Implements precision-aware tolerance, equality and special-value rules as one operation.
 function approximateEquality(relative: boolean): () => Member {
   const name = relative ? 'std.math.approxEqRel' : 'std.math.approxEqAbs';
   return generic(name, 4, (sema, call, type, args) => {
@@ -527,21 +526,23 @@ function approximateEquality(relative: boolean): () => Member {
       sema.error(call.span, `${name} には浮動小数点数の型を渡してください。`);
     const values = args.map((arg) => sema.coerce(sema.compile(arg, type), type, arg));
     const bits = bitsOf(type);
-    return computed(BOOL, values, call.span, ([x, y, tolerance]) => {
-      const a = x as AnyFloat,
-        b = y as AnyFloat,
-        t = tolerance as AnyFloat;
-      const order = compareFloats(t, 0);
-      if (order === undefined || (relative ? order <= 0 : order < 0)) panic(PANIC.unreachable);
-      if (compareFloats(a, b) === 0) return true;
-      if (isNaNFloat(a) || isNaNFloat(b)) return false;
-      const difference = absoluteFloat(floatArithmetic(a, b, '-', bits));
-      const absA = absoluteFloat(a),
-        absB = absoluteFloat(b);
-      const limit = relative ? floatArithmetic(compareFloats(absA, absB)! >= 0 ? absA : absB, t, '*', bits) : t;
-      return (compareFloats(difference, limit) ?? 1) <= 0;
-    });
+    return computed(BOOL, values, call.span, ([x, y, tolerance]) =>
+      approximatelyEqual(x as AnyFloat, y as AnyFloat, tolerance as AnyFloat, bits, relative)
+    );
   });
+}
+
+/** `std.math.approxEqAbs` and `approxEqRel` on floats of `bits` bits, which panic at a tolerance out of range. */
+export function approximatelyEqual(a: AnyFloat, b: AnyFloat, t: AnyFloat, bits: FloatBits, relative: boolean): boolean {
+  const order = compareFloats(t, 0);
+  if (order === undefined || (relative ? order <= 0 : order < 0)) panic(PANIC.unreachable);
+  if (compareFloats(a, b) === 0) return true;
+  if (isNaNFloat(a) || isNaNFloat(b)) return false;
+  const difference = absoluteFloat(floatArithmetic(a, b, '-', bits));
+  const absA = absoluteFloat(a),
+    absB = absoluteFloat(b);
+  const limit = relative ? floatArithmetic(compareFloats(absA, absB)! >= 0 ? absA : absB, t, '*', bits) : t;
+  return (compareFloats(difference, limit) ?? 1) <= 0;
 }
 
 function absoluteFloat(value: AnyFloat): AnyFloat {
