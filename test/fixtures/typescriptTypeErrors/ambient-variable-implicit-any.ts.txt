@@ -1,0 +1,6 @@
+declare let u;
+declare namespace D { let v; export var y; let t: number; namespace E { let z; } }
+export declare let w;
+namespace N { export declare let q; }
+declare var ok: string;
+console.log("x");

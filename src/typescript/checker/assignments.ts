@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share write validation and updates to reference flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
 import type { FlowEntry, State } from './flow';
 import { applicableIndex } from './indexInfos';
@@ -191,8 +192,9 @@ export class AssignmentChecker {
         declaration.parent?.childForFieldName('kind')?.text !== 'let') ||
       declaration.childForFieldName('name')?.type !== 'identifier' ||
       declaration.childForFieldName('type') ||
-      // Other code may assign an exported variable, so its type cannot follow its assignments here.
-      declaration.parent?.parent?.type === 'export_statement'
+      // Other code may assign an exported or ambient variable, so its type cannot follow its assignments here.
+      declaration.parent?.parent?.type === 'export_statement' ||
+      isAmbient(declaration)
     )
       return false;
     const value = declaration.childForFieldName('value');

@@ -1,0 +1,6 @@
+(1,13): error TS7005: Variable 'u' implicitly has an 'any' type.
+(2,27): error TS7005: Variable 'v' implicitly has an 'any' type.
+(2,41): error TS7005: Variable 'y' implicitly has an 'any' type.
+(2,77): error TS7005: Variable 'z' implicitly has an 'any' type.
+(3,20): error TS7005: Variable 'w' implicitly has an 'any' type.
+(4,34): error TS7005: Variable 'q' implicitly has an 'any' type.

@@ -2,6 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import { assert } from 'es-toolkit';
 
+import { isCheckedAmbientDeclaration } from '../namespaceInstantiation';
 import { awaitedType, checkAwaitPlace } from './awaited';
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
@@ -209,7 +210,7 @@ export class StatementChecker {
           node,
           'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'
         );
-      else if (child.type === 'internal_module' || child.type === 'module') this.check(child);
+      else if (isCheckedAmbientDeclaration(child)) this.check(child);
     }
   }
 

@@ -1,6 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { isAmbient, isInstantiatedNamespace } from '../namespaceInstantiation';
+import { isAmbient, isCheckedAmbientDeclaration, isInstantiatedNamespace } from '../namespaceInstantiation';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
@@ -245,12 +245,13 @@ export class Namespaces {
     if (name?.type !== 'string' && !isNamespaceOrModuleTopLevel(node))
       this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
     const body = node.childForFieldName('body');
-    if (!body || isAmbient(node) || name?.type === 'string') return;
+    if (!body || name?.type === 'string') return;
+    const statements = isAmbient(node) ? named(body).filter(isCheckedAmbientDeclaration) : named(body);
     const outer = this.c.flow.current;
     this.c.flow.current = new FlowState();
     try {
       this.c.statements.declareHoistedVariables(this.c.binder.ownScope(body));
-      this.c.statements.checkBlockStatements(named(body));
+      this.c.statements.checkBlockStatements(statements);
     } finally {
       this.c.flow.current = outer;
     }
