@@ -1064,12 +1064,13 @@ function familyInstanceHead(features: FeatureGates<'convert'>, node: Node): { fa
 let typeWildcards: { count: number } | undefined;
 
 function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstance = false): Decl {
-  for (const name of ['context', 'forall', 'kind']) {
+  for (const name of ['forall', 'kind']) {
     const child = field(node, name);
-    if (child) {
-      if (name === 'context') throw unsupportedError(spanOf(child), 'newtype 宣言の文脈（DatatypeContexts）');
-      throw unsupported(child);
-    }
+    if (child) throw unsupported(child);
+  }
+  const contextNode = field(node, 'context');
+  if (contextNode && !features.allows('datatypeContexts')) {
+    throw syntaxError(spanOf(contextNode), 'newtype 宣言に文脈を書くには、DatatypeContexts の拡張が要ります。');
   }
   const constructorsNode = field(node, 'constructors');
   let con: ConDecl;
@@ -1081,7 +1082,12 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
     if (cons.length !== 1 || cons[0].fields.length !== 1) {
       throw syntaxError(spanOf(constructorsNode), 'newtype には、フィールドが 1 つの構成子を 1 つだけ書いてください。');
     }
-    con = cons[0];
+    if (constructorsNode.descendantsOfType(['strict_field', 'lazy_field']).length > 0) {
+      throw syntaxError(spanOf(constructorsNode), 'newtype の構成子のフィールドには、! や ~ を付けられません。');
+    }
+    // StrictData makes only a data constructor's fields strict.
+    const { strictFields: _, ...lazy } = cons[0];
+    con = lazy;
     checkGadtNewtypeConstructor(con);
   } else {
     con = convertNewtypeConstructor(features, required(node, 'constructor'));
@@ -1090,7 +1096,7 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
     kind: 'data',
     name: typeDeclName(features, node),
     params: isInstance ? [] : typeParams(features, node),
-    ...(hasToken(node, 'type') ? { typeData: true } : {}),
+    ...(contextNode ? { datatypeContext: convertContext(features, contextNode) } : {}),
     cons: [con],
     deriving: convertDerivingClauses(features, node),
     span: spanOf(node),
@@ -1105,9 +1111,6 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
  */
 function checkGadtNewtypeConstructor(con: ConDecl): void {
   if ((con.context?.length ?? 0) > 0) throw syntaxError(con.span, 'newtype の構成子には、文脈を書けません。');
-  if ((con.strictFields?.length ?? 0) > 0) {
-    throw syntaxError(con.span, 'newtype の構成子のフィールドには、! や ~ を付けられません。');
-  }
   const params: string[] = [];
   let head = con.result;
   while (head?.kind === 'tapp') {
@@ -1124,12 +1127,20 @@ function checkGadtNewtypeConstructor(con: ConDecl): void {
   }
 }
 
-/** The type variables a type mentions, bound or free. */
+/** The type variables a type mentions free: those a `forall` inside it binds are its own. */
 function collectTvars(value: unknown, into: Set<string>): void {
   if (Array.isArray(value)) {
     for (const item of value) collectTvars(item, into);
   } else if (value && typeof value === 'object') {
     const node = value as { kind?: string; name?: unknown };
+    if (node.kind === 'tforall') {
+      const forall = value as Extract<TypeExpr, { kind: 'tforall' }>;
+      const inner = new Set<string>();
+      collectTvars([forall.body, forall.context], inner);
+      for (const binder of forall.binders) inner.delete(binder.name.name);
+      for (const name of inner) into.add(name);
+      return;
+    }
     if (node.kind === 'tvar' && typeof node.name === 'string') into.add(node.name);
     for (const [key, child] of Object.entries(value)) if (key !== 'span') collectTvars(child, into);
   }
