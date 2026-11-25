@@ -480,6 +480,9 @@ class AstChecker {
         break;
       }
       case 'destructure': {
+        if (statement.isComptime) this.comptimeKeyword(statement);
+        if (statement.isComptime && statement.targets.every((target) => target.declaration?.isConst))
+          this.error(statement, 'comptime const は冗長です（初期化の式を comptime で囲んでください）。');
         this.expression(statement.value, 'value');
         for (const target of statement.targets) {
           if (target.declaration) {

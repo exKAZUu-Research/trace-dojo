@@ -468,27 +468,57 @@ export abstract class StatementCompiler extends CallCompiler {
       const value = this.compileDeclValue(statement.value as Expression, declared, statement.name);
       return declared ? this.coerce(value, declared, statement.value as Expression) : value;
     }, statement);
-    const binding: LocalBinding = statement.isConst
-      ? {
-          kind: 'local',
-          name: statement.name,
-          slot: -1,
-          type: value.type,
-          isConst: true,
-          known: true,
-          value: value.value,
-        }
+    this.declareComptimeLocal(statement, statement.isConst, value);
+    return { exec: () => {}, noreturn: false };
+  }
+
+  /** `comptime var a, var b = value;`: each declared target is a `comptime var` of its element. */
+  private comptimeDestructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
+    const value = this.comptimeValue(() => this.compile(statement.value), statement);
+    const type = value.type;
+    const isArray = type.kind === 'array';
+    const count = statement.targets.length;
+    const elementTypes =
+      type.kind === 'struct' && type.isTuple
+        ? (type.fields ?? []).map((field) => field.type)
+        : isArray
+          ? Array.from({ length: Number(type.length) }, () => type.child)
+          : this.error(statement, `${typeName(type)} 型の値は、分割して代入できません。`);
+    if (elementTypes.length !== count)
+      this.error(statement, `分割代入の数が合いません（${count} 個ですが、値は ${elementTypes.length} 個です）。`);
+    for (const [index, target] of statement.targets.entries()) {
+      const declaration = target.declaration;
+      if (!declaration) return this.error(target, 'comptime の分割代入には、宣言だけを書いてください。');
+      const element = this.elementOf(value, index, elementTypes[index], isArray, statement);
+      const declared = declaration.type ? this.compileType(declaration.type) : undefined;
+      this.declareComptimeLocal(
+        declaration,
+        declaration.isConst,
+        declared ? this.coerce(element, declared, target) : element
+      );
+    }
+    return { exec: () => {}, noreturn: false };
+  }
+
+  /** A local that the compiler holds: a constant's known value, or the cell of a `comptime var`. */
+  private declareComptimeLocal(
+    declaration: { name: string; quotedName?: boolean },
+    isConst: boolean,
+    value: TExpr
+  ): void {
+    const { name } = declaration;
+    const binding: LocalBinding = isConst
+      ? { kind: 'local', name, slot: -1, type: value.type, isConst: true, known: true, value: value.value }
       : {
           kind: 'local',
-          name: statement.name,
+          name,
           slot: -1,
           type: value.type,
           isConst: false,
           known: false,
           comptimeCell: { slots: [copyForStorage(value.value)], conditionDepth: this.context.runtimeConditionDepth },
         };
-    if (!isDiscardName(statement)) this.scope.locals?.set(statement.name, binding);
-    return { exec: () => {}, noreturn: false };
+    if (!isDiscardName(declaration)) this.scope.locals?.set(name, binding);
   }
 
   /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do. */
@@ -514,6 +544,7 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionNcss -- Keeps aggregate target analysis and generated assignment order together.
   // code-gauge-allow functionCognitiveComplexity -- Keeps aggregate target analysis and generated assignment order together.
   private destructure(statement: Extract<Statement, { kind: 'destructure' }>): Stmt {
+    if (statement.isComptime) return this.comptimeDestructure(statement);
     const sequential = this.sequentialDestructure(statement);
     if (sequential) return sequential;
     const value = this.compile(statement.value);

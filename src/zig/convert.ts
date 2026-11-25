@@ -344,7 +344,8 @@ function statement(node: Node): Statement {
         const converted = variableStatement(inner);
         if (converted.kind === 'var') return { ...converted, ...spanOf(node), isComptime: true };
         if (converted.kind === 'expression') return { kind: 'comptime', ...spanOf(node), body: converted.expression };
-        return fail(node, 'comptime の分割代入は書けません。');
+        if (converted.kind === 'destructure') return { ...converted, ...spanOf(node), isComptime: true };
+        return fail(node, 'comptime の後には、変数の宣言を書いてください。');
       }
       return { kind: 'comptime', ...spanOf(node), body: deferBody(node) };
     }

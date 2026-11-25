@@ -287,7 +287,7 @@ export interface DestructureTarget extends Span {
 export type Statement = Span &
   (
     | VariableDeclaration
-    | { kind: 'destructure'; targets: DestructureTarget[]; value: Expression }
+    | { kind: 'destructure'; targets: DestructureTarget[]; value: Expression; isComptime?: boolean }
     | { kind: 'expression'; expression: Expression }
     | { kind: 'defer'; isErrdefer: boolean; body: Expression }
     /** `comptime { ... }` or `comptime expr;` in a block, which runs while the compiler analyzes the function. */
