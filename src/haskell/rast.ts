@@ -22,6 +22,8 @@ export type RExpr = (
       ref: VarRef;
       name: string;
       span: Span;
+      /** A strict binding's evaluation of its variable, which is not instantiated. */
+      forcing?: true;
       /** The dictionaries the variable's instantiated scheme takes, in order. */
       evidence?: Evidence[];
     }
@@ -427,7 +429,7 @@ export interface QClause {
 export type QDecl =
   | { k: 'fun'; name: QRef; clauses: QClause[] }
   | { k: 'val'; pat: QPat; body: QBody; where: QDecls }
-  | { k: 'sig'; name: QRef; type: QType }
+  | { k: 'sig'; name: QRef; type: QType; isDefault?: boolean }
   | { k: 'fixity'; assoc: Fixity['assoc']; prec: number; name: QRef }
   | {
       k: 'data';

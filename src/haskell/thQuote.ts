@@ -511,7 +511,7 @@ export class QuoteBuilder {
         );
       }
       case 'sig': {
-        return this.call('sigD', this.nameOf(decl.name), this.type(decl.type));
+        return this.call(decl.isDefault ? 'defaultSigD' : 'sigD', this.nameOf(decl.name), this.type(decl.type));
       }
       case 'fixity': {
         const fn = { infixl: 'infixLD', infixr: 'infixRD', infix: 'infixND' }[decl.assoc];

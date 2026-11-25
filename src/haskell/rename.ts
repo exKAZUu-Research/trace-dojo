@@ -1435,7 +1435,13 @@ class Renamer {
         if (isHoleName(expr.name, scope, (name) => this.valuesNamed(name))) {
           return { k: 'hole', name: expr.name.name, span };
         }
-        return { k: 'var', ref: this.resolveVar(expr.name, scope), name: describeName(expr.name), span };
+        return {
+          k: 'var',
+          ref: this.resolveVar(expr.name, scope),
+          name: describeName(expr.name),
+          span,
+          ...(expr.forcing ? { forcing: true } : {}),
+        };
       }
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
@@ -3038,7 +3044,7 @@ class Renamer {
       } else if (decl.kind === 'typeSyn') other(decl.name, 'type');
       else if (decl.kind === 'class') {
         const cls = other(decl.name, 'type');
-        const names = decl.decls.flatMap((member) => (member.kind === 'sig' ? member.names : []));
+        const names = decl.decls.flatMap((member) => (member.kind === 'sig' && !member.isDefault ? member.names : []));
         for (const name of names) value(name);
         this.quoteClassMethods.set(cls, new Map(names.map((name) => [name.name, values.get(name.name) as LocalVar])));
       }
@@ -3088,7 +3094,12 @@ class Renamer {
     switch (decl.kind) {
       case 'sig': {
         const type = this.quoteSigType(decl.sig, scope);
-        return decl.names.map((name): QDecl => ({ k: 'sig', name: nameOf(name), type }));
+        return decl.names.map((name): QDecl => ({
+          k: 'sig',
+          name: nameOf(name),
+          type,
+          ...(decl.isDefault ? { isDefault: true } : {}),
+        }));
       }
       case 'patBind': {
         const pat = this.quotePat(decl.pat, new Map(), scope, declared);
@@ -3219,7 +3230,9 @@ class Renamer {
    */
   private quoteGlobal(namespace: QuoteNamespace, name: QName, required: boolean): QRef {
     const outer = this.options.spliceModule;
-    const outerSpace = outer && !name.qualifier ? spliceModuleSpace(outer, namespace, name.name) : undefined;
+    // `M.x` with the module's own name refers to its definition as `x` does.
+    const own = outer && (!name.qualifier || name.qualifier === outer.module);
+    const outerSpace = own ? spliceModuleSpace(outer, namespace, name.name) : undefined;
     if (outer && outerSpace) return { k: 'global', space: outerSpace, module: outer.module, name: name.name };
     const found = this.programGlobal(namespace, name);
     if (found) return found;
