@@ -2244,6 +2244,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private forOperand(compiled: TExpr, capture: Capture | undefined, span: Span): ForOperand {
+    this.refuseComptimeVarReference(compiled, span);
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
     const type = compiled.type;
