@@ -1616,15 +1616,29 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const candidates = this.membersOf<MemberSymbol>(supertype, member.name, member.kind);
       for (const { symbol: candidate, substitution } of candidates) {
         if (candidate.visibility === 'private') continue;
+        // The function's own type parameters correspond by position, as `fun <T> map(x: T)` overrides its parent's.
+        const paired = new Map(memberTypes);
         if (member.kind === 'function' && candidate.kind === 'function') {
           if (candidate.params.length !== member.params.length) continue;
+          if (candidate.typeParameters.length !== member.typeParameters.length) continue;
+          for (const [index, param] of member.typeParameters.entries())
+            paired.set(param, { kind: 'param', param: candidate.typeParameters[index], nullable: false });
           const matches = candidate.params.every((param, index) =>
-            isSameType(substitute(param.type, substitution), substitute(member.params[index].type, memberTypes))
+            isSameType(substitute(param.type, substitution), substitute(member.params[index].type, paired))
           );
           if (!matches) continue;
         }
         if ((member.extensionReceiver === undefined) !== (candidate.extensionReceiver === undefined)) continue;
-        this.checkOverrideType(cls, member, candidate, substitution, memberTypes);
+        if (
+          member.extensionReceiver &&
+          candidate.extensionReceiver &&
+          !isSameType(
+            substitute(candidate.extensionReceiver, substitution),
+            substitute(member.extensionReceiver, paired)
+          )
+        )
+          continue;
+        this.checkOverrideType(cls, member, candidate, substitution, paired);
         if (!found.includes(candidate)) found.push(candidate);
       }
     }
