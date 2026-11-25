@@ -337,6 +337,9 @@ function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: Subs
   if (subscript?.indirect !== undefined) {
     shell.discard(`${subscript.indirect}: invalid variable name`);
   }
+  if (name.startsWith('!')) {
+    shell.discard(`${name}: invalid indirect expansion`);
+  }
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript?.wholeArray) {
     shell.discard(`$${name}: cannot assign in this way`);
   }

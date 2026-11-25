@@ -576,15 +576,28 @@ export class Expander {
         ctx
       );
     }
+    return this.expandIndirectVariable(expansion, subscript, ctx);
+  }
+
+  private expandIndirectVariable(
+    expansion: ParameterExpansion,
+    subscript: SubscriptRef | undefined,
+    ctx: WordContext
+  ): WordSegment[] {
+    const { name } = expansion;
     const own = subscript === undefined ? this.shell.store.ownView(name) : undefined;
     if (own?.attributes.has('n')) {
-      const target = own.scalar ?? '';
+      if (own.kind === 'unset') this.shell.discard(`${name}: invalid indirect expansion`);
+      const target = own.scalar as string;
       return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, undefined, ctx);
     }
     const direct = this.parameterValue(name, subscript, expansion);
-    const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
-    if (reference === undefined || reference === '') {
-      return this.expandEmptyIndirect(expansion, subscript, reference, ctx);
+    const reference =
+      direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
+    if (reference === undefined) {
+      this.checkIndirectReference(name, subscript?.text);
+      const missingName = `!${name}[${subscript?.rawText ?? ''}]`;
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, missingName, undefined, ctx);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
@@ -594,21 +607,6 @@ export class Expander {
       target.subscript,
       ctx
     );
-  }
-
-  private expandEmptyIndirect(
-    expansion: ParameterExpansion,
-    subscript: SubscriptRef | undefined,
-    reference: string | undefined,
-    ctx: WordContext
-  ): WordSegment[] {
-    if (reference === undefined || expansion.operator === undefined) {
-      this.checkIndirectReference(expansion.name, subscript?.text);
-    }
-    if (expansion.operator !== undefined) {
-      this.shell.discard(': invalid variable name');
-    }
-    return this.valueSegments({ kind: 'scalar', value: undefined }, ctx);
   }
 
   private finishIndirect(
@@ -625,7 +623,12 @@ export class Expander {
   private checkIndirectReference(name: string, subscript: string | undefined): void {
     if (subscript === undefined) this.shell.discard(`${name}: invalid indirect expansion`);
     const resolved = resolveTargetName(this.shell, name, false);
-    if (resolved === undefined || !this.shell.store.ownView(resolved)) {
+    const own = resolved === undefined ? undefined : this.shell.store.ownView(resolved);
+    if (
+      resolved === undefined ||
+      own?.attributes.has('n') ||
+      (!own && !this.shell.store.hasMaterializedTarget(resolved))
+    ) {
       this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
     }
   }
