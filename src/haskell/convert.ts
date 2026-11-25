@@ -1778,6 +1778,11 @@ function convertType(features: FeatureGates<'convert'>, node: Node): TypeExpr {
   }
 }
 
+/** A type argument, or `undefined` for the wildcard `_`, which leaves the type for inference. */
+function wildcardOr(node: Node, convert: (node: Node) => TypeExpr): TypeExpr | undefined {
+  return node.type === 'wildcard' ? undefined : convert(node);
+}
+
 /** Whether a type is an application with the `*` token among its parts. */
 export function hasStarArgument(type: TypeExpr): boolean {
   let head = type;
@@ -1851,7 +1856,7 @@ export function convertExpr(features: FeatureGates<'convert'>, node: Node): Expr
         return {
           kind: 'tyapp',
           expr: convertExpr(features, fn),
-          type: convertType(features, required(argument, 'type')),
+          type: wildcardOr(required(argument, 'type'), (typeNode) => convertType(features, typeNode)),
           required: true,
           span,
         };

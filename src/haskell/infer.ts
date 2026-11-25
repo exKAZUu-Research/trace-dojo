@@ -828,7 +828,6 @@ export class Checker {
     }
     const args = freshKinds(scheme.kinds).map((kind, index) => this.freshVar(kind, scheme.names?.[index]));
     for (const [position, typeArg] of typeArgs.entries()) {
-      if (!typeArg) continue;
       const index = specified[position];
       if (applications[position].required && !scheme.required?.includes(index)) {
         typeError(applications[position].span, '(type t) を渡せるのは、forall a -> で型を受け取る引数だけです。');
@@ -839,6 +838,8 @@ export class Checker {
           'forall a -> で型を受け取る引数には、@ ではなく (type t) で型を渡してください。'
         );
       }
+      // A wildcard (`@_` or `(type _)`) leaves the variable for inference.
+      if (!typeArg) continue;
       const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
       const type = this.convertType(typeArg, this.scopedTypes, scoped, (args[index] as TVar).kind);
       this.checkKinds();

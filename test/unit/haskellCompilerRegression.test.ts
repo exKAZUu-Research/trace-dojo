@@ -1337,6 +1337,9 @@ test.each([
   ['main = print (id (type Int) 3)', undefined],
   ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f @Int 3)', undefined],
   ['k :: forall a b -> a -> b -> a\nk _ _ x _ = x\nmain = print (k (type Int) @Bool 3 True)', undefined],
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f @_ 3)', undefined],
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f (type _) 3)', '3\n'],
+  ['main = print (id @_ 3 :: Int)', '3\n'],
 ])('a required type argument takes only (type t), and (type t) goes only to one: %s', (body, stdout) => {
   const result = executeProgram('haskell', `{-# LANGUAGE RequiredTypeArguments, TypeOperators #-}\n${body}\n`);
   if (stdout === undefined) expect(result.kind).toBe('compileError');
