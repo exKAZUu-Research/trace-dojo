@@ -402,9 +402,27 @@ pub const Reader = struct {
     }
 
     pub fn appendRemaining(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), limit: Limit) LimitedAllocError!void {
-        const data = try r.allocRemaining(gpa, if (limit == .unlimited) limit else .limited(@intFromEnum(limit) -| list.items.len));
-        defer gpa.free(data);
-        try list.appendSlice(gpa, data);
+        var remaining: usize = if (limit == .unlimited) std.math.maxInt(usize) else @intFromEnum(limit);
+        var spare: [4096]u8 = undefined;
+        while (remaining != 0) {
+            const data = if (r.buffer.len == 0) blk: {
+                const descriptor = r.descriptor orelse return;
+                const n = try readInput(descriptor, spare[0..@min(spare.len, remaining)]);
+                if (n == 0) return;
+                break :blk spare[0..n];
+            } else blk: {
+                if (r.seek == r.end) r.fillMore() catch |err| switch (err) {
+                    error.EndOfStream => return,
+                    error.ReadFailed => return error.ReadFailed,
+                };
+                const n = @min(r.end - r.seek, remaining);
+                defer r.seek += n;
+                break :blk r.buffer[r.seek .. r.seek + n];
+            };
+            try list.appendSlice(gpa, data);
+            remaining -= data.len;
+        }
+        return error.StreamTooLong;
     }
 
     pub fn appendExact(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), n: usize) (std.mem.Allocator.Error || Error)!void {
