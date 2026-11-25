@@ -316,6 +316,11 @@ export class VariableSymbol {
    */
   suspendInvocable = false;
   isParameter = false;
+  /**
+   * For the variable that holds a `when` subject in a suspend function's rewrite, the key of the stable value the subject
+   * reads, which the variable's tests narrow as `when (v) { is String -> ... }` narrows `v`.
+   */
+  subjectKey: string | undefined;
 
   constructor(
     readonly name: string,

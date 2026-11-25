@@ -6386,6 +6386,11 @@ test.each([
     'two 2\n30\nf2 f3 f30 \n',
   ],
   [
+    'when whose type tests smart-cast its subject',
+    'val v: Any = "abc"\n    println(when (v) { is Int -> f(v + 1); is String -> f(v.length); else -> 0 })',
+    '3\nf3 \n',
+  ],
+  [
     'try as a value',
     'val x = try { f(1) / 0 } catch (e: ArithmeticException) { f(7) } finally { g(9) }\n    println(x)',
     '7\nf1 f7 g9 \n',

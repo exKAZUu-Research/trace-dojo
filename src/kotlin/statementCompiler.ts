@@ -45,6 +45,7 @@ import { NUMBER_OPERATOR_NAMES } from './operators';
 import { framedInstanceTest } from './reified';
 import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
+import { isHiddenSubject } from './suspendRewrites';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { checkedRead, instanceTest } from './typeChecks';
 import { commonSupertype, isSubtype } from './typeRelations';
@@ -274,6 +275,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.flow.maybeAssigned.add(variable);
     if (unnarrowed) this.flow.narrowed.set(keyOf(variable), initializer.type);
     if (!declared) this.narrowToCase(keyOf(variable), initializer);
+    // A suspend function's `when (v)` tests a variable holding `v`, whose tests smart-cast `v` as kotlinc's do.
+    if (isHiddenSubject(name)) variable.subjectKey = initializer.stableKey;
     const write = this.variableAccess(context, variable).write;
     return this.withStep(
       row,

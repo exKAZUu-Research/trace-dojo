@@ -11,6 +11,13 @@ export function hiddenName(what: string): string {
   return `\0${what}${hiddenNames++}`;
 }
 
+const SUBJECT = 'subject';
+
+/** Whether a name is that of the variable `whenAsIf` holds a `when` subject in. */
+export function isHiddenSubject(name: string): boolean {
+  return name.startsWith(`\0${SUBJECT}`);
+}
+
 export function propertyStatement(row: number, name: string, initializer: Expression): Statement {
   return {
     kind: 'property',
@@ -69,7 +76,7 @@ export function forAsWhile(statement: Extract<Statement, { kind: 'for' }>): Stat
 export function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Expression {
   const { row } = expression;
   // `when (val x = ...)` reads its subject through its own variable, which its branches see.
-  const subjectName = expression.subjectVariable?.name ?? hiddenName('subject');
+  const subjectName = expression.subjectVariable?.name ?? hiddenName(SUBJECT);
   const subject: Expression = { kind: 'name', row, name: subjectName };
   const test = (
     condition: Extract<Expression, { kind: 'when' }>['entries'][number]['conditions'][number]
