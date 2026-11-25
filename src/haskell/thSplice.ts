@@ -130,31 +130,43 @@ export function spliceHeader(root: Node): string {
  * of the rest of the program stay. A splice runs as a program of the module's pragmas and imports, as GHC's stage
  * restriction allows: it cannot use the module's own definitions.
  */
+/** How a splice's program runs: the code it spells, and what it printed while it ran. */
+export type SpliceRunner = (program: string) => { code: string; printed: string };
+
+/**
+ * Runs a program's splices in the order they are written, as GHC does, and puts the code of each in its place,
+ * giving the program's text and what the splices printed.
+ */
 export function expandSplices(
   source: string,
   header: string,
   sites: readonly SpliceSite[],
-  run: (program: string) => string
-): string {
-  let result = source;
-  for (const site of [...sites].toReversed()) {
+  run: SpliceRunner
+): { source: string; printed: string } {
+  let printed = '';
+  const codes = sites.map((site) => {
     const lines = site.code.split('\n');
     const padded = [' '.repeat(site.column + 2) + lines[0], ...lines.slice(1).map((line) => `  ${line}`)].join('\n');
     const program = `${header}\nimport qualified Language.Haskell.TH.Runner as SpliceRunner\nmain :: IO ()\nmain = SpliceRunner.${site.runner} (\n${padded}\n  )\n`;
-    let output: string;
     try {
-      output = run(program);
+      const output = run(program);
+      printed += output.printed;
+      return output.code;
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       const detail = error.diagnostics[0]?.message ?? '';
       throw compileError(site.row, `Template Haskell のスプライスを実行できません。${detail}`);
     }
-    const text = uniqueNames(output);
+  });
+  let result = source;
+  // From the last site back, so that the offsets of the earlier ones stay.
+  for (const [index, site] of sites.entries().toArray().toReversed()) {
+    const text = uniqueNames(codes[index]);
     const rows = source.slice(site.start, site.end).split('\n').length - 1;
     const replacement = site.runner === 'runDecSplice' ? text : `(${text})`;
     result = result.slice(0, site.start) + replacement + '\n'.repeat(rows) + result.slice(site.end);
   }
-  return result;
+  return { source: result, printed };
 }
 
 /**

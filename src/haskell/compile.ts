@@ -46,7 +46,7 @@ import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { findProgramSplices, misplacedHaskellAtomicMessage, parseHaskell, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
-import { expandSplices } from './thSplice';
+import { expandSplices, type SpliceRunner } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
@@ -502,15 +502,17 @@ function tryClass(cls: (name: string) => ClassEntity, name: string): ClassEntity
   }
 }
 
-let spliceRunner: ((program: string) => string) | undefined;
+let spliceRunner: SpliceRunner | undefined;
 
-/** Sets how a splice's program runs, giving its output, which running programs provides. */
-export function setSpliceRunner(runner: (program: string) => string): void {
+/** Sets how a splice's program runs, giving its code and what it printed, which running programs provides. */
+export function setSpliceRunner(runner: SpliceRunner): void {
   spliceRunner = runner;
 }
 
 export interface CompiledProgram {
   main: GlobalDef;
+  /** What the program's Template Haskell splices printed while it compiled. */
+  compileOutput?: string;
 }
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
@@ -522,9 +524,10 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const text = preprocessProgram(source);
     const splices = findProgramSplices(text);
     let expanded = text;
+    let compileOutput = '';
     if (splices && splices.sites.length > 0) {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      expanded = expandSplices(text, splices.header, splices.sites, spliceRunner);
+      ({ source: expanded, printed: compileOutput } = expandSplices(text, splices.header, splices.sites, spliceRunner));
     }
     const parsed = parseHaskell(expanded);
     const renamed = renameModule(parsed, {
@@ -554,7 +557,10 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const misplaced = codegen.checkAtomicClaims();
     if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
     assert(checked.main, 'The checked program has no main');
-    return { main: codegen.compileEntry(checked.main.entity, checked.main.evidence) };
+    return {
+      main: codegen.compileEntry(checked.main.entity, checked.main.evidence),
+      ...(compileOutput ? { compileOutput } : {}),
+    };
   });
 }
 

@@ -324,8 +324,9 @@ thNewUnique = primitive "thNewUnique"
 reportWarning :: String -> Q ()
 reportWarning s = Q (hPutStrLn stderr ("Template Haskell error: " ++ s))
 
+-- An error the splice reports, marked so that the compiler fails the splice with it once the splice ends.
 reportError :: String -> Q ()
-reportError s = Q (hPutStrLn stderr ("Template Haskell error: " ++ s))
+reportError s = Q (hPutStr stderr ("\1" ++ s ++ "\1"))
 
 report :: Bool -> String -> Q ()
 report True = reportError
@@ -1455,7 +1456,8 @@ instance Splice a => Splice [a] where
   renderSplice xs = intercalate "; " (map renderSplice xs)
 
 runSplice :: Splice a => Q a -> IO ()
-runSplice (Q io) = io >>= putStr . renderSplice
+-- The code a splice spells, after a mark that keeps it apart from what the splice prints itself while it runs.
+runSplice (Q io) = io >>= \x -> putStr ("\0" ++ renderSplice x)
 
 runDecSplice :: Q [Dec] -> IO ()
 runDecSplice = runSplice
