@@ -157,10 +157,12 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         const source = fromLeft ? left : right;
         const element = fromLeft ? index : ~index;
         const span = { row: maskArg.row, col: maskArg.col, endRow: maskArg.endRow };
-        if (!source) return { kind: 'undefined', ...span };
-        const length = (source.type as ArrayType).length;
+        // An undefined operand has the other operand's length, which a mask element must still fall within.
+        const sized = source ?? left ?? right;
+        const length = sized ? (sized.type as ArrayType).length : 0n;
         if (element >= length)
           this.error(maskArg, `@shuffle のマスクの ${position} 番目 ${index} は、ベクトルの範囲の外です。`);
+        if (!source) return { kind: 'undefined', ...span };
         const holder = elements[sources.indexOf(source)];
         return {
           kind: 'index',
