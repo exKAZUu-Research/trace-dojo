@@ -1242,7 +1242,8 @@ renderExp (InfixE (Just a) op (Just b)) = "(" ++ renderExp a ++ " " ++ renderOp 
 renderExp (InfixE (Just a) op Nothing) = "(" ++ renderExp a ++ " " ++ renderOp op ++ ")"
 renderExp (InfixE Nothing op (Just b)) = "(" ++ renderOp op ++ " " ++ renderExp b ++ ")"
 renderExp (InfixE Nothing op Nothing) = "(" ++ renderOp op ++ ")"
-renderExp (UInfixE a op b) = "(" ++ renderExp a ++ " " ++ renderOp op ++ " " ++ renderExp b ++ ")"
+-- An unresolved chain is written without inner parentheses, so that the operators' fixities order it, as in GHC.
+renderExp (UInfixE a op b) = "(" ++ renderUInfix a ++ " " ++ renderOp op ++ " " ++ renderUInfix b ++ ")"
 renderExp (ParensE e) = "(" ++ renderExp e ++ ")"
 renderExp (LamE ps e) = "(\\" ++ unwords (map renderPat ps) ++ " -> " ++ renderExp e ++ ")"
 renderExp (LamCaseE ms) = "(\\case {" ++ intercalate "; " (map renderMatch ms) ++ "})"
@@ -1266,6 +1267,10 @@ renderExp (ImplicitParamVarE s) = "?" ++ s
 renderExp (GetFieldE e f) = "(" ++ renderExp e ++ ")." ++ f
 renderExp (TypeE t) = "(type " ++ renderTypeAtom t ++ ")"
 renderExp e = error ("Template Haskell: this expression cannot be spliced: " ++ show e)
+
+renderUInfix :: Exp -> String
+renderUInfix (UInfixE a op b) = renderUInfix a ++ " " ++ renderOp op ++ " " ++ renderUInfix b
+renderUInfix e = renderExp e
 
 renderOp :: Exp -> String
 renderOp (VarE n) = renderNameInfix n
