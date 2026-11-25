@@ -618,7 +618,12 @@ function declareOne(
     isSubscripted,
   });
   if (
-    !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, operand, assignMode, isSubscripted)
+    !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, {
+      operandName: name,
+      operand,
+      assignMode,
+      isSubscripted,
+    })
   ) {
     return false;
   }
@@ -640,20 +645,19 @@ function declareOne(
   return ok;
 }
 
-// code-gauge-allow functionParameterCount -- Applies array attributes to a +n referent when separate, and link/cell attributes to destination.
 function applyDeclaredAttributes(
   shell: Shell,
   builtin: string,
   destination: DeclarationDestination,
   preUnsetStore: PreUnsetNamerefStore | undefined,
   options: Options,
-  operand: DeclarationArgument,
-  assignMode: AssignMode,
-  isSubscripted: boolean
+  ctx: { operandName: string; operand: DeclarationArgument; assignMode: AssignMode; isSubscripted: boolean }
 ): boolean {
+  const { operandName, operand, assignMode, isSubscripted } = ctx;
   const assigns = assignMode !== 'none' || isCompound(operand);
-  if (preUnsetStore?.deferUnsetN && (isSubscripted || options.set.has('a') || options.set.has('A'))) {
-    if (!applyReferentArrayKind(shell, builtin, destination.variable.name, preUnsetStore, options, isSubscripted)) {
+  const subscriptsStore = isSubscripted && assignMode !== 'none';
+  if (preUnsetStore?.deferUnsetN && (subscriptsStore || options.set.has('a') || options.set.has('A'))) {
+    if (!applyReferentArrayKind(shell, builtin, destination.variable.name, preUnsetStore, options, subscriptsStore)) {
       return false;
     }
     return applyAttributes(
@@ -675,16 +679,19 @@ function applyDeclaredAttributes(
     destination.referencedSubscript === undefined &&
     !options.set.has('A') &&
     !destination.variable.attributes.has('A');
-  if (isSubscripted) convertSubscriptedNameref(shell, destination.variable, options);
+  if (subscriptsStore) convertSubscriptedNameref(shell, destination.variable, options);
+  const bareSubscriptUnlink =
+    isSubscripted && assignMode === 'none' && options.unset.has('n') && destination.variable.attributes.has('n');
   return applyAttributes(
     shell,
     builtin,
     destination.variable,
     options,
     assigns && !redirectsGlobalScalarStore,
-    isSubscripted || destination.referencedSubscript !== undefined,
+    (isSubscripted && !bareSubscriptUnlink) || destination.referencedSubscript !== undefined,
     Boolean(preUnsetStore?.deferUnsetN),
-    isCompound(operand)
+    isCompound(operand),
+    isSubscripted ? operandName : destination.variable.name
   );
 }
 
@@ -1028,7 +1035,7 @@ function resolvePreUnsetNamerefStore(
     ctx.isLocal ||
     !unset.has('n') ||
     !finalLink?.attributes.has('n') ||
-    (!ctx.assigns && !set.has('a') && !set.has('A') && !ctx.isSubscripted)
+    (!ctx.assigns && !set.has('a') && !set.has('A'))
   ) {
     return undefined;
   }
@@ -1350,7 +1357,7 @@ function declaredDestination(
     name,
     lookupSet,
     unset,
-    isSubscripted,
+    isSubscripted && assignMode !== 'none',
     set.has('g'),
     scope
   );
@@ -1694,11 +1701,12 @@ function applyAttributes(
   assigns: boolean,
   impliesIndexed: boolean,
   deferUnsetN = false,
-  assignsCompound = false
+  assignsCompound = false,
+  reportedName = variable.name
 ): boolean {
   const error = conversionError(variable, set, unset, impliesIndexed || assignsCompound);
   if (error) {
-    shell.reportError(`${builtin}: ${variable.name}: ${error}`);
+    shell.reportError(`${builtin}: ${reportedName}: ${error}`);
     return false;
   }
   const becomesIndexed =
