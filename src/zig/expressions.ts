@@ -101,6 +101,7 @@ import {
   U8,
   UNDEFINED_TYPE,
   USIZE,
+  vectorOf,
   wrapInt,
 } from './types';
 import { unavailableMessage } from './unavailable';
@@ -1632,7 +1633,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     let left = this.compile(expression.left);
     if (left.type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(left.type)].unbounded)
       return this.pointerArithmetic(left, expression);
-    let right = this.compile(expression.right, isVectorType(left.type) ? left.type : undefined);
+    // Zig gives an arithmetic operand no result type, so `v * @splat(2)` has no type for the @splat.
+    let right = this.compile(expression.right);
     if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
@@ -1813,7 +1815,12 @@ export abstract class ExpressionCompiler extends SemaBase {
   // code-gauge-allow functionCognitiveComplexity -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
-    if (isVectorType(left.type)) return this.vectorOperation(expression, [left, this.compile(expression.right)]);
+    if (isVectorType(left.type)) {
+      // A shift amount takes its type from the shifted vector: a vector of the elements' log2 integers.
+      const child = left.type.child;
+      const amount = child.kind === 'int' ? vectorOf(left.type.length, log2IntType(child)) : undefined;
+      return this.vectorOperation(expression, [left, this.compile(expression.right, amount)]);
+    }
     const type = left.type;
     if (type.kind !== 'int' && type.kind !== 'comptime_int') {
       return this.error(expression, `シフトは整数の型にだけ使えます（${typeName(type)} 型です）。`);
