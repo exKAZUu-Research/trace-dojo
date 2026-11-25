@@ -75,7 +75,13 @@ class Handle {
   setBuffering(mode: BufferMode): void {
     this.checkNotClosed('hSetBuffering');
     if (mode.kind === 'BlockBuffering' && mode.size !== undefined && mode.size <= 0n) {
-      throw ioError('InvalidArgument', 'hSetBuffering', undefined, `illegal buffer size ${showSignedInt(mode.size)}`);
+      throw ioError(
+        'InvalidArgument',
+        'hSetBuffering',
+        undefined,
+        `illegal buffer size ${showSignedInt(mode.size)}`,
+        this.value
+      );
     }
     this.buffering = mode;
   }
