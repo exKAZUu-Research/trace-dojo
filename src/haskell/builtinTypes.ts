@@ -316,23 +316,31 @@ const naturalOperands = [NATURAL_KIND, NATURAL_KIND];
 
 /** GHC.TypeLits' type families, by name. */
 export const TYPE_LIT_FAMILIES: Record<string, TypeEntity> = {
-  '+': builtinFamily('+', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) + (b as bigint))),
+  '+': builtinFamily('+', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    chargeNaturalBits(Math.max(bitLength(a as bigint), bitLength(b as bigint)) + 1);
+    return natural((a as bigint) + (b as bigint));
+  }),
   '*': builtinFamily('*', naturalOperands, NATURAL_KIND, ([a, b]) => {
     chargeNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
     return natural((a as bigint) * (b as bigint));
   }),
-  '-': builtinFamily('-', naturalOperands, NATURAL_KIND, ([a, b]) => natural((a as bigint) - (b as bigint))),
+  '-': builtinFamily('-', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    chargeNaturalBits(bitLength(a as bigint));
+    return natural((a as bigint) - (b as bigint));
+  }),
   '^': builtinFamily('^', naturalOperands, NATURAL_KIND, ([a, b]) => {
     const [base, exponent] = [a as bigint, b as bigint];
     if (base > 1n) chargeNaturalBits(Number(BigInt(bitLength(base) - 1) * exponent));
     return natural(base ** exponent);
   }),
-  Div: builtinFamily('Div', naturalOperands, NATURAL_KIND, ([a, b]) =>
-    b === 0n ? undefined : natural((a as bigint) / (b as bigint))
-  ),
-  Mod: builtinFamily('Mod', naturalOperands, NATURAL_KIND, ([a, b]) =>
-    b === 0n ? undefined : natural((a as bigint) % (b as bigint))
-  ),
+  Div: builtinFamily('Div', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    chargeNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
+    return b === 0n ? undefined : natural((a as bigint) / (b as bigint));
+  }),
+  Mod: builtinFamily('Mod', naturalOperands, NATURAL_KIND, ([a, b]) => {
+    chargeNaturalBits(bitLength(a as bigint) + bitLength(b as bigint));
+    return b === 0n ? undefined : natural((a as bigint) % (b as bigint));
+  }),
   Log2: builtinFamily('Log2', [NATURAL_KIND], NATURAL_KIND, ([a]) =>
     (a as bigint) <= 0n ? undefined : natural(BigInt((a as bigint).toString(2).length - 1))
   ),
