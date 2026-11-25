@@ -133,7 +133,7 @@ f() { break; echo after; }; for i in 1; do f; done
     kind: 'executed',
     stdout: 'st 2\nst 2\ncollated\nbytewise\nabc ab c\nruns 1\n next\nst 127\nafter\n',
     stderr: [
-      'main.sh: line 1: [: abc: integer expression expected',
+      'main.sh: line 1: [: abc: integer expected',
       'main.sh: line 2: [: b: binary operator expected',
       'main.sh: line 7: r: readonly variable',
       'main.sh: line 8: r: readonly variable',

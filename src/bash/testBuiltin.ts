@@ -224,7 +224,7 @@ class TestReader {
 
   private parseInteger(text: string): bigint {
     const value = legalNumber(text);
-    if (value === undefined) this.fail(`${text}: integer expression expected`);
+    if (value === undefined) this.fail(`${text}: integer expected`);
     return value;
   }
 }
