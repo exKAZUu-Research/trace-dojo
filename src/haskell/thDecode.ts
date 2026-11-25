@@ -1258,23 +1258,44 @@ function isSpecialSyntax(occ: string): boolean {
 /** The finite decimal a fraction is, `2.25` for 9/4, or `undefined` when it has none. */
 function decimalOf(numerator: bigint, denominator: bigint): string | undefined {
   // The decimal has as many digits as the larger count of 2s and 5s in the denominator, paid for before it is built.
-  let rest = denominator;
-  let twos = 0;
-  let fives = 0;
-  for (; rest % 2n === 0n; twos++) {
-    chargeTypeWork();
-    rest /= 2n;
-  }
-  for (; rest % 5n === 0n; fives++) {
-    chargeTypeWork();
-    rest /= 5n;
-  }
-  if (rest !== 1n) return undefined;
-  const digits = Math.max(twos, fives);
+  const twos = removeFactor(denominator, 2n);
+  const fives = removeFactor(twos.rest, 5n);
+  if (fives.rest !== 1n) return undefined;
+  const digits = Math.max(twos.count, fives.count);
   chargeTypeWork(digits);
   const scale = 10n ** BigInt(digits);
   const scaled = numerator * (scale / denominator);
   const whole = scaled / scale;
   const fraction = (scaled % scale).toString().padStart(digits, '0');
   return `${whole}.${digits === 0 ? '0' : fraction}`;
+}
+
+/**
+ * How many times a prime divides a number, and what is left: by dividing by the prime's squarings, `p`, `p^2`, `p^4`,
+ * ..., largest first, in a number of divisions logarithmic in the count, each paid for by its operands' size.
+ */
+function removeFactor(value: bigint, prime: bigint): { count: number; rest: bigint } {
+  const powers: { power: bigint; exponent: number }[] = [];
+  for (let power = prime, exponent = 1; divides(power, value); power *= power, exponent *= 2) {
+    powers.push({ power, exponent });
+  }
+  let rest = value;
+  let count = 0;
+  for (const { power, exponent } of powers.toReversed()) {
+    if (!divides(power, rest)) continue;
+    rest /= power;
+    count += exponent;
+  }
+  return { count, rest };
+}
+
+/** Whether a number divides another, paid for by their sizes. */
+function divides(divisor: bigint, dividend: bigint): boolean {
+  chargeTypeWork(wordsOf(dividend) + wordsOf(divisor));
+  return dividend % divisor === 0n;
+}
+
+/** The size of a number in 64-bit words, which the cost of dividing it grows with. */
+function wordsOf(value: bigint): number {
+  return Math.ceil(value.toString(16).length / 16);
 }
