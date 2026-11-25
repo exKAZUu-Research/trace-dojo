@@ -660,6 +660,38 @@ export class QuoteBuilder {
         const fn = { infixl: 'infixLD', infixr: 'infixRD', infix: 'infixND' }[decl.assoc];
         return decl.ops.map((op) => this.call(fn, this.int(decl.prec), this.nameOf(op.name)));
       }
+      case 'instance': {
+        if (decl.overlap) throw this.unsupportedIn(decl.span, 'この instance 宣言');
+        const free = freeTypeVars([...decl.context, ...decl.types]).filter((name) => !this.env.has(name));
+        return [
+          this.bindAround(free, () => {
+            let head = this.call('conT', this.globalName(decl.cls, 'type'));
+            for (const type of decl.types) head = this.call('appT', head, this.typ(type));
+            const context = this.call('cxt', this.list(decl.context.map((c) => this.typ(c))));
+            return this.call('instanceD', context, head, this.list(this.decls(decl.decls)));
+          }),
+        ];
+      }
+      case 'class': {
+        if (decl.paramKinds?.some(Boolean)) throw this.unsupportedIn(decl.span, 'この class 宣言');
+        return [
+          this.bindAround(
+            decl.params.map((param) => param.name),
+            () => {
+              const names = (list: Name[]): Expr => this.list(list.map((name) => this.nameOf(name.name)));
+              const fundeps = decl.fundeps.map((fundep) => this.call('FunDep', names(fundep.from), names(fundep.to)));
+              return this.call(
+                'classD',
+                this.call('cxt', this.list(decl.context.map((c) => this.typ(c)))),
+                this.nameOf(decl.name.name),
+                this.tyVars(decl.params),
+                this.list(fundeps),
+                this.list(this.decls(decl.decls))
+              );
+            }
+          ),
+        ];
+      }
       default: {
         throw this.unsupportedIn(decl.span, 'この宣言');
       }
