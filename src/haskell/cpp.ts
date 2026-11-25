@@ -357,7 +357,7 @@ class ConditionParser {
     text: string,
     private readonly error: (message: string) => Error
   ) {
-    this.tokens = text.match(/0[xX][\da-fA-F]+|\d+|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g) ?? [];
+    this.tokens = text.match(/(?:0[xX][\da-fA-F]+|\d+)[uUlL]*|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g) ?? [];
   }
 
   parse(): number {
@@ -431,9 +431,11 @@ class ConditionParser {
         return value;
       }
       default: {
-        if (token !== undefined && /^0[xX][\da-fA-F]+$/.test(token)) return Number.parseInt(token.slice(2), 16);
-        if (token !== undefined && /^0[0-7]*$/.test(token)) return Number.parseInt(token, 8);
-        if (token !== undefined && /^[1-9]\d*$/.test(token)) return Number.parseInt(token, 10);
+        // C's integer suffixes (u, l, and their combinations) do not change the value.
+        const digits = token?.replace(/[uUlL]+$/, '');
+        if (digits !== undefined && /^0[xX][\da-fA-F]+$/.test(digits)) return Number.parseInt(digits.slice(2), 16);
+        if (digits !== undefined && /^0[0-7]*$/.test(digits)) return Number.parseInt(digits, 8);
+        if (digits !== undefined && /^[1-9]\d*$/.test(digits)) return Number.parseInt(digits, 10);
         throw this.error(`#if の式に誤りがあります（${token ?? '式の終わり'}）。`);
       }
     }
