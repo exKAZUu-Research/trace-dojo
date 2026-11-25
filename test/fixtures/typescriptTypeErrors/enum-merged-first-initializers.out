@@ -1,0 +1,2 @@
+(2,10): error TS2432: In an enum with multiple declarations, only one declaration can omit an initializer for its first enum element.
+(5,10): error TS2432: In an enum with multiple declarations, only one declaration can omit an initializer for its first enum element.

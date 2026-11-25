@@ -159,6 +159,7 @@ export class Enums {
         previous = member;
       }
     }
+    errors.push(...countedFirstErrors(declarations));
     return { members, errors };
   }
 
@@ -285,6 +286,20 @@ export class Enums {
     });
     return undefined;
   }
+}
+
+/** Only one declaration of an enum may start counting from 0, as two would give their first members the same value. */
+function countedFirstErrors(declarations: TreeNode[]): EnumInfo['errors'] {
+  const counting = declarations.flatMap((declaration) => {
+    const first = named(declaration.childForFieldName('body') as TreeNode).find(
+      (member) => memberNameOf(member) !== undefined
+    );
+    return first && !first.childForFieldName('value') ? [first] : [];
+  });
+  return counting.slice(1).map((member) => ({
+    node: member,
+    message: '複数の宣言がある列挙型で、最初の列挙要素の初期化子を省略できる宣言は 1 つのみです。',
+  }));
 }
 
 function duplicateError(member: TreeNode, name: string): { node: TreeNode; message: string } {
