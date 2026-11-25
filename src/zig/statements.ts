@@ -2703,8 +2703,11 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private checkedControlResult(value: TExpr, knownControl = false): TExpr {
-    // Code that the compiler runs gives its value when it runs, so no runtime condition chooses it.
-    const atRuntime = this.context.comptimeDepth === 0;
+    // Code that the compiler runs gives its value when it runs, so no runtime condition chooses it: a comptime block's,
+    // and the body of a function whose return type only the compiler holds, which every call runs at compile time.
+    const instance = this.analyzedFunction();
+    const atRuntime =
+      this.context.comptimeDepth === 0 && !(instance && this.requiresComptime(instance.returnType, value.span));
     if (atRuntime && !knownControl && !staticResultOf(value)) this.rejectRuntimeComptime(value.type, value.span);
     return value;
   }
