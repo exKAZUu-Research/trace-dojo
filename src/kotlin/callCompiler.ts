@@ -725,9 +725,10 @@ export abstract class CallCompiler extends CompilerCore {
         return attempt && this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
       if (applicable.length === 0) continue;
-      return checkingApplicability || applicable.length === 1
-        ? applicable[0]
-        : this.mostSpecific(applicable, compiledArgs, args, scope, context, row, name);
+      const fitting = applicable.length > 1 ? this.fittingReferences(scope, context, applicable, args) : applicable;
+      return checkingApplicability || fitting.length === 1
+        ? fitting[0]
+        : this.mostSpecific(fitting, compiledArgs, args, scope, context, row, name);
     }
     return undefined;
   }
@@ -964,6 +965,41 @@ export abstract class CallCompiler extends CompilerCore {
     sam: NonNullable<ReturnType<CallCompiler['samOf']>>,
     type: KType
   ): Compiled;
+
+  /**
+   * The candidates whose function types the call's callable references fit, as `sumOf(String::length)` picks the
+   * overload whose selector returns Int and `pick(String::length)` the one whose function takes one parameter. A
+   * reference compiled for each candidate's function type tells, which `referenceFits` cannot before inference; when
+   * it rules out every candidate, they all stay, for the call to report as it would.
+   */
+  private fittingReferences(
+    scope: Scope,
+    context: FunctionContext,
+    attempts: Attempt[],
+    args: ArgumentSyntax[]
+  ): Attempt[] {
+    const references = [...args.keys()].filter((index) => args[index].value.kind === 'reference');
+    if (references.length === 0) return attempts;
+    const fitting = attempts.filter((attempt) =>
+      references.every((index) => {
+        const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(index));
+        const param = attempt.candidate.symbol.params[paramIndex];
+        if (!param || passesArray(args[index], param)) return true;
+        const paramType = substitute(param.type, attempt.substitution);
+        const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
+        const sam = this.samOf(elementType);
+        const functionType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
+        if (!functionType) return true;
+        let fits = false;
+        const error = this.probeApplicability(context, (probe) => {
+          const reference = this.compileExpression(scope, probe, args[index].value, functionType);
+          fits = this.acceptsArgument(reference, functionType);
+        });
+        return !error && fits;
+      })
+    );
+    return fitting.length > 0 ? fitting : attempts;
+  }
 
   /** Whether a callable reference may stand for a value of the type, which its expected function type then selects. */
   private referenceFits(type: KType): boolean {

@@ -6439,14 +6439,21 @@ test("reads the variables of the enclosing function in local classes' initialize
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[7, 8, 14]\n' });
 });
 
-test('infers the result types of calls from the callable references they pass', () => {
+test('chooses overloads and infers result types from the callable references calls pass', () => {
   const source = `fun len(s: String) = s.length
 fun main() {
     println(listOf("a", "bb").map(String::length))
     println(listOf("a", "bb").map(::len))
     println(" x ".let(String::trim))
-}`;
-  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[1, 2]\nx\n' });
+    println(listOf("ab", "c").sumOf(String::length))
+    println(pick(String::length))
+}
+fun pick(f: (String) -> Int) = 1
+fun pick(f: (String, Int) -> Int) = 2`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2]\n[1, 2]\nx\n3\n1\n',
+  });
 });
 
 test('initializes an enum entry with a body once, with the arguments it passes', () => {

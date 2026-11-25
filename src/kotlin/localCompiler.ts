@@ -78,6 +78,11 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     if (expectedFunction) {
       const fitted = this.fitReferenceParameters(target, expectedFunction);
       const isProperty = !this.namesFunction(referenceScope, target, name, row);
+      // A property's reference takes only the receiver it is unbound from, as `String::length` is `(String) -> Int`.
+      if (isProperty && fitted.params.length !== (target.kind === 'unbound' ? 1 : 0)) {
+        const actual = this.compileReference(scope, context, expression, undefined).type;
+        return this.error(row, typeMismatchMessage(expected as KType, actual));
+      }
       const lambda = referenceLambda(target, name, fitted.params.length, row, isProperty);
       return this.withBoundReceiver(
         target,
