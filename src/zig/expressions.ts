@@ -343,8 +343,13 @@ export abstract class ExpressionCompiler extends SemaBase {
         this.error(spans[index] ?? span, `引数の型 ${typeName(param)} は、C の呼び出し規約の関数には使えません。`);
     }
     this.resolveStorage(returnType, span);
+    // Zig writes an inferred error set's return type as the function declares it.
+    const written =
+      returnType.kind === 'error_union' && returnType.errorSet.inferredFrom
+        ? `!${typeName(returnType.payload)}`
+        : typeName(returnType);
     if (!cAbiType(returnType, true))
-      this.error(span, `戻り値の型 ${typeName(returnType)} は、C の呼び出し規約の関数には使えません。`);
+      this.error(span, `戻り値の型 ${written} は、C の呼び出し規約の関数には使えません。`);
   }
 
   // Names -----------------------------------------------------------------------------------------------------------
