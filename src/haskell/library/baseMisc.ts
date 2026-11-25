@@ -759,6 +759,3 @@ instance RealFloat a => RealFloat (Down a) where
   isIEEE (Down x) = isIEEE x
 
 `;
-
-/** Standard input and files, which this environment rejects before running, as Java's Scanner and files are. */
-export const BASE_UNSUPPORTED = String.raw``;
