@@ -37,6 +37,7 @@ export class Namespaces {
         const structure = emptyStructure();
         for (const [name, member] of exports?.values ?? []) {
           if (member.valueKind === 'namespace' && !this.isInstantiated(member)) continue;
+          if (member.valueKind === 'importAlias' && !this.imported(member, 'value')) continue;
           // Only a `const` export is read-only: tsc lets a program reassign an exported function, class, or enum.
           const readonly = member.valueEntries.every((entry) => entry.kind === 'const');
           structure.properties.set(name, {

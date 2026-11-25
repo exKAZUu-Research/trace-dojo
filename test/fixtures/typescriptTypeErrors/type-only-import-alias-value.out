@@ -1,0 +1,2 @@
+(3,13): error TS2693: 'X' only refers to a type, but is being used as a value here.
+(8,13): error TS2339: Property 'Z' does not exist on type 'typeof M'.

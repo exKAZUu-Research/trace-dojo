@@ -1,0 +1,8 @@
+namespace N { export type T = number; export const k = 3; }
+import X = N.T;
+console.log(X);
+import K = N.k;
+let y: X = K;
+console.log(y);
+namespace M { export import Z = N.T; }
+const v = M.Z;
