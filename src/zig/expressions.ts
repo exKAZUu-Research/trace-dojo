@@ -716,6 +716,18 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Pointers --------------------------------------------------------------------------------------------------------
 
   /**
+   * A C pointer known to be null, as one the program holds when it runs: Zig checks a C pointer where the program uses
+   * it, so `.*`, `.?`, and an index of a known null fail when they run, not when they compile.
+   */
+  private nullCPointerAtRuntime(pointer: TExpr): TExpr {
+    const isNullC =
+      pointer.type.kind === 'pointer' && pointer.type.size === 'c' && staticResultOf(pointer)?.value === NULL;
+    if (!isNullC) return pointer;
+    const evaluate = pointer.eval;
+    return { ...runtime(pointer.type, (frame) => evaluate(frame), pointer.span), place: pointer.place };
+  }
+
+  /**
    * A pointer or slice into a `comptime var`, which the compiler knows and remembers the variable of, since code that
    * runs when the program runs holds none.
    */
@@ -742,12 +754,16 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected dereferenced(pointer: TExpr, span: Span, load = true): TExpr {
     const type = pointer.type;
     if (type.kind === 'pointer' && type.size === 'c') {
-      const single = this.derived(pointer, pointerOf('one', type.child, { isConst: type.isConst }), (value) => {
-        // Debug builds check a C pointer for null where it is used, as `.?` does.
-        if (value === NULL) return nullUnwrapPanic();
-        if (!(value instanceof Pointer)) throw new MemoryFault();
-        return value;
-      });
+      const single = this.derived(
+        this.nullCPointerAtRuntime(pointer),
+        pointerOf('one', type.child, { isConst: type.isConst }),
+        (value) => {
+          // Debug builds check a C pointer for null where it is used, as `.?` does.
+          if (value === NULL) return nullUnwrapPanic();
+          if (!(value instanceof Pointer)) throw new MemoryFault();
+          return value;
+        }
+      );
       return this.dereferenced(single, span, load);
     }
     if (type.kind !== 'pointer' || type.size !== 'one') {
@@ -894,7 +910,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     const type = operand.type;
     // `.?` checks a C pointer for null and keeps its type, though Zig refuses it where the result is a place.
     if (type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unwrap && !location)
-      return this.derived(operand, type, (value) => (value === NULL ? nullUnwrapPanic() : value));
+      return this.derived(this.nullCPointerAtRuntime(operand), type, (value) =>
+        value === NULL ? nullUnwrapPanic() : value
+      );
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
@@ -962,7 +980,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const object = this.compileLocation(expression.object);
+    const object = this.nullCPointerAtRuntime(this.compileLocation(expression.object));
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
