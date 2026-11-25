@@ -386,7 +386,7 @@ stderr = HandleStderr
 stdin :: Handle
 stdin = HandleStdin
 
-data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode deriving (Eq, Ord, Enum, Bounded, Read, Show)
+data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode deriving (Eq, Ord, Enum, Read, Show)
 
 data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 
