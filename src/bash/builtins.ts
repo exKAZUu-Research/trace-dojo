@@ -276,7 +276,7 @@ function exitBuiltin(shell: Shell, args: string[]): number {
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
-    throw new ExitSignal(2);
+    return 2;
   }
   rejectExtraOperands(shell, 'exit', extra);
   throw new ExitSignal(Number(BigInt.asUintN(8, status)));
