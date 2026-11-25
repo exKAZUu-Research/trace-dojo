@@ -186,6 +186,7 @@ test.each([
   ["process.stdout.write('x', () => {});", 'process.stdout.write のコールバックは、この採点環境では使えません。'],
   ['console.log(typeof Symbol.dispose);', 'Symbol.dispose などの well-known シンボルは、この採点環境では使えません。'],
   ["enum H { ['key'] = 4 }", 'enum のメンバー名を [ ] で書くことは、この採点環境では使えません。'],
+  ['console.log(E.A); const enum E { A }', '宣言より前での const enum の使用は、この採点環境では使えません。'],
   ["const fs = require('fs', 'utf8');", '引数は 1 個必要ですが、2 個渡されています。'],
   ['const fs = require(1);', "型 'number' の引数を型 'string' のパラメーターに渡すことはできません。"],
   [

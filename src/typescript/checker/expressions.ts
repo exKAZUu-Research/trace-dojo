@@ -722,6 +722,11 @@ export class ExpressionChecker {
       }
       if (current.type === 'field_definition' && !hasToken(current, 'static')) return;
     }
+    // tsc accepts a const enum used before its declaration, whose members esbuild inlines and this interpreter does not.
+    if (symbol.valueKind === 'enum' && symbol.valueDeclarations.some((d) => hasToken(d, 'const'))) {
+      this.c.error(node, unsupportedMessage('宣言より前での const enum の使用'));
+      return;
+    }
     const kind = symbol.valueKind === 'class' ? 'クラス' : symbol.valueKind === 'enum' ? '列挙型' : '変数';
     this.c.error(node, `${kind} ${symbol.name} は宣言より前で使われています。`);
   }
