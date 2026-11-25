@@ -440,10 +440,22 @@ export abstract class SemaBase implements SemaApi {
     return false;
   }
 
+  /**
+   * Records a call outside compile-time code, which the program makes when it runs the function that the call stands
+   * in; code outside any function runs only at compile time.
+   */
+  protected callAtRuntime(callee: FunctionInstance): void {
+    const caller = this.analyzedFunction();
+    if (caller?.runsAtRuntime) this.markRuntimeUse(callee);
+    else caller?.runtimeCallees.add(callee);
+  }
+
   /** Records that the program runs a function, which reports a `@compileError` that only such a call's analysis meets. */
   protected markRuntimeUse(instance: FunctionInstance): void {
+    if (instance.runsAtRuntime) return;
     if (instance.pendingCompileError) throw instance.pendingCompileError;
     instance.runsAtRuntime = true;
+    for (const callee of instance.runtimeCallees) this.markRuntimeUse(callee);
   }
 
   /** The innermost container whose scope the compiler is in, which `@This()` names. */

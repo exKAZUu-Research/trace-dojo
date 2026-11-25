@@ -891,7 +891,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const ref = expression.value as unknown as FnRef;
     if (!(ref instanceof FnRef)) this.error(span, 'この関数は、値として使えません。');
     const instance = this.instantiate(ref, [], span);
-    if (this.comptimeDepth === 0) this.markRuntimeUse(instance);
+    if (this.comptimeDepth === 0) this.callAtRuntime(instance);
     return new FnValue(instance);
   }
 

@@ -33,6 +33,8 @@ export class FunctionInstance {
   runsAtRuntime = false;
   /** A `@compileError` on a branch that only the analysis for the program's calls reaches, which such a call reports. */
   pendingCompileError?: CompileError;
+  /** The functions that the body calls outside compile-time code, which the program runs when it runs this one. */
+  readonly runtimeCallees = new Set<FunctionInstance>();
   /** Whether the function's name marks it as one that creates an object, as Java's constructors do. */
   readonly createsObject: boolean;
 

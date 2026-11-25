@@ -263,7 +263,7 @@ export abstract class CallCompiler extends VectorCompiler {
     }
     const instance = this.instantiate(ref, argTypes, expression, args);
     if (this.comptimeDepth === 0 && !this.requiresComptime(instance.returnType, expression))
-      this.markRuntimeUse(instance);
+      this.callAtRuntime(instance);
     const evaluators = valueEvaluators(args);
     const row = expression.row;
     const call = runtime(
