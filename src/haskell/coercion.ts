@@ -56,7 +56,12 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
       if ((spec.k === 'unwrap') === forward) {
         return lazily(() => convert(spec.inner, (force(value) as ConValue).fields[0], forward, leaves, runtime));
       }
-      return new ConValue(spec.con, [convert(spec.inner, value, forward, leaves, runtime)]);
+      // A newtype's value is its field's, so evaluating the box evaluates the field, as its constructor does.
+      return lazily(() => {
+        const field = convert(spec.inner, value, forward, leaves, runtime);
+        force(field);
+        return new ConValue(spec.con, [field]);
+      });
     }
     case 'fun': {
       return lazily(() => {
