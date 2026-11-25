@@ -160,6 +160,26 @@ for ((kotlinName, javaType) in mapOf(
     "java.util.SortedSet" to java.util.SortedSet::class.java,
     "java.util.TreeMap" to java.util.TreeMap::class.java,
     "java.util.TreeSet" to java.util.TreeSet::class.java,
+    // The JVM exceptions the prelude declares, which the natives throw as the JVM does.
+    "java.io.FileNotFoundException" to java.io.FileNotFoundException::class.java,
+    "java.io.IOException" to java.io.IOException::class.java,
+    "java.lang.ArrayStoreException" to java.lang.ArrayStoreException::class.java,
+    "java.lang.ExceptionInInitializerError" to java.lang.ExceptionInInitializerError::class.java,
+    "java.lang.LinkageError" to java.lang.LinkageError::class.java,
+    "java.lang.NegativeArraySizeException" to java.lang.NegativeArraySizeException::class.java,
+    "java.lang.NoClassDefFoundError" to java.lang.NoClassDefFoundError::class.java,
+    "java.util.DuplicateFormatFlagsException" to java.util.DuplicateFormatFlagsException::class.java,
+    "java.util.FormatFlagsConversionMismatchException" to java.util.FormatFlagsConversionMismatchException::class.java,
+    "java.util.IllegalFormatCodePointException" to java.util.IllegalFormatCodePointException::class.java,
+    "java.util.IllegalFormatConversionException" to java.util.IllegalFormatConversionException::class.java,
+    "java.util.IllegalFormatException" to java.util.IllegalFormatException::class.java,
+    "java.util.IllegalFormatFlagsException" to java.util.IllegalFormatFlagsException::class.java,
+    "java.util.IllegalFormatPrecisionException" to java.util.IllegalFormatPrecisionException::class.java,
+    "java.util.IllegalFormatWidthException" to java.util.IllegalFormatWidthException::class.java,
+    "java.util.MissingFormatArgumentException" to java.util.MissingFormatArgumentException::class.java,
+    "java.util.MissingFormatWidthException" to java.util.MissingFormatWidthException::class.java,
+    "java.util.UnknownFormatConversionException" to java.util.UnknownFormatConversionException::class.java,
+    "java.util.regex.PatternSyntaxException" to java.util.regex.PatternSyntaxException::class.java,
 )) {
     val names = members.getOrPut(kotlinName) { sortedSetOf() }
     for (method in javaType.methods) {

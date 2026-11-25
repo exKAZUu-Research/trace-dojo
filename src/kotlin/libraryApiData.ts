@@ -7,14 +7,28 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.io.Closeable': 'close use',
   'java.io.File':
     'appendBytes appendText bufferedReader bufferedWriter canExecute canRead canWrite compareTo copyRecursively copyTo createNewFile delete deleteOnExit deleteRecursively endsWith equals exists extension forEachBlock forEachLine getAbsoluteFile getAbsolutePath getCanonicalFile getCanonicalPath getFreeSpace getName getParent getParentFile getPath getTotalSpace getUsableSpace hashCode inputStream invariantSeparatorsPath isAbsolute isDirectory isFile isHidden isRooted lastModified length list listFiles mkdir mkdirs nameWithoutExtension normalize outputStream printWriter readBytes readLines readText reader relativeTo relativeToOrNull relativeToOrSelf renameTo resolve resolveSibling setExecutable setLastModified setReadOnly setReadable setWritable startsWith toPath toRelativeString toString toURI toURL useLines walk walkBottomUp walkTopDown writeBytes writeText writer',
+  'java.io.FileNotFoundException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.io.IOException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.io.InputStream': 'buffered bufferedReader copyTo decodingWith readBytes reader',
   'java.io.OutputStream': 'buffered bufferedWriter encodingWith writer',
   'java.io.PrintWriter': 'append checkError close flush format print printf println write',
   'java.io.Reader': 'buffered copyTo forEachLine readLines readText useLines',
   'java.io.Writer': 'buffered',
   'java.lang.Appendable': 'append appendLine appendRange appendln',
+  'java.lang.ArrayStoreException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.lang.AutoCloseable': 'use',
   'java.lang.Class': 'kotlin',
+  'java.lang.ExceptionInInitializerError':
+    'addSuppressed fillInStackTrace getCause getException getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.lang.LinkageError':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.lang.NegativeArraySizeException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.lang.NoClassDefFoundError':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.lang.PrintStream': 'append charset checkError close flush format print printf println write writeBytes',
   'java.lang.StringBuilder':
     'append appendLine appendRange appendln clear deleteAt deleteRange insert insertRange set setRange toCharArray',
@@ -35,9 +49,29 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.util.AbstractSet':
     'add addAll clear contains containsAll equals forEach hashCode isEmpty iterator parallelStream remove removeAll removeIf retainAll size spliterator stream toArray toString',
   'java.util.Comparator': 'reversed then thenBy thenByDescending thenComparator thenDescending',
+  'java.util.DuplicateFormatFlagsException':
+    'addSuppressed fillInStackTrace getCause getFlags getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.util.Enumeration': 'asSequence iterator toList',
+  'java.util.FormatFlagsConversionMismatchException':
+    'addSuppressed fillInStackTrace getCause getConversion getFlags getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatCodePointException':
+    'addSuppressed fillInStackTrace getCause getCodePoint getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatConversionException':
+    'addSuppressed fillInStackTrace getArgumentClass getCause getConversion getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatFlagsException':
+    'addSuppressed fillInStackTrace getCause getFlags getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatPrecisionException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getPrecision getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.IllegalFormatWidthException':
+    'addSuppressed fillInStackTrace getCause getLocalizedMessage getMessage getStackTrace getSuppressed getWidth initCause printStackTrace setStackTrace toString',
   'java.util.Locale':
     'clone equals getCountry getDisplayCountry getDisplayLanguage getDisplayName getDisplayScript getDisplayVariant getExtension getExtensionKeys getISO3Country getISO3Language getLanguage getScript getUnicodeLocaleAttributes getUnicodeLocaleKeys getUnicodeLocaleType getVariant hasExtensions hashCode stripExtensions toLanguageTag toString',
+  'java.util.MissingFormatArgumentException':
+    'addSuppressed fillInStackTrace getCause getFormatSpecifier getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
+  'java.util.MissingFormatWidthException':
+    'addSuppressed fillInStackTrace getCause getFormatSpecifier getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.util.NavigableSet':
     'add addAll addFirst addLast ceiling clear comparator contains containsAll descendingIterator descendingSet equals first floor forEach getFirst getLast hashCode headSet higher isEmpty iterator last lower parallelStream pollFirst pollLast remove removeAll removeFirst removeIf removeLast retainAll reversed size spliterator stream subSet tailSet toArray',
   'java.util.Optional': 'asSequence getOrDefault getOrElse getOrNull toCollection toList toSet',
@@ -52,6 +86,8 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.util.TreeSet':
     'add addAll addFirst addLast ceiling clear clone comparator contains containsAll descendingIterator descendingSet equals first floor forEach getFirst getLast hashCode headSet higher isEmpty iterator last lower parallelStream pollFirst pollLast remove removeAll removeFirst removeIf removeLast retainAll reversed size spliterator stream subSet tailSet toArray toString',
   'java.util.UUID': 'toKotlinUuid',
+  'java.util.UnknownFormatConversionException':
+    'addSuppressed fillInStackTrace getCause getConversion getLocalizedMessage getMessage getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.util.concurrent.ConcurrentMap': 'getOrElseIfMissing getOrPut getOrPutIfMissing getOrPutIfNull',
   'java.util.concurrent.TimeUnit': 'toDurationUnit',
   'java.util.concurrent.atomic.AtomicBoolean': 'asKotlinAtomic',
@@ -64,6 +100,8 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.util.concurrent.locks.Lock': 'withLock',
   'java.util.concurrent.locks.ReentrantReadWriteLock': 'read write',
   'java.util.regex.Pattern': 'toRegex',
+  'java.util.regex.PatternSyntaxException':
+    'addSuppressed fillInStackTrace getCause getDescription getIndex getLocalizedMessage getMessage getPattern getStackTrace getSuppressed initCause printStackTrace setStackTrace toString',
   'java.util.stream.DoubleStream': 'asSequence toList',
   'java.util.stream.IntStream': 'asSequence toList',
   'java.util.stream.LongStream': 'asSequence toList',

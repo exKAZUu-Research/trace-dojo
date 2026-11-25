@@ -14,14 +14,14 @@ test('lists the JVM members of every JVM class the prelude declares', () => {
     const jdkNames = new Set((libraryDeclarationNames[pkg] ?? '').split(' '));
     return [
       ...source.matchAll(
-        /^(?:(?:public|internal|open|abstract|data|sealed|final) )*(?:class|interface|object) (\w+)/gm
+        /^(?:(?:public|internal|open|abstract|data|sealed|final|external) )*(?:class|interface|object) (\w+)/gm
       ),
     ]
       .map((match) => match[1])
       .filter((name) => jdkNames.has(name))
       .map((name) => `${pkg}.${name}`);
   });
-  expect(declared).toContain('java.util.TreeSet');
+  expect(declared).toEqual(expect.arrayContaining(['java.util.TreeSet', 'java.io.File']));
   expect(declared.filter((name) => !Object.hasOwn(libraryMemberNames, name))).toEqual([]);
 });
 
