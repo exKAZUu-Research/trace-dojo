@@ -6429,6 +6429,19 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test('reads regex groups by name, as Kotlin/JVM does', () => {
+  const source = `fun main() {
+    val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
+    println(m.groups["year"]?.value)
+    println(m.groups.get("year")?.range)
+    println(runCatching { m.groups["month"] }.exceptionOrNull())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2024\n3..6\njava.lang.IllegalArgumentException: No group with name <month>\n',
+  });
+});
+
 test('calls suspend member extensions, dispatching on the value of their class', () => {
   const source = `open class A { open suspend fun Int.tag(): String = "A$this" }
 class C : A() { override suspend fun Int.tag(): String = "C$this" }
