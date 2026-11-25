@@ -10223,7 +10223,20 @@ const Ex = extern struct { a: u8 };
 const P8 = packed struct(u8) { a: u8 };
 const P3 = packed struct(u3) { a: u3 };
 const PU8 = packed union { a: u8, b: i8 };
-const Auto = struct { a: u8 };`;
+const Auto = struct { a: u8 };
+const T0 = enum(u1) { a };
+const T1 = enum(u3) { a };
+const T2 = enum(i8) { a };
+const T3 = enum(u0) { a };
+const T4 = enum(i3) { a };
+const T5 = enum(u16) { a };
+const T6 = enum(u9) { a };
+const T7 = enum(i1) { a };
+const T8 = packed struct(u0) {};
+const T9 = packed struct(u16) { a: u16 };
+const T10 = packed struct(i8) { a: u8 };
+const T11 = packed struct(u24) { a: u24 };
+const T12 = enum(u8) { a, _ };`;
   // Whether `zig run` accepts each type as a C parameter, an extern struct's field, and a C return type.
   const types: [type: string, accepted: string][] = [
     ['u0', '111'],
@@ -10274,6 +10287,19 @@ const Auto = struct { a: u8 };`;
     ['c_longdouble', '111'],
     ['?[*]u8', '111'],
     ['*[2]u8', '111'],
+    ['T0', '000'],
+    ['T1', '000'],
+    ['T2', '111'],
+    ['T3', '111'],
+    ['T4', '000'],
+    ['T5', '111'],
+    ['T6', '000'],
+    ['T7', '000'],
+    ['T8', '111'],
+    ['T9', '111'],
+    ['T10', '111'],
+    ['T11', '000'],
+    ['T12', '111'],
   ];
   const uses = [
     (type: string) => `fn f(x: ${type}) callconv(.c) void { _ = x; } pub fn main() void { _ = &f; }`,
