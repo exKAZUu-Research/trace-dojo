@@ -345,6 +345,7 @@ export class Expander {
     const inner = this.expandParts(parts, {
       inDouble: true,
       spacedStar: ctx.spacedStar,
+      ...(ctx.spacedArrayStar ? { spacedArrayStar: true } : {}),
       ...(ctx.splittingFields ? { splittingFields: true } : {}),
       ...(ctx.inAssignmentRhs ? { inAssignmentRhs: true } : {}),
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
