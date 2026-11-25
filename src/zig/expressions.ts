@@ -718,6 +718,24 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Pointers --------------------------------------------------------------------------------------------------------
 
+  /**
+   * What an index outside compile-time code reads through a pointer or slice into a comptime var: the elements as the
+   * variable holds them where the code stands, as Zig's comptime-known load gives them.
+   */
+  private loadedComptimeElements(object: TExpr, span: Span): TExpr {
+    const type = object.type;
+    const fact = staticResultOf(object);
+    const value = fact?.value;
+    if (this.comptimeDepth > 0 || type.kind !== 'pointer' || !(value instanceof Pointer || value instanceof Slice))
+      return object;
+    if (!this.comptimeVariableHolding(value.target)) return object;
+    if (type.size === 'one') return type.child.kind === 'array' ? this.dereferenced(object, span, false) : object;
+    const copy = { slots: value.target.slots.map((slot) => copyForStorage(slot)) };
+    const snapshot =
+      value instanceof Slice ? new Slice(copy, value.start, value.length) : new Pointer(copy, value.index);
+    return known(type, snapshot, span);
+  }
+
   /** `p.*`, or a pointer that a field access or an index goes through. */
   // code-gauge-allow functionCognitiveComplexity -- Checks each kind of pointer that `.*` may go through.
   protected dereferenced(pointer: TExpr, span: Span, load = true): TExpr {
@@ -932,7 +950,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const object = this.compileLocation(expression.object);
+    const object = this.loadedComptimeElements(this.compileLocation(expression.object), expression);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
