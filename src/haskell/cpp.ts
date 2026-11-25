@@ -225,10 +225,10 @@ class Preprocessor {
         result += line.slice(index);
         break;
       }
-      if (char === '"' || (char === "'" && /^'(\\.[^']*|[^\\'])'/.test(line.slice(index)) && !/[\w']$/.test(code))) {
-        flush();
+      if (char === '"' || isCharacterLiteral(line, index, code)) {
+        // A literal stays in the code, which a macro call's arguments may hold; expansion copies it as it is.
         const end = literalEnd(line, index);
-        result += line.slice(index, end);
+        code += line.slice(index, end);
         index = end;
         continue;
       }
@@ -244,6 +244,12 @@ class Preprocessor {
     let result = '';
     let index = 0;
     while (index < text.length) {
+      if (text[index] === '"' || isCharacterLiteral(text, index, result)) {
+        const end = literalEnd(text, index);
+        result += text.slice(index, end);
+        index = end;
+        continue;
+      }
       const match = /^[A-Za-z_][\w']*/.exec(text.slice(index));
       if (!match || (index > 0 && /[\w']/.test(text[index - 1]))) {
         result += text[index];
@@ -288,9 +294,12 @@ class Preprocessor {
     if (params.length !== args.length) {
       throw this.error(this.row, `マクロ ${name} には、引数を ${params.length} 個書いてください。`);
     }
+    // As C does, each argument is expanded in full first, under the macros being expanded around the call, and the
+    // body with the results in it is then expanded again with this macro blocked.
+    const expandedArgs = args.map((arg) => this.expand(arg.trim(), active, condition));
     const body = (macro as Macro).body.replaceAll(/[A-Za-z_]\w*/g, (word) => {
       const position = params.indexOf(word);
-      return position === -1 ? word : args[position].trim();
+      return position === -1 ? word : expandedArgs[position];
     });
     return { text: this.expand(body, new Set([...active, name]), condition), end };
   }
@@ -309,6 +318,11 @@ class Preprocessor {
   private error(row: number, message: string): Error {
     return compileError(row, message);
   }
+}
+
+/** Whether a character literal starts at a position: a `'` that does not end a name such as `x'`. */
+function isCharacterLiteral(text: string, index: number, before: string): boolean {
+  return text[index] === "'" && /^'(\\.[^']*|[^\\'])'/.test(text.slice(index)) && !/[\w']$/.test(before);
 }
 
 /** Where a string or character literal starting at a position ends. */
@@ -330,6 +344,12 @@ function splitArguments(
   let current = '';
   for (let index = open + 1; index < text.length; index++) {
     const char = text[index];
+    if (char === '"' || isCharacterLiteral(text, index, current)) {
+      const end = literalEnd(text, index);
+      current += text.slice(index, end);
+      index = end - 1;
+      continue;
+    }
     if (char === '(') depth++;
     if (char === ')' && depth-- === 0) {
       args.push(current);
