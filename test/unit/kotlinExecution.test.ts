@@ -6595,6 +6595,7 @@ test.each([
     true,
   ],
   ['a type that may be null', 'const val Y: Int? = 1\nfun main() { println(Y) }', false],
+  ['a lateinit Boolean', 'class A { lateinit var b: Boolean }\nfun main() { println(1) }', false],
   ['a type that is not primitive', 'const val X: Any = 1\nfun main() { println(X) }', false],
 ])('compiles const vals of %s only as kotlinc does', (_name, source, compiles) => {
   expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
@@ -6726,6 +6727,36 @@ fun main() {
     stdout: 'caught\n',
     uncaughtException: 'java.lang.IllegalStateException: y',
   });
+});
+
+test.each([
+  [
+    "an inner class's header reading the class around it",
+    'open class Base(val t: String)\nclass Outer(val s: String) { inner class In : Base(s + "?") }\nfun main() { println(Outer("a").In().t) }',
+    'a?\n',
+  ],
+  [
+    'a lateinit property read in an init block',
+    'class L { lateinit var s: String; init { s = "x"; println(s) } }\nfun main() { L() }',
+    'x\n',
+  ],
+  [
+    'a file at the root',
+    'import java.io.File\nfun main() { println(listOf(File("/").parent, File("/a").parent)) }',
+    '[null, /]\n',
+  ],
+  [
+    'a regex group the pattern lacks',
+    'fun main() { try { Regex("(a)").find("a")!!.groups[5] } catch (e: Exception) { println(e) } }',
+    'java.lang.IndexOutOfBoundsException: No group 5\n',
+  ],
+  [
+    'an iterator of a sorted map after its last element',
+    'fun main() { val m = sortedMapOf(1 to "a", 2 to "b"); for (k in m.keys) if (k == 2) m[3] = "c"; println(m) }',
+    '{1=a, 2=b, 3=c}\n',
+  ],
+])('runs %s as kotlinc does', (_name, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
 test('reads enum entries imported under an alias', () => {

@@ -83,8 +83,9 @@ internal class TreeMap<K, V> private constructor(
         var high = nodes.size - 1
         while (low <= high) {
             val middle = (low + high) ushr 1
-            val comparison = compareInOrder(order, nodes[middle].key, key)
-            if (comparison < 0) low = middle + 1 else if (comparison > 0) high = middle - 1 else return middle
+            // The key sought comes first, as java.util.TreeMap passes it to the comparator.
+            val comparison = compareInOrder(order, key, nodes[middle].key)
+            if (comparison > 0) low = middle + 1 else if (comparison < 0) high = middle - 1 else return middle
         }
         return -(low + 1)
     }
@@ -250,14 +251,20 @@ internal class TreeMapIterator<K, V, T>(
     private var next = if (isDescending) map.highIndex() - 1 else map.lowIndex()
     private var last = -1
     private var expected = map.modCount
+    // Whether an entry followed the last one returned, as java.util.TreeMap's iterator holds the next entry: changes
+    // after that step do not change the answer, and the next step then fails fast.
+    private var hadNext = inView()
 
-    override fun hasNext(): Boolean = if (isDescending) next >= map.lowIndex() else next < map.highIndex()
+    private fun inView(): Boolean = if (isDescending) next >= map.lowIndex() else next < map.highIndex()
+
+    override fun hasNext(): Boolean = if (map.modCount == expected) inView() else hadNext
 
     override fun next(): T {
         if (map.modCount != expected) throw ConcurrentModificationException()
-        if (!hasNext()) throw NoSuchElementException()
+        if (!inView()) throw NoSuchElementException()
         last = next
         next = if (isDescending) next - 1 else next + 1
+        hadNext = inView()
         return select(map.nodeAt(last))
     }
 
@@ -268,6 +275,7 @@ internal class TreeMapIterator<K, V, T>(
         if (!isDescending) next = last
         last = -1
         expected = map.modCount
+        hadNext = inView()
     }
 }
 
