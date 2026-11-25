@@ -294,15 +294,34 @@ export class Shell implements ArithmeticHost, RootContext {
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        const outcome = this.runLoopIteration(last, () => {
-          const condition = this.runCondition(statement.condition);
-          if ((condition === 0) === statement.until) return 'stop';
-          last.status = this.runStatements(statement.body);
-          return 'next';
-        });
-        if (outcome === 'stop') return;
+        const cond = this.runWhileCondition(statement.condition, last);
+        if (cond.action === 'break' || (cond.status === 0) === statement.until) return;
+        if (cond.action === 'continue') continue;
+        if (this.iterate(statement.body, last) === 'stop') return;
       }
     });
+  }
+
+  private runWhileCondition(
+    condition: Statement[],
+    last: { status: number }
+  ): { action: 'normal' | 'continue' | 'break'; status: number } {
+    try {
+      return { action: 'normal', status: this.runCondition(condition) };
+    } catch (error) {
+      if (error instanceof BreakSignal) {
+        last.status = error.status;
+        this.store.setCommandStatus(error.status);
+        if (--error.count > 0) throw error;
+        return { action: 'break', status: error.status };
+      }
+      if (error instanceof ContinueSignal) {
+        this.store.setCommandStatus(0);
+        if (--error.count > 0) throw error;
+        return { action: 'continue', status: 0 };
+      }
+      throw error;
+    }
   }
 
   private executeFor(statement: Extract<Statement, { kind: 'for' }>): number {
