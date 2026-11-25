@@ -1682,7 +1682,8 @@ export class Evaluator extends AsyncExecutor {
         if (value === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
         return this.runtime.runtimeTypeOf(value) ?? objectType;
       });
-      const binding = this.program.bindLate?.(expression, types);
+      const target = expression.target && frame.resolve(expression.target.type);
+      const binding = this.program.bindLate?.(expression, types, target);
       if (!binding) throw new Error('A dynamic operation ran without a binder');
       if ('message' in binding) throw this.runtimeBinderError(binding.message);
       const { bound, method } = binding;

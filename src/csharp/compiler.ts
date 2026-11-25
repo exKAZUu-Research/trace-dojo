@@ -63,7 +63,8 @@ export interface CompiledProgram {
   /** Whether integral overflow throws outside `checked` and `unchecked`, as `CheckForOverflowUnderflow` makes it. */
   checkOverflow: boolean;
   /** Binds an operation on `dynamic` values to its operands' types when it runs, as the runtime binder does. */
-  bindLate?: (node: LateNode, types: Type[]) => LateBinding;
+  /** `target` is the type a conversion converts to, with the type arguments of the code that runs it. */
+  bindLate?: (node: LateNode, types: Type[], target: Type | undefined) => LateBinding;
 }
 
 type LateNode = Extract<BoundExpression, { kind: 'late' }>;
@@ -182,7 +183,7 @@ export class Compiler extends AttributeBinder {
       entry,
       isTopLevel,
       checkOverflow: unit.options?.checkOverflow ?? false,
-      bindLate: (node, operandTypes) => this.bindLate(node, operandTypes),
+      bindLate: (node, operandTypes, target) => this.bindLate(node, operandTypes, target),
     };
   }
 
@@ -233,22 +234,22 @@ export class Compiler extends AttributeBinder {
    * Binds a late-bound operation with its operands as hidden locals of the given types, in the context of the code
    * that wrote it, once per site and types. Its compile errors become the runtime binder's messages.
    */
-  private bindLate(node: LateNode, types: Type[]): LateBinding {
+  private bindLate(node: LateNode, types: Type[], target: Type | undefined): LateBinding {
     let bySite = this.lateBindings.get(node);
     if (!bySite) {
       bySite = new Map();
       this.lateBindings.set(node, bySite);
     }
-    const key = types.map((type) => displayType(type, true)).join('|');
+    const key = [...types, ...(target ? [target] : [])].map((type) => displayType(type, true)).join('|');
     let binding = bySite.get(key);
     if (!binding) {
-      binding = this.bindLateOnce(node, types);
+      binding = this.bindLateOnce(node, types, target);
       bySite.set(key, binding);
     }
     return binding;
   }
 
-  private bindLateOnce(node: LateNode, types: Type[]): LateBinding {
+  private bindLateOnce(node: LateNode, types: Type[], target: Type | undefined): LateBinding {
     const typeContext = node.typeContext ?? {
       namespace: [this.userRoot, this.library.root],
       usings: [],
@@ -271,8 +272,8 @@ export class Compiler extends AttributeBinder {
         local.isRefLocal = node.operands[index].kind === 'refArgument';
       }
       let bound = this.bindValue(node.syntax, context);
-      if (node.target)
-        bound = this.convert(bound, node.target.type, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
+      if (node.target && target)
+        bound = this.convert(bound, target, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
       else if (bound.type.kind === 'void' && !node.isDiscarded)
         return { message: "Cannot implicitly convert type 'void' to 'object'" };
       else if (bound.type.kind !== 'void' && bound.type.kind !== 'error')
