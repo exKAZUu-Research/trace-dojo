@@ -394,9 +394,10 @@ function substring(
     return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
   }
   const scalarTarget = value.kind === 'scalar' ? value.value : scalarWholeArrayText(shell, name, value);
+  const targetLabel = substringTargetLabel(expansion);
   const evaluate = (parts: (string | WordPart)[]): bigint => {
     const expanded = expander.arithmeticText({ pieces: parts, row: shell.currentRow }, true, true);
-    return shell.evaluateText(expanded, undefined, true);
+    return shell.evaluateText(expanded, targetLabel, true);
   };
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
@@ -419,6 +420,12 @@ function substring(
     ctx,
     expansion.text
   );
+}
+
+function substringTargetLabel(expansion: ParameterExpansion): string {
+  const prefix = expansion.prefix ?? '';
+  const sub = expansion.subscript ? `[${expansion.subscript.text}]` : '';
+  return `${prefix}${expansion.name}${sub}`;
 }
 
 function scalarWholeArrayText(
