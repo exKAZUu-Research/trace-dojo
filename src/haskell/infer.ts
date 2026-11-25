@@ -694,6 +694,19 @@ export class Checker {
       this.checkLambda(expr, expected, context);
       return;
     }
+    // A polymorphic parameter reaches the lambdas in an if's branches and a let's body.
+    if ((expr.k === 'if' || expr.k === 'let') && hasPolymorphicParameter(expected)) {
+      if (expr.k === 'if') {
+        this.checkExpr(expr.cond, tcon(this.builtins.bool), 'if の条件');
+        this.checkExpr(expr.ifTrue, expected, context);
+        this.checkExpr(expr.ifFalse, expected, context);
+      } else {
+        this.inferBindGroup(expr.binds);
+        this.checkExpr(expr.body, expected, context);
+      }
+      expr.type = expected;
+      return;
+    }
     const actual = this.inferExpr(expr);
     this.unify(actual, expected, expr.span, context);
   }
@@ -924,11 +937,19 @@ export class Checker {
   }
 
   private inferCase(expr: Extract<RExpr, { k: 'case' }>): Type {
-    const scrutineeType = this.inferExpr(expr.scrutinee);
+    // A variable of a polymorphic type, as `\case` scrutinizes its parameter, keeps its type for the patterns.
+    const { scrutinee } = expr;
+    const polymorphic =
+      scrutinee.k === 'var' && scrutinee.ref.kind === 'local' && scrutinee.ref.local.type
+        ? prune(scrutinee.ref.local.type)
+        : undefined;
+    const scrutineeType = this.inferExpr(scrutinee);
+    const patternType =
+      polymorphic?.tag === 'forall' && expr.alts.every((alt) => alt.pat.k === 'var') ? polymorphic : scrutineeType;
     const result = this.freshVar();
     for (const alt of expr.alts) {
       this.inPatternScope(() => {
-        this.inferPat(alt.pat, scrutineeType);
+        this.inferPat(alt.pat, patternType);
         this.checkRhs(alt.rhs, result);
       });
     }
@@ -1775,8 +1796,16 @@ function checksParameters(expected: Type, arity: number): boolean {
   for (let index = 0; index < arity; index++) {
     const parts = functionParts(remaining);
     if (!parts) return false;
-    if (parts.multiplicity || prune(parts.param).tag === 'forall') return true;
+    if (parts.multiplicity) return true;
     remaining = prune(parts.result);
+  }
+  return hasPolymorphicParameter(expected);
+}
+
+/** Whether a function type has a parameter of a polymorphic type, which only checking against it can give. */
+function hasPolymorphicParameter(type: Type): boolean {
+  for (let parts = functionParts(prune(type)); parts; parts = functionParts(prune(parts.result))) {
+    if (prune(parts.param).tag === 'forall') return true;
   }
   return false;
 }
