@@ -25,6 +25,7 @@ import type {
   TypeExpr,
   TyVarBinder,
 } from './syntax';
+import { THIS_MODULE } from './syntax';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type ConValue, IOPrim, type Slot } from './values';
 
@@ -244,10 +245,14 @@ class SpliceDecoder {
   }
 
   /** A name the splice refers to, a global one with the identity it has, which no binding the program has captures. */
-  private ref(slot: Slot): QName {
+  private ref(slot: Slot, namespace: 'var' | 'con' | 'type'): QName {
     const parts = this.nameParts(slot);
     const { span } = this;
     if (isSpecialSyntax(parts.occ)) return { name: parts.occ, span };
+    // A new name the splice binds at its top level is this module's own, whatever else the program imports.
+    if (parts.unique !== undefined && this.spellings.get(parts.unique) === parts.occ) {
+      return { name: parts.occ, global: { module: THIS_MODULE, namespace }, span };
+    }
     switch (parts.flavour) {
       case 'Q': {
         return { name: parts.occ, qualifier: parts.module, span };
@@ -264,8 +269,8 @@ class SpliceDecoder {
   }
 
   private operator(slot: Slot): Operator {
-    const name = this.ref(slot);
-    return { ...name, isConstructor: /^[:A-Z]/.test(name.name) };
+    const isConstructor = /^[:A-Z]/.test(this.nameParts(slot).occ);
+    return { ...this.ref(slot, isConstructor ? 'con' : 'var'), isConstructor };
   }
 
   /** Keeps the spelling of the new names a declaration binds at the top level, which the program refers to. */
@@ -412,10 +417,10 @@ class SpliceDecoder {
     switch (e.con.name) {
       case 'VarE':
       case 'UnboundVarE': {
-        return { kind: 'var', name: this.ref(f[0]), span };
+        return { kind: 'var', name: this.ref(f[0], 'var'), span };
       }
       case 'ConE': {
-        return { kind: 'con', name: this.ref(f[0]), span };
+        return { kind: 'con', name: this.ref(f[0], 'con'), span };
       }
       case 'LitE': {
         const lit = this.con(f[0]);
@@ -557,7 +562,7 @@ class SpliceDecoder {
         return { kind: 'typed', expr: this.exp(f[0]), sig: this.sigType(f[1]), span };
       }
       case 'RecConE': {
-        return { kind: 'recordCon', con: this.ref(f[0]), fields: this.fieldBinds(f[1]), span };
+        return { kind: 'recordCon', con: this.ref(f[0], 'con'), fields: this.fieldBinds(f[1]), span };
       }
       case 'RecUpdE': {
         return { kind: 'recordUpdate', expr: this.exp(f[0]), fields: this.fieldBinds(f[1]), span };
@@ -652,7 +657,7 @@ class SpliceDecoder {
   private fieldBinds(slot: Slot): { field: QName; value: Expr; span: Span }[] {
     return this.list(slot).map((pair) => {
       const [name, value] = this.con(pair).fields;
-      return { field: this.ref(name), value: this.exp(value), span: this.span };
+      return { field: this.ref(name, 'var'), value: this.exp(value), span: this.span };
     });
   }
 
@@ -761,10 +766,10 @@ class SpliceDecoder {
         return elems.length === 1 ? elems[0] : { kind: 'ptuple', elems, span };
       }
       case 'ConP': {
-        return { kind: 'pcon', con: this.ref(f[0]), args: this.list(f[2]).map((arg) => this.pat(arg)), span };
+        return { kind: 'pcon', con: this.ref(f[0], 'con'), args: this.list(f[2]).map((arg) => this.pat(arg)), span };
       }
       case 'InfixP': {
-        return { kind: 'pcon', con: this.ref(f[1]), args: [this.pat(f[0]), this.pat(f[2])], span };
+        return { kind: 'pcon', con: this.ref(f[1], 'con'), args: [this.pat(f[0]), this.pat(f[2])], span };
       }
       case 'UInfixP': {
         return { kind: 'pchain', items: this.patChain(slot), span };
@@ -787,9 +792,9 @@ class SpliceDecoder {
       case 'RecP': {
         const fields = this.list(f[1]).map((pair) => {
           const [name, inner] = this.con(pair).fields;
-          return { field: this.ref(name), pat: this.pat(inner), span };
+          return { field: this.ref(name, 'var'), pat: this.pat(inner), span };
         });
-        return { kind: 'precord', con: this.ref(f[0]), fields, span };
+        return { kind: 'precord', con: this.ref(f[0], 'con'), fields, span };
       }
       case 'ListP': {
         return { kind: 'plist', elems: this.list(f[0]).map((elem) => this.pat(elem)), span };
@@ -853,13 +858,13 @@ class SpliceDecoder {
         return { kind: 'tvar', name: this.binder(f[0]).name, span };
       }
       case 'ConT': {
-        return { kind: 'tcon', name: this.ref(f[0]), span };
+        return { kind: 'tcon', name: this.ref(f[0], 'type'), span };
       }
       case 'PromotedT': {
-        return { kind: 'tpromoted', name: this.ref(f[0]), span };
+        return { kind: 'tpromoted', name: this.ref(f[0], 'con'), span };
       }
       case 'InfixT': {
-        const op: TypeExpr = { kind: 'tcon', name: this.ref(f[1]), span };
+        const op: TypeExpr = { kind: 'tcon', name: this.ref(f[1], 'type'), span };
         return { kind: 'tapp', fn: { kind: 'tapp', fn: op, arg: this.type(f[0]), span }, arg: this.type(f[2]), span };
       }
       case 'ParensT': {
@@ -1105,7 +1110,7 @@ class SpliceDecoder {
                 ? 'phantom'
                 : undefined;
         });
-        return [{ kind: 'roleAnnotation', name: this.ref(f[0]), roles, span }];
+        return [{ kind: 'roleAnnotation', name: this.ref(f[0], 'type'), roles, span }];
       }
       case 'TypeDataD':
       case 'ImplicitParamBindD': {
@@ -1134,7 +1139,7 @@ class SpliceDecoder {
       head = this.con(head.fields[0]);
     }
     if (head.con.name !== 'ConT') return this.unavailable('dec');
-    return { cls: this.ref(head.fields[0]), types: types.map((type) => this.type(type)) };
+    return { cls: this.ref(head.fields[0], 'type'), types: types.map((type) => this.type(type)) };
   }
 
   private strategy(slot: Slot): { strategy: DerivingClause['strategy']; via?: TypeExpr } {

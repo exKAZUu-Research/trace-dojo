@@ -80,6 +80,7 @@ import type {
   TypeEquation,
   TypeExpr,
 } from './syntax';
+import { THIS_MODULE } from './syntax';
 import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -2351,7 +2352,7 @@ class Renamer {
   private globalValues(name: QName): ValueEntity[] | undefined {
     const { global } = name;
     if (!global) return undefined;
-    if (global.module === this.module.name) {
+    if (global.module === this.module.name || global.module === THIS_MODULE) {
       const own = this.ownValues.get(name.name);
       return own ? [own] : undefined;
     }
@@ -2361,7 +2362,7 @@ class Renamer {
   private globalTypes(name: QName): TypeLike[] | undefined {
     const { global } = name;
     if (global?.namespace !== 'type') return undefined;
-    if (global.module === this.module.name) {
+    if (global.module === this.module.name || global.module === THIS_MODULE) {
       const own = this.ownTypes.get(name.name);
       return own ? [own] : undefined;
     }

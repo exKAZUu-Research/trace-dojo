@@ -13,6 +13,9 @@ export interface Name {
   span: Span;
 }
 
+/** The module of a global name a splice gives when it is the module being compiled. */
+export const THIS_MODULE = '';
+
 /** A possibly qualified name, such as `M.fromList`. */
 export interface QName extends Name {
   qualifier?: string;

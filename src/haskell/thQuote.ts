@@ -132,6 +132,8 @@ export class QuoteBuilder {
         return { kind: 'thVar', name: expr.name, constructor: false, span: expr.span };
       }
       case 'con': {
+        const generated = expr.name.qualifier ? undefined : this.env.get(expr.name.name);
+        if (generated) return this.call('conE', this.local(generated));
         return { kind: 'thVar', name: expr.name, constructor: true, span: expr.span };
       }
       case 'lit': {
@@ -271,7 +273,10 @@ export class QuoteBuilder {
     );
   }
 
+  /** A name the quote refers to: one its own declarations bind, or a global one. */
   private globalName(name: QName, namespace: 'var' | 'con' | 'type'): Expr {
+    const generated = name.qualifier ? undefined : this.env.get(name.name);
+    if (generated) return this.local(generated);
     return { kind: 'thName', name, namespace, span: name.span };
   }
 
@@ -347,41 +352,37 @@ export class QuoteBuilder {
       if (guard.kind === 'let') return { kind: 'let', decls: guard.decls, span: guard.span };
       return { kind: 'bind', pat: guard.pat, expr: guard.expr, span: guard.span };
     });
-    const names = stmts.flatMap((stmt) => this.stmtBinders(stmt));
-    return this.bindAround(names, () => this.call('patGE', this.stmtList(stmts), this.expr(expr)));
+    // The guarded expression sees every guard's variables.
+    return this.stmts(stmts, (list) => this.call('patGE', list, this.expr(expr)));
   }
 
   /** Statements, each binding its variables for the statements after it, given to what builds from their list. */
-  private stmts(stmts: Stmt[], build: (list: Expr) => Expr): Expr {
-    const names = stmts.flatMap((stmt) => this.stmtBinders(stmt));
-    return this.bindAround(names, () => build(this.stmtList(stmts)));
-  }
-
-  private stmtList(stmts: Stmt[]): Expr {
-    return this.list(
-      stmts.map((stmt) => {
-        switch (stmt.kind) {
-          case 'bind': {
-            return this.call('bindS', this.pat(stmt.pat), this.expr(stmt.expr));
-          }
-          case 'let': {
-            return this.call('letS', this.list(this.decls(stmt.decls)));
-          }
-          case 'exp': {
-            return this.call('noBindS', this.expr(stmt.expr));
-          }
-          default: {
-            throw this.unsupportedIn(stmt.span, 'この文');
-          }
-        }
-      })
-    );
-  }
-
-  private stmtBinders(stmt: Stmt): string[] {
-    if (stmt.kind === 'bind') return this.binders([stmt.pat]);
-    if (stmt.kind === 'let') return this.declBinders(stmt.decls);
-    return [];
+  /**
+   * Statements, each of which sees the variables the statements before it bind: a bind's expression is outside its
+   * own pattern's scope, and a `let`'s declarations are inside their own.
+   */
+  private stmts(stmts: Stmt[], build: (list: Expr) => Expr, done: Expr[] = []): Expr {
+    const [stmt, ...rest] = stmts;
+    if (!stmt) return build(this.list(done));
+    switch (stmt.kind) {
+      case 'bind': {
+        const expr = this.expr(stmt.expr);
+        return this.bindAround(this.binders([stmt.pat]), () =>
+          this.stmts(rest, build, [...done, this.call('bindS', this.pat(stmt.pat), expr)])
+        );
+      }
+      case 'let': {
+        return this.bindAround(this.declBinders(stmt.decls), () =>
+          this.stmts(rest, build, [...done, this.call('letS', this.list(this.decls(stmt.decls)))])
+        );
+      }
+      case 'exp': {
+        return this.stmts(rest, build, [...done, this.call('noBindS', this.expr(stmt.expr))]);
+      }
+      default: {
+        throw this.unsupportedIn(stmt.span, 'この文');
+      }
+    }
   }
 
   // Patterns
