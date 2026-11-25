@@ -154,8 +154,13 @@ function view(node: TreeNode, binder: Binder): ViewNode {
 
 function identifierView(node: TreeNode, binder: Binder): ViewNode {
   const symbol = binder.lookupValue(node, nameOf(node));
-  // A namespace's exported variable is a property of the namespace's object, which its declarations read.
-  if (symbol?.exportedFrom && exportedVariableKinds.has(symbol.valueKind ?? ''))
+  // A namespace's exported variable is a property of the namespace's object, which its declarations read, as is any
+  // export that another declaration of the namespace reads, where the name has no binding of its own.
+  if (
+    symbol?.exportedFrom &&
+    (exportedVariableKinds.has(symbol.valueKind ?? '') ||
+      namespaceBodyOf(node)?.id !== namespaceBodyOf(symbol.valueDeclaration)?.id)
+  )
     return memberReference(node, symbol.exportedFrom.name, nameOf(node));
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
   if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
@@ -163,6 +168,17 @@ function identifierView(node: TreeNode, binder: Binder): ViewNode {
   return nameOf(node) === 'undefined' && !symbol
     ? leaf(node, 'undefined', '(void 0)')
     : generic(node, node.type, binder);
+}
+
+/** The body of the namespace declaration a node is in, whose function binds the names it declares. */
+function namespaceBodyOf(node: TreeNode | undefined): TreeNode | undefined {
+  for (let current = node?.parent; current; current = current.parent)
+    if (
+      current.type === 'statement_block' &&
+      (current.parent?.type === 'internal_module' || current.parent?.type === 'module')
+    )
+      return current;
+  return undefined;
 }
 
 /** The name parentheses wrap, through nested parentheses and type assertions, as `((x))` and `(x as any)`. */
