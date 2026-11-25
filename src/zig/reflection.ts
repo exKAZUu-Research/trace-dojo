@@ -12,7 +12,6 @@ import {
   type FnType,
   type IntType,
   intType,
-  isComptimeOnly,
   NORETURN,
   optionalOf,
   sliceOf,
@@ -247,8 +246,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const type = this.compileType(args[0]);
     // Zig lays out a container it reflects on, which checks its packed and extern fields.
     const opaque = type.kind === 'struct' && type.namespace.syntax?.containerKind === 'opaque';
-    if ((type.kind === 'struct' || type.kind === 'union') && !opaque && !isComptimeOnly(type))
-      this.resolveStorage(type, args[0]);
+    if ((type.kind === 'struct' || type.kind === 'union') && !opaque) this.resolveStorage(type, args[0]);
     const info = this.langMember('Type', expression) as UnionType;
     return known(info, this.typeInfo(type, info, expression), expression);
   }
@@ -362,7 +360,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     this.resolveStorage(type, arg);
     if (type.kind === 'anyopaque' || (type.kind === 'struct' && type.namespace.syntax?.containerKind === 'opaque'))
       this.error(arg, `${name} は、大きさのない opaque 型 ${typeName(type)} には使えません。`);
-    if (isComptimeOnly(type) && name !== '@alignOf')
+    if (this.requiresComptime(type, arg) && name !== '@alignOf')
       this.error(arg, `${typeName(type)} 型はコンパイルのときだけの型なので、${name} は使えません。`);
     return type;
   }
