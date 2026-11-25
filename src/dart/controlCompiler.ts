@@ -423,9 +423,10 @@ export abstract class ControlCompiler extends StatementCompiler {
         : this.compileGenBlock(functionBody.block, false);
     if (functionBody.kind === 'block' && this.flow.reachable) {
       this.fn.returnTypes?.push(NULL);
-      // A function declared to return Object completes a Future<Object?>, yet must still return a value.
+      // A function declared to return Object completes a Future<Object?>, yet must still return a value; one declared
+      // to return a nullable type, as Future<int>?, need not.
       const valueType = expectedReturn && (isObject(expectedReturn) ? expectedReturn : futureValueType(expectedReturn));
-      if (declared && valueType && this.requiresReturn(valueType)) {
+      if (declared && valueType && !isNullable(declared) && this.requiresReturn(valueType)) {
         this.error(
           { row: functionBody.block.row },
           `戻り値の型が ${typeName(declared)} の関数 ${spec.name} は、最後に値を return しなければなりません。`
