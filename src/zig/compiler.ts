@@ -1,5 +1,5 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
-import { ExecutionBudget, LIMITS } from '../interpreter/limits';
+import { ExecutionBudget } from '../interpreter/limits';
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { panic } from './arith';
 import type { FunctionDeclaration, SourceFile, Span } from './ast';
@@ -217,16 +217,8 @@ class Compiler extends StatementCompiler {
       return duringComptime(() => expression.eval(frame));
     } catch (error) {
       if (error instanceof MemoryFault) return this.error(expression.span, 'undefined のポインタは参照できません。');
-      if (error instanceof BranchQuotaExceeded)
-        return this.error(
-          { ...expression.span, row: error.row ?? expression.span.row },
-          `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${error.quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
-        );
-      if (error instanceof CompileTimeCallDepthExceeded)
-        return this.error(
-          { ...expression.span, row: error.row ?? expression.span.row },
-          `コンパイルのときの計算で、関数の呼び出しが ${LIMITS.maxCallDepth} 段の深さを超えました（この採点環境の上限です）。`
-        );
+      if (error instanceof BranchQuotaExceeded || error instanceof CompileTimeCallDepthExceeded)
+        return this.error({ ...expression.span, row: error.row ?? expression.span.row }, error.message);
       if (error instanceof ZigPanic) {
         if (error.text === 'unable to resolve comptime value')
           return this.error(expression.span, 'コンパイルのときに値が決まりません（実行時に決まる値を使っています）。');

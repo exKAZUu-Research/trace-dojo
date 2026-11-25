@@ -6,7 +6,16 @@ import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
 import { withMemoryAccounting } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
-import { type Frame, OutOfMemory, Runtime, StackOverflow, UnavailableOperation, ZigPanic } from './runtime';
+import {
+  BranchQuotaExceeded,
+  CompileTimeCallDepthExceeded,
+  type Frame,
+  OutOfMemory,
+  Runtime,
+  StackOverflow,
+  UnavailableOperation,
+  ZigPanic,
+} from './runtime';
 import { ErrorValue } from './values';
 
 export function executeZigProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -77,6 +86,8 @@ function describeUncaught(error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof ZigPanic) return `panic: ${error.text}`;
   if (error instanceof UnavailableOperation) return error.message;
+  // Analysis reports these as compile errors; one that reaches the run is described the same way.
+  if (error instanceof BranchQuotaExceeded || error instanceof CompileTimeCallDepthExceeded) return error.message;
   if (error instanceof OutOfMemory) return 'error: OutOfMemory';
   // Zig's guard page makes deep recursion crash, whose address differs on every run.
   if (error instanceof StackOverflow || (error instanceof RangeError && /call stack/i.test(error.message))) {

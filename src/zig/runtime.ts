@@ -48,7 +48,9 @@ export class BranchQuotaExceeded extends Error {
     readonly row: number | undefined,
     readonly quota: number
   ) {
-    super(`evaluation exceeded ${quota} backwards branches`);
+    super(
+      `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
+    );
     this.name = 'BranchQuotaExceeded';
   }
 }
@@ -56,7 +58,9 @@ export class BranchQuotaExceeded extends Error {
 /** Calls nested deeper than the grader's call depth while the compiler evaluates code, which ends the analysis. */
 export class CompileTimeCallDepthExceeded extends Error {
   constructor(readonly row: number | undefined) {
-    super('compile-time calls nested too deep');
+    super(
+      `コンパイルのときの計算で、関数の呼び出しが ${LIMITS.maxCallDepth} 段の深さを超えました（この採点環境の上限です）。`
+    );
     this.name = 'CompileTimeCallDepthExceeded';
   }
 }
