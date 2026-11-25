@@ -642,7 +642,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const decorated = decorators
       ? this.applyDecorators(fn, behavior, definitions, decorators, staticInitializers, inferredName)
       : { cls: fn, initializers: [] };
-    if (cls.name) classScope.bindings.set(cls.name, { value: decorated.cls, isMutable: false });
+    // As tsx compiles a decorated class, its own name inside its body stays the class the decorators were given.
+    if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
     runInitializers(this.runtime, decorated.initializers, decorated.cls);
     return decorated.cls;

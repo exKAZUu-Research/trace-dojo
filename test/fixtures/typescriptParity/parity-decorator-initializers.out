@@ -1,0 +1,5 @@
+init s undefined undefined
+init a 1 undefined
+constructed
+false registered true undefined
+undefined true true

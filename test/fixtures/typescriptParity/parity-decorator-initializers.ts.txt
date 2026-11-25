@@ -1,0 +1,26 @@
+function track(_t: unknown, c: ClassAccessorDecoratorContext) {
+  c.addInitializer(function (this: any) { console.log('init', String(c.name), this.a, this.b); });
+}
+class Counter {
+  @track accessor a = 1;
+  b = 2;
+  @track static accessor s = 3;
+}
+new Counter();
+console.log('constructed');
+const registry: string[] = [];
+function withLogging(cls: any, _c: ClassDecoratorContext): any {
+  return class extends cls { logged = true; };
+}
+@withLogging
+class Service {
+  static self = this;
+  static {
+    registry.push('registered ' + (this === Service));
+  }
+  static instance = new Service();
+  static make() { return new Service(); }
+  same() { return this instanceof Service; }
+}
+console.log(Service.self === Service, registry.join(','), (Service.instance as any).logged);
+console.log((Service.make() as any).logged, new Service().same(), (new Service() as any).logged);
