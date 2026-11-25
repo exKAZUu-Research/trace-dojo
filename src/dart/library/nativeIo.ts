@@ -113,7 +113,7 @@ define('_File._write', (runtime, _self, [path, contents, append, failure, shownP
   return;
 });
 
-/** The open file a `_FileSink` writes to. */
+/** The open file an `_OpenedFile` writes to. */
 class SinkFile implements NativeState {
   [key: string]: unknown;
 
@@ -124,7 +124,7 @@ class SinkFile implements NativeState {
   }
 }
 
-define('_FileSink._open', (runtime, self, [path, appends]) => {
+define('_OpenedFile._open', (runtime, self, [path, appends]) => {
   const text = stringArg(runtime, path, 'path');
   const handle = withFileErrors(runtime, 'Cannot open file', () =>
     runtime.io.files.open(text, { create: 'always', truncate: appends !== true, append: false })
@@ -134,7 +134,7 @@ define('_FileSink._open', (runtime, self, [path, appends]) => {
   return;
 });
 
-define('_FileSink._writeOpened', (_runtime, self, [contents]) => {
+define('_OpenedFile._writeOpened', (_runtime, self, [contents]) => {
   ((self as DartObject).native as SinkFile).handle.write(contents as string);
   return;
 });

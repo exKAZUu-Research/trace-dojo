@@ -21,7 +21,7 @@ Never _rejectBytes() => throw UnsupportedError("UTF-8 でないバイト列の�
 class _Utf8Bytes {
   List<int> _pending = const <int>[];
   String text(List<int> data) {
-    final bytes = <int>[..._pending, ...data];
+    final bytes = _pending.isEmpty ? data : <int>[..._pending, ...data];
     var end = bytes.length;
     for (var back = 1; back <= 3 && back <= bytes.length; back++) {
       final byte = bytes[bytes.length - back];
@@ -31,6 +31,10 @@ class _Utf8Bytes {
         if (length > back) end = bytes.length - back;
         break;
       }
+    }
+    if (end == bytes.length) {
+      _pending = const <int>[];
+      return _textOfBytes(bytes);
     }
     _pending = bytes.sublist(end);
     return _textOfBytes(bytes.sublist(0, end));
@@ -389,7 +393,7 @@ class _File extends FileSystemEntity implements File {
     if (mode != FileMode.write && mode != FileMode.append && mode != FileMode.writeOnly && mode != FileMode.writeOnlyAppend) {
       throw ArgumentError("Invalid file mode for this operation");
     }
-    return _FileSink(this, mode._appends);
+    return _IOSinkImpl(_FileStreamConsumer(this, mode._appends), encoding);
   }
   Stream<List<int>> openRead([int? start, int? end]) => Stream<List<int>>.fromFuture(Future(() {
         final from = start ?? 0;
@@ -405,134 +409,239 @@ class _File extends FileSystemEntity implements File {
   external static void _create(String path, bool recursive, bool exclusive);
 }
 
-/**
- * An IOSink of a file. The file is opened, created or truncated, when the sink is, as the VM's I/O service opens it
- * before the program's next file operation, and what the sink buffers is written in a later event, so that it reaches
- * the file without a flush or a close.
- */
-class _FileSink implements IOSink {
-  final _File _file;
-  final _Utf8Bytes _bytes = _Utf8Bytes();
-  final StringBuffer _buffer = StringBuffer();
-  final Completer<void> _done = Completer<void>();
+// _StreamSinkImpl and _IOSinkImpl are the SDK's (lib/io/io_sink.dart) and _FileStreamConsumer is lib/io/file_impl.dart's,
+// over _OpenedFile in place of RandomAccessFile.
+class _StreamSinkImpl<T> implements StreamSink<T> {
+  final StreamConsumer<T> _target;
+  final Completer _doneCompleter = Completer();
+  StreamController<T>? _controllerInstance;
+  Completer? _controllerCompleter;
   bool _isClosed = false;
-  /**
-   * Why the file could not be opened, which the VM reports to the flush or addStream of data written since, to close,
-   * and otherwise as an unhandled error.
-   */
-  Object? _openError;
-  StackTrace? _openStackTrace;
-  bool get _failed => _openError != null;
-  bool _openErrorTaken = false;
-  bool _unwrittenSinceReport = false;
-  bool _writeScheduled = false;
-  _FileSink(this._file, bool appends) {
-    try {
-      _open(_file.path, appends);
-    } catch (error, stackTrace) {
-      _openError = error;
-      _openStackTrace = stackTrace;
-      _reportUnhandledLater();
+  bool _isBound = false;
+  bool _hasError = false;
+  _StreamSinkImpl(this._target);
+  void add(T data) {
+    if (_isClosed) {
+      throw StateError("StreamSink is closed");
     }
+    _controller.add(data);
   }
-  Encoding get encoding => utf8;
-  void write(Object? object) {
-    _startWrite();
-    _bytes.finish();
-    _buffer.write(object);
+  void addError(error, [StackTrace? stackTrace]) {
+    if (_isClosed) {
+      throw StateError("StreamSink is closed");
+    }
+    _controller.addError(error, stackTrace);
   }
-  void writeln([Object? object = ""]) {
-    _startWrite();
-    _bytes.finish();
-    _buffer.writeln(object);
-  }
-  void writeAll(Iterable<dynamic> objects, [String separator = ""]) {
-    _startWrite();
-    _bytes.finish();
-    _buffer.writeAll(objects, separator);
-  }
-  void writeCharCode(int charCode) {
-    _startWrite();
-    _bytes.finish();
-    _buffer.writeCharCode(charCode);
-  }
-  void add(List<int> data) {
-    _startWrite();
-    _buffer.write(_bytes.text(data));
-  }
-  void addError(Object error, [StackTrace? stackTrace]) {
-    if (!_done.isCompleted) _done.completeError(error, stackTrace);
-  }
-  Future addStream(Stream<List<int>> stream) {
-    if (_failed) _openErrorTaken = true;
-    return stream.forEach(add).then((_) {
-      if (_failed) _reportOpenError();
+  Future addStream(Stream<T> stream) {
+    if (_isBound) {
+      throw StateError("StreamSink is already bound to a stream");
+    }
+    if (_hasError) return done;
+    _isBound = true;
+    var future = _controllerCompleter == null
+        ? _target.addStream(stream)
+        : _controllerCompleter!.future.then((_) => _target.addStream(stream));
+    _controllerInstance?.close();
+    return future.whenComplete(() {
+      _isBound = false;
     });
   }
   Future flush() {
-    if (!_failed) return Future(_writeBuffered);
-    if (!_unwrittenSinceReport) {
-      // A flush with nothing to write resolves, and the failure waits for a later close or flush.
-      _flushesWaiting++;
-      return Future(() {
-        _flushesWaiting--;
-        _reportUnhandledLater();
-      });
+    if (_isBound) {
+      throw StateError("StreamSink is bound to a stream");
     }
-    _openErrorTaken = true;
-    return Future(_reportOpenError);
-  }
-  int _flushesWaiting = 0;
-  /** Reports the failure to open as unhandled unless a flush, addStream, or close takes it first. */
-  void _reportUnhandledLater() {
-    Future(() {
-      if (!_openErrorTaken && _flushesWaiting == 0) Future<void>.error(_openError!, _openStackTrace);
+    if (_controllerInstance == null) return Future.value(this);
+    _isBound = true;
+    var future = _controllerCompleter!.future;
+    _controllerInstance!.close();
+    return future.whenComplete(() {
+      _isBound = false;
     });
   }
-  /** Fails the operation that carries the data of a sink whose file could not be opened. */
-  void _reportOpenError() {
-    _unwrittenSinceReport = false;
-    Error.throwWithStackTrace(_openError!, _openStackTrace ?? StackTrace.empty);
-  }
   Future close() {
-    if (!_isClosed) _bytes.finish();
+    if (_isBound) {
+      throw StateError("StreamSink is bound to a stream");
+    }
     if (!_isClosed) {
       _isClosed = true;
-      _openErrorTaken = true;
-      Future(() {
-        if (_failed) Error.throwWithStackTrace(_openError!, _openStackTrace ?? StackTrace.empty);
-        _writeBuffered();
-        return _file;
-      }).then((file) {
-        if (!_done.isCompleted) _done.complete();
-      }, onError: (Object error, StackTrace stackTrace) {
-        if (!_done.isCompleted) _done.completeError(error, stackTrace);
-      });
+      if (_controllerInstance != null) {
+        _controllerInstance!.close();
+      } else {
+        _closeTarget();
+      }
     }
     return done;
   }
-  Future get done => _done.future;
-  void _writeBuffered() {
-    final contents = _buffer.toString();
-    _buffer.clear();
-    if (contents.isNotEmpty) _writeOpened(contents);
+  void _closeTarget() {
+    _target.close().then(_completeDoneValue, onError: _completeDoneError);
   }
-  /**
-   * Opens the sink's file: from its start, or in append mode at the end it has now, which other writes to the file do
-   * not move, and which the sink keeps writing to after the file is renamed or deleted, as the VM's open file does.
-   */
+  Future get done => _doneCompleter.future;
+  void _completeDoneValue(value) {
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.complete(value);
+    }
+  }
+  void _completeDoneError(error, StackTrace? stackTrace) {
+    if (!_doneCompleter.isCompleted) {
+      _hasError = true;
+      _doneCompleter.completeError(error, stackTrace);
+    }
+  }
+  StreamController<T> get _controller {
+    if (_isBound) {
+      throw StateError("StreamSink is bound to a stream");
+    }
+    if (_isClosed) {
+      throw StateError("StreamSink is closed");
+    }
+    if (_controllerInstance == null) {
+      _controllerInstance = StreamController<T>(sync: true);
+      _controllerCompleter = Completer();
+      _target.addStream(_controller.stream).then(
+        (_) {
+          if (_isBound) {
+            _controllerCompleter!.complete(this);
+            _controllerCompleter = null;
+            _controllerInstance = null;
+          } else {
+            _closeTarget();
+          }
+        },
+        onError: (error, stackTrace) {
+          if (_isBound) {
+            _controllerCompleter!.completeError(error, stackTrace);
+            _controllerCompleter = null;
+            _controllerInstance = null;
+          } else {
+            _completeDoneError(error, stackTrace);
+          }
+        },
+      );
+    }
+    return _controllerInstance!;
+  }
+}
+
+class _IOSinkImpl extends _StreamSinkImpl<List<int>> implements IOSink {
+  Encoding _encoding;
+  bool _encodingMutable = true;
+  _IOSinkImpl(StreamConsumer<List<int>> target, this._encoding) : super(target);
+  Encoding get encoding => _encoding;
+  void set encoding(Encoding value) {
+    if (!_encodingMutable) {
+      throw StateError("IOSink encoding is not mutable");
+    }
+    _encoding = value;
+  }
+  void write(Object? obj) {
+    String string = '$obj';
+    if (string.isEmpty) return;
+    add(_encoding.encode(string));
+  }
+  void writeAll(Iterable objects, [String separator = ""]) {
+    Iterator iterator = objects.iterator;
+    if (!iterator.moveNext()) return;
+    if (separator.isEmpty) {
+      do {
+        write(iterator.current);
+      } while (iterator.moveNext());
+    } else {
+      write(iterator.current);
+      while (iterator.moveNext()) {
+        write(separator);
+        write(iterator.current);
+      }
+    }
+  }
+  void writeln([Object? object = ""]) {
+    add(_encoding.encode('$object\n'));
+  }
+  void writeCharCode(int charCode) {
+    write(String.fromCharCode(charCode));
+  }
+}
+
+class _FileStreamConsumer implements StreamConsumer<List<int>> {
+  File? _file;
+  Future<_OpenedFile> _openFuture;
+  _FileStreamConsumer(File file, bool appends)
+    : _file = file,
+      _openFuture = _OpenedFile._openFile(file.path, appends);
+  /** The file once opened, which later streams write to without waiting for the open again. */
+  _OpenedFile? _opened;
+  Future<File?> addStream(Stream<List<int>> stream) {
+    Completer<File?> completer = new Completer<File?>.sync();
+    final opened = _opened;
+    if (opened != null) {
+      _write(opened, stream, completer);
+      return completer.future;
+    }
+    _openFuture
+        .then((openedFile) {
+          _opened = openedFile;
+          _write(openedFile, stream, completer);
+        })
+        .catchError(completer.completeError);
+    return completer.future;
+  }
+  void _write(_OpenedFile openedFile, Stream<List<int>> stream, Completer<File?> completer) {
+    late StreamSubscription<List<int>> _subscription;
+    void error(e, StackTrace stackTrace) {
+      _subscription.cancel();
+      openedFile.close();
+      completer.completeError(e, stackTrace);
+    }
+    // _OpenedFile writes at once, so the subscription need not pause while a write is in flight.
+    _subscription = stream.listen(
+      (d) {
+        try {
+          openedFile.writeFrom(d);
+        } catch (e, stackTrace) {
+          error(e, stackTrace);
+        }
+      },
+      onDone: () {
+        completer.complete(_file);
+      },
+      onError: error,
+      cancelOnError: true,
+    );
+  }
+  Future<File?> close() => _openFuture.then((openedFile) => openedFile.close()).then((_) => _file);
+}
+
+/**
+ * The open file a sink writes to, in place of the SDK's RandomAccessFile: opened at once, as the VM's I/O service
+ * opens it before the program's next file operation, and written at its own position, which other writes to the file
+ * do not move and which follows the file after a rename or delete.
+ */
+class _OpenedFile {
+  /** The file holds text, so the bytes of a character written in parts wait for the rest of it. */
+  final _Utf8Bytes _bytes = _Utf8Bytes();
+  _OpenedFile._();
+  static Future<_OpenedFile> _openFile(String path, bool appends) {
+    final file = _OpenedFile._();
+    try {
+      file._open(path, appends);
+    } catch (error, stackTrace) {
+      // The VM's I/O service answers a failure later, after code the program runs before its next event.
+      return Future<_OpenedFile>(() => Error.throwWithStackTrace(error, stackTrace));
+    }
+    return Future.value(file);
+  }
+  void writeFrom(List<int> bytes) {
+    _writeOpened(_bytes.text(bytes));
+  }
+  Future<void> close() {
+    try {
+      _bytes.finish();
+    } catch (error, stackTrace) {
+      return Future.error(error, stackTrace);
+    }
+    return Future.value();
+  }
   external void _open(String path, bool appends);
   external void _writeOpened(String contents);
-  void _startWrite() {
-    if (_isClosed) throw StateError("StreamSink is closed");
-    if (_failed) _unwrittenSinceReport = true;
-    if (_failed || _writeScheduled) return;
-    _writeScheduled = true;
-    Future(() {
-      _writeScheduled = false;
-      _writeBuffered();
-    }).catchError(addError);
-  }
 }
 
 abstract interface class Directory implements FileSystemEntity {
