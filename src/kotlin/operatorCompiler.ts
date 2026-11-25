@@ -79,9 +79,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.toLongConstant(this.compilePrefix(scope, context, expression, undefined));
     }
     const operand = this.compileExpression(scope, context, expression.operand);
+    // `!` on a value that is not a Boolean calls its `operator fun not()`, as `-` calls `unaryMinus`.
+    if (operator === '!' && !isSubtype(operand.type, this.booleanType))
+      return this.compileOperatorCall(scope, context, operand, 'not', [], row, operator);
     if (operator === '!') {
-      if (!isSubtype(operand.type, this.booleanType))
-        this.error(row, typeMismatchMessage(this.booleanType, operand.type));
       const evaluate = checkedBoolean(operand, operand.eval);
       return {
         type: this.booleanType,
