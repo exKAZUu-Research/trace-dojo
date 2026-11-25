@@ -126,7 +126,8 @@ export type Pat =
   | { kind: 'pchain'; items: ChainItem<Pat>[]; span: Span }
   | { kind: 'pbang'; pat: Pat; span: Span }
   | { kind: 'plazy'; pat: Pat; span: Span }
-  | { kind: 'pview'; expr: Expr; exprText: string; pat: Pat; span: Span }
+  /** `(e -> p)`; `written` is the pattern the source wrote when the converter made the view, for messages. */
+  | { kind: 'pview'; expr: Expr; exprText: string; pat: Pat; written?: Pat; span: Span }
   | { kind: 'por'; alts: Pat[]; span: Span }
   /** A pattern with a type signature, `(x :: Int)`, which may bind the type variables it names. */
   | { kind: 'psig'; pat: Pat; type: TypeExpr; span: Span }

@@ -2637,6 +2637,7 @@ export function convertPattern(features: FeatureGates<'convert'>, node: Node): P
           expr: matches,
           exprText: '==',
           pat: { kind: 'pcon', con: { name: 'True', span }, args: [], span },
+          written: { kind: 'plit', lit, negative: false, span },
           span,
         };
       }
@@ -2696,6 +2697,7 @@ export function convertPattern(features: FeatureGates<'convert'>, node: Node): P
         expr: { kind: 'support', name: 'overloadedToList', span },
         exprText: 'toList',
         pat: list,
+        written: list,
         span,
       };
     }

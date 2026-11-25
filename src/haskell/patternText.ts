@@ -43,6 +43,7 @@ export function surfacePatternText(pat: Pat): string {
       return `~${patternArgument(pat.pat)}`;
     }
     case 'pview': {
+      if (pat.written) return surfacePatternText(pat.written);
       return `(${pat.exprText} -> ${surfacePatternText(pat.pat)})`;
     }
     case 'por': {
