@@ -183,8 +183,14 @@ define('hPutStr', 2, [], ([handle, text], runtime) =>
     checkUsable(entry, 'hPutStr', false);
     if (channel) writeString(text, runtime, (chunk) => runtime.io[channel].write(chunk));
     else if (entry.writer) {
-      const writer = entry.writer;
-      writeString(text, runtime, (chunk) => writer.write(chunk));
+      const { reader, writer } = entry;
+      // A handle open for both reading and writing has one position, as GHC's does.
+      if (reader) writer.position = reader.position;
+      try {
+        writeString(text, runtime, (chunk) => writer.write(chunk));
+      } finally {
+        if (reader && writer.position !== undefined) reader.position = writer.position;
+      }
     } else throw ioError('IllegalOperation', 'hPutStr', entry.name, 'handle is not open for writing');
     return unit();
   })

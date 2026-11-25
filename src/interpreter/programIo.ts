@@ -220,7 +220,7 @@ class DirectoryNode {
 /** A file opened for writing, which keeps writing to the same file after it is renamed or deleted, as on POSIX. */
 export class FileHandle {
   /** Where the next write goes, or `undefined` for the end of the file. */
-  private position: number | undefined;
+  position: number | undefined;
 
   constructor(
     private readonly files: VirtualFileSystem,
