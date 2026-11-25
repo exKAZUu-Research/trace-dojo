@@ -1,11 +1,14 @@
 import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
 import {
   couldMatch,
+  freshTypeVar,
   instantiateType,
   matchType,
   type Pred,
   prune,
   splitApp,
+  STAR,
+  tap,
   type Type,
   typesEqual,
   typeVarsOf,
@@ -50,7 +53,8 @@ export class ClassEnv {
         continue;
       }
       // An instance that could match once the type is known decides nothing yet, unless it is incoherent.
-      if (instance.overlap !== 'INCOHERENT' && couldMatch(instance.head, pred.type)) pending = true;
+      if (instance.overlap !== 'INCOHERENT' && couldMatch(instance.head, withFamiliesUnknown(pred.type)))
+        pending = true;
     }
     // As GHC does, an instance gives way to a more specific one when either pragma allows it.
     const remaining = matches.filter(
@@ -104,19 +108,18 @@ function overlapping(instance: InstanceInfo): boolean {
 /** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */
 export function hasConstructorHead(type: Type): boolean {
   const { head } = splitApp(type);
-  // A type family's application that has not reduced, at the head or inside, decides no instance yet: what it
-  // reduces to may still be learned.
-  return head.tag === 'tcon' && !hasFamilyApplication(type);
+  // A type family's application that has not reduced is no constructor yet: what it reduces to may still be learned.
+  return head.tag === 'tcon' && head.entity.sort !== 'family';
 }
 
-function hasFamilyApplication(type: Type): boolean {
-  const pending = [type];
-  for (let current = pending.pop(); current; current = pending.pop()) {
-    const { head, args } = splitApp(prune(current));
-    if (head.tag === 'tcon' && head.entity.sort === 'family') return true;
-    pending.push(...args);
-  }
-  return false;
+/**
+ * A type with its unreduced family applications replaced by unknowns: an instance that could match it may match
+ * once they reduce, while one whose head has a variable there matches them already.
+ */
+function withFamiliesUnknown(type: Type): Type {
+  const { head, args } = splitApp(prune(type));
+  if (head.tag === 'tcon' && head.entity.sort === 'family') return freshTypeVar(STAR, 0);
+  return args.length === 0 ? head : tap(head, ...args.map(withFamiliesUnknown));
 }
 
 export function superPred(pred: Pred, index: number): Pred {
