@@ -159,9 +159,21 @@ export class Namespaces {
     const target = symbol.importTarget;
     const module = target && this.moduleNamed(target.module);
     if (!target || !module) return undefined;
-    if (target.name === '*') return module;
+    if (target.name === '*' || this.isSyntheticDefault(module, target.name)) return module;
     const exports = module.namespaceExports as Scope;
     return (meaning === 'value' ? exports.values : exports.types).get(target.name);
+  }
+
+  /**
+   * Whether `import x from "m"` names the whole of a Node module, which has no default export of its own: tsc's default
+   * `esModuleInterop` lets a default import stand for a CommonJS module.
+   */
+  private isSyntheticDefault(module: Sym, name: string): boolean {
+    return (
+      name === 'default' &&
+      !module.namespaceExports?.values.has('default') &&
+      this.c.libraryBinder.ambientModules.get(module.name) === module
+    );
   }
 
   private moduleNamed(name: string): Sym | undefined {
@@ -181,19 +193,20 @@ export class Namespaces {
     if (!source || !clause || clause.type === 'import_require_clause') return;
     const module = this.moduleNamed(stringValue(source));
     if (!module) return;
+    const moduleName = `'"${stringValue(source)}"'`;
     for (const part of named(clause)) {
-      if (part.type === 'identifier')
-        this.c.error(part, `モジュール '${source.text}' には既定のエクスポートがありません。`);
-      if (part.type !== 'named_imports') continue;
-      for (const specifier of named(part)) {
-        const name = specifier.childForFieldName('name');
-        const exports = module.namespaceExports as Scope;
-        if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
-          this.c.error(
-            name,
-            `モジュール '${source.text}' には、エクスポートされたメンバー '${name.text}' がありません。`
-          );
-      }
+      if (part.type === 'identifier' && !this.isSyntheticDefault(module, 'default'))
+        this.c.error(part, `モジュール ${moduleName} には既定のエクスポートがありません。`);
+      if (part.type === 'named_imports') this.checkNamedImports(part, module, moduleName);
+    }
+  }
+
+  private checkNamedImports(imports: TreeNode, module: Sym, moduleName: string): void {
+    const exports = module.namespaceExports as Scope;
+    for (const specifier of named(imports)) {
+      const name = specifier.childForFieldName('name');
+      if (name && !exports.values.has(name.text) && !exports.types.has(name.text))
+        this.c.error(name, `モジュール ${moduleName} には、エクスポートされたメンバー '${name.text}' がありません。`);
     }
   }
 

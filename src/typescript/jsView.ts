@@ -286,7 +286,8 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
 
 /**
  * An `import` of a Node.js module as tsx compiles it for a CommonJS program, which reads the module with `require`:
- * `var fs = require("fs");` and `var readFileSync = require("fs").readFileSync;`. A type-only one compiles to nothing.
+ * `var fs = require("fs");` (for a default or namespace import) and `var readFileSync = require("fs").readFileSync;`. A
+ * type-only one compiles to nothing.
  */
 function importView(node: TreeNode): ViewNode {
   const clause = node.childForFieldName('import_clause');
@@ -330,6 +331,8 @@ function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [st
     ]);
   const parts = clause.type === 'import_require_clause' ? [clause] : clause.namedChildren;
   return parts.flatMap((part): [string, ViewNode][] => {
+    // A default import is the whole module, as tsx's interop gives a CommonJS module without a default export.
+    if (part?.type === 'identifier') return [[part.text, required()]];
     const name = part?.namedChildren[0];
     if ((part?.type === 'import_require_clause' || part?.type === 'namespace_import') && name)
       return [[name.text, required()]];
