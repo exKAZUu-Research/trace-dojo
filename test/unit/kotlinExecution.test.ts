@@ -6574,6 +6574,16 @@ test.each([
 
 test.each([
   [
+    'an annotation with arguments on a class',
+    'annotation class A(val s: String)\n@A("x") class C\nfun main() { println(1) }',
+    true,
+  ],
+  [
+    'an annotation missing its argument on a class',
+    'annotation class A(val s: String)\n@A class C\nfun main() { println(1) }',
+    false,
+  ],
+  [
     'an interface declared in a function body',
     'fun main() {\n  interface I { fun f() = 1 }\n  class C : I\n  println(C().f())\n}',
     false,

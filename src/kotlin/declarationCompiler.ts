@@ -317,6 +317,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       for (const each of entries) this.declareSupertypes(each);
     });
     for (const each of entries) this.declareMembers(each);
+    for (const each of entries) this.validateClassAnnotations(each);
     this.linkClasses(entries);
     return entries;
   }
@@ -465,6 +466,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.file = entry.file;
       this.declareMembers(entry);
     }
+    for (const entry of this.classEntries) {
+      this.file = entry.file;
+      this.validateClassAnnotations(entry);
+    }
     for (const { file, context } of files) {
       this.file = context;
       const packageScope = this.packageScope(context.packageName);
@@ -535,6 +540,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  /**
+   * Checks a class's annotations once every class has its members, as an annotation's arguments go to the constructor
+   * of an annotation class, which may come later in the program.
+   */
+  private validateClassAnnotations(entry: ClassEntry): void {
+    const { symbol } = entry;
+    this.withOptIns(this.classOptIns(symbol), () =>
+      this.validateAnnotations(
+        entry.scope,
+        entry.decl.modifiers,
+        annotationSite(symbol.isAnnotation ? ['ANNOTATION_CLASS', 'CLASS'] : ['CLASS'])
+      )
+    );
+  }
+
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
     symbol.optInMarkers = this.optInMarkersOf(entry.scope, entry.decl.modifiers.annotations);
@@ -545,11 +565,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareSupertypesOpted(entry: ClassEntry): void {
     const { symbol } = entry;
-    this.validateAnnotations(
-      entry.scope,
-      entry.decl.modifiers,
-      annotationSite(symbol.isAnnotation ? ['ANNOTATION_CLASS', 'CLASS'] : ['CLASS'])
-    );
     for (const spec of entry.decl.supers) {
       const written = this.resolveType(entry.scope, spec.type);
       const type = written.kind === 'function' ? this.functionInterfaceType(written, spec.row) : (written as ClassType);
