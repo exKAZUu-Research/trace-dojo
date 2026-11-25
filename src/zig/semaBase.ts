@@ -2000,9 +2000,11 @@ export function nullUnwrapPanic(): never {
 
 export { BigFloat, BOOL, COMPTIME_FLOAT, COMPTIME_INT, NULL_TYPE, UNDEFINED_TYPE, arrayOf, isComptimeOnly };
 
+/** Whether `target` is `storage` or lies in it, a view of an array that shares its slots included. */
 function holdsStorage(storage: Slots, target: Slots): boolean {
   return (
     storage === target ||
+    storage.slots === target.slots ||
     storage.slots.some(
       (value) =>
         (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
