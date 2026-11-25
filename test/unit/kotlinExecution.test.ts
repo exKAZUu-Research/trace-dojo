@@ -6474,6 +6474,16 @@ test('keeps what local functions and classes captured in lambdas that outlive th
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[106, 212]\n' });
 });
 
+test.each([
+  ['String::length', true],
+  ['String::uppercase', false],
+])('checks the function type of %s passed for a fun interface', (reference, compiles) => {
+  const source = `fun interface S { fun m(s: String): Int }
+fun use(s: S) = s.m("abc")
+fun main() { println(use(${reference})) }`;
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

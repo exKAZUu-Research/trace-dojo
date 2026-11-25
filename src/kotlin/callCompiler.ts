@@ -1385,7 +1385,13 @@ export abstract class CallCompiler extends CompilerCore {
     const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
     if (argument.value.kind === 'reference') {
       const reference = this.compileExpression(scope, context, argument.value, lambdaType ?? elementType);
-      if (sam) return this.samWrap(reference, sam, resolved(elementType));
+      if (sam) {
+        // A wrapped reference has the interface's type, which argumentEvaluations then accepts; the reference itself
+        // must have the type of the interface's function.
+        if (!this.acceptsArgument(reference, lambdaType ?? sam.functionType))
+          this.error(argument.row, typeMismatchMessage(elementType, reference.type));
+        return this.samWrap(reference, sam, resolved(elementType));
+      }
       // Relating the reference's type to the parameter's gives the call's type variables their types, as `R` of
       // `map(String::length)`; acceptsArgument checks the argument later.
       isSubtype(reference.type, elementType);
