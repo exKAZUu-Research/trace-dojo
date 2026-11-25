@@ -229,7 +229,12 @@ export abstract class StatementCompiler extends PatternCompiler {
    */
   protected returnValueType(): DartType | undefined {
     const { returnType, isAsync } = this.fn.kind;
-    if (!isAsync) return returnType ?? (this.fn.returnTypes ? undefined : VOID);
+    if (!isAsync) {
+      // A function literal is checked against its context's return type once that type is known, as r65's check is.
+      const context = this.fn.contextReturn;
+      const known = context && !containsInferenceHole(context) ? context : undefined;
+      return returnType ?? known ?? (this.fn.returnTypes ? undefined : VOID);
+    }
     const declared = returnType ?? this.fn.contextReturn;
     return declared ? futureValueType(declared) : undefined;
   }
