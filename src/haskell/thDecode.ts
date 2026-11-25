@@ -1265,9 +1265,12 @@ class SpliceDecoder {
         const inner = this.conDecl(f[2]);
         const exVars = this.list(f[0]).map((b) => this.tyVar(b));
         const context = this.cxt(f[1]);
+        // A context needs the binders a written `forall` gives, which are none in `Show a => Box a`, as source has
+        // them; a GADT constructor's are its signature's variables, which the renamer collects when none are given.
+        const binds = exVars.length > 0 || (context.length > 0 && !inner.result);
         return {
           ...inner,
-          ...(exVars.length > 0 ? { exVars } : {}),
+          ...(binds ? { exVars } : {}),
           ...(context.length > 0 ? { context } : {}),
         };
       }
