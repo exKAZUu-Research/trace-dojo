@@ -992,7 +992,7 @@ export class Checker {
         ? conScheme(head.con)
         : head.k === 'var'
           ? head.ref.kind === 'local'
-            ? head.ref.local.scheme
+            ? (head.ref.local.scheme ?? localPolytypeScheme(head.ref.local))
             : this.globalMono.has(head.ref.entity)
               ? undefined
               : head.ref.entity.scheme
@@ -1947,6 +1947,15 @@ function bindingLabel(binding: RBinding): string {
 function setBinderScheme(binder: Binder, scheme: Scheme): void {
   if (binder.kind === 'local') binder.local.scheme = scheme;
   else binder.entity.scheme = scheme;
+}
+
+/** The scheme of a local whose type is polymorphic, as a rank-N parameter's is. */
+function localPolytypeScheme(local: LocalVar): Scheme | undefined {
+  const type = local.type && prune(local.type);
+  // The binders of a written `forall`, which type applications take in order.
+  return type?.tag === 'forall'
+    ? { ...polytypeScheme(type), specified: type.vars.map((_, index) => index) }
+    : undefined;
 }
 
 /** A polymorphic type inside another as a scheme, with its variables as `TGen` indices. */
