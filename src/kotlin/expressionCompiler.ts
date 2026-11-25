@@ -2050,7 +2050,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number,
     shown: string
   ): { call: ResolvedCall; compiled: Compiled } {
-    const levels = this.syntaxCandidateLevels(receiver, name, row, shown, 'isOperator');
+    const levels = this.syntaxCandidateLevels(scope, receiver, name, row, shown, 'isOperator');
     const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
     return {
       call,
@@ -2058,22 +2058,35 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
+  /**
+   * The candidates an operator or an infix call resolves among: those a call of the function on the receiver does, its
+   * members first and then the extensions in scope (local, of implicit receivers, and top-level), that carry the
+   * modifier. A receiver that may be null takes only extensions, whose receiver may be.
+   */
+  // code-gauge-allow functionParameterCount -- the scope, the receiver, and the parts of the call are each needed, and bundling them would only rename them.
   protected syntaxCandidateLevels(
+    scope: Scope,
     receiver: Compiled,
     name: string,
     row: number,
     shown: string,
     modifier: 'isOperator' | 'isInfix'
   ): Candidate[][] {
+    const isNullableReceiver = isNullable(resolved(receiver.type));
+    const levels = this.memberCallLevels(scope, receiver, name, row).flatMap((level) =>
+      'candidates' in level
+        ? [
+            level.candidates.filter(
+              (candidate) => candidate.symbol[modifier] && !(isNullableReceiver && candidate.kind === 'member')
+            ),
+          ]
+        : []
+    );
+    const fitting = levels.filter((level) => level.length > 0);
+    if (fitting.length > 0) return fitting;
     const members = this.memberCandidates(nonNull(receiver.type), name).filter(
       (candidate) => candidate.symbol[modifier]
     );
-    const extensions = this.extensionCandidateLevels(receiver.type, name).map((level) =>
-      level.filter((candidate) => candidate.symbol[modifier])
-    );
-    const isNullableReceiver = isNullable(resolved(receiver.type));
-    const levels = [isNullableReceiver ? [] : members, ...extensions].filter((level) => level.length > 0);
-    if (levels.length > 0) return levels;
     if (isNullableReceiver && members.length > 0) this.requireNonNullReceiver(receiver, row, false);
     return this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
   }

@@ -6696,6 +6696,17 @@ fun main() { println(listOf(File("a/b/").name, File("a", "/b").path, File("a") =
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[b, a/b, true]\n' });
 });
 
+test('finds operators and infix functions where a call of them finds them', () => {
+  const source = `data class V(val x: Int)
+class Ops { operator fun V.times(k: Int) = V(x * k) }
+fun main() {
+    operator fun V.div(k: Int) = V(x / k)
+    infix fun Int.pow(e: Int): Int { var r = 1; repeat(e) { r *= this }; return r }
+    println(listOf(V(6) / 3, 2 pow 3, with(Ops()) { V(2) * 5 }))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[V(x=2), 8, V(x=10)]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

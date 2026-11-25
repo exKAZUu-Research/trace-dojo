@@ -695,7 +695,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.toLongConstant(this.compileInfix(scope, context, expression, undefined));
     const { name, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
-    const levels = this.syntaxCandidateLevels(left, name, row, name, 'isInfix');
+    const levels = this.syntaxCandidateLevels(scope, left, name, row, name, 'isInfix');
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const call = this.resolveCall(scope, context, levels, args, false, [], expected, left, row, name);
     return { ...this.finishCall(call, left, row), isCall: false };
