@@ -165,10 +165,14 @@ define('_Directory._createDirectory', (runtime, _self, [path, recursive]) => {
  * the SDK's Directory creates the ancestors one by one.
  */
 function rejectFileAncestors(runtime: Runtime, path: string, withPath: boolean): void {
-  const names = path.split('/');
-  for (let count = 1; count < names.length + (withPath ? 1 : 0); count++) {
-    const ancestor = names.slice(0, count).join('/');
-    if (ancestor !== '' && runtime.io.files.kindOf(ancestor) === 'file') throw new FileSystemError('ENOTDIR', ancestor);
+  // Each ancestor ends at a separator, and the path itself keeps the separators it ends with.
+  const ends = [...path.matchAll(/\/+/gu)].map((match) => match.index).filter((index) => index > 0);
+  if (withPath) ends.push(path.length);
+  for (const end of ends) {
+    const ancestor = path.slice(0, end);
+    // Separators that only end the path belong to the path itself, as the error names it.
+    const named = /^\/*$/u.test(path.slice(end)) ? path : ancestor;
+    if (runtime.io.files.kindOf(ancestor) === 'file') throw new FileSystemError('ENOTDIR', named);
   }
 }
 
