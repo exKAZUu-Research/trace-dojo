@@ -183,8 +183,8 @@ export function expandSplices(
 }
 
 /**
- * Names the new names of a splice's code: each by its own name when no other new name of the code has it, and with
- * its number otherwise, as `x_1`. The library marks them as `\u0001name\u0002number\u0003`.
+ * Names the new names of a splice's code: each by its own name when no other name of the code has it (another new
+ * name, or a plain one such as mkName gives), and with its number otherwise, as `x_1`. The library marks them as `\u0001name\u0002number\u0003`.
  */
 function uniqueNames(text: string): string {
   const pattern = /\u0001([^\u0002]*)\u0002(\d+)\u0003/g;
@@ -194,7 +194,9 @@ function uniqueNames(text: string): string {
     set.add(match[2]);
     numbers.set(match[1], set);
   }
+  // A plain name (from mkName, or the program's own) of the same text would capture a new name written plainly.
+  const plain = new Set(text.replaceAll(pattern, ' ').match(/[\w']+/g));
   return text.replaceAll(pattern, (_, name: string, number: string) =>
-    (numbers.get(name)?.size ?? 0) > 1 && /^[\w']+$/.test(name) ? `${name}_${number}` : name
+    ((numbers.get(name)?.size ?? 0) > 1 || plain.has(name)) && /^[\w']+$/.test(name) ? `${name}_${number}` : name
   );
 }
