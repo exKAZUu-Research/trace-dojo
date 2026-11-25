@@ -348,11 +348,6 @@ ${['fs', 'node:fs'].map((name) => `declare module "${name}" {
         recursive?: boolean | undefined;
         mode?: Mode | undefined;
     }
-    interface RmDirOptions {
-        maxRetries?: number | undefined;
-        recursive?: boolean | undefined;
-        retryDelay?: number | undefined;
-    }
     function readFileSync(path: PathOrFileDescriptor, options?: { encoding?: null | undefined; flag?: string | undefined } | null): Buffer;
     function readFileSync(path: PathOrFileDescriptor, options: { encoding: BufferEncoding; flag?: string | undefined } | BufferEncoding): string;
     function readFileSync(path: PathOrFileDescriptor, options?: (ObjectEncodingOptions & { flag?: string | undefined }) | BufferEncoding | null): string | Buffer;
@@ -363,8 +358,12 @@ ${['fs', 'node:fs'].map((name) => `declare module "${name}" {
     function mkdirSync(path: PathLike, options?: Mode | (MakeDirectoryOptions & { recursive?: false | undefined }) | null): void;
     function mkdirSync(path: PathLike, options?: Mode | MakeDirectoryOptions | null): string | undefined;
     function readdirSync(path: PathLike, options?: { encoding: BufferEncoding | null; withFileTypes?: false | undefined; recursive?: boolean | undefined } | BufferEncoding | null): string[];
+    function readdirSync(path: PathLike, options: { encoding: "buffer"; withFileTypes?: false | undefined; recursive?: boolean | undefined } | "buffer"): Buffer[];
+    function readdirSync(path: PathLike, options?: (ObjectEncodingOptions & { withFileTypes?: false | undefined; recursive?: boolean | undefined }) | BufferEncoding | null): string[] | Buffer[];
+    function readdirSync(path: PathLike, options: ObjectEncodingOptions & { withFileTypes: true; recursive?: boolean | undefined }): any[];
+    function readdirSync(path: PathLike, options: { encoding: "buffer"; withFileTypes: true; recursive?: boolean | undefined }): any[];
     function unlinkSync(path: PathLike): void;
-    function rmdirSync(path: PathLike, options?: RmDirOptions): void;
+    function rmdirSync(path: PathLike): void;
     function renameSync(oldPath: PathLike, newPath: PathLike): void;
 ${[...UNAVAILABLE_FS_MEMBERS].map((member) => `    function ${member}(...args: any[]): any;`).join('\n')}
 }`).join('\n')}
