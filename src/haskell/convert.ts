@@ -1593,17 +1593,16 @@ function convertClass(features: FeatureGates<'convert'>, node: Node): Decl {
 }
 
 function convertInstance(features: FeatureGates<'convert'>, node: Node): Decl {
-  for (const name of ['forall', 'kind', 'head']) {
-    const child = field(node, name);
-    if (child) {
-      if (name === 'head') throw unsupportedError(spanOf(child), '演算子のクラスのインスタンス');
-      throw unsupported(child);
-    }
-  }
+  const kindNode = field(node, 'kind');
+  if (kindNode) throw unsupported(kindNode);
+  // An explicit `forall` names the variables the head binds anyway.
   const contextNode = field(node, 'context');
-  const nameNode = required(node, 'name');
-  const patterns = fields(node, 'patterns');
-  const types = patterns.flatMap((patternsNode) => namedChildren(patternsNode));
+  const head = field(node, 'head');
+  if (head) requireTypeOperators(features, head);
+  const nameNode = head ? required(head, 'operator') : required(node, 'name');
+  const types = head
+    ? fields(head, 'operand')
+    : fields(node, 'patterns').flatMap((patternsNode) => namedChildren(patternsNode));
   for (const type of types) rejectUnsupported(type);
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
@@ -1622,7 +1621,7 @@ function convertInstance(features: FeatureGates<'convert'>, node: Node): Decl {
   return {
     kind: 'instance',
     context: contextNode ? convertContext(features, contextNode) : [],
-    cls: qualifiedName(nameNode).name,
+    cls: head ? plainName(nameNode) : qualifiedName(nameNode).name,
     types: types.map((node) => convertType(features, node)),
     decls,
     ...(overlap ? { overlap } : {}),
