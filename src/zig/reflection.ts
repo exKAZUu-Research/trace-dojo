@@ -154,7 +154,14 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     this.builtinArity(expression, 1);
     const message = this.comptimeText(args[0]);
     // Code that the compiler runs, and a branch on `@inComptime()`, reach the call only on the path that runs it.
-    const deferred = runtime(NORETURN, () => this.error(expression, message), expression);
+    const reported = this.reportedSpan(expression);
+    const deferred = runtime(
+      NORETURN,
+      () => {
+        throw new CompileError([{ row: reported.row, message }]);
+      },
+      expression
+    );
     if (this.context.comptimeDepth > 0 || this.context.inComptimeBranchDepth > 0) return deferred;
     // Zig analyzes a branch on a runtime condition only for the program's calls; a call at compile time with known
     // arguments analyzes the branch its arguments take.
@@ -164,7 +171,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       (this.context.runtimeConditionDepth > 0 || this.context.afterRuntimeReturnDepth > 0) &&
       !instance.runsAtRuntime
     ) {
-      instance.pendingCompileError ??= new CompileError([{ row: expression.row, message }]);
+      instance.pendingCompileError ??= new CompileError([{ row: reported.row, message }]);
       return deferred;
     }
     return this.error(expression, message);

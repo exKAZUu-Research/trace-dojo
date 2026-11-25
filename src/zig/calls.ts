@@ -440,7 +440,9 @@ export abstract class CallCompiler extends VectorCompiler {
     }
     const key = this.specializationKey(decl, paramTypes, comptimeArgs);
     const existing = this.instances.get(key);
+    const userSpan = this.reportedSpan(span);
     if (existing) {
+      existing.userSpan ??= userSpan;
       if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
       return existing;
     }
@@ -470,6 +472,7 @@ export abstract class CallCompiler extends VectorCompiler {
       comptimeArgs
     );
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
+    instance.userSpan = userSpan;
     if (syntax.params.every((param) => param.type !== undefined)) instance.identity = decl;
     instance.internal = decl.namespace.internal ?? false;
     instance.isAtomic = !instance.internal && this.atomicRow(syntax);

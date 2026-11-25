@@ -147,7 +147,10 @@ export abstract class StatementCompiler extends CallCompiler {
   // Functions -------------------------------------------------------------------------------------------------------
 
   protected compileFunctionBody(compilation: FunctionCompilation): void {
-    this.separateAnalysis(() => this.compileFunctionBodyAlone(compilation));
+    this.separateAnalysis(() => {
+      this.context.userSpan = compilation.instance.userSpan;
+      this.compileFunctionBodyAlone(compilation);
+    });
   }
 
   protected separateAnalysis<T>(run: () => T): T {

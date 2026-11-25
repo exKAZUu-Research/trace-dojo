@@ -286,6 +286,8 @@ export interface AnalysisContext {
   evalBranches: BranchCount;
   /** The condition depths of the returns compiled so far, in order. */
   returnDepths: ConditionDepths[];
+  /** The program's code that first reached the library code being compiled, where its compile errors report. */
+  userSpan?: Span;
 }
 
 export interface ConditionDepths {
@@ -389,7 +391,15 @@ export abstract class SemaBase implements SemaApi {
   }
 
   error(span: Span, message: string): never {
-    throw new CompileError([{ row: span.row, message }]);
+    throw new CompileError([{ row: this.reportedSpan(span).row, message }]);
+  }
+
+  /**
+   * Where a compile error at a span is reported: in library code ported from Zig's source, at the program's code that
+   * reached it, since the program's rows are the ones a learner reads.
+   */
+  protected reportedSpan(span: Span): Span {
+    return (this.enclosingNamespace().internal && this.context.userSpan) || span;
   }
 
   abstract compile(expression: Expression, resultType?: Type): TExpr;
