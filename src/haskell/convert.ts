@@ -975,19 +975,34 @@ function convertEquation(features: ConvertContext, node: Node): TypeEquation {
  */
 function familyInstanceHead(features: ConvertContext, node: Node): { family: QName; patterns: TypeExpr[] } {
   const patternFeatures: ConvertContext = { ...features, wildcards: { count: 0 } };
+  const head = declarationHead(features, node);
+  return { family: head.name, patterns: head.operands.map((operand) => convertType(patternFeatures, operand)) };
+}
+
+/**
+ * The head of a declaration, an equation, or an instance, written prefix (`T a b`, `(++) a b`, `M.C t`) or infix
+ * (`a ++ b`, ``a `And` b``): its name and the nodes of its operands, which are binders or types by what it heads.
+ */
+function declarationHead(features: ConvertContext, node: Node): { name: QName; nameNode: Node; operands: Node[] } {
   const head = field(node, 'head');
   if (head) {
     requireTypeOperators(features, head);
+    const operator = required(head, 'operator');
     return {
-      family: infixHeadName(required(head, 'operator')),
-      patterns: fields(head, 'operand').map((operand) => convertType(patternFeatures, operand)),
+      name: infixHeadName(operator),
+      nameNode: operator,
+      operands: namedChildren(head).filter((child) => child.id !== operator.id),
     };
   }
+  const nameNode = required(node, 'name');
+  if (nameNode.type !== 'name' && nameNode.type !== 'qualified') {
+    rejectUnsupported(nameNode);
+    requireTypeOperators(features, nameNode);
+  }
   return {
-    family: qualifiedName(required(node, 'name')).name,
-    patterns: fields(node, 'patterns').flatMap((patterns) =>
-      namedChildren(patterns).map((child) => convertType(patternFeatures, child))
-    ),
+    name: nameNode.type === 'qualified' ? qualifiedName(nameNode).name : plainName(nameNode),
+    nameNode,
+    operands: fields(node, 'patterns').flatMap((patterns) => namedChildren(patterns)),
   };
 }
 
@@ -1127,17 +1142,7 @@ function derivingClasses(node: Node): QName[] {
 }
 
 function typeDeclName(features: ConvertContext, node: Node): Name {
-  const head = field(node, 'head');
-  if (head) {
-    requireTypeOperators(features, head);
-    return infixHeadName(required(head, 'operator'));
-  }
-  const nameNode = required(node, 'name');
-  if (nameNode.type !== 'name') {
-    rejectUnsupported(nameNode);
-    requireTypeOperators(features, nameNode);
-  }
-  return plainName(nameNode);
+  return declarationHead(features, node).name;
 }
 
 function requireImplicitParams(features: ConvertContext, span: Span): void {
@@ -1196,28 +1201,15 @@ function typeParamKinds(features: ConvertContext, node: Node): (TypeExpr | undef
 }
 
 function typeParamBinders(features: ConvertContext, node: Node): TyVarBinder[] {
-  const head = field(node, 'head');
-  // An infix head's operands, `a ++ b` or `(a :: k) ++ (b :: k)`, in the order they are written.
-  const operator = head && field(head, 'operator');
-  const headBinders = head
-    ? namedChildren(head)
-        .filter((child) => child.id !== operator?.id)
-        .map((child) => convertBinder(features, child))
-    : [];
-  return [
-    ...headBinders,
-    ...fields(node, 'patterns').flatMap((patterns) => {
-      if (patterns.type !== 'type_params') throw unsupported(patterns);
-      // `@k` binds a kind variable, which the kinds of the other parameters name.
-      return namedChildren(patterns)
-        .filter((param) => {
-          if (param.type !== 'invisible') return true;
-          requireTypeAbstractions(features, spanOf(param));
-          return false;
-        })
-        .map((node) => convertBinder(features, node));
-    }),
-  ];
+  for (const patterns of fields(node, 'patterns')) if (patterns.type !== 'type_params') throw unsupported(patterns);
+  // `@k` binds a kind variable, which the kinds of the other parameters name.
+  return declarationHead(features, node)
+    .operands.filter((param) => {
+      if (param.type !== 'invisible') return true;
+      requireTypeAbstractions(features, spanOf(param));
+      return false;
+    })
+    .map((param) => convertBinder(features, param));
 }
 
 function hasInvisibleBinder(node: Node): boolean {
@@ -1536,12 +1528,7 @@ function convertInstance(features: ConvertContext, node: Node): Decl {
   if (kindNode) throw unsupported(kindNode);
   // An explicit `forall` names the variables the head binds anyway.
   const contextNode = field(node, 'context');
-  const head = field(node, 'head');
-  if (head) requireTypeOperators(features, head);
-  const nameNode = head ? required(head, 'operator') : required(node, 'name');
-  const types = head
-    ? fields(head, 'operand')
-    : fields(node, 'patterns').flatMap((patternsNode) => namedChildren(patternsNode));
+  const { name: cls, nameNode, operands: types } = declarationHead(features, node);
   for (const type of types) rejectUnsupported(type);
   const declarationsNode = field(node, 'declarations');
   const decls = declarationsNode
@@ -1560,7 +1547,7 @@ function convertInstance(features: ConvertContext, node: Node): Decl {
   return {
     kind: 'instance',
     context: contextNode ? convertContext(features, contextNode) : [],
-    cls: head ? infixHeadName(nameNode) : qualifiedName(nameNode).name,
+    cls,
     types: types.map((node) => convertType(features, node)),
     decls,
     ...(overlap ? { overlap } : {}),
