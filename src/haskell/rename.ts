@@ -19,6 +19,7 @@ import {
   UNIT_TYPE,
 } from './builtinTypes';
 import { hasStarArgument, QUALIFIED_DO_BIND } from './convert';
+import { forEachVar } from './dependencies';
 import {
   type ClassEntity,
   type ConInfo,
@@ -1312,10 +1313,15 @@ class Renamer {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Local declarations combine signatures, fixities, and bindings in one scope.
-  // code-gauge-allow functionNcss -- Local declarations combine signatures, fixities, and bindings in one scope.
-  renameLocalDecls(sourceDecls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
+  renameLocalDecls(decls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
+    const declared = this.declareLocalDecls(decls);
     const scope = new LocalScope(parent);
+    for (const [name, local] of declared.locals) scope.define(name, local);
+    return { group: this.renameDeclaredDecls(declared, scope), scope };
+  }
+
+  /** The variables a group of local declarations binds, with the fixities it declares, before its bindings renamed. */
+  private declareLocalDecls(sourceDecls: Decl[]): LocalDecls {
     const decls = this.expandBindingWildcards(sourceDecls, (name) =>
       this.recordFieldNames(name, () => this.lookupCon(name))
     );
@@ -1325,25 +1331,23 @@ class Renamer {
       }
     }
     const raw = groupBindings(decls);
+    const locals = new Map<string, LocalVar>();
     for (const binding of raw) {
       for (const name of binding.names) {
-        if (scope.vars.has(name.name)) throw compileError(name.span, `${name.name} が重複して定義されています。`);
-        scope.define(name.name, newLocal(name.name, name.span));
+        if (locals.has(name.name)) throw compileError(name.span, `${name.name} が重複して定義されています。`);
+        locals.set(name.name, newLocal(name.name, name.span));
       }
     }
-    for (const decl of decls) {
-      if (decl.kind !== 'fixity') continue;
-      for (const op of decl.ops) {
-        const local = scope.vars.get(op.name);
-        if (!local) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
-        if (local.fixity) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
-        local.fixity = { assoc: decl.assoc, prec: decl.prec };
-      }
-    }
-    const sigs = this.collectSigs(decls, raw, (name) => scope.vars.get(name));
-    const bindings: RBinding[] = raw.map((binding) => {
+    applyLocalFixities(decls, (name) => locals.get(name));
+    return { decls, raw, locals };
+  }
+
+  /** The bindings of declared local declarations, renamed in a scope that has their variables. */
+  private renameDeclaredDecls({ decls, raw, locals }: LocalDecls, scope: LocalScope): RBindGroup {
+    const sigs = this.collectSigs(decls, raw, (name) => locals.get(name));
+    const bindings = raw.map((binding): RBinding => {
       if (binding.kind === 'fun') {
-        const local = scope.vars.get(binding.names[0].name) as LocalVar;
+        const local = locals.get(binding.names[0].name) as LocalVar;
         const renamed = this.renameFunBinding(binding, { kind: 'local', local }, scope);
         renamed.sig = sigs.get(local.name);
         withRequiredTypeArguments(renamed);
@@ -1351,12 +1355,12 @@ class Renamer {
       }
       const renamed = this.renamePatBinding(binding, scope);
       // The pattern's variables are the ones the group declared.
-      renamed.binders = renamed.binders.map((local) => scope.vars.get(local.name) as LocalVar);
-      replacePatLocals(renamed.pat, scope);
+      renamed.binders = renamed.binders.map((local) => locals.get(local.name) as LocalVar);
+      replacePatLocals(renamed.pat, locals);
       renamed.patSigs = patternSignatures(renamed, sigs);
       return renamed;
     });
-    return { group: { bindings }, scope };
+    return { bindings };
   }
 
   private renameRhs(rhs: Rhs, parent: LocalScope): RRhs {
@@ -1539,25 +1543,7 @@ class Renamer {
         };
       }
       case 'comprehension': {
-        if (expr.quals.some((qual) => qual.kind === 'transform'))
-          return this.renameExpr(withoutTransforms(this.withRecordWildcards(expr)), scope);
-        if (this.features.allows('monadComprehensions') && expr.parallel) {
-          return this.renameExpr(parallelMonadComprehension(this.withRecordWildcards(expr)), scope);
-        }
-        if (this.features.allows('monadComprehensions') && !expr.parallel) {
-          // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
-          const support = (name: string): Expr => ({ kind: 'support', name, span });
-          const stmts: Stmt[] = expr.quals.map((qual) =>
-            qual.kind === 'exp'
-              ? { ...qual, expr: { kind: 'app', fn: support('guard'), arg: qual.expr, span: qual.span } }
-              : qual
-          );
-          stmts.push({ kind: 'exp', expr: { kind: 'app', fn: support('return'), arg: expr.expr, span }, span });
-          return this.renameExpr({ kind: 'do', stmts, span }, scope);
-        }
-        if (expr.parallel) return this.renameParallelComprehension(expr, scope);
-        const { stmts, scope: inner } = this.renameStmts(expr.quals, scope, false);
-        return { k: 'comp', expr: this.renameExpr(expr.expr, inner), quals: stmts, span };
+        return this.renameComprehension(expr, scope);
       }
       case 'leftSection': {
         const left = sectionOperand(expr.op, expr.left, 'infixl', (op) => this.fixityOf(op, scope));
@@ -1642,87 +1628,6 @@ class Renamer {
       span: { ...span, endRow: op.span.endRow, endCol: op.span.endCol },
     };
     return { k: 'app', fn: inner, arg: right, span };
-  }
-
-  /**
-   * Renames `[e | qs1 | qs2 | ...]` as `[e | (vs1, (vs2, ...)) <- zip [vs1 | qs1] (zip [vs2 | qs2] ...)]`, where each
-   * `vs` is the tuple of the variables its branch binds.
-   */
-  private renameParallelComprehension(expr: Extract<Expr, { kind: 'comprehension' }>, scope: LocalScope): RExpr {
-    const { span } = expr;
-    const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
-      const renamed = this.renameStmts(quals, scope, false);
-      const locals = renamed.stmts.flatMap((stmt) =>
-        stmt.k === 'bind'
-          ? rpatLocals(stmt.pat)
-          : stmt.k === 'let'
-            ? stmt.binds.bindings.flatMap((binding) =>
-                binding.k === 'fun' ? [(binding.binder as { kind: 'local'; local: LocalVar }).local] : binding.binders
-              )
-            : []
-      );
-      const seen = new Map<string, LocalVar>();
-      for (const local of locals) seen.set(local.name, local);
-      return { stmts: renamed.stmts, locals: [...seen.values()] };
-    });
-    const names = new Set<string>();
-    for (const branch of branches) {
-      for (const local of branch.locals) {
-        if (names.has(local.name))
-          throw compileError(local.span, `並列の内包表記の中で ${local.name} が重複しています。`);
-        names.add(local.name);
-      }
-    }
-    const tupleOf = (items: RExpr[]): RExpr =>
-      items.length === 1
-        ? items[0]
-        : items.length === 0
-          ? { k: 'con', con: UNIT_CON, span }
-          : { k: 'tuple', elems: items, span };
-    const zip = (fn: RExpr, left: RExpr, right: RExpr): RExpr => ({
-      k: 'app',
-      fn: { k: 'app', fn, arg: left, span },
-      arg: right,
-      span,
-    });
-    const zipFn: RExpr = {
-      k: 'var',
-      ref: { kind: 'global', entity: this.supportValue('zip', span) },
-      name: 'zip',
-      span,
-    };
-    const outer = new LocalScope(scope);
-    const patterns: RPat[] = [];
-    const lists: RExpr[] = [];
-    for (const branch of branches) {
-      const fresh = branch.locals.map((local) => newLocal(local.name, local.span));
-      for (const local of fresh) outer.define(local.name, local);
-      const vars = branch.locals.map((local): RExpr => ({
-        k: 'var',
-        ref: { kind: 'local', local },
-        name: local.name,
-        span,
-      }));
-      lists.push({ k: 'comp', expr: tupleOf(vars), quals: branch.stmts, span });
-      const pats = fresh.map((local): RPat => ({ k: 'var', local, span }));
-      patterns.push(
-        pats.length === 1
-          ? pats[0]
-          : { k: 'con', con: pats.length === 0 ? UNIT_CON : tupleCon(pats.length), args: pats, span }
-      );
-    }
-    let source = lists.at(-1) as RExpr;
-    let pattern = patterns.at(-1) as RPat;
-    for (let index = lists.length - 2; index >= 0; index--) {
-      source = zip(zipFn, lists[index], source);
-      pattern = { k: 'con', con: tupleCon(2), args: [patterns[index], pattern], span };
-    }
-    return {
-      k: 'comp',
-      expr: this.renameExpr(expr.expr, outer),
-      quals: [{ k: 'bind', pat: pattern, expr: source, span }],
-      span,
-    };
   }
 
   private supportValue(name: string, span: Span): ValueEntity {
@@ -1854,82 +1759,275 @@ class Renamer {
   }
 
   /**
-   * A comprehension whose qualifiers have the `..` of their record patterns replaced by the fields they bind, which
-   * the lowerings that collect the qualifiers' binders must see.
+   * A comprehension: a list comprehension, or under MonadComprehensions a `do` block in any monad. Its `then`
+   * qualifiers and parallel branches lower on the renamed qualifiers, whose variables are the locals they bind.
    */
-  private withRecordWildcards(
-    expr: Extract<Expr, { kind: 'comprehension' }>
-  ): Extract<Expr, { kind: 'comprehension' }> {
-    return {
-      ...expr,
-      quals: this.stmtsWithRecordWildcards(expr.quals),
-      ...(expr.parallel ? { parallel: expr.parallel.map((quals) => this.stmtsWithRecordWildcards(quals)) } : {}),
-    };
-  }
-
-  private stmtsWithRecordWildcards(stmts: Stmt[]): Stmt[] {
-    const resolve = (name: QName): readonly string[] => this.recordFieldNames(name, () => this.lookupCon(name));
-    return stmts.map((stmt): Stmt => {
-      switch (stmt.kind) {
-        case 'bind': {
-          return { ...stmt, pat: expandRecordWildcards(stmt.pat, resolve) };
-        }
-        case 'let': {
-          return { ...stmt, decls: this.expandBindingWildcards(stmt.decls, resolve) };
-        }
-        case 'rec': {
-          return { ...stmt, stmts: this.stmtsWithRecordWildcards(stmt.stmts) };
-        }
-        case 'exp':
-        case 'transform': {
-          return stmt;
-        }
-        default: {
-          return stmt satisfies never;
-        }
+  private renameComprehension(expr: Extract<Expr, { kind: 'comprehension' }>, scope: LocalScope): RExpr {
+    const { span } = expr;
+    const monad = this.features.allows('monadComprehensions');
+    const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => this.renameQualifiers(quals, scope, monad));
+    if (branches.length === 1) {
+      const [branch] = branches;
+      return this.comprehensionOf(branch.stmts, this.renameExpr(expr.expr, branch.scope), monad, span);
+    }
+    // `[e | qs1 | qs2]` is `[e | (vs1, vs2) <- zip [vs1 | qs1] [vs2 | qs2]]`, with `mzip` in a monad, where each `vs`
+    // is the tuple of the variables its branch binds.
+    const names = new Set<string>();
+    const tuples = branches.map((branch) => {
+      const locals = visibleLocals(branch.stmts, branch.scope);
+      for (const local of locals) {
+        if (names.has(local.name))
+          throw compileError(local.span, `並列の内包表記の中で ${local.name} が重複しています。`);
+        names.add(local.name);
       }
+      const source = this.comprehensionOf(branch.stmts, tupleExpr(locals, span), monad, span);
+      return { source, ...freshTuple(locals, span) };
     });
+    const outer = new LocalScope(scope);
+    for (const tuple of tuples) for (const local of tuple.fresh) outer.define(local.name, local);
+    const zip = this.supportExpr(monad ? 'mzip' : 'zip', span);
+    let { source, pat } = tuples.at(-1) as (typeof tuples)[number];
+    for (const tuple of tuples.slice(0, -1).toReversed()) {
+      source = applyExpr(zip, [tuple.source, source], span);
+      pat = { k: 'con', con: tupleCon(2), args: [tuple.pat, pat], span };
+    }
+    const result = this.renameExpr(expr.expr, outer);
+    return this.comprehensionOf([{ k: 'bind', pat, expr: source, span }], result, monad, span);
   }
 
+  /** A comprehension of renamed qualifiers, whose boolean guards are `guard`s in a monad. */
+  private comprehensionOf(quals: RStmt[], result: RExpr, monad: boolean, span: Span): RExpr {
+    if (!monad) return { k: 'comp', expr: result, quals, span };
+    const stmts = quals.map((qual): RStmt =>
+      qual.k === 'exp'
+        ? { ...qual, expr: applyExpr(this.supportExpr('guard', qual.span), [qual.expr], qual.span) }
+        : qual
+    );
+    stmts.push({ k: 'exp', expr: applyExpr(this.supportExpr('return', span), [result], span), span });
+    return { k: 'do', stmts, span };
+  }
+
+  /**
+   * A branch's qualifiers. `qs, then f, rs` is `vs <- f [vs | qs], rs`, where `vs` are the variables `qs` bind; `then
+   * f by e` passes `f` the function `\vs -> e`, and `then group` rebinds each of them to the list of its values in a
+   * group.
+   */
+  private renameQualifiers(quals: Stmt[], parent: LocalScope, monad: boolean): { stmts: RStmt[]; scope: LocalScope } {
+    let stmts: RStmt[] = [];
+    let scope = parent;
+    for (const qual of quals) {
+      if (qual.kind === 'rec') throw compileError(qual.span, 'rec は、do の中にだけ書けます。');
+      if (qual.kind !== 'transform') {
+        const renamed = this.renameStmt(qual, scope);
+        stmts.push(renamed.stmt);
+        scope = renamed.scope;
+        continue;
+      }
+      const { span } = qual;
+      const locals = visibleLocals(stmts, scope);
+      let source = this.comprehensionOf(stmts, tupleExpr(locals, span), monad, span);
+      const fn = this.renameExpr(qual.fn, parent);
+      if (qual.by) {
+        const key = freshTuple(locals, span);
+        const keyScope = new LocalScope(parent);
+        for (const local of key.fresh) keyScope.define(local.name, local);
+        const by: RExpr = { k: 'lambda', pats: [key.pat], body: this.renameExpr(qual.by, keyScope), span };
+        source = applyExpr(fn, [by, source], span);
+      } else source = applyExpr(fn, [source], span);
+      if (qual.group) source = this.regrouped(locals, source, span);
+      const bound = freshTuple(locals, span);
+      scope = new LocalScope(parent);
+      for (const local of bound.fresh) scope.define(local.name, local);
+      stmts = [{ k: 'bind', pat: bound.pat, expr: source, span }];
+    }
+    return { stmts, scope };
+  }
+
+  /** `map (\g -> (map (\vs -> v1) g, ...)) groups`: each group of tuples as the tuple of its variables' lists. */
+  private regrouped(locals: LocalVar[], groups: RExpr, span: Span): RExpr {
+    const group = newLocal(' group', span);
+    const map = this.supportExpr('map', span);
+    const columns = locals.map((_, index) => {
+      const column = freshTuple(locals, span);
+      const select: RExpr = { k: 'lambda', pats: [column.pat], body: localExpr(column.fresh[index], span), span };
+      return applyExpr(map, [select, localExpr(group, span)], span);
+    });
+    const body = columns.length === 1 ? columns[0] : tupleOfExprs(columns, span);
+    const regroup: RExpr = { k: 'lambda', pats: [{ k: 'var', local: group, span }], body, span };
+    return applyExpr(map, [regroup, groups], span);
+  }
+
+  /**
+   * A block's statements. A `rec` block's statements see all the variables they bind, and it lowers, as GHC's does,
+   * to `vs <- mfix (\~vs -> do { ss; return vs })`; an `mdo`'s is split into the smallest such segments first.
+   */
   private renameStmts(source: Stmt[], parent: LocalScope, isDo: boolean): { stmts: RStmt[]; scope: LocalScope } {
     let scope = parent;
-    const result: RStmt[] = [];
-    const stmts = source.flatMap((written) => {
-      if (written.kind !== 'rec') return [written];
-      const stmt = { ...written, stmts: this.stmtsWithRecordWildcards(written.stmts) };
-      return stmt.segmented ? recursiveSegments(stmt) : [recursiveBind(stmt)];
-    });
-    for (const [index, stmt] of stmts.entries()) {
-      const isLast = index === stmts.length - 1;
+    const stmts: RStmt[] = [];
+    const blocks: RecursiveBlock[] = [];
+    for (const [index, stmt] of source.entries()) {
+      if (isDo && index === source.length - 1 && stmt.kind !== 'exp') {
+        throw compileError(
+          stmt.span,
+          `do の最後の文は、式にしてください（${stmt.kind === 'let' ? 'let' : '<-'} で終われません）。`
+        );
+      }
+      if (stmt.kind === 'rec') {
+        const block = this.renameRecursiveBlock(stmt, scope);
+        blocks.push(block);
+        stmts.push(...block.stmts);
+        scope = block.scope;
+        continue;
+      }
+      if (stmt.kind === 'transform') throw compileError(stmt.span, 'then は、リストの内包表記の中にだけ書けます。');
+      const renamed = this.renameStmt(stmt, scope);
+      stmts.push(renamed.stmt);
+      scope = renamed.scope;
+    }
+    let lowered = stmts;
+    for (const block of blocks) lowered = this.lowerRecursiveBlock(block, lowered);
+    return { stmts: lowered, scope };
+  }
+
+  private renameStmt(
+    stmt: Extract<Stmt, { kind: 'bind' | 'let' | 'exp' }>,
+    scope: LocalScope
+  ): { stmt: RStmt; scope: LocalScope } {
+    const { span } = stmt;
+    switch (stmt.kind) {
+      case 'exp': {
+        return { stmt: { k: 'exp', expr: this.renameExpr(stmt.expr, scope), span }, scope };
+      }
+      case 'bind': {
+        const expr = this.renameExpr(stmt.expr, scope);
+        const binders = new Map<string, LocalVar>();
+        const pat = this.renamePat(stmt.pat, binders, scope);
+        const inner = new LocalScope(scope);
+        for (const [name, local] of binders) inner.define(name, local);
+        return { stmt: { k: 'bind', pat, expr, span }, scope: inner };
+      }
+      case 'let': {
+        const local = this.renameLocalDecls(stmt.decls, scope);
+        return { stmt: { k: 'let', binds: local.group, span }, scope: local.scope };
+      }
+    }
+  }
+
+  /**
+   * The statements of a `rec` block, renamed where every variable they bind is in scope, as the statements after it
+   * are: their patterns and declarations first, then their expressions.
+   */
+  private renameRecursiveBlock(block: Extract<Stmt, { kind: 'rec' }>, parent: LocalScope): RecursiveBlock {
+    const heads = block.stmts.map((stmt) => {
       switch (stmt.kind) {
-        case 'exp': {
-          result.push({ k: 'exp', expr: this.renameExpr(stmt.expr, scope), span: stmt.span });
-          break;
-        }
         case 'bind': {
-          if (isDo && isLast) throw compileError(stmt.span, 'do の最後の文は、式にしてください（<- で終われません）。');
-          const expr = this.renameExpr(stmt.expr, scope);
           const binders = new Map<string, LocalVar>();
-          const pat = this.renamePat(stmt.pat, binders, scope);
-          scope = new LocalScope(scope);
-          for (const [name, local] of binders) scope.define(name, local);
-          result.push({ k: 'bind', pat, expr, span: stmt.span });
-          break;
+          return { stmt, pat: this.renamePat(stmt.pat, binders, parent), locals: [...binders.values()] };
+        }
+        case 'let': {
+          const declared = this.declareLocalDecls(stmt.decls);
+          return { stmt, declared, locals: [...declared.locals.values()] };
+        }
+        case 'exp': {
+          return { stmt, locals: [] };
+        }
+        case 'rec': {
+          throw compileError(stmt.span, 'rec の中に rec は書けません。');
         }
         case 'transform': {
           throw compileError(stmt.span, 'then は、リストの内包表記の中にだけ書けます。');
         }
-        case 'let': {
-          if (isDo && isLast)
-            throw compileError(stmt.span, 'do の最後の文は、式にしてください（let で終われません）。');
-          const local = this.renameLocalDecls(stmt.decls, scope);
-          scope = local.scope;
-          result.push({ k: 'let', binds: local.group, span: stmt.span });
-          break;
+      }
+    });
+    const scope = new LocalScope(parent);
+    const owners = new Map<LocalVar, number>();
+    for (const [index, head] of heads.entries()) {
+      for (const local of head.locals) {
+        if (scope.vars.has(local.name)) {
+          throw compileError(local.span, `rec と mdo の中では、${local.name} を一度だけ束縛してください。`);
         }
+        scope.define(local.name, local);
+        owners.set(local, index);
       }
     }
-    return { stmts: result, scope };
+    const stmts = heads.map((head): RStmt => {
+      const { stmt } = head;
+      const { span } = stmt;
+      if (stmt.kind === 'let') {
+        return { k: 'let', binds: this.renameDeclaredDecls(head.declared as LocalDecls, scope), span };
+      }
+      const expr = this.renameExpr(stmt.expr, scope);
+      return stmt.kind === 'bind' ? { k: 'bind', pat: head.pat as RPat, expr, span } : { k: 'exp', expr, span };
+    });
+    return { stmts, owners, segmented: block.segmented ?? false, scope, span: block.span };
+  }
+
+  /**
+   * The statements of a `do` with a renamed `rec` block among them replaced by its segments, each the bind `vs <- mfix
+   * (\~vs' -> do { ss; return vs })`. In an `mdo`, a statement that uses a variable a later statement binds (or a bind
+   * its own) shares a segment with every statement up to that one, and overlapping segments join, as GHC segments
+   * them; the other statements stay as they are. A `rec` block is one segment.
+   */
+  private lowerRecursiveBlock(block: RecursiveBlock, stmts: RStmt[]): RStmt[] {
+    const start = stmts.indexOf(block.stmts[0]);
+    const count = block.stmts.length;
+    const reach = block.stmts.map((stmt, index) => {
+      let last = -1;
+      forEachVar([stmt], (node) => {
+        const owner = node.ref.kind === 'local' ? block.owners.get(node.ref.local) : undefined;
+        if (owner !== undefined && isForward(owner, index, stmt)) last = Math.max(last, owner);
+      });
+      return last;
+    });
+    const result = stmts.slice(0, start);
+    const after = stmts.slice(start + count);
+    for (let index = 0; index < count; index++) {
+      if (block.segmented && reach[index] < index) {
+        result.push(block.stmts[index]);
+        continue;
+      }
+      let end = block.segmented ? reach[index] : count - 1;
+      for (let inner = index; inner <= end; inner++) end = Math.max(end, reach[inner]);
+      const later = [...block.stmts.slice(end + 1), ...after];
+      result.push(this.recursiveBind(block, index, end, later));
+      index = end;
+    }
+    result.push(...after);
+    return result;
+  }
+
+  /**
+   * A segment of a `rec` block as its `mfix` bind: its statements' uses of the variables it binds at or after them
+   * refer to the lambda's, and the statements after it use the bind's.
+   */
+  private recursiveBind(block: RecursiveBlock, first: number, last: number, after: RStmt[]): RStmt {
+    const { span } = block;
+    const segment = block.stmts.slice(first, last + 1);
+    const locals = [...block.owners].flatMap(([local, owner]) => (owner >= first && owner <= last ? [local] : []));
+    const lambda = freshTuple(locals, span);
+    const bound = freshTuple(locals, span);
+    for (const [index, stmt] of segment.entries()) {
+      forEachVar([stmt], (node) => {
+        const position = node.ref.kind === 'local' ? locals.indexOf(node.ref.local) : -1;
+        if (position === -1) return;
+        const owner = block.owners.get(locals[position]) as number;
+        if (isForward(owner, first + index, stmt)) node.ref = { kind: 'local', local: lambda.fresh[position] };
+      });
+    }
+    forEachVar(after, (node) => {
+      const position = node.ref.kind === 'local' ? locals.indexOf(node.ref.local) : -1;
+      if (position !== -1) node.ref = { kind: 'local', local: bound.fresh[position] };
+    });
+    const result = applyExpr(this.supportExpr('return', span), [tupleExpr(locals, span)], span);
+    const body: RExpr = { k: 'do', stmts: [...segment, { k: 'exp', expr: result, span }], span };
+    const fn: RExpr = { k: 'lambda', pats: [{ k: 'lazy', pat: lambda.pat, span }], body, span };
+    return { k: 'bind', pat: bound.pat, expr: applyExpr(this.supportExpr('mfix', span), [fn], span), span };
+  }
+
+  /** A library value the compiler chooses, as an expression. */
+  private supportExpr(name: string, span: Span): RExpr {
+    const entity = this.supportValue(name, span);
+    return entity.con ? { k: 'con', con: entity.con, span } : { k: 'var', ref: { kind: 'global', entity }, name, span };
   }
 
   private fixityOf(op: Operator, scope: LocalScope): Fixity {
@@ -2786,67 +2884,6 @@ function withRequiredTypeArguments(binding: Extract<RBinding, { k: 'fun' }>): vo
   }
 }
 
-/**
- * A comprehension with `then` qualifiers as one without: `[e | qs, then f, rs]` is `[e | vs <- f [vs | qs], rs]`,
- * where `vs` are the variables `qs` bind; `then group` rebinds each of them to the list of its values in a group.
- */
-function withoutTransforms(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
-  const { span } = expr;
-  const index = expr.quals.findLastIndex((qual) => qual.kind === 'transform');
-  const transform = expr.quals[index] as Extract<Stmt, { kind: 'transform' }>;
-  const before = expr.quals.slice(0, index);
-  const names: Name[] = [];
-  for (const qual of before) {
-    if (qual.kind === 'bind') collectPatNames(qual.pat, names);
-    else if (qual.kind === 'let') for (const binding of groupBindings(qual.decls)) names.push(...binding.names);
-  }
-  const unique = [...new Map(names.map((name) => [name.name, name])).values()];
-  const tupleExpr = (): Expr =>
-    unique.length === 1
-      ? { kind: 'var', name: unique[0], span }
-      : unique.length === 0
-        ? { kind: 'con', name: { name: '()', span }, span }
-        : { kind: 'tuple', elems: unique.map((name): Expr => ({ kind: 'var', name, span })), span };
-  const tuplePat = (): Pat =>
-    unique.length === 1
-      ? { kind: 'pvar', name: unique[0], span }
-      : unique.length === 0
-        ? { kind: 'pwild', span }
-        : { kind: 'ptuple', elems: unique.map((name): Pat => ({ kind: 'pvar', name, span })), span };
-  const app = (fn: Expr, arg: Expr): Expr => ({ kind: 'app', fn, arg, span });
-  const inner: Expr = { kind: 'comprehension', expr: tupleExpr(), quals: before, span };
-  let transformed = transform.by
-    ? app(app(transform.fn, { kind: 'lambda', pats: [tuplePat()], body: transform.by, span }), inner)
-    : app(transform.fn, inner);
-  if (transform.group) {
-    const group: Name = { name: ' group', span };
-    const columns: Expr[] = unique.map((name) =>
-      app(
-        app(
-          { kind: 'support', name: 'map', span },
-          { kind: 'lambda', pats: [tuplePat()], body: { kind: 'var', name, span }, span }
-        ),
-        {
-          kind: 'var',
-          name: group,
-          span,
-        }
-      )
-    );
-    const regroup: Expr = {
-      kind: 'lambda',
-      pats: [{ kind: 'pvar', name: group, span }],
-      body: columns.length === 1 ? columns[0] : { kind: 'tuple', elems: columns, span },
-      span,
-    };
-    transformed = app(app({ kind: 'support', name: 'map', span }, regroup), transformed);
-  }
-  return {
-    ...expr,
-    quals: [{ kind: 'bind', pat: tuplePat(), expr: transformed, span: transform.span }, ...expr.quals.slice(index + 1)],
-  };
-}
-
 interface PatternSynonymInfo {
   name: string;
   arity: number;
@@ -3036,58 +3073,6 @@ function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): nu
   return index;
 }
 
-function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[]) => Expr | Pat): Expr | Pat {
-  return items.length === 1 ? one(items[0]) : many(items);
-}
-
-/**
- * A parallel monad comprehension, `[e | qs1 | qs2]`, as GHC desugars it: each branch a comprehension of the tuple of
- * the variables it binds, the branches zipped with `mzip`, and `e` over their variables.
- */
-function parallelMonadComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
-  const { span } = expr;
-  const support = (name: string): Expr => ({ kind: 'support', name, span });
-  const unit: Name = { name: '()', span };
-  const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
-    // A name a later qualifier binds again is the later one's.
-    const names = [...new Map(quals.flatMap((stmt) => stmtBinders(stmt)).map((name) => [name.name, name])).values()];
-    const vars: Expr[] = names.map((name) => ({ kind: 'var', name: { name: name.name, span }, span }));
-    const pats: Pat[] = names.map((name) => ({ kind: 'pvar', name, span }));
-    const tuple: Expr =
-      vars.length === 0
-        ? { kind: 'con', name: unit, span }
-        : vars.length === 1
-          ? vars[0]
-          : { kind: 'tuple', elems: vars, span };
-    const pattern: Pat =
-      pats.length === 0
-        ? { kind: 'pcon', con: unit, args: [], span }
-        : pats.length === 1
-          ? pats[0]
-          : { kind: 'ptuple', elems: pats, span };
-    return { source: { kind: 'comprehension', expr: tuple, quals, span } as Expr, pattern };
-  });
-  let source = (branches.at(-1) as (typeof branches)[number]).source;
-  let pattern = (branches.at(-1) as (typeof branches)[number]).pattern;
-  for (let index = branches.length - 2; index >= 0; index--) {
-    source = {
-      kind: 'app',
-      fn: { kind: 'app', fn: support('mzip'), arg: branches[index].source, span },
-      arg: source,
-      span,
-    };
-    pattern = { kind: 'ptuple', elems: [branches[index].pattern, pattern], span };
-  }
-  return {
-    kind: 'do',
-    stmts: [
-      { kind: 'bind', pat: pattern, expr: source, span },
-      { kind: 'exp', expr: { kind: 'app', fn: support('return'), arg: expr.expr, span }, span },
-    ],
-    span,
-  };
-}
-
 /** Adds a candidate under a key once: every table that re-exports an entity gives it, and it is one candidate. */
 function addCandidate<T>(map: Map<string, T[]>, key: string, item: T, identity: (candidate: T) => unknown): void {
   const list = map.get(key) ?? [];
@@ -3095,95 +3080,88 @@ function addCandidate<T>(map: Map<string, T[]>, key: string, item: T, identity: 
   map.set(key, list);
 }
 
-/**
- * The statements of an `mdo` as GHC segments them: a statement that uses a variable a statement at or after it binds
- * shares a `rec` with every statement up to that one, overlapping groups join, and the others stay as they are.
- */
-function recursiveSegments(stmt: Extract<Stmt, { kind: 'rec' }>): Stmt[] {
-  const bound = stmt.stmts.map((inner) => new Set(stmtBinders(inner).map((name) => name.name)));
-  const reach = stmt.stmts.map((inner, index) => {
-    const used = new Set<string>();
-    mentionedNames(inner, used);
-    let last = -1;
-    for (let later = index; later < stmt.stmts.length; later++) {
-      if ([...bound[later]].some((name) => used.has(name))) last = later;
+/** Local declarations whose variables are declared, with the fixities they declare, before their bindings renamed. */
+interface LocalDecls {
+  decls: Decl[];
+  raw: RawBinding[];
+  locals: ReadonlyMap<string, LocalVar>;
+}
+
+/** A renamed `rec` block, whose statements are among those of its `do` until it lowers. */
+interface RecursiveBlock {
+  stmts: RStmt[];
+  /** The index of the statement that binds each variable the block binds. */
+  owners: ReadonlyMap<LocalVar, number>;
+  segmented: boolean;
+  scope: LocalScope;
+  span: Span;
+}
+
+/** Sets the fixities that local fixity declarations declare on the variables they name. */
+function applyLocalFixities(decls: Decl[], lookup: (name: string) => LocalVar | undefined): void {
+  for (const decl of decls) {
+    if (decl.kind !== 'fixity') continue;
+    for (const op of decl.ops) {
+      const local = lookup(op.name);
+      if (!local) throw compileError(op.span, `結合性を宣言した ${op.name} の定義がありません。`);
+      if (local.fixity) throw compileError(op.span, `${op.name} の結合性が重複して宣言されています。`);
+      local.fixity = { assoc: decl.assoc, prec: decl.prec };
     }
-    return last;
-  });
-  const result: Stmt[] = [];
-  for (let index = 0; index < stmt.stmts.length; index++) {
-    if (reach[index] < index) {
-      result.push(stmt.stmts[index]);
-      continue;
-    }
-    let end = reach[index];
-    for (let inner = index; inner <= end; inner++) end = Math.max(end, reach[inner]);
-    result.push(recursiveBind({ kind: 'rec', stmts: stmt.stmts.slice(index, end + 1), span: stmt.span }));
-    index = end;
   }
+}
+
+/** Whether a use, in the statement at `index`, of a variable bound by the statement at `owner` precedes its binding. */
+function isForward(owner: number, index: number, stmt: RStmt): boolean {
+  return owner > index || (owner === index && stmt.k === 'bind');
+}
+
+/** The variables statements bind that are in scope after them, in the order they are bound. */
+function visibleLocals(stmts: RStmt[], scope: LocalScope): LocalVar[] {
+  const locals = stmts.flatMap((stmt) =>
+    stmt.k === 'bind'
+      ? rpatLocals(stmt.pat)
+      : stmt.k === 'let'
+        ? stmt.binds.bindings.flatMap((binding) =>
+            binding.k === 'fun' ? [(binding.binder as { kind: 'local'; local: LocalVar }).local] : binding.binders
+          )
+        : []
+  );
+  return locals.filter((local) => scope.lookup(local.name) === local);
+}
+
+/** The tuple of variables' values: unit for none, and the value itself for one. */
+function tupleExpr(locals: LocalVar[], span: Span): RExpr {
+  return locals.length === 1
+    ? localExpr(locals[0], span)
+    : tupleOfExprs(
+        locals.map((local) => localExpr(local, span)),
+        span
+      );
+}
+
+function tupleOfExprs(elems: RExpr[], span: Span): RExpr {
+  return elems.length === 0 ? { k: 'con', con: UNIT_CON, span } : { k: 'tuple', elems, span };
+}
+
+/** New variables of the names of variables, with the pattern of their tuple, as `tupleExpr` builds it. */
+function freshTuple(locals: LocalVar[], span: Span): { fresh: LocalVar[]; pat: RPat } {
+  const fresh = locals.map((local) => newLocal(local.name, local.span));
+  const pats = fresh.map((local): RPat => ({ k: 'var', local, span }));
+  const pat: RPat =
+    pats.length === 1
+      ? pats[0]
+      : { k: 'con', con: pats.length === 0 ? UNIT_CON : tupleCon(pats.length), args: pats, span };
+  return { fresh, pat };
+}
+
+function localExpr(local: LocalVar, span: Span): RExpr {
+  return { k: 'var', ref: { kind: 'local', local }, name: local.name, span };
+}
+
+function applyExpr(fn: RExpr, args: RExpr[], span: Span): RExpr {
+  let result = fn;
+  for (const arg of args) result = { k: 'app', fn: result, arg, span };
   return result;
-}
-
-/** The names an expression, a pattern, or a statement mentions, as variables or operators, wherever they are bound. */
-function mentionedNames(node: unknown, into: Set<string>): void {
-  if (Array.isArray(node)) {
-    for (const item of node) mentionedNames(item, into);
-    return;
-  }
-  if (typeof node !== 'object' || node === null) return;
-  const record = node as { kind?: string; name?: { name?: string }; op?: { name?: string } };
-  if (record.kind === 'var' && record.name?.name) into.add(record.name.name);
-  if (record.kind === 'operator' && record.op?.name) into.add(record.op.name);
-  for (const [key, value] of Object.entries(node)) if (key !== 'span') mentionedNames(value, into);
-}
-
-function stmtBinders(stmt: Stmt): Name[] {
-  const names: Name[] = [];
-  if (stmt.kind === 'bind') collectPatNames(stmt.pat, names);
-  else if (stmt.kind === 'let') for (const binding of groupBindings(stmt.decls)) names.push(...binding.names);
-  else if (stmt.kind === 'rec') throw compileError(stmt.span, 'rec の中に rec は書けません。');
-  return names;
-}
-
-/**
- * A `rec` block as the bind `vs <- mfix (\~vs -> do { ss; return vs })`, where `vs` are the variables its statements
- * bind, which then refer to their own later values.
- */
-function recursiveBind(stmt: Extract<Stmt, { kind: 'rec' }>): Stmt {
-  const { span } = stmt;
-  const names = stmt.stmts.flatMap(stmtBinders);
-  const pattern = (): Pat =>
-    tupleOf(
-      names,
-      (name) => ({ kind: 'pvar', name, span }),
-      (all) =>
-        all.length === 0
-          ? { kind: 'pcon', con: { name: '()', span }, args: [], span }
-          : { kind: 'ptuple', elems: all.map((name): Pat => ({ kind: 'pvar', name, span })), span }
-    ) as Pat;
-  const result = tupleOf(
-    names,
-    (name) => ({ kind: 'var', name, span }),
-    (all) =>
-      all.length === 0
-        ? { kind: 'con', name: { name: '()', span }, span }
-        : { kind: 'tuple', elems: all.map((name): Expr => ({ kind: 'var', name, span })), span }
-  ) as Expr;
-  const body: Expr = {
-    kind: 'do',
-    stmts: [
-      ...stmt.stmts,
-      { kind: 'exp', expr: { kind: 'app', fn: { kind: 'support', name: 'return', span }, arg: result, span }, span },
-    ],
-    span,
-  };
-  const lambda: Expr = { kind: 'lambda', pats: [{ kind: 'plazy', pat: pattern(), span }], body, span };
-  return {
-    kind: 'bind',
-    pat: pattern(),
-    expr: { kind: 'app', fn: { kind: 'support', name: 'mfix', span }, arg: lambda, span },
-    span,
-  };
 }
 
 /** Whether a variable is a named typed hole: an unqualified name starting with `_` that nothing defines. */
@@ -3377,11 +3355,11 @@ function collectPatNames(pat: Pat, into: Name[]): void {
   }
 }
 
-function replacePatLocals(pat: RPat, scope: LocalScope): void {
+function replacePatLocals(pat: RPat, locals: ReadonlyMap<string, LocalVar>): void {
   const pending = [pat];
   while (pending.length > 0) {
     const current = pending.pop()!;
-    if (current.k === 'var' || current.k === 'as') current.local = scope.vars.get(current.local.name) as LocalVar;
+    if (current.k === 'var' || current.k === 'as') current.local = locals.get(current.local.name) as LocalVar;
     pending.push(...rpatChildren(current).toReversed());
   }
 }

@@ -1,7 +1,9 @@
 import type { ValueEntity } from './entities';
-import { type LocalVar, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs } from './rast';
+import { type LocalVar, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs, type RStmt } from './rast';
 
 type Key = LocalVar | ValueEntity;
+
+type VarNode = Extract<RExpr, { k: 'var' }>;
 
 export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
   const owner = new Map<Key, number>();
@@ -14,8 +16,8 @@ export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
   }
   const edges = bindings.map((binding) => {
     const targets = new Set<number>();
-    collectBindingRefs(binding, (key) => {
-      const target = owner.get(key);
+    collectBindingRefs(binding, (node) => {
+      const target = owner.get(node.ref.kind === 'local' ? node.ref.local : node.ref.entity);
       if (target !== undefined) targets.add(target);
     });
     return [...targets];
@@ -72,7 +74,7 @@ export function stronglyConnected(edges: readonly number[][]): number[][] {
   return result;
 }
 
-function collectBindingRefs(binding: RBinding, visit: (key: Key) => void): void {
+function collectBindingRefs(binding: RBinding, visit: (node: VarNode) => void): void {
   if (binding.k === 'pat') {
     collectPatRefs(binding.pat, visit);
     collectRhsRefs(binding.rhs, visit);
@@ -85,7 +87,7 @@ function collectBindingRefs(binding: RBinding, visit: (key: Key) => void): void 
 }
 
 /** Collects the references of the expressions of a pattern's view patterns. */
-function collectPatRefs(pat: RPat, visit: (key: Key) => void): void {
+function collectPatRefs(pat: RPat, visit: (node: VarNode) => void): void {
   const pending = [pat];
   while (pending.length > 0) {
     const current = pending.pop() as RPat;
@@ -94,7 +96,7 @@ function collectPatRefs(pat: RPat, visit: (key: Key) => void): void {
   }
 }
 
-function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
+function collectRhsRefs(rhs: RRhs, visit: (node: VarNode) => void): void {
   for (const binding of rhs.where.bindings) collectBindingRefs(binding, visit);
   if (rhs.body.k === 'plain') {
     collectExprRefs(rhs.body.expr, visit);
@@ -110,8 +112,19 @@ function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
   }
 }
 
-export function collectExprRefs(expr: RExpr, visit: (key: Key) => void): void {
-  if (expr.k === 'var') visit(expr.ref.kind === 'local' ? expr.ref.local : expr.ref.entity);
+/** Visits the variable occurrences of statements, wherever they are nested. */
+export function forEachVar(stmts: RStmt[], visit: (node: VarNode) => void): void {
+  for (const stmt of stmts) {
+    if (stmt.k === 'let') for (const binding of stmt.binds.bindings) collectBindingRefs(binding, visit);
+    else {
+      if (stmt.k === 'bind') collectPatRefs(stmt.pat, visit);
+      collectExprRefs(stmt.expr, visit);
+    }
+  }
+}
+
+function collectExprRefs(expr: RExpr, visit: (node: VarNode) => void): void {
+  if (expr.k === 'var') visit(expr);
   for (const pat of exprPatterns(expr)) collectPatRefs(pat, visit);
   const { exprs, bindings, rhss } = childrenOf(expr);
   for (const child of exprs) collectExprRefs(child, visit);
