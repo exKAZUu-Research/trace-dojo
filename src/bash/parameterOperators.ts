@@ -710,7 +710,7 @@ function declarationTransformSegments(
   }
   if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx, target.expansionText);
   const values =
-    isArray && ctx.splittingFields && ctx.inDouble && !value.star
+    isArray && !ctx.inAssignmentRhs && ctx.inDouble && !value.star
       ? splitQuotedDeclarationFields(text, expander.currentIfs())
       : [text];
   return expander.valueSegments({ ...value, values, transformed: true }, ctx, target.expansionText);
@@ -731,16 +731,29 @@ function positionalDeclarationSegments(
   for (const element of value.values) {
     pushMeteredItem(quotedValues, quoteReusable(element), shell.runtime.step);
   }
-  if (!ctx.splittingFields) {
+  if (ctx.inAssignmentRhs) {
     return [scalarPositionalDeclarationSegment(expander, shell, quotedValues, value.star, ctx)];
   }
+  return wordPositionalDeclarationSegments(expander, value, quotedValues, expansionText, ctx);
+}
+
+function wordPositionalDeclarationSegments(
+  expander: Expander,
+  value: Extract<ParameterValue, { kind: 'list' }>,
+  quotedValues: readonly string[],
+  expansionText: string,
+  ctx: WordContext
+): WordSegment[] {
+  const ifs = expander.currentIfs();
   if (ctx.inDouble && !value.star) {
-    const items = [...splitPrefixFields('set -- ', quotedValues[0], expander.currentIfs()), ...quotedValues.slice(1)];
+    const items = [...splitPrefixFields('set -- ', quotedValues[0], ifs), ...quotedValues.slice(1)];
     return expander.valueSegments({ ...value, values: items, transformed: true }, ctx, expansionText);
   }
-  const body = expander.valueSegments({ ...value, values: quotedValues, transformed: true }, ctx, expansionText);
-  const prefix = ctx.inDouble ? [textSegment('set -- ', true, false)] : unquotedPositionalPrefix(expander.currentIfs());
-  return [...prefix, ...body];
+  const body = expander.valueSegments({ ...value, values: [...quotedValues], transformed: true }, ctx, expansionText);
+  const raw = [...(ctx.inDouble ? [textSegment('set -- ', true, false)] : unquotedPositionalPrefix(ifs)), ...body];
+  if (ctx.splittingFields || ctx.inDouble || value.star) return raw;
+  const fields = splitWordSegments(raw, ifs).map((field) => field.map((fragment) => fragment.text).join(''));
+  return expander.valueSegments({ ...value, values: fields, transformed: true }, ctx, expansionText);
 }
 
 function scalarPositionalDeclarationSegment(

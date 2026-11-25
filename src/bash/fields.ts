@@ -5,6 +5,7 @@ export interface WordContext {
   readonly spacedStar: boolean;
   readonly splittingFields?: boolean;
   readonly inAssignmentValue?: boolean;
+  readonly inAssignmentRhs?: boolean;
   readonly inOperatorWord?: boolean;
   readonly inQuotedOperatorWord?: boolean;
   readonly inSubscript?: boolean;

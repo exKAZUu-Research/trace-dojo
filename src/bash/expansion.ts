@@ -98,7 +98,9 @@ export class Expander {
   /** Expands an assignment's value, optionally joining `$*` with spaces when `IFS` is empty (`spacedStar`). */
   expandAssignmentValue(word: Word, spacedStar = false): string {
     this.checkTilde(word.parts, true);
-    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar, inAssignmentValue: true }));
+    return this.joinSegments(
+      this.expandParts(word.parts, { inDouble: false, spacedStar, inAssignmentValue: true, inAssignmentRhs: true })
+    );
   }
 
   /** Expands a word into a glob pattern, quoting characters protected by quotes. */
@@ -144,7 +146,9 @@ export class Expander {
       if (keyed) {
         const key = this.joinSegments(this.expandParts(keyed.key, SUBSCRIPT_WORD_CONTEXT));
         this.checkTilde(keyed.value, true);
-        const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+        const value = this.joinSegments(
+          this.expandParts(keyed.value, { inDouble: false, spacedStar: false, inAssignmentRhs: true })
+        );
         pushMeteredItem(elements, { key, value, append: keyed.append, rawText: word.text }, this.shell.runtime.step);
         continue;
       }
@@ -218,7 +222,9 @@ export class Expander {
     const key = this.joinSegments(this.expandParts(keyed.key, SUBSCRIPT_WORD_CONTEXT));
     if (key === '') return { error: `${word.text}: bad array subscript` };
     this.checkTilde(keyed.value, true);
-    const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+    const value = this.joinSegments(
+      this.expandParts(keyed.value, { inDouble: false, spacedStar: false, inAssignmentRhs: true })
+    );
     return { key, value, append: keyed.append, rawText: word.text };
   }
 
@@ -328,6 +334,7 @@ export class Expander {
       inDouble: true,
       spacedStar: ctx.spacedStar,
       ...(ctx.splittingFields ? { splittingFields: true } : {}),
+      ...(ctx.inAssignmentRhs ? { inAssignmentRhs: true } : {}),
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
       ...(ctx.inQuotedOperatorWord ? { inQuotedOperatorWord: true } : {}),
       ...(ctx.inSubscript ? { inSubscript: true } : {}),
