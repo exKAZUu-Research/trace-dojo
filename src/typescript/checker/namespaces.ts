@@ -242,6 +242,8 @@ export class Namespaces {
         node,
         "'namespace' の宣言に 'module' キーワードは使えません。代わりに 'namespace' キーワードを使ってください。"
       );
+    if (name?.type !== 'string' && !isNamespaceOrModuleTopLevel(node))
+      this.c.error(node, '名前空間宣言は、名前空間またはモジュールの最上位レベルでのみ許可されます。');
     const body = node.childForFieldName('body');
     if (!body || isAmbient(node) || name?.type === 'string') return;
     const outer = this.c.flow.current;
@@ -253,6 +255,16 @@ export class Namespaces {
       this.c.flow.current = outer;
     }
   }
+}
+
+/** Whether a namespace is declared in the program or in another namespace's body, the places tsc allows one. */
+function isNamespaceOrModuleTopLevel(node: TreeNode): boolean {
+  let container = node.parent;
+  while (container && ['expression_statement', 'export_statement', 'ambient_declaration'].includes(container.type))
+    container = container.parent;
+  if (container?.type === 'program') return true;
+  const owner = container?.type === 'statement_block' ? container.parent : undefined;
+  return owner?.type === 'internal_module' || owner?.type === 'module';
 }
 
 /** The names of a qualified type name, as `A`, `B`, and `T` of `A.B.T`. */
