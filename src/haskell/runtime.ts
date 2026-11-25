@@ -52,8 +52,10 @@ export type PreviewContext = Pick<PreviewView, 'owner' | 'scope'> & { frame: Tra
 /** The state of one run: its globals, its machine, its trace frames, its turtles, and its output. */
 export class Runtime implements TracedRuntime<TraceFrame> {
   readonly world = new TurtleWorld();
-  readonly budget = new ExecutionBudget();
+  readonly budget: ExecutionBudget;
   readonly io: ProgramIO;
+  /** What a Template Haskell splice's program, run while a program compiles, stores for the compiler. */
+  readonly splice: { result?: Slot; errors: string[]; exit?: string } = { errors: [] };
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
@@ -64,7 +66,8 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private gcMilliseconds = 0;
   private readonly previews = new PreviewBudget();
 
-  constructor(input?: ProgramInput) {
+  constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
+    this.budget = budget;
     this.io = new ProgramIO(this.budget, input);
     this.machine = new Machine(this);
   }

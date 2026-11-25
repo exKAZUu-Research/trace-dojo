@@ -1,14 +1,16 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { spanOf } from './convert';
 import { compileError } from './errors';
+import type { Span } from './syntax';
+import { SpliceNames, type SpliceSyntax } from './thDecode';
 
 /** A splice of a program, which runs while the program compiles: `$(e)`, `$$(e)`, a declaration, or `[q|...|]`. */
 export interface SpliceSite {
-  start: number;
-  end: number;
-  /** The row (from 0) the splice starts on, where an error in it is reported. */
-  row: number;
+  /** The splice's node's start, by which the conversion finds what the splice gives. */
+  key: number;
+  span: Span;
   /** How the program that runs the splice gives its result: as declarations, a typed expression, or any tree. */
   runner: 'runSplice' | 'runDecSplice' | 'runTypedSplice';
   /** The code that builds the tree, with the column its first line starts at. */
@@ -108,9 +110,7 @@ function spliceCode(inner: Node, names: ModuleNames): string {
 }
 
 function spliceSite(node: Node, names: ModuleNames): SpliceSite {
-  // The scanner gives a splice the spaces before its `$`, which stay where they are.
-  const leading = node.text.length - node.text.trimStart().length;
-  const base = { start: node.startIndex + leading, end: node.endIndex, row: node.startPosition.row };
+  const base = { key: node.startIndex, span: spanOf(node) };
   if (node.type === 'quasiquote') {
     const quoter = node.childForFieldName('quoter')?.text.trim() ?? '';
     const body = node.childForFieldName('body')?.text ?? '';
@@ -138,68 +138,45 @@ export function spliceHeader(root: Node): string {
   return lines.join('\n');
 }
 
-/** How a splice's program runs: the code it spells, and what it printed while it ran to its standard streams. */
-export type SpliceRunner = (program: string) => { code: string; printed: string; printedError: string };
+/** How a splice's program runs: what its tree gives as syntax at the splice's span, and what it printed. */
+export type SpliceRunner = (
+  program: string,
+  span: Span,
+  names: SpliceNames
+) => {
+  result: SpliceSyntax;
+  printed: string;
+  printedError: string;
+};
 
 /**
- * Runs a program's splices in the order they are written, as GHC does, and puts the code of each in its place,
- * giving the program's text and what the splices printed to each standard stream. The code takes the rows the splice had, and the text
- * after the splice keeps its row and column, so that the layout of the rest of the program stays. A splice runs as
- * a program of the module's pragmas and imports, as GHC's stage restriction allows: it cannot use the module's own
- * definitions.
+ * Runs a program's splices in the order they are written, as GHC does, giving what each gives by its node's start,
+ * and what they printed to each standard stream. A splice runs as a program of the module's pragmas and imports, as
+ * GHC's stage restriction allows: it cannot use the module's own definitions.
  */
-export function expandSplices(
-  source: string,
-  header: string,
-  sites: readonly SpliceSite[],
+export function runSplices(
+  root: Node,
   run: SpliceRunner
-): { source: string; printed: string; printedError: string } {
+): { grafts: Map<number, SpliceSyntax>; printed: string; printedError: string } {
+  const header = spliceHeader(root);
+  const names = new SpliceNames();
+  const grafts = new Map<number, SpliceSyntax>();
   let printed = '';
   let printedError = '';
-  const codes = sites.map((site) => {
+  for (const site of collectSplices(root)) {
     const lines = site.code.split('\n');
     const padded = [' '.repeat(site.column + 2) + lines[0], ...lines.slice(1).map((line) => `  ${line}`)].join('\n');
     const program = `${header}\nimport qualified Language.Haskell.TH.Runner as SpliceRunner\nmain :: IO ()\nmain = SpliceRunner.${site.runner} (\n${padded}\n  )\n`;
     try {
-      const output = run(program);
+      const output = run(program, site.span, names);
       printed += output.printed;
       printedError += output.printedError;
-      return output.code;
+      grafts.set(site.key, output.result);
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       const detail = error.diagnostics[0]?.message ?? '';
-      throw compileError(site.row, `Template Haskell のスプライスを実行できません。${detail}`);
+      throw compileError(site.span, `Template Haskell のスプライスを実行できません。${detail}`);
     }
-  });
-  let result = source;
-  // From the last site back, so that the offsets of the earlier ones stay.
-  for (const [index, site] of sites.entries().toArray().toReversed()) {
-    const text = uniqueNames(codes[index]);
-    const spliceLines = source.slice(site.start, site.end).split('\n');
-    const replacement = site.runner === 'runDecSplice' ? text : `(${text})`;
-    // Tabs stay, so that the layout reads the same column for the text after the splice.
-    const indent = spliceLines.length > 1 ? (spliceLines.at(-1) ?? '').replaceAll(/[^\t]/g, ' ') : '';
-    result =
-      result.slice(0, site.start) + replacement + '\n'.repeat(spliceLines.length - 1) + indent + result.slice(site.end);
   }
-  return { source: result, printed, printedError };
-}
-
-/**
- * Names the new names of a splice's code: each by its own name when no other name of the code has it (another new
- * name, or a plain one such as mkName gives), and with its number otherwise, as `x_1`. The library marks them as `\u0001name\u0002number\u0003`.
- */
-function uniqueNames(text: string): string {
-  const pattern = /\u0001([^\u0002]*)\u0002(\d+)\u0003/g;
-  const numbers = new Map<string, Set<string>>();
-  for (const match of text.matchAll(pattern)) {
-    const set = numbers.get(match[1]) ?? new Set();
-    set.add(match[2]);
-    numbers.set(match[1], set);
-  }
-  // A plain name (from mkName, or the program's own) of the same text would capture a new name written plainly.
-  const plain = new Set(text.replaceAll(pattern, ' ').match(/[\w']+/g));
-  return text.replaceAll(pattern, (_, name: string, number: string) =>
-    ((numbers.get(name)?.size ?? 0) > 1 || plain.has(name)) && /^[\w']+$/.test(name) ? `${name}_${number}` : name
-  );
+  return { grafts, printed, printedError };
 }

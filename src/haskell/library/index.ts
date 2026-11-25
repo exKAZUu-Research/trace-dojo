@@ -474,13 +474,13 @@ const SET_VALUES = [
 /** The names `Language.Haskell.TH` and its modules export: those its source declares, but its own helpers. */
 const TEMPLATE_HASKELL_MODULE: PublicModule = (() => {
   const internal =
-    /^(render|quote[A-Z]|run[A-Z]\w*Splice|runSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent|packageOf)/;
+    /^(quote[A-Z]|run[A-Z]\w*Splice|runSplice|storeSplice|reportSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent|packageOf)/;
   const values = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^([a-z_][\w']*|\([^)]+\)) ::/gm)]
     .map((match) => match[1])
     .filter((name) => !internal.test(name));
   const types = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^(?:data|newtype|type|class) (?:[^=]*=> )?([A-Z]\w*)/gm)]
     .map((match) => match[1])
-    .filter((name) => name !== 'Splice');
+    .filter((name) => !name.startsWith('Splice'));
   return {
     from: 'Language.Haskell.TH.Internal',
     types: [...new Set(types)].map((name): [string, 'all'] => [name, 'all']),

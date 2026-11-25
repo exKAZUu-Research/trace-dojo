@@ -6,7 +6,8 @@ import { validateDialect } from './dialect';
 import { Extensions, readExtensions } from './extensions';
 import type { FeatureGates } from './features';
 import type { Module } from './syntax';
-import { collectSplices, spliceHeader, type SpliceSite } from './thSplice';
+import type { SpliceSyntax } from './thDecode';
+import { runSplices, type SpliceRunner } from './thSplice';
 
 const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm');
 /** The grammar with the lexical syntax of the extensions GHC2021 lacks, which a program reads with when it enables one. */
@@ -29,6 +30,26 @@ export const misplacedHaskellAtomicMessage =
  * never runs it.
  */
 export function parseHaskell(source: string, defaultName = 'Main', library = false): Module {
+  return parseModule(source, defaultName, library).module;
+}
+
+/**
+ * Parses a program, running its Template Haskell splices with `run` and putting the syntax each gives in its place,
+ * and gives what the splices printed while they ran.
+ */
+export function parseProgram(
+  source: string,
+  run: SpliceRunner
+): { module: Module; printed: string; printedError: string } {
+  return parseModule(source, 'Main', false, run);
+}
+
+function parseModule(
+  source: string,
+  defaultName: string,
+  library: boolean,
+  run?: SpliceRunner
+): { module: Module; printed: string; printedError: string } {
   const extensions = library
     ? new Extensions(['TypeFamilies', 'DataKinds', 'RoleAnnotations'])
     : readExtensions(source);
@@ -40,7 +61,15 @@ export function parseHaskell(source: string, defaultName = 'Main', library = fal
     MISSING_TOKEN_NAMES,
     (root) => {
       if (!library) validateDialect(root, extensions);
-      return convertModule(root, extensions, defaultName);
+      const spliced =
+        run && features.allows('splices')
+          ? runSplices(root, run)
+          : { grafts: new Map<number, SpliceSyntax>(), printed: '', printedError: '' };
+      return {
+        module: convertModule(root, extensions, defaultName, spliced.grafts),
+        printed: spliced.printed,
+        printedError: spliced.printedError,
+      };
     }
   );
 }
@@ -54,27 +83,10 @@ export function preprocessProgram(source: string): string {
 }
 
 /**
- * The splices of a program that uses Template Haskell, which run before it compiles, with the pragmas and imports
- * the programs that run them keep.
- */
-export function findProgramSplices(
-  source: string
-): { sites: SpliceSite[]; header: string; source: string } | undefined {
-  const features = readExtensions(source).gates('parse');
-  if (!features.allows('splices')) return undefined;
-  // The sites' offsets are in the text with the declaration quotes' braces, which the splices then replace in.
-  const text = withDeclarationQuoteBraces(features, source);
-  return parseSource(extendedParser, text, MISSING_TOKEN_NAMES, (root) => ({
-    sites: collectSplices(root),
-    header: spliceHeader(root),
-    source: text,
-  }));
-}
-
-/**
  * Writes the layout of each declaration quote, `[d| ... |]`, with explicit braces and semicolons, which the grammar
  * reads where its layout fails (a first declaration on the quote's line): each goes in place of a space where there
- * is one, so that rows stay, and a declaration at the left margin gets its semicolon before it.
+ * is one, so that rows stay, and a declaration at the left margin gets its semicolon before it. Only the parse of
+ * this text reads its offsets.
  */
 function withDeclarationQuoteBraces(features: FeatureGates<'parse'>, source: string): string {
   if (!features.allows('declarationQuotes')) return source;

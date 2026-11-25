@@ -43,10 +43,10 @@ import {
   KNOWN_LIBRARY_VALUES,
 } from './library/knownValues';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
-import { findProgramSplices, misplacedHaskellAtomicMessage, parseHaskell, preprocessProgram } from './parse';
+import { misplacedHaskellAtomicMessage, parseHaskell, parseProgram, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
-import { expandSplices, type SpliceRunner } from './thSplice';
+import type { SpliceRunner } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
@@ -520,22 +520,16 @@ export interface CompiledProgram {
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = (library ??= compileLibrary());
   return withCompilationBudget(() => {
-    // Splices run within the program's budget: each splice's program compiles on the budget that is left. They are
-    // found in the text the C preprocessor leaves, as the program is.
-    const text = preprocessProgram(source);
-    const splices = findProgramSplices(text);
-    let expanded = text;
-    let compileOutput = '';
-    let compileErrorOutput = '';
-    if (splices && splices.sites.length > 0) {
+    // Splices run within the program's budget: each splice's program compiles and runs on the budget that is left.
+    // They are found in the text the C preprocessor leaves, as the program is.
+    const {
+      module: parsed,
+      printed: compileOutput,
+      printedError: compileErrorOutput,
+    } = parseProgram(preprocessProgram(source), (program, span, names) => {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      ({
-        source: expanded,
-        printed: compileOutput,
-        printedError: compileErrorOutput,
-      } = expandSplices(splices.source, splices.header, splices.sites, spliceRunner));
-    }
-    const parsed = parseHaskell(expanded);
+      return spliceRunner(program, span, names);
+    });
     const renamed = renameModule(parsed, {
       modules: lib.modules,
       implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),

@@ -16,6 +16,11 @@ export interface Name {
 /** A possibly qualified name, such as `M.fromList`. */
 export interface QName extends Name {
   qualifier?: string;
+  /**
+   * For a global name a Template Haskell splice gives, the module GHC defines it in and its namespace, by which the
+   * name refers to its entity whatever the program's scope has.
+   */
+  global?: { module: string; namespace: 'var' | 'con' | 'type' };
 }
 
 export type Literal =

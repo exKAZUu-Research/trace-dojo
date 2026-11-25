@@ -6,6 +6,7 @@ type Charge = (units: number) => void;
 let spend: Charge | undefined;
 /** The budget of the compilation in progress, which every producer of compile-time work charges. */
 let compilation: Charge | undefined;
+let compilationRemaining = 0;
 
 /**
  * Runs a compilation within the one compilation budget. A compilation inside another one, such as that of a Template
@@ -13,10 +14,10 @@ let compilation: Charge | undefined;
  */
 export function withCompilationBudget<T>(work: () => T): T {
   if (compilation) return withTypeWorkBudget(compilation, work);
-  let remaining = LIMITS.maxOperations;
+  compilationRemaining = LIMITS.maxOperations;
   const charge: Charge = (units) => {
-    remaining -= units;
-    if (remaining < 0) throw new ExecutionLimitError('operations');
+    compilationRemaining -= units;
+    if (compilationRemaining < 0) throw new ExecutionLimitError('operations');
   };
   compilation = charge;
   try {
@@ -39,4 +40,9 @@ export function withTypeWorkBudget<T>(charge: Charge, work: () => T): T {
 /** Charges compile-time work to the budget in force: one unit for a step, or the size of what a step produces. */
 export function chargeTypeWork(units = 1): void {
   spend?.(units);
+}
+
+/** The operations the compilation in progress has left, which a program it runs (a splice's) may spend. */
+export function remainingCompilationWork(): number {
+  return compilation ? Math.max(compilationRemaining, 0) : LIMITS.maxOperations;
 }

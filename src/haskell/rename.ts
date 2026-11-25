@@ -288,6 +288,7 @@ class Renamer {
   private readonly ownValues = new Map<string, ValueEntity>();
   private readonly importOrigins = new Map<object, Map<string | undefined, Set<string>>>();
   private readonly ownTypes = new Map<string, TypeLike>();
+  private globals?: { values: Map<string, ValueEntity[]>; types: Map<string, TypeLike[]> };
   /** The fields DuplicateRecordFields lets share the name of a field of another type. */
   private readonly duplicateFields: ValueEntity[] = [];
   private readonly ownTypeChildren = new Map<TypeLike, ValueEntity[]>();
@@ -2239,7 +2240,6 @@ class Renamer {
         return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
       }
       const con = this.lookupCon(expr.name);
-      if (expr.name.qualifier) return thCall(span, 'conE', qualifiedThName(expr.name));
       return thCall(span, 'quoteGlobalCon', thString(span, this.thModule('con', con)), thString(span, con.name));
     }
     if (expr.implicit) {
@@ -2253,7 +2253,6 @@ class Renamer {
     const ref = this.resolveVar(expr.name, scope);
     // A variable of the program outside the quote is lifted: the tree of its value.
     if (ref.kind === 'local') return thCall(span, 'lift', { kind: 'var', name: expr.name, span });
-    if (expr.name.qualifier) return thCall(span, 'varE', qualifiedThName(expr.name));
     return thCall(
       span,
       'quoteGlobalVar',
@@ -2262,18 +2261,9 @@ class Renamer {
     );
   }
 
-  /**
-   * A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. A global one the program writes qualified keeps
-   * its qualifier, which the module the splice goes into reads it by: a quote is spliced only into its own module.
-   */
+  /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
   private thNameCode(expr: Extract<Expr, { kind: 'thName' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    if (expr.name.qualifier) {
-      if (expr.namespace === 'type') this.lookupType(expr.name);
-      else if (expr.namespace === 'con') this.lookupCon(expr.name);
-      else this.lookupValue(expr.name, false);
-      return qualifiedThName(expr.name);
-    }
     const global = (make: string, module: string, name: string): Expr =>
       thCall(span, make, thString(span, thPackage(module)), thString(span, module), thString(span, name));
     if (expr.namespace === 'type') {
@@ -2350,8 +2340,55 @@ class Renamer {
     return 'GHC.Internal.Base';
   }
 
+  /**
+   * The entities a global name a splice gives refers to: this module's of its name, or those the library defines
+   * under its name in the module GHC defines it in, which Template Haskell's names carry; `undefined` for another
+   * name, or when none matches, which then resolves by its spelling.
+   */
+  private globalValues(name: QName): ValueEntity[] | undefined {
+    const { global } = name;
+    if (!global) return undefined;
+    if (global.module === this.module.name) {
+      const own = this.ownValues.get(name.name);
+      return own ? [own] : undefined;
+    }
+    return this.globalIndex().values.get(`${global.module} ${name.name}`);
+  }
+
+  private globalTypes(name: QName): TypeLike[] | undefined {
+    const { global } = name;
+    if (global?.namespace !== 'type') return undefined;
+    if (global.module === this.module.name) {
+      const own = this.ownTypes.get(name.name);
+      return own ? [own] : undefined;
+    }
+    return this.globalIndex().types.get(`${global.module} ${name.name}`);
+  }
+
+  private globalIndex(): { values: Map<string, ValueEntity[]>; types: Map<string, TypeLike[]> } {
+    if (this.globals) return this.globals;
+    const values = new Map<string, ValueEntity[]>();
+    const types = new Map<string, TypeLike[]>();
+    for (const table of this.options.modules.values()) {
+      for (const entity of table.values.values()) {
+        const module = entity.con ? this.thModule('con', entity.con) : this.thModule('v', entity);
+        addCandidate(values, `${module} ${entity.name}`, entity, (candidate) => candidate);
+      }
+      for (const { entity } of table.types.values()) {
+        addCandidate(
+          types,
+          `${this.thModule('t', entity.entity)} ${entity.entity.name}`,
+          entity,
+          (candidate) => candidate.entity
+        );
+      }
+    }
+    this.globals = { values, types };
+    return this.globals;
+  }
+
   private resolveVar(name: QName, scope: LocalScope): VarRef {
-    if (!name.qualifier) {
+    if (!name.qualifier && !name.global) {
       const local = scope.lookup(name.name);
       if (local) return { kind: 'local', local };
     }
@@ -2361,6 +2398,8 @@ class Renamer {
   }
 
   private valuesNamed(name: QName): readonly ValueEntity[] {
+    const global = this.globalValues(name);
+    if (global) return global;
     if (name.qualifier) return this.scope.qualifiedValues.get(name.qualifier)?.get(name.name) ?? [];
     const weak = this.options.weakValues?.get(name.name);
     return weak ? [...this.scope.values.get(name.name), weak] : this.scope.values.get(name.name);
@@ -2368,7 +2407,9 @@ class Renamer {
 
   private lookupValue(name: QName, variablesOnly: boolean): ValueEntity {
     let candidates: ValueEntity[];
-    if (name.qualifier) {
+    const global = this.globalValues(name);
+    if (global) candidates = global;
+    else if (name.qualifier) {
       const table = this.scope.qualifiedValues.get(name.qualifier);
       if (!table && !this.scope.moduleAliases.has(name.qualifier)) {
         throw compileError(name.span, `モジュール ${name.qualifier} は import されていません。`);
@@ -2425,7 +2466,9 @@ class Renamer {
       if (unboxed) return unboxed;
     }
     let candidates: ValueEntity[];
-    if (name.qualifier) {
+    const global = this.globalValues(name);
+    if (global) candidates = global;
+    else if (name.qualifier) {
       const table = this.scope.qualifiedValues.get(name.qualifier);
       if (!table && !this.scope.moduleAliases.has(name.qualifier)) {
         throw compileError(name.span, `モジュール ${name.qualifier} は import されていません。`);
@@ -2443,9 +2486,11 @@ class Renamer {
 
   private lookupField(name: QName, types?: readonly TypeEntity[]): FieldInfo {
     let candidates = (
-      name.qualifier
-        ? (this.scope.qualifiedValues.get(name.qualifier)?.get(name.name) ?? [])
-        : this.scope.values.get(name.name)
+      this.globalValues(name) ??
+      (name.qualifier
+        ? this.scope.qualifiedValues.get(name.qualifier)?.get(name.name)
+        : this.scope.values.get(name.name)) ??
+      []
     ).filter((entity) => entity.sort === 'field' || entity.unsupportedField);
     // A constructor or an update decides which type's field a name shared by fields of several types is.
     if (types && candidates.length > 1) {
@@ -2462,7 +2507,9 @@ class Renamer {
 
   private lookupType(name: QName): TypeLike {
     let candidates: TypeLike[];
-    if (name.qualifier) {
+    const global = this.globalTypes(name);
+    if (global) candidates = global;
+    else if (name.qualifier) {
       const table = this.scope.qualifiedTypes.get(name.qualifier);
       if (!table && !this.scope.moduleAliases.has(name.qualifier)) {
         throw compileError(name.span, `モジュール ${name.qualifier} は import されていません。`);
@@ -2504,6 +2551,7 @@ class Renamer {
   }
 
   private typeExists(name: QName): boolean {
+    if (this.globalTypes(name)) return true;
     if (name.qualifier) return (this.scope.qualifiedTypes.get(name.qualifier)?.get(name.name).length ?? 0) > 0;
     return (
       this.scope.types.get(name.name).length > 0 ||
@@ -2918,9 +2966,11 @@ function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[])
   return items.length === 1 ? one(items[0]) : many(items);
 }
 
-/** A global name as the program writes it with its qualifier, which the module a splice goes into reads it by. */
-function qualifiedThName(name: QName): Expr {
-  return thCall(name.span, 'mkNameQ', thString(name.span, name.qualifier ?? ''), thString(name.span, name.name));
+/** Adds a candidate under a key once: every table that re-exports an entity gives it, and it is one candidate. */
+function addCandidate<T>(map: Map<string, T[]>, key: string, item: T, identity: (candidate: T) => unknown): void {
+  const list = map.get(key) ?? [];
+  if (!list.some((other) => identity(other) === identity(item))) list.push(item);
+  map.set(key, list);
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Template Haskell's library, `Language.Haskell.TH`: the syntax trees of expressions, patterns, types, and
  * declarations as the template-haskell package that GHC 9.14.1 comes with defines them, the `Q` monad, the functions
- * that build the trees, `Lift`, and `pprint`. It also renders a tree as source text, which a splice puts in place.
+ * that build the trees, `Lift`, and `pprint`.
  */
 export const TEMPLATE_HASKELL_SOURCE = String.raw`module Language.Haskell.TH.Internal where
 
@@ -373,9 +373,12 @@ thNewUnique = primitive "thNewUnique"
 reportWarning :: String -> Q ()
 reportWarning s = Q (hPutStrLn stderr ("Template Haskell error: " ++ s))
 
--- An error the splice reports, marked so that the compiler fails the splice with it once the splice ends.
+-- An error the splice reports, which fails the splice once it ends.
 reportError :: String -> Q ()
-reportError s = Q (hPutStr stderr ("\1" ++ s ++ "\1"))
+reportError s = Q (reportSpliceError s)
+
+reportSpliceError :: String -> IO ()
+reportSpliceError = primitive "reportSpliceError"
 
 report :: Bool -> String -> Q ()
 report True = reportError
@@ -1220,7 +1223,7 @@ pprDec (NewtypeD c n vs _ con ders) =
   "newtype " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons [con] ++ pprDerivs ders
 pprDec (ClassD c n vs fds ds) =
   "class " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprFunDeps fds ++ pprMembers ds
-pprDec (InstanceD o c t ds) = "instance " ++ maybe "" renderOverlap o ++ pprCxt c ++ pprType 0 t ++ pprMembers ds
+pprDec (InstanceD o c t ds) = "instance " ++ maybe "" pprOverlap o ++ pprCxt c ++ pprType 0 t ++ pprMembers ds
 pprDec (StandaloneDerivD _ c t) = "deriving instance " ++ pprCxt c ++ pprType 0 t
 pprDec (DefaultSigD n t) = "default " ++ pprNamePrefix n ++ " :: " ++ pprType 0 t
 pprDec (InfixD (Fixity p d) _ n) = dir d ++ " " ++ show p ++ " " ++ pprNameInfix n
@@ -1256,7 +1259,7 @@ pprDerivs ds = concat ["\n    deriving " ++ pprDeriv s c | DerivClause s c <- ds
     classes [t] = pprType 0 t
     classes c = "(" ++ intercalate ", " (map (pprType 0) c) ++ ")"
     pprDeriv (Just (ViaStrategy t)) c = classes c ++ " via " ++ pprType 0 t
-    pprDeriv s c = maybe "" renderStrategy s ++ classes c
+    pprDeriv s c = maybe "" pprStrategy s ++ classes c
 
 pprFunDeps :: [FunDep] -> String
 pprFunDeps [] = ""
@@ -1270,281 +1273,55 @@ indentAfterFirst n s = case lines s of
   [] -> ""
   (l : ls) -> intercalate "\n" (l : map (replicate n ' ' ++) ls)
 
--- Rendering trees as source text for splices: one line, with explicit braces, and names as the program refers to them
+pprOverlap :: Overlap -> String
+pprOverlap Overlappable = "{-# OVERLAPPABLE #-} "
+pprOverlap Overlapping = "{-# OVERLAPPING #-} "
+pprOverlap Overlaps = "{-# OVERLAPS #-} "
+pprOverlap Incoherent = "{-# INCOHERENT #-} "
 
--- A new name is marked with its number, which the compiler drops where no other new name has the same name.
-spliceName :: Name -> String
-spliceName (Name (OccName occ) flavour) = case flavour of
-  NameU u -> "\1" ++ occ ++ "\2" ++ show u ++ "\3"
-  NameL u -> "\1" ++ occ ++ "\2" ++ show u ++ "\3"
-  NameQ (ModName m) -> m ++ "." ++ occ
-  _ -> occ
+pprStrategy :: DerivStrategy -> String
+pprStrategy StockStrategy = "stock "
+pprStrategy AnyclassStrategy = "anyclass "
+pprStrategy NewtypeStrategy = "newtype "
+pprStrategy (ViaStrategy t) = "via " ++ pprType 2 t ++ " "
 
-renderNamePrefix :: Name -> String
-renderNamePrefix n = let s = spliceName n in if isSymOcc (nameBase n) then "(" ++ s ++ ")" else s
+-- What a splice gives, which the compiler grafts in its place.
 
-renderNameInfix :: Name -> String
-renderNameInfix n = let s = spliceName n in if isSymOcc (nameBase n) then s else "${'`'}" ++ s ++ "${'`'}"
-
-renderLit :: Lit -> String
-renderLit (IntegerL i) = "(" ++ show i ++ ")"
-renderLit (CharL c) = show c
-renderLit (StringL s) = show s
-renderLit (RationalL r) = "(" ++ show (numerator r) ++ " / " ++ show (denominator r) ++ ")"
-renderLit l = pprLit 0 l
-
-renderExp :: Exp -> String
-renderExp (VarE n) = renderNamePrefix n
-renderExp (ConE n) = renderNamePrefix n
-renderExp (UnboundVarE n) = renderNamePrefix n
-renderExp (LitE l) = renderLit l
-renderExp (AppE f x) = "(" ++ renderExp f ++ " " ++ renderExp x ++ ")"
-renderExp (AppTypeE f t) = "(" ++ renderExp f ++ " @" ++ renderTypeAtom t ++ ")"
-renderExp (InfixE (Just a) op (Just b)) = "(" ++ renderExp a ++ " " ++ renderOp op ++ " " ++ renderExp b ++ ")"
-renderExp (InfixE (Just a) op Nothing) = "(" ++ renderExp a ++ " " ++ renderOp op ++ ")"
-renderExp (InfixE Nothing op (Just b)) = "(" ++ renderOp op ++ " " ++ renderExp b ++ ")"
-renderExp (InfixE Nothing op Nothing) = "(" ++ renderOp op ++ ")"
--- An unresolved chain is written without inner parentheses, so that the operators' fixities order it, as in GHC.
-renderExp (UInfixE a op b) = "(" ++ renderUInfix a ++ " " ++ renderOp op ++ " " ++ renderUInfix b ++ ")"
-renderExp (ParensE e) = "(" ++ renderExp e ++ ")"
-renderExp (LamE ps e) = "(\\" ++ unwords (map renderPat ps) ++ " -> " ++ renderExp e ++ ")"
-renderExp (LamCaseE ms) = "(\\case {" ++ intercalate "; " (map renderMatch ms) ++ "})"
-renderExp (TupE es) = "(" ++ intercalate ", " (map (maybe "" renderExp) es) ++ ")"
-renderExp (CondE c a b) = "(if " ++ renderExp c ++ " then " ++ renderExp a ++ " else " ++ renderExp b ++ ")"
-renderExp (MultiIfE alts) = "(if {" ++ concat [" | " ++ renderGuard g ++ " -> " ++ renderExp e | (g, e) <- alts] ++ " })"
-renderExp (LetE ds e) = "(let {" ++ intercalate "; " (map renderDec ds) ++ "} in " ++ renderExp e ++ ")"
-renderExp (CaseE e ms) = "(case " ++ renderExp e ++ " of {" ++ intercalate "; " (map renderMatch ms) ++ "})"
-renderExp (DoE _ ss) = "(do {" ++ intercalate "; " (map renderStmt ss) ++ "})"
-renderExp (MDoE _ ss) = "(mdo {" ++ intercalate "; " (map renderStmt ss) ++ "})"
-renderExp (CompE ss) = case reverse ss of
-  (NoBindS e : rest) -> "[" ++ renderExp e ++ " | " ++ intercalate ", " (map renderStmt (reverse rest)) ++ "]"
-  _ -> error "renderExp: empty comprehension"
-renderExp (ArithSeqE r) = "[" ++ renderRange r ++ "]"
-renderExp (ListE es) = "[" ++ intercalate ", " (map renderExp es) ++ "]"
-renderExp (SigE e t) = "(" ++ renderExp e ++ " :: " ++ renderType t ++ ")"
-renderExp (RecConE n fs) = "(" ++ renderNamePrefix n ++ " {" ++ intercalate ", " [renderNamePrefix f ++ " = " ++ renderExp e | (f, e) <- fs] ++ "})"
-renderExp (RecUpdE e fs) = "(" ++ renderExp e ++ " {" ++ intercalate ", " [renderNamePrefix f ++ " = " ++ renderExp x | (f, x) <- fs] ++ "})"
-renderExp (LabelE s) = "#" ++ s
-renderExp (ImplicitParamVarE s) = "?" ++ s
-renderExp (GetFieldE e f) = "(" ++ renderExp e ++ ")." ++ f
-renderExp (TypeE t) = "(type " ++ renderTypeAtom t ++ ")"
--- A tree with no spliced form here is unavailable. (This and the other render messages are Japanese, written with
--- escapes, since a library source is ASCII: "この形の式を作るスプライスは、この採点環境では使えません。" and the like.)
-renderExp _ = errorWithoutStackTrace "\12371\12398\24418\12398\24335\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-
-renderUInfix :: Exp -> String
-renderUInfix (UInfixE a op b) = renderUInfix a ++ " " ++ renderOp op ++ " " ++ renderUInfix b
-renderUInfix e = renderExp e
-
-renderOp :: Exp -> String
-renderOp (VarE n) = renderNameInfix n
-renderOp (ConE n) = renderNameInfix n
-renderOp (UnboundVarE n) = renderNameInfix n
-renderOp e = "${'`'}" ++ renderExp e ++ "${'`'}"
-
-renderRange :: Range -> String
-renderRange (FromR a) = renderExp a ++ " .."
-renderRange (FromThenR a b) = renderExp a ++ ", " ++ renderExp b ++ " .."
-renderRange (FromToR a b) = renderExp a ++ " .. " ++ renderExp b
-renderRange (FromThenToR a b c) = renderExp a ++ ", " ++ renderExp b ++ " .. " ++ renderExp c
-
-renderStmt :: Stmt -> String
-renderStmt (BindS p e) = renderPat p ++ " <- " ++ renderExp e
-renderStmt (LetS ds) = "let {" ++ intercalate "; " (map renderDec ds) ++ "}"
-renderStmt (NoBindS e) = renderExp e
-renderStmt (ParS sss) = intercalate " | " (map (intercalate ", " . map renderStmt) sss)
-renderStmt (RecS ss) = "rec {" ++ intercalate "; " (map renderStmt ss) ++ "}"
-
-renderGuard :: Guard -> String
-renderGuard (NormalG e) = renderExp e
-renderGuard (PatG ss) = intercalate ", " (map renderStmt ss)
-
-renderBody :: String -> Body -> String
-renderBody eq (NormalB e) = " " ++ eq ++ " " ++ renderExp e
-renderBody eq (GuardedB gs) = concat [" | " ++ renderGuard g ++ " " ++ eq ++ " " ++ renderExp e | (g, e) <- gs]
-
-renderWhere :: [Dec] -> String
-renderWhere [] = ""
-renderWhere ds = " where {" ++ intercalate "; " (map renderDec ds) ++ "}"
-
-renderMatch :: Match -> String
-renderMatch (Match p b ds) = renderPat p ++ renderBody "->" b ++ renderWhere ds
-
-renderPat :: Pat -> String
-renderPat (LitP (RationalL r)) = renderFractionalPat r
-renderPat (LitP l) = renderLit l
-renderPat (VarP n) = renderNamePrefix n
-renderPat (TupP ps) = "(" ++ intercalate ", " (map renderPat ps) ++ ")"
-renderPat (ConP n _ ps) = "(" ++ unwords (renderNamePrefix n : map renderPat ps) ++ ")"
-renderPat (InfixP a n b) = "(" ++ renderPat a ++ " " ++ renderNameInfix n ++ " " ++ renderPat b ++ ")"
-renderPat (UInfixP a n b) = "(" ++ renderPat a ++ " " ++ renderNameInfix n ++ " " ++ renderPat b ++ ")"
-renderPat (ParensP p) = "(" ++ renderPat p ++ ")"
-renderPat (TildeP p) = "(~" ++ renderPat p ++ ")"
-renderPat (BangP p) = "(!" ++ renderPat p ++ ")"
-renderPat (AsP n p) = "(" ++ renderNamePrefix n ++ "@" ++ renderPat p ++ ")"
-renderPat WildP = "_"
-renderPat (RecP n fs) = "(" ++ renderNamePrefix n ++ " {" ++ intercalate ", " [renderNamePrefix f ++ " = " ++ renderPat p | (f, p) <- fs] ++ "})"
-renderPat (ListP ps) = "[" ++ intercalate ", " (map renderPat ps) ++ "]"
-renderPat (SigP p t) = "(" ++ renderPat p ++ " :: " ++ renderType t ++ ")"
-renderPat (ViewP e p) = "(" ++ renderExp e ++ " -> " ++ renderPat p ++ ")"
-renderPat _ = errorWithoutStackTrace "\12371\12398\24418\12398\12497\12479\12540\12531\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-
-renderTypeAtom :: Type -> String
-renderTypeAtom t = "(" ++ renderType t ++ ")"
-
-renderType :: Type -> String
-renderType (ForallT vs c t) = (if null vs then "" else "forall " ++ unwords (map renderTyVar vs) ++ ". ") ++ renderCxt c ++ renderType t
-renderType (AppT (AppT ArrowT a) b) = renderTypeAtom a ++ " -> " ++ renderTypeAtom b
-renderType (AppT ListT a) = "[" ++ renderType a ++ "]"
-renderType t@(AppT _ _) = case splitT t [] of
-  (TupleT n, args) | length args == n -> "(" ++ intercalate ", " (map renderType args) ++ ")"
-  (f, args) -> unwords (renderTypeAtom f : map renderTypeAtom args)
-  where
-    splitT (AppT f x) acc = splitT f (x : acc)
-    splitT f acc = (f, acc)
-renderType (VarT n) = renderNamePrefix n
-renderType (ConT n) = renderNamePrefix n
-renderType (PromotedT n) = "'" ++ renderNamePrefix n
-renderType (SigT t k) = "(" ++ renderType t ++ " :: " ++ renderType k ++ ")"
-renderType (InfixT a n b) = renderTypeAtom a ++ " " ++ renderNameInfix n ++ " " ++ renderTypeAtom b
-renderType (ParensT t) = renderTypeAtom t
-renderType (TupleT 0) = "()"
-renderType (TupleT n) = "(" ++ replicate (n - 1) ',' ++ ")"
-renderType ArrowT = "(->)"
-renderType ListT = "[]"
-renderType EqualityT = "(~)"
-renderType StarT = "Type"
-renderType ConstraintT = "Constraint"
-renderType (LitT (NumTyLit n)) = show n
-renderType (LitT (StrTyLit s)) = show s
-renderType (LitT (CharTyLit c)) = show c
-renderType WildCardT = "_"
-renderType _ = errorWithoutStackTrace "\12371\12398\24418\12398\22411\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-
-renderTyVar :: TyVarBndr flag -> String
-renderTyVar (PlainTV n _) = renderNamePrefix n
-renderTyVar (KindedTV n _ k) = "(" ++ renderNamePrefix n ++ " :: " ++ renderType k ++ ")"
-
-renderCxt :: Cxt -> String
-renderCxt [] = ""
-renderCxt cs = "(" ++ intercalate ", " (map renderType cs) ++ ") => "
-
-renderDec :: Dec -> String
-renderDec (FunD n cs) = intercalate "; " [unwords (renderNamePrefix n : map renderPat ps) ++ renderBody "=" b ++ renderWhere ds | Clause ps b ds <- cs]
-renderDec (ValD p b ds) = renderPat p ++ renderBody "=" b ++ renderWhere ds
-renderDec (SigD n t) = renderNamePrefix n ++ " :: " ++ renderType t
-renderDec (KiSigD n k) = "type " ++ renderNamePrefix n ++ " :: " ++ renderType k
-renderDec (TySynD n vs t) = "type " ++ unwords (renderNamePrefix n : map renderTyVar vs) ++ " = " ++ renderType t
-renderDec (DataD c n vs k cons ders) =
-  "data " ++ renderCxt c ++ unwords (renderNamePrefix n : map renderTyVar vs) ++ renderKindSig k ++ renderCons cons ++ renderDerivs ders
-renderDec (NewtypeD c n vs k con ders) =
-  "newtype " ++ renderCxt c ++ unwords (renderNamePrefix n : map renderTyVar vs) ++ renderKindSig k ++ renderCons [con] ++ renderDerivs ders
-renderDec (ClassD c n vs fds ds) =
-  "class " ++ renderCxt c ++ unwords (renderNamePrefix n : map renderTyVar vs) ++ renderFunDeps fds ++ renderMembers ds
-renderDec (InstanceD o c t ds) = "instance " ++ maybe "" renderOverlap o ++ renderCxt c ++ renderType t ++ renderMembers ds
-renderDec (StandaloneDerivD s c t) = "deriving " ++ maybe "" renderStrategy s ++ "instance " ++ renderCxt c ++ renderType t
-renderDec (DefaultSigD n t) = "default " ++ renderNamePrefix n ++ " :: " ++ renderType t
-renderDec (InfixD (Fixity p d) _ n) = dir d ++ " " ++ show p ++ " " ++ renderNameInfix n
-  where
-    dir InfixL = "infixl"
-    dir InfixR = "infixr"
-    dir InfixN = "infix"
-renderDec (DefaultD ts) = "default (" ++ intercalate ", " (map renderType ts) ++ ")"
-renderDec (RoleAnnotD n rs) = "type role " ++ renderNamePrefix n ++ concatMap role rs
-  where
-    role NominalR = " nominal"
-    role RepresentationalR = " representational"
-    role PhantomR = " phantom"
-    role InferR = " _"
-renderDec _ = errorWithoutStackTrace "\12371\12398\24418\12398\23459\35328\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-
-renderKindSig :: Maybe Kind -> String
-renderKindSig Nothing = ""
-renderKindSig (Just k) = " :: " ++ renderType k
-
-renderOverlap :: Overlap -> String
-renderOverlap Overlappable = "{-# OVERLAPPABLE #-} "
-renderOverlap Overlapping = "{-# OVERLAPPING #-} "
-renderOverlap Overlaps = "{-# OVERLAPS #-} "
-renderOverlap Incoherent = "{-# INCOHERENT #-} "
-
-renderStrategy :: DerivStrategy -> String
-renderStrategy StockStrategy = "stock "
-renderStrategy AnyclassStrategy = "anyclass "
-renderStrategy NewtypeStrategy = "newtype "
-renderStrategy (ViaStrategy t) = "via " ++ renderTypeAtom t ++ " "
-
-renderFunDeps :: [FunDep] -> String
-renderFunDeps [] = ""
-renderFunDeps fds = " | " ++ intercalate ", " [unwords (map renderNamePrefix a) ++ " -> " ++ unwords (map renderNamePrefix b) | FunDep a b <- fds]
-
-renderMembers :: [Dec] -> String
-renderMembers [] = ""
-renderMembers ds = " where {" ++ intercalate "; " (map renderDec ds) ++ "}"
-
-renderCons :: [Con] -> String
-renderCons [] = ""
-renderCons cons = " = " ++ intercalate " | " (map renderCon cons)
-
-renderCon :: Con -> String
-renderCon (NormalC n bts) = unwords (renderNamePrefix n : [renderBang b ++ renderTypeAtom t | (b, t) <- bts])
-renderCon (RecC n vbts) = renderNamePrefix n ++ " {" ++ intercalate ", " [renderNamePrefix f ++ " :: " ++ renderBang b ++ renderTypeAtom t | (f, b, t) <- vbts] ++ "}"
-renderCon (InfixC (b1, t1) n (b2, t2)) = renderBang b1 ++ renderTypeAtom t1 ++ " " ++ renderNameInfix n ++ " " ++ renderBang b2 ++ renderTypeAtom t2
-renderCon (ForallC vs c con) = "forall " ++ unwords (map renderTyVar vs) ++ ". " ++ renderCxt c ++ renderCon con
-renderCon _ = errorWithoutStackTrace "\12371\12398\24418\12398\27083\25104\23376\65288GADT \12398\27083\25104\23376\12394\12393\65289\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-
--- A pattern takes a literal, not a division: a fraction is written as the finite decimal it is.
-renderFractionalPat :: Rational -> String
-renderFractionalPat r
-  | rest /= 1 = errorWithoutStackTrace "\26377\38480\12398\23567\25968\12391\26360\12369\12394\12356\20998\25968\12398\12497\12479\12540\12531\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
-  | numerator r < 0 = "(-" ++ text ++ ")"
-  | otherwise = text
-  where
-    d = denominator r
-    rest = strip 5 (strip 2 d)
-    strip p x = if x ${'`'}mod${'`'} p == 0 then strip p (x ${'`'}div${'`'} p) else x
-    k = head [i | i <- [0 ..], (10 ^ i) ${'`'}mod${'`'} d == 0]
-    scaled = abs (numerator r) * (10 ^ k ${'`'}div${'`'} d)
-    fraction = show (scaled ${'`'}mod${'`'} (10 ^ k))
-    text = show (scaled ${'`'}div${'`'} (10 ^ k)) ++ "." ++ (if k == 0 then "0" else replicate (k - length fraction) '0' ++ fraction)
-
-renderBang :: Bang -> String
-renderBang (Bang _ SourceStrict) = "!"
-renderBang (Bang _ SourceLazy) = "~"
-renderBang _ = ""
-
-renderDerivs :: [DerivClause] -> String
-renderDerivs ds = concat [renderDeriv s ("(" ++ intercalate ", " (map renderType c) ++ ")") | DerivClause s c <- ds]
-  where
-    -- A via type comes after the classes: deriving (C) via T.
-    renderDeriv (Just (ViaStrategy t)) classes = " deriving " ++ classes ++ " via " ++ renderTypeAtom t
-    renderDeriv s classes = " deriving " ++ maybe "" renderStrategy s ++ classes
-
--- What a splice gives, which the compiler reads from the output of the program that runs it.
+data SpliceResult = SpliceExp Exp | SplicePat Pat | SpliceType Type | SpliceDecs [Dec] deriving (Show)
 
 class Splice a where
-  renderSplice :: a -> String
+  spliceResult :: a -> SpliceResult
 
 instance Splice Exp where
-  renderSplice = renderExp
+  spliceResult = SpliceExp
 
 instance Splice Pat where
-  renderSplice = renderPat
+  spliceResult = SplicePat
 
 instance Splice Type where
-  renderSplice = renderType
+  spliceResult = SpliceType
 
 instance Splice Dec where
-  renderSplice = renderDec
+  spliceResult d = SpliceDecs [d]
 
 instance Splice a => Splice [a] where
-  renderSplice xs = intercalate "; " (map renderSplice xs)
+  spliceResult xs = SpliceDecs (concatMap (decsOf . spliceResult) xs)
+    where
+      decsOf (SpliceDecs ds) = ds
+      decsOf r = errorWithoutStackTrace ("not a declaration: " ++ show r)
 
+-- The stored result is the splice program's last action, so a splice that exits or fails before it stores none. Its
+-- Show instance demands every part of the tree, which runs whatever the tree still has to compute while the splice
+-- runs.
 runSplice :: Splice a => Q a -> IO ()
--- The code a splice spells, after a mark that keeps it apart from what the splice prints itself while it runs.
--- A splice that exits fails as GHC reports it.
-runSplice (Q io) = (io >>= \x -> putStr ("\0" ++ renderSplice x)) ${'`'}catch${'`'} \e ->
-  hPutStr stderr ("\1Exception when trying to run compile-time code:\n  " ++ show (e :: ExitCode) ++ "\1")
+runSplice (Q io) = (io >>= \x -> let r = spliceResult x in length (show r) ${'`'}seq${'`'} storeSpliceResult r) ${'`'}catch${'`'} \e ->
+  storeSpliceExit ("Exception when trying to run compile-time code:\n  " ++ show (e :: ExitCode))
+
+storeSpliceResult :: SpliceResult -> IO ()
+storeSpliceResult = primitive "storeSpliceResult"
+
+storeSpliceExit :: String -> IO ()
+storeSpliceExit = primitive "storeSpliceExit"
 
 runDecSplice :: Q [Dec] -> IO ()
 runDecSplice = runSplice

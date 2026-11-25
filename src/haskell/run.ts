@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import { ExecutionLimitError } from '../interpreter/limits';
+import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { type CompiledProgram, compileProgram, setSpliceRunner } from './compile';
@@ -7,21 +7,33 @@ import type { GlobalDef } from './core';
 import { ioSupport } from './ioPrimitives';
 import { forceString } from './primitives';
 import { Runtime, type TraceFrame } from './runtime';
+import { decodeSplice } from './thDecode';
+import { chargeTypeWork, remainingCompilationWork } from './typeWorkBudget';
 import { HaskellException, type Slot, type Value } from './values';
 
-// A splice runs as a program of its own while the program that has it compiles: its output, after a mark, spells
-// its code, and what it prints before the mark and to its standard error is the compiler's output, as runIO's is in
-// GHC. An error it reports with reportError, marked in its standard error, fails it, as a run without the mark does.
-setSpliceRunner((program) => {
-  const run = runProgram(new Runtime(), compileProgram(program));
-  if (run.uncaughtException !== undefined) {
-    throw new CompileError([{ row: 0, message: run.uncaughtException }]);
+// A splice runs as a program of its own while the program that has it compiles, on what is left of the compilation's
+// budget: it stores its tree, which the compiler grafts in its place, and what it prints is the compiler's output, as
+// runIO's is in GHC. An error it reports with reportError fails it, as does an exit or an end without a stored tree.
+setSpliceRunner((program, span, names) => {
+  const budget = new ExecutionBudget(LIMITS.maxMilliseconds, remainingCompilationWork());
+  const runtime = new Runtime(undefined, budget);
+  let run: ProgramRun;
+  try {
+    run = runProgram(runtime, compileProgram(program));
+  } finally {
+    chargeTypeWork(budget.spent);
   }
-  const reported = /\u0001([^\u0001]*)\u0001/.exec(run.stderr);
-  if (reported) throw new CompileError([{ row: 0, message: reported[1] }]);
-  const mark = run.stdout.lastIndexOf('\u0000');
-  if (mark === -1) throw new CompileError([{ row: 0, message: 'Exception when trying to run compile-time code' }]);
-  return { printed: run.stdout.slice(0, mark), printedError: run.stderr, code: run.stdout.slice(mark + 1) };
+  const failure =
+    run.uncaughtException ??
+    runtime.splice.errors[0] ??
+    runtime.splice.exit ??
+    (runtime.splice.result ? undefined : 'Exception when trying to run compile-time code');
+  if (failure !== undefined) throw new CompileError([{ row: 0, message: failure }]);
+  return {
+    result: decodeSplice(runtime, runtime.splice.result as Slot, span, names),
+    printed: run.stdout,
+    printedError: run.stderr,
+  };
 });
 
 export function executeHaskellProgram(source: string, input?: ProgramInput): ProgramExecution {
