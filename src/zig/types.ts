@@ -133,6 +133,8 @@ export interface StructType {
   readonly layout: 'auto' | 'extern' | 'packed';
   /** Filled when the struct is first used, since fields may refer to types declared later. */
   fields: StructField[] | undefined;
+  /** The backing integer that `packed struct(i16)` names, filled when its fields are checked. */
+  backingInteger?: IntType;
   /** A struct that the grader implements natively, such as `Turtle` or `std.ArrayList(T)`. */
   native?: NativeStruct;
 }
@@ -174,6 +176,8 @@ export interface UnionType {
   /** The tag's enum of a tagged union. */
   tagType: EnumType | undefined;
   fields: UnionField[] | undefined;
+  /** The backing integer that `packed union(u8)` names, filled when its fields are checked. */
+  backingInteger?: IntType;
 }
 
 export interface FnType {

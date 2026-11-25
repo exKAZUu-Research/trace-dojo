@@ -805,6 +805,7 @@ export abstract class SemaBase implements SemaApi {
     this.inContainerScope(type.namespace, () => {
       const backing = this.compileType(argument);
       if (backing.kind !== 'int') this.error(argument, `packed ${type.kind} の基底型には整数型を指定してください。`);
+      type.backingInteger = backing;
       const bits = bitSizeOf(type, () => this.spendCompilation());
       if (backing.bits !== bits)
         this.error(

@@ -14,6 +14,7 @@ import {
   BOOL,
   COMPTIME_INT,
   ENUM_LITERAL,
+  type IntType,
   intType,
   isComptimeOnly,
   NORETURN,
@@ -377,7 +378,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
           `${typeName(type)} 型は基底の整数型を書いていないので、@backingInt があいまいです。`
         );
       this.resolveStorage(type, args[0]);
-      const backing = intType(false, bitSizeOf(type));
+      const backing = backingIntegerOf(type);
       return this.derived(operand, backing, (value) => reinterpret(value, type, backing));
     }
     return this.error(
@@ -618,7 +619,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         return variant('struct', {
           is_tuple: type.isTuple,
           layout: { auto: 0n, extern: 1n, packed: 2n }[type.layout],
-          backing_integer: optionalValue(type.layout === 'packed' ? intType(false, bitSizeOf(type)) : undefined),
+          backing_integer: optionalValue(type.layout === 'packed' ? backingIntegerOf(type) : undefined),
           field_names: this.names(fields.map((field) => field.name)),
           field_types: this.constSlice(fields.map((field) => field.type)),
           field_attrs: this.constSlice(fields.map((field) => this.fieldAttributes(attributes, field, span))),
@@ -642,7 +643,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         return variant('union', {
           layout: { auto: 0n, extern: 1n, packed: 2n }[type.layout],
           tag_type: optionalValue(type.tagType),
-          backing_integer: optionalValue(type.layout === 'packed' ? intType(false, bitSizeOf(type)) : undefined),
+          backing_integer: optionalValue(type.layout === 'packed' ? backingIntegerOf(type) : undefined),
           field_names: this.names(fields.map((field) => field.name)),
           field_types: this.constSlice(fields.map((field) => field.type)),
           field_attrs: this.constSlice(fields.map(() => this.structValue(attributes, span, {}))),
@@ -711,6 +712,11 @@ function reinterpret(value: Value, from: Type, to: Type): Value {
   const bytes = Array.from<Value>({ length }).fill(0n);
   new BufferMemory(bytes, spendMemory, memorySpace()).write(from, 0, value);
   return new BufferMemory(bytes, spendMemory, memorySpace()).read(to, 0);
+}
+
+/** The backing integer of a packed struct or union: the one it names, else the unsigned one of its bits. */
+function backingIntegerOf(type: Extract<Type, { kind: 'struct' | 'union' }>): IntType {
+  return type.backingInteger ?? intType(false, bitSizeOf(type));
 }
 
 /**
