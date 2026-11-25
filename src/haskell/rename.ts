@@ -300,6 +300,8 @@ class Renamer {
   private readonly declaredCons = new Map<Decl, ConInfo[]>();
   /** The pattern synonyms, by name, with the names of the functions that match and build their values. */
   private readonly patternSynonyms = new Map<string, PatternSynonymInfo>();
+  /** The constructors of the module's `type data` declarations, which are types without a tick or DataKinds. */
+  private readonly typeDataCons = new Set<string>();
   /** The features of the module's extensions that resolving names decides. */
   private readonly features: FeatureGates<'rename'>;
 
@@ -308,6 +310,9 @@ class Renamer {
     private readonly options: RenameOptions
   ) {
     this.features = module.extensions.gates('rename');
+    for (const decl of module.decls) {
+      if (decl.kind === 'data' && decl.typeData) for (const con of decl.cons) this.typeDataCons.add(con.name.name);
+    }
   }
 
   run(): RModule {
@@ -2564,7 +2569,7 @@ class Renamer {
     }
     if (builtin) return { k: 'con', entity: builtin, span: name.span };
     if (
-      this.features.allows('promotion') &&
+      (this.features.allows('promotion') || (!name.qualifier && this.typeDataCons.has(name.name))) &&
       !this.typeExists(name) &&
       this.valuesNamed(name).some((entity) => entity.sort === 'con')
     ) {

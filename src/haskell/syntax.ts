@@ -254,6 +254,8 @@ export type Decl =
       kind: 'data';
       name: Name;
       params: Name[];
+      /** `type data`, whose constructors are types only, as TypeData declares them. */
+      typeData?: boolean;
       /** The kinds the parameters' annotations give, by position. */
       paramKinds?: (TypeExpr | undefined)[];
       /** The kind `data T :: k where` gives the type. */
