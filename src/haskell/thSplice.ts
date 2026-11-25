@@ -138,17 +138,15 @@ export function spliceHeader(root: Node): string {
   return lines.join('\n');
 }
 
-/**
- * Runs a program's splices and puts the code they give in their places, each on the rows it had, so that the rows
- * of the rest of the program stay. A splice runs as a program of the module's pragmas and imports, as GHC's stage
- * restriction allows: it cannot use the module's own definitions.
- */
 /** How a splice's program runs: the code it spells, and what it printed while it ran. */
 export type SpliceRunner = (program: string) => { code: string; printed: string };
 
 /**
  * Runs a program's splices in the order they are written, as GHC does, and puts the code of each in its place,
- * giving the program's text and what the splices printed.
+ * giving the program's text and what the splices printed. The code takes the rows the splice had, and the text
+ * after the splice keeps its row and column, so that the layout of the rest of the program stays. A splice runs as
+ * a program of the module's pragmas and imports, as GHC's stage restriction allows: it cannot use the module's own
+ * definitions.
  */
 export function expandSplices(
   source: string,
@@ -175,9 +173,12 @@ export function expandSplices(
   // From the last site back, so that the offsets of the earlier ones stay.
   for (const [index, site] of sites.entries().toArray().toReversed()) {
     const text = uniqueNames(codes[index]);
-    const rows = source.slice(site.start, site.end).split('\n').length - 1;
+    const spliceLines = source.slice(site.start, site.end).split('\n');
     const replacement = site.runner === 'runDecSplice' ? text : `(${text})`;
-    result = result.slice(0, site.start) + replacement + '\n'.repeat(rows) + result.slice(site.end);
+    // Tabs stay, so that the layout reads the same column for the text after the splice.
+    const indent = spliceLines.length > 1 ? (spliceLines.at(-1) ?? '').replaceAll(/[^\t]/g, ' ') : '';
+    result =
+      result.slice(0, site.start) + replacement + '\n'.repeat(spliceLines.length - 1) + indent + result.slice(site.end);
   }
   return { source: result, printed };
 }
