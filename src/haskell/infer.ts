@@ -320,17 +320,7 @@ export class Checker {
     givens: readonly { pred: Pred; evidence: Evidence }[]
   ): 'solved' | 'retained' | 'again' | undefined {
     const { pred } = hole;
-    if (isLiteralClass(pred.cls)) {
-      const literal = prune(this.reduceFamilies(pred.type));
-      if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
-        hole.solution = { kind: 'literal', value: literal.entity.literal };
-        return 'solved';
-      }
-      // A family application that does not reduce yet, `KnownNat (n + 1)`, may be given, or reduce later.
-      if (isFamilyApplication(literal)) return entailByGivens(givens, pred) ? undefined : 'retained';
-      if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
-      return undefined;
-    }
+    if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) return this.solveLiteral(hole, givens);
     switch (pred.cls) {
       case IMPLICIT_CLASS: {
         return this.solveImplicit(hole, givens);
@@ -363,6 +353,25 @@ export class Checker {
         return undefined;
       }
     }
+  }
+
+  /**
+   * Solves `KnownNat n` or `KnownSymbol s` by the literal its type reduces to, or leaves it to the givens; a family
+   * application with type variables, `KnownNat (n + 1)`, may still reduce, and waits for that.
+   */
+  private solveLiteral(
+    hole: EvidenceHole,
+    givens: readonly { pred: Pred; evidence: Evidence }[]
+  ): 'solved' | 'retained' | undefined {
+    const literal = prune(this.reduceFamilies(hole.pred.type));
+    if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
+      hole.solution = { kind: 'literal', value: literal.entity.literal };
+      return 'solved';
+    }
+    if (entailByGivens(givens, hole.pred)) return undefined;
+    if (isFamilyApplication(literal) && typeVarsOf(literal).size > 0) return 'retained';
+    if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
+    return undefined;
   }
 
   private solveImplicit(
@@ -573,7 +582,6 @@ export class Checker {
         continue;
       }
       for (const hole of retained) {
-        if (isLiteralClass(hole.pred.cls) && typeVarsOf(hole.pred.type).size === 0) this.noInstance(hole);
         if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
       for (const [variable, holes] of holesByVariable(retained)) {
@@ -753,6 +761,7 @@ export class Checker {
   }
 
   /** Checks an expression by its form's check rule, or returns false when the form infers its type instead. */
+  // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private checkExprInner(expr: RExpr, expected: Type, context: string | undefined): boolean {
     switch (expr.k) {
       case 'lambda': {
@@ -792,24 +801,33 @@ export class Checker {
         return true;
       }
       case 'tuple': {
-        const { head, args } = splitApp(this.reduceFamilies(expected));
-        if (head.tag !== 'tcon' || head.entity !== tupleCon(expr.elems.length).type) return false;
-        if (args.length !== expr.elems.length) return false;
+        const args = this.expectedArgs(expected, tupleCon(expr.elems.length).type, expr.elems.length);
+        if (!args) return false;
         for (const [index, elem] of expr.elems.entries()) this.checkExpr(elem, args[index], context);
         return true;
       }
-      case 'list':
+      case 'list': {
+        const [elem] = this.expectedArgs(expected, LIST_TYPE, 1) ?? [];
+        if (!elem) return false;
+        for (const item of expr.elems) this.checkExpr(item, elem, 'リストの要素');
+        return true;
+      }
       case 'comp': {
-        const { head, args } = splitApp(this.reduceFamilies(expected));
-        if (head.tag !== 'tcon' || head.entity !== LIST_TYPE || args.length !== 1) return false;
-        if (expr.k === 'list') for (const item of expr.elems) this.checkExpr(item, args[0], 'リストの要素');
-        else this.inPatternScope(() => this.checkComprehension(expr, args[0]));
+        const [elem] = this.expectedArgs(expected, LIST_TYPE, 1) ?? [];
+        if (!elem) return false;
+        this.inPatternScope(() => this.checkComprehension(expr, elem));
         return true;
       }
       default: {
         return false;
       }
     }
+  }
+
+  /** The arguments of the expected type when it applies `entity` to `arity` of them, as a tuple or list type does. */
+  private expectedArgs(expected: Type, entity: TypeEntity, arity: number): Type[] | undefined {
+    const { head, args } = splitApp(this.reduceFamilies(expected));
+    return head.tag === 'tcon' && head.entity === entity && args.length === arity ? args : undefined;
   }
 
   // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
@@ -1375,7 +1393,6 @@ export class Checker {
     }
     let result: Type = expected?.type ?? this.freshVar();
     for (const [index, stmt] of expr.stmts.entries()) {
-      const isLast = index === expr.stmts.length - 1;
       switch (stmt.k) {
         case 'bind': {
           const value = this.freshVar();
@@ -1391,7 +1408,7 @@ export class Checker {
           break;
         }
         case 'exp': {
-          if (isLast) {
+          if (index === expr.stmts.length - 1) {
             if (expected) this.checkExpr(stmt.expr, result, expected.context);
             else result = this.inferExpr(stmt.expr);
             if (needsMonad) this.unify(result, tap(monad, this.freshVar()), stmt.expr.span, 'do の最後の文');
@@ -1402,7 +1419,6 @@ export class Checker {
         }
       }
     }
-    expr.type = result;
     return result;
   }
 
@@ -1889,10 +1905,6 @@ export class Checker {
   checkKinds(specialize = false): void {
     this.typeConversion.checkKinds(specialize);
   }
-}
-
-function isLiteralClass(cls: ClassEntity): boolean {
-  return cls === literalClasses?.nat || cls === literalClasses?.symbol;
 }
 
 /** Givens with their constraints written as types made the classes' constraints, once their heads are classes. */
