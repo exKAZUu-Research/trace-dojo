@@ -135,10 +135,15 @@ define('_FileSink._writeOpened', (_runtime, self, [contents]) => {
 define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
   const { files } = runtime.io;
   const text = stringArg(runtime, path, 'path');
-  withFileErrors(runtime, 'Cannot create file', () => {
-    if (recursive === true) files.createDirectory(parentOf(text), true);
-    files.open(text, { create: exclusive === true ? 'exclusive' : 'always', truncate: false, append: true });
-  });
+  if (recursive === true) {
+    withFileErrors(runtime, 'Creation failed', () => {
+      rejectFileAncestors(runtime, text, false);
+      files.createDirectory(parentOf(text), true);
+    });
+  }
+  withFileErrors(runtime, 'Cannot create file', () =>
+    files.open(text, { create: exclusive === true ? 'exclusive' : 'always', truncate: false, append: true })
+  );
   return;
 });
 
@@ -149,10 +154,23 @@ define('_Directory._createDirectory', (runtime, _self, [path, recursive]) => {
     const kind = files.kindOf(text);
     if (kind === 'directory') return;
     if (kind === 'file') throw new FileSystemError('ENOTDIR', text);
+    if (recursive === true) rejectFileAncestors(runtime, text, true);
     files.createDirectory(text, recursive === true);
   });
   return;
 });
+
+/**
+ * Fails a recursive creation at the first of a path's ancestors that is a file, named as the program spells it, as
+ * the SDK's Directory creates the ancestors one by one.
+ */
+function rejectFileAncestors(runtime: Runtime, path: string, withPath: boolean): void {
+  const names = path.split('/');
+  for (let count = 1; count < names.length + (withPath ? 1 : 0); count++) {
+    const ancestor = names.slice(0, count).join('/');
+    if (ancestor !== '' && runtime.io.files.kindOf(ancestor) === 'file') throw new FileSystemError('ENOTDIR', ancestor);
+  }
+}
 
 define('_Directory._list', (runtime, _self, [path, recursive]) => {
   const { files } = runtime.io;
