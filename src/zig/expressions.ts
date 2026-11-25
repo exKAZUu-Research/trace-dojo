@@ -150,6 +150,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Abstract parts that later layers compile.
   protected abstract compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr;
   protected abstract compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr;
+  protected abstract checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void;
   protected abstract compileControl(expression: Expression, resultType: Type | undefined): TExpr;
   protected abstract compileTry(expression: ExpressionOf<'try'>, resultType: Type | undefined): TExpr;
   protected abstract compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr;
@@ -215,6 +216,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         return this.compileCall(expression, resultType);
       }
       case 'builtinCall': {
+        this.checkBuiltinAvailable(expression);
         return this.compileBuiltin(expression, resultType);
       }
       case 'unary': {

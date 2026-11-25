@@ -142,6 +142,18 @@ const UNAVAILABLE = new Map<string, string>([
   ['@Enum', '@Enum（型の操作）'],
 ]);
 
+/** Builtins whose answers depend on how memory represents a value, which programs cannot use. */
+const MEMORY_REPRESENTATION = new Map<string, string>([
+  ['@bitCast', '@bitCast（メモリの表現に依存する変換）'],
+  ['@sizeOf', '@sizeOf（メモリの表現）'],
+  ['@bitSizeOf', '@bitSizeOf（メモリの表現）'],
+  ['@alignOf', '@alignOf（メモリの表現）'],
+  ['@offsetOf', '@offsetOf（メモリの表現）'],
+  ['@bitOffsetOf', '@bitOffsetOf（メモリの表現）'],
+  ['@backingInt', '@backingInt（メモリの表現に依存する変換）'],
+  ['@fromBackingInt', '@fromBackingInt（メモリの表現に依存する変換）'],
+]);
+
 const ARGUMENT_COUNTS: Record<string, number> = {
   '@as': 2,
   '@intCast': 1,
@@ -216,10 +228,20 @@ const MATH_OPERATIONS: Record<string, UnaryOperation> = {
 
 export abstract class BuiltinCompiler extends ExpressionCompiler {
   private readonly nameSlices = new Map<string, Slice>();
+
+  /** Refuses a builtin that this grader does not run, before any class of the compiler handles the call. */
+  protected checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void {
+    const { name } = expression;
+    const unavailable = UNAVAILABLE.get(name);
+    if (unavailable) this.error(expression, `${unavailable}は、この採点環境では使えません。`);
+    // Library code ported from Zig's source uses these as primitives, which programs do not get.
+    const representation = MEMORY_REPRESENTATION.get(name);
+    if (representation && !this.enclosingNamespace().internal)
+      this.error(expression, `${representation}は、この採点環境では使えません。`);
+  }
+
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
     const { name, args } = expression;
-    const unavailable = UNAVAILABLE.get(name);
-    if (unavailable) return this.error(expression, `${unavailable}は、この採点環境では使えません。`);
     const count = ARGUMENT_COUNTS[name];
     if (count === undefined && name !== '@min' && name !== '@max' && name !== '@TypeOf') {
       return this.error(expression, `組み込み関数 ${name} はありません。`);

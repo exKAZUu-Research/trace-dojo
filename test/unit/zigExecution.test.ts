@@ -10305,7 +10305,7 @@ const T13 = packed union(u8) { a: u8, b: i8 };`;
   ];
   const uses = [
     (type: string) => `fn f(x: ${type}) callconv(.c) void { _ = x; } pub fn main() void { _ = &f; }`,
-    (type: string) => `const S = extern struct { x: ${type} }; pub fn main() void { _ = @sizeOf(S); }`,
+    (type: string) => `const S = extern struct { x: ${type} }; pub fn main() void { var s: S = undefined; _ = &s; }`,
     (type: string) => `fn f() callconv(.c) ${type} { return undefined; } pub fn main() void { _ = &f; }`,
   ];
   test.each(
