@@ -1542,10 +1542,25 @@ export abstract class SemaBase implements SemaApi {
     if (a.kind === 'enum_literal' && (b.kind === 'enum' || b.kind === 'union')) return b;
     if (b.kind === 'enum_literal' && (a.kind === 'enum' || a.kind === 'union')) return a;
     if (a.kind === 'pointer' && b.kind === 'pointer') return peerPointers(a, b);
+    if (isTupleType(a) && isTupleType(b)) return this.peerTuples(a, b);
     if (a.kind === 'noreturn') return b;
     if (b.kind === 'noreturn') return a;
     return undefined;
   }
+
+  /** Two tuples of the same length resolve to the tuple of their fields' peer types, as Zig's anonymous tuples do. */
+  private peerTuples(a: StructType, b: StructType): Type | undefined {
+    const left = a.fields ?? [];
+    const right = b.fields ?? [];
+    if (left.length !== right.length) return undefined;
+    const types = left.map((field, index) => this.peerPair(field.type, right[index].type, []));
+    if (types.some((type) => type === undefined)) return undefined;
+    return this.tupleType(types.map((type, index) => ({ name: String(index), type: type as Type, hasDefault: false })));
+  }
+}
+
+function isTupleType(type: Type): type is StructType {
+  return type.kind === 'struct' && type.isTuple;
 }
 
 function addDecls(namespace: Namespace, members: readonly ContainerMember[]): void {
