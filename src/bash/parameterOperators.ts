@@ -251,7 +251,13 @@ function mapPatternRemoval(
   ctx: WordContext,
   map: (text: string) => string
 ): WordSegment[] {
-  if (!ctx.inDouble && value.kind === 'list' && !value.positional && shell.store.readScalar('IFS') === '') {
+  if (
+    Boolean(ctx.splittingFields) &&
+    !ctx.inDouble &&
+    value.kind === 'list' &&
+    !value.positional &&
+    shell.store.readScalar('IFS') === ''
+  ) {
     if (value.values.length === 0) return [];
     const text = joinMetered(value.values.map(map), ' ', (cost) => shell.runtime.spend(cost));
     return text === '' ? [] : [textSegment(text, false, false)];
