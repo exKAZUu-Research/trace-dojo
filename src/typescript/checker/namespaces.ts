@@ -125,22 +125,31 @@ export class Namespaces {
     if (!rootValue?.namespaceExports) return { error: `名前空間 ${root.text} が見つかりません。` };
     let current: Sym = rootValue;
     for (const [index, part] of rest.entries()) {
-      const isLast = index === rest.length - 1;
+      const remaining = rest.length - 1 - index;
+      const next = this.pathMember(current, part.text, remaining === 0 ? meaning : 'value');
+      if (next.error) return next;
+      const symbol = next.symbol as Sym;
       // An enum's members are the last name of a path, as in `import X = N.E.A`.
-      const next: Sym | undefined = current.namespaceExports
-        ? this.exportedMember(current, part.text, isLast ? meaning : 'value')
-        : current.enumMembers?.values.get(part.text);
-      if (!next && isLast && meaning === 'type' && current.namespaceExports?.values.has(part.text)) {
-        const name = `${qualifiedName(current)}.${part.text}`;
-        return { error: `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。` };
-      }
-      if (!next || !(isLast || next.namespaceExports || (next.valueKind === 'enum' && index === rest.length - 2)))
-        return {
-          error: `名前空間 '${qualifiedName(current)}' には、エクスポートされたメンバー '${part.text}' がありません。`,
-        };
-      current = next;
+      if (remaining > 0 && !symbol.namespaceExports && !(symbol.valueKind === 'enum' && remaining === 1))
+        return { error: missingMemberError(current, part.text) };
+      current = symbol;
     }
     return { symbol: current };
+  }
+
+  /** What a name of a path names in the namespace or enum before it, or why it names nothing there. */
+  private pathMember(container: Sym, name: string, meaning: 'value' | 'type'): { symbol?: Sym; error?: string } {
+    const symbol = container.namespaceExports
+      ? this.exportedMember(container, name, meaning)
+      : container.enumMembers?.values.get(name);
+    if (symbol) return { symbol };
+    if (meaning === 'type' && container.namespaceExports?.values.has(name)) {
+      const qualified = `${qualifiedName(container)}.${name}`;
+      return {
+        error: `${qualified} は値であり、型としては使えません。型を表すには typeof ${qualified} と書いてください。`,
+      };
+    }
+    return { error: missingMemberError(container, name) };
   }
 
   private exportedMember(namespace: Sym, name: string, meaning: 'value' | 'type'): Sym | undefined {
@@ -262,6 +271,10 @@ function qualifiedPath(node: TreeNode): TreeNode[] {
 }
 
 /** The name a namespace is printed with, `A.B` for `B` in `A`. */
+function missingMemberError(container: Sym, name: string): string {
+  return `名前空間 '${qualifiedName(container)}' には、エクスポートされたメンバー '${name}' がありません。`;
+}
+
 function qualifiedName(symbol: Sym): string {
   return symbol.exportedFrom ? `${qualifiedName(symbol.exportedFrom)}.${symbol.name}` : symbol.name;
 }
