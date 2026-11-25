@@ -18,6 +18,10 @@ export class FunctionScope {
   catchDepth = 0;
   /** How many finally blocks enclose the statement being bound, which control may not leave. */
   finallyDepth = 0;
+  /** How many try blocks with catch clauses enclose the statement being bound, where `yield return` may not stand. */
+  tryWithCatchDepth = 0;
+  /** For an iterator, the type of the values its `yield return` statements produce. */
+  iteratorElementType: Type | undefined;
   /** The switch statements around the statement being bound, innermost last, which `goto case` jumps within. */
   readonly switches: PendingSwitch[] = [];
 

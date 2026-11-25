@@ -2,6 +2,7 @@
 import './nativesCore';
 import './nativesTime';
 import './nativesIndex';
+import './nativesIterators';
 import './nativesString';
 import './nativesCollections';
 import './nativesArray';

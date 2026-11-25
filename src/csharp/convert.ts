@@ -45,7 +45,6 @@ import { ExpressionConverter } from './convertExpression';
 const UNSUPPORTED_STATEMENTS: Record<string, string> = {
   fixed_statement: '`fixed` 文',
   unsafe_statement: '`unsafe` ブロック',
-  yield_statement: '`yield` 文',
 };
 
 const UNSUPPORTED_DECLARATIONS: Record<string, string> = { extension_declaration: '拡張ブロック（`extension(...)`）' };
@@ -870,6 +869,9 @@ export class Converter extends ExpressionConverter {
       }
       case 'using_statement': {
         return this.convertUsingStatement(node);
+      }
+      case 'yield_statement': {
+        return { kind: 'yield', value: parts[0] ? this.convertExpression(parts[0]) : undefined, ...position };
       }
       default: {
         const what = UNSUPPORTED_STATEMENTS[node.type];

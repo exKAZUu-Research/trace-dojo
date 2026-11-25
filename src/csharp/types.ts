@@ -183,6 +183,8 @@ export class MethodSymbol {
   callsAreRemoved = false;
   /** The symbols of the method's `[Conditional]` attributes. */
   conditionalSymbols: string[] | undefined;
+  /** For an iterator (a body with `yield`), the type of its values and whether it returns an enumerable. */
+  iterator: { elementType: Type; isEnumerable: boolean } | undefined;
   /** Whether `[ModuleInitializer]` runs the method before the entry point. */
   isModuleInitializer = false;
   /** The message of an `[Obsolete(message, true)]` attribute, which makes every use an error (CS0619). */

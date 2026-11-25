@@ -208,6 +208,13 @@ export class FlowAnalyzer {
       case 'using': {
         return this.statement(statement.body, state);
       }
+      case 'yieldReturn': {
+        return this.expression(statement.value, state);
+      }
+      case 'yieldBreak': {
+        this.jumps.returns.push(state);
+        return 'unreachable';
+      }
     }
   }
 

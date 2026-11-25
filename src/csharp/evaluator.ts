@@ -10,6 +10,7 @@ import type {
 import type { CompiledProgram } from './compiler';
 import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
 import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
+import { IteratorExecutor, type IteratorState } from './iterators';
 import { formatValue } from './library/formatting';
 import { typeObjectOf } from './library/nativesCore';
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
@@ -27,7 +28,6 @@ import {
 } from './numeric';
 import { environmentOf, exceptionMessage, recordMember, stringOf, toStringValue } from './objects';
 import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
-import { StatementExecutor } from './statementExecutor';
 import {
   type ArrayType,
   baseTypeOf,
@@ -110,7 +110,7 @@ type AssignmentExpression = Extract<
 >;
 
 /** Runs the bound tree of a compiled program. */
-export class Evaluator extends StatementExecutor {
+export class Evaluator extends IteratorExecutor {
   constructor(runtime: Runtime, program: CompiledProgram) {
     super(runtime, program);
     runtime.evaluator = this;
@@ -166,14 +166,13 @@ export class Evaluator extends StatementExecutor {
         throw new PendingException('System.EntryPointNotFoundException', `Entry point was not found.`);
       return undefined;
     }
-    const frame = new Frame(this.runtime, method, self, typeEnvironment, callRow, method.locals.length);
-    if (captured) frame.captured = captured;
-    for (const [index, local] of method.locals.entries()) {
-      if (!local.isParameter || local.owner !== method) continue;
-      // A value parameter receives a copy also when the library calls back with a struct it stores.
-      const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
-      frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
-    }
+    const frame = this.frameFor(method, self, args, typeEnvironment, callRow, captured);
+    if (method.iterator)
+      return this.startIterator(
+        method.iterator,
+        () => this.frameFor(method, self, args, typeEnvironment, callRow, captured),
+        frame
+      );
     // An instance constructor, a base class's called from a derived one's included, first runs its class's static
     // constructor, as .NET does before the class's first instance.
     if (method.kind === 'constructor' && !method.isStatic && method.owner.staticConstructor) {
@@ -190,6 +189,52 @@ export class Evaluator extends StatementExecutor {
     } finally {
       this.runtime.popFrame();
     }
+  }
+
+  /** The frame of a call of a method with a body, its parameters holding the arguments. */
+  private frameFor(
+    method: MethodSymbol,
+    self: Value,
+    args: (Value | VariableReference)[],
+    typeEnvironment: Map<TypeParameterSymbol, Type>,
+    callRow: number | undefined,
+    captured: Map<LocalSymbol, Cell> | undefined
+  ): Frame {
+    const frame = new Frame(this.runtime, method, self, typeEnvironment, callRow, method.locals.length);
+    if (captured) frame.captured = captured;
+    for (const [index, local] of method.locals.entries()) {
+      if (!local.isParameter || local.owner !== method) continue;
+      // A value parameter receives a copy also when the library calls back with a struct it stores.
+      const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
+      frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
+    }
+    return frame;
+  }
+
+  /**
+   * The object a call of an iterator method returns without running its body: an enumerable, whose each
+   * `GetEnumerator` but the first starts a fresh run with the call's arguments, or an enumerator.
+   */
+  private startIterator(
+    iterator: NonNullable<MethodSymbol['iterator']>,
+    makeFrame: () => Frame,
+    frame: Frame
+  ): CsObject {
+    const elementType = frame.resolve(iterator.elementType);
+    const type = namedType(this.runtime.library.typeNamed('System.Linq.Internal.YieldIterator', 1), [elementType]);
+    const create = (runFrame: Frame): IteratorState => ({
+      method: runFrame.method as MethodSymbol,
+      frame: runFrame,
+      elementType,
+      steps: undefined,
+      status: 'before',
+      current: this.defaultOf(elementType),
+      restart: iterator.isEnumerable ? () => create(makeFrame()) : undefined,
+      isTaken: !iterator.isEnumerable,
+    });
+    const object = new CsObject(type, []);
+    object.native = create(frame);
+    return object;
   }
 
   private ownerFromEnvironment(

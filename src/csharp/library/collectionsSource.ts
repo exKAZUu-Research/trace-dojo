@@ -636,6 +636,8 @@ namespace System.Linq.Internal {
   public static class CollectionBuilder { public static void AddAll<T>(ICollection<T> target, IEnumerable<T> items); }
   public sealed class Iterator<T> : IOrderedEnumerable<T> { public IEnumerator<T> GetEnumerator(); }
   public sealed class Enumerator<T> : IEnumerator<T> { public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
+  /** What an iterator method returns, which runs the method's body as \`MoveNext\` asks for its values. */
+  public sealed class YieldIterator<T> : IEnumerable<T>, IEnumerator<T> { public IEnumerator<T> GetEnumerator(); public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
   public sealed class Grouping<TKey, TElement> : IGrouping<TKey, TElement> { public TKey Key { get; } public IEnumerator<TElement> GetEnumerator(); }
   public sealed class Lookup<TKey, TElement> : ILookup<TKey, TElement> {
     public int Count { get; }

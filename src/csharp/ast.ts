@@ -317,6 +317,8 @@ export type Statement =
   | ({ kind: 'lock'; value: Expression; body: Statement } & Position)
   | ({ kind: 'goto'; target: GotoTarget } & Position)
   | ({ kind: 'labeled'; label: string; statement: Statement } & Position)
+  /** `yield return value;`, or `yield break;` without a value. */
+  | ({ kind: 'yield'; value: Expression | undefined } & Position)
   | ({
       kind: 'using';
       /** The declared resources, or the expression whose value is the resource. */

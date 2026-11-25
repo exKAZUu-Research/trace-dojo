@@ -304,6 +304,8 @@ export type StepKind =
 interface StatementBase {
   row: number;
   step: StepKind;
+  /** Whether a `yield return` inside the statement may suspend it, which then runs as a generator. */
+  suspends?: true;
 }
 
 export interface BoundBlock extends StatementBase {
@@ -402,6 +404,8 @@ export type BoundStatement =
    */
   | ({ kind: 'goto'; target: LabelSymbol | BoundSwitchSection | undefined } & StatementBase)
   | ({ kind: 'lock'; value: BoundExpression; body: BoundStatement } & StatementBase)
+  | ({ kind: 'yieldReturn'; value: BoundExpression } & StatementBase)
+  | ({ kind: 'yieldBreak' } & StatementBase)
   /** Runs its body, then disposes the resource its local holds, if not null, through `IDisposable.Dispose`. */
   | ({
       kind: 'using';

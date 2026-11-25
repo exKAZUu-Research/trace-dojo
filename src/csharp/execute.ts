@@ -65,6 +65,10 @@ function runEntry(evaluator: Evaluator): string | undefined {
   const stringSymbol = runtime.library.specials.get('string') as TypeSymbol;
   const args: Value[] = entry.parameters.length === 0 ? [] : [new CsArray(arrayType(namedType(stringSymbol)), [0], [])];
   try {
+    // `[ModuleInitializer]` methods run when the module loads, before the entry point.
+    for (const type of program.types)
+      for (const method of type.methods)
+        if (method.isModuleInitializer) evaluator.invoke(root, method, undefined, [], undefined, new Map());
     // .NET initializes a type with a static constructor before any of its members runs, so before Main is called.
     runtime.ensureInitialized(entry.owner.declaredType);
     evaluator.invoke(root, entry, undefined, args, undefined, new Map());

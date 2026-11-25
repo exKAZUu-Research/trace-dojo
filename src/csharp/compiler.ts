@@ -710,7 +710,8 @@ export class Compiler extends AttributeBinder {
         ),
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
-    const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error';
+    // An iterator ends by falling off its body, which returns no value.
+    const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error' && !method.iterator;
     const assignedAtExit = analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
     if (method.kind === 'localFunction') {
       method.assignedAtExit = assignedAtExit;

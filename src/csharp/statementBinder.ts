@@ -30,6 +30,7 @@ import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope, type PendingSwitch } from './scopes';
 import {
+  displayMethod,
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
@@ -633,7 +634,67 @@ export abstract class StatementBinder extends PatternBinder {
       case 'using': {
         return this.bindUsingStatement(statement, context);
       }
+      case 'yield': {
+        return this.bindYield(statement, context);
+      }
     }
+  }
+
+  private bindYield(statement: Extract<Statement, { kind: 'yield' }>, context: BindContext): BoundStatement {
+    const { fn } = context;
+    const { row } = statement;
+    if (fn.kind === 'lambda') {
+      this.error(statement, 'CS1621', 'yield ステートメントは、匿名メソッドまたはラムダ式の内部では使用できません');
+      return { kind: 'empty', row, step: 'none' };
+    }
+    if (!statement.value) return { kind: 'yieldBreak', row, step: 'none' };
+    const value = this.bindAs(statement.value, fn.iteratorElementType ?? ERROR_TYPE, context);
+    if (fn.finallyDepth > 0) this.error(statement, 'CS1625', 'finally 句の本体で生成することはできません');
+    else if (fn.catchDepth > 0) this.error(statement, 'CS1631', 'catch 句の本体で値を生成することはできません');
+    else if (fn.tryWithCatchDepth > 0)
+      this.error(statement, 'CS1626', 'catch 句を含む try ブロックの本体で値を生成することはできません');
+    return { kind: 'yieldReturn', value, row, step: 'step' };
+  }
+
+  /**
+   * Makes a body with `yield` an iterator (C# spec §15.15): its return type must be an enumerable or an enumerator
+   * interface, whose element type its `yield return` values convert to, and its parameters may not be references.
+   */
+  private beginIterator(body: Block, context: BindContext, returnType: Type): void {
+    if (!body.statements.some(containsYield)) return;
+    const { fn } = context;
+    const { method } = fn;
+    const iterator = this.iteratorShape(returnType);
+    if (!iterator) {
+      if (returnType.kind !== 'error') {
+        const name = method.name === '<Main>$' ? '<top-level-statements-entry-point>' : displayMethod(method);
+        this.error(
+          method.kind === 'localFunction' || method.name === '<Main>$' ? body : method.row,
+          'CS1624',
+          `'${displayType(returnType)}' は反復子インターフェイス型ではないため、'${name}' の本体は反復子ブロックにできません`
+        );
+      }
+      // The body is still an iterator, which reports no missing return (CS0161).
+      fn.iteratorElementType = ERROR_TYPE;
+      method.iterator = { elementType: ERROR_TYPE, isEnumerable: true };
+      return;
+    }
+    for (const parameter of method.parameters)
+      if (parameter.refKind)
+        this.error(parameter.position ?? method.row, 'CS1623', '反復子には ref、in、out パラメーターを指定できません');
+    fn.iteratorElementType = iterator.elementType;
+    method.iterator = iterator;
+  }
+
+  /** The element type of an iterator's return type, and whether it is an enumerable, if it is one of the four. */
+  private iteratorShape(type: Type): { elementType: Type; isEnumerable: boolean } | undefined {
+    if (type.kind !== 'named') return undefined;
+    const name = type.symbol.fullName;
+    if (name === 'System.Collections.Generic.IEnumerable`1') return { elementType: type.args[0], isEnumerable: true };
+    if (name === 'System.Collections.Generic.IEnumerator`1') return { elementType: type.args[0], isEnumerable: false };
+    if (name === 'System.Collections.IEnumerable') return { elementType: this.objectType, isEnumerable: true };
+    if (name === 'System.Collections.IEnumerator') return { elementType: this.objectType, isEnumerable: false };
+    return undefined;
   }
 
   /** The label of a name that a `goto` in the context may jump to: one of its block's or an enclosing block's. */
@@ -1284,6 +1345,14 @@ export abstract class StatementBinder extends PatternBinder {
   private bindReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
     const { fn } = context;
     if (fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出られません');
+    if (fn.iteratorElementType) {
+      this.error(
+        statement,
+        'CS1622',
+        '反復子から値を返すことができません。yield return ステートメントを使用して値を返すか、yield break ステートメントを使用して反復子を終了してください。'
+      );
+      return { kind: 'empty', row: statement.row, step: 'none' };
+    }
     if (fn.returnType === undefined) {
       // A lambda whose return type is being inferred collects the types its returns return.
       if (!statement.value) return { kind: 'return', value: undefined, row: statement.row, step: 'none' };
@@ -1322,7 +1391,13 @@ export abstract class StatementBinder extends PatternBinder {
 
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindTry(statement: Extract<Statement, { kind: 'try' }>, context: BindContext): BoundStatement {
-    const body = this.bindBlock(statement.body, context);
+    if (statement.catches.length > 0) context.fn.tryWithCatchDepth++;
+    let body: BoundBlock;
+    try {
+      body = this.bindBlock(statement.body, context);
+    } finally {
+      if (statement.catches.length > 0) context.fn.tryWithCatchDepth--;
+    }
     const exceptionType = namedType(this.library.specials.get('exception') as TypeSymbol);
     const caught: Type[] = [];
     const catches: BoundCatch[] = statement.catches.map((clause) => {
@@ -1483,7 +1558,12 @@ export abstract class StatementBinder extends PatternBinder {
     returnType: Type
   ): BoundBlock | undefined {
     if (!body) return undefined;
-    if (body.kind === 'block') return this.bindBlock(body, context, false);
+    if (body.kind === 'block') {
+      this.beginIterator(body, context, returnType);
+      const block = this.bindBlock(body, context, false);
+      if (context.fn.method.iterator) markSuspending(block);
+      return block;
+    }
     const saved = this.allowsThrowExpression;
     this.allowsThrowExpression = true;
     try {
@@ -1596,4 +1676,98 @@ function collectDesignatedNames(node: unknown, names: string[]): void {
   }
   if (kind === 'single' && 'name' in node) names.push((node as { name: string }).name);
   for (const value of Object.values(node)) collectDesignatedNames(value, names);
+}
+
+/** Whether a statement holds a `yield` of its own function, which makes the function an iterator. */
+function containsYield(statement: Statement): boolean {
+  switch (statement.kind) {
+    case 'yield': {
+      return true;
+    }
+    case 'block': {
+      return statement.statements.some(containsYield);
+    }
+    case 'if': {
+      return (
+        containsYield(statement.consequence) ||
+        (statement.alternative !== undefined && containsYield(statement.alternative))
+      );
+    }
+    case 'while':
+    case 'do':
+    case 'for':
+    case 'foreach':
+    case 'lock':
+    case 'using':
+    case 'checked': {
+      return containsYield(statement.body);
+    }
+    case 'labeled': {
+      return containsYield(statement.statement);
+    }
+    case 'switch': {
+      return statement.sections.some((section) => section.statements.some(containsYield));
+    }
+    case 'try': {
+      return (
+        containsYield(statement.body) ||
+        statement.catches.some((clause) => containsYield(clause.body)) ||
+        (statement.finally !== undefined && containsYield(statement.finally))
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** Marks the statements of an iterator's body that a `yield return` may suspend, which run as generators. */
+function markSuspending(statement: BoundStatement): boolean {
+  let suspends = false;
+  const visit = (inner: BoundStatement | undefined): void => {
+    if (inner && markSuspending(inner)) suspends = true;
+  };
+  switch (statement.kind) {
+    case 'yieldReturn': {
+      suspends = true;
+      break;
+    }
+    case 'block': {
+      for (const inner of statement.statements) visit(inner);
+      break;
+    }
+    case 'if': {
+      visit(statement.consequence);
+      visit(statement.alternative);
+      break;
+    }
+    case 'while':
+    case 'do':
+    case 'for':
+    case 'foreach':
+    case 'lock':
+    case 'using': {
+      visit(statement.body);
+      break;
+    }
+    case 'labeled': {
+      visit(statement.statement);
+      break;
+    }
+    case 'switch': {
+      for (const section of statement.sections) for (const inner of section.statements) visit(inner);
+      break;
+    }
+    case 'try': {
+      visit(statement.body);
+      for (const clause of statement.catches) visit(clause.body);
+      visit(statement.finally);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+  if (suspends) statement.suspends = true;
+  return suspends;
 }

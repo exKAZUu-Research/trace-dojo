@@ -15,13 +15,13 @@ import { CsThrow, type ExceptionState, type Frame, ProgramExit, type Slot } from
 import type { LocalSymbol, MethodSymbol, Type } from './types';
 import { Cell, copyValue, type CsArray, CsObject, type CsString, stringText, UNASSIGNED, type Value } from './values';
 
-const BREAK = Symbol('break');
-const CONTINUE = Symbol('continue');
+export const BREAK = Symbol('break');
+export const CONTINUE = Symbol('continue');
 interface ReturnCompletion {
   value: Value;
 }
 /** A `goto` on its way to the block or switch that holds its target. */
-class GotoCompletion {
+export class GotoCompletion {
   constructor(readonly target: LabelSymbol | BoundSwitchSection) {}
 }
 export type Completion = undefined | typeof BREAK | typeof CONTINUE | ReturnCompletion | GotoCompletion;
@@ -30,7 +30,10 @@ export type Completion = undefined | typeof BREAK | typeof CONTINUE | ReturnComp
 const labelIndices = new WeakMap<BoundStatement[], Map<LabelSymbol | BoundSwitchSection, number>>();
 
 /** Where a label stands among a list of statements, or undefined when the list does not hold it. */
-function labelIndexIn(statements: BoundStatement[], target: LabelSymbol | BoundSwitchSection): number | undefined {
+export function labelIndexIn(
+  statements: BoundStatement[],
+  target: LabelSymbol | BoundSwitchSection
+): number | undefined {
   let indices = labelIndices.get(statements);
   if (!indices) {
     indices = new Map();
@@ -42,7 +45,13 @@ function labelIndexIn(statements: BoundStatement[], target: LabelSymbol | BoundS
 }
 
 /** That a loop goes on to its next iteration. */
-const NEXT = Symbol('next');
+export const NEXT = Symbol('next');
+
+/** The elements of a foreach loop's collection, which `next` gives one by one until it gives none. */
+export interface ElementCursor {
+  next(): { value: Value } | undefined;
+  close(): void;
+}
 
 type ForStatement = Extract<BoundStatement, { kind: 'for' }>;
 type ForeachStatement = Extract<BoundStatement, { kind: 'foreach' }>;
@@ -76,7 +85,7 @@ export abstract class StatementExecutor extends PatternMatcher {
   }
 
   /** Runs statements from an index, going on from a label of theirs that a `goto` among them jumps to. */
-  private runStatements(statements: BoundStatement[], frame: Frame, start: number): Completion {
+  protected runStatements(statements: BoundStatement[], frame: Frame, start: number): Completion {
     for (let index = start; index < statements.length; index++) {
       const completion = this.execute(statements[index], frame);
       if (completion === undefined) continue;
@@ -162,6 +171,12 @@ export abstract class StatementExecutor extends PatternMatcher {
       case 'using': {
         return this.executeUsing(statement, frame);
       }
+      case 'yieldBreak': {
+        return { value: undefined };
+      }
+      case 'yieldReturn': {
+        throw new Error('A yield return runs only in an iterator body');
+      }
     }
   }
 
@@ -220,14 +235,14 @@ export abstract class StatementExecutor extends PatternMatcher {
     });
   }
 
-  private runForInitializers(statement: ForStatement, frame: Frame): void {
+  protected runForInitializers(statement: ForStatement, frame: Frame): void {
     if (statement.initializers.length === 0) return;
     this.withStep(statement.row, headerStep(statement.initializers), () => {
       for (const initializer of statement.initializers) this.execute(withoutStep(initializer), frame);
     });
   }
 
-  private runForUpdates(statement: ForStatement, frame: Frame): void {
+  protected runForUpdates(statement: ForStatement, frame: Frame): void {
     if (statement.updates.length === 0) return;
     this.withStep(statement.row, 'step', () => {
       for (const update of statement.updates) this.evaluate(update, frame);
@@ -239,15 +254,26 @@ export abstract class StatementExecutor extends PatternMatcher {
     if (collection === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(collection);
     try {
-      return this.inScope(frame, [statement.variable, ...statement.locals], [], () =>
-        this.iterate(statement, collection, frame, (element) => this.runForeachIteration(statement, frame, element))
-      );
+      return this.inScope(frame, [statement.variable, ...statement.locals], [], () => {
+        const cursor = this.elementsOf(statement, collection, frame);
+        try {
+          for (let element = cursor.next(); element; element = cursor.next()) {
+            this.bindIteration(statement, frame, element.value);
+            const outcome = loopOutcome(this.execute(statement.body, frame));
+            if (outcome !== NEXT) return outcome;
+          }
+          return;
+        } finally {
+          cursor.close();
+        }
+      });
     } finally {
       frame.temporaries.pop();
     }
   }
 
-  private runForeachIteration(statement: ForeachStatement, frame: Frame, element: Value): Completion {
+  /** Stores an element in a foreach loop's variable, or deconstructs it into the loop's variables. */
+  protected bindIteration(statement: ForeachStatement, frame: Frame, element: Value): void {
     const converted = statement.elementConversion
       ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
       : element;
@@ -258,35 +284,38 @@ export abstract class StatementExecutor extends PatternMatcher {
       this.evaluate(statement.deconstruction, frame);
     }
     if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
-    return this.execute(statement.body, frame);
   }
 
-  private iterate(
-    statement: ForeachStatement,
-    collection: Value,
-    frame: Frame,
-    runIteration: (element: Value) => Completion
-  ): Completion {
+  /**
+   * The elements a foreach loop goes through, one at a time: an array's or a string's, or those the collection's
+   * `GetEnumerator` returns, whose enumerator `close` disposes, when it implements IDisposable, as the loop ends.
+   */
+  protected elementsOf(statement: ForeachStatement, collection: Value, frame: Frame): ElementCursor {
     const { iteration } = statement;
-    if (iteration.kind === 'array') {
-      const { values } = collection as CsArray;
-      return iterateIndexed(values.length, (index) => values[index], runIteration);
+    if (iteration.kind === 'array' || iteration.kind === 'string') {
+      const values = iteration.kind === 'array' ? (collection as CsArray).values : undefined;
+      const text = iteration.kind === 'string' ? stringText(collection as string | CsString) : '';
+      const length = values ? values.length : text.length;
+      let index = 0;
+      return {
+        next: () => {
+          if (index >= length) return;
+          const value = values ? values[index] : text.charCodeAt(index);
+          index++;
+          return { value };
+        },
+        close: () => {},
+      };
     }
-    if (iteration.kind === 'string') {
-      const text = stringText(collection as string | CsString);
-      return iterateIndexed(text.length, (index) => text.charCodeAt(index), runIteration);
-    }
-    return this.iterateEnumerator(statement, iteration, collection, frame, runIteration);
+    return this.enumeratorElements(statement, iteration, collection, frame);
   }
 
-  /** Runs a foreach loop over the enumerator that the collection's `GetEnumerator` returns. */
-  private iterateEnumerator(
+  private enumeratorElements(
     statement: ForeachStatement,
     iteration: Extract<ForeachKind, { kind: 'enumerator' }>,
     collection: Value,
-    frame: Frame,
-    runIteration: (element: Value) => Completion
-  ): Completion {
+    frame: Frame
+  ): ElementCursor {
     const receiverType = this.runtime.runtimeTypeOf(collection);
     const getEnumerator =
       iteration.getEnumerator.owner.kind === 'interface' || iteration.getEnumerator.isVirtual
@@ -295,33 +324,35 @@ export abstract class StatementExecutor extends PatternMatcher {
     const enumerator = this.invokeWithoutArguments(frame, getEnumerator, collection, statement.row, receiverType);
     if (enumerator === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(enumerator);
-    try {
-      const enumeratorType = this.runtime.runtimeTypeOf(enumerator);
-      const moveNext = this.runtime.dispatch(iteration.moveNext, enumerator);
-      const getter = iteration.current.getter as MethodSymbol;
-      const current = this.runtime.dispatch(getter, enumerator);
-      while (this.invokeWithoutArguments(frame, moveNext, enumerator, statement.row, enumeratorType) as boolean) {
-        const element = this.boxedAsCalled(
-          getter,
-          current,
-          enumeratorType,
-          this.invokeWithoutArguments(frame, current, enumerator, statement.row, enumeratorType)
-        );
-        const outcome = loopOutcome(runIteration(element));
-        if (outcome !== NEXT) return outcome;
-      }
-      return undefined;
-    } finally {
-      frame.temporaries.pop();
-      // Only an enumerator that implements IDisposable is disposed, through its implementation of the interface.
-      if (enumerator !== undefined && this.isInstanceOf(enumerator, iteration.disposable)) {
-        const dispose = this.runtime.dispatch(iteration.dispose, enumerator, iteration.disposable);
-        this.invokeWithoutArguments(frame, dispose, enumerator, statement.row, this.runtime.runtimeTypeOf(enumerator));
-      }
-    }
+    const enumeratorType = this.runtime.runtimeTypeOf(enumerator);
+    const moveNext = this.runtime.dispatch(iteration.moveNext, enumerator);
+    const getter = iteration.current.getter as MethodSymbol;
+    const current = this.runtime.dispatch(getter, enumerator);
+    return {
+      next: () => {
+        if (!(this.invokeWithoutArguments(frame, moveNext, enumerator, statement.row, enumeratorType) as boolean))
+          return;
+        const value = this.invokeWithoutArguments(frame, current, enumerator, statement.row, enumeratorType);
+        return { value: this.boxedAsCalled(getter, current, enumeratorType, value) };
+      },
+      close: () => {
+        frame.temporaries.pop();
+        // Only an enumerator that implements IDisposable is disposed, through its implementation of the interface.
+        if (this.isInstanceOf(enumerator, iteration.disposable)) {
+          const dispose = this.runtime.dispatch(iteration.dispose, enumerator, iteration.disposable);
+          this.invokeWithoutArguments(
+            frame,
+            dispose,
+            enumerator,
+            statement.row,
+            this.runtime.runtimeTypeOf(enumerator)
+          );
+        }
+      },
+    };
   }
 
-  private invokeWithoutArguments(
+  protected invokeWithoutArguments(
     frame: Frame,
     method: MethodSymbol,
     receiver: Value,
@@ -359,7 +390,7 @@ export abstract class StatementExecutor extends PatternMatcher {
   }
 
   /** The section of the first label that matches, or else the default section. */
-  private chooseSection(sections: BoundSwitchSection[], value: Value, frame: Frame): BoundSwitchSection | undefined {
+  protected chooseSection(sections: BoundSwitchSection[], value: Value, frame: Frame): BoundSwitchSection | undefined {
     let defaultSection: BoundSwitchSection | undefined;
     for (const section of sections) {
       for (const label of section.labels) {
@@ -426,7 +457,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     return completion;
   }
 
-  private runFinally(block: BoundBlock, frame: Frame): Completion {
+  protected runFinally(block: BoundBlock, frame: Frame): Completion {
     return this.executeBlock(block, frame);
   }
 
@@ -536,32 +567,20 @@ export abstract class StatementExecutor extends PatternMatcher {
 }
 
 /** What a loop does after its body completes: go on, or end with the completion it returns. */
-function loopOutcome(completion: Completion): Completion | typeof NEXT {
+export function loopOutcome(completion: Completion): Completion | typeof NEXT {
   if (completion === undefined || completion === CONTINUE) return NEXT;
   return completion === BREAK ? undefined : completion;
 }
 
-function iterateIndexed(
-  length: number,
-  elementAt: (index: number) => Value,
-  runIteration: (element: Value) => Completion
-): Completion {
-  for (let index = 0; index < length; index++) {
-    const outcome = loopOutcome(runIteration(elementAt(index)));
-    if (outcome !== NEXT) return outcome;
-  }
-  return undefined;
-}
-
 /** A for loop's initializers record one step, unless they declare without initializing. */
-function headerStep(initializers: BoundStatement[]): BoundStatement['step'] {
+export function headerStep(initializers: BoundStatement[]): BoundStatement['step'] {
   const recordsStep = initializers.some(
     (initializer) => initializer.step !== 'none' || initializer.kind === 'expression'
   );
   return recordsStep ? 'step' : 'none';
 }
 
-function withoutStep(statement: BoundStatement): BoundStatement {
+export function withoutStep(statement: BoundStatement): BoundStatement {
   return statement.step === 'none' ? statement : ({ ...statement, step: 'none' } as BoundStatement);
 }
 
