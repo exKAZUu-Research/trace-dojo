@@ -451,7 +451,14 @@ export abstract class StatementCompiler extends CallCompiler {
         return this.deferStatement(statement);
       }
       case 'comptime': {
-        const value = this.comptimeValue(() => this.compile(statement.body), statement);
+        const body = statement.body;
+        // `comptime x = v;` runs the assignment statement at compile time.
+        const compileBody = (): TExpr => {
+          if (body.kind !== 'assign') return this.compile(body);
+          const exec = this.statementExpression(body, statement).exec;
+          return runtime(VOID, (frame) => void exec(frame), body);
+        };
+        const value = this.comptimeValue(compileBody, statement);
         if (value.type.kind !== 'void' && value.type.kind !== 'noreturn')
           this.error(
             statement.body,
