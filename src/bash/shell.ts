@@ -752,7 +752,7 @@ export class Shell implements ArithmeticHost, RootContext {
     try {
       return evaluateArithmetic(text, this, undefined, () => this.runtime.spend(), preExpanded);
     } catch (error) {
-      if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticError) this.failures.exitWithMessage(error.message);
       if (error instanceof ArithmeticStoreError) {
         this.failures.handleStoreFailure('fatalReadonlyArithmetic', error.failure);
       }
