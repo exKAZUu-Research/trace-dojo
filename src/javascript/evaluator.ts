@@ -811,19 +811,11 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     };
-    // A private instance accessor belongs to each instance, which gets it before its fields as a private method does.
-    if (member.key.kind === 'private' && !member.isStatic)
-      instanceFields.unshift({
-        key,
-        isPrivate: true,
-        initialize: undefined,
-        stepRow: undefined,
-        onlyCalls: false,
-        property,
-      });
-    else if (member.key.kind === 'private') mergePrivate(runtime, target, privateIdentity(key), property);
-    else target.properties.set(key, property);
-    return { field, property };
+    if (member.key.kind !== 'private') {
+      target.properties.set(key, property);
+      return { field, property };
+    }
+    return { field, property: this.installPrivateMember(key, property, member.isStatic, target, instanceFields) };
   }
 
   private fieldInitializer(
@@ -861,22 +853,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
     const { runtime } = this;
     const method = this.createFunction(member.fn, classScope, target);
     if (member.key.kind === 'computed') nameFunction(runtime, method, key);
-    if (member.key.kind === 'private') {
-      const property = privateMethodProperty(member.kind, method);
-      if (!member.isStatic) {
-        instanceFields.unshift({
-          key,
-          isPrivate: true,
-          initialize: undefined,
-          stepRow: undefined,
-          onlyCalls: false,
-          property,
-        });
-        return property;
-      }
-      mergePrivate(runtime, target, privateIdentity(key), property);
-      return target.privateMembers?.get(privateIdentity(key));
-    }
+    if (member.key.kind === 'private')
+      return this.installPrivateMember(
+        key,
+        privateMethodProperty(member.kind, method),
+        member.isStatic,
+        target,
+        instanceFields
+      );
     if (member.kind === 'method')
       runtime.defineProperty(target, key, {
         value: method,
@@ -886,6 +870,32 @@ export class Evaluator extends SuspendableStatementEvaluator {
       });
     else defineAccessor(runtime, target, key, member.kind, method, false);
     return target.properties.get(key);
+  }
+
+  /**
+   * Installs a private method or accessor: a static one on the class, merged with its other half, and an instance one
+   * on each instance, before its fields. Returns the property the member's decorators replace or wrap.
+   */
+  private installPrivateMember(
+    key: Key,
+    property: Property,
+    isStatic: boolean,
+    target: JsObject,
+    instanceFields: ClassField[]
+  ): Property {
+    if (!isStatic) {
+      instanceFields.unshift({
+        key,
+        isPrivate: true,
+        initialize: undefined,
+        stepRow: undefined,
+        onlyCalls: false,
+        property,
+      });
+      return property;
+    }
+    mergePrivate(this.runtime, target, privateIdentity(key), property);
+    return target.privateMembers?.get(privateIdentity(key)) ?? property;
   }
 
   private methodScope(scope: Scope, thisValue: JsObject, homeObject: JsObject): Scope {
