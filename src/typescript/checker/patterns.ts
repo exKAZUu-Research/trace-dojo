@@ -655,19 +655,31 @@ export class BindingPatterns {
   }
 
   /**
-   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns yields: the type argument of
-   * a library iterator, or else the `value` its `next()` results have, as for an iterator object a program writes.
+   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns yields, as tsc reads it: the
+   * `value` of the results its `next()` gives that are not done (awaited for an async iterator), or else a library
+   * iterator's type argument.
    */
   private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
     const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
     const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
     if (iteratorType?.kind !== 'object') return undefined;
-    if (iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
     const next = this.c.propertyOf(iteratorType, 'next');
     const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
-    if (!result) return undefined;
-    const settled = method === 'asyncIterator' ? awaitedType(this.c, result) : result;
-    return this.c.propertyOf(settled, 'value')?.type();
+    const settled = result && (method === 'asyncIterator' ? awaitedType(this.c, result) : result);
+    const yielded = settled
+      ? (settled.kind === 'union' ? settled.types : [settled]).filter((member) => !this.isDoneResult(member))
+      : [];
+    const values = yielded.flatMap((member) => {
+      const value = this.c.propertyOf(member, 'value');
+      return value ? [value.type()] : [];
+    });
+    return values.length > 0 ? unionOf(values) : iteratorType.typeArguments?.[0];
+  }
+
+  /** Whether an iterator result says it is done, as `IteratorReturnResult` does, so it yields no element. */
+  private isDoneResult(result: Type): boolean {
+    const done = this.c.propertyOf(result, 'done')?.type();
+    return done?.kind === 'literal' && done.value === true;
   }
 
   private iterableConstraint(type: Type): Type | undefined {
