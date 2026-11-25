@@ -32,6 +32,7 @@ import {
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
 import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { isPublicStdMember } from './library/native';
+import { valuesEqual } from './library/valueEquality';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
@@ -2016,6 +2017,14 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Initializers ----------------------------------------------------------------------------------------------------
 
+  /** A comptime field takes only its own value, which Zig checks where a literal gives it. */
+  private checkComptimeField(compiled: TExpr, field: StructField, span: Span): void {
+    const fact = staticResultOf(compiled);
+    const expected = field.comptimeValue?.value;
+    if (!fact || !valuesEqual(field.type, fact.value, expected, () => this.spendCompilation()))
+      this.error(span, `comptime のフィールド「${field.name}」には、既定の値と同じ値しか入れられません。`);
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   protected structInit(expression: ExpressionOf<'structInit'>, resultType: Type | undefined): TExpr {
     const type = expression.type ? this.compileType(expression.type) : resultType && unwrapResult(resultType);
@@ -2035,11 +2044,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (expression.fields.length === 0 && type.native && this.structFields(type, expression).length === 0)
       return this.nativeDefault(type, expression);
     const plan = this.structInitializerPlan(expression, type);
-    const elements = plan.map(({ field, value }) =>
-      value
-        ? this.coerce(this.compile(value, field.type), field.type, value)
-        : known(field.type, field.defaultValue, expression)
-    );
+    const elements = plan.map(({ field, value }) => {
+      if (!value) return known(field.type, field.defaultValue, expression);
+      const compiled = this.coerce(this.compile(value, field.type), field.type, value);
+      if (field.comptimeValue) this.checkComptimeField(compiled, field, value);
+      return compiled;
+    });
     return this.aggregate(type, elements, expression, (values) => {
       const slots: Value[] = [];
       for (const [index, { position }] of plan.entries()) slots[position] = values[index];
