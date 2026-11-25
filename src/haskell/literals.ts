@@ -131,14 +131,12 @@ export function parseStringLiteral(text: string, span: Span, multiline = false):
 
 /**
  * Reads a `"""` string as GHC's MultilineStrings does (GHC.Parser.String's `lexMultilineString`): on the source text,
- * before it reads escapes, it joins string gaps, splits lines, expands leading tabs, removes the indentation the
+ * before it reads escapes, it collapses string gaps, splits lines, expands leading tabs, removes the indentation the
  * lines after the first share, empties those lines of only whitespace, and drops a leading and a trailing newline.
  */
 function readMultilineString(text: string, span: Span): string[] {
   if (text.length < 6 || !text.endsWith('"""')) throw syntaxError(span, 'リテラルの区切りの書き方に誤りがあります。');
-  const lines = text
-    .slice(3, -3)
-    .replaceAll(/\\[\t\n\v\f\r ]+\\/g, '')
+  const lines = collapseGaps(text.slice(3, -3), span)
     .split(/\r\n|[\n\r\f]/)
     .map((line) => line.replace(/^[\t ]+/, (indent) => expandTabs(indent)));
   const indents = lines
@@ -155,6 +153,34 @@ function readMultilineString(text: string, span: Span): string[] {
   if (joined.startsWith('\n')) joined = joined.slice(1);
   if (joined.endsWith('\n')) joined = joined.slice(0, -1);
   return readChars(escapeBareQuotes(joined), span, true);
+}
+
+/**
+ * Replaces each string gap with `\&`, which keeps a numeric escape before it from taking the digits after it, and
+ * leaves the escapes `\\` and `\^\` whole, whose backslashes open no gap.
+ */
+function collapseGaps(body: string, span: Span): string {
+  let result = '';
+  let index = 0;
+  while (index < body.length) {
+    const char = body[index];
+    if (char !== '\\') {
+      result += char;
+      index++;
+    } else if (STRING_GAP_WHITESPACE.test(body[index + 1] ?? '')) {
+      const close = body.indexOf('\\', index + 1);
+      if (close === -1 || !STRING_GAP_WHITESPACE.test(body.slice(index + 1, close))) {
+        throw syntaxError(span, String.raw`文字列の継続（\ と \ の間）の書き方に誤りがあります。`);
+      }
+      result += String.raw`\&`;
+      index = close + 1;
+    } else {
+      const length = body.startsWith(String.raw`\\`, index) ? 2 : body.startsWith('\\^\\', index) ? 3 : 1;
+      result += body.slice(index, index + length);
+      index += length;
+    }
+  }
+  return result;
 }
 
 /** Escapes the quotes, newlines, and tabs a multiline string holds as they are, which an ordinary string cannot. */
