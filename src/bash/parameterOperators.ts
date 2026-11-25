@@ -208,7 +208,7 @@ function failRequireOperator(
         ? 'parameter null or not set'
         : 'parameter not set'
       : expandErrorWord(expander, shell, argument);
-  expander.failParameter(subscript === undefined ? name : `${name}[${subscript.text}]`, message);
+  expander.failParameter(subscript === undefined ? name : `${name}[${subscript.rawText}]`, message);
 }
 
 function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: SubscriptRef | undefined): ResolvedTarget {

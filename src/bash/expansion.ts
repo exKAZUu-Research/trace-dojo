@@ -576,7 +576,7 @@ export class Expander {
     const reference =
       direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
     if (reference === undefined) {
-      this.checkIndirectReference(name, subscript?.text);
+      this.checkIndirectReference(name, subscript?.rawText);
       const missingName = `!${name}[${subscript?.rawText ?? ''}]`;
       return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, missingName, undefined, ctx);
     }
