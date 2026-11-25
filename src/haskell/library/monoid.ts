@@ -362,7 +362,7 @@ stimesMonoid n x
 /** `Data.List.NonEmpty`'s functions, whose names are those of the list functions they mirror. */
 export const NON_EMPTY_SOURCE = String.raw`module Data.List.NonEmpty.Internal where
 
-import Base hiding (map, head, tail, last, init, length, reverse, filter, takeWhile, dropWhile, span, break, zip, zipWith, unzip, iterate, repeat, cycle, (!!), sort, sortBy, sortOn, group, groupBy, nub, nubBy, partition, splitAt, take, drop, scanl, scanr, scanl1, scanr1, insert, transpose, toList, xor, singleton, cons, uncons, intersperse, isPrefixOf, some1, sortWith, groupWith, groupAllWith, unfoldr)
+import Base hiding (map, head, tail, last, init, length, reverse, filter, takeWhile, dropWhile, span, break, zip, zipWith, unzip, iterate, repeat, cycle, (!!), sort, sortBy, sortOn, group, groupBy, nub, nubBy, partition, splitAt, take, drop, scanl, scanr, scanl1, scanr1, insert, transpose, toList, xor, singleton, cons, uncons, intersperse, isPrefixOf, some1, sortWith, groupWith, groupAllWith, unfoldr, inits, tails, append, unfold)
 import qualified Base as B
 
 infixr 5 <|
@@ -534,6 +534,18 @@ unfoldr :: (a -> (b, Maybe a)) -> a -> NonEmpty b
 unfoldr f a = case f a of
   (b, Nothing) -> b :| []
   (b, Just c) -> b <| unfoldr f c
+
+inits :: Foldable f => f a -> NonEmpty [a]
+inits = fromList . B.inits . B.foldr (:) []
+
+tails :: Foldable f => f a -> NonEmpty [a]
+tails = fromList . B.tails . B.foldr (:) []
+
+append :: NonEmpty a -> NonEmpty a -> NonEmpty a
+append (a :| as) (b :| bs) = a :| (as ++ b : bs)
+
+unfold :: (a -> (b, Maybe a)) -> a -> NonEmpty b
+unfold = unfoldr
 
 xor :: NonEmpty Bool -> Bool
 xor (x :| xs) = B.foldr (\a b -> a /= b) x xs
