@@ -1864,7 +1864,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
   /** The call of a resolved function on a receiver, without virtual dispatch, as `super.f()` makes. */
   protected abstract nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value;
 
-  /** Calls a value of a function type, such as a lambda held in a variable. */
   /** Whether values of the type can be called as functions, through an `operator fun invoke`. */
   protected hasInvokeOperator(type: KType): boolean {
     return (
@@ -1873,6 +1872,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     );
   }
 
+  /** Calls a value of a function type, such as a lambda held in a variable. */
+  // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileInvoke(
     scope: Scope,
     context: FunctionContext,

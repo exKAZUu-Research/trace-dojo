@@ -1126,10 +1126,6 @@ export abstract class CallCompiler extends CompilerCore {
     options: { isInline: boolean; useExpectedResult?: boolean }
   ): KType | undefined;
 
-  /**
-   * Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. A subclass
-   * uses a protected member only through a receiver of the subclass, or through `super`, whose receiver is undefined.
-   */
   /** Rejects a use of a member whose opt-in markers, or its class's, the code is not opted in to. */
   protected requireMemberOptIn(symbol: FunctionSymbol | PropertySymbol, row: number): void {
     const owner = symbol.owner;
@@ -1143,6 +1139,10 @@ export abstract class CallCompiler extends CompilerCore {
     );
   }
 
+  /**
+   * Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. A subclass
+   * uses a protected member only through a receiver of the subclass, or through `super`, whose receiver is undefined.
+   */
   protected checkAccessible(
     scope: Scope,
     member: FunctionSymbol | PropertySymbol,
