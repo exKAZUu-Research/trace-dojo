@@ -632,12 +632,7 @@ export class Expander {
   private checkIndirectReference(name: string, subscript: string | undefined): void {
     if (subscript === undefined) this.shell.discard(`${name}: invalid indirect expansion`);
     const resolved = resolveTargetName(this.shell, name, false);
-    const own = resolved === undefined ? undefined : this.shell.store.ownView(resolved);
-    if (
-      resolved === undefined ||
-      own?.attributes.has('n') ||
-      (!own && !this.shell.store.hasMaterializedTarget(resolved))
-    ) {
+    if (resolved === undefined || !this.shell.store.hasIndirectContainer(resolved)) {
       this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
     }
   }

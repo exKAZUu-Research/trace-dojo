@@ -179,7 +179,7 @@ export class VariableStore {
   private readonly positional: string[][];
   private readonly calls: CallFrameEntry[];
   private readonly unsetHostEnv: Set<string>;
-  private rematch: string[];
+  private rematch: string[] | undefined;
   private readonly prng: RandomStream;
   lastStatus = 0;
   lastArgument: string | undefined;
@@ -194,7 +194,7 @@ export class VariableStore {
       positional: string[][];
       calls: CallFrameEntry[];
       unsetHostEnv: Set<string>;
-      rematch: string[];
+      rematch: string[] | undefined;
       prng: RandomStream;
       lastStatus: number;
       lastArgument: string | undefined;
@@ -222,7 +222,7 @@ export class VariableStore {
     this.positional = [[]];
     this.calls = [];
     this.unsetHostEnv = new Set();
-    this.rematch = [];
+    this.rematch = undefined;
     this.prng = new RandomStream();
     this.subshellLevel = 0;
     this.initSystemVariables();
@@ -315,7 +315,7 @@ export class VariableStore {
       positional: this.positional.map((args) => [...args]),
       calls: this.calls.map((c) => ({ ...c })),
       unsetHostEnv: new Set(this.unsetHostEnv),
-      rematch: [...this.rematch],
+      rematch: this.rematch ? [...this.rematch] : undefined,
       prng: this.prng.fork(nextLevel),
       lastStatus: this.lastStatus,
       lastArgument: this.lastArgument,
@@ -438,7 +438,8 @@ export class VariableStore {
   }
 
   isDynamic(name: string): boolean {
-    return (DYNAMIC_VARIABLES.has(name) || name === 'BASH_REMATCH') && !this.findOwnCell(name);
+    if (this.findOwnCell(name)) return false;
+    return name === 'BASH_REMATCH' ? this.rematch !== undefined : DYNAMIC_VARIABLES.has(name);
   }
 
   private checkPostDereferenceAccess(name: string): void {
@@ -510,7 +511,7 @@ export class VariableStore {
 
   private readDynamicElements(name: string): Map<bigint, string> | undefined {
     if (name === 'BASH_REMATCH') {
-      return new Map(this.rematch.map((v, i) => [BigInt(i), v]));
+      return this.rematch ? new Map(this.rematch.map((v, i) => [BigInt(i), v])) : undefined;
     }
     if (name === 'FUNCNAME') {
       if (this.calls.length === 0) return undefined;
@@ -537,12 +538,10 @@ export class VariableStore {
       };
     }
     const elements = this.readDynamicElements(name);
-    if (!elements) return undefined;
     return {
       name,
       attributes: new Set<Attribute>(['a']),
-      kind: 'indexed',
-      indexed: elements,
+      ...(elements ? { kind: 'indexed', indexed: elements } : { kind: 'unset' }),
       isSystem: true,
       userAssigned: false,
       nullReference: false,
@@ -584,6 +583,17 @@ export class VariableStore {
   isAssociativeName(resolvedName: string): boolean {
     const cell = this.findOwnCell(resolvedName);
     return cell?.value?.kind === 'associative' || cell?.attributes.has('A') === true;
+  }
+
+  hasIndirectContainer(resolvedName: string): boolean {
+    rejectUnsupportedSpecialVariable(resolvedName);
+    const cell = this.findOwnCell(resolvedName);
+    if (cell) {
+      if (cell.unreadHostEnv) rejectUnsupportedHostEnv(resolvedName);
+      return !cell.attributes.has('n');
+    }
+    this.checkPostDereferenceAccess(resolvedName);
+    return this.isDynamic(resolvedName);
   }
 
   hasMaterializedTarget(resolvedName: string): boolean {
@@ -1153,7 +1163,7 @@ export class VariableStore {
       }
     }
     for (const args of this.positional) yield* args;
-    yield* this.rematch;
+    if (this.rematch) yield* this.rematch;
     if (this.lastArgument !== undefined) yield this.lastArgument;
   }
 
