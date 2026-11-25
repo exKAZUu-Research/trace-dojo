@@ -501,6 +501,15 @@ plainNumber neg s = case plainDecimal s of
 plainDecimal :: String -> (Bool, Bool, Integer, String)
 plainDecimal = primitive "plainDecimal"
 
+-- Reads a fractional number, by the plain parse of digits, fraction, and exponent where it applies, as readIntegral.
+readFractional :: Fractional a => ReadS a
+readFractional r = case plainFractional r of
+  (True, negative, tok, rest) -> let x = fromDecimalText tok in [(if negative then negate x else x, rest)]
+  _ -> readSignedNumber convFractional negate r
+
+plainFractional :: String -> (Bool, Bool, String, String)
+plainFractional = primitive "plainFractional"
+
 convInteger :: String -> Maybe Integer
 convInteger tok = case convBased tok of
   Just n -> Just n
@@ -549,10 +558,10 @@ instance (Integral a, Read a) => Read (Ratio a) where
   readsPrec p = readParen (p > 7) (\r -> [(x % y, u) | (x, s) <- readsPrec 8 r, ("%", t) <- lex s, (y, u) <- readsPrec 8 t])
 
 instance Read Double where
-  readsPrec _ = readSignedNumber convFractional negate
+  readsPrec _ = readFractional
 
 instance Read Float where
-  readsPrec _ = readSignedNumber convFractional negate
+  readsPrec _ = readFractional
 
 instance Read Char where
   readsPrec _ = readParen False (\r -> [(c, t) | ('\'':lexeme, t) <- lex r, Just c <- [decodeLitChar (init lexeme)]])

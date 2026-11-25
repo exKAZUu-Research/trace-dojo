@@ -90,30 +90,52 @@ export function forceString(slot: Slot, runtime: Runtime): string {
 }
 
 /**
- * The decimal integer a string starts with, after ASCII spaces and an optional `-`, when the character after its
- * digits cannot continue a number's lexeme (the end, a space, `)`, `]` or `,`); reads only the cells up to it.
+ * The number a string starts with, after ASCII spaces and an optional `-`: decimal digits, and for a fractional one
+ * an optional `.digits` and exponent, when the character after it cannot continue a number's lexeme (the end, a
+ * space, `)`, `]` or `,`). Reads only the cells up to that character.
  */
-function plainDecimal(text: Slot, runtime: Runtime): { negative: boolean; magnitude: bigint; rest: Slot } | undefined {
+function plainNumber(
+  text: Slot,
+  runtime: Runtime,
+  fractional: boolean
+): { negative: boolean; token: string; rest: Slot } | undefined {
   let rest = text;
   let cell = runtime.machine.force(rest) as ConValue;
   const charOf = (): string | undefined =>
     cell.con === CONS_CON ? (runtime.machine.force(cell.fields[0]) as string) : undefined;
-  const advance = (): void => {
+  let token = '';
+  const take = (): void => {
+    token += charOf() as string;
     rest = cell.fields[1];
     cell = runtime.machine.force(rest) as ConValue;
     runtime.spend();
   };
-  while (charOf() !== undefined && ASCII_SPACE.test(charOf() as string)) advance();
+  const isDigit = (): boolean => {
+    const char = charOf();
+    return char !== undefined && char >= '0' && char <= '9';
+  };
+  const digits = (): boolean => {
+    if (!isDigit()) return false;
+    while (isDigit()) take();
+    return true;
+  };
+  while (charOf() !== undefined && ASCII_SPACE.test(charOf() as string)) take();
   const negative = charOf() === '-';
-  if (negative) advance();
-  let digits = '';
-  for (let char = charOf(); char !== undefined && char >= '0' && char <= '9'; char = charOf()) {
-    digits += char;
-    advance();
+  if (negative) take();
+  token = '';
+  if (!digits()) return undefined;
+  if (fractional && charOf() === '.') {
+    take();
+    if (!digits()) return undefined;
+  }
+  if (fractional && (charOf() === 'e' || charOf() === 'E')) {
+    take();
+    if (charOf() === '+' || charOf() === '-') take();
+    if (!digits()) return undefined;
   }
   const next = charOf();
-  if (digits === '' || (next !== undefined && !ASCII_SPACE.test(next) && !')],'.includes(next))) return undefined;
-  return { negative, magnitude: BigInt(digits), rest };
+  if (next !== undefined && !ASCII_SPACE.test(next) && !')],'.includes(next)) return undefined;
+  return { negative, token, rest };
 }
 
 /** The characters `isSpace` holds for below U+0080. */
@@ -693,10 +715,16 @@ strict('toTitle', 1, ([a]) => {
 
 define('readDecimal', 1, [], ([text], runtime) => BigInt(forceString(text, runtime)));
 define('plainDecimal', 1, [], ([text], runtime) => {
-  const plain = plainDecimal(text, runtime);
+  const plain = plainNumber(text, runtime, false);
   return plain
-    ? tuple(bool(true), bool(plain.negative), plain.magnitude, plain.rest)
+    ? tuple(bool(true), bool(plain.negative), BigInt(plain.token), plain.rest)
     : tuple(bool(false), bool(false), 0n, text);
+});
+define('plainFractional', 1, [], ([text], runtime) => {
+  const plain = plainNumber(text, runtime, true);
+  return plain
+    ? tuple(bool(true), bool(plain.negative), unpackString(plain.token, 0), plain.rest)
+    : tuple(bool(false), bool(false), NIL(), text);
 });
 define('readFloatText', 1, [], ([text], runtime) => {
   const parts = decimalParts(forceString(text, runtime));
