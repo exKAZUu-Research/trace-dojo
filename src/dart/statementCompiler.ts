@@ -1218,6 +1218,8 @@ export abstract class StatementCompiler extends PatternCompiler {
         expected.kind !== 'void' &&
         expected.kind !== 'dynamic' &&
         expected.kind !== 'null' &&
+        // A function literal's return type comes from its context, which `return;` fits when it allows null.
+        (this.fn.kind.returnType !== undefined || !isNullable(expected)) &&
         !this.fn.kind.isConstructor
       ) {
         this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
