@@ -18,6 +18,7 @@ import type {
   TypeExpr,
   TyVarBinder,
 } from './syntax';
+import { chargeTypeWork } from './typeWorkBudget';
 
 /**
  * Template Haskell's quotes, `[| e |]` and the like, as code that builds the syntax trees with the library's
@@ -773,17 +774,11 @@ function exactFraction(text: string): [bigint, bigint] {
   const match = /^(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(cleaned);
   if (!match) return [BigInt(Math.round(Number(cleaned) * 1e9)), 1_000_000_000n];
   const digits = BigInt(`${match[1] || '0'}${match[2] ?? ''}`);
-  let exponent = -(match[2]?.length ?? 0) + Number(match[3] ?? 0);
-  let numerator = digits;
-  let denominator = 1n;
-  while (exponent > 0) {
-    numerator *= 10n;
-    exponent--;
-  }
-  while (exponent < 0) {
-    denominator *= 10n;
-    exponent++;
-  }
+  const exponent = BigInt(match[3] ?? 0) - BigInt(match[2]?.length ?? 0);
+  // The power of ten has as many digits as the exponent says, which the compilation pays for before it is built.
+  chargeTypeWork(Number(exponent < 0n ? -exponent : exponent));
+  const numerator = exponent > 0n ? digits * 10n ** exponent : digits;
+  const denominator = exponent < 0n ? 10n ** -exponent : 1n;
   const divisor = gcd(numerator, denominator);
   return [numerator / divisor, denominator / divisor];
 }
