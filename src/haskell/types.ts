@@ -447,9 +447,15 @@ export function typesEqual(a: Type, b: Type): boolean {
   for (const [x, y] of walkGraphPairs(a, b, prune, typeChildren)) {
     if (x === y) continue;
     if (x.tag === 'forall' && y.tag === 'forall') {
-      if (x.vars.length !== y.vars.length) return false;
+      if (x.vars.length !== y.vars.length || x.preds.length !== y.preds.length) return false;
       const shared = x.vars.map((variable) => freshTypeVar(variable.kind, 0));
-      if (!typesEqual(substituteBound(x, shared).body, substituteBound(y, shared).body)) return false;
+      const left = substituteBound(x, shared);
+      const right = substituteBound(y, shared);
+      // The contexts are part of the type, as unification compares them too.
+      const samePreds = left.preds.every(
+        (pred, index) => pred.cls === right.preds[index].cls && typesEqual(pred.type, right.preds[index].type)
+      );
+      if (!samePreds || !typesEqual(left.body, right.body)) return false;
       continue;
     }
     if (x.tag === 'tcon' && y.tag === 'tcon' && x.entity === y.entity) continue;
