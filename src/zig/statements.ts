@@ -530,7 +530,7 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: () => {}, noreturn: false };
   }
 
-  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, `x[i]`, or `p.*` do. */
+  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, `x[i]`, `p.*`, or `o.?` do. */
   private comptimeVariableOf(target: Expression): LocalBinding | undefined {
     switch (target.kind) {
       case 'identifier': {
@@ -541,13 +541,13 @@ export abstract class StatementCompiler extends CallCompiler {
         return binding.known ? this.comptimeVariableReferencedBy(binding.value) : undefined;
       }
       case 'field':
-      case 'index': {
+      case 'index':
+      case 'slice': {
         return this.comptimeVariableOf(target.object);
       }
-      case 'paren': {
-        return this.comptimeVariableOf(target.operand);
-      }
-      case 'deref': {
+      case 'paren':
+      case 'deref':
+      case 'unwrap': {
         return this.comptimeVariableOf(target.operand);
       }
       default: {
