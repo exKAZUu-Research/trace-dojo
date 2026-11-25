@@ -1,7 +1,7 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassNode, Expression, IterationSource, MemberExpression, Program, Statement } from '../javascript/ast';
-import { nameOf, type Node, rowOf, unwrapParentheses } from '../javascript/convertNodes';
+import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../javascript/convertNodes';
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type FoldedValue, foldEnumValue } from './enumFolding';
@@ -182,5 +182,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
 /** The name of an enum member, which an identifier or a string literal gives. */
 function enumMemberName(member: Node): string {
   const name = member.type === 'enum_assignment' ? (member.childForFieldName('name') as Node) : member;
+  // tsx's esbuild does not compile a member name in brackets.
+  if (name.type === 'computed_property_name') unsupported(name, 'enum のメンバー名を [ ] で書くこと');
   return name.type === 'string' ? decodeStringLiteral(name.text) : nameOf(name);
 }
