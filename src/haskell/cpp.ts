@@ -24,12 +24,46 @@ interface Token {
   painted?: boolean;
 }
 
-/** The versions `MIN_VERSION_...` compares with: those GHC 9.14.1 comes with. */
-const PACKAGE_VERSIONS: Record<string, number[]> = {
-  base: [4, 22, 0, 0],
-  containers: [0, 8, 0, 0],
-  GLASGOW_HASKELL: [9, 14, 1, 0],
+/** The versions GHC 9.14.1 comes with of the packages whose modules this environment has. */
+const PACKAGE_VERSIONS: Record<string, string> = {
+  array: '0.5.8.0',
+  base: '4.22.0.0',
+  bytestring: '0.12.2.0',
+  containers: '0.8',
+  mtl: '2.3.1',
+  stm: '2.5.3.1',
+  'template-haskell': '2.24.0.0',
+  text: '2.1.3',
+  transformers: '0.6.1.2',
 };
+
+/**
+ * The macros GHC defines for each package, as Cabal generates them: `VERSION_pkg`, the version as a string, and
+ * `MIN_VERSION_pkg(major1,major2,minor)`, whether the version is at least the given one; and
+ * `MIN_VERSION_GLASGOW_HASKELL` for the compiler's version.
+ */
+function versionMacros(): [string, Macro][] {
+  return [
+    ...Object.entries(PACKAGE_VERSIONS).flatMap(([pkg, version]): [string, Macro][] => {
+      const name = pkg.replaceAll('-', '_');
+      return [
+        [`VERSION_${name}`, { body: tokenize(`"${version}"`, 0) }],
+        versionAtLeast(`MIN_VERSION_${name}`, version, ['major1', 'major2', 'minor']),
+      ];
+    }),
+    versionAtLeast('MIN_VERSION_GLASGOW_HASKELL', '9.14.1.0', ['ma', 'mi', 'pl1', 'pl2']),
+  ];
+}
+
+/** `MIN_VERSION_...(a, b, ...)`, whether a version is at least the one its arguments give, as a C comparison. */
+function versionAtLeast(name: string, version: string, params: string[]): [string, Macro] {
+  const parts = version.split('.').map(Number);
+  const terms = params.map((param, index) => {
+    const equal = params.slice(0, index).map((earlier, at) => `(${earlier}) == ${parts[at] ?? 0} && `);
+    return `${equal.join('')}(${param}) ${index === params.length - 1 ? '<=' : '<'} ${parts[index] ?? 0}`;
+  });
+  return [name, { params, body: tokenize(`(${terms.join(' || ')})`, 0) }];
+}
 
 /** Macros that tell the operating system or the CPU, which this environment does not let a program depend on. */
 const PLATFORM_MACRO = /^\w+_(HOST|BUILD|TARGET)_(OS|ARCH)$/;
@@ -55,6 +89,7 @@ class Preprocessor {
     ['__GLASGOW_HASKELL_FULL_VERSION__', { body: tokenize('"9.14.1"', 0) }],
     ['__GLASGOW_HASKELL_PATCHLEVEL1__', { body: tokenize('1', 0) }],
     ['__FILE__', { body: tokenize('"Main.hs"', 0) }],
+    ...versionMacros(),
   ]);
 
   /** The row that `__LINE__` and errors refer to. */
@@ -218,11 +253,10 @@ interface Sink {
   condition: boolean;
 }
 
-/** A call of a function-like macro, or of `MIN_VERSION_...`, whose arguments are being expanded. */
+/** A call of a function-like macro, whose arguments are being expanded. */
 interface Call {
   name: string;
-  macro?: Macro;
-  version?: string;
+  macro: Macro;
   args: Token[][];
   expanded: Token[][];
 }
@@ -289,8 +323,7 @@ class Expansion {
       this.emitName(token, false);
       return;
     }
-    const version = /^MIN_VERSION_(\w+)$/.exec(name)?.[1];
-    if (!macro && version === undefined) {
+    if (!macro) {
       this.emitName(token, false);
     } else if (macro && !macro.params) {
       chargeTypeWork(1 + macro.body.length);
@@ -301,7 +334,7 @@ class Expansion {
     } else if (this.takeOpenParen()) {
       this.call({
         name,
-        ...(version === undefined ? { macro } : { version }),
+        macro,
         args: this.collectArguments(),
         expanded: [],
       });
@@ -401,16 +434,13 @@ class Expansion {
   }
 
   private call(call: Call): void {
-    const { name, macro, version } = call;
+    const { name, macro } = call;
     // `()` gives one empty argument to a macro of one parameter and none to a macro of none.
     const empty = call.args.length === 1 && call.args[0].length === 0;
-    const args = empty && (macro?.params ?? []).length !== 1 ? [] : call.args;
+    const params = macro.params ?? [];
+    const args = empty && params.length !== 1 ? [] : call.args;
     call.args = args;
-    if (version !== undefined && !Object.hasOwn(PACKAGE_VERSIONS, version)) {
-      throw this.preprocessor.error(this.preprocessor.row, `パッケージ ${version} の版のマクロはありません。`);
-    }
-    const params = macro?.params ?? [];
-    if (macro && params.length !== args.length) {
+    if (params.length !== args.length) {
       throw this.preprocessor.error(
         this.preprocessor.row,
         `マクロ ${name} には、引数を ${params.length} 個書いてください。`
@@ -427,8 +457,7 @@ class Expansion {
 
   /** Starts expanding the next argument of a call on its own, under the macros disabled around the call. */
   private expandArgument(call: Call): void {
-    // In code, GHC's `MIN_VERSION_...` is a comparison whose arguments are integers, as in a condition.
-    this.sinks.push({ tokens: [], condition: call.version !== undefined || this.condition });
+    this.sinks.push({ tokens: [], condition: this.condition });
     this.frames.push({ tokens: call.args[call.expanded.length], position: 0, argument: true });
   }
 
@@ -443,28 +472,8 @@ class Expansion {
     }
   }
 
-  private finishCall({ name, macro, version, expanded }: Call): void {
-    const { row } = this.preprocessor;
-    if (version !== undefined) {
-      const wanted = expanded.map((arg) =>
-        Number.parseInt(
-          arg
-            .map((token) => token.text)
-            .join('')
-            .trim(),
-          10
-        )
-      );
-      const satisfied = satisfiesVersion(PACKAGE_VERSIONS[version], wanted);
-      // In code, GHC's macro is a comparison, which Haskell reads as a Bool.
-      this.emit({
-        kind: 'other',
-        text: this.condition ? String(Number(satisfied)) : satisfied ? 'True' : 'False',
-        row,
-      });
-      return;
-    }
-    const { params = [], body } = macro as Macro;
+  private finishCall({ name, macro, expanded }: Call): void {
+    const { params = [], body } = macro;
     const argOf = (token: Token): Token[] | undefined =>
       token.kind === 'name' ? expanded[params.indexOf(token.text)] : undefined;
     chargeTypeWork(1 + body.reduce((total, token) => total + (argOf(token)?.length ?? 1), 0));
@@ -473,14 +482,6 @@ class Expansion {
       body.flatMap((token) => (argOf(token) ?? [token]).map((replacement) => ({ ...replacement })))
     );
   }
-}
-
-function satisfiesVersion(version: number[], wanted: number[]): boolean {
-  for (const [position, part] of wanted.entries()) {
-    const have = version[position] ?? 0;
-    if (have !== part) return have > part;
-  }
-  return true;
 }
 
 function trimSpaces(tokens: Token[]): Token[] {
