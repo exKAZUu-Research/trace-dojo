@@ -115,6 +115,16 @@ export interface FieldBind {
   field: QName;
   value: Expr;
   span: Span;
+  /** Whether `..` filled the field in, which names the constructor's field however its name is in scope. */
+  byWildcard?: boolean;
+}
+
+export interface FieldPat {
+  field: QName;
+  pat: Pat;
+  span: Span;
+  /** Whether `..` filled the field in, which names the constructor's field however its name is in scope. */
+  byWildcard?: boolean;
 }
 
 /** One element of an operator chain before fixity resolution: an operand, an operator, or a prefix minus. */
@@ -131,7 +141,7 @@ export type Pat =
   | { kind: 'ptuple'; elems: Pat[]; span: Span }
   | { kind: 'plist'; elems: Pat[]; span: Span }
   | { kind: 'pas'; name: Name; pat: Pat; span: Span }
-  | { kind: 'precord'; con: QName; fields: { field: QName; pat: Pat; span: Span }[]; span: Span; wildcard?: Span }
+  | { kind: 'precord'; con: QName; fields: FieldPat[]; span: Span; wildcard?: Span }
   | { kind: 'pchain'; items: ChainItem<Pat>[]; span: Span }
   | { kind: 'pbang'; pat: Pat; span: Span }
   | { kind: 'plazy'; pat: Pat; span: Span }

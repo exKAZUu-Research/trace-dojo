@@ -1713,15 +1713,32 @@ class Renamer {
     };
   }
 
-  /** The fields `..` fills in a construction: each one not given whose name a variable in scope has. */
+  /**
+   * The fields `..` fills in a construction: each one in scope, however qualified, that the construction does not
+   * give and whose name a variable in scope has.
+   */
   private wildcardFields(con: ConInfo, given: FieldBind[], span: Span, scope: LocalScope): FieldBind[] {
     const named = new Set(given.map((bind) => bind.field.name));
-    return (con.fieldNames ?? []).flatMap((name) => {
-      if (named.has(name)) return [];
-      return this.wildcardDefined(name, scope)
-        ? [{ field: { name, span }, value: { kind: 'var', name: { name, span }, span } as Expr, span }]
-        : [];
+    return this.wildcardFieldNames(con).flatMap((name): FieldBind[] => {
+      if (named.has(name) || !this.wildcardDefined(name, scope)) return [];
+      return [{ field: { name, span }, value: { kind: 'var', name: { name, span }, span }, span, byWildcard: true }];
     });
+  }
+
+  /** The fields of a constructor that `..` takes: those in scope, qualified or not, as GHC has it. */
+  private wildcardFieldNames(con: ConInfo): string[] {
+    const own = con.entity.module === this.module.name;
+    return (con.fieldNames ?? []).filter((name) => own || this.conField(con, name));
+  }
+
+  /** A constructor's field of a name, by its identity, if a name in scope, qualified or not, refers to it. */
+  private conField(con: ConInfo, name: string): FieldInfo | undefined {
+    const tables = [this.scope.values, ...this.scope.qualifiedValues.values()];
+    for (const table of tables) {
+      const found = table.get(name).find((entity) => entity.sort === 'field' && entity.field?.positions.has(con));
+      if (found?.field) return found.field;
+    }
+    return undefined;
   }
 
   /** Whether `..` in a construction takes a field from a variable of its name: a local or a top-level one here. */
@@ -1736,7 +1753,8 @@ class Renamer {
     const seen = new Set<string>();
     const types = cons ? [cons[0].type] : this.updatedTypes(fields);
     return fields.map((fieldBind) => {
-      const field = this.lookupField(fieldBind.field, types);
+      const byWildcard = fieldBind.byWildcard && cons ? this.conField(cons[0], fieldBind.field.name) : undefined;
+      const field = byWildcard ?? this.lookupField(fieldBind.field, types);
       if (seen.has(field.name)) throw compileError(fieldBind.span, `フィールド ${field.name} が重複しています。`);
       seen.add(field.name);
       if (cons && !cons.every((con) => field.positions.has(con))) {
@@ -2174,7 +2192,7 @@ class Renamer {
   /** The fields a record pattern's `..` binds: those of a record pattern synonym, or of the constructor. */
   private recordFieldNames(name: QName, con: () => ConInfo): readonly string[] {
     const synonym = name.qualifier ? undefined : this.patternSynonyms.get(name.name);
-    return synonym?.fields ?? con().fieldNames ?? [];
+    return synonym?.fields ?? this.wildcardFieldNames(con());
   }
 
   /**
@@ -2225,13 +2243,14 @@ class Renamer {
     const seen = new Set<string>();
     const order: number[] = [];
     for (const fieldPat of pat.fields) {
-      const field = this.lookupField(fieldPat.field, [con.type]);
-      const position = field.positions.get(con);
+      const field = fieldPat.byWildcard ? undefined : this.lookupField(fieldPat.field, [con.type]);
+      const name = field?.name ?? fieldPat.field.name;
+      const position = field ? field.positions.get(con) : (con.fieldNames ?? []).indexOf(name);
       if (position === undefined) {
-        throw compileError(fieldPat.span, `構成子 ${con.name} には、フィールド ${field.name} がありません。`);
+        throw compileError(fieldPat.span, `構成子 ${con.name} には、フィールド ${name} がありません。`);
       }
-      if (seen.has(field.name)) throw compileError(fieldPat.span, `フィールド ${field.name} が重複しています。`);
-      seen.add(field.name);
+      if (seen.has(name)) throw compileError(fieldPat.span, `フィールド ${name} が重複しています。`);
+      seen.add(name);
       args[position] = this.renamePat(fieldPat.pat, binders, scope);
       order.push(position);
     }
@@ -3906,8 +3925,14 @@ function expandRecordWildcards(pat: Pat, resolve: (name: QName) => readonly stri
       const span = pat.wildcard;
       const named = new Set(fields.map((field) => field.field.name));
       for (const name of resolve(pat.con)) {
-        if (!named.has(name))
-          fields.push({ field: { name, span }, pat: { kind: 'pvar', name: { name, span }, span }, span });
+        if (!named.has(name)) {
+          fields.push({
+            field: { name, span },
+            pat: { kind: 'pvar', name: { name, span }, span },
+            span,
+            byWildcard: true,
+          });
+        }
       }
       return { ...pat, fields, wildcard: undefined };
     }
