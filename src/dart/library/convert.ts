@@ -304,7 +304,11 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
     _sink.addError(error, stackTrace);
   }
   void close() {
-    if (_pending.isNotEmpty) _sink.add(_utf8Decode(_pending, _allowMalformed));
+    if (_pending.isNotEmpty) {
+      // The SDK's decoder reports a character left unfinished at the end of the stream with no position.
+      if (!_allowMalformed) throw FormatException("Unfinished UTF-8 octet sequence");
+      _sink.add(_utf8Decode(_pending, true));
+    }
     _sink.close();
   }
 }
