@@ -21,8 +21,6 @@ export function executeZigProgram(source: string, input?: ProgramInput): Program
   try {
     return { kind: 'executed', ...runProgram(new Runtime(input), compiled) };
   } catch (error) {
-    // A `@compileError` on a branch of `@inComptime()` fails when the call that Zig would analyze it for runs.
-    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }

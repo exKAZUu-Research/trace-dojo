@@ -273,27 +273,10 @@ export interface AnalysisContext {
   comptimeStore: LocalBinding | undefined;
   /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
   runtimeConditionDepth: number;
-  /**
-   * How many branches on `@inComptime()` enclose the code being compiled. Zig analyzes only the branch that a call
-   * takes, so a `@compileError` there fails only when it runs.
-   */
-  inComptimeBranchDepth: number;
-  /**
-   * How many blocks the code being compiled follows a return on a runtime branch in, as the rest of a block after
-   * `if (c) return;` does: it runs only on the other branch, which Zig analyzes only for the calls that reach it.
-   */
-  afterRuntimeReturnDepth: number;
   /** The backward branches that the analysis has evaluated, against the evaluation quota. */
   evalBranches: BranchCount;
-  /** The condition depths of the returns compiled so far, in order. */
-  returnDepths: ConditionDepths[];
   /** The program's code that first reached the library code being compiled, where its compile errors report. */
   userSpan?: Span;
-}
-
-export interface ConditionDepths {
-  readonly runtime: number;
-  readonly inComptime: number;
 }
 
 export function newAnalysisContext(): AnalysisContext {
@@ -301,10 +284,7 @@ export function newAnalysisContext(): AnalysisContext {
     comptimeDepth: 0,
     comptimeStore: undefined,
     runtimeConditionDepth: 0,
-    inComptimeBranchDepth: 0,
-    afterRuntimeReturnDepth: 0,
     evalBranches: { count: 0, quota: 1000 },
-    returnDepths: [],
   };
 }
 
@@ -449,24 +429,6 @@ export abstract class SemaBase implements SemaApi {
       if (decl) return decl;
     }
     return undefined;
-  }
-
-  /**
-   * Records a call outside compile-time code, which the program makes when it runs the function that the call stands
-   * in; code outside any function runs only at compile time.
-   */
-  protected callAtRuntime(callee: FunctionInstance): void {
-    const caller = this.analyzedFunction();
-    if (caller?.runsAtRuntime) this.markRuntimeUse(callee);
-    else caller?.runtimeCallees.add(callee);
-  }
-
-  /** Records that the program runs a function, which reports a `@compileError` that only such a call's analysis meets. */
-  protected markRuntimeUse(instance: FunctionInstance): void {
-    if (instance.runsAtRuntime) return;
-    if (instance.pendingCompileError) throw instance.pendingCompileError;
-    instance.runsAtRuntime = true;
-    for (const callee of instance.runtimeCallees) this.markRuntimeUse(callee);
   }
 
   /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */

@@ -60,6 +60,7 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）', inLibrary: true }],
   ['syntax:comptimeVarPointer', { what: 'comptime var を指すポインタやスライス' }],
   ['@setRuntimeSafety(false)', { what: '@setRuntimeSafety(false)（実行時の検査を外す指定）' }],
+  ['@inComptime', { what: '@inComptime（コンパイルのときかどうかの判定）' }],
   ['syntax:extern', { what: 'extern（外部で定義する関数・変数の宣言）' }],
   ['syntax:linksection', { what: 'linksection（OS ごとに書き方が異なるセクションの指定）' }],
   ['syntax:cVarargs', { what: 'C の可変個の引数（...）' }],

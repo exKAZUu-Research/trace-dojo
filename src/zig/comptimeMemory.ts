@@ -15,10 +15,6 @@ export function duringComptime<T>(evaluate: () => T): T {
   }
 }
 
-export function isDuringComptime(): boolean {
-  return evaluationDepth > 0;
-}
-
 export function rejectRuntimeEffect(): void {
   if (evaluationDepth > 0) panic('unable to resolve comptime value');
 }

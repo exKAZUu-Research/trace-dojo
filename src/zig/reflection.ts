@@ -4,7 +4,6 @@ import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { BufferMemory } from './bufferMemory';
 import { BuiltinCompiler } from './builtins';
-import { isDuringComptime } from './comptimeMemory';
 import { constantText } from './constantText';
 import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
 import { langNamespace } from './library/lang';
@@ -56,9 +55,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       }
       case '@setEvalBranchQuota': {
         return this.builtinSetEvalBranchQuota(expression);
-      }
-      case '@inComptime': {
-        return this.builtinInComptime(expression);
       }
       case '@sizeOf': {
         return this.builtinSizeOf(expression);
@@ -153,28 +149,16 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { args } = expression;
     this.builtinArity(expression, 1);
     const message = this.comptimeText(args[0]);
-    // Code that the compiler runs, and a branch on `@inComptime()`, reach the call only on the path that runs it.
+    if (this.context.comptimeDepth === 0) return this.error(expression, message);
+    // Code that the compiler runs reaches the call only on the path that runs it.
     const reported = this.reportedSpan(expression);
-    const deferred = runtime(
+    return runtime(
       NORETURN,
       () => {
         throw new CompileError([{ row: reported.row, message }]);
       },
       expression
     );
-    if (this.context.comptimeDepth > 0 || this.context.inComptimeBranchDepth > 0) return deferred;
-    // Zig analyzes a branch on a runtime condition only for the program's calls; a call at compile time with known
-    // arguments analyzes the branch its arguments take.
-    const instance = this.analyzedFunction();
-    if (
-      instance &&
-      (this.context.runtimeConditionDepth > 0 || this.context.afterRuntimeReturnDepth > 0) &&
-      !instance.runsAtRuntime
-    ) {
-      instance.pendingCompileError ??= new CompileError([{ row: reported.row, message }]);
-      return deferred;
-    }
-    return this.error(expression, message);
   }
 
   private builtinCompileLog(expression: ExpressionOf<'builtinCall'>): TExpr {
@@ -198,13 +182,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       },
       expression
     );
-  }
-
-  private builtinInComptime(expression: ExpressionOf<'builtinCall'>): TExpr {
-    this.builtinArity(expression, 0);
-    // Zig analyzes a function body apart for the calls that run at compile time, where `@inComptime()` is known. This
-    // compiler analyzes a body once for both, so the body asks when it runs.
-    return runtime(BOOL, () => isDuringComptime(), expression);
   }
 
   private builtinSizeOf(expression: ExpressionOf<'builtinCall'>): TExpr {

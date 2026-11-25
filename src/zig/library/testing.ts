@@ -17,11 +17,7 @@ pub const io = @compileError("not testing");
 pub const environ = @compileError("not testing");
 
 pub fn failPrint(comptime fmt: []const u8, args: anytype) void {
-    if (@inComptime()) {
-        @compileError("a std.testing check failed at compile time");
-    } else {
-        std.debug.print(fmt, args);
-    }
+    std.debug.print(fmt, args);
 }
 
 pub fn expect(ok: bool) !void {

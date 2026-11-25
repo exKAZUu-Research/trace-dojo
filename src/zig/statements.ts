@@ -13,7 +13,6 @@ import { hasValueDependentWrites, sizeOf } from './layout';
 import { memorySpace } from './memoryAccounting';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
-  type ConditionDepths,
   copyForFrame,
   copyForStorage,
   errorSetIncludes,
@@ -307,20 +306,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Blocks ----------------------------------------------------------------------------------------------------------
 
-  /**
-   * Compiles the statements after one that returns on a branch as code on the other branch: the rest of a block after
-   * `if (c) return;` runs only where `c` is false, which Zig analyzes as the branch it is.
-   */
-  private continueAfterReturns(
-    returns: readonly ConditionDepths[],
-    outer: ConditionDepths & { afterReturn: number }
-  ): void {
-    if (returns.some((depths) => depths.runtime > outer.runtime))
-      this.context.afterRuntimeReturnDepth = Math.max(this.context.afterRuntimeReturnDepth, outer.afterReturn + 1);
-    if (returns.some((depths) => depths.inComptime > outer.inComptime))
-      this.context.inComptimeBranchDepth = Math.max(this.context.inComptimeBranchDepth, outer.inComptime + 1);
-  }
-
   protected blockStatements(statements: readonly Statement[], span: Span, keepLocals = false): Stmt {
     const locals = new Map<string, LocalBinding>();
     const scope: Scope = { locals, parent: this.scope };
@@ -328,28 +313,15 @@ export abstract class StatementCompiler extends CallCompiler {
       const compiled: Stmt[] = [];
       let hasDefers = false;
       let noreturn = false;
-      const outer = {
-        runtime: this.context.runtimeConditionDepth,
-        inComptime: this.context.inComptimeBranchDepth,
-        afterReturn: this.context.afterRuntimeReturnDepth,
-      };
-      try {
-        for (const statement of statements) {
-          const mark = this.context.returnDepths.length;
-          const stmt = this.statement(statement);
-          if (statement.kind === 'defer') hasDefers = true;
-          compiled.push(stmt);
-          if (stmt.noreturn) {
-            noreturn = true;
-            break;
-          }
-          this.continueAfterReturns(this.context.returnDepths.slice(mark), outer);
+      for (const statement of statements) {
+        const stmt = this.statement(statement);
+        if (statement.kind === 'defer') hasDefers = true;
+        compiled.push(stmt);
+        if (stmt.noreturn) {
+          noreturn = true;
+          break;
         }
-      } finally {
-        this.context.inComptimeBranchDepth = outer.inComptime;
-        this.context.afterRuntimeReturnDepth = outer.afterReturn;
       }
-      void span;
       const slots = keepLocals ? [] : [...locals.values()].map((binding) => binding.slot);
       const execs = compiled.map((stmt) => stmt.exec);
       const run = (frame: Frame): Jump | undefined => {
@@ -1134,10 +1106,6 @@ export abstract class StatementCompiler extends CallCompiler {
   /** The code of a jump: it computes the jump's value and gives the Jump that leaves its target. */
   private jumpMaker(expression: ExpressionOf<'break' | 'continue' | 'return'>): (frame: Frame) => Jump {
     if (expression.kind === 'return') {
-      this.context.returnDepths.push({
-        runtime: this.context.runtimeConditionDepth,
-        inComptime: this.context.inComptimeBranchDepth,
-      });
       return this.returnMaker(expression);
     }
     const target = this.findTarget(expression.label, expression.kind, expression);
@@ -1389,10 +1357,10 @@ export abstract class StatementCompiler extends CallCompiler {
           resultType,
           asStatement
         );
-      const [then, otherwise] = this.onInComptime(expression.condition, () => [
-        this.branch(expression.consequent, undefined, resultType, asStatement),
-        expression.otherwise ? this.branch(expression.otherwise, undefined, resultType, asStatement) : undefined,
-      ]);
+      const then = this.branch(expression.consequent, undefined, resultType, asStatement);
+      const otherwise = expression.otherwise
+        ? this.branch(expression.otherwise, undefined, resultType, asStatement)
+        : undefined;
       const evaluateTest = test.eval;
       return this.combineBranches(expression, then, otherwise, resultType, asStatement, (frame) =>
         evaluateTest(frame) ? 0 : 1
@@ -1488,17 +1456,6 @@ export abstract class StatementCompiler extends CallCompiler {
       },
       [binding?.binding, errorBinding?.binding]
     );
-  }
-
-  /** Compiles the branches of a condition, counting them as branches on `@inComptime()` when the condition asks it. */
-  private onInComptime<T>(condition: Expression, compileBranches: () => T): T {
-    if (!asksInComptime(condition)) return compileBranches();
-    this.context.inComptimeBranchDepth++;
-    try {
-      return compileBranches();
-    } finally {
-      this.context.inComptimeBranchDepth--;
-    }
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps known capture facts and their lexical runtime initialization together.
@@ -3371,11 +3328,4 @@ function errorUnionCannotFail(value: TExpr): boolean {
   return result
     ? !(result.value instanceof ErrorValue)
     : value.type.errorSet.resolved !== false && value.type.errorSet.names?.size === 0;
-}
-
-/** Whether a condition is `@inComptime()` or its negation. */
-function asksInComptime(condition: Expression): boolean {
-  const expression = unwrapParens(condition);
-  if (expression.kind === 'unary' && expression.operator === '!') return asksInComptime(expression.operand);
-  return expression.kind === 'builtinCall' && expression.name === '@inComptime';
 }
