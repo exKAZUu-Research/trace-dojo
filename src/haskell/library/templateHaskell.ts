@@ -1279,7 +1279,9 @@ renderExp (LabelE s) = "#" ++ s
 renderExp (ImplicitParamVarE s) = "?" ++ s
 renderExp (GetFieldE e f) = "(" ++ renderExp e ++ ")." ++ f
 renderExp (TypeE t) = "(type " ++ renderTypeAtom t ++ ")"
-renderExp e = error ("Template Haskell: this expression cannot be spliced: " ++ show e)
+-- A tree with no spliced form here is unavailable. (This and the other render messages are Japanese, written with
+-- escapes, since a library source is ASCII: "この形の式を作るスプライスは、この採点環境では使えません。" and the like.)
+renderExp _ = errorWithoutStackTrace "\12371\12398\24418\12398\24335\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
 
 renderUInfix :: Exp -> String
 renderUInfix (UInfixE a op b) = renderUInfix a ++ " " ++ renderOp op ++ " " ++ renderUInfix b
@@ -1335,7 +1337,7 @@ renderPat (RecP n fs) = "(" ++ renderNamePrefix n ++ " {" ++ intercalate ", " [r
 renderPat (ListP ps) = "[" ++ intercalate ", " (map renderPat ps) ++ "]"
 renderPat (SigP p t) = "(" ++ renderPat p ++ " :: " ++ renderType t ++ ")"
 renderPat (ViewP e p) = "(" ++ renderExp e ++ " -> " ++ renderPat p ++ ")"
-renderPat p = error ("Template Haskell: this pattern cannot be spliced: " ++ show p)
+renderPat _ = errorWithoutStackTrace "\12371\12398\24418\12398\12497\12479\12540\12531\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
 
 renderTypeAtom :: Type -> String
 renderTypeAtom t = "(" ++ renderType t ++ ")"
@@ -1367,7 +1369,7 @@ renderType (LitT (NumTyLit n)) = show n
 renderType (LitT (StrTyLit s)) = show s
 renderType (LitT (CharTyLit c)) = show c
 renderType WildCardT = "_"
-renderType t = error ("Template Haskell: this type cannot be spliced: " ++ show t)
+renderType _ = errorWithoutStackTrace "\12371\12398\24418\12398\22411\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
 
 renderTyVar :: TyVarBndr flag -> String
 renderTyVar (PlainTV n _) = renderNamePrefix n
@@ -1404,7 +1406,7 @@ renderDec (RoleAnnotD n rs) = "type role " ++ renderNamePrefix n ++ concatMap ro
     role RepresentationalR = " representational"
     role PhantomR = " phantom"
     role InferR = " _"
-renderDec d = error ("Template Haskell: this declaration cannot be spliced: " ++ show d)
+renderDec _ = errorWithoutStackTrace "\12371\12398\24418\12398\23459\35328\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
 
 renderKindSig :: Maybe Kind -> String
 renderKindSig Nothing = ""
@@ -1439,7 +1441,7 @@ renderCon (NormalC n bts) = unwords (renderNamePrefix n : [renderBang b ++ rende
 renderCon (RecC n vbts) = renderNamePrefix n ++ " {" ++ intercalate ", " [renderNamePrefix f ++ " :: " ++ renderBang b ++ renderTypeAtom t | (f, b, t) <- vbts] ++ "}"
 renderCon (InfixC (b1, t1) n (b2, t2)) = renderBang b1 ++ renderTypeAtom t1 ++ " " ++ renderNameInfix n ++ " " ++ renderBang b2 ++ renderTypeAtom t2
 renderCon (ForallC vs c con) = "forall " ++ unwords (map renderTyVar vs) ++ ". " ++ renderCxt c ++ renderCon con
-renderCon c = error ("Template Haskell: this constructor cannot be spliced: " ++ show c)
+renderCon _ = errorWithoutStackTrace "\12371\12398\24418\12398\27083\25104\23376\65288GADT \12398\27083\25104\23376\12394\12393\65289\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
 
 renderBang :: Bang -> String
 renderBang (Bang _ SourceStrict) = "!"
