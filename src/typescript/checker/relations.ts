@@ -767,7 +767,8 @@ export class Relations {
         const structure = this.c.structureOf(source);
         const properties = new Map(structure.properties);
         for (const [index, { property }] of discriminants.entries()) {
-          properties.set(property.name, { ...property, type: () => combination[index] });
+          // tsc compares each combination by its values alone, so an optional discriminant is required in it.
+          properties.set(property.name, { ...property, optional: false, type: () => combination[index] });
         }
         return { ...structure, properties };
       });
