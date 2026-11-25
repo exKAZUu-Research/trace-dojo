@@ -101,8 +101,9 @@ export class Namespaces {
       return {
         symbol: meaning === 'value' ? rootValue : this.unaliased(this.c.scopeOf(root).lookupType(root.text), 'type'),
       };
-    if (!rootValue?.namespaceExports) return { error: `名前空間 ${root.text} が見つかりません。` };
-    let current: Sym = rootValue;
+    const isEnumMember = rootValue?.valueKind === 'enum' && rest.length === 1;
+    if (!rootValue?.namespaceExports && !isEnumMember) return { error: `名前空間 ${root.text} が見つかりません。` };
+    let current = rootValue as Sym;
     for (const [index, part] of rest.entries()) {
       const remaining = rest.length - 1 - index;
       const next = this.pathMember(current, part.text, remaining === 0 ? meaning : 'value');
