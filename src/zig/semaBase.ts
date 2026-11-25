@@ -1200,7 +1200,21 @@ export abstract class SemaBase implements SemaApi {
     return sentinelHolds ? this.convertPointer(expression, from, to, rule.convert) : undefined;
   }
 
+  /** A converted pointer, which refers into the same `comptime var` as the pointer it converts. */
   private convertPointer(
+    expression: TExpr,
+    from: Extract<Type, { kind: 'pointer' }>,
+    to: Extract<Type, { kind: 'pointer' }>,
+    convert: PointerConversion
+  ): TExpr {
+    const converted = this.convertedPointer(expression, from, to, convert);
+    const variable = this.comptimeVarOf(expression);
+    if (variable && converted.known && (converted.value instanceof Pointer || converted.value instanceof Slice))
+      this.comptimeVarReferences.set(converted.value, variable);
+    return converted;
+  }
+
+  private convertedPointer(
     expression: TExpr,
     from: Extract<Type, { kind: 'pointer' }>,
     to: Extract<Type, { kind: 'pointer' }>,
