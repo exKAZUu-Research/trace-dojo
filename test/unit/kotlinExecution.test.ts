@@ -6838,6 +6838,15 @@ test('runs safe forEach calls whose lambdas suspend only on receivers that are n
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 99]\n' });
 });
 
+test('suspends on suspend function values called with a receiver, through invoke, or as properties', () => {
+  const source = `class H { val g: suspend (Int) -> Int = { it * 2 } }
+fun main() {
+    val f: suspend Int.() -> Int = { this * 2 }
+    println(sequence { yield(3.f()); yield(f.invoke(4)); yield(H().g(5)) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8, 10]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

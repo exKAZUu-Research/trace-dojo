@@ -745,12 +745,19 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const property = new PropertySymbol(param.name);
     property.owner = symbol;
     property.type = type;
+    this.noteSuspendProperty(property);
     property.isVar = param.binding === 'var';
     this.applyMemberModifiers(property, param.modifiers, symbol);
     property.row = param.row;
     property.isLibrary = entry.file.isLibrary;
     symbol.addMember(property);
     entry.parameterProperties.push({ param, symbol: property, index });
+  }
+
+  /** Counts a property of a suspend function type among the names whose calls may suspend, as `h.g(3)` calls it. */
+  private noteSuspendProperty(property: PropertySymbol): void {
+    const type = property.type && resolved(property.type);
+    if (type?.kind === 'function' && type.isSuspend) this.suspendFunctionNames.add(property.name);
   }
 
   private unitTypeOrUndefined(): KType {
@@ -1150,6 +1157,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     if (decl.type) symbol.type = this.resolveType(scope, decl.type);
+    this.noteSuspendProperty(symbol);
     symbol.hasCustomGetter = decl.getter?.body !== undefined || decl.delegate !== undefined;
     if (decl.setter) symbol.setterVisibility = visibilityOf(decl.setter.modifiers);
     if (

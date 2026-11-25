@@ -853,7 +853,12 @@ export abstract class SuspendCompiler extends LocalCompiler {
   private isSuspendCallee(scope: Scope, callee: Expression): boolean {
     const name = callee.kind === 'name' || callee.kind === 'member' ? callee.name : undefined;
     if (name === undefined) return false;
-    const variable = callee.kind === 'name' ? this.findVariable(scope, name) : undefined;
+    // `x.f()` and `f.invoke(x)` call the value of `f` as `f(x)` does, when it is a variable in scope.
+    const valueName =
+      callee.kind === 'member' && name === 'invoke' && callee.receiver.kind === 'name' ? callee.receiver.name : name;
+    const variable = this.findVariable(scope, valueName);
+    if (callee.kind === 'member' && (!variable || this.suspendFunctionNames.has(name)))
+      return this.suspendFunctionNames.has(name);
     if (variable?.suspendInvocable) return true;
     if (variable) {
       const type = resolved(variable.type);
