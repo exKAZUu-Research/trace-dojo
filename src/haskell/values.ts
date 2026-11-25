@@ -230,8 +230,19 @@ export function isFunction(value: Value): value is FunValue {
  */
 export type ExceptionCause =
   | { kind: 'value'; value: Slot }
-  | { kind: 'arith' | 'pattern' }
+  /** An arithmetic failure, by the constructor of `ArithException` it is. */
+  | { kind: 'arith'; error: ArithError }
+  | { kind: 'pattern' }
   | { kind: 'io'; type: string; location: string; file?: string; description: string };
+
+/** The constructors of `ArithException`. */
+export type ArithError =
+  | 'Overflow'
+  | 'Underflow'
+  | 'LossOfPrecision'
+  | 'DivideByZero'
+  | 'Denormal'
+  | 'RatioZeroDenominator';
 
 export class HaskellException extends Error {
   constructor(

@@ -102,22 +102,23 @@ instance Read ExitCode where
 instance Exception ExitCode
 
 -- The exception a built-in failure raises, which a catch sees: its kind and its message, and for an IO error, its
--- type, its location, and its file name.
+-- type, its location, and its file name; for an arithmetic failure, the third string names its constructor.
 primException :: String -> String -> String -> String -> String -> SomeException
 primException kind message ioType location file = case kind of
-  "arith" -> toException (arithException message)
+  "arith" -> toException (arithException ioType)
   "pattern" -> toException (PatternMatchFail message)
   "io" -> toException (IOError Nothing (ioErrorType ioType) location message Nothing (if null file then Nothing else Just file))
   "exit" -> toException (if message == "0" then ExitSuccess else ExitFailure (read message))
   _ -> toException (ErrorCall message)
 
+-- The ArithException a failure is, by the constructor its cause names.
 arithException :: String -> ArithException
-arithException message = case message of
-  "arithmetic overflow" -> Overflow
-  "arithmetic underflow" -> Underflow
-  "loss of precision" -> LossOfPrecision
-  "denormal" -> Denormal
-  "Ratio has zero denominator" -> RatioZeroDenominator
+arithException constructor = case constructor of
+  "Overflow" -> Overflow
+  "Underflow" -> Underflow
+  "LossOfPrecision" -> LossOfPrecision
+  "Denormal" -> Denormal
+  "RatioZeroDenominator" -> RatioZeroDenominator
   _ -> DivideByZero
 
 -- Whether an exception ends the program without a message: an exit code.

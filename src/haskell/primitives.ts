@@ -100,7 +100,7 @@ function wrapInt(value: bigint): bigint {
 }
 
 function divideByZero(): HaskellException {
-  return new HaskellException('divide by zero', { kind: 'arith' });
+  return new HaskellException('divide by zero', { kind: 'arith', error: 'DivideByZero' });
 }
 
 /** Floor division and modulus, as Haskell's `div` and `mod` round toward negative infinity. */
@@ -135,7 +135,7 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
       if ((b as bigint) === 0n) throw divideByZero();
       if (prefix === 'int' && (a as bigint) === INT_MIN && (b as bigint) === -1n) {
         // GHC reports the overflow of the one quotient that does not fit.
-        throw new HaskellException('arithmetic overflow', { kind: 'arith' });
+        throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
       }
       return wrap(op(a as bigint, b as bigint));
     };
@@ -185,7 +185,7 @@ function rotate64(value: bigint, count: bigint): bigint {
 
 function shiftCount(value: Value): bigint {
   const count = value as bigint;
-  if (count < 0n) throw new HaskellException('arithmetic overflow', { kind: 'arith' });
+  if (count < 0n) throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
   return count;
 }
 
@@ -811,8 +811,11 @@ define(
 define('divZeroError', 0, [], () => {
   throw divideByZero();
 });
+define('ratioZeroDenominatorError', 0, [], () => {
+  throw new HaskellException('Ratio has zero denominator', { kind: 'arith', error: 'RatioZeroDenominator' });
+});
 define('overflowError', 0, [], () => {
-  throw new HaskellException('arithmetic overflow', { kind: 'arith' });
+  throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
 });
 define('ioUnit', 0, [], () => new IOReturn(unit()));
 define(

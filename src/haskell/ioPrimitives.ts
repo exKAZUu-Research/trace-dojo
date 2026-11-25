@@ -329,7 +329,9 @@ export function exceptionValue(error: HaskellException, runtime: Runtime): Slot 
   const strings =
     cause?.kind === 'io'
       ? ['io', cause.description, cause.type, cause.location, cause.file ?? '']
-      : [cause?.kind ?? 'error', error.display, '', '', ''];
+      : cause?.kind === 'arith'
+        ? ['arith', error.display, cause.error, '', '']
+        : [cause?.kind ?? 'error', error.display, '', '', ''];
   return new Thunk(
     undefined,
     undefined,

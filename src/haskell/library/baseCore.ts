@@ -430,6 +430,9 @@ divZeroError = primitive "divZeroError"
 overflowError :: a
 overflowError = primitive "overflowError"
 
+ratioZeroDenominatorError :: a
+ratioZeroDenominatorError = primitive "ratioZeroDenominatorError"
+
 lcm :: Integral a => a -> a -> a
 lcm x y = if y == fromInteger 0 || x == fromInteger 0 then fromInteger 0 else abs ((x ${BT}quot${BT} (gcd x y)) * y)
 
@@ -699,7 +702,7 @@ floatToRational x = let (m, e) = decodeFloat x
 -- Rationals
 
 reduce :: Integral a => a -> a -> Ratio a
-reduce x y = if y == fromInteger 0 then errorWithoutStackTrace "Ratio has zero denominator"
+reduce x y = if y == fromInteger 0 then ratioZeroDenominatorError
              else let d = gcd x y in (x ${BT}quot${BT} d) :% (y ${BT}quot${BT} d)
 
 (%) :: Integral a => a -> a -> Ratio a
@@ -729,7 +732,7 @@ instance Integral a => Num (Ratio a) where
 
 instance Integral a => Fractional (Ratio a) where
   (x :% y) / (x' :% y') = (x * y') % (y * x')
-  recip (x :% y) = if x == fromInteger 0 then errorWithoutStackTrace "Ratio has zero denominator"
+  recip (x :% y) = if x == fromInteger 0 then ratioZeroDenominatorError
                    else if x < fromInteger 0 then negate y :% negate x else y :% x
   fromRational (x :% y) = fromInteger x % fromInteger y
 
