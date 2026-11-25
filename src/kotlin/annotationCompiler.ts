@@ -202,8 +202,8 @@ export abstract class AnnotationCompiler extends BodyCompiler {
     }
     if (value.kind === 'reference' && value.name === 'class' && this.isLibraryMarkerReference(scope, value)) return;
     const compiled = this.compileAnnotationExpression(scope, value, expected);
-    if (!isSubtype(compiled.type, expected) && !compiled.integerLiteral)
-      this.error(row, typeMismatchMessage(expected, compiled.type));
+    // An integer literal fits only the integer types it can be, as an argument of a call does.
+    if (!this.acceptsArgument(compiled, expected)) this.error(row, typeMismatchMessage(expected, compiled.type));
     if (!this.isConstantExpression(scope, value) && !isAnnotationConstant(compiled, value))
       this.error(row, 'アノテーションの引数には、定数を書いてください。');
   }

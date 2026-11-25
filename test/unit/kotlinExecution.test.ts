@@ -6567,6 +6567,31 @@ test.each([
   expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
 });
 
+test.each([
+  [
+    'a spread argument for a parameter that is not vararg',
+    'fun f(x: Int) = x\nfun main() { println(f(*intArrayOf(1))) }',
+    false,
+  ],
+  [
+    'a spread argument for a vararg',
+    'fun g(vararg x: Int) = x.sum()\nfun main() { println(g(*intArrayOf(1, 2), 3)) }',
+    true,
+  ],
+  [
+    "an integer literal for an annotation's String",
+    'annotation class A(val s: String)\n@A(1) fun f() = 1\nfun main() { println(f()) }',
+    false,
+  ],
+  [
+    "integer literals for an annotation's Long and Byte",
+    'annotation class N(val n: Long, val b: Byte)\n@N(1, 2) fun f() = 1\nfun main() { println(f()) }',
+    true,
+  ],
+])('compiles %s only as kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
