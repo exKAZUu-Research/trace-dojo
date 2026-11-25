@@ -462,24 +462,11 @@ pub const Reader = struct {
 
     pub fn allocRemaining(r: *Reader, gpa: std.mem.Allocator, limit: Limit) LimitedAllocError![]u8 {
         var list: std.ArrayList(u8) = .empty;
-        errdefer list.deinit(gpa);
-        var spare: [4096]u8 = undefined;
-        while (true) {
-            const data = if (r.buffer.len == 0) blk: {
-                const descriptor = r.descriptor orelse break;
-                const n = try readInput(descriptor, &spare);
-                if (n == 0) break;
-                break :blk spare[0..n];
-            } else r.buffer[r.seek..r.end];
-            if (limit != .unlimited and list.items.len + data.len > @intFromEnum(limit)) return error.StreamTooLong;
-            try list.appendSlice(gpa, data);
-            if (r.buffer.len == 0) continue;
-            r.seek = r.end;
-            r.fillMore() catch |err| switch (err) {
-                error.EndOfStream => break,
-                error.ReadFailed => return error.ReadFailed,
-            };
-        }
+        defer list.deinit(gpa);
+        try r.appendRemaining(gpa, &list, switch (limit) {
+            .unlimited => limit,
+            else => .limited(@intFromEnum(limit) + 1),
+        });
         return list.toOwnedSlice(gpa);
     }
 };
@@ -698,9 +685,11 @@ pub const Dir = struct {
     pub fn readFileAlloc(dir: Dir, io: Io, file_path: []const u8, gpa: std.mem.Allocator, limit: Limit) (File.OpenError || FsError || Io.Reader.LimitedAllocError)![]u8 {
         const file = try dir.openFile(io, file_path, .{});
         defer file.close(io);
-        var buffer: [4096]u8 = undefined;
-        var reader = file.reader(io, &buffer);
-        return reader.interface.allocRemaining(gpa, limit);
+        var reader = file.reader(io, &.{});
+        var list: std.ArrayList(u8) = .empty;
+        defer list.deinit(gpa);
+        try reader.interface.appendRemaining(gpa, &list, limit);
+        return list.toOwnedSlice(gpa);
     }
 
     pub fn deleteFile(dir: Dir, io: Io, sub_path: []const u8) (FsError || error{ FileNotFound, IsDir, NotDir, AccessDenied, PermissionDenied, FileBusy, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
