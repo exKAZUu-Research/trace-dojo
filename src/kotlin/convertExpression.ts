@@ -98,7 +98,6 @@ export abstract class ExpressionConverter {
   // code-gauge-allow functionNcss -- one case per kind of tree-sitter's expression nodes.
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   convertExpression(node: Node): Expression {
-    if (Object.hasOwn(UNAVAILABLE_EXPRESSIONS, node.type)) throw unavailable(node, UNAVAILABLE_EXPRESSIONS[node.type]);
     const row = rowOf(node);
     switch (node.type) {
       case 'number_literal': {
@@ -833,9 +832,6 @@ function intoRightOperand(target: Expression, apply: (operand: Expression) => Ex
     }
   }
 }
-
-/** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
-const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {};
 
 /** Whether a statement ends with a function's `=` body, as `fun f() = 1` or `val g = fun() = 2` does. */
 function endsWithExpressionBody(statement: Node): boolean {
