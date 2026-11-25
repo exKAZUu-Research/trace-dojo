@@ -532,8 +532,10 @@ transpose = fromList . B.map fromList . B.transpose . B.map toList . toList
 
 unfoldr :: (a -> (b, Maybe a)) -> a -> NonEmpty b
 unfoldr f a = case f a of
-  (b, Nothing) -> b :| []
-  (b, Just c) -> b <| unfoldr f c
+  (b, mc) -> b :| maybe [] go mc
+  where
+    go c = case f c of
+      (d, me) -> d : maybe [] go me
 
 inits :: Foldable f => f a -> NonEmpty [a]
 inits = fromList . B.inits . B.foldr (:) []
