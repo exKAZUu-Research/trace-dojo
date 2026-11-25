@@ -164,7 +164,7 @@ export type TypeExpr =
   | { kind: 'tpromoted'; name: QName; span: Span }
   /** A type-level list, `'[a, b]`, or tuple, `'(a, b)`. */
   | { kind: 'tpromotedList' | 'tpromotedTuple'; elems: TypeExpr[]; span: Span }
-  /** A type applied to a kind, `Proxy @Type`, which fixes the kind of its parameter. */
+  /** A type applied to a kind, `T @Type` for `type T :: forall k. k -> Type`, which fixes its kind variable. */
   | { kind: 'tkindapp'; type: TypeExpr; kindArg: TypeExpr; span: Span }
   /** An implicit parameter's constraint, `?x :: t`. */
   | { kind: 'timplicit'; name: string; type: TypeExpr; span: Span }
