@@ -61,7 +61,8 @@ export function isBreakSegment(segment: WordSegment): segment is BreakSegment {
  * and each non-whitespace `IFS` character terminates a field (adjacent whitespace coalesces with one delimiter).
  */
 export function splitWordSegments(segments: readonly WordSegment[], ifs: string): TextSegment[][] {
-  const state = new SplitterState(ifs);
+  const hasList = segments.some((seg) => seg.kind === 'break' || seg.kind === 'emptyList' || Boolean(seg.fromList));
+  const state = new SplitterState(ifs, hasList);
   for (const segment of segments) state.add(segment);
   return state.finish();
 }
@@ -71,11 +72,13 @@ class SplitterState {
   private field: TextSegment[] = [];
   private started = false;
   private afterWhite = false;
-  private afterListWhite = false;
   private afterDelimiter = false;
   private readonly hasNonWhitePrimaryIfs: boolean;
 
-  constructor(private readonly ifs: string) {
+  constructor(
+    private readonly ifs: string,
+    private readonly hasList: boolean
+  ) {
     this.hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
   }
 
@@ -88,10 +91,9 @@ class SplitterState {
       this.field.push({ ...segment, split: false });
       this.started = true;
       this.afterWhite = false;
-      this.afterListWhite = false;
       this.afterDelimiter = false;
     } else if (segment.text !== '') {
-      this.splitText(segment.text, Boolean(segment.fromList));
+      this.splitText(segment.text);
     }
   }
 
@@ -104,17 +106,12 @@ class SplitterState {
     if (segment.quoted) {
       if (this.started) this.end();
       this.afterWhite = true;
-      this.afterListWhite = false;
       this.afterDelimiter = false;
       return;
     }
     if (this.ifs === '') {
       if (this.started) this.end();
       return;
-    }
-    if (this.afterListWhite) {
-      this.afterWhite = true;
-      this.afterListWhite = false;
     }
     if (this.hasNonWhitePrimaryIfs) {
       this.separate(this.ifs[0]);
@@ -134,39 +131,36 @@ class SplitterState {
     this.started = false;
   }
 
-  private splitText(text: string, fromList: boolean): void {
+  private splitText(text: string): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
         run += c;
         this.started = true;
         this.afterWhite = false;
-        this.afterListWhite = false;
         this.afterDelimiter = false;
         continue;
       }
       if (run) this.field.push(textSegment(run, false, false));
       run = '';
-      this.separate(c, fromList);
+      this.separate(c);
     }
     if (run) this.field.push(textSegment(run, false, false));
   }
 
-  private separate(c: string, fromList = false): void {
+  private separate(c: string): void {
     if (c === ' ' || c === '\t' || c === '\n') {
       if (this.started) {
         this.end();
         this.afterWhite = true;
-      } else if (!this.afterDelimiter) {
-        if (fromList) this.afterWhite = true;
-        else this.afterListWhite = true;
+      } else if (!this.afterDelimiter && this.hasList) {
+        this.afterWhite = true;
       }
       return;
     }
     if (this.started) this.end();
     else if (!this.afterWhite) this.fields.push([]);
     this.afterWhite = false;
-    this.afterListWhite = false;
     this.afterDelimiter = true;
   }
 }

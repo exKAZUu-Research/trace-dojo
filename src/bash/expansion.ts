@@ -615,7 +615,7 @@ export class Expander {
     if (value.kind === 'scalar') return scalarValueSegments(value.value, inDouble);
     if (ctx.inOperatorWord || ctx.inSubscript) rejectListInScalarContext(sourceText ?? '$@');
     if (value.star && inDouble) return this.quotedStarSegments(value.values);
-    if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
+    if (value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
     const separator = this.separatorOf(value, ctx);
     for (const [index, element] of value.values.entries()) {
