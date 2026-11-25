@@ -116,10 +116,17 @@ export function hasConstructorHead(type: Type): boolean {
  * A type with its unreduced family applications replaced by unknowns: an instance that could match it may match
  * once they reduce, while one whose head has a variable there matches them already.
  */
-function withFamiliesUnknown(type: Type): Type {
+function withFamiliesUnknown(type: Type, unknowns: [Type, Type][] = []): Type {
   const { head, args } = splitApp(prune(type));
-  if (head.tag === 'tcon' && head.entity.sort === 'family') return freshTypeVar(STAR, 0);
-  return args.length === 0 ? head : tap(head, ...args.map(withFamiliesUnknown));
+  if (head.tag === 'tcon' && head.entity.sort === 'family') {
+    // Equal applications reduce alike, so they share one unknown, as GHC's apartness check has them.
+    const known = unknowns.find(([application]) => typesEqual(application, type));
+    if (known) return known[1];
+    const unknown = freshTypeVar(STAR, 0);
+    unknowns.push([type, unknown]);
+    return unknown;
+  }
+  return args.length === 0 ? head : tap(head, ...args.map((arg) => withFamiliesUnknown(arg, unknowns)));
 }
 
 export function superPred(pred: Pred, index: number): Pred {
