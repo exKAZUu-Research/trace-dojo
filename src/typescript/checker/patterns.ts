@@ -673,6 +673,8 @@ export class BindingPatterns {
       const value = this.c.propertyOf(member, 'value');
       return value ? [value.type()] : [];
     });
+    // tsc gives an iterator whose results are all done elements of type any.
+    if (settled && yielded.length === 0) return anyType;
     return values.length > 0 ? unionOf(values) : iteratorType.typeArguments?.[0];
   }
 

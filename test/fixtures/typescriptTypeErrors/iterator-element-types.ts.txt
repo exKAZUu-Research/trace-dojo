@@ -18,3 +18,5 @@ function* g() { yield 1; return 'end'; }
 for (const x of g()) console.log(x.toFixed(1));
 for (const x of [1, 2]) console.log(x.toFixed(1));
 for (const x of new Map([['a', 1]])) console.log(x[0].toUpperCase(), x[1].toFixed(0));
+const done = { [Symbol.iterator]() { return { next(): { value: string; done: true } { return { value: '', done: true }; } }; } };
+for (const x of done) console.log(x.toUpperCase());
