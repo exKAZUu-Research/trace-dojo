@@ -641,12 +641,9 @@ export class FunctionChecker {
   checkOverloadImplementation(node: TreeNode): void {
     if (this.c.isLibrary(node)) return;
     this.checkSignatureAnnotations(node);
-    const siblings = node.parent ? named(node.parent) : [];
-    const index = siblings.findIndex((sibling) => sibling.id === node.id);
+    const { later, next } = followingDeclarations(node);
     // An optional method needs no implementation, unless a later declaration of the method follows.
-    if (hasToken(node, '?') && !siblings.slice(index + 1).some((sibling) => this.declaresSameMethod(node, sibling)))
-      return;
-    const next = siblings[index + 1];
+    if (hasToken(node, '?') && !later.some((sibling) => this.declaresSameMethod(node, sibling))) return;
     const nextName = next?.childForFieldName('name');
     if (
       next &&
@@ -883,4 +880,17 @@ function mayReturnNever(node: TreeNode): boolean {
   if (node.type === 'arrow_function' || node.type === 'function_expression' || node.type === 'generator_function')
     return true;
   return node.type === 'method_definition' && node.parent?.type === 'object';
+}
+
+/**
+ * The declarations after a signature in its block, and the one right after it, which may implement it; an exported
+ * signature and its implementation are the declarations of neighbouring export statements.
+ */
+function followingDeclarations(node: TreeNode): { later: TreeNode[]; next: TreeNode | undefined } {
+  const item = node.parent?.type === 'export_statement' ? node.parent : node;
+  const siblings = item.parent ? named(item.parent) : [];
+  const later = siblings.slice(siblings.findIndex((sibling) => sibling.id === item.id) + 1);
+  const next =
+    later[0]?.type === 'export_statement' ? (later[0].childForFieldName('declaration') ?? later[0]) : later[0];
+  return { later, next };
 }
