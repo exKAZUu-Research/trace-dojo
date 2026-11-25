@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's parameter expansion operators and transformations in one module.
 import type { ParameterExpansion, Word, WordPart } from './ast';
-import { appendMetered, joinMetered } from './budget';
+import { appendMetered, joinMetered, pushMeteredItem } from './budget';
 import { ATTRIBUTE_ORDER, rejectListInScalarContext, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
@@ -617,7 +617,6 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
   return chars.join('');
 }
 
-// code-gauge-allow functionNcss -- One case per transformation letter of Bash's parameter expansion.
 function transform(
   expander: Expander,
   shell: Shell,
@@ -660,14 +659,7 @@ function transform(
       return attributeTransformSegments(expander, shell, name, value, ctx);
     }
     case 'A': {
-      const { text, isArray } = formatDeclarationTransform(shell, name, value);
-      if (value.kind === 'list') {
-        if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
-        const values =
-          isArray && ctx.inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
-        return expander.valueSegments({ ...value, values, transformed: true }, ctx, expansion.text);
-      }
-      return expander.valueSegments({ kind: 'scalar', value: text }, ctx, expansion.text);
+      return declarationTransformSegments(expander, shell, value, { name, expansionText: expansion.text }, ctx);
     }
     case 'K':
     case 'k': {
@@ -693,6 +685,43 @@ function attributeTransformSegments(
     return expander.valueSegments({ ...value, values }, ctx);
   }
   return value.value === undefined && !view ? [] : expander.valueSegments({ kind: 'scalar', value: flags }, ctx);
+}
+
+function declarationTransformSegments(
+  expander: Expander,
+  shell: Shell,
+  value: ParameterValue,
+  target: { name: string; expansionText: string },
+  ctx: WordContext
+): WordSegment[] {
+  if (value.kind === 'list' && value.positional) {
+    return positionalDeclarationSegments(expander, shell, value, target.expansionText, ctx);
+  }
+  const { text, isArray } = formatDeclarationTransform(shell, target.name, value);
+  if (value.kind !== 'list') {
+    return expander.valueSegments({ kind: 'scalar', value: text }, ctx, target.expansionText);
+  }
+  if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx, target.expansionText);
+  const values =
+    isArray && ctx.inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
+  return expander.valueSegments({ ...value, values, transformed: true }, ctx, target.expansionText);
+}
+
+function positionalDeclarationSegments(
+  expander: Expander,
+  shell: Shell,
+  value: Extract<ParameterValue, { kind: 'list' }>,
+  expansionText: string,
+  ctx: WordContext
+): WordSegment[] {
+  if (value.values.length === 0) {
+    return expander.valueSegments({ ...value, values: [] }, ctx, expansionText);
+  }
+  const items = ['set', '--'];
+  for (const element of value.values) {
+    pushMeteredItem(items, quoteReusable(element), shell.runtime.step);
+  }
+  return expander.valueSegments({ ...value, values: items, transformed: true }, ctx, expansionText);
 }
 
 function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
