@@ -553,11 +553,16 @@ export class OperatorChecker {
       operand.type === 'unary_expression' &&
       ['+', '-'].includes(operand.childForFieldName('operator')?.text ?? '') &&
       named(operand)[0]?.type === 'number';
+    const object = ['member_expression', 'subscript_expression'].includes(operand.type)
+      ? operand.childForFieldName('object')
+      : undefined;
+    const isEnumMember = object && this.c.namespaces.qualifiedValueSymbol(object)?.valueKind === 'enum';
     if (
       !['string', 'number', 'true', 'false', 'object', 'array', 'template_string'].includes(operand.type) &&
-      !signedLiteral
+      !signedLiteral &&
+      !isEnumMember
     )
-      this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
+      this.c.error(node, 'const アサーションは、enum のメンバーの参照か、リテラル式にのみ使えます。');
     return mapType(check(expression, contextual), (type) => (type.kind === 'literal' ? regularOf(type) : type));
   }
 }

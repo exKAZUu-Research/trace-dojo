@@ -1471,13 +1471,11 @@ function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): bool
 }
 
 /**
- * Whether a literal type is related to another of the same value, where an enum member's type is related only from its
- * own and from a numeric literal's, except when comparing.
+ * Whether a literal type is related to another of the same value, where an enum member's type is related only from a
+ * member of its enum, which tsc identifies by value, and from a numeric literal's, except when comparing.
  */
 function literalRelated(s: LiteralType, t: LiteralType, relation: Relation): boolean {
   if (s.value !== t.value) return false;
   if (relation === 'comparable' || !t.enumMember) return true;
-  return s.enumMember
-    ? s.enumMember.enumName === t.enumMember.enumName && s.enumMember.name === t.enumMember.name
-    : typeof s.value === 'number';
+  return s.enumMember ? s.enumMember.enumName === t.enumMember.enumName : typeof s.value === 'number';
 }

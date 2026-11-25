@@ -641,7 +641,13 @@ export class TypeNodes {
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;
     const symbol = this.c.scopeOf(root).lookupType(root.text) ?? this.c.scopeOf(root).lookupValue(root.text);
     const value = this.c.scopeOf(root).lookupValue(root.text);
-    if (value?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id)
+    // A namespace merged with the enum may export a type of the name, which tsc finds before a member.
+    const name = node.childForFieldName('name')?.text ?? '';
+    if (
+      value?.valueKind === 'enum' &&
+      root.id === node.childForFieldName('module')?.id &&
+      !value.namespaceExports?.types.has(name)
+    )
       return this.enumMemberTypeNamed(node, value, root.text);
     if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
       return this.namespaceMemberType(node, root);
