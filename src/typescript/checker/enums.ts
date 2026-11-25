@@ -45,6 +45,7 @@ interface EnumInfo {
 export class Enums {
   private readonly infos = new Map<number, EnumInfo>();
   private readonly computing = new Set<number>();
+  private readonly evaluatingConstants = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -195,7 +196,7 @@ export class Enums {
           : expression.text.slice(1, -1);
       }
       case 'identifier': {
-        return members.get(expression.text)?.value;
+        return members.get(expression.text)?.value ?? this.constantVariableValue(expression, symbol);
       }
       case 'member_expression':
       case 'subscript_expression': {
@@ -218,6 +219,20 @@ export class Enums {
       default: {
         return undefined;
       }
+    }
+  }
+
+  /** The value of a `const` an initializer names, when a constant expression initializes it, as tsc evaluates it. */
+  private constantVariableValue(name: TreeNode, symbol: Sym): EnumValue | undefined {
+    const variable = this.c.scopeOf(name).lookupValue(name.text);
+    const declaration = variable?.valueDeclaration;
+    const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
+    if (variable?.valueKind !== 'const' || !value || this.evaluatingConstants.has(variable.id)) return undefined;
+    this.evaluatingConstants.add(variable.id);
+    try {
+      return this.evaluate(value, symbol, new Map());
+    } finally {
+      this.evaluatingConstants.delete(variable.id);
     }
   }
 
