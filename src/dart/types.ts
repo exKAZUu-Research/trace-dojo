@@ -177,12 +177,12 @@ export function factorType(type: DartType, removed: DartType): DartType {
 
 /** `futureValueType(T)`: what an `async` function declared to return `T` completes its future with. */
 export function futureValueType(type: DartType): DartType {
-  const base = nonNullable(type);
-  if (base.kind === 'interface' && base.cls === coreTypes.future) return base.args[0] ?? DYNAMIC;
-  const value = futureOrValue(base);
+  // futureValueType(S?) is futureValueType(S): only the outer `?` goes, so FutureOr<int?> keeps int?.
+  if (type.kind === 'interface' && type.cls === coreTypes.future) return type.args[0] ?? DYNAMIC;
+  const value = futureOrValue(type);
   if (value) return value;
-  if (base.kind === 'void' || base.kind === 'dynamic') return base;
-  if (isObject(base) || isTop(type)) return objectType(true);
+  if (type.kind === 'void' || type.kind === 'dynamic') return type;
+  if (isObject(nonNullable(type)) || isTop(type)) return objectType(true);
   return DYNAMIC;
 }
 
