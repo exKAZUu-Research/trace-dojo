@@ -1857,10 +1857,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return [{ ...candidate, kind: 'extension', receiverType: undefined, dispatch: instance }];
       });
     if (candidates.length === 0) this.error(row, `super には ${name} がありません。`);
+    // Members come before member extensions, as they do on an ordinary receiver.
+    const members = candidates.filter((candidate) => candidate.kind !== 'extension');
+    const extensions = candidates.filter((candidate) => candidate.kind === 'extension');
     const resolvedCall = this.resolveCall(
       scope,
       context,
-      [candidates],
+      [members, extensions].filter((level) => level.length > 0),
       args,
       hasTrailingLambda,
       typeArgs,
