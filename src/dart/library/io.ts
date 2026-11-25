@@ -162,7 +162,11 @@ class Stdout implements IOSink {
   void addError(Object error, [StackTrace? stackTrace]) {
     Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
   }
-  Future addStream(Stream<List<int>> stream) => stream.forEach(add);
+  Future addStream(Stream<List<int>> stream) => stream.forEach((data) {
+        // The VM's sink hands a stream to the file itself, which fails each chunk, even an empty one, once closed.
+        if (_closed.isCompleted) throw const FileSystemException("File closed", "");
+        write(_textOfBytes(data));
+      });
   Future flush() => Future.value();
   // Closing completes, and so does done, once closed; afterwards a write fails, and print drops what it prints.
   Future close() {
