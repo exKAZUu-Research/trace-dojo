@@ -138,12 +138,9 @@ class UsageCounter {
       }
       case 'case': {
         const scrutinee = this.expr(expr.scrutinee);
-        if (
-          scrutinee === 1 &&
-          expr.scrutinee.k === 'var' &&
-          expr.scrutinee.ref.kind === 'local' &&
-          expr.scrutinee.ref.local === this.local
-        ) {
+        let inner = expr.scrutinee;
+        while (inner.k === 'typed' || inner.k === 'tyapp' || inner.k === 'poly') inner = inner.expr;
+        if (scrutinee === 1 && inner.k === 'var' && inner.ref.kind === 'local' && inner.ref.local === this.local) {
           for (const alt of expr.alts) this.pending.push({ locals: linearLocals(alt.pat), rhs: alt.rhs });
         }
         return add(scrutinee, branches(expr.alts.map((alt) => this.rhs(alt.rhs))));
