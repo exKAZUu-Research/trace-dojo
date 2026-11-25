@@ -612,8 +612,8 @@ export class Expander {
   valueSegments(value: ParameterValue, ctx: WordContext): WordSegment[] {
     const { inDouble } = ctx;
     if (value.kind === 'scalar') return scalarValueSegments(value.value, inDouble);
-    const listOrigin = !(value.positional && value.star && (inDouble || ctx.inOperatorWord));
-    if (value.star && inDouble) return this.quotedStarSegments(value.values, listOrigin);
+    const listOrigin = !(value.star && (inDouble || ctx.inOperatorWord));
+    if (value.star && inDouble) return this.quotedStarSegments(value.values);
     if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
     const separator = this.separatorOf(value, ctx.spacedStar);
@@ -625,11 +625,10 @@ export class Expander {
     return segments;
   }
 
-  private quotedStarSegments(values: readonly string[], listOrigin: boolean): WordSegment[] {
-    const extra = listOrigin ? { fromList: true } : undefined;
-    if (values.length === 0) return [listOrigin ? textSegment('', true, false, extra) : QUOTED_EMPTY_SEGMENT];
+  private quotedStarSegments(values: readonly string[]): WordSegment[] {
+    if (values.length === 0) return [QUOTED_EMPTY_SEGMENT];
     const joined = joinBounded(values, this.ifsJoiner(), (cost) => this.spend(cost));
-    return [textSegment(joined, true, false, extra)];
+    return [textSegment(joined, true, false)];
   }
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, spacedStar: boolean): WordSegment {

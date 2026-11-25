@@ -200,14 +200,10 @@ function collectOperatorWordEntries(
     const keepsFields = keepsOperatorFields(part);
     const expanded = expander.expandParts([part], itemCtx);
     pushSegmentRoots(roots, expanded);
-    const starFromList = expanded.some((s) => s.kind === 'text' && s.fromList);
     for (const seg of expanded) {
       if (seg.kind === 'emptyList') continue;
       if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
-        entries.push({
-          segment: textSegment(starJoiner, false, true, starFromList ? { fromList: true } : undefined),
-          keepsFields,
-        });
+        entries.push({ segment: textSegment(starJoiner, false, true), keepsFields });
         continue;
       }
       entries.push({ segment: seg, keepsFields });
