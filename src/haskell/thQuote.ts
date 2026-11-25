@@ -731,6 +731,7 @@ export class QuoteBuilder {
         });
         const name = this.nameOf(decl.name.name);
         const tyVars = this.tyVars(decl.params);
+        if (decl.typeData) return this.call('typeDataD', name, tyVars, this.nothing(), this.list(cons));
         if (decl.newtype) {
           return this.call(
             'newtypeD',

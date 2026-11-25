@@ -835,6 +835,9 @@ kiSigD n = fmap (KiSigD n)
 tySynD :: Quote m => Name -> [TyVarBndr BndrVis] -> m Type -> m Dec
 tySynD n vs = fmap (TySynD n vs)
 
+typeDataD :: Quote m => Name -> [TyVarBndr BndrVis] -> Maybe Kind -> [m Con] -> m Dec
+typeDataD n vs k cons = TypeDataD n vs k <$> sequenceA cons
+
 dataD :: Quote m => m Cxt -> Name -> [TyVarBndr BndrVis] -> Maybe Kind -> [m Con] -> [m DerivClause] -> m Dec
 dataD c n vs k cons ds = (\c' cons' ds' -> DataD c' n vs k cons' ds') <$> c <*> sequenceA cons <*> sequenceA ds
 
@@ -1217,6 +1220,7 @@ pprDec (ValD p b ds) = pprPat 0 p ++ pprBody " =" b ++ pprWhere ds
 pprDec (SigD n t) = pprNamePrefix n ++ " :: " ++ pprType 0 t
 pprDec (KiSigD n k) = "type " ++ pprNamePrefix n ++ " :: " ++ pprType 0 k
 pprDec (TySynD n vs t) = "type " ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ " = " ++ pprType 0 t
+pprDec (TypeDataD n vs _ cons) = "type data " ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons cons
 pprDec (DataD c n vs _ cons ders) =
   "data " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons cons ++ pprDerivs ders
 pprDec (NewtypeD c n vs _ con ders) =

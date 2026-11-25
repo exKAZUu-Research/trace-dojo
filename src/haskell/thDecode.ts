@@ -292,6 +292,11 @@ class SpliceDecoder {
         for (const name of this.patBinders(dec.fields[0])) keep(name);
         return;
       }
+      case 'TypeDataD': {
+        keep(dec.fields[0]);
+        for (const con of this.list(dec.fields[3])) for (const name of this.conBinders(con)) keep(name);
+        return;
+      }
       case 'DataD':
       case 'NewtypeD': {
         keep(dec.fields[1]);
@@ -1112,7 +1117,22 @@ class SpliceDecoder {
         });
         return [{ kind: 'roleAnnotation', name: this.ref(f[0], 'type'), roles, span }];
       }
-      case 'TypeDataD':
+      case 'TypeDataD': {
+        const binders = this.list(f[1]).map((b) => this.tyVar(b));
+        const kind = this.maybe(f[2]);
+        return [
+          {
+            kind: 'data',
+            name: this.binder(f[0]),
+            ...this.params(binders),
+            typeData: true,
+            ...(kind ? { kindSig: this.type(kind) } : {}),
+            cons: this.list(f[3]).map((con) => this.conDecl(con)),
+            deriving: [],
+            span,
+          },
+        ];
+      }
       case 'ImplicitParamBindD': {
         return this.unavailable('dec');
       }
