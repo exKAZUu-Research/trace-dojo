@@ -281,20 +281,25 @@ define('openFile', 2, [], ([pathSlot, modeSlot], runtime) =>
       if (other.isClosed || other.path !== resolved) continue;
       if (writing || other.isWritable) throw ioError('ResourceBusy', 'openFile', path, 'file is locked');
     }
-    const streams: HandleStreams = {};
-    try {
-      if (writing) {
-        streams.writer = runtime.io.files.open(path, { create: 'always', truncate: mode === 1, append: mode === 2 });
-      }
-      if (mode === 0 || mode === 3) streams.reader = runtime.io.openReader(path);
-    } catch (error) {
-      fileSystemError(error, 'openFile', path);
-    }
     const id = table.nextId++;
-    table.files.set(id, new Handle(path, streams, { kind: 'BlockBuffering' }, resolved));
+    table.files.set(id, new Handle(path, openStreams(path, mode, runtime), { kind: 'BlockBuffering' }, resolved));
     return new ConValue(fileHandleCon as ConInfo, [BigInt(id), pathSlot]);
   })
 );
+
+/** Opens a file's streams for an `IOMode`, given by its constructor's tag. */
+function openStreams(path: string, mode: number, runtime: Runtime): HandleStreams {
+  try {
+    const writer =
+      mode === 0
+        ? undefined
+        : runtime.io.files.open(path, { create: 'always', truncate: mode === 1, append: mode === 2 });
+    const reader = mode === 0 || mode === 3 ? runtime.io.openReader(path) : undefined;
+    return { reader, writer };
+  } catch (error) {
+    fileSystemError(error, 'openFile', path);
+  }
+}
 
 let fileHandleCon: ConInfo | undefined;
 
