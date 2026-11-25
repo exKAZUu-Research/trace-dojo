@@ -771,6 +771,9 @@ export class QuoteBuilder {
       );
       return this.call('recC', this.nameOf(con.name.name), this.list(fields));
     }
+    if (con.isInfix && con.fields.length === 2) {
+      return this.call('infixC', bangType(con.fields[0], 0), this.nameOf(con.name.name), bangType(con.fields[1], 1));
+    }
     return this.call('normalC', this.nameOf(con.name.name), this.list(con.fields.map(bangType)));
   }
 }
