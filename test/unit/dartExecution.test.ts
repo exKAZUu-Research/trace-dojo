@@ -10015,6 +10015,7 @@ void main() async {
   }
   File('notes/a.txt').renameSync('b.txt');
   Directory('notes').deleteSync();
+  File('log.txt').openWrite().write('unclosed');
 }`;
   expect(executeProgram('dart', program, { stdin: 'first\nXsecond\n', files: { 'input.txt': 'given' } })).toMatchObject(
     {
@@ -10023,7 +10024,7 @@ void main() async {
         '[first, 88, second, null]\n[[one, two, three], 14, given]\none\ntwo\nthree\n[notes/a.txt]\n' +
         "PathNotFoundException: Cannot open file, path = 'none.txt' (OS Error: No such file or directory, errno = 2)\n" +
         "FileSystemException: Deletion failed, path = 'notes' (OS Error: Directory not empty, errno = 66)\n",
-      finalFiles: { 'b.txt': 'one\ntwo\nthree\n', 'input.txt': 'given' },
+      finalFiles: { 'b.txt': 'one\ntwo\nthree\n', 'input.txt': 'given', 'log.txt': 'unclosed' },
     }
   );
 });

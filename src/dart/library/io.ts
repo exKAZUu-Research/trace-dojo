@@ -343,29 +343,43 @@ class _File extends FileSystemEntity implements File {
   external static void _create(String path, bool recursive, bool exclusive);
 }
 
-/** An IOSink of a file, which writes what it buffered when it is flushed or closed. */
+/**
+ * An IOSink of a file. The file is opened, created or truncated, when the sink is, as the VM's I/O service opens it
+ * before the program's next file operation, and what the sink buffers is written in a later event, so that it reaches
+ * the file without a flush or a close.
+ */
 class _FileSink implements IOSink {
   final _File _file;
   bool _append;
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
-  _FileSink(this._file, this._append);
+  bool _failed = false;
+  bool _writeScheduled = false;
+  _FileSink(this._file, this._append) {
+    try {
+      _writeBuffered();
+    } catch (error, stackTrace) {
+      // The VM reports a failure to open the file to done, which is unhandled unless the program closes the sink.
+      _failed = true;
+      Future(() => addError(error, stackTrace));
+    }
+  }
   Encoding get encoding => utf8;
   void write(Object? object) {
-    _checkOpen();
+    _startWrite();
     _buffer.write(object);
   }
   void writeln([Object? object = ""]) {
-    _checkOpen();
+    _startWrite();
     _buffer.writeln(object);
   }
   void writeAll(Iterable<dynamic> objects, [String separator = ""]) {
-    _checkOpen();
+    _startWrite();
     _buffer.writeAll(objects, separator);
   }
   void writeCharCode(int charCode) {
-    _checkOpen();
+    _startWrite();
     _buffer.writeCharCode(charCode);
   }
   void add(List<int> data) {
@@ -380,7 +394,7 @@ class _FileSink implements IOSink {
     if (!_isClosed) {
       _isClosed = true;
       Future(() {
-        _writeBuffered();
+        if (!_failed) _writeBuffered();
         return _file;
       }).then((file) {
         if (!_done.isCompleted) _done.complete();
@@ -396,8 +410,14 @@ class _FileSink implements IOSink {
     _buffer.clear();
     _append = true;
   }
-  void _checkOpen() {
+  void _startWrite() {
     if (_isClosed) throw StateError("StreamSink is closed");
+    if (_failed || _writeScheduled) return;
+    _writeScheduled = true;
+    Future(() {
+      _writeScheduled = false;
+      _writeBuffered();
+    }).catchError(addError);
   }
 }
 
