@@ -300,8 +300,11 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
 /** Lists, arrays, and sets show as arrays of their elements, and maps as objects keyed by their keys. */
 function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | undefined {
   const kind = isArray(object) ? arrayElementKind(object) : undefined;
+  const sorted = sortedEntriesOf(object);
+  const isSortedSet = object.cls.kotlinName === 'java.util.TreeSet';
   const items =
     indexedItems(object) ??
+    (sorted && isSortedSet ? sorted.map((entry) => entry.key) : undefined) ??
     (object.store && object.native?.isSet ? object.store.ordered().map((entry) => entry.key) : undefined);
   if (items && !object.cls.name.endsWith('Iterator')) {
     const entries: Record<string, DisplayNode> = {};
@@ -311,12 +314,30 @@ function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | un
     }
     return { kind: 'array', entries };
   }
-  if (!object.store) return undefined;
+  const mapEntries = sorted ?? object.store?.ordered();
+  if (!mapEntries) return undefined;
   // Keys are the learner's strings, so they must not reach Object.prototype's setters, as `__proto__` would.
   const entries = Object.create(null) as Record<string, DisplayNode>;
-  for (const entry of object.store.ordered())
-    entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+  for (const entry of mapEntries) entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   return { kind: 'object', entries };
+}
+
+/**
+ * The entries of the prelude's TreeMap, or of the TreeMap that holds a TreeSet's elements, in order, so that they show
+ * as the Java interpreter shows java.util.TreeMap and TreeSet rather than as the fields that implement them.
+ */
+function sortedEntriesOf(object: KObject): { key: Value; value: Value }[] | undefined {
+  const name = object.cls.kotlinName;
+  const map = name === 'java.util.TreeSet' ? fieldOf(object, 'map') : name === 'java.util.TreeMap' ? object : undefined;
+  if (!(map instanceof KObject)) return undefined;
+  const nodes = fieldOf(map, 'nodes');
+  const items = nodes instanceof KObject ? indexedItems(nodes) : undefined;
+  return items?.map((node) => ({ key: fieldOf(node as KObject, 'key'), value: fieldOf(node as KObject, 'value') }));
+}
+
+function fieldOf(object: KObject, name: string): Value {
+  const field = fieldsOf(object.cls).find((property) => property.name === name);
+  return object.fields[field?.slot as number] as Value;
 }
 
 /**

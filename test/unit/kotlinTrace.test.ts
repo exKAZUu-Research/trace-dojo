@@ -31,6 +31,28 @@ class Counter {
 class Counter(var count: Int)`,
   },
   {
+    name: 'sorted maps and sets',
+    java: `import java.util.*;
+public class Main {
+  public static void main(String[] args) {
+    TreeMap<Integer, String> m = new TreeMap<>();
+    m.put(2, "b");
+    m.put(1, "a");
+    TreeSet<Integer> s = new TreeSet<>();
+    s.add(3);
+    s.add(1);
+  }
+}`,
+    kotlin: `fun main() {
+    val m = sortedMapOf<Int, String>()
+    m[2] = "b"
+    m[1] = "a"
+    val s = sortedSetOf<Int>()
+    s.add(3)
+    s.add(1)
+}`,
+  },
+  {
     name: 'atomic constructors',
     java: `public class Main {
   public static void main(String[] args) {
