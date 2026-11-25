@@ -49,3 +49,29 @@ export function newItems(frame: Frame, kotlinName: string, items: Value[]): KObj
 export function throwError(frame: Frame, qualifiedName: string, message?: string): never {
   return frame.runtime.throwError(frame, qualifiedName, message);
 }
+
+/**
+ * How an object of a library class shows in a trace, which the class declares when its fields are how it is
+ * implemented rather than what it holds: the elements of an array, or a map's entries.
+ */
+export type TraceShape = { kind: 'array'; items: Value[] } | { kind: 'map'; entries: { key: Value; value: Value }[] };
+
+const traceShapes = new Map<string, (object: KObject) => TraceShape>();
+
+/** Declares how the objects of a library class, by its Kotlin name, show in a trace. */
+export function defineTraceShape(kotlinName: string, shape: (object: KObject) => TraceShape): void {
+  traceShapes.set(kotlinName, shape);
+}
+
+export function traceShapeOf(object: KObject): TraceShape | undefined {
+  return traceShapes.get(object.cls.kotlinName)?.(object);
+}
+
+/** A field of an object of a prelude class, by the name its declaration gives it. */
+export function fieldValue(object: KObject, name: string): Value {
+  for (let cls: ClassSymbol | undefined = object.cls; cls; cls = cls.superclass?.cls) {
+    const field = cls.ownFields.find((property) => property.name === name);
+    if (field) return object.fields[field.slot as number] as Value;
+  }
+  throw new Error(`The class ${object.cls.name} has no field ${name}`);
+}

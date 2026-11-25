@@ -41,6 +41,9 @@ public class Main {
     TreeSet<Integer> s = new TreeSet<>();
     s.add(3);
     s.add(1);
+    Set<Integer> keys = m.keySet();
+    Collection<String> values = m.values();
+    Set<Map.Entry<Integer, String>> entries = m.entrySet();
   }
 }`,
     kotlin: `fun main() {
@@ -50,6 +53,9 @@ public class Main {
     val s = sortedSetOf<Int>()
     s.add(3)
     s.add(1)
+    val keys = m.keys
+    val values = m.values
+    val entries = m.entries
 }`,
   },
   {

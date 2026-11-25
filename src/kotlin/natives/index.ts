@@ -7,3 +7,4 @@ import './reflection';
 import './files';
 import './regex';
 import './coroutines';
+import './sortedCollections';
