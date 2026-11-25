@@ -1220,7 +1220,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       ...this.receiverLevels(scope, context, name, row),
       ...this.companionLevels(scope, name, row),
     ];
-    const packageLevels = this.topLevelCallLevels(name, row);
+    const packageLevels = this.topLevelCallLevels(scope, name, row);
     const cls = this.findClass(scope, name);
     typeArgs = this.aliasConstructorTypeArguments(scope, name, typeArgs, row);
     if (cls) this.checkNestedAccessible(scope, cls, row);
@@ -1311,7 +1311,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const instantiable = !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
     const candidates = instantiable || hasNoOtherLevel ? this.constructorCandidates(cls, row) : [];
     if (candidates.length === 0) return undefined;
-    return this.topLevelCallLevels(name, row, {
+    return this.topLevelCallLevels(scope, name, row, {
       candidates,
       level: this.classLevel(scope, name),
     });
@@ -1400,6 +1400,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** @param constructors A class's constructors, which join the functions of the class's own level as one overload set. */
   private topLevelCallLevels(
+    scope: Scope,
     name: string,
     row: number,
     constructors?: { candidates: Candidate[]; level: number }
@@ -1409,7 +1410,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       ? [{ candidates: constructors.candidates, receiver: undefined }]
       : [];
     const levels = this.topLevelFunctions(name, true).flatMap((functions, index) => {
-      const own = this.packageCallLevels(functions, properties[index], row);
+      const own = this.packageCallLevels(scope, functions, properties[index], row);
       if (constructors?.level !== index) return own;
       // Constructors and the functions of the same level form one overload set.
       const [first, ...rest] = own;
@@ -1426,7 +1427,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return constructors?.level === -1 ? [...constructorLevel, ...levels] : levels;
   }
 
-  private packageCallLevels(functions: FunctionSymbol[], properties: PropertySymbol[], row: number): CallLevel[] {
+  private packageCallLevels(
+    scope: Scope,
+    functions: FunctionSymbol[],
+    properties: PropertySymbol[],
+    row: number
+  ): CallLevel[] {
     const candidates = functions
       .filter((symbol) => !symbol.extensionReceiver)
       .map((symbol): Candidate => ({
@@ -1437,7 +1443,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
       }));
     const levels: CallLevel[] = candidates.length > 0 ? [{ candidates, receiver: undefined }] : [];
     const property = properties.find((symbol) => !symbol.extensionReceiver);
-    if (property && (!property.type || resolved(property.type).kind === 'function')) {
+    // A property holding a function, or a value that an invoke operator calls, such as the KFunction1 of `val h = ::f`.
+    const type = property?.type && resolved(property.type);
+    if (property && (!type || type.kind === 'function' || this.hasInvokeOperator(scope, type, row))) {
       levels.push({
         functionValues: [
           {
@@ -1795,7 +1803,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const functions = qualified.scope?.functions.get(name) ?? [];
     const properties = qualified.scope?.properties.get(name) ?? [];
-    const levels = this.packageCallLevels(functions, properties, row);
+    const levels = this.packageCallLevels(scope, functions, properties, row);
     const cls = qualified.scope?.classes.get(name);
     const sam = cls && this.samConstructorCall(scope, context, cls, args, typeArgs, expected);
     if (sam) return sam;

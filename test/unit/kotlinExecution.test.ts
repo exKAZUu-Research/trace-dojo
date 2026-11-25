@@ -6448,12 +6448,15 @@ fun main() {
     println(" x ".let(String::trim))
     println(listOf("ab", "c").sumOf(String::length))
     println(pick(String::length))
+    println(doubled(4))
 }
+val doubled = ::twiceOf
+fun twiceOf(x: Int) = x * 2
 fun pick(f: (String) -> Int) = 1
 fun pick(f: (String, Int) -> Int) = 2`;
   expect(executeProgram('kotlin', source)).toMatchObject({
     kind: 'executed',
-    stdout: '[1, 2]\n[1, 2]\nx\n3\n1\n',
+    stdout: '[1, 2]\n[1, 2]\nx\n3\n1\n8\n',
   });
 });
 
