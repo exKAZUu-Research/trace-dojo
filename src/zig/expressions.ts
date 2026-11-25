@@ -909,10 +909,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const operand = location ? this.compileLocation(expression.operand) : this.compile(expression.operand);
     const type = operand.type;
     // `.?` checks a C pointer for null and keeps its type, though Zig refuses it where the result is a place.
-    if (type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unwrap && !location)
-      return this.derived(this.nullCPointerAtRuntime(operand), type, (value) =>
-        value === NULL ? nullUnwrapPanic() : value
-      );
+    if (type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unwrap && !location) {
+      // Zig checks a known C pointer only where the program uses what `.?` gives.
+      if (staticResultOf(operand)?.value === NULL) return this.nullCPointerAtRuntime(operand);
+      return this.derived(operand, type, (value) => (value === NULL ? nullUnwrapPanic() : value));
+    }
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
