@@ -6701,6 +6701,18 @@ test("fails a sequence builder's iterator after its block throws or is resumed f
   });
 });
 
+test('stops single and joinToString on infinite sequences where kotlinc does', () => {
+  const source = `fun main() {
+    val naturals = generateSequence(1) { it + 1 }
+    try { naturals.single() } catch (e: Exception) { println(e) }
+    println(naturals.joinToString(limit = 3))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'java.lang.IllegalArgumentException: Sequence has more than one element.\n1, 2, 3, ...\n',
+  });
+});
+
 test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
   const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
 fun main() {

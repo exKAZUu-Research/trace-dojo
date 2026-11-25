@@ -409,11 +409,34 @@ fun <T> Sequence<T>.last(): T {
     return last
 }
 
-fun <T> Sequence<T>.lastOrNull(): T? = toList().lastOrNull()
+fun <T> Sequence<T>.lastOrNull(): T? {
+    var last: T? = null
+    for (element in this) last = element
+    return last
+}
 
-inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T = toList().last(predicate)
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+    var last: T? = null
+    var found = false
+    for (element in this) {
+        if (predicate(element)) {
+            last = element
+            found = true
+        }
+    }
+    if (!found) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    @Suppress("UNCHECKED_CAST")
+    return last as T
+}
 
-fun <T> Sequence<T>.single(): T = toList().single()
+// Stops at a second element, as an infinite sequence has one.
+fun <T> Sequence<T>.single(): T {
+    val source = iterator()
+    if (!source.hasNext()) throw NoSuchElementException("Sequence is empty.")
+    val single = source.next()
+    if (source.hasNext()) throw IllegalArgumentException("Sequence has more than one element.")
+    return single
+}
 
 fun <T> Sequence<T>.elementAt(index: Int): T =
     elementAtOrElse(index) { throw IndexOutOfBoundsException("Sequence doesn't contain element at index $it.") }
@@ -547,10 +570,11 @@ inline fun <T, R : Comparable<R>> Sequence<T>.minByOrNull(selector: (T) -> R): T
 inline fun <T> Sequence<T>.partition(predicate: (T) -> Boolean): Pair<List<T>, List<T>> = toList().partition(predicate)
 
 fun <T> Sequence<T>.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): String =
-    toList().joinToString(separator, prefix, postfix, limit, truncated, transform)
+    asIterable().joinToString(separator, prefix, postfix, limit, truncated, transform)
 
+// Through the sequence's iterable, which stops past the limit, as an infinite sequence needs.
 fun <T, A : StringBuilder> Sequence<T>.joinTo(buffer: A, separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): A =
-    toList().joinTo(buffer, separator, prefix, postfix, limit, truncated, transform)
+    asIterable().joinTo(buffer, separator, prefix, postfix, limit, truncated, transform)
 
 // The text's lines and parts as sequences, which hold the same strings that \`lines\` and \`split\` give.
 fun CharSequence.lineSequence(): Sequence<String> = lines().asSequence()
