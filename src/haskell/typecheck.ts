@@ -513,13 +513,15 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
         ({ con }) =>
           (con.exKinds?.length ?? 0) > 0 || (con.context?.length ?? 0) > 0 || (con.equalities?.length ?? 0) > 0
       )?.con;
-      if (special) {
+      const how = derivingStrategy(module, options, decl, cls, strategy, span);
+      // Only stock deriving reads the constructors; an anyclass instance is empty, and newtype and via ones go
+      // through the representation.
+      if (special && how === 'stock') {
         throw compileError(
           span,
           `構成子 ${special.name} に存在型の型変数・文脈・特定の結果の型があるので、${cls.name} を deriving できません。`
         );
       }
-      const how = derivingStrategy(module, options, decl, cls, strategy, span);
       if (how === 'newtype' || how === 'via') {
         const coerced = coercedDerivingHead(checker, decl, cls, how, via, span);
         const info = makeInstance(cls, coerced.headKinds, coerced.head, [], module.name, span);
