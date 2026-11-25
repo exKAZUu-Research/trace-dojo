@@ -1019,10 +1019,18 @@ export abstract class ExpressionCompiler extends SemaBase {
     const staticSource =
       type.kind === 'array' ? object.place?.compileTimePointer : object.known ? object.value : undefined;
     const addressType = pointerTo(child, isConst);
+    // A vector's elements have no addresses: a runtime index reads only a vector known at compile time, and never
+    // picks an element to point to.
+    const vectorElement = isVectorType(type) || (type.kind === 'pointer' && isVectorType(type.child));
+    const refuseRuntimeIndex = (): never =>
+      this.error(expression, 'ベクトルの要素の添字は、コンパイルのときに決まっていなければなりません。');
+    if (vectorElement && !staticResultOf(index) && !staticResultOf(object)) refuseRuntimeIndex();
     const place: Place = {
       isConst,
       address: () => ({
-        ...runtime(addressType, locatePointer, expression),
+        ...(vectorElement && !staticResultOf(index)
+          ? refuseRuntimeIndex()
+          : runtime(addressType, locatePointer, expression)),
         staticResult: this.constantResult(
           [type.kind === 'array' ? base.operand : object, index],
           ([value, position]) => projectElement(value, position as bigint),
