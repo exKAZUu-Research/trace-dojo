@@ -129,6 +129,8 @@ interface BreakSite {
 export abstract class StatementCompiler extends CallCompiler {
   protected fn: FnContext | undefined;
   private slotCounter = 0;
+  /** The condition depths of the returns compiled in the current function, in order. */
+  private returnDepths: ConditionDepths[] = [];
 
   /** The atomic annotations' rows, when the program is traced. */
   protected abstract readonly tracing: boolean;
@@ -148,11 +150,14 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   protected separateAnalysis<T>(run: () => T): T {
-    const { fn, comptimeDepth, runtimeConditionDepth, inComptimeBranchDepth, evalBranches } = this;
+    const { fn, comptimeDepth, runtimeConditionDepth, inComptimeBranchDepth, afterRuntimeReturnDepth } = this;
+    const { evalBranches, returnDepths } = this;
     this.fn = undefined;
+    this.returnDepths = [];
     this.comptimeDepth = 0;
     this.runtimeConditionDepth = 0;
     this.inComptimeBranchDepth = 0;
+    this.afterRuntimeReturnDepth = 0;
     this.evalBranches = { count: 0, quota: 1000 };
     try {
       return run();
@@ -161,6 +166,8 @@ export abstract class StatementCompiler extends CallCompiler {
       this.comptimeDepth = comptimeDepth;
       this.runtimeConditionDepth = runtimeConditionDepth;
       this.inComptimeBranchDepth = inComptimeBranchDepth;
+      this.afterRuntimeReturnDepth = afterRuntimeReturnDepth;
+      this.returnDepths = returnDepths;
       this.evalBranches = evalBranches;
     }
   }
@@ -317,6 +324,20 @@ export abstract class StatementCompiler extends CallCompiler {
 
   // Blocks ----------------------------------------------------------------------------------------------------------
 
+  /**
+   * Compiles the statements after one that returns on a branch as code on the other branch: the rest of a block after
+   * `if (c) return;` runs only where `c` is false, which Zig analyzes as the branch it is.
+   */
+  private continueAfterReturns(
+    returns: readonly ConditionDepths[],
+    outer: ConditionDepths & { afterReturn: number }
+  ): void {
+    if (returns.some((depths) => depths.runtime > outer.runtime))
+      this.afterRuntimeReturnDepth = Math.max(this.afterRuntimeReturnDepth, outer.afterReturn + 1);
+    if (returns.some((depths) => depths.inComptime > outer.inComptime))
+      this.inComptimeBranchDepth = Math.max(this.inComptimeBranchDepth, outer.inComptime + 1);
+  }
+
   protected blockStatements(statements: readonly Statement[], span: Span, keepLocals = false): Stmt {
     const locals = new Map<string, LocalBinding>();
     const scope: Scope = { locals, parent: this.scope };
@@ -324,14 +345,26 @@ export abstract class StatementCompiler extends CallCompiler {
       const compiled: Stmt[] = [];
       let hasDefers = false;
       let noreturn = false;
-      for (const statement of statements) {
-        const stmt = this.statement(statement);
-        if (statement.kind === 'defer') hasDefers = true;
-        compiled.push(stmt);
-        if (stmt.noreturn) {
-          noreturn = true;
-          break;
+      const outer = {
+        runtime: this.runtimeConditionDepth,
+        inComptime: this.inComptimeBranchDepth,
+        afterReturn: this.afterRuntimeReturnDepth,
+      };
+      try {
+        for (const statement of statements) {
+          const mark = this.returnDepths.length;
+          const stmt = this.statement(statement);
+          if (statement.kind === 'defer') hasDefers = true;
+          compiled.push(stmt);
+          if (stmt.noreturn) {
+            noreturn = true;
+            break;
+          }
+          this.continueAfterReturns(this.returnDepths.slice(mark), outer);
         }
+      } finally {
+        this.inComptimeBranchDepth = outer.inComptime;
+        this.afterRuntimeReturnDepth = outer.afterReturn;
       }
       void span;
       const slots = keepLocals ? [] : [...locals.values()].map((binding) => binding.slot);
@@ -1117,7 +1150,10 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** The code of a jump: it computes the jump's value and gives the Jump that leaves its target. */
   private jumpMaker(expression: ExpressionOf<'break' | 'continue' | 'return'>): (frame: Frame) => Jump {
-    if (expression.kind === 'return') return this.returnMaker(expression);
+    if (expression.kind === 'return') {
+      this.returnDepths.push({ runtime: this.runtimeConditionDepth, inComptime: this.inComptimeBranchDepth });
+      return this.returnMaker(expression);
+    }
     const target = this.findTarget(expression.label, expression.kind, expression);
     const { id } = target;
     if (expression.kind === 'continue') {
@@ -3351,4 +3387,9 @@ function asksInComptime(condition: Expression): boolean {
   const expression = unwrapParens(condition);
   if (expression.kind === 'unary' && expression.operator === '!') return asksInComptime(expression.operand);
   return expression.kind === 'builtinCall' && expression.name === '@inComptime';
+}
+
+interface ConditionDepths {
+  readonly runtime: number;
+  readonly inComptime: number;
 }

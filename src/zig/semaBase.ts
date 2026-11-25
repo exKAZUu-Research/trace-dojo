@@ -284,6 +284,11 @@ export abstract class SemaBase implements SemaApi {
    * takes, so a `@compileError` there fails only when it runs.
    */
   protected inComptimeBranchDepth = 0;
+  /**
+   * How many blocks the code being compiled follows a return on a runtime branch in, as the rest of a block after
+   * `if (c) return;` does: it runs only on the other branch, which Zig analyzes only for the calls that reach it.
+   */
+  protected afterRuntimeReturnDepth = 0;
   /** The backward branches that the analysis of the current function or declaration has evaluated. */
   protected evalBranches: BranchCount = { count: 0, quota: 1000 };
   private resolvingUnionFields = 0;

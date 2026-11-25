@@ -157,7 +157,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     // Zig analyzes a branch on a runtime condition only for the program's calls; a call at compile time with known
     // arguments analyzes the branch its arguments take.
     const instance = this.analyzedFunction();
-    if (instance && this.runtimeConditionDepth > 0 && !instance.runsAtRuntime) {
+    if (instance && (this.runtimeConditionDepth > 0 || this.afterRuntimeReturnDepth > 0) && !instance.runsAtRuntime) {
       instance.pendingCompileError ??= new CompileError([{ row: expression.row, message }]);
       return deferred;
     }
