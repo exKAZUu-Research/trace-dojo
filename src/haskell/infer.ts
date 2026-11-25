@@ -725,26 +725,91 @@ export class Checker {
     return type;
   }
 
+  /**
+   * Checks an expression against the type its context expects. Each form passes the expected type into the parts
+   * whose types it decides, so that a lambda anywhere among them binds its parameters at the expected parameter
+   * types, polymorphic or linear as they may be; a form with nothing to pass, or an expected type without the form's
+   * shape, is inferred and its type unified with the expected one.
+   */
   checkExpr(expr: RExpr, expected: Type, context?: string): void {
-    if (expr.k === 'lambda' && checksParameters(expected, expr.pats.length)) {
-      this.checkLambda(expr, expected, context);
-      return;
+    this.recursion.run(() => {
+      if (this.checkExprInner(expr, expected, context)) expr.type = expected;
+      else this.unify(this.inferExpr(expr), expected, expr.span, context);
+    });
+  }
+
+  /**
+   * Checks an expression against a type that may be polymorphic, `forall a. C a => t`, as GHC does at rigid type
+   * variables, giving the expression to put in its place: one that takes the dictionaries of the type's constraints.
+   */
+  checkPoly(expr: RExpr, expected: Type, context?: string): RExpr {
+    const type = prune(expected);
+    if (type.tag !== 'forall') {
+      this.checkExpr(expr, expected, context);
+      return expr;
     }
-    // A polymorphic parameter reaches the lambdas in an if's branches and a let's body.
-    if ((expr.k === 'if' || expr.k === 'let') && hasPolymorphicParameter(expected)) {
-      if (expr.k === 'if') {
+    const dictParams = this.checkAgainstScheme(polytypeScheme(type), (rho) => this.checkExpr(expr, rho, context));
+    return dictParams.length > 0 ? { k: 'poly', expr, dictParams, span: expr.span } : expr;
+  }
+
+  /** Checks an expression by its form's check rule, or returns false when the form infers its type instead. */
+  private checkExprInner(expr: RExpr, expected: Type, context: string | undefined): boolean {
+    switch (expr.k) {
+      case 'lambda': {
+        if (!functionParts(this.reduceFamilies(expected))) return false;
+        this.checkLambda(expr, expected, context);
+        return true;
+      }
+      case 'let': {
+        this.inferBindGroup(expr.binds);
+        this.checkExpr(expr.body, expected, context);
+        return true;
+      }
+      case 'if': {
         this.checkExpr(expr.cond, tcon(this.builtins.bool), 'if の条件');
         this.checkExpr(expr.ifTrue, expected, context);
         this.checkExpr(expr.ifFalse, expected, context);
-      } else {
-        this.inferBindGroup(expr.binds);
-        this.checkExpr(expr.body, expected, context);
+        return true;
       }
-      expr.type = expected;
-      return;
+      case 'case': {
+        this.inferCase(expr, expected);
+        return true;
+      }
+      case 'do': {
+        this.inPatternScope(() => this.inferDo(expr, { type: expected, context }));
+        return true;
+      }
+      case 'poly': {
+        this.checkExpr(expr.expr, expected, context);
+        return true;
+      }
+      case 'app': {
+        this.inferApp(expr, { type: expected, context });
+        return true;
+      }
+      case 'implicitLet': {
+        this.withImplicitBindings(expr, () => this.checkExpr(expr.body, expected, context));
+        return true;
+      }
+      case 'tuple': {
+        const { head, args } = splitApp(this.reduceFamilies(expected));
+        if (head.tag !== 'tcon' || head.entity !== tupleCon(expr.elems.length).type) return false;
+        if (args.length !== expr.elems.length) return false;
+        for (const [index, elem] of expr.elems.entries()) this.checkExpr(elem, args[index], context);
+        return true;
+      }
+      case 'list':
+      case 'comp': {
+        const { head, args } = splitApp(this.reduceFamilies(expected));
+        if (head.tag !== 'tcon' || head.entity !== LIST_TYPE || args.length !== 1) return false;
+        if (expr.k === 'list') for (const item of expr.elems) this.checkExpr(item, args[0], 'リストの要素');
+        else this.inPatternScope(() => this.checkComprehension(expr, args[0]));
+        return true;
+      }
+      default: {
+        return false;
+      }
     }
-    const actual = this.inferExpr(expr);
-    this.unify(actual, expected, expr.span, context);
   }
 
   // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
@@ -771,17 +836,7 @@ export class Checker {
         return type;
       }
       case 'implicitLet': {
-        const params = expr.binds.map((bind) =>
-          newDictParam({
-            cls: IMPLICIT_CLASS,
-            type: tap(tcon(IMPLICIT_TYPES), tcon(symbolType(bind.name)), this.inferExpr(bind.expr)),
-          })
-        );
-        expr.dictParams = params;
-        return this.withGivens(
-          params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
-          () => this.inferExpr(expr.body)
-        );
+        return this.withImplicitBindings(expr, () => this.inferExpr(expr.body));
       }
       case 'projection': {
         const record = this.inferExpr(expr.expr);
@@ -842,10 +897,9 @@ export class Checker {
         return listOf(elem);
       }
       case 'comp': {
-        return this.inPatternScope(() => {
-          for (const qual of expr.quals) this.inferQualifier(qual);
-          return listOf(this.inferExpr(expr.expr));
-        });
+        const elem = this.freshVar();
+        this.inPatternScope(() => this.checkComprehension(expr, elem));
+        return listOf(elem);
       }
       case 'rsection': {
         return this.inferRightSection(expr);
@@ -881,6 +935,26 @@ export class Checker {
         return this.inferRecordUpdate(expr);
       }
     }
+  }
+
+  /** Checks the body of `let ?x = e in body` under the implicit parameters the bindings give it. */
+  private withImplicitBindings<T>(expr: Extract<RExpr, { k: 'implicitLet' }>, body: () => T): T {
+    const params = expr.binds.map((bind) =>
+      newDictParam({
+        cls: IMPLICIT_CLASS,
+        type: tap(tcon(IMPLICIT_TYPES), tcon(symbolType(bind.name)), this.inferExpr(bind.expr)),
+      })
+    );
+    expr.dictParams = params;
+    return this.withGivens(
+      params.map((param) => ({ pred: param.pred, evidence: { kind: 'param', param } as Evidence })),
+      body
+    );
+  }
+
+  private checkComprehension(expr: Extract<RExpr, { k: 'comp' }>, elem: Type): void {
+    for (const qual of expr.quals) this.inferQualifier(qual);
+    this.checkExpr(expr.expr, elem);
   }
 
   /**
@@ -940,7 +1014,7 @@ export class Checker {
 
   /**
    * Checks a lambda against a function type parameter by parameter, so that a parameter of a polymorphic type binds
-   * a polymorphic variable and one of a linear arrow is checked to be used once.
+   * a polymorphic variable and one of a linear arrow is checked to be used once; the body is checked against the rest.
    */
   private checkLambda(expr: Extract<RExpr, { k: 'lambda' }>, expected: Type, context?: string): void {
     this.inPatternScope(() => {
@@ -952,7 +1026,7 @@ export class Checker {
         if (multiplicity) linear.push(...linearLocals(pat));
         remaining = result;
       }
-      this.checkExpr(expr.body, remaining, context);
+      expr.body = this.checkPoly(expr.body, remaining, context);
       const body = { body: { k: 'plain', expr: expr.body } as const, where: { bindings: [] }, span: expr.span };
       if (linear.length > 0) checkLinearUses(linear, body);
     });
@@ -972,24 +1046,34 @@ export class Checker {
     });
   }
 
-  private inferCase(expr: Extract<RExpr, { k: 'case' }>): Type {
-    // A variable of a polymorphic type, as `\case` scrutinizes its parameter, keeps its type for the patterns.
-    const { scrutinee } = expr;
-    const polymorphic =
-      scrutinee.k === 'var' && scrutinee.ref.kind === 'local' && scrutinee.ref.local.type
-        ? prune(scrutinee.ref.local.type)
-        : undefined;
-    const scrutineeType = this.inferExpr(scrutinee);
-    const patternType =
-      polymorphic?.tag === 'forall' && expr.alts.every((alt) => alt.pat.k === 'var') ? polymorphic : scrutineeType;
-    const result = this.freshVar();
+  private inferCase(expr: Extract<RExpr, { k: 'case' }>, result: Type = this.freshVar()): Type {
+    const scrutineeType = this.scrutineeType(expr);
     for (const alt of expr.alts) {
       this.inPatternScope(() => {
-        this.inferPat(alt.pat, patternType);
+        this.inferPat(alt.pat, scrutineeType);
         this.checkRhs(alt.rhs, result);
       });
     }
     return result;
+  }
+
+  /**
+   * The type a case's patterns match. The parameters `\case` and `\cases` scrutinize keep their types uninstantiated,
+   * polymorphic as they may be, since GHC matches those patterns against the lambda's parameter types.
+   */
+  private scrutineeType(expr: Extract<RExpr, { k: 'case' }>): Type {
+    const { scrutinee } = expr;
+    if (expr.what !== String.raw`\case` && expr.what !== String.raw`\cases`) return this.inferExpr(scrutinee);
+    const parameterType = (parameter: RExpr): Type => {
+      const type = parameter.k === 'var' && parameter.ref.kind === 'local' ? parameter.ref.local.type : undefined;
+      if (!type || prune(type).tag !== 'forall') return this.inferExpr(parameter);
+      parameter.type = type;
+      return type;
+    };
+    if (scrutinee.k !== 'tuple') return parameterType(scrutinee);
+    const type = tap(tcon(tupleCon(scrutinee.elems.length).type), ...scrutinee.elems.map(parameterType));
+    scrutinee.type = type;
+    return type;
   }
 
   /** Checks `(p :: t)` against the type it matches, binding the variables of `t` not yet in scope to what they match. */
@@ -1071,24 +1155,43 @@ export class Checker {
     this.wanted.push(...deferred);
   }
 
-  private inferApp(expr: Extract<RExpr, { k: 'app' }>): Type {
-    const fn = prune(this.inferExpr(expr.fn));
-    const parts = functionParts(fn);
-    if (parts) {
-      const args = [parts.param, parts.result];
-      const param = prune(args[0]);
-      if (param.tag === 'forall') {
-        const dictParams = this.checkAgainstScheme(polytypeScheme(param), (type) =>
-          this.checkExpr(expr.arg, type, argumentContext(expr.fn))
-        );
-        if (dictParams.length > 0) expr.arg = { k: 'poly', expr: expr.arg, dictParams, span: expr.arg.span };
-      } else this.checkExpr(expr.arg, args[0], argumentContext(expr.fn));
-      return args[1];
+  /**
+   * Infers an application `f a1 ... an` from its function's type. Checked against an expected type, the result type
+   * is unified with it before the arguments whose parameter types the function's type already has are checked, as
+   * GHC does, so that the expected type reaches those arguments too.
+   */
+  private inferApp(expr: Extract<RExpr, { k: 'app' }>, expected?: { type: Type; context?: string }): Type {
+    const spine: Extract<RExpr, { k: 'app' }>[] = [];
+    let head: RExpr = expr;
+    for (; head.k === 'app'; head = head.fn) spine.unshift(head);
+    let type = this.inferExpr(head);
+    const pending: { app: Extract<RExpr, { k: 'app' }>; param: Type }[] = [];
+    const checkPending = (): void => {
+      for (const { app, param } of pending) app.arg = this.checkPoly(app.arg, param, argumentContext(app.fn));
+      pending.length = 0;
+    };
+    for (const app of spine) {
+      let parts = functionParts(prune(type));
+      if (!parts && pending.length > 0) {
+        // The arguments before may decide the function type here: `id caller (\f -> ...)` passes `caller`'s
+        // polymorphic parameter to the lambda only once `id caller` is checked.
+        checkPending();
+        parts = functionParts(prune(type));
+      }
+      if (parts) {
+        pending.push({ app, param: parts.param });
+        type = parts.result;
+      } else {
+        const argType = this.inferExpr(app.arg);
+        const result = this.freshVar();
+        this.unify(type, fnType(argType, result), app.span, '関数の適用');
+        type = result;
+      }
+      app.type = type;
     }
-    const argType = this.inferExpr(expr.arg);
-    const result = this.freshVar();
-    this.unify(fn, fnType(argType, result), expr.span, '関数の適用');
-    return result;
+    if (expected) this.unify(type, expected.type, expr.span, expected.context);
+    checkPending();
+    return type;
   }
 
   private inferRightSection(expr: Extract<RExpr, { k: 'rsection' }>): Type {
@@ -1097,7 +1200,7 @@ export class Checker {
     const first = functionParts(opType);
     const second = first && functionParts(prune(first.result));
     if (second) {
-      this.checkExpr(expr.right, second.param, argumentContext(expr.op));
+      expr.right = this.checkPoly(expr.right, second.param, argumentContext(expr.op));
       const { head, args } = splitApp(opType);
       return tap(head, ...args.slice(0, -1), second.result);
     }
@@ -1141,7 +1244,7 @@ export class Checker {
   private checkFields(fields: readonly RFieldBind[], con: ConInfo, fieldTypes: readonly Type[]): void {
     for (const fieldBind of fields) {
       const position = fieldBind.field.positions.get(con) as number;
-      this.checkExpr(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
+      fieldBind.value = this.checkPoly(fieldBind.value, fieldTypes[position], `フィールド ${fieldBind.field.name}`);
     }
   }
 
@@ -1260,8 +1363,9 @@ export class Checker {
     }
   }
 
+  /** @param expected The type the block is checked against, which its last statement then is checked against. */
   // code-gauge-allow functionCognitiveComplexity -- The statement kinds share the monad type threaded through the block.
-  private inferDo(expr: Extract<RExpr, { k: 'do' }>): Type {
+  private inferDo(expr: Extract<RExpr, { k: 'do' }>, expected?: { type: Type; context?: string }): Type {
     const needsMonad = expr.stmts.some(
       (stmt, index) => stmt.k === 'bind' || (stmt.k === 'exp' && index < expr.stmts.length - 1)
     );
@@ -1269,7 +1373,7 @@ export class Checker {
     if (needsMonad) {
       expr.monad = this.want({ cls: this.builtins.monad, type: monad }, expr.span, 'do');
     }
-    let result: Type = this.freshVar();
+    let result: Type = expected?.type ?? this.freshVar();
     for (const [index, stmt] of expr.stmts.entries()) {
       const isLast = index === expr.stmts.length - 1;
       switch (stmt.k) {
@@ -1288,7 +1392,8 @@ export class Checker {
         }
         case 'exp': {
           if (isLast) {
-            result = this.inferExpr(stmt.expr);
+            if (expected) this.checkExpr(stmt.expr, result, expected.context);
+            else result = this.inferExpr(stmt.expr);
             if (needsMonad) this.unify(result, tap(monad, this.freshVar()), stmt.expr.span, 'do の最後の文');
           } else {
             this.checkExpr(stmt.expr, tap(monad, this.freshVar()), 'do の文');
@@ -1401,7 +1506,7 @@ export class Checker {
   checkRhs(rhs: RRhs, expected: Type): void {
     this.inferBindGroup(rhs.where);
     if (rhs.body.k === 'plain') {
-      this.checkExpr(rhs.body.expr, expected);
+      rhs.body.expr = this.checkPoly(rhs.body.expr, expected);
       return;
     }
     for (const branch of rhs.body.branches) {
@@ -1411,7 +1516,7 @@ export class Checker {
           else if (guard.k === 'pat') this.inferPat(guard.pat, this.inferExpr(guard.expr));
           else this.inferBindGroup(guard.binds);
         }
-        this.checkExpr(branch.expr, expected);
+        branch.expr = this.checkPoly(branch.expr, expected);
       });
     }
   }
@@ -1842,29 +1947,6 @@ export function polytypeScheme(type: TForall): Scheme {
     preds,
     type: body,
   };
-}
-
-/**
- * Whether a lambda of `arity` parameters checks against `expected` one parameter at a time: when one of them has a
- * linear arrow or a polymorphic type, which inferring the lambda first would lose.
- */
-function checksParameters(expected: Type, arity: number): boolean {
-  let remaining = prune(expected);
-  for (let index = 0; index < arity; index++) {
-    const parts = functionParts(remaining);
-    if (!parts) return false;
-    if (parts.multiplicity) return true;
-    remaining = prune(parts.result);
-  }
-  return hasPolymorphicParameter(expected);
-}
-
-/** Whether a function type has a parameter of a polymorphic type, which only checking against it can give. */
-function hasPolymorphicParameter(type: Type): boolean {
-  for (let parts = functionParts(prune(type)); parts; parts = functionParts(prune(parts.result))) {
-    if (prune(parts.param).tag === 'forall') return true;
-  }
-  return false;
 }
 
 export function conScheme(con: ConInfo): Scheme {
