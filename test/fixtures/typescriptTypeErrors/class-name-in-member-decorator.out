@@ -1,0 +1,3 @@
+(2,24): error TS2449: Class 'C' used before its declaration.
+(3,17): error TS2449: Class 'D' used before its declaration.
+(3,19): error TS2729: Property 'z' is used before its initialization.

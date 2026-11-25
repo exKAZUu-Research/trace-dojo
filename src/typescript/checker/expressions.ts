@@ -723,9 +723,10 @@ export class ExpressionChecker {
     const declaration = symbol.valueDeclaration;
     if (!declaration || this.c.isLibrary(declaration)) return;
     if (!this.beforeBindingInitialized(node, symbol, declaration)) return;
-    // A use inside a function that runs later is fine.
-    for (let current: TreeNode | null = node.parent; current; current = current.parent) {
+    // A use inside a function that runs later is fine, but not in a member's decorator, which runs with the class.
+    for (let child = node, current = node.parent; current; child = current, current = current.parent) {
       if (current.id === declaration.id) break;
+      if (child.type === 'decorator') continue;
       if (
         laterRunningTypes.has(current.type) &&
         !(current.startIndex <= declaration.startIndex && declaration.endIndex <= current.endIndex) &&
@@ -765,7 +766,9 @@ export class ExpressionChecker {
   private beforeBindingInitialized(node: TreeNode, symbol: Sym, declaration: TreeNode): boolean {
     const name = symbol.valueEntries[0]?.name ?? declaration;
     if (node.startIndex < name.startIndex) return true;
-    if (symbol.valueKind === 'class' || node.startIndex >= declaration.endIndex) return false;
+    // A member's decorator runs while the class is being defined, before its name is bound.
+    if (symbol.valueKind === 'class') return isWithinDecorator(node, declaration);
+    if (node.startIndex >= declaration.endIndex) return false;
     const value = declaration.childForFieldName('value');
     if (value && value.startIndex <= node.startIndex && node.endIndex <= value.endIndex) return true;
     for (let current = name.parent; current && current.id !== declaration.id; current = current.parent) {
@@ -1249,4 +1252,12 @@ function isCallee(node: TreeNode): boolean {
   const { parent } = expression;
   const callee = parent?.childForFieldName(parent.type === 'new_expression' ? 'constructor' : 'function');
   return (parent?.type === 'call_expression' || parent?.type === 'new_expression') && callee?.id === expression.id;
+}
+
+/** Whether a node is in a decorator inside a declaration, such as one of a class's members. */
+function isWithinDecorator(node: TreeNode, declaration: TreeNode): boolean {
+  if (node.startIndex < declaration.startIndex || node.endIndex > declaration.endIndex) return false;
+  for (let current = node.parent; current && current.id !== declaration.id; current = current.parent)
+    if (current.type === 'decorator') return true;
+  return false;
 }

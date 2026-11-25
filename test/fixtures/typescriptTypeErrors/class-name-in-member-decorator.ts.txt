@@ -1,0 +1,9 @@
+function wrap(v: unknown) { return (_t: any, _c: any) => { console.log("w", v); }; }
+class C { @wrap(typeof C) m() { return 1; } static y = 5; }
+class D { @wrap(D.z) f = 1; static z = 2; }
+class E { @((_t: any, _c: any) => { console.log(typeof E); }) m() { return 3; } }
+class F { m() { return F; } }
+console.log(new C().m(), new E().m(), new F().m());
+class G { static v = 1; }
+class H { @wrap(G.v) m() { return 4; } }
+console.log(new H().m());
