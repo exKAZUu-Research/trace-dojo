@@ -31,6 +31,7 @@ import {
 import { environmentOf, exceptionMessage, recordMember, stringOf, toStringValue } from './objects';
 import { CsPointer, layoutOf, type MemoryBlock, readAt, sizeOf, writeAt } from './pointers';
 import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
+import { newTypedReference, refValuePlace, typedReferenceTarget } from './typedReferences';
 import {
   type ArrayType,
   baseTypeOf,
@@ -104,7 +105,10 @@ type AccessExpression = Extract<
       | 'implicitIndex'
       | 'typeOf'
       | 'compoundOperand'
-      | 'conditionalAccess';
+      | 'conditionalAccess'
+      | 'makeRef'
+      | 'refType'
+      | 'refValue';
   }
 >;
 type InvocationExpression = Extract<
@@ -494,7 +498,10 @@ export class Evaluator extends AsyncExecutor {
       case 'typeOf':
       case 'refAssign':
       case 'compoundOperand':
-      case 'conditionalAccess': {
+      case 'conditionalAccess':
+      case 'makeRef':
+      case 'refType':
+      case 'refValue': {
         return this.evaluateAccess(expression, frame);
       }
       case 'call':
@@ -574,6 +581,17 @@ export class Evaluator extends AsyncExecutor {
       }
       case 'typeOf': {
         return typeObjectOf(this.runtime, frame.resolve(expression.target));
+      }
+      case 'makeRef': {
+        const reference = this.referenceTo(expression.target, frame);
+        return newTypedReference(expression.type, { reference, type: frame.resolve(expression.target.type) });
+      }
+      case 'refType': {
+        const target = typedReferenceTarget(this.evaluate(expression.operand, frame));
+        return target && typeObjectOf(this.runtime, target.type);
+      }
+      case 'refValue': {
+        return this.place(expression, frame).get();
       }
       case 'compoundOperand': {
         return frame.operands.at(-1) as Value;
@@ -1111,6 +1129,9 @@ export class Evaluator extends AsyncExecutor {
         const pointer = this.pointerValue(target.pointer, frame);
         const type = frame.resolve(target.type);
         return { get: () => readAt(pointer, type), set: (value) => writeAt(pointer, type, value) };
+      }
+      case 'refValue': {
+        return refValuePlace(this.evaluate(target.operand, frame), frame.resolve(target.type));
       }
     }
   }

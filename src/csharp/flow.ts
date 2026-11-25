@@ -9,7 +9,7 @@ import type {
   BoundPattern,
   BoundStatement,
 } from './bound';
-import { type FieldSymbol, LocalSymbol, type MethodSymbol, type Type } from './types';
+import { type FieldSymbol, isRefLikeType, LocalSymbol, type MethodSymbol, type Type } from './types';
 
 /** The locals definitely assigned at a point, or every local when the point is unreachable. */
 type State = Set<LocalSymbol> | 'unreachable';
@@ -26,6 +26,8 @@ export interface FlowDiagnostics {
   lambdaNotAllPathsReturn(delegateType: Type, row: number): void;
   fallsThrough(label: string, isLast: boolean, row: number): void;
   outNotAssigned(local: LocalSymbol, row: number): void;
+  /** A read of a ref struct local whose value an `await` or a `yield return` would have to keep. */
+  heldAcrossSuspension(local: LocalSymbol, row: number): void;
 }
 
 function union(a: State, b: State): State {
@@ -103,6 +105,11 @@ export class FlowAnalyzer {
   private outParameters: LocalSymbol[] = [];
   /** The locals of the function being analyzed, which a call that never returns leaves assigned. */
   private functionLocals: LocalSymbol[] = [];
+  /**
+   * The ref struct locals that an `await` or a `yield return` took out of the assigned state, since a suspended
+   * function cannot keep them; a read of one before it is assigned again is an error of its own.
+   */
+  private readonly suspended = new Set<LocalSymbol>();
   /** The states that the `goto`s analyzed so far carry to each label or switch section. */
   private readonly gotoStates = new Map<object, State[]>();
 
@@ -215,7 +222,7 @@ export class FlowAnalyzer {
         return this.statement(statement.body, state);
       }
       case 'yieldReturn': {
-        return this.expression(statement.value, state);
+        return this.suspend(this.expression(statement.value, state));
       }
       case 'yieldBreak': {
         this.jumps.returns.push(state);
@@ -485,7 +492,7 @@ export class FlowAnalyzer {
         return this.operatorExpression(expression, state);
       }
       case 'await': {
-        return this.expression(expression.operand, state);
+        return this.suspend(this.expression(expression.operand, state));
       }
       case 'implicitIndex': {
         return this.expression(expression.access, this.expressions(expression.setup, state));
@@ -530,8 +537,13 @@ export class FlowAnalyzer {
       case 'late': {
         return this.expressions(expression.operands, state);
       }
-      case 'refAssign': {
+      case 'refAssign':
+      case 'makeRef': {
         return this.reference(expression.target, state, expression.row);
+      }
+      case 'refType':
+      case 'refValue': {
+        return this.expression(expression.operand, state);
       }
       case 'addressOf': {
         // `&x` needs no value in x, and x is definitely assigned after it (C# spec §24.6.5).
@@ -751,8 +763,24 @@ export class FlowAnalyzer {
     return fields.length > 0 && fields.every((field) => isAssigned(state, this.fieldOf(local, field)));
   }
 
+  /** The state after a suspension, which leaves no ref struct local assigned. */
+  private suspend(state: State): State {
+    if (state === 'unreachable') return state;
+    const kept = new Set<LocalSymbol>();
+    for (const local of state) {
+      if (isRefLikeType(local.type) && !local.isParameter) this.suspended.add(local);
+      else kept.add(local);
+    }
+    return kept;
+  }
+
   private read(local: LocalSymbol, state: State, row: number): void {
-    if (local.isHidden || isAssigned(state, local) || this.reported.has(local)) return;
+    if (local.isHidden || isAssigned(state, local)) return;
+    if (this.suspended.has(local)) {
+      this.diagnostics.heldAcrossSuspension(local, row);
+      return;
+    }
+    if (this.reported.has(local)) return;
     if (isStructLocal(local) && this.fieldsAssigned(local, state)) return;
     this.reported.add(local);
     this.diagnostics.unassigned(local, row);
@@ -785,6 +813,9 @@ export class FlowAnalyzer {
       }
       case 'deref': {
         return this.expression(target.pointer, state);
+      }
+      case 'refValue': {
+        return this.expression(target.operand, state);
       }
       default: {
         return state;

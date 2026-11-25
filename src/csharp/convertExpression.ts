@@ -37,13 +37,6 @@ import {
   unsupported,
 } from './convertBase';
 
-/** The syntax of each stage C or D expression node, named for learners. */
-const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  makeref_expression: '`__makeref`',
-  reftype_expression: '`__reftype`',
-  refvalue_expression: '`__refvalue`',
-};
-
 const UNSUPPORTED_TYPES: Record<string, string> = {};
 
 export class ExpressionConverter {
@@ -569,9 +562,21 @@ export class ExpressionConverter {
         const [operand] = namedChildren(node);
         return { kind: 'refExpression', operand: this.convertExpression(operand), ...position };
       }
+      case 'makeref_expression':
+      case 'reftype_expression': {
+        const [operand] = namedChildren(node);
+        const kind = node.type === 'makeref_expression' ? 'makeRef' : 'refType';
+        return { kind, operand: this.convertExpression(operand), ...position };
+      }
+      case 'refvalue_expression': {
+        return {
+          kind: 'refValue',
+          operand: this.convertExpression(requiredField(node, 'value')),
+          type: this.convertType(requiredField(node, 'type')),
+          ...position,
+        };
+      }
       default: {
-        const what = UNSUPPORTED_EXPRESSIONS[node.type];
-        if (what) unsupported(node, what);
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
       }
     }

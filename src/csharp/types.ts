@@ -351,6 +351,8 @@ export class TypeSymbol {
   isSealed = false;
   isRecord = false;
   isReadonly = false;
+  /** Whether the type is a `ref struct`, such as `ReadOnlySpan<T>` or `TypedReference`, whose values never leave the stack. */
+  isRefLike = false;
   access: Accessibility = 'internal';
   special: SpecialType | undefined;
   declaration: TypeDeclaration | undefined;
@@ -438,6 +440,19 @@ export function isValueType(type: Type): boolean {
   if (type.kind === 'named') return type.symbol.isValueType;
   if (type.kind === 'typeParameter') return type.symbol.hasValueConstraint;
   return false;
+}
+
+/** Whether values of the type live only on the stack, so that they are never boxed, captured, or stored in the heap. */
+export function isRefLikeType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isRefLike;
+}
+
+/**
+ * Whether the type is `TypedReference`, one of the restricted types that predate ref structs, for which Roslyn reports
+ * its older errors where a ref struct gets the newer ones.
+ */
+export function isRestrictedType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isLibrary && type.symbol.fullName === 'System.TypedReference';
 }
 
 export function isReferenceType(type: Type): boolean {

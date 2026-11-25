@@ -9,6 +9,8 @@ import {
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
+  isRefLikeType,
+  isRestrictedType,
   MAX_TUPLE_ARITY,
   type NamedType,
   namedType,
@@ -281,9 +283,13 @@ export class BinderBase {
     return namedType(this.wellKnown.nullable, [type]);
   }
 
-  tupleType(elements: Type[], names?: (string | undefined)[]): NamedType {
+  /** @param row Where the program writes the tuple, whose element types are checked as type arguments there. */
+  tupleType(elements: Type[], names?: (string | undefined)[], row?: number): NamedType {
     const symbol = this.library.valueTuples.get(elements.length);
     if (!symbol) this.unsupported(0, `要素が${MAX_TUPLE_ARITY + 1}個以上のタプル`);
+    if (row !== undefined)
+      for (const [index, element] of elements.entries())
+        this.checkTypeArgumentKind(element, `T${index + 1}`, displayTypeSymbol(symbol), row);
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;
@@ -483,9 +489,20 @@ export class BinderBase {
     context: TypeContext,
     method: { returnsByRef: 'ref' | 'readonly' | undefined }
   ): Type {
-    if (node.kind !== 'refType') return this.resolveType(node, context);
+    if (node.kind !== 'refType') return this.checkReturnType(this.resolveType(node, context), node);
     method.returnsByRef = node.isReadonly ? 'readonly' : 'ref';
-    return this.resolveType(node.type, context);
+    return this.checkReturnType(this.resolveType(node.type, context), node);
+  }
+
+  /** Reports a `TypedReference` return type, which C# allows no method or delegate. */
+  checkReturnType(type: Type, position: Position): Type {
+    if (isRestrictedType(type))
+      this.error(
+        position,
+        'CS1599',
+        `メソッド、デリゲート、または関数ポインターの戻り値の型を '${displayType(type)}' にすることはできません`
+      );
+    return type;
   }
 
   /** Reports a pointer outside an unsafe context (CS0214). */
@@ -559,7 +576,8 @@ export class BinderBase {
         }
         return this.tupleType(
           node.elements.map((element) => this.resolveType(element.type, context)),
-          node.elements.map((element) => element.name)
+          node.elements.map((element) => element.name),
+          node.row
         );
       }
     }
@@ -583,13 +601,17 @@ export class BinderBase {
     if (element.kind === 'named' && element.symbol.isStatic) {
       this.error(node, 'CS0719', `'${displayType(element)}': 配列要素をスタティック型にすることはできません`);
     }
+    if (isRefLikeType(element))
+      this.error(node, 'CS0611', `配列要素を '${displayType(element)}' 型にすることはできません`);
     return arrayType(element, node.rank);
   }
 
   private resolveNullableType(node: Extract<TypeNode, { kind: 'nullableType' }>, context: TypeContext): Type {
     const inner = this.resolveType(node.inner, context);
-    if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable')
+    if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable') {
+      this.checkTypeArgumentKind(inner, 'T', 'Nullable<T>', node.row);
       return this.nullableOf(inner);
+    }
     if (inner.kind === 'typeParameter' && inner.symbol.hasValueConstraint) return this.nullableOf(inner);
     // A nullable reference type is the type itself to the runtime and to conversions, which only Roslyn's messages show.
     if (inner.kind === 'named' || inner.kind === 'array' || inner.kind === 'typeParameter')
@@ -838,9 +860,31 @@ export class BinderBase {
         `型 '${displayType(args[0])}' は、ジェネリック型のパラメーター 'T'、またはメソッド 'Nullable<T>' として使用するために、Null 非許容の値型でなければなりません`
       );
     }
-    if (args.length > 0 && symbol.special !== 'nullable')
+    const parameters = symbol.allTypeParameters;
+    const display = displayTypeSymbol(symbol);
+    const areKindsAllowed = args
+      .map((arg, index) => this.checkTypeArgumentKind(arg, parameters[index].name, display, position.row))
+      .every(Boolean);
+    if (areKindsAllowed && args.length > 0 && symbol.special !== 'nullable')
       this.constraintChecks.push({ symbol, args, row: position.row });
     return namedType(symbol, args);
+  }
+
+  /** Reports a ref struct as a type argument, which no type parameter of this grader's or a program's allows. */
+  checkTypeArgumentKind(arg: Type, parameter: string, owner: string, row: number): boolean {
+    if (isRestrictedType(arg)) {
+      this.error(row, 'CS0306', `型 '${displayType(arg)}' は型引数として使用できません`);
+      return false;
+    }
+    if (isRefLikeType(arg)) {
+      this.error(
+        row,
+        'CS9244',
+        `'${displayType(arg)}' 型は、ジェネリック型またはメソッド '${owner}' のパラメーター '${parameter}' として使用するためには、ref 構造体または ref 構造体を許容する型パラメーターにすることはできません。`
+      );
+      return false;
+    }
+    return true;
   }
 }
 

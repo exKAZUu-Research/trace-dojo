@@ -734,6 +734,7 @@ export abstract class CallBinder extends OperatorBinder {
     owner: string
   ): boolean {
     if (arg.kind === 'error') return true;
+    if (!this.checkTypeArgumentKind(arg, parameter.name, owner, row)) return false;
     if (
       parameter.hasReferenceConstraint &&
       !this.isReference(arg) &&

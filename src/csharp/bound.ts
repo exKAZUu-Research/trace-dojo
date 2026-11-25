@@ -223,6 +223,12 @@ export type BoundExpression =
       /** Whether the operation may stand as a statement: a call, an assignment, or an increment. */
       isStatement: boolean;
     } & Base)
+  /** `__makeref(x)`, a `TypedReference` to a variable and its type. */
+  | ({ kind: 'makeRef'; target: BoundLValue } & Base)
+  /** `__reftype(r)`, the `System.Type` of the variable a `TypedReference` refers to, or null for a default one. */
+  | ({ kind: 'refType'; operand: BoundExpression } & Base)
+  /** `__refvalue(r, T)`, the variable a `TypedReference` refers to, which must be exactly of type T. */
+  | ({ kind: 'refValue'; operand: BoundExpression } & Base)
   /** `r = ref x`, which makes a ref local refer to another variable, and is that variable's value. */
   | ({ kind: 'refAssign'; local: LocalSymbol; target: BoundLValue } & Base)
   /** `&x`: a pointer to a variable, decomposed into the storage it lies in and its offset there. */
@@ -285,7 +291,19 @@ export type BoundDeconstructTarget =
 export type BoundLValue =
   | Extract<
       BoundExpression,
-      { kind: 'local' | 'field' | 'staticField' | 'element' | 'property' | 'this' | 'implicitIndex' | 'call' | 'deref' }
+      {
+        kind:
+          | 'local'
+          | 'field'
+          | 'staticField'
+          | 'element'
+          | 'property'
+          | 'this'
+          | 'implicitIndex'
+          | 'call'
+          | 'deref'
+          | 'refValue';
+      }
     >
   | ({ kind: 'discard' } & Base);
 

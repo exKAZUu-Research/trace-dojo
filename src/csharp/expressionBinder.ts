@@ -23,6 +23,8 @@ import {
   isDynamicType,
   isPointerType,
   isReferenceType,
+  isRefLikeType,
+  isSpecial,
   isValueType,
   isVoidPointer,
   LocalSymbol,
@@ -192,30 +194,45 @@ export abstract class ExpressionBinder extends LambdaBinder {
         if (!node.isUnsafe) return this.unsupported(node, 'Span への `stackalloc`');
         return this.bindStackalloc(node, undefined, context);
       }
+      case 'makeRef':
+      case 'refType':
+      case 'refValue': {
+        return this.bindTypedReference(node, context);
+      }
       case 'refExpression': {
         // A ref local's initializer, a `return ref`, and `r = ref x` take `ref x` apart; elsewhere it is not run.
         return this.unsupported(node, 'この場所の `ref` 式');
       }
-      case 'fromEnd': {
-        const operand = this.bindAs(node.operand, this.intType, context);
-        return this.libraryCreation('System.Index', [operand, this.constant(true, this.boolType, row)], node);
-      }
+      case 'fromEnd':
       case 'range': {
-        const index = namedType(this.library.typeNamed('System.Index'));
-        const end = (written: Expression | undefined, fromEnd: boolean): BoundExpression =>
-          written
-            ? this.bindAs(written, index, context)
-            : this.libraryCreation(
-                'System.Index',
-                [this.constant(0, this.intType, row), this.constant(fromEnd, this.boolType, row)],
-                node
-              );
-        return this.libraryCreation('System.Range', [end(node.start, false), end(node.end, true)], node);
+        return this.bindIndexOrRange(node, context);
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  /** `^n`, a `System.Index` from the end, or `a..b`, a `System.Range` whose omitted ends are the start and the end. */
+  private bindIndexOrRange(
+    node: Extract<Expression, { kind: 'fromEnd' | 'range' }>,
+    context: BindContext
+  ): BoundExpression {
+    const row = node.row;
+    if (node.kind === 'fromEnd') {
+      const operand = this.bindAs(node.operand, this.intType, context);
+      return this.libraryCreation('System.Index', [operand, this.constant(true, this.boolType, row)], node);
+    }
+    const index = namedType(this.library.typeNamed('System.Index'));
+    const end = (written: Expression | undefined, fromEnd: boolean): BoundExpression =>
+      written
+        ? this.bindAs(written, index, context)
+        : this.libraryCreation(
+            'System.Index',
+            [this.constant(0, this.intType, row), this.constant(fromEnd, this.boolType, row)],
+            node
+          );
+    return this.libraryCreation('System.Range', [end(node.start, false), end(node.end, true)], node);
   }
 
   private bindCreationExpression(node: Expression, context: BindContext): BindResult | undefined {
@@ -512,6 +529,15 @@ export abstract class ExpressionBinder extends LambdaBinder {
           `型 '${value.type.kind === 'void' ? 'void' : 'ラムダ式'}' を 'object' に暗黙的に変換できません`
         );
       }
+      // The handler formats a ref struct by its generic `AppendFormatted<T>`, which takes no ref struct, except a
+      // `ReadOnlySpan<char>`, which it has its own overload for.
+      if (isRefLikeType(value.type) && !this.isCharSpan(value.type))
+        this.checkTypeArgumentKind(
+          value.type,
+          'T',
+          'DefaultInterpolatedStringHandler.AppendFormatted<T>(T)',
+          hole.expression.row
+        );
       let alignment: number | undefined;
       if (hole.alignment) {
         const bound = this.bindAs(hole.alignment, this.intType, context);
@@ -523,6 +549,15 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (parts.every((part) => typeof part === 'string'))
       return this.constant(parts.join(''), this.stringType, node.row);
     return { kind: 'interpolated', parts, type: this.stringType, row: node.row };
+  }
+
+  private isCharSpan(type: Type): boolean {
+    return (
+      type.kind === 'named' &&
+      type.symbol.isLibrary &&
+      type.symbol.fullName === 'System.ReadOnlySpan`1' &&
+      isSpecial(type.args[0], 'char')
+    );
   }
 
   private readonly conditionalReceivers: BoundExpression[] = [];
@@ -1088,7 +1123,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
     }
     const type = this.tupleType(
       elements.map((element) => element.type),
-      uniqueNames
+      uniqueNames,
+      node.row
     );
     return { kind: 'tuple', elements, type, row: node.row };
   }
@@ -1707,6 +1743,29 @@ export abstract class ExpressionBinder extends LambdaBinder {
         `'${displayType(type)}' には定義済みのサイズが指定されていないため、sizeof は unsafe コンテキストでのみ使用できます`
       );
     return { kind: 'default', type: this.intType, row: node.row };
+  }
+
+  /** `__makeref(x)`, `__reftype(r)`, and `__refvalue(r, T)`, which make and read a `TypedReference`. */
+  private bindTypedReference(
+    node: Extract<Expression, { kind: 'makeRef' | 'refType' | 'refValue' }>,
+    context: BindContext
+  ): BoundExpression {
+    const typedReference = namedType(this.library.typeNamed('System.TypedReference'));
+    const row = node.row;
+    if (node.kind === 'makeRef')
+      return { kind: 'makeRef', target: this.bindLValue(node.operand, context, 'ref'), type: typedReference, row };
+    const operand = this.bindAs(node.operand, typedReference, context);
+    if (node.kind === 'refType')
+      return { kind: 'refType', operand, type: namedType(this.library.typeNamed('System.Type')), row };
+    if (node.type.kind === 'varType') {
+      this.error(
+        node.type,
+        'CS0825',
+        "コンテキスト キーワード 'var' は、ローカル変数宣言内またはスクリプト コード内でのみ有効です"
+      );
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
+    return { kind: 'refValue', operand, type: this.resolveType(node.type, context.fn.typeContext), row };
   }
 
   pointerTo(type: Type): NamedType {

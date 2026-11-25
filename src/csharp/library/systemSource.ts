@@ -28,6 +28,12 @@ namespace System {
     public string? Namespace { get; }
     public override string ToString();
   }
+  public ref struct TypedReference {
+    public static Type GetTargetType(TypedReference value);
+    public static object? ToObject(TypedReference value);
+    public override bool Equals(object? o);
+    public override int GetHashCode();
+  }
   public abstract class Enum : ValueType, IComparable, IFormattable {
     public bool HasFlag(Enum flag);
     public int CompareTo(object? target);

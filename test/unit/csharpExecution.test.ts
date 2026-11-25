@@ -373,6 +373,37 @@ class P
   });
 });
 
+// A TypedReference refers to a variable, whose exact type `__refvalue` checks when it runs; as a ref struct, it may
+// not be boxed or captured by a lambda.
+test('typed references read and write the variables they refer to', () => {
+  const program = String.raw`int x = 1;
+TypedReference r = __makeref(x);
+__refvalue(r, int) += 4;
+Console.WriteLine($"{x} {__reftype(r)} {TypedReference.ToObject(r)}");
+try { Console.WriteLine(__refvalue(r, long)); } catch (InvalidCastException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['5 System.Int32 5', 'Specified cast is not valid.', ''].join('\n'),
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'int x = 1;\nvar r = __makeref(x);\nobject o = r;\nFunc<int> f = () => __refvalue(r, int);\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: "CS0029: 型 'System.TypedReference' を 'object' に暗黙的に変換できません" },
+      {
+        row: 3,
+        message:
+          "CS4013: 型 'TypedReference' のインスタンスは、入れ子になった関数、クエリ式、反復子ブロック、または非同期メソッドの中では使用できません",
+      },
+    ],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

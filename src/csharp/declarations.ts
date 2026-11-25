@@ -41,6 +41,8 @@ import {
   FieldSymbol,
   interfacesOf,
   isReferenceType,
+  isRefLikeType,
+  isRestrictedType,
   isValueType,
   MethodSymbol,
   type NamedType,
@@ -250,6 +252,7 @@ export class DeclarationBinder extends BinderBase {
       declaration.typeKind === 'enum' ||
       declaration.typeKind === 'delegate';
     symbol.isReadonly = modifiers.has('readonly');
+    symbol.isRefLike = declaration.isRefStruct;
     symbol.access = accessibilityOf(declaration.modifiers, containing ? 'private' : 'internal');
     symbol.typeParameters = declaration.typeParameters.map(
       (parameter, index) => new TypeParameterSymbol(parameter.name, symbol, index, parameter.variance)
@@ -753,7 +756,7 @@ export class DeclarationBinder extends BinderBase {
     invoke.access = 'public';
     invoke.parameters = this.resolveParameters(declaration.delegateParameters, context, invoke);
     invoke.returnType = declaration.delegateReturnType
-      ? this.resolveType(declaration.delegateReturnType, context)
+      ? this.checkReturnType(this.resolveType(declaration.delegateReturnType, context), declaration.delegateReturnType)
       : VOID_TYPE;
     symbol.invoke = invoke;
     symbol.methods.push(invoke);
@@ -806,6 +809,7 @@ export class DeclarationBinder extends BinderBase {
         `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
       );
     if (member.modifiers.set.has('volatile')) this.checkVolatile(declarator, field);
+    this.checkStoredType(field, member.type);
     if (
       symbol.kind === 'struct' &&
       !field.isStatic &&
@@ -819,6 +823,22 @@ export class DeclarationBinder extends BinderBase {
         "'struct' でフィールド初期化子を使用するには、明示的に宣言されたコンストラクターが必要です。"
       );
     }
+  }
+
+  /** Reports a field of a ref struct type, which only an instance of a ref struct, itself on the stack, may hold. */
+  private checkStoredType(field: FieldSymbol, position: Position): void {
+    if (isRestrictedType(field.type))
+      this.error(
+        position,
+        'CS0610',
+        `フィールドまたはプロパティに型 '${displayType(field.type)}' を指定することはできません`
+      );
+    else if (isRefLikeType(field.type) && (field.isStatic || !field.owner.isRefLike))
+      this.error(
+        position,
+        'CS8345',
+        `フィールドまたは自動実装プロパティは、それが ref 構造体のインスタンス メンバーである場合を除いて、型 '${displayType(field.type)}' にすることができません。`
+      );
   }
 
   /** Reports a required member less accessible than its type, which code creating the type could not set (CS9032). */
@@ -1255,6 +1275,7 @@ export class DeclarationBinder extends BinderBase {
     field.column = member.column;
     property.backingField = field;
     symbol.fields.push(field);
+    this.checkStoredType(field, member.type);
     if (symbol.isStatic && !property.isStatic)
       this.error(
         member,

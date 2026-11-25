@@ -151,7 +151,8 @@ export abstract class StatementBinder extends PatternBinder {
         this.checkAssignable(target.access, position, context, use);
         return target;
       }
-      case 'deref': {
+      case 'deref':
+      case 'refValue': {
         return target;
       }
       case 'call': {
@@ -169,7 +170,7 @@ export abstract class StatementBinder extends PatternBinder {
         return target;
       }
       case 'staticField': {
-        this.checkReadonlyField(target.field, context, position);
+        this.checkReadonlyField(target.field, context, position, use);
         return target;
       }
       case 'element': {
@@ -229,7 +230,7 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext,
     use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
   ): void {
-    this.checkReadonlyField(target.field, context, position);
+    this.checkReadonlyField(target.field, context, position, use);
     if (this.reportsReadonlyLocalMember(target.receiver, position)) return;
     const holder = target.receiver;
     if (
@@ -338,14 +339,27 @@ export abstract class StatementBinder extends PatternBinder {
     );
   }
 
-  private checkReadonlyField(field: FieldSymbol, context: BindContext, position: Position): void {
+  private checkReadonlyField(
+    field: FieldSymbol,
+    context: BindContext,
+    position: Position,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): void {
     if (field.isConst) {
       this.error(position, 'CS0131', '代入式の左辺には変数、プロパティ、またはインデクサーを指定してください');
       return;
     }
     if (!field.isReadonly) return;
     if (!this.canAssignReadonly(field, context)) {
-      if (field.isStatic)
+      if (use === 'ref' || use === 'out')
+        this.error(
+          position,
+          field.isStatic ? 'CS0199' : 'CS0192',
+          field.isStatic
+            ? '静的な読み取り専用フィールドを ref 値または out 値として使用することはできません (静的コンストラクターでは可)'
+            : '読み取り専用フィールドを ref 値または out 値として使用することはできません (コンストラクターでは可)'
+        );
+      else if (field.isStatic)
         this.error(
           position,
           'CS0198',
@@ -1195,7 +1209,7 @@ export abstract class StatementBinder extends PatternBinder {
   bindRefTarget(operand: Expression, isReadonly: boolean, context: BindContext, use: 'local' | 'return'): BoundLValue {
     const bound = this.toValue(this.bindExpression(operand, context), operand);
     const isVariable =
-      ['local', 'field', 'staticField', 'element'].includes(bound.kind) ||
+      ['local', 'field', 'staticField', 'element', 'refValue'].includes(bound.kind) ||
       (bound.kind === 'call' && bound.method.returnsByRef !== undefined);
     if (bound.type.kind === 'error') return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
     if (!isVariable) {

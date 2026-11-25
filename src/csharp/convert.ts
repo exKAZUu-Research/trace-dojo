@@ -314,6 +314,7 @@ export class Converter extends ExpressionConverter {
       kind: 'type',
       typeKind,
       isRecord: node.type === 'record_declaration',
+      isRefStruct: typeKind === 'struct' && hasToken(node, 'ref'),
       modifiers: this.convertModifiers(node),
       name: requiredField(node, 'name').text,
       typeParameters: [],

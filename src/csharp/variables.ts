@@ -12,6 +12,7 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'this':
     case 'element':
     case 'deref':
+    case 'refValue':
     case 'compoundOperand': {
       return true;
     }

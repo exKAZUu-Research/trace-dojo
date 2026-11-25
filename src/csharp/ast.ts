@@ -217,6 +217,12 @@ export type Expression =
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
   | ({ kind: 'typeof'; type: TypeNode } & Position)
   | ({ kind: 'sizeof'; type: TypeNode; isUnsafe?: boolean } & Position)
+  /** `__makeref(x)`, a `TypedReference` to a variable. */
+  | ({ kind: 'makeRef'; operand: Expression } & Position)
+  /** `__reftype(r)`, the type of the variable a `TypedReference` refers to. */
+  | ({ kind: 'refType'; operand: Expression } & Position)
+  /** `__refvalue(r, T)`, the variable a `TypedReference` refers to, which must be of type T. */
+  | ({ kind: 'refValue'; operand: Expression; type: TypeNode } & Position)
   /** `ref x`, the variable that a ref local refers to or a method returns by reference. */
   | ({ kind: 'refExpression'; operand: Expression } & Position)
   /** `&x`, the address of a variable, or of a method for a function pointer. */
@@ -501,6 +507,8 @@ export interface TypeDeclaration extends Position, Attributed {
   kind: 'type';
   typeKind: 'class' | 'struct' | 'interface' | 'enum' | 'delegate';
   isRecord: boolean;
+  /** Whether a struct is a `ref struct`, whose values live only on the stack. */
+  isRefStruct: boolean;
   modifiers: Modifiers;
   name: string;
   typeParameters: TypeParameterDeclaration[];

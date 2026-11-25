@@ -845,6 +845,12 @@ export class Compiler extends AttributeBinder {
           'CS0177',
           `out パラメーター '${local.name}' はコントロールが現在のメソッドを抜ける前に割り当てられる必要があります`
         ),
+      heldAcrossSuspension: (local, row) =>
+        this.error(
+          row,
+          'CS4007',
+          `'${displayType(local.type, true)}' 型のインスタンスは、'await' または 'yield' 境界を越えて保持することはできません。`
+        ),
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
     // An iterator ends by falling off its body, which returns no value, and an async function returns what its task

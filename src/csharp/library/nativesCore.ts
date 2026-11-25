@@ -35,6 +35,7 @@ import {
   valuesEqual,
 } from '../objects';
 import { CsThrow, type ExceptionState, ProgramExit, type Runtime } from '../runtime';
+import { typedReferenceTarget } from '../typedReferences';
 import {
   type FieldSymbol,
   MAX_TUPLE_ARITY,
@@ -185,6 +186,24 @@ defineNatives({
   'System.Type.ToString': (call, receiver) => {
     const type = typeOf(receiver);
     return typeString(call, 'ToString', typeof type === 'string' ? type : runtimeTypeName(type));
+  },
+});
+
+defineNatives({
+  'System.TypedReference.GetTargetType': (call, _receiver, [value]) => {
+    const target = typedReferenceTarget(value as Value);
+    return target && typeObject(call, target.type);
+  },
+  'System.TypedReference.ToObject': (call, _receiver, [value]) => {
+    const target = typedReferenceTarget(value as Value);
+    if (!target) fail('System.ArgumentNullException', 'Type in TypedReference cannot be null.', 'value');
+    return evaluatorOf(call).box(target.reference.get(), target.type);
+  },
+  'System.TypedReference.Equals': () => fail('System.NotSupportedException', 'This feature is not implemented.'),
+  // .NET hashes the referenced variable's type, whose Type object's identity hash this is.
+  'System.TypedReference.GetHashCode': (call, receiver) => {
+    const target = typedReferenceTarget(receiver);
+    return target ? identityHash(call.frame.runtime, typeObject(call, target.type)) : 0;
   },
 });
 

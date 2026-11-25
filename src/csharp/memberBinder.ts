@@ -9,6 +9,7 @@ import type { MethodCandidate } from './lookup';
 import type { NamespaceSymbol } from './namespaces';
 import type { FunctionScope } from './scopes';
 import {
+  baseTypeOf,
   displayMethod,
   displayType,
   displayTypeSymbol,
@@ -16,6 +17,8 @@ import {
   FieldSymbol,
   isDynamicType,
   isReferenceType,
+  isRefLikeType,
+  isRestrictedType,
   isValueType,
   LocalSymbol,
   MethodSymbol,
@@ -565,8 +568,14 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'constant', value: local.constantValue, type: local.type, row: position.row };
     }
     if (local.owner && local.owner !== context.fn.method) {
-      // A ref local refers to a variable of its method's frame, which a lambda may outlive.
-      if (local.isRefLocal)
+      // A ref local refers to a variable of its method's frame, which a lambda may outlive, as a ref struct may.
+      if (isRestrictedType(local.type))
+        this.error(
+          position,
+          'CS4013',
+          `型 '${displayType(local.type, false)}' のインスタンスは、入れ子になった関数、クエリ式、反復子ブロック、または非同期メソッドの中では使用できません`
+        );
+      else if (local.isRefLocal || isRefLikeType(local.type))
         this.error(
           position,
           'CS8175',
@@ -1586,6 +1595,8 @@ export abstract class MemberBinder extends CallBinder {
     ) {
       receiver = this.convert(receiver, this.objectType, node);
     }
+    if (receiver && isRefLikeType(receiver.type) && method.owner.kind === 'class')
+      this.reportInheritedOnRefStruct(receiver.type, method, node);
     const isVirtual =
       !group.isBaseAccess &&
       (method.isVirtual || method.isAbstract || method.isOverride || method.owner.kind === 'interface');
@@ -1601,6 +1612,28 @@ export abstract class MemberBinder extends CallBinder {
       ...constrained,
       row: node.row,
     };
+  }
+
+  /**
+   * Reports a call of a method that a ref struct inherits, which runs on the boxed value that a ref struct has none of,
+   * naming the class whose override the call would box the value to, as Roslyn does.
+   */
+  private reportInheritedOnRefStruct(receiverType: Type, method: MethodSymbol, position: Position): void {
+    let declaring = method.owner;
+    for (let type = receiverType as NamedType | undefined; type; type = baseTypeOf(type)) {
+      const overrides = type.symbol.methods.some(
+        (candidate) => candidate.name === method.name && candidate.parameters.length === method.parameters.length
+      );
+      if (!overrides) continue;
+      if (type === receiverType) return;
+      declaring = type.symbol;
+      break;
+    }
+    this.error(
+      position,
+      'CS0029',
+      `型 '${displayType(receiverType, true)}' を '${displayTypeSymbol(declaring, [], true)}' に暗黙的に変換できません`
+    );
   }
 
   /**

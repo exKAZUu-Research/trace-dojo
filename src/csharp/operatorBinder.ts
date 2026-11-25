@@ -21,6 +21,7 @@ import {
   isDynamicType,
   isPointerType,
   isReferenceType,
+  isRefLikeType,
   isVoidPointer,
   type NamedType,
   nullableUnderlying,
@@ -601,6 +602,8 @@ export abstract class OperatorBinder extends ConversionBinder {
         row
       );
     }
+    // A ref struct operand would have to be boxed to call its `ToString()`.
+    if (isRefLikeType(left.type) || isRefLikeType(right.type)) this.reportBinary('+', left, right, row);
     for (const part of parts) {
       if (part.kind === 'unbound' || part.type.kind === 'void') {
         this.error(

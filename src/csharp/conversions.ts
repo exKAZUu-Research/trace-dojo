@@ -4,6 +4,7 @@ import {
   isDynamicType,
   isPointerType,
   isReferenceType,
+  isRefLikeType,
   isValueType,
   isVoidPointer,
   type NamedType,
@@ -265,7 +266,7 @@ export class Conversions {
 
   /** Whether boxing a value of the value type gives a value of the reference type. */
   private isBoxingTarget(from: Type, to: Type): boolean {
-    if (to.kind !== 'named') return false;
+    if (to.kind !== 'named' || isRefLikeType(from)) return false;
     if (to.symbol === this.types.object.symbol || to.symbol === this.types.valueType.symbol) return true;
     if (isEnumType(from) && to.symbol === this.types.enum.symbol) return true;
     if (to.symbol.kind !== 'interface') return false;
