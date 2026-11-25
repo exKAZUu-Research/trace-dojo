@@ -73,7 +73,6 @@ export function globalOf(key: object, name: string, entity?: ValueEntity): Globa
   return def;
 }
 
-/** The library's entities that generated code refers to. */
 export interface CodegenSupport {
   value(name: string): ValueEntity;
   boolType(): TypeEntity;
@@ -119,7 +118,6 @@ export function sourceSpanText(span: Span): string {
   return `${PROGRAM_FILE}:(${span.row + 1},${span.col + 1})-(${span.endRow + 1},${span.endCol})`;
 }
 
-/** Generates code for a module's bindings and instances, registering its globals and instance dictionaries. */
 export class Codegen {
   /** The scope of top-level code, which has no frame at run time. */
   private readonly rootFrame = new FrameScope(undefined);
@@ -223,7 +221,6 @@ export class Codegen {
     return patternProjection(matched, index, binding.binders.length);
   }
 
-  /** Registers how a module's instance's dictionary is built. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
   compileInstance(info: InstanceInfo, bindings: RBinding[], sourceDefined = false): void {
     for (const binding of bindings) {
@@ -1785,7 +1782,6 @@ function isFunctionOrAction(local: LocalVar): boolean {
   return head.tag === 'tcon' && (head.entity.special === 'function' || head.entity === IO_TYPE);
 }
 
-/** Whether an expression is `return x` or `pure x`. */
 function isReturn(expr: RExpr, support: CodegenSupport): boolean {
   if (expr.k !== 'app') return false;
   const fn = stripDollar(expr.fn, support);

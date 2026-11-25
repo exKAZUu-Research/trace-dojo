@@ -37,12 +37,10 @@ export function isQuoteLevelBinder(local: LocalVar): boolean {
   return levelNames.has(local);
 }
 
-/** The variable holding the new name of the quote binder a local stands for in a splice inside the quote. */
 export function quoteLevelName(local: LocalVar): string | undefined {
   return levelNames.get(local);
 }
 
-/** The binders of the quotes around a splice's code, if the code is a splice inside a quote. */
 export function quoteBindersAround(code: Expr): readonly { local: LocalVar; nameVariable: string }[] | undefined {
   return splicesInQuotes.get(code);
 }
@@ -53,7 +51,6 @@ export function quoteBindersAround(code: Expr): readonly { local: LocalVar; name
  * its scope starts; a binder it does not (one of a pattern quote) keeps its spelling, `mkName`.
  */
 export class QuoteBuilder {
-  /** The variables of the generated code that hold the new names of the quote's binders in scope. */
   private env = new Map<LocalVar, string>();
   private count = 0;
 

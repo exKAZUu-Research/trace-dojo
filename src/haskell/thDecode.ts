@@ -37,7 +37,6 @@ import { THIS_MODULE } from './syntax';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type ConValue, IOPrim, type Slot } from './values';
 
-// What a splice's program stores for the compiler: its result, the errors it reports, or that it exited.
 define(
   'storeSpliceResult',
   1,
@@ -81,7 +80,6 @@ define(
     )
 );
 
-/** What a splice gives, as the syntax the compiler grafts in its place. */
 export type SpliceSyntax =
   | { kind: 'exp'; expr: Expr }
   | { kind: 'pat'; pat: Pat }
@@ -201,7 +199,6 @@ class SpliceDecoder {
     return value.con.name === 'Just' ? value.fields[0] : undefined;
   }
 
-  /** A `NonEmpty`'s elements. */
   private nonEmpty(slot: Slot): Slot[] {
     const value = this.con(slot);
     return [value.fields[0], ...this.list(value.fields[1])];
@@ -254,7 +251,6 @@ class SpliceDecoder {
     return spelled;
   }
 
-  /** A name the splice binds: a variable, a constructor, a type, or a type variable. */
   private binder(slot: Slot): Name {
     return { name: this.spelling(this.nameParts(slot)), span: this.span };
   }
@@ -373,7 +369,6 @@ class SpliceDecoder {
     }
   }
 
-  /** A constructor's name and its fields' names. */
   private conBinders(slot: Slot): Slot[] {
     const con = this.con(slot);
     switch (con.con.name) {
@@ -1182,7 +1177,6 @@ class SpliceDecoder {
     };
   }
 
-  /** An instance's head, `C t1 t2`, as its class and types. */
   private instanceHead(slot: Slot): { cls: QName; types: TypeExpr[] } {
     const types: Slot[] = [];
     let head = this.con(slot);
@@ -1292,7 +1286,6 @@ function isSpecialSyntax(occ: string): boolean {
   return occ === '[]' || occ === '()' || occ === ':' || occ === '->' || /^\(,+\)$/.test(occ);
 }
 
-/** The finite decimal a fraction is, `2.25` for 9/4, or `undefined` when it has none. */
 function decimalOf(numerator: bigint, denominator: bigint): string | undefined {
   // The decimal has as many digits as the larger count of 2s and 5s in the denominator, paid for before it is built.
   const twos = removeFactor(denominator, 2n);
@@ -1326,7 +1319,6 @@ function removeFactor(value: bigint, prime: bigint): { count: number; rest: bigi
   return { count, rest };
 }
 
-/** Whether a number divides another, paid for by their sizes. */
 function divides(divisor: bigint, dividend: bigint): boolean {
   chargeTypeWork(wordsOf(dividend) + wordsOf(divisor));
   return dividend % divisor === 0n;

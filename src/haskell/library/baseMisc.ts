@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** `IO`, standard output, the Turtle API, `Data.Char`, `Data.List`, and `Data.Bits`. */
 export const BASE_MISC = String.raw`
 -- IO
 

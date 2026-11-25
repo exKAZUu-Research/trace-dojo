@@ -505,7 +505,6 @@ function exportedByGhc(module: string, names: string[]): string[] {
   return names.filter((name) => exported.has(name));
 }
 
-/** The modules a program may import, by name. */
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
   'Data.List': { from: 'Base', types: [], values: DATA_LIST_VALUES },

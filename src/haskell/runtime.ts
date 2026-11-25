@@ -19,12 +19,10 @@ const ALLOCATION_OVERHEAD = 8;
 const ALLOCATION_LIMIT = LIMITS.maxSlots * ALLOCATION_OVERHEAD;
 export const MAX_DISPLAY_NODES = Math.floor(LIMITS.maxSlots / ALLOCATION_OVERHEAD);
 
-/** A call shown in a trace: a named function (or the program's `main`) running `IO` statements. */
 export class TraceFrame implements TracedFrame {
   readonly contexts: TraceContext[] = [];
 
   constructor(
-    /** The frame of the call whose statements this trace frame shows. */
     readonly invocation: Env | undefined,
     readonly callRow: number | undefined
   ) {}
@@ -49,7 +47,6 @@ export class TraceFrame implements TracedFrame {
 
 export type PreviewContext = Pick<PreviewView, 'owner' | 'scope'> & { frame: TraceFrame };
 
-/** The state of one run: its globals, its machine, its trace frames, its turtles, and its output. */
 export class Runtime implements TracedRuntime<TraceFrame> {
   readonly world = new TurtleWorld();
   readonly budget: ExecutionBudget;

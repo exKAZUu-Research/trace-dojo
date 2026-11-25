@@ -7,12 +7,10 @@ import { ConValue, type Slot, type Value } from './values';
 /** The strict fields of a newtype's constructor: its one field, so that building the box evaluates it. */
 export const NEWTYPE_STRICT_FIELDS: readonly number[] = [0];
 
-/** Whether a constructor's pattern matches without evaluating the value it matches: a newtype's does. */
 export function matchesWithoutEvaluating(con: ConInfo): boolean {
   return con.isNewtype === true;
 }
 
-/** A newtype's box around a field, evaluating the field first, as the constructor does. */
 export function newtypeBox(con: ConInfo, field: Slot, force: (slot: Slot) => Value): ConValue {
   force(field);
   return new ConValue(con, [field]);

@@ -1,14 +1,11 @@
 import { type ExecutionBudget, ExecutionLimitError, LIMITS } from './limits';
 
-/** What a run starts from besides its program. */
 export interface ProgramInput {
-  /** The text the program reads from standard input. */
   stdin?: string;
   /** The contents of the files that exist when the program starts, by path; their directories exist as well. */
   files?: Readonly<Record<string, string>>;
 }
 
-/** What a run leaves besides its turtles. */
 export interface ProgramOutput {
   stdout: string;
   /** Original stdout when it cannot be recovered from the UTF-8 display text. */
@@ -142,7 +139,6 @@ export class TextReader {
     return false;
   }
 
-  /** The next code unit, or `undefined` at the end. */
   read(): string | undefined {
     this.budget.spend();
     if (this.isAtEnd) return undefined;
@@ -195,11 +191,9 @@ export class FileSystemError extends Error {
   }
 }
 
-/** How opening a file for writing treats a file that exists or not. */
 export interface OpenMode {
   /** Whether to create a missing file always, never, or only when none exists, failing if one does. */
   create: 'always' | 'never' | 'exclusive';
-  /** Whether to empty an existing file. */
   truncate: boolean;
   /** Whether writes go to the end of the file, rather than over its text from its start. */
   append: boolean;
@@ -258,7 +252,6 @@ interface Location {
   dots: '.' | '..' | undefined;
 }
 
-/** A directory that a walk down a path has entered, with its name in its parent. */
 interface Step {
   directory: DirectoryNode;
   name: string;
