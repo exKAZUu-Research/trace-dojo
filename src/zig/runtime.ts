@@ -170,6 +170,7 @@ export class Runtime {
       const bytes = this.stdinBytes.subarray(this.stdinPosition, this.stdinPosition + limit);
       this.stdinPosition += bytes.length;
       this.spend(Math.ceil((bytes.length + 1) / 64));
+      if (bytes.length === 0 && limit > 0) entry.sawEnd = true;
       return bytes;
     }
     const file = entry.target as OpenFile;
@@ -177,7 +178,13 @@ export class Runtime {
     const bytes = content.subarray(file.position, file.position + limit);
     file.position += bytes.length;
     this.spend(Math.ceil((content.length + 1) / 64));
+    if (bytes.length === 0 && limit > 0) entry.sawEnd = true;
     return bytes;
+  }
+
+  /** Whether a read of the descriptor has met its end, which is when Zig's `File.Reader` learns the size. */
+  sawInputEnd(descriptor: number): boolean {
+    return this.openDescriptor(descriptor)?.sawEnd === true;
   }
 
   /** Whether reading standard input or an open file would give no more bytes. */
@@ -293,6 +300,7 @@ interface Descriptor {
   readonly target: StandardStream | OpenFile;
   readonly mode: { readonly read: boolean; readonly write: boolean };
   closed: boolean;
+  sawEnd?: boolean;
 }
 
 /** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */

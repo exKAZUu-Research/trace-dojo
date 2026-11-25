@@ -522,7 +522,8 @@ pub const File = struct {
         interface: Io.Reader,
 
         pub fn atEnd(r: *File.Reader) bool {
-            return r.interface.bufferedLen() == 0 and inputAtEnd(r.interface.descriptor.?);
+            // Zig knows the file's size only once a read has met the end.
+            return r.interface.bufferedLen() == 0 and sawInputEnd(r.interface.descriptor.?);
         }
     };
 };
@@ -906,6 +907,12 @@ function nativeMembers(fileType: Type): Record<string, () => Member> {
         for (const [index, byte] of bytes.entries()) slice.set(index, BigInt(byte));
         return BigInt(bytes.length);
       }
+    ),
+    sawInputEnd: call(
+      'sawInputEnd',
+      [USIZE],
+      () => BOOL,
+      (frame, [descriptor]) => frame.runtime.sawInputEnd(Number(descriptor as bigint))
     ),
     inputAtEnd: call(
       'inputAtEnd',
