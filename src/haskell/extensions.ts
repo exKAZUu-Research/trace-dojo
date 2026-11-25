@@ -5,7 +5,7 @@ import { featureAllowed, type FeatureGates, type FeatureOf, type Phase } from '.
  * The language extensions GHC 9.14 knows, which `{-# LANGUAGE #-}` may name. A name outside this list is an error, as
  * GHC reports `Unsupported extension`.
  */
-const KNOWN_EXTENSIONS = new Set(
+export const KNOWN_EXTENSIONS = new Set(
   `Unsafe Trustworthy Safe CPP OverlappingInstances UndecidableInstances IncoherentInstances UndecidableSuperClasses
   MonomorphismRestriction MonoLocalBinds DeepSubsumption RelaxedPolyRec ExtendedDefaultRules NamedDefaults
   ForeignFunctionInterface UnliftedFFITypes InterruptibleFFI CApiFFI GHCForeignImportPrim ParallelArrays Arrows
@@ -30,8 +30,23 @@ const KNOWN_EXTENSIONS = new Set(
   ListTuplePuns MultilineStrings ExplicitLevelImports ImplicitStagePersistence NondecreasingIndentation`.split(/\s+/)
 );
 
+/**
+ * The extensions this environment accepts without a feature of its own to switch: each only lifts a restriction this
+ * environment does not impose, names what it always does, or keeps GHC's default. With the features (features.ts)
+ * and the unsupported extensions below, these account for every extension GHC knows, which a test checks.
+ */
+export const UNGATED_EXTENSIONS = new Set(
+  `OverlappingInstances IncoherentInstances MonomorphismRestriction MonoLocalBinds DeepSubsumption RelaxedPolyRec
+  ForeignFunctionInterface UnliftedNewtypes UnliftedDatatypes TypeInType DisambiguateRecordFields DoAndIfThenElse
+  ConstraintKinds TypeData ApplicativeDo DeriveDataTypeable DeriveGeneric TypeSynonymInstances FlexibleContexts
+  FlexibleInstances ConstrainedClassMethods PostfixOperators LiberalTypeSynonyms ImpredicativeTypes RelaxedLayout
+  TraditionalRecordSyntax PartialTypeSignatures NamedWildCards EmptyDataDeriving QuantifiedConstraints
+  ImportQualifiedPost CUSKs FieldSelectors ExtendedLiterals ListTuplePuns ImplicitStagePersistence
+  NondecreasingIndentation`.split(/\s+/)
+);
+
 /** Old names GHC still accepts for an extension. */
-const SYNONYMS: Record<string, string> = {
+export const SYNONYMS: Record<string, string> = {
   GeneralizedNewtypeDeriving: 'GeneralisedNewtypeDeriving',
   RecordPuns: 'NamedFieldPuns',
   DoRec: 'RecursiveDo',
@@ -208,7 +223,7 @@ export function readExtensions(source: string): Extensions {
  * What each extension that this environment does not support changes, for its message. These change what programs
  * mean without syntax of their own to reject, so enabling them is rejected.
  */
-const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
+export const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
   RebindableSyntax: '構文の読み替え（RebindableSyntax）',
   NPlusKPatterns: 'n+k パターン（NPlusKPatterns。Haskell 2010 で言語から外された書き方）',
   ParallelArrays: '並列配列（ParallelArrays）',

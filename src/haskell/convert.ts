@@ -41,14 +41,28 @@ import type {
 } from './syntax';
 import { QuoteBuilder } from './thQuote';
 
-/** What each node type stands for, in the message that rejects it. */
-const UNSUPPORTED_NODES: Record<string, string> = {
+/** What each node type this environment does not support stands for, in the message that rejects it. */
+export const UNSUPPORTED_NODES: Record<string, string> = {
   cpp: 'C プリプロセッサの指令',
   calling_convention: '外部の関数の宣言（foreign）',
   entity: '外部の関数の宣言（foreign）',
   safety: '外部の関数の宣言（foreign）',
   foreign_import: '外部の関数の宣言（foreign import）',
   foreign_export: '外部の関数の宣言（foreign export）',
+};
+
+/**
+ * The node types the converter reads only through their text or their parent, never by their type, with how. Every
+ * other node type of the grammar is either converted by its type, reached through a field the converter reads, or
+ * rejected as unsupported, which a test checks against the grammar.
+ */
+export const GENERIC_NODES: Record<string, string> = {
+  content: 'the text of a comment, which conversion skips',
+  module_id: 'a part of a module name, read with the name as text',
+  constructor_synonym: 'a constructor of a COMPLETE-like list, read through its parent constructor_synonyms',
+  field_pattern: 'a field of a record pattern, read through its own fields',
+  typed_hole: 'a hole, read as the name `_` of an expression',
+  quoted_expression: 'the expression of a quote, which convertQuote reads when the quote holds no other kind',
 };
 
 const columnsByTree = new WeakMap<Tree, Uint32Array>();
