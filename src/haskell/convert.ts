@@ -624,7 +624,7 @@ function convertRhsBody(
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
     return {
-      guards: fields(guardsNode, 'guard').map((node) => convertGuard(features, node)),
+      guards: fields(guardsNode, 'guard').flatMap((node) => convertGuard(features, node)),
       expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
     };
@@ -638,30 +638,51 @@ function checkSeparator(match: Node, separator: '=' | '->'): void {
   }
 }
 
-function convertGuard(features: FeatureGates<'convert'>, node: Node): Guard {
+/** A guard, as one or more: a `let` with banged bindings is followed by a guard that evaluates them. */
+function convertGuard(features: FeatureGates<'convert'>, node: Node): Guard[] {
   rejectUnsupported(node);
+  const span = spanOf(node);
   switch (node.type) {
     case 'boolean': {
-      return { kind: 'bool', expr: convertExpr(features, namedChildren(node)[0] ?? node), span: spanOf(node) };
+      return [{ kind: 'bool', expr: convertExpr(features, namedChildren(node)[0] ?? node), span }];
     }
     case 'let': {
-      return { kind: 'let', decls: convertLocalBinds(features, field(node, 'binds')), span: spanOf(node) };
+      const { decls, forced } = strictBindings(features, convertLocalBinds(features, field(node, 'binds')));
+      const guard: Guard = { kind: 'let', decls, span };
+      return forced.length === 0 ? [guard] : [guard, { kind: 'bool', expr: forcing(forced, trueOf(span), span), span }];
     }
     case 'pattern_guard': {
       if (!features.allows('patternGuards')) {
         throw syntaxError(spanOf(node), 'パターンガードを使うには、PatternGuards の拡張が要ります。');
       }
-      return {
-        kind: 'pat',
-        pat: convertPattern(features, required(node, 'pattern')),
-        expr: convertExpr(features, required(node, 'expression')),
-        span: spanOf(node),
-      };
+      return [
+        {
+          kind: 'pat',
+          pat: convertPattern(features, required(node, 'pattern')),
+          expr: convertExpr(features, required(node, 'expression')),
+          span,
+        },
+      ];
     }
     default: {
-      throw syntaxError(spanOf(node), '書き方に誤りがあります。');
+      throw syntaxError(span, '書き方に誤りがあります。');
     }
   }
+}
+
+function trueOf(span: Span): Expr {
+  return { kind: 'con', name: { name: 'True', span }, span };
+}
+
+/** A `let` qualifier of a comprehension, followed by a guard that evaluates its banged bindings. */
+function withForcedQualifier(features: FeatureGates<'convert'>, stmt: Stmt): Stmt[] {
+  if (stmt.kind !== 'let') return [stmt];
+  const { decls, forced } = strictBindings(features, stmt.decls);
+  if (forced.length === 0) return [stmt];
+  return [
+    { kind: 'let', decls, span: stmt.span },
+    { kind: 'exp', expr: forcing(forced, trueOf(stmt.span), stmt.span), span: stmt.span },
+  ];
 }
 
 /** Under Strict, a pattern that binds is matched strictly, as if it had a `!`, unless it is lazy, `~p`. */
@@ -2054,7 +2075,9 @@ function convertCollection(features: FeatureGates<'convert'>, node: Node, span: 
     }
     case 'list_comprehension': {
       const branches = fields(node, 'qualifiers').map((qualifiers) =>
-        fields(qualifiers, 'qualifier').map((node) => convertStatement(features, node))
+        fields(qualifiers, 'qualifier').flatMap((node) =>
+          withForcedQualifier(features, convertStatement(features, node))
+        )
       );
       if (branches.length > 1 && !features.allows('parallelListComp')) {
         throw syntaxError(span, '並列の内包表記を使うには、ParallelListComp の拡張が要ります。');
@@ -2153,7 +2176,7 @@ function convertMultiWayIf(features: FeatureGates<'convert'>, node: Node, span: 
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
     return {
-      guards: fields(guardsNode, 'guard').map((node) => convertGuard(features, node)),
+      guards: fields(guardsNode, 'guard').flatMap((node) => convertGuard(features, node)),
       expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
     };
