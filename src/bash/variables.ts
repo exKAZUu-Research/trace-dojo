@@ -184,7 +184,7 @@ export class VariableStore {
   private readonly functions: Map<string, FunctionDefinition>;
   private readonly positional: string[][];
   private readonly calls: CallFrameEntry[];
-  private readonly compoundGuards: string[] = [];
+  private readonly compoundGuards: { name: string; blockReads: boolean }[] = [];
   private rematch: string[] | undefined;
   private readonly prng: RandomStream;
   lastStatus = 0;
@@ -295,10 +295,10 @@ export class VariableStore {
     return this.compoundGuards.length;
   }
 
-  enterCompoundGuard(resolvedName: string): number {
-    this.guardCompoundAccess(resolvedName);
+  enterCompoundGuard(resolvedName: string, blockReads = true): number {
+    this.guardCompoundMutation(resolvedName);
     const saved = this.compoundGuards.length;
-    this.compoundGuards.push(resolvedName);
+    this.compoundGuards.push({ name: resolvedName, blockReads });
     return saved;
   }
 
@@ -306,8 +306,16 @@ export class VariableStore {
     this.compoundGuards.length = savedDepth;
   }
 
-  guardCompoundAccess(name: string): void {
-    if (this.compoundGuards.includes(name)) rejectSelfReferencingCompound(name);
+  guardCompoundRead(name: string): void {
+    if (this.compoundGuards.some((g) => g.name === name && g.blockReads)) {
+      rejectSelfReferencingCompound(name);
+    }
+  }
+
+  guardCompoundMutation(name: string): void {
+    if (this.compoundGuards.some((g) => g.name === name)) {
+      rejectSelfReferencingCompound(name);
+    }
   }
 
   /** Whether an enclosing command-prefix `'temp'` scope binds `name`. */
@@ -344,7 +352,7 @@ export class VariableStore {
   }
 
   bindTemporaryScalar(scopeIndex: number, name: string, value: string, append: boolean): StoreFailure | undefined {
-    this.guardCompoundAccess(name);
+    this.guardCompoundMutation(name);
     rejectUnsupportedVariableMutation(name, false);
     const existing = this.findOwnCell(name);
     if (existing?.attributes.has('r')) {
@@ -415,18 +423,18 @@ export class VariableStore {
 
   /** Resolves a variable name across at most one function-local nameref hop, enforcing capability invariants. */
   resolveTargetName(name: string): string {
-    this.guardCompoundAccess(name);
+    this.guardCompoundRead(name);
     const found = this.findOwnCellWithScope(name);
     if (!found || !found.cell.attributes.has('n')) return name;
     const target = found.cell.value?.kind === 'scalar' ? found.cell.value.value : '';
-    this.guardCompoundAccess(target);
+    this.guardCompoundRead(target);
     const targetFound = this.findOwnCellWithScope(target, found.scopeIndex - 1);
     rejectUnsupportedNamerefDereference(name, target, targetFound ? cellShapeOf(targetFound.cell) : undefined);
     return target;
   }
 
   ownView(name: string, maxScopeIndex = this.scopes.length - 1): VariableView | undefined {
-    this.guardCompoundAccess(name);
+    this.guardCompoundRead(name);
     const cell = this.findOwnCell(name, maxScopeIndex);
     return cell ? this.cellToView(cell) : undefined;
   }
@@ -497,7 +505,7 @@ export class VariableStore {
   }
 
   hasIndirectContainer(resolvedName: string): boolean {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell) return !cell.attributes.has('n');
@@ -505,7 +513,7 @@ export class VariableStore {
   }
 
   hasMaterializedTarget(resolvedName: string): boolean {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell) return cell.value !== undefined;
@@ -539,14 +547,14 @@ export class VariableStore {
   }
 
   readAssociativeElement(resolvedName: string, key: string): string | undefined {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     return cell?.value?.kind === 'associative' ? cell.value.table.get(key) : undefined;
   }
 
   readIndexedElement(resolvedName: string, index: bigint): string | undefined {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementAt(cell.value, index);
@@ -561,7 +569,7 @@ export class VariableStore {
   }
 
   readArrayLength(resolvedName: string): number {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementCount(cell.value);
@@ -573,7 +581,7 @@ export class VariableStore {
   }
 
   readArrayValues(resolvedName: string): string[] {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementValues(cell.value);
@@ -586,7 +594,7 @@ export class VariableStore {
   }
 
   readArrayKeys(resolvedName: string): string[] {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundRead(resolvedName);
     rejectUnsupportedVariableRead(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementKeys(cell.value);
@@ -607,7 +615,7 @@ export class VariableStore {
   // ---------------------------------------------------------------- transactional writes, declarations, & unsets
 
   writeScalarNamed(resolvedName: string, rawText: string, opts: NamedWriteOptions): StoreOutcome {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     const cell = this.getOrCreateDestination(opts.intent ?? 'visible', resolvedName);
     return this.writeScalarCell(cell, rawText, Boolean(opts.append), opts.evalInt, opts.reportedName);
@@ -619,7 +627,7 @@ export class VariableStore {
     rawText: string,
     opts: NamedWriteOptions
   ): StoreOutcome {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     const cell = this.getOrCreateDestination(opts.intent ?? 'visible', resolvedName, 'associative');
     return this.writeMapEntry(
@@ -636,7 +644,7 @@ export class VariableStore {
     rawText: string,
     opts: NamedWriteOptions
   ): StoreOutcome {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     const cell = this.getOrCreateDestination(opts.intent ?? 'visible', resolvedName);
     return this.writeMapEntry(
@@ -649,7 +657,7 @@ export class VariableStore {
 
   writeCompoundNamed(req: CompoundWriteRequest): { outcome: StoreOutcome; materializedArray: boolean } {
     const { resolvedName, intent, isAssoc, preAttrs, postReadonly, elements, hooks } = req;
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     if (intent === 'local') this.rejectLocalShadowingNamerefTarget(resolvedName);
     const prior = this.priorViewAtIntent(resolvedName, intent);
@@ -657,7 +665,13 @@ export class VariableStore {
     const cell = this.getOrCreateDestination(intent, resolvedName, isAssoc ? 'associative' : 'indexed');
     const preErr = applyAttributesToCell(cell, preAttrs, false);
     if (preErr) return { outcome: preErr, materializedArray: false };
-    const outcome = this.writeCompoundCell(cell, elements, hooks);
+    const saved = this.enterCompoundGuard(resolvedName, true);
+    let outcome: StoreOutcome;
+    try {
+      outcome = this.writeCompoundCell(cell, elements, hooks);
+    } finally {
+      this.leaveCompoundGuards(saved);
+    }
     if (!outcome.ok) return { outcome, materializedArray: false };
     if (postReadonly) {
       const roErr = applyAttributesToCell(cell, new Set<Attribute>(['r']), true);
@@ -674,7 +688,7 @@ export class VariableStore {
     evalInt: IntEvaluator,
     drivePairs: (commitPair: (key: string, value: string, append: boolean) => boolean) => string | undefined
   ): { outcome: StoreOutcome; syntaxError?: string; materializedArray: boolean } {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     const cell = this.getOrCreateDestination('visible', resolvedName, 'associative');
     const wasMaterialized = cell.value?.kind === 'associative';
@@ -682,15 +696,7 @@ export class VariableStore {
     if (!writable.ok) return { outcome: writable, materializedArray: false };
     const table = this.ensureAssociativeTable(cell);
     cell.userAssigned = true;
-    let streamFailure: StoreFailure | undefined;
-    const syntaxError = drivePairs((key, value, append) => {
-      const failure = this.storeAssociativeCompoundPair(cell, table, table, { key, value, append }, evalInt);
-      if (failure) {
-        streamFailure = failure;
-        return false;
-      }
-      return true;
-    });
+    const { streamFailure, syntaxError } = this.runAssociativeStream(cell, table, evalInt, drivePairs);
     if (streamFailure) return { outcome: streamFailure, materializedArray: false };
     return {
       outcome: { ok: true, stored: '' },
@@ -701,7 +707,7 @@ export class VariableStore {
 
   /** Transactionally validates and binds `local -n name=target` inside a function without leaving partial cells. */
   declareNamerefNamed(builtin: string, name: string, value: string | undefined): StoreFailure | undefined {
-    this.guardCompoundAccess(name);
+    this.guardCompoundMutation(name);
     const fnIdx = this.currentFunctionScopeIndex();
     const hasExistingLocal = fnIdx !== undefined && this.scopes[fnIdx].map.has(name);
     rejectUnsupportedNamerefDeclaration(builtin, name, value, fnIdx !== undefined, hasExistingLocal);
@@ -723,7 +729,7 @@ export class VariableStore {
   /** Transactionally declares and optionally assigns a scalar or empty array variable at `req.intent`. */
   declareScalarNamed(req: ScalarDeclarationRequest): { failure?: StoreFailure; materializedArray: boolean } {
     const { targetName, intent, effectiveSet, value, append, evalInt } = req;
-    this.guardCompoundAccess(targetName);
+    this.guardCompoundMutation(targetName);
     rejectUnsupportedVariableMutation(targetName, false);
     if (intent === 'local') this.rejectLocalShadowingNamerefTarget(targetName);
     const prior = this.priorViewAtIntent(targetName, intent);
@@ -751,10 +757,11 @@ export class VariableStore {
   }
 
   unsetNamed(name: string, followNameref: boolean): StoreFailure | undefined {
-    this.guardCompoundAccess(name);
+    this.guardCompoundMutation(name);
     const own = this.findOwnCell(name);
     if (own?.attributes.has('n')) rejectUnsupportedNamerefMutation('unset', name);
     const target = followNameref ? this.resolveTargetName(name) : name;
+    this.guardCompoundMutation(target);
     rejectUnsupportedVariableMutation(target, false);
     const fnIdx = this.currentFunctionScopeIndex();
     for (let i = this.scopes.length - 1; i >= 0; i--) {
@@ -781,7 +788,7 @@ export class VariableStore {
     target: { kind: 'associative'; key: string } | { kind: 'indexed'; index: bigint } | { kind: 'wholeArray' },
     reportedName: string
   ): StoreFailure | undefined {
-    this.guardCompoundAccess(resolvedName);
+    this.guardCompoundMutation(resolvedName);
     rejectUnsupportedVariableMutation(resolvedName, false);
     const cell = this.findOwnCell(resolvedName);
     if (!cell) return undefined;
@@ -916,7 +923,7 @@ export class VariableStore {
     for (const scope of this.scopes) {
       for (const cell of scope.map.values()) {
         if (!cell.name.startsWith(prefix)) continue;
-        this.guardCompoundAccess(cell.name);
+        this.guardCompoundRead(cell.name);
         if (cell.isSystem && !cell.userAssigned) rejectUnsupportedPrefixListing(prefix);
         if (cell.value !== undefined) names.add(cell.name);
       }
@@ -1080,6 +1087,29 @@ export class VariableStore {
     cell.attributes.add('A');
     cell.userAssigned = true;
     return { ok: true, stored: '' };
+  }
+
+  private runAssociativeStream(
+    cell: Cell,
+    table: AssociativeTable,
+    evalInt: IntEvaluator,
+    drivePairs: (commitPair: (key: string, value: string, append: boolean) => boolean) => string | undefined
+  ): { streamFailure?: StoreFailure; syntaxError?: string } {
+    const saved = this.enterCompoundGuard(cell.name, false);
+    let streamFailure: StoreFailure | undefined;
+    try {
+      const syntaxError = drivePairs((key, value, append) => {
+        const failure = this.storeAssociativeCompoundPair(cell, table, table, { key, value, append }, evalInt);
+        if (failure) {
+          streamFailure = failure;
+          return false;
+        }
+        return true;
+      });
+      return { streamFailure, syntaxError };
+    } finally {
+      this.leaveCompoundGuards(saved);
+    }
   }
 
   private storeAssociativeCompoundPair(

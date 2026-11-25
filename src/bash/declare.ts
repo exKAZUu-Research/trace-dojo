@@ -496,7 +496,6 @@ function streamAssociativeAppend(
   reportedName: string,
   context: FailureContext
 ): { ok: boolean; materialized: boolean } {
-  shell.store.enterCompoundGuard(targetName);
   const { outcome, syntaxError, materializedArray } = shell.store.writeAssociativeCompoundStreamNamed(
     targetName,
     reportedName,
@@ -518,7 +517,7 @@ function expandAndCommitCompound(
   isAssoc: boolean
 ): { ok: boolean; materialized: boolean } {
   const isDeclaration = req.builtin !== undefined;
-  const beforeExpandDepth = shell.store.enterCompoundGuard(targetName);
+  const beforeExpandDepth = shell.store.enterCompoundGuard(targetName, false);
   const expanded = shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
   shell.store.leaveCompoundGuards(beforeExpandDepth);
   const { outcome, materializedArray } = shell.store.writeCompoundNamed({
