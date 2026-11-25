@@ -534,7 +534,9 @@ export class ExpressionChecker {
       declaration?.type === 'variable_declarator' &&
       declaration.childForFieldName('name')?.type === 'identifier' &&
       !declaration.childForFieldName('value') &&
-      !hasToken(declaration, '!')
+      !hasToken(declaration, '!') &&
+      // A namespace's exported variable is read as a property of its object, which tsc does not check.
+      declaration.parent?.parent?.type !== 'export_statement'
     );
   }
 
@@ -1201,12 +1203,8 @@ function isSideEffectFree(node: TreeNode): boolean {
       return named(expression).every((child) => isSideEffectFree(child));
     }
     case 'unary_expression': {
-      const operator = expression.childForFieldName('operator')?.text ?? '';
-      return (
-        operator === 'typeof' ||
-        (['!', '+', '-', '~'].includes(operator) &&
-          isSideEffectFree(expression.childForFieldName('argument') as TreeNode))
-      );
+      // tsc takes these operators as free of side effects whatever their operand, though it may call a function.
+      return ['typeof', '!', '+', '-', '~'].includes(expression.childForFieldName('operator')?.text ?? '');
     }
     default: {
       return false;

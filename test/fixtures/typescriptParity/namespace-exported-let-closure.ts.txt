@@ -1,0 +1,2 @@
+namespace N { export let v: number; export function get(): number { return v; } export const g = () => v; }
+console.log(N.get(), N.g());
