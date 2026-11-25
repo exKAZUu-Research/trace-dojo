@@ -148,7 +148,12 @@ export class Expander {
         const key = this.joinSegments(this.expandParts(keyed.key, SUBSCRIPT_WORD_CONTEXT));
         this.checkTilde(keyed.value, true);
         const value = this.joinSegments(
-          this.expandParts(keyed.value, { inDouble: false, spacedStar: !isAssociative, inAssignmentRhs: true })
+          this.expandParts(keyed.value, {
+            inDouble: false,
+            spacedStar: !isAssociative,
+            spacedArrayStar: !isAssociative,
+            inAssignmentRhs: true,
+          })
         );
         pushMeteredItem(elements, { key, value, append: keyed.append, rawText: word.text }, this.shell.runtime.step);
         continue;
@@ -610,7 +615,7 @@ export class Expander {
     if (value.star && inDouble) return this.quotedStarSegments(value.values);
     if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
-    const separator = this.separatorOf(value, ctx.spacedStar, inDouble);
+    const separator = this.separatorOf(value, ctx);
     for (const [index, element] of value.values.entries()) {
       if (index > 0) segments.push(separator);
       segments.push(listElementSegment(element, inDouble));
@@ -625,16 +630,13 @@ export class Expander {
     return [textSegment(joined, true, false)];
   }
 
-  private separatorOf(
-    value: Extract<ParameterValue, { kind: 'list' }>,
-    spacedStar: boolean,
-    inDouble: boolean
-  ): WordSegment {
+  private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
     const ifsJoiner = this.ifsJoiner();
-    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner, inDouble);
-    return value.positional && spacedStar && ifsJoiner === ''
-      ? breakSegment('field', ifsJoiner, inDouble)
-      : breakSegment('star', ifsJoiner, inDouble);
+    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner, ctx.inDouble);
+    const spaceEmptyIfs = ctx.spacedStar && (Boolean(value.positional) || Boolean(ctx.spacedArrayStar));
+    return spaceEmptyIfs && ifsJoiner === ''
+      ? breakSegment('field', ifsJoiner, ctx.inDouble)
+      : breakSegment('star', ifsJoiner, ctx.inDouble);
   }
 
   ifsJoiner(): string {

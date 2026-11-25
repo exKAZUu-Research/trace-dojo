@@ -3,6 +3,7 @@
 export interface WordContext {
   readonly inDouble: boolean;
   readonly spacedStar: boolean;
+  readonly spacedArrayStar?: boolean;
   readonly splittingFields?: boolean;
   readonly inAssignmentValue?: boolean;
   readonly inAssignmentRhs?: boolean;
