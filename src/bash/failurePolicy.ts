@@ -67,10 +67,7 @@ export class FailurePolicy {
       case 'parameterRequire': {
         throw new ExitSignal(1);
       }
-      case 'fatalReadonlyArithmetic': {
-        if (failure.reason === 'readonly') throw new ExitSignal(1);
-        throw new DiscardSignal(1);
-      }
+      case 'fatalReadonlyArithmetic':
       case 'scriptAssignment':
       case 'expansion':
       case 'declarationCompoundPhase1': {

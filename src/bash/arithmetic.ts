@@ -185,10 +185,14 @@ export function splitSubscriptText(text: string): { name: string; subscript: str
   return close === text.length - 1 ? { name: text.slice(0, open), subscript: text.slice(open + 1, close) } : undefined;
 }
 
-/** Finds the index of the `]` matching the `[` at `start`, skipping quotes, escapes, expansions, and nested `[...]`. */
-export function skipSubscript(source: string, start: number): number {
+/** Finds the index of the `]` matching the `[` at `start`, treating masked expansion characters as literal data. */
+export function skipSubscript(source: string, start: number, quotedMask?: ReadonlySet<number>): number {
   if (source[start] !== '[') return source.length;
-  const text = new SourceText(source);
+  const scanSource =
+    quotedMask && quotedMask.size > 0 && !quotedMask.has(start)
+      ? maskQuotedSubscriptSource(source, start + 1, quotedMask)
+      : source;
+  const text = new SourceText(scanSource);
   text.parseSubstitution = (subStart) => skipBalanced(text, subStart - 1, '(', ')');
   try {
     return skipBalanced(text, start, '[', ']') - 1;
@@ -196,6 +200,12 @@ export function skipSubscript(source: string, start: number): number {
     if (error instanceof SyntaxFailure || error instanceof UnknownSyntax) return source.length;
     throw error;
   }
+}
+
+function maskQuotedSubscriptSource(source: string, from: number, quotedMask: ReadonlySet<number>): string {
+  let out = source.slice(0, from);
+  for (let i = from; i < source.length; i++) out += quotedMask.has(i) ? 'x' : source[i];
+  return out;
 }
 
 class ExpressionSession {
@@ -643,7 +653,7 @@ class FrameParser {
     let subscript: string | undefined;
     let subscriptQuoted: ReadonlySet<number> | undefined;
     if (this.source[end] === '[') {
-      const close = skipSubscript(this.source, end);
+      const close = skipSubscript(this.source, end, this.quotedMask);
       if (close >= this.source.length || this.source[close] !== ']') this.fail('bad array subscript');
       const subStart = end + 1;
       subscript = this.source.slice(subStart, close);
