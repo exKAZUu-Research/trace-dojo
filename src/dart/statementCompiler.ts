@@ -32,6 +32,7 @@ import {
   futureValueType,
   interfaceType,
   isNullable,
+  isObject,
   isPotentiallyNullable,
   isSubtype,
   isTop,
@@ -87,10 +88,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     spec: FunctionSpec,
     expectedReturn: DartType | undefined
   ): (frame: Frame) => Value;
-  protected abstract compileAsyncBody(
-    spec: FunctionSpec,
-    expectedReturn: DartType | undefined
-  ): (frame: Frame) => Value;
+  protected abstract compileAsyncBody(spec: FunctionSpec): (frame: Frame) => Value;
 
   // Functions
 
@@ -128,7 +126,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       if (spec.kind.isGenerator) {
         run = this.compileGeneratorBody(spec, expectedReturn);
       } else if (spec.kind.isAsync) {
-        run = this.compileAsyncBody(spec, expectedReturn);
+        run = this.compileAsyncBody(spec);
       } else if (spec.body.kind === 'expression') {
         const body = spec.body.expression;
         const compiled = this.compileReturnValue(body, expectedReturn, true);
@@ -138,7 +136,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         const block = this.compileBlock(spec.body.block, false);
         if (this.flow.reachable) {
           fn.returnTypes?.push(NULL);
-          if (spec.returnType && this.requiresReturn(spec.returnType)) {
+          if (spec.returnType && this.mustReturnValue(spec.returnType, false)) {
             this.error(
               { row: spec.body.block.row },
               `戻り値の型が ${typeName(spec.returnType)} の関数 ${displayName(spec.name)} は、最後に値を return しなければなりません。`
@@ -181,7 +179,14 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected readonly usedAtomicRows = new Set<number>();
 
   /** Whether a function returning `type` must end with a `return`, because `null` is not a value of the type. */
-  protected requiresReturn(type: DartType): boolean {
+  /**
+   * Whether a function declared to return `declared` must end with a `return` of a value, because `null` is not a
+   * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
+   * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
+   */
+  protected mustReturnValue(declared: DartType, isAsync: boolean): boolean {
+    if (isAsync && isNullable(declared)) return false;
+    const type = isAsync && !isObject(declared) ? futureValueType(declared) : declared;
     if (isTop(type) || type.kind === 'null' || isNullable(type)) return false;
     if (type.kind === 'never') return true;
     return !isPotentiallyNullable(type) || type.kind === 'typeParam';

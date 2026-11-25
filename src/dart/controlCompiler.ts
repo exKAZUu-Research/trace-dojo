@@ -37,7 +37,6 @@ import {
   futureValueType,
   interfaceType,
   isNullable,
-  isObject,
   isSubtype,
   iterableElementOf,
   NEVER,
@@ -411,7 +410,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   /** The body of an `async` function, which runs until its first `await` and returns its future. */
-  protected compileAsyncBody(spec: FunctionSpec, expectedReturn: DartType | undefined): (frame: Frame) => Value {
+  protected compileAsyncBody(spec: FunctionSpec): (frame: Frame) => Value {
     const declared = spec.returnType;
     const futureOfNever = interfaceType(coreTypes.future, [NEVER]);
     if (declared && (declared.kind === 'void' ? false : !isSubtype(futureOfNever, declared))) {
@@ -424,10 +423,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         : this.compileGenBlock(functionBody.block, false);
     if (functionBody.kind === 'block' && this.flow.reachable) {
       this.fn.returnTypes?.push(NULL);
-      // A function declared to return Object completes a Future<Object?>, yet must still return a value; one declared
-      // to return a nullable type, as Future<int>?, need not.
-      const valueType = expectedReturn && (isObject(expectedReturn) ? expectedReturn : futureValueType(expectedReturn));
-      if (declared && valueType && !isNullable(declared) && this.requiresReturn(valueType)) {
+      if (declared && this.mustReturnValue(declared, true)) {
         this.error(
           { row: functionBody.block.row },
           `戻り値の型が ${typeName(declared)} の関数 ${spec.name} は、最後に値を return しなければなりません。`
