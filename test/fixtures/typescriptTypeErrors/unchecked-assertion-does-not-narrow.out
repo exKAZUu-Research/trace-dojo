@@ -1,0 +1,2 @@
+(5,1): error TS2775: Assertions require every name in the call target to be declared with an explicit type annotation.
+(6,13): error TS18046: 's' is of type 'unknown'.

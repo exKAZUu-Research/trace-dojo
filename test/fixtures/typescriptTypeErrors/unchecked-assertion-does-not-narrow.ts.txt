@@ -1,0 +1,10 @@
+const check = (v: unknown): asserts v is string => {
+  if (typeof v !== "string") throw new Error("x");
+};
+let s: unknown = "abc";
+check(s);
+console.log(s.length);
+const check2: (v: unknown) => asserts v is string = check;
+let t: unknown = "de";
+check2(t);
+console.log(t.length);

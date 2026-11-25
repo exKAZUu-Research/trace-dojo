@@ -226,11 +226,14 @@ export class ConditionChecker {
   applyAssertion(call: TreeNode): void {
     const predicate = this.c.expressions.calls.predicateOf(call);
     if (!predicate?.asserts) return;
-    if (!this.c.expressions.calls.hasExplicitCalleeType(call))
+    // As tsc does, an assertion through a callee without an explicit type is reported and narrows nothing.
+    if (!this.c.expressions.calls.hasExplicitCalleeType(call)) {
       this.c.error(
         call.childForFieldName('function') ?? call,
         'アサーションを使うには、呼び出し先のすべての名前が、明示的な型注釈を付けて宣言されている必要があります。'
       );
+      return;
+    }
     const { target, type } = predicate;
     this.c.flow.current =
       predicate.asserts === 'truthy'
