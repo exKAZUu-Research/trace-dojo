@@ -22,6 +22,14 @@ const frontEnd = ['convert.ts', 'dialect.ts', 'parse.ts', 'thSplice.ts', 'thQuot
   .map((file) => fs.readFileSync(path.join(import.meta.dirname, '../../src/haskell', file), 'utf8'))
   .join('\n');
 const named = (word: string): boolean => frontEnd.includes(`'${word}'`);
+/**
+ * Whether the converter dispatches on a node type: a `case` label, a comparison with a node's type, or a member of a
+ * list or set it tests a node's type against. A quoted name elsewhere (a message, a field) does not count.
+ */
+const dispatched = (type: string): boolean => {
+  const quoted = `'${type}'`.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  return new RegExp(String.raw`(case |[!=]== |\[|, |\(|Set\(\[)${quoted}`).test(frontEnd);
+};
 
 test('every node type of the grammar is converted, reached through a field, or listed as unsupported', () => {
   const supertypes = new Set(nodeTypes.filter((node) => node.subtypes).map((node) => node.type));
@@ -37,7 +45,7 @@ test('every node type of the grammar is converted, reached through a field, or l
     .map((node) => node.type)
     .filter(
       (type) =>
-        !named(type) &&
+        !dispatched(type) &&
         !Object.hasOwn(UNSUPPORTED_NODES, type) &&
         !Object.hasOwn(GENERIC_NODES, type) &&
         // A subtype of a supertype is dispatched by its type, so being reached is not enough for it.
