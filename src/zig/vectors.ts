@@ -56,10 +56,12 @@ export abstract class VectorCompiler extends ReflectionCompiler {
   protected vectorOperation(expression: ExpressionOf<'binary' | 'unary'>, operands: TExpr[]): TExpr {
     const vector = operands.map((operand) => operand.type).find((type) => isVectorType(type)) as ArrayType;
     const coerced = operands.map((operand, index) => {
-      if (isVectorType(operand.type)) {
+      // An array takes part as the vector of its elements, as Zig's peer types make it.
+      if (operand.type.kind === 'array') {
         if (operand.type.length !== vector.length)
           this.error(expression, `ベクトルの長さが合いません（${vector.length} と ${operand.type.length} です）。`);
-        return operand;
+        const elements = vectorOf(operand.type.length, operand.type.child);
+        return isVectorType(operand.type) ? operand : this.coerce(operand, elements, operand.span);
       }
       return this.error(
         index === 0 || expression.kind === 'unary' ? expression : operand.span,
