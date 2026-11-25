@@ -38,7 +38,7 @@ export function readRadixDigits(
 }
 
 const UTF8_ENCODER = new TextEncoder();
-const FATAL_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
+const FATAL_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const NAMED_ANSIC_ESCAPES: Record<string, string> = {
   '\u001B': 'E',
   '\u0007': 'a',
@@ -113,7 +113,8 @@ function octalEscape(byte: number): string {
 }
 
 function isPrintable(c: string): boolean {
-  const code = c.codePointAt(0) as number;
+  const code = c.codePointAt(0);
+  if (code === undefined) return false;
   if (code < 0x80) return code >= 0x20 && code < 0x7f;
   return !/^[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]$/u.test(c);
 }

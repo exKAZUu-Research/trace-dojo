@@ -991,7 +991,7 @@ export function decodeAnsiC(text: string): string {
   }
   // A NUL byte ends the string, as it ends a C string.
   const end = bytes.indexOf(0);
-  return new TextDecoder().decode(new Uint8Array(end === -1 ? bytes : bytes.slice(0, end)));
+  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(new Uint8Array(end === -1 ? bytes : bytes.slice(0, end)));
 }
 
 /** The bytes of the escape whose letter is at `index`, and the index of its last character. */

@@ -13,8 +13,8 @@ import {
 } from './quoting';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const fatalDecoder = new TextDecoder('utf-8', { fatal: true });
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+const fatalDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /** Decodes bytes as UTF-8, replacing invalid sequences as a terminal reading Bash's output shows them. */
 export function decodeBytes(bytes: number[] | Uint8Array): string {
