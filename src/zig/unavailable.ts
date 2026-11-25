@@ -69,6 +69,7 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['syntax:asm', { what: 'インラインアセンブリ（asm）' }],
   ['syntax:packedFieldPointer', { what: 'packed struct のフィールドへのポインタの型（align(a:b:c)）' }],
   ['syntax:addrspace', { what: 'generic 以外のアドレス空間（CPU ごとに異なるもの）' }],
+  ['syntax:cCallingConventionInfo', { what: 'C の呼び出し規約の関数の型の @typeInfo（CPU と OS で値が変わるもの）' }],
   ['syntax:callconv', { what: 'auto と c 以外の呼び出し規約（CPU ごとに異なるもの）' }],
 ]);
 
