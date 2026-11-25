@@ -38,7 +38,6 @@ import {
   isNullable,
   isPotentiallyNullable,
   isSubtype,
-  isTop,
   mentionsTypeParams,
   NEVER,
   nonNullable,
@@ -1350,7 +1349,8 @@ function callArgument(
 /**
  * What a type parameter stands for in an argument's context. A closure's parameters take the context's type over what
  * the other arguments gave, as Dart solves the context first: `num n = ap(1, (a) => a + 1)` types `a` as num. Other
- * arguments see only a context that says more than Object?, as `[3, 9]` in `print(maxOf([3, 9]))` stays a List<int>.
+ * arguments see it too, Object? included: `Object? o = await wrap(f)` infers wrap's T as Object?, while `[1, 2]` in
+ * `Object? o = pick([1, 2])` stays a List<int>, as a literal does under any context that is not a collection.
  * A context beyond the bound is clamped to it, as `print(pick([1], (x) => x.isEven))` types x as num.
  */
 function argumentContextFor(
@@ -1364,10 +1364,7 @@ function argumentContextFor(
   const params = new Set(type.typeParams);
   const contextual = fromContext.get(param);
   const usable =
-    contextual &&
-    !mentionsTypeParams(contextual, params) &&
-    withinBound(param, contextual, type.typeParams) &&
-    (closurePass || !isTop(contextual))
+    contextual && !mentionsTypeParams(contextual, params) && withinBound(param, contextual, type.typeParams)
       ? contextual
       : undefined;
   if (usable) return usable;
