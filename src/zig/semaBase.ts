@@ -449,13 +449,21 @@ export abstract class SemaBase implements SemaApi {
   }
 
   private referencesComptimeVar(value: Value): boolean {
+    return this.comptimeVariableReferencedBy(value) !== undefined;
+  }
+
+  /** The `comptime var` that a pointer or slice in a value, at any depth, points into. */
+  protected comptimeVariableReferencedBy(value: Value): LocalBinding | undefined {
     this.spendCompilation();
-    if (value instanceof Pointer || value instanceof Slice)
-      return this.comptimeVariableHolding(value.target) !== undefined;
-    if (value instanceof Some) return this.referencesComptimeVar(value.value);
-    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion)
-      return value.slots.some((slot) => this.referencesComptimeVar(slot));
-    return false;
+    if (value instanceof Pointer || value instanceof Slice) return this.comptimeVariableHolding(value.target);
+    if (value instanceof Some) return this.comptimeVariableReferencedBy(value.value);
+    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) {
+      for (const slot of value.slots) {
+        const variable = this.comptimeVariableReferencedBy(slot);
+        if (variable) return variable;
+      }
+    }
+    return undefined;
   }
 
   /**

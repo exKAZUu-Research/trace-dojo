@@ -537,10 +537,8 @@ export abstract class StatementCompiler extends CallCompiler {
         const binding = this.lookup(target.name);
         if (binding?.kind !== 'local') return undefined;
         if (binding.comptimeCell) return binding;
-        // A pointer to a comptime var, or into one, reaches the variable.
-        return binding.known && (binding.value instanceof Pointer || binding.value instanceof Slice)
-          ? this.comptimeVariableHolding(binding.value.target)
-          : undefined;
+        // A pointer to a comptime var, or into one, reaches the variable, also from a field of a value holding it.
+        return binding.known ? this.comptimeVariableReferencedBy(binding.value) : undefined;
       }
       case 'field':
       case 'index': {
