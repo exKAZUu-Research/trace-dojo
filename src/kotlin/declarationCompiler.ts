@@ -1232,7 +1232,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return (
       actual.kind === 'class' &&
       !actual.nullable &&
-      (this.core.primitives.has(actual.cls) || actual.cls === this.core.string)
+      (this.core.primitives.has(actual.cls) || actual.cls === this.core.boolean || actual.cls === this.core.string)
     );
   }
 
