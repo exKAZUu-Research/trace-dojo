@@ -339,10 +339,16 @@ export abstract class SuspendCompiler extends LocalCompiler {
       }
       case 'destructuring': {
         const holder = hiddenName('destructured');
-        return this.compileSuspendStatements(scope, context, [
-          propertyStatement(statement.row, holder, statement.initializer),
-          { ...statement, initializer: { kind: 'name', row: statement.row, name: holder } },
-        ]);
+        // In the scope around the declaration, which its names are declared in for the statements after it.
+        return this.compileSuspendStatements(
+          scope,
+          context,
+          [
+            propertyStatement(statement.row, holder, statement.initializer),
+            { ...statement, initializer: { kind: 'name', row: statement.row, name: holder } },
+          ],
+          true
+        );
       }
       default: {
         return this.unsupportedSuspension(statement.row);
@@ -586,20 +592,18 @@ export abstract class SuspendCompiler extends LocalCompiler {
       target = { ...target, receiver: held(target.receiver), indices: target.indices.map(held) };
     }
     const variable = target.kind === 'name' ? this.findVariable(scope, target.name) : undefined;
-    if (variable && statement.operator !== '=') {
+    // A `val` keeps its value, so only a `var` can change before the value runs; a `val`'s error then names it.
+    if (variable?.isVar && statement.operator !== '=') {
       // `x += f()` reads `x` before `f()` runs, as kotlinc's `x = x + f()` and `x.plusAssign(f())` do: the value read
-      // takes the operation, and a `var` then gets its result.
+      // takes the operation, and the variable then gets its result.
       const read = hiddenName('target');
-      before.push({ ...propertyStatement(row, read, target), isVar: variable.isVar } as Statement);
+      before.push({ ...propertyStatement(row, read, target), isVar: true } as Statement);
       const operand = held(statement.value);
       const readName: Expression = { kind: 'name', row, name: read };
-      const writeBack: Statement[] = variable.isVar
-        ? [{ kind: 'assignment', row, operator: '=', target, value: readName }]
-        : [];
       return this.compileSuspendStatements(scope, context, [
         ...before,
         { ...statement, target: readName, value: operand },
-        ...writeBack,
+        { kind: 'assignment', row, operator: '=', target, value: readName },
       ]);
     }
     const value = held(statement.value);
