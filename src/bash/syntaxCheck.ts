@@ -9,9 +9,10 @@ import type { Node, Parser } from '@willbooster/web-tree-sitter';
 import { CompileError } from '../interpreter/diagnostics';
 import { skipSubscript } from './arithmetic';
 import type { BackquoteSyntaxError } from './ast';
-import { parseConditional } from './conditionalSyntax';
+import { parseConditional, trailingLineToken } from './conditionalSyntax';
 import { formatSyntaxToken, syntaxErrorMessage } from './syntaxErrors';
 import {
+  arithmeticClose,
   arithmeticEnd,
   type BashSyntaxError,
   type DeferredRegion,
@@ -875,8 +876,9 @@ class ShellGrammarValidator {
   }
 
   private parseCStyleForHeader(forKeyword: ShellToken, openParens: ShellToken): void {
-    const closeEnd = arithmeticEnd(this.text, openParens.start);
-    if (closeEnd === undefined) this.failUnexpected({ ...openParens, value: '(' });
+    const close = arithmeticClose(this.text, openParens.start);
+    if (!close.doubleClosed) this.failSingleClosedForHeader(close.index);
+    const closeEnd = close.index + 2;
     const sections = forHeaderSemicolons(this.text, openParens.start + 2, closeEnd - 2).length + 1;
     if (sections < 3) this.text.fail(forKeyword.row, 'syntax error: arithmetic expression required');
     if (sections > 3) this.text.fail(forKeyword.row, "syntax error: `;' unexpected");
@@ -891,6 +893,23 @@ class ShellGrammarValidator {
     this.seekTo(closeEnd);
     if (this.hasOperator(this.peek(), ';')) this.advance();
     this.consumeNewlines();
+  }
+
+  private failSingleClosedForHeader(singleCloseIndex: number): never {
+    const { source } = this.text;
+    const after = singleCloseIndex + 1;
+    const next = source[after];
+    let near: string;
+    if (next === ';' || next === '&' || next === '|') {
+      near = next;
+    } else if (next !== undefined && !' \t\n\r'.includes(next)) {
+      let end = after;
+      while (end < source.length && !' \t\n;|&'.includes(source[end])) end++;
+      near = trailingLineToken(source, end) ?? '(';
+    } else {
+      near = trailingLineToken(source, after) ?? '(';
+    }
+    this.text.fail(this.text.rowAt(singleCloseIndex), `syntax error near \`${formatSyntaxToken(near)}'`);
   }
 
   private parseLoopBodyGroup(allowsBraceBody: boolean): void {

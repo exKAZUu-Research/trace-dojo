@@ -226,7 +226,7 @@ function immediateTokenAfterClose(source: string, cursor: number): string | unde
 }
 
 /** Extracts the token immediately preceding `cursor` on the current line for Bash's secondary `syntax error near` diagnostic. */
-function trailingLineToken(source: string, cursor: number): string | undefined {
+export function trailingLineToken(source: string, cursor: number): string | undefined {
   const limit = Math.min(cursor, source.length);
   const lineStart = source.lastIndexOf('\n', limit - 2) + 1;
   const nextBreak = source.indexOf('\n', lineStart);

@@ -312,6 +312,11 @@ function skipDollarParenthesis(text: SourceText, open: number): number {
  * `)`, which makes it a nested subshell for Bash.
  */
 export function arithmeticEnd(text: SourceText, open: number): number | undefined {
+  const close = arithmeticClose(text, open);
+  return close.doubleClosed ? close.index + 2 : undefined;
+}
+
+export function arithmeticClose(text: SourceText, open: number): { index: number; doubleClosed: boolean } {
   const { source } = text;
   let depth = 0;
   for (let i = open + 2; i < source.length;) {
@@ -319,7 +324,7 @@ export function arithmeticEnd(text: SourceText, open: number): number | undefine
     if (c === '(') depth++;
     else if (c === ')') {
       if (depth > 0) depth--;
-      else return source[i + 1] === ')' ? i + 2 : undefined;
+      else return { index: i, doubleClosed: source[i + 1] === ')' };
     }
     i = c === '(' || c === ')' ? i + 1 : skipWordPiece(text, i);
   }
