@@ -270,9 +270,7 @@ export abstract class CallCompiler extends ReflectionCompiler {
       }
     }
     const instance = this.instantiate(ref, argTypes, expression, args);
-    if (!this.requiresComptime(instance.returnType, expression))
-      for (const [index, arg] of args.entries())
-        if (!params[index].isComptime) this.refuseComptimeVarReference(arg, arg.span);
+    if (!this.requiresComptime(instance.returnType, expression)) this.refuseRuntimeArguments(params, args);
     const evaluators = valueEvaluators(args);
     const row = expression.row;
     const call = runtime(
@@ -300,6 +298,12 @@ export abstract class CallCompiler extends ReflectionCompiler {
     );
     const result = this.evaluateAtCompileTime(body);
     return this.combine(args, instance.returnType, () => result, call.span);
+  }
+
+  /** Refuses an argument to a parameter that the program receives when it runs, which holds a comptime var's address. */
+  private refuseRuntimeArguments(params: readonly { isComptime: boolean }[], args: readonly TExpr[]): void {
+    for (const [index, arg] of args.entries())
+      if (!params[index].isComptime) this.refuseComptimeVarReference(arg, arg.span);
   }
 
   /** Passes a method's receiver, taking its address or dereferencing it to match the first parameter. */
