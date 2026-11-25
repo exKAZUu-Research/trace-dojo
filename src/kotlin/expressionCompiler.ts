@@ -1212,7 +1212,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const local =
       variable &&
       typeArgs.length === 0 &&
-      (resolved(variable.type).kind === 'function' || this.hasInvokeOperator(scope, resolved(variable.type)))
+      (resolved(variable.type).kind === 'function' || this.hasInvokeOperator(scope, resolved(variable.type), row))
         ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
         : undefined;
     if (local && !(local instanceof CompileError)) return local;
@@ -1886,18 +1886,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  /** Whether values of the type can be called as functions, through an `operator fun invoke` member or extension. */
-  protected hasInvokeOperator(scope: Scope, type: KType): boolean {
+  /**
+   * Whether values of the type can be called as functions, through an `operator fun invoke` among the candidates a
+   * call of `invoke` on such a value resolves among: its members and the extensions in scope.
+   */
+  protected hasInvokeOperator(scope: Scope, type: KType, row: number): boolean {
     if (type.kind !== 'class') return false;
-    return (
-      this.membersOf<FunctionSymbol>(type, 'invoke', 'function').some(isOperator) ||
-      this.extensionFunctionCandidates(this.localFunctions(scope, 'invoke'), type).some(isOperator) ||
-      this.receiversOf(scope).some((dispatch) =>
-        this.memberExtensionCandidates(dispatch, 'invoke', type).some(isOperator)
-      ) ||
-      this.topLevelFunctions('invoke', true).some((level) =>
-        this.extensionFunctionCandidates(level, type).some(isOperator)
-      )
+    const value: Compiled = { type, repr: 'ref', eval: () => UNIT };
+    return this.memberCallLevels(scope, value, 'invoke', row).some(
+      (level) => 'candidates' in level && level.candidates.some(isOperator)
     );
   }
 
@@ -1916,7 +1913,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     void hasTrailingLambda;
     const type = resolved(functionValue.type);
-    if (type.kind === 'class' && !type.nullable && this.hasInvokeOperator(scope, type)) {
+    if (type.kind === 'class' && !type.nullable && this.hasInvokeOperator(scope, type, row)) {
       if (explicitReceiver) return this.error(row, `${typeToString(type)} の値は呼び出せません。`);
       return this.compileMethodCall(
         scope,
