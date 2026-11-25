@@ -169,6 +169,7 @@ export class Evaluator extends AsyncExecutor {
     }
     const frame = this.frameFor(method, self, args, typeEnvironment, callRow, captured);
     if (method.isAsync && !method.iterator) return this.startAsync(method, frame);
+    // An async iterator's state machine is one an iterator's, whose MoveNextAsync also awaits.
     if (method.iterator)
       return this.startIterator(
         method.iterator,
@@ -223,7 +224,10 @@ export class Evaluator extends AsyncExecutor {
     frame: Frame
   ): CsObject {
     const elementType = frame.resolve(iterator.elementType);
-    const type = namedType(this.runtime.library.typeNamed('System.Linq.Internal.YieldIterator', 1), [elementType]);
+    const className = frame.method?.isAsync
+      ? 'System.Linq.Internal.YieldAsyncIterator'
+      : 'System.Linq.Internal.YieldIterator';
+    const type = namedType(this.runtime.library.typeNamed(className, 1), [elementType]);
     const create = (runFrame: Frame): IteratorState => ({
       method: runFrame.method as MethodSymbol,
       frame: runFrame,

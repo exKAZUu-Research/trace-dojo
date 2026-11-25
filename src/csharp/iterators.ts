@@ -13,7 +13,7 @@ import {
 } from './statementExecutor';
 import type { TaskState } from './tasks';
 import type { LocalSymbol, MethodSymbol, Type } from './types';
-import { Cell, copyValue, UNASSIGNED, type Value } from './values';
+import { Cell, copyValue, type CsObject, type CsStruct, UNASSIGNED, type Value } from './values';
 
 /**
  * What a suspended body yields to its driver: the value of a `yield return`, or the task an `await` waits for, or
@@ -384,7 +384,21 @@ export abstract class IteratorExecutor extends StatementExecutor {
       const resource = this.readLocal(frame, statement.local);
       if (!isExiting && resource !== undefined) {
         const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
-        this.invokeWithoutArguments(frame, dispose, resource, statement.row, this.runtime.runtimeTypeOf(resource));
+        const result = this.invokeWithoutArguments(
+          frame,
+          dispose,
+          resource,
+          statement.row,
+          this.runtime.runtimeTypeOf(resource)
+        );
+        // `await using` waits for the ValueTask that DisposeAsync returns.
+        if (statement.isAwait) {
+          const task = ((result as CsStruct).fields[0] as CsObject | undefined)?.native as TaskState | undefined;
+          if (task && !task.isDone) yield { awaiting: task };
+          // An exception from disposal replaces the one leaving the body, as it does in C#.
+          // oxlint-disable-next-line no-unsafe-finally
+          if (task?.status === 'faulted') throw task.exceptions[0];
+        }
       }
     }
   }

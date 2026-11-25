@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { BoundArgument, BoundBlock, BoundExpression, BoundLValue } from './bound';
-import { IteratorExecutor, type Steps, type Suspension } from './iterators';
+import { IteratorExecutor, type IteratorState, type Steps, type Suspension } from './iterators';
 import type { PendingException } from './numeric';
 import type { CsThrow, Frame } from './runtime';
 import { taskObject, type TaskState, UnhandledAsyncException } from './tasks';
@@ -197,6 +197,69 @@ export abstract class AsyncExecutor extends IteratorExecutor {
     const resume = (): void => this.advanceAsync(state, frame, steps, shape);
     if (awaiting === 'yield') this.runtime.scheduler.queue(resume);
     else awaiting.whenDone(resume);
+  }
+
+  /**
+   * `MoveNextAsync` of an async iterator: runs the body to its next `yield return`, whose value the returned task
+   * completes with true, through the awaits on the way, or to its end, which completes it with false.
+   */
+  moveNextAsync(state: IteratorState): TaskState {
+    const task = this.runtime.scheduler.newTask();
+    if (state.status === 'after') task.complete(false);
+    else {
+      state.steps ??= this.executeBlockSteps(state.method.body as BoundBlock, state.frame, true);
+      this.advanceAsyncIterator(state, task);
+    }
+    return task;
+  }
+
+  private advanceAsyncIterator(state: IteratorState, task: TaskState): void {
+    let result: IteratorResult<Suspension, unknown>;
+    state.status = 'running';
+    try {
+      result = this.resumeBody(state.frame, state.steps as Steps<unknown>);
+    } catch (error) {
+      state.status = 'after';
+      const thrown = this.asThrow(error);
+      if (!thrown) throw error;
+      task.fault([thrown]);
+      return;
+    }
+    if (result.done) {
+      state.status = 'after';
+      task.complete(false);
+      return;
+    }
+    const suspension = result.value;
+    if ('value' in suspension) {
+      state.current = suspension.value;
+      state.status = 'suspended';
+      task.complete(true);
+      return;
+    }
+    const resume = (): void => this.advanceAsyncIterator(state, task);
+    if (suspension.awaiting === 'yield') this.runtime.scheduler.queue(resume);
+    else suspension.awaiting.whenDone(resume);
+  }
+
+  /** `DisposeAsync` of an async iterator: runs the finally blocks around the `yield return` it is suspended at. */
+  disposeAsyncIterator(state: IteratorState): TaskState {
+    const task = this.runtime.scheduler.newTask();
+    if (state.status !== 'suspended' || !state.steps) {
+      if (state.status !== 'running') state.status = 'after';
+      task.complete(undefined);
+      return task;
+    }
+    const steps = state.steps;
+    state.status = 'after';
+    this.runtime.pushFrame(state.frame);
+    try {
+      steps.return(undefined);
+    } finally {
+      this.runtime.popFrame();
+    }
+    task.complete(undefined);
+    return task;
   }
 
   /** Runs a suspended body's frame again until the body next suspends or ends. */

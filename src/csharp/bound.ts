@@ -426,5 +426,7 @@ export type BoundStatement =
       body: BoundStatement;
       dispose: MethodSymbol;
       disposable: NamedType;
+      /** `await using`, which awaits the `ValueTask` of `IAsyncDisposable.DisposeAsync`. */
+      isAwait?: true;
     } & StatementBase)
   | ({ kind: 'empty' } & StatementBase);

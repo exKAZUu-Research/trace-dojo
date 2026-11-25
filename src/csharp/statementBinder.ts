@@ -438,10 +438,12 @@ export abstract class StatementBinder extends PatternBinder {
     if (index === -1) return statements.map((statement) => this.bindStatement(statement, context));
     const declaration = statements[index] as Extract<Statement, { kind: 'localDeclaration' }>;
     const before = statements.slice(0, index).map((statement) => this.bindStatement(statement, context));
+    const isAwait = declaration.using === 'await using';
     const resources = this.bindUsingResources(
       { kind: 'declaration', type: declaration.type, declarators: declaration.declarators },
       declaration,
-      context
+      context,
+      isAwait
     );
     const rest = statements.slice(index + 1);
     const restRow = rest[0]?.row ?? declaration.row;
@@ -453,17 +455,17 @@ export abstract class StatementBinder extends PatternBinder {
       row: restRow,
       step: 'none',
     };
-    return [...before, ...this.nestUsings(resources, body)];
+    return [...before, ...this.nestUsings(resources, body, isAwait)];
   }
 
   private bindUsingStatement(statement: Extract<Statement, { kind: 'using' }>, context: BindContext): BoundStatement {
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
-    const resources = this.bindUsingResources(statement.resource, statement, inner);
+    const resources = this.bindUsingResources(statement.resource, statement, inner, statement.isAwait);
     const body = this.bindEmbedded(statement.body, inner);
     return {
       kind: 'block',
-      statements: this.nestUsings(resources, body),
+      statements: this.nestUsings(resources, body, statement.isAwait),
       capturedLocals: [],
       locals: scope.locals,
       row: statement.row,
@@ -475,14 +477,15 @@ export abstract class StatementBinder extends PatternBinder {
   private bindUsingResources(
     resource: Extract<Statement, { kind: 'using' }>['resource'],
     position: Position,
-    context: BindContext
+    context: BindContext,
+    isAwait: boolean
   ): { declaration: BoundStatement; local: LocalSymbol }[] {
     if (resource.kind === 'expression') {
       const value = this.bindTypedValue(resource.value, context);
       const local = new LocalSymbol('\0using', value.type, position.row, position.column);
       local.isHidden = true;
       context.fn.addLocal(local);
-      this.checkDisposable(value.type, resource.value);
+      this.checkDisposable(value.type, resource.value, isAwait);
       return [{ declaration: { kind: 'localDeclaration', local, value, row: position.row, step: 'callsOnly' }, local }];
     }
     return resource.declarators.map((declarator) => {
@@ -495,16 +498,24 @@ export abstract class StatementBinder extends PatternBinder {
       const local = context.scope.variables.get(declarator.name) as LocalSymbol;
       local.isReadonly = true;
       local.readonlyReason = 'using 変数';
-      this.checkDisposable(local.type, declarator);
+      this.checkDisposable(local.type, declarator, isAwait);
       return { declaration: { ...declaration, row: declarator.row }, local };
     });
   }
 
-  /** Reports a resource type that converts to no `IDisposable`, which `using` needs to dispose it. */
-  private checkDisposable(type: Type, position: Position): void {
+  /** Reports a resource type that converts to no `IDisposable` (or `IAsyncDisposable`), which `using` disposes it by. */
+  private checkDisposable(type: Type, position: Position, isAwait: boolean): void {
     if (type.kind === 'error' || type.kind === 'null') return;
-    const disposable = this.library.typeNamed('System.IDisposable').declaredType;
+    const disposable = this.library.typeNamed(isAwait ? 'System.IAsyncDisposable' : 'System.IDisposable').declaredType;
     if (this.conversions.implicit(type, disposable) !== undefined) return;
+    if (isAwait) {
+      this.error(
+        position,
+        'CS8410',
+        `'${displayType(type)}': 非同期 using ステートメントで使用される型は、'System.IAsyncDisposable' に実装するか、適切な 'DisposeAsync' メソッドを実装する必要があります。`
+      );
+      return;
+    }
     this.error(
       position,
       'CS1674',
@@ -515,11 +526,12 @@ export abstract class StatementBinder extends PatternBinder {
   /** The declarations of the resources, each followed by the `using` that disposes it after the rest. */
   private nestUsings(
     resources: { declaration: BoundStatement; local: LocalSymbol }[],
-    body: BoundStatement
+    body: BoundStatement,
+    isAwait: boolean
   ): BoundStatement[] {
     let inner: BoundStatement[] = [body];
     for (const { declaration, local } of resources.toReversed()) {
-      const disposable = this.library.typeNamed('System.IDisposable');
+      const disposable = this.library.typeNamed(isAwait ? 'System.IAsyncDisposable' : 'System.IDisposable');
       inner = [
         declaration,
         {
@@ -529,7 +541,10 @@ export abstract class StatementBinder extends PatternBinder {
             inner.length === 1
               ? inner[0]
               : { kind: 'block', statements: inner, capturedLocals: [], locals: [], row: body.row, step: 'none' },
-          dispose: disposable.methods.find((method) => method.name === 'Dispose') as MethodSymbol,
+          dispose: disposable.methods.find(
+            (method) => method.name === (isAwait ? 'DisposeAsync' : 'Dispose')
+          ) as MethodSymbol,
+          ...(isAwait ? { isAwait: true as const } : {}),
           disposable: disposable.declaredType,
           row: declaration.row,
           step: 'none',
@@ -586,6 +601,7 @@ export abstract class StatementBinder extends PatternBinder {
         return this.bindFor(statement, context);
       }
       case 'foreach': {
+        if (statement.isAwait) return this.bindAwaitForeach(statement, context);
         // The collection expression's declarations belong to the loop, as the iteration variable does.
         return this.inLoopScope(context, row, (inner) => this.bindForeach(statement, inner));
       }
@@ -641,6 +657,99 @@ export abstract class StatementBinder extends PatternBinder {
     }
   }
 
+  /**
+   * Binds `await foreach` as C# spec §13.9.5 expands it: `var e = c.GetAsyncEnumerator(); try { while (await
+   * e.MoveNextAsync()) { var x = e.Current; body } } finally { await e.DisposeAsync(); }`, with `e` hidden.
+   */
+  private asyncLoopCount = 0;
+
+  private bindAwaitForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
+    const position = { row: statement.row, column: statement.column };
+    const collectionType = this.quietly(() => this.bindTypedValue(statement.collection, context).type);
+    if (
+      collectionType &&
+      collectionType.kind !== 'error' &&
+      !this.hasMethod(collectionType, 'GetAsyncEnumerator', context)
+    ) {
+      const display = displayType(collectionType);
+      const hint = this.hasMethod(collectionType, 'GetEnumerator', context)
+        ? `'await foreach' ではなく 'foreach' ですか?`
+        : '';
+      this.error(
+        statement.collection,
+        'CS8415',
+        `'${display}' は 'GetAsyncEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して非同期 foreach ステートメントを使用することはできません。${hint}`
+      );
+      return { kind: 'block', statements: [], capturedLocals: [], locals: [], row: statement.row, step: 'none' };
+    }
+    // Each loop's enumerator has a name of its own, which nested loops may not hide.
+    const enumeratorName = `\0asyncEnumerator${this.asyncLoopCount++}`;
+    const enumerator: Expression = { kind: 'name', name: enumeratorName, typeArgs: undefined, ...position };
+    const call = (target: Expression, name: string): Expression => ({
+      kind: 'invocation',
+      target: { kind: 'memberAccess', target, name, typeArgs: undefined, nameRow: statement.row, ...position },
+      args: [],
+      ...position,
+    });
+    const current: Expression = {
+      kind: 'memberAccess',
+      target: enumerator,
+      name: 'Current',
+      typeArgs: undefined,
+      nameRow: statement.row,
+      ...position,
+    };
+    const binding: Statement =
+      statement.variable.kind === 'single'
+        ? {
+            kind: 'localDeclaration',
+            isConst: false,
+            type: statement.type,
+            declarators: [{ name: statement.variable.name, initializer: current, ...position }],
+            ...position,
+          }
+        : { kind: 'deconstruction', designation: statement.variable, value: current, ...position };
+    const block = (statements: Statement[]): Block => ({
+      kind: 'block',
+      statements,
+      endRow: statement.row,
+      ...position,
+    });
+    const lowered = block([
+      {
+        kind: 'localDeclaration',
+        isConst: false,
+        type: { kind: 'varType', ...position },
+        declarators: [
+          { name: enumeratorName, initializer: call(statement.collection, 'GetAsyncEnumerator'), ...position },
+        ],
+        ...position,
+      },
+      {
+        kind: 'try',
+        body: block([
+          {
+            kind: 'while',
+            condition: { kind: 'await', operand: call(enumerator, 'MoveNextAsync'), ...position },
+            body: block([binding, statement.body]),
+            ...position,
+          },
+        ]),
+        catches: [],
+        finally: block([
+          {
+            kind: 'expression',
+            expression: { kind: 'await', operand: call(enumerator, 'DisposeAsync'), ...position },
+            ...position,
+          },
+        ]),
+        ...position,
+      },
+    ]);
+    const bound = this.bindStatement(lowered, context);
+    return bound;
+  }
+
   private bindYield(statement: Extract<Statement, { kind: 'yield' }>, context: BindContext): BoundStatement {
     const { fn } = context;
     const { row } = statement;
@@ -667,10 +776,18 @@ export abstract class StatementBinder extends PatternBinder {
     const { method } = fn;
     const iterator = this.iteratorShape(returnType, method.isAsync);
     if (!iterator) {
-      if (returnType.kind !== 'error') {
-        const name = method.name === '<Main>$' ? '<top-level-statements-entry-point>' : displayMethod(method);
+      const name = method.name === '<Main>$' ? '<top-level-statements-entry-point>' : displayMethod(method);
+      const at = method.kind === 'localFunction' || method.name === '<Main>$' ? body : method.row;
+      if (!method.isAsync && this.iteratorShape(returnType, true))
         this.error(
-          method.kind === 'localFunction' || method.name === '<Main>$' ? body : method.row,
+          at,
+          'CS8403',
+          `反復子ブロックを伴うメソッド '${name}' が '${displayType(returnType)}' を返すには 'async' でなければなりません`
+        );
+      // An async method's return type that no async method has is reported as such (CS1983) instead.
+      else if (returnType.kind !== 'error' && !method.isAsync) {
+        this.error(
+          at,
           'CS1624',
           `'${displayType(returnType)}' は反復子インターフェイス型ではないため、'${name}' の本体は反復子ブロックにできません`
         );
@@ -1071,11 +1188,19 @@ export abstract class StatementBinder extends PatternBinder {
       const found = this.enumeratorPattern(type, statement.collection, inner);
       if (!found) {
         const display = collection.kind === 'unbound' ? 'ラムダ式' : displayType(type);
-        this.error(
-          statement.collection,
-          'CS1579',
-          `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません`
-        );
+        // A type that `await foreach` would iterate gets the hint to use that instead.
+        if (this.hasMethod(type, 'GetAsyncEnumerator', inner))
+          this.error(
+            statement.collection,
+            'CS8414',
+            `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません。'foreach' ではなく 'await foreach' ですか?`
+          );
+        else
+          this.error(
+            statement.collection,
+            'CS1579',
+            `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません`
+          );
         iteration = { kind: 'array', rank: 1 };
         elementType = ERROR_TYPE;
       } else {
@@ -1170,6 +1295,11 @@ export abstract class StatementBinder extends PatternBinder {
    */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  /** Whether a type has an accessible method of the name, which some foreach errors suggest by. */
+  private hasMethod(type: Type, name: string, context: BindContext): boolean {
+    return this.lookupMember(type, name, context.fn.typeContext).found?.kind === 'methods';
+  }
+
   private enumeratorPattern(
     type: Type,
     position: Position,

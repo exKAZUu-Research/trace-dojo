@@ -15,7 +15,8 @@ export function markSuspends(node: unknown, seen = new Set<object>()): boolean {
   if (Object.getPrototypeOf(node) !== Object.prototype) return false;
   const record = node as Record<string, unknown> & { kind?: string; suspends?: true };
   if (record.kind === 'lambda' || record.kind === 'unbound') return false;
-  let suspends = record.kind === 'await' || record.kind === 'yieldReturn';
+  let suspends =
+    record.kind === 'await' || record.kind === 'yieldReturn' || (record.kind === 'using' && record.isAwait === true);
   for (const [key, value] of Object.entries(record)) {
     // Types, the syntax a node keeps, and a jump's target hold no part of the code that runs here.
     if (SKIPPED_KEYS.has(key) || (key === 'target' && record.kind === 'goto')) continue;
