@@ -3,6 +3,7 @@ import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
+import type { LineMap } from './preprocessor';
 import {
   allInterfacesOf,
   arrayType,
@@ -874,7 +875,8 @@ export abstract class CallBinder extends OperatorBinder {
           return this.constant(this.callerMember, type, row);
         }
         case 'LineNumber': {
-          return this.convert(this.constant(row + 1, this.intType, row), type, row);
+          const line = (this.lineMap?.map(row) ?? row) + 1;
+          return this.convert(this.constant(line, this.intType, row), type, row);
         }
         case 'FilePath': {
           return this.constant(CALLER_FILE_PATH, type, row);
@@ -910,6 +912,8 @@ export abstract class CallBinder extends OperatorBinder {
 
   /** The name of the member whose body is being bound, which `[CallerMemberName]` gives. */
   protected callerMember = '';
+  /** The rows that `#line` directives give `[CallerLineNumber]`. */
+  protected lineMap: LineMap | undefined;
 
   /** The value of an omitted optional argument. */
   protected abstract defaultArgument(

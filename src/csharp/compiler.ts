@@ -120,7 +120,11 @@ function buildLibrary(): Library {
 /** Compiles a program: parses nothing itself, but declares, binds, and checks it. */
 export function compileProgram(unit: CompilationUnit, options: CompileOptions = {}): CompiledProgram {
   const compiler = new Compiler(getLibrary(), options);
-  return compiler.compile(unit);
+  try {
+    return compiler.compile(unit);
+  } catch (error) {
+    throw error instanceof CompileError && unit.lineMap ? unit.lineMap.remap(error) : error;
+  }
 }
 
 export class Compiler extends AttributeBinder {
@@ -141,6 +145,7 @@ export class Compiler extends AttributeBinder {
     let entry: MethodSymbol | undefined;
     let isTopLevel = false;
     let declared: DeclaredType[] = [];
+    this.lineMap = unit.lineMap;
     this.runGuarded(() => {
       declared = this.declareUnit(unit, this.userRoot, false);
       this.checkStructLayouts(declared);

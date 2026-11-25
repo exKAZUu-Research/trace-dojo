@@ -1,4 +1,4 @@
-import type { BuildOptions } from './preprocessor';
+import type { BuildOptions, LineMap } from './preprocessor';
 
 /** The syntax tree of a C# program, converted from tree-sitter's tree with stage C and D syntax already rejected. */
 
@@ -583,6 +583,8 @@ export interface CompilationUnit {
   sourceRows: number;
   /** The compiler options that the program's `#:property` directives set; the library has none. */
   options?: BuildOptions;
+  /** The rows that `#line` directives map the diagnostics to; the library has none. */
+  lineMap?: LineMap;
   /** The `[assembly: ...]` and `[module: ...]` attributes. */
   attributes?: AttributeNode[];
 }

@@ -441,6 +441,42 @@ test('a class Main returning Task or Task<int> runs as the entry point and is wa
   });
 });
 
+// `#line` moves the rows that compile errors and `[CallerLineNumber]` report, and directive errors come with the
+// syntax errors in row order.
+test('#line maps the rows of compile errors and caller line numbers as Roslyn does', () => {
+  const caller = String.raw`using System.Runtime.CompilerServices;
+#line 100
+Show();
+#line hidden
+Show();
+#line default
+Show();
+static void Show([CallerLineNumber] int line = 0) => Console.WriteLine(line);
+`;
+  expect(executeProgram('csharp', caller)).toMatchObject({ kind: 'executed', stdout: '100\n102\n7\n' });
+  const errors =
+    'int a = "x";\n#line 200\nint b = "y";\n#line (1,1)-(5,60) "f.cs"\nint c = "z";\n#line default\nint d = "w";\n';
+  const conversion = "CS0029: 型 'string' を 'int' に暗黙的に変換できません";
+  expect(executeProgram('csharp', errors)).toEqual({
+    kind: 'compileError',
+    diagnostics: [0, 199, 0, 6].map((row) => ({ row, message: conversion })),
+  });
+  expect(executeProgram('csharp', 'Console.WriteLine(1);\n#line 40\nint x = 1\n#line bad\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 39, message: 'CS1002: ; が必要です' },
+      { row: 40, message: 'CS1576: #line ディレクティブの行数が指定されていないか、無効です' },
+    ],
+  });
+  expect(executeProgram('csharp', '#if A\n#region r\n#endif\n#endregion\nConsole.WriteLine(1);\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: 'CS1038: #endregion ディレクティブが必要です' },
+      { row: 5, message: 'CS1027: #endif ディレクティブ が必要です' },
+    ],
+  });
+});
+
 // A property or indexer returning by reference names the variable its getter returns, which assignments, `++`, and
 // ref arguments write through; a `ref readonly` one is read-only.
 test('properties and indexers returning by reference read and write the variable they return', () => {

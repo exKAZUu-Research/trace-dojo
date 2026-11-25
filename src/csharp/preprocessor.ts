@@ -29,6 +29,34 @@ export interface PreprocessedSource {
   /** The source with directives and the lines they leave out blanked, so that rows and columns stay as written. */
   text: string;
   options: BuildOptions;
+  lineMap: LineMap;
+  /** The directives' errors, which Roslyn reports with the syntax errors, in the order of their rows. */
+  diagnostics: SourceDiagnostic[];
+}
+
+/**
+ * The rows that `#line` directives give the lines after them, which Roslyn reports diagnostics and `[CallerLineNumber]`
+ * at; the trace keeps showing the rows as written, the program the learner sees.
+ */
+export class LineMap {
+  /** The mappings in source order, each from its first row on: the row it maps that one to. */
+  private readonly entries: { start: number; mapped: number }[] = [];
+
+  map(row: number): number {
+    const entry = this.entries.findLast(({ start }) => start <= row);
+    return entry ? entry.mapped + row - entry.start : row;
+  }
+
+  /** Maps the rows from `start` on so that `start` becomes `mapped`. */
+  add(start: number, mapped: number): void {
+    this.entries.push({ start, mapped });
+  }
+
+  /** The error with its diagnostics at the rows Roslyn reports them. */
+  remap(error: CompileError): CompileError {
+    if (this.entries.length === 0) return error;
+    return new CompileError(error.diagnostics.map(({ row, message }) => ({ row: this.map(row), message })));
+  }
 }
 
 /** The `#:property` names whose values the run follows, and those that change nothing a program can observe. */
@@ -49,17 +77,27 @@ const IGNORED_PROPERTIES = new Set([
 const LANGUAGE_VERSIONS = new Set(['latest', 'latestmajor', 'preview', 'default', '14', '14.0']);
 
 interface Conditional {
-  row: number;
+  kind: 'if';
   /** Whether a branch has already been taken, so that later `#elif` and `#else` branches are skipped. */
   taken: boolean;
   /** Whether the enclosing region is active. */
   parentActive: boolean;
   hasElse: boolean;
-  /** How many `#region`s were open at the `#if`, which must close the ones opened inside before its `#endif`. */
-  regions: number;
   /** Whether the current branch is active, once an `#elif` or `#else` has chosen it. */
   active?: boolean;
 }
+
+/**
+ * An open `#if` or `#region`. Roslyn keeps both in one stack and checks only the innermost against each directive
+ * that ends one, so an `#endif` inside a `#region` is reported and leaves both open.
+ */
+type OpenBlock = Conditional | { kind: 'region' };
+
+const UNEXPECTED_ERRORS = {
+  if: ['CS1027', '#endif ディレクティブ が必要です'],
+  region: ['CS1038', '#endregion ディレクティブが必要です'],
+  none: ['CS1028', '不適切なプリプロセッサ ディレクティブです'],
+} as const;
 
 /**
  * Runs C#'s preprocessing directives (C# spec §6.5) before the program is parsed: it evaluates `#if`, `#elif`,
@@ -82,9 +120,9 @@ class Preprocessor {
     symbols: [],
   };
   private readonly diagnostics: SourceDiagnostic[] = [];
-  private readonly conditionals: Conditional[] = [];
-  private readonly regions: number[] = [];
+  private readonly blocks: OpenBlock[] = [];
   private readonly scanner = new LineScanner();
+  private readonly lineMap = new LineMap();
   /** Whether a token came before, after which `#define`, `#undef`, and `#:` may not come. */
   private tokenSeen = false;
 
@@ -104,18 +142,21 @@ class Preprocessor {
         if (this.scanner.scan(line)) this.tokenSeen = true;
       } else lines[row] = '';
     }
-    const end = lines.length;
-    if (this.regions.length > 0)
-      diagnostics.push({ row: end - 1, message: 'CS1038: #endregion ディレクティブが必要です' });
-    if (this.conditionals.length > 0)
-      diagnostics.push({ row: end - 1, message: 'CS1027: #endif ディレクティブ が必要です' });
-    if (diagnostics.length > 0) throw new CompileError(diagnostics.map(({ row, message }) => ({ row, message })));
+    const innermost = this.blocks.at(-1);
+    if (innermost) this.unexpected(lines.length - 1);
     this.options.symbols = [...this.symbols];
-    return { text: lines.join('\n'), options: this.options };
+    return { text: lines.join('\n'), options: this.options, lineMap: this.lineMap, diagnostics };
   }
 
   private isActive(): boolean {
-    return this.conditionals.length === 0 || isBranchActive(this.conditionals.at(-1) as Conditional);
+    const conditional = this.blocks.findLast((block) => block.kind === 'if');
+    return !conditional || isBranchActive(conditional);
+  }
+
+  /** Reports a directive that the innermost open block does not let end it, by what that block is. */
+  private unexpected(row: number): void {
+    const [code, message] = UNEXPECTED_ERRORS[this.blocks.at(-1)?.kind ?? 'none'];
+    this.error(row, code, message);
   }
 
   private error(row: number, code: string, message: string): void {
@@ -149,23 +190,26 @@ class Preprocessor {
         return;
       }
       case 'region': {
-        this.regions.push(row);
+        this.blocks.push({ kind: 'region' });
         return;
       }
       case 'endregion': {
-        if (this.regions.length === 0) this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
-        else this.regions.pop();
+        if (this.blocks.at(-1)?.kind === 'region') this.blocks.pop();
+        else this.unexpected(row);
         return;
       }
       case 'error': {
         this.error(row, 'CS1029', `#error: '${rest.trimEnd()}'`);
         return;
       }
+      case 'line': {
+        this.lineDirective(rest, row);
+        return;
+      }
       case 'warning':
-      case 'line':
       case 'pragma':
       case 'nullable': {
-        // Warnings, nullable analysis, and line mapping change only the warnings and the lines that messages cite.
+        // Warnings and nullable analysis change only the warnings.
         return;
       }
       default: {
@@ -192,22 +236,57 @@ class Preprocessor {
     else this.symbols.delete(symbol[1]);
   }
 
+  /**
+   * `#line`: a line number with an optional file, `default`, `hidden`, which keeps the mapping before it for the
+   * diagnostics in the lines it hides, or the span form `(line,column)-(line,column) [offset] "file"`.
+   */
+  private lineDirective(rest: string, row: number): void {
+    const { diagnostics, lineMap } = this;
+    const next = row + 1;
+    const keyword = /^(default|hidden)\b/.exec(rest)?.[1];
+    if (keyword) {
+      lineMap.add(next, keyword === 'default' ? next : lineMap.map(next));
+      checkLineEnd(rest.slice(keyword.length), row, diagnostics);
+      return;
+    }
+    const span = /^\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*-\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*(\d+\s*)?/.exec(rest);
+    const line = span ?? /^(\d+)\s*/.exec(rest);
+    if (!line || Number(line[1]) === 0) {
+      this.error(row, 'CS1576', '#line ディレクティブの行数が指定されていないか、無効です');
+      return;
+    }
+    const [startLine, startColumn, endLine, endColumn] = (span?.slice(1, 5) ?? []).map(Number);
+    if (span && (endLine < startLine || (endLine === startLine && endColumn < startColumn))) {
+      this.error(row, 'CS8939', '#line ディレクティブの終了位置は、開始位置と同じかそれ以上でなければなりません');
+      return;
+    }
+    const after = rest.slice(line[0].length);
+    const file = /^"[^"]*"/.exec(after)?.[0];
+    if (file === undefined && (span || (after.trimEnd() !== '' && !after.startsWith('//')))) {
+      this.error(row, 'CS1578', '引用符付きのファイル名、単一行コメント、または行末が必要です');
+      return;
+    }
+    lineMap.add(next, Number(line[1]) - 1);
+    checkLineEnd(after.slice(file?.length ?? 0).trimStart(), row, diagnostics);
+  }
+
   /** `#if`, `#elif`, `#else`, and `#endif`, which choose the branch whose lines stay. */
   private conditional(name: 'if' | 'elif' | 'else' | 'endif', rest: string, row: number): void {
-    const { conditionals, diagnostics, symbols } = this;
+    const { blocks, diagnostics, symbols } = this;
     if (name === 'if') {
       const parentActive = this.isActive();
       const value = parentActive ? evaluateCondition(rest, row, symbols, diagnostics) : false;
-      conditionals.push({ row, taken: value, parentActive, hasElse: false, regions: this.regions.length });
+      blocks.push({ kind: 'if', taken: value, parentActive, hasElse: false });
+      return;
+    }
+    const current = blocks.at(-1);
+    if (current?.kind !== 'if' || (name !== 'endif' && current.hasElse)) {
+      this.unexpected(row);
       return;
     }
     if (name === 'endif') {
-      this.endConditional(rest, row);
-      return;
-    }
-    const current = conditionals.at(-1);
-    if (!current || current.hasElse) {
-      this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
+      blocks.pop();
+      checkLineEnd(rest, row, diagnostics);
       return;
     }
     const isCandidate = current.parentActive && !current.taken;
@@ -217,19 +296,6 @@ class Preprocessor {
       checkLineEnd(rest, row, diagnostics);
     } else current.active = isCandidate ? evaluateCondition(rest, row, symbols, diagnostics) : false;
     if (current.active) current.taken = true;
-  }
-
-  private endConditional(rest: string, row: number): void {
-    const closed = this.conditionals.pop();
-    if (!closed) {
-      this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
-      return;
-    }
-    if (this.regions.length > closed.regions) {
-      this.error(row, 'CS1038', '#endregion ディレクティブが必要です');
-      this.regions.length = closed.regions;
-    }
-    checkLineEnd(rest, row, this.diagnostics);
   }
 }
 

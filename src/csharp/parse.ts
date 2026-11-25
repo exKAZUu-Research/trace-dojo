@@ -1,6 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { CompilationUnit } from './ast';
@@ -11,14 +11,34 @@ const parser = await loadParser('@willbooster/tree-sitter-c-sharp/tree-sitter-c_
 
 /** Parses a C# source file, throwing a `CompileError` for invalid or unsupported syntax. */
 export function parseCSharp(source: string, isLibrary = false): CompilationUnit {
-  const { text, options } = isLibrary ? { text: source, options: undefined } : preprocess(source);
-  return parseSource(
-    parser,
-    parenthesizeExpressionStatements(text),
-    MISSING_TOKEN_NAMES,
-    (root) => ({ ...new Converter(isLibrary, options?.allowUnsafe ?? false).convertCompilationUnit(root), options }),
-    { locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors) }
-  );
+  const { text, options, lineMap, diagnostics } = isLibrary
+    ? { text: source, options: undefined, lineMap: undefined, diagnostics: [] as SourceDiagnostic[] }
+    : preprocess(source);
+  let unit: CompilationUnit | undefined;
+  let syntaxErrors: SourceDiagnostic[] = [];
+  try {
+    unit = parseSource(
+      parser,
+      parenthesizeExpressionStatements(text),
+      MISSING_TOKEN_NAMES,
+      (root) => ({
+        ...new Converter(isLibrary, options?.allowUnsafe ?? false).convertCompilationUnit(root),
+        options,
+        lineMap,
+      }),
+      { locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors) }
+    );
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    syntaxErrors = error.diagnostics;
+  }
+  if (!unit || diagnostics.length > 0) {
+    const merged =
+      diagnostics.length > 0 ? [...diagnostics, ...syntaxErrors].toSorted((a, b) => a.row - b.row) : syntaxErrors;
+    const error = new CompileError(merged);
+    throw lineMap ? lineMap.remap(error) : error;
+  }
+  return unit;
 }
 
 const MISSING_TOKEN_NAMES = { identifier: '識別子' };
