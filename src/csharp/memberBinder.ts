@@ -863,6 +863,8 @@ export abstract class MemberBinder extends CallBinder {
       isCallee
     );
     if (!found) {
+      const fromExtension = this.bindStaticExtension(type, name, typeArgs, position, context, isCallee);
+      if (fromExtension) return fromExtension;
       if (inaccessible) {
         this.reportInaccessible(inaccessible, position);
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
@@ -1004,6 +1006,11 @@ export abstract class MemberBinder extends CallBinder {
     );
     const extensions = this.lookupExtensionMethods(name, context.fn.typeContext);
     if (!found) {
+      const getters = isCallee ? [] : this.lookupExtensionProperties(name, context.fn.typeContext);
+      if (getters.length > 0) {
+        const group = this.extensionGroup(`get_${name}`, receiver, getters, position);
+        return this.invokeMethodGroup(group, [], position);
+      }
       if (extensions.length > 0) {
         return {
           kind: 'methodGroup',
@@ -1346,6 +1353,43 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Calls the best method of a group, falling back to extension methods when no instance method applies. */
+  /** A method group of extension members, which a call resolves with the receiver as their first argument. */
+  private extensionGroup(
+    name: string,
+    receiver: BoundExpression | undefined,
+    methods: MethodCandidate[],
+    position: Position
+  ): Extract<NonValue, { kind: 'methodGroup' }> {
+    return {
+      kind: 'methodGroup',
+      name,
+      candidates: receiver ? [] : methods,
+      receiver,
+      isSimpleName: false,
+      typeArgs: undefined,
+      extensions: receiver ? methods : [],
+      isBaseAccess: false,
+      row: position.row,
+    };
+  }
+
+  /** `T.M()` or `T.P` of a static member that an extension block for `T` declares. */
+  private bindStaticExtension(
+    type: Type,
+    name: string,
+    typeArgs: Type[] | undefined,
+    position: Position,
+    context: BindContext,
+    isCallee: boolean
+  ): BindResult | undefined {
+    const methods = this.lookupStaticExtensions(type, name, false, context.fn.typeContext);
+    if (methods.length > 0) return { ...this.extensionGroup(name, undefined, methods, position), typeArgs };
+    if (isCallee) return undefined;
+    const getters = this.lookupStaticExtensions(type, name, true, context.fn.typeContext);
+    if (getters.length === 0) return undefined;
+    return this.invokeMethodGroup(this.extensionGroup(`get_${name}`, undefined, getters, position), [], position);
+  }
+
   invokeMethodGroup(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     args: ArgumentInfo[],

@@ -47,8 +47,6 @@ const UNSUPPORTED_STATEMENTS: Record<string, string> = {
   unsafe_statement: '`unsafe` ブロック',
 };
 
-const UNSUPPORTED_DECLARATIONS: Record<string, string> = { extension_declaration: '拡張ブロック（`extension(...)`）' };
-
 const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
   'public',
   'private',
@@ -422,8 +420,7 @@ export class Converter extends ExpressionConverter {
   // code-gauge-allow functionNcss -- One case per kind of member declaration.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
-    const what = UNSUPPORTED_DECLARATIONS[node.type];
-    if (what) unsupported(node, what);
+    if (node.type === 'extension_declaration') return this.convertExtensionBlock(node, owner);
     const attributes = this.attributed(node);
     return this.convertMemberWithoutAttributes(node, owner).map((member) => ({ ...member, ...attributes }));
   }
@@ -730,6 +727,93 @@ export class Converter extends ExpressionConverter {
       defaultValue: defaultNode ? this.convertExpression(defaultNode) : undefined,
       ...this.attributed(node),
       ...positionOf(node),
+    };
+  }
+
+  /**
+   * An extension block, as the methods of the enclosing static class that C# 14 lowers it to: an instance method
+   * takes the receiver as its `this` parameter, a property becomes its getter, and a static member is the class's,
+   * found through the receiver's type. The block's type parameters and constraints go to each member.
+   */
+  private convertExtensionBlock(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
+    if (!owner.modifiers.set.has('static') || owner.typeParameters.length > 0)
+      throw new CompileError([
+        {
+          row: node.startPosition.row,
+          message: 'CS9283: 拡張機能は、最上位レベルの非ジェネリック静的クラスで宣言する必要があります',
+        },
+      ]);
+    const parts = namedChildren(node);
+    const typeParametersNode = parts.find((part) => part.type === 'type_parameter_list');
+    const typeParameters = typeParametersNode ? this.convertTypeParameters(typeParametersNode) : [];
+    const constraints = parts
+      .filter((part) => part.type === 'type_parameter_constraints_clause')
+      .map((part) => this.convertConstraintClause(part));
+    const receiverNode = parts.find((part) => part.type === 'receiver_parameter') as Node;
+    const receiverType = this.convertType(requiredField(receiverNode, 'type'));
+    const receiverName = field(receiverNode, 'name')?.text;
+    const receiverModifier = namedChildren(receiverNode)
+      .filter((child) => child.type === 'modifier')
+      .map((child) => child.text)
+      .find((text) => text === 'ref' || text === 'in') as Parameter['modifier'];
+    const body = parts.find((part) => part.type === 'extension_body') as Node;
+    const members: MemberDeclaration[] = [];
+    for (const memberNode of namedChildren(body)) {
+      if (memberNode.type === 'comment') continue;
+      for (const member of this.convertMember(memberNode, owner)) {
+        const method = this.extensionMember(member, memberNode);
+        const isStatic = method.modifiers.set.has('static');
+        if (!isStatic && !receiverName)
+          throw new CompileError([
+            {
+              row: method.row,
+              message: `CS9303: '${member.kind === 'property' ? member.name : method.name}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
+            },
+          ]);
+        const receiver: Parameter = {
+          name: receiverName as string,
+          type: receiverType,
+          modifier: receiverModifier,
+          isThis: true,
+          defaultValue: undefined,
+          ...positionOf(receiverNode),
+        };
+        const set = new Set<Modifier>([...method.modifiers.set, 'static']);
+        members.push({
+          ...method,
+          modifiers: { set, positions: method.modifiers.positions },
+          typeParameters: [...typeParameters, ...method.typeParameters],
+          constraints: [...constraints, ...method.constraints],
+          parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
+          extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
+        });
+      }
+    }
+    return members;
+  }
+
+  /** A member of an extension block as a method: a method itself, or a read-only property as its getter. */
+  private extensionMember(member: MemberDeclaration, node: Node): MethodDeclaration {
+    if (member.kind === 'method') return member;
+    const getter =
+      member.kind === 'property' ? member.accessors.find((accessor) => accessor.kind === 'get') : undefined;
+    if (member.kind !== 'property' || !getter || member.accessors.length > 1 || member.initializer)
+      unsupported(node, '拡張ブロックのメソッドと読み取り専用プロパティ以外のメンバー');
+    return {
+      kind: 'method',
+      modifiers: member.modifiers,
+      returnType: member.type,
+      name: `get_${member.name}`,
+      typeParameters: [],
+      constraints: [],
+      parameters: [],
+      body: getter.body,
+      bodyRow: getter.row,
+      startRow: member.row,
+      attributes: member.attributes,
+      extension: { property: member.name },
+      row: member.row,
+      column: member.column,
     };
   }
 

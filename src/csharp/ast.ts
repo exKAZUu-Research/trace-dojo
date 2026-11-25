@@ -382,6 +382,11 @@ export interface MethodDeclaration extends Position, Attributed {
   isRemovedPartial?: boolean;
   /** The interface of an explicit implementation (`void IShape.Draw()`). */
   explicitInterface?: TypeNode;
+  /**
+   * A member of an extension block (`extension(int n) { ... }`), which the converter turns into a method of the
+   * enclosing static class: an extension property's getter, or a static member of the receiver's type.
+   */
+  extension?: { property?: string; staticReceiver?: TypeNode };
 }
 
 export interface ConstructorDeclaration extends Position, Attributed {

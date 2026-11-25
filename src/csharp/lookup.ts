@@ -165,13 +165,39 @@ export class LookupBinder extends DeclarationBinder {
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   lookupExtensionMethods(name: string, context: TypeContext): MethodCandidate[] {
+    // An extension property's getter is found by the property's name only.
+    return this.lookupExtensionMembers(
+      context,
+      (method) => method.isExtension && method.name === name && !method.extensionProperty
+    );
+  }
+
+  /** The getters of the extension properties of a name that the extension blocks in scope declare. */
+  lookupExtensionProperties(name: string, context: TypeContext): MethodCandidate[] {
+    return this.lookupExtensionMembers(context, (method) => method.extensionProperty === name);
+  }
+
+  /** The static members of extension blocks for a type, by name: methods, or with `property`, property getters. */
+  lookupStaticExtensions(type: Type, name: string, isProperty: boolean, context: TypeContext): MethodCandidate[] {
+    return this.lookupExtensionMembers(
+      context,
+      (method) =>
+        method.staticExtensionOf !== undefined &&
+        sameType(method.staticExtensionOf, type) &&
+        (isProperty ? method.extensionProperty === name : method.name === name && !method.extensionProperty)
+    );
+  }
+
+  /** The methods of the static classes in scope that satisfy a test, as extension methods are found. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private lookupExtensionMembers(context: TypeContext, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
     const result: MethodCandidate[] = [];
     const visit = (types: Map<string, TypeSymbol[]>): void => {
       for (const list of types.values()) {
         for (const symbol of list) {
           if (!symbol.isStatic) continue;
           for (const method of symbol.methods) {
-            if (method.isExtension && method.name === name) result.push({ method, owner: symbol.declaredType });
+            if (matches(method)) result.push({ method, owner: symbol.declaredType });
           }
         }
       }
@@ -182,7 +208,7 @@ export class LookupBinder extends DeclarationBinder {
     for (const group of context.usings) for (const namespace of group) visit(namespace.types);
     for (const type of context.staticUsings ?? [])
       for (const method of type.symbol.methods)
-        if (method.isExtension && method.name === name) result.push({ method, owner: type.symbol.declaredType });
+        if (matches(method)) result.push({ method, owner: type.symbol.declaredType });
     return result.filter(
       (candidate, index) => result.findIndex((other) => other.method === candidate.method) === index
     );

@@ -194,6 +194,10 @@ export class MethodSymbol {
   conditionalSymbols: string[] | undefined;
   /** Whether the method is `async`, and for one, what its return type wraps: the type its `return` statements give. */
   isAsync = false;
+  /** For the getter of an extension block's property, the property's name, which `x.P` finds it by. */
+  extensionProperty: string | undefined;
+  /** For a static member of an extension block, the receiver type, whose static members it joins (`string.M()`). */
+  staticExtensionOf: Type | undefined;
   /** How a method returns by reference (`ref T M()`, `ref readonly T M()`), if it does. */
   returnsByRef: 'ref' | 'readonly' | undefined;
   async: AsyncShape | undefined;

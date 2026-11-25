@@ -984,6 +984,9 @@ export class DeclarationBinder extends BinderBase {
     method.returnType = this.resolveReturnType(member.returnType, methodContext, method);
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
     method.isExtension = member.parameters[0]?.isThis === true;
+    method.extensionProperty = member.extension?.property;
+    if (member.extension?.staticReceiver)
+      method.staticExtensionOf = this.resolveType(member.extension.staticReceiver, methodContext);
     this.collectAttributes(
       member.attributes,
       'method',
