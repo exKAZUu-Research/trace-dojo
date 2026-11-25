@@ -201,9 +201,8 @@ function openPath(
   const writes = mode !== 0;
   const directory = files.kindOf(target) === 'directory';
   if (directory && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
-  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   if (directory) {
-    const descriptor = frame.runtime.openFile({ content: noText, read: noText, directory: true, position: 0, decoder });
+    const descriptor = frame.runtime.openFile({ content: noText, directory: true });
     return handle('file', { fd: descriptor });
   }
   const create = flags.create ? (flags.exclusive ? 'exclusive' : 'always') : 'never';
@@ -211,13 +210,7 @@ function openPath(
     ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
     : undefined;
   const content = files.openForReading(target);
-  const descriptor = frame.runtime.openFile({
-    content,
-    read: mode === 1 ? undefined : content,
-    position: 0,
-    write,
-    decoder,
-  });
+  const descriptor = frame.runtime.openFile({ content, read: mode === 1 ? undefined : content, write });
   return handle('file', { fd: descriptor });
 }
 

@@ -1,15 +1,15 @@
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import { type FileHandle, type ProgramInput, ProgramIO } from '../interpreter/programIo';
+import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
 import { BufferMemorySpace } from './bufferMemory';
 import { rejectRuntimeEffect } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
+import { FileStream, InputStream, type OpenFile, OutputStream, type Stream } from './streams';
 import { TurtleReachability } from './turtleReachability';
 import type { Type } from './types';
 import { unavailableMessage } from './unavailable';
-import { createUtf8Decoder } from './utf8';
 import { type Slots, UNASSIGNED, type Value } from './values';
 
 /** A panic, which ends the program: Zig's safety checks and `@panic` cannot be caught. */
@@ -95,7 +95,6 @@ export class Runtime {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
-  private readonly outputDecoders = [createUtf8Decoder(), createUtf8Decoder()];
   /** The storage of container-level variables, which garbage collection starts from. */
   readonly globals: { cell: Slots; type: Type }[] = [];
   private readonly turtleReachability = new TurtleReachability((cost) => this.spend(cost));
@@ -103,19 +102,16 @@ export class Runtime {
   private activeFrameSlots = 0;
   /** The backward branches of the analysis that evaluates code at compile time, which a run of the program lacks. */
   branchCount: BranchCount | undefined;
-  /** What each descriptor that a `std.Io.File` holds refers to, how it may be used, and whether it was closed. */
-  private readonly descriptors = new Map<number, Descriptor>([
-    [0, { target: 'stdin', mode: { read: true, write: false }, closed: false }],
-    [1, { target: 'stdout', mode: { read: false, write: true }, closed: false }],
-    [2, { target: 'stderr', mode: { read: false, write: true }, closed: false }],
-  ]);
+  /** The stream each descriptor that a `std.Io.File` holds refers to, standard streams included. */
+  private readonly descriptors = new Map<number, Stream>();
   private nextDescriptor = 3;
-  private stdinBytes: Uint8Array | undefined;
-  private stdinPosition = 0;
 
   constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
     this.budget = budget;
     this.io = new ProgramIO(this.budget, input);
+    this.descriptors.set(0, new InputStream(this.io.stdin.reader));
+    this.descriptors.set(1, new OutputStream(this.io.stdout));
+    this.descriptors.set(2, new OutputStream(this.io.stderr));
   }
 
   identityOf(value: object): bigint {
@@ -134,27 +130,27 @@ export class Runtime {
 
   openFile(file: OpenFile): number {
     const descriptor = this.nextDescriptor++;
-    this.descriptors.set(descriptor, {
-      target: file,
-      mode: { read: file.read !== undefined, write: file.write !== undefined },
-      closed: false,
-    });
+    this.descriptors.set(
+      descriptor,
+      new FileStream(file, () => {
+        throw new UnavailableOperation('io:nonUtf8File');
+      })
+    );
     return descriptor;
   }
 
   closeDescriptor(descriptor: number): void {
-    const entry = this.descriptors.get(descriptor);
+    const stream = this.descriptors.get(descriptor);
     // Closing a closed descriptor is the use after free that a Debug build's close asserts against.
-    if (!entry || entry.closed) throw new ZigPanic('reached unreachable code');
-    entry.closed = true;
-    const { target } = entry;
-    if (typeof target === 'object') writeFileText(target, () => target.decoder.decode());
+    if (!stream || stream.closed) throw new ZigPanic('reached unreachable code');
+    stream.closed = true;
+    stream.finish();
   }
 
   /** The file that a descriptor refers to, when it is open and not a standard stream. */
   openFileAt(descriptor: number): OpenFile | undefined {
-    const target = this.openDescriptor(descriptor)?.target;
-    return typeof target === 'object' ? target : undefined;
+    const stream = this.openStream(descriptor);
+    return stream instanceof FileStream ? stream.file : undefined;
   }
 
   /**
@@ -163,41 +159,19 @@ export class Runtime {
    */
   readInput(descriptor: number, limit: number): Uint8Array | undefined {
     rejectRuntimeEffect();
-    const entry = this.openDescriptor(descriptor);
-    if (!entry?.mode.read) return undefined;
-    if (entry.target === 'stdin') {
-      this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
-      const bytes = this.stdinBytes.subarray(this.stdinPosition, this.stdinPosition + limit);
-      this.stdinPosition += bytes.length;
-      this.spend(Math.ceil((bytes.length + 1) / 64));
-      if (bytes.length === 0 && limit > 0) entry.sawEnd = true;
-      return bytes;
-    }
-    const file = entry.target as OpenFile;
-    if (file.directory) return undefined;
-    const content = new TextEncoder().encode((file.read as () => string)());
-    const bytes = content.subarray(file.position, file.position + limit);
-    file.position += bytes.length;
-    this.spend(Math.ceil((content.length + 1) / 64));
-    if (bytes.length === 0 && limit > 0) entry.sawEnd = true;
-    return bytes;
+    const stream = this.openStream(descriptor);
+    return stream?.mode.read ? stream.read(limit, (cost) => this.spend(cost)) : undefined;
   }
 
   /** Whether a read of the descriptor has met its end, which is when Zig's `File.Reader` learns the size. */
   sawInputEnd(descriptor: number): boolean {
-    return this.openDescriptor(descriptor)?.sawEnd === true;
+    return this.openStream(descriptor)?.sawEnd === true;
   }
 
   /** Whether reading standard input or an open file would give no more bytes. */
   inputAtEnd(descriptor: number): boolean {
-    const entry = this.openDescriptor(descriptor);
-    if (!entry?.mode.read) return true;
-    if (entry.target === 'stdin') {
-      this.stdinBytes ??= new TextEncoder().encode(this.io.stdin.reader.readRest());
-      return this.stdinPosition >= this.stdinBytes.length;
-    }
-    const file = entry.target as OpenFile;
-    return file.position >= new TextEncoder().encode((file.read as () => string)()).length;
+    const stream = this.openStream(descriptor);
+    return !stream?.mode.read || stream.atEnd();
   }
 
   /**
@@ -206,28 +180,19 @@ export class Runtime {
    */
   writeOutput(fd: number, bytes: readonly number[]): boolean {
     rejectRuntimeEffect();
-    const entry = this.openDescriptor(fd);
-    if (!entry?.mode.write) return false;
-    const { target } = entry;
-    if (target === 'stdout' || target === 'stderr') {
-      const index = target === 'stdout' ? 0 : 1;
-      const text = this.outputDecoders[index].decode(new Uint8Array(bytes), { stream: true });
-      (index === 1 ? this.io.stderr : this.io.stdout).write(text);
-      return true;
-    }
-    const file = target as OpenFile;
-    writeFileText(file, () => file.decoder.decode(new Uint8Array(bytes), { stream: true }));
+    const stream = this.openStream(fd);
+    if (!stream?.mode.write) return false;
+    stream.write(bytes);
     return true;
   }
 
-  private openDescriptor(descriptor: number): Descriptor | undefined {
-    const entry = this.descriptors.get(descriptor);
-    return entry && !entry.closed ? entry : undefined;
+  private openStream(descriptor: number): Stream | undefined {
+    const stream = this.descriptors.get(descriptor);
+    return stream && !stream.closed ? stream : undefined;
   }
 
   finishOutput(): void {
-    this.io.stdout.write(this.outputDecoders[0].decode());
-    this.io.stderr.write(this.outputDecoders[1].decode());
+    for (const fd of [1, 2]) this.descriptors.get(fd)?.finish();
   }
 
   /** Counts slots that a program allocates, ending it as Zig does when memory runs out. */
@@ -277,45 +242,6 @@ export class Runtime {
     const turtles = this.turtleReachability.collect(this.globals, this.frames);
     this.world.retain((turtle) => turtles.has(turtle));
   }
-}
-
-/**
- * Writes the text that a file's bytes decode to; the run's files hold text, so bytes that are not UTF-8 end the
- * program instead of turning into U+FFFD.
- */
-function writeFileText(file: OpenFile, decode: () => string): void {
-  if (!file.write) return;
-  let text: string;
-  try {
-    text = decode();
-  } catch {
-    throw new UnavailableOperation('io:nonUtf8File');
-  }
-  file.write.write(text);
-}
-
-type StandardStream = 'stdin' | 'stdout' | 'stderr';
-
-/** A descriptor: the standard stream or the file it refers to, the uses it is open for, and whether it was closed. */
-interface Descriptor {
-  readonly target: StandardStream | OpenFile;
-  readonly mode: { readonly read: boolean; readonly write: boolean };
-  closed: boolean;
-  sawEnd?: boolean;
-}
-
-/** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
-export interface OpenFile {
-  /** The text of the file the descriptor refers to, which follows the file after a rename or a deletion. */
-  content: () => string;
-  read?: () => string;
-  /** Whether the descriptor refers to a directory, which opens for reading but fails each read, as the OS's do. */
-  readonly directory?: boolean;
-  /** How many bytes of the file reading has passed. */
-  position: number;
-  write?: FileHandle;
-  /** A fatal decoder, which holds the bytes of a partly written character. */
-  readonly decoder: TextDecoder;
 }
 
 export class OutOfMemory extends Error {
