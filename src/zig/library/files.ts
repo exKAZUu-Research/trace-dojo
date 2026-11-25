@@ -93,6 +93,8 @@ pub const Reader = struct {
 
     pub fn rebase(r: *Reader, capacity: usize) Error!void {
         if (r.buffer.len - r.seek >= capacity) return;
+        // A fixed reader ends where its bytes end, as endingRebase does.
+        if (r.descriptor == null) return error.EndOfStream;
         if (capacity > r.buffer.len) @panic("reached unreachable code");
         const data = r.buffer[r.seek..r.end];
         @memmove(r.buffer[0..data.len], data);
