@@ -72,7 +72,6 @@ import {
   USIZE,
   VOID,
 } from './types';
-import { decodeUtf8 } from './utf8';
 import { aggregateFacts, fieldFacts, staticResultOf, type ValueFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -275,8 +274,6 @@ export interface AnalysisContext {
   runtimeConditionDepth: number;
   /** The backward branches that the analysis has evaluated, against the evaluation quota. */
   evalBranches: BranchCount;
-  /** The program's code that first reached the library code being compiled, where its compile errors report. */
-  userSpan?: Span;
 }
 
 export function newAnalysisContext(): AnalysisContext {
@@ -372,15 +369,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   error(span: Span, message: string): never {
-    throw new CompileError([{ row: this.reportedSpan(span).row, message }]);
-  }
-
-  /**
-   * Where a compile error at a span is reported: in library code ported from Zig's source, at the program's code that
-   * reached it, since the program's rows are the ones a learner reads.
-   */
-  protected reportedSpan(span: Span): Span {
-    return (this.enclosingNamespace().internal && this.context.userSpan) || span;
+    throw new CompileError([{ row: span.row, message }]);
   }
 
   abstract compile(expression: Expression, resultType?: Type): TExpr;
@@ -553,12 +542,6 @@ export abstract class SemaBase implements SemaApi {
         return known(type, value, span);
       }
       default: {
-        // A library declaration that is only `@compileError("...")` reports its message where the program uses it.
-        const value = decl.syntax.value;
-        if (decl.namespace.internal && value?.kind === 'builtinCall' && value.name === '@compileError') {
-          const [message] = value.args;
-          if (message?.kind === 'string') this.error(span, decodeUtf8(message.bytes));
-        }
         this.resolveVariable(decl);
         const { alignment } = decl;
         if (decl.kind === 'const') {

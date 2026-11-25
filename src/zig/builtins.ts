@@ -177,8 +177,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   /** Refuses a builtin that this grader does not run, before any class of the compiler handles the call. */
   protected checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void {
     const unavailable = UNAVAILABLE.get(expression.name);
-    if (unavailable && !(unavailable.inLibrary && this.enclosingNamespace().internal))
-      this.error(expression, unavailableMessage(expression.name));
+    if (unavailable) this.error(expression, unavailableMessage(expression.name));
   }
 
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {

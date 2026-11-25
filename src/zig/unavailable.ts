@@ -1,8 +1,6 @@
 /** Something this grader does not run, and the words its diagnostic names it by. */
 interface Unavailable {
   readonly what: string;
-  /** Whether library code ported from Zig's source still uses it, as a builtin that depends on memory representation. */
-  readonly inLibrary?: boolean;
 }
 
 /**
@@ -50,14 +48,14 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@Struct', { what: '@Struct（型の操作）' }],
   ['@Union', { what: '@Union（型の操作）' }],
   ['@Enum', { what: '@Enum（型の操作）' }],
-  ['@bitCast', { what: '@bitCast（メモリの表現に依存する変換）', inLibrary: true }],
-  ['@sizeOf', { what: '@sizeOf（メモリの表現）', inLibrary: true }],
-  ['@bitSizeOf', { what: '@bitSizeOf（メモリの表現）', inLibrary: true }],
-  ['@alignOf', { what: '@alignOf（メモリの表現）', inLibrary: true }],
-  ['@offsetOf', { what: '@offsetOf（メモリの表現）', inLibrary: true }],
-  ['@bitOffsetOf', { what: '@bitOffsetOf（メモリの表現）', inLibrary: true }],
-  ['@backingInt', { what: '@backingInt（メモリの表現に依存する変換）', inLibrary: true }],
-  ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）', inLibrary: true }],
+  ['@bitCast', { what: '@bitCast（メモリの表現に依存する変換）' }],
+  ['@sizeOf', { what: '@sizeOf（メモリの表現）' }],
+  ['@bitSizeOf', { what: '@bitSizeOf（メモリの表現）' }],
+  ['@alignOf', { what: '@alignOf（メモリの表現）' }],
+  ['@offsetOf', { what: '@offsetOf（メモリの表現）' }],
+  ['@bitOffsetOf', { what: '@bitOffsetOf（メモリの表現）' }],
+  ['@backingInt', { what: '@backingInt（メモリの表現に依存する変換）' }],
+  ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）' }],
   ['@Vector', { what: 'ベクトル（@Vector）' }],
   ['@reduce', { what: 'ベクトル（@reduce）' }],
   ['@shuffle', { what: 'ベクトル（@shuffle）' }],

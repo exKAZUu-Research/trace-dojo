@@ -1,18 +1,13 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss -- The builtins that inspect types share the analysis of `std.lang.Type`'s values.
-import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-import { BufferMemory } from './bufferMemory';
 import { BuiltinCompiler } from './builtins';
 import { constantText } from './constantText';
-import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
+import { bitSizeOf } from './layout';
 import { langNamespace } from './library/lang';
-import { memorySpace, spendMemory } from './memoryAccounting';
 import { known, runtime, type TExpr } from './semaBase';
 import {
   ANYTYPE,
   BOOL,
-  COMPTIME_INT,
   ENUM_LITERAL,
   type FnType,
   type IntType,
@@ -40,11 +35,11 @@ import { Cell, markConstantStorage, NULL, Pointer, Slice, type Value, ZArray, ZS
  */
 export abstract class ReflectionCompiler extends BuiltinCompiler {
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
-    return this.reflectionBuiltin(expression, resultType) ?? super.compileBuiltin(expression, resultType);
+    return this.reflectionBuiltin(expression) ?? super.compileBuiltin(expression, resultType);
   }
 
   // code-gauge-allow functionNcss -- Dispatches one case per builtin, as Zig's language reference lists them.
-  private reflectionBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr | undefined {
+  private reflectionBuiltin(expression: ExpressionOf<'builtinCall'>): TExpr | undefined {
     switch (expression.name) {
       case '@typeName': {
         return this.builtinTypeName(expression);
@@ -57,21 +52,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       }
       case '@setEvalBranchQuota': {
         return this.builtinSetEvalBranchQuota(expression);
-      }
-      case '@sizeOf': {
-        return this.builtinSizeOf(expression);
-      }
-      case '@alignOf': {
-        return this.builtinSizeOf(expression);
-      }
-      case '@bitSizeOf': {
-        return this.builtinSizeOf(expression);
-      }
-      case '@offsetOf': {
-        return this.builtinOffsetOf(expression);
-      }
-      case '@bitOffsetOf': {
-        return this.builtinOffsetOf(expression);
       }
       case '@hasDecl': {
         return this.builtinHasDecl(expression);
@@ -118,15 +98,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       case '@volatileCast': {
         return this.builtinConstCast(expression);
       }
-      case '@bitCast': {
-        return this.builtinBitCast(expression, resultType);
-      }
-      case '@backingInt': {
-        return this.builtinBackingInt(expression);
-      }
-      case '@fromBackingInt': {
-        return this.builtinFromBackingInt(expression, resultType);
-      }
       default: {
         return undefined;
       }
@@ -153,11 +124,10 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const message = this.comptimeText(args[0]);
     if (this.context.comptimeDepth === 0) return this.error(expression, message);
     // Code that the compiler runs reaches the call only on the path that runs it.
-    const reported = this.reportedSpan(expression);
     return runtime(
       NORETURN,
       () => {
-        throw new CompileError([{ row: reported.row, message }]);
+        throw new CompileError([{ row: expression.row, message }]);
       },
       expression
     );
@@ -184,33 +154,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       },
       expression
     );
-  }
-
-  private builtinSizeOf(expression: ExpressionOf<'builtinCall'>): TExpr {
-    const { name, args } = expression;
-    this.builtinArity(expression, 1);
-    const type = this.sizedType(args[0], name);
-    const bits = name === '@bitSizeOf' ? reflectedBitSize(type) : undefined;
-    if (name === '@bitSizeOf' && bits === undefined)
-      this.error(args[0], `${typeName(type)} 型にはビット数がありません（packed でない構造体などを含みます）。`);
-    const size = name === '@sizeOf' ? sizeOf(type) : name === '@alignOf' ? alignOf(type) : (bits as number);
-    return known(COMPTIME_INT, BigInt(size), expression);
-  }
-
-  private builtinOffsetOf(expression: ExpressionOf<'builtinCall'>): TExpr {
-    const { name, args } = expression;
-    this.builtinArity(expression, 2);
-    const type = this.sizedType(args[0], name);
-    const fieldName = this.comptimeText(args[1]);
-    if (type.kind !== 'struct')
-      return this.error(args[0], `${name} には構造体の型を書いてください（${typeName(type)} 型です）。`);
-    const fields = this.structFields(type, expression);
-    const index = fields.findIndex((field) => field.name === fieldName);
-    if (index === -1) return this.error(args[1], `${typeName(type)} 型には、フィールド「${fieldName}」がありません。`);
-    if (fields[index].comptimeValue)
-      return this.error(args[1], `comptime のフィールド「${fieldName}」には位置がありません。`);
-    const bits = fieldOffsets(type)[index];
-    return known(COMPTIME_INT, BigInt(name === '@offsetOf' ? Math.floor(bits / 8) : bits), expression);
   }
 
   private builtinHasDecl(expression: ExpressionOf<'builtinCall'>): TExpr {
@@ -337,85 +280,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       place: undefined,
       local: undefined,
     };
-  }
-
-  private builtinBitCast(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
-    const { args } = expression;
-    this.builtinArity(expression, 1);
-    const target = this.resultTypeOf(expression, resultType);
-    const operand = this.compile(args[0]);
-    for (const [type, span] of [
-      [operand.type, args[0]],
-      [target, expression],
-    ] as const) {
-      this.resolveStorage(type, span);
-      if (!bitCastable(type)) return this.error(span, `@bitCast では ${typeName(type)} 型を変換できません。`);
-    }
-    const from = bitSizeOf(operand.type);
-    const to = bitSizeOf(target);
-    if (from !== to)
-      return this.error(
-        expression,
-        `@bitCast の変換の前後でビット数が合いません（${typeName(target)} は ${to} ビット、${typeName(operand.type)} は ${from} ビットです）。`
-      );
-    return this.derived(operand, target, (value) => reinterpret(value, operand.type, target));
-  }
-
-  private builtinBackingInt(expression: ExpressionOf<'builtinCall'>): TExpr {
-    const { args } = expression;
-    this.builtinArity(expression, 1);
-    const operand = this.compile(args[0]);
-    const type = operand.type;
-    if (type.kind === 'enum') {
-      const tag = this.enumFields(type) && (type.tagType as Type);
-      return this.derived(operand, tag, (value) => value);
-    }
-    if (type.kind === 'union' && type.layout !== 'packed' && type.tagType) {
-      const tags = this.enumFields(type.tagType);
-      this.unionFields(type);
-      return this.derived(operand, type.tagType.tagType as Type, (value) => tags[(value as ZUnion).tag].value);
-    }
-    if ((type.kind === 'struct' || type.kind === 'union') && type.layout === 'packed') {
-      // Zig takes the backing integer only of a packed type that names it, as `packed struct(u8)` does.
-      if (!type.namespace.syntax?.argument)
-        return this.error(
-          args[0],
-          `${typeName(type)} 型は基底の整数型を書いていないので、@backingInt があいまいです。`
-        );
-      this.resolveStorage(type, args[0]);
-      const backing = backingIntegerOf(type);
-      return this.derived(operand, backing, (value) => reinterpret(value, type, backing));
-    }
-    return this.error(
-      args[0],
-      `@backingInt には enum か packed struct・packed union を渡してください（${typeName(type)} 型です）。`
-    );
-  }
-
-  private builtinFromBackingInt(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {
-    const { args } = expression;
-    this.builtinArity(expression, 1);
-    const target = this.resultTypeOf(expression, resultType);
-    if (target.kind === 'enum') {
-      const fields = this.enumFields(target);
-      const tag = target.tagType as Type;
-      const operand = this.coerce(this.compile(args[0], tag), tag, args[0]);
-      const values = new Set(fields.map((field) => field.value));
-      const exhaustive = target.exhaustive;
-      return this.derived(operand, target, (value) =>
-        exhaustive && !values.has(value as bigint) ? panic(PANIC.invalidEnum) : value
-      );
-    }
-    if ((target.kind === 'struct' || target.kind === 'union') && target.layout === 'packed') {
-      this.resolveStorage(target, expression);
-      const backing = intType(false, bitSizeOf(target));
-      const operand = this.coerce(this.compile(args[0], backing), backing, args[0]);
-      return this.derived(operand, target, (value) => reinterpret(value, backing, target));
-    }
-    return this.error(
-      expression,
-      `@fromBackingInt の結果の型には enum か packed struct・packed union が要ります（${typeName(target)} 型です）。`
-    );
   }
 
   private resultTypeOf(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): Type {
@@ -690,66 +554,7 @@ function optionalValue(value: Type | undefined): Value {
   return value ?? NULL;
 }
 
-/** Whether `@bitCast` takes or gives a value of a type, which must have a fixed bit layout. */
-function bitCastable(type: Type): boolean {
-  switch (type.kind) {
-    case 'int':
-    case 'float':
-    case 'bool': {
-      return true;
-    }
-    case 'enum': {
-      return type.namespace.syntax?.argument !== undefined;
-    }
-    case 'struct':
-    case 'union': {
-      return type.layout !== 'auto';
-    }
-    case 'array': {
-      return bitCastable(type.child);
-    }
-    default: {
-      return false;
-    }
-  }
-}
-
-/** A value's bits read as a value of another type of the same size, as memory holds them on a little-endian CPU. */
-function reinterpret(value: Value, from: Type, to: Type): Value {
-  const length = Math.max(sizeOf(from), sizeOf(to));
-  const bytes = Array.from<Value>({ length }).fill(0n);
-  new BufferMemory(bytes, spendMemory, memorySpace()).write(from, 0, value);
-  return new BufferMemory(bytes, spendMemory, memorySpace()).read(to, 0);
-}
-
 /** The backing integer of a packed struct or union: the one it names, else the unsigned one of its bits. */
 function backingIntegerOf(type: Extract<Type, { kind: 'struct' | 'union' }>): IntType {
   return type.backingInteger ?? intType(false, bitSizeOf(type));
-}
-
-/**
- * What `@bitSizeOf` gives: an array's elements' bits without padding, its sentinel included, and none for what Zig lays out only
- * in bytes, a struct or union that is not packed, an optional that is not a pointer, or an error union.
- */
-function reflectedBitSize(type: Type): number | undefined {
-  switch (type.kind) {
-    case 'struct':
-    case 'union': {
-      return type.layout === 'packed' ? bitSizeOf(type) : undefined;
-    }
-    case 'array': {
-      const element = reflectedBitSize(type.child);
-      const length = Number(type.length) + (type.sentinel === undefined ? 0 : 1);
-      return element === undefined ? undefined : length * element;
-    }
-    case 'optional': {
-      return type.child.kind === 'pointer' ? bitSizeOf(type) : undefined;
-    }
-    case 'error_union': {
-      return undefined;
-    }
-    default: {
-      return bitSizeOf(type);
-    }
-  }
 }

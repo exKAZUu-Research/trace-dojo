@@ -147,7 +147,6 @@ export abstract class StatementCompiler extends CallCompiler {
 
   protected compileFunctionBody(compilation: FunctionCompilation): void {
     this.separateAnalysis(() => {
-      this.context.userSpan = compilation.instance.userSpan;
       this.compileFunctionBodyAlone(compilation);
     });
   }

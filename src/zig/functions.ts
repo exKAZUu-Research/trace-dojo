@@ -28,8 +28,6 @@ export class FunctionInstance {
   recordsSteps = false;
   internal = false;
   state: 'pending' | 'compiling' | 'compiled' = 'pending';
-  /** The program's code that first reached this function, where a library function's compile errors report. */
-  userSpan?: Span;
   /** Whether the function's name marks it as one that creates an object, as Java's constructors do. */
   readonly createsObject: boolean;
 
