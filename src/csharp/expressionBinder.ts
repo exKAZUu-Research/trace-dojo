@@ -1722,6 +1722,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (fn.lockDepth > 0) this.error(node, 'CS1996', 'lock ステートメントの本体で待機することはできません');
     const operand = this.bindTypedValue(node.operand, context);
     if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    if (isDynamicType(operand.type)) return this.bindDynamicAwait(node, operand, context);
     const call = (receiver: BoundExpression, name: string): BoundExpression => {
       const group = this.bindInstanceMember(receiver, name, undefined, node, context, true);
       if (group.kind !== 'methodGroup') return this.toValue(group, node);
@@ -1735,6 +1736,41 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const isCompleted = this.toValue(this.bindInstanceMember(awaiter, 'IsCompleted', undefined, node, context), node);
     const getResult = call(awaiter, 'GetResult');
     return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: getResult.type, row };
+  }
+
+  /** `await d` of a `dynamic` value, whose awaiter, `IsCompleted`, and `GetResult()` bind when they run. */
+  private bindDynamicAwait(
+    node: Extract<Expression, { kind: 'await' }>,
+    operand: BoundExpression,
+    context: BindContext
+  ): BoundExpression {
+    const { row } = node;
+    const member = (name: string): Extract<Expression, { kind: 'memberAccess' }> => ({
+      kind: 'memberAccess',
+      target: this.lateOperand(0, node),
+      name,
+      typeArgs: undefined,
+      nameRow: row,
+      row,
+      column: node.column,
+    });
+    const call = (name: string): Expression => ({
+      kind: 'invocation',
+      target: member(name),
+      args: [],
+      row,
+      column: node.column,
+    });
+    const dynamicOperand: BoundExpression = { kind: 'compoundOperand', type: this.dynamicType, row };
+    const options = { receiver: 0, isStatement: true };
+    const getAwaiter = this.late(call('GetAwaiter'), [dynamicOperand], context, options);
+    const isCompleted = this.convert(
+      this.late(member('IsCompleted'), [dynamicOperand], context, { receiver: 0 }),
+      this.boolType,
+      node
+    );
+    const getResult = this.late(call('GetResult'), [dynamicOperand], context, options);
+    return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: this.dynamicType, row };
   }
 
   /** The type of `typeof`, where an unbound generic type (`List<>`) stands for its definition. */

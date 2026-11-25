@@ -442,6 +442,7 @@ export abstract class LambdaBinder extends MemberBinder {
         );
       else this.diagnostics.push({ row: node.row, message: 'not a statement' });
     }
+    discardResult(value);
     return {
       kind: 'block',
       statements: [{ kind: 'expression', expression: value, row: bodyNode.row, step: 'none' }],
@@ -531,4 +532,11 @@ function withParameters(
     column: node.column,
   }));
   return { ...node, parameters };
+}
+
+/** Marks the late-bound operation whose value a statement drops, which the runtime binder lets return `void`. */
+export function discardResult(expression: BoundExpression): void {
+  if (expression.kind === 'late') expression.isDiscarded = true;
+  else if (expression.kind === 'await') discardResult(expression.getResult);
+  else if (expression.kind === 'conditionalAccess') discardResult(expression.access);
 }

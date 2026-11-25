@@ -260,15 +260,21 @@ export class Compiler extends AttributeBinder {
     const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
     const context: BindContext = { scope: new LocalScope(undefined, fn), fn };
     const saved = this.diagnostics.length;
-    this.lastInconvertibleMethod = undefined;
+    this.lastInconvertibleCall = undefined;
     // The runtime binder does not look for extension methods.
     this.isLateBinding = true;
     try {
-      for (const [index, type] of types.entries())
-        this.declareLocal(lateOperandName(index), type, node.syntax, context).isHidden = true;
+      for (const [index, type] of types.entries()) {
+        const local = this.declareLocal(lateOperandName(index), type, node.syntax, context);
+        local.isHidden = true;
+        // The operand of a `ref` or `out` argument refers to the caller's variable.
+        local.isRefLocal = node.operands[index].kind === 'refArgument';
+      }
       let bound = this.bindValue(node.syntax, context);
       if (node.target)
         bound = this.convert(bound, node.target.type, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
+      else if (bound.type.kind === 'void' && !node.isDiscarded)
+        return { message: "Cannot implicitly convert type 'void' to 'object'" };
       else if (bound.type.kind !== 'void' && bound.type.kind !== 'error')
         bound = this.convert(bound, this.dynamicType, node.syntax);
       const diagnostic = this.diagnostics[saved];
@@ -305,7 +311,10 @@ export class Compiler extends AttributeBinder {
         return `The call is ambiguous between the following methods or properties: '${first}' and '${second}'`;
       }
       case 'CS1503': {
-        return `The best overloaded method match for '${this.lastInconvertibleMethod ?? ''}' has some invalid arguments`;
+        return this.lastInconvertibleCall ?? '';
+      }
+      case 'CS0149': {
+        return 'Cannot invoke a non-delegate type';
       }
       case 'CS0019': {
         return `Operator '${quoted[0]}' cannot be applied to operands of type '${quoted[1]}' and '${quoted[2]}'`;

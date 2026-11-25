@@ -215,7 +215,8 @@ export type BoundExpression =
   | ({
       kind: 'late';
       syntax: Expression;
-      operands: BoundExpression[];
+      /** The operands, of which a `ref` or `out` argument of a call passes its variable. */
+      operands: BoundArgument[];
       /** The operand whose null value fails as a receiver does, before binding. */
       receiver: number | undefined;
       /** For a conversion of a `dynamic` value, the type it converts to. */
@@ -224,6 +225,8 @@ export type BoundExpression =
       typeContext: TypeContext | undefined;
       /** Whether the operation may stand as a statement: a call, an assignment, or an increment. */
       isStatement: boolean;
+      /** Whether a statement drops the value, which lets a call bind to a method returning `void`. */
+      isDiscarded?: boolean;
     } & Base)
   /** A UTF-8 string literal, a `ReadOnlySpan<byte>` over its bytes, which every evaluation shares. */
   | ({ kind: 'utf8'; bytes: readonly number[] } & Base)

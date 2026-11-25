@@ -535,7 +535,7 @@ export class FlowAnalyzer {
   private lessCommonExpression(expression: BoundExpression, state: State): State {
     switch (expression.kind) {
       case 'late': {
-        return this.expressions(expression.operands, state);
+        return this.arguments(expression.operands, state);
       }
       case 'refAssign':
       case 'makeRef': {

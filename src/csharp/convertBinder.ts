@@ -1,6 +1,6 @@
 import type { Expression, Position } from './ast';
 import type { TypeContext } from './binderBase';
-import type { BoundExpression } from './bound';
+import type { BoundArgument, BoundExpression } from './bound';
 import { type ConversionKind, INTEGRAL_RANGES, isEnum, isNumeric } from './conversions';
 import { CsDecimal } from './decimal';
 import { LookupBinder } from './lookup';
@@ -244,7 +244,6 @@ export abstract class ConversionBinder extends LookupBinder {
     return false;
   }
 
-  /** Converts an expression to a type, reporting Roslyn's error when the conversion does not exist. */
   /** The syntax of a late-bound operation's operand. */
   lateOperand(index: number, position: Position): Expression {
     return {
@@ -259,7 +258,7 @@ export abstract class ConversionBinder extends LookupBinder {
   /** An operation on `dynamic` values, which binds to the values' types when it runs. */
   late(
     syntax: Expression,
-    operands: BoundExpression[],
+    operands: BoundArgument[],
     context: { fn: { typeContext: TypeContext | undefined } },
     options: LateOptions = {}
   ): BoundExpression {

@@ -1359,12 +1359,19 @@ export abstract class MemberBinder extends CallBinder {
     context: BindContext
   ): BoundExpression | undefined {
     const onDynamic = target.kind === 'late' && node.target.kind === 'memberAccess';
+    // Invoking a `dynamic` value calls it as the delegate it holds.
+    const ofDynamic = !onDynamic && !isNonValue(target) && isDynamicType(target.type);
+    const hasDynamicArgument = args.some(
+      (arg) => arg.expression.kind !== 'unbound' && isDynamicType(arg.expression.type)
+    );
+    if (target.kind === 'methodGroup' && hasDynamicArgument && this.rejectsDynamicLocalCall(target, node)) {
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
     const withDynamic =
       target.kind === 'methodGroup' &&
-      args.some((arg) => arg.expression.kind !== 'unbound' && isDynamicType(arg.expression.type)) &&
-      !target.candidates.some((candidate) => candidate.method.kind === 'localFunction') &&
-      args.every((arg) => arg.refKind === undefined);
-    if (!onDynamic && !withDynamic) return undefined;
+      hasDynamicArgument &&
+      !target.candidates.some((candidate) => candidate.method.kind === 'localFunction');
+    if (!onDynamic && !ofDynamic && !withDynamic) return undefined;
     // The runtime binder finds no extension methods, which C# rejects calling with `dynamic` arguments.
     if (target.kind === 'methodGroup' && target.candidates.length === 0 && target.receiver) {
       this.error(
@@ -1385,10 +1392,13 @@ export abstract class MemberBinder extends CallBinder {
       }
     let receiver: BoundExpression | undefined;
     let callee: Expression = node.target;
-    if (onDynamic) receiver = (target as Extract<BoundExpression, { kind: 'late' }>).operands[0];
-    else if (target.kind === 'methodGroup' && target.receiver && target.candidates.some((c) => !c.method.isStatic))
+    if (onDynamic) receiver = (target as Extract<BoundExpression, { kind: 'late' }>).operands[0] as BoundExpression;
+    else if (ofDynamic) {
+      receiver = target as BoundExpression;
+      callee = this.lateOperand(0, node.target);
+    } else if (target.kind === 'methodGroup' && target.receiver && target.candidates.some((c) => !c.method.isStatic))
       receiver = target.receiver;
-    if (receiver) {
+    if (receiver && !ofDynamic) {
       const name = node.target.kind === 'memberAccess' ? node.target.name : (target as { name: string }).name;
       const typeArgs =
         node.target.kind === 'memberAccess' || node.target.kind === 'name' ? node.target.typeArgs : undefined;
@@ -1408,7 +1418,7 @@ export abstract class MemberBinder extends CallBinder {
       target: callee,
       args: args.map((arg, index) => ({
         name: arg.name,
-        modifier: undefined,
+        modifier: arg.refKind === 'in' ? undefined : arg.refKind,
         value: this.lateOperand(index + offset, { row: arg.row, column: 0 }),
         row: arg.row,
         column: 0,
@@ -1416,8 +1426,53 @@ export abstract class MemberBinder extends CallBinder {
       row: node.row,
       column: node.column,
     };
-    const operands = [...(receiver ? [receiver] : []), ...args.map((arg) => arg.expression)];
+    const operands = [
+      ...(receiver ? [receiver] : []),
+      ...args.map((arg, index) => this.lateArgument(arg, node.args[index])),
+    ];
     return this.late(syntax, operands, context, { receiver: receiver ? 0 : undefined, isStatement: true });
+  }
+
+  /**
+   * Reports a call of a generic local function whose type arguments would be inferred from `dynamic` arguments
+   * (CS8322), which Roslyn cannot bind at run time.
+   */
+  private rejectsDynamicLocalCall(group: Extract<BindResult, { kind: 'methodGroup' }>, node: Position): boolean {
+    const local = group.candidates.find((candidate) => candidate.method.kind === 'localFunction')?.method;
+    if (!local || local.typeParameters.length === 0 || group.typeArgs) return false;
+    this.error(
+      node,
+      'CS8322',
+      `動的な型のある引数は、推定された型の引数のある汎用ローカル関数 '${local.name}' に渡すことはできません。`
+    );
+    return true;
+  }
+
+  /**
+   * The operand of a late-bound call's argument: its value, or for `ref` and `out` the variable, which an `out var`
+   * cannot declare without the parameter's type (CS8197).
+   */
+  private lateArgument(arg: ArgumentInfo, syntax: Argument): BoundArgument {
+    if (arg.refKind !== 'ref' && arg.refKind !== 'out') return arg.expression;
+    let target = arg.target;
+    if (arg.declareOut) {
+      const declaration = syntax.value;
+      if (arg.isOutVar && declaration.kind === 'declaration' && declaration.designation.kind === 'single') {
+        this.error(
+          declaration.designation,
+          'CS8197',
+          `暗黙的に型指定された out 変数 '${declaration.designation.name}' の型を推論できません。`
+        );
+      }
+      target = arg.declareOut(arg.isOutVar ? ERROR_TYPE : arg.expression.type);
+    }
+    return {
+      kind: 'refArgument',
+      target: target as BoundLValue,
+      refKind: arg.refKind,
+      type: arg.expression.type,
+      row: arg.row,
+    };
   }
 
   private bindNameof(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {

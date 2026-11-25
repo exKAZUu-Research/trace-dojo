@@ -373,6 +373,43 @@ class P
   });
 });
 
+// `?.` and invoking a delegate work on `dynamic` values, a call passes `ref` and `out` variables, `await` takes a
+// task held as `dynamic`, and the runtime binder names the overloads it finds ambiguous as .NET does.
+test('dynamic invocations, ref arguments, and await bind at run time as .NET binds them', () => {
+  const program = String.raw`dynamic c = new C(), none = null, f = (Func<int, int>)(x => x + 1);
+Console.WriteLine($"{c?.Name} {none?.Name == null} {f(2)}");
+int got, count = 1;
+c.Get(5, out got);
+c.Inc(ref count);
+Console.WriteLine($"{got} {count} {await (dynamic)Later()}");
+try { var nothing = c.Inc(ref count); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { f("x"); } catch (Exception e) { Console.WriteLine(e.Message); }
+Console.WriteLine(none);
+static async Task<string> Later() { await Task.Yield(); return "later"; }
+class C {
+    public string Name => "c";
+    public void Get(int x, out int y) { y = x * 3; }
+    public void Inc(ref int x) { x++; }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'c True 3',
+      '15 2 later',
+      "Cannot implicitly convert type 'void' to 'object'",
+      "Delegate 'System.Func<int,int>' has some invalid arguments",
+      '',
+    ].join('\n'),
+    uncaughtException:
+      "Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: The call is ambiguous between the following methods or properties: 'System.Console.WriteLine(string, params object[])' and 'System.Console.WriteLine(char[])'",
+  });
+  expect(executeProgram('csharp', 'dynamic d = 1;\nint.TryParse(d, out var n);\n')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: "CS8197: 暗黙的に型指定された out 変数 'n' の型を推論できません。" }],
+  });
+});
+
 // A TypedReference refers to a variable, whose exact type `__refvalue` checks when it runs; as a ref struct, it may
 // not be boxed or captured by a lambda. A UTF-8 string literal is a ReadOnlySpan<byte>, another ref struct.
 test('typed references and UTF-8 string literals behave as ref structs do in .NET', () => {

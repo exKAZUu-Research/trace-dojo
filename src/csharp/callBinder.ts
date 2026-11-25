@@ -150,7 +150,8 @@ export abstract class CallBinder extends OperatorBinder {
         return undefined;
       const [first, second] = this.tiedCandidates(mostDerived, args);
       // The runtime binder names them by their full type names and with `params`.
-      this.lastAmbiguity = [first, second].map(({ candidate }) => {
+      const runtimeTie = this.isLateBinding ? this.runtimeBinderTie(mostDerived, args) : [first, second];
+      this.lastAmbiguity = runtimeTie.map(({ candidate }) => {
         const parameters = candidate.method.parameters.map(
           (parameter) =>
             `${parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitutionOf(candidate.owner)))}`
@@ -179,6 +180,32 @@ export abstract class CallBinder extends OperatorBinder {
     );
     const list = undominated.length >= 2 ? undominated : applicable;
     return [list[0], list[1]];
+  }
+
+  /**
+   * The two candidates the runtime binder names in an ambiguity: it keeps the better of each candidate and the next,
+   * skips past a pair that ties, and then checks the one it kept against those before it.
+   */
+  private runtimeBinderTie(applicable: Applicable[], args: ArgumentInfo[]): [Applicable, Applicable] {
+    let tie: [Applicable, Applicable] | undefined;
+    let kept = applicable[0];
+    for (let index = 1; index < applicable.length; index++) {
+      const contender = applicable[index];
+      if (this.isBetter(kept, contender, args)) continue;
+      if (this.isBetter(contender, kept, args)) {
+        kept = contender;
+        continue;
+      }
+      tie = [kept, contender];
+      index++;
+      if (index >= applicable.length) return tie;
+      kept = applicable[index];
+    }
+    for (const earlier of applicable) {
+      if (earlier === kept) break;
+      if (!this.isBetter(kept, earlier, args)) return [kept, earlier];
+    }
+    return tie ?? [applicable[0], applicable[1]];
   }
 
   /** Maps arguments to a candidate's parameters, infers its type arguments, and checks the arguments convert. */
@@ -1219,8 +1246,8 @@ export abstract class CallBinder extends OperatorBinder {
   /** The two methods of the last ambiguous call, as the runtime binder's message names them. */
   protected lastAmbiguity: string[] | undefined;
 
-  /** The method whose argument did not convert, which the runtime binder's message names. */
-  protected lastInconvertibleMethod: string | undefined;
+  /** The runtime binder's message for the last call whose argument did not convert, which names its method or delegate. */
+  protected lastInconvertibleCall: string | undefined;
 
   protected abstract rejectUnknownLibraryMember(type: Type, name: string, position: number): void;
 
@@ -1251,7 +1278,10 @@ export abstract class CallBinder extends OperatorBinder {
         `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(candidate.method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
       );
     } else {
-      this.lastInconvertibleMethod = displayMethodIn(candidate.method, candidate.owner);
+      this.lastInconvertibleCall =
+        description.kind === 'delegate'
+          ? `Delegate '${displayType(candidate.owner, true).replaceAll(', ', ',')}' has some invalid arguments`
+          : `The best overloaded method match for '${displayMethodIn(candidate.method, candidate.owner)}' has some invalid arguments`;
       this.error(
         arg.row,
         'CS1503',

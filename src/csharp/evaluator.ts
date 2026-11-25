@@ -1657,10 +1657,14 @@ export class Evaluator extends AsyncExecutor {
    */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateLate(expression: Extract<BoundExpression, { kind: 'late' }>, frame: Frame): Value {
-    const values: Value[] = [];
+    const values: (Value | Reference)[] = [];
     const start = frame.temporaries.length;
     try {
       for (const operand of expression.operands) {
+        if (operand.kind === 'refArgument') {
+          values.push(this.referenceTo(operand.target, frame));
+          continue;
+        }
         const value = copyValue(this.evaluate(operand, frame));
         values.push(value);
         frame.temporaries.push(value);
@@ -1669,8 +1673,11 @@ export class Evaluator extends AsyncExecutor {
       if (expression.receiver !== undefined && values[expression.receiver] === undefined)
         throw this.runtimeBinderError('Cannot perform runtime binding on a null reference');
       const types = expression.operands.map((operand, index) => {
+        // A variable passed by reference binds as its declared type, which a `dynamic` one gives as `object`.
+        if (operand.kind === 'refArgument')
+          return isDynamicType(operand.type) ? objectType : frame.resolve(operand.type);
         if (!isDynamicType(operand.type)) return frame.resolve(operand.type);
-        const value = values[index];
+        const value = values[index] as Value;
         // A null value binds as the null literal does, which converts to any reference type.
         if (value === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
         return this.runtime.runtimeTypeOf(value) ?? objectType;

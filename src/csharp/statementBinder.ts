@@ -23,6 +23,7 @@ import type {
 import { LabelSymbol } from './bound';
 import type { BindContext } from './convertBinder';
 import { constantText } from './convertBinder';
+import { discardResult } from './lambdaBinder';
 import type { MemberLookup } from './lookup';
 import { propertyDisplay } from './memberBinder';
 import { PatternBinder } from './patternBinder';
@@ -1654,9 +1655,11 @@ export abstract class StatementBinder extends PatternBinder {
 
   /**
    * Reports CS0201 for an expression that stands as a statement but is not one that may. An expression that failed to
-   * bind is judged by its syntax, as Roslyn does, so that `x.Missing;` reports both errors and `Missing();` one.
+   * bind is judged by its syntax, as Roslyn does, so that `x.Missing;` reports both errors and `Missing();` one. The
+   * statement drops the expression's value.
    */
   private requireStatementExpression(expression: BoundExpression, node: Expression): void {
+    discardResult(expression);
     if (expression.type.kind === 'error' ? isStatementSyntax(node) : this.isStatementExpression(expression)) return;
     // An instance compound assignment operator binds to a call followed by the target's value.
     if (expression.kind === 'sequence' && isStatementSyntax(node)) return;

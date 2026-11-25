@@ -4,8 +4,8 @@ import { IteratorExecutor, type IteratorState, type Steps, type Suspension } fro
 import type { PendingException } from './numeric';
 import type { Frame } from './runtime';
 import { taskObject, type TaskState, UnhandledAsyncException } from './tasks';
-import { type AsyncShape, type MethodSymbol, type NamedType } from './types';
-import { Cell, copyValue, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
+import { type AsyncShape, isDynamicType, type MethodSymbol, type NamedType } from './types';
+import { Cell, copyValue, CsBox, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
 
 /**
  * Runs async functions (C# spec §15.14): a call runs the body until its first `await` of an unfinished task, then
@@ -145,8 +145,15 @@ export abstract class AsyncExecutor extends IteratorExecutor {
   private *awaitSteps(expression: Extract<BoundExpression, { kind: 'await' }>, frame: Frame): Steps<Value> {
     const awaitable = yield* this.evaluateSteps(expression.operand, frame);
     const awaiter = this.withOperand(frame, awaitable, () => this.evaluate(expression.getAwaiter, frame));
+    // A `dynamic` operand's awaiter, boxed as a `dynamic` value, is known only now; the scheduler knows the waits of
+    // the library's awaiters alone.
+    const unboxed = awaiter instanceof CsBox ? awaiter.value : awaiter;
+    if (isDynamicType(expression.getAwaiter.type) && !(unboxed instanceof CsStruct && unboxed.type.symbol.isLibrary))
+      throw new CompileError([
+        { row: expression.row, message: '独自の awaiter（`GetAwaiter`）は、この採点環境では使えません。' },
+      ]);
     const isCompleted = this.withOperand(frame, awaiter, () => this.evaluate(expression.isCompleted, frame));
-    if (!isCompleted) yield { awaiting: awaitedTask(awaiter) };
+    if (!isCompleted) yield { awaiting: awaitedTask(unboxed) };
     return this.withOperand(frame, awaiter, () => this.evaluate(expression.getResult, frame));
   }
 
@@ -322,6 +329,9 @@ function operandsOf(expression: BoundExpression): BoundExpression[] {
     }
     case 'new': {
       return argumentOperands(expression.args);
+    }
+    case 'late': {
+      return argumentOperands(expression.operands);
     }
     case 'newArray': {
       return [...expression.sizes, ...(expression.elements ?? [])];
