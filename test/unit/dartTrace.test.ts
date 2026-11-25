@@ -514,6 +514,8 @@ Future<void> main() async {
   var total = await fa + await fb;
   a.turnRight();
   print(total);
+  var fc = walk(a, 1);
+  print(await Future.delayed(Duration(milliseconds: 50), () => total));
 }`;
   const trace = traceProgram('dart', program, program);
   expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
@@ -539,7 +541,13 @@ Future<void> main() async {
     [14, []],
     [15, []],
     [16, []],
+    [2, [17]],
+    [3, [17]],
+    [17, []],
+    [4, [17]],
+    [2, [17]],
+    [18, []],
   ]);
   expect(trace.finalVars).toEqual({ total: 4 });
-  expect(trace.stdout).toBe('4\n');
+  expect(trace.stdout).toBe('4\n4\n');
 });

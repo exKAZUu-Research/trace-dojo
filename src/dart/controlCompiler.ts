@@ -475,9 +475,13 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { result: exec, parts } = compiled;
     const { step } = capture;
     return function* (frame) {
-      const mark = frame.runtime.steps.statementMark();
-      const completion = yield* evaluateParts(frame, parts, () => exec(frame));
-      if (step) frame.runtime.steps.completeStatement(step.row, step.onlyCalls, mark);
+      const { steps } = frame.runtime;
+      const { value: completion, ownSteps } = yield* countingOwnSteps(
+        evaluateParts(frame, parts, () => exec(frame)),
+        steps
+      );
+      // Only the steps the statement recorded itself can show what its calls did, not those of other work it waited on.
+      if (step) steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - ownSteps);
       return completion;
     };
   }
@@ -933,6 +937,30 @@ export abstract class ControlCompiler extends StatementCompiler {
       const resumed: unknown = yield isEach ? new YieldEachRequest(value) : value;
       return resumed === LISTENER_CANCELLED ? CANCELLED_RETURN : undefined;
     };
+  }
+}
+
+/** Runs a statement's generator, counting the steps it records itself, between the waits where other work runs. */
+function* countingOwnSteps<T>(
+  generator: Generator<AwaitRequest, T, Value>,
+  steps: { statementMark: () => number }
+): Generator<AwaitRequest, { value: T; ownSteps: number }, Value> {
+  let ownSteps = 0;
+  let start = steps.statementMark();
+  let result = generator.next();
+  for (;;) {
+    ownSteps += steps.statementMark() - start;
+    if (result.done) return { value: result.value, ownSteps };
+    let resumed: Value;
+    try {
+      resumed = yield result.value;
+    } catch (error) {
+      start = steps.statementMark();
+      result = generator.throw(error);
+      continue;
+    }
+    start = steps.statementMark();
+    result = generator.next(resumed);
   }
 }
 
