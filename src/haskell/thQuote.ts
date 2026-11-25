@@ -441,6 +441,13 @@ export class QuoteBuilder {
       case 'plit': {
         if (pat.negative && pat.lit.kind === 'int')
           return this.call('litP', this.call('integerL', this.int(-pat.lit.value)));
+        if (pat.negative && pat.lit.kind === 'frac') {
+          const [numerator, denominator] = exactFraction(pat.lit.text);
+          return this.call(
+            'litP',
+            this.call('rationalL', this.app(this.sup('%'), this.int(-numerator), this.int(denominator)))
+          );
+        }
         return this.call('litP', this.literal(pat.lit));
       }
       case 'pcon': {
