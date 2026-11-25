@@ -1,0 +1,8 @@
+const o = { n: 3, f: undefined as undefined | (() => number) };
+o.f = function () { return this.n; };
+console.log(o.f());
+const o2: { f?: () => number } = {};
+o2.f = function () { return this === o2 ? 1 : 2; };
+console.log(o2.f());
+const g = function () { return 1; };
+console.log(g());

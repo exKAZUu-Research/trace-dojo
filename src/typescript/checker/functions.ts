@@ -118,6 +118,19 @@ export class FunctionChecker {
 
   constructor(private readonly c: Checker) {}
 
+  /** For `o.f = function () {...}`, the object the function is assigned to, which tsc gives it as `this`. */
+  private assignedObjectThis(node: TreeNode): Type | undefined {
+    const assignment = node.parent;
+    if (assignment?.type !== 'assignment_expression' || assignment.childForFieldName('right')?.id !== node.id)
+      return undefined;
+    const left = assignment.childForFieldName('left');
+    const object =
+      left?.type === 'member_expression' || left?.type === 'subscript_expression'
+        ? left.childForFieldName('object')
+        : undefined;
+    return object ? this.c.widen(this.c.silently(() => this.c.expressions.check(object))) : undefined;
+  }
+
   /** The innermost function whose flow the checked code follows, which an inlined function body shares. */
   flowOwner(): TreeNode | undefined {
     return this.contexts.findLast((context) => !context.inlined)?.node;
@@ -133,7 +146,7 @@ export class FunctionChecker {
       : contextualSignatureOf(this.c, contextual, node);
     const signature = this.c.signatures.signatureOf(node, contextualSignature, false);
     if (node.type !== 'arrow_function' && isContextSensitiveFunction(node))
-      this.c.classes.registerContextualThis(node, contextualSignature?.thisType);
+      this.c.classes.registerContextualThis(node, contextualSignature?.thisType ?? this.assignedObjectThis(node));
     // Parameters take their types from the signature, which the body sees.
     this.bindParameters(node, signature);
     const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;

@@ -1,0 +1,3 @@
+const p = { n: 1 };
+p['k' as string] = function () { return this.zz; };
+const h = function () { return this; };
