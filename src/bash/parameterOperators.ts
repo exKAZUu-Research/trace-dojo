@@ -710,7 +710,9 @@ function declarationTransformSegments(
   }
   if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx, target.expansionText);
   const values =
-    isArray && ctx.inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
+    isArray && ctx.splittingFields && ctx.inDouble && !value.star
+      ? splitQuotedDeclarationFields(text, expander.currentIfs())
+      : [text];
   return expander.valueSegments({ ...value, values, transformed: true }, ctx, target.expansionText);
 }
 
@@ -724,9 +726,13 @@ function positionalDeclarationSegments(
   if (value.values.length === 0) {
     return expander.valueSegments({ ...value, values: [] }, ctx, expansionText);
   }
+  if (ctx.inOperatorWord || ctx.inSubscript) rejectListInScalarContext(expansionText);
   const quotedValues: string[] = [];
   for (const element of value.values) {
     pushMeteredItem(quotedValues, quoteReusable(element), shell.runtime.step);
+  }
+  if (!ctx.splittingFields) {
+    return [scalarPositionalDeclarationSegment(expander, shell, quotedValues, value.star, ctx)];
   }
   if (ctx.inDouble && !value.star) {
     const items = [...splitPrefixFields('set -- ', quotedValues[0], expander.currentIfs()), ...quotedValues.slice(1)];
@@ -735,6 +741,20 @@ function positionalDeclarationSegments(
   const body = expander.valueSegments({ ...value, values: quotedValues, transformed: true }, ctx, expansionText);
   const prefix = ctx.inDouble ? [textSegment('set -- ', true, false)] : unquotedPositionalPrefix(expander.currentIfs());
   return [...prefix, ...body];
+}
+
+function scalarPositionalDeclarationSegment(
+  expander: Expander,
+  shell: Shell,
+  quotedValues: readonly string[],
+  isStar: boolean,
+  ctx: WordContext
+): WordSegment {
+  const spend = (cost?: number): void => shell.runtime.spend(cost);
+  const ifsJoiner = expander.ifsJoiner();
+  const joiner = !isStar || (!ctx.inDouble && ctx.spacedStar && ifsJoiner === '') ? ifsJoiner || ' ' : ifsJoiner;
+  const joined = joinMetered(quotedValues, joiner, spend);
+  return textSegment(appendMetered('set -- ', joined, spend), ctx.inDouble, false);
 }
 
 function unquotedPositionalPrefix(ifs: string): WordSegment[] {

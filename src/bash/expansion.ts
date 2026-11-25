@@ -15,6 +15,7 @@ import {
   breakSegment,
   DEFAULT_WORD_CONTEXT,
   EMPTY_LIST_SEGMENT,
+  FIELD_SPLITTING_WORD_CONTEXT,
   isBreakSegment,
   QUOTED_EMPTY_SEGMENT,
   splitWordSegments,
@@ -70,7 +71,7 @@ export class Expander {
     for (const word of words) {
       for (const parts of expandBraces(word.parts, this.shell.runtime.step)) {
         this.checkTilde(parts, false);
-        for (const field of this.splitFields(this.expandParts(parts, DEFAULT_WORD_CONTEXT))) {
+        for (const field of this.splitFields(this.expandParts(parts, FIELD_SPLITTING_WORD_CONTEXT))) {
           pushMeteredItem(fields, this.finishField(field), this.shell.runtime.step);
         }
       }
@@ -326,6 +327,7 @@ export class Expander {
     const inner = this.expandParts(parts, {
       inDouble: true,
       spacedStar: ctx.spacedStar,
+      ...(ctx.splittingFields ? { splittingFields: true } : {}),
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
       ...(ctx.inQuotedOperatorWord ? { inQuotedOperatorWord: true } : {}),
       ...(ctx.inSubscript ? { inSubscript: true } : {}),

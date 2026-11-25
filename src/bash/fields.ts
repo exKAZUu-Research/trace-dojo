@@ -3,6 +3,7 @@
 export interface WordContext {
   readonly inDouble: boolean;
   readonly spacedStar: boolean;
+  readonly splittingFields?: boolean;
   readonly inAssignmentValue?: boolean;
   readonly inOperatorWord?: boolean;
   readonly inQuotedOperatorWord?: boolean;
@@ -10,6 +11,7 @@ export interface WordContext {
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };
+export const FIELD_SPLITTING_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false, splittingFields: true };
 
 export interface TextSegment {
   readonly kind: 'text';
