@@ -466,10 +466,9 @@ class ConditionParser {
         if (suffix !== '' && !token.endsWith(suffix)) continue;
         const digits = pattern.exec(token.slice(0, token.length - suffix.length))?.[1];
         if (digits === undefined) continue;
-        const value = [...digits].reduce(
-          (total, digit) => total * BigInt(radix) + BigInt(Number.parseInt(digit, 16)),
-          0n
-        );
+        const value = digits
+          .split('')
+          .reduce((total, digit) => total * BigInt(radix) + BigInt(Number.parseInt(digit, 16)), 0n);
         if (value > UINT64_MAX) throw this.error(`#if の整数 ${token} は大きすぎます。`);
         return { value, unsigned: /u/i.test(suffix) || value > INT64_MAX };
       }
