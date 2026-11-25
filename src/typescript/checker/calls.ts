@@ -477,8 +477,8 @@ export class Calls {
   }
 
   /**
-   * `require("fs")`, Node.js's `require` of a module this interpreter provides, which is that module as `import * as`
-   * gives it; any other module, or one a string literal does not name, is rejected before the program runs.
+   * `require("fs")`, Node.js's `require` of a module this interpreter provides, which @types/node types as `any`; any
+   * other module, or one a string literal does not name, is rejected before the program runs.
    */
   private requiredModule(callee: TreeNode, args: TreeNode[]): Type | undefined {
     if (callee.type !== 'identifier' || callee.text !== 'require') return undefined;
@@ -500,8 +500,7 @@ export class Calls {
     }
     // `require("fs" as const)` names fs as `require("fs")` does.
     const name = this.c.flow.constantIndexName(withoutAssertions(id));
-    const module = name === undefined ? undefined : this.c.namespaces.moduleObjectType(name);
-    if (module) return module;
+    if (name !== undefined && this.c.namespaces.moduleObjectType(name)) return anyType;
     this.c.error(
       callee,
       unsupportedMessage(name === undefined ? '名前が定数で決まらない require' : `モジュール '${name}' の require`)

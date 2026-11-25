@@ -467,8 +467,8 @@ export class ExpressionChecker {
   }
 
   /**
-   * Node.js's `require` other than called by name, which the checker types by the module it names: as a value, or
-   * through a member such as `require.resolve` or `require.call`, it could load any module.
+   * Node.js's `require` other than called by name, which the checker accepts only for a module this interpreter
+   * provides: as a value, or through a member such as `require.resolve` or `require.call`, it could load any module.
    */
   private reportRequireValue(node: TreeNode): Type {
     const parent = node.parent;

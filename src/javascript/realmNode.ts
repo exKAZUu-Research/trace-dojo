@@ -22,6 +22,7 @@ const MODULE_NAMES = { fs: 'fs', 'node:fs': 'fs' } as const;
 export function defineNodeBuiltins(builder: RealmBuilder): void {
   const fs = new JsObject(builder.realm.objectPrototype);
   defineFileSystem(builder, fs);
+  builder.realm.fsModule = fs;
   const modules = { fs };
   builder.global(
     'require',

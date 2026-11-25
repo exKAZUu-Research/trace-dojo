@@ -70,19 +70,26 @@ export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck
   defineUnavailableRegExpStatics(runtime);
   orderBuiltinMembers(realm);
   const process = realm.globals.lookup('process')?.value;
-  return (value, key) =>
-    unavailableSymbolFeature(value, key, symbol) ??
-    (process instanceof JsObject && value === process && isUnavailableProcessMember(runtime, process, key)
-      ? `process.${String(key)}`
-      : undefined);
+  const nodeObjects = new Map<Value, string>();
+  if (process instanceof JsObject) nodeObjects.set(process, 'process');
+  if (realm.fsModule) nodeObjects.set(realm.fsModule, 'fs');
+  return (value, key) => {
+    const owner = nodeObjects.get(value);
+    const isUnavailableNodeMember =
+      owner !== undefined && value instanceof JsObject && isUndefinedMember(runtime, value, key);
+    return (
+      unavailableSymbolFeature(value, key, symbol) ?? (isUnavailableNodeMember ? `${owner}.${String(key)}` : undefined)
+    );
+  };
 }
 
 /**
- * Whether a name of `process` is one Node.js has but this interpreter does not run: every name but those it defines and
- * those every object inherits, as the type checker rejects every member of `process` but its standard streams.
+ * Whether a name of `process` or `fs` is one this interpreter does not run: every name but those it defines and those
+ * every object inherits, as the type checker rejects every member of `process` but its standard streams. A program
+ * reaches the others through `any`, or through `require`, which types the module as `any`.
  */
-function isUnavailableProcessMember(runtime: Runtime, process: JsObject, key: Key | undefined): boolean {
-  return typeof key === 'string' && !process.properties.has(key) && !runtime.realm.objectPrototype.properties.has(key);
+function isUndefinedMember(runtime: Runtime, object: JsObject, key: Key | undefined): boolean {
+  return typeof key === 'string' && !object.properties.has(key) && !runtime.realm.objectPrototype.properties.has(key);
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {

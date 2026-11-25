@@ -46,6 +46,8 @@ export interface Realm {
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
   regExpConstructor?: JsFunction;
+  /** Node.js's `fs` module, which `require` returns. */
+  fsModule?: JsObject;
   regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
