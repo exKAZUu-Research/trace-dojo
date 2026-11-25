@@ -105,10 +105,12 @@ export class Runtime implements TracedRuntime<Frame> {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
   }
 
-  addTurtle(turtle: TurtleState): string {
-    const handle = `${TURTLE_HANDLE_PREFIX}${this.nextTurtle++}`;
+  reserveTurtleHandle(): string {
+    return `${TURTLE_HANDLE_PREFIX}${this.nextTurtle++}`;
+  }
+
+  commitTurtle(handle: string, turtle: TurtleState): void {
     this.turtles.set(handle, turtle);
-    return handle;
   }
 
   /** Whether `text` is a turtle handle created in this run, whether still alive or removed. */

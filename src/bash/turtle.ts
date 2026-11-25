@@ -1,6 +1,7 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../interpreter/turtleWorld';
+import { rejectUnsupportedVariableMutation } from './capabilities';
 import type { Shell } from './shell';
-import { resolveScalarTarget, resolveSubscriptTarget, writeResolvedTarget } from './targets';
+import { type ResolvedTarget, resolveScalarTarget, resolveSubscriptTarget, writeResolvedTarget } from './targets';
 import { isIdentifier } from './variables';
 
 /** Stops the program at a turtle's error, as Java's uncaught exception does, after Bash's error line. */
@@ -22,13 +23,36 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
   const [variable, xText = '0', yText = '0', color] = args;
   const split = shell.splitSubscript(variable);
   if (!isIdentifier(split ? split.name : variable)) fail(shell, name, `\`${variable}': not a valid identifier`);
-  const coordinate = (text: string): number => {
-    if (!/^[-+]?\d+$/.test(text.trim())) fail(shell, name, `${text}: integer expected`);
-    return Number(text.trim());
-  };
-  const created = shell.runtime.world.create(coordinate(xText), coordinate(yText), color);
+  const x = parseCoordinate(shell, name, xText);
+  const y = parseCoordinate(shell, name, yText);
+  const target = resolveTurtleTarget(shell, variable, split);
+  if (target.kind === 'invalid' || target.kind === 'wholeArray') {
+    const failed = writeResolvedTarget(shell, target, '', false, name);
+    if (!failed.ok) shell.failures.handleStoreFailure('regularBuiltin', failed, name);
+    return 1;
+  }
+  const previousColor = shell.runtime.world.board[y]?.[x];
+  const created = shell.runtime.world.create(x, y, color);
   if ('error' in created) fail(shell, name, created.error);
-  const handle = shell.runtime.addTurtle(created);
+  const handle = shell.runtime.reserveTurtleHandle();
+  return commitCreatedTurtle(shell, name, target, handle, {
+    turtle: created,
+    x,
+    y,
+    previousColor: previousColor as string,
+  });
+}
+
+function parseCoordinate(shell: Shell, name: string, text: string): number {
+  if (!/^[-+]?\d+$/.test(text.trim())) fail(shell, name, `${text}: integer expected`);
+  return Number(text.trim());
+}
+
+function resolveTurtleTarget(
+  shell: Shell,
+  variable: string,
+  split: { name: string; subscript: string } | undefined
+): ResolvedTarget {
   const target = split
     ? resolveSubscriptTarget(shell, {
         name: split.name,
@@ -36,12 +60,39 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
         operation: 'write',
       })
     : resolveScalarTarget(shell, variable, true);
-  const outcome = writeResolvedTarget(shell, target, handle, false);
+  if (target.kind === 'randomSeed') rejectUnsupportedVariableMutation('RANDOM', false);
+  return target;
+}
+
+function commitCreatedTurtle(
+  shell: Shell,
+  name: string,
+  target: ResolvedTarget,
+  handle: string,
+  rollback: { turtle: TurtleState; x: number; y: number; previousColor: string }
+): number {
+  let outcome;
+  try {
+    outcome = writeResolvedTarget(shell, target, handle, false, name);
+  } catch (error) {
+    rollbackTurtle(shell, rollback);
+    throw error;
+  }
   if (!outcome.ok) {
+    rollbackTurtle(shell, rollback);
     shell.failures.handleStoreFailure('regularBuiltin', outcome, name);
     return 1;
   }
+  shell.runtime.commitTurtle(handle, rollback.turtle);
   return 0;
+}
+
+function rollbackTurtle(
+  shell: Shell,
+  rollback: { turtle: TurtleState; x: number; y: number; previousColor: string }
+): void {
+  shell.runtime.world.remove(rollback.turtle);
+  shell.runtime.world.board[rollback.y][rollback.x] = rollback.previousColor;
 }
 
 function turtleArgument(shell: Shell, args: string[], name: string): TurtleState {
