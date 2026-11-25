@@ -4,14 +4,7 @@ import { ATTRIBUTE_ORDER, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
-import {
-  appendBounded,
-  type Expander,
-  joinBounded,
-  type ParameterValue,
-  type SubscriptRef,
-  unescapeDoubleQuoted,
-} from './expansion';
+import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
 import {
   EMPTY_LIST_SEGMENT,
   FIELD_BREAK_SEGMENT,
@@ -601,6 +594,7 @@ function splitSubstring(parts: WordPart[]): {
 } {
   const offset: (string | WordPart)[] = [];
   const state: SubstringScanState = { depth: 0, conditional: 0, inSingle: false };
+  const continuationState = { inSingle: false };
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') {
       offset.push(part);
@@ -608,22 +602,47 @@ function splitSubstring(parts: WordPart[]): {
     }
     const splitAt = findSubstringSeparator(part.text, state);
     if (splitAt === -1) {
-      offset.push(unescapeDoubleQuoted(part.text));
+      offset.push(stripSubstringContinuations(part.text, continuationState));
       continue;
     }
-    const before = unescapeDoubleQuoted(part.text.slice(0, splitAt));
+    const before = stripSubstringContinuations(part.text.slice(0, splitAt), continuationState);
     if (before) offset.push(before);
-    return { offset, length: unescapeSubstringRest(part.text.slice(splitAt + 1), parts.slice(index + 1)) };
+    return { offset, length: formatSubstringRest(part.text.slice(splitAt + 1), parts.slice(index + 1)) };
   }
   return { offset, length: undefined };
 }
 
-function unescapeSubstringRest(after: string, tail: readonly WordPart[]): (string | WordPart)[] {
-  const head = unescapeDoubleQuoted(after);
+function formatSubstringRest(after: string, tail: readonly WordPart[]): (string | WordPart)[] {
+  const state = { inSingle: false };
+  const head = stripSubstringContinuations(after, state);
   const rest = tail.map((item): string | WordPart =>
-    item.kind === 'literal' ? unescapeDoubleQuoted(item.text) : item
+    item.kind === 'literal' ? stripSubstringContinuations(item.text, state) : item
   );
   return head ? [head, ...rest] : rest;
+}
+
+function stripSubstringContinuations(text: string, state: { inSingle: boolean }): string {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (state.inSingle) {
+      if (c === "'") state.inSingle = false;
+      out += c;
+      continue;
+    }
+    if (c === "'") {
+      state.inSingle = true;
+      out += c;
+      continue;
+    }
+    if (c === '\\' && i + 1 < text.length) {
+      if (text[i + 1] !== '\n') out += text.slice(i, i + 2);
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
 }
 
 function findSubstringSeparator(text: string, state: SubstringScanState): number {
