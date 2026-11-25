@@ -121,6 +121,9 @@ function codeIndexOf(source: string, text: string, from: number): number {
         else if (source.startsWith('-}', index)) depth--;
         index += source.startsWith('{-', index) || source.startsWith('-}', index) ? 2 : 1;
       }
+    } else if (source.startsWith('"""', index)) {
+      const end = source.indexOf('"""', index + 3);
+      index = end === -1 ? source.length : end + 3;
     } else if (/^--+(?![!#$%&*+./<=>?@\\^|~:])/.test(source.slice(index, index + 64))) {
       const end = source.indexOf('\n', index);
       index = end === -1 ? source.length : end;
