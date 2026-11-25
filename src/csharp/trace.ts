@@ -209,6 +209,7 @@ function instanceFields(self: CsObject | CsStruct): [FieldSymbol, Type][] {
     const own = type.symbol.fields.filter(
       (field) =>
         !field.isStatic &&
+        !field.eventAccessors &&
         !(field.isPrimaryParameter && !field.property) &&
         (!field.name.startsWith('<') || field.property !== undefined)
     );

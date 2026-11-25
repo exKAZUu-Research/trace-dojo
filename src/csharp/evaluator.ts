@@ -763,6 +763,14 @@ export class Evaluator extends StatementExecutor {
   }
 
   private evaluateCall(expression: Extract<BoundExpression, { kind: 'call' }>, frame: Frame): Value {
+    if (expression.constrainedType) {
+      const type = frame.resolve(expression.constrainedType) as NamedType;
+      const implementation = this.runtime.staticImplementation(type, expression.method);
+      return this.evaluateCall(
+        { ...expression, method: implementation, owner: type, constrainedType: undefined },
+        frame
+      );
+    }
     const { method } = expression;
     const receiver = this.evaluateReceiver(expression, frame);
     frame.temporaries.push(receiver);
@@ -998,6 +1006,12 @@ export class Evaluator extends StatementExecutor {
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
+    if (target.constrainedType) {
+      const type = frame.resolve(target.constrainedType) as NamedType;
+      const getter = this.runtime.staticImplementation(type, target.property.getter as MethodSymbol);
+      const property = getter.property ?? target.property;
+      return this.propertyPlace({ ...target, property, owner: type, constrainedType: undefined }, frame);
+    }
     const { property } = target;
     let receiver: Value = undefined;
     if (target.receiver) {

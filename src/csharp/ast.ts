@@ -331,6 +331,8 @@ export interface MethodDeclaration extends Position {
   startRow: number;
   /** A partial method with only its defining declaration, whose calls C# removes with their arguments. */
   isRemovedPartial?: boolean;
+  /** The interface of an explicit implementation (`void IShape.Draw()`). */
+  explicitInterface?: TypeNode;
 }
 
 export interface ConstructorDeclaration extends Position {
@@ -373,6 +375,7 @@ export interface PropertyDeclaration extends Position {
   initializer: Expression | ArrayInitializer | undefined;
   /** Whether the property is written with an expression body, which makes it read-only. */
   isExpressionBodied: boolean;
+  explicitInterface?: TypeNode;
 }
 
 export interface IndexerDeclaration extends Position {
@@ -381,6 +384,18 @@ export interface IndexerDeclaration extends Position {
   type: TypeNode;
   parameters: Parameter[];
   accessors: Accessor[];
+  explicitInterface?: TypeNode;
+}
+
+/** An event with its own `add` and `remove` accessors, which keeps no delegate field. */
+export interface EventAccessorDeclaration extends Position {
+  kind: 'eventAccessors';
+  modifiers: Modifiers;
+  type: TypeNode;
+  name: string;
+  add: Block | Expression | undefined;
+  remove: Block | Expression | undefined;
+  explicitInterface?: TypeNode;
 }
 
 export interface EventFieldDeclaration extends Position {
@@ -439,6 +454,7 @@ export type MemberDeclaration =
   | PropertyDeclaration
   | IndexerDeclaration
   | EventFieldDeclaration
+  | EventAccessorDeclaration
   | OperatorDeclaration
   | TypeDeclaration;
 

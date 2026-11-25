@@ -550,6 +550,11 @@ export abstract class OperatorBinder extends ConversionBinder {
     const candidates: MethodCandidate[] = [];
     for (const operand of operands) {
       const type = nullableUnderlying(operand.type) ?? operand.type;
+      if (type.kind === 'typeParameter') {
+        for (const candidate of this.lookupOperators(type, name))
+          if (!candidates.some((existing) => existing.method === candidate.method)) candidates.push(candidate);
+        continue;
+      }
       if (
         type.kind !== 'named' ||
         type.symbol.special === 'string' ||

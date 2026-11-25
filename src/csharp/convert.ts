@@ -47,10 +47,7 @@ const UNSUPPORTED_STATEMENTS: Record<string, string> = {
   yield_statement: '`yield` 文',
 };
 
-const UNSUPPORTED_DECLARATIONS: Record<string, string> = {
-  event_declaration: '`add`・`remove` を書いたイベントの宣言',
-  extension_declaration: '拡張ブロック（`extension(...)`）',
-};
+const UNSUPPORTED_DECLARATIONS: Record<string, string> = { extension_declaration: '拡張ブロック（`extension(...)`）' };
 
 const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
   'public',
@@ -430,12 +427,15 @@ export class Converter extends ExpressionConverter {
         },
       ]);
     }
-    const explicitInterface = namedChildren(node).find((child) => child.type === 'explicit_interface_specifier');
-    if (explicitInterface) unsupported(explicitInterface, 'インターフェイスの明示的な実装');
+    const specifier = namedChildren(node).find((child) => child.type === 'explicit_interface_specifier');
+    const explicitInterface = specifier ? { explicitInterface: this.convertType(namedChildren(specifier)[0]) } : {};
     const position = positionOf(field(node, 'name') ?? node);
     switch (node.type) {
       case 'method_declaration': {
-        return [this.convertMethod(node)];
+        return [{ ...this.convertMethod(node), ...explicitInterface }];
+      }
+      case 'event_declaration': {
+        return [this.convertEventAccessors(node, explicitInterface.explicitInterface)];
       }
       case 'constructor_declaration': {
         const initializerNode = namedChildren(node).find((child) => child.type === 'constructor_initializer');
@@ -483,7 +483,7 @@ export class Converter extends ExpressionConverter {
         return [{ kind: 'event', modifiers: this.convertModifiers(node), type, declarators, ...positionOf(node) }];
       }
       case 'property_declaration': {
-        return [this.convertProperty(node)];
+        return [{ ...this.convertProperty(node), ...explicitInterface } as MemberDeclaration];
       }
       case 'indexer_declaration': {
         const valueNode = field(node, 'value');
@@ -497,6 +497,7 @@ export class Converter extends ExpressionConverter {
             accessors: accessorsNode
               ? this.convertAccessors(accessorsNode)
               : [{ kind: 'get', modifiers: emptyModifiers(), body: this.convertBody(valueNode), ...positionOf(node) }],
+            ...explicitInterface,
             ...positionOf(node),
           },
         ];
@@ -566,6 +567,31 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  private convertEventAccessors(node: Node, explicitInterface: TypeNode | undefined): MemberDeclaration {
+    const accessors = namedChildren(requiredField(node, 'accessors'));
+    const bodyOf = (kind: string): Block | Expression | undefined => {
+      const accessor = accessors.find((candidate) => requiredField(candidate, 'name').text === kind);
+      return accessor ? this.convertBody(field(accessor, 'body')) : undefined;
+    };
+    for (const accessor of accessors) {
+      this.rejectAttributes(accessor);
+      if (!['add', 'remove'].includes(requiredField(accessor, 'name').text))
+        throw new CompileError([
+          { row: accessor.startPosition.row, message: 'CS1055: add または remove アクセサーが必要です' },
+        ]);
+    }
+    return {
+      kind: 'eventAccessors',
+      modifiers: this.convertModifiers(node),
+      type: this.convertType(requiredField(node, 'type')),
+      name: requiredField(node, 'name').text,
+      add: bodyOf('add'),
+      remove: bodyOf('remove'),
+      ...(explicitInterface ? { explicitInterface } : {}),
+      ...positionOf(requiredField(node, 'name')),
+    };
+  }
+
   private convertProperty(node: Node): MemberDeclaration {
     const valueNode = field(node, 'value');
     const accessorsNode = field(node, 'accessors');
@@ -602,7 +628,6 @@ export class Converter extends ExpressionConverter {
     return namedChildren(node).map((accessor) => {
       this.rejectAttributes(accessor);
       const kind = requiredField(accessor, 'name').text;
-      if (kind === 'add' || kind === 'remove') unsupported(accessor, 'イベントの `add`・`remove` アクセサー');
       if (!['get', 'set', 'init'].includes(kind)) {
         throw new CompileError([
           { row: accessor.startPosition.row, message: 'CS1014: get または set アクセサーが必要です' },

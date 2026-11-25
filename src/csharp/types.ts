@@ -177,6 +177,8 @@ export class MethodSymbol {
   isRemovedPartial = false;
   /** For an explicit interface implementation (`void IShape.Draw()`), the interface it implements a member of. */
   explicitInterface: NamedType | undefined;
+  /** Whether the method is an event's `add` or `remove` accessor, which no name finds. */
+  isEventAccessor = false;
   /** Whether a constructor has `[SetsRequiredMembers]`, which frees its callers from setting the required members. */
   setsRequiredMembers = false;
 
@@ -207,6 +209,8 @@ export class FieldSymbol {
   isPrimaryParameter = false;
   /** Whether the field is `required`, which every object creation's initializer must set. */
   isRequired = false;
+  /** For an event with `add` and `remove` accessors, which it uses in place of a delegate field. */
+  eventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
 
   constructor(
     readonly name: string,
@@ -233,6 +237,8 @@ export class PropertySymbol {
   overridden: PropertySymbol | undefined;
   /** Whether the property is `required`, which every object creation's initializer must set. */
   isRequired = false;
+  /** For an explicit interface implementation (`int IShape.Area { get; }`), the interface. */
+  explicitInterface: NamedType | undefined;
   row = 0;
   /** The column of the declaration, which orders the members a record prints. */
   column = 0;

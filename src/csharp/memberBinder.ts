@@ -47,6 +47,8 @@ export type NonValue =
       /** Extension methods for a receiver that no instance method fits. */
       extensions: MethodCandidate[];
       isBaseAccess: boolean;
+      /** For `T.M()` on a type parameter, the parameter whose type argument implements the static abstract method. */
+      constrainedType?: Type;
       row: number;
     }
   | { kind: 'discard'; row: number };
@@ -657,6 +659,15 @@ export abstract class MemberBinder extends CallBinder {
       const { field } = found;
       const type = substitute(field.type, substitution);
       if (field.isConst) return this.constantField(field, type, position);
+      // An event with its own accessors has no delegate to read, inside its type or out.
+      if (field.eventAccessors && !this.isEventSubscriptionTarget && !this.isBindingName) {
+        this.error(
+          position,
+          'CS0079',
+          `イベント '${displayTypeSymbol(field.owner)}.${field.name}' は += または -= の左側にのみ使用できます`
+        );
+        return { kind: 'default', type: ERROR_TYPE, row: position.row };
+      }
       // Outside its declaring type, an event may only be subscribed to or unsubscribed from.
       if (
         field.isEvent &&
@@ -811,6 +822,8 @@ export abstract class MemberBinder extends CallBinder {
   ): BindResult {
     if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: position.row };
     if (type.kind === 'typeParameter') {
+      const constrained = this.bindConstrainedMember(type, name, typeArgs, position, context, isCallee);
+      if (constrained) return constrained;
       this.error(
         position,
         'CS0704',
@@ -869,6 +882,42 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
     return this.memberAccessOn(undefined, found, position, context);
+  }
+
+  /**
+   * Binds `T.M()` or `T.P` on a type parameter to a static abstract or virtual member of its constraint interfaces
+   * (C# spec §19.4.4), which the type argument's implementation answers at run time.
+   */
+  private bindConstrainedMember(
+    type: Extract<Type, { kind: 'typeParameter' }>,
+    name: string,
+    typeArgs: Type[] | undefined,
+    position: Position,
+    context: BindContext,
+    isCallee: boolean
+  ): BindResult | undefined {
+    const { found } = this.lookupMember(type, name, context.fn.typeContext, typeArgs?.length ?? 0, isCallee);
+    if (found?.kind === 'methods') {
+      const candidates = found.candidates.filter((candidate) => isConstrained(candidate.method));
+      if (candidates.length === 0) return undefined;
+      return {
+        kind: 'methodGroup',
+        name,
+        candidates,
+        receiver: undefined,
+        isSimpleName: false,
+        typeArgs,
+        extensions: [],
+        isBaseAccess: false,
+        constrainedType: type,
+        row: position.row,
+      };
+    }
+    if (found?.kind === 'property' && isConstrained(found.property)) {
+      const access = this.memberAccessOn(undefined, found, position, context);
+      return { ...access, constrainedType: type } as BoundExpression;
+    }
+    return undefined;
   }
 
   /**
@@ -1339,6 +1388,7 @@ export abstract class MemberBinder extends CallBinder {
       group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
     const returnType = this.covariantReturn(group, method) ?? substitute(method.returnType, substitution);
+    const constrained = group.constrainedType ? { constrainedType: group.constrainedType } : {};
     let receiver = method.isStatic ? undefined : group.receiver;
     if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
       this.error(
@@ -1392,6 +1442,7 @@ export abstract class MemberBinder extends CallBinder {
       owner: resolved.candidate.owner,
       isVirtual,
       type: returnType,
+      ...constrained,
       row: node.row,
     };
   }
@@ -1474,6 +1525,11 @@ export abstract class MemberBinder extends CallBinder {
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row };
     const method = resolved.candidate.method;
+    // An interface's static abstract operator runs the one that the operand's type argument implements.
+    const constrainedType =
+      method.owner.kind === 'interface'
+        ? operands.find((operand) => operand.type.kind === 'typeParameter')?.type
+        : undefined;
     return {
       kind: 'call',
       method,
@@ -1483,6 +1539,7 @@ export abstract class MemberBinder extends CallBinder {
       owner: resolved.candidate.owner,
       isVirtual: false,
       type: substitute(method.returnType, substitutionOf(resolved.candidate.owner)),
+      ...(constrainedType ? { constrainedType } : {}),
       row,
     };
   }
@@ -1837,6 +1894,11 @@ export abstract class MemberBinder extends CallBinder {
 }
 
 /** The type parameter of a name that the enclosing method or types declare, from the innermost out. */
+/** Whether a member is an interface's static abstract or virtual member, which a type parameter's argument implements. */
+function isConstrained(member: MethodSymbol | PropertySymbol): boolean {
+  return member.isStatic && member.owner.kind === 'interface' && (member.isAbstract || member.isVirtual);
+}
+
 function typeParameterNamed(name: string, typeContext: TypeContext): Type | undefined {
   for (const parameter of typeContext.methodTypeParameters.toReversed())
     if (parameter.name === name) return parameter.type;

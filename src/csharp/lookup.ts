@@ -121,6 +121,8 @@ export class LookupBinder extends DeclarationBinder {
     let inaccessible: MethodSymbol | undefined;
     for (const method of owner.symbol.methods) {
       if (method.name !== name || method.kind === 'operator' || method.property || method.isOverride) continue;
+      // Explicit interface implementations and event accessors have no name that code can call them by.
+      if (method.explicitInterface || method.isEventAccessor) continue;
       // The library's private members stand for .NET's explicit interface implementations, which no name finds.
       if (method.access === 'private' && owner.symbol.isLibrary) continue;
       if (!this.isAccessible(method.access, owner.symbol, context, type)) {
@@ -139,7 +141,10 @@ export class LookupBinder extends DeclarationBinder {
     for (const owner of this.searchChain(type)) {
       const indexers = owner.symbol.properties.filter(
         (property) =>
-          property.isIndexer && !property.isOverride && this.isAccessible(property.access, owner.symbol, context, type)
+          property.isIndexer &&
+          !property.isOverride &&
+          !property.explicitInterface &&
+          this.isAccessible(property.access, owner.symbol, context, type)
       );
       if (indexers.length > 0) return indexers.map((property) => ({ property, owner }));
     }
@@ -149,7 +154,7 @@ export class LookupBinder extends DeclarationBinder {
   /** The user-defined operators of a type and its bases. */
   lookupOperators(type: Type, name: string): MethodCandidate[] {
     const result: MethodCandidate[] = [];
-    if (type.kind !== 'named') return result;
+    if (type.kind !== 'named' && type.kind !== 'typeParameter') return result;
     for (const owner of this.searchChain(type)) {
       for (const method of owner.symbol.methods)
         if (method.kind === 'operator' && method.name === name) result.push({ method, owner });
@@ -240,8 +245,12 @@ export class LookupBinder extends DeclarationBinder {
 function memberNamed(owner: NamedType, name: string, isInvoked: boolean): FieldSymbol | PropertySymbol | undefined {
   const { symbol } = owner;
   const found =
-    symbol.fields.find((candidate) => candidate.name === name && !candidate.property) ??
-    symbol.properties.find((candidate) => candidate.name === name && !candidate.isIndexer);
+    symbol.fields.find(
+      (candidate) => candidate.name === name && !candidate.property && !candidate.eventAccessors?.add.explicitInterface
+    ) ??
+    symbol.properties.find(
+      (candidate) => candidate.name === name && !candidate.isIndexer && !candidate.explicitInterface
+    );
   // A member's type in its owner's type arguments, as `Func<int, int>` for KeyValuePair's `Value`, tells if it can be called.
   return found && isInvoked && !isInvocable(substitute(found.type, substitutionOf(owner))) ? undefined : found;
 }

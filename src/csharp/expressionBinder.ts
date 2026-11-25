@@ -1413,6 +1413,26 @@ export abstract class ExpressionBinder extends LambdaBinder {
     } finally {
       this.subscriptionTarget = saved;
     }
+    const eventAccessors =
+      target.kind === 'field' || target.kind === 'staticField' ? target.field.eventAccessors : undefined;
+    if (eventAccessors && (binaryOperator === '+' || binaryOperator === '-')) {
+      const method = binaryOperator === '+' ? eventAccessors.add : eventAccessors.remove;
+      const receiver = target.kind === 'field' ? target.receiver : undefined;
+      return {
+        kind: 'call',
+        method,
+        receiver,
+        args: [this.bindAs(node.value, target.type, context)],
+        typeArgs: [],
+        owner:
+          target.kind === 'staticField'
+            ? target.owner
+            : ((receiver?.type as NamedType | undefined) ?? method.owner.declaredType),
+        isVirtual: method.isVirtual || method.isOverride || method.isAbstract,
+        type: VOID_TYPE,
+        row: node.row,
+      };
+    }
     if (target.kind === 'field' && target.field.isEvent && (binaryOperator === '+' || binaryOperator === '-')) {
       const value = this.bindAs(node.value, target.type, context);
       if (context.fn.typeContext.type !== target.field.owner)

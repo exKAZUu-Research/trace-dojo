@@ -85,6 +85,8 @@ export type BoundExpression =
       isVirtual: boolean;
       /** A constructor's call of another, which `: this(...)` makes, rather than `: base(...)`. */
       isThisInitializer?: boolean;
+      /** For a static abstract method called through a type parameter, the parameter whose type argument implements it. */
+      constrainedType?: Type;
       /**
        * A call the program does not write, such as the base constructor call of a constructor without `: base(...)`,
        * which traces leave out of the calls in progress as the Java interpreter leaves out its implicit `super()`.
@@ -97,6 +99,8 @@ export type BoundExpression =
       property: PropertySymbol;
       args: BoundArgument[];
       owner: NamedType;
+      /** For a static abstract property read through a type parameter, the parameter that implements it. */
+      constrainedType?: Type;
     } & Base)
   | ({ kind: 'invokeDelegate'; target: BoundExpression; args: BoundArgument[] } & Base)
   | ({
