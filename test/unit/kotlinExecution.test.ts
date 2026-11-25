@@ -6829,6 +6829,15 @@ test('gives suspending lambdas their primitive receivers as values', () => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 9]\n' });
 });
 
+test('runs safe forEach calls whose lambdas suspend only on receivers that are not null', () => {
+  const source = `fun main() {
+    val xs: List<Int>? = listOf(4)
+    val ys: List<Int>? = null
+    println(sequence { xs?.forEach { yield(it) }; ys?.forEach { yield(it) }; yield(99) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 99]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

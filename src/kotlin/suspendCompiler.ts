@@ -905,6 +905,8 @@ export abstract class SuspendCompiler extends LocalCompiler {
       return [{ kind: 'for', row, label, variable, iterable: range, body }];
     }
     if (call.callee.kind !== 'member') return undefined;
+    // `xs?.forEach { ... }` loops only over a receiver that is not null, as the call it is runs only then.
+    if (call.callee.isSafe) return [{ kind: 'expressionStatement', row, expression: safeCallAsIf(call) }];
     return [{ kind: 'for', row, label, variable, iterable: call.callee.receiver, body }];
   }
 }
