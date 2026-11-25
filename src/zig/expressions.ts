@@ -29,7 +29,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
@@ -2312,10 +2312,12 @@ function hasSentinel(type: Type): boolean {
 }
 
 /** Whether a value of a type passes as it does in C, as `callconv(.c)` requires of parameters and results. */
+const C_INTEGER_BITS = new Set([8, 16, 32, 64, 128]);
+
 function cAbiType(type: Type, isReturn: boolean): boolean {
   switch (type.kind) {
     case 'int': {
-      return type.bits === 0 ? false : [8, 16, 32, 64, 128].includes(type.bits);
+      return C_INTEGER_BITS.has(type.bits);
     }
     case 'float':
     case 'bool': {
@@ -2336,8 +2338,13 @@ function cAbiType(type: Type, isReturn: boolean): boolean {
     }
     case 'struct':
     case 'union': {
-      // A packed type has a C ABI only through the backing integer that `packed struct(u8)` names.
-      return type.layout === 'extern' || (type.layout === 'packed' && type.namespace.syntax?.argument !== undefined);
+      // A packed type has a C ABI only through the backing integer that `packed struct(u8)` names, of a C width.
+      return (
+        type.layout === 'extern' ||
+        (type.layout === 'packed' &&
+          type.namespace.syntax?.argument !== undefined &&
+          C_INTEGER_BITS.has(bitSizeOf(type)))
+      );
     }
     default: {
       return false;
