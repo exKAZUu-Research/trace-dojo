@@ -11,6 +11,7 @@ import {
 } from './capabilities';
 import { charactersOf } from './characters';
 import {
+  type BadSubstitutionTarget,
   type BreakSegment,
   breakSegment,
   DEFAULT_WORD_CONTEXT,
@@ -280,6 +281,7 @@ export class Expander {
       inDouble: true,
       spacedStar: false,
       ...(inSubscript ? { inSubscript: true } : {}),
+      badSubTarget: { kind: 'arithmetic', pieces: source.pieces },
     };
     for (const piece of source.pieces) {
       if (typeof piece === 'string') {
@@ -300,9 +302,11 @@ export class Expander {
 
   /** Expands `parts` with explicit immutable `WordContext`. */
   expandParts(parts: WordPart[], ctx: WordContext): WordSegment[] {
+    const effectiveCtx: WordContext =
+      ctx.badSubTarget === undefined ? { ...ctx, badSubTarget: { kind: 'parts', parts } } : ctx;
     const segments: WordSegment[] = [];
     for (const part of parts) {
-      for (const seg of this.expandPart(part, ctx)) {
+      for (const seg of this.expandPart(part, effectiveCtx)) {
         segments.push(seg);
       }
     }
@@ -322,7 +326,7 @@ export class Expander {
         return [textSegment(part.text, true, false)];
       }
       case 'double': {
-        return this.expandDoublePart(part.parts, ctx);
+        return this.expandDoublePart(part, ctx);
       }
       case 'parameter': {
         return this.expandParameter(part, ctx);
@@ -337,8 +341,8 @@ export class Expander {
     }
   }
 
-  private expandDoublePart(parts: WordPart[], ctx: WordContext): WordSegment[] {
-    const inner = this.expandParts(parts, {
+  private expandDoublePart(part: Extract<WordPart, { kind: 'double' }>, ctx: WordContext): WordSegment[] {
+    const inner = this.expandParts(part.parts, {
       inDouble: true,
       spacedStar: ctx.spacedStar,
       ...(ctx.spacedArrayStar ? { spacedArrayStar: true } : {}),
@@ -347,6 +351,7 @@ export class Expander {
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
       ...(ctx.inQuotedOperatorWord ? { inQuotedOperatorWord: true } : {}),
       ...(ctx.inSubscript ? { inSubscript: true } : {}),
+      badSubTarget: { kind: 'double', part },
     });
     if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [EMPTY_LIST_SEGMENT];
     const kept = inner.filter((seg) => seg.kind !== 'emptyList');
@@ -393,6 +398,7 @@ export class Expander {
   // ---------------------------------------------------------------- parameters
 
   expandParameter(expansion: ParameterExpansion, ctx: WordContext): WordSegment[] {
+    if (expansion.unclosedSubscript) this.failUnclosedSubscript(expansion, ctx.badSubTarget);
     if ((ctx.inOperatorWord || ctx.inSubscript) && isListExpansionSyntax(expansion)) {
       rejectListInScalarContext(expansion.text);
     }
@@ -403,12 +409,7 @@ export class Expander {
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
     }
-    if (
-      expansion.prefix === '#' &&
-      expansion.subscript !== undefined &&
-      expansion.subscript.text !== '@' &&
-      expansion.subscript.text !== '*'
-    ) {
+    if (isElementLengthExpansion(expansion)) {
       return this.valueSegments(this.elementLengthValue(expansion), ctx, expansion.text);
     }
     const subscript = expansion.subscript ? this.subscriptRef(name, expansion.subscript) : undefined;
@@ -747,10 +748,77 @@ export class Expander {
     return [textSegment('', inDouble, !inDouble)];
   }
 
+  private failUnclosedSubscript(expansion: ParameterExpansion, target: BadSubstitutionTarget | undefined): never {
+    if (target?.kind === 'double') {
+      const quoted = stripLineContinuations(target.part.rawText);
+      this.shell.discard(`bad substitution: no closing \`}' in ${quoted}`);
+    }
+    const shown = stripLineContinuations(formatBadSubstitutionText(target, expansion.text));
+    this.shell.discard(`${shown}: bad substitution`);
+  }
+
   failParameter(name: string, message: string): never {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
+}
+
+function isElementLengthExpansion(expansion: ParameterExpansion): boolean {
+  return (
+    expansion.prefix === '#' &&
+    expansion.subscript !== undefined &&
+    expansion.subscript.text !== '@' &&
+    expansion.subscript.text !== '*'
+  );
+}
+
+function formatBadSubstitutionText(target: BadSubstitutionTarget | undefined, fallback: string): string {
+  if (!target) return fallback;
+  if (target.kind === 'double') return target.part.rawText;
+  if (target.kind === 'arithmetic') {
+    return target.pieces.map((piece) => (typeof piece === 'string' ? piece : partSourceText(piece))).join('');
+  }
+  return target.parts.map(partSourceText).join('');
+}
+
+function partSourceText(part: WordPart): string {
+  switch (part.kind) {
+    case 'literal':
+    case 'parameter':
+    case 'commandSubstitution': {
+      return part.text;
+    }
+    case 'single': {
+      return `'${part.text}'`;
+    }
+    case 'ansiC':
+    case 'double':
+    case 'arithmeticExpansion': {
+      return part.rawText;
+    }
+  }
+}
+
+function stripLineContinuations(raw: string): string {
+  if (!raw.includes('\\\n')) return raw;
+  let out = '';
+  for (let i = 0; i < raw.length;) {
+    const step = readContinuationAtom(raw, i);
+    out += step.emit;
+    i = step.next;
+  }
+  return out;
+}
+
+function readContinuationAtom(raw: string, i: number): { emit: string; next: number } {
+  if (raw[i] === "'") {
+    const close = raw.indexOf("'", i + 1);
+    return close === -1 ? { emit: raw.slice(i), next: raw.length } : { emit: raw.slice(i, close + 1), next: close + 1 };
+  }
+  if (raw[i] === '\\' && i + 1 < raw.length) {
+    return { emit: raw[i + 1] === '\n' ? '' : raw.slice(i, i + 2), next: i + 2 };
+  }
+  return { emit: raw[i], next: i + 1 };
 }
 
 function usesAssignmentIfs(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): boolean {

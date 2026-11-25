@@ -1,5 +1,12 @@
 /** Immutable per-word context and typed segment model for Bash word expansion and pure field splitting. */
 
+import type { WordPart } from './ast';
+
+export type BadSubstitutionTarget =
+  | { readonly kind: 'parts'; readonly parts: readonly WordPart[] }
+  | { readonly kind: 'double'; readonly part: Extract<WordPart, { kind: 'double' }> }
+  | { readonly kind: 'arithmetic'; readonly pieces: readonly (string | WordPart)[] };
+
 export interface WordContext {
   readonly inDouble: boolean;
   readonly spacedStar: boolean;
@@ -10,6 +17,7 @@ export interface WordContext {
   readonly inOperatorWord?: boolean;
   readonly inQuotedOperatorWord?: boolean;
   readonly inSubscript?: boolean;
+  readonly badSubTarget?: BadSubstitutionTarget;
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };

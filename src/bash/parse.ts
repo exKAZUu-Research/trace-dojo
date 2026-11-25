@@ -257,7 +257,10 @@ function tryReadAnsiCSubscript(raw: string, i: number): { parts: WordPart[]; nex
   let close = i + 2;
   while (close < raw.length && raw[close] !== "'") close += raw[close] === '\\' ? 2 : 1;
   if (close >= raw.length) return undefined;
-  return { parts: [{ kind: 'ansiC', text: decodeAnsiC(raw.slice(i + 2, close)) }], next: close + 1 };
+  return {
+    parts: [{ kind: 'ansiC', text: decodeAnsiC(raw.slice(i + 2, close)), rawText: raw.slice(i, close + 1) }],
+    next: close + 1,
+  };
 }
 
 function readDoubleQuotedPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
@@ -269,7 +272,10 @@ function readDoubleQuotedPiece(raw: string, i: number, text: SourceText): { part
     return { parts: [{ kind: 'single', text: raw[i] }], next: i + 1 };
   }
   const inner = raw.slice(quoteStart + 1, end - 1);
-  return { parts: [{ kind: 'double', parts: scanWordSliceParts(inner, true, false) }], next: end };
+  return {
+    parts: [{ kind: 'double', parts: scanWordSliceParts(inner, true, false), rawText: raw.slice(quoteStart, end) }],
+    next: end,
+  };
 }
 
 function readBackquotedPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
@@ -301,7 +307,13 @@ function readDollarGroupPiece(raw: string, i: number, text: SourceText): { parts
     }
     const inner = raw.slice(i + 2, end - 1);
     return {
-      parts: [{ kind: 'arithmeticExpansion', expression: { pieces: rawArithmeticPieces(inner), row: 0 } }],
+      parts: [
+        {
+          kind: 'arithmeticExpansion',
+          expression: { pieces: rawArithmeticPieces(inner), row: 0 },
+          rawText: raw.slice(i, end),
+        },
+      ],
       next: end,
     };
   }
@@ -315,7 +327,13 @@ function readDollarGroupPiece(raw: string, i: number, text: SourceText): { parts
     if (closeEnd !== undefined) {
       const inner = raw.slice(i + 3, closeEnd - 2);
       return {
-        parts: [{ kind: 'arithmeticExpansion', expression: { pieces: rawArithmeticPieces(inner), row: 0 } }],
+        parts: [
+          {
+            kind: 'arithmeticExpansion',
+            expression: { pieces: rawArithmeticPieces(inner), row: 0 },
+            rawText: raw.slice(i, closeEnd),
+          },
+        ],
         next: closeEnd,
       };
     }
@@ -421,7 +439,16 @@ export function parseBracedParameterExpansion(slice: string, inDouble: boolean, 
   if (inner === '') return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
   const { prefix, pos: afterPrefix } = readParameterPrefix(inner);
   const header = readParameterNameAndSubscript(inner, afterPrefix, row);
-  if (!header) return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
+  if (!header || header.kind === 'unclosedSubscript') {
+    return {
+      kind: 'parameter',
+      name: '',
+      argument: [],
+      text: slice,
+      braced: true,
+      ...(header?.kind === 'unclosedSubscript' ? { unclosedSubscript: true } : {}),
+    };
+  }
   if (header.next >= inner.length) {
     return {
       kind: 'parameter',
@@ -457,36 +484,40 @@ function readParameterPrefix(inner: string): { prefix?: '#' | '!'; pos: number }
   return isLengthPrefix ? { prefix: '#', pos: 1 } : { pos: 0 };
 }
 
-function readParameterNameAndSubscript(
-  inner: string,
-  pos: number,
-  row = 0
-): { name: string; subscript?: { parts: WordPart[]; row: number; text: string }; next: number } | undefined {
+type ParsedParameterHeader =
+  | { kind: 'ok'; name: string; subscript?: { parts: WordPart[]; row: number; text: string }; next: number }
+  | { kind: 'unclosedSubscript' };
+
+function readParameterNameAndSubscript(inner: string, pos: number, row = 0): ParsedParameterHeader | undefined {
   const rest = inner.slice(pos);
   const idMatch = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest);
-  if (idMatch) {
-    let name = idMatch[0];
-    const afterName = pos + name.length;
-    if (inner[afterName] !== '[') return { name, next: afterName };
-    const text = createSubscriptSourceText(inner);
-    let closeEnd = inner.length;
-    try {
-      closeEnd = skipBalanced(text, afterName, '[', ']');
-    } catch {
-      return undefined;
-    }
+  if (idMatch) return readNamedParameterHeader(inner, pos, idMatch[0], row);
+  const numMatch = /^\d+/.exec(rest);
+  if (numMatch) return { kind: 'ok', name: numMatch[0], next: pos + numMatch[0].length };
+  if ('@#?*!$_-'.includes(rest[0] ?? '')) return { kind: 'ok', name: rest[0], next: pos + 1 };
+  return undefined;
+}
+
+function readNamedParameterHeader(inner: string, pos: number, initialName: string, row: number): ParsedParameterHeader {
+  let name = initialName;
+  const afterName = pos + name.length;
+  if (inner[afterName] !== '[') return { kind: 'ok', name, next: afterName };
+  const text = createSubscriptSourceText(inner);
+  try {
+    const closeEnd = skipBalanced(text, afterName, '[', ']');
     const subRaw = inner.slice(afterName + 1, closeEnd - 1);
-    if (inner[closeEnd] === '[') name = '';
+    let scanEnd = closeEnd;
+    if (inner[scanEnd] === '[') name = '';
+    while (inner[scanEnd] === '[') scanEnd = skipBalanced(text, scanEnd, '[', ']');
     return {
+      kind: 'ok',
       name,
       subscript: { parts: scanWordSliceParts(subRaw, false, false), row, text: subRaw },
       next: closeEnd,
     };
+  } catch {
+    return { kind: 'unclosedSubscript' };
   }
-  const numMatch = /^\d+/.exec(rest);
-  if (numMatch) return { name: numMatch[0], next: pos + numMatch[0].length };
-  if ('@#?*!$_-'.includes(rest[0] ?? '')) return { name: rest[0], next: pos + 1 };
-  return undefined;
 }
 
 /** Extracts the unexpanded `length` slice from `${name:offset:length}` for Bash's negative-length diagnostic. */

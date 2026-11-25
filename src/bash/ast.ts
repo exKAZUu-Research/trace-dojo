@@ -13,12 +13,12 @@ export type WordPart =
   /** The text between single quotes. */
   | { kind: 'single'; text: string }
   /** The decoded text of `$'...'`. */
-  | { kind: 'ansiC'; text: string }
+  | { kind: 'ansiC'; text: string; rawText: string }
   /** Double-quoted parts; `$"..."` is the same in the C and UTF-8 locales without message catalogs. */
-  | { kind: 'double'; parts: WordPart[] }
+  | { kind: 'double'; parts: WordPart[]; rawText: string }
   | ParameterExpansion
   | { kind: 'commandSubstitution'; body: Statement[]; text: string; row: number; syntaxError?: BackquoteSyntaxError }
-  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource };
+  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource; rawText: string };
 
 /** A syntax error in a backquoted body, which Bash reports when it runs the substitution, with the line it shows. */
 export interface BackquoteSyntaxError {
@@ -46,6 +46,8 @@ export interface ParameterExpansion {
   text: string;
   /** Whether the expansion was written with braces, as `${x}`. */
   braced: boolean;
+  /** Whether `[` inside `${name[...]}` had no matching `]` before `}`. */
+  unclosedSubscript?: boolean;
 }
 
 /**

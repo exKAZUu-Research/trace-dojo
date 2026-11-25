@@ -680,11 +680,24 @@ export class Converter {
         return node.text === '' ? [] : [{ kind: 'single', text: node.text.slice(1, -1) }];
       }
       case 'ansi_c_string': {
-        return [{ kind: 'ansiC', text: decodeAnsiC(node.text.slice(2, -1)) }];
+        return [
+          {
+            kind: 'ansiC',
+            text: decodeAnsiC(node.text.slice(2, -1)),
+            rawText: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
+          },
+        ];
       }
       case 'string':
       case 'translated_string': {
-        return [{ kind: 'double', parts: mergeLiterals(this.stringParts(node)) }];
+        const quoteStart = node.type === 'translated_string' ? node.startIndex + 1 : node.startIndex;
+        return [
+          {
+            kind: 'double',
+            parts: mergeLiterals(this.stringParts(node)),
+            rawText: this.analyzed.originalSource.slice(quoteStart, node.endIndex),
+          },
+        ];
       }
       case 'simple_expansion': {
         const name = node.namedChildren[0]?.text ?? '';
@@ -702,6 +715,7 @@ export class Converter {
           {
             kind: 'arithmeticExpansion',
             expression: brackets ? this.arithmeticInside(node, '$[', ']') : this.arithmeticInside(node, '$((', '))'),
+            rawText: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
           },
         ];
       }

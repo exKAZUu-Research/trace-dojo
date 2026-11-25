@@ -7,6 +7,7 @@ import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
 import { type Expander, type ParameterValue, type SubscriptRef } from './expansion';
 import {
+  type BadSubstitutionTarget,
   breakSegment,
   EMPTY_LIST_SEGMENT,
   QUOTED_EMPTY_SEGMENT,
@@ -148,15 +149,20 @@ function expandArgument(expander: Expander, parts: WordPart[], ctx: WordContext,
       seg.kind === 'text' && !seg.quoted && !ctx.inAssignmentValue ? { ...seg, split: true } : seg
     );
   }
+  const badSubTarget: BadSubstitutionTarget = { kind: 'parts', parts };
   const segments: WordSegment[] = [];
   for (const part of parts) {
-    segments.push(...expandDoubleQuotedOperatorPart(expander, part));
+    segments.push(...expandDoubleQuotedOperatorPart(expander, part, badSubTarget));
   }
   const kept = segments.filter((seg) => seg.kind !== 'emptyList');
   return kept.length === 0 ? [QUOTED_EMPTY_SEGMENT] : kept;
 }
 
-function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart): WordSegment[] {
+function expandDoubleQuotedOperatorPart(
+  expander: Expander,
+  part: WordPart,
+  badSubTarget: BadSubstitutionTarget
+): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
   return expander.expandParts([part], {
@@ -164,6 +170,7 @@ function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart): Wor
     spacedStar: false,
     inOperatorWord: true,
     inQuotedOperatorWord: true,
+    badSubTarget,
   });
 }
 
