@@ -264,7 +264,10 @@ export function nonNullable(type: DartType): DartType {
       return { ...type, nullable: false, promoted };
     }
     default: {
-      return type.nullable ? { ...type, nullable: false } : type;
+      const nonNull = type.nullable ? { ...type, nullable: false } : type;
+      // NonNull(FutureOr<T>) is FutureOr<NonNull(T)>, so that no type isNullable accepts stays nullable.
+      const value = futureOrValue(nonNull);
+      return value && isNullable(value) ? interfaceType(coreTypes.futureOr, [nonNullable(value)]) : nonNull;
     }
   }
 }

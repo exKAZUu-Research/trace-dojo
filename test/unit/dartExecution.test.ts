@@ -10065,6 +10065,17 @@ Future<void> main() async {
   expect(executeProgram('dart', typed)).toMatchObject({ kind: 'compileError' });
 });
 
+test('Dart types conditional, if-null, and switch expressions with FutureOr', () => {
+  const program = `import 'dart:async';
+void main() {
+  final c = true;
+  FutureOr<int?> x = 1;
+  FutureOr<int?> y = null;
+  print([c ? x : 3, y ?? 3, x!]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 3, 1]\n' });
+});
+
 test('Dart collection for elements await each element once in order', () => {
   const program = `Future<int> later(int x) async {
   await null;
