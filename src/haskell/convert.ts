@@ -679,7 +679,7 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
       return [
         {
           kind: 'pat',
-          pat: convertPattern(features, required(node, 'pattern')),
+          pat: strictPattern(features, convertPattern(features, required(node, 'pattern'))),
           expr: convertExpr(features, required(node, 'expression')),
           span,
         },

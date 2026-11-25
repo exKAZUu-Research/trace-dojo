@@ -345,7 +345,7 @@ function forcing(names: string[], expr: Expr, span: Span): Expr {
 }
 
 function trueOf(span: Span): Expr {
-  return { kind: 'con', name: { name: 'True', span }, span };
+  return { kind: 'support', name: 'True', span };
 }
 
 function unitOf(span: Span): Expr {
