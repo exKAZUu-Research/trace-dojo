@@ -1371,6 +1371,7 @@ renderMatch :: Match -> String
 renderMatch (Match p b ds) = renderPat p ++ renderBody "->" b ++ renderWhere ds
 
 renderPat :: Pat -> String
+renderPat (LitP (RationalL r)) = renderFractionalPat r
 renderPat (LitP l) = renderLit l
 renderPat (VarP n) = renderNamePrefix n
 renderPat (TupP ps) = "(" ++ intercalate ", " (map renderPat ps) ++ ")"
@@ -1491,6 +1492,21 @@ renderCon (RecC n vbts) = renderNamePrefix n ++ " {" ++ intercalate ", " [render
 renderCon (InfixC (b1, t1) n (b2, t2)) = renderBang b1 ++ renderTypeAtom t1 ++ " " ++ renderNameInfix n ++ " " ++ renderBang b2 ++ renderTypeAtom t2
 renderCon (ForallC vs c con) = "forall " ++ unwords (map renderTyVar vs) ++ ". " ++ renderCxt c ++ renderCon con
 renderCon _ = errorWithoutStackTrace "\12371\12398\24418\12398\27083\25104\23376\65288GADT \12398\27083\25104\23376\12394\12393\65289\12434\20316\12427\12473\12503\12521\12452\12473\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
+
+-- A pattern takes a literal, not a division: a fraction is written as the finite decimal it is.
+renderFractionalPat :: Rational -> String
+renderFractionalPat r
+  | rest /= 1 = errorWithoutStackTrace "\26377\38480\12398\23567\25968\12391\26360\12369\12394\12356\20998\25968\12398\12497\12479\12540\12531\12399\12289\12371\12398\25505\28857\29872\22659\12391\12399\20351\12360\12414\12379\12435\12290"
+  | numerator r < 0 = "(-" ++ text ++ ")"
+  | otherwise = text
+  where
+    d = denominator r
+    rest = strip 5 (strip 2 d)
+    strip p x = if x ${'`'}mod${'`'} p == 0 then strip p (x ${'`'}div${'`'} p) else x
+    k = head [i | i <- [0 ..], (10 ^ i) ${'`'}mod${'`'} d == 0]
+    scaled = abs (numerator r) * (10 ^ k ${'`'}div${'`'} d)
+    fraction = show (scaled ${'`'}mod${'`'} (10 ^ k))
+    text = show (scaled ${'`'}div${'`'} (10 ^ k)) ++ "." ++ (if k == 0 then "0" else replicate (k - length fraction) '0' ++ fraction)
 
 renderBang :: Bang -> String
 renderBang (Bang _ SourceStrict) = "!"
