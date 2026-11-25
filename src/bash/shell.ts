@@ -77,7 +77,6 @@ export class Shell implements ArithmeticHost {
   private lineShift: number;
   private loopDepth = 0;
   private conditionDepth = 0;
-  private listConditionDepth = 0;
 
   constructor(
     readonly runtime: Runtime,
@@ -134,7 +133,7 @@ export class Shell implements ArithmeticHost {
   }
 
   // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
-  execute(statement: Statement): number {
+  execute(statement: Statement, guarded = false): number {
     this.runtime.spend();
     this.currentRow = statement.lineRow - this.lineShift;
     let status: number;
@@ -143,7 +142,7 @@ export class Shell implements ArithmeticHost {
       case 'declaration':
       case 'arithmetic':
       case 'test': {
-        status = this.executeSimple(statement);
+        status = this.executeSimple(statement, guarded);
         break;
       }
       case 'if': {
@@ -186,23 +185,17 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'list': {
-        this.listConditionDepth++;
-        let left: number;
-        try {
-          left = this.execute(statement.left);
-        } finally {
-          this.listConditionDepth--;
-        }
+        const left = this.execute(statement.left, true);
         const runsRight = statement.operator === '&&' ? left === 0 : left !== 0;
-        status = runsRight ? this.execute(statement.right) : left;
+        status = runsRight ? this.execute(statement.right, guarded) : left;
         break;
       }
       case 'not': {
-        status = this.execute(statement.body) === 0 ? 1 : 0;
+        status = this.execute(statement.body, guarded) === 0 ? 1 : 0;
         break;
       }
       case 'redirected': {
-        status = this.withRedirects(statement.redirects, () => this.execute(statement.body));
+        status = this.withRedirects(statement.redirects, () => this.execute(statement.body, guarded));
         break;
       }
     }
@@ -210,9 +203,9 @@ export class Shell implements ArithmeticHost {
     return status;
   }
 
-  private executeSimple(statement: Statement): number {
+  private executeSimple(statement: Statement, guarded: boolean): number {
     if (this.conditionDepth > 0) {
-      return this.withStatus(() => this.runSimpleBody(statement).status);
+      return this.withStatus(() => this.runSimpleBody(statement, guarded).status);
     }
     const mark = this.runtime.steps.statementMark();
     let outcome: { status: number; stepMode: StepMode; ranFunction: boolean } = {
@@ -221,7 +214,7 @@ export class Shell implements ArithmeticHost {
       ranFunction: false,
     };
     const status = this.withStatus(() => {
-      outcome = this.runSimpleBody(statement);
+      outcome = this.runSimpleBody(statement, guarded);
       return outcome.status;
     });
     if (outcome.stepMode === 'binding') this.runtime.steps.stepBinding(statement.row, false);
@@ -231,10 +224,13 @@ export class Shell implements ArithmeticHost {
     return status;
   }
 
-  private runSimpleBody(statement: Statement): { status: number; stepMode: StepMode; ranFunction: boolean } {
+  private runSimpleBody(
+    statement: Statement,
+    guarded: boolean
+  ): { status: number; stepMode: StepMode; ranFunction: boolean } {
     switch (statement.kind) {
       case 'command': {
-        return this.executeCommand(statement);
+        return this.executeCommand(statement, guarded);
       }
       case 'declaration': {
         return this.executeDeclarationStatement(statement);
@@ -242,14 +238,14 @@ export class Shell implements ArithmeticHost {
       case 'arithmetic': {
         return {
           status: this.arithmeticStatus(statement.expression, '(('),
-          stepMode: this.listConditionDepth > 0 ? 'skip' : 'statement',
+          stepMode: guarded ? 'skip' : 'statement',
           ranFunction: false,
         };
       }
       case 'test': {
         return {
           status: conditionalStatus(this, statement.expression),
-          stepMode: this.listConditionDepth > 0 ? 'skip' : 'statement',
+          stepMode: guarded ? 'skip' : 'statement',
           ranFunction: false,
         };
       }
@@ -471,7 +467,10 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- simple commands & declarations
 
-  private executeCommand(statement: Extract<Statement, { kind: 'command' }>): {
+  private executeCommand(
+    statement: Extract<Statement, { kind: 'command' }>,
+    guarded: boolean
+  ): {
     status: number;
     stepMode: StepMode;
     ranFunction: boolean;
@@ -490,7 +489,14 @@ export class Shell implements ArithmeticHost {
     if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
       rejectUnsupportedFeature(classified.feature);
     }
-    return this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
+    const isConditionBuiltin =
+      guarded && classified.kind === 'builtin' && statement.assignments.length === 0 && CONDITION_BUILTINS.has(name);
+    const status = this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
+    return {
+      status,
+      stepMode: isConditionBuiltin ? 'skip' : 'statement',
+      ranFunction: classified.kind === 'function',
+    };
   }
 
   private executeDynamicDeclaration(
@@ -514,9 +520,8 @@ export class Shell implements ArithmeticHost {
     args: string[],
     lastArg: string,
     kind: 'function' | 'builtin' | 'notFound'
-  ): { status: number; stepMode: StepMode; ranFunction: boolean } {
-    const isConditionBuiltin = kind === 'builtin' && statement.assignments.length === 0 && CONDITION_BUILTINS.has(name);
-    const status = this.withTemporaryScope(statement.assignments, () =>
+  ): number {
+    return this.withTemporaryScope(statement.assignments, () =>
       this.withRedirects(statement.redirects, () => {
         let code = 127;
         if (kind === 'function') {
@@ -530,11 +535,6 @@ export class Shell implements ArithmeticHost {
         return code;
       })
     );
-    return {
-      status,
-      stepMode: this.listConditionDepth > 0 && isConditionBuiltin ? 'skip' : 'statement',
-      ranFunction: kind === 'function',
-    };
   }
 
   private executeDeclarationStatement(statement: Extract<Statement, { kind: 'declaration' }>): {
@@ -620,12 +620,10 @@ export class Shell implements ArithmeticHost {
     const saved = {
       loop: this.loopDepth,
       cond: this.conditionDepth,
-      listCond: this.listConditionDepth,
       shift: this.lineShift,
     };
     this.loopDepth = 0;
     this.conditionDepth = 0;
-    this.listConditionDepth = 0;
     this.lineShift = fn.lineShift;
     try {
       return this.restoringLine(() => this.execute(fn.body));
@@ -635,7 +633,6 @@ export class Shell implements ArithmeticHost {
     } finally {
       this.loopDepth = saved.loop;
       this.conditionDepth = saved.cond;
-      this.listConditionDepth = saved.listCond;
       this.lineShift = saved.shift;
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
