@@ -545,7 +545,11 @@ export class QuoteRenamer {
    * group declares, which its operators otherwise lack.
    */
   private declGroup(decls: Decl[], parent: QuoteScope): { decls: QDecls; scope: QuoteScope } {
-    const names = new GroupNames(parent, (name) => this.bindValue(name), this.globals.newLocal);
+    const names = new GroupNames(
+      parent,
+      (name) => this.bindValue(name),
+      (name, span) => this.globals.newLocal(name, span)
+    );
     for (const [index, decl] of decls.entries()) names.declare(decl, decls[index - 1]);
     for (const decl of decls) if (decl.kind === 'fixity') names.applyFixity(decl);
     const scope = { ...this.withValues(parent, names.values.values()), cons: names.cons, types: names.types };
