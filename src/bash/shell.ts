@@ -295,30 +295,33 @@ export class Shell implements ArithmeticHost {
       this.reportError(`\`${statement.variable}': not a valid identifier`);
       return 1;
     }
-    const values = statement.values
-      ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
-      : [...this.store.positionalArgs()];
-    const bindsObjects = values.some((value) => this.runtime.isTurtleHandle(value) || this.namesStructure(value));
-    return this.restoringLine(() => this.runForIterations(statement, values, bindsObjects));
+    return this.loop((last) => {
+      const values = statement.values
+        ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
+        : [...this.store.positionalArgs()];
+      const bindsObjects = values.some((value) => this.runtime.isTurtleHandle(value) || this.namesStructure(value));
+      this.restoringLine(() => {
+        this.runForIterations(statement, values, bindsObjects, last);
+      });
+    });
   }
 
   private runForIterations(
     statement: Extract<Statement, { kind: 'for' }>,
     values: readonly string[],
-    bindsObjects: boolean
-  ): number {
-    return this.loop((last) => {
-      for (const value of values) {
-        this.runtime.spend();
-        this.currentRow = statement.row - this.lineShift;
-        if (!this.bindLoopVariable(statement.variable, value, bindsObjects)) {
-          last.status = 1;
-          return;
-        }
-        this.runtime.steps.stepBinding(statement.row, !bindsObjects);
-        if (this.iterate(statement.body, last) === 'stop') return;
+    bindsObjects: boolean,
+    last: { status: number }
+  ): void {
+    for (const value of values) {
+      this.runtime.spend();
+      this.currentRow = statement.row - this.lineShift;
+      if (!this.bindLoopVariable(statement.variable, value, bindsObjects)) {
+        last.status = 1;
+        return;
       }
-    });
+      this.runtime.steps.stepBinding(statement.row, !bindsObjects);
+      if (this.iterate(statement.body, last) === 'stop') return;
+    }
   }
 
   private bindLoopVariable(name: string, value: string, bindsObjects: boolean): boolean {
@@ -343,8 +346,11 @@ export class Shell implements ArithmeticHost {
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
     };
-    if (statement.init && evaluateHeader(statement.init, true) === undefined) return 1;
     return this.loop((last) => {
+      if (statement.init && evaluateHeader(statement.init, true) === undefined) {
+        last.status = 1;
+        return;
+      }
       for (;;) {
         this.runtime.spend();
         if (statement.condition) {
