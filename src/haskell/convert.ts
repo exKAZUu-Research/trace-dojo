@@ -1781,8 +1781,12 @@ function convertType(features: ConvertContext, node: Node): TypeExpr {
     }
     case 'list': {
       const elements = fields(node, 'element');
-      if (elements.length !== 1) throw unsupportedError(span, "昇格したリストの型（'[a, b]）");
-      return { kind: 'tlist', elem: convertType(features, elements[0]), span };
+      if (elements.length === 1) return { kind: 'tlist', elem: convertType(features, elements[0]), span };
+      // Under DataKinds, a list type of other than one element is the promoted list, its tick optional.
+      if (!features.allows('promotedSyntax')) {
+        throw syntaxError(span, '要素が 1 つでないリストの型を書くには、DataKinds の拡張が要ります。');
+      }
+      return convertPromoted(features, node, span);
     }
     case 'tuple': {
       const elements = fields(node, 'element');
