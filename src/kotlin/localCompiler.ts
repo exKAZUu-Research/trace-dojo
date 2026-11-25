@@ -284,6 +284,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     const property = receiverType ? this.findProperty(receiverType, name, row) : this.freeProperty(scope, name);
     if (!property) {
       if (!receiverType && this.findVariable(scope, name)) this.error(row, 'ローカル変数は :: で参照できません。');
+      // A name of what this environment does not run is unavailable, as its call and its value are.
+      if (!receiverType) this.rejectUnavailableLibraryReference(name, row);
       return this.error(row, `${name} が見つかりません。`);
     }
     const { symbol, substitution } = property;
