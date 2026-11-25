@@ -287,6 +287,20 @@ function lazyContents(entry: OpenHandle, reader: TextReader, runtime: Runtime): 
   return cons(character, new Thunk(undefined, undefined, () => lazyContents(entry, reader, runtime)));
 }
 
+// Program arguments
+
+/** The arguments `getArgs` gives while `withArgs` runs an action, by run; a run starts with none. */
+const programArgs = new WeakMap<Runtime, Slot>();
+
+define('getArgs', 0, [], (_, runtime) => ioAction('getArgs', [], () => programArgs.get(runtime) ?? NIL()));
+
+define('setArgs', 1, [], ([args], runtime) =>
+  ioAction('withArgs', [args], () => {
+    programArgs.set(runtime, args);
+    return unit();
+  })
+);
+
 // Exceptions
 
 define('throwSome', 1, [], ([exception]) => {

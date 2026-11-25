@@ -220,7 +220,7 @@ uninterruptibleMask_ :: IO a -> IO a
 uninterruptibleMask_ action = action
 
 assert :: Bool -> a -> a
-assert _ x = x
+assert condition x = if condition then x else throw (AssertionFailed "Assertion failed")
 
 -- IO errors
 
@@ -550,7 +550,10 @@ die :: String -> IO a
 die message = hPutStrLn stderr message >> exitFailure
 
 getArgs :: IO [String]
-getArgs = return []
+getArgs = primitive "getArgs"
+
+setArgs :: [String] -> IO ()
+setArgs = primitive "setArgs"
 
 getProgName :: IO String
 getProgName = return "Main.hs"
@@ -567,7 +570,7 @@ getEnv :: String -> IO String
 getEnv name = ioError (IOError Nothing NoSuchThing "getEnv" "no environment variable" Nothing (Just name))
 
 withArgs :: [String] -> IO a -> IO a
-withArgs _ action = action
+withArgs args action = bracket (getArgs >>= \old -> setArgs args >> return old) setArgs (\_ -> action)
 
 -- Mutable references
 
