@@ -179,8 +179,14 @@ function childrenOf(expr: RExpr): { exprs: RExpr[]; bindings: RBinding[]; rhss: 
     case 'rsection': {
       return { ...none, exprs: [expr.op, expr.right] };
     }
-    case 'typed': {
+    case 'typed':
+    case 'tyapp':
+    case 'projection':
+    case 'poly': {
       return { ...none, exprs: [expr.expr] };
+    }
+    case 'implicitLet': {
+      return { ...none, exprs: [...expr.binds.map((bind) => bind.expr), expr.body] };
     }
     case 'recordCon': {
       return { ...none, exprs: expr.fields.map((field) => field.value) };
@@ -188,8 +194,15 @@ function childrenOf(expr: RExpr): { exprs: RExpr[]; bindings: RBinding[]; rhss: 
     case 'recordUpdate': {
       return { ...none, exprs: [expr.expr, ...expr.fields.map((field) => field.value)] };
     }
-    default: {
+    case 'var':
+    case 'con':
+    case 'lit':
+    case 'hole':
+    case 'implicit': {
       return none;
+    }
+    default: {
+      return expr satisfies never;
     }
   }
 }
