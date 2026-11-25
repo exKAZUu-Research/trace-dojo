@@ -10083,10 +10083,13 @@ Stream<int> stream() async* {
 void main() async {
   print([for (var i = 0; i < 2; i++) await later(i), for (var x in numbers()) await later(x)]);
   print([0, await for (var x in stream()) if (x.isOdd) await later(x) else x]);
+  var count = 0;
+  print([for (var i = 0; i < 3; i++) if (i.isEven) await later(i) else count += 1, count]);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'later 0\nlater 1\nnumbers\nlater 1\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\n',
+    stdout:
+      'later 0\nlater 1\nnumbers\nlater 1\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\nlater 0\nlater 2\n[0, 1, 20, 1]\n',
   });
 });
 

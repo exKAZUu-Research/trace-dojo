@@ -128,6 +128,23 @@ export abstract class AwaitCompiler extends CompilerBase {
     return root ? this.remembering(root, key) : (_frame, compute) => compute();
   }
 
+  /**
+   * What each iteration of the collection `for` elements being compiled remembers once it completes, which an
+   * evaluation of the statement again after a later iteration's `await` reuses instead of running the iteration again.
+   */
+  protected completedIterations<T>(key: object): {
+    read: (frame: Frame) => T | undefined;
+    write: (frame: Frame, outcome: T) => void;
+  } {
+    const root = this.awaitRoot;
+    if (!root) throw new Error('Only a statement that awaits remembers its iterations.');
+    const slot = this.awaitSlot(root, key);
+    return {
+      read: (frame) => (readMemo(frame, slot, true) as CompletedIteration<T> | undefined)?.outcome,
+      write: (frame, outcome) => writeMemo(frame, slot, iterationKey(frame), new CompletedIteration(outcome)),
+    };
+  }
+
   /** Compiles a collection `for` element's parts, whose remembered values are kept apart for each iteration. */
   protected inCollectionLoop<T>(compile: () => T): T {
     const root = this.awaitRoot;
@@ -161,5 +178,11 @@ export abstract class AwaitCompiler extends CompilerBase {
       if (root.loopDepth > 0) root.iterated.add(slot);
     }
     return slot;
+  }
+}
+
+class CompletedIteration<T> extends Cell {
+  constructor(readonly outcome: T) {
+    super(undefined);
   }
 }

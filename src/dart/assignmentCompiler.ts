@@ -853,8 +853,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const map = run(frame);
       if (nullAware && map === undefined) return;
       // The VM adds a spread map by the literal's `addAll`, whose hashing may run learner code while the map is unnamed.
-      frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
-        frame.runtime.links.addAllToMap(frame.runtime, add.target as DartObject, map)
+      applyAddition(add, (target) =>
+        frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
+          frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
+        )
       );
     };
   }
@@ -993,7 +995,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.recordsSteps = savedRecords;
       return {
         bind: binding,
-        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
+        body: this.compileElementLoopBody(element, iterates, kind, elementContext, valueContext),
         moveNext: element.isAwait ? this.awaitedMoveNext(element) : syncMoveNext,
         // The stream iterator, created once, has moved past the elements of the iterations its statement runs again.
         current: element.isAwait ? this.rememberEachIteration(element.binding) : undefined,
@@ -1006,6 +1008,36 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       ? listed
       : (frame) => frame.runtime.getProperty(listed(frame), 'iterator', undefined);
     return forInElementLoop(iteratorOf, iterates, { moveNext, current, bind, body: body.run });
+  }
+
+  /**
+   * The body of a collection `for` element. When an `await` in it may suspend the statement, an iteration that
+   * completed replays what it added when the statement runs again after a later iteration's `await`, instead of
+   * running again, so that parts written after the `await` that an earlier iteration ran keep their effects once.
+   */
+  private compileElementLoopBody(
+    element: Extract<CollectionElement, { kind: 'forElement' | 'forInElement' }>,
+    iterates: boolean,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined
+  ): { types: ElementTypes[]; run: (frame: Frame, add: AddElement) => void } {
+    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
+    if (!iterates) return body;
+    const { read, write } = this.completedIterations<AddOperation[]>({});
+    return {
+      types: body.types,
+      run: (frame, add) => {
+        const completed = read(frame);
+        if (completed) {
+          for (const operation of completed) applyAddition(add, operation);
+          return;
+        }
+        const operations: AddOperation[] = [];
+        body.run(frame, recordingAdd(add, operations));
+        write(frame, operations);
+      },
+    };
   }
 
   /** The `StreamIterator` an `await for` element reads, created once while its statement runs again after awaits. */
@@ -1045,7 +1077,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       return {
         condition: compiledCondition,
         afterLoop: exit,
-        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
+        body: this.compileElementLoopBody(element, iterates, kind, elementContext, valueContext),
         updates: this.withoutRemembering(() => element.updates.map((update) => this.compileExpression(update).run)),
       };
     });
@@ -1293,7 +1325,31 @@ interface ElementTypes {
   value?: DartType;
 }
 /** Adds an element to a collection literal being built; a set or map literal names itself as the target. */
-type AddElement = ((key: Value, value?: Value) => void) & { target?: DartObject };
+type AddElement = ((key: Value, value?: Value) => void) & {
+  target?: DartObject;
+  /** Adds what `operation` adds, through which an add that records the additions sees an addition writing `target`. */
+  addAll?: (operation: AddOperation) => void;
+};
+
+/** An addition to the collection being built, run with the collection's add. */
+type AddOperation = (add: AddElement) => void;
+
+function applyAddition(add: AddElement, operation: AddOperation): void {
+  if (add.addAll) add.addAll(operation);
+  else operation(add);
+}
+
+/** An add that also records each addition in `operations`, so that they can be applied again later. */
+function recordingAdd(add: AddElement, operations: AddOperation[]): AddElement {
+  const addAll = (operation: AddOperation): void => {
+    operations.push(operation);
+    applyAddition(add, operation);
+  };
+  return Object.assign((key: Value, value?: Value) => addAll((target) => target(key, value)), {
+    target: add.target,
+    addAll,
+  });
+}
 
 function collectionName(kind: 'list' | 'set' | 'map'): string {
   return kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
@@ -1304,6 +1360,10 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
 }
 
 function addIterableElements(frame: Frame, iterable: Value, elementType: DartType | undefined, add: AddElement): void {
+  if (add.addAll) {
+    add.addAll((target) => addIterableElements(frame, iterable, elementType, target));
+    return;
+  }
   const { runtime } = frame;
   if (elementType === undefined && add.target && runtime.links.quickCopySet(runtime, add.target, iterable)) return;
   runtime.withCallRoots(iterable, NO_ARGUMENTS, () =>
