@@ -588,7 +588,6 @@ lamCasesE :: Quote m => [m Clause] -> m Exp
 lamCasesE cs = LamCasesE <$> sequenceA cs
 
 tupE :: Quote m => [m Exp] -> m Exp
-tupE [e] = e
 tupE es = fmap (TupE . map Just) (sequenceA es)
 
 tupSectionE :: Quote m => [Maybe (m Exp)] -> m Exp
@@ -684,7 +683,6 @@ varP :: Quote m => Name -> m Pat
 varP = return . VarP
 
 tupP :: Quote m => [m Pat] -> m Pat
-tupP [p] = p
 tupP ps = TupP <$> sequenceA ps
 
 conP :: Quote m => Name -> [m Pat] -> m Pat
@@ -987,6 +985,12 @@ pprNamePrefix n = if isSymOcc (nameBase n) then "(" ++ showName n ++ ")" else sh
 pprNameInfix :: Name -> String
 pprNameInfix n = if isSymOcc (nameBase n) then showName n else "${'`'}" ++ showName n ++ "${'`'}"
 
+-- Parts on one line when they fit GHC's line width, and on lines of their own, indented by one, when they do not.
+pprSep :: [String] -> String
+pprSep parts =
+  let one = unwords parts
+  in if length one <= 100 && notElem '\n' one then one else intercalate "\n " parts
+
 parensIf :: Bool -> String -> String
 parensIf True s = "(" ++ s ++ ")"
 parensIf False s = s
@@ -1037,8 +1041,7 @@ pprExp _ (ParensE e) = "(" ++ pprExp 0 e ++ ")"
 pprExp p (LamE ps e) = parensIf (p > 0) ("\\" ++ unwords (map (pprPat 3) ps) ++ " -> " ++ pprExp 0 e)
 pprExp p (LamCaseE ms) = parensIf (p > 0) ("\\case\n" ++ indent (intercalate "\n" (map ppr ms)))
 pprExp _ (TupE es) = "(" ++ intercalate ", " (map (maybe "" (pprExp 0)) es) ++ ")"
-pprExp p (CondE c a b) =
-  parensIf (p > 0) ("if " ++ pprExp 0 c ++ "\n then " ++ pprExp 0 a ++ "\n else " ++ pprExp 0 b)
+pprExp p (CondE c a b) = parensIf (p > 0) (pprSep ["if " ++ pprExp 0 c, "then " ++ pprExp 0 a, "else " ++ pprExp 0 b])
 pprExp p (MultiIfE alts) = parensIf (p > 0) ("if " ++ intercalate "\n   " [ "| " ++ pprGuard g ++ " -> " ++ pprExp 0 e | (g, e) <- alts ])
 pprExp p (LetE ds e) = parensIf (p > 0) ("let " ++ indentAfterFirst 4 (intercalate "\n" (map pprDec ds)) ++ "\n in " ++ pprExp 0 e)
 pprExp p (CaseE e ms) = parensIf (p > 0) ("case " ++ pprExp 0 e ++ " of {\n" ++ indent (intercalate ";\n" (map ppr ms)) ++ " }")
@@ -1224,7 +1227,7 @@ renderLit :: Lit -> String
 renderLit (IntegerL i) = "(" ++ show i ++ ")"
 renderLit (CharL c) = show c
 renderLit (StringL s) = show s
-renderLit (RationalL r) = "(" ++ show (fromRational r :: Double) ++ ")"
+renderLit (RationalL r) = "(" ++ show (numerator r) ++ " / " ++ show (denominator r) ++ ")"
 renderLit l = pprLit 0 l
 
 renderExp :: Exp -> String
@@ -1319,7 +1322,7 @@ renderTypeAtom :: Type -> String
 renderTypeAtom t = "(" ++ renderType t ++ ")"
 
 renderType :: Type -> String
-renderType (ForallT vs c t) = "forall " ++ unwords (map renderTyVar vs) ++ ". " ++ renderCxt c ++ renderType t
+renderType (ForallT vs c t) = (if null vs then "" else "forall " ++ unwords (map renderTyVar vs) ++ ". ") ++ renderCxt c ++ renderType t
 renderType (AppT (AppT ArrowT a) b) = renderTypeAtom a ++ " -> " ++ renderTypeAtom b
 renderType (AppT ListT a) = "[" ++ renderType a ++ "]"
 renderType t@(AppT _ _) = case splitT t [] of
@@ -1425,7 +1428,11 @@ renderBang (Bang _ SourceLazy) = "~"
 renderBang _ = ""
 
 renderDerivs :: [DerivClause] -> String
-renderDerivs ds = concat [" deriving " ++ maybe "" renderStrategy s ++ "(" ++ intercalate ", " (map renderType c) ++ ")" | DerivClause s c <- ds]
+renderDerivs ds = concat [renderDeriv s ("(" ++ intercalate ", " (map renderType c) ++ ")") | DerivClause s c <- ds]
+  where
+    -- A via type comes after the classes: deriving (C) via T.
+    renderDeriv (Just (ViaStrategy t)) classes = " deriving " ++ classes ++ " via " ++ renderTypeAtom t
+    renderDeriv s classes = " deriving " ++ maybe "" renderStrategy s ++ classes
 
 -- What a splice gives, which the compiler reads from the output of the program that runs it.
 
