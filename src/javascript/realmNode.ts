@@ -1,4 +1,4 @@
-import { FileSystemError, type FileSystemErrorCode, type OpenMode } from '../interpreter/programIo';
+import { FileSystemError, type FileSystemErrorCode, type OpenMode, resolvePath } from '../interpreter/programIo';
 import { inspect } from './inspect';
 import type { RealmBuilder } from './realm';
 import type { Runtime } from './runtime';
@@ -14,6 +14,9 @@ const ERRORS: Record<FileSystemErrorCode, { description: string; errno: number }
   ENOTEMPTY: { description: 'directory not empty', errno: -39 },
   EINVAL: { description: 'invalid argument', errno: -22 },
 };
+
+/** The paths that name the run's standard output streams, by the stream each names. */
+const STANDARD_STREAMS = { '/dev/stdout': 'stdout', '/dev/stderr': 'stderr' } as const;
 
 /** The modules `require` returns, by the names Node.js accepts for them. */
 const MODULE_NAMES = { fs: 'fs', 'node:fs': 'fs' } as const;
@@ -177,6 +180,12 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
     rejectUnavailableMember(`${method} の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
   const path = requirePath(runtime, file);
   const data = requireText(runtime, content, 'data');
+  // `/dev/stdout` and `/dev/stderr` are the run's standard streams, as `/dev/stdin` is its standard input.
+  const stream = STANDARD_STREAMS[resolvePath(path) as keyof typeof STANDARD_STREAMS];
+  if (stream) {
+    runtime.io[stream].write(data);
+    return;
+  }
   const flag = isObject(options) ? runtime.get(options, 'flag') : undefined;
   const mode = openModeOf(runtime, flag === undefined ? defaultFlag : runtime.toString(flag));
   withErrors(runtime, 'open', path, () => runtime.io.files.open(path, mode).write(data));
