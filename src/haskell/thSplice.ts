@@ -147,7 +147,7 @@ export function expandSplices(
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       const detail = error.diagnostics[0]?.message ?? '';
-      throw compileError(site.row + 1, `Template Haskell のスプライスを実行できません。${detail}`);
+      throw compileError(site.row, `Template Haskell のスプライスを実行できません。${detail}`);
     }
     const text = uniqueNames(output);
     const rows = source.slice(site.start, site.end).split('\n').length - 1;

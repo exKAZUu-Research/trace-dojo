@@ -54,7 +54,7 @@ class Preprocessor {
     const output: string[] = [];
     const stack: Conditional[] = [];
     for (let index = 0; index < lines.length; index++) {
-      this.row = index + 1;
+      this.row = index;
       let line = lines[index];
       const directive = /^\s*#\s*([A-Za-z]+)?(.*)$/.exec(line);
       if (directive && this.inBlockComment === 0) {
@@ -272,7 +272,7 @@ class Preprocessor {
     active: ReadonlySet<string>,
     condition: boolean
   ): { text: string; end: number } {
-    if (name === '__LINE__') return { text: String(this.row), end: index };
+    if (name === '__LINE__') return { text: String(this.row + 1), end: index };
     const version = /^MIN_VERSION_(\w+)$/.exec(name);
     const macro = active.has(name) ? undefined : this.macros.get(name);
     if (!macro && !version) return { text: condition ? '0' : name, end: index };
