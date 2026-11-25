@@ -602,6 +602,23 @@ export class FunctionChecker {
   }
 
   /**
+   * The type of what a `yield` yields from, which an unannotated generator's type is inferred from, as from what it
+   * returns: a use of the generator there makes its type circular.
+   */
+  private yieldOperandType(operand: TreeNode, delegated: boolean, context: FunctionContext | undefined): Type {
+    const generator = context?.generator;
+    if (!context || generator?.annotation)
+      return this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType);
+    const wasInReturn = context.inReturn;
+    context.inReturn = true;
+    try {
+      return this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType);
+    } finally {
+      context.inReturn = wasInReturn;
+    }
+  }
+
+  /**
    * `yield value` or `yield* iterable` in a generator, whose value is what the generator receives from `next()`, or the
    * return value of the iterable it delegates to.
    */
@@ -611,9 +628,7 @@ export class FunctionChecker {
     const isAsync = context?.isAsync === true;
     const operand = named(node).find((child) => child.type !== 'comment');
     const delegated = hasToken(node, '*');
-    const operandType = operand
-      ? this.c.expressions.check(operand, delegated ? undefined : generator?.yieldType)
-      : undefinedType;
+    const operandType = operand ? this.yieldOperandType(operand, delegated, context) : undefinedType;
     if (!generator) return anyType;
     const yielded = this.yieldedType(operand, operandType, delegated, isAsync);
     generator.yieldTypes.push(yielded);
