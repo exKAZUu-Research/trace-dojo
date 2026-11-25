@@ -321,7 +321,11 @@ export class Checker {
         return this.solveImplicit(hole, givens);
       }
       case CONSTRAINT_TYPE_CLASS: {
-        const preds = constraintPreds(pred.type);
+        const preds = constraintPreds(this.reduceFamilies(pred.type));
+        if (preds.length === 0) {
+          hole.solution = { kind: 'equality' };
+          return 'solved';
+        }
         if (preds.length !== 1) {
           typeError(hole.span, '制約のタプルを型変数の制約に当てはめることは、この採点環境では使えません。');
         }
@@ -885,7 +889,6 @@ export class Checker {
     return type;
   }
 
-  /** Checks a lambda against a function type of LinearTypes, whose linear arguments it must use exactly once. */
   /**
    * Checks a lambda against a function type parameter by parameter, so that a parameter of a polymorphic type binds
    * a polymorphic variable and one of a linear arrow is checked to be used once.

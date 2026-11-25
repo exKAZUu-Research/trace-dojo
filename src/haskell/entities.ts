@@ -163,7 +163,7 @@ export interface ClassEntity {
 /** How a class constraint is satisfied: a dictionary parameter, an instance, or a superclass of another. */
 export type Evidence =
   | { kind: 'param'; param: DictParam }
-  /** The evidence of a type equality, `a ~ b`, which holds no value at run time. */
+  /** The evidence of a type equality, `a ~ b`, or of the empty constraint, `()`, which holds no value at run time. */
   | { kind: 'equality' }
   /** The evidence of `HasField "f" r a`: the selector of the field. */
   | { kind: 'field'; field: FieldInfo }

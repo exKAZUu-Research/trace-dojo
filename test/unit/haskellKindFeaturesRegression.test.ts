@@ -123,7 +123,6 @@ const kindMisuses = [
   ['invalidShowMaybe', 'type C=Show Maybe\nmain=print 1'],
   ['invalidOverClass', 'type C a=Show a a\nmain=print 1'],
   ['invalidClassValue', 'data D=D Show\nmain=print 1'],
-  ['constraintTupleEmpty', 'type C a=(Show a,())\nmain=print 1'],
   ['aliasValueContext', 'type Name=String\nclass Name a=>C a\nmain=print 1'],
   ['aliasValueInstance', 'type Point=(Int,Int)\ninstance Point Int\nmain=print 1'],
   ['aliasValueDeriving', 'type Name=String\ndata D=D deriving Name\nmain=print 1'],

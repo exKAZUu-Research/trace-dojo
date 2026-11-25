@@ -399,7 +399,7 @@ export function constraintTupleType(arity: number): TypeEntity {
   if (!entity) {
     let kind: Kind = { tag: 'constraint' };
     for (let index = 0; index < arity; index++) kind = kindArrow({ tag: 'constraint' }, kind);
-    entity = { ...primType(`(${','.repeat(arity - 1)})`, arity, 'tuple'), kind };
+    entity = { ...primType(arity === 0 ? '()' : `(${','.repeat(arity - 1)})`, arity, 'tuple'), kind };
     constraintTuples.set(arity, entity);
   }
   return entity;

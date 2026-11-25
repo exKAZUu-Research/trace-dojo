@@ -8,6 +8,7 @@ import {
   MULTIPLICITY_KIND,
   tupleType,
   TYPE_KIND,
+  UNIT_TYPE,
 } from './builtinTypes';
 import type { ClassEntity, ConInfo, TypeEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
@@ -101,7 +102,10 @@ export class TypeConversion {
   }
 
   convert(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
-    const { type: result, kind } = this.convertTypeKind(type, vars, varKinds);
+    const { type: result, kind } =
+      pruneKind(expected).tag === 'constraint' && isTupleForm(type)
+        ? this.convertTuple(type, vars, varKinds, true)
+        : this.convertTypeKind(type, vars, varKinds);
     if (!unifyKinds(kind, expected)) {
       throw compileError(
         type.span,
@@ -222,6 +226,13 @@ export class TypeConversion {
       case 'kinded': {
         return this.kindOf(type.type, kindVars);
       }
+      case 'tuple': {
+        return {
+          tag: 'data',
+          entity: tupleType(type.elems.length),
+          args: type.elems.map((elem) => this.kindOf(elem, kindVars)),
+        };
+      }
       case 'forall': {
         for (const binder of type.binders) kindVars.set(binder.name, freshKindVar());
         return this.kindOf(type.body, kindVars);
@@ -276,16 +287,30 @@ export class TypeConversion {
     return entity.kind;
   }
 
+  /**
+   * A tuple: of constraints when one of its parts is a constraint or its place takes one (`()` there is the empty
+   * constraint), of types otherwise.
+   */
   private convertTuple(
-    type: Extract<RType, { k: 'tuple' }>,
+    type: TupleForm,
     vars: ReadonlyMap<string, Type>,
-    varKinds: ReadonlyMap<string, Kind>
+    varKinds: ReadonlyMap<string, Kind>,
+    isConstraint = false
   ): { type: Type; kind: Kind } {
-    const parts = type.elems.map((elem) => this.convertTypeKind(elem, vars, varKinds));
-    const kind = parts.some((part) => pruneKind(part.kind).tag === 'constraint') ? CONSTRAINT : STAR;
+    const elems = type.k === 'tuple' ? type.elems : [];
+    const converted = elems.map((elem) => this.convertTypeKind(elem, vars, varKinds));
+    const kind =
+      isConstraint || converted.some((part) => pruneKind(part.kind).tag === 'constraint') ? CONSTRAINT : STAR;
+    const parts = converted.map((part, index) => {
+      const elem = elems[index];
+      if (kind === CONSTRAINT && isTupleForm(elem) && pruneKind(part.kind).tag !== 'constraint') {
+        return this.convertTuple(elem, vars, varKinds, true);
+      }
+      return part;
+    });
     for (const [index, part] of parts.entries())
       if (!unifyKinds(part.kind, kind))
-        throw compileError(type.elems[index].span, 'タプルの型の種類（カインド）が合いません。');
+        throw compileError(elems[index].span, 'タプルの型の種類（カインド）が合いません。');
     if (kind === CONSTRAINT)
       return { type: tap(tcon(constraintTupleType(parts.length)), ...parts.map((part) => part.type)), kind };
     let result: Type = tcon(tupleType(parts.length));
@@ -409,8 +434,15 @@ export function constraintPreds(type: Type): Pred[] {
       return [{ cls, type: cls.packed ? tap(tcon(cls.packed), ...args) : args[0] }];
     }
   }
-  if (head.tag === 'tcon' && args.length > 0 && head.entity === constraintTupleType(args.length)) {
+  if (head.tag === 'tcon' && head.entity === constraintTupleType(args.length)) {
     return args.flatMap(constraintPreds);
   }
   return [{ cls: CONSTRAINT_TYPE_CLASS, type }];
+}
+
+/** A tuple, or `()`, the tuple of none, which a place that takes a constraint reads as the empty constraint. */
+type TupleForm = Extract<RType, { k: 'tuple' }> | Extract<RType, { k: 'con' }>;
+
+function isTupleForm(type: RType): type is TupleForm {
+  return type.k === 'tuple' || (type.k === 'con' && type.entity === UNIT_TYPE);
 }
