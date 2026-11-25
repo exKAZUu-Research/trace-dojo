@@ -170,7 +170,14 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     this.builtinArity(expression, 2);
     const type = this.containerArgument(args[0], name);
     const fieldName = this.comptimeText(args[1]);
+    this.refuseLeftOutField(type, fieldName, expression);
     return known(BOOL, this.fieldNames(type, expression).includes(fieldName), expression);
+  }
+
+  /** A field of Zig's type that the grader leaves out, which reflection may not answer for differently than Zig. */
+  private refuseLeftOutField(type: Type, name: string, span: Span): void {
+    if (type.kind === 'struct' && type.native?.leftOutFields?.includes(name))
+      this.error(span, `${typeName(type)}.${name}は、この採点環境では使えません。`);
   }
 
   private builtinFieldType(expression: ExpressionOf<'builtinCall'>): TExpr {
@@ -178,6 +185,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     this.builtinArity(expression, 2);
     const type = this.containerArgument(args[0], name);
     const fieldName = this.comptimeText(args[1]);
+    this.refuseLeftOutField(type, fieldName, expression);
     const fields =
       type.kind === 'struct'
         ? this.structFields(type, expression)
@@ -495,6 +503,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       case 'struct': {
         if (type.namespace.syntax?.containerKind === 'opaque')
           return variant('opaque', { decl_names: this.declNames(type) });
+        // A native type that leaves out some of Zig's fields cannot list them all.
+        const leftOut = type.native?.leftOutFields?.[0];
+        if (leftOut !== undefined) this.refuseLeftOutField(type, leftOut, span);
         const struct = nested('Struct') as StructType;
         const attributes = this.memberType(struct, 'FieldAttributes', span) as StructType;
         const fields = this.structFields(type, span);
