@@ -6802,6 +6802,18 @@ test("runs sequences' indexed filters and overloads chosen by their lambdas' res
   });
 });
 
+test("runs initializers with their own locals and objects before a secondary constructor's body", () => {
+  const source = `interface R { fun run2(): Int }
+class K {
+    val a: Int
+    val r = object : R { override fun run2() = 7 }
+    init { val t = 40; a = t + 2 }
+    constructor(z: Int) { println(z + a + r.run2()) }
+}
+fun main() { K(1) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '50\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

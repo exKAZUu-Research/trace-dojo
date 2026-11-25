@@ -882,17 +882,20 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (symbol.isObject) this.objectInitializers.set(symbol, initialize);
     else if (entry.constructorSymbol && !delegatesToSecondaries)
       this.bindConstructor(symbol, entry.constructorSymbol, initialize);
-    this.compileSecondaryConstructors(entry, delegatesToSecondaries ? { steps, flow: initializedFlow } : undefined);
+    this.compileSecondaryConstructors(
+      entry,
+      delegatesToSecondaries ? { initialize: symbol.initialize, flow: initializedFlow } : undefined
+    );
   }
 
   /**
    * Compiles each `constructor(...)`: its parameters' defaults, the constructor it delegates to, and its body. Without
    * a primary constructor, a delegation to the superclass then runs the class's property initializers and `init`
-   * blocks, as `classSteps` does, before the body.
+   * blocks, as `classSteps` does, before the body: in their own frame, whose slots their code was given.
    */
   private compileSecondaryConstructors(
     entry: ClassEntry,
-    classSteps: { steps: ((frame: Frame) => void)[]; flow: Flow } | undefined
+    classSteps: { initialize: (frame: Frame, instance: Value) => void; flow: Flow } | undefined
   ): void {
     const targets = new Map<FunctionSymbol, FunctionSymbol>();
     for (const { decl, symbol: ctor } of entry.secondaryConstructors) {
@@ -947,7 +950,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         false
       ).eval;
       if (classSteps && decl.delegation?.kind !== 'this') this.checkValsInitialized(entry);
-      const steps = classSteps && decl.delegation?.kind !== 'this' ? classSteps.steps : [];
+      const initializeClass = decl.delegation?.kind === 'this' ? undefined : classSteps?.initialize;
       const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
       const run = (frame: Frame): Value => {
         if (fillsDefaults)
@@ -955,7 +958,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
             if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
           }
         delegate?.(frame, frame.thisValue);
-        for (const step of steps) step(frame);
+        initializeClass?.(frame, frame.thisValue);
         body(frame);
         return UNIT;
       };
