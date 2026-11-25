@@ -596,11 +596,12 @@ modifyIORef ref f = readIORef ref >>= \x -> writeIORef ref (f x)
 modifyIORef' :: IORef a -> (a -> a) -> IO ()
 modifyIORef' ref f = readIORef ref >>= \x -> let y = f x in y ${'`'}seq${'`'} writeIORef ref y
 
+-- As GHC's atomicModifyIORef2, the new value goes in lazily before the pair f gives is matched.
 atomicModifyIORef :: IORef a -> (a -> (a, b)) -> IO b
-atomicModifyIORef ref f = readIORef ref >>= \x -> let (y, r) = f x in writeIORef ref y >> return r
+atomicModifyIORef ref f = readIORef ref >>= \x -> let p = f x in writeIORef ref (fst p) >> case p of (_, r) -> return r
 
 atomicModifyIORef' :: IORef a -> (a -> (a, b)) -> IO b
-atomicModifyIORef' ref f = readIORef ref >>= \x -> case f x of (y, r) -> y ${'`'}seq${'`'} r ${'`'}seq${'`'} (writeIORef ref y >> return r)
+atomicModifyIORef' ref f = readIORef ref >>= \x -> let p = f x in writeIORef ref (fst p) >> case p of (y, r) -> y ${'`'}seq${'`'} r ${'`'}seq${'`'} return r
 
 atomicWriteIORef :: IORef a -> a -> IO ()
 atomicWriteIORef = writeIORef
