@@ -336,9 +336,15 @@ class _File extends FileSystemEntity implements File {
     }
     return _FileSink(this, mode._appends);
   }
-  Stream<List<int>> openRead([int? start, int? end]) =>
-      Stream<List<int>>.fromFuture(Future(() => readAsBytesSync().sublist(start ?? 0, end)))
-          .where((bytes) => bytes.isNotEmpty);
+  Stream<List<int>> openRead([int? start, int? end]) => Stream<List<int>>.fromFuture(Future(() {
+        final from = start ?? 0;
+        if (from < 0) throw RangeError("Bad start position: " + from.toString());
+        if (end != null && end < from) throw RangeError("Bad end position: " + end.toString());
+        // The VM reads up to the end of the file, so a range past it gives what the file has there.
+        final bytes = readAsBytesSync();
+        final to = end == null || end > bytes.length ? bytes.length : end;
+        return from < to ? bytes.sublist(from, to) : <int>[];
+      })).where((bytes) => bytes.isNotEmpty);
   external static String _read(String path, String failure);
   external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
   external static void _create(String path, bool recursive, bool exclusive);
