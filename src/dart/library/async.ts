@@ -295,8 +295,6 @@ void _completeWithErrorCallback(_Future result, Object error, StackTrace stackTr
   result._completeErrorObject(_interceptCaughtError(error, stackTrace));
 }
 
-/** The replacement a zone's error callback gives an error, which the root zone never does. */
-AsyncError? _interceptError(Object error, StackTrace? stackTrace) => null;
 
 AsyncError _interceptCaughtError(Object error, StackTrace? stackTrace) => AsyncError(error, stackTrace);
 

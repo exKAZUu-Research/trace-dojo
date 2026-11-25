@@ -2448,12 +2448,7 @@ _runUserCode<T>(
   try {
     onSuccess(userCode());
   } catch (error, stackTrace) {
-    AsyncError? replacement = _interceptError(error, stackTrace);
-    if (replacement != null) {
-      onError(replacement.error, replacement.stackTrace);
-    } else {
-      onError(error, stackTrace);
-    }
+    onError(error, stackTrace);
   }
 }
 void _cancelAndError(
@@ -2584,11 +2579,6 @@ void _addErrorWithReplacement(
   Object error,
   StackTrace stackTrace,
 ) {
-  var replacement = _interceptError(error, stackTrace);
-  if (replacement != null) {
-    error = replacement.error;
-    stackTrace = replacement.stackTrace;
-  }
   sink._addError(error, stackTrace);
 }
 class _WhereStream<T> extends _ForwardingStream<T, T> {
