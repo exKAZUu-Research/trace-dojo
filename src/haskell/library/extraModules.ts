@@ -74,6 +74,19 @@ phase (x :+ y) = atan2 y x
 instance Functor Complex where
   fmap f (x :+ y) = f x :+ f y
 
+instance Foldable Complex where
+  foldr f z (x :+ y) = f x (f y z)
+
+instance Traversable Complex where
+  traverse f (x :+ y) = (:+) <$> f x <*> f y
+
+instance Applicative Complex where
+  pure a = a :+ a
+  (f :+ g) <*> (a :+ b) = f a :+ g b
+
+instance Monad Complex where
+  (a :+ b) >>= f = realPart (f a) :+ imagPart (f b)
+
 instance RealFloat a => Num (Complex a) where
   (x :+ y) + (x' :+ y') = (x + x') :+ (y + y')
   (x :+ y) - (x' :+ y') = (x - x') :+ (y - y')
