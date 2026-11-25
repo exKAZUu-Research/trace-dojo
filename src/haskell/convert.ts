@@ -717,17 +717,15 @@ function strictBindings(features: FeatureGates<'convert'>, decls: Decl[]): { dec
       result.push({ kind: 'funClause', name: banged.name, args: [], rhs: decl.rhs, span: decl.span });
       continue;
     }
+    // Forcing a variable of the whole pattern matches all of it, even when the program uses none of its variables.
     const name = generatedName('strict', forced.length);
     forced.push(name);
-    result.push(
-      { kind: 'funClause', name: { name, span: decl.span }, args: [], rhs: decl.rhs, span: decl.span },
-      {
-        kind: 'patBind',
-        pat: banged,
-        rhs: { body: { kind: 'plain', expr: varOf(name, decl.span) }, where: [], span: decl.span },
-        span: decl.span,
-      }
-    );
+    result.push({
+      kind: 'patBind',
+      pat: { kind: 'pas', name: { name, span: decl.span }, pat: banged, span: decl.span },
+      rhs: decl.rhs,
+      span: decl.span,
+    });
   }
   return { decls: result, forced };
 }

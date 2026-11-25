@@ -1760,6 +1760,7 @@ function patternText(pat: RPat): string {
       return '_';
     }
     case 'as': {
+      if (pat.local.name.startsWith(' ')) return patternText(pat.pat);
       return `${pat.local.name}@${patternText(pat.pat)}`;
     }
     case 'lit': {

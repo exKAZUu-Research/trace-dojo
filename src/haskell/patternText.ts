@@ -18,6 +18,8 @@ export function surfacePatternText(pat: Pat): string {
       return `[${pat.elems.map(surfacePatternText).join(', ')}]`;
     }
     case 'pas': {
+      // A name the conversion generates, which starts with a space, names a pattern the program wrote without one.
+      if (pat.name.name.startsWith(' ')) return surfacePatternText(pat.pat);
       return `${pat.name.name}@${patternArgument(pat.pat)}`;
     }
     case 'pcon': {
