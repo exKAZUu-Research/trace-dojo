@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 import { compileError, unsupportedError } from './errors';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -72,8 +73,23 @@ class Preprocessor {
         output.push('');
         continue;
       }
-      line = this.expandLine(line);
-      output.push(line);
+      // A macro call's arguments continue onto the code lines after it until its `)`.
+      const comment = this.inBlockComment;
+      let joined = 0;
+      for (;;) {
+        try {
+          line = this.expandLine(line);
+          break;
+        } catch (error) {
+          const next = lines[index + 1];
+          if (!isUnclosedCall(error) || next === undefined || /^\s*#/.test(next)) throw error;
+          this.inBlockComment = comment;
+          line += `\n${next}`;
+          index++;
+          joined++;
+        }
+      }
+      output.push(line, ...Array.from({ length: Math.max(joined - (line.split('\n').length - 1), 0) }, () => ''));
     }
     const open = stack.at(-1);
     if (open) throw this.error(open.row, '#if に対応する #endif がありません。');
@@ -240,7 +256,8 @@ class Preprocessor {
   }
 
   /** Expands the macros of a piece of code; a macro being expanded is not expanded again inside itself. */
-  private expand(text: string, active: ReadonlySet<string>, condition: boolean): string {
+  private expand(code: string, active: ReadonlySet<string>, condition: boolean): string {
+    let text = code;
     let result = '';
     let index = 0;
     while (index < text.length) {
@@ -261,6 +278,16 @@ class Preprocessor {
       if (condition) this.checkPlatform(name);
       const expanded = this.expandName(name, text, index, active, condition);
       chargeTypeWork(expanded.text.length);
+      // As C rescans a replacement with the code after it, a function-like macro's name that ends the replacement
+      // takes the arguments that follow it.
+      const tail = /(?<![\w'])[A-Za-z_][\w']*$/.exec(expanded.text);
+      const follower = tail && tail[0] !== name && !active.has(tail[0]) ? this.macros.get(tail[0]) : undefined;
+      if (follower?.params && /^\s*\(/.test(text.slice(expanded.end))) {
+        result += expanded.text.slice(0, tail?.index);
+        text = (tail?.[0] ?? '') + text.slice(expanded.end);
+        index = 0;
+        continue;
+      }
       result += expanded.text;
       index = expanded.end;
     }
@@ -360,7 +387,13 @@ function splitArguments(
       current = '';
     } else current += char;
   }
-  throw error('マクロの呼び出しの ) がありません。');
+  throw error(UNCLOSED_CALL);
+}
+
+const UNCLOSED_CALL = 'マクロの呼び出しの ) がありません。';
+
+function isUnclosedCall(error: unknown): boolean {
+  return error instanceof CompileError && error.diagnostics[0]?.message === UNCLOSED_CALL;
 }
 
 /**
