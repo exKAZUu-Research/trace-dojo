@@ -152,6 +152,21 @@ interface PatternScope {
   hint?: string;
 }
 
+/** The expression forms whose check is their inference, with the inferred type unified with the expected one. */
+type InferredForm =
+  | 'hole'
+  | 'var'
+  | 'con'
+  | 'lit'
+  | 'tyapp'
+  | 'implicit'
+  | 'projection'
+  | 'arith'
+  | 'rsection'
+  | 'typed'
+  | 'recordCon'
+  | 'recordUpdate';
+
 export class Checker {
   private readonly recursion = new RecursionBudget();
   private readonly patternScopes: PatternScope[] = [];
@@ -588,7 +603,6 @@ export class Checker {
         continue;
       }
       for (const hole of retained) {
-        if (hole.pred.cls === IMPLICIT_CLASS) this.noInstance(hole);
         if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
       for (const [variable, holes] of holesByVariable(retained)) {
@@ -821,18 +835,8 @@ export class Checker {
         this.inPatternScope(() => this.checkComprehension(expr, elem));
         return true;
       }
-      case 'hole':
-      case 'var':
-      case 'con':
-      case 'lit':
-      case 'tyapp':
-      case 'implicit':
-      case 'projection':
-      case 'arith':
-      case 'rsection':
-      case 'typed':
-      case 'recordCon':
-      case 'recordUpdate': {
+      default: {
+        expr.k satisfies InferredForm;
         return false;
       }
     }
@@ -1172,6 +1176,7 @@ export class Checker {
    * is unified with it before the arguments whose parameter types the function's type already has are checked, as
    * GHC does, so that the expected type reaches those arguments too.
    */
+  // code-gauge-allow functionNcss -- The spine walk keeps the pending arguments and the instantiations it interleaves.
   private inferApp(expr: Extract<RExpr, { k: 'app' }>, expected?: { type: Type; context?: string }): Type {
     const spine: Extract<RExpr, { k: 'app' }>[] = [];
     let head: RExpr = expr;
@@ -1824,6 +1829,8 @@ export class Checker {
   }
 
   ambiguous(hole: EvidenceHole): never {
+    // An implicit parameter no `let ?x` gives is unbound rather than ambiguous.
+    if (hole.pred.cls === IMPLICIT_CLASS) this.noInstance(hole);
     const printer = new TypePrinter();
     typeError(
       hole.span,
