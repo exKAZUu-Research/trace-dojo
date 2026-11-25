@@ -437,7 +437,7 @@ pub const Reader = struct {
         var result: U = 0;
         for (0..bytes.len) |i| {
             const byte = if (endian == .little) bytes[bytes.len - 1 - i] else bytes[i];
-            result = (result << 8) | byte;
+            result = if (@bitSizeOf(U) > 8) (result << 8) | byte else byte;
         }
         return @bitCast(result);
     }
