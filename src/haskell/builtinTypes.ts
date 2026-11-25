@@ -348,10 +348,11 @@ export const TYPE_LIT_FAMILIES: Record<string, TypeEntity> = {
   CmpSymbol: builtinFamily('CmpSymbol', [SYMBOL_KIND, SYMBOL_KIND], orderingKind, ([a, b]) =>
     compared(a < b ? -1 : a === b ? 0 : 1)
   ),
-  AppendSymbol: builtinFamily('AppendSymbol', [SYMBOL_KIND, SYMBOL_KIND], SYMBOL_KIND, ([a, b]) => ({
-    tag: 'tcon',
-    entity: symbolType(`${a as string}${b as string}`),
-  })),
+  AppendSymbol: builtinFamily('AppendSymbol', [SYMBOL_KIND, SYMBOL_KIND], SYMBOL_KIND, ([a, b]) => {
+    // One unit per character, as the C preprocessor charges for the text it produces.
+    chargeTypeWork((a as string).length + (b as string).length);
+    return { tag: 'tcon', entity: symbolType(`${a as string}${b as string}`) };
+  }),
   '<=?': builtinFamily('<=?', naturalOperands, boolKind, ([a, b]) => {
     const cons = (comparisonCons as { bool: ConInfo[] }).bool;
     return { tag: 'tcon', entity: promotedType(cons[(a as bigint) <= (b as bigint) ? 1 : 0]) };
