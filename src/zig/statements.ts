@@ -498,7 +498,12 @@ export abstract class StatementCompiler extends CallCompiler {
     switch (target.kind) {
       case 'identifier': {
         const binding = this.lookup(target.name);
-        return binding?.kind === 'local' && binding.comptimeCell ? binding : undefined;
+        if (binding?.kind !== 'local') return undefined;
+        if (binding.comptimeCell) return binding;
+        // A pointer to a comptime var, or into one, reaches the variable.
+        return binding.known && (binding.value instanceof Pointer || binding.value instanceof Slice)
+          ? this.comptimeVariableHolding(binding.value.target)
+          : undefined;
       }
       case 'field':
       case 'index': {
@@ -508,11 +513,7 @@ export abstract class StatementCompiler extends CallCompiler {
         return this.comptimeVariableOf(target.operand);
       }
       case 'deref': {
-        if (target.operand.kind !== 'identifier') return undefined;
-        const binding = this.lookup(target.operand.name);
-        return binding?.kind === 'local' && binding.known && binding.value instanceof Pointer
-          ? this.comptimeVariableHolding(binding.value.target)
-          : undefined;
+        return this.comptimeVariableOf(target.operand);
       }
       default: {
         return undefined;
