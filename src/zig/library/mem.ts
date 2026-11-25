@@ -478,13 +478,14 @@ function iteratorFactory(name: string, kind: 'split' | 'token', delimiter: Delim
 
 /**
  * Where the elements a slice, an array pointer, or a many-item pointer points to start, and how many precede the
- * first that equals `stop`, which a many-item pointer must reach.
+ * first that equals `stop`, or `guard`, which a many-item pointer must reach.
  */
 function elementsUntil(
   value: Value,
   isArray: boolean,
   stop: Value | undefined,
-  frame: Frame
+  frame: Frame,
+  guard?: Value
 ): { target: { slots: Value[] }; start: number; length: number } {
   let target: { slots: Value[] };
   let start: number;
@@ -504,7 +505,10 @@ function elementsUntil(
   }
   let position = start;
   const end = limit ?? target.slots.length;
-  while (position < end && (stop === undefined || !scalarValuesEqual(target.slots[position], stop))) {
+  const stopsAt = (element: Value): boolean =>
+    (stop !== undefined && scalarValuesEqual(element, stop)) ||
+    (guard !== undefined && scalarValuesEqual(element, guard));
+  while (position < end && !stopsAt(target.slots[position])) {
     frame.runtime.spend();
     position++;
   }
@@ -551,12 +555,14 @@ function sentinelSpan(name: string, kind: SentinelSpanKind): () => Member {
     if (!acceptsOperand(kind, pointer))
       return sema.error(call.span, `${name} には、番兵付きのポインタ（[*:0]u8 など）を渡してください。`);
     const stop = end ?? sentinel?.value;
+    // A many-item pointer's scan for another value also stops at its sentinel, which Zig never reads past.
+    const guard = end !== undefined && type.size === 'many' ? sentinel?.value : undefined;
     const sliceType = sliceOf(child, type.isConst, resultSentinel(pointer, end));
     const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
     const evaluate = operand.eval;
     const span = (value: Value, frame: Frame): Value => {
       if (value === NULL) return NULL;
-      const { target, start, length } = elementsUntil(value, array !== undefined, stop, frame);
+      const { target, start, length } = elementsUntil(value, array !== undefined, stop, frame, guard);
       return kind === 'len' ? BigInt(length) : new Slice(target, start, length);
     };
     return runtime(resultType, (frame) => span(evaluate(frame), frame), call.span);
