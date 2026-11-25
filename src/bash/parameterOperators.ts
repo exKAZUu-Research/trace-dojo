@@ -154,7 +154,7 @@ function expandArgument(
 function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
-  return expander.expandParts([part], { inDouble, spacedStar });
+  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true });
 }
 
 function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {
@@ -195,15 +195,19 @@ function collectOperatorWordEntries(
   roots: string[]
 ): OperatorWordEntry[] {
   const entries: OperatorWordEntry[] = [];
-  const itemCtx: WordContext = { inDouble: false, spacedStar };
+  const itemCtx: WordContext = { inDouble: false, spacedStar, inOperatorWord: true };
   for (const part of parts) {
     const keepsFields = keepsOperatorFields(part);
     const expanded = expander.expandParts([part], itemCtx);
     pushSegmentRoots(roots, expanded);
+    const starFromList = expanded.some((s) => s.kind === 'text' && s.fromList);
     for (const seg of expanded) {
       if (seg.kind === 'emptyList') continue;
       if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
-        entries.push({ segment: textSegment(starJoiner, false, true, { fromList: true }), keepsFields });
+        entries.push({
+          segment: textSegment(starJoiner, false, true, starFromList ? { fromList: true } : undefined),
+          keepsFields,
+        });
         continue;
       }
       entries.push({ segment: seg, keepsFields });
@@ -304,10 +308,10 @@ function defaultValue(
   const outcome = writeResolvedTarget(shell, target, text, false);
   if (!outcome.ok) shell.failures.handleStoreFailure('expansion', outcome);
   const stored = outcome.ok ? outcome.stored : '';
-  const fromList = !ctx.inDouble && word.some((seg) => seg.kind === 'text' && seg.fromList);
-  return fromList && stored !== ''
-    ? [textSegment(stored, false, true, { fromList: true })]
-    : expander.valueSegments({ kind: 'scalar', value: stored }, ctx);
+  const fromList = word.some((seg) => seg.kind === 'text' && seg.fromList);
+  if (!fromList) return expander.valueSegments({ kind: 'scalar', value: stored }, ctx);
+  if (stored === '') return ctx.inDouble ? [textSegment('', true, false, { fromList: true })] : [];
+  return [textSegment(stored, ctx.inDouble, !ctx.inDouble, { fromList: true })];
 }
 
 function failRequireOperator(

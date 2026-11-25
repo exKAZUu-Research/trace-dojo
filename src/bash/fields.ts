@@ -3,6 +3,7 @@
 export interface WordContext {
   readonly inDouble: boolean;
   readonly spacedStar: boolean;
+  readonly inOperatorWord?: boolean;
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };

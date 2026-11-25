@@ -312,7 +312,6 @@ export class Expander {
     );
   }
 
-  // code-gauge-allow functionNcss -- Dispatches each WordPart variant using explicit immutable WordContext.
   private expandPart(part: WordPart, ctx: WordContext): WordSegment[] {
     this.spend();
     switch (part.kind) {
@@ -324,29 +323,44 @@ export class Expander {
         return [textSegment(part.text, true, false)];
       }
       case 'double': {
-        const inner = this.expandParts(part.parts, { inDouble: true, spacedStar: ctx.spacedStar });
-        if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];
-        const kept = inner.filter((seg) => seg.kind !== 'emptyList');
-        if (kept.length === 0) return [QUOTED_EMPTY_SEGMENT];
-        if (kept.every(isBreakSegment)) return kept;
-        return [QUOTED_EMPTY_SEGMENT, ...kept];
+        return this.expandDoublePart(part.parts, ctx);
       }
       case 'parameter': {
         return this.expandParameter(part, ctx);
       }
       case 'commandSubstitution': {
-        if (part.syntaxError) return this.failBackquoted(part.syntaxError, ctx.inDouble);
-        const { output, status } = this.shell.captureSubshell(part.body, part.row);
-        this.lastSubstitutionStatus = status;
-        this.shell.store.lastStatus = status;
-        if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
-        return [textSegment(output.replaceAll('\0', '').replace(/\n+$/, ''), ctx.inDouble, !ctx.inDouble)];
+        return this.expandCommandSubstitution(part, ctx.inDouble);
       }
       case 'arithmeticExpansion': {
         const value = this.shell.evaluate(part.expression, undefined);
         return [textSegment(String(value), ctx.inDouble, !ctx.inDouble)];
       }
     }
+  }
+
+  private expandDoublePart(parts: WordPart[], ctx: WordContext): WordSegment[] {
+    const inner = this.expandParts(parts, {
+      inDouble: true,
+      spacedStar: ctx.spacedStar,
+      ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
+    });
+    if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];
+    const kept = inner.filter((seg) => seg.kind !== 'emptyList');
+    if (kept.length === 0) return [QUOTED_EMPTY_SEGMENT];
+    if (kept.every(isBreakSegment)) return kept;
+    return [QUOTED_EMPTY_SEGMENT, ...kept];
+  }
+
+  private expandCommandSubstitution(
+    part: Extract<WordPart, { kind: 'commandSubstitution' }>,
+    inDouble: boolean
+  ): WordSegment[] {
+    if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
+    const { output, status } = this.shell.captureSubshell(part.body, part.row);
+    this.lastSubstitutionStatus = status;
+    this.shell.store.lastStatus = status;
+    if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
+    return [textSegment(output.replaceAll('\0', '').replace(/\n+$/, ''), inDouble, !inDouble)];
   }
 
   checkTilde(parts: WordPart[], afterColon: boolean): void {
@@ -595,44 +609,27 @@ export class Expander {
     return { name: reference, subscript: undefined };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Emits typed text, break, and empty-list segments for scalars and `@`/`*` lists inside and outside quotes.
   valueSegments(value: ParameterValue, ctx: WordContext): WordSegment[] {
     const { inDouble } = ctx;
-    if (value.kind === 'scalar') {
-      return value.value === undefined || value.value === ''
-        ? inDouble
-          ? [QUOTED_EMPTY_SEGMENT]
-          : []
-        : [textSegment(value.value, inDouble, !inDouble)];
-    }
-    if (value.star && inDouble) {
-      return value.values.length === 0
-        ? [QUOTED_EMPTY_SEGMENT]
-        : [
-            textSegment(
-              joinBounded(value.values, this.ifsJoiner(), (cost) => this.spend(cost)),
-              true,
-              false
-            ),
-          ];
-    }
+    if (value.kind === 'scalar') return scalarValueSegments(value.value, inDouble);
+    const listOrigin = !(value.positional && value.star && (inDouble || ctx.inOperatorWord));
+    if (value.star && inDouble) return this.quotedStarSegments(value.values, listOrigin);
     if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
     const segments: WordSegment[] = [];
     const separator = this.separatorOf(value, ctx.spacedStar);
     for (const [index, element] of value.values.entries()) {
       if (index > 0) segments.push(separator);
-      if (inDouble && element === '') segments.push(QUOTED_EMPTY_SEGMENT);
-      else {
-        segments.push(
-          textSegment(element, inDouble, !inDouble, {
-            ...(!inDouble && !value.star ? { atListElement: true } : {}),
-            ...(!inDouble ? { fromList: true } : {}),
-          })
-        );
-      }
+      segments.push(listElementSegment(element, inDouble, value.star, listOrigin));
     }
     if (inDouble && value.values.length > 0) segments.unshift(QUOTED_EMPTY_SEGMENT);
     return segments;
+  }
+
+  private quotedStarSegments(values: readonly string[], listOrigin: boolean): WordSegment[] {
+    const extra = listOrigin ? { fromList: true } : undefined;
+    if (values.length === 0) return [listOrigin ? textSegment('', true, false, extra) : QUOTED_EMPTY_SEGMENT];
+    const joined = joinBounded(values, this.ifsJoiner(), (cost) => this.spend(cost));
+    return [textSegment(joined, true, false, extra)];
   }
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, spacedStar: boolean): WordSegment {
@@ -814,6 +811,21 @@ function scanTildeLiteral(text: string, start: number, afterColon: boolean): boo
     if (c === '/' || (afterColon && c === ':')) return true;
   }
   return undefined;
+}
+
+function scalarValueSegments(value: string | undefined, inDouble: boolean): WordSegment[] {
+  if (value === undefined || value === '') return inDouble ? [QUOTED_EMPTY_SEGMENT] : [];
+  return [textSegment(value, inDouble, !inDouble)];
+}
+
+function listElementSegment(element: string, inDouble: boolean, star: boolean, listOrigin: boolean): TextSegment {
+  if (inDouble && element === '') {
+    return listOrigin ? textSegment('', true, false, { fromList: true }) : QUOTED_EMPTY_SEGMENT;
+  }
+  return textSegment(element, inDouble, !inDouble, {
+    ...(!inDouble && !star ? { atListElement: true } : {}),
+    ...(listOrigin ? { fromList: true } : {}),
+  });
 }
 
 function lengthOf(value: ParameterValue): ParameterValue {
