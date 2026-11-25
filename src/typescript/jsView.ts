@@ -274,7 +274,12 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const statements = nestedNamespaceStatements(node, body, path, binder);
   const outermost = path[0].text;
   const symbol = binder.lookupValue(node, outermost);
-  const declaresObject = symbol?.valueEntries[0]?.kind === 'namespace' && symbol.valueDeclaration?.id === node.id;
+  // The first declaration with run-time code creates the object, as one that only declares types compiles to nothing.
+  const creating = symbol?.valueDeclarations.find((declaration) => {
+    const declarationBody = declaration.childForFieldName('body');
+    return declarationBody !== null && hasRuntimeCode(declarationBody);
+  });
+  const declaresObject = symbol?.valueEntries[0]?.kind === 'namespace' && creating?.id === node.id;
   const call = namespaceCall(
     node,
     outermost,
