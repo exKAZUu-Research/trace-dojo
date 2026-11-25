@@ -749,7 +749,7 @@ export abstract class SemaBase implements SemaApi {
           defaultValue,
           hasDefault: field.value !== undefined,
           ...(field.isComptime ? { comptimeValue: { value: defaultValue } } : {}),
-          ...(field.alignment ? { alignment: alignmentOperand(this, field.alignment) } : {}),
+          ...(field.alignment ? { alignment: this.fieldAlignment(type, field.alignment) } : {}),
         });
       }
     });
@@ -834,6 +834,12 @@ export abstract class SemaBase implements SemaApi {
           `extern ${type.kind} には、${typeName(field.type)} 型のフィールドは書けません。`
         );
     }
+  }
+
+  /** The alignment that `align(n)` gives a struct's field, which a packed struct's fields cannot override. */
+  private fieldAlignment(type: StructType, expression: Expression): number {
+    if (type.layout === 'packed') this.error(expression, 'packed struct のフィールドの整列は変えられません。');
+    return alignmentOperand(this, expression);
   }
 
   /** Checks the backing integer that `packed struct(u8)` or `packed union(u8)` names against the fields' bits. */
