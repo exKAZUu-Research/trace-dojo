@@ -3235,8 +3235,14 @@ export function collectTypeVars(type: TypeExpr, into: Set<string>): void {
       collectTypeVars(type.elem, into);
       break;
     }
-    case 'ttuple': {
+    case 'ttuple':
+    case 'tpromotedList':
+    case 'tpromotedTuple': {
       for (const elem of type.elems) collectTypeVars(elem, into);
+      break;
+    }
+    case 'tchain': {
+      for (const item of type.items) if (item.kind === 'operand') collectTypeVars(item.value, into);
       break;
     }
     case 'tkinded': {
