@@ -90,7 +90,7 @@ class ConditionalValidator {
       const first = this.current;
       if (first.kind === 'close') {
         if (atGroupStart) this.abort(first.row, "expected `)'");
-        const near = immediateSeparatorAfterClose(this.text.source, this.cursor) ?? first.value;
+        const near = immediateTokenAfterClose(this.text.source, this.cursor) ?? first.value;
         this.text.fail(first.row, `syntax error near \`${near}'`);
       }
       if (this.isPunct('(')) {
@@ -143,7 +143,7 @@ class ConditionalValidator {
 
   private abort(row: number, message: string): never {
     const near =
-      (this.current.kind === 'close' ? immediateSeparatorAfterClose(this.text.source, this.cursor) : undefined) ??
+      (this.current.kind === 'close' ? immediateTokenAfterClose(this.text.source, this.cursor) : undefined) ??
       trailingLineToken(this.text.source, this.cursor);
     throw new SyntaxFailure(row, message, near);
   }
@@ -217,11 +217,10 @@ class ConditionalValidator {
   }
 }
 
-function immediateSeparatorAfterClose(source: string, cursor: number): string | undefined {
+function immediateTokenAfterClose(source: string, cursor: number): string | undefined {
   const ch = source[cursor];
-  const next = source[cursor + 1];
-  if (ch === ';' && next !== ';' && next !== '&') return ';';
-  if (ch === '&' && next !== '&' && next !== '>') return '&';
+  if (ch === ';' || ch === '&' || ch === '|') return ch;
+  if (ch === '>' || ch === '<' || ch === '(' || ch === ')') return `]]${ch}`;
   return undefined;
 }
 
