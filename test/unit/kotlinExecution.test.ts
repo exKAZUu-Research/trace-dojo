@@ -6668,6 +6668,26 @@ fun main() {
   });
 });
 
+test("fails a sequence builder's iterator after its block throws or is resumed from inside, as kotlinc does", () => {
+  const source = `fun main() {
+    val it = sequence { yield(1); throw IllegalStateException("boom") }.iterator()
+    println(it.next())
+    try { it.hasNext() } catch (e: Exception) { println(e) }
+    try { it.hasNext() } catch (e: Exception) { println(e) }
+    lateinit var inner: Iterator<Int>
+    inner = iterator { yield(1); inner.hasNext() }
+    inner.next()
+    try { inner.next() } catch (e: Exception) { println(e) }
+    println(sequence { println(yield(1)) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1\njava.lang.IllegalStateException: boom\njava.lang.IllegalStateException: Iterator has failed.\n' +
+      'java.lang.IllegalStateException: Iterator has failed.\nkotlin.Unit\n[1]\n',
+  });
+});
+
 test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
   const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
 fun main() {
