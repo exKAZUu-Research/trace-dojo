@@ -67,7 +67,9 @@ instance Enum ${name} where
   toEnum n = if toInteger n < (${lo}) || toInteger n > ${hi}
     then errorWithoutStackTrace ("Enum.toEnum{${name}}: tag (" ++ show n ++ ") is outside of enumeration's range (${lo},${hi})")
     else ${con} (toInteger n)
-  fromEnum (${con} x) = fromInteger x
+  fromEnum (${con} x) = if x > 9223372036854775807
+    then errorWithoutStackTrace ("Enum.fromEnum{${name}}: value (" ++ show x ++ ") is outside of Int's bounds (-9223372036854775808,9223372036854775807)")
+    else fromInteger x
   enumFrom x = enumFromTo x maxBound
   enumFromThen x y = enumFromThenTo x y (if y >= x then maxBound else minBound)
   enumFromTo (${con} a) (${con} b) = map ${con} (enumFromTo a b)
