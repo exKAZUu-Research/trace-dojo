@@ -45,6 +45,8 @@ export class SourceText {
   readonly backquotes: { start: number; end: number }[] = [];
   /** Offsets of characters that are contextual literals in Bash (`'` in `"${...}"`, `$` before non-ASCII, etc.). */
   readonly literalSingleQuotes: number[] = [];
+  /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */
+  readonly declarationFunctionStarts: number[] = [];
   /** Balanced arithmetic and compound-subscript spans collected during the single lexical/validation pass. */
   readonly arithmeticRegions: DeferredRegion[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */

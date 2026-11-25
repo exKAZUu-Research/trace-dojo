@@ -516,11 +516,12 @@ export class Converter {
         this.claimedAtomicRows.add(headerRow);
       }
     }
+    const nameNode = node.childForFieldName('name');
     return {
       row,
       lineRow: row,
       kind: 'function',
-      name: node.childForFieldName('name')?.text ?? '',
+      name: nameNode ? this.restoreQuotes(nameNode.text, nameNode.startIndex) : '',
       body: this.statement(body),
       isAtomic,
     };
@@ -616,13 +617,13 @@ export class Converter {
   }
 
   private restoreQuotes(text: string, startIndex: number): string {
-    if (this.analyzed.literalQuotes.size === 0 || !text.includes('\u001F')) return text;
+    const { literalQuotes, declarationFunctionStarts, originalSource } = this.analyzed;
+    const hasQuote = literalQuotes.size > 0 && text.includes('\u001F');
+    const hasFnStart = declarationFunctionStarts.size > 0 && text.includes('_');
+    if (!hasQuote && !hasFnStart) return text;
     let out = '';
     for (let i = 0; i < text.length; i++) {
-      out +=
-        text[i] === '\u001F' && this.analyzed.literalQuotes.has(startIndex + i)
-          ? this.analyzed.originalSource[startIndex + i]
-          : text[i];
+      out += restoreNormalizedChar(text[i], startIndex + i, originalSource, literalQuotes, declarationFunctionStarts);
     }
     return out;
   }
@@ -750,6 +751,18 @@ export class Converter {
     } else expansion.name = parameter.text;
     return expansion;
   }
+}
+
+function restoreNormalizedChar(
+  ch: string,
+  index: number,
+  originalSource: string,
+  literalQuotes: ReadonlySet<number>,
+  declarationFunctionStarts: ReadonlySet<number>
+): string {
+  if (ch === '\u001F' && literalQuotes.has(index)) return originalSource[index];
+  if (ch === '_' && declarationFunctionStarts.has(index)) return originalSource[index];
+  return ch;
 }
 
 function thenWord(owner: Node): Node {

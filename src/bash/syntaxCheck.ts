@@ -32,6 +32,7 @@ export interface AnalyzedBashSource {
   readonly deferredArithmetic: ReadonlyMap<number, string>;
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
   readonly literalQuotes: ReadonlySet<number>;
+  readonly declarationFunctionStarts: ReadonlySet<number>;
 }
 
 /** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
@@ -42,17 +43,22 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
   }
   const backquotes = analyzeBackquotes(source, checked.backquotes);
   const literalQuotes = new Set([...checked.literalSingleQuotes, ...backquotes.literalSingleQuotes]);
-  const quoteNormalized = applyLiteralQuotePlaceholders(backquotes.source, literalQuotes);
+  const declarationFunctionStarts = new Set([
+    ...checked.declarationFunctionStarts,
+    ...backquotes.declarationFunctionStarts,
+  ]);
+  const normalized = applySourceNormalizations(backquotes.source, literalQuotes, declarationFunctionStarts);
   const regions = [...checked.arithmeticRegions, ...backquotes.arithmeticRegions].toSorted(
     (a, b) => a.openStart - b.openStart
   );
-  const { grammarSource, deferredArithmetic } = resolveDeferredArithmeticRegions(parser, quoteNormalized, regions);
+  const { grammarSource, deferredArithmetic } = resolveDeferredArithmeticRegions(parser, normalized, regions);
   return {
     originalSource: source,
     grammarSource,
     deferredArithmetic,
     backquoteErrors: backquotes.errors,
     literalQuotes,
+    declarationFunctionStarts,
   };
 }
 
@@ -60,6 +66,7 @@ export function checkBashSyntax(source: string): {
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number }[];
   literalSingleQuotes: number[];
+  declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
 } {
   const text = createValidatorSourceText(source);
@@ -67,6 +74,7 @@ export function checkBashSyntax(source: string): {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
     literalSingleQuotes: text.literalSingleQuotes,
+    declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
   };
 }
@@ -88,10 +96,12 @@ function analyzeBackquotes(
   source: string;
   errors: Map<number, BackquoteSyntaxError>;
   literalSingleQuotes: number[];
+  declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
 } {
   const errors = new Map<number, BackquoteSyntaxError>();
   const literalSingleQuotes: number[] = [];
+  const declarationFunctionStarts: number[] = [];
   const arithmeticRegions: DeferredRegion[] = [];
   let normalized = source;
   for (const { start, end } of backquotes) {
@@ -102,17 +112,23 @@ function analyzeBackquotes(
       normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
     } else {
       literalSingleQuotes.push(...inspected.quoteOffsets);
+      declarationFunctionStarts.push(...inspected.fnStarts);
       arithmeticRegions.push(...inspected.arithmeticRegions);
     }
   }
-  return { source: normalized, errors, literalSingleQuotes, arithmeticRegions };
+  return { source: normalized, errors, literalSingleQuotes, declarationFunctionStarts, arithmeticRegions };
 }
 
 function inspectBackquoteSpan(
   source: string,
   start: number,
   end: number
-): { error?: BackquoteSyntaxError; quoteOffsets: number[]; arithmeticRegions: DeferredRegion[] } {
+): {
+  error?: BackquoteSyntaxError;
+  quoteOffsets: number[];
+  fnStarts: number[];
+  arithmeticRegions: DeferredRegion[];
+} {
   let body = '';
   const bodyOffsets: number[] = [];
   for (let i = start + 1; i < end - 1; i++) {
@@ -126,42 +142,45 @@ function inspectBackquoteSpan(
   const padded = `${pad}${body}\n`;
   const checked = checkBashSyntax(padded);
   if (checked.error && checked.error !== 'unknown') {
-    return { error: inspectUnescapedBackquoteBody(body, row), quoteOffsets: [], arithmeticRegions: [] };
+    return { error: inspectUnescapedBackquoteBody(body, row), quoteOffsets: [], fnStarts: [], arithmeticRegions: [] };
   }
   const nested = analyzeBackquotes(padded, checked.backquotes);
   const mapOffset = (idx: number): number | undefined => {
     const rel = idx - pad.length;
     return rel >= 0 && rel < bodyOffsets.length ? bodyOffsets[rel] : undefined;
   };
-  const quoteOffsets = [...checked.literalSingleQuotes, ...nested.literalSingleQuotes]
-    .map(mapOffset)
-    .filter((v): v is number => v !== undefined);
+  const mapOffsets = (a: readonly number[], b: readonly number[]): number[] =>
+    [...a, ...b].map(mapOffset).filter((v): v is number => v !== undefined);
+  const quoteOffsets = mapOffsets(checked.literalSingleQuotes, nested.literalSingleQuotes);
+  const fnStarts = mapOffsets(checked.declarationFunctionStarts, nested.declarationFunctionStarts);
   const arithmeticRegions = [...checked.arithmeticRegions, ...nested.arithmeticRegions]
-    .map((r): DeferredRegion | undefined => {
-      const openStart = mapOffset(r.openStart);
-      const regionStart = mapOffset(r.start);
-      const regionEnd = mapOffset(r.end);
-      const closeEnd = mapOffset(r.closeEnd);
-      if (openStart === undefined || regionStart === undefined || regionEnd === undefined || closeEnd === undefined) {
-        return undefined;
-      }
-      return {
-        opener: r.opener,
-        openStart,
-        start: regionStart,
-        end: regionEnd,
-        closeEnd,
-        keepsSemicolons: r.keepsSemicolons,
-      };
-    })
+    .map((r) => mapDeferredRegion(r, mapOffset))
     .filter((r): r is DeferredRegion => r !== undefined);
-  return { quoteOffsets, arithmeticRegions };
+  return { quoteOffsets, fnStarts, arithmeticRegions };
 }
 
-function applyLiteralQuotePlaceholders(source: string, offsets: ReadonlySet<number>): string {
-  if (offsets.size === 0) return source;
+function mapDeferredRegion(
+  region: DeferredRegion,
+  mapOffset: (idx: number) => number | undefined
+): DeferredRegion | undefined {
+  const openStart = mapOffset(region.openStart);
+  const start = mapOffset(region.start);
+  const end = mapOffset(region.end);
+  const closeEnd = mapOffset(region.closeEnd);
+  if (openStart === undefined || start === undefined || end === undefined || closeEnd === undefined) return undefined;
+  return { opener: region.opener, openStart, start, end, closeEnd, keepsSemicolons: region.keepsSemicolons };
+}
+
+function applySourceNormalizations(
+  source: string,
+  quoteOffsets: ReadonlySet<number>,
+  fnStarts: ReadonlySet<number>
+): string {
+  if (quoteOffsets.size === 0 && fnStarts.size === 0) return source;
   let out = '';
-  for (let i = 0; i < source.length; i++) out += offsets.has(i) ? '\u001F' : source[i];
+  for (let i = 0; i < source.length; i++) {
+    out += quoteOffsets.has(i) ? '\u001F' : fnStarts.has(i) ? '_' : source[i];
+  }
   return out;
 }
 
@@ -920,6 +939,7 @@ class ShellGrammarValidator {
         commandName = token.value;
       }
       if (position === 0 && this.hasOperator(this.peek(), '(')) {
+        if (DECLARATION_NAMES.has(token.value)) this.text.declarationFunctionStarts.push(token.start);
         this.advance();
         if (!this.hasOperator(this.peek(), ')')) this.failUnexpected(this.peek());
         this.advance();
@@ -955,6 +975,7 @@ class ShellGrammarValidator {
       const { start } = this.cached;
       while ((this.text.backquotes.at(-1)?.start ?? -1) >= start) this.text.backquotes.pop();
       while ((this.text.literalSingleQuotes.at(-1) ?? -1) >= start) this.text.literalSingleQuotes.pop();
+      while ((this.text.declarationFunctionStarts.at(-1) ?? -1) >= start) this.text.declarationFunctionStarts.pop();
       while ((this.text.arithmeticRegions.at(-1)?.openStart ?? -1) >= start) this.text.arithmeticRegions.pop();
       this.stream.position = start;
       this.cached = undefined;
