@@ -396,15 +396,23 @@ class _FileSink implements IOSink {
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
-  bool _failed = false;
+  /** Why the file could not be opened, which writes and flushes report instead of writing. */
+  Object? _openError;
+  StackTrace? _openStackTrace;
+  bool get _failed => _openError != null;
+  bool _openErrorTaken = false;
   bool _writeScheduled = false;
   _FileSink(this._file, bool appends) {
     try {
       _open(_file.path, appends);
     } catch (error, stackTrace) {
       // The VM reports a failure to open the file to done, which is unhandled unless the program closes the sink.
-      _failed = true;
-      Future(() => addError(error, stackTrace));
+      _openError = error;
+      _openStackTrace = stackTrace;
+      // A flush before then takes the failure instead.
+      Future(() {
+        if (!_openErrorTaken) addError(error, stackTrace);
+      });
     }
   }
   Encoding get encoding => utf8;
@@ -436,7 +444,11 @@ class _FileSink implements IOSink {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
   }
   Future addStream(Stream<List<int>> stream) => stream.forEach(add);
-  Future flush() => Future(_writeBuffered);
+  Future flush() {
+    if (!_failed) return Future(_writeBuffered);
+    _openErrorTaken = true;
+    return Future.error(_openError!, _openStackTrace);
+  }
   Future close() {
     if (!_isClosed) _bytes.finish();
     if (!_isClosed) {
