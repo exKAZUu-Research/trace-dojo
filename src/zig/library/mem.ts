@@ -561,7 +561,8 @@ function sentinelSpan(name: string, kind: SentinelSpanKind): () => Member {
     const resultType = kind === 'len' ? USIZE : optional ? optionalOf(sliceType) : sliceType;
     const evaluate = operand.eval;
     const span = (value: Value, frame: Frame): Value => {
-      if (value === NULL) return NULL;
+      // A C pointer has no null to give back, which std.mem asserts against.
+      if (value === NULL) return optional ? NULL : panic(PANIC.unreachable);
       const { target, start, length } = elementsUntil(value, array !== undefined, stop, frame, guard);
       return kind === 'len' ? BigInt(length) : new Slice(target, start, length);
     };
