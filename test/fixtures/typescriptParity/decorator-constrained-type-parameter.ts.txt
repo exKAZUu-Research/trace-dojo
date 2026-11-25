@@ -1,0 +1,16 @@
+function log<T extends Function>(target: T, context: ClassMethodDecoratorContext) {
+  console.log('wrapped', String(context.name));
+  return target;
+}
+function bound<T extends (...args: any[]) => any>(target: T, context: ClassMethodDecoratorContext) {
+  return target;
+}
+class Calc {
+  @log add(a: number, b: number) {
+    return a + b;
+  }
+  @bound twice(a: number) {
+    return a * 2;
+  }
+}
+console.log(new Calc().add(1, 2), new Calc().twice(4));

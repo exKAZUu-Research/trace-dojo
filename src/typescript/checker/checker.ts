@@ -404,7 +404,9 @@ export class Checker {
   fillTypeArguments(parameters: TypeParameter[], typeArguments: Type[]): Type[] {
     const mapper: Mapper = new Map();
     return parameters.map((parameter, index) => {
-      const argument = typeArguments[index] ?? this.instantiate(parameter.default?.() ?? unknownType, mapper);
+      // A copy, as the instantiated default keeps its mapper, which must not come to map the default to itself.
+      const argument =
+        typeArguments[index] ?? this.instantiate(parameter.default?.() ?? unknownType, createMapper(mapper));
       mapper.set(parameter.id, argument);
       return argument;
     });
