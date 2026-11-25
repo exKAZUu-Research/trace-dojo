@@ -984,6 +984,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
     const object = this.nullCPointerAtRuntime(this.compileLocation(expression.object));
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
+    // A runtime index reads through a pointer or slice into a comptime var when the program runs, which Zig refuses.
+    if (!staticResultOf(index)) this.refuseComptimeVarReference(object, expression);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
       const position = Number(this.knownValue(index, 'タプルの添字') as bigint);
