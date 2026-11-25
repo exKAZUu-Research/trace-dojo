@@ -25,9 +25,32 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         return this.shuffle(expression);
       }
       default: {
-        return super.compileBuiltin(expression, resultType);
+        return this.elementwiseBuiltin(expression, resultType) ?? super.compileBuiltin(expression, resultType);
       }
     }
+  }
+
+  /**
+   * A builtin that Zig applies to each element of vector operands, written as the builtin over each element's scalar;
+   * a cast takes each element's result type from the vector it results in.
+   */
+  private elementwiseBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr | undefined {
+    const cast = ELEMENTWISE_CASTS.has(expression.name);
+    if (!cast && !ELEMENTWISE_BUILTINS.has(expression.name)) return undefined;
+    const operands = expression.args.map((arg) => this.compile(arg));
+    const vector = operands.map((operand) => operand.type).find((type) => isVectorType(type)) as ArrayType | undefined;
+    if (!vector) return undefined;
+    for (const operand of operands) {
+      if (!isVectorType(operand.type) || operand.type.length !== vector.length)
+        this.error(
+          operand.span,
+          `${expression.name} には、長さ ${vector.length} のベクトルだけを渡してください（${typeName(operand.type)} 型です）。`
+        );
+    }
+    const target = resultType && isVectorType(resultType) ? resultType.child : undefined;
+    if (cast && !target) return this.error(expression, `${expression.name} には、ベクトルの結果の型が要ります。`);
+    // Each element's call is compiled with the element's result type, which a cast takes its type from.
+    return this.elementwise(operands, (elements) => ({ ...expression, args: elements }), Number(vector.length), target);
   }
 
   protected vectorOperation(expression: ExpressionOf<'binary' | 'unary'>, operands: TExpr[]): TExpr {
@@ -281,3 +304,38 @@ function elementOf(name: string, position: number, { row, col, endRow }: Span): 
     index: { kind: 'integer', ...span, value: BigInt(position) },
   };
 }
+
+/** The builtins that Zig applies to each element of vector operands. */
+const ELEMENTWISE_BUILTINS = new Set([
+  '@abs',
+  '@sqrt',
+  '@sin',
+  '@cos',
+  '@tan',
+  '@exp',
+  '@exp2',
+  '@log',
+  '@log2',
+  '@log10',
+  '@floor',
+  '@ceil',
+  '@trunc',
+  '@round',
+  '@divTrunc',
+  '@divFloor',
+  '@divExact',
+  '@mod',
+  '@rem',
+  '@min',
+  '@max',
+  '@clz',
+  '@ctz',
+  '@popCount',
+  '@byteSwap',
+  '@bitReverse',
+  '@shlExact',
+  '@shrExact',
+]);
+
+/** The casts that Zig applies to each element, taking each element's result type from the vector's. */
+const ELEMENTWISE_CASTS = new Set(['@intCast', '@truncate', '@floatCast', '@floatFromInt', '@intFromFloat']);
