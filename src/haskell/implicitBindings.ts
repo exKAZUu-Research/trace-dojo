@@ -69,14 +69,18 @@ export function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehe
 }
 
 /**
- * A right-hand side whose `where` binds implicit parameters, which scope over its guards and bodies: each value is an
- * ordinary `where` binding, shared by every guard that reads it, which the implicit bindings name.
+ * A right-hand side whose `where` binds implicit parameters, which scope over its guards and bodies: each value is a
+ * `where` binding, shared by every guard that reads it, which the implicit bindings name.
  */
 export function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
+  // A lazy pattern, which Strict leaves lazy, as GHC leaves the implicit binding it stands for.
   const values: Decl[] = binds.map((bind) => ({
-    kind: 'funClause',
-    name: { name: ` implicit ${bind.name}`, span: bind.span },
-    args: [],
+    kind: 'patBind',
+    pat: {
+      kind: 'plazy',
+      pat: { kind: 'pvar', name: { name: ` implicit ${bind.name}`, span: bind.span }, span: bind.span },
+      span: bind.span,
+    },
     rhs: { body: { kind: 'plain', expr: bind.expr }, where: [], span: bind.span },
     span: bind.span,
   }));
