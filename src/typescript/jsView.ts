@@ -105,6 +105,7 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
 /** The TypeScript declarations that compile to code of their own. */
 const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => ViewNode> = {
   module: (node, binder) => namespaceView(node, binder),
+  internal_module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
   import_statement: (node) => importView(node),
   export_statement: (node, binder) => exportView(node, binder),
