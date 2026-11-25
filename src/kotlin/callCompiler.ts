@@ -942,12 +942,22 @@ export abstract class CallCompiler extends CompilerCore {
   protected samOf(type: KType): { functionType: FunctionType; method: FunctionSymbol; cls: ClassSymbol } | undefined {
     const actual = resolved(type);
     if (actual.kind !== 'class' || !actual.cls.isFunInterface) return undefined;
-    for (const members of actual.cls.members.values()) {
+    // The abstract method may be declared by an interface the fun interface extends.
+    const classes: ClassSymbol[] = [];
+    const visit = (cls: ClassSymbol): void => {
+      if (classes.includes(cls)) return;
+      classes.push(cls);
+      for (const parent of cls.interfaces) visit(parent.cls);
+    };
+    visit(actual.cls);
+    for (const members of classes.flatMap((cls) => [...cls.members.values()])) {
       for (const member of members) {
         if (member.kind !== 'function' || !member.isAbstract) continue;
         const found = this.membersOf<FunctionSymbol>(actual, member.name, 'function').find(
           (candidate) => candidate.symbol === member
         );
+        // A method that a nearer interface implements is not the abstract one.
+        if (!found) continue;
         const substitution = found?.substitution ?? new Map();
         return {
           functionType: {
