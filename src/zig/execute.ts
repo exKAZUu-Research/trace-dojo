@@ -6,7 +6,7 @@ import { type CompiledProgram, compileSource } from './compiler';
 import { ExitSignal, processInit } from './library/std';
 import { withMemoryAccounting } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
-import { type Frame, OutOfMemory, Runtime, StackOverflow, ZigPanic } from './runtime';
+import { type Frame, OutOfMemory, Runtime, StackOverflow, UnavailableOperation, ZigPanic } from './runtime';
 import { ErrorValue } from './values';
 
 export function executeZigProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -76,6 +76,7 @@ function describeUncaught(error: unknown): string | undefined {
   if (error instanceof MemoryFault) return 'Segmentation fault';
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof ZigPanic) return `panic: ${error.text}`;
+  if (error instanceof UnavailableOperation) return error.message;
   if (error instanceof OutOfMemory) return 'error: OutOfMemory';
   // Zig's guard page makes deep recursion crash, whose address differs on every run.
   if (error instanceof StackOverflow || (error instanceof RangeError && /call stack/i.test(error.message))) {

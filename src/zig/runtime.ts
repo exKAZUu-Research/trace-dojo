@@ -8,6 +8,7 @@ import { rejectRuntimeEffect } from './comptimeMemory';
 import type { FunctionInstance } from './functions';
 import { TurtleReachability } from './turtleReachability';
 import type { Type } from './types';
+import { unavailableMessage } from './unavailable';
 import { createUtf8Decoder } from './utf8';
 import { type Slots, UNASSIGNED, type Value } from './values';
 
@@ -16,6 +17,14 @@ export class ZigPanic extends Error {
   constructor(readonly text: string) {
     super(`panic: ${text}`);
     this.name = 'ZigPanic';
+  }
+}
+
+/** Ends the program at an operation that the grader does not run, with the 「使えません」 diagnostic. */
+export class UnavailableOperation extends Error {
+  constructor(key: string) {
+    super(unavailableMessage(key));
+    this.name = 'UnavailableOperation';
   }
 }
 
@@ -138,6 +147,8 @@ export class Runtime {
     // Closing a closed descriptor is the use after free that a Debug build's close asserts against.
     if (!entry || entry.closed) throw new ZigPanic('reached unreachable code');
     entry.closed = true;
+    const { target } = entry;
+    if (typeof target === 'object') writeFileText(target, () => target.decoder.decode());
   }
 
   /** The file that a descriptor refers to, when it is open and not a standard stream. */
@@ -197,7 +208,7 @@ export class Runtime {
       return true;
     }
     const file = target as OpenFile;
-    file.write?.write(file.decoder.decode(new Uint8Array(bytes), { stream: true }));
+    writeFileText(file, () => file.decoder.decode(new Uint8Array(bytes), { stream: true }));
     return true;
   }
 
@@ -260,6 +271,21 @@ export class Runtime {
   }
 }
 
+/**
+ * Writes the text that a file's bytes decode to; the run's files hold text, so bytes that are not UTF-8 end the
+ * program instead of turning into U+FFFD.
+ */
+function writeFileText(file: OpenFile, decode: () => string): void {
+  if (!file.write) return;
+  let text: string;
+  try {
+    text = decode();
+  } catch {
+    throw new UnavailableOperation('io:nonUtf8File');
+  }
+  file.write.write(text);
+}
+
 type StandardStream = 'stdin' | 'stdout' | 'stderr';
 
 /** A descriptor: the standard stream or the file it refers to, the uses it is open for, and whether it was closed. */
@@ -277,6 +303,7 @@ export interface OpenFile {
   /** How many bytes of the file reading has passed. */
   position: number;
   write?: FileHandle;
+  /** A fatal decoder, which holds the bytes of a partly written character. */
   readonly decoder: TextDecoder;
 }
 

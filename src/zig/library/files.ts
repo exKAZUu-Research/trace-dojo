@@ -891,7 +891,13 @@ function openPath(
     : undefined;
   const content = files.openForReading(target);
   const read = mode === 1 ? undefined : content;
-  const descriptor = frame.runtime.openFile({ content, read, position: 0, write, decoder: new TextDecoder() });
+  const descriptor = frame.runtime.openFile({
+    content,
+    read,
+    position: 0,
+    write,
+    decoder: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }),
+  });
   return handle('file', { fd: descriptor });
 }
 

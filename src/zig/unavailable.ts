@@ -6,8 +6,8 @@ interface Unavailable {
 }
 
 /**
- * The builtins, by name, and the syntax, by a `syntax:` key, that this grader rejects with the 「使えません」
- * diagnostic; the declarations of Zig's library it leaves out are listed by publicMembers.ts instead.
+ * The builtins, by name, the syntax, by a `syntax:` key, and the operations of a run, by an `io:` key, that this grader
+ * rejects with the 「使えません」 diagnostic; the declarations of Zig's library it leaves out are listed by publicMembers.ts instead.
  */
 export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Unavailable>([
   ['@cImport', { what: 'C との連携（@cImport）' }],
@@ -58,6 +58,7 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@bitOffsetOf', { what: '@bitOffsetOf（メモリの表現）', inLibrary: true }],
   ['@backingInt', { what: '@backingInt（メモリの表現に依存する変換）', inLibrary: true }],
   ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）', inLibrary: true }],
+  ['io:nonUtf8File', { what: 'UTF-8 として正しくないバイトのファイルへの書き込み' }],
   ['syntax:comptimeVarPointer', { what: 'comptime var を指すポインタやスライス' }],
   ['@setRuntimeSafety(false)', { what: '@setRuntimeSafety(false)（実行時の検査を外す指定）' }],
   ['@inComptime', { what: '@inComptime（コンパイルのときかどうかの判定）' }],
