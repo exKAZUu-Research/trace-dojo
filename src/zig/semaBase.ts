@@ -667,7 +667,7 @@ export abstract class SemaBase implements SemaApi {
         );
       }
     }
-    // Zig checks a packed type's backing integer and an extern type's fields at the type's first use.
+    // Zig checks a packed type's backing integer at the type's first use.
     if (type.layout !== 'auto') this.resolveStorage(type, span);
     return fields;
   }
