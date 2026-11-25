@@ -1,0 +1,11 @@
+outer: for (let i = (() => { for (let j = 0; j < 1; j++) {} return 0; })(); i < 2; i = i + "s") {
+  continue outer;
+}
+class Animal { name = 'a'; }
+class Dog extends Animal {
+  override toString(): string { return `Dog(${this.name})`; }
+  override valueOf(): number { return 1; }
+  override missing(): void {}
+  static override bind(): any { return 1; }
+}
+console.log(String(new Dog()));

@@ -65,8 +65,11 @@ export class StatementChecker {
   /** Where each loop checked silently exits, by the loop and its entry state. */
   private readonly silentLoopExits = new Map<string, State[]>();
   private readonly jumpTargets: JumpTarget[] = [];
-  /** The labels of the loop about to be checked, which its jump target takes. */
-  private pendingLabels: string[] = [];
+  /**
+   * The labels of the loop about to be checked, by the loop, which its jump target takes: a loop its header contains
+   * must not take them.
+   */
+  private readonly pendingLabels = new Map<number, string[]>();
   private readonly reportedMissingTypes = new Set<string>();
   /** The types of the objects `for...in` loops iterate, by loop. */
   private readonly forInObjectTypes = new Map<number, Type>();
@@ -253,7 +256,7 @@ export class StatementChecker {
     const { labels, body } = labeledBody(node);
     if (!body) return;
     if (loopStatementTypes.has(body.type)) {
-      this.pendingLabels = labels;
+      this.pendingLabels.set(body.id, labels);
       this.checkSubstatement(body);
       return;
     }
@@ -556,8 +559,8 @@ export class StatementChecker {
    * @param iterate Runs one iteration from the current state and returns the state where the loop exits from it.
    */
   private loop(node: TreeNode, iterate: (target: JumpTarget) => State): void {
-    const labels = this.pendingLabels;
-    this.pendingLabels = [];
+    const labels = this.pendingLabels.get(node.id) ?? [];
+    this.pendingLabels.delete(node.id);
     const entry = this.c.flow.current;
     let stateKey = this.stateKey(entry);
     // An enclosing loop's silent passes check this loop once each; the same entry state leaves it the same way.

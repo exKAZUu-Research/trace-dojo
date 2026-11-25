@@ -85,7 +85,7 @@ export class ClassDeclarationChecker {
       const name = memberName(this.c, member);
       const isStatic = hasToken(member, 'static');
       const base = isStatic ? this.c.classes.baseStaticType(node) : this.c.classes.baseInstanceType(node);
-      if (name === undefined || !base || isAnyLike(base) || this.c.structureOf(base).properties.has(name)) continue;
+      if (name === undefined || !base || isAnyLike(base) || this.c.propertyOf(base, name)) continue;
       this.c.error(
         member,
         `このメンバーには 'override' 修飾子を付けられません。基底クラス '${this.c.print(this.c.classes.baseInstanceType(node) ?? base)}' で宣言されていません。`
