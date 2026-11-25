@@ -16,6 +16,7 @@ import {
 } from './variables';
 
 const NODE_COST = 32;
+const TURTLE_HANDLE_PATTERN = /^Turtle@\d+$/;
 
 // oxlint-disable-next-line unicorn/no-null -- Trace format represents null references as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
@@ -178,7 +179,7 @@ class TraceSnapshotter {
     let denseCost = NODE_COST;
     for (const [index, [key, element]] of elements.entries()) {
       const { child, isTurtle, valueCost } = this.indexedElementEntry(element);
-      hasTurtle ||= isTurtle;
+      hasTurtle ||= isTurtle || TURTLE_HANDLE_PATTERN.test(element);
       isDense &&= key === BigInt(index) && !isTurtle;
       const keyText = String(key);
       const stepCost = keyText.length + valueCost;
@@ -225,8 +226,8 @@ class TraceSnapshotter {
     let hasTurtle = false;
     let displayCost = NODE_COST;
     for (const [key, element] of table.entries()) {
+      hasTurtle ||= TURTLE_HANDLE_PATTERN.test(element);
       if (this.runtime.isTurtleHandle(element)) {
-        hasTurtle = true;
         const turtle = turtleNode(this.runtime, element);
         if (turtle) {
           displayCost += key.length + NODE_COST * 3;
