@@ -4,7 +4,8 @@ import { isVectorType, type Type, typeName, USIZE, vectorOf } from './types';
 
 /**
  * The rules for each kind of operand that Zig's Sema checks the same way wherever the operand stands: an alignment, an
- * operand a vector builtin takes, a `@shuffle` mask element, and the operand of a field access. Every operation
+ * operand a vector builtin takes, a `@shuffle` mask element, and the operand of a field access (which `for` reads the
+ * length of) or of a slice. Every operation
  * consults the rule for its operand here rather than writing its own.
  */
 
@@ -38,4 +39,10 @@ export function checkMaskElement(sema: SemaApi, element: bigint, length: bigint,
 export function checkFieldOperand(sema: SemaApi, type: Type, span: Span): void {
   const vector = isVectorType(type) || (type.kind === 'pointer' && type.size === 'one' && isVectorType(type.child));
   if (vector) sema.error(span, `${typeName(type)} 型は、フィールドを参照できません。`);
+}
+
+/** The operand of a slice, which a vector, unlike an array, is not. */
+export function checkSliceOperand(sema: SemaApi, type: Type, span: Span): void {
+  if (isVectorType(type) || (type.kind === 'pointer' && type.size === 'one' && isVectorType(type.child)))
+    sema.error(span, `${typeName(type)} 型はスライスできません。`);
 }

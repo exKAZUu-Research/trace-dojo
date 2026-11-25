@@ -1,4 +1,4 @@
-import { alignmentOperand, checkFieldOperand } from './admissibility';
+import { alignmentOperand, checkFieldOperand, checkSliceOperand } from './admissibility';
 import { valueSlots } from './allocation';
 import {
   checked,
@@ -1112,6 +1112,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let type = operand.type;
     const start = this.coerce(this.compile(expression.start, USIZE), USIZE, expression.start);
     const end = expression.end ? this.coerce(this.compile(expression.end, USIZE), USIZE, expression.end) : undefined;
+    checkSliceOperand(this, type, expression);
     // Slicing an array slices it where it lives, as through a pointer to it.
     let base = operand;
     if (type.kind === 'array') {
