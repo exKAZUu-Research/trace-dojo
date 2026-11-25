@@ -73,24 +73,28 @@ class ConditionalValidator {
     this.abort(this.openRow, `syntax error in conditional expression: unexpected token \`${this.displayCurrent()}'`);
   }
 
-  private parseOr(): void {
-    this.parseAnd();
+  private parseOr(atGroupStart = false): void {
+    this.parseAnd(atGroupStart);
     while (this.isPunct('||')) this.parseAnd();
   }
 
-  private parseAnd(): void {
-    this.parseAtom();
+  private parseAnd(atGroupStart = false): void {
+    this.parseAtom(atGroupStart);
     while (this.isPunct('&&')) this.parseAtom();
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Validates parenthesized, negated, unary, and binary/word conditional primaries.
-  private parseAtom(): void {
+  private parseAtom(atGroupStart = false): void {
     this.text.nested(() => {
       this.advancePastNewlines();
       const first = this.current;
-      if (first.kind === 'close') this.text.fail(first.row, `syntax error near \`${first.value}'`);
+      if (first.kind === 'close') {
+        if (atGroupStart) this.abort(first.row, "expected `)'");
+        const near = immediateSeparatorAfterClose(this.text.source, this.cursor) ?? first.value;
+        this.text.fail(first.row, `syntax error near \`${near}'`);
+      }
       if (this.isPunct('(')) {
-        this.parseOr();
+        this.parseOr(true);
         if (!this.isPunct(')')) this.abort(first.row, `unexpected token \`${this.displayCurrent()}', expected \`)'`);
         this.advancePastNewlines();
         return;
@@ -138,7 +142,10 @@ class ConditionalValidator {
   }
 
   private abort(row: number, message: string): never {
-    throw new SyntaxFailure(row, message, trailingLineToken(this.text.source, this.cursor));
+    const near =
+      (this.current.kind === 'close' ? immediateSeparatorAfterClose(this.text.source, this.cursor) : undefined) ??
+      trailingLineToken(this.text.source, this.cursor);
+    throw new SyntaxFailure(row, message, near);
   }
 
   private advancePastNewlines(): void {
@@ -208,6 +215,14 @@ class ConditionalValidator {
     }
     return source.slice(begin, this.cursor);
   }
+}
+
+function immediateSeparatorAfterClose(source: string, cursor: number): string | undefined {
+  const ch = source[cursor];
+  const next = source[cursor + 1];
+  if (ch === ';' && next !== ';' && next !== '&') return ';';
+  if (ch === '&' && next !== '&' && next !== '>') return '&';
+  return undefined;
 }
 
 /** Extracts the token immediately preceding `cursor` on the current line for Bash's secondary `syntax error near` diagnostic. */

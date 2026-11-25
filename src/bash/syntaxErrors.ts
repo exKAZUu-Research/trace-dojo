@@ -4,7 +4,7 @@ import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { isExplainedError } from '../interpreter/treeSitter';
 
 /** The words that Bash reads as reserved words in a command's position, which then end a construct. */
-export const CLOSING_RESERVED_WORDS = new Set(['then', 'else', 'elif', 'fi', 'do', 'done', 'esac', '}', 'in']);
+export const CLOSING_RESERVED_WORDS = new Set(['then', 'else', 'elif', 'fi', 'do', 'done', 'esac', '}', ']]', 'in']);
 
 /** The constructs whose opening word Bash names when the file ends before their closing word. */
 const OPENING_WORDS = new Set(['if', 'while', 'until', 'for', 'select', 'case', '{']);

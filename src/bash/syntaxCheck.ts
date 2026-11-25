@@ -546,9 +546,10 @@ const KEYWORDS = new Set([
   '}',
   '!',
   '[[',
+  ']]',
 ]);
 
-const CONTINUATION_OR_CLOSING_KEYWORDS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'do', 'done', 'in', '}']);
+const CONTINUATION_OR_CLOSING_KEYWORDS = new Set(['then', 'else', 'elif', 'fi', 'esac', 'do', 'done', 'in', '}', ']]']);
 const CASE_CLAUSE_TERMINATORS = new Set([';;', ';&', ';;&']);
 
 class ShellGrammarValidator {
@@ -673,7 +674,8 @@ class ShellGrammarValidator {
       next.kind === 'word' &&
       this.isKeywordToken(next) &&
       CONTINUATION_OR_CLOSING_KEYWORDS.has(next.value) &&
-      next.value !== 'in';
+      next.value !== 'in' &&
+      next.value !== ']]';
     if (requiresSeparator && next.kind === 'word' && !closesEnclosing) this.failUnexpected(next);
   }
 
