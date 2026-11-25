@@ -1920,6 +1920,8 @@ export function convertExpr(features: FeatureGates<'convert'>, node: Node): Expr
     case 'parens': {
       const inner = field(node, 'expression');
       if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+      const section = lexicalNegationSection(features, inner, span);
+      if (section) return section;
       return { kind: 'paren', expr: convertExpr(features, inner), span };
     }
     case 'tuple':
@@ -2040,6 +2042,20 @@ function convertNameExpression(node: Node, span: Span): Expr {
   if (node.text === '_') return { kind: 'hole', name: '_', span };
   const { name, isConstructor } = qualifiedName(node);
   return isConstructor || name.name.startsWith(':') ? { kind: 'con', name, span } : { kind: 'var', name, span };
+}
+
+/**
+ * Under LexicalNegation, `(- x)` with a space after the minus is the right section of subtraction, `\y -> y - x`;
+ * only a minus right before its operand negates.
+ */
+function lexicalNegationSection(features: FeatureGates<'convert'>, inner: Node, span: Span): Expr | undefined {
+  if (!features.allows('lexicalNegation') || inner.type !== 'operator_chain') return undefined;
+  const parts = namedChildren(inner);
+  if (parts.length !== 2 || parts[0].type !== 'prefix_negation') return undefined;
+  const minus = parts[0].child(0);
+  if (!minus || minus.endIndex === parts[1].startIndex) return undefined;
+  // The renamer reads a `-` section as negation, so the section is `subtract x`.
+  return { kind: 'app', fn: { kind: 'support', name: 'subtract', span }, arg: convertExpr(features, parts[1]), span };
 }
 
 function convertSection(features: FeatureGates<'convert'>, node: Node, span: Span): Expr {
