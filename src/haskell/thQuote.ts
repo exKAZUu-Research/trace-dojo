@@ -358,7 +358,6 @@ export class QuoteBuilder {
     return this.stmts(stmts, (list) => this.call('patGE', list, this.expr(expr)));
   }
 
-  /** Statements, each binding its variables for the statements after it, given to what builds from their list. */
   /**
    * Statements, each of which sees the variables the statements before it bind: a bind's expression is outside its
    * own pattern's scope, and a `let`'s declarations are inside their own.

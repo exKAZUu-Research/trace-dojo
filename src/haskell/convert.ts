@@ -127,7 +127,6 @@ function hasToken(node: Node, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }
 
-/** Converts a module's parse tree into the surface syntax, rejecting syntax this environment does not support. */
 /** What converting a module reads besides its syntax tree. */
 interface ConvertContext extends FeatureGates<'convert'> {
   /** The syntax each Template Haskell splice gave, by its node's start. */
@@ -153,6 +152,7 @@ function grafted<K extends SpliceSyntax['kind']>(
   return graft as Extract<SpliceSyntax, { kind: K }>;
 }
 
+/** Converts a module's parse tree into the surface syntax, rejecting syntax this environment does not support. */
 export function convertModule(
   root: Node,
   extensions: Extensions,
@@ -376,13 +376,13 @@ function convertImportItem(features: ConvertContext, node: Node, exporting = fal
   return { kind: 'type', name: nameOf(typeNode), children };
 }
 
-/** The name a node spells, without parentheses around an operator. */
 /** The name an infix declaration head's operator gives: a symbol, or a name in backticks, `a \`And\` b`. */
 function infixHeadName(node: Node): QName {
   const inner = node.type === 'infix_id' ? namedChildren(node)[0] : undefined;
   return inner ? qualifiedName(inner).name : plainName(node);
 }
 
+/** The name a node spells, without parentheses around an operator. */
 function plainName(node: Node): Name {
   if (node.type === 'prefix_id' || node.type === 'parenthesized_name') {
     const inner = namedChildren(node)[0];
@@ -662,7 +662,6 @@ function checkSeparator(match: Node, separator: '=' | '->'): void {
   }
 }
 
-/** A guard, as one or more: a `let` with banged bindings is followed by a guard that evaluates them. */
 function convertGuard(features: ConvertContext, node: Node): Guard[] {
   rejectUnsupported(node);
   const span = spanOf(node);
@@ -887,7 +886,6 @@ function convertPatternSynonymHead(node: Node): { name: Name; params: Name[]; fi
   }
 }
 
-/** Converts the declarations of type families and data families, and their instances. */
 /** Converts `type family F a`, with its result kind and injectivity, or a closed family with its equations. */
 function convertTypeFamily(features: ConvertContext, node: Node, span: Span): Decl {
   const equationsNode = field(node, 'closed_family');
@@ -929,6 +927,7 @@ function familyInjectivity(features: ConvertContext, node: Node, params: Name[])
   });
 }
 
+/** Converts the declarations of type families and data families, and their instances. */
 function convertFamilyDecl(features: ConvertContext, node: Node): Decl {
   if (!features.allows('typeFamilies')) {
     throw syntaxError(spanOf(node), '型族やデータ族を使うには、TypeFamilies の拡張が要ります。');

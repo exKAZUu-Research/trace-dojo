@@ -78,8 +78,10 @@ export type Expr =
   | { kind: 'recordCon'; con: QName; fields: FieldBind[]; span: Span; wildcard?: Span }
   | { kind: 'recordUpdate'; expr: Expr; fields: FieldBind[]; span: Span }
   | { kind: 'paren'; expr: Expr; span: Span }
-  /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
-  /** `e @t`, or `e (type t)` (`required`), which only a `forall a ->` binder takes. */
+  /**
+   * A visible type application, `e @t`, `e @_` (which leaves the argument to inference), or `e (type t)`
+   * (`required`), which only a `forall a ->` binder takes.
+   */
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; required?: boolean; span: Span }
   /** An implicit parameter, `?x`. */
   | { kind: 'implicit'; name: string; span: Span }
