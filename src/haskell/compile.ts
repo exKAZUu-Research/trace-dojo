@@ -6,6 +6,7 @@ import {
   COERCIBLE_CLASS,
   CONSTRAINT_KIND,
   DOUBLE_TYPE,
+  EQUALITY_CLASS,
   HAS_FIELD_CLASS,
   INT_TYPE,
   INTEGER_TYPE,
@@ -29,19 +30,10 @@ import {
   LIBRARY_SOURCES,
   PUBLIC_MODULES,
   TEMPLATE_HASKELL_UNSUPPORTED,
-  UNIMPLEMENTED_LIBRARY_TYPES,
-  UNIMPLEMENTED_LIBRARY_VALUES,
   UNSUPPORTED_MODULES,
   UNSUPPORTED_VALUES,
 } from './library';
-import {
-  KNOWN_LIBRARY_CLASS_METHODS,
-  KNOWN_LIBRARY_FIELDS,
-  KNOWN_LIBRARY_TYPE_CHILDREN,
-  KNOWN_LIBRARY_TYPES,
-  KNOWN_LIBRARY_VALUE_REEXPORTS,
-  KNOWN_LIBRARY_VALUES,
-} from './library/knownValues';
+import { GHC_EXPORTS, type GhcModuleExports } from './library/ghcExports';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell, parseProgram, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
@@ -258,7 +250,6 @@ class LibraryCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- The export pass combines explicit selections, implemented identities and unsupported API entries.
   publicModules(): Map<string, ExportTable> {
     const modules = new Map<string, ExportTable>();
     for (const [name, spec] of Object.entries(PUBLIC_MODULES)) {
@@ -267,58 +258,6 @@ class LibraryCompiler {
       this.exportValues(exports, spec.from, spec.values, name);
       if (spec.overrides) this.exportValues(exports, spec.overrides.from, spec.overrides.values, name);
       for (const [typeName, children] of spec.types) exportType(exports, source, typeName, children, name);
-      for (const value of KNOWN_LIBRARY_VALUES[name] ?? []) {
-        if (!exports.values.has(value)) {
-          const reexport = Object.entries(KNOWN_LIBRARY_VALUE_REEXPORTS[name] ?? {}).find(([, names]) =>
-            names.includes(value)
-          );
-          const shared = reexport && modules.get(reexport[0])?.values.get(value);
-          assert(!reexport || shared, `Missing library re-export ${reexport?.[0]}.${value}`);
-          exports.values.set(
-            value,
-            shared ?? {
-              id: nextId(),
-              name: value,
-              module: name,
-              sort: 'var',
-              unsupportedField: KNOWN_LIBRARY_FIELDS[name]?.includes(value),
-              unsupported: `ライブラリ関数（${name}.${value}）`,
-            }
-          );
-        }
-      }
-      for (const type of KNOWN_LIBRARY_TYPES[name] ?? []) {
-        if (!exports.types.has(type)) {
-          const implemented = source.types.get(type);
-          if (implemented) {
-            exports.types.set(type, {
-              entity: implemented.entity,
-              children: implemented.children.filter((child) => exports.values.get(child.name) === child),
-            });
-            continue;
-          }
-          exports.types.set(type, {
-            entity: {
-              kind: 'type',
-              entity: {
-                id: nextId(),
-                name: type,
-                module: name,
-                sort: 'prim',
-                kind: STAR,
-                arity: 0,
-                cons: [],
-                fields: new Map(),
-                unsupported: `ライブラリの型（${name}.${type}）`,
-              },
-            },
-            children: [],
-          });
-        }
-      }
-      addUnimplementedNames(exports, name);
-      attachKnownTypeChildren(exports);
-      assertPublicExports(name, exports);
       modules.set(name, exports);
     }
     for (const name of ['GHC.TypeLits', 'GHC.TypeNats']) {
@@ -333,6 +272,7 @@ class LibraryCompiler {
     for (const kind of [TYPE_KIND, CONSTRAINT_KIND])
       kinds.types.set(kind.name, { entity: { kind: 'type', entity: kind }, children: [] });
     modules.set('Data.Kind', kinds);
+    addGhcExports(modules, (name) => this.internal.get(PUBLIC_MODULES[name]?.from ?? name));
     this.markConstructorVisibility(modules);
     return modules;
   }
@@ -366,22 +306,6 @@ class LibraryCompiler {
       values.set(name, entity);
     }
     return values;
-  }
-}
-
-function attachKnownTypeChildren(exports: ExportTable): void {
-  for (const [typeName, entry] of exports.types) {
-    const names =
-      entry.entity.kind === 'class' ? KNOWN_LIBRARY_CLASS_METHODS[typeName] : KNOWN_LIBRARY_TYPE_CHILDREN[typeName];
-    if (!names) continue;
-    entry.children = names.flatMap((method) => {
-      const value = exports.values.get(method);
-      return value ? [value] : [];
-    });
-    if (entry.entity.kind === 'class') {
-      const cls = entry.entity.entity;
-      cls.exportedMethods = [...new Set([...(cls.exportedMethods ?? []), ...entry.children])];
-    }
   }
 }
 
@@ -565,39 +489,121 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
   });
 }
 
-function assertPublicExports(name: string, exports: ExportTable): void {
-  const values = KNOWN_LIBRARY_VALUES[name];
-  const types = KNOWN_LIBRARY_TYPES[name];
-  for (const value of exports.values.keys())
-    assert(!values || values.includes(value), `${name} does not export ${value}`);
-  for (const type of exports.types.keys()) assert(!types || types.includes(type), `${name} does not export ${type}`);
+/** A module of GHC's, with its exports here and the key of each name for the GHC entity it is. */
+interface GhcModule {
+  name: string;
+  ghc: GhcModuleExports;
+  exports: ExportTable;
+  values: string[];
+  identity: (key: string) => string;
 }
 
-/** The names GHC's module has that this one leaves out, which a program that uses them learns are unavailable. */
-function addUnimplementedNames(exports: ExportTable, name: string): void {
-  for (const value of UNIMPLEMENTED_LIBRARY_VALUES[name] ?? []) {
+/** The library's entities for GHC's ones, and the children GHC exports with each type, by the key of the GHC entity. */
+interface GhcEntities {
+  values: Map<string, ValueEntity>;
+  types: Map<string, TypeLike>;
+  children: Map<string, Set<string>>;
+}
+
+/**
+ * Gives each module what its GHC counterpart exports beyond what the library selects for it: the entity another module
+ * exports for the same GHC entity, a type of the module the library takes it from, or else an entity that tells a
+ * program using it that it is unavailable. A type gets the children GHC exports with it that the module exports.
+ */
+function addGhcExports(modules: Map<string, ExportTable>, sourceOf: (name: string) => ExportTable | undefined): void {
+  const ghcModules = Object.entries(GHC_EXPORTS).map(([name, ghc]): GhcModule => {
+    const exports = modules.get(name);
+    assert(exports, `GHC's ${name} is not a module here`);
+    const identity = (key: string): string => `${key} ${ghc.origins?.[key] ?? ''}`;
+    return { name, ghc, exports, identity, values: ghc.values.split(' ').filter(Boolean) };
+  });
+  const entities = libraryEntities(ghcModules);
+  for (const module of ghcModules) {
+    addGhcValues(module, entities);
+    addGhcTypes(module, entities, sourceOf(module.name));
+    assertGhcExports(module);
+  }
+}
+
+function libraryEntities(ghcModules: GhcModule[]): GhcEntities {
+  const entities: GhcEntities = { values: new Map(), types: new Map(), children: new Map() };
+  for (const { ghc, exports, identity, values } of ghcModules) {
+    for (const value of values) {
+      const entity = exports.values.get(value);
+      const key = identity(`v:${value}`);
+      if (entity && !entities.values.has(key)) entities.values.set(key, entity);
+    }
+    for (const [type, children] of Object.entries(ghc.types)) {
+      const entry = exports.types.get(type);
+      const key = identity(`t:${type}`);
+      if (entry && !entities.types.has(key)) entities.types.set(key, entry.entity);
+      entities.children.set(key, new Set([...(entities.children.get(key) ?? []), ...children.split(' ')]));
+    }
+  }
+  return entities;
+}
+
+function addGhcValues({ name, ghc, exports, identity, values }: GhcModule, entities: GhcEntities): void {
+  const fields = new Set(ghc.fields?.split(' '));
+  for (const value of values) {
     if (exports.values.has(value)) continue;
-    exports.values.set(value, {
+    const key = identity(`v:${value}`);
+    const entity = entities.values.get(key) ?? {
       id: nextId(),
       name: value,
       module: name,
       sort: 'var',
+      unsupportedField: fields.has(value),
       unsupported: `ライブラリ関数（${name}.${value}）`,
-    });
-  }
-  for (const type of UNIMPLEMENTED_LIBRARY_TYPES[name] ?? []) {
-    if (exports.types.has(type)) continue;
-    const entity: TypeEntity = {
-      id: nextId(),
-      name: type,
-      module: name,
-      sort: 'prim',
-      kind: STAR,
-      arity: 0,
-      cons: [],
-      fields: new Map(),
-      unsupported: `ライブラリの型（${name}.${type}）`,
     };
-    exports.types.set(type, { entity: { kind: 'type', entity }, children: [] });
+    entities.values.set(key, entity);
+    exports.values.set(value, entity);
   }
+}
+
+function addGhcTypes(
+  { name, ghc, exports, identity }: GhcModule,
+  entities: GhcEntities,
+  source: ExportTable | undefined
+): void {
+  for (const type of Object.keys(ghc.types)) {
+    const key = identity(`t:${type}`);
+    let entry = exports.types.get(type);
+    if (!entry) {
+      const entity: TypeLike =
+        type === '~'
+          ? { kind: 'class', entity: EQUALITY_CLASS }
+          : (entities.types.get(key) ?? source?.types.get(type)?.entity ?? unavailableType(name, type));
+      entities.types.set(key, entity);
+      entry = { entity, children: [] };
+      exports.types.set(type, entry);
+    }
+    entry.children = [...(entities.children.get(key) ?? [])].flatMap((child) => exports.values.get(child) ?? []);
+    if (entry.entity.kind === 'class') {
+      const cls = entry.entity.entity;
+      cls.exportedMethods = [...new Set([...(cls.exportedMethods ?? []), ...entry.children])];
+    }
+  }
+}
+
+function assertGhcExports({ name, ghc, exports, values }: GhcModule): void {
+  const exported = new Set(values);
+  for (const value of exports.values.keys()) assert(exported.has(value), `GHC's ${name} does not export ${value}`);
+  for (const type of exports.types.keys())
+    assert(Object.hasOwn(ghc.types, type), `GHC's ${name} does not export ${type}`);
+}
+
+function unavailableType(module: string, name: string): TypeLike {
+  const entity: TypeEntity = {
+    id: nextId(),
+    name,
+    module,
+    sort: 'prim',
+    kind: STAR,
+    arity: 0,
+    cons: [],
+    fields: new Map(),
+    unsupported: `ライブラリの型（${module}.${name}）`,
+  };
+  return { kind: 'type', entity };
 }

@@ -6,6 +6,7 @@ import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './
 import { BASE_EXTRA } from './extra';
 import { BASE_SMALL_MODULES, TREE_SOURCE } from './extraModules';
 import { FIXED_WIDTH_LIFT, FIXED_WIDTH_PRINTF, FIXED_WIDTH_SOURCE } from './fixedWidth';
+import { GHC_EXPORTS } from './ghcExports';
 import { BASE_MONOID, NON_EMPTY_SOURCE, SEMIGROUP_SOURCE } from './monoid';
 import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
@@ -471,22 +472,35 @@ const SET_VALUES = [
   'deleteFindMax',
 ];
 
-/** The names `Language.Haskell.TH` and its modules export: those its source declares, but its own helpers. */
-const TEMPLATE_HASKELL_MODULE: PublicModule = (() => {
+const TEMPLATE_HASKELL_DECLARED = (() => {
   const internal =
     /^(quote[A-Z]|run[A-Z]\w*Splice|runSplice|storeSplice|reportSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent|packageOf)/;
   const values = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^([a-z_][\w']*|\([^)]+\)) ::/gm)]
     .map((match) => match[1])
     .filter((name) => !internal.test(name));
-  const types = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^(?:data|newtype|type|class) (?:[^=]*=> )?([A-Z]\w*)/gm)]
-    .map((match) => match[1])
-    .filter((name) => !name.startsWith('Splice'));
+  const types = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^(?:data|newtype|type|class) (?:[^=]*=> )?([A-Z]\w*)/gm)].map(
+    (match) => match[1]
+  );
+  return { values: new Set(values), types: new Set(types) };
+})();
+
+/** A module of Template Haskell: what GHC's module exports among what the source declares, but its own helpers. */
+function templateHaskellModule(name: string): PublicModule {
+  const ghc = GHC_EXPORTS[name];
   return {
     from: 'Language.Haskell.TH.Internal',
-    types: [...new Set(types)].map((name): [string, 'all'] => [name, 'all']),
-    values: [...new Set(values)],
+    types: Object.entries(ghc.types)
+      .filter(([type]) => TEMPLATE_HASKELL_DECLARED.types.has(type))
+      .map(([type, children]) => [type, children.split(' ')]),
+    values: ghc.values.split(' ').filter((value) => TEMPLATE_HASKELL_DECLARED.values.has(value)),
   };
-})();
+}
+
+/** The names among `names` that GHC's module exports, for a module that shares a list of another one. */
+function exportedByGhc(module: string, names: string[]): string[] {
+  const exported = new Set(GHC_EXPORTS[module].values.split(' '));
+  return names.filter((name) => exported.has(name));
+}
 
 /** The modules a program may import, by name. */
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
@@ -1058,10 +1072,10 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
   'Data.Functor.Identity': { from: 'Base', types: [['Identity', 'all']], values: ['runIdentity'] },
   'Data.Functor.Const': { from: 'Base', types: [['Const', 'all']], values: ['getConst'] },
   'Data.Functor.Compose': { from: 'Base', types: [['Compose', 'all']], values: ['getCompose'] },
-  'Language.Haskell.TH': TEMPLATE_HASKELL_MODULE,
-  'Language.Haskell.TH.Syntax': TEMPLATE_HASKELL_MODULE,
-  'Language.Haskell.TH.Lib': TEMPLATE_HASKELL_MODULE,
-  'Language.Haskell.TH.Ppr': TEMPLATE_HASKELL_MODULE,
+  'Language.Haskell.TH': templateHaskellModule('Language.Haskell.TH'),
+  'Language.Haskell.TH.Syntax': templateHaskellModule('Language.Haskell.TH.Syntax'),
+  'Language.Haskell.TH.Lib': templateHaskellModule('Language.Haskell.TH.Lib'),
+  'Language.Haskell.TH.Ppr': templateHaskellModule('Language.Haskell.TH.Ppr'),
   'Language.Haskell.TH.Quote': {
     from: 'Language.Haskell.TH.Internal',
     types: [['QuasiQuoter', 'all']],
@@ -1156,7 +1170,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['IntMap', 'none'],
       ['Key', 'none'],
     ],
-    values: MAP_VALUES,
+    values: exportedByGhc('Data.IntMap', MAP_VALUES),
   },
   'Data.IntMap.Strict': {
     from: 'Data.Map.Internal',
@@ -1164,8 +1178,8 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['IntMap', 'none'],
       ['Key', 'none'],
     ],
-    values: MAP_VALUES,
-    overrides: { from: 'Data.Map.Strict.Internal', values: STRICT_MAP_VALUES },
+    values: exportedByGhc('Data.IntMap.Strict', MAP_VALUES),
+    overrides: { from: 'Data.Map.Strict.Internal', values: exportedByGhc('Data.IntMap.Strict', STRICT_MAP_VALUES) },
   },
   'Data.IntSet': {
     from: 'Data.Set.Internal',
@@ -1173,7 +1187,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['IntSet', 'none'],
       ['Key', 'none'],
     ],
-    values: SET_VALUES,
+    values: exportedByGhc('Data.IntSet', SET_VALUES),
   },
   'Data.Tree': {
     from: 'Data.Tree.Internal',
@@ -1264,266 +1278,4 @@ export const UNSUPPORTED_MODULES: Record<string, string> = {
   'Control.Monad.Writer': 'mtl のモナド変換子（Control.Monad.Writer）',
   Foreign: '外部の関数（Foreign）',
   'Foreign.C': '外部の関数（Foreign.C）',
-};
-
-/**
- * The names of modules this environment provides that GHC's modules have beyond what it implements, which a
- * program that uses them learns are unavailable rather than missing.
- */
-export const UNIMPLEMENTED_LIBRARY_VALUES: Record<string, readonly string[]> = {
-  // GHC's Template Haskell names that its builders and syntax here do not cover.
-  'Language.Haskell.TH': [
-    'anyclassStrategy',
-    'appK',
-    'arrowK',
-    'bindCode_',
-    'bndrInvis',
-    'bndrReq',
-    'bytesPrimL',
-    'cApi',
-    'cCall',
-    'classP',
-    'closedTypeFamilyD',
-    'conK',
-    'constrainedE',
-    'dataD_doc',
-    'dataFamilyD',
-    'dataInstD',
-    'dataInstD_doc',
-    'defaultFixity',
-    'dyn',
-    'equalP',
-    'explBidir',
-    'forImpD',
-    'forallC',
-    'forallE',
-    'forallVisE',
-    'forallVisT',
-    'fromR',
-    'fromThenR',
-    'fromThenToR',
-    'fromToR',
-    'funD_doc',
-    'funDep',
-    'gadtC',
-    'getDoc',
-    'implBidir',
-    'implicitParamBindD',
-    'implicitParamT',
-    'inferR',
-    'inferredSpec',
-    'infixPatSyn',
-    'injectivityAnn',
-    'interruptible',
-    'invisP',
-    'isStrict',
-    'javaScript',
-    'kindSig',
-    'kindedBndrTV',
-    'kindedInvisTV',
-    'listK',
-    'maxPrecedence',
-    'mkBytes',
-    'moduleAnnotation',
-    'newDeclarationGroup',
-    'newtypeD_doc',
-    'newtypeInstD',
-    'newtypeInstD_doc',
-    'newtypeStrategy',
-    'noSig',
-    'nominalR',
-    'notStrict',
-    'openTypeFamilyD',
-    'patSynD',
-    'patSynD_doc',
-    'patSynSigD',
-    'phantomR',
-    'plainInvisTV',
-    'pprExp',
-    'pprLit',
-    'pprParendType',
-    'pprPat',
-    'pragAnnD',
-    'pragCompleteD',
-    'pragInlD',
-    'pragLineD',
-    'pragRuleD',
-    'pragSpecD',
-    'pragSpecED',
-    'pragSpecInlD',
-    'pragSpecInlED',
-    'pragSpecInstD',
-    'prefixPatSyn',
-    'prim',
-    'promotedConsT',
-    'promotedInfixT',
-    'promotedNilT',
-    'promotedTupleT',
-    'promotedUInfixT',
-    'putDoc',
-    'recGadtC',
-    'recordPatSyn',
-    'reifyAnnotations',
-    'reifyConStrictness',
-    'reifyModule',
-    'representationalR',
-    'ruleVar',
-    'safe',
-    'specifiedSpec',
-    'standaloneDerivWithStrategyD',
-    'stdCall',
-    'stockStrategy',
-    'strictType',
-    'stringPrimL',
-    'thisModule',
-    'tupleDataName',
-    'tupleK',
-    'tupleTypeName',
-    'tySynEqn',
-    'tySynInstD',
-    'tyVarSig',
-    'typeAnnotation',
-    'typeDataD',
-    'typeDataD_doc',
-    'typeP',
-    'typedRuleVar',
-    'uInfixT',
-    'unboxedSumDataName',
-    'unboxedSumE',
-    'unboxedSumP',
-    'unboxedSumT',
-    'unboxedSumTypeName',
-    'unboxedTupE',
-    'unboxedTupP',
-    'unboxedTupleDataName',
-    'unboxedTupleT',
-    'unboxedTupleTypeName',
-    'unidir',
-    'unpacked',
-    'unsafe',
-    'valueAnnotation',
-    'varK',
-    'varStrictType',
-    'viaStrategy',
-    'withDecDoc',
-    'withDecsDoc',
-  ],
-  'Data.Sequence': [
-    'Empty',
-    ':<|',
-    ':|>',
-    'scanr',
-    'scanl1',
-    'scanr1',
-    'unzip',
-    'unzipWith',
-    'zip3',
-    'zipWith3',
-    'zip4',
-    'zipWith4',
-    'cycleTaking',
-    'elemIndexR',
-    'findIndexR',
-    'elemIndicesL',
-    'elemIndicesR',
-    'findIndicesL',
-    'findIndicesR',
-    'takeWhileR',
-    'dropWhileR',
-    'spanr',
-    'breakr',
-    'unstableSortBy',
-    'unstableSortOn',
-    'foldMapWithIndex',
-    'traverseWithIndex',
-    'fromArray',
-    'iterateN',
-  ],
-  'Data.Word': [
-    'byteSwap16',
-    'byteSwap32',
-    'byteSwap64',
-    'bitReverse8',
-    'bitReverse16',
-    'bitReverse32',
-    'bitReverse64',
-  ],
-  'Data.Tree': [
-    'unfoldTreeM',
-    'unfoldForestM',
-    'unfoldTreeM_BF',
-    'unfoldForestM_BF',
-    'leaves',
-    'edges',
-    'pathsToRoot',
-    'pathsFromRoot',
-  ],
-  'Data.Fixed': ['resolution', 'showFixed', 'MkFixed'],
-  'Data.List.NonEmpty': [
-    'prependList',
-    'appendList',
-    'inits1',
-    'tails1',
-    'permutations',
-    'permutations1',
-    'groupAllWith1',
-    'groupWith1',
-  ],
-};
-
-export const UNIMPLEMENTED_LIBRARY_TYPES: Record<string, readonly string[]> = {
-  'Language.Haskell.TH': [
-    'AnnLookup',
-    'AnnTarget',
-    'Arity',
-    'Callconv',
-    'DecidedStrictness',
-    'DefaultBndrFlag',
-    'DocLoc',
-    'FamilyResultSig',
-    'FamilyResultSigQ',
-    'Foreign',
-    'InjectivityAnn',
-    'Inline',
-    'InstanceDec',
-    'ModuleInfo',
-    'ParentName',
-    'PatSynArgs',
-    'PatSynArgsQ',
-    'PatSynDir',
-    'PatSynDirQ',
-    'PatSynType',
-    'Phases',
-    'Pragma',
-    'RuleBndr',
-    'RuleBndrQ',
-    'RuleMatch',
-    'Safety',
-    'Strict',
-    'SumAlt',
-    'SumArity',
-    'TySynEqn',
-    'TySynEqnQ',
-    'TypeFamilyHead',
-    'Unlifted',
-  ],
-  'Data.Fixed': [
-    'Fixed',
-    'HasResolution',
-    'E0',
-    'E1',
-    'E2',
-    'E3',
-    'E6',
-    'E9',
-    'E12',
-    'Uni',
-    'Deci',
-    'Centi',
-    'Milli',
-    'Micro',
-    'Nano',
-    'Pico',
-  ],
-  'Data.Tree': ['PostOrder'],
 };
