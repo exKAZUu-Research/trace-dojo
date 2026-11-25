@@ -898,6 +898,9 @@ export abstract class ExpressionCompiler extends SemaBase {
   private unwrapOptional(expression: ExpressionOf<'unwrap'>, location = false): TExpr {
     const operand = location ? this.compileLocation(expression.operand) : this.compile(expression.operand);
     const type = operand.type;
+    // `.?` checks a C pointer for null and keeps its type, though Zig refuses it where the result is a place.
+    if (type.kind === 'pointer' && type.size === 'c' && !location)
+      return this.derived(operand, type, (value) => (value === NULL ? nullUnwrapPanic() : value));
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
     const child = type.child;
