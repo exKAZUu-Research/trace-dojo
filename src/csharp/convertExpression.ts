@@ -42,7 +42,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
   ref_expression: '`ref` 式',
-  await_expression: '`await`',
   stackalloc_expression: '`stackalloc`',
   implicit_stackalloc_expression: '`stackalloc`',
 };
@@ -468,6 +467,9 @@ export class ExpressionConverter {
       case 'anonymous_method_expression': {
         return this.convertAnonymousMethod(node);
       }
+      case 'await_expression': {
+        return { kind: 'await', operand: this.convertExpression(namedChildren(node)[0]), ...position };
+      }
       case 'typeof_expression': {
         return { kind: 'typeof', type: this.convertType(requiredField(node, 'type')), ...position };
       }
@@ -719,7 +721,6 @@ export class ExpressionConverter {
         .filter((child) => child.type === 'modifier')
         .map((child) => child.text)
     );
-    if (modifiers.has('async')) unsupported(node, '`async` の匿名メソッド');
     const parametersNode = field(node, 'parameters');
     const body = namedChildren(node).find((child) => child.type === 'block') as Node;
     return {
@@ -729,6 +730,7 @@ export class ExpressionConverter {
       isStatic: modifiers.has('static'),
       returnType: undefined,
       isAnonymousMethod: true,
+      ...(modifiers.has('async') ? { isAsync: true as const } : {}),
       ...(parametersNode ? {} : { omitsParameters: true as const }),
       ...positionOf(node),
     };
@@ -755,7 +757,6 @@ export class ExpressionConverter {
         .filter((child) => child.type === 'modifier')
         .map((child) => child.text)
     );
-    if (modifiers.has('async')) unsupported(node, '`async` のラムダ式');
     const parameters: LambdaParameter[] = [];
     for (const parameterNode of fieldChildren(node, 'parameters')) {
       if (parameterNode.type === 'implicit_parameter') {
@@ -788,6 +789,7 @@ export class ExpressionConverter {
       body: bodyNode.type === 'block' ? this.convertBlockNode(bodyNode) : this.convertExpression(bodyNode),
       isStatic: modifiers.has('static'),
       returnType: returnTypeNode ? this.convertType(returnTypeNode) : undefined,
+      ...(modifiers.has('async') ? { isAsync: true as const } : {}),
       ...positionOf(node),
     };
   }

@@ -6,7 +6,9 @@ import type { BindContext } from './convertBinder';
 import { MemberBinder, type NonValue } from './memberBinder';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope } from './scopes';
+import { markSuspends } from './suspension';
 import {
+  type AsyncShape,
   displayType,
   ERROR_TYPE,
   LocalSymbol,
@@ -204,6 +206,41 @@ export abstract class LambdaBinder extends MemberBinder {
   /** Binds the attributes collected since the last time, which the compiler provides. */
   protected abstract bindPendingAttributes(): void;
 
+  /** What an async function's return type wraps (C# spec §15.14.1), or undefined for a type no async function returns. */
+  asyncShapeOf(returnType: Type): AsyncShape | undefined {
+    if (returnType.kind === 'void') return { kind: 'void', resultType: VOID_TYPE };
+    if (returnType.kind !== 'named') return undefined;
+    switch (returnType.symbol.fullName) {
+      case 'System.Threading.Tasks.Task': {
+        return { kind: 'task', resultType: VOID_TYPE };
+      }
+      case 'System.Threading.Tasks.Task`1': {
+        return { kind: 'task', resultType: returnType.args[0] };
+      }
+      case 'System.Threading.Tasks.ValueTask': {
+        return { kind: 'valueTask', resultType: VOID_TYPE };
+      }
+      case 'System.Threading.Tasks.ValueTask`1': {
+        return { kind: 'valueTask', resultType: returnType.args[0] };
+      }
+      case 'System.Collections.Generic.IAsyncEnumerable`1': {
+        return { kind: 'asyncEnumerable', resultType: returnType.args[0] };
+      }
+      case 'System.Collections.Generic.IAsyncEnumerator`1': {
+        return { kind: 'asyncEnumerator', resultType: returnType.args[0] };
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  /** The task type an async lambda returns for the type its returns give, as its natural type wraps it. */
+  protected asyncReturnOf(inferred: Type): Type {
+    const task = this.library.typeNamed('System.Threading.Tasks.Task', inferred.kind === 'void' ? 0 : 1);
+    return inferred.kind === 'void' ? namedType(task) : namedType(task, [inferred]);
+  }
+
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
   protected bindLambda(
     node: LambdaExpression,
@@ -219,7 +256,24 @@ export abstract class LambdaBinder extends MemberBinder {
     const cached = cache.get(key);
     if (cached && !report) return { result: cached.result, returnType: cached.returnType };
     const savedDiagnostics = this.diagnostics.length;
-    const context = this.lambdaContext(node, outer, parameterTypes, returnType);
+    // An async lambda's body returns what its delegate's task type wraps, and one without a delegate type infers it.
+    const shape = node.isAsync && returnType ? this.asyncShapeOf(returnType) : undefined;
+    if (node.isAsync && returnType && !shape && returnType.kind !== 'error') {
+      if (report && delegateType)
+        this.error(
+          node,
+          'CS4010',
+          `非同期の ラムダ式 をデリゲート型 '${displayType(delegateType)}' に変換できません。非同期の ラムダ式 は void、Task、または Task<T> を返しますが、いずれも '${displayType(delegateType)}' に変換することができません。`
+        );
+      return { result: undefined, returnType: undefined };
+    }
+    const bodyReturnType = shape ? shape.resultType : returnType;
+    const context = this.lambdaContext(node, outer, parameterTypes, bodyReturnType);
+    if (node.isAsync) {
+      context.fn.method.isAsync = true;
+      context.fn.method.async = shape ?? { kind: 'task', resultType: VOID_TYPE };
+      if (returnType) context.fn.method.returnType = returnType;
+    }
     // A lambda binds once for each delegate type it may convert to, but its attributes once.
     if (node.attributes && !this.lambdasWithAttributes.has(node)) {
       this.lambdasWithAttributes.add(node);
@@ -230,7 +284,17 @@ export abstract class LambdaBinder extends MemberBinder {
       this.bindPendingAttributes();
     }
     const method = context.fn.method;
-    const { body, inferred } = this.bindLambdaBodyGuarded(node, context, returnType, report);
+    const bound = this.bindLambdaBodyGuarded(node, context, bodyReturnType, report);
+    const { body } = bound;
+    let { inferred } = bound;
+    if (node.isAsync) {
+      markSuspends(body);
+      if (!returnType && inferred) {
+        inferred = this.asyncReturnOf(inferred);
+        method.returnType = inferred;
+        method.async = { kind: 'task', resultType: bound.inferred as Type };
+      } else if (returnType) inferred = returnType;
+    }
     method.body = body;
     const failed = this.diagnostics.length > savedDiagnostics;
     const lambda: LambdaInfo = { method, captures: [...context.fn.captures], isStatic: node.isStatic };
@@ -415,6 +479,7 @@ export abstract class LambdaBinder extends MemberBinder {
       case 'new':
       case 'deconstructAssign':
       case 'eventAccessor':
+      case 'await':
       case 'throw': {
         return true;
       }

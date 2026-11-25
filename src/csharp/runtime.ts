@@ -3,9 +3,11 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Library } from './binderBase';
+import type { BoundExpression } from './bound';
 import type { Evaluator } from './evaluator';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
+import { TaskScheduler } from './tasks';
 import {
   baseTypeOf,
   type FieldSymbol,
@@ -83,6 +85,13 @@ export class Frame {
   readonly temporaries: Value[] = [];
   /** The current values of compound assignments' targets and of initialized objects, innermost last. */
   readonly operands: Value[] = [];
+  /**
+   * The values of an expression's operands that an async function's `await` evaluation has already evaluated, which
+   * evaluating the expression then takes in place of evaluating them again.
+   */
+  memo: Map<BoundExpression, Value> | undefined;
+  /** Whether the function is suspended at an `await` or a `yield return`, which leaves its frame for now. */
+  isSuspended = false;
 
   constructor(
     readonly runtime: Runtime,
@@ -111,6 +120,7 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
+  readonly scheduler = new TaskScheduler(() => this.spend());
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   /** The static fields of each constructed type, keyed by the type's identity. */

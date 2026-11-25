@@ -22,6 +22,8 @@ export type OperandKind =
 interface Base {
   type: Type;
   row: number;
+  /** Whether an `await` inside the expression may suspend it, which then runs as a generator. */
+  suspends?: true;
 }
 
 export type BoundArgument =
@@ -189,6 +191,17 @@ export type BoundExpression =
       parts: (string | { value: BoundExpression; alignment: number | undefined; format: string | undefined })[];
     } & Base)
   | ({ kind: 'tuple'; elements: BoundExpression[] } & Base)
+  /**
+   * `await operand`: the operand's awaiter (`getAwaiter`, reading the operand as a `compoundOperand`) is awaited until
+   * `isCompleted` holds, then `getResult` (reading the awaiter as a `compoundOperand`) gives the value.
+   */
+  | ({
+      kind: 'await';
+      operand: BoundExpression;
+      getAwaiter: BoundExpression;
+      isCompleted: BoundExpression;
+      getResult: BoundExpression;
+    } & Base)
   /** `typeof(T)`, the one System.Type object of a type. */
   | ({ kind: 'typeOf'; target: Type } & Base)
   | ({

@@ -1,4 +1,5 @@
 import { checkElementStore } from './arrayStore';
+import { AsyncExecutor } from './asyncExecutor';
 import type {
   BoundArguments,
   BoundBlock,
@@ -10,7 +11,7 @@ import type {
 import type { CompiledProgram } from './compiler';
 import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
 import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
-import { IteratorExecutor, type IteratorState } from './iterators';
+import type { IteratorState } from './iterators';
 import { formatValue } from './library/formatting';
 import { typeObjectOf } from './library/nativesCore';
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
@@ -110,7 +111,7 @@ type AssignmentExpression = Extract<
 >;
 
 /** Runs the bound tree of a compiled program. */
-export class Evaluator extends IteratorExecutor {
+export class Evaluator extends AsyncExecutor {
   constructor(runtime: Runtime, program: CompiledProgram) {
     super(runtime, program);
     runtime.evaluator = this;
@@ -167,6 +168,7 @@ export class Evaluator extends IteratorExecutor {
       return undefined;
     }
     const frame = this.frameFor(method, self, args, typeEnvironment, callRow, captured);
+    if (method.isAsync && !method.iterator) return this.startAsync(method, frame);
     if (method.iterator)
       return this.startIterator(
         method.iterator,
@@ -440,6 +442,12 @@ export class Evaluator extends IteratorExecutor {
 
   // code-gauge-allow functionNcss -- One case label per kind of bound expression, grouped into sub-dispatchers.
   evaluate(expression: BoundExpression, frame: Frame): Value {
+    const { memo } = frame;
+    if (memo?.has(expression)) {
+      const value = memo.get(expression);
+      memo.delete(expression);
+      return value;
+    }
     switch (expression.kind) {
       case 'constant':
       case 'local':
@@ -769,7 +777,7 @@ export class Evaluator extends IteratorExecutor {
     return this.isInstanceOf(value, target) ? value : undefined;
   }
 
-  private evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
+  protected evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
     const value = this.evaluate(expression.value, frame);
     for (const arm of expression.arms) {
       // Each arm is a scope of its own, whose variables leave it whether the arm is taken or not.
@@ -781,7 +789,16 @@ export class Evaluator extends IteratorExecutor {
       );
       if (result) return result.value;
     }
-    throw new PendingException(
+    throw this.unmatched(expression, value, frame);
+  }
+
+  /** The exception of a switch expression that no arm matches. */
+  protected unmatched(
+    expression: Extract<BoundExpression, { kind: 'switch' }>,
+    value: Value,
+    frame: Frame
+  ): PendingException {
+    return new PendingException(
       'System.Runtime.CompilerServices.SwitchExpressionException',
       `Non-exhaustive switch expression failed to match its input.\nUnmatched value was ${this.evaluator().formatUnmatched(value, expression.value.type, frame)}.`
     );

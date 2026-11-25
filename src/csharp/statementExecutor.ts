@@ -66,7 +66,7 @@ interface Catcher {
 /** The evaluator's execution of statements. */
 export abstract class StatementExecutor extends PatternMatcher {
   /** The exceptions that catch clauses are handling, which `throw;` rethrows. */
-  private readonly currentExceptions: CsThrow[] = [];
+  protected readonly currentExceptions: CsThrow[] = [];
 
   /** Runs a statement, recording its step when it completes as the trace's rules say. */
   protected withStep<T>(row: number, step: BoundStatement['step'], run: () => T): T {

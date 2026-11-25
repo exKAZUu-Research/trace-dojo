@@ -29,6 +29,7 @@ import { PatternBinder } from './patternBinder';
 import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope, type PendingSwitch } from './scopes';
+import { markSuspends } from './suspension';
 import {
   displayMethod,
   displayType,
@@ -664,7 +665,7 @@ export abstract class StatementBinder extends PatternBinder {
     if (!body.statements.some(containsYield)) return;
     const { fn } = context;
     const { method } = fn;
-    const iterator = this.iteratorShape(returnType);
+    const iterator = this.iteratorShape(returnType, method.isAsync);
     if (!iterator) {
       if (returnType.kind !== 'error') {
         const name = method.name === '<Main>$' ? '<top-level-statements-entry-point>' : displayMethod(method);
@@ -687,9 +688,16 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** The element type of an iterator's return type, and whether it is an enumerable, if it is one of the four. */
-  private iteratorShape(type: Type): { elementType: Type; isEnumerable: boolean } | undefined {
+  private iteratorShape(type: Type, isAsync: boolean): { elementType: Type; isEnumerable: boolean } | undefined {
     if (type.kind !== 'named') return undefined;
     const name = type.symbol.fullName;
+    if (isAsync) {
+      if (name === 'System.Collections.Generic.IAsyncEnumerable`1')
+        return { elementType: type.args[0], isEnumerable: true };
+      if (name === 'System.Collections.Generic.IAsyncEnumerator`1')
+        return { elementType: type.args[0], isEnumerable: false };
+      return undefined;
+    }
     if (name === 'System.Collections.Generic.IEnumerable`1') return { elementType: type.args[0], isEnumerable: true };
     if (name === 'System.Collections.Generic.IEnumerator`1') return { elementType: type.args[0], isEnumerable: false };
     if (name === 'System.Collections.IEnumerable') return { elementType: this.objectType, isEnumerable: true };
@@ -749,6 +757,15 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   private bindLock(statement: Extract<Statement, { kind: 'lock' }>, context: BindContext): BoundStatement {
+    context.fn.lockDepth++;
+    try {
+      return this.bindLockStatement(statement, context);
+    } finally {
+      context.fn.lockDepth--;
+    }
+  }
+
+  private bindLockStatement(statement: Extract<Statement, { kind: 'lock' }>, context: BindContext): BoundStatement {
     const value = this.bindTypedValue(statement.value, context);
     if (value.type.kind !== 'error' && !isReferenceType(value.type) && value.type.kind !== 'null')
       this.error(
@@ -1369,7 +1386,14 @@ export abstract class StatementBinder extends PatternBinder {
     }
     if (fn.returnType.kind === 'void') {
       const value = this.bindValue(statement.value, context);
-      if (fn.kind === 'lambda')
+      const shape = fn.method.async;
+      if (shape && (shape.kind === 'task' || shape.kind === 'valueTask') && fn.kind !== 'lambda')
+        this.error(
+          statement,
+          'CS1997',
+          `'${describe()}' は '${displayType(fn.method.returnType)}' を返す非同期メソッドであるため、return キーワードの後にオブジェクト式を続けてはなりません`
+        );
+      else if (fn.kind === 'lambda')
         this.error(statement, 'CS8030', 'void に変換されデリゲートを返す匿名関数は、値を返すことができません');
       else
         this.error(
@@ -1461,6 +1485,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(declaration.row, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
     }
     method.isStatic = declaration.modifiers.set.has('static') || context.fn.isStatic;
+    method.isAsync = declaration.modifiers.set.has('async');
     method.row = declaration.row;
     method.declaration = declaration;
     method.typeParameters = declaration.typeParameters.map(
@@ -1558,12 +1583,57 @@ export abstract class StatementBinder extends PatternBinder {
     returnType: Type
   ): BoundBlock | undefined {
     if (!body) return undefined;
+    const valueType = this.beginAsync(context, returnType);
     if (body.kind === 'block') {
       this.beginIterator(body, context, returnType);
       const block = this.bindBlock(body, context, false);
-      if (context.fn.method.iterator) markSuspending(block);
+      if (context.fn.method.iterator || context.fn.method.isAsync) markSuspends(block);
       return block;
     }
+    if (context.fn.method.isAsync) {
+      const block = this.bindExpressionBody(body, context, valueType);
+      if (block) markSuspends(block);
+      return block;
+    }
+    return this.bindExpressionBody(body, context, returnType);
+  }
+
+  /**
+   * Makes an async function's body bind to the type its return type wraps, which its `return` statements give, as
+   * C# spec §15.14 says; reports a return type that no async function has (CS1983) and reference parameters (CS1988).
+   */
+  private beginAsync(context: BindContext, returnType: Type): Type {
+    const { fn } = context;
+    const { method } = fn;
+    if (!method.isAsync) return returnType;
+    const shape = this.asyncShapeOf(returnType);
+    if (!shape) {
+      if (returnType.kind !== 'error')
+        this.error(
+          method.row,
+          'CS1983',
+          '非同期メソッドの戻り値の型は、void、Task、Task<T>、task-like 型、IAsyncEnumerable<T>、IAsyncEnumerator<T> でなければなりません'
+        );
+      method.async = { kind: 'task', resultType: ERROR_TYPE };
+    } else {
+      method.async = shape;
+    }
+    for (const parameter of method.parameters)
+      if (parameter.refKind)
+        this.error(
+          parameter.position ?? method.row,
+          'CS1988',
+          '非同期メソッドには ref、in、out パラメーターを指定できません'
+        );
+    const valueType =
+      method.async.kind === 'asyncEnumerable' || method.async.kind === 'asyncEnumerator'
+        ? VOID_TYPE
+        : method.async.resultType;
+    fn.returnType = valueType;
+    return valueType;
+  }
+
+  private bindExpressionBody(body: Expression, context: BindContext, returnType: Type): BoundBlock {
     const saved = this.allowsThrowExpression;
     this.allowsThrowExpression = true;
     try {
@@ -1619,7 +1689,7 @@ function blockOf(statement: BoundStatement, row: number): BoundBlock {
 /** Whether an expression's syntax may stand as a statement: a call, `new`, an increment, or an assignment. */
 function isStatementSyntax(node: Expression): boolean {
   if (node.kind === 'conditionalAccess') return isStatementSyntax(node.access);
-  return ['invocation', 'new', 'implicitNew', 'increment', 'assign', 'throw'].includes(node.kind);
+  return ['invocation', 'new', 'implicitNew', 'increment', 'assign', 'throw', 'await'].includes(node.kind);
 }
 
 /**
@@ -1719,55 +1789,4 @@ function containsYield(statement: Statement): boolean {
       return false;
     }
   }
-}
-
-/** Marks the statements of an iterator's body that a `yield return` may suspend, which run as generators. */
-function markSuspending(statement: BoundStatement): boolean {
-  let suspends = false;
-  const visit = (inner: BoundStatement | undefined): void => {
-    if (inner && markSuspending(inner)) suspends = true;
-  };
-  switch (statement.kind) {
-    case 'yieldReturn': {
-      suspends = true;
-      break;
-    }
-    case 'block': {
-      for (const inner of statement.statements) visit(inner);
-      break;
-    }
-    case 'if': {
-      visit(statement.consequence);
-      visit(statement.alternative);
-      break;
-    }
-    case 'while':
-    case 'do':
-    case 'for':
-    case 'foreach':
-    case 'lock':
-    case 'using': {
-      visit(statement.body);
-      break;
-    }
-    case 'labeled': {
-      visit(statement.statement);
-      break;
-    }
-    case 'switch': {
-      for (const section of statement.sections) for (const inner of section.statements) visit(inner);
-      break;
-    }
-    case 'try': {
-      visit(statement.body);
-      for (const clause of statement.catches) visit(clause.body);
-      visit(statement.finally);
-      break;
-    }
-    default: {
-      break;
-    }
-  }
-  if (suspends) statement.suspends = true;
-  return suspends;
 }

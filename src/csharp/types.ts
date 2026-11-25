@@ -136,6 +136,15 @@ export type MethodKind =
   | 'destructor'
   | 'delegateInvoke';
 
+/**
+ * What an async function's return type makes of its body: a task (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`) that
+ * its `return` completes with `resultType`, nothing (`async void`), or an async stream of `resultType` values.
+ */
+export interface AsyncShape {
+  kind: 'void' | 'task' | 'valueTask' | 'asyncEnumerable' | 'asyncEnumerator';
+  resultType: Type;
+}
+
 export class MethodSymbol {
   typeParameters: TypeParameterSymbol[] = [];
   parameters: ParameterSymbol[] = [];
@@ -183,6 +192,9 @@ export class MethodSymbol {
   callsAreRemoved = false;
   /** The symbols of the method's `[Conditional]` attributes. */
   conditionalSymbols: string[] | undefined;
+  /** Whether the method is `async`, and for one, what its return type wraps: the type its `return` statements give. */
+  isAsync = false;
+  async: AsyncShape | undefined;
   /** For an iterator (a body with `yield`), the type of its values and whether it returns an enumerable. */
   iterator: { elementType: Type; isEnumerable: boolean } | undefined;
   /** Whether `[ModuleInitializer]` runs the method before the entry point. */

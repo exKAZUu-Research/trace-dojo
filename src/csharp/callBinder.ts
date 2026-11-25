@@ -666,11 +666,13 @@ export abstract class CallBinder extends OperatorBinder {
       !aInvoke.parameterTypes.every((type, index) => sameType(type, bInvoke.parameterTypes[index]))
     )
       return undefined;
-    const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
-    if (!inferred) return undefined;
+    // A delegate with a return type is better than a void one when the lambda converts to both (C# spec
+    // §12.6.4.5), as `() => throw e` for `Func<Task>` over `Action`.
     const aReturns = aInvoke.returnType.kind !== 'void';
     const bReturns = bInvoke.returnType.kind !== 'void';
-    if (inferred.kind !== 'void' && aReturns !== bReturns) return aReturns ? 1 : -1;
+    if (aReturns !== bReturns) return aReturns ? 1 : -1;
+    const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
+    if (!inferred) return undefined;
     if (sameType(inferred, aInvoke.returnType) && !sameType(inferred, bInvoke.returnType)) return 1;
     if (sameType(inferred, bInvoke.returnType) && !sameType(inferred, aInvoke.returnType)) return -1;
     return this.betterTarget(aInvoke.returnType, bInvoke.returnType);

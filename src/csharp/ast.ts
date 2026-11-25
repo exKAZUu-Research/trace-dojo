@@ -47,7 +47,8 @@ export type Modifier =
   | 'partial'
   | 'required'
   | 'file'
-  | 'volatile';
+  | 'volatile'
+  | 'async';
 
 export interface Modifiers {
   set: ReadonlySet<Modifier>;
@@ -198,6 +199,7 @@ export type Expression =
       omitsParameters?: true;
       /** Whether `delegate (...) { }` wrote it rather than `=>`, which some messages name differently. */
       isAnonymousMethod?: true;
+      isAsync?: true;
     } & Position)
   | ({ kind: 'default'; type: TypeNode | undefined } & Position)
   | ({ kind: 'declaration'; type: TypeNode; designation: Designation } & Position)
@@ -208,6 +210,7 @@ export type Expression =
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
   | ({ kind: 'typeof'; type: TypeNode } & Position)
   | ({ kind: 'sizeof'; type: TypeNode } & Position)
+  | ({ kind: 'await'; operand: Expression } & Position)
   /** `^n`, an index from the end. */
   | ({ kind: 'fromEnd'; operand: Expression } & Position)
   /** `a..b`, a range whose omitted ends are the start and the end. */
@@ -306,7 +309,15 @@ export type Statement =
       updates: Expression[];
       body: Statement;
     } & Position)
-  | ({ kind: 'foreach'; type: TypeNode; variable: Designation; collection: Expression; body: Statement } & Position)
+  | ({
+      kind: 'foreach';
+      type: TypeNode;
+      variable: Designation;
+      collection: Expression;
+      body: Statement;
+      /** `await foreach`, over an async stream. */
+      isAwait?: true;
+    } & Position)
   | ({ kind: 'switch'; value: Expression; sections: SwitchSection[] } & Position)
   | ({ kind: 'break' } & Position)
   | ({ kind: 'continue' } & Position)

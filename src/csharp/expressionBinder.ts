@@ -122,6 +122,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
           this.bindElementAccess(target, node.args, node, context)
         );
       }
+      case 'await': {
+        return this.bindAwait(node, context);
+      }
       case 'typeof': {
         return {
           kind: 'typeOf',
@@ -1483,6 +1486,52 @@ export abstract class ExpressionBinder extends LambdaBinder {
         ? this.convert(operation, target.type, node)
         : this.compoundConversion(operation, target.type, resolvedValue, node);
     return { kind: 'compoundAssign', target, operation: converted, type: target.type, row: node.row };
+  }
+
+  /**
+   * Binds `await operand` (C# spec §12.9.8) through the awaitable pattern: the operand's `GetAwaiter()`, the awaiter's
+   * `IsCompleted`, and its `GetResult()`, whose type is the expression's. The library's awaiters, of tasks and
+   * `Task.Yield()`, are the ones whose waits the scheduler knows.
+   */
+  private bindAwait(node: Extract<Expression, { kind: 'await' }>, context: BindContext): BoundExpression {
+    const { fn } = context;
+    const { row } = node;
+    if (!fn.method.isAsync) {
+      if (fn.kind === 'lambda')
+        this.error(
+          node,
+          'CS4034',
+          "await' 演算子は、非同期の ラムダ式 でのみ使用できます。この ラムダ式 を 'async' 修飾子でマークすることを検討してください。"
+        );
+      else if (fn.method.returnType.kind === 'void')
+        this.error(
+          node,
+          'CS4033',
+          "await' 演算子は、非同期メソッド内でのみ使用できます。このメソッドに 'async' 修飾子を指定し、戻り値の型を 'Task' に変更することを検討してください。"
+        );
+      else
+        this.error(
+          node,
+          'CS4032',
+          `await' 演算子は、非同期メソッド内でのみ使用できます。このメソッドを 'async' 修飾子でマークし、戻り値の型を 'Task<${displayType(fn.method.returnType)}>' に変更することを検討してください。`
+        );
+    }
+    if (fn.lockDepth > 0) this.error(node, 'CS1996', 'lock ステートメントの本体で待機することはできません');
+    const operand = this.bindTypedValue(node.operand, context);
+    if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    const call = (receiver: BoundExpression, name: string): BoundExpression => {
+      const group = this.bindInstanceMember(receiver, name, undefined, node, context, true);
+      if (group.kind !== 'methodGroup') return this.toValue(group, node);
+      return this.invokeMethodGroup(group, [], node);
+    };
+    const getAwaiter = call({ kind: 'compoundOperand', type: operand.type, row }, 'GetAwaiter');
+    if (getAwaiter.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    const awaiter: BoundExpression = { kind: 'compoundOperand', type: getAwaiter.type, row };
+    if (getAwaiter.type.kind !== 'named' || !getAwaiter.type.symbol.isLibrary)
+      this.unsupported(node, '独自の awaiter（`GetAwaiter`）');
+    const isCompleted = this.toValue(this.bindInstanceMember(awaiter, 'IsCompleted', undefined, node, context), node);
+    const getResult = call(awaiter, 'GetResult');
+    return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: getResult.type, row };
   }
 
   /** The type of `typeof`, where an unbound generic type (`List<>`) stands for its definition. */

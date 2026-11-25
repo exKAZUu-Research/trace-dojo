@@ -477,6 +477,9 @@ export class FlowAnalyzer {
       case 'switch': {
         return this.operatorExpression(expression, state);
       }
+      case 'await': {
+        return this.expression(expression.operand, state);
+      }
       case 'implicitIndex': {
         return this.expression(expression.access, this.expressions(expression.setup, state));
       }
@@ -804,7 +807,9 @@ export class FlowAnalyzer {
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
     const start = state === 'unreachable' ? state : new Set([...state, ...parameters]);
     const end = this.statement(method.body, start);
-    if (end !== 'unreachable' && method.returnType.kind !== 'void' && method.returnType.kind !== 'error') {
+    // An async lambda returns what its task type wraps.
+    const returnType = method.async ? method.async.resultType : method.returnType;
+    if (end !== 'unreachable' && returnType.kind !== 'void' && returnType.kind !== 'error') {
       this.diagnostics.lambdaNotAllPathsReturn(delegateType, method.row);
     }
     this.jumps = savedJumps;

@@ -1,7 +1,7 @@
-import type { BoundBlock, BoundStatement, BoundSwitchSection, LabelSymbol } from './bound';
+import type { BoundBlock, BoundCatch, BoundExpression, BoundStatement, BoundSwitchSection, LabelSymbol } from './bound';
 import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
-import { type Frame, ProgramExit } from './runtime';
+import { type CsThrow, type Frame, ProgramExit } from './runtime';
 import {
   BREAK,
   type Completion,
@@ -11,16 +11,18 @@ import {
   NEXT,
   StatementExecutor,
 } from './statementExecutor';
+import type { TaskState } from './tasks';
 import type { LocalSymbol, MethodSymbol, Type } from './types';
-import { Cell, UNASSIGNED, type Value } from './values';
+import { Cell, copyValue, UNASSIGNED, type Value } from './values';
 
-/** What a suspended iterator body yields to its driver: the value of a `yield return`. */
-export interface Yielded {
-  value: Value;
-}
+/**
+ * What a suspended body yields to its driver: the value of a `yield return`, or the task an `await` waits for, or
+ * `Task.Yield()`'s request to run the rest later.
+ */
+export type Suspension = { value: Value } | { awaiting: TaskState | 'yield' };
 
-/** The execution of a statement that may suspend at a `yield return`, as a generator of the values it yields. */
-export type Steps<T> = Generator<Yielded, T, undefined>;
+/** The execution of code that may suspend at a `yield return` or an `await`, as a generator of its suspensions. */
+export type Steps<T> = Generator<Suspension, T, undefined>;
 
 /** The run of one iterator: its body's frame and generator, and where `MoveNext` has taken it. */
 export interface IteratorState {
@@ -60,7 +62,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
         state.status = 'after';
         return false;
       }
-      state.current = result.value.value;
+      state.current = (result.value as { value: Value }).value;
       state.status = 'suspended';
       return true;
     } catch (error) {
@@ -87,25 +89,57 @@ export abstract class IteratorExecutor extends StatementExecutor {
     }
   }
 
+  /** Evaluates an expression of a suspending statement, which an `await` inside may suspend in async code. */
+  // oxlint-disable-next-line require-yield -- An iterator's expressions never suspend; the async executor overrides this.
+  protected *valueSteps(expression: BoundExpression, frame: Frame): Steps<Value> {
+    return this.evaluate(expression, frame);
+  }
+
+  // code-gauge-allow functionNcss -- One case per kind of statement that may suspend.
   *executeSteps(statement: BoundStatement, frame: Frame): Steps<Completion> {
     if (!statement.suspends) return this.execute(statement, frame);
     this.runtime.spend();
     switch (statement.kind) {
       case 'yieldReturn': {
-        const value = this.withStep(statement.row, statement.step, () => this.evaluate(statement.value, frame));
+        const value = yield* this.stepSteps(statement.row, statement.step, this.valueSteps(statement.value, frame));
         yield { value };
         return undefined;
       }
+      case 'expression': {
+        yield* this.stepSteps(statement.row, statement.step, this.valueSteps(statement.expression, frame));
+        return undefined;
+      }
+      case 'localDeclaration': {
+        const { local, value } = statement;
+        yield* this.stepSteps(
+          statement.row,
+          statement.step,
+          this.declarationSteps(local, value as BoundExpression, frame)
+        );
+        return undefined;
+      }
+      case 'return': {
+        return { value: statement.value ? copyValue(yield* this.valueSteps(statement.value, frame)) : undefined };
+      }
+      case 'throw': {
+        throw this.throwValue(yield* this.valueSteps(statement.value as BoundExpression, frame));
+      }
       case 'block': {
+        if ((statement as { isDeclarationGroup?: boolean }).isDeclarationGroup)
+          return yield* this.stepSteps(
+            statement.row,
+            statement.step,
+            this.runStatementSteps(statement.statements, frame, 0)
+          );
         return yield* this.executeBlockSteps(statement, frame);
       }
       case 'if': {
-        if (this.evaluate(statement.condition, frame) as boolean)
+        if ((yield* this.valueSteps(statement.condition, frame)) as boolean)
           return yield* this.executeSteps(statement.consequence, frame);
         return statement.alternative ? yield* this.executeSteps(statement.alternative, frame) : undefined;
       }
       case 'while': {
-        while (this.evaluate(statement.condition, frame) as boolean) {
+        while ((yield* this.valueSteps(statement.condition, frame)) as boolean) {
           const outcome = loopOutcome(yield* this.executeSteps(statement.body, frame));
           if (outcome !== NEXT) return outcome;
         }
@@ -115,7 +149,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
         do {
           const outcome = loopOutcome(yield* this.executeSteps(statement.body, frame));
           if (outcome !== NEXT) return outcome;
-        } while (this.evaluate(statement.condition, frame) as boolean);
+        } while ((yield* this.valueSteps(statement.condition, frame)) as boolean);
         return undefined;
       }
       case 'for': {
@@ -134,7 +168,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
         return yield* this.executeSteps(statement.statement, frame);
       }
       case 'lock': {
-        if (this.evaluate(statement.value, frame) === undefined)
+        if ((yield* this.valueSteps(statement.value, frame)) === undefined)
           throw new PendingException('System.ArgumentNullException', 'Value cannot be null.');
         return yield* this.executeSteps(statement.body, frame);
       }
@@ -147,7 +181,22 @@ export abstract class IteratorExecutor extends StatementExecutor {
     }
   }
 
-  private *executeBlockSteps(block: BoundBlock, frame: Frame, isBody = false): Steps<Completion> {
+  /** Runs a statement's suspending work, then records its step as {@link StatementExecutor.withStep} does. */
+  private *stepSteps<T>(row: number, step: BoundStatement['step'], run: Steps<T>): Steps<T> {
+    if (!this.tracing || step === 'none') return yield* run;
+    const { steps } = this.runtime;
+    const mark = steps.statementMark();
+    const result = yield* run;
+    steps.completeStatement(row, step === 'callsOnly', mark);
+    return result;
+  }
+
+  private *declarationSteps(local: LocalSymbol, value: BoundExpression, frame: Frame): Steps<undefined> {
+    this.storeLocal(frame, local, copyValue(yield* this.valueSteps(value, frame)));
+    return undefined;
+  }
+
+  protected *executeBlockSteps(block: BoundBlock, frame: Frame, isBody = false): Steps<Completion> {
     return yield* this.inScopeSteps(
       frame,
       isBody ? [] : block.locals,
@@ -193,7 +242,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
 
   private *forLoopSteps(statement: Extract<BoundStatement, { kind: 'for' }>, frame: Frame): Steps<Completion> {
     this.runForInitializers(statement, frame);
-    while (!statement.condition || (this.evaluate(statement.condition, frame) as boolean)) {
+    while (!statement.condition || ((yield* this.valueSteps(statement.condition, frame)) as boolean)) {
       const outcome = loopOutcome(yield* this.executeSteps(statement.body, frame));
       if (outcome !== NEXT) return outcome;
       this.runForUpdates(statement, frame);
@@ -202,7 +251,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
   }
 
   private *foreachSteps(statement: Extract<BoundStatement, { kind: 'foreach' }>, frame: Frame): Steps<Completion> {
-    const collection = this.evaluate(statement.collection, frame);
+    const collection = yield* this.valueSteps(statement.collection, frame);
     if (collection === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(collection);
     try {
@@ -232,7 +281,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
   }
 
   private *switchSteps(statement: Extract<BoundStatement, { kind: 'switch' }>, frame: Frame): Steps<Completion> {
-    const value = this.evaluate(statement.value, frame);
+    const value = yield* this.valueSteps(statement.value, frame);
     const locals = statement.sections.flatMap((section) => section.locals);
     return yield* this.inScopeSteps(frame, locals, [], this.sectionSteps(statement, value, frame));
   }
@@ -258,23 +307,70 @@ export abstract class IteratorExecutor extends StatementExecutor {
     return undefined;
   }
 
-  /** A try statement around a `yield return`, which C# allows only without catch clauses (CS1626). */
+  /**
+   * A try statement around a suspension. An iterator's has no catch clauses (CS1626); an async function's may, whose
+   * filters run when its body throws, after the finally blocks inside it, as one pass over the handlers.
+   */
   private *trySteps(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Steps<Completion> {
     let completion: Completion;
     let isExiting = false;
     try {
-      completion = yield* this.executeBlockSteps(statement.body, frame);
+      completion = yield* this.tryBodySteps(statement, frame);
     } catch (error) {
       // `Environment.Exit` ends the process without running finally blocks.
       isExiting = error instanceof ProgramExit;
       throw error;
     } finally {
       if (statement.finally && !isExiting) {
-        const finallyCompletion = this.runFinally(statement.finally, frame);
+        const finallyCompletion = yield* this.executeBlockSteps(statement.finally, frame);
         if (finallyCompletion !== undefined) completion = finallyCompletion;
       }
     }
     return completion;
+  }
+
+  private *tryBodySteps(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Steps<Completion> {
+    try {
+      return yield* this.executeBlockSteps(statement.body, frame);
+    } catch (error) {
+      const thrown = statement.catches.length > 0 ? this.asThrow(error) : undefined;
+      if (!thrown) throw error;
+      for (const clause of statement.catches) {
+        if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
+        const handled = yield* this.catchSteps(clause, thrown, frame);
+        if (handled !== 'declined') return handled;
+      }
+      throw thrown;
+    }
+  }
+
+  private *catchSteps(clause: BoundCatch, thrown: CsThrow, frame: Frame): Steps<Completion | 'declined'> {
+    for (const local of clause.locals) frame.slots[local.slot] = local.isCaptured ? new Cell(UNASSIGNED) : UNASSIGNED;
+    try {
+      if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
+      if (clause.filter && !((yield* this.valueSteps(clause.filter, frame)) as boolean)) return 'declined';
+      return yield* this.withExceptionSteps(thrown, this.executeBlockSteps(clause.body, frame));
+    } finally {
+      for (const local of clause.locals) frame.slots[local.slot] = UNASSIGNED;
+    }
+  }
+
+  /**
+   * Runs a catch clause's body, with its exception the one `throw;` rethrows while the body runs, which other code
+   * running while it is suspended does not see.
+   */
+  private *withExceptionSteps<T>(thrown: CsThrow, run: Steps<T>): Steps<T> {
+    for (;;) {
+      this.currentExceptions.push(thrown);
+      let result: IteratorResult<Suspension, T>;
+      try {
+        result = run.next();
+      } finally {
+        this.currentExceptions.pop();
+      }
+      if (result.done) return result.value;
+      yield result.value;
+    }
   }
 
   private *usingSteps(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Steps<Completion> {

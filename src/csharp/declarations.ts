@@ -1435,6 +1435,7 @@ export class DeclarationBinder extends BinderBase {
     method.isSealed = set.has('sealed');
     method.isNew = set.has('new');
     method.isExtern = set.has('extern');
+    method.isAsync = set.has('async');
     method.access = accessibilityOf(modifiers, symbol.kind === 'interface' ? 'public' : 'private');
     method.row = position.row;
     method.typeParameters = typeParameters.map(

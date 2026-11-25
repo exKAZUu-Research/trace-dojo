@@ -18,6 +18,7 @@ import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
+import { TASKS_SOURCE } from './library/tasksSource';
 import { TURTLE_SOURCE } from './library/turtleSource';
 import { NamespaceSymbol } from './namespaces';
 import { parseCSharp } from './parse';
@@ -33,6 +34,7 @@ import {
   type LocalSymbol,
   MethodSymbol,
   type NamedType,
+  namedType,
   type ParameterSymbol,
   substitute,
   substitutionOf,
@@ -93,7 +95,7 @@ function buildLibrary(): Library {
   };
   const compiler = new Compiler(library, {});
   // One unit, since the library's namespaces refer to each other's types.
-  const unit = parseCSharp([SYSTEM_SOURCE, COLLECTIONS_SOURCE, TURTLE_SOURCE].join('\n'), true);
+  const unit = parseCSharp([SYSTEM_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, TURTLE_SOURCE].join('\n'), true);
   const declared = compiler.declareUnit(unit, root, true);
   compiler.bindLibraryMembers(declared);
   if (compiler.diagnostics.length > 0)
@@ -241,6 +243,12 @@ export class Compiler extends AttributeBinder {
     entry.isStatic = true;
     entry.access = 'private';
     entry.returnType = returnsValue ? this.intType : VOID_TYPE;
+    // Top-level statements with `await` make an async entry point, returning Task or Task<int>.
+    if (unit.statements.some(containsAwait)) {
+      entry.isAsync = true;
+      const task = this.library.typeNamed('System.Threading.Tasks.Task', returnsValue ? 1 : 0);
+      entry.returnType = returnsValue ? namedType(task, [this.intType]) : namedType(task);
+    }
     entry.parameters = [{ name: 'args', type: arrayType(this.stringType), refKind: undefined, isParams: false }];
     entry.row = unit.statements[0].row;
     type.methods.push(entry);
@@ -710,8 +718,10 @@ export class Compiler extends AttributeBinder {
         ),
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
-    // An iterator ends by falling off its body, which returns no value.
-    const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error' && !method.iterator;
+    // An iterator ends by falling off its body, which returns no value, and an async function returns what its task
+    // type wraps.
+    const returnType = method.async ? method.async.resultType : method.returnType;
+    const returnsValue = returnType.kind !== 'void' && returnType.kind !== 'error' && !method.iterator;
     const assignedAtExit = analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
     if (method.kind === 'localFunction') {
       method.assignedAtExit = assignedAtExit;
@@ -855,6 +865,16 @@ export class Compiler extends AttributeBinder {
 }
 
 /** Whether top-level statements return a value, which makes the entry point return `int`. */
+/** Whether syntax holds an `await` of its own function, outside the lambdas and local functions in it. */
+function containsAwait(node: unknown): boolean {
+  if (typeof node !== 'object' || node === null) return false;
+  if (Array.isArray(node)) return node.some(containsAwait);
+  const record = node as { kind?: string; isAwait?: boolean; using?: string };
+  if (record.kind === 'lambda' || record.kind === 'localFunction') return false;
+  if (record.kind === 'await' || record.isAwait === true || record.using === 'await using') return true;
+  return Object.values(record).some(containsAwait);
+}
+
 function containsValueReturn(statements: Statement[]): boolean {
   const visit = (statement: Statement): boolean => {
     switch (statement.kind) {

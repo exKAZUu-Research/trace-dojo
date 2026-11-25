@@ -7,8 +7,9 @@ import { Evaluator } from './evaluator';
 import { runtimeTypeName } from './objects';
 import { parseCSharp } from './parse';
 import { type CsThrow, Frame, ProgramExit, Runtime } from './runtime';
+import { DeadlockError, type TaskState, UnhandledAsyncException } from './tasks';
 import { arrayType, namedType, type TypeSymbol } from './types';
-import { CsArray, meterStructs, type Value } from './values';
+import { CsArray, CsObject, meterStructs, type Value } from './values';
 
 export function executeCSharpProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -38,7 +39,7 @@ export function runProgram(evaluator: Evaluator, onMainExit?: (frame: Frame) => 
   const { runtime, program } = evaluator;
   let finalTurtles: ProgramRun['finalTurtles'] = [];
   runtime.onExit = (frame) => {
-    if (frame.method !== program.entry || runtime.frames.length > 0) return;
+    if (frame.method !== program.entry || runtime.frames.length > 0 || frame.isSuspended) return;
     onMainExit?.(frame);
     runtime.frames.push(frame);
     try {
@@ -71,10 +72,18 @@ function runEntry(evaluator: Evaluator): string | undefined {
         if (method.isModuleInitializer) evaluator.invoke(root, method, undefined, [], undefined, new Map());
     // .NET initializes a type with a static constructor before any of its members runs, so before Main is called.
     runtime.ensureInitialized(entry.owner.declaredType);
-    evaluator.invoke(root, entry, undefined, args, undefined, new Map());
+    const result = evaluator.invoke(root, entry, undefined, args, undefined, new Map());
+    // An async entry point's task is waited for, as the generated `Main` does with `GetAwaiter().GetResult()`.
+    if (entry.isAsync && result instanceof CsObject) {
+      const state = result.native as TaskState;
+      runtime.scheduler.runUntil(() => state.isDone);
+      if (state.status === 'faulted') throw state.exceptions[0];
+    }
     return undefined;
   } catch (error) {
     if (error instanceof ProgramExit) return undefined;
+    if (error instanceof DeadlockError) return error.message;
+    if (error instanceof UnhandledAsyncException) return describeUncaught(evaluator, error.thrown);
     if (evaluator.isStackOverflow(error)) {
       runtime.io.stderr.write('Stack overflow.\n');
       return 'Stack overflow.';

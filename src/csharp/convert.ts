@@ -66,10 +66,10 @@ const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
   'required',
   'file',
   'volatile',
+  'async',
 ]);
 
 const UNSUPPORTED_MODIFIERS: Record<string, string> = {
-  async: '`async`',
   unsafe: '`unsafe`',
   extern: '`extern`',
   fixed: '`fixed`',
@@ -999,7 +999,6 @@ export class Converter extends ExpressionConverter {
   private convertForeach(node: Node): Statement {
     const typeNode = field(node, 'type');
     const left = requiredField(node, 'left');
-    if (hasToken(node, 'await')) unsupported(node, '`await foreach`');
     let type: TypeNode;
     let variable;
     if (typeNode) {
@@ -1043,6 +1042,7 @@ export class Converter extends ExpressionConverter {
       variable,
       collection: this.convertExpression(requiredField(node, 'right')),
       body: this.convertEmbedded(requiredField(node, 'body')),
+      ...(hasToken(node, 'await') ? { isAwait: true as const } : {}),
       ...positionOf(node),
     };
   }
