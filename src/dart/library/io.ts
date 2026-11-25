@@ -126,6 +126,7 @@ const OSError _notTerminal = OSError("Inappropriate ioctl for device", 25);
 
 abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
   Encoding get encoding;
+  set encoding(Encoding value);
   void add(List<int> data);
   void addError(Object error, [StackTrace? stackTrace]);
   Future addStream(Stream<List<int>> stream);
@@ -142,6 +143,7 @@ class Stdout implements IOSink {
   final bool _isError;
   Stdout._(this._isError);
   Encoding get encoding => utf8;
+  set encoding(Encoding value) => _requireUtf8(value);
   bool get hasTerminal => false;
   bool get supportsAnsiEscapes => false;
   int get terminalColumns => throw const StdoutException("Could not get terminal size", _notTerminal);
@@ -270,8 +272,19 @@ abstract class FileSystemEntity {
   }
   static Future<FileSystemEntityType> type(String path, {bool followLinks = true}) =>
       Future(() => typeSync(path, followLinks: followLinks));
-  static bool identicalSync(String path1, String path2) => _isSameFile(path1, path2);
-  static Future<bool> identical(String path1, String path2) => Future(() => _isSameFile(path1, path2));
+  static bool identicalSync(String path1, String path2) {
+    if (_kindOf(path1) == 2 || _kindOf(path2) == 2) {
+      throw const FileSystemException("Error in FileSystemEntity.identicalSync", null, OSError("No such file or directory", 2));
+    }
+    return _isSameFile(path1, path2);
+  }
+  static Future<bool> identical(String path1, String path2) => Future(() {
+        if (_kindOf(path1) == 2 || _kindOf(path2) == 2) {
+          throw PathNotFoundException(
+              "", const OSError("No such file or directory", 2), "Error in FileSystemEntity.identical(" + path1 + ", " + path2 + ")");
+        }
+        return _isSameFile(path1, path2);
+      });
   static final RegExp _parentRegExp = RegExp(r'[^/]/+[^/]');
   static String parentOf(String path) {
     int rootEnd = -1;
@@ -531,6 +544,7 @@ class _IOSinkImpl extends _StreamSinkImpl<List<int>> implements IOSink {
     if (!_encodingMutable) {
       throw StateError("IOSink encoding is not mutable");
     }
+    _requireUtf8(value);
     _encoding = value;
   }
   void write(Object? obj) {
