@@ -8,7 +8,7 @@ import { constantText } from './constantText';
 import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
 import { langNamespace } from './library/lang';
 import { memorySpace, spendMemory } from './memoryAccounting';
-import { known, runtime, staticResultOf, type TExpr } from './semaBase';
+import { known, runtime, type TExpr } from './semaBase';
 import {
   ANYTYPE,
   BOOL,
@@ -274,13 +274,12 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const parameter = { '@branchHint': 'BranchHint', '@setFloatMode': 'FloatMode', '@prefetch': 'PrefetchOptions' }[
       name as '@branchHint' | '@setFloatMode' | '@prefetch'
     ] as string | undefined;
-    const compiled = args.map((arg, index) => {
-      const lastArgument = index === args.length - 1;
-      if (!parameter || !lastArgument) return this.compile(arg);
-      const type = this.langMember(parameter, expression);
-      return this.coerce(this.compile(arg, type), type, arg);
-    });
-    if (name === '@setRuntimeSafety' && staticResultOf(compiled[0])?.value === false)
+    const setting = args.at(-1) as Expression;
+    for (const arg of args.slice(0, -1)) this.compile(arg);
+    const type = parameter ? this.langMember(parameter, expression) : BOOL;
+    // Zig requires the setting to be known at compile time, as `@setRuntimeSafety(b)` with a runtime `b` is not.
+    const value = this.knownValue(this.coerce(this.compile(setting, type), type, setting), `${name} の引数`);
+    if (name === '@setRuntimeSafety' && value === false)
       this.error(expression, unavailableMessage('@setRuntimeSafety(false)'));
     return known(VOID, undefined, expression);
   }
