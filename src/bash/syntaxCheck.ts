@@ -772,16 +772,22 @@ class ShellGrammarValidator {
     this.withBlock(open, () => {
       this.advance();
       const target = this.peek();
-      if (this.hasOperator(target, '((') && open.value === 'for') this.parseCStyleForHeader(open, target);
-      else this.parseWordListForHeader(target);
-      this.parseLoopBodyGroup();
+      let allowsBraceBody = false;
+      if (this.hasOperator(target, '((') && open.value === 'for') {
+        this.parseCStyleForHeader(open, target);
+        allowsBraceBody = true;
+      } else {
+        const separated = this.parseWordListForHeader(target);
+        allowsBraceBody = open.value === 'for' && separated;
+      }
+      this.parseLoopBodyGroup(allowsBraceBody);
     });
   }
 
-  private parseWordListForHeader(variable: ShellToken): void {
+  private parseWordListForHeader(variable: ShellToken): boolean {
     if (variable.kind !== 'word') this.failUnexpected(variable);
     this.advance();
-    this.consumeNewlines();
+    const hadNewline = this.consumeNewlines();
     const afterName = this.peek();
     if (afterName.kind === 'word' && afterName.value === 'in' && !afterName.quoted) {
       this.advance();
@@ -789,10 +795,11 @@ class ShellGrammarValidator {
       const term = this.peek();
       if (!this.hasOperator(term, ';') && term.kind !== 'newline') this.failUnexpected(term);
     } else if (!this.hasOperator(afterName, ';')) {
-      return;
+      return hadNewline;
     }
     this.advance();
     this.consumeNewlines();
+    return true;
   }
 
   private parseCStyleForHeader(forKeyword: ShellToken, openParens: ShellToken): void {
@@ -814,9 +821,9 @@ class ShellGrammarValidator {
     this.consumeNewlines();
   }
 
-  private parseLoopBodyGroup(): void {
+  private parseLoopBodyGroup(allowsBraceBody: boolean): void {
     const open = this.peek();
-    if (this.hasKeyword(open, '{')) {
+    if (allowsBraceBody && this.hasKeyword(open, '{')) {
       this.parseDelimitedCompound(open, '}');
       return;
     }
@@ -1004,8 +1011,13 @@ class ShellGrammarValidator {
     this.stream.position = index;
   }
 
-  private consumeNewlines(): void {
-    while (this.peek().kind === 'newline') this.advance();
+  private consumeNewlines(): boolean {
+    let consumed = false;
+    while (this.peek().kind === 'newline') {
+      this.advance();
+      consumed = true;
+    }
+    return consumed;
   }
 
   private withBlock(open: ShellToken, body: () => void): void {

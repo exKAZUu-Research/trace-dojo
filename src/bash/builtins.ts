@@ -153,12 +153,13 @@ function parsePrintfOptions(shell: Shell, args: string[]): { target: string | un
 }
 
 function letBuiltin(shell: Shell, args: string[]): number {
-  if (args.length === 0) {
+  const expressions = operands(args);
+  if (expressions.length === 0) {
     shell.reportError('let: expression expected');
     return 1;
   }
   let value: bigint | undefined = 0n;
-  for (const arg of args) {
+  for (const arg of expressions) {
     value = shell.tryEvaluate(arg, 'let');
     if (value === undefined) return 1;
   }
