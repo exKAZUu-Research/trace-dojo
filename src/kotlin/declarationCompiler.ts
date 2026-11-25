@@ -1240,7 +1240,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (!type) return this.error(row, 'lateinit のプロパティには型を書いてください。');
     const actual = resolved(type);
     if (actual.nullable) this.error(row, 'lateinit のプロパティの型には、null かもしれない型を使えません。');
-    if (actual.kind === 'class' && this.core.primitives.has(actual.cls))
+    if (actual.kind === 'class' && (this.core.primitives.has(actual.cls) || actual.cls === this.core.boolean))
       this.error(row, `lateinit のプロパティの型には、${actual.cls.name} を使えません。`);
     if (actual.kind === 'param' && isNullable(actual))
       this.error(row, 'lateinit のプロパティの型には、null かもしれない型引数を使えません。');
