@@ -6363,7 +6363,7 @@ test.each([
   ['a block body', 'fun main() {\n  fun local(x: Int): Int { return x }; println(local(1))\n}', true],
   ['a semicolon at the end of the row', 'fun main() {\n  fun local(x: Int) = x;\n  println(local(1))\n}', true],
   ['top-level functions', 'fun top() = 1; fun main() { println(top()) }', true],
-])('rejects a statement after %s whose = body ends at a semicolon on its row', (_name, source, compiles) => {
+])('compiles a statement after %s on the row of its semicolon only when kotlinc does', (_name, source, compiles) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });
 
