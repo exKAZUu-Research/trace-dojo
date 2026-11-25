@@ -143,7 +143,9 @@ class UsageCounter {
         return add(this.expr(expr.fn), scale(this.expr(expr.arg), linear));
       }
       case 'lambda': {
-        return scale(this.expr(expr.body), false);
+        // A lambda's own arrow does not multiply what its body captures; where the lambda goes does, as `app` and
+        // `let` count.
+        return this.expr(expr.body);
       }
       case 'let': {
         // A variable a `let` binds uses what its right side does as many times as the body uses the variable.
@@ -193,7 +195,11 @@ class UsageCounter {
         return scale(this.expr(expr.expr), false) === 0 && !this.mentions(expr) ? 0 : 'many';
       }
       case 'rsection': {
-        return scale(add(this.expr(expr.op), this.expr(expr.right)), false);
+        // The operand goes to the operator's second parameter.
+        const first = expr.op.type ? functionParts(zonk(expr.op.type)) : undefined;
+        const second = first ? functionParts(first.result) : undefined;
+        const linear = expr.op.k === 'con' || second?.multiplicity !== undefined;
+        return add(this.expr(expr.op), scale(this.expr(expr.right), linear));
       }
       case 'recordUpdate': {
         // The new values go to the constructor's linear fields, as building a record does.

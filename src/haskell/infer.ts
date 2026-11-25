@@ -1025,7 +1025,15 @@ export class Checker {
   }
 
   private inferRightSection(expr: Extract<RExpr, { k: 'rsection' }>): Type {
-    const opType = this.inferExpr(expr.op);
+    const opType = prune(this.inferExpr(expr.op));
+    // An operator's arrows keep their multiplicities, as GHC types `(`op` x)` by `\y -> op y x`.
+    const first = functionParts(opType);
+    const second = first && functionParts(prune(first.result));
+    if (second) {
+      this.checkExpr(expr.right, second.param, argumentContext(expr.op));
+      const { head, args } = splitApp(opType);
+      return tap(head, ...args.slice(0, -1), second.result);
+    }
     const a = this.freshVar();
     const b = this.freshVar();
     const c = this.freshVar();
