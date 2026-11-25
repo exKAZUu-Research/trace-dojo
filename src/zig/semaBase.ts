@@ -57,6 +57,7 @@ import {
   type Namespace,
   NULL_TYPE,
   optionalOf,
+  pointerOf,
   pointerTo,
   type PointerType,
   sameSentinel,
@@ -1732,8 +1733,21 @@ function peerPointers(a: Extract<Type, { kind: 'pointer' }>, b: Extract<Type, { 
       ? pointerTo(arrayOf(left.length, child, sentinel), isConst)
       : sliceOf(child, isConst, sentinel);
   }
-  const child = peerMemoryType(a.child, b.child, isConst);
-  return child ? pointerTo(child, isConst) : undefined;
+  // A C pointer takes in any other pointer; otherwise the sizes must agree.
+  const size = a.size === b.size ? a.size : a.size === 'c' || b.size === 'c' ? 'c' : undefined;
+  const child = size && peerMemoryType(a.child, b.child, isConst);
+  if (!size || !child) return undefined;
+  const alignment =
+    a.alignment === undefined && b.alignment === undefined
+      ? undefined
+      : Math.min(a.alignment ?? alignOf(a.child), b.alignment ?? alignOf(b.child));
+  return pointerOf(size, child, {
+    isConst,
+    isVolatile: a.isVolatile === true || b.isVolatile === true,
+    allowZero: a.allowZero === true || b.allowZero === true,
+    alignment,
+    sentinel,
+  });
 }
 
 function peerMemoryType(a: Type, b: Type, isConst: boolean): Type | undefined {
