@@ -10,6 +10,7 @@ import { ClassDeclarationChecker } from './classDeclarations';
 import { ClassChecker } from './classes';
 import { ConditionChecker } from './conditions';
 import { checkDuplicateDeclarations, checkParameterRedeclarations } from './declarations';
+import { checkDecoratorPlacements } from './decoratorChecks';
 import { Enums } from './enums';
 import { ExpressionChecker } from './expressions';
 import { Flow } from './flow';
@@ -159,6 +160,7 @@ export class Checker {
     for (const name of bigIntPropertyNames(this.root))
       this.error(name, 'bigint リテラルはプロパティ名として使えません。');
     this.classes.checkThisTypePlacements(this.root);
+    checkDecoratorPlacements(this, this.root);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);

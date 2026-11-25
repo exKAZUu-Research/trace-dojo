@@ -67,6 +67,29 @@ export function checkDecorators(c: Checker, classNode: TreeNode, info: ClassInfo
   }
 }
 
+/** What a standard decorator may decorate, besides a member of a class body that runs. */
+const decoratedDeclarations = new Set(['class_declaration', 'class', 'abstract_class_declaration']);
+
+/**
+ * Reports each decorator on something other than a class or a class member that runs, such as a parameter, which tsc
+ * rejects because standard decorators do not apply there.
+ */
+export function checkDecoratorPlacements(c: Checker, root: TreeNode): void {
+  for (const decorator of root.descendantsOfType('decorator'))
+    if (decorator && !isDecoratable(decorator.parent)) c.error(decorator, 'デコレーターはここでは無効です。');
+}
+
+function isDecoratable(node: TreeNode | null): boolean {
+  if (!node) return false;
+  if (decoratedDeclarations.has(node.type)) return true;
+  return (
+    node.parent?.type === 'class_body' &&
+    memberKind(node) !== undefined &&
+    !hasToken(node, 'declare') &&
+    !hasToken(node, 'abstract')
+  );
+}
+
 function decoratorsOf(node: TreeNode): TreeNode[] {
   return named(node).filter((child) => child.type === 'decorator');
 }
