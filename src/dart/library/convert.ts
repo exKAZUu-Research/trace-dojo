@@ -278,6 +278,19 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
   final bool _allowMalformed;
   List<int> _pending = <int>[];
   _Utf8ChunkSink(this._sink, this._allowMalformed);
+  /**
+   * Whether the bytes from start to the end can begin a character, so that they wait for its rest. A second byte the
+   * lead rules out, as only A0 to BF follow E0, is an error the SDK's decoder reports as soon as it reads it, so such
+   * bytes are decoded at once.
+   */
+  static bool _beginsCharacter(List<int> bytes, int start) {
+    if (start + 1 >= bytes.length) return true;
+    final lead = bytes[start];
+    final second = bytes[start + 1];
+    final low = lead == 0xE0 ? 0xA0 : lead == 0xF0 ? 0x90 : 0x80;
+    final high = lead == 0xED ? 0x9F : lead == 0xF4 ? 0x8F : 0xBF;
+    return second >= low && second <= high;
+  }
   void add(List<int> chunk) {
     var bytes = [..._pending, ...chunk];
     var end = bytes.length;
@@ -287,7 +300,7 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
       var lead = bytes[start];
       // Only a byte that can begin a character, C2 to F4, waits for the rest of it.
       var length = lead < 0xC2 || lead > 0xF4 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
-      if (start + length > end) end = start;
+      if (start + length > end && _beginsCharacter(bytes, start)) end = start;
     }
     final carried = _pending.length;
     _pending = bytes.sublist(end);
@@ -305,7 +318,7 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
   }
   void close() {
     if (_pending.isNotEmpty) {
-      // The SDK's decoder reports a character left unfinished at the end of the stream with no position.
+      // What is held is always the start of a character, which the SDK's decoder reports with no position at the end.
       if (!_allowMalformed) throw FormatException("Unfinished UTF-8 octet sequence");
       _sink.add(_utf8Decode(_pending, true));
     }
