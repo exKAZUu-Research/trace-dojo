@@ -1,0 +1,23 @@
+make 1
+move 1
+drop -1
+make 2
+move 1
+drop -1
+make 3
+move 3
+move 1
+move 2
+drop -1
+drop -1
+mvassign 2
+mvassign 3
+drop -1
+move 2
+mvassign 3
+mvassign 2
+drop -1
+end
+drop -1
+drop 2
+drop 3

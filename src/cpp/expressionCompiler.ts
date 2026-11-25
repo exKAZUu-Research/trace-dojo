@@ -5,11 +5,14 @@ import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { arithmeticOperation, convertNumeric, type NumericValue } from './arithmetic';
 import { byteAt } from './bytes';
-import { hasAuto, isAuto } from './compilerBase';
+import { asTemplate, hasAuto, isAuto } from './compilerBase';
+import { requirementsHold } from './concepts';
 import {
   classLocation,
+  conversionFunctions,
   type ConversionSequence,
   convertArithmetic,
+  functionTypeOf,
   implicitConversion,
   Rank,
   scalarValue,
@@ -29,38 +32,62 @@ import {
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
+  zeroLiteral,
 } from './expr';
 import { type FloatingValue, fusedNaN, negateFloat } from './floatSign';
-import { moveValue } from './library/elements';
-import { throwLibrary } from './library/support';
-import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
-import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
+import { orderingOf, UNORDERED } from './library/compare';
+import { lessThan, moveValue } from './library/elements';
+import { cStringStore, throwLibrary } from './library/support';
+import {
+  codeUnits,
+  LITERAL_TYPES,
+  literalBytes,
+  type LiteralPrefix,
+  literalPrefix,
+  numberLiteral,
+  utf8,
+} from './literals';
+import { typeInfoName } from './mangling';
+import { constructArray, initializeAt, invoke, ObjectCompiler, zeroOf } from './objectCompiler';
+import { hasUserType, memberOperators, overloadedOperator, withOverloads } from './operatorOverloads';
+import { expandPacks, PACK_ELEMENT, packElements, packsIn, withPackElement } from './packs';
 import { erasePointee, recoverPointee } from './pointerCasts';
+import type { ClassTemplateInfo } from './programTemplates';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
 import {
+  alignOf,
   type ArithmeticType,
   BOOL,
   CHAR,
   type ClassInfo,
   classType,
+  DOUBLE,
   type FieldInfo,
+  fieldSubobjectOffset,
+  FLOAT,
   type FunctionInfo,
   type GlobalInfo,
   INT,
   isArithmetic,
+  isCharType,
   isConstType,
   isCopyConstructor,
   isInteger,
   isReferenceRelated,
+  isScopedEnum,
+  isSigned,
   isWide,
+  LDOUBLE,
   LONG,
   nonReference,
   NULLPTR,
   pointerTo,
   PTRDIFF_T,
+  referenceTo,
   sameType,
+  type SecondaryBase,
   SIZE_T,
   sizeOf,
   type StaticFieldInfo,
@@ -69,6 +96,7 @@ import {
   unqualified,
   withConst,
 } from './types';
+import { TYPE_QUERIES, TYPE_TRAITS } from './typeTraits';
 import {
   ArrayStore,
   Box,
@@ -77,11 +105,15 @@ import {
   FunctionRef,
   holdValues,
   Liveness,
+  MemberPointer,
   NULL_PTR,
+  outermostObject,
   Ptr,
   Store,
+  UNINIT,
   type Value,
 } from './values';
+import { nextVariadicArgument, startVariadicArguments } from './variadic';
 
 const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
 const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
@@ -91,7 +123,14 @@ type FloatingFactors = [FloatingValue, FloatingValue];
 
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
-  protected isUnevaluated = false;
+  /** Whether `auto` deduces an array from an array, as a structured binding's hidden variable does. */
+  protected deducesArrays = false;
+
+  /**
+   * The expressions the interpreter has compiled, by the text of the `compiled_expression` nodes that stand for them
+   * in the code it writes.
+   */
+  private readonly compiledExpressions = new Map<string, Expr>();
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */
   private readonly literalStores = new Map<string, Box>();
   // A replacement evaluator must explicitly preserve factor evaluation, including any new side effects.
@@ -99,6 +138,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   compileExpression(node: Syntax): Expr {
     switch (node.type) {
+      case 'compiled_expression': {
+        return this.compiledExpressions.get(node.text) as Expr;
+      }
       case 'number_literal': {
         // The grammar reads a sign before a number as part of the literal; C++ reads it as a unary operator.
         const sign = /^[+-]/.exec(node.text)?.[0];
@@ -115,8 +157,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.charLiteral(node);
       }
       case 'string_literal':
+      case 'raw_string_literal':
       case 'concatenated_string': {
         return this.stringLiteral(node);
+      }
+      case 'user_defined_literal': {
+        return this.userDefinedLiteral(node);
       }
       case 'true':
       case 'false': {
@@ -135,15 +181,45 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.identifier(node);
       }
       case 'qualified_identifier': {
-        const expr = this.entityExpr(this.lookupQualified(node), node, true);
+        const concept = this.conceptId(node);
+        if (concept) return concept;
+        const entity = this.lookupQualified(node);
+        let name = fieldOf(node, 'name') as Syntax;
+        while (name.type === 'qualified_identifier') name = fieldOf(name, 'name') as Syntax;
+        const variable = entity.kind === 'template' ? entity.template.program : undefined;
+        if (variable?.kind === 'variable' && (name.type === 'template_function' || name.type === 'template_type')) {
+          const written = this.templateArguments(fieldOf(name, 'arguments') as Syntax);
+          return this.entityExpr(this.instantiateVariableTemplate(variable, written, node.row), node, true);
+        }
+        const expr = this.entityExpr(entity, node, true);
         // `std::min<long long>` names a function template with its template arguments.
-        const name = fieldOf(node, 'name') as Syntax;
         if (name.type !== 'template_function' || !expr.functions) return expr;
         const templateArgs = this.templateArguments(fieldOf(name, 'arguments') as Syntax);
         return { ...expr, functions: { ...expr.functions, templateArgs } };
       }
       case 'template_function': {
         return this.templateFunction(node);
+      }
+      case 'typeid_expression': {
+        return this.typeidExpression(node);
+      }
+      case 'va_arg_expression': {
+        return this.vaArgExpression(node);
+      }
+      case 'requires_expression': {
+        return constantExpr(BOOL, Number(requirementsHold(this as never, node)), node.row);
+      }
+      case PACK_ELEMENT: {
+        return withPackElement(this, node, (pattern) => this.compileExpression(pattern));
+      }
+      case 'fold_expression': {
+        return this.foldExpression(node);
+      }
+      case 'pack_index_expression': {
+        return this.entityExpr(this.packElement(node), fieldOf(node, 'pack') as Syntax, false);
+      }
+      case 'dependent_name': {
+        return this.compileExpression({ ...node.children[0], field: node.field });
       }
       case 'this': {
         return this.thisExpr(node.row);
@@ -203,6 +279,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'compound_literal_expression': {
         return this.bracedCast(node);
       }
+      case 'lambda_expression': {
+        return this.deducingLambdas?.get(node) ?? this.lambdaExpression(node);
+      }
+      case 'extension_expression': {
+        return this.compileExpression(node.children[0]);
+      }
+      case 'alignof_expression': {
+        const operand = fieldOf(node, 'type') ?? node.children[0];
+        const type =
+          operand.type === 'type_descriptor' ? this.typeDescriptor(operand) : this.compileExpression(operand).type;
+        return constantExpr(SIZE_T, BigInt(alignOf(nonReference(type))), node.row);
+      }
+      case 'offsetof_expression': {
+        return this.offsetOf(node);
+      }
+      case 'generic_expression': {
+        return this.genericSelection(node);
+      }
       case 'initializer_list': {
         return this.error(node.row, '{...} は、この場所では値として使えません。');
       }
@@ -218,7 +312,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // Literals ---------------------------------------------------------------------------------------------------------
 
   private charLiteral(node: Syntax): Expr {
-    checkLiteralPrefix(node);
+    const prefix = literalPrefix(node);
+    if (prefix) return this.wideCharLiteral(node, prefix);
     const bytes = literalBytes(node.children);
     if (bytes.length === 1) {
       const code = byteAt(bytes);
@@ -236,12 +331,59 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return constantExpr(INT, value, node.row);
   }
 
+  /** `L'a'`, `u'a'`, `U'a'`, and `u8'a'`: a character of a character type, which must fit one code unit of it. */
+  private wideCharLiteral(node: Syntax, prefix: LiteralPrefix): Expr {
+    const units = codeUnits(literalBytes(node.children), prefix);
+    const { character } = LITERAL_TYPES[prefix];
+    if (units.length !== 1)
+      return this.error(node.row, `文字リテラル ${node.text} は、${character} の1文字に収まりません。`);
+    return constantExpr(LITERAL_TYPES[prefix], units[0], node.row);
+  }
+
+  /** A string literal with a prefix: an array of the code units of its character type, with a null one at the end. */
+  private wideStringLiteral(node: Syntax, parts: readonly Syntax[], prefix: LiteralPrefix): Expr {
+    let bytes = '';
+    for (const part of parts) {
+      const own = literalPrefix(part);
+      if (own && own !== prefix) return this.error(part.row, '接頭辞の違う文字列リテラルはつなげられません。');
+      bytes +=
+        part.type === 'raw_string_literal'
+          ? utf8(part.children.find((child) => child.type === 'raw_string_content')?.text ?? '')
+          : literalBytes(part.children);
+    }
+    const element = LITERAL_TYPES[prefix];
+    const units = [...codeUnits(bytes, prefix), 0];
+    const key = `${prefix}\0${bytes}`;
+    let box = this.literalStores.get(key);
+    if (!box) {
+      const store = new ArrayStore(units, element);
+      store.isLiteral = true;
+      box = new Box(store);
+      this.literalStores.set(key, box);
+    }
+    const location = new Ptr(box, 0);
+    return {
+      type: { kind: 'array', of: withConst(element), length: units.length },
+      isLvalue: true,
+      row: node.row,
+      run: () => location,
+      staticAddress: true,
+    };
+  }
+
   private stringLiteral(node: Syntax): Expr {
     const parts = node.type === 'concatenated_string' ? node.children : [node];
     let bytes = '';
+    // A literal with a prefix (`L"..."`, `u8"..."`), or that concatenates with one, has the prefix's character type.
+    const prefix = parts.map((part) => literalPrefix(part)).find(Boolean);
+    if (prefix) return this.wideStringLiteral(node, parts, prefix);
     for (const part of parts) {
-      if (part.type !== 'string_literal') return this.unsupported(part.row, '生の文字列リテラル（R"(...)"）');
-      checkLiteralPrefix(part);
+      if (part.type === 'raw_string_literal') {
+        // A raw string literal holds its characters as written, with no escape sequences (C++20 [lex.string]).
+        bytes += utf8(part.children.find((child) => child.type === 'raw_string_content')?.text ?? '');
+        continue;
+      }
+      if (part.type !== 'string_literal') return this.error(part.row, `${part.text} は文字列リテラルではありません。`);
       bytes += literalBytes(part.children);
     }
     let box = this.literalStores.get(bytes);
@@ -263,6 +405,84 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       literalBytes: bytes,
       staticAddress: true,
     };
+  }
+
+  /**
+   * A user-defined literal (C++20 [lex.ext]): `10_km` calls `operator""_km`, and the library's `"abc"s` makes a
+   * `std::string`.
+   */
+  private userDefinedLiteral(node: Syntax): Expr {
+    const suffix = (node.children.find((child) => child.type === 'literal_suffix') as Syntax).text;
+    const literal = node.children.find((child) => child.type !== 'literal_suffix') as Syntax;
+    const { row } = node;
+    if (!suffix.startsWith('_')) return this.standardLiteral(suffix, literal, row);
+    const name = `operator""${suffix}`;
+    const entity = this.findName(name);
+    if (entity?.kind !== 'functions') return this.error(row, `リテラル演算子 ${name} は宣言されていません。`);
+    const callee = this.entityExpr(entity, { ...node, text: name }, false);
+    const args = this.literalOperatorArguments(literal, entity.functions);
+    return this.callWith(callee, args, row);
+  }
+
+  /** The arguments a literal operator gets for a literal: its value, or a string literal's pointer and length. */
+  private literalOperatorArguments(literal: Syntax, candidates: FunctionInfo[]): Expr[] {
+    const { row } = literal;
+    if (literal.type === 'number_literal') {
+      const value = this.compileExpression(literal);
+      const takesRaw = candidates.some(
+        (fn) => fn.params.length === 1 && fn.params[0].type.kind === 'pointer' && isCharType(fn.params[0].type.to)
+      );
+      const isInteger = value.type.kind === 'int';
+      const cooked = candidates.some(
+        (fn) =>
+          fn.params.length === 1 && (isInteger ? fn.params[0].type.kind === 'int' : fn.params[0].type.kind === 'float')
+      );
+      // A numeric literal goes to the operator that takes its value, or else to the one that takes its characters.
+      if (!cooked && takesRaw)
+        return [
+          this.stringLiteral({
+            ...literal,
+            type: 'string_literal',
+            children: [{ ...literal, type: 'string_content' }],
+            all: [{ ...literal, type: 'string_content' }],
+          }),
+        ];
+      return [
+        convertArithmetic(
+          this.rvalue(value),
+          isInteger ? { kind: 'int', name: 'ullong' } : { kind: 'float', name: 'ldouble' }
+        ),
+      ];
+    }
+    const value = this.compileExpression(literal);
+    if (literal.type === 'char_literal') return [value];
+    const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+    return [this.rvalue(value), constantExpr(SIZE_T, BigInt(length - 1), row)];
+  }
+
+  /**
+   * The library's literal suffixes: `"abc"s` makes a `std::string` and `"abc"sv` a `std::string_view`; the others need
+   * what the interpreter leaves out.
+   */
+  private standardLiteral(suffix: string, literal: Syntax, row: number): Expr {
+    if (suffix === 's' && literal.type !== 'number_literal') {
+      const value = this.compileExpression(literal);
+      const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+      const { stringClass } = this.library;
+      const pointer = this.rvalue(value);
+      return this.constructObject(stringClass, [pointer, constantExpr(SIZE_T, BigInt(length - 1), row)], row, false);
+    }
+    if (['h', 'min', 's', 'ms', 'us', 'ns', 'y', 'd'].includes(suffix))
+      return this.unsupported(row, '<chrono> の時間のリテラル');
+    if (['i', 'if', 'il'].includes(suffix)) return this.imaginaryLiteral(suffix, literal, row);
+    const view = suffix === 'sv' && literal.type !== 'number_literal' ? this.findStdName('string_view') : undefined;
+    if (view?.kind === 'class') {
+      const value = this.compileExpression(literal);
+      const length = (value.type as Extract<Type, { kind: 'array' }>).length ?? 1;
+      const args = [this.rvalue(value), constantExpr(SIZE_T, BigInt(length - 1), row)];
+      return this.constructObject(view.cls, args, row, false);
+    }
+    return this.error(row, `リテラルの接尾辞 ${suffix} はありません。`);
   }
 
   // Names -----------------------------------------------------------------------------------------------------------
@@ -309,6 +529,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         };
       }
       case 'global': {
+        if (!entity.global.isDefined) this.requireStaticDefinition(entity.global, row);
         return this.staticStorageExpr(entity.global, row, entity.constant);
       }
       case 'field': {
@@ -319,7 +540,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         }
         if (isQualified && !this.context.cls)
           return this.error(row, `メンバ変数 ${name} を使うには、オブジェクトが要ります。`);
-        const object = this.implicitThis(row, name);
+        const object = this.subobject(this.implicitThis(row, name, field.owner), field.owner, row);
         this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name, this.context.cls);
         return this.fieldAccess(object, field, row);
       }
@@ -330,7 +551,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'functions': {
         const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic);
-        const object = members.length > 0 && !this.context.isStaticContext ? this.implicitThis(row, name) : undefined;
+        const object =
+          members.length > 0 && !this.context.isStaticContext
+            ? this.implicitThis(row, name, members[0].owner)
+            : undefined;
         const owner = entity.functions.find((fn) => fn.owner && !fn.native)?.owner;
         const namingClass = owner && this.namingClass(node, owner);
         const functions: FunctionCandidates = { name, candidates: entity.functions, object, isQualified, namingClass };
@@ -354,6 +578,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'namespace': {
         return this.error(row, `${node.text} は名前空間の名前なので、値としては使えません。`);
       }
+      case 'pack': {
+        return this.error(row, `パラメータパック ${name} は、... で展開して使ってください。`);
+      }
       case 'ambiguous': {
         return this.error(row, `${name} が、自分で宣言したものと std::${name} のどちらを指すのか決まりません。`);
       }
@@ -373,18 +600,104 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private templateFunction(node: Syntax): Expr {
     const nameNode = fieldOf(node, 'name') as Syntax;
+    const concept = this.conceptId(node);
+    if (concept) return concept;
     const entity =
       nameNode.type === 'qualified_identifier'
         ? this.lookupQualified(nameNode)
         : this.lookupName(nameNode.text, node.row);
     const templateArgs = this.templateArguments(fieldOf(node, 'arguments') as Syntax);
+    const variable = entity.kind === 'template' ? entity.template.program : undefined;
+    if (variable?.kind === 'variable')
+      return this.entityExpr(this.instantiateVariableTemplate(variable, templateArgs, node.row), nameNode, true);
     if (entity.kind !== 'functions') return this.error(node.row, `${nameNode.text} は関数テンプレートではありません。`);
     const expr = this.entityExpr(entity, nameNode, nameNode.type === 'qualified_identifier');
     return { ...expr, functions: { ...(expr.functions as FunctionCandidates), templateArgs } };
   }
 
+  /**
+   * `p->~A()`, which runs the object's destructor and those of its members and bases without freeing its storage
+   * (C++20 [class.dtor]p15).
+   */
+  private destructorCall(object: Expr, name: Syntax, row: number): Expr {
+    const type = object.type;
+    const written = name.children[0]?.text ?? '';
+    const cls = type.kind === 'class' ? type.cls : undefined;
+    // `x.~T()` names the type through a name for it, such as a template parameter.
+    const named = this.findName(written, true);
+    const namesType =
+      (named?.kind === 'type' && sameType(unqualified(named.type), unqualified(type), false)) ||
+      (named?.kind === 'class' && named.cls === cls);
+    if (cls && !namesType && written !== cls.name && written !== cls.name.replace(/^std::/, '').replace(/<.*$/, ''))
+      return this.error(row, `デストラクタの名前 ~${written} が ${typeName(type)} と合いません。`);
+    const destroy = this.destroyerOf(type, row);
+    const call: FunctionInfo = {
+      name: `~${written}`,
+      displayName: `~${written}`,
+      params: [],
+      ret: { kind: 'void' },
+      owner: cls,
+      isStatic: false,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: true,
+      isNoexcept: true,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+      native: (_args, { frame, selfLocation }) => {
+        destroy?.(frame, selfLocation?.read() as Value);
+        return;
+      },
+    };
+    return {
+      type: { kind: 'void' },
+      isLvalue: false,
+      row,
+      run: () => {},
+      functions: { name: call.name, candidates: [call], object, isQualified: true },
+    };
+  }
+
   /** `this` as the object it points to, for a member a member function names without `this->`. */
-  private implicitThis(row: number, name: string): Expr {
+  /** The subobject of a class that an object of a class derived from it holds, through its secondary bases. */
+  private subobject(object: Expr, owner: ClassInfo, row: number): Expr {
+    let current = object;
+    for (;;) {
+      if (current.type.kind !== 'class') return current;
+      let found: ClassInfo['secondaryBases'][number] | undefined;
+      for (let cls: ClassInfo | undefined = current.type.cls; cls && !found; cls = cls.base) {
+        if (cls === owner) return current;
+        found = cls.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(owner));
+      }
+      if (!found) return current;
+      current = this.baseSubobject(current, found, row);
+    }
+  }
+
+  /**
+   * The subobject of a secondary base that an object holds; a virtual base's is the complete object's, which only
+   * converting the object at run time reaches.
+   */
+  private baseSubobject(object: Expr, secondary: SecondaryBase, row: number): Expr {
+    if (!secondary.isVirtual) return this.fieldAccess(object, secondary.field, row);
+    const view = classLocation(this.materialize(object), secondary.cls);
+    return { ...view, type: classType(secondary.cls, isConstType(object.type)), isLvalue: true };
+  }
+
+  private implicitThis(row: number, name: string, owner?: ClassInfo): Expr {
+    const { captures } = this.context;
+    if (captures && owner !== captures.closure) {
+      // A lambda's body names the members of the enclosing object through the `this` it captures.
+      const object = captures.thisObject(row);
+      if (!object) return this.error(row, `ラムダ式で this を取り込んでいないので、メンバ ${name} は使えません。`);
+      return object;
+    }
     if (this.context.isStaticContext || !this.context.cls) {
       return this.error(row, `static のメンバ関数（または関数）の中では、メンバ ${name} は使えません。`);
     }
@@ -399,7 +712,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     };
   }
 
+  /** The `this` of the code compiled now. */
+  compileThis(row: number): Expr {
+    return this.thisExpr(row);
+  }
+
   private thisExpr(row: number): Expr {
+    const { captures } = this.context;
+    if (captures) {
+      const object = captures.thisObject(row);
+      if (!object) return this.error(row, 'ラムダ式で this を取り込んでいないので、this は使えません。');
+      return this.addressOf(object, row);
+    }
     if (this.context.isStaticContext || !this.context.cls) {
       return this.error(row, 'this は、static でないメンバ関数の中でしか使えません。');
     }
@@ -414,14 +738,28 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const argument = this.compileExpression(fieldOf(node, 'argument') as Syntax);
     const object = isArrow ? this.arrow(argument, node.row) : argument;
     const fieldNode = fieldOf(node, 'field') as Syntax;
-    if (fieldNode.type === 'destructor_name') return this.unsupported(node.row, 'デストラクタの明示的な呼び出し');
+    if (fieldNode.type === 'destructor_name') return this.destructorCall(object, fieldNode, node.row);
     if (fieldNode.type === 'qualified_identifier') return this.qualifiedMember(object, fieldNode);
+    // `obj.f<int>` and `obj.template f<int>` name a member function template with template arguments.
+    const method = fieldNode.type === 'dependent_name' ? fieldNode.children[0] : fieldNode;
+    if (method?.type === 'template_method') {
+      const member = this.member(object, (fieldOf(method, 'name') as Syntax).text, node.row);
+      if (!member.functions) return this.error(node.row, `${method.text} はメンバ関数テンプレートではありません。`);
+      const templateArgs = this.templateArguments(fieldOf(method, 'arguments') as Syntax);
+      return { ...member, functions: { ...member.functions, templateArgs } };
+    }
     return this.member(object, fieldNode.text, node.row);
   }
 
   /** The object `p->` designates: what a pointer points to, or what an iterator's `->` gives. */
   arrow(pointer: Expr, row: number): Expr {
     const type = pointer.type;
+    if (type.kind === 'class' && !type.cls.library) {
+      // `p->m` calls `p.operator->()` and applies `->` again to its result (C++20 [over.ref]).
+      const overloaded = overloadedOperator(this, '->', [pointer], row);
+      if (!overloaded) return this.error(row, `${typeName(type)} には operator-> がありません。`);
+      return this.arrow(overloaded.expr, row);
+    }
     if (type.kind === 'class' && type.cls.library?.operator) {
       const result = type.cls.library.operator(this, '->', [pointer], row);
       if (result) return result;
@@ -460,7 +798,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     this.checkLibraryLayout(type, row);
     const cls = naming ?? type.cls;
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
-      const field = owner.ownFields.find((candidate) => candidate.name === name);
+      const field =
+        owner.ownFields.find((candidate) => candidate.name === name) ??
+        owner.anonymousFields.find((candidate) => candidate.name === name);
       if (field) {
         this.checkAccess(field.access, owner, cls, row, name, type.cls);
         return this.fieldAccess(object, field, row);
@@ -503,7 +843,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         functions: { name, candidates: [], object },
       };
     }
+    const inSecondary = this.secondaryMember(object, cls, name, row);
+    if (inSecondary) return inSecondary;
     return this.missingMember(cls, name, row);
+  }
+
+  /** A member that a secondary base of the class (or of its bases) declares, through the base's subobject. */
+  private secondaryMember(object: Expr, cls: ClassInfo, name: string, row: number): Expr | undefined {
+    const found: Expr[] = [];
+    for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
+      for (const secondary of owner.secondaryBases) {
+        // A member of a virtual base is one member, which the virtual base's own entry reaches.
+        if (!hasMemberNamed(secondary.cls, name, secondary.isVirtual === true)) continue;
+        this.checkBaseConversion(cls, secondary.cls, row);
+        found.push(this.member(this.baseSubobject(object, secondary, row), name, row));
+      }
+    }
+    if (found.length > 1) return this.error(row, `${name} は複数の親クラスにあるので、どれを指すのか決まりません。`);
+    return found[0];
   }
 
   private staticMemberExpr(field: StaticFieldInfo, row: number, object?: Expr): Expr {
@@ -559,8 +916,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The data member of an object, as an lvalue that is const when the object is. */
   fieldAccess(object: Expr, field: FieldInfo, row: number): Expr {
+    if (field.path) {
+      const [first, ...rest] = field.path;
+      return this.fieldAccess(
+        this.fieldAccess(object, first, row),
+        { ...field, path: rest.length > 0 ? rest : undefined },
+        row
+      );
+    }
     const { index } = field;
-    const type = isConstType(object.type) ? withConst(field.type) : field.type;
+    const type = isConstType(object.type) && !field.isMutable ? withConst(field.type) : field.type;
     if (field.type.kind === 'reference') {
       const objectRun = this.objectOf(object);
       return {
@@ -573,10 +938,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     const cls = object.type.kind === 'class' ? object.type.cls : field.owner;
     const locate = (location: Ptr): Ptr => new Ptr(location.read() as CObject, index, { location, cls });
+    const isBitField = field.bitWidth !== undefined;
+    const bitFieldPromotion = isBitField ? bitFieldPromotionOf(type, field.bitWidth as number) : undefined;
     if (object.isLvalue) {
       const { run, temporaryBinding } = object;
       return {
         type,
+        bitFieldPromotion,
+        isBitField,
         isLvalue: true,
         isXvalue: object.isXvalue,
         staticAddress: object.staticAddress,
@@ -585,13 +954,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => locate(run(frame) as Ptr),
-        description: field.name,
+        description: field.name.replace(/^\0capture /, ''),
         temporaryBinding: temporaryBinding && ((frame, retain) => locate(temporaryBinding(frame, retain))),
       };
     }
     const materialized = this.temporaryLocation(object);
     return {
       type,
+      bitFieldPromotion,
+      isBitField,
       isLvalue: true,
       isXvalue: true,
       row,
@@ -603,6 +974,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // Operators ---------------------------------------------------------------------------------------------------------
 
   private binaryExpression(node: Syntax): Expr {
+    const memberOperator = tokenOf(node, ['.*', '->*']) as '.*' | '->*' | undefined;
+    if (memberOperator) {
+      const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
+      const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+      return this.memberAccessThroughPointer(memberOperator, left, right, node.row);
+    }
     const operator =
       tokenOf(node, [
         ...ARITHMETIC_OPERATORS,
@@ -618,10 +995,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         'not_eq',
       ]) ?? '';
     const normalized = ALTERNATIVE_TOKENS[operator] ?? operator;
-    if (normalized === '<=>') return this.unsupported(node.row, '三方比較演算子（<=>）');
     const leftNode = fieldOf(node, 'left') as Syntax;
     const left = this.compileExpression(leftNode);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+    if (normalized === '<=>') return this.threeWay(left, right, node.row);
     if (RELATIONAL_OPERATORS.includes(normalized))
       this.checkChainedComparison(normalized, leftNode, left, right, node.row);
     return this.binary(normalized, left, right, node.row);
@@ -644,9 +1021,114 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** Compiles a binary operator on two compiled operands. */
   binary(operator: string, left: Expr, right: Expr, row: number): Expr {
+    if (!left.functions && !right.functions && (hasUserType(left.type) || hasUserType(right.type)))
+      return this.withComparisonRewrites(operator, left, right, row);
+    return this.builtinBinary(operator, left, right, row);
+  }
+
+  /**
+   * A binary operator with the operator functions the program declares, including the comparisons C++20 rewrites:
+   * `a != b` as `!(a == b)` and `a == b` as `b == a` when only those are declared (C++20 [over.match.oper]p3).
+   */
+  private withComparisonRewrites(operator: string, left: Expr, right: Expr, row: number): Expr {
+    const builtin = (): Expr => this.builtinBinary(operator, left, right, row);
+    const direct = overloadedOperator(this, operator, [left, right], row);
+    if (direct) return withOverloads(this, operator, [left, right], row, builtin);
+    if (operator === '==' || operator === '!=') {
+      const equal =
+        overloadedOperator(this, '==', [left, right], row) ?? overloadedOperator(this, '==', [right, left], row);
+      if (equal) return operator === '==' ? equal.expr : this.unary('!', equal.expr, row);
+    }
+    if (RELATIONAL_OPERATORS.includes(operator)) {
+      // `a < b` compares `a <=> b` with 0, or `b <=> a` the other way (C++20 [over.match.oper]p3).
+      const forward = overloadedOperator(this, '<=>', [left, right], row);
+      if (forward) return this.binary(operator, forward.expr, zeroLiteral(row), row);
+      const reversed = overloadedOperator(this, '<=>', [right, left], row);
+      if (reversed) return this.binary(operator, constantExpr(INT, 0, row), reversed.expr, row);
+    }
+    return builtin();
+  }
+
+  /**
+   * `a <=> b` (C++20 [expr.spaceship]): an operator function the program declares, or the built-in comparison of
+   * arithmetic values (a `std::strong_ordering` for integers, a `std::partial_ordering` for floating-point values)
+   * and of pointers, or the library's three-way comparison of its classes.
+   */
+  threeWay(left: Expr, right: Expr, row: number): Expr {
+    if (hasUserType(left.type) || hasUserType(right.type)) {
+      const overloaded = overloadedOperator(this, '<=>', [left, right], row);
+      if (overloaded) return overloaded.expr;
+    }
+    const a = promoteBitField(this.rvalue(left));
+    const b = promoteBitField(this.rvalue(right));
+    if (isArithmetic(a.type) && isArithmetic(b.type) && !isScopedEnum(a.type)) {
+      const common = commonType(unqualified(a.type) as never, unqualified(b.type) as never) as ArithmeticType;
+      const x = convertArithmetic(a, common).run;
+      const y = convertArithmetic(b, common).run;
+      const cls = this.library.ordering(common.kind === 'float' ? 'partial_ordering' : 'strong_ordering');
+      return orderingOf(
+        cls,
+        (frame) =>
+          frame.unsequencedOperands(x, y, (first, second) => {
+            const p = first as number | bigint;
+            const q = second as number | bigint;
+            if (Number.isNaN(Number(p)) || Number.isNaN(Number(q))) return UNORDERED;
+            return p < q ? -1 : p > q ? 1 : 0;
+          }),
+        row
+      );
+    }
+    if (a.type.kind === 'pointer' && b.type.kind === 'pointer') {
+      const x = a.run;
+      const y = b.run;
+      return orderingOf(
+        this.library.ordering('strong_ordering'),
+        (frame) => Math.sign((x(frame) as Ptr).compareAddress(y(frame) as Ptr)),
+        row
+      );
+    }
+    const less = sameType(unqualified(left.type), unqualified(right.type), false)
+      ? lessThan(unqualified(left.type))
+      : undefined;
+    if (less && left.type.kind === 'class') {
+      const x = this.materialize(left).run;
+      const y = this.materialize(right).run;
+      return orderingOf(
+        this.library.ordering('strong_ordering'),
+        (frame) => {
+          const p = (x(frame) as Ptr).read();
+          const q = (y(frame) as Ptr).read();
+          return Math.sign(less(p, q, frame));
+        },
+        row
+      );
+    }
+    return this.error(row, `演算子 <=> は ${typeName(left.type)} と ${typeName(right.type)} には使えません。`);
+  }
+
+  private builtinBinary(operator: string, written: Expr, writtenRight: Expr, row: number): Expr {
+    const left = this.builtinOperand(written);
+    const right = this.builtinOperand(writtenRight);
     const libraryResult = this.libraryOperator(operator, [left, right], row);
     if (libraryResult) return libraryResult;
     if (operator === '&&' || operator === '||') return this.logical(operator, left, right, row);
+    const member = [left, right].find((operand) => operand.type.kind === 'memberPointer')?.type;
+    if (member && (operator === '==' || operator === '!=')) {
+      // Pointers to members compare equal when they designate the same member, or are both null.
+      const a = this.convert(left, unqualified(member), row).run;
+      const b = this.convert(right, unqualified(member), row).run;
+      return {
+        type: BOOL,
+        isLvalue: false,
+        row,
+        run: (frame) =>
+          holdAll(
+            frame,
+            [a, b],
+            ([x, y]) => Number((x as MemberPointer).equals(y as MemberPointer) === (operator === '==')) as Value
+          ),
+      };
+    }
     for (const operand of [left, right]) {
       if (operand.type.kind === 'class') {
         return this.error(
@@ -662,6 +1144,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const rightValue = this.rvalue(right);
     const lt = leftValue.type;
     const rt = rightValue.type;
+    // A scoped enumeration takes part only in comparisons with its own type (C++20 [expr.rel], [expr.eq]).
+    if (
+      (isScopedEnum(lt) || isScopedEnum(rt)) &&
+      (!COMPARISONS.has(operator) || !sameType(unqualified(lt), unqualified(rt)))
+    )
+      return this.error(
+        row,
+        `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません（enum class の値は整数として計算できません）。`
+      );
     if (isArithmetic(lt) && isArithmetic(rt)) return this.arithmetic(operator, leftValue, rightValue, row);
     return this.pointerOperation(operator, leftValue, rightValue, row);
   }
@@ -698,7 +1189,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** An arithmetic operator on two arithmetic prvalues, after the usual arithmetic conversions. */
-  arithmetic(operator: string, left: Expr, right: Expr, row: number): Expr {
+  arithmetic(operator: string, written: Expr, right: Expr, row: number): Expr {
+    const left = promoteBitField(written);
+    right = promoteBitField(right);
     const lt = left.type as ArithmeticType;
     const rt = right.type as ArithmeticType;
     if (['%', '<<', '>>', '&', '|', '^'].includes(operator) && (!isInteger(lt) || !isInteger(rt))) {
@@ -778,7 +1271,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
-  private shift(operator: '<<' | '>>', left: Expr, right: Expr, row: number): Expr {
+  private shift(operator: '<<' | '>>', written: Expr, right: Expr, row: number): Expr {
+    const left = promoteBitField(written);
     const type = promote(unqualified(left.type) as never) as Extract<Type, { kind: 'int' }>;
     const a = convertArithmetic(left, type);
     const b = this.rvalue(right);
@@ -916,6 +1410,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   unary(operator: string, operand: Expr, row: number): Expr {
+    if (!operand.functions && hasUserType(operand.type))
+      return withOverloads(this, operator, [operand], row, () => this.builtinUnary(operator, operand, row));
+    return this.builtinUnary(operator, operand, row);
+  }
+
+  /**
+   * The operand a built-in operator takes for an object of a class that the program wrote: the value of its only
+   * implicit conversion function (C++20 [over.built]), or the object itself.
+   */
+  private builtinOperand(expr: Expr): Expr {
+    if (expr.type.kind !== 'class' || expr.type.cls.library) return expr;
+    const [only, ...others] = conversionFunctions(expr.type.cls).filter((fn) => !fn.isExplicit);
+    return only && others.length === 0 ? this.callConversion(expr, only) : expr;
+  }
+
+  private builtinUnary(operator: string, writtenOperand: Expr, row: number): Expr {
+    const operand = this.builtinOperand(writtenOperand);
     const libraryResult = this.libraryOperator(operator, [operand], row);
     if (libraryResult) return libraryResult;
     if (operator === '!') {
@@ -927,10 +1438,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (constant !== undefined) expr.constant = Number(constant) === 0 ? 1 : 0;
       return expr;
     }
-    const value = this.rvalue(operand);
+    const value = promoteBitField(this.rvalue(operand));
     const type = value.type;
     if (operator === '+' && type.kind === 'pointer') return value;
-    if (!isArithmetic(type) || (operator === '~' && !isInteger(type))) {
+    if (!isArithmetic(type) || (operator === '~' && !isInteger(type)) || isScopedEnum(type)) {
       return this.error(row, `演算子 ${operator} は ${typeName(type)} には使えません。`);
     }
     const promoted = isInteger(type)
@@ -979,8 +1490,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.increment(target, operator, isPrefix, node.row);
   }
 
-  // code-gauge-allow functionNcss -- The result category and shared update depend on the same operand.
   increment(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
+    if (hasUserType(target.type))
+      return withOverloads(
+        this,
+        operator,
+        [target],
+        row,
+        () => this.builtinIncrement(target, operator, isPrefix, row),
+        !isPrefix
+      );
+    return this.builtinIncrement(target, operator, isPrefix, row);
+  }
+
+  // code-gauge-allow functionNcss -- The result category and shared update depend on the same operand.
+  private builtinIncrement(target: Expr, operator: '++' | '--', isPrefix: boolean, row: number): Expr {
     const libraryResult = this.libraryOperator(isPrefix ? operator : `x${operator}`, [target], row);
     if (libraryResult) return libraryResult;
     this.checkAssignable(target, row, operator);
@@ -993,6 +1517,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     } else if (isArithmetic(type)) {
       if (type.kind === 'int' && type.name === 'bool')
         return this.error(row, `bool の変数には ${operator} を使えません（C++17 から）。`);
+      if (type.kind === 'int' && type.enumeration)
+        return this.error(row, `列挙 ${type.enumeration.name} の変数には ${operator} を使えません。`);
       const common = commonType(unqualified(type) as never, INT as never) as ArithmeticType;
       const add = arithmeticOperation('+', common);
       const one = common.kind === 'int' && isWide(common) ? BigInt(delta) : delta;
@@ -1031,15 +1557,106 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private pointerExpression(node: Syntax): Expr {
     const operator = tokenOf(node, ['*', '&']);
-    const operand = this.compileExpression(fieldOf(node, 'argument') as Syntax);
+    const argument = fieldOf(node, 'argument') as Syntax;
+    const member =
+      operator === '&' && argument.type === 'qualified_identifier' ? this.memberPointer(argument) : undefined;
+    if (member) return member;
+    const operand = this.compileExpression(argument);
     if (operator === '&') return this.addressOf(operand, node.row);
     return this.dereferenceOperator(operand, node.row);
   }
 
+  /** `&C::m` of a non-static member: a pointer to the member, or undefined for another qualified name. */
+  private memberPointer(node: Syntax): Expr | undefined {
+    const scopeNode = fieldOf(node, 'scope');
+    const scope = scopeNode && this.resolveScope(scopeNode);
+    if (scope?.kind !== 'class') return undefined;
+    const entity = this.lookupQualified(node);
+    const { row } = node;
+    if (entity.kind === 'field') {
+      const { field } = entity;
+      const value = new MemberPointer(field);
+      return {
+        type: { kind: 'memberPointer', cls: field.owner, to: field.type },
+        isLvalue: false,
+        row,
+        run: () => value,
+      };
+    }
+    if (entity.kind !== 'functions') return undefined;
+    const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic && !fn.isConstructor);
+    if (members.length === 0) return undefined;
+    const [fn, ...others] = members;
+    if (others.length > 0)
+      return this.error(row, `${node.text} はオーバーロードされているので、どれを指すのか決まりません。`);
+    this.checkDefined(fn, row);
+    const value = new MemberPointer(undefined, fn);
+    const type: Type = {
+      kind: 'memberPointer',
+      cls: fn.owner as ClassInfo,
+      to: {
+        ...(functionTypeOf(fn) as Extract<Type, { kind: 'function' }>),
+        ...(fn.isConst ? { isConstMember: true } : {}),
+      },
+    };
+    return { type, isLvalue: false, row, run: () => value };
+  }
+
+  /**
+   * `object.*member` and `pointer->*member`: the member of an object that a pointer to a member designates, an lvalue
+   * for a data member, or a member function to call (C++20 [expr.mptr.oper]).
+   */
+  private memberAccessThroughPointer(operator: '.*' | '->*', left: Expr, right: Expr, row: number): Expr {
+    const memberType = right.type;
+    if (memberType.kind !== 'memberPointer')
+      return this.error(row, `${operator} の右には、メンバへのポインタを書いてください（${typeName(memberType)}）。`);
+    const object = operator === '->*' ? this.arrow(left, row) : left;
+    if (object.type.kind !== 'class' || !object.type.cls.isDerivedFrom(memberType.cls))
+      return this.error(row, `${typeName(object.type)} には、${typeName(memberType)} の指すメンバがありません。`);
+    const base = this.convert(
+      this.materialize(object),
+      referenceTo(classType(memberType.cls, isConstType(object.type))),
+      row
+    );
+    const location = base.run;
+    const member = this.rvalue(right).run;
+    if (memberType.to.kind === 'function') {
+      return {
+        type: { kind: 'void' },
+        isLvalue: false,
+        row,
+        run: () => {},
+        boundMember: { object: base, member: this.rvalue(right) },
+      };
+    }
+    const type = isConstType(object.type) ? withConst(memberType.to) : memberType.to;
+    return {
+      type,
+      isLvalue: true,
+      row,
+      run: (frame) =>
+        holdAll(frame, [location, member], ([place, pointer]) => {
+          const field = (pointer as MemberPointer).field;
+          if (!field) throw new CppRuntimeError('nullAccess');
+          const target = (place as Ptr).forClass(memberType.cls);
+          return new Ptr(target.read() as CObject, field.index, { location: target, cls: memberType.cls });
+        }),
+    };
+  }
+
   dereferenceOperator(operand: Expr, row: number): Expr {
+    if (hasUserType(operand.type))
+      return withOverloads(this, '*', [operand], row, () => this.builtinDereference(operand, row));
+    return this.builtinDereference(operand, row);
+  }
+
+  private builtinDereference(operand: Expr, row: number): Expr {
     const libraryResult = this.libraryOperator('*', [operand], row);
     if (libraryResult) return libraryResult;
+    if (operand.functions) return operand;
     const value = this.rvalue(operand);
+    // `*fp` designates the function, which a call uses as it uses the pointer.
+    if (value.type.kind === 'pointer' && value.type.to.kind === 'function') return value;
     if (value.type.kind !== 'pointer')
       return this.error(row, `* はポインタにしか使えません（${typeName(value.type)}）。`);
     return this.dereference(value, row);
@@ -1067,9 +1684,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   addressOf(operand: Expr, row: number): Expr {
-    if (operand.functions) return this.unsupported(row, '関数ポインタ');
+    if (operand.functions) {
+      if (operand.functions.object || operand.functions.candidates.some((fn) => fn.owner && !fn.isStatic))
+        return this.error(row, 'メンバ関数へのポインタは、&クラス名::関数名 と書いて作ってください。');
+      return operand;
+    }
     if (!operand.isLvalue || operand.isXvalue)
       return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
+    if (operand.isBitField) return this.error(row, 'ビットフィールドのアドレスは取れません。');
     if (operand.type.kind === 'class' && operand.type.cls.library?.operator) {
       const result = operand.type.cls.library.operator(this, '&', [operand], row);
       if (result) return result;
@@ -1105,6 +1727,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Compiles `target = source` or a compound assignment. */
   // code-gauge-allow functionNcss -- Both assignments share storage tracking and preserve C++ operand order.
   assign(operator: string, target: Expr, source: Expr, row: number): Expr {
+    if (target.type.kind === 'class' && !target.type.cls.library) {
+      const overloaded = overloadedOperator(this, operator, [target, source], row);
+      if (overloaded) return overloaded.expr;
+    } else if (hasUserType(source.type) || (target.type.kind === 'int' && target.type.enumeration)) {
+      const overloaded = overloadedOperator(this, operator, [target, source], row);
+      if (overloaded && operator !== '=') return overloaded.expr;
+    }
     if (target.type.kind === 'class') {
       const libraryResult = this.libraryOperator(operator, [target, source], row);
       if (libraryResult) return libraryResult;
@@ -1214,11 +1843,36 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
+  /** `a ?: b` (a GNU extension clang++ accepts), which gives `a` when it is true and else `b`, evaluating `a` once. */
+  private elvis(test: Expr, alternative: Expr, row: number): Expr {
+    const value = this.rvalue(test);
+    const held: Value[] = [];
+    const first: Expr = { ...value, run: () => held.at(-1) as Value, constant: undefined };
+    const condition = this.condition(first, row);
+    const { left, right, type } = this.conditionalOperands(first, alternative, row);
+    const leftValue = this.rvalue(left).run;
+    const rightValue = this.rvalue(right).run;
+    return {
+      type,
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        held.push(value.run(frame) as Value);
+        try {
+          return condition(frame) ? leftValue(frame) : rightValue(frame);
+        } finally {
+          held.pop();
+        }
+      },
+    };
+  }
+
   private conditionalExpression(node: Syntax): Expr {
     const test = this.compileExpression(fieldOf(node, 'condition') as Syntax);
     const condition = this.condition(test, node.row);
     const consequenceNode = fieldOf(node, 'consequence');
-    if (!consequenceNode) return this.unsupported(node.row, '条件演算子の省略形（x ?: y）');
+    if (!consequenceNode)
+      return this.elvis(test, this.compileExpression(fieldOf(node, 'alternative') as Syntax), node.row);
     const a = this.compileExpression(consequenceNode);
     const b = this.compileExpression(fieldOf(node, 'alternative') as Syntax);
     const { left, right, type, isLvalue } = this.conditionalOperands(a, b, node.row);
@@ -1332,6 +1986,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private commaExpression(node: Syntax): Expr {
     const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
+    return this.comma(left, right);
+  }
+
+  /** `left, right`, which evaluates `left`, discards its value, and gives `right`. */
+  comma(left: Expr, right: Expr): Expr {
     const { run: second, temporaryBinding } = right;
     const value = this.rvalue(left);
     const hasConstantLeft = value.constant !== undefined;
@@ -1388,6 +2047,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   subscript(array: Expr, index: Expr, row: number): Expr {
+    if (array.type.kind === 'class' && !array.type.cls.library) {
+      const overloaded = overloadedOperator(this, '[]', [array, index], row);
+      if (overloaded) return overloaded.expr;
+    }
     const libraryResult = this.libraryOperator('[]', [array, index], row);
     if (libraryResult) return libraryResult;
     if (index.braced) return this.error(row, 'この型の [] の中に {...} は書けません。');
@@ -1463,12 +2126,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const value = this.rvalue(expr);
     const type = value.type;
     const run = value.run;
+    if (isScopedEnum(type)) return this.error(row, `enum class（${typeName(type)}）の値は条件に使えません。`);
     if (isArithmetic(type))
       return (frame) => {
         const v = run(frame);
         return v !== 0 && v !== 0n;
       };
     if (type.kind === 'pointer' || type.kind === 'nullptr') return (frame) => !(run(frame) as Ptr).isNull;
+    if (type.kind === 'class' && !type.cls.library) {
+      // A condition converts to `bool` contextually, which may use an explicit conversion function.
+      const conversion = implicitConversion(this, expr, BOOL, true, true);
+      if (conversion) return this.condition(conversion.apply(expr), row);
+    }
     const libraryBool = this.libraryBool(expr, row);
     if (libraryBool) {
       const test = libraryBool.run;
@@ -1516,6 +2185,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `${typeName(expr.type)} を ${typeName(type)} には変換できません。`);
     }
     if (type.kind === 'class') return this.constructObject(type.cls, [expr], row, false);
+    if (expr.type.kind === 'class' && !expr.type.cls.library) {
+      // A cast is a direct-initialization, which may use an explicit conversion function.
+      const conversion = implicitConversion(this, expr, unqualified(type), true, true);
+      if (conversion) return conversion.apply(expr);
+    }
     return this.convert(expr, unqualified(type), row);
   }
 
@@ -1544,6 +2218,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   ): Expr {
     const { type: from } = expr;
     const { to } = type;
+    // `static_cast<T&&>(x)` makes an xvalue of an lvalue, as `std::move` does.
+    if (
+      type.isRvalue &&
+      expr.isLvalue &&
+      sameType(unqualified(from), unqualified(to), false) &&
+      (!isConstType(from) || isConstType(to))
+    )
+      return { ...expr, type: to, isXvalue: true };
     if (
       expr.isLvalue &&
       !expr.isXvalue &&
@@ -1555,7 +2237,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
     }
     const converted = this.convert(expr, type, row);
-    return { ...converted, type: to, isLvalue: true, isXvalue: false };
+    return { ...converted, type: to, isLvalue: true, isXvalue: type.isRvalue === true };
   }
 
   private castPointer(
@@ -1578,7 +2260,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
       );
-    if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
+    // A C-style cast may take `const` away, as const_cast does; static_cast may not.
+    if (isConstType(from) && !isConstType(to) && kind !== 'C')
+      return this.error(row, `static_cast では const を外せません（${typeName(value.type)} から ${typeName(type)}）。`);
     if (from.kind === 'class' && to.kind === 'class')
       return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
     const run = value.run;
@@ -1619,14 +2303,168 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private namedCast(node: Syntax): Expr {
     const keyword = node.all.find((child) => !child.isNamed && child.type.endsWith('_cast'))?.type;
-    if (keyword !== 'static_cast') return this.unsupported(node.row, keyword ?? 'キャスト');
     const type = this.typeDescriptor(fieldOf(node, 'type') as Syntax);
-    return this.explicitConversion(this.compileExpression(fieldOf(node, 'value') as Syntax), type, node.row, 'static');
+    const value = this.compileExpression(fieldOf(node, 'value') as Syntax);
+    const { row } = node;
+    switch (keyword) {
+      case 'static_cast': {
+        return this.explicitConversion(value, type, row, 'static');
+      }
+      case 'const_cast': {
+        return this.constCast(value, type, row);
+      }
+      case 'dynamic_cast': {
+        return this.dynamicCast(value, type, row);
+      }
+      case 'reinterpret_cast': {
+        // The cases whose results do not depend on how the machine lays out values in memory.
+        const target = nonReference(type);
+        const source = this.rvalue(value).type;
+        if (
+          target.kind === 'pointer' &&
+          source.kind === 'pointer' &&
+          sameType(unqualified(target.to), unqualified(source.to), false)
+        )
+          return this.explicitConversion(value, type, row, 'C');
+        return this.unsupported(row, 'reinterpret_cast（値のメモリ上の表し方は、CPU や OS によって違います）');
+      }
+      default: {
+        return this.unsupported(row, keyword ?? 'キャスト');
+      }
+    }
+  }
+
+  /** `const_cast<T>(e)`, which adds or removes `const` from a pointer's or a reference's target. */
+  private constCast(value: Expr, type: Type, row: number): Expr {
+    const strip = (t: Type): Type => (t.kind === 'pointer' ? pointerTo(strip(t.to)) : unqualified(t));
+    if (type.kind === 'reference') {
+      if (!value.isLvalue || !sameType(strip(value.type), strip(type.to), false))
+        return this.error(row, `${typeName(value.type)} は const_cast で ${typeName(type)} に変換できません。`);
+      return { ...value, type: type.to, isXvalue: type.isRvalue === true ? true : undefined };
+    }
+    const pointer = this.rvalue(value);
+    if (
+      type.kind !== 'pointer' ||
+      pointer.type.kind !== 'pointer' ||
+      !sameType(strip(pointer.type), strip(type), false)
+    )
+      return this.error(row, `${typeName(value.type)} は const_cast で ${typeName(type)} に変換できません。`);
+    return { ...pointer, type };
+  }
+
+  /**
+   * `dynamic_cast<T>(e)`, which checks the dynamic type of a polymorphic object: a pointer cast gives a null pointer
+   * when the object is no `T`, and a reference cast throws `std::bad_cast`.
+   */
+  private dynamicCast(value: Expr, type: Type, row: number): Expr {
+    const isReference = type.kind === 'reference';
+    const target = isReference ? type.to : type.kind === 'pointer' ? type.to : undefined;
+    const source = isReference ? value.type : this.rvalue(value).type;
+    const from = isReference ? source : source.kind === 'pointer' ? source.to : undefined;
+    if (target?.kind !== 'class' || from?.kind !== 'class')
+      return this.error(row, 'dynamic_cast には、クラスへのポインタか参照を書いてください。');
+    if (isConstType(from) && !isConstType(target))
+      return this.error(row, `dynamic_cast では const を外せません（${typeName(source)}）。`);
+    if (from.cls.isDerivedFrom(target.cls))
+      return isReference
+        ? this.castReference(value, type as Extract<Type, { kind: 'reference' }>, row, 'static')
+        : this.convert(value, type, row);
+    if (!from.cls.isPolymorphic)
+      return this.error(row, `${typeName(from)} は仮想関数を持たないので、dynamic_cast できません。`);
+    const cls = target.cls;
+    const badCast = this.library.exception('bad_cast');
+    if (isReference) {
+      const run = value.run;
+      return {
+        type: target,
+        isLvalue: true,
+        row,
+        run: (frame) => {
+          const location = run(frame) as Ptr;
+          const object = location.read();
+          if (!(object instanceof CObject) || !outermostObject(object).cls.isDerivedFrom(cls))
+            throwLibrary(frame, badCast, 'std::bad_cast');
+          return location.forClass(cls);
+        },
+      };
+    }
+    const run = this.rvalue(value).run;
+    return {
+      type,
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        const location = run(frame) as Ptr;
+        if (location.isNull) return NULL_PTR;
+        const object = location.read();
+        return object instanceof CObject && outermostObject(object).cls.isDerivedFrom(cls)
+          ? location.forClass(cls)
+          : NULL_PTR;
+      },
+    };
+  }
+
+  /**
+   * A fold expression (C++20 [expr.prim.fold]): `(xs + ...)` and `(0 + ... + xs)` fold from the right or the left,
+   * applying the operator to the pack's elements in order.
+   */
+  private foldExpression(node: Syntax): Expr {
+    const operator = (fieldOf(node, 'operator') as Syntax).type;
+    const left = fieldOf(node, 'left') as Syntax;
+    const right = fieldOf(node, 'right') as Syntax;
+    const isPack = (side: Syntax): boolean => side.isNamed && packsIn(this, side).size > 0;
+    const isRightFold = left.isNamed && isPack(left);
+    const pattern = isRightFold ? left : right;
+    const init = isRightFold ? (right.isNamed ? right : undefined) : left.isNamed ? left : undefined;
+    const operands = packElements(this, pattern, node.row).map((element) => this.compileExpression(element));
+    if (init) {
+      const initial = this.compileExpression(init);
+      if (isRightFold) operands.push(initial);
+      else operands.unshift(initial);
+    }
+    if (operands.length === 0) {
+      // An empty pack folds to the operator's identity, which only `&&`, `||`, and `,` have.
+      if (operator === '&&') return constantExpr(BOOL, 1, node.row);
+      if (operator === '||') return constantExpr(BOOL, 0, node.row);
+      if (operator === ',') return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: () => {} };
+      return this.error(node.row, `空のパラメータパックは、演算子 ${operator} で畳み込めません。`);
+    }
+    // A right fold applies the operator from the last element back, a left fold from the first forward.
+    const [first, ...rest] = isRightFold ? operands.toReversed() : operands;
+    let folded = first;
+    for (const operand of rest)
+      folded = isRightFold
+        ? this.foldOperation(operator, operand, folded, node.row)
+        : this.foldOperation(operator, folded, operand, node.row);
+    return folded;
+  }
+
+  private foldOperation(operator: string, left: Expr, right: Expr, row: number): Expr {
+    if (operator === ',') return this.comma(left, right);
+    if (operator.endsWith('=') && !['==', '!=', '<=', '>='].includes(operator))
+      return this.assign(operator, left, right, row);
+    return this.binary(ALTERNATIVE_TOKENS[operator] ?? operator, left, right, row);
   }
 
   private sizeofExpression(node: Syntax): Expr {
-    if (node.all.some((child) => child.type === '...')) return this.unsupported(node.row, 'sizeof...');
+    if (node.all.some((child) => child.type === '...')) {
+      const name = fieldOf(node, 'value') as Syntax;
+      const entity = this.findName(name.text);
+      if (entity?.kind !== 'pack') return this.error(node.row, `${name.text} はパラメータパックではありません。`);
+      return constantExpr(SIZE_T, BigInt(entity.items.length), node.row);
+    }
     const type = this.sizeofOperandType(node);
+    if (type.kind === 'array' && type.variableLength) {
+      // A variable-length array's size is its length at run time, times its element's.
+      const array = this.compileExpression(fieldOf(node, 'value') as Syntax).run;
+      const element = BigInt(sizeOf(type.of));
+      return {
+        type: SIZE_T,
+        isLvalue: false,
+        row: node.row,
+        run: (frame) => BigInt(((array(frame) as Ptr).read() as ArrayStore).length) * element,
+      };
+    }
     if (type.kind === 'function') return this.error(node.row, '関数には sizeof を使えません。');
     if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
     if (type.kind === 'array' && type.length === undefined)
@@ -1663,26 +2501,237 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
   }
 
+  protected typeOfExpression(operand: Syntax): Type {
+    return this.unevaluated(() => this.compileExpression(operand).type);
+  }
+
+  protected decltypeOf(operand: Syntax): Type {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      // An unparenthesized name or member access gives the type its entity was declared with.
+      if (operand.type === 'identifier' || operand.type === 'qualified_identifier') {
+        const entity =
+          operand.type === 'identifier' ? this.lookupName(operand.text, operand.row) : this.lookupQualified(operand);
+        if (entity.kind === 'local') return entity.local.type;
+        if (entity.kind === 'global') return entity.global.type;
+        if (entity.kind === 'field') return entity.field.type;
+        if (entity.kind === 'staticField') return entity.field.type;
+      }
+      const expr = this.compileExpression(operand);
+      if (operand.type === 'field_expression' && expr.description !== undefined) return expr.type;
+      if (expr.functions) {
+        const [fn, ...others] = expr.functions.candidates;
+        if (others.length > 0) return this.error(operand.row, `${expr.functions.name} はオーバーロードされています。`);
+        return functionTypeOf(fn);
+      }
+      return this.decltypeOfValue(expr);
+    } finally {
+      this.isUnevaluated = previous;
+    }
+  }
+
+  /** What `decltype` gives for an expression other than a name: a reference to an lvalue's or an xvalue's type. */
+  protected decltypeOfValue(expr: Expr): Type {
+    if (expr.isXvalue) return referenceTo(expr.type, true);
+    return expr.isLvalue ? referenceTo(expr.type) : expr.type;
+  }
+
+  /** `offsetof(T, member)`, the offset in bytes of a member in the objects of a standard-layout class. */
+  private offsetOf(node: Syntax): Expr {
+    const type = this.typeDescriptor(fieldOf(node, 'type') as Syntax);
+    const member = fieldOf(node, 'member') as Syntax;
+    if (type.kind !== 'class') return this.error(node.row, `${typeName(type)} はクラスではありません。`);
+    const field = type.cls.fields.find((candidate) => candidate.name === member.text);
+    if (!field) return this.error(node.row, `${typeName(type)} に ${member.text} というメンバはありません。`);
+    return constantExpr(SIZE_T, BigInt(fieldSubobjectOffset(type.cls, field)), node.row);
+  }
+
+  /**
+   * `_Generic(e, T1: v1, default: v2)` (a C11 feature clang++ accepts), which gives the value whose type is the
+   * controlling expression's after array and function decay and without qualifiers.
+   */
+  private genericSelection(node: Syntax): Expr {
+    const [control, ...associations] = node.children;
+    const controlType = this.unevaluated(() => this.rvalue(this.compileExpression(control)).type);
+    let fallback: Syntax | undefined;
+    for (let index = 0; index + 1 < associations.length; index += 2) {
+      const typeNode = associations[index];
+      const value = associations[index + 1];
+      if (typeNode.text === 'default') {
+        fallback = value;
+        continue;
+      }
+      if (sameType(unqualified(this.typeDescriptor(typeNode)), unqualified(controlType)))
+        return this.compileExpression(value);
+    }
+    if (fallback) return this.compileExpression(fallback);
+    return this.error(node.row, `_Generic に ${typeName(controlType)} 型に合うものがありません。`);
+  }
+
+  /** Runs `run` in an unevaluated operand. */
+  unevaluated<T>(run: () => T): T {
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return run();
+    } finally {
+      this.isUnevaluated = previous;
+    }
+  }
+
   /** `T{...}`, a braced functional cast, which list-initializes a prvalue. */
   private bracedCast(node: Syntax): Expr {
     const typeNode = fieldOf(node, 'type') as Syntax;
-    if (typeNode.type === 'type_descriptor') return this.unsupported(node.row, '複合リテラル（(型){...}）');
-    const type = this.resolveTypeSpecifier(typeNode);
+    // `(T){...}` is a C99 compound literal, which clang++ makes a temporary as `T{...}`.
     const list = fieldOf(node, 'value') as Syntax;
-    const value = this.listValue(type, list, true, node.row);
+    if (typeNode.type !== 'type_descriptor' && this.namedClassTemplate(typeNode)) {
+      // `Box{1}` deduces a class template's arguments, from the lambdas it initializes the object with too.
+      const nodes = expandPacks(this, list.children);
+      const args = nodes.map((arg) => this.argument(arg));
+      const saved = this.deducingLambdas;
+      this.deducingLambdas = new Map(saved);
+      for (const [index, arg] of nodes.entries())
+        if (arg.type === 'lambda_expression') this.deducingLambdas.set(arg, args[index]);
+      try {
+        const type = this.withDeducedClass(typeNode, args, () => this.resolveTypeSpecifier(typeNode));
+        return this.listObject(type, list, node.row);
+      } finally {
+        this.deducingLambdas = saved;
+      }
+    }
+    const type =
+      typeNode.type === 'type_descriptor' ? this.typeDescriptor(typeNode) : this.resolveTypeSpecifier(typeNode);
+    return this.listObject(type, list, node.row);
+  }
+
+  private listObject(type: Type, list: Syntax, row: number): Expr {
+    const value = this.listValue(type, list, true, row);
     const object = { ...value, onlyCalls: type.kind === 'class' };
     return list.children.length === 0 ? constantFunctor(type, object) : object;
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------
 
+  /** `va_start(ap, last)`, `va_end(ap)`, and `va_copy(dst, src)` of `<cstdarg>`, which work on a `va_list`. */
+  private variadicMacro(name: string, argNodes: readonly Syntax[], row: number): Expr {
+    const args = argNodes.map((arg) => this.compileExpression(arg));
+    const [list, other] = args;
+    if (!list?.isLvalue) return this.error(row, `${name} の最初の引数には va_list の変数を書いてください。`);
+    if (name === 'va_start' && !this.context.fn?.isVariadic)
+      return this.error(row, 'va_start は、可変長引数（...）をとる関数の中でしか使えません。');
+    const location = list.run;
+    const source = name === 'va_copy' && other ? this.rvalue(other).run : undefined;
+    return {
+      type: { kind: 'void' },
+      isLvalue: false,
+      row,
+      run: (frame) => {
+        const target = location(frame) as Ptr;
+        if (name === 'va_start') target.write(startVariadicArguments(frame));
+        else if (source) target.write(source(frame) as Ptr);
+        return;
+      },
+    };
+  }
+
+  /** `va_arg(ap, T)`, the next argument of a variadic function, as a `T`. */
+  private vaArgExpression(node: Syntax): Expr {
+    const list = this.compileExpression(fieldOf(node, 'value') as Syntax);
+    const type = unqualified(this.typeDescriptor(fieldOf(node, 'type') as Syntax));
+    if (!list.isLvalue) return this.error(node.row, 'va_arg の最初の引数には va_list の変数を書いてください。');
+    const location = list.run;
+    return {
+      type,
+      isLvalue: false,
+      row: node.row,
+      run: (frame) => {
+        const place = location(frame) as Ptr;
+        const { value, next } = nextVariadicArgument(place.read() as Ptr, type);
+        place.write(next);
+        return value;
+      },
+    };
+  }
+
+  /**
+   * `typeid(T)` or `typeid(e)`: the `std::type_info` of a type, or of the dynamic type of a polymorphic object, which
+   * names the type as Apple clang++ does (C++20 [expr.typeid]).
+   */
+  private typeidExpression(node: Syntax): Expr {
+    const { row } = node;
+    const typeInfo = this.findStdName('type_info');
+    if (typeInfo?.kind !== 'class') return this.error(row, 'typeid を使うには #include <typeinfo> を書いてください。');
+    const { cls } = typeInfo;
+    const result = { type: withConst(classType(cls)), isLvalue: true, row };
+    const typeNode = fieldOf(node, 'type');
+    if (typeNode) {
+      const type = this.typeDescriptor(typeNode);
+      return { ...result, run: (frame) => typeInfoObject(frame, cls, type, row) };
+    }
+    const valueNode = fieldOf(node, 'value') as Syntax;
+    // `typeid(Base)` names a type with a name the grammar reads as an expression.
+    const named = this.expressionAsType(valueNode);
+    if (named) return { ...result, run: (frame) => typeInfoObject(frame, cls, named, row) };
+    const probe = this.unevaluated(() => this.compileExpression(valueNode));
+    const operandType = probe.type;
+    if (!(probe.isLvalue && operandType.kind === 'class' && operandType.cls.isPolymorphic))
+      return { ...result, run: (frame) => typeInfoObject(frame, cls, operandType, row) };
+    // A polymorphic glvalue's typeid names the dynamic type of the object, which runs the operand.
+    const operand = this.compileExpression(valueNode).run;
+    return {
+      ...result,
+      run: (frame) => {
+        const object = (operand(frame) as Ptr).read();
+        const dynamic = object instanceof CObject ? classType(outermostObject(object).cls) : operandType;
+        return typeInfoObject(frame, cls, dynamic, row);
+      },
+    };
+  }
+
+  /** A type-trait builtin (`__is_class(T)`), a constant that tells whether its types have a property. */
+  private typeTrait(name: string, argNodes: readonly Syntax[], row: number): Expr {
+    const typeOf = (node: Syntax): Type =>
+      this.expressionAsType(node) ?? this.error(row, `${name} の引数には型を書いてください（${node.text}）。`);
+    const types = argNodes.map((arg) => (arg.type === PACK_ELEMENT ? withPackElement(this, arg, typeOf) : typeOf(arg)));
+    if (Object.hasOwn(TYPE_QUERIES, name))
+      return constantExpr(SIZE_T, BigInt(TYPE_QUERIES[name](this as never, types, row)), row);
+    return constantExpr(BOOL, Number(TYPE_TRAITS[name](this as never, types, row)), row);
+  }
+
+  /** The expression or initializer that direct-initializes an object of a type from arguments (`T(args...)`). */
+  directInitialization(type: Type, args: Expr[], row: number): Expr | Initializer {
+    if (type.kind === 'class') return this.constructObject(type.cls, args, row, false);
+    if (args.length === 0) return this.valueInitialized(type, row);
+    if (args.length === 1) return this.convert(this.directInitializerArgument(type, args[0]), type, row);
+    return this.error(row, `${typeName(type)} は値1つで初期化してください。`);
+  }
+
   private callExpression(node: Syntax): Expr {
     const functionNode = fieldOf(node, 'function') as Syntax;
     const argsNode = fieldOf(node, 'arguments') as Syntax;
-    const argNodes = argsNode.children;
+    const argNodes = expandPacks(this, argsNode.children);
     const isUnqualified = functionNode.type === 'identifier';
+    if (isUnqualified && VARIADIC_MACROS.has(functionNode.text) && this.library.isFunctionMacro(functionNode.text))
+      return this.variadicMacro(functionNode.text, argNodes, node.row);
     if (isUnqualified && this.library.isFunctionMacro(functionNode.text))
       return this.unsupported(functionNode.row, `マクロ（${functionNode.text}）`);
+    // The grammar reads the `noexcept(e)` operator as a call.
+    if (functionNode.type === 'identifier' && functionNode.text === 'noexcept' && argNodes.length === 1)
+      return this.noexceptOperator(argNodes[0], node.row);
+    if (
+      isUnqualified &&
+      (Object.hasOwn(TYPE_TRAITS, functionNode.text) || Object.hasOwn(TYPE_QUERIES, functionNode.text))
+    )
+      return this.typeTrait(functionNode.text, argNodes, node.row);
+    const cast = this.utilityCast(functionNode, argNodes, node.row);
+    if (cast) return cast;
+    // `Box(5)` makes an instance of a class template, deducing its arguments from the call's.
+    if (this.namedClassTemplate(functionNode)) {
+      const args = argNodes.map((arg) => this.argument(arg));
+      const deduced = this.withDeducedClass(functionNode, args, () => this.resolveTypeSpecifier(functionNode));
+      if (deduced.kind === 'class') return this.constructObject(deduced.cls, args, node.row, false);
+    }
     const typeTarget = this.callTypeTarget(functionNode);
     if (typeTarget) {
       if (argNodes.length === 1 && typeTarget.kind !== 'class') {
@@ -1709,6 +2758,56 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.callWith(callee, args, node.row, isUnqualified);
   }
 
+  /**
+   * `noexcept(e)`, which tells whether an unevaluated expression may throw: whether it calls a function that may, or
+   * makes an object with `new` or `throw` (C++20 [expr.unary.noexcept]).
+   */
+  private noexceptOperator(operand: Syntax, row: number): Expr {
+    const previous = { probe: this.noexceptProbe, unevaluated: this.isUnevaluated };
+    const probe = { mayThrow: false };
+    this.noexceptProbe = probe;
+    this.isUnevaluated = true;
+    try {
+      this.compileExpression(operand);
+    } finally {
+      this.noexceptProbe = previous.probe;
+      this.isUnevaluated = previous.unevaluated;
+    }
+    return constantExpr(BOOL, probe.mayThrow ? 0 : 1, row);
+  }
+
+  /**
+   * `std::move(x)`, `std::forward<T>(x)`, and `std::as_const(x)` of `<utility>`, which only change the value category
+   * or the constness of their argument (C++20 [utility]).
+   */
+  private utilityCast(functionNode: Syntax, argNodes: readonly Syntax[], row: number): Expr | undefined {
+    const qualified = functionNode.type === 'qualified_identifier' && fieldOf(functionNode, 'scope')?.text === 'std';
+    const named = qualified ? (fieldOf(functionNode, 'name') as Syntax) : functionNode;
+    const plain = named.type === 'template_function' ? (fieldOf(named, 'name') as Syntax) : named;
+    if (!['move', 'forward', 'as_const'].includes(plain.text) || argNodes.length !== 1) return undefined;
+    // An unqualified name means std's only through `using namespace std;` with nothing else of that name.
+    if (!qualified) {
+      const entity = this.findName(plain.text);
+      if (entity?.kind !== 'functions' || entity.functions.some((fn) => !fn.native)) return undefined;
+    }
+    const arg = this.compileExpression(argNodes[0]);
+    if (arg.functions) return undefined;
+    if (plain.text === 'as_const') {
+      if (!arg.isLvalue || arg.isXvalue) return this.error(row, 'std::as_const には左辺値を渡してください。');
+      return { ...arg, type: withConst(arg.type), onlyCalls: true };
+    }
+    if (plain.text === 'move') {
+      if (!arg.isLvalue) return { ...this.materialize(arg), isXvalue: true, onlyCalls: true };
+      return { ...arg, isXvalue: true, onlyCalls: true };
+    }
+    const list = named.type === 'template_function' ? fieldOf(named, 'arguments') : undefined;
+    if (!list) return this.error(row, 'std::forward には <型> でテンプレート引数を書いてください。');
+    const [type] = this.templateArguments(list);
+    const isLvalue = type?.kind === 'reference' && !type.isRvalue;
+    const value = arg.isLvalue ? arg : this.materialize(arg);
+    return { ...value, isXvalue: isLvalue ? undefined : true, onlyCalls: true };
+  }
+
   /** The type a call's function names, when the call is a functional cast `T(...)` rather than a function call. */
   private callTypeTarget(node: Syntax): Type | undefined {
     if (node.type === 'primitive_type' || node.type === 'sized_type_specifier' || node.type === 'template_type') {
@@ -1716,7 +2815,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (node.type === 'template_function') {
       const name = fieldOf(node, 'name') as Syntax;
-      const entity = name.type === 'qualified_identifier' ? this.lookupQualified(name) : this.findName(name.text);
+      const found = name.type === 'qualified_identifier' ? this.lookupQualified(name) : this.findName(name.text);
+      const entity = found && asTemplate(found);
       if (entity?.kind === 'template') {
         return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
       }
@@ -1738,6 +2838,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** An argument of a call, which may be a braced list only for parameters whose type the call decides. */
   argument(node: Syntax): Expr {
+    if (node.type === PACK_ELEMENT) return withPackElement(this, node, (pattern) => this.argument(pattern));
     if (node.type === 'initializer_list') {
       return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: () => {}, braced: node };
     }
@@ -1752,7 +2853,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const result = object.type.cls.library.memberCall(this, object, candidates.name, args, row);
       if (result) return result;
     }
+    if (callee.boundMember) return this.callThroughMemberPointer(callee.boundMember, args, row);
     if (!candidates) {
+      const pointee = callee.type.kind === 'pointer' ? callee.type.to : callee.type;
+      if (pointee.kind === 'function') return this.callThroughPointer(callee, pointee, args, row);
+      if (callee.type.kind === 'class' && !callee.type.cls.library) {
+        const overloaded = overloadedOperator(this, '()', [callee, ...args], row);
+        if (overloaded) return overloaded.expr;
+        const calls = memberOperators(callee.type.cls, 'operator()');
+        if (calls.length > 0) this.resolve(`${typeName(callee.type)} の operator()`, calls, args, callee, row);
+        return this.error(
+          row,
+          `${typeName(callee.type)} 型の値は関数として呼び出せません（operator() がありません）。`
+        );
+      }
       if (callee.type.kind === 'class' && callee.type.cls.library?.call) {
         const result = callee.type.cls.library.call(this, callee, args, row);
         if (result) return result;
@@ -1776,6 +2890,94 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.callExpr(resolved, args, object, row, candidates.isQualified === true);
   }
 
+  /** Calls the function a pointer to a function points to, with the arguments its type takes. */
+  /** `(object.*member)(args)`, which calls the member function the pointer designates, its final overrider. */
+  private callThroughMemberPointer(bound: NonNullable<Expr['boundMember']>, args: Expr[], row: number): Expr {
+    const memberType = bound.member.type as Extract<Type, { kind: 'memberPointer' }>;
+    const type = memberType.to as Extract<Type, { kind: 'function' }>;
+    if (isConstType(bound.object.type) && !type.isConstMember)
+      return this.error(row, `const のオブジェクトで、const でないメンバ関数（${typeName(memberType)}）は呼べません。`);
+    const signature: FunctionInfo = { ...this.pointerSignature(type, typeName(memberType), row), isStatic: false };
+    const resolved = this.resolve(`メンバへのポインタ（${typeName(memberType)}）`, [signature], args, undefined, row);
+    const argRuns = this.callArguments(signature, this.convertArguments(resolved, args), row);
+    const object = bound.object.run;
+    const member = bound.member.run;
+    const isReference = type.ret.kind === 'reference';
+    const result = nonReference(type.ret);
+    return {
+      type: result,
+      isLvalue: isReference,
+      row,
+      onlyCalls: true,
+      isTemporaryObject: !isReference && result.kind === 'class',
+      run: (frame) =>
+        holdAll(frame, [object, member, ...argRuns], ([receiver, pointer, ...values]) => {
+          const fn = (pointer as MemberPointer).fn;
+          if (!fn) throw new CppRuntimeError('nullAccess');
+          return this.prepareInvocation(fn, row)(frame, values, receiver as Ptr);
+        }),
+    };
+  }
+
+  private pointerSignature(type: Extract<Type, { kind: 'function' }>, displayName: string, row: number): FunctionInfo {
+    return {
+      name: '(関数ポインタ)',
+      displayName,
+      params: type.params.map((param) => ({ name: undefined, type: param, row })),
+      ret: type.ret,
+      isStatic: true,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: false,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+    };
+  }
+
+  private callThroughPointer(callee: Expr, type: Extract<Type, { kind: 'function' }>, args: Expr[], row: number): Expr {
+    const signature: FunctionInfo = {
+      name: '(関数ポインタ)',
+      displayName: typeName(callee.type),
+      params: type.params.map((param) => ({ name: undefined, type: param, row })),
+      ret: type.ret,
+      isStatic: true,
+      isVirtual: false,
+      isConst: false,
+      isPure: false,
+      isConstructor: false,
+      isDestructor: false,
+      isOverride: false,
+      isFinal: false,
+      access: 'public',
+      row,
+      isAtomic: false,
+      isDefined: true,
+    };
+    const resolved = this.resolve(`関数ポインタ（${typeName(callee.type)}）`, [signature], args, undefined, row);
+    const argRuns = this.callArguments(signature, this.convertArguments(resolved, args), row);
+    const target = this.rvalue(callee).run;
+    const isReference = type.ret.kind === 'reference';
+    const result = nonReference(type.ret);
+    return {
+      type: result,
+      isLvalue: isReference,
+      row,
+      onlyCalls: true,
+      isTemporaryObject: !isReference && result.kind === 'class',
+      run: (frame) =>
+        holdAll(frame, [target, ...argRuns], ([pointer, ...values]) => {
+          if (!(pointer instanceof FunctionRef)) throw new CppRuntimeError('nullAccess');
+          return invoke(frame, pointer.candidates[0], values, undefined, row, true);
+        }),
+    };
+  }
+
   callCallback(candidates: FunctionCandidates, args: Expr[], row: number): Expr {
     const resolved = this.resolve('関数', candidates.candidates, args, undefined, row, candidates.templateArgs, true);
     const { fn } = resolved;
@@ -1787,6 +2989,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.withLibraryAccess(() => this.callExpr(resolved, args, undefined, row));
   }
 
+  /** A concept-id used as an expression (`std::integral<int>`), which is a constant of type `bool`. */
+  protected abstract conceptId(node: Syntax): Expr | undefined;
+  abstract isInitializerList(cls: ClassInfo): boolean;
+  protected abstract instantiateVariableTemplate(info: ClassTemplateInfo, written: Type[], row: number): Entity;
+
+  /** A lambda expression's closure object. */
+  abstract lambdaExpression(node: Syntax): Expr;
+
+  /** The non-member operator functions an operator expression may call, as unqualified lookup finds them. */
+  nonMemberOperators(name: string, operands: Expr[]): FunctionInfo[] {
+    const entity = this.findNonMemberName(name);
+    const found = entity?.kind === 'functions' ? entity.functions.filter((fn) => !fn.owner && !fn.native) : [];
+    return this.withArgumentDependentLookup(name, found, operands).filter((fn) => !fn.owner && !fn.native);
+  }
+
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */
   protected abstract withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[];
 
@@ -1796,7 +3013,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const binding = implicitConversion(this, arg, to, false);
       if (binding) return { ...binding, apply: () => binding.apply(arg) };
     }
-    if (to.kind === 'reference' && !isConstType(to.to)) return undefined;
+    // A braced list binds a const lvalue reference or an rvalue reference to a temporary (C++20 [dcl.init.list]p3.10).
+    if (to.kind === 'reference' && !to.isRvalue && !isConstType(to.to)) return undefined;
     const type = unqualified(nonReference(to));
     let value: Expr;
     try {
@@ -1810,10 +3028,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return sequence(rank, () => (to.kind === 'reference' ? this.materialize(value) : value));
   }
 
-  protected listReferenceValue(list: Syntax, referent: Type, direct: boolean): Expr | undefined {
+  protected listReferenceValue(
+    list: Syntax,
+    reference: Extract<Type, { kind: 'reference' }>,
+    direct: boolean
+  ): Expr | undefined {
+    const referent = reference.to;
     const target = this.singleListExpression(list);
     if (target && isReferenceRelated(target.type, referent)) return target;
-    if (isConstType(referent)) return this.listValue(unqualified(referent), list, direct);
+    if (reference.isRvalue || isConstType(referent)) return this.listValue(unqualified(referent), list, direct);
   }
 
   private singleListExpression(list: Syntax): Expr | undefined {
@@ -1836,6 +3059,37 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantInitialization: initialize.isConstant,
       constantStringLength: initialize.constantStringLength,
       isTemporaryObject: type.kind === 'class',
+    };
+  }
+
+  /** `2.5i`, a `std::complex` whose imaginary part is the number (C++20 [complex.literals]). */
+  private imaginaryLiteral(suffix: string, literal: Syntax, row: number): Expr {
+    const entity = this.findStdName('complex');
+    const template = entity?.kind === 'template' ? entity.template.program : undefined;
+    if (template?.kind !== 'class')
+      return this.error(row, '虚数のリテラルを使うには #include <complex> を書いてください。');
+    const part = suffix === 'if' ? FLOAT : suffix === 'il' ? LDOUBLE : DOUBLE;
+    const type = this.instantiateClassTemplate(template, [part], row) as Extract<Type, { kind: 'class' }>;
+    const value = this.convert(this.compileExpression(literal), part, row);
+    return this.constructObject(type.cls, [constantExpr(part, 0, row), value], row, false);
+  }
+
+  /** A node that stands for an expression already compiled, in code the interpreter writes. */
+  protected compiledSyntax(expr: Expr): Syntax {
+    const text = `\0compiled ${this.compiledExpressions.size}`;
+    this.compiledExpressions.set(text, expr);
+    const { row } = expr;
+    return {
+      type: 'compiled_expression',
+      text,
+      row,
+      endRow: row,
+      start: 0,
+      end: 0,
+      isNamed: true,
+      field: undefined,
+      all: [],
+      children: [],
     };
   }
 
@@ -1885,6 +3139,19 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         `${cls.name} には、引数（${args.map((arg) => typeName(arg.type)).join(', ')}）をとるコンストラクタがありません。`
       );
+    }
+    // A library container takes a `std::initializer_list` as the range of its elements.
+    const [only] = args;
+    if (cls.library && args.length === 1 && only.type.kind === 'class' && this.isInitializerList(only.type.cls)) {
+      const range = this.materialize(only);
+      const ends = ['begin', 'end'].map((end) => this.callWith(this.member(range, end, row), [], row));
+      return this.constructArguments(cls, ends, row, isBraced);
+    }
+    // A library class takes an object of the program's class through the class's conversion function.
+    if (cls.library && args.length === 1 && only.type.kind === 'class' && !only.type.cls.library) {
+      const conversions = [...only.type.cls.methods.values()].flat().filter((fn) => fn.isConversion);
+      const conversion = conversions.length > 0 ? implicitConversion(this, only, classType(cls)) : undefined;
+      if (conversion) return conversion.apply(only);
     }
     const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, row);
     return this.constructWith(cls, resolved, args, row);
@@ -1938,7 +3205,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   // new and delete ---------------------------------------------------------------------------------------------------
 
   private newExpression(node: Syntax): Expr {
-    if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
+    if (this.noexceptProbe) this.noexceptProbe.mayThrow = true;
+    const placement = this.placementOf(node);
     let baseType = this.specifiedType(node, true);
     let declarator = fieldOf(node, 'declarator');
     for (; declarator?.type === 'abstract_pointer_declarator'; declarator = fieldOf(declarator, 'declarator'))
@@ -1961,6 +3229,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       let elementType = baseType;
       for (const length of lengths.slice(1).toReversed())
         elementType = { kind: 'array', of: elementType, length: this.arrayLength(length) };
+      if (placement) return this.unsupported(node.row, '配列の配置 new（new (場所) 型[要素の数]）');
       return this.newArray(elementType, lengths[0], argsNode, node.row);
     }
     if (baseType.kind === 'void') return this.error(node.row, 'void のオブジェクトは new で作れません。');
@@ -1970,7 +3239,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     else if (argsNode.type === 'initializer_list') {
       initialize = this.listInitializer(type, argsNode, node.row, true);
     } else {
-      const args = argsNode.children.map((arg) => this.argument(arg));
+      const args = expandPacks(this, argsNode.children).map((arg) => this.argument(arg));
       if (type.kind === 'class')
         initialize = this.copyInitializer(type, this.constructObject(type.cls, args, node.row, false), node.row, false);
       else if (args.length === 0) initialize = this.valueInitialized(type, node.row).run as Eval<Value>;
@@ -1978,6 +3247,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         initialize = this.convert(this.directInitializerArgument(type, args[0]), type, node.row).run as Eval<Value>;
       else return this.error(node.row, `new ${typeName(type)}(...) には値を1つだけ書いてください。`);
     }
+    if (placement) return this.placementNew(placement, type, initialize, node.row);
     return {
       type: pointerTo(baseType),
       isLvalue: false,
@@ -1999,6 +3269,45 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             throw error;
           }
         });
+      },
+    };
+  }
+
+  /**
+   * The pointer a placement `new (p) T` makes its object at, or undefined for an ordinary `new`, which
+   * `new (std::nothrow) T` is too, since allocation never fails.
+   */
+  private placementOf(node: Syntax): Expr | undefined {
+    const placement = fieldOf(node, 'placement');
+    if (!placement) return undefined;
+    const args = placement.children;
+    if (args.length === 1 && /^(?:std::)?nothrow$/.test(args[0].text.replaceAll(/\s/g, ''))) return undefined;
+    if (args.length !== 1) return this.unsupported(node.row, '引数が2つ以上の配置 new');
+    const pointer = this.rvalue(this.compileExpression(args[0]));
+    if (pointer.type.kind !== 'pointer')
+      return this.error(node.row, `配置 new の場所には、ポインタを書いてください（${typeName(pointer.type)}）。`);
+    return pointer;
+  }
+
+  /** `new (p) T(...)`, which makes an object of `T` where `p` points, as the object of `T` that was there. */
+  private placementNew(pointer: Expr, type: Type, initialize: Initializer, row: number): Expr {
+    const pointee = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
+    if (pointee.kind !== 'void' && !sameType(unqualified(pointee), type, false))
+      return this.unsupported(row, `${typeName(pointee)} の場所に ${typeName(type)} を作る配置 new`);
+    const place = pointer.run;
+    return {
+      type: pointerTo(type),
+      isLvalue: false,
+      row,
+      onlyCalls: type.kind === 'class',
+      run: (frame) => {
+        const written = place(frame) as Ptr;
+        if (written.isNull) throw new CppRuntimeError('nullAccess');
+        const location = pointee.kind === 'void' ? recoverPointee(written, type) : written;
+        initializeAt(frame, type, location, location.readRaw(), (target) =>
+          initialize(frame, target, false, 'full-expression')
+        );
+        return location;
       },
     };
   }
@@ -2076,6 +3385,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The value copy-initialization gives an object of a type; `isList` checks for narrowing conversions. */
   abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Initializer;
+  /** `std::hash<T>` for a type, which the program may specialize. */
+  abstract stdHash(type: Type): Type;
+  abstract instantiateClassTemplate(info: ClassTemplateInfo, written: Type[], row: number): Type;
+  /** Whether the code being compiled is the library's C++ source, in `std`. */
+  abstract readonly isLibraryCode: boolean;
 
   /** The value default-initialization gives an object of a type. */
   abstract defaultInitializer(type: Type, row: number): Initializer;
@@ -2125,10 +3439,19 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** The type of an `auto` variable, deduced from its initializer as a function template parameter would be. */
   deduceAuto(declared: Type, init: Expr, row: number): Type {
     if (!hasAuto(declared)) return declared;
-    if (init.functions) return this.unsupported(row, '関数ポインタ');
+    if (init.functions) {
+      // A function's name decays to a pointer to the function, which must be the only one of that name.
+      const [fn, ...others] = init.functions.candidates;
+      if (others.length > 0)
+        return this.error(row, `${init.functions.name} はオーバーロードされているので、auto の型が決まりません。`);
+      if (fn.owner && !fn.isStatic)
+        return this.error(row, 'メンバ関数へのポインタは、&クラス名::関数名 と書いて作ってください。');
+      return this.deduceAutoPattern(declared, pointerTo(functionTypeOf(fn)), row);
+    }
     if (init.type.kind === 'void')
       return this.error(row, 'auto の変数の初期値に、値を返さない関数（void）の結果は使えません。');
-    const decayed = init.type.kind === 'array' ? pointerTo(init.type.of) : unqualified(init.type);
+    const decayed =
+      init.type.kind === 'array' && !this.deducesArrays ? pointerTo(init.type.of) : unqualified(init.type);
     return this.deduceAutoPattern(declared, decayed, row);
   }
 
@@ -2208,7 +3531,9 @@ function combinedPointee(left: Type, right: Type): Type | undefined {
 
 const isPointerLike = (type: Type): boolean => type.kind === 'pointer' || type.kind === 'nullptr';
 
-const asPointer = (value: unknown): Ptr => (value instanceof Ptr ? value : NULL_PTR);
+/** A pointer's value; a pointer to a function, which only `==` and `!=` compare, keeps its function. */
+const asPointer = (value: unknown): Ptr =>
+  value instanceof Ptr || value instanceof FunctionRef ? (value as Ptr) : NULL_PTR;
 
 const ALTERNATIVE_TOKENS: Record<string, string> = {
   and: '&&',
@@ -2242,7 +3567,7 @@ function signedByte(code: number): number {
 }
 
 /** The location of the object a member function runs for. */
-function thisLocation(frame: Frame): Ptr {
+export function thisLocation(frame: Frame): Ptr {
   return frame.self as Ptr;
 }
 
@@ -2301,7 +3626,8 @@ function isConstantObject(object: Expr | undefined): boolean {
 function downcastLocation(location: Ptr, to: ClassInfo): Ptr {
   const object = location.read();
   let view: Ptr | undefined;
-  if (object instanceof CObject) view = object.cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
+  if (object instanceof CObject)
+    view = outermostObject(object).cls.isDerivedFrom(to) ? location.forClass(to) : undefined;
   else if (object instanceof Store) view = object.classView(location, to);
   if (!view) throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
   return view;
@@ -2316,3 +3642,71 @@ function virtualBaseBetween(derived: ClassInfo, base: ClassInfo): ClassInfo | un
     if (found) return found;
   }
 }
+
+/**
+ * The promotion of a bit-field's type that its width allows: int when int holds every value of the width, else
+ * unsigned int when that does, else none beyond its type's own (C++20 [conv.prom]).
+ */
+function bitFieldPromotionOf(type: Type, width: number): Extract<Type, { kind: 'int' }> | undefined {
+  if (type.kind !== 'int' || type.enumeration || sizeOf(type) < 4) return undefined;
+  const signed = isSigned(type);
+  if (width < 32 || (signed && width === 32)) return INT;
+  if (width === 32) return { kind: 'int', name: 'uint' };
+  return undefined;
+}
+
+/** A bit-field's value after the promotion its width allows, or another value as it is. */
+function promoteBitField(expr: Expr): Expr {
+  const promotion = expr.bitFieldPromotion;
+  if (!promotion || expr.isLvalue) return expr;
+  return { ...convertArithmetic(expr, promotion), bitFieldPromotion: undefined };
+}
+
+/** Whether a class or one of its bases declares a member of a name, through its virtual bases only `withVirtual`. */
+export function hasMemberNamed(cls: ClassInfo, name: string, withVirtual = true): boolean {
+  for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
+    if (owner.ownFields.some((field) => field.name === name) || owner.methods.has(name)) return true;
+    if (owner.staticFields.has(name) || owner.constants.has(name) || owner.memberTypes.has(name)) return true;
+    for (const secondary of owner.secondaryBases)
+      if ((withVirtual || !secondary.isVirtual) && hasMemberNamed(secondary.cls, name, withVirtual)) return true;
+    if (withVirtual && owner.directVirtualBases.some((base) => hasMemberNamed(base.cls, name))) return true;
+  }
+  return false;
+}
+
+const typeInfoObjects = new WeakMap<object, Map<string, Ptr>>();
+
+/**
+ * The `std::type_info` object that names a type, one for each name in a run of a program, which names the type when a
+ * program first asks, since a type the interpreter cannot name stops only the program that asks.
+ */
+function typeInfoObject(frame: Frame, cls: ClassInfo, type: Type, row: number): Ptr {
+  let name: string;
+  try {
+    name = typeInfoName(type, row);
+  } catch (error) {
+    if (error instanceof CompileError) throw new CppRuntimeError('custom', error.diagnostics[0]?.message);
+    throw error;
+  }
+  let objects = typeInfoObjects.get(frame.runtime);
+  if (!objects) {
+    objects = new Map();
+    typeInfoObjects.set(frame.runtime, objects);
+  }
+  let location = objects.get(name);
+  if (!location) {
+    const object = new CObject(
+      cls,
+      cls.fields.map(() => UNINIT)
+    );
+    object.values[0] = new Ptr(cStringStore(name), 0);
+    const box = new Box(object);
+    location = box.location(0);
+    object.completeLocation = location;
+    objects.set(name, location);
+  }
+  return location;
+}
+
+/** The macros of `<cstdarg>` that the compiler gives the meaning of. */
+const VARIADIC_MACROS = new Set(['va_start', 'va_end', 'va_copy']);

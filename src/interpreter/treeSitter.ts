@@ -30,11 +30,14 @@ export function parseSource<T>(
     tooDeepMessage = NESTING_TOO_DEEP,
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
     progress,
+    acceptsMissing,
   }: {
     maxNestingDepth?: number;
     tooDeepMessage?: string;
     locateErrors?: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[];
     progress?: (cost?: number) => void;
+    /** Whether a token the parser inserted stands for something the language lets a program leave out. */
+    acceptsMissing?: (node: Node) => boolean;
   } = {}
 ): T {
   let parsingFailure: { error: unknown } | undefined;
@@ -63,12 +66,12 @@ export function parseSource<T>(
     assertNestingDepth(tree.rootNode, maxNestingDepth, tooDeepMessage, progress);
     const syntaxErrors = locateErrors(
       tree.rootNode,
-      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, progress)
+      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, progress, acceptsMissing)
     );
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
-    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, progress);
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, progress, acceptsMissing);
     if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
     return converted;
   } finally {
@@ -154,11 +157,17 @@ function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
   includeHidden: boolean,
-  progress?: (cost?: number) => void
+  progress?: (cost?: number) => void,
+  acceptsMissing?: (node: Node) => boolean
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
+  const isAccepted = (node: Node): boolean =>
+    acceptsMissing !== undefined &&
+    !node.isError &&
+    (node.isMissing ? acceptsMissing(node) : node.children.every((child) => !child.hasError || isAccepted(child)));
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
+    if (node.hasError && isAccepted(node)) return;
     const own = ownError(node, missingTokenNames);
     if (own) {
       errors.push(own);

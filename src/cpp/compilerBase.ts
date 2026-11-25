@@ -1,16 +1,24 @@
+import { enumeratorEntity, enumSpecifierType } from './enums';
 import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
 import { isSdkMemberDeclared } from './library/libcGlobals';
 import type { Library, LibraryTemplate } from './library/registry';
-import { type Entity, FunctionContext, Scope } from './scopes';
-import { fieldOf, hasToken, type Syntax } from './syntax';
+import { expandPacks, PACK_ELEMENT, withPackElement } from './packs';
+import type { Eval } from './runtime';
+import { type Entity, FunctionContext, type NamespaceInfo, Scope } from './scopes';
+import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
+  CHARACTER_TYPES,
+  type CharacterTypeName,
   ClassInfo,
   classType,
+  type EnumInfo,
   type GlobalInfo,
   type IntName,
+  isArithmetic,
   pointerTo,
   referenceTo,
+  sameType,
   type Type,
   typeName,
   VOID,
@@ -29,13 +37,34 @@ export interface Declared {
 
 /** The parts of the compiler that every other part uses: messages, scopes, names, and types. */
 export abstract class CompilerBase {
-  readonly globalScope = new Scope();
+  /** The global namespace's scope. */
+  readonly rootScope = new Scope();
+  /** The namespace whose declarations are compiled now, or undefined for the global namespace. */
+  namespace: NamespaceInfo | undefined;
+  /** The bindings of the parameters of the template instances whose declarations are compiled now. */
+  templateScopes: Scope[] = [];
+
+  /** The scope of the namespace whose declarations are compiled now. */
+  get globalScope(): Scope {
+    return this.namespace?.scope ?? this.rootScope;
+  }
   /** The names `using namespace std;` makes visible, in effect after it appears. */
   usesStd = false;
   readonly globals: GlobalInfo[] = [];
   context: FunctionContext = new FunctionContext(undefined, undefined, VOID);
   /** The class whose member declarations are being compiled, whose members are in scope. */
   memberClass: ClassInfo | undefined;
+  /** Whether an array declarator may have a length that is no constant, as a local variable's may (a clang extension). */
+  protected allowsVariableLength = false;
+  /** The row of the program's statement or declaration compiled last, where errors in the library's code show. */
+  protected userRow = 0;
+  /** The class that a class template's name without arguments, at the type node, denotes after deduction. */
+  private deducedClass?: { node: Syntax; type: Type };
+  /**
+   * The lambda expressions of the declaration compiled now whose closure types deduced a class template's arguments,
+   * which the declaration's initialization uses as they are, since each compilation of a lambda makes a new type.
+   */
+  protected deducingLambdas?: Map<Syntax, Expr>;
 
   constructor(protected readonly library: Library) {}
 
@@ -62,11 +91,19 @@ export abstract class CompilerBase {
   findName(name: string, typeOnly = false): Entity | undefined {
     const local = this.context.lookupLocal(name, typeOnly ? isTypeName : undefined);
     if (local) return local;
-    for (let cls = this.enclosingClass; cls; cls = cls.base) {
-      const member = this.memberEntity(cls, name);
-      if (member && (!typeOnly || isTypeName(member))) return member;
-      if (name === cls.name) return { kind: 'class', cls };
+    const captured = this.context.captures?.lookup(name);
+    if (captured && (!typeOnly || isTypeName(captured))) return captured;
+    for (let index = this.templateScopes.length - 1; index >= 0; index--) {
+      const bound = this.templateScopes[index].names.get(name);
+      if (bound && (!typeOnly || isTypeName(bound))) return bound;
     }
+    // A nested class's members see its own members, then those of the classes it is nested in.
+    for (let outer = this.enclosingClass; outer; outer = outer.outer) {
+      const member = this.inheritedMember(outer, name, typeOnly);
+      if (member) return member;
+    }
+    const inNamespace = this.findInNamespaces(name);
+    if (inNamespace && (!typeOnly || isTypeName(inNamespace))) return inNamespace;
     if (typeOnly) {
       const global = this.typeOnlyGlobalName(name);
       if (global) return global;
@@ -76,6 +113,37 @@ export abstract class CompilerBase {
     return this.findGlobalName(name);
   }
 
+  /**
+   * What a name denotes in the namespaces around the code compiled now, short of the global namespace, or through the
+   * `using namespace` directives of its blocks.
+   */
+  private findInNamespaces(name: string): Entity | undefined {
+    const local = this.nominated(
+      this.context.scopes.flatMap((scope) => scope.usings),
+      name
+    );
+    if (local) return local;
+    for (let ns = this.namespace; ns; ns = ns.parent) {
+      const found = ns.member(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** What a name denotes outside every class: in the blocks, the namespaces, and the global namespace. */
+  findNonMemberName(name: string): Entity | undefined {
+    return this.context.lookupLocal(name) ?? this.findInNamespaces(name) ?? this.findGlobalName(name);
+  }
+
+  /** What a name denotes in the namespaces `using namespace` directives nominate. */
+  protected nominated(namespaces: readonly NamespaceInfo[], name: string): Entity | undefined {
+    for (const ns of namespaces) {
+      const found = ns.member(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
   private get hasUsingStd(): boolean {
     return this.usesStd || this.context.scopes.some((scope) => scope.usesStd);
   }
@@ -83,7 +151,7 @@ export abstract class CompilerBase {
   /** Looks a name up in the global namespace, including the names `using` brought in. */
   findGlobalName(name: string): Entity | undefined {
     const found = this.ordinaryGlobalName(name);
-    const own = found === this.globalScope.names.get(name) ? found : undefined;
+    const own = found === this.rootScope.names.get(name) ? found : undefined;
     const usesStd = this.hasUsingStd;
     if (own && usesStd && this.library.conflictsWithStdName(name, own.kind === 'functions')) {
       return { kind: 'ambiguous', name };
@@ -101,7 +169,7 @@ export abstract class CompilerBase {
   }
 
   private ordinaryGlobalName(name: string): Entity | undefined {
-    const own = this.globalScope.names.get(name);
+    const own = this.rootScope.names.get(name) ?? this.nominated(this.rootScope.usings, name);
     const library = this.library.global(name);
     if (own?.kind === 'class' && this.library.hasGlobalDeclaration(name)) {
       return library ?? { kind: 'hiddenClass', cls: own.cls };
@@ -113,19 +181,67 @@ export abstract class CompilerBase {
   }
 
   private typeOnlyGlobalName(name: string): Entity | undefined {
-    const own = this.globalScope.names.get(name);
+    const own = this.rootScope.names.get(name) ?? this.nominated(this.rootScope.usings, name);
     if (own && isTypeName(own)) return own;
     const library = this.library.global(name);
     return library && isTypeName(library) ? library : undefined;
   }
 
   protected findStdName(name: string): Entity | undefined {
-    const std = this.library.std(name);
-    const local = this.globalScope.names.get(name);
+    let std = this.library.std(name);
+    const isNative = std !== undefined && std.kind !== 'unsupported';
+    if ((!isNative || std?.kind === 'functions') && this.library.declaresStd(name)) {
+      const written = this.librarySourceEntity(name);
+      // The library's C++ source adds overloads to the natives' (`std::abs` of a `std::complex`).
+      if (written?.kind === 'functions' && std?.kind === 'functions')
+        std = { kind: 'functions', functions: [...std.functions, ...written.functions] };
+      else if (written && !isNative) return written;
+    }
+    const local = this.rootScope.names.get(name);
     if (std?.kind === 'functions' && local?.kind === 'functions') {
       return { kind: 'functions', functions: this.library.rebindCOverloads(name, std.functions, local.functions) };
     }
     return std;
+  }
+
+  /**
+   * Resolves a type with a class template's name without arguments at `node` (`std::vector v{1, 2};`) as the class an
+   * initializer's arguments deduce, which `deduce` gives (C++20 [over.match.class.deduct]).
+   */
+  protected withDeducedClass<T>(node: Syntax, args: Expr[], resolve: () => T): T {
+    const template = this.namedClassTemplate(node);
+    if (!template) return resolve();
+    const saved = this.deducedClass;
+    this.deducedClass = { node, type: this.deduceClassTemplate(template, args, node.row) };
+    try {
+      return resolve();
+    } finally {
+      this.deducedClass = saved;
+    }
+  }
+
+  /** The class template a type's name names without template arguments, or undefined when it names none. */
+  protected namedClassTemplate(node: Syntax): LibraryTemplate | undefined {
+    if (node.type !== 'type_identifier' && node.type !== 'identifier' && node.type !== 'qualified_identifier')
+      return undefined;
+    const inner = node.type === 'qualified_identifier' ? fieldOf(node, 'name')?.type : undefined;
+    if (inner !== undefined && inner !== 'type_identifier' && inner !== 'identifier') return undefined;
+    let entity: Entity | undefined;
+    try {
+      entity = node.type === 'qualified_identifier' ? this.lookupQualified(node, true) : this.findName(node.text, true);
+    } catch {
+      return undefined;
+    }
+    if (entity?.kind !== 'template') return undefined;
+    const program = entity.template.program;
+    return !program || program.kind === 'class' ? entity.template : undefined;
+  }
+
+  protected abstract deduceClassTemplate(template: LibraryTemplate, args: Expr[], row: number): Type;
+
+  /** What `std::name` denotes when the library defines it in C++ source, which is compiled on its first use. */
+  protected librarySourceEntity(_name: string): Entity | undefined {
+    return undefined;
   }
 
   lookupName(name: string, row: number, typeOnly = false): Entity {
@@ -152,7 +268,9 @@ export abstract class CompilerBase {
 
   /** The member named `name` that a class itself declares, as an entity. */
   memberEntity(cls: ClassInfo, name: string): Entity | undefined {
-    const field = cls.ownFields.find((candidate) => candidate.name === name);
+    const field =
+      cls.ownFields.find((candidate) => candidate.name === name) ??
+      cls.anonymousFields.find((candidate) => candidate.name === name);
     if (field) return { kind: 'field', field };
     const methods = cls.methods.get(name);
     if (methods) return { kind: 'functions', functions: methods };
@@ -164,17 +282,77 @@ export abstract class CompilerBase {
     if (constant) return { kind: 'value', make: constant };
   }
 
+  /** A member of a class or of its bases, the first base's before the others' (C++20 [class.member.lookup]). */
+  private inheritedMember(cls: ClassInfo, name: string, typeOnly: boolean): Entity | undefined {
+    for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+      const member = this.memberEntity(current, name);
+      if (member && (!typeOnly || isTypeName(member))) return member;
+      if (name === current.name) return { kind: 'class', cls: current };
+      for (const secondary of current.secondaryBases) {
+        const inherited = this.inheritedMember(secondary.cls, name, typeOnly);
+        if (inherited) return inherited;
+      }
+    }
+    return undefined;
+  }
+
   /** Looks up `scope::name` for a qualified identifier, its scope being a namespace or a class. */
   lookupQualified(node: Syntax, typeOnly = false): Entity {
     const scopeNode = fieldOf(node, 'scope');
-    const nameNode = fieldOf(node, 'name') as Syntax;
+    const written = fieldOf(node, 'name') as Syntax;
+    // `T::template f<int>` marks a dependent name, which an instance resolves as any other.
+    const nameNode = written.type === 'dependent_name' ? { ...written.children[0], field: 'name' } : written;
     if (!scopeNode) return this.lookupInGlobal(nameNode, typeOnly);
     const scope = this.resolveScope(scopeNode);
+    if (scope.kind === 'namespace' && scope.ns) return this.lookupInProgramNamespace(scope.ns, nameNode, node.row);
     if (scope.kind === 'namespace') return this.lookupInNamespace(nameNode, node.row);
+    if (scope.kind === 'enum') {
+      const enumerator = enumeratorEntity(scope.info, nameNode.text);
+      return (
+        enumerator ?? this.error(node.row, `列挙 ${scope.info.name} に ${nameNode.text} という列挙子はありません。`)
+      );
+    }
     return this.lookupInClass(scope.cls, nameNode, node.row);
   }
 
+  /** Looks up a name, which may be qualified further, as a member of a namespace the program defines. */
+  private lookupInProgramNamespace(ns: NamespaceInfo, nameNode: Syntax, row: number): Entity {
+    if (nameNode.type === 'qualified_identifier') {
+      const scopeNode = fieldOf(nameNode, 'scope') as Syntax;
+      const inner = ns.member(this.plainName(scopeNode));
+      const rest = fieldOf(nameNode, 'name') as Syntax;
+      if (inner?.kind === 'namespace' && inner.ns) return this.lookupInProgramNamespace(inner.ns, rest, row);
+      const cls =
+        inner?.kind === 'class'
+          ? inner.cls
+          : inner?.kind === 'type' && inner.type.kind === 'class'
+            ? inner.type.cls
+            : undefined;
+      if (cls) return this.lookupInClass(cls, rest, row);
+      if (inner?.kind === 'type' && inner.type.kind === 'int' && inner.type.enumeration) {
+        const info = inner.type.enumeration;
+        return (
+          enumeratorEntity(info, rest.text) ??
+          this.error(row, `列挙 ${info.name} に ${rest.text} という列挙子はありません。`)
+        );
+      }
+      return this.error(row, `${ns.qualifiedName}::${scopeNode.text} はクラスでも名前空間でもありません。`);
+    }
+    const name = this.plainName(nameNode);
+    return ns.member(name) ?? this.error(row, `${ns.qualifiedName}::${name} は宣言されていません。`);
+  }
+
   private lookupInGlobal(nameNode: Syntax, typeOnly: boolean): Entity {
+    // `::a::x` names a member of a namespace from the global one.
+    if (nameNode.type === 'qualified_identifier') {
+      const saved = this.namespace;
+      this.namespace = undefined;
+      try {
+        return this.lookupQualified(nameNode, typeOnly);
+      } finally {
+        this.namespace = saved;
+      }
+    }
     const name = this.plainName(nameNode);
     const entity = typeOnly ? this.typeOnlyGlobalName(name) : this.ordinaryGlobalName(name);
     if (!entity) {
@@ -190,14 +368,24 @@ export abstract class CompilerBase {
       const scope = fieldOf(nameNode, 'scope') as Syntax;
       const scopeName = scope.type === 'template_type' ? (fieldOf(scope, 'name') as Syntax) : scope;
       const entity = this.lookupInNamespace(scopeName, row);
+      // `std::numbers::pi` names a member of a namespace of the library's C++ source.
+      if (entity.kind === 'namespace' && entity.ns)
+        return this.lookupInProgramNamespace(entity.ns, fieldOf(nameNode, 'name') as Syntax, row);
       let type: Type | undefined;
       if (entity.kind === 'class') type = classType(entity.cls);
       else if (entity.kind === 'type') type = entity.type;
       else if (entity.kind === 'template' && scope.type === 'template_type') {
         type = this.instantiateTemplate(entity.template, fieldOf(scope, 'arguments') as Syntax, row);
       }
+      const member = fieldOf(nameNode, 'name') as Syntax;
+      // `std::endian::little` names an enumerator of an enumeration of std.
+      if (type?.kind === 'int' && type.enumeration)
+        return (
+          enumeratorEntity(type.enumeration, member.text) ??
+          this.error(row, `列挙 ${type.enumeration.name} に ${member.text} という列挙子はありません。`)
+        );
       if (type?.kind !== 'class') return this.unsupported(row, '入れ子の名前空間');
-      return this.lookupInClass(type.cls, fieldOf(nameNode, 'name') as Syntax, row);
+      return this.lookupInClass(type.cls, member, row);
     }
     const name = this.plainName(nameNode);
     const entity = this.findStdName(name);
@@ -211,11 +399,19 @@ export abstract class CompilerBase {
     return entity;
   }
 
-  private lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
+  protected lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
     if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     this.checkLibraryLayout(classType(cls), row);
     if (nameNode.type === 'qualified_identifier') {
       const inner = this.lookupInClass(cls, fieldOf(nameNode, 'scope') as Syntax, row);
+      const innerName = fieldOf(nameNode, 'name') as Syntax;
+      if (inner.kind === 'type' && inner.type.kind === 'int' && inner.type.enumeration) {
+        const info = inner.type.enumeration;
+        return (
+          enumeratorEntity(info, innerName.text) ??
+          this.error(row, `列挙 ${info.name} に ${innerName.text} という列挙子はありません。`)
+        );
+      }
       if (inner.kind !== 'class' && !(inner.kind === 'type' && inner.type.kind === 'class')) {
         return this.error(row, `${nameNode.text} はクラスの中にありません。`);
       }
@@ -254,12 +450,32 @@ export abstract class CompilerBase {
   }
 
   /** The namespace or class a qualified name's scope names. */
-  resolveScope(node: Syntax): { kind: 'namespace' } | { kind: 'class'; cls: ClassInfo } {
-    if (node.type === 'namespace_identifier' && node.text === 'std') return { kind: 'namespace' };
+  resolveScope(
+    node: Syntax
+  ): { kind: 'namespace'; ns?: NamespaceInfo } | { kind: 'class'; cls: ClassInfo } | { kind: 'enum'; info: EnumInfo } {
+    if (
+      (node.type === 'namespace_identifier' || node.type === 'identifier') &&
+      node.text === 'std' &&
+      !this.findInNamespaces('std')
+    )
+      return { kind: 'namespace' };
+    if (node.type === 'qualified_identifier' || node.type === 'nested_namespace_specifier') {
+      const entity =
+        node.type === 'qualified_identifier' ? this.lookupQualified(node, true) : this.nestedNamespace(node);
+      if (entity.kind === 'namespace') return { kind: 'namespace', ns: entity.ns };
+      if (entity.kind === 'class') return { kind: 'class', cls: entity.cls };
+      if (entity.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
+      if (entity.kind === 'type' && entity.type.kind === 'int' && entity.type.enumeration)
+        return { kind: 'enum', info: entity.type.enumeration };
+      return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
+    }
     if (node.type === 'namespace_identifier' || node.type === 'type_identifier' || node.type === 'identifier') {
       const entity = this.findName(node.text, true);
+      if (entity?.kind === 'namespace') return { kind: 'namespace', ns: entity.ns };
       if (entity?.kind === 'class') return { kind: 'class', cls: entity.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
+      if (entity?.kind === 'type' && entity.type.kind === 'int' && entity.type.enumeration)
+        return { kind: 'enum', info: entity.type.enumeration };
       if (!entity) {
         this.checkUnimplementedSdkName(node.text, node.row, 'global');
         if (this.hasUsingStd) this.checkUnimplementedSdkName(node.text, node.row, 'std');
@@ -272,12 +488,143 @@ export abstract class CompilerBase {
     return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
   }
 
+  /** The namespace `a::b` names in a nested namespace specifier. */
+  nestedNamespace(node: Syntax): Entity {
+    let entity: Entity | undefined;
+    for (const part of node.children) {
+      let found: Entity | undefined;
+      if (entity?.kind === 'namespace')
+        // `std::filesystem` names a namespace of the library's C++ source.
+        found = entity.ns ? entity.ns.member(part.text) : this.findStdName(part.text);
+      else if (!entity)
+        found =
+          part.text === 'std' && !this.findInNamespaces('std')
+            ? { kind: 'namespace', name: 'std' }
+            : this.findName(part.text, true);
+      const isLast = part === node.children.at(-1);
+      if (found?.kind !== 'namespace' || (!found.ns && (isLast || entity)))
+        return this.error(part.row, `${part.text} は名前空間ではありません。`);
+      entity = found;
+    }
+    return entity ?? this.error(node.row, '名前空間の名前を書いてください。');
+  }
+
   plainName(node: Syntax): string {
-    if (node.type === 'operator_name') return this.unsupported(node.row, '演算子のオーバーロード（operator）');
+    if (node.type === 'operator_name') return operatorName(node);
+    if (node.type === 'operator_cast') return this.conversionName(node);
     if (node.type === 'template_function' || node.type === 'template_type') {
       return (fieldOf(node, 'name') as Syntax).text;
     }
     return node.text;
+  }
+
+  /** What a name declared in the innermost scope (a block, a class, or the global scope) denotes, if anything. */
+  findDeclaredHere(name: string): Entity | undefined {
+    if (this.context.fn) return this.context.scope.names.get(name);
+    if (this.memberClass) return this.memberEntity(this.memberClass, name);
+    return this.globalScope.names.get(name);
+  }
+
+  /** Declares a type or a constant in the innermost scope: a block, a class, or the global scope. */
+  declareHere(name: string, entity: Entity, row: number): void {
+    this.checkHeaderMacro(name, row);
+    if (this.findDeclaredHere(name)) this.error(row, `${name} はすでに宣言されています。`);
+    if (this.context.fn) {
+      this.context.scope.names.set(name, entity);
+      return;
+    }
+    const cls = this.memberClass;
+    if (cls) {
+      if (entity.kind === 'type') cls.memberTypes.set(name, entity.type);
+      else if (entity.kind === 'class') cls.memberTypes.set(name, classType(entity.cls));
+      else if (entity.kind === 'value') cls.constants.set(name, entity.make);
+      else this.error(row, `${name} はクラスの中では宣言できません。`);
+      return;
+    }
+    this.globalScope.names.set(name, entity);
+  }
+
+  /** Runs `run` where some names denote the given entities, as a pack expansion's element binds its packs. */
+  withBindings<T>(bindings: ReadonlyMap<string, Entity>, run: () => T): T {
+    const scope = new Scope();
+    for (const [name, entity] of bindings) scope.names.set(name, entity);
+    this.context.scopes.push(scope);
+    try {
+      return run();
+    } finally {
+      this.context.scopes.pop();
+    }
+  }
+
+  /** The element of a pack that `xs...[i]` or `Ts...[i]` names, its index being a constant expression. */
+  packElement(node: Syntax): Entity {
+    const packNode = fieldOf(node, 'pack') as Syntax;
+    const pack = this.findName(packNode.text);
+    if (pack?.kind !== 'pack') return this.error(node.row, `${packNode.text} はパラメータパックではありません。`);
+    const index = this.constantValueOf(this.compileExpression(fieldOf(node, 'index') as Syntax));
+    if (index === undefined) return this.error(node.row, 'パックの添字には整数の定数式を書いてください。');
+    const element = pack.items[Number(index)];
+    if (!element || Number(index) < 0)
+      return this.error(node.row, `パック ${packNode.text} の添字 ${index} が範囲を超えています。`);
+    return element;
+  }
+
+  /** Runs `compile` with a scope of names it declares, which only it sees. */
+  withNames(compile: (declare: (name: string, entity: Entity) => void) => void): void {
+    const scope = new Scope();
+    this.context.scopes.push(scope);
+    try {
+      compile((name, entity) => scope.names.set(name, entity));
+    } finally {
+      this.context.scopes.pop();
+    }
+  }
+
+  /** Compiles a declaration that only declares names or checks constants: `typedef`, `using`, or `static_assert`. */
+  declarationOnly(node: Syntax): void {
+    switch (node.type) {
+      case 'type_definition': {
+        const base = this.specifiedType(node);
+        for (const declarator of fieldsOf(node, 'declarator')) {
+          const { name, type } = this.applyDeclarator(base, declarator);
+          if (name === undefined) this.error(declarator.row, 'typedef する名前を書いてください。');
+          this.declareTypeName(name, type, declarator.row);
+        }
+        return;
+      }
+      case 'alias_declaration': {
+        const name = (fieldOf(node, 'name') as Syntax).text;
+        this.declareTypeName(name, this.typeDescriptor(fieldOf(node, 'type') as Syntax), node.row);
+        return;
+      }
+      case 'static_assert_declaration': {
+        this.staticAssert(node);
+        return;
+      }
+      default: {
+        this.error(node.row, `${node.text.split('\n')[0]} は宣言として書けません。`);
+      }
+    }
+  }
+
+  private declareTypeName(name: string, type: Type, row: number): void {
+    const existing = this.findDeclaredHere(name);
+    // A typedef may declare a name again for the same type (C++20 [dcl.typedef]).
+    if (existing?.kind === 'type' && sameType(existing.type, type)) return;
+    if (type.kind === 'class' && type.cls.isUnnamed) type.cls.name = name;
+    this.declareHere(name, { kind: 'type', type }, row);
+  }
+
+  private staticAssert(node: Syntax): void {
+    const conditionNode = fieldOf(node, 'condition') as Syntax;
+    const condition = this.rvalue(this.compileExpression(conditionNode));
+    const value = this.constantValueOf(condition);
+    if (value === undefined || !isArithmetic(condition.type))
+      this.error(node.row, `static_assert の条件（${conditionNode.text}）は定数式でなければなりません。`);
+    if (Number(value) !== 0) return;
+    const message = fieldOf(node, 'message');
+    const detail = message ? `: ${message.text}` : '';
+    this.error(node.row, `static_assert の条件 ${conditionNode.text} が成り立ちません${detail}`);
   }
 
   // Types ----------------------------------------------------------------------------------------------------------
@@ -287,9 +634,10 @@ export abstract class CompilerBase {
     const typeNode = fieldOf(declaration, 'type');
     if (!typeNode) return this.error(declaration.row, '型を書いてください。');
     const type = this.resolveTypeSpecifier(typeNode, allowAuto);
+    // `constexpr` makes a variable const, but not the type a function returns.
     const isConst =
       this.hasSpecifier(declaration, 'const') ||
-      this.isConstexpr(declaration) ||
+      (this.isConstexpr(declaration) && !declaresFunction(declaration)) ||
       (typeNode.type === 'sized_type_specifier' && this.hasSpecifier(typeNode, 'const'));
     return isConst ? withConst(type) : type;
   }
@@ -314,17 +662,26 @@ export abstract class CompilerBase {
   resolveTypeSpecifier(node: Syntax, allowAuto = false, typeOnly = false): Type {
     switch (node.type) {
       case 'primitive_type': {
-        if (WIDE_CHARACTER_TYPES.has(node.text)) return this.unsupported(node.row, `ワイド文字の型（${node.text}）`);
+        if (Object.hasOwn(CHARACTER_TYPES, node.text)) {
+          const character = node.text as CharacterTypeName;
+          return { kind: 'int', name: CHARACTER_TYPES[character], character };
+        }
         return primitiveType(node.text) ?? this.typeOfEntity(this.lookupName(node.text, node.row), node);
       }
       case 'sized_type_specifier': {
         return this.sizedType(node);
       }
       case 'placeholder_type_specifier': {
-        if (fieldOf(node, 'constraint')) return this.unsupported(node.row, 'コンセプトで制約した auto');
-        if (node.children.some((child) => child.type === 'decltype')) return this.unsupported(node.row, 'decltype');
         if (!allowAuto) return this.error(node.row, 'auto は、この場所では型として使えません。');
-        return AUTO;
+        return node.children.some((child) => child.type === 'decltype') ? DECLTYPE_AUTO : AUTO;
+      }
+      case 'decltype': {
+        const operand = node.children[0];
+        if (operand?.type === 'auto') {
+          if (!allowAuto) return this.error(node.row, 'decltype(auto) は、この場所では型として使えません。');
+          return DECLTYPE_AUTO;
+        }
+        return this.decltypeOf(operand as Syntax);
       }
       case 'type_identifier':
       case 'identifier':
@@ -338,8 +695,25 @@ export abstract class CompilerBase {
         return this.templateType(node, this.lookupName((fieldOf(node, 'name') as Syntax).text, node.row, typeOnly));
       }
       case 'class_specifier':
-      case 'struct_specifier': {
+      case 'struct_specifier':
+      case 'union_specifier': {
         return this.classSpecifierType(node);
+      }
+      case 'enum_specifier': {
+        return enumSpecifierType(this, node);
+      }
+      case 'pack_index_type': {
+        const element = this.packElement(node);
+        return this.typeOfEntity(element, fieldOf(node, 'pack') as Syntax);
+      }
+      case 'typeof_specifier': {
+        // `__typeof__(e)` (a GNU extension) names the type of an expression or a type.
+        const operand = node.children[0];
+        if (operand.type === 'type_descriptor') return this.typeDescriptor(operand);
+        return this.typeOfExpression(operand);
+      }
+      case 'dependent_type': {
+        return this.resolveTypeSpecifier(node.children[0], allowAuto, true);
       }
       case 'type_descriptor': {
         return this.typeDescriptor(node);
@@ -368,6 +742,8 @@ export abstract class CompilerBase {
         return entity.type;
       }
       case 'template': {
+        const deduced = this.deducedClass;
+        if (deduced && deduced.node.start === node.start && deduced.node.end === node.end) return deduced.type;
         return this.error(node.row, `${entity.template.name} には <...> でテンプレート引数を書いてください。`);
       }
       default: {
@@ -376,14 +752,20 @@ export abstract class CompilerBase {
     }
   }
 
-  private templateType(node: Syntax, entity: Entity): Type {
+  private templateType(node: Syntax, written: Entity): Type {
+    const entity = asTemplate(written);
     if (entity.kind !== 'template') return this.error(node.row, `${node.text} はテンプレートではありません。`);
     return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
   }
 
   protected instantiateTemplate(template: LibraryTemplate, list: Syntax, row: number): Type {
-    if (!template.takesArrayBound)
-      return this.library.trackDefinition(template.name, template.instantiate(this.templateArguments(list), row));
+    if (!template.takesArrayBound && template.program) return template.instantiate(this.templateArguments(list), row);
+    if (!template.takesArrayBound) {
+      const args = this.templateArguments(list);
+      if (args.some((arg) => arg.kind === 'int' && arg.templateValue !== undefined))
+        return this.error(row, `std::${template.name} のテンプレート引数には型を書いてください。`);
+      return this.library.trackDefinition(template.name, template.instantiate(args, row));
+    }
     const args = list.children;
     if (args.length !== 2) return this.error(row, `std::${template.name} のテンプレート引数は 2 個です。`);
     const [element, bound] = args;
@@ -395,13 +777,76 @@ export abstract class CompilerBase {
     );
   }
 
-  protected templateArguments(list: Syntax): Type[] {
-    return list.children.map((argument) => this.templateTypeArgument(argument));
+  /** The arguments of a template argument list: types, or the values of constant expressions. */
+  templateArguments(list: Syntax): Type[] {
+    return expandPacks(this, list.children).map((argument) =>
+      argument.type === PACK_ELEMENT
+        ? withPackElement(this, argument, (pattern) => this.templateTypeArgument(pattern))
+        : this.templateTypeArgument(argument)
+    );
   }
 
   private templateTypeArgument(argument: Syntax): Type {
-    if (argument.type === 'type_descriptor') return this.typeDescriptor(argument);
-    return this.expressionAsType(argument) ?? this.error(argument.row, 'テンプレート引数には型を書いてください。');
+    if (argument.type === 'type_descriptor') {
+      // `Box<N>` gives a name the grammar reads as a type, which may name a value.
+      const named = fieldOf(argument, 'type');
+      if (!fieldOf(argument, 'declarator') && named?.type === 'type_identifier') {
+        const entity = this.findName(named.text);
+        if (entity?.kind === 'value' || entity?.kind === 'local' || entity?.kind === 'global')
+          return this.valueArgument(named);
+      }
+      // `S<f<int>()>` calls a function template, which the grammar reads as the type of a function.
+      const declarator = fieldOf(argument, 'declarator');
+      if (
+        named?.type === 'template_type' &&
+        declarator?.type === 'abstract_function_declarator' &&
+        !fieldOf(declarator, 'declarator') &&
+        fieldOf(declarator, 'parameters')?.children.length === 0 &&
+        this.findName((fieldOf(named, 'name') as Syntax).text)?.kind === 'functions'
+      ) {
+        const parameters = fieldOf(declarator, 'parameters') as Syntax;
+        return this.valueArgument({
+          ...argument,
+          type: 'call_expression',
+          all: [
+            { ...named, type: 'template_function', field: 'function' },
+            { ...parameters, type: 'argument_list', field: 'arguments' },
+          ],
+          children: [],
+        });
+      }
+      // `S<is_small_v<T>>` and `S<C<T>>` name a variable template's instance and a concept's satisfaction, which the
+      // grammar reads as types.
+      if (!fieldOf(argument, 'declarator') && named?.type === 'template_type') {
+        const entity = this.findName((fieldOf(named, 'name') as Syntax).text);
+        const kind = entity?.kind === 'template' ? entity.template.program?.kind : undefined;
+        if (kind === 'variable' || kind === 'concept')
+          return this.valueArgument({ ...named, type: 'template_function' });
+      }
+      // `S<std::is_integral<T>::value>` names a static member, which the grammar reads as a type.
+      if (!fieldOf(argument, 'declarator') && named?.type === 'qualified_identifier') {
+        const entity = this.lookupQualified(named);
+        if (
+          entity.kind === 'value' ||
+          entity.kind === 'staticField' ||
+          entity.kind === 'global' ||
+          (entity.kind === 'template' && entity.template.program?.kind === 'variable')
+        )
+          return this.valueArgument(named);
+      }
+      return this.typeDescriptor(argument);
+    }
+    return this.expressionAsType(argument) ?? this.valueArgument(argument);
+  }
+
+  /** A non-type template argument: the value of a constant expression, with its type. */
+  private valueArgument(node: Syntax): Type {
+    const expr = this.rvalue(this.compileExpression(node));
+    const constant = this.constantValueOf(expr);
+    if (expr.type.kind !== 'int' || constant === undefined)
+      return this.error(node.row, `テンプレート引数 ${node.text} には、型か整数の定数式を書いてください。`);
+    const { enumeration: _, ...type } = expr.type;
+    return { ...unqualifiedInt(type), templateValue: constant };
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */
@@ -459,6 +904,16 @@ export abstract class CompilerBase {
    * `int *a[3]` declares an array of three pointers.
    */
   applyDeclarator(base: Type, declarator: Syntax): Declared {
+    // `int P::*p` declares a pointer to a member of `P`.
+    const memberPointer = declarator.type === 'qualified_identifier' ? fieldOf(declarator, 'name') : undefined;
+    if (memberPointer?.type === 'pointer_declarator' || memberPointer?.type === 'abstract_pointer_declarator') {
+      const scope = this.resolveScope(fieldOf(declarator, 'scope') as Syntax);
+      if (scope.kind !== 'class')
+        return this.error(declarator.row, `${declarator.text} の :: の前にはクラスを書いてください。`);
+      if (base.kind === 'reference') return this.error(declarator.row, '参照のメンバへのポインタは作れません。');
+      const isConst = memberPointer.children.some((child) => child.type === 'type_qualifier' && child.text === 'const');
+      return this.applyInner(withConst({ kind: 'memberPointer', cls: scope.cls, to: base }, isConst), memberPointer);
+    }
     switch (declarator.type) {
       case 'identifier':
       case 'field_identifier':
@@ -467,11 +922,19 @@ export abstract class CompilerBase {
       case 'destructor_name':
       case 'operator_name':
       case 'template_function': {
-        if (declarator.type === 'operator_name')
-          return this.unsupported(declarator.row, '演算子のオーバーロード（operator）');
         const name = this.declaredName(declarator);
         if (name !== undefined) this.checkHeaderMacro(name.split('::').at(-1) ?? name, declarator.row);
         return { name, nameNode: declarator, type: base };
+      }
+      case 'parenthesized_declarator':
+      case 'abstract_parenthesized_declarator': {
+        const inner = declarator.children[0];
+        return inner ? this.applyDeclarator(base, inner) : { name: undefined, nameNode: undefined, type: base };
+      }
+      case 'abstract_function_declarator': {
+        const type = this.functionType(base, declarator);
+        const inner = fieldOf(declarator, 'declarator');
+        return inner ? this.applyDeclarator(type, inner) : { name: undefined, nameNode: undefined, type };
       }
       case 'pointer_declarator':
       case 'abstract_pointer_declarator': {
@@ -481,10 +944,12 @@ export abstract class CompilerBase {
       }
       case 'reference_declarator':
       case 'abstract_reference_declarator': {
-        if (hasToken(declarator, '&&')) return this.unsupported(declarator.row, '右辺値参照（&&）');
-        if (base.kind === 'reference') return this.error(declarator.row, '参照への参照は作れません。');
+        const isRvalue = hasToken(declarator, '&&');
+        // A reference to a reference that a template argument or an alias names collapses (C++20 [dcl.ref]p6).
+        if (base.kind === 'reference')
+          return this.applyInner(referenceTo(base.to, base.isRvalue === true && isRvalue), declarator);
         if (base.kind === 'void') return this.error(declarator.row, 'void への参照は作れません。');
-        return this.applyInner(referenceTo(base), declarator);
+        return this.applyInner(referenceTo(base, isRvalue), declarator);
       }
       case 'array_declarator':
       case 'abstract_array_declarator': {
@@ -493,12 +958,39 @@ export abstract class CompilerBase {
         if (base.kind === 'array' && base.length === undefined)
           return this.error(declarator.row, '多次元配列の内側の大きさを書いてください。');
         if (hasAuto(base)) return this.error(declarator.row, '配列の要素の型を auto で書くことはできません。');
+        if (base.kind === 'array' && base.variableLength)
+          return this.unsupported(declarator.row, '内側の大きさが定数でない多次元配列');
         const size = fieldOf(declarator, 'size');
+        const variableLength = size && this.allowsVariableLength ? this.variableLengthOf(size) : undefined;
+        if (variableLength) return this.applyInner({ kind: 'array', of: base, variableLength }, declarator);
         const length = size ? this.arrayLength(size) : undefined;
         return this.applyInner({ kind: 'array', of: base, length }, declarator);
       }
+      case 'operator_cast': {
+        // A conversion function (`operator int() const`) returns the type it names.
+        const type = this.conversionType(declarator);
+        const { parameters } = conversionDeclarators(fieldOf(declarator, 'declarator') as Syntax);
+        return { name: this.conversionName(declarator), nameNode: declarator, type, function: parameters };
+      }
       case 'function_declarator': {
+        // `auto f() -> int` writes the return type after the parameters.
+        const trailing = declarator.children.find((child) => child.type === 'trailing_return_type');
+        if (trailing) {
+          if (!isAuto(base))
+            this.error(declarator.row, '後置の戻り値の型（-> 型）を書くときは、前の型を auto にしてください。');
+          // The parameters are in scope in the trailing return type (`auto f(int a) -> decltype(a)`).
+          const parameters = fieldOf(declarator, 'parameters');
+          let trailingType: Type = base;
+          this.withNames((declare) => {
+            if (parameters) this.declareParameterNames(parameters, declare);
+            trailingType = this.typeDescriptor(trailing.children[0]);
+          });
+          base = trailingType;
+        }
         const inner = fieldOf(declarator, 'declarator');
+        // `int (*fp)(int)` declares a pointer to a function type rather than a function.
+        if (inner?.type === 'parenthesized_declarator' || inner?.type === 'abstract_parenthesized_declarator')
+          return this.applyDeclarator(this.functionType(base, declarator), inner);
         const declared = inner
           ? this.applyDeclarator(base, inner)
           : { name: undefined, nameNode: undefined, type: base };
@@ -521,9 +1013,51 @@ export abstract class CompilerBase {
     return this.applyDeclarator(type, inner);
   }
 
+  /** The function type a function declarator gives a return type: `int(int, char)`. */
+  private functionType(ret: Type, declarator: Syntax): Type {
+    if (ret.kind === 'array') this.error(declarator.row, '関数は配列を返せません。');
+    if (ret.kind === 'function') this.error(declarator.row, '関数は関数を返せません。');
+    const parameters = fieldOf(declarator, 'parameters');
+    const isConstMember = declarator.children.some(
+      (child) => child.type === 'type_qualifier' && child.text === 'const'
+    );
+    return {
+      kind: 'function',
+      ret,
+      params: parameters ? this.parameterTypes(parameters) : [],
+      ...(isConstMember ? { isConstMember } : {}),
+    };
+  }
+
+  /** The type of an unevaluated expression, without a reference. */
+  protected abstract typeOfExpression(operand: Syntax): Type;
+
+  /** The type `decltype(e)` names (C++20 [dcl.type.decltype]). */
+  protected abstract decltypeOf(operand: Syntax): Type;
+
+  /** Declares a parameter list's names, for the unevaluated operands of a trailing return type. */
+  protected abstract declareParameterNames(list: Syntax, declare: (name: string, entity: Entity) => void): void;
+
+  /** The types of a parameter list's parameters, after arrays and functions decay to pointers. */
+  protected abstract parameterTypes(list: Syntax): Type[];
+
+  /** The type a conversion function (`operator int() const`) converts to. */
+  conversionType(node: Syntax): Type {
+    const base = this.specifiedType(node);
+    const { type } = conversionDeclarators(fieldOf(node, 'declarator') as Syntax);
+    return type ? this.applyDeclarator(base, type).type : base;
+  }
+
+  /** The name of a conversion function, such as `operator int`. */
+  conversionName(node: Syntax): string {
+    return `operator ${typeName(this.conversionType(node))}`;
+  }
+
   private declaredName(node: Syntax): string {
     if (node.type === 'qualified_identifier') return this.declaredName(fieldOf(node, 'name') as Syntax);
     if (node.type === 'destructor_name') return `~${node.children[0]?.text ?? ''}`;
+    if (node.type === 'operator_name') return operatorName(node);
+    if (node.type === 'operator_cast') return this.conversionName(node);
     if (node.type === 'template_function') return this.unsupported(node.row, 'テンプレートの特殊化');
     return node.text;
   }
@@ -531,19 +1065,49 @@ export abstract class CompilerBase {
   /** The length of an array, which must be a constant expression. */
   protected abstract arrayLength(size: Syntax): number;
 
+  /** The length of a variable-length array (`int a[n];`), evaluated where it is declared, or undefined for a constant. */
+  protected abstract variableLengthOf(size: Syntax): Eval<unknown> | undefined;
+
   /** Compiles an expression of the program, for the parts of the base that evaluate constants. */
   abstract compileExpression(node: Syntax): Expr;
+
+  /** The prvalue of an expression. */
+  abstract rvalue(expr: Expr): Expr;
+
+  /** The value of a constant expression of arithmetic type, or undefined when the expression is none. */
+  abstract constantValueOf(expr: Expr): number | bigint | undefined;
 
   describeType(type: Type): string {
     return typeName(type);
   }
 }
 
+/**
+ * The name of an operator function, with no spaces in its symbol: `operator+`, `operator()`, `operator[]`, or with a
+ * space before a word: `operator new[]`, `operator co_await`, and `operator""_km` for a literal operator.
+ */
+export function operatorName(node: Syntax): string {
+  const symbol = node.text.replace(/^operator/, '').replaceAll(/\s+/g, '');
+  return /^[a-z_]/i.test(symbol) ? `operator ${symbol}` : `operator${symbol}`;
+}
+
+function unqualifiedInt<T extends { isConst?: boolean }>(type: T): T {
+  const { isConst: _, ...rest } = type;
+  return rest as T;
+}
+
 /** The type that `auto` stands for until an initializer decides it. */
 export const AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('auto', 'class'));
+/** `decltype(auto)`, which deduces what `decltype` gives for its initializer. */
+export const DECLTYPE_AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('decltype(auto)', 'class'));
 
 export function isAuto(type: Type): boolean {
-  return type.kind === 'class' && type.cls === AUTO.cls;
+  return type.kind === 'class' && (type.cls === AUTO.cls || type.cls === DECLTYPE_AUTO.cls);
+}
+
+/** A template a name denotes, which the name of a class template's instance in its own scope also denotes. */
+export function asTemplate(entity: Entity): Entity {
+  return entity.kind === 'class' && entity.cls.templateEntity ? entity.cls.templateEntity : entity;
 }
 
 function isTypeName(entity: Entity): boolean {
@@ -554,8 +1118,6 @@ export function hasAuto(type: Type): boolean {
   if (type.kind === 'pointer' || type.kind === 'reference') return hasAuto(type.to);
   return isAuto(type);
 }
-
-const WIDE_CHARACTER_TYPES = new Set(['wchar_t', 'char8_t', 'char16_t', 'char32_t']);
 
 const PRIMITIVE_TYPES: Record<string, Type> = {
   void: VOID,
@@ -602,4 +1164,28 @@ function sizedIntType(words: string[]): Type | undefined {
 function unsignedName(name: IntName): IntName {
   const names: Partial<Record<IntName, IntName>> = { short: 'ushort', int: 'uint', long: 'ulong', llong: 'ullong' };
   return names[name] ?? name;
+}
+
+/** Whether a declaration declares a function: its declarator ends in a parameter list. */
+function declaresFunction(declaration: Syntax): boolean {
+  let current = fieldOf(declaration, 'declarator');
+  while (current) {
+    if (current.type === 'function_declarator') return true;
+    if (current.type === 'init_declarator' || current.type === 'parenthesized_declarator') return false;
+    current = fieldOf(current, 'declarator') ?? current.children.find((child) => child.type.endsWith('declarator'));
+  }
+  return false;
+}
+
+/**
+ * The declarators of a conversion function (`operator int*() const`): those of the type it converts to, without the
+ * innermost one, which declares the function's parameters.
+ */
+function conversionDeclarators(declarator: Syntax): { type: Syntax | undefined; parameters: Syntax | undefined } {
+  if (declarator.type === 'abstract_function_declarator') return { type: undefined, parameters: declarator };
+  const inner = declarator.children.find((child) => child.type.endsWith('declarator'));
+  if (!inner) return { type: declarator, parameters: undefined };
+  const split = conversionDeclarators(inner);
+  const all = declarator.all.flatMap((child) => (child === inner ? (split.type ? [split.type] : []) : [child]));
+  return { type: { ...declarator, all, children: all.filter((child) => child.isNamed) }, parameters: split.parameters };
 }

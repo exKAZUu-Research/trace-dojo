@@ -27,7 +27,9 @@ import type { Library, LibraryTemplate } from './registry';
 import { addMethod, native, nativeConstructor } from './support';
 import { typeKey } from './templates';
 
+/** The parameters of a Mersenne Twister (`std::mersenne_twister_engine`). */
 interface EngineParameters {
+  kind: 'mersenne';
   w: number;
   n: number;
   m: number;
@@ -43,7 +45,19 @@ interface EngineParameters {
   f: bigint;
 }
 
+/** The parameters of a 32-bit linear congruential engine (`std::linear_congruential_engine`). */
+interface LcgParameters {
+  kind: 'lcg';
+  a: bigint;
+  c: bigint;
+  m: bigint;
+}
+
+const MINSTD_RAND0: LcgParameters = { kind: 'lcg', a: 16_807n, c: 0n, m: 2_147_483_647n };
+const MINSTD_RAND: LcgParameters = { kind: 'lcg', a: 48_271n, c: 0n, m: 2_147_483_647n };
+
 const MT19937: EngineParameters = {
+  kind: 'mersenne',
   w: 32,
   n: 624,
   m: 397,
@@ -60,6 +74,7 @@ const MT19937: EngineParameters = {
 };
 
 const MT19937_64: EngineParameters = {
+  kind: 'mersenne',
   w: 64,
   n: 312,
   m: 156,
@@ -75,12 +90,12 @@ const MT19937_64: EngineParameters = {
   f: 6_364_136_223_846_793_005n,
 };
 
-/** A random number engine: a Mersenne Twister, or `std::random_device`. */
+/** A random number engine: a Mersenne Twister, a linear congruential engine, or `std::random_device`. */
 export class EngineValue extends Store {
   private state: bigint[] = [];
   private index = 0;
 
-  constructor(readonly parameters: EngineParameters | undefined) {
+  constructor(readonly parameters: EngineParameters | LcgParameters | undefined) {
     super();
   }
 
@@ -96,12 +111,31 @@ export class EngineValue extends Store {
     throw new Error('An engine is assigned by its operations');
   }
 
+  /** The number of bits of the engine's result type. */
   get bits(): number {
-    return this.parameters?.w ?? 32;
+    return this.parameters?.kind === 'mersenne' ? this.parameters.w : 32;
   }
 
-  seed(frame: Frame, value = 5489n): void {
+  /** The least value the engine gives. */
+  get min(): bigint {
+    return this.parameters?.kind === 'lcg' && this.parameters.c === 0n ? 1n : 0n;
+  }
+
+  /** The number of values the engine gives: `max() - min() + 1`. */
+  get range(): bigint {
+    if (this.parameters?.kind === 'lcg') return this.parameters.m - 1n - this.min + 1n;
+    return 1n << BigInt(this.bits);
+  }
+
+  seed(frame: Frame, value?: bigint): void {
+    if (this.parameters?.kind === 'lcg') {
+      const { c, m } = this.parameters;
+      const seed = value ?? 1n;
+      this.state = [c % m === 0n && seed % m === 0n ? 1n : seed % m];
+      return;
+    }
     const { w, n, f } = this.parameters as EngineParameters;
+    value ??= 5489n;
     frame.runtime.spend(n);
     const mask = (1n << BigInt(w)) - 1n;
     this.state = [BigInt.asUintN(w, value)];
@@ -121,6 +155,12 @@ export class EngineValue extends Store {
   next(): bigint {
     const parameters = this.parameters;
     if (!parameters) return BigInt(Math.floor(Math.random() * 2 ** 32));
+    if (parameters.kind === 'lcg') {
+      const { a, c, m } = parameters;
+      const value = (a * (this.state[0] as bigint) + c) % m;
+      this.state[0] = value;
+      return value;
+    }
     const { w, n, m, r, a, u, d, s, b, t, c, l } = parameters;
     const mask = (1n << BigInt(w)) - 1n;
     const lower = (1n << BigInt(r)) - 1n;
@@ -146,7 +186,7 @@ function independentBits(engine: EngineValue, bits: number, resultBits: number):
   const engineBits = engine.bits;
   const workingBits = Math.max(engineBits, resultBits);
   const workingMask = (1n << BigInt(workingBits)) - 1n;
-  const range = ((1n << BigInt(engineBits)) - 1n + 1n) & workingMask;
+  const range = engine.range & workingMask;
   const m = range === 0n ? workingBits : log2(range);
   let n = Math.floor(bits / m) + (bits % m === 0 ? 0 : 1);
   let w0 = Math.floor(bits / n);
@@ -166,16 +206,17 @@ function independentBits(engine: EngineValue, bits: number, resultBits: number):
   if (range === 0n) return engine.next() & mask0;
   const resultMask = (1n << BigInt(resultBits)) - 1n;
   let sum = 0n;
+  const { min } = engine;
   for (let k = 0; k < n0; k++) {
     let value: bigint;
-    do value = engine.next();
+    do value = engine.next() - min;
     while (value >= y0);
     sum = w0 < resultBits ? (sum << BigInt(w0)) & resultMask : 0n;
     sum = (sum + (value & mask0)) & resultMask;
   }
   for (let k = n0; k < n; k++) {
     let value: bigint;
-    do value = engine.next();
+    do value = engine.next() - min;
     while (value >= y1);
     sum = w0 < resultBits - 1 ? (sum << BigInt(w0 + 1)) & resultMask : 0n;
     sum = (sum + (value & mask1)) & resultMask;
@@ -205,13 +246,15 @@ export function uniformInteger(engine: EngineValue, a: bigint, b: bigint, result
 /** `std::generate_canonical<T, digits>`, a number in [0, 1) from enough engine calls for the type's digits. */
 function canonical(engine: EngineValue, digits: number, isFloat: boolean): number {
   const round = isFloat ? Math.fround : (value: number): number => value;
-  const logR = engine.bits;
+  const { min, range } = engine;
+  const logR = log2(range);
   const k = Math.max(1, Math.floor(digits / logR) + (digits % logR === 0 ? 0 : 1));
-  const rp = 2 ** logR;
+  const rp = round(Number(range));
+  const draw = (): number => round(Number(engine.next() - min));
   let base = rp;
-  let sum = round(Number(engine.next()));
+  let sum = draw();
   // libc++ computes in the result type, and clang fuses `sum += value * base` into one rounding.
-  for (let i = 1; i < k; i++, base *= rp) sum = fma(round(Number(engine.next())), base, sum, isFloat);
+  for (let i = 1; i < k; i++, base = round(base * rp)) sum = fma(draw(), base, sum, isFloat);
   return round(sum / base);
 }
 
@@ -221,6 +264,8 @@ export function randomEngines(): Map<string, ClassInfo> {
   for (const [name, parameters, resultType] of [
     ['mt19937', MT19937, UINT],
     ['mt19937_64', MT19937_64, ULLONG],
+    ['minstd_rand0', MINSTD_RAND0, UINT],
+    ['minstd_rand', MINSTD_RAND, UINT],
     ['random_device', undefined, UINT],
   ] as const) {
     const cls = new ClassInfo(`std::${name}`, 'class');
@@ -231,8 +276,8 @@ export function randomEngines(): Map<string, ClassInfo> {
       kind: 'engine',
       sdkMemberClass: name,
       args: [],
-      size: parameters ? parameters.n * (parameters.w / 8) + 8 : 4,
-      align: parameters ? 8 : 4,
+      size: parameters?.kind === 'mersenne' ? parameters.n * (parameters.w / 8) + 8 : 4,
+      align: parameters?.kind === 'mersenne' ? 8 : 4,
       call: (compiler, object, args, row) => {
         if (args.length > 0) return;
         if (isConstType(object.type)) return compiler.error(row, `const の ${cls.name} には () を使えません。`);
@@ -284,10 +329,10 @@ export function randomEngines(): Map<string, ClassInfo> {
           }
         })
       );
-      const max = (1n << BigInt(parameters.w)) - 1n;
+      const range = new EngineValue(parameters);
       for (const [method, value] of [
-        ['min', 0n],
-        ['max', max],
+        ['min', range.min],
+        ['max', range.min + range.range - 1n],
       ] as const) {
         addMethod(cls, { ...native(method, [], resultType, () => toResult(value)), isStatic: true });
       }
@@ -300,6 +345,8 @@ export function randomEngines(): Map<string, ClassInfo> {
     }
     engines.set(name, cls);
   }
+  // libc++'s `std::default_random_engine` is `std::minstd_rand`.
+  engines.set('default_random_engine', engines.get('minstd_rand') as ClassInfo);
   return engines;
 }
 
@@ -442,7 +489,7 @@ export function randomClasses(library: Library): LibraryTemplate[] {
   }));
 }
 
-function seededEngine(frame: Frame, parameters: EngineParameters, seed?: bigint): EngineValue {
+function seededEngine(frame: Frame, parameters: EngineParameters | LcgParameters, seed?: bigint): EngineValue {
   const engine = new EngineValue(parameters);
   engine.seed(frame, seed);
   return engine;

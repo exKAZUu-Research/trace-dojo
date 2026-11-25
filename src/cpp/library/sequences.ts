@@ -66,6 +66,7 @@ import type { Library } from './registry';
 import {
   listSort,
   listSortInPlace,
+  mergeListRuns,
   reserveSequenceStorage as reserve,
   SequenceEditor,
   type Source,
@@ -812,17 +813,19 @@ const nonEmpty = (self: SequenceValue): void => {
   if (self.length === 0) throw new CppRuntimeError('emptyContainer');
 };
 
+type ListMethod = (
+  name: string,
+  params: Type[],
+  ret: Type,
+  run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
+  options?: { isConst?: boolean }
+) => void;
+
 function listMethods(
   library: Library,
   cls: ClassInfo,
   element: Type,
-  method: (
-    name: string,
-    params: Type[],
-    ret: Type,
-    run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
-    options?: { isConst?: boolean }
-  ) => void,
+  method: ListMethod,
   editor: SequenceEditor
 ): void {
   const less = lessThan(element);
@@ -859,7 +862,14 @@ function listMethods(
     const [arg] = args;
     if (args.length !== 1) return;
     const operand = { type: element };
-    const call = predicateCallback(library.compiler, unqualified(arg.type), arg.functions, [operand, operand], arg.row);
+    const call = predicateCallback(
+      library.compiler,
+      unqualified(arg.type),
+      arg.functions,
+      [operand, operand],
+      arg.row,
+      arg
+    );
     return call ? (frame, a, b) => truthy(call(frame, a, b)) : undefined;
   };
   addTemplateMethod(cls, 'sort', (args) => {
@@ -877,6 +887,7 @@ function listMethods(
       { owner: cls }
     );
   });
+  listTransferMethods(library, cls, element, method, editor, callable);
   addTemplateMethod(cls, 'unique', (args) => {
     const same = callable(args);
     if (!same) return;
@@ -888,6 +899,85 @@ function listMethods(
       { owner: cls }
     );
   });
+}
+
+/**
+ * The members of `std::list` that move nodes between lists or remove them by a predicate: `splice` and `merge`,
+ * whose elements keep their objects and iterators, and `remove_if`.
+ */
+function listTransferMethods(
+  library: Library,
+  cls: ClassInfo,
+  element: Type,
+  method: ListMethod,
+  editor: SequenceEditor,
+  callable: (args: Expr[]) => ((frame: Frame, a: Ptr, b: Ptr) => boolean) | undefined
+): void {
+  const less = lessThan(element);
+  const listRef = referenceTo(classType(cls));
+  const constIterator = cls.memberTypes.get('const_iterator') as Type;
+  for (const otherType of [listRef, { ...listRef, isRvalue: true }]) {
+    method('splice', [constIterator, otherType], VOID, (self, [at, other]) => {
+      spliceAll(self, positionOf(self, at), (other as Ptr).read() as SequenceValue);
+    });
+    method('merge', [otherType], VOID, (self, [other], frame) => {
+      if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
+      const middle = self.length;
+      spliceAll(self, middle, (other as Ptr).read() as SequenceValue);
+      mergeListRuns(frame, self, 0, middle, self.length, (a, b) => less(a.read(), b.read(), frame) < 0);
+    });
+  }
+  addTemplateMethod(cls, 'merge', (args) => {
+    const [other, comparator] = args;
+    const compare = comparator && callable([comparator]);
+    if (!other || !compare || args.length !== 2) return;
+    return native(
+      'merge',
+      [listRef, ...callableParams([comparator])],
+      VOID,
+      ([source], { self, frame }) => {
+        const list = self as SequenceValue;
+        const middle = list.length;
+        spliceAll(list, middle, (source as Ptr).read() as SequenceValue);
+        mergeListRuns(frame, list, 0, middle, list.length, (a, b) => compare(frame, a, b));
+      },
+      { owner: cls }
+    );
+  });
+  addTemplateMethod(cls, 'remove_if', (args) => {
+    const [predicate] = args;
+    if (!predicate || args.length !== 1) return;
+    const test = predicateCallback(
+      library.compiler,
+      unqualified(predicate.type),
+      predicate.functions,
+      [{ type: element }],
+      predicate.row,
+      predicate
+    );
+    if (!test) return;
+    return native(
+      'remove_if',
+      callableParams(args),
+      SIZE_T,
+      (_args, { self, frame }) => {
+        const list = self as SequenceValue;
+        return removeListRuns(frame, list, editor, 0, (_first, candidate) =>
+          truthy(test(frame, list.location(candidate)))
+        );
+      },
+      { owner: cls }
+    );
+  });
+}
+
+/** Moves the nodes of another list before a position, keeping their elements' objects and iterators. */
+function spliceAll(self: SequenceValue, index: number, other: SequenceValue): void {
+  if (other === self || other.length === 0) return;
+  const start = self.length;
+  const count = other.length;
+  other.transferNodesTo(self, 0, count);
+  if (index < start) self.moveNodesBefore(start, start + count, index);
 }
 
 function removeListRuns(

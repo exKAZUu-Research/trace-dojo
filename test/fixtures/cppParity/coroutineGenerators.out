@@ -1,0 +1,8 @@
+make fib
+0 1 1 2 3 5 8 13 drop fib
+
+alpha
+make inner
+beta
+drop inner
+end

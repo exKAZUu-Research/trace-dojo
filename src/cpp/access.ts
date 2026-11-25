@@ -23,12 +23,12 @@ export function isMemberAccessible(
   ) {
     return true;
   }
-  const base = naming.base;
-  return (
-    base !== undefined &&
-    base.isDerivedFrom(owner) &&
-    isBaseAccessible(naming, base, here) &&
-    isMemberAccessible(access, owner, base, here, objectClass)
+  return [naming.base, ...naming.secondaryBases.map((secondary) => secondary.cls)].some(
+    (base) =>
+      base !== undefined &&
+      base.isDerivedFrom(owner) &&
+      isBaseAccessible(naming, base, here) &&
+      isMemberAccessible(access, owner, base, here, objectClass)
   );
 }
 
@@ -48,6 +48,10 @@ export function accessAsMemberOf(access: Access, owner: ClassInfo, cls: ClassInf
   if (cls === owner) return access;
   const inBase = cls.base && accessAsMemberOf(access, owner, cls.base);
   if (inBase && inBase !== 'private') return cls.baseAccess === 'public' ? inBase : cls.baseAccess;
+  for (const secondary of cls.secondaryBases) {
+    const inherited = accessAsMemberOf(access, owner, secondary.cls);
+    if (inherited && inherited !== 'private') return secondary.access === 'public' ? inherited : secondary.access;
+  }
   for (const base of cls.library?.additionalPublicBases ?? []) {
     const inherited = accessAsMemberOf(access, owner, base);
     if (inherited && inherited !== 'private') return inherited;

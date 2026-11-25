@@ -15,6 +15,9 @@ export function typeKey(type: Type): string {
     case 'array': {
       return `${typeKey(type.of)}[${type.length ?? ''}]`;
     }
+    case 'memberPointer': {
+      return `${typeKey(type.to)} ${type.cls.name}#${type.cls.id}::*`;
+    }
     default: {
       return typeName(type);
     }

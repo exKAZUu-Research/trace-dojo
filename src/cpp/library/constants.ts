@@ -104,11 +104,10 @@ export function constantsOf(library: Library): Map<string, Entity> {
   // clang++'s NULL is __null, a null pointer constant of type long.
   set('NULL', (row) => ({ ...constant(LONG, 0n)(row), isNullConstant: true }));
   const filePointer = pointerTo({ kind: 'class', cls: library.fileClass });
-  for (const name of ['stdout', 'stderr'] as const) {
+  for (const name of ['stdin', 'stdout', 'stderr'] as const) {
     const store = library.fileStore(name);
     set(name, (row) => ({ type: filePointer, isLvalue: false, row, run: () => new Ptr(store, 0) }));
   }
-  entries.set('stdin', { kind: 'unsupported', feature: '標準入力（stdin）' });
   void [CHAR, SCHAR, SHORT, UCHAR, USHORT];
   return entries;
 }

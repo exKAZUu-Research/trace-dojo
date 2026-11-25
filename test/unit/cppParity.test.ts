@@ -1911,3 +1911,43 @@ test.each(fs.readdirSync(FIXTURE_DIR).filter((name) => name.endsWith('.cpp')))(
     expect(execution.stdout + uncaught).toBe(expected);
   }
 );
+
+test('reads standard input through std::cin and the C functions in turn', () => {
+  const program = fs.readFileSync(
+    path.join(import.meta.dirname, '..', 'fixtures', 'cppInput', 'standardInput.cpp'),
+    'utf8'
+  );
+  const execution = executeProgram('cpp', program, { stdin: '3 4\n2.5 alice\nrest of line\n99\nzz z\n' });
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    stdout: '2 3 4 2.50 alice [10] line=rest of line\ncin 99\n2 12 34\nz=3 -1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('reads and writes the files of the run with fstream and the C file functions', () => {
+  const program = `#include <cstdio>
+#include <fstream>
+#include <iostream>
+#include <string>
+int main() {
+  std::ifstream in("scores.txt");
+  std::string name;
+  int score, total = 0;
+  while (in >> name >> score) total += score;
+  std::ofstream out("total.txt");
+  out << "total " << total << "\\n";
+  FILE* log = fopen("log.txt", "a");
+  fprintf(log, "%d\\n", total);
+  fclose(log);
+  std::cout << std::ifstream("missing.txt").is_open() << (fopen("missing.txt", "r") == NULL);
+}`;
+  const execution = executeProgram('cpp', program, {
+    files: { 'scores.txt': 'alice 90\nbob 75\n', 'log.txt': 'old\n' },
+  });
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    stdout: '01',
+    finalFiles: { 'log.txt': 'old\n165\n', 'scores.txt': 'alice 90\nbob 75\n', 'total.txt': 'total 165\n' },
+  });
+});

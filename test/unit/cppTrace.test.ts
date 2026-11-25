@@ -2206,10 +2206,10 @@ test.each([
 });
 
 test('the interpreter rejects the syntax it leaves out with a message naming it', () => {
-  const execution = executeProgram('cpp', 'int main() {\n  auto f = [](int x) { return x; };\n}');
+  const execution = executeProgram('cpp', 'int main() {\n  asm("nop");\n}');
   expect(execution).toEqual({
     kind: 'compileError',
-    diagnostics: [{ row: 1, message: 'ラムダ式は、この採点環境では使えません。' }],
+    diagnostics: [{ row: 1, message: 'インラインアセンブリ（asm）は、この採点環境では使えません。' }],
   });
 });
 

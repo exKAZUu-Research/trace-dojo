@@ -1,0 +1,10 @@
+file_size: filesystem error: in file_size: No such file or directory ["nope.txt"] | "nope.txt" ""
+file_size dir: filesystem error: in file_size: Is a directory ["d"] | "d" ""
+create_directory: filesystem error: in create_directory: No such file or directory ["x/y"] | "x/y" ""
+remove: filesystem error: in remove: Directory not empty ["d"] | "d" ""
+rename: filesystem error: in rename: No such file or directory ["missing"] ["other"] | "missing" "other"
+copy_file: filesystem error: in copy_file: File exists ["d/f.txt"] ["d/f.txt"] | "d/f.txt" "d/f.txt"
+copy_file2: filesystem error: in copy_file: No such file or directory ["z"] ["nope"] | "z" "nope"
+dir_iter: filesystem error: in directory_iterator::directory_iterator(...): No such file or directory ["nodir"] | "nodir" ""
+2 remove_all ok
+create_directories: filesystem error: in create_directories: Not a directory ["f/g"] | "f/g" ""

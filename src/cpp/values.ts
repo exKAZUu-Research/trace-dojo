@@ -1,3 +1,4 @@
+import { INT_PROPERTIES } from '../c/types';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
 import type { FloatNaN } from './floatSign';
@@ -6,9 +7,11 @@ import {
   baseSubobjectOffset,
   type ClassInfo,
   classType,
+  type FieldInfo,
   fieldSubobjectOffset,
   type FunctionInfo,
   isArithmetic,
+  type SecondaryBase,
   sizeOf,
   type Type,
 } from './types';
@@ -23,7 +26,17 @@ export class PartialScalar {
   ) {}
 }
 
-export type Value = number | bigint | FloatNaN | Ptr | Store | FunctionRef | PartialScalar | typeof UNINIT | undefined;
+export type Value =
+  | number
+  | bigint
+  | FloatNaN
+  | Ptr
+  | Store
+  | FunctionRef
+  | MemberPointer
+  | PartialScalar
+  | typeof UNINIT
+  | undefined;
 
 export function isIndeterminate(value: Value): boolean {
   return value === UNINIT || value instanceof PartialScalar;
@@ -235,6 +248,10 @@ export class CObject extends Store {
   private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
+  /** The object whose secondary base this object is, which virtual calls and downcasts reach. */
+  secondaryOwner?: CObject;
+  /** The member of a union that was written last, or undefined while no access has decided one. */
+  activeMember?: number;
 
   get completeLocation(): Ptr | undefined {
     return this.receiverLocation.location;
@@ -274,6 +291,18 @@ export class CObject extends Store {
   receiver(asClass = this.cls): Ptr {
     if (this.completeClass === asClass)
       return new CompleteObjectPointer(this.receiverLocation, this.fallbackReceiver());
+    // A base off the chain of first bases is a member's subobject, which knows the object it is a base of; a virtual
+    // base's subobject is the complete object's.
+    if (!isFirstBase(this.completeClass, asClass)) {
+      const secondary = secondaryBaseReaching(this.completeClass, asClass);
+      if (secondary?.isVirtual && this.secondaryOwner) return outermostObject(this).receiver(asClass);
+      const subobject = secondary && this.values[secondary.field.index];
+      if (subobject instanceof CObject) {
+        subobject.secondaryOwner = this;
+        return subobject.receiver(asClass);
+      }
+    }
+    if (this.secondaryOwner && !this.completeClass.isDerivedFrom(asClass)) return this.secondaryOwner.receiver(asClass);
     this.baseLocations ??= new Map();
     let location = this.baseLocations.get(asClass);
     if (!location) {
@@ -353,12 +382,37 @@ export class CObject extends Store {
 
   get(index: number): Value {
     this.checkAlive();
+    if (this.completeClass.isUnion) this.readUnionMember(index);
     return initializedValue(this.values[index]);
   }
 
   set(index: number, value: Value): void {
     this.checkAlive();
-    this.values[index] = value;
+    if (this.completeClass.isUnion && value !== UNINIT) this.activeMember = index;
+    const field = this.completeClass.fields[index];
+    this.values[index] = field?.bitWidth === undefined ? value : fitBitField(value, field.type, field.bitWidth);
+  }
+
+  /**
+   * Makes a member of a union the one in use as an access to it does: reading another member than the one written last
+   * would reinterpret its bytes, which depend on the CPU, so only a member that is an object or an array, whose own
+   * members the access goes on to write, takes over.
+   */
+  private readUnionMember(index: number): void {
+    const active = this.activeMember;
+    if (active === undefined || active === index) {
+      this.activeMember = index;
+      return;
+    }
+    const type = this.completeClass.fields[index]?.type;
+    if (type?.kind === 'class' || type?.kind === 'array') {
+      this.activeMember = index;
+      return;
+    }
+    throw new CppRuntimeError(
+      'custom',
+      '共用体で、最後に書き込んだのとは別のメンバーを読むこと（値のメモリ上の表し方は、CPU や OS によって違います）は、この採点環境では使えません。'
+    );
   }
 
   destroyReferenceTemporaries(frame: Frame): void {
@@ -556,6 +610,13 @@ export class Ptr {
   }
 
   allocationLocation(): Ptr {
+    // A secondary base's subobject belongs to the object it is a base of, which `new` allocated.
+    const object = this.isNull ? undefined : this.addressedValue();
+    if (object instanceof CObject && object.secondaryOwner) {
+      let owner = object.secondaryOwner;
+      while (owner.secondaryOwner) owner = owner.secondaryOwner;
+      if (owner.completeLocation) return owner.completeLocation;
+    }
     const store = this.store;
     return this.index === 0 && store instanceof BaseSubobjectStorage ? (store.object.completeLocation ?? this) : this;
   }
@@ -568,7 +629,8 @@ export class Ptr {
     return length;
   }
 
-  equals(other: Ptr): boolean {
+  equals(other: Ptr | FunctionRef): boolean {
+    if (other instanceof FunctionRef) return false;
     const a = this.address;
     const b = other.address;
     return a.store === b.store && a.index === b.index;
@@ -665,6 +727,72 @@ class CompleteObjectPointer extends Ptr {
 }
 
 /** A function used as a value, which a library algorithm calls. */
+/** A function's name, or the value of a pointer to a function, which designates the first candidate. */
 export class FunctionRef {
   constructor(readonly candidates: FunctionInfo[]) {}
+
+  readonly isNull = false;
+
+  equals(other: Ptr | FunctionRef): boolean {
+    return other instanceof FunctionRef && other.candidates[0] === this.candidates[0];
+  }
+}
+
+/** The value a bit-field holds after storing a value of its type: the value's low bits, signed for a signed type. */
+function fitBitField(value: Value, type: Type, width: number): Value {
+  if (type.kind !== 'int' || (typeof value !== 'number' && typeof value !== 'bigint')) return value;
+  // An enumeration without a fixed type keeps a sign bit only when it has a negative enumerator, as clang does.
+  const info = type.enumeration;
+  const signed =
+    info && !info.hasFixedType
+      ? [...info.enumerators.values()].some((enumerator) => enumerator < 0)
+      : INT_PROPERTIES[type.name].signed;
+  const fitted = signed ? BigInt.asIntN(width, BigInt(value)) : BigInt.asUintN(width, BigInt(value));
+  return typeof value === 'bigint' ? fitted : Number(fitted);
+}
+
+/** A pointer to a member of a class: a data member, a member function, or neither when it is null. */
+export class MemberPointer {
+  constructor(
+    readonly field?: FieldInfo,
+    readonly fn?: FunctionInfo
+  ) {}
+
+  get isNull(): boolean {
+    return !this.field && !this.fn;
+  }
+
+  equals(other: MemberPointer): boolean {
+    return this.field === other.field && this.fn === other.fn;
+  }
+}
+
+export const NULL_MEMBER = new MemberPointer();
+
+/** Whether a class is a base of another through first bases only, whose subobjects begin at their object. */
+function isFirstBase(cls: ClassInfo, base: ClassInfo): boolean {
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) if (current === base) return true;
+  return false;
+}
+
+/** The secondary or virtual base of a class or of its first bases through which the class derives from `base`. */
+function secondaryBaseReaching(cls: ClassInfo, base: ClassInfo): SecondaryBase | undefined {
+  // A virtual base reached through any path is the complete object's one subobject.
+  for (const virtual of cls.virtualBases) {
+    const field = cls.virtualBaseField(virtual);
+    if (field && (virtual === base || virtual.isDerivedFrom(base)))
+      return { cls: virtual, access: 'public', field, isVirtual: true };
+  }
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+    const found = current.secondaryBases.find((secondary) => secondary.cls.isDerivedFrom(base));
+    if (found) return found.isVirtual ? { ...found, field: cls.virtualBaseField(found.cls) ?? found.field } : found;
+  }
+  return undefined;
+}
+
+/** The complete object an object is a subobject of, through the members that hold its secondary bases. */
+export function outermostObject(object: CObject): CObject {
+  let owner = object;
+  while (owner.secondaryOwner && owner.secondaryOwner.liveness === Liveness.Alive) owner = owner.secondaryOwner;
+  return owner;
 }

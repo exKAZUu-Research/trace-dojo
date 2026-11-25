@@ -21,6 +21,8 @@ export function traceCppProgram(program: string, trace: TraceOptions, input?: Pr
   const snapshotter = new Snapshotter(compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.fn?.isAtomic === true,
+    // The library's code, which the interpreter writes in C++ at negative rows, shows no call of its own.
+    hidesCallRow: (frame) => (frame.fn?.row ?? 0) < 0,
     recordItem: (item) => snapshotter.recordItem(item),
     scalarVarsOf: (frame) => snapshotter.variablesOf(frame, true, false).vars,
     variablesOf: (frame) => snapshotter.variablesOf(frame, true, true),
@@ -85,7 +87,9 @@ class Snapshotter {
     for (const field of owner.fields) {
       const scalar = this.scalarOf(self.values[field.index], field.type);
       if (scalar === NOT_SCALAR || scalar === undefined) continue;
-      const name = `this->${field.name}`;
+      if (field.name === '\0this') continue;
+      // A lambda's captures show as the variables they capture.
+      const name = owner.isLambda ? field.name.replace(/^\0capture /, '') : `this->${field.name}`;
       this.take(NODE_COST + name.length);
       variables.vars[name] = scalar;
     }

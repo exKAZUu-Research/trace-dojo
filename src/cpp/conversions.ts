@@ -14,8 +14,8 @@ import {
   type Type,
   unqualified,
 } from './types';
-import type { Ptr } from './values';
-import { NULL_PTR } from './values';
+import type { MemberPointer, Ptr } from './values';
+import { FunctionRef, NULL_MEMBER, NULL_PTR } from './values';
 
 /** The ranks of implicit conversion sequences, better first. */
 export const enum Rank {
@@ -36,8 +36,11 @@ export interface ConversionSequence {
   baseDistance: number;
   convertsToVoidPointer?: boolean;
   isInitializerList?: boolean;
-  /** How the sequence binds a reference, when the target is one. */
-  reference?: { toConst: boolean };
+  /**
+   * How the sequence binds a reference, when the target is one: to const or not, as an rvalue reference or not, and
+   * whether the source is an rvalue, which overload resolution compares (C++20 [over.ics.rank]p3.2.3).
+   */
+  reference?: { toConst: boolean; isRvalue?: boolean; fromRvalue?: boolean };
   /** The converting constructor of a user-defined conversion. */
   user?: FunctionInfo;
   scalarSource?: ClassInfo;
@@ -61,6 +64,10 @@ export interface ConversionHost {
   isViableConstructor(constructor: FunctionInfo): boolean;
   /** The conversion of a braced list argument (`f({1, 2})`) to a type, by list-initialization. */
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined;
+  /** A call of a conversion function (`operator int() const`) on an object. */
+  callConversion(expr: Expr, fn: FunctionInfo): Expr;
+  /** Notes that the program uses a function, which it must then define. */
+  useFunction(fn: FunctionInfo, row: number): void;
 }
 
 const identity = (expr: Expr): Expr => expr;
@@ -81,17 +88,88 @@ export function implicitConversion(
   host: ConversionHost,
   expr: Expr,
   to: Type,
-  allowUser = true
+  allowUser = true,
+  allowExplicit = false
+): ConversionSequence | undefined {
+  const standard = convertWithoutFunctions(host, expr, to, allowUser);
+  if (standard || !allowUser || to.kind === 'reference' || expr.type.kind !== 'class' || expr.type.cls.library)
+    return standard;
+  return conversionFunction(host, expr, to, allowExplicit);
+}
+
+/**
+ * The user-defined conversion by a conversion function of the expression's class (C++20 [over.match.conv]), the
+ * explicit ones too when `allowExplicit` (a direct-initialization or a contextual conversion to `bool`).
+ */
+function conversionFunction(
+  host: ConversionHost,
+  expr: Expr,
+  to: Type,
+  allowExplicit: boolean
+): ConversionSequence | undefined {
+  const source = expr.type as Extract<Type, { kind: 'class' }>;
+  const viable: { fn: FunctionInfo; second: ConversionSequence }[] = [];
+  for (const fn of conversionFunctions(source.cls)) {
+    if (fn.isExplicit && !allowExplicit) continue;
+    if (isConstType(source) && !fn.isConst) continue;
+    const result: Expr = {
+      type: unqualified(fn.ret.kind === 'reference' ? fn.ret.to : fn.ret),
+      isLvalue: fn.ret.kind === 'reference',
+      row: expr.row,
+      run: () => {},
+    };
+    const second = convertWithoutFunctions(host, result, to, false);
+    if (second) viable.push({ fn, second });
+  }
+  const best = bestOf(viable, (a, b) => compareSequences(a.second, b.second));
+  if (!best) return undefined;
+  return sequence(Rank.UserDefined, (e) => best.second.apply(host.callConversion(e, best.fn)), {
+    user: best.fn,
+  });
+}
+
+/** The conversion functions a class declares or inherits, the derived class's hiding the base's of the same name. */
+export function conversionFunctions(cls: ClassInfo): FunctionInfo[] {
+  const found = new Map<string, FunctionInfo[]>();
+  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+    for (const [name, methods] of current.methods) {
+      if (!found.has(name) && methods.some((fn) => fn.isConversion)) found.set(name, methods);
+    }
+  }
+  return [...found.values()].flat().filter((fn) => fn.isConversion);
+}
+
+function convertWithoutFunctions(
+  host: ConversionHost,
+  expr: Expr,
+  to: Type,
+  allowUser: boolean
 ): ConversionSequence | undefined {
   // The library's pseudo-parameter of a callable or a braced list takes the argument as it is.
   if (expr.braced && to.kind === 'function')
     return sequence(Rank.Exact, (e) => ({ ...e, constantInitialization: true }), { isInitializerList: true });
   if (expr.braced) return host.bracedConversion(expr.braced, to);
-  // A function's name converts only to a parameter that takes a callable, as the library's algorithms have.
+  const pointee = to.kind === 'pointer' && to.to.kind === 'function' ? to.to : undefined;
+  if (pointee && expr.functions) return functionPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
+  // A function's name binds a reference to a pointer to it (a forwarding reference's deduction) as a temporary.
+  const pointerTarget = to.kind === 'reference' && (to.isRvalue || isConstType(to.to)) ? unqualified(to.to) : undefined;
+  if (expr.functions && pointerTarget?.kind === 'pointer' && pointerTarget.to.kind === 'function') {
+    const pointer = functionPointer(host, expr, pointerTarget, pointerTarget.to);
+    if (pointer) return { ...pointer, apply: (e) => host.materialize(pointer.apply(e)) };
+  }
+  if (pointee && allowUser && expr.type.kind === 'class' && expr.type.cls.isLambda)
+    return lambdaPointer(host, expr, to as Extract<Type, { kind: 'pointer' }>, pointee);
+  // A function's name converts only to a parameter that takes a callable, as the library's algorithms have, or to
+  // a class whose constructor takes the function (`std::function`).
+  if (expr.functions && to.kind === 'class' && !to.cls.library && allowUser)
+    return classConversion(host, expr, to.cls, allowUser);
   if (to.kind === 'function' || expr.functions) {
     return to.kind === 'function' && expr.functions ? sequence(Rank.Exact, (e) => e) : undefined;
   }
-  if (to.kind === 'reference') return referenceBinding(host, expr, to.to, allowUser);
+  if (to.kind === 'reference')
+    return to.isRvalue
+      ? rvalueReferenceBinding(host, expr, to.to, allowUser)
+      : referenceBinding(host, expr, to.to, allowUser);
   if (to.kind === 'class') return classConversion(host, expr, to.cls, allowUser);
   if (allowUser && expr.type.kind === 'class' && expr.type.cls.library?.scalarValue) {
     const scalar = scalarValue(host, expr);
@@ -103,6 +181,55 @@ export function implicitConversion(
       });
   }
   return standardConversion(host, expr, to);
+}
+
+/** The type of a function, which a pointer to it points to. */
+export function functionTypeOf(fn: FunctionInfo): Type {
+  return { kind: 'function', ret: fn.ret, params: fn.params.map((param) => unqualified(param.type)) };
+}
+
+/** A function's name converted to a pointer to the overload whose type is the pointee's (C++20 [over.over]). */
+function functionPointer(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'pointer' }>,
+  pointee: Type
+): ConversionSequence | undefined {
+  const candidates = expr.functions?.candidates ?? [];
+  const fn = candidates.find(
+    (candidate) => (!candidate.owner || candidate.isStatic) && sameType(functionTypeOf(candidate), pointee, false)
+  );
+  if (!fn) return undefined;
+  return sequence(Rank.Exact, (e) => {
+    host.useFunction(fn, e.row);
+    const value = new FunctionRef([fn]);
+    return { type: to, isLvalue: false, row: e.row, run: () => value, staticAddress: true };
+  });
+}
+
+/** A lambda without captures converted to a pointer to its function call operator (C++20 [expr.prim.lambda.closure]). */
+function lambdaPointer(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'pointer' }>,
+  pointee: Type
+): ConversionSequence | undefined {
+  const { cls } = expr.type as Extract<Type, { kind: 'class' }>;
+  const [call] = cls.methods.get('operator()') ?? [];
+  if (!call || cls.fields.length > 0 || !sameType(functionTypeOf(call), pointee, false)) return undefined;
+  const value = new FunctionRef([call]);
+  return sequence(Rank.UserDefined, (e) => {
+    const { run } = e;
+    return {
+      type: to,
+      isLvalue: false,
+      row: e.row,
+      run: (frame) => {
+        run(frame);
+        return value;
+      },
+    };
+  });
 }
 
 export function scalarValue(host: ConversionHost, expr: Expr): Expr {
@@ -120,36 +247,93 @@ function referenceBinding(
   allowUser: boolean
 ): ConversionSequence | undefined {
   const toConst = isConstType(target);
-  if (!toConst && expr.isXvalue) return undefined;
+  if (!toConst && (expr.isXvalue || expr.isBitField)) return undefined;
   const from = expr.type;
-  if (expr.isLvalue && (toConst || !isConstType(from))) {
+  // A const reference to a bit-field binds to a temporary holding its value.
+  if (expr.isLvalue && !expr.isBitField && (toConst || !isConstType(from))) {
+    const fromRvalue = expr.isXvalue === true;
     if (
       sameType(unqualified(from), unqualified(target), false) &&
       (from.kind !== 'array' || sameType(from, target, false))
     ) {
-      return sequence(Rank.Exact, identity, { reference: { toConst } });
+      return sequence(Rank.Exact, identity, { reference: { toConst, fromRvalue } });
     }
     const distance = baseDistance(from, target);
     if (distance > 0) {
       return sequence(Rank.Conversion, (e) => toBase(host, e, target), {
-        reference: { toConst },
+        reference: { toConst, fromRvalue },
         baseDistance: distance,
       });
     }
   }
+  const viaFunction = allowUser ? lvalueConversionFunction(host, expr, target) : undefined;
+  if (viaFunction) return viaFunction;
   if (!toConst) return undefined;
+  const fromRvalue = !expr.isLvalue || expr.isXvalue === true;
   if (!expr.isLvalue && from.kind === 'class' && target.kind === 'class') {
     const distance = from.cls === target.cls ? 0 : baseDistance(from, target);
     if (from.cls === target.cls || distance > 0) {
       return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => toBase(host, host.materialize(e), target), {
-        reference: { toConst },
+        reference: { toConst, fromRvalue },
         baseDistance: distance,
       });
     }
   }
   const converted = implicitConversion(host, expr, unqualified(target), allowUser);
   if (!converted) return undefined;
-  return { ...converted, reference: { toConst }, apply: (e) => host.materialize(converted.apply(e)) };
+  return { ...converted, reference: { toConst, fromRvalue }, apply: (e) => host.materialize(converted.apply(e)) };
+}
+
+/**
+ * Binds an lvalue reference to the lvalue a conversion function of the expression's class returns (C++20
+ * [dcl.init.ref]p5.1.2).
+ */
+function lvalueConversionFunction(host: ConversionHost, expr: Expr, target: Type): ConversionSequence | undefined {
+  const source = expr.type;
+  if (source.kind !== 'class' || source.cls.library) return undefined;
+  const viable: { fn: FunctionInfo; second: ConversionSequence }[] = [];
+  for (const fn of conversionFunctions(source.cls)) {
+    if (fn.isExplicit || fn.ret.kind !== 'reference' || fn.ret.isRvalue) continue;
+    if (isConstType(source) && !fn.isConst) continue;
+    const result: Expr = { type: fn.ret.to, isLvalue: true, row: expr.row, run: () => {} };
+    const second = referenceBinding(host, result, target, false);
+    if (second) viable.push({ fn, second });
+  }
+  const best = bestOf(viable, (a, b) => compareSequences(a.second, b.second));
+  if (!best) return undefined;
+  return sequence(Rank.UserDefined, (e) => best.second.apply(host.callConversion(e, best.fn)), {
+    user: best.fn,
+    reference: best.second.reference,
+  });
+}
+
+/** Binds an rvalue reference (`T&&`), which only an rvalue may bind: an xvalue directly, a prvalue as a temporary. */
+function rvalueReferenceBinding(
+  host: ConversionHost,
+  expr: Expr,
+  target: Type,
+  allowUser: boolean
+): ConversionSequence | undefined {
+  if (expr.isLvalue && !expr.isXvalue) return undefined;
+  const from = expr.type;
+  const reference = { toConst: isConstType(target), isRvalue: true, fromRvalue: true };
+  if (isConstType(from) && !isConstType(target)) return undefined;
+  const related = sameType(unqualified(from), unqualified(target), false) || baseDistance(from, target) > 0;
+  if (related) {
+    const distance = baseDistance(from, target);
+    return sequence(
+      distance > 0 ? Rank.Conversion : Rank.Exact,
+      (e) => toBase(host, e.isLvalue ? e : host.materialize(e), target),
+      { reference, baseDistance: distance }
+    );
+  }
+  const converted = implicitConversion(host, { ...expr, isXvalue: false }, unqualified(target), allowUser);
+  if (!converted) return undefined;
+  return { ...converted, reference, apply: (e) => markXvalue(host.materialize(converted.apply(e))) };
+}
+
+function markXvalue(expr: Expr): Expr {
+  return { ...expr, isXvalue: true };
 }
 
 function classConversion(
@@ -188,7 +372,7 @@ function standardConversion(host: ConversionHost, expr: Expr, to: Type): Convers
   if (from.kind === 'class' || to.kind === 'void' || from.kind === 'void') return undefined;
   if (isArithmetic(to)) {
     if (isArithmetic(from)) return arithmeticConversion(host, from, to);
-    if (to.name === 'bool' && (from.kind === 'pointer' || from.kind === 'array')) {
+    if (to.name === 'bool' && (from.kind === 'pointer' || from.kind === 'array' || from.kind === 'memberPointer')) {
       return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to, run: notNull(host.rvalue(e).run) }), {
         isBoolean: true,
       });
@@ -197,6 +381,25 @@ function standardConversion(host: ConversionHost, expr: Expr, to: Type): Convers
   }
   if (to.kind === 'nullptr') return from.kind === 'nullptr' ? sequence(Rank.Exact, (e) => host.rvalue(e)) : undefined;
   if (to.kind === 'pointer') return pointerConversion(host, expr, to);
+  if (to.kind === 'memberPointer') return memberPointerConversion(host, expr, to);
+  return undefined;
+}
+
+/**
+ * The conversions to a pointer to a member: the same type, the null pointer constant, and a pointer to a member of a
+ * base to one of the derived class (C++20 [conv.mem]).
+ */
+function memberPointerConversion(
+  host: ConversionHost,
+  expr: Expr,
+  to: Extract<Type, { kind: 'memberPointer' }>
+): ConversionSequence | undefined {
+  const from = expr.type;
+  if (expr.isNullConstant || from.kind === 'nullptr')
+    return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to, run: () => NULL_MEMBER }));
+  if (from.kind !== 'memberPointer' || !sameType(from.to, to.to)) return undefined;
+  if (from.cls === to.cls) return sequence(Rank.Exact, (e) => ({ ...host.rvalue(e), type: to }));
+  if (to.cls.isDerivedFrom(from.cls)) return sequence(Rank.Conversion, (e) => ({ ...host.rvalue(e), type: to }));
   return undefined;
 }
 
@@ -204,12 +407,27 @@ function arithmeticConversion(
   host: ConversionHost,
   from: Extract<Type, { kind: 'int' | 'float' }>,
   to: Extract<Type, { kind: 'int' | 'float' }>
-): ConversionSequence {
+): ConversionSequence | undefined {
   const target = unqualified(to);
   const apply = (e: Expr): Expr => convertArithmetic(host.rvalue(e), target);
+  const fromEnum = from.kind === 'int' ? from.enumeration : undefined;
+  const toEnum = to.kind === 'int' ? to.enumeration : undefined;
+  // No integer converts to an enumeration implicitly, and a scoped enumeration converts to nothing (C++20 [conv.integral]).
+  if (toEnum || fromEnum?.isScoped) return toEnum === fromEnum ? sequence(Rank.Exact, apply) : undefined;
+  if (fromEnum) {
+    // An unscoped enumeration promotes to its underlying type and to that type's promotion (C++20 [conv.prom]).
+    const promoted = enumPromotion(from as Extract<Type, { kind: 'int' }>);
+    if (to.kind === 'int' && (to.name === promoted || (fromEnum.hasFixedType && to.name === fromEnum.underlying)))
+      return sequence(Rank.Promotion, apply);
+    return sequence(Rank.Conversion, apply);
+  }
   if (from.kind === to.kind && from.name === to.name) return sequence(Rank.Exact, apply);
   if (isPromotion(from, to)) return sequence(Rank.Promotion, apply);
   return sequence(Rank.Conversion, apply);
+}
+
+function enumPromotion(type: Extract<Type, { kind: 'int' }>): string {
+  return intRank(type.name) < intRank('int') ? 'int' : type.name;
 }
 
 /** Converts an arithmetic prvalue to another arithmetic type, folding constants. */
@@ -330,7 +548,7 @@ export function classLocation(expr: Expr, cls: ClassInfo): Expr {
 }
 
 function notNull(run: Expr['run']): Expr['run'] {
-  return (frame) => ((run(frame) as Ptr).isNull ? 0 : 1);
+  return (frame) => ((run(frame) as Ptr | MemberPointer).isNull ? 0 : 1);
 }
 
 /** How many classes up from `from` the class `to` is, or 0 when `to` is no proper base of `from`. */
@@ -357,6 +575,13 @@ export function compareSequences(a: ConversionSequence, b: ConversionSequence): 
   }
   const qualification = compareQualificationTargets(a.qualificationTarget, b.qualificationTarget);
   if (qualification) return qualification;
+  // An rvalue binds an rvalue reference better than an lvalue reference.
+  if (
+    a.reference?.fromRvalue &&
+    b.reference?.fromRvalue &&
+    Boolean(a.reference.isRvalue) !== Boolean(b.reference.isRvalue)
+  )
+    return a.reference.isRvalue ? 1 : -1;
   if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
   return 0;
 }

@@ -3,6 +3,8 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
+import { stripAttributes } from './attributes';
+import { preprocessCpp } from './preprocessor';
 import { rejectUnsupportedSyntax } from './stages';
 import { copySyntax, type Syntax } from './syntax';
 
@@ -18,7 +20,8 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 };
 
 /** Parses a translation unit, throwing a `CompileError` for invalid syntax or syntax the interpreter leaves out. */
-export function parseCpp(source: string): Syntax {
+export function parseCpp(written: string): Syntax {
+  const source = withTemplateGuides(preprocessCpp(written));
   return parseSource(
     parser,
     source,
@@ -26,10 +29,92 @@ export function parseCpp(source: string): Syntax {
     (root) => {
       const syntax = copySyntax(root);
       rejectUnsupportedSyntax(syntax);
-      return syntax;
+      return stripAttributes(syntax);
     },
-    { locateErrors: (root, errors) => locateErrors(root, errors, source) }
+    {
+      locateErrors: (root, errors) => locateErrors(root, errors, source),
+      // A bit-field without a name (`int : 0;`) parses as one whose name is missing.
+      acceptsMissing: (node) => node.type === 'field_identifier' && node.nextSibling?.type === 'bitfield_clause',
+    }
   );
+}
+
+/**
+ * A deduction guide that is no template (`Name(const char*) -> Name<std::string>;`), which the grammar cannot parse,
+ * with `template <>` before it, which the grammar parses as a template declaration of the same guide.
+ */
+const NON_TEMPLATE_GUIDE =
+  /^([ \t]*)((?:explicit[ \t]+)?([A-Za-z_]\w*)[ \t]*\([^;{}]*\)[ \t]*->[ \t]*(?:\w+::)*\3[ \t]*<[^;{}]*>[ \t]*;)/gm;
+
+function withTemplateGuides(source: string): string {
+  return source.replaceAll(NON_TEMPLATE_GUIDE, '$1template <> $2');
+}
+
+/**
+ * The row the interpreter's own library source starts at, below every row of a program, so that its code records no
+ * steps and shows no calls.
+ */
+export const LIBRARY_ROW = -1_000_000;
+
+/** Parses the C++ source of part of the interpreter's library, whose rows start at `LIBRARY_ROW`. */
+export function parseLibrarySource(source: string): Syntax {
+  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) =>
+    copySyntax(root, undefined, { row: LIBRARY_ROW, index: 0 })
+  );
+}
+
+/**
+ * Parses a statement as a declaration, which the grammar reads as comparisons when a class template's arguments are
+ * all values (`std::bitset<8> b;`): `const` before it leaves the grammar a declaration only, and the copy drops it.
+ */
+export function parseAsDeclaration(statement: Syntax): Syntax | undefined {
+  const prefix = 'void declaration_probe() { const ';
+  const tree = parser.parse(`${prefix}${statement.text} }`);
+  if (!tree) return undefined;
+  try {
+    const { rootNode } = tree;
+    if (rootNode.hasError) return undefined;
+    const declaration = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    if (declaration?.type !== 'declaration' || declaration.endIndex !== prefix.length + statement.text.length)
+      return undefined;
+    const syntax = copySyntax(declaration, undefined, { row: statement.row, index: statement.start - prefix.length });
+    const all = syntax.all.slice(1);
+    return { ...syntax, all, children: all.filter((child) => child.isNamed) };
+  } finally {
+    tree.delete();
+  }
+}
+
+/** Parses the text of an expression that starts at a node, as the grammar would parse it alone in parentheses. */
+export function parseExpressionAt(text: string, at: Syntax): Syntax | undefined {
+  const prefix = 'void expression_probe() { (';
+  const tree = parser.parse(`${prefix}${text}); }`);
+  if (!tree) return undefined;
+  try {
+    const { rootNode } = tree;
+    if (rootNode.hasError) return undefined;
+    const statement = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    const expression = statement?.namedChild(0)?.namedChild(0);
+    if (!expression) return undefined;
+    return copySyntax(expression, undefined, { row: at.row, index: at.start - prefix.length });
+  } finally {
+    tree.delete();
+  }
+}
+
+/** Parses a statement the interpreter writes, which it compiles as if it were written at a row. */
+export function parseStatementAt(text: string, row: number): Syntax {
+  const prefix = 'void statement_probe() { ';
+  const tree = parser.parse(`${prefix}${text} }`);
+  if (!tree) throw new Error(`cannot parse ${text}`);
+  try {
+    const { rootNode } = tree;
+    const statement = rootNode.namedChild(0)?.childForFieldName('body')?.namedChild(0);
+    if (rootNode.hasError || !statement) throw new Error(`cannot parse ${text}`);
+    return copySyntax(statement, undefined, { row, index: -prefix.length });
+  } finally {
+    tree.delete();
+  }
 }
 
 export function parseInitializerArguments(parameters: Syntax): Syntax | undefined {

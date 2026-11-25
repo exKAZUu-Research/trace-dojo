@@ -23,9 +23,21 @@ import {
   isConstType,
   isCopyConstructor,
   type Type,
+  unqualified,
   withConst,
 } from '../types';
-import { ArrayStore, CObject, endLifetime, FunctionRef, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  FunctionRef,
+  holdValues,
+  Ptr,
+  Store,
+  UNINIT,
+  type Value,
+} from '../values';
 import { SequenceValue } from './containerValues';
 import type { LibraryClass } from './libraryClass';
 import { compareBytes, StringValue } from './string';
@@ -48,7 +60,9 @@ type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
 
 type MoveConstruction =
   | { kind: 'copy' | 'string' | 'sequence' | 'members' }
-  | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> };
+  | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> }
+  /** A move constructor the program writes, which the library calls. */
+  | { kind: 'program'; constructor: FunctionInfo };
 
 export function checkContainerElement(
   compiler: ExpressionCompiler,
@@ -135,6 +149,11 @@ export function movedArgument(compiler: ExpressionCompiler, type: Type, argument
   const target: Type = { kind: 'reference', to: withConst(type) };
   const bound = implicitConversion(compiler, argument, target)?.apply(argument);
   if (bound?.isXvalue && !isConstType(bound.type)) return bound.run as Eval<Ptr>;
+  // A temporary that converting an argument of another class makes is an rvalue to move from too.
+  if (argument.type.kind === 'class' && argument.type.cls !== type.cls && (!argument.isLvalue || argument.isXvalue)) {
+    const rvalue: Type = { kind: 'reference', to: type, isRvalue: true };
+    return implicitConversion(compiler, argument, rvalue)?.apply(argument).run as Eval<Ptr> | undefined;
+  }
 }
 
 export function requireElementUse(
@@ -187,8 +206,11 @@ export function canTransferElementStorage(type: Type): boolean {
   if (type.kind === 'array') return type.length === 0 || canTransferElementStorage(type.of);
   if (type.kind !== 'class') return true;
   const { cls } = type;
-  if (!cls.isComplete || cls.isNoncopyable) return false;
+  if (!cls.isComplete) return false;
   const move = moveConstruction(type);
+  // A container moves an element whose move may throw only when it cannot copy it (`std::move_if_noexcept`).
+  if (move.kind === 'program') return move.constructor.isNoexcept || cls.isNoncopyable;
+  if (cls.isNoncopyable) return false;
   if (move.kind === 'copy') return canCopyWithoutThrow(type);
   if (move.kind === 'string' || move.kind === 'sequence') return true;
   if (move.kind === 'array') return canTransferElementStorage(move.array.type);
@@ -204,6 +226,8 @@ export function moveConstruction(type: ClassType): MoveConstruction {
   if (cls.library?.kind === 'string') return { kind: 'string' };
   if (ownsMovableSequence(type)) return { kind: 'sequence' };
   if (cls.library?.aggregateArray) return { kind: 'array', array: cls.library.aggregateArray };
+  const constructor = writtenMove(cls, cls.constructors);
+  if (constructor) return { kind: 'program', constructor };
   return { kind: canMoveFields(cls) ? 'members' : 'copy' };
 }
 
@@ -243,6 +267,13 @@ export function constructElementFromRvalue(frame: Frame, type: Type, source: Val
   if (construction.kind === 'array')
     return constructMovedArray(frame, construction.array, (source as SequenceValue).items);
   const destination = target instanceof CObject ? target : undefined;
+  if (construction.kind === 'program') {
+    const object = newObject(frame, cls, false, destination);
+    object.needsConstruction = true;
+    invoke(frame, construction.constructor, [(source as CObject).receiver()], object.receiver(), cls.row, true);
+    object.needsConstruction = false;
+    return object;
+  }
   if (construction.kind === 'members') {
     const move = (): Value => transferSubobjects(frame, cls, source as CObject, destination);
     return canTransferElementStorage(type) ? frame.runtime.withoutOuterHandlers(move) : move();
@@ -442,6 +473,11 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
       frame.runtime.spend();
       target.items[index] = moveValue(frame, element, target.items[index], value);
     }
+  } else if (!cls.library && writtenMove(cls, cls.methods.get('operator=') ?? [])) {
+    const assignment = writtenMove(cls, cls.methods.get('operator=') ?? []) as FunctionInfo;
+    withTemporaries(frame, () =>
+      invoke(frame, assignment, [(source as CObject).receiver()], (target as CObject).receiver(), cls.row)
+    );
   } else if (canMoveFields(cls)) {
     const to = target as CObject;
     const from = source as CObject;
@@ -461,6 +497,23 @@ function moveField(frame: Frame, type: Type, target: Value, source: Value): Valu
     if (replacement !== undefined) location.write(replacement);
   } else location.write(value);
   return target;
+}
+
+/** The function among `candidates` the program writes for moving from an object of a class (`T(T&&)`). */
+function writtenMove(cls: ClassInfo, candidates: readonly FunctionInfo[]): FunctionInfo | undefined {
+  return candidates.find((fn) => {
+    const [param, ...rest] = fn.params;
+    return (
+      !fn.native &&
+      !fn.isDeleted &&
+      param?.type.kind === 'reference' &&
+      param.type.isRvalue === true &&
+      param.type.to.kind === 'class' &&
+      param.type.to.cls === cls &&
+      !isConstType(param.type.to) &&
+      rest.every((other) => other.defaultValue !== undefined)
+    );
+  });
 }
 
 function canMoveFields(cls: ClassInfo): boolean {
@@ -488,9 +541,26 @@ export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
 
 export type ValueComparison<T> = (a: Value, b: Value, frame: Frame) => T;
 
+/**
+ * Applies an operator function the program declares to two objects of a class it wrote, or undefined when it declares
+ * none for them; the compiler provides it.
+ */
+type ProgramOperator = (cls: ClassInfo, operator: '<' | '==') => ValueComparison<boolean> | undefined;
+
+let programOperator: ProgramOperator | undefined;
+
+export function provideProgramOperators(provide: ProgramOperator | undefined): void {
+  programOperator = provide;
+}
+
 /** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
 export function lessThan(type: Type): ValueComparison<number> | undefined {
   if (type.kind === 'reference') return compareReferences(lessThan(type.to));
+  if (type.kind === 'class' && !type.cls.library) {
+    const less = programOperator?.(type.cls, '<');
+    if (!less) return undefined;
+    return (a, b, frame) => (less(a, b, frame) ? -1 : less(b, a, frame) ? 1 : 0);
+  }
   if (isArithmetic(type)) {
     return (a, b) => {
       const x = a as number | bigint;
@@ -538,6 +608,7 @@ export function lessThan(type: Type): ValueComparison<number> | undefined {
 /** Whether two values of a type are equal, as `==` says, or undefined when `==` does not apply. */
 export function equalTo(type: Type): ValueComparison<boolean> | undefined {
   if (type.kind === 'reference') return compareReferences(equalTo(type.to));
+  if (type.kind === 'class' && !type.cls.library) return programOperator?.(type.cls, '==');
   if (type.kind === 'pointer') return (a, b) => (a as Ptr).equals(b as Ptr);
   if (type.kind === 'class' && type.cls.library?.kind === 'pair') {
     const [first, second] = type.cls.fields;
@@ -576,21 +647,76 @@ export function callbackOperands(
   }));
 }
 
+/** The position of each argument of a call of a library function, which its callables are read from. */
+export const callablePositions = new WeakMap<Expr, number>();
+
+/**
+ * The object of a class the program wrote with `operator()` (such as a lambda's closure), which a library function
+ * received as an argument, for calling it; undefined for other arguments.
+ */
+export function programCallable(arg: Expr | undefined): Expr | undefined {
+  if (!arg) return undefined;
+  const { type } = arg;
+  const isFunctionPointer = type.kind === 'pointer' && type.to.kind === 'function';
+  if (!isFunctionPointer && (type.kind !== 'class' || type.cls.library)) return undefined;
+  const position = callablePositions.get(arg);
+  if (position === undefined) return undefined;
+  if (isFunctionPointer)
+    return {
+      type: unqualified(type),
+      isLvalue: false,
+      row: arg.row,
+      run: (frame) => {
+        const value = frame.runtime.nativeArguments.at(-1)?.[position];
+        return value instanceof Ptr && !value.isNull ? value.read() : (value as Value);
+      },
+    };
+  if (type.kind !== 'class') return undefined;
+  return {
+    type: unqualifiedClass(type),
+    isLvalue: true,
+    row: arg.row,
+    run: (frame) => {
+      // The library function takes the callable by reference or by value.
+      const value = frame.runtime.nativeArguments.at(-1)?.[position];
+      return value instanceof Ptr ? value : new Ptr(new Box(value as Value), 0);
+    },
+  };
+}
+
+function unqualifiedClass(type: ClassType): ClassType {
+  return classType(type.cls);
+}
+
 export function predicateCallback(
   compiler: ExpressionCompiler,
   argumentType: Type,
   functions: FunctionCandidates | undefined,
   operands: CallbackOperand[],
-  row: number
+  row: number,
+  arg?: Expr
 ): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined {
   if (functions) {
     return functionCallback(compiler, functions, operands, row, true);
   }
+  const callable = programCallable(arg);
+  if (callable) return callbackRunner(compiler, operands, row, (args) => compiler.callWith(callable, args, row), true);
   if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor' && operands.length === 2) {
     const callee: Expr = { type: argumentType, row, isLvalue: false, run: () => {} };
     return callbackRunner(compiler, operands, row, (args) => compiler.callWith(callee, args, row), true);
   }
   return undefined;
+}
+
+/** Calls an argument of a class the program wrote with `operator()`, or undefined for other arguments. */
+export function callableCallback(
+  compiler: ExpressionCompiler,
+  arg: Expr,
+  operands: CallbackOperand[]
+): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined {
+  const callable = programCallable(arg);
+  if (!callable) return undefined;
+  return callbackRunner(compiler, operands, arg.row, (args) => compiler.callWith(callable, args, arg.row), false);
 }
 
 export function functionCallback(
@@ -631,3 +757,40 @@ export function truthy(value: Value): boolean {
 }
 
 export { CObject, FunctionRef, SequenceValue, Store, StringValue };
+
+/**
+ * Calls a function object of a class the program writes with keys, as a container does with its own object of the
+ * class, which holds nothing, so that any object of the class gives the same results.
+ */
+export function functionObjectCall(
+  compiler: ExpressionCompiler,
+  keyType: Type,
+  cls: ClassInfo,
+  arity: number,
+  row = 0
+): (keys: Value[], frame: Frame) => Value {
+  if (cls.fields.length > 0)
+    return compiler.unsupported(row, `値を持つ関数オブジェクト（${cls.name}）をコンテナに使うこと`);
+  const object = new CObject(cls, []);
+  const callee: Expr = { type: classType(cls, true), isLvalue: true, row, run: () => new Ptr(new Box(object), 0) };
+  const operands: Value[][] = [];
+  const operand = (index: number): Expr => ({
+    type: withConst(keyType),
+    isLvalue: true,
+    row,
+    run: () => new Ptr(new Box((operands.at(-1) as Value[])[index]), 0),
+  });
+  const call = compiler.callWith(
+    callee,
+    Array.from({ length: arity }, (_, index) => operand(index)),
+    row
+  );
+  return (keys, frame) => {
+    operands.push(keys);
+    try {
+      return withTemporaries(frame, () => call.run(frame) as Value);
+    } finally {
+      operands.pop();
+    }
+  };
+}

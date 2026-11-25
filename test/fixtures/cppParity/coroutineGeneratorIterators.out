@@ -1,0 +1,16 @@
++split
+[the]
+[quick]
+[brown]
+[fox]
+-split
+total 18
+0
+1
+got 1
+error: bad value
+7 14 21 
+16 9 4 1 
++split
+-split
+2ab

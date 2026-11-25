@@ -1,31 +1,46 @@
 import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
-import { AUTO, hasAuto } from './compilerBase';
-import { permitsQualificationConversion } from './conversions';
+import { AUTO, type Declared, DECLTYPE_AUTO, hasAuto, isAuto } from './compilerBase';
+import { convertArithmetic, permitsQualificationConversion } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import {
+  constantExpr,
   type ConstantLocation,
   constantLocationOf,
   type Expr,
   type Initializer,
   type InitializerTarget,
+  initializerWithConstancy,
   type MemberConstant,
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
   type TemporaryBinding,
 } from './expr';
-import { ExpressionCompiler } from './expressionCompiler';
+import { ExpressionCompiler, hasMemberNamed } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
-import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
-import { parseInitializerArguments } from './parse';
+import { bindRetainedTemporary, constructArray, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
+import { expandPacks } from './packs';
+import { parseAsDeclaration, parseInitializerArguments } from './parse';
 import { erasePointee } from './pointerCasts';
-import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
+import {
+  BREAK,
+  type Completion,
+  CONTINUE,
+  type Eval,
+  type Exec,
+  type Frame,
+  GOTO,
+  type LocalInfo,
+  RETURN,
+} from './runtime';
 import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
-import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
+import { fieldOf, fieldsOf, hasToken, type Syntax, tokenOf } from './syntax';
 import {
+  decay,
   type GlobalInfo,
   hasVacuousInitialization,
+  INT,
   intMax,
   intMin,
   isArithmetic,
@@ -33,6 +48,8 @@ import {
   isInteger,
   isLibraryClass,
   isReferenceRelated,
+  isScopedEnum,
+  LONG,
   nonReference,
   pointerTo,
   referenceTo,
@@ -72,12 +89,19 @@ export interface AutoDeduction {
   type: Type;
 }
 
-interface LocalDeclaration {
+export interface LocalDeclaration {
   exec: Exec;
   hasInitializer: boolean;
   createsObject: boolean;
   deduced?: AutoDeduction;
   type?: Type;
+}
+
+/** How statements compile: to closures that run them at once, or to coroutine statements that may suspend. */
+export interface StatementMode<T> {
+  statement: (node: Syntax) => T;
+  statements: (nodes: readonly Syntax[]) => T;
+  scopeExit: (run: T, scope: Scope) => T;
 }
 
 /** Compiles statements to closures that run them and tell how they completed. */
@@ -87,7 +111,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Records the step of a statement after it runs, as `StepTracker.runStatement` says. */
   withStep(row: number, exec: Exec, isOnlyCall = false): Exec {
-    if (!this.recordsSteps) return exec;
+    if (!this.recordsSteps || row < 0) return exec;
     return (frame) => frame.runtime.steps.runStatement(row, isOnlyCall, () => exec(frame));
   }
 
@@ -96,16 +120,26 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return (frame) => withTemporaries(frame, run);
   }
 
+  protected readonly execMode: StatementMode<Exec> = {
+    statement: (node) => this.compileStatement(node),
+    statements: (nodes) => this.compileStatements(nodes),
+    scopeExit: (exec, scope) => this.withScopeExit(exec, scope),
+  };
+
   /** Compiles statements in a new block scope, whose variables end their lifetime when the block completes. */
   inScope(compile: () => Exec, scope = new Scope()): Exec {
+    return this.inScopeWith(this.execMode, compile, scope);
+  }
+
+  protected inScopeWith<T>(mode: StatementMode<T>, compile: () => T, scope = new Scope()): T {
     this.context.scopes.push(scope);
-    let exec: Exec;
+    let run: T;
     try {
-      exec = compile();
+      run = compile();
     } finally {
       this.context.popScope();
     }
-    return this.withScopeExit(exec, scope);
+    return mode.scopeExit(run, scope);
   }
 
   /** Ends the lifetime of a scope's variables when its statements complete, however they complete. */
@@ -126,22 +160,63 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   compileBlock(node: Syntax): Exec {
-    return this.inScope(() => this.compileStatements(node.children));
+    const scope = new Scope();
+    let statements: LabeledExec | undefined;
+    const exec = this.inScope(() => {
+      statements = this.compileStatements(node.children);
+      return statements;
+    }, scope);
+    const enter = statements?.enter;
+    if (!enter) return exec;
+    // A `goto` may enter the block at one of its labels, which starts the block's scope there.
+    return Object.assign(exec, { enter: this.withScopeExit((frame) => enter(frame, frame.gotoLabel), scope) });
   }
 
-  compileStatements(nodes: readonly Syntax[]): Exec {
-    const compiled = nodes.map((node) => this.compileStatement(node));
-    if (compiled.length === 1) return compiled[0];
-    return (frame) => {
-      for (const exec of compiled) {
-        const completion = exec(frame);
+  compileStatements(nodes: readonly Syntax[]): LabeledExec {
+    const labels = new Map<string, number>();
+    for (const [index, node] of nodes.entries()) {
+      for (const label of labelsIn(node)) labels.set(label, index);
+    }
+    const { enclosingLabels } = this.context;
+    enclosingLabels.push(labels);
+    let compiled: LabeledExec[];
+    try {
+      compiled = nodes.map((node) => this.compileStatement(node));
+    } finally {
+      enclosingLabels.pop();
+    }
+    if (labels.size === 0) {
+      if (compiled.length === 1) return compiled[0];
+      return (frame) => {
+        for (const exec of compiled) {
+          const completion = exec(frame);
+          if (completion !== undefined) return completion;
+        }
+        return;
+      };
+    }
+    const run = (frame: Frame, label: string | undefined): Completion => {
+      let index = label === undefined ? 0 : (labels.get(label) as number);
+      let entering = label;
+      while (index < compiled.length) {
+        const exec = compiled[index];
+        const completion = entering !== undefined && exec.enter ? exec.enter(frame, entering) : exec(frame);
+        entering = undefined;
+        if (completion === GOTO && labels.has(frame.gotoLabel)) {
+          index = labels.get(frame.gotoLabel) as number;
+          entering = frame.gotoLabel;
+          continue;
+        }
         if (completion !== undefined) return completion;
+        index++;
       }
       return;
     };
+    return Object.assign((frame: Frame) => run(frame, undefined), { enter: run });
   }
 
   compileStatement(node: Syntax): Exec {
+    if (node.row >= 0) this.userRow = node.row;
     return this.budgeted(this.compileStatementBody(node));
   }
 
@@ -158,10 +233,44 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       case 'compound_statement': {
         return this.compileBlock(node);
       }
+      case 'labeled_statement': {
+        const label = (fieldOf(node, 'label') as Syntax).text;
+        const previous = this.context.labels.get(label);
+        if (previous !== undefined) this.error(node.row, `ラベル ${label} はすでに ${previous + 1} 行目にあります。`);
+        this.context.labels.set(label, node.row);
+        const statement = node.children.find((child) => child.field !== 'label');
+        if (!statement) return () => {};
+        const exec: LabeledExec = this.compileStatement(statement);
+        // The label names the statement; entering at a label inside it enters the statement there.
+        const enter = exec.enter;
+        return Object.assign((frame: Frame) => exec(frame), {
+          enter: (frame: Frame, target: string) => (target === label || !enter ? exec(frame) : enter(frame, target)),
+        });
+      }
+      case 'type_definition':
+      case 'alias_declaration':
+      case 'static_assert_declaration': {
+        this.declarationOnly(node);
+        return () => {};
+      }
+      case 'goto_statement': {
+        const label = (fieldOf(node, 'label') as Syntax).text;
+        const isReachable = this.context.enclosingLabels.some((labels) => labels.has(label));
+        this.context.gotos.push({ label, row: node.row, isReachable });
+        return this.withStep(node.row, (frame) => {
+          frame.gotoLabel = label;
+          return GOTO;
+        });
+      }
       case 'declaration': {
         return this.localDeclaration(node).exec;
       }
+      case 'pragma_operator': {
+        return () => {};
+      }
       case 'expression_statement': {
+        const declaration = this.misreadDeclaration(node);
+        if (declaration) return this.localDeclaration(declaration).exec;
         return this.expressionStatement(node);
       }
       case 'if_statement': {
@@ -205,13 +314,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.throwStatement(node);
       }
       case 'class_specifier':
-      case 'struct_specifier': {
-        return this.unsupported(node.row, '関数の中のクラスの定義');
+      case 'struct_specifier':
+      case 'union_specifier': {
+        this.resolveTypeSpecifier(node);
+        return () => {};
+      }
+      case 'enum_specifier': {
+        this.resolveTypeSpecifier(node);
+        return () => {};
       }
       case 'function_definition': {
         const assignment = asZeroAssignment(node);
         if (assignment) return this.compileStatementBody(assignment);
-        return this.error(node.row, '関数の中に関数は定義できません（ラムダ式は、この採点環境では使えません）。');
+        return this.error(node.row, '関数の中に関数は定義できません（ラムダ式を使ってください）。');
       }
       case 'using_declaration': {
         this.usingDeclaration(node);
@@ -226,14 +341,75 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** Brings `std` names into scope, for `using namespace std;` or `using std::cout;`. */
   abstract usingDeclaration(node: Syntax): void;
 
+  /** Declares a function in a block (`int f(int);`), which names a function of the enclosing namespace. */
+  protected abstract tupleLikeSize(type: Type): number | undefined;
+  protected abstract tupleLikeElement(source: Expr, index: number, row: number): Expr;
+  protected abstract localFunctionDeclaration(declaration: Syntax, declared: Declared): LocalDeclaration;
+
   // Declarations -----------------------------------------------------------------------------------------------------
+
+  /**
+   * The declaration an expression statement is when its comparisons start with a class template's name
+   * (`std::bitset<8> b;`), which the grammar reads as `std::bitset < 8 > b`.
+   */
+  private misreadDeclaration(node: Syntax): Syntax | undefined {
+    let first: Syntax | undefined = node.children[0];
+    while (first?.type === 'comma_expression' || first?.type === 'binary_expression') {
+      if (first.type === 'binary_expression' && tokenOf(first, ['<']) === '<') break;
+      first = fieldOf(first, 'left');
+    }
+    const name = first?.type === 'binary_expression' ? fieldOf(first, 'left') : undefined;
+    if (!name || !this.namedClassTemplate(name)) return undefined;
+    return parseAsDeclaration(node);
+  }
+
+  /**
+   * The type a variable declaration's specifiers give, where a class template's name without arguments takes the
+   * arguments its only declarator's initializer deduces.
+   */
+  protected declarationType(node: Syntax): Type {
+    const typeNode = fieldOf(node, 'type');
+    const declarators = fieldsOf(node, 'declarator');
+    if (!typeNode || declarators.length !== 1 || !this.namedClassTemplate(typeNode))
+      return this.specifiedType(node, true);
+    const [written] = declarators;
+    // The grammar reads `S x(raw);` as a function's declaration, which names no type of a parameter.
+    const declarator =
+      written.type === 'function_declarator' ? (this.asDirectInitialization(written, written) ?? written) : written;
+    const value =
+      declarator.type === 'init_declarator' ? (fieldOf(declarator, 'value') ?? declarator.children[1]) : undefined;
+    if (!value) return this.specifiedType(node, true);
+    const nodes =
+      value.type === 'argument_list' || value.type === 'initializer_list' ? expandPacks(this, value.children) : [value];
+    const args = nodes.map((arg) => this.argument(arg));
+    this.deducingLambdas = new Map();
+    for (const [index, arg] of nodes.entries())
+      if (arg.type === 'lambda_expression') this.deducingLambdas.set(arg, args[index]);
+    return this.withDeducedClass(typeNode, args, () => this.specifiedType(node, true));
+  }
 
   private localDeclaration(
     node: Syntax,
     recordStep = true
   ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
-    const isStatic = this.hasSpecifier(node, 'static');
-    const base = this.specifiedType(node, true);
+    try {
+      return this.localDeclarationOf(node, recordStep);
+    } finally {
+      this.deducingLambdas = undefined;
+    }
+  }
+
+  private localDeclarationOf(
+    node: Syntax,
+    recordStep: boolean
+  ): { exec: Exec; recordsStep: boolean; enter?: Exec | false } {
+    // A thread_local variable of a program with one thread is a static one.
+    const isStatic =
+      this.hasSpecifier(node, 'static') ||
+      this.hasSpecifier(node, 'thread_local') ||
+      this.hasSpecifier(node, '__thread');
+    if (this.hasSpecifier(node, 'extern')) return this.blockExtern(node);
+    const base = this.declarationType(node);
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) return this.error(node.row, '変数の名前を書いてください。');
     let recordsStep = false;
@@ -262,15 +438,51 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
+  /** `extern int g;` in a block, which names the namespace's variable of that name. */
+  private blockExtern(node: Syntax): { exec: Exec; recordsStep: boolean } {
+    for (const declarator of fieldsOf(node, 'declarator')) {
+      const { name } = this.applyDeclarator(INT, declarator);
+      const entity = name === undefined ? undefined : this.globalScope.names.get(name);
+      if (!name || entity?.kind !== 'global')
+        return this.unsupported(node.row, '関数の中の extern の宣言で、まだ宣言されていない変数を宣言すること');
+      this.context.scope.names.set(name, entity);
+    }
+    return { exec: () => {}, recordsStep: false };
+  }
+
   private localDeclarator(base: Type, declarator: Syntax, declaration: Syntax): LocalDeclaration {
-    const declared = this.applyDeclarator(base, declarator);
+    const structured = structuredBinding(declarator, `\0binding ${declarator.start}`);
+    if (structured) {
+      // `auto [a, b] = e;` declares a hidden variable and names its elements (C++20 [dcl.struct.bind]).
+      if (!hasAuto(base)) return this.error(declarator.row, '構造化束縛の型には auto を書いてください。');
+      const saved = this.deducesArrays;
+      this.deducesArrays = true;
+      let hidden: LocalDeclaration;
+      try {
+        hidden = this.localDeclarator(base, structured.declarator, declaration);
+      } finally {
+        this.deducesArrays = saved;
+      }
+      const bind = this.bindElements(structured.names, structured.hidden, declarator.row);
+      return {
+        ...hidden,
+        exec: (frame) => {
+          hidden.exec(frame);
+          return bind(frame);
+        },
+      };
+    }
+    const savedVariable = this.allowsVariableLength;
+    this.allowsVariableLength = !this.isConstexpr(declaration) && !this.hasSpecifier(declaration, 'static');
+    let declared: Declared;
+    try {
+      declared = this.applyDeclarator(base, declarator);
+    } finally {
+      this.allowsVariableLength = savedVariable;
+    }
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
-    if (declared.function)
-      return this.error(
-        declarator.row,
-        `${declared.name ?? ''}(); は関数の宣言になります。変数を作るには ${declared.name ?? ''}; と書いてください（関数の中での関数の宣言は、この採点環境では使えません）。`
-      );
+    if (declared.function) return this.localFunctionDeclaration(declaration, declared);
     const name = declared.name as string;
     if (declared.nameNode?.type === 'qualified_identifier')
       return this.error(declarator.row, `${name} の宣言に :: は書けません。`);
@@ -279,10 +491,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let type = declared.type;
     if (type.kind === 'reference') return this.referenceDeclarator(name, type, declarator);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
+    if (type.kind === 'array' && type.variableLength) return this.variableLengthArray(name, type, value, declarator);
     let init: Initializer;
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
     let deduced: AutoDeduction | undefined;
+    const listType = isAuto(type) ? this.initializerListDeduction(declarator, value) : undefined;
+    if (listType) type = listType;
     if (hasAuto(type)) {
       const source = this.autoInitializer(declarator, value, name);
       const expr = this.withInitializingName(name, type, () => this.compileExpression(source));
@@ -311,6 +526,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     entity.foldedValue = this.initializerFoldedValue(type, init);
     if (entity.isConstexpr)
       entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
+    // A constexpr variable holds its value from the start, as the compiler evaluated its initializer.
+    const evaluated = entity.isConstexpr && isInteger(type) && !init.isConstant ? entity.constant : undefined;
+    if (evaluated !== undefined) init = initializerWithConstancy(() => evaluated, true);
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
@@ -327,6 +545,41 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       deduced,
       type,
     };
+  }
+
+  /**
+   * A variable-length array (`int a[n];`, a clang extension), whose elements are default-initialized when its
+   * declaration runs, as many as its length then is.
+   */
+  private variableLengthArray(
+    name: string,
+    type: Extract<Type, { kind: 'array' }>,
+    value: Syntax | undefined,
+    declarator: Syntax
+  ): LocalDeclaration {
+    const { row } = declarator;
+    if (value) return this.error(row, `大きさが定数でない配列 ${name} には、初期値を書けません。`);
+    const length = type.variableLength as Eval<unknown>;
+    const element = this.defaultInitializer(type.of, row);
+    const destroyElement = this.destroyerOf(type.of, row);
+    const { local } = this.declareVariable(name, type);
+    const destroy = this.destroyerOf(type, row);
+    if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
+    const exec: Exec = (frame) => {
+      const count = Number(length(frame));
+      this.initializeLocal(frame, local, (target) =>
+        constructArray(
+          frame,
+          count,
+          type.of,
+          (current, slot) => element(current, slot instanceof CObject ? slot : undefined),
+          destroyElement,
+          target instanceof ArrayStore ? target : undefined
+        )
+      );
+      return;
+    };
+    return { exec: this.fullExpression(exec), hasInitializer: false, createsObject: this.isClassLike(type), type };
   }
 
   private initializeLocal(
@@ -353,6 +606,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       );
     }
     return first;
+  }
+
+  /** The `std::initializer_list<T>` that `auto x = {1, 2};` deduces from its elements, all of type `T`. */
+  private initializerListDeduction(declarator: Syntax, value: Syntax | undefined): Type | undefined {
+    if (value?.type !== 'initializer_list' || value.children.length === 0 || !hasToken(declarator, '=')) return;
+    const types = value.children.map((node) =>
+      node.type === 'initializer_list'
+        ? this.error(node.row, 'auto x = {...} の要素には {...} を書けません。')
+        : unqualified(decay(nonReference(this.compileExpression(node).type)))
+    );
+    const [first] = types;
+    if (types.some((type) => !sameType(type, first)))
+      return this.error(declarator.row, 'auto x = {...} の要素の型がそろっていないので、型を決められません。');
+    const entity = this.findStdName('initializer_list');
+    const info = entity?.kind === 'template' ? entity.template : undefined;
+    if (!info || info.takesArrayBound)
+      return this.error(declarator.row, 'auto x = {...} を使うには #include <initializer_list> を書いてください。');
+    return info.instantiate([first], declarator.row);
   }
 
   /** Rejects `auto x = {1, 2};`, which deduces `std::initializer_list`. */
@@ -439,7 +710,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       };
     }
     if (value.type === 'argument_list') {
-      const args = value.children.map((arg) => this.argument(arg));
+      const args = expandPacks(this, value.children).map((arg) => this.argument(arg));
       if (type.kind === 'class')
         return {
           init: this.copyInitializer(type, this.constructObject(type.cls, args, row, false), row, false),
@@ -469,9 +740,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   constantOf(expr: Expr, type: Type): number | bigint | undefined {
     if (!isArithmetic(type)) return undefined;
     const value = this.rvalue(expr);
-    if (value.constant === undefined || !isArithmetic(value.type)) return undefined;
+    if (!isArithmetic(value.type)) return undefined;
     try {
-      return this.convert(value, unqualified(type), expr.row).constant;
+      return this.constantValueOf(this.convert(value, unqualified(type), expr.row));
     } catch {
       return undefined;
     }
@@ -518,6 +789,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (value.type === 'string_literal' || value.type === 'concatenated_string') {
       const literal = this.compileExpression(value);
       if (literal.literalBytes !== undefined) return { ...type, length: literal.literalBytes.length + 1 };
+      // A wide or Unicode string literal (`L"abc"`) initializes an array of its character type.
+      if (literal.type.kind === 'array' && sameType(unqualified(literal.type.of), unqualified(type.of)))
+        return { ...type, length: literal.type.length };
     }
     return this.error(value.row, '配列の初期値には {...} か文字列リテラルを書いてください。');
   }
@@ -604,7 +878,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const isDeduced = hasAuto(declared.to);
     let target: Expr;
     if (value.type === 'initializer_list' && !isDeduced) {
-      const bound = this.listReferenceValue(value, declared.to, direct);
+      const bound = this.listReferenceValue(value, declared, direct);
       if (!bound) return this.error(row, `参照 ${name} を {...} の値に束縛できません。`);
       target = bound;
     } else if (value.type === 'initializer_list' || value.type === 'argument_list') {
@@ -613,7 +887,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     } else {
       target = this.compileExpression(value);
     }
-    const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
+    // `auto&&` is a forwarding reference: an lvalue reference for an lvalue, else an rvalue reference.
+    const isForwarding = isDeduced && declared.isRvalue === true && isAuto(declared.to) && !isConstType(declared.to);
+    const type = isForwarding
+      ? referenceTo(target.type, !target.isLvalue || target.isXvalue === true)
+      : isDeduced
+        ? referenceTo(this.deduceAutoReference(declared.to, target), declared.isRvalue)
+        : declared;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
     return this.referenceBinding(type, target, row);
@@ -622,10 +902,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
     const { type: source } = target;
     const { to } = type;
-    const isDirect = target.isLvalue && isReferenceRelated(source, to);
+    const isDirect = target.isLvalue && !target.isBitField && isReferenceRelated(source, to);
     const isTemporaryClass =
       !target.isLvalue && source.kind === 'class' && to.kind === 'class' && source.cls.isDerivedFrom(to.cls);
-    if (!isDirect && isConstType(to) && !target.functions && source.kind !== 'void') {
+    if (type.isRvalue && target.isLvalue && !target.isXvalue)
+      return this.error(
+        row,
+        `右辺値参照（${typeName(type)}）は、左辺値（変数など）には束縛できません（std::move で xvalue にしてください）。`
+      );
+    if (!isDirect && (isConstType(to) || type.isRvalue === true) && !target.functions && source.kind !== 'void') {
       if (isTemporaryClass) this.checkBaseConversion(source.cls, to.cls, row);
       const bound = isTemporaryClass ? target : this.convert(target, unqualified(to), row);
       return {
@@ -783,32 +1068,119 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.withStep(node.row, exec, onlyCalls(expressionNode));
   }
 
+  /**
+   * The condition of an `if`, a loop, or a `switch`: an expression, or the declaration of a variable whose value is
+   * the condition (`if (int n = f())`), which declares the variable in the current scope.
+   */
   private conditionOf(clause: Syntax): Eval<boolean> {
     const value = clause.type === 'condition_clause' ? fieldOf(clause, 'value') : clause;
     if (!value) return this.error(clause.row, '条件を書いてください。');
-    if (value.type === 'declaration')
-      return this.unsupported(value.row, '条件の中の変数の宣言（if (int x = f()) など）');
-    const condition = this.condition(this.compileExpression(value), value.row);
-    return this.fullExpression(condition);
+    const { declare, expr } = this.conditionValue(value);
+    const condition = this.fullExpression(this.condition(expr, value.row));
+    if (!declare) return condition;
+    return (frame) => {
+      declare(frame);
+      return condition(frame);
+    };
+  }
+
+  /** The value a condition tests, after the declaration of its variable when it declares one. */
+  private conditionValue(value: Syntax): { declare?: Exec; expr: Expr } {
+    if (value.type !== 'declaration') return { expr: this.compileExpression(value) };
+    const declarator = fieldOf(value, 'declarator') as Syntax;
+    const initializer = fieldOf(value, 'value');
+    if (!initializer) return this.error(value.row, '条件の中で宣言する変数には、初期値を書いてください。');
+    const init: Syntax = {
+      ...value,
+      type: 'init_declarator',
+      field: 'declarator',
+      all: value.all.filter((child) => child.field === 'declarator' || child.field === 'value' || child.type === '='),
+      children: [declarator, initializer],
+    };
+    const declaration: Syntax = {
+      ...value,
+      all: [...value.all.filter(isSpecifier), init],
+      children: [...value.children.filter(isSpecifier), init],
+    };
+    const { exec } = this.localDeclaration(declaration, false);
+    const name = this.applyDeclarator(VOID, declarator).name as string;
+    return { declare: exec, expr: this.entityExpr(this.lookupName(name, value.row), declarator, false) };
+  }
+
+  /** Compiles the init-statement of an `if`, a `switch`, or a range `for`, which runs before the rest. */
+  private initStatement(clause: Syntax | undefined): Exec | undefined {
+    const node = clause?.type === 'init_statement' ? clause.children[0] : clause;
+    if (!node) return undefined;
+    return this.compileStatement(node);
   }
 
   private ifStatement(node: Syntax): Exec {
-    if (node.all.some((child) => child.type === 'constexpr')) return this.unsupported(node.row, 'if constexpr');
-    if (node.all.some((child) => child.type === 'consteval')) return this.unsupported(node.row, 'if consteval');
-    const condition = this.conditionOf(fieldOf(node, 'condition') as Syntax);
-    const consequence = this.inScope(() => this.compileStatement(fieldOf(node, 'consequence') as Syntax));
-    const elseClause = fieldOf(node, 'alternative');
-    const alternativeNode = elseClause?.children[0];
-    const alternative = alternativeNode ? this.inScope(() => this.compileStatement(alternativeNode)) : undefined;
-    return (frame) => (condition(frame) ? consequence(frame) : alternative?.(frame));
+    if (node.all.some((child) => child.type === 'constexpr')) return this.constexprIf(node);
+    if (node.all.some((child) => child.type === 'consteval')) {
+      // `if consteval` takes its first branch only while a constant expression is evaluated.
+      const consequence = this.inScope(() => this.compileStatement(fieldOf(node, 'consequence') as Syntax));
+      const alternativeNode = fieldOf(node, 'alternative')?.children[0];
+      const alternative = alternativeNode ? this.inScope(() => this.compileStatement(alternativeNode)) : undefined;
+      return (frame) => (frame.runtime.isConstantEvaluation ? consequence(frame) : alternative?.(frame));
+    }
+    return this.inScope(() => {
+      const { init, condition, consequence, alternative } = this.ifParts(node, this.execMode);
+      return (frame) => {
+        init?.(frame);
+        return condition(frame) ? consequence(frame) : alternative?.(frame);
+      };
+    });
   }
 
-  private loopBody(node: Syntax, header?: Scope): Exec {
+  /** The parts of an `if` statement, compiled in the scope of its condition. */
+  protected ifParts<T>(
+    node: Syntax,
+    mode: StatementMode<T>
+  ): { init: Exec | undefined; condition: Eval<boolean>; consequence: T; alternative: T | undefined } {
+    const clause = fieldOf(node, 'condition') as Syntax;
+    const init = this.initStatement(fieldOf(clause, 'initializer'));
+    const condition = this.conditionOf(clause);
+    const consequence = this.inScopeWith(mode, () => mode.statement(fieldOf(node, 'consequence') as Syntax));
+    const alternativeNode = fieldOf(node, 'alternative')?.children[0];
+    const alternative = alternativeNode ? this.inScopeWith(mode, () => mode.statement(alternativeNode)) : undefined;
+    return { init, condition, consequence, alternative };
+  }
+
+  /**
+   * `if constexpr`, whose condition is a constant expression that chooses the branch to compile: the other one is
+   * discarded, as in a template it is not instantiated (C++20 [stmt.if]p2).
+   */
+  private constexprIf(node: Syntax): Exec {
+    return this.inScope(() => {
+      const { init, branch } = this.constexprIfParts(node, this.execMode);
+      return (frame) => {
+        init?.(frame);
+        return branch?.(frame);
+      };
+    });
+  }
+
+  protected constexprIfParts<T>(
+    node: Syntax,
+    mode: StatementMode<T>
+  ): { init: Exec | undefined; branch: T | undefined } {
+    const clause = fieldOf(node, 'condition') as Syntax;
+    const init = this.initStatement(fieldOf(clause, 'initializer'));
+    const valueNode = fieldOf(clause, 'value');
+    if (!valueNode || valueNode.type === 'declaration')
+      return this.error(node.row, 'if constexpr の条件には定数式を書いてください。');
+    const value = this.constantValueOf(this.compileExpression(valueNode));
+    if (value === undefined) return this.error(node.row, 'if constexpr の条件には定数式を書いてください。');
+    const chosen = Number(value) !== 0 ? fieldOf(node, 'consequence') : fieldOf(node, 'alternative')?.children[0];
+    return { init, branch: chosen ? this.inScopeWith(mode, () => mode.statement(chosen)) : undefined };
+  }
+
+  private loopBody<T>(mode: StatementMode<T>, node: Syntax, header?: Scope): T {
     this.context.loopDepth++;
     try {
-      return this.inScope(
-        () =>
-          node.type === 'compound_statement' ? this.compileStatements(node.children) : this.compileStatement(node),
+      return this.inScopeWith(
+        mode,
+        () => (node.type === 'compound_statement' ? mode.statements(node.children) : mode.statement(node)),
         new Scope(header?.names)
       );
     } finally {
@@ -817,28 +1189,42 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private whileStatement(node: Syntax): Exec {
+    return this.inScope(() => this.whileLoop(node));
+  }
+
+  /** The condition and the body of a `while` loop, compiled in the scope of its condition. */
+  protected whileParts<T>(node: Syntax, mode: StatementMode<T>): { condition: Eval<boolean>; body: T } {
     const condition = this.conditionOf(fieldOf(node, 'condition') as Syntax);
-    const body = this.loopBody(fieldOf(node, 'body') as Syntax);
+    return { condition, body: this.loopBody(mode, fieldOf(node, 'body') as Syntax) };
+  }
+
+  /** The body and the condition of a `do` loop. */
+  protected doParts<T>(node: Syntax, mode: StatementMode<T>): { condition: Eval<boolean>; body: T } {
+    const body = this.loopBody(mode, fieldOf(node, 'body') as Syntax);
+    return { body, condition: this.conditionOf(fieldOf(node, 'condition') as Syntax) };
+  }
+
+  private whileLoop(node: Syntax): Exec {
+    const { condition, body } = this.whileParts(node, this.execMode);
     return (frame) => {
       while (condition(frame)) {
         frame.runtime.spend();
         const completion = body(frame);
         if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
+        if (completion === RETURN || completion === GOTO) return completion;
       }
       return;
     };
   }
 
   private doStatement(node: Syntax): Exec {
-    const body = this.loopBody(fieldOf(node, 'body') as Syntax);
-    const condition = this.conditionOf(fieldOf(node, 'condition') as Syntax);
+    const { body, condition } = this.doParts(node, this.execMode);
     return (frame) => {
       do {
         frame.runtime.spend();
         const completion = body(frame);
         if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
+        if (completion === RETURN || completion === GOTO) return completion;
       } while (condition(frame));
       return;
     };
@@ -846,66 +1232,107 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private forStatement(node: Syntax): Exec {
     const scope = new Scope();
-    this.context.scopes.push(scope);
-    let loop: Exec;
-    try {
-      const initNode = fieldOf(node, 'initializer');
-      let init: Exec = doNothing;
-      let initRecords = false;
-      if (initNode?.type === 'declaration') {
-        const declaration = this.localDeclaration(initNode, false);
-        init = declaration.exec;
-        initRecords = declaration.recordsStep;
-      } else if (initNode) {
-        const expr = this.compileExpression(initNode);
-        const discard = this.discardedValue(expr);
-        init = this.fullExpression((frame) => (discard(frame), undefined));
-        initRecords = true;
-      }
-      const conditionNode = fieldOf(node, 'condition');
-      const condition = conditionNode ? this.conditionOf(conditionNode) : () => true;
-      const updateNodes = fieldsOf(node, 'update');
-      const updates = updateNodes.map((update) => this.discardedValue(this.compileExpression(update)));
-      const update = this.fullExpression<undefined>((frame) => {
-        for (const run of updates) run(frame);
-        return;
-      });
-      const body = this.loopBody(fieldOf(node, 'body') as Syntax, scope);
-      const stepInit = this.recordsSteps && initRecords;
-      const stepUpdate = this.recordsSteps && updates.length > 0;
-      const { row } = node;
-      loop = (frame) => {
+    return this.inScope(() => {
+      const { init, condition, update, body } = this.forParts(node, this.execMode, scope);
+      return (frame) => {
         init(frame);
-        if (stepInit) frame.runtime.steps.step(row);
         while (condition(frame)) {
           frame.runtime.spend();
           const completion = body(frame);
           if (completion === BREAK) break;
-          if (completion === RETURN) return completion;
+          if (completion === RETURN || completion === GOTO) return completion;
           update(frame);
-          if (stepUpdate) frame.runtime.steps.step(row);
         }
         return;
       };
-    } finally {
-      this.context.popScope();
+    }, scope);
+  }
+
+  /** The parts of a `for` loop, compiled in its scope, whose init-statement and update record the loop's steps. */
+  protected forParts<T>(
+    node: Syntax,
+    mode: StatementMode<T>,
+    scope: Scope
+  ): { init: Eval<void>; condition: Eval<boolean>; update: Eval<void>; body: T } {
+    const initNode = fieldOf(node, 'initializer');
+    let initialize: Exec = doNothing;
+    let initRecords = false;
+    if (initNode?.type === 'declaration') {
+      const declaration = this.localDeclaration(initNode, false);
+      initialize = declaration.exec;
+      initRecords = declaration.recordsStep;
+    } else if (initNode) {
+      const expr = this.compileExpression(initNode);
+      const discard = this.discardedValue(expr);
+      initialize = this.fullExpression((frame) => (discard(frame), undefined));
+      initRecords = true;
     }
-    return this.withScopeExit(loop, scope);
+    const conditionNode = fieldOf(node, 'condition');
+    const condition = conditionNode ? this.conditionOf(conditionNode) : () => true;
+    const updateNodes = fieldsOf(node, 'update');
+    const updates = updateNodes.map((update) => this.discardedValue(this.compileExpression(update)));
+    const runUpdates = this.fullExpression<undefined>((frame) => {
+      for (const run of updates) run(frame);
+      return;
+    });
+    const body = this.loopBody(mode, fieldOf(node, 'body') as Syntax, scope);
+    const { row } = node;
+    const stepInit = this.recordsSteps && row >= 0 && initRecords;
+    const stepUpdate = this.recordsSteps && row >= 0 && updates.length > 0;
+    return {
+      init: (frame) => {
+        initialize(frame);
+        if (stepInit) frame.runtime.steps.step(row);
+      },
+      condition,
+      update: (frame) => {
+        runUpdates(frame);
+        if (stepUpdate) frame.runtime.steps.step(row);
+      },
+      body,
+    };
   }
 
   private rangeFor(node: Syntax): Exec {
-    const scope = new Scope();
-    this.context.scopes.push(scope);
-    let loop: Exec;
-    try {
-      loop = this.rangeForLoop(node);
-    } finally {
-      this.context.popScope();
-    }
-    return this.withScopeExit(loop, scope);
+    return this.inScope(() => {
+      const { init, start, notDone, advance, enter, body, bodyScope } = this.rangeForParts(node, this.execMode);
+      const iteration = this.withScopeExit((frame) => {
+        enter(frame);
+        return body(frame);
+      }, bodyScope);
+      return (frame) => {
+        const completion = init?.(frame);
+        if (completion !== undefined) return completion;
+        start(frame);
+        while (notDone(frame)) {
+          frame.runtime.spend();
+          const completion = iteration(frame);
+          if (completion === BREAK) break;
+          if (completion === RETURN || completion === GOTO) return completion;
+          advance(frame);
+        }
+        return;
+      };
+    });
   }
 
-  private rangeForLoop(node: Syntax): Exec {
+  /**
+   * The parts of a range `for` loop, compiled in its scope: `start` initializes the range and the iterators, and
+   * `enter` binds the variable of an iteration in `bodyScope`, the scope of `body`.
+   */
+  protected rangeForParts<T>(
+    node: Syntax,
+    mode: StatementMode<T>
+  ): {
+    init: Exec | undefined;
+    start: Eval<void>;
+    notDone: Eval<boolean>;
+    advance: Eval<unknown>;
+    enter: Eval<void>;
+    body: T;
+    bodyScope: Scope;
+  } {
+    const init = this.initStatement(fieldOf(node, 'initializer'));
     const rangeNode = fieldOf(node, 'right') as Syntax;
     const { row } = node;
     const range =
@@ -916,21 +1343,32 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let end: Expr;
     if (rangeType.kind === 'array') {
       begin = this.rvalue(rangeRef);
-      end = this.pointerOffset(
-        begin,
-        {
-          type: { kind: 'int', name: 'long' },
-          isLvalue: false,
-          row,
-          run: () => BigInt(rangeType.length ?? 0),
-          constant: BigInt(rangeType.length ?? 0),
-        },
-        1,
-        row
-      );
+      // A variable-length array's length is its array's at run time.
+      const array = rangeRef.run;
+      const length: Expr = rangeType.variableLength
+        ? {
+            type: { kind: 'int', name: 'long' },
+            isLvalue: false,
+            row,
+            run: (frame) => BigInt(((array(frame) as Ptr).read() as ArrayStore).length),
+          }
+        : {
+            type: { kind: 'int', name: 'long' },
+            isLvalue: false,
+            row,
+            run: () => BigInt(rangeType.length ?? 0),
+            constant: BigInt(rangeType.length ?? 0),
+          };
+      end = this.pointerOffset(begin, length, 1, row);
     } else if (rangeType.kind === 'class') {
-      begin = this.callWith(this.member(rangeRef, 'begin', row), [], row);
-      end = this.callWith(this.member(rangeRef, 'end', row), [], row);
+      // A class without the members takes the functions argument-dependent lookup finds (C++20 [stmt.ranged]p1).
+      const hasMembers = hasMemberNamed(rangeType.cls, 'begin') && hasMemberNamed(rangeType.cls, 'end');
+      begin = hasMembers
+        ? this.callWith(this.member(rangeRef, 'begin', row), [], row)
+        : this.rangeCall('begin', rangeRef, row);
+      end = hasMembers
+        ? this.callWith(this.member(rangeRef, 'end', row), [], row)
+        : this.rangeCall('end', rangeRef, row);
     } else {
       return this.error(row, `範囲 for 文では、${typeName(rangeType)} 型の値の要素を順に取り出せません。`);
     }
@@ -955,37 +1393,60 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.context.scopes.push(bodyScope);
     let bind: Exec;
     let variableType: Type;
-    let body: Exec;
+    let body: T;
     try {
       ({ bind, type: variableType } = this.rangeVariable(node, element));
-      body = this.loopBody(fieldOf(node, 'body') as Syntax, bodyScope);
+      body = this.loopBody(mode, fieldOf(node, 'body') as Syntax, bodyScope);
     } finally {
       this.context.popScope();
     }
-    const iteration = this.withScopeExit((frame) => {
-      bind(frame);
-      if (this.recordsSteps) frame.runtime.steps.stepBinding(row, this.isAnswered(variableType));
-      return body(frame);
-    }, bodyScope);
+    const stepsBinding = this.recordsSteps && row >= 0;
+    const isAnswered = this.isAnswered(variableType);
     const saveIterator = (local: LocalInfo, run: Expr['run']): Eval<void> =>
       this.fullExpression((frame) => {
         frame.slots[local.slot] = new Box(run(frame) as Value);
       });
     const initializeBegin = saveIterator(iteratorLocal, begin.run);
     const initializeEnd = saveIterator(endLocal, end.run);
-    return (frame) => {
-      initializeRange(frame);
-      initializeBegin(frame);
-      initializeEnd(frame);
-      while (notDone(frame)) {
-        frame.runtime.spend();
-        const completion = iteration(frame);
-        if (completion === BREAK) break;
-        if (completion === RETURN) return completion;
-        advance(frame);
-      }
-      return;
+    return {
+      init,
+      start: (frame) => {
+        initializeRange(frame);
+        initializeBegin(frame);
+        initializeEnd(frame);
+      },
+      notDone,
+      advance,
+      enter: (frame) => {
+        bind(frame);
+        if (stepsBinding) frame.runtime.steps.stepBinding(row, isAnswered);
+      },
+      body,
+      bodyScope,
     };
+  }
+
+  /** `begin(range)` or `end(range)`, the functions of the range's namespace a range `for` calls. */
+  private rangeCall(name: string, range: Expr, row: number): Expr {
+    const functions = this.withArgumentDependentLookup(name, [], [range]);
+    if (functions.length === 0)
+      return this.error(
+        row,
+        `範囲 for 文では、${typeName(range.type)} 型の値の要素を順に取り出せません（${name} がありません）。`
+      );
+    const nameNode: Syntax = {
+      type: 'identifier',
+      text: name,
+      row,
+      endRow: row,
+      start: 0,
+      end: 0,
+      isNamed: true,
+      field: undefined,
+      all: [],
+      children: [],
+    };
+    return this.callWith(this.entityExpr({ kind: 'functions', functions }, nameNode, false), [range], row);
   }
 
   private bindRangeFor(range: Expr, row: number): { initializeRange: Eval<void>; rangeRef: Expr } {
@@ -1038,7 +1499,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** Declares the variable of a range-based for loop, which each iteration binds to an element. */
   private rangeVariable(node: Syntax, element: Expr): { bind: Exec; type: Type } {
     const base = this.specifiedType(node, true);
-    const declarator = fieldOf(node, 'declarator') as Syntax;
+    const written = fieldOf(node, 'declarator') as Syntax;
+    const structured = structuredBinding(written, `\0binding ${written.start}`);
+    if (structured) {
+      if (!hasAuto(base)) return this.error(written.row, '構造化束縛の型には auto を書いてください。');
+      const hidden = this.rangeVariable(
+        { ...node, all: node.all.map((child) => (child === written ? structured.declarator : child)) },
+        element
+      );
+      const bind = this.bindElements(structured.names, structured.hidden, written.row);
+      return {
+        type: hidden.type,
+        bind: (frame) => {
+          hidden.bind(frame);
+          return bind(frame);
+        },
+      };
+    }
+    const declarator = written;
     const declared = this.applyDeclarator(base, declarator);
     const name = declared.name as string;
     if (declared.type.kind === 'reference') {
@@ -1074,33 +1552,111 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
+  /**
+   * Declares the names of a structured binding as references to the elements of the hidden variable: an array's
+   * elements, a pair's members, or a class's public data members.
+   */
+  private bindElements(names: Syntax[], hidden: string, row: number): Exec {
+    const source = this.entityExpr(this.lookupName(hidden, row), { ...names[0], text: hidden }, false);
+    const elements = this.decompose(source, names.length, row);
+    const slots = names.map((name, index) => {
+      this.checkRedeclaration(name.text, name.row);
+      const element = elements[index];
+      const local = this.context.declareLocal(name.text, referenceTo(element.type), false);
+      this.context.scope.names.set(name.text, { kind: 'local', local, isReference: true });
+      return { slot: local.slot, locate: element.run as Eval<Ptr> };
+    });
+    return this.fullExpression<undefined>((frame) => {
+      for (const { slot, locate } of slots) frame.slots[slot] = locate(frame);
+      return;
+    });
+  }
+
+  /** The elements a structured binding decomposes an object into. */
+  private decompose(source: Expr, count: number, row: number): Expr[] {
+    const { type } = source;
+    const mismatch = (size: number): never =>
+      this.error(row, `${typeName(type)} 型の値は ${size} 個に分かれますが、名前が ${count} 個あります。`);
+    if (type.kind === 'array') {
+      if (type.length !== count) return mismatch(type.length ?? 0);
+      return Array.from({ length: count }, (_, index) =>
+        this.subscript(source, constantExpr(LONG, BigInt(index), row), row)
+      );
+    }
+    if (type.kind !== 'class') return this.error(row, `${typeName(type)} 型の値は構造化束縛で分けられません。`);
+    const library = type.cls.library;
+    if (library?.kind === 'pair') {
+      if (count !== 2) return mismatch(2);
+      return [this.member(source, 'first', row), this.member(source, 'second', row)];
+    }
+    if (library?.aggregateArray) {
+      const length = library.aggregateArray.type.length ?? 0;
+      if (length !== count) return mismatch(length);
+      return Array.from({ length: count }, (_, index) =>
+        this.subscript(source, constantExpr(LONG, BigInt(index), row), row)
+      );
+    }
+    if (library?.tupleElements) return library.tupleElements(this, source, count, row);
+    if (library) return this.error(row, `${typeName(type)} 型の値は構造化束縛で分けられません。`);
+    // A class that `std::tuple_size` gives a size splits into what `get<i>` gives (C++20 [dcl.struct.bind]).
+    const size = this.tupleLikeSize(type);
+    if (size !== undefined) {
+      if (size !== count) return mismatch(size);
+      return Array.from({ length: count }, (_, index) => this.tupleLikeElement(source, index, row));
+    }
+    const fields = type.cls.fields;
+    if (fields.some((field) => field.access !== 'public'))
+      return this.error(row, `${typeName(type)} には public でないメンバがあるので、構造化束縛で分けられません。`);
+    if (fields.length !== count) return mismatch(fields.length);
+    return fields.map((field) => this.fieldAccess(source, field, row));
+  }
+
   /** Whether learners write down a variable's value: numbers, characters, Booleans, and strings. */
   isAnswered(type: Type): boolean {
     return isArithmetic(type) || isLibraryClass(type, 'string');
   }
 
   private switchStatement(node: Syntax): Exec {
+    return this.inScope(() => this.switchWithScope(node));
+  }
+
+  private switchWithScope(node: Syntax): Exec {
     const conditionClause = fieldOf(node, 'condition') as Syntax;
+    const init = this.initStatement(fieldOf(conditionClause, 'initializer'));
     const valueNode = fieldOf(conditionClause, 'value');
-    if (!valueNode || valueNode.type === 'declaration')
-      return this.unsupported(node.row, '条件の中の変数の宣言（switch (int x = f()) など）');
-    const subject = this.rvalue(this.compileExpression(valueNode));
+    if (!valueNode) return this.error(node.row, 'switch 文の () に値を書いてください。');
+    const { declare, expr: subjectExpr } = this.conditionValue(valueNode);
+    const subject = this.rvalue(subjectExpr);
     if (!isInteger(subject.type))
       return this.error(node.row, `switch 文の () には整数を書いてください（${typeName(subject.type)}）。`);
     const promoted = promote(subject.type);
-    const value = this.fullExpression(this.convert(subject, promoted, node.row).run);
+    const evaluate = this.fullExpression(convertArithmetic(subject, promoted).run);
+    const value: Eval<unknown> =
+      init || declare
+        ? (frame) => {
+            init?.(frame);
+            declare?.(frame);
+            return evaluate(frame);
+          }
+        : evaluate;
     const body = fieldOf(node, 'body') as Syntax;
+    const scoped = isScopedEnum(subject.type) ? subject.type : undefined;
     return this.inScope(() => {
       this.context.switchDepth++;
       try {
-        return this.compileSwitchBody(body, promoted, value);
+        return this.compileSwitchBody(body, promoted, value, scoped);
       } finally {
         this.context.switchDepth--;
       }
     });
   }
 
-  private compileSwitchBody(body: Syntax, promoted: Extract<Type, { kind: 'int' }>, value: Eval<unknown>): Exec {
+  private compileSwitchBody(
+    body: Syntax,
+    promoted: Extract<Type, { kind: 'int' }>,
+    value: Eval<unknown>,
+    scoped: Type | undefined
+  ): Exec {
     const labels = new Map<string, number>();
     let defaultIndex: number | undefined;
     const statements: Exec[] = [];
@@ -1128,9 +1684,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const caseValue = fieldOf(node, 'value');
         if (caseValue) {
           const label = this.compileExpression(caseValue);
-          if (!isInteger(label.type) || label.constant === undefined)
-            this.error(node.row, 'case の値には整数の定数を書いてください。');
-          const integer = BigInt(label.constant);
+          const labelValue = this.constantValueOf(label);
+          if (!isInteger(label.type) || labelValue === undefined)
+            return this.error(node.row, 'case の値には整数の定数を書いてください。');
+          if (scoped && !sameType(unqualified(label.type), unqualified(scoped)))
+            this.error(node.row, `case の値 ${caseValue.text} は ${typeName(scoped)} 型の列挙子でなければなりません。`);
+          const integer = BigInt(labelValue);
           if (integer < intMin(promoted.name) || integer > intMax(promoted.name))
             this.error(node.row, `case の値が ${typeName(promoted)} 型の範囲を超えています。`);
           const key = String(integer);
@@ -1163,6 +1722,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private returnStatement(node: Syntax): Exec {
     const valueNode = node.children[0];
+    const isDeduced = hasAuto(this.context.returnType) || this.context.autoReturn !== undefined;
+    const precompiled =
+      valueNode && valueNode.type !== 'initializer_list' && isDeduced ? this.compileExpression(valueNode) : undefined;
+    if (hasAuto(this.context.returnType)) {
+      this.context.autoReturn = this.context.returnType;
+      this.deduceReturnType(precompiled, valueNode, node.row);
+    } else if (this.context.autoReturn && valueNode?.type !== 'initializer_list') {
+      this.checkReturnDeduction(this.context.autoReturn, precompiled, valueNode, node.row);
+    }
     const returnType = this.context.returnType;
     if (!valueNode) {
       if (returnType.kind !== 'void' && !this.context.fn?.isConstructor) {
@@ -1171,7 +1739,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return () => RETURN;
     }
     if (returnType.kind === 'void') {
-      const expr = this.compileExpression(valueNode);
+      const expr = precompiled ?? this.compileExpression(valueNode);
       if (expr.type.kind !== 'void') this.error(node.row, '戻り値の型が void の関数は値を返せません。');
       const run = this.fullExpression(expr.run);
       return (frame) => {
@@ -1179,7 +1747,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return RETURN;
       };
     }
-    const value = this.returnValue(valueNode, returnType, node.row);
+    const value = this.returnValue(valueNode, returnType, node.row, precompiled);
     const run = this.fullExpression(value);
     return (frame) => {
       frame.returnValue = run(frame);
@@ -1187,14 +1755,66 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  private returnValue(node: Syntax, returnType: Type, row: number): Eval<Value | Ptr> {
+  /**
+   * Decides an `auto` return type from the first `return` statement (C++20 [dcl.spec.auto]), whose value later ones
+   * must agree with.
+   */
+  private deduceReturnType(value: Expr | undefined, node: Syntax | undefined, row: number): void {
+    const declared = this.context.returnType;
+    if (!value) {
+      if (declared.kind !== 'class' && declared.kind !== 'void' && !isAuto(declared))
+        this.error(row, 'auto の戻り値の型は、値を返さない return 文からは決められません。');
+      this.setReturnType(VOID);
+      return;
+    }
+    if (value.type.kind === 'void') {
+      this.setReturnType(VOID);
+      return;
+    }
+    this.setReturnType(this.deducedReturnType(declared, value, node as Syntax, row));
+  }
+
+  /**
+   * The return type an `auto` return type deduces from a value: `auto&&` deduces as a forwarding reference does, and
+   * `decltype(auto)` as `decltype` of the returned expression.
+   */
+  private deducedReturnType(declared: Type, value: Expr, node: Syntax, row: number): Type {
+    if (declared.kind === 'class' && declared.cls === DECLTYPE_AUTO.cls) {
+      if (node.type === 'identifier' || node.type === 'qualified_identifier' || node.type === 'field_expression')
+        return this.decltypeOf(node);
+      return this.decltypeOfValue(value);
+    }
+    if (declared.kind !== 'reference') return this.deduceAuto(declared, value, row);
+    const isRvalue = declared.isRvalue === true && (!value.isLvalue || value.isXvalue === true);
+    return referenceTo(this.deduceAutoReference(declared.to, value), isRvalue);
+  }
+
+  /** Rejects a `return` whose value deduces another type than the first one did. */
+  private checkReturnDeduction(declared: Type, value: Expr | undefined, node: Syntax | undefined, row: number): void {
+    const first = this.context.returnType;
+    let type: Type = VOID;
+    if (value && value.type.kind !== 'void') type = this.deducedReturnType(declared, value, node as Syntax, row);
+    if (!sameType(type, first))
+      this.error(
+        row,
+        `戻り値の型が、前の return 文で決まった ${typeName(first)} 型と、この return 文の ${typeName(type)} 型で違います。`
+      );
+  }
+
+  private setReturnType(type: Type): void {
+    this.context.returnType = type;
+    if (this.context.fn) this.context.fn.ret = type;
+  }
+
+  private returnValue(node: Syntax, returnType: Type, row: number, precompiled?: Expr): Eval<Value | Ptr> {
     if (node.type === 'initializer_list') {
+      if (hasAuto(returnType)) return this.error(row, 'auto の戻り値の型は {...} からは決められません。');
       if (returnType.kind === 'reference') return this.error(row, '参照を返す関数は {...} を返せません。');
       this.context.noteReturn(undefined);
       const initialize = this.listInitializer(returnType, node, row);
       return (frame) => initialize(frame, undefined, false, 'full-expression');
     }
-    const expr = this.compileExpression(node);
+    const expr = precompiled ?? this.compileExpression(node);
     if (returnType.kind === 'reference') {
       return this.convert(expr, returnType, row).run;
     }
@@ -1231,20 +1851,24 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
-  private tryStatement(node: Syntax): Exec {
-    const block = fieldOf(node, 'body');
-    if (!block) return this.error(node.row, 'try の後に {} を書いてください。');
-    const scope = new Scope();
-    scope.isTryBlock = true;
-    const body = this.inScope(() => this.compileStatements(block.children), scope);
-    const clauses = node.children.filter((child) => child.type === 'catch_clause');
-    const handlers = clauses.map((clause, index) => {
-      if (index < clauses.length - 1 && catchesAll(clause))
-        this.error(clause.row, 'catch (...) は最後の catch にしてください。');
-      return this.catchClause(clause);
-    });
-    if (handlers.length === 0) return this.error(node.row, 'try の後に catch を書いてください。');
-    const matches = (exception: CppException): boolean => handlers.some((handler) => handler.matches(exception));
+  /**
+   * A function-try-block, whose handlers catch what the member initializers and the body throw; a constructor's or a
+   * destructor's handler rethrows the exception when it completes (C++20 [except.handle]p15).
+   */
+  protected functionTryBlock(node: Syntax, initialization: Exec | undefined, rethrows: boolean): Exec {
+    if (!rethrows) return this.tryStatement(node, initialization);
+    const all = node.all.map((child) => (child.type === 'catch_clause' ? withRethrow(child) : child));
+    return this.tryStatement({ ...node, all, children: all.filter((child) => child.isNamed) }, initialization);
+  }
+
+  private tryStatement(node: Syntax, prelude?: Exec): Exec {
+    const { body: statements, matches, handle } = this.tryParts(node, this.execMode);
+    const body: Exec = prelude
+      ? (frame) => {
+          prelude(frame);
+          return statements(frame);
+        }
+      : statements;
     return (frame) => {
       const { tryBlocks } = frame.runtime;
       tryBlocks.push(matches);
@@ -1255,12 +1879,45 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         if (!(error instanceof CppException)) throw error;
         tryBlocks.pop();
         isActive = false;
-        const handler = handlers.find((candidate) => candidate.matches(error));
-        if (!handler) throw error;
-        return runHandler(frame, handler.run, error);
+        return handle(frame, error);
       } finally {
         if (isActive) tryBlocks.pop();
       }
+    };
+  }
+
+  /**
+   * The block of a `try` statement and its handlers: `matches` tells whether one catches an exception, and `handle`
+   * runs the one that does, rethrowing an exception none catches.
+   */
+  protected tryParts<T>(
+    node: Syntax,
+    mode: StatementMode<T>
+  ): {
+    body: T;
+    matches: (exception: CppException) => boolean;
+    handle: (frame: Frame, exception: CppException) => Completion;
+  } {
+    const block = fieldOf(node, 'body');
+    if (!block) return this.error(node.row, 'try の後に {} を書いてください。');
+    const scope = new Scope();
+    scope.isTryBlock = true;
+    const body = this.inScopeWith(mode, () => mode.statements(block.children), scope);
+    const clauses = node.children.filter((child) => child.type === 'catch_clause');
+    const handlers = clauses.map((clause, index) => {
+      if (index < clauses.length - 1 && catchesAll(clause))
+        this.error(clause.row, 'catch (...) は最後の catch にしてください。');
+      return this.catchClause(clause);
+    });
+    if (handlers.length === 0) return this.error(node.row, 'try の後に catch を書いてください。');
+    return {
+      body,
+      matches: (exception) => handlers.some((handler) => handler.matches(exception)),
+      handle: (frame, exception) => {
+        const handler = handlers.find((candidate) => candidate.matches(exception));
+        if (!handler) throw exception;
+        return runHandler(frame, handler.run, exception);
+      },
     };
   }
 
@@ -1434,7 +2091,7 @@ function catchValue(error: CppException, caught: Type): Value {
 }
 
 /** Runs a handler for an exception, which ends the exception unless the handler rethrows it. */
-function runHandler(
+export function runHandler(
   frame: Frame,
   run: (frame: Frame, exception: CppException) => Completion,
   exception: CppException
@@ -1460,8 +2117,10 @@ function runHandler(
  * Destroys an exception object when the last handler running for it exits other than by rethrowing it
  * (C++20 [except.throw]).
  */
-function endException(frame: Frame, exception: CppException): void {
-  if (exception.handlerCount > 0 || exception.isDestroyed) return;
+export function endException(frame: Frame, exception: CppException): void {
+  if (exception.handlerCount > 0 || exception.references > 0 || exception.isDestroyed) return;
+  // An exception `std::rethrow_exception` throws again lives until a handler of the new throw ends.
+  if (frame.runtime.isUnwinding(exception)) return;
   exception.isDestroyed = true;
   if (exception.type.kind === 'class') {
     const destroy = exception.type.cls.operations?.destroy;
@@ -1471,6 +2130,64 @@ function endException(frame: Frame, exception: CppException): void {
 }
 
 /** Destroys automatic objects in reverse order and clears the local bindings. */
+/**
+ * The structured binding a declarator declares (`[a, b]`, `&[a, b]`), with its names and the declarator that declares
+ * the hidden variable of the given name in its place.
+ */
+function structuredBinding(
+  declarator: Syntax,
+  hidden: string
+): { names: Syntax[]; declarator: Syntax; hidden: string } | undefined {
+  if (declarator.type === 'structured_binding_declarator') {
+    const name: Syntax = { ...declarator, type: 'identifier', text: hidden, all: [], children: [] };
+    return { names: [...declarator.children], declarator: name, hidden };
+  }
+  const inner = declarator.children.find((child) =>
+    ['structured_binding_declarator', 'reference_declarator'].includes(child.type)
+  );
+  if (!inner || !['init_declarator', 'reference_declarator'].includes(declarator.type)) return undefined;
+  const found = structuredBinding(inner, hidden);
+  if (!found) return undefined;
+  const all = declarator.all.map((child) => (child === inner ? found.declarator : child));
+  return { ...found, declarator: { ...declarator, all, children: all.filter((child) => child.isNamed) } };
+}
+
+/** Whether a child of a condition's declaration is one of its specifiers rather than its declarator or value. */
+function isSpecifier(child: Syntax): boolean {
+  return child.field !== 'declarator' && child.field !== 'value' && child.type !== '=';
+}
+
+/** A catch clause whose handler ends with `throw;`, which rethrows the exception it handles. */
+function withRethrow(clause: Syntax): Syntax {
+  const body = fieldOf(clause, 'body') as Syntax;
+  const statement: Syntax = {
+    ...body,
+    type: 'throw_statement',
+    text: 'throw;',
+    all: [],
+    children: [],
+    field: undefined,
+    row: body.endRow,
+  };
+  const all = [...body.all.slice(0, -1), statement, ...body.all.slice(-1)];
+  const rewritten: Syntax = { ...body, all, children: [...body.children, statement] };
+  const parts = clause.all.map((child) => (child === body ? rewritten : child));
+  return { ...clause, all: parts, children: parts.filter((child) => child.isNamed) };
+}
+
+/** A statement that a `goto` may enter at one of the labels it contains. */
+export type LabeledExec = Exec & { enter?: (frame: Frame, label: string) => Completion };
+
+/** The labels a `goto` reaches by entering a statement: its own and those of the blocks it consists of. */
+function labelsIn(node: Syntax): string[] {
+  if (node.type === 'labeled_statement') {
+    const label = (fieldOf(node, 'label') as Syntax).text;
+    return [label, ...node.children.filter((child) => child.field !== 'label').flatMap(labelsIn)];
+  }
+  if (node.type === 'compound_statement') return node.children.flatMap(labelsIn);
+  return [];
+}
+
 export function endScope(frame: Frame, { slots, statics, destructibles }: Scope): void {
   for (let index = slots.length - 1; index >= 0; index--) {
     const slot = slots[index];

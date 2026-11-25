@@ -1,12 +1,15 @@
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
+import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
   ClassInfo,
   classType,
+  DOUBLE,
   FLOAT,
+  type FunctionInfo,
   isConstType,
   referenceTo,
   SIZE_T,
@@ -24,6 +27,7 @@ import {
   type ElementOperations,
   elementOperations,
   equalTo,
+  functionObjectCall,
   requireDefaultConstruction,
   requireElementUse,
   type ValueComparison,
@@ -41,7 +45,7 @@ import {
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
 import type { StringValue } from './string';
-import { addMethod, constRef, native, nativeConstructor, throwLibrary } from './support';
+import { addMethod, CONST_CHAR_PTR, constRef, native, nativeConstructor, throwLibrary } from './support';
 import { typeKey } from './templates';
 
 const MASK = (1n << 64n) - 1n;
@@ -162,6 +166,19 @@ const rotate = (value: bigint, shift: number): bigint =>
 const shiftMix = (value: bigint): bigint => value ^ (value >> 47n);
 
 type KeyHash = (value: Value, frame: Frame) => bigint;
+
+/** The hash a hash function object the program writes, or `std::hash` of a program's class, gives a key. */
+function hashWith(compiler: ExpressionCompiler, keyType: Type, hasher: Type): KeyHash {
+  if (hasher.kind !== 'class' || hasher.cls.library)
+    return compiler.unsupported(0, `ハッシュ関数に ${typeName(hasher)} を使うこと`);
+  const call = functionObjectCall(compiler, keyType, hasher.cls, 1);
+  return (value, frame) => BigInt.asUintN(64, BigInt(call([value], frame) as number | bigint));
+}
+
+function programEquality(compiler: ExpressionCompiler, keyType: Type, cls: ClassInfo): ValueComparison<boolean> {
+  const call = functionObjectCall(compiler, keyType, cls, 2);
+  return (a, b, frame) => Number(call([a, b], frame)) !== 0;
+}
 
 /** `std::hash<T>` of a key, as libc++ computes it for the key types it hashes. */
 function hashOf(type: Type): KeyHash | undefined {
@@ -656,9 +673,16 @@ export function unorderedClass(
   library: Library,
   kind: 'unordered_map' | 'unordered_set',
   keyType: Type,
-  valueType: Type | undefined
+  valueType: Type | undefined,
+  hasher?: Type,
+  keyEqual?: Type
 ): ClassInfo {
-  const args = valueType ? [keyType, valueType] : [keyType];
+  const args = [
+    keyType,
+    ...(valueType ? [valueType] : []),
+    ...(hasher ? [hasher] : []),
+    ...(keyEqual ? [keyEqual] : []),
+  ];
   const name = `std::${kind}<${args.map((arg) => typeName(arg)).join(', ')}>`;
   const key = `${kind}<${args.map((arg) => typeKey(arg)).join(',')}>`;
   const cached = library.instances.get(key);
@@ -667,10 +691,16 @@ export function unorderedClass(
   library.instances.set(key, cls);
   cls.isComplete = true;
   const compiler = library.compiler;
-  const hash = hashOf(unqualified(keyType));
-  const equal = equalTo(unqualified(keyType));
-  if (!hash || !equal)
-    return compiler.unsupported(0, `${typeName(keyType)} をキーにした ${`std::${kind}`}（std::hash がない型）`);
+  const plainKey = unqualified(keyType);
+  const hash = hasher
+    ? hashWith(compiler, plainKey, hasher)
+    : (hashOf(plainKey) ?? hashWith(compiler, plainKey, compiler.stdHash(plainKey)));
+  const equal =
+    keyEqual?.kind === 'class' && !keyEqual.cls.library
+      ? programEquality(compiler, plainKey, keyEqual.cls)
+      : equalTo(plainKey);
+  if (!equal)
+    return compiler.unsupported(0, `${typeName(keyType)} をキーにした ${`std::${kind}`}（== で比べられない型）`);
   const isMap = valueType !== undefined;
   const entryType: Type = isMap ? classType(pairClass(library, withConst(keyType), valueType)) : keyType;
   const elementType: Type = isMap ? entryType : withConst(keyType);
@@ -941,3 +971,33 @@ function hashPosition(self: HashValue, position: unknown): HashPosition {
 }
 
 const keyArg = (arg: unknown): Value => (arg as Ptr).read();
+
+/** The natives `std::hash` computes libc++'s hashes of floating-point numbers and of strings with. */
+export function hashFunctions(): Map<string, FunctionInfo[]> {
+  const hashFloat = hashOf(FLOAT) as KeyHash;
+  const hashDouble = hashOf(DOUBLE) as KeyHash;
+  return new Map([
+    [
+      '__builtin_hash_float',
+      [native('__builtin_hash_float', [FLOAT], SIZE_T, ([value], { frame }) => hashFloat(value as Value, frame))],
+    ],
+    [
+      '__builtin_hash_double',
+      [native('__builtin_hash_double', [DOUBLE], SIZE_T, ([value], { frame }) => hashDouble(value as Value, frame))],
+    ],
+    [
+      '__builtin_hash_bytes',
+      [
+        native('__builtin_hash_bytes', [CONST_CHAR_PTR, SIZE_T], SIZE_T, ([pointer, size], { frame }) => {
+          const { store, index } = pointer as Ptr;
+          let bytes = '';
+          for (let offset = 0; offset < Number(size); offset++) {
+            bytes += String.fromCodePoint(((store as Store).get(index + offset) as number) & 0xff);
+          }
+          frame.runtime.spend(Math.ceil(bytes.length / 64));
+          return hashBytes(bytes);
+        }),
+      ],
+    ],
+  ]);
+}

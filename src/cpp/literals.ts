@@ -1,7 +1,7 @@
 import { roundBinary, roundDecimalToFloat } from '../c/library/binaryFloat';
-import { compileError, unsupported } from './errors';
+import { compileError } from './errors';
 import type { Syntax } from './syntax';
-import { type FloatType, intMax, type IntName, type IntType } from './types';
+import { type CharacterTypeName, type FloatType, intMax, type IntName, type IntType } from './types';
 
 /** The value and type of an integer or floating-point literal, as clang++ reads it. */
 export function numberLiteral(node: Syntax): { type: IntType | FloatType; value: number | bigint } {
@@ -139,8 +139,29 @@ function numericEscape(part: Syntax, digits: string, base: 8 | 16): string {
   return String.fromCodePoint(value);
 }
 
-/** Rejects the prefixes of wide and Unicode literals, which the interpreter leaves out. */
-export function checkLiteralPrefix(node: Syntax): void {
-  const prefix = /^(u8|u|U|L)(?=['"])/.exec(node.text);
-  if (prefix) unsupported(node.row, `接頭辞 ${prefix[1]} の付いた文字・文字列リテラル`);
+export type LiteralPrefix = 'u8' | 'u' | 'U' | 'L';
+
+/** The character type of the literals with each prefix, as arm64 macOS represents it. */
+export const LITERAL_TYPES: Readonly<Record<LiteralPrefix, IntType & { character: CharacterTypeName }>> = {
+  u8: { kind: 'int', name: 'uchar', character: 'char8_t' },
+  u: { kind: 'int', name: 'ushort', character: 'char16_t' },
+  U: { kind: 'int', name: 'uint', character: 'char32_t' },
+  L: { kind: 'int', name: 'int', character: 'wchar_t' },
+};
+
+/** The prefix of a wide or Unicode character or string literal, if it has one. */
+export function literalPrefix(node: Syntax): LiteralPrefix | undefined {
+  return /^(u8|u|U|L)(?=R?['"])/.exec(node.text)?.[1] as LiteralPrefix | undefined;
+}
+
+/**
+ * The code units of text in UTF-8 bytes, in the encoding of a prefix's character type: UTF-8 for `u8`, UTF-16 for
+ * `u`, and UTF-32 for `U` and `L` (whose `wchar_t` arm64 macOS makes 32-bit).
+ */
+export function codeUnits(bytes: string, prefix: LiteralPrefix): number[] {
+  if (prefix === 'u8') return [...bytes].map((byte) => byte.codePointAt(0) as number);
+  const text = new TextDecoder().decode(Uint8Array.from([...bytes].map((byte) => byte.codePointAt(0) as number)));
+  // oxlint-disable-next-line unicorn/prefer-code-point -- A char16_t literal holds UTF-16 code units, surrogates included.
+  if (prefix === 'u') return Array.from({ length: text.length }, (_, index) => text.charCodeAt(index));
+  return [...text].map((char) => char.codePointAt(0) as number);
 }

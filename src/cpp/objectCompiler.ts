@@ -18,9 +18,9 @@ import {
   type TemporaryBinding,
 } from './expr';
 import { SequenceValue } from './library/containerValues';
-import { constructElementFromRvalue, moveConstruction } from './library/elements';
+import { callablePositions, constructElementFromRvalue, moveConstruction } from './library/elements';
 import { StringValue } from './library/string';
-import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
+import { type Eval, type Frame, holdAll, Runtime, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
   type Access,
@@ -50,6 +50,7 @@ import {
   holdValues,
   Liveness,
   NULL_PTR,
+  outermostObject,
   Ptr,
   Store,
   UNINIT,
@@ -71,12 +72,22 @@ export function invoke(
   isCallerDestroying = false
 ): Value | Ptr {
   const { runtime } = frame;
+  if (runtime.isConstantEvaluation && !fn.native) {
+    if (!fn.isConstexpr && !fn.owner?.isLambda)
+      throw new CppRuntimeError('custom', `${fn.displayName} は constexpr ではありません。`);
+    runtime.constexprCalls++;
+  }
   if (fn.owner && self) self = self.forClass(fn.owner);
   if (fn.native) {
     const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
     if (override && sameParameters(fn, override)) return invoke(frame, override, args, self, row, isCallerDestroying);
     runtime.spend();
-    return fn.native(args, { self: self?.read(), selfLocation: self, frame, row }) as Value | Ptr;
+    runtime.nativeArguments.push(args);
+    try {
+      return fn.native(args, { self: self?.read(), selfLocation: self, frame, row }) as Value | Ptr;
+    } finally {
+      runtime.nativeArguments.pop();
+    }
   }
   const compiled = fn.compiled;
   if (!compiled) throw new Error(`${fn.displayName} has no body`);
@@ -86,6 +97,7 @@ export function invoke(
       const value = args[index] as Value;
       callee.slots[index] = parameterLocation(param.type, value);
     }
+    if (fn.isVariadic) callee.variadicArguments = args.slice(fn.params.length);
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
     else compiled.body(callee);
     if (!isCallerDestroying) destroyParameters(callee, fn, args);
@@ -198,7 +210,8 @@ export function bindRetainedTemporary(
 }
 
 /** Ends the lifetime of temporaries created since `mark`, the last first. */
-function destroyTemporaries(frame: Frame, mark: number): void {
+export function destroyTemporaries(frame: Frame, mark: number): void {
+  if (frame.retainsTemporaries) return;
   const { temporaries } = frame;
   while (temporaries.length > mark) {
     const temporary = temporaries.pop();
@@ -349,7 +362,7 @@ export interface Resolved {
   fn: FunctionInfo;
   conversions: ConversionSequence[];
 }
-type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
+export type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
 
 interface ObjectUseContext {
   access?: ClassInfo;
@@ -430,6 +443,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       memberConstant: expr.memberConstant,
       constant: expr.constant,
       foldedValue: expr.foldedValue,
+      bitFieldPromotion: expr.bitFieldPromotion,
       row: expr.row,
       run: size === 0 ? (frame) => (run(frame) as Ptr).read() : (frame) => frame.readScalar(run(frame) as Ptr, size),
       onlyCalls: expr.onlyCalls,
@@ -583,12 +597,33 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     objectClass?: ClassInfo
   ): void {
     if (isMemberAccessible(access, owner, naming, this.accessClass, objectClass)) return;
+    if (this.isFriendOf(owner) || this.isFriendOf(naming)) return;
     const word = accessAsMemberOf(access, owner, naming) === 'protected' ? 'protected' : 'private';
     this.error(row, `${name} は ${owner.name} の ${word} のメンバなので、ここでは使えません。`);
   }
 
+  /** Whether the code compiled now is a friend of a class: a member of a friend class, or a friend function. */
+  private isFriendOf(cls: ClassInfo): boolean {
+    if (this.usingLibraryAccess) return false;
+    const fn = this.context.fn;
+    if (fn !== undefined && cls.friendFunctions.has(fn)) return true;
+    if (fn?.templateScopes && !fn.owner && cls.friendTemplateNames.has(fn.name)) return true;
+    const here = this.enclosingClass;
+    if (!here) return false;
+    const befriends = (friend: ClassInfo): boolean =>
+      cls.friendClasses.has(friend) ||
+      (friend.templateOrigin !== undefined && cls.friendClassTemplates.has(friend.templateOrigin));
+    if (befriends(here)) return true;
+    // A nested class is a member, which may use the private members of the classes it is in.
+    for (let outer = here.outer; outer; outer = outer.outer) {
+      if (outer === cls || befriends(outer)) return true;
+    }
+    return false;
+  }
+
   checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void {
     if (from === to || !from.isDerivedFrom(to) || isBaseAccessible(from, to, this.accessClass)) return;
+    if (this.isFriendOf(from)) return;
     this.error(row, `${to.name} は ${from.name} の public な親クラスではないので、${from.name} から変換できません。`);
   }
 
@@ -609,14 +644,27 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
   }
 
+  useFunction(fn: FunctionInfo, row: number): void {
+    this.checkDefined(fn, row);
+  }
+
+  callConversion(expr: Expr, fn: FunctionInfo): Expr {
+    this.checkDefined(fn, expr.row);
+    return this.callExpr({ fn, conversions: [] }, [], expr, expr.row);
+  }
+
   isViableConstructor(constructor: FunctionInfo): boolean {
     return !constructor.isExplicit;
   }
 
   /** Converts an expression to a type as initialization does, or stops with a message naming `what`. */
   convert(expr: Expr, to: Type, row: number, what = '値'): Expr {
-    if (expr.functions) this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
-    if (expr.type.kind === 'void' && !expr.braced) this.error(row, '値を返さない関数（void）の結果は使えません。');
+    const target = nonReference(to);
+    // A function's name converts to a pointer to it, or to a class whose constructor takes one (`std::function`).
+    if (expr.functions && !(target.kind === 'pointer' && target.to.kind === 'function') && target.kind !== 'class')
+      this.error(row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
+    if (expr.type.kind === 'void' && !expr.braced && !expr.functions)
+      this.error(row, '値を返さない関数（void）の結果は使えません。');
     const conversion = implicitConversion(this, expr, to);
     if (!conversion) return this.error(row, this.conversionMessage(expr, to, what));
     return conversion.apply(expr);
@@ -672,7 +720,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return best;
   }
 
-  protected matchingOverloads(
+  matchingOverloads(
     candidates: FunctionInfo[],
     args: Expr[],
     object?: Expr,
@@ -680,9 +728,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     isFunctionPointer = false
   ): MatchingOverload[] {
     const viable: MatchingOverload[] = [];
+    for (const [index, arg] of args.entries()) callablePositions.set(arg, index);
     for (const candidate of candidates) {
       const instantiated = candidate.instantiate?.(args, templateArgs);
-      const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;
+      const fn = candidate.instantiate
+        ? instantiated && (instantiated.isTemplate ? instantiated : { ...instantiated, isTemplate: true })
+        : candidate;
       if (!fn || (templateArgs && !candidate.instantiate)) continue;
       if (isFunctionPointer && args.length < fn.params.length) continue;
       const conversions = this.argumentConversions(fn, args);
@@ -746,11 +797,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** The conversion of the object of a member function call to the implicit object parameter. */
   private objectConversion(fn: FunctionInfo, object: Expr): ConversionSequence | undefined {
     if (isConstType(object.type) && !fn.isConst) return undefined;
+    // A ref-qualified member function takes an object of its value category (C++20 [over.match.funcs]p4).
+    const isRvalue = !object.isLvalue || object.isXvalue === true;
+    if (fn.refQualifier === '&' && isRvalue && !fn.isConst) return undefined;
+    if (fn.refQualifier === '&&' && !isRvalue) return undefined;
     return {
       rank: Rank.Exact,
       isBoolean: false,
       baseDistance: 0,
-      reference: { toConst: fn.isConst },
+      reference: {
+        toConst: fn.isConst,
+        isRvalue: fn.refQualifier === '&&',
+        fromRvalue: fn.refQualifier ? isRvalue : undefined,
+      },
       apply: (e) => e,
     };
   }
@@ -774,7 +833,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (aBetter !== bBetter) return aBetter ? 1 : -1;
     if (aBetter && bBetter) return 0;
     if (a.fn.isTemplate !== b.fn.isTemplate) return a.fn.isTemplate ? -1 : 1;
-    return 0;
+    // Between two function templates, the more specialized one wins (C++20 [temp.func.order]).
+    return Math.sign((a.fn.templateSpecificity ?? 0) - (b.fn.templateSpecificity ?? 0));
   }
 
   /**
@@ -812,8 +872,53 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    * A call of a resolved function. A member function needs the object, as an lvalue or a prvalue; `isQualified`
    * calls the function itself rather than the final overrider of a virtual one.
    */
+  /**
+   * The value of a constant expression of arithmetic type: its folded constant, or the result of running it while
+   * compiling, which succeeds when it uses only constants and constexpr functions (C++20 [expr.const]).
+   */
+  constantValueOf(expr: Expr): number | bigint | undefined {
+    const value = this.rvalue(expr);
+    if (value.constant !== undefined) return value.constant;
+    if (!isArithmeticType(value.type) || this.isEvaluatingConstant) return undefined;
+    const runtime = new Runtime();
+    runtime.isConstantEvaluation = true;
+    this.isEvaluatingConstant = true;
+    try {
+      const frame = runtime.pushFrame(undefined, undefined, undefined, undefined);
+      const result = withTemporaries(frame, () => value.run(frame));
+      // An expression that calls no constexpr function is a constant only when the compiler folded it.
+      if (runtime.constexprCalls === 0) return undefined;
+      return typeof result === 'number' || typeof result === 'bigint' ? result : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      this.isEvaluatingConstant = false;
+    }
+  }
+
+  private isEvaluatingConstant = false;
+  /** Whether the expression compiled now is an unevaluated operand (`sizeof`, `decltype`, `noexcept`). */
+  protected isUnevaluated = false;
+
+  /** Whether the code compiled now runs only in constant evaluation: a consteval function's body. */
+  private get isImmediateContext(): boolean {
+    return this.context.fn?.isConsteval === true || this.isUnevaluated || this.isEvaluatingConstant;
+  }
+
+  /** A call of a consteval function, which the compiler evaluates: its value is a constant (C++20 [expr.const]p13). */
+  private immediateCall(fn: FunctionInfo, run: Eval<Value | Ptr>, type: Type, row: number): Expr {
+    const value = this.constantValueOf({ type, isLvalue: false, row, run });
+    if (value === undefined)
+      return this.error(row, `consteval の関数 ${fn.displayName} の呼び出しは、定数式でなければなりません。`);
+    return { type, isLvalue: false, row, run: () => value, constant: value };
+  }
+
+  /** The calls of the `noexcept(e)` operand compiled now, which tells whether one of them may throw. */
+  noexceptProbe: { mayThrow: boolean } | undefined;
+
   callExpr(resolved: Resolved, args: Expr[], object: Expr | undefined, row: number, isQualified = false): Expr {
     const { fn } = resolved;
+    if (this.noexceptProbe && !fn.isNoexcept && !fn.isDestructor) this.noexceptProbe.mayThrow = true;
     const converted = this.convertArguments(resolved, args);
     const argRuns = this.callArguments(fn, converted, row);
     const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
@@ -827,9 +932,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
+    if (fn.isConsteval && !this.isImmediateContext) return this.immediateCall(fn, run, type, row);
     return {
       type,
       isLvalue: isReference,
+      // A call of a function returning an rvalue reference is an xvalue.
+      isXvalue: fn.ret.kind === 'reference' && fn.ret.isRvalue === true ? true : undefined,
       row,
       run,
       ...(object ? memberCallConstancy(fn, object, converted) : this.callConstancy(fn, args, converted)),
@@ -847,12 +955,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return (frame: Frame, args: unknown[], receiver?: Ptr): Value | Ptr => {
       const location = fn.isStatic ? undefined : receiver;
       let callee = fn;
+      let self = location;
       if (key !== undefined && location) {
         const target = location.read();
-        if (target instanceof CObject) callee = target.cls.virtuals.get(key) ?? fn;
+        if (target instanceof CObject) {
+          // A secondary base's subobject calls the final overrider of the object it is a base of.
+          const owner = outermostObject(target);
+          callee = owner.cls.virtuals.get(key) ?? fn;
+          if (owner !== target && callee.owner && owner.cls.isDerivedFrom(callee.owner))
+            self = owner.receiver(callee.owner);
+        }
         if (callee.isPure) throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
       }
-      const result = invoke(frame, callee, args, location, row, true);
+      const result = invoke(frame, callee, args, self, row, true);
       if (resultClass && callee !== fn && !sameType(callee.ret, fn.ret)) return (result as Ptr).forClass(resultClass);
       return result;
     };
@@ -1012,6 +1127,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     if (move.kind === 'array') {
       this.checkMoveOperation(move.array.type, fallback, row, { seen: context.seen });
+      return;
+    }
+    if (move.kind === 'program') {
+      this.checkDefined(move.constructor, row);
+      this.checkObjectUse(type, 'destroy', row, context);
       return;
     }
     if (move.kind !== 'members') return;

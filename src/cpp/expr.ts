@@ -44,6 +44,12 @@ export function initializerWithConstancy(run: Initializer, isConstant: boolean, 
  */
 export interface Expr extends ConstantValue {
   isAssignmentList?: boolean;
+  /** The type a bit-field's value promotes to when int (or unsigned int) holds every value its width allows. */
+  bitFieldPromotion?: Extract<Type, { kind: 'int' }>;
+  /** The object and the pointer to a member function of `(object.*member)`, which only a call may use. */
+  boundMember?: { object: Expr; member: Expr };
+  /** Whether the lvalue designates a bit-field, which has no address and no non-const reference binds to. */
+  isBitField?: boolean;
   type: Type;
   isLvalue: boolean;
   isXvalue?: boolean;
@@ -104,6 +110,11 @@ export interface FunctionCandidates {
 
 export function constantExpr(type: Type, value: number | bigint, row: number): Expr {
   return { type, isLvalue: false, run: () => value, row, constant: value };
+}
+
+/** The literal `0`, which a comparison category compares with. */
+export function zeroLiteral(row: number): Expr {
+  return { ...constantExpr({ kind: 'int', name: 'int' }, 0, row), isNullConstant: true };
 }
 
 export function memberConstantOf(expr: Expr): MemberConstant | undefined {

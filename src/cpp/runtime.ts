@@ -5,15 +5,19 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import { byteAt } from './bytes';
+import type { Coroutine } from './coroutines';
 import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
-import { StreamValue } from './library/iostream';
+import { OPEN_MODE, StreamValue } from './library/iostream';
+import { utf8 } from './literals';
 import type { FunctionInfo, Type } from './types';
-import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
+import { Box, childValues, CObject, endLifetime, type FunctionRef, Liveness, Ptr, Store, type Value } from './values';
 
 /** How a statement ended: normally (undefined), or by `break`, `continue`, or `return`. */
 export const BREAK = 1;
 export const CONTINUE = 2;
 export const RETURN = 3;
+/** A `goto`, whose label `Frame.gotoLabel` names. */
+export const GOTO = 4;
 export type Completion = number | undefined;
 
 export type Exec = (frame: Frame) => Completion;
@@ -48,6 +52,8 @@ export class Frame implements TracedFrame {
   readonly slots: Slot[];
   returnValue: Value | Ptr = undefined;
   readonly temporaries: Temporary[] = [];
+  /** Whether the full-expressions of the frame leave their temporaries to the coroutine statement that awaits. */
+  retainsTemporaries = false;
   /** Values the frame holds outside its variables, such as an exception a handler runs for. */
   readonly pending: (Value | Ptr)[] = [];
   readonly evaluationRoots: Value[] = [];
@@ -55,6 +61,10 @@ export class Frame implements TracedFrame {
   private operandAccesses?: OperandAccesses;
   /** The slot of the local variable that a `return` returned without copying (the named return value). */
   nrvoSlot: number | undefined;
+  /** The arguments a call passed to the `...` of a C variadic function, with their types after promotion. */
+  variadicArguments?: readonly unknown[];
+  /** The label of the `goto` the frame is jumping to. */
+  gotoLabel = '';
 
   /**
    * @param self The location of the object a member function runs for, which `this` points to.
@@ -62,7 +72,7 @@ export class Frame implements TracedFrame {
   constructor(
     readonly runtime: Runtime,
     readonly fn: FunctionInfo | undefined,
-    readonly callRow: number | undefined,
+    public callRow: number | undefined,
     slotCount: number,
     readonly self: Ptr | undefined,
     readonly compiled: CompiledFunction | undefined
@@ -194,6 +204,17 @@ export class Runtime implements TracedRuntime<Frame> {
   /** The number of delete expressions destroying objects now. */
   deleteDepth = 0;
   readonly frames: Frame[] = [];
+  /** The coroutines whose frames are live, by the storage of their promises, which their handles' addresses point to. */
+  readonly coroutines = new Map<Store, Coroutine>();
+  readonly destroyedCoroutines = new WeakSet<Store>();
+  /** The exceptions `std::exception_ptr`s share, by the storage of their objects. */
+  readonly sharedExceptions = new Map<object, CppException>();
+  /** Whether the run evaluates a constant expression while compiling, where only constexpr functions may run. */
+  isConstantEvaluation = false;
+  /** How many constexpr functions of the program the constant evaluation called. */
+  constexprCalls = 0;
+  /** The arguments of the library functions running now, the innermost last, which their callables come from. */
+  readonly nativeArguments: unknown[][] = [];
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly steps = new StepTracker();
@@ -202,6 +223,12 @@ export class Runtime implements TracedRuntime<Frame> {
   libcOverrides: ReadonlyMap<string, FunctionInfo> = new Map();
   private allocatedSlots = 0;
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
+  /** The objects whose secondary bases' subobjects are being constructed, the innermost last. */
+  readonly constructionOwners: CObject[] = [];
+  /** The functions `at_quick_exit` registered, which `quick_exit` calls, the last registered first. */
+  readonly quickExitHandlers: FunctionRef[] = [];
+  /** The function `std::set_terminate` installed, which `std::terminate` calls. */
+  terminateHandler: FunctionRef | undefined;
   /** The state of `rand`. */
   randomState = 1;
   /** The objects with static storage duration that have destructors, in the order their construction completed. */
@@ -240,6 +267,21 @@ export class Runtime implements TracedRuntime<Frame> {
   onMainEnd: ((frame: Frame) => void) | undefined;
 
   private readonly streams = new Map<string, StreamValue>();
+
+  private stdinStream: StreamValue | undefined;
+
+  /**
+   * Standard input as a stream of the bytes the run reads, which `std::cin` and the C functions (`scanf`, `getchar`)
+   * read from in turn, as when they are synchronized (C++20 [ios.members.static]).
+   */
+  standardInput(): StreamValue {
+    if (!this.stdinStream) {
+      this.stdinStream = new StreamValue('istream', 'buffer', OPEN_MODE.in);
+      this.stdinStream.startWith(utf8(this.io.stdin.reader.readRest()));
+      this.stdinStream.tied = new Ptr(this.standardStream('stdout'), 0);
+    }
+    return this.stdinStream;
+  }
 
   /** `std::cout` or `std::cerr` of this run, whose formatting state persists across the run. */
   standardStream(target: 'stdout' | 'stderr' | 'clog'): StreamValue {
@@ -282,6 +324,10 @@ export class Runtime implements TracedRuntime<Frame> {
     return new ProgramAbort(message);
   }
 
+  isUnwinding(exception: CppException): boolean {
+    return this.unwinding.has(exception);
+  }
+
   beginHandler(exception: CppException): void {
     this.handling.push(exception);
     this.unwinding.delete(exception);
@@ -308,6 +354,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Writes bytes (a string of character codes below 256) to standard output or standard error. */
   write(stream: 'stdout' | 'stderr', bytes: string): void {
+    if (this.isConstantEvaluation) throw new CppRuntimeError('custom', '定数式の中では出力できません。');
     if (bytes.length === 0) return;
     // oxlint-disable-next-line no-control-regex -- ASCII text decodes to itself.
     if (/^[\u0000-\u007F]*$/.test(bytes)) {
@@ -344,6 +391,9 @@ export class Runtime implements TracedRuntime<Frame> {
   ): Frame {
     this.spend();
     if (this.frames.length >= LIMITS.maxCallDepth) throw new CppRuntimeError('stackOverflow');
+    // A call from the library's code (a negative row) shows as the program's call that ran that code.
+    if (callRow !== undefined && callRow < 0)
+      callRow = this.frames.findLast((frame) => (frame.callRow ?? 0) >= 0)?.callRow;
     const frame = new Frame(this, fn, callRow, compiled?.slotCount ?? 0, self, compiled);
     this.frames.push(frame);
     return frame;
@@ -368,7 +418,7 @@ export class Runtime implements TracedRuntime<Frame> {
       reached.add(value);
       pending.push(value);
     };
-    for (const frame of this.frames) {
+    for (const frame of [...this.frames, ...[...this.coroutines.values()].map((coroutine) => coroutine.frame)]) {
       for (const slot of frame.slots) visit(slot);
       visit(frame.self);
       visit(frame.returnValue);
@@ -376,7 +426,7 @@ export class Runtime implements TracedRuntime<Frame> {
       for (const value of frame.pending) visit(value);
       for (const value of frame.evaluationRoots) visit(value);
     }
-    for (const exception of this.handling) visit(exception.value);
+    for (const exception of [...this.handling, ...this.sharedExceptions.values()]) visit(exception.value);
     for (const exception of this.unwinding) visit(exception.value);
     for (const global of this.globals) visit(global);
     while (pending.length > 0) {

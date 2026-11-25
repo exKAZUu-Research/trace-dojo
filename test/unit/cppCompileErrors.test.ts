@@ -40,9 +40,6 @@ int main() {
 });
 
 test.each([
-  ['list', 'std::list<int> first{1, 2}, second{3}; first.splice(first.begin(), second);', 'splice'],
-  ['list', 'std::list<int> first{1, 2}, second{3}; first.merge(second);', 'merge'],
-  ['list', 'std::list<int> first{1, 2}; first.remove_if(isOdd);', 'remove_if'],
   ['vector', 'std::vector<int>::allocator_type allocator;', 'allocator_type'],
   ['vector', 'std::vector<int> values{1}; values.rbegin().base();', 'base'],
   ['list', 'std::list<int> values{1}; values.crbegin().base();', 'base'],
@@ -551,22 +548,6 @@ int main() { cout << ${name}; }`;
     });
   }
 );
-
-test.each([
-  ['cstdio', 'int value; scanf("%d", &value);'],
-  ['cstdio', 'std::scanf("%*d");'],
-  ['stdio.h', 'getchar();'],
-  ['cstdio', 'FILE* file = fopen("example.txt", "r");'],
-  ['cstdio', 'char buffer[8]; fgets(buffer, 8, stdin);'],
-  ['cstdio', 'std::remove("example.txt");'],
-])('rejects unavailable C input and file access with an explicit diagnostic: %s %s', (header, body) => {
-  const program = `#include <${header}>
-int main() { ${body} }`;
-  expect(executeProgram('cpp', program)).toMatchObject({
-    kind: 'compileError',
-    diagnostics: [{ row: 1, message: expect.stringContaining('この採点環境では使えません。') }],
-  });
-});
 
 test('copy-list initialization rejects an explicit forwarding pair constructor', () => {
   const program = `#include <utility>
@@ -1275,7 +1256,7 @@ int main() {
   });
 });
 
-test.each(['S& r = s; int a[r.N];', 'S* p = &s; int a[p->N];'])(
+test.each(['S& r = s; static int a[r.N];', 'S* p = &s; static int a[p->N];'])(
   'rejects a static constant named through a non-constant object expression in %s',
   (body) => {
     const program = `struct S { static const int N = 3; };
@@ -1334,7 +1315,7 @@ test.each([
   ['static S a[2][2];', 'a[2][1].N'],
 ])('rejects a static constant named through out-of-bounds element of %s %s', (declaration, bound) => {
   const program = `struct S { static const int N = 3; };
-int main() { ${declaration} int b[${bound}]; }`;
+int main() { ${declaration} static int b[${bound}]; }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 1, message: expect.stringContaining('可変長配列') }],

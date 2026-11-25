@@ -1,17 +1,28 @@
-import { CppRuntimeError, ProgramExit } from '../errors';
+import { FileSystemError } from '../../interpreter/programIo';
+import { byteArray } from '../bytes';
+import type { ConceptInfo } from '../concepts';
+import { coroutineFunctions } from '../coroutines';
+import { CppRuntimeError, ProgramAbort, ProgramExit } from '../errors';
+import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { invoke } from '../objectCompiler';
+import type { ClassTemplateInfo } from '../programTemplates';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
 import {
   CHAR,
   ClassInfo,
   classType,
+  decay,
   type FunctionInfo,
   INT,
   LLONG,
   LONG,
+  nonReference,
+  pointerTo,
   referenceTo,
   sameParameters,
+  sameType,
   SCHAR,
   SHORT,
   type Type,
@@ -19,17 +30,31 @@ import {
   UINT,
   ULLONG,
   ULONG,
+  unqualified,
   USHORT,
   VOID,
 } from '../types';
-import { Box, Ptr } from '../values';
+import { Box, type FunctionRef, NULL_PTR, Ptr } from '../values';
 import { algorithmFunctions } from './algorithms';
 import { makePair } from './associative';
+import { bitCastFunctions } from './bitCasts';
 import { cFunctions } from './cFunctions';
+import { orderingClasses, type OrderingName } from './compare';
 import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
+import { exceptionPointerFunctions } from './exceptionPointers';
 import { exceptionClasses } from './exceptions';
-import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
+import { filesystemFunctions } from './filesystem';
+import { formatFunctions } from './format';
+import {
+  FLAGS,
+  ManipulatorValue,
+  OPEN_MODE,
+  skipWhitespace,
+  Streams,
+  type StreamValue,
+  StreamValue as StreamValueClass,
+} from './iostream';
 import {
   conflictsWithLibcGlobal,
   conflictsWithStdName,
@@ -44,32 +69,30 @@ import {
 import { mathFunctions } from './math';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
-import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
+import { asNumber, CONST_CHAR_PTR, generic, native, readCString } from './support';
 import { turtleClass } from './turtle';
+import { hashFunctions } from './unordered';
 import { headerOf, isCtypeFunction, isVisible } from './visibility';
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
 export type LibraryTemplate =
-  | { name: string; takesArrayBound?: false; instantiate: (args: Type[], row: number) => Type }
-  | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type };
+  | {
+      name: string;
+      takesArrayBound?: false;
+      instantiate: (args: Type[], row: number) => Type;
+      /** The class template or alias template the program declares, when the template is the program's. */
+      program?: ClassTemplateInfo | ConceptInfo;
+    }
+  | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type; program?: undefined };
 
 /** The names the library declares that the interpreter leaves out, with the feature they belong to. */
 const UNSUPPORTED_STD_NAMES: Record<string, string> = {
-  cin: '標準入力（std::cin）',
   wcin: '標準入力（std::wcin）',
-  ifstream: 'ファイルの読み書き（std::ifstream）',
-  ofstream: 'ファイルの読み書き（std::ofstream）',
-  fstream: 'ファイルの読み書き（std::fstream）',
   nothrow: '例外を投げない割り当て（std::nothrow）',
   nothrow_t: '例外を投げない割り当て（std::nothrow_t）',
   new_handler: 'メモリ不足時のハンドラ（std::new_handler）',
   set_new_handler: 'メモリ不足時のハンドラ（std::set_new_handler）',
   get_new_handler: 'メモリ不足時のハンドラ（std::get_new_handler）',
-  exception_ptr: '例外へのポインタ（std::exception_ptr）',
-  current_exception: '例外へのポインタ（std::current_exception）',
-  make_exception_ptr: '例外へのポインタ（std::make_exception_ptr）',
-  rethrow_exception: '例外へのポインタ（std::rethrow_exception）',
-  filesystem: 'ファイルシステム（std::filesystem）',
   thread: 'スレッド（std::thread）',
   jthread: 'スレッド（std::jthread）',
   mutex: '排他制御（std::mutex）',
@@ -89,48 +112,11 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   regex_replace: '正規表現（std::regex_replace）',
   smatch: '正規表現（std::smatch）',
   locale: 'ロケール（std::locale）',
-  type_info: '実行時の型の情報（std::type_info）',
   type_index: '実行時の型の情報（std::type_index）',
-  tuple: 'std::tuple',
-  make_tuple: 'std::tuple',
-  tie: 'std::tie',
-  get: 'std::get',
-  optional: 'std::optional',
-  nullopt: 'std::optional',
-  make_optional: 'std::optional',
-  variant: 'std::variant',
-  visit: 'std::variant',
-  any: 'std::any',
-  function: 'std::function',
-  bind: 'std::bind',
-  unique_ptr: 'スマートポインタ（std::unique_ptr）',
-  shared_ptr: 'スマートポインタ（std::shared_ptr）',
-  weak_ptr: 'スマートポインタ（std::weak_ptr）',
-  make_unique: 'スマートポインタ（std::make_unique）',
-  make_shared: 'スマートポインタ（std::make_shared）',
-  move: 'ムーブ（std::move）',
   forward: '完全転送（std::forward）',
-  initializer_list: 'std::initializer_list',
-  bitset: 'std::bitset',
-  complex: '複素数（std::complex）',
   valarray: 'std::valarray',
-  string_view: 'std::string_view',
-  span: 'std::span',
-  format: '書式（std::format）',
-  ranges: 'レンジ（std::ranges）',
-  views: 'レンジ（std::views）',
-  forward_list: 'std::forward_list',
   wstring: 'ワイド文字列（std::wstring）',
   wcout: 'ワイド文字の出力（std::wcout）',
-  numbers: '数学の定数（std::numbers）',
-  normal_distribution: '正規分布（std::normal_distribution）',
-  bernoulli_distribution: 'std::bernoulli_distribution',
-  discrete_distribution: 'std::discrete_distribution',
-  minstd_rand: 'std::minstd_rand',
-  default_random_engine: 'std::default_random_engine',
-  sample: 'std::sample',
-  terminate: 'std::terminate',
-  addressof: 'std::addressof',
 };
 
 const UNSUPPORTED_C_NAMES: Record<string, string> = {
@@ -142,32 +128,13 @@ const UNSUPPORTED_C_NAMES: Record<string, string> = {
   raise: 'シグナル（std::raise）',
   setjmp: '大域的な脱出（setjmp）',
   longjmp: '大域的な脱出（longjmp）',
-  scanf: '標準入力（scanf）',
-  vscanf: '標準入力（vscanf）',
-  getchar: '標準入力（getchar）',
-  stdin: '標準入力（stdin）',
-  getc: '標準入力・ファイル（getc）',
-  fgetc: '標準入力・ファイル（fgetc）',
-  fgets: '標準入力・ファイル（fgets）',
-  fscanf: '標準入力・ファイル（fscanf）',
-  vfscanf: '標準入力・ファイル（vfscanf）',
-  ungetc: '標準入力・ファイル（ungetc）',
-  fopen: 'ファイルの読み書き（fopen）',
   freopen: 'ファイルの読み書き（freopen）',
-  fclose: 'ファイルの読み書き（fclose）',
   fread: 'ファイルの読み書き（fread）',
   fwrite: 'ファイルの読み書き（fwrite）',
-  fseek: 'ファイルの読み書き（fseek）',
-  ftell: 'ファイルの読み書き（ftell）',
   fgetpos: 'ファイルの読み書き（fgetpos）',
   fsetpos: 'ファイルの読み書き（fsetpos）',
-  rewind: 'ファイルの読み書き（rewind）',
   tmpfile: 'ファイルの読み書き（tmpfile）',
   tmpnam: 'ファイルの読み書き（tmpnam）',
-  rename: 'ファイルの名前の変更（std::rename）',
-  abort: 'std::abort',
-  atexit: 'std::atexit',
-  quick_exit: 'std::quick_exit',
 };
 
 /** The library a program compiles against: what `#include` and `std::` give it, and `Turtle`. */
@@ -183,6 +150,7 @@ export class Library {
   readonly streams: Streams;
   private readonly exceptions: Map<string, ClassInfo>;
   private readonly stdNames = new Map<string, Entity>();
+  private readonly orderings = orderingClasses();
   private readonly nativeStdTemplates = new Set<FunctionInfo>();
   private readonly localeCtypeOverloads = new Map<string, FunctionInfo>();
   private readonly globalNames = new Map<string, Entity>();
@@ -190,9 +158,18 @@ export class Library {
   private readonly incomplete = new Map<ClassInfo, string>();
   /** `FILE`, which only `stdout` and `stderr` point to. */
   readonly fileClass: ClassInfo;
-  private readonly files = new Map<'stdout' | 'stderr', Box>();
-  private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, () => {}, {
-    uses: (row) => this.compiler.unsupported(row, 'ファイルの削除（remove）'),
+  private readonly files = new Map<'stdin' | 'stdout' | 'stderr', Box>();
+  private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, ([path], { frame }) => {
+    try {
+      frame.runtime.io.files.remove(
+        new TextDecoder().decode(byteArray(readCString(path as Ptr, frame.runtime))),
+        'file'
+      );
+      return 0;
+    } catch (error) {
+      if (error instanceof FileSystemError) return -1;
+      throw error;
+    }
   });
 
   constructor() {
@@ -201,7 +178,7 @@ export class Library {
     this.fileClass.isNoncopyable = true;
     this.fileClass.isAssignmentDeleted = true;
     this.fileClass.library = { kind: 'FILE', args: [], size: 152, align: 8 };
-    for (const name of ['stdout', 'stderr'] as const) this.files.set(name, new Box(undefined));
+    for (const name of ['stdin', 'stdout', 'stderr'] as const) this.files.set(name, new Box(undefined));
     this.stringClass = stringClass(this);
     this.exceptions = exceptionClasses(() => this.stringType);
     this.turtle = turtleClass(
@@ -216,8 +193,32 @@ export class Library {
     return classType(this.stringClass);
   }
 
-  fileStore(name: 'stdout' | 'stderr'): Box {
+  fileStore(name: 'stdin' | 'stdout' | 'stderr'): Box {
     return this.files.get(name) as Box;
+  }
+
+  /** The stream a `FILE*` reads from: standard input, or a file `fopen` opened to read. */
+  inputStream(pointer: Ptr, frame: Frame): StreamValue {
+    if (pointer.isNull) throw new CppRuntimeError('nullAccess');
+    if (pointer.store === this.files.get('stdin')) return frame.runtime.standardInput();
+    const file = pointer.store instanceof Box ? pointer.store.value : undefined;
+    if (file instanceof StreamValueClass && file.mode & OPEN_MODE.in) return file;
+    throw new CppRuntimeError('custom', '書き込み用に開いたファイルからは読めません。');
+  }
+
+  /** Writes bytes to what a `FILE*` points to: standard output or error, or a file `fopen` opened to write. */
+  writeFile(pointer: Ptr, frame: Frame, bytes: string): void {
+    if (pointer.isNull) throw new CppRuntimeError('nullAccess');
+    if (pointer.store === this.files.get('stdout') || pointer.store === this.files.get('stderr')) {
+      frame.runtime.write(this.fileTarget(pointer), bytes);
+      return;
+    }
+    const file = pointer.store instanceof Box ? pointer.store.value : undefined;
+    if (!(file instanceof StreamValueClass) || !file.isOpen)
+      throw new CppRuntimeError('custom', '閉じたファイルには書き込めません。');
+    if (!(file.mode & (OPEN_MODE.out | OPEN_MODE.app)))
+      throw new CppRuntimeError('custom', '読み込み用に開いたファイルには書き込めません。');
+    file.write(frame, bytes);
   }
 
   /** The standard stream a `FILE*` points to. */
@@ -225,6 +226,11 @@ export class Library {
     if (pointer.store === this.files.get('stderr')) return 'stderr';
     if (pointer.store === this.files.get('stdout')) return 'stdout';
     throw new CppRuntimeError('nullAccess');
+  }
+
+  /** The result type of `<=>`: `std::strong_ordering`, `std::weak_ordering`, or `std::partial_ordering`. */
+  ordering(name: OrderingName): ClassInfo {
+    return this.orderings.get(name) as ClassInfo;
   }
 
   exception(name: string): ClassInfo {
@@ -240,8 +246,52 @@ export class Library {
     }
   }
 
+  /**
+   * The template arguments of a library class template that an initializer's arguments deduce, as its deduction
+   * guides do (`std::vector v{1, 2}`, `std::pair p(1, 2.5)`, `std::array a{1, 2, 3}`), or undefined when they deduce
+   * none. A class template that takes an array bound gives its element type, then its bound.
+   */
+  deduceTemplateArguments(name: string, args: readonly Expr[]): Type[] | undefined {
+    if (args.some((arg) => arg.braced)) return undefined;
+    const types = args.map((arg) => decay(unqualified(nonReference(arg.type))));
+    const [first, second] = types;
+    if (!first) return undefined;
+    // An instance of the template deduces itself.
+    const library = first.kind === 'class' ? first.cls.library : undefined;
+    if (types.length === 1 && library?.kind === name) {
+      const bound = library.aggregateArray?.type.length;
+      return bound === undefined ? [...library.args] : [library.args[0], arrayBound(bound)];
+    }
+    const allSame = types.every((type) => sameType(type, first, false));
+    if (name === 'pair') return types.length === 2 ? types : undefined;
+    if (name === 'array') return allSame ? [first, arrayBound(types.length)] : undefined;
+    if (!DEDUCIBLE_CONTAINERS.has(name)) return undefined;
+    const isMap = MAP_CONTAINERS.has(name);
+    if (allSame && !isMap) return [first];
+    // `std::vector v(3, 2.5)` takes a count, then the value of each element.
+    if (types.length === 2 && first.kind === 'int' && second && !isMap) return [second];
+    const pair = first.kind === 'class' && first.cls.library?.kind === 'pair' ? first.cls.library.args : undefined;
+    if (isMap && allSame && pair) return [unqualified(pair[0]), pair[1]];
+    return undefined;
+  }
+
+  /** Whether the included headers declare `std::name`. */
+  declaresStd(name: string): boolean {
+    return this.isCompilingLibrary || isVisible(name, this.headers, 'std');
+  }
+
+  /**
+   * Whether the code being compiled is the library's C++ source, which sees all of `std` whatever headers the program
+   * includes, as a header of libc++ sees what it includes itself.
+   */
+  private get isCompilingLibrary(): boolean {
+    return this.compiler.isLibraryCode;
+  }
+
   std(name: string): Entity | undefined {
-    if (!isVisible(name, this.headers, 'std')) return undefined;
+    // The interpreter's own names, which only the library's C++ source uses, are not in the SDK's headers.
+    if (name.startsWith(INTERNAL_PREFIX)) return this.stdNames.get(name);
+    if (!this.declaresStd(name)) return undefined;
     const entity = this.stdNames.get(name);
     if (entity?.kind === 'class') this.trackDefinition(name, classType(entity.cls));
     if (entity && entity.kind !== 'functions') return entity;
@@ -252,7 +302,7 @@ export class Library {
   }
 
   trackDefinition(name: string, type: Type): Type {
-    if (type.kind === 'class' && isSdkStdForwardOnly(name, this.headers)) {
+    if (type.kind === 'class' && !this.isCompilingLibrary && isSdkStdForwardOnly(name, this.headers)) {
       type.cls.isComplete = false;
       this.incomplete.set(type.cls, name);
     }
@@ -260,8 +310,8 @@ export class Library {
   }
 
   private stdFunctions(name: string, registered: FunctionInfo[]): FunctionInfo[] {
-    const templates = isSdkStdDeclared(name, this.headers, 'template');
-    const ordinary = isSdkStdDeclared(name, this.headers, 'function');
+    const templates = this.isCompilingLibrary || isSdkStdDeclared(name, this.headers, 'template');
+    const ordinary = this.isCompilingLibrary || isSdkStdDeclared(name, this.headers, 'function');
     const visible = registered.filter((fn) =>
       fn.isTemplate || this.nativeStdTemplates.has(fn) ? templates : ordinary
     );
@@ -295,6 +345,13 @@ export class Library {
       const definition = definitions.find((candidate) => sameParameters(candidate, fn));
       return definition ?? fn;
     });
+  }
+
+  /** The C library's function that a declaration declares, with the same name and parameters, whatever the headers. */
+  cLibraryFunction(declaration: FunctionInfo): FunctionInfo | undefined {
+    const entity = this.globalNames.get(declaration.name);
+    if (entity?.kind !== 'functions') return undefined;
+    return entity.functions.find((fn) => fn.native && fn.libcGlobal && sameParameters(fn, declaration));
   }
 
   sameCFunction(declaration: FunctionInfo, library: FunctionInfo): boolean {
@@ -398,6 +455,7 @@ export class Library {
     this.addStd('FILE', file);
     this.addStd('string', { kind: 'class', cls: this.stringClass });
     for (const [name, cls] of this.exceptions) this.addStd(name, { kind: 'class', cls });
+    for (const [name, cls] of this.orderings) this.addStd(name, { kind: 'class', cls });
     this.addStreams();
     this.addFunctions(stringFunctions(this, this.stringClass), this.stdNames);
     const c = cFunctions(this);
@@ -415,11 +473,21 @@ export class Library {
     for (const [name, cls] of randomEngines()) this.addStd(name, { kind: 'class', cls });
     this.addFunctions(algorithmFunctions(this), this.stdNames);
     this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
+    this.addFunctions(coroutineFunctions(), this.stdNames);
+    this.addFunctions(exceptionPointerFunctions(), this.stdNames);
+    this.addFunctions(hashFunctions(), this.stdNames);
+    this.addFunctions(bitCastFunctions(), this.stdNames);
+    this.addFunctions(filesystemFunctions(this), this.stdNames);
+    const format = formatFunctions(this);
+    this.addFunctions(format.functions, this.stdNames);
+    this.addStd('format_args', { kind: 'class', cls: format.formatArgs });
     const exit = native('exit', [INT], VOID, ([status]) => {
       throw new ProgramExit(asNumber(status));
     });
-    this.addFunctions(new Map([['exit', [exit]]]), this.stdNames);
-    this.addFunctions(new Map([['exit', [exit]]]), this.globalNames);
+    for (const [name, functions] of [['exit', [exit]], ...programEndings()] as const) {
+      this.addFunctions(new Map([[name, [...functions]]]), this.stdNames);
+      this.addFunctions(new Map([[name, [...functions]]]), this.globalNames);
+    }
     for (const [name, type] of [
       ['size_t', ULONG],
       ['ptrdiff_t', LONG],
@@ -436,6 +504,8 @@ export class Library {
       ['uint32_t', UINT],
       ['uint64_t', ULLONG],
       ['nullptr_t', { kind: 'nullptr' }],
+      // arm64 macOS defines `va_list` as `char *`.
+      ['va_list', { kind: 'pointer', to: CHAR }],
     ] as const) {
       const entity = { kind: 'type', type } as const;
       this.addStd(name, entity);
@@ -463,12 +533,25 @@ export class Library {
         }),
       });
     }
+    const istreamType = classType(streams.istream);
+    this.addStd('cin', {
+      kind: 'value',
+      make: (row) => ({
+        type: istreamType,
+        isLvalue: true,
+        row,
+        run: (frame) => new Ptr(frame.runtime.standardInput(), 0),
+      }),
+    });
     for (const [name, cls] of [
       ['ostream', streams.ostream],
       ['istream', streams.istream],
       ['ostringstream', streams.ostringstream],
       ['istringstream', streams.istringstream],
       ['stringstream', streams.stringstream],
+      ['ifstream', streams.ifstream],
+      ['ofstream', streams.ofstream],
+      ['fstream', streams.fstream],
       ['ios_base', streams.iosBase],
       ['ios', streams.ios],
     ] as const) {
@@ -477,14 +560,16 @@ export class Library {
     this.addStd('streamsize', { kind: 'type', type: LONG });
     for (const [name, apply] of Object.entries(MANIPULATORS)) {
       const isOutputOnly = OUTPUT_MANIPULATORS.has(name);
-      const streamType = referenceTo(classType(isOutputOnly ? streams.ostream : streams.iosBase));
+      const streamClass = isOutputOnly ? streams.ostream : name === 'ws' ? streams.istream : streams.iosBase;
+      const streamType = referenceTo(classType(streamClass));
       const fn = native(name, [streamType], streamType, ([location], { frame }) => {
         const stream = location as Ptr;
         apply(stream.read() as StreamValue, frame);
         return stream;
       });
       fn.streamManipulator = isOutputOnly ? 'output' : 'both';
-      if (isOutputOnly) this.nativeStdTemplates.add(fn);
+      // libc++ declares these manipulators as function templates of the character type.
+      if (isOutputOnly || name === 'ws') this.nativeStdTemplates.add(fn);
       this.addStd(name, { kind: 'functions', functions: [fn] });
     }
     const manipulatorFunctions = new Map<string, FunctionInfo[]>();
@@ -546,5 +631,112 @@ const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> 
   uppercase: (stream) => (stream.flags |= FLAGS.uppercase),
   nouppercase: (stream) => (stream.flags &= ~FLAGS.uppercase),
   skipws: (stream) => (stream.flags |= FLAGS.skipws),
+  ws: skipWhitespace,
   noskipws: (stream) => (stream.flags &= ~FLAGS.skipws),
 };
+
+/** The library's class templates whose deduction guides take the elements of an initializer list. */
+const DEDUCIBLE_CONTAINERS = new Set([
+  'vector',
+  'deque',
+  'list',
+  'forward_list',
+  'set',
+  'multiset',
+  'unordered_set',
+  'unordered_multiset',
+  'map',
+  'multimap',
+  'unordered_map',
+  'unordered_multimap',
+]);
+const MAP_CONTAINERS = new Set(['map', 'multimap', 'unordered_map', 'unordered_multimap']);
+
+function arrayBound(length: number): Type {
+  return { kind: 'int', name: 'ulong', templateValue: BigInt(length) };
+}
+
+const HANDLER: Type = pointerTo({ kind: 'function', ret: VOID, params: [] });
+
+function callHandler(frame: Frame, handler: unknown, row: number): void {
+  const [fn] = (handler as FunctionRef).candidates;
+  if (fn) invoke(frame, fn, [], undefined, row);
+}
+
+/** The prefix of the names of `std` the interpreter declares for the library's C++ source. */
+const INTERNAL_PREFIX = '__builtin_';
+
+function abort(): never {
+  throw new ProgramAbort('std::abort でプログラムが止まりました。');
+}
+
+/**
+ * The functions of `<cstdlib>` and `<exception>` that end the program besides `exit`: `abort`, `terminate` with its
+ * handler, `quick_exit` and `_Exit`, and the functions they and `exit` call (`atexit`, `at_quick_exit`).
+ */
+function programEndings(): [string, FunctionInfo[]][] {
+  return [
+    ['abort', [native('abort', [], VOID, abort)]],
+    [
+      'atexit',
+      [
+        native('atexit', [HANDLER], INT, ([handler], { frame, row }) => {
+          // exit calls the functions and destroys the static objects in the reverse order of their registrations.
+          frame.runtime.staticObjects.push({
+            box: new Box(),
+            destroy: (current) => callHandler(current, handler, row),
+          });
+          return 0;
+        }),
+      ],
+    ],
+    [
+      'at_quick_exit',
+      [
+        native('at_quick_exit', [HANDLER], INT, ([handler], { frame }) => {
+          frame.runtime.quickExitHandlers.push(handler as FunctionRef);
+          return 0;
+        }),
+      ],
+    ],
+    [
+      'quick_exit',
+      [
+        native('quick_exit', [INT], VOID, ([status], { frame, row }) => {
+          const handlers = frame.runtime.quickExitHandlers;
+          while (handlers.length > 0) callHandler(frame, handlers.pop(), row);
+          throw new ProgramExit(asNumber(status), true);
+        }),
+      ],
+    ],
+    [
+      '_Exit',
+      [
+        native('_Exit', [INT], VOID, ([status]) => {
+          throw new ProgramExit(asNumber(status), true);
+        }),
+      ],
+    ],
+    [
+      'set_terminate',
+      [
+        native('set_terminate', [HANDLER], HANDLER, ([handler], { frame }) => {
+          const previous = frame.runtime.terminateHandler;
+          frame.runtime.terminateHandler = handler as FunctionRef | undefined;
+          return previous ?? NULL_PTR;
+        }),
+      ],
+    ],
+    [
+      'terminate',
+      [
+        native('terminate', [], VOID, (_, { frame, row }) => {
+          const handler = frame.runtime.terminateHandler;
+          if (handler && !handler.isNull) callHandler(frame, handler, row);
+          else frame.runtime.write('stderr', 'libc++abi: terminating\n');
+          return abort();
+        }),
+      ],
+    ],
+  ];
+}

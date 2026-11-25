@@ -34,7 +34,10 @@ export type Entity =
   | { kind: 'template'; template: LibraryTemplate }
   /** A library object or constant, such as `std::cout` or `INT_MAX`. */
   | { kind: 'value'; make: (row: number) => Expr }
-  | { kind: 'namespace'; name: string }
+  /** A namespace the program defines, or `std` when `ns` is undefined. */
+  | { kind: 'namespace'; name: string; ns?: NamespaceInfo }
+  /** A template parameter pack, or a function parameter pack, whose elements an expansion (`xs...`) uses. */
+  | { kind: 'pack'; items: Entity[] }
   /** A library name the interpreter leaves out, such as `std::thread`. */
   | { kind: 'unsupported'; feature: string };
 
@@ -42,6 +45,8 @@ export class Scope {
   readonly names = new Map<string, Entity>();
   isTryBlock = false;
   usesStd = false;
+  /** The namespaces `using namespace` directives in this scope nominate, whose names unqualified lookup finds. */
+  readonly usings: NamespaceInfo[] = [];
   /** The variables declared in this block whose destruction has an effect, by slot. */
   readonly destructibles = new Map<number, (frame: Frame, value: Value) => void>();
   /** The slots of the variables declared in this block, which go out of scope with it. */
@@ -59,6 +64,15 @@ export class Scope {
   constructor(readonly conflictingDeclarations?: ReadonlyMap<string, Entity>) {}
 }
 
+/** What a lambda's body sees of the scopes around it: the variables it captures and the enclosing object. */
+export interface CaptureLookup {
+  /** What a name denotes in the enclosing scopes, as a member of the closure when the lambda captures it. */
+  lookup(name: string): Entity | undefined;
+  /** The enclosing object, which the body's `this` and implicit member accesses use, when the lambda captures it. */
+  thisObject(row: number): Expr | undefined;
+  readonly closure: ClassInfo;
+}
+
 /** What the compiler knows about the function whose body it compiles. */
 export class FunctionContext {
   readonly locals: LocalInfo[] = [];
@@ -68,12 +82,36 @@ export class FunctionContext {
   switchDepth = 0;
   /** The locals that a `return` returns without copying, which the result shares (NRVO). */
   readonly namedReturns = new Set<LocalInfo>();
+  /** The labels of the function's statements, by name, with their rows. */
+  readonly labels = new Map<string, number>();
+  /**
+   * The labels the function's `goto` statements jump to, with their rows and whether the jump only enters blocks,
+   * which the interpreter can do, rather than a loop or a branch of an `if`.
+   */
+  readonly gotos: { label: string; row: number; isReachable: boolean }[] = [];
+  /** The labels each statement list around the statement compiled now may jump to, the innermost last. */
+  readonly enclosingLabels: ReadonlyMap<string, number>[] = [];
 
+  /** The scopes around a local class, whose names its member functions see after their own. */
+  readonly outerScopes: Scope[] = [];
+  /** The `auto` return type the function declares, which every `return` must deduce the same type from. */
+  autoReturn: Type | undefined;
+  /** The captures of the lambda whose body this is. */
+  captures: CaptureLookup | undefined;
+
+  /** @param returnType The function's return type, which its first `return` decides when it is `auto`. */
   constructor(
     readonly fn: FunctionInfo | undefined,
     readonly cls: ClassInfo | undefined,
-    readonly returnType: Type
+    public returnType: Type
   ) {}
+
+  /** The context of a local class's member declarations, which see the names of the function's blocks. */
+  static classBody(enclosing: FunctionContext): FunctionContext {
+    const context = new FunctionContext(undefined, undefined, enclosing.returnType);
+    context.outerScopes.push(...enclosing.scopes.toReversed(), ...enclosing.outerScopes);
+    return context;
+  }
 
   get scope(): Scope {
     return this.scopes.at(-1) as Scope;
@@ -136,5 +174,42 @@ export class FunctionContext {
       const entity = this.scopes[index].names.get(name);
       if (entity && (!accept || accept(entity))) return entity;
     }
+    // A local class sees the types and constants of the enclosing blocks, but not their variables.
+    for (const scope of this.outerScopes) {
+      const entity = scope.names.get(name);
+      if (entity && entity.kind !== 'local' && (!accept || accept(entity))) return entity;
+      if (entity?.kind === 'local' && (entity.isConstexpr || entity.staticStorage) && (!accept || accept(entity)))
+        return entity;
+    }
+  }
+}
+
+/** A namespace the program defines (`namespace geo { ... }`), whose declarations its scope holds. */
+export class NamespaceInfo {
+  readonly scope = new Scope();
+  /** The inline namespaces in this one, whose members are members of this one too. */
+  readonly inlineNamespaces: NamespaceInfo[] = [];
+
+  constructor(
+    readonly name: string,
+    readonly parent: NamespaceInfo | undefined
+  ) {}
+
+  /** The name with the enclosing namespaces, such as `geo::detail`, which names its members in messages. */
+  get qualifiedName(): string {
+    return this.parent ? `${this.parent.qualifiedName}::${this.name}` : this.name;
+  }
+
+  /** What `name` denotes as a member of this namespace: its own, an inline namespace's, or a nominated one's. */
+  member(name: string, seen = new Set<NamespaceInfo>()): Entity | undefined {
+    if (seen.has(this)) return undefined;
+    seen.add(this);
+    const own = this.scope.names.get(name);
+    if (own) return own;
+    for (const inner of [...this.inlineNamespaces, ...this.scope.usings]) {
+      const found = inner.member(name, seen);
+      if (found) return found;
+    }
+    return undefined;
   }
 }
