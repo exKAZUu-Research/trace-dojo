@@ -567,6 +567,38 @@ export class DeclarationBinder extends BinderBase {
     this.applyConstraints(type.symbol.typeParameters, type.declaration.constraints, type.context);
   }
 
+  /** A constraint by a type: an interface, a class that is not sealed, or a type parameter not leading back to this one. */
+  private applyTypeConstraint(
+    parameter: TypeParameterSymbol,
+    constraint: Extract<ConstraintClause['constraints'][number], { kind: 'type' }>,
+    context: TypeContext
+  ): void {
+    const constraintType = this.resolveType(constraint.type, context);
+    if (
+      constraintType.kind === 'named' &&
+      constraintType.symbol.isSealed &&
+      constraintType.symbol.kind !== 'interface' &&
+      !this.isLibraryUnit &&
+      constraintType.symbol.special !== 'enum'
+    ) {
+      this.error(
+        constraint,
+        'CS0701',
+        `'${displayType(constraintType)}' は有効な制約ではありません。制約として使用された型はインターフェイス、非シール クラス、または型パラメーターでなければなりません。`
+      );
+    }
+    // A constraint that leads back to its own parameter, as `where T : U where U : T`, is circular (CS0454).
+    if (constraintType.kind === 'typeParameter' && constrainsBackTo(constraintType.symbol, parameter, new Set())) {
+      this.error(
+        constraint,
+        'CS0454',
+        `'${constraintType.symbol.name}' と '${parameter.name}' を含む、循環制約の依存関係です`
+      );
+      return;
+    }
+    if (constraintType.kind !== 'error') parameter.constraintTypes.push(constraintType);
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected applyConstraints(
     parameters: TypeParameterSymbol[],
@@ -626,33 +658,7 @@ export class DeclarationBinder extends BinderBase {
             break;
           }
           case 'type': {
-            const constraintType = this.resolveType(constraint.type, context);
-            if (
-              constraintType.kind === 'named' &&
-              constraintType.symbol.isSealed &&
-              constraintType.symbol.kind !== 'interface' &&
-              !this.isLibraryUnit &&
-              constraintType.symbol.special !== 'enum'
-            ) {
-              this.error(
-                constraint,
-                'CS0701',
-                `'${displayType(constraintType)}' は有効な制約ではありません。制約として使用された型はインターフェイス、非シール クラス、または型パラメーターでなければなりません。`
-              );
-            }
-            // A constraint that leads back to its own parameter, as `where T : U where U : T`, is circular (CS0454).
-            if (
-              constraintType.kind === 'typeParameter' &&
-              constrainsBackTo(constraintType.symbol, parameter, new Set())
-            ) {
-              this.error(
-                constraint,
-                'CS0454',
-                `'${constraintType.symbol.name}' と '${parameter.name}' を含む、循環制約の依存関係です`
-              );
-              break;
-            }
-            if (constraintType.kind !== 'error') parameter.constraintTypes.push(constraintType);
+            this.applyTypeConstraint(parameter, constraint, context);
             break;
           }
         }
@@ -1134,6 +1140,28 @@ export class DeclarationBinder extends BinderBase {
     symbol.constructors.push(constructor);
   }
 
+  /** Reports a private virtual or abstract property (CS0621) and a sealed one that overrides nothing (CS0238). */
+  private checkPropertyModifiers(
+    property: PropertySymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>,
+    shownName: string
+  ): void {
+    const symbol = property.owner;
+    if (symbol.kind === 'interface' || this.isLibraryUnit) return;
+    if ((property.isVirtual || property.isAbstract || property.isOverride) && property.access === 'private')
+      this.error(
+        member,
+        'CS0621',
+        `'${displayTypeSymbol(symbol)}.${shownName}': 仮想または抽象メンバーには、private を指定できません`
+      );
+    if (member.modifiers.set.has('sealed') && !property.isOverride)
+      this.error(
+        member,
+        'CS0238',
+        `'${displayTypeSymbol(symbol)}.${shownName}' はオーバーライドではないため、シールドにできません`
+      );
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private declareProperty(
@@ -1158,27 +1186,7 @@ export class DeclarationBinder extends BinderBase {
       property.isAbstract = false;
     }
     if (property.isRequired) this.checkRequiredAccess(property, member);
-    if (
-      (property.isVirtual || property.isAbstract || property.isOverride) &&
-      property.access === 'private' &&
-      symbol.kind !== 'interface' &&
-      !this.isLibraryUnit
-    ) {
-      const shown = isIndexer ? 'this' : name;
-      this.error(
-        member,
-        'CS0621',
-        `'${displayTypeSymbol(symbol)}.${shown}': 仮想または抽象メンバーには、private を指定できません`
-      );
-    }
-    if (modifiers.has('sealed') && !property.isOverride && symbol.kind !== 'interface' && !this.isLibraryUnit) {
-      const shown = isIndexer ? 'this' : name;
-      this.error(
-        member,
-        'CS0238',
-        `'${displayTypeSymbol(symbol)}.${shown}' はオーバーライドではないため、シールドにできません`
-      );
-    }
+    this.checkPropertyModifiers(property, member, shownName);
     property.row = member.row;
     property.column = member.column;
     if (member.kind === 'property') property.declaration = member;
@@ -2175,31 +2183,47 @@ export class DeclarationBinder extends BinderBase {
         );
         return;
       }
-      for (const [kind, keyword] of [
-        ['getter', 'get'],
-        ['setter', 'set'],
-      ] as const) {
-        if (!member[kind]) continue;
-        const accessor = candidate[kind];
-        const candidateName = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
-        if (!accessor) missing(`${memberName}.${keyword}`);
-        else if (kind === 'setter' && candidate.isInitOnly !== member.isInitOnly) {
-          const [wanted, given] = member.isInitOnly ? ['init', 'set'] : ['set', 'init'];
-          this.error(
-            symbol.row,
-            'CS8854',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${wanted}' を実装しません。'${candidateName}.${given}' は '${memberName}.${wanted}' を実装できません。`
-          );
-        } else if (accessor.access !== 'public')
-          this.error(
-            symbol.row,
-            'CS0277',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません。'${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}.${keyword}' はパブリックではありません。`
-          );
-      }
+      this.checkAccessorImplementations(symbol, member, candidate, current, memberName);
       return;
     }
     missing(memberName);
+  }
+
+  /** Reports an interface property's accessor that the implementing property lacks, or implements as `init` for `set`. */
+  private checkAccessorImplementations(
+    symbol: TypeSymbol,
+    member: PropertySymbol,
+    candidate: PropertySymbol,
+    current: NamedType,
+    memberName: string
+  ): void {
+    for (const [kind, keyword] of [
+      ['getter', 'get'],
+      ['setter', 'set'],
+    ] as const) {
+      if (!member[kind]) continue;
+      const accessor = candidate[kind];
+      const candidateName = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
+      if (!accessor)
+        this.error(
+          symbol.row,
+          'CS0535',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません`
+        );
+      else if (kind === 'setter' && candidate.isInitOnly !== member.isInitOnly) {
+        const [wanted, given] = member.isInitOnly ? ['init', 'set'] : ['set', 'init'];
+        this.error(
+          symbol.row,
+          'CS8854',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${wanted}' を実装しません。'${candidateName}.${given}' は '${memberName}.${wanted}' を実装できません。`
+        );
+      } else if (accessor.access !== 'public')
+        this.error(
+          symbol.row,
+          'CS0277',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません。'${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}.${keyword}' はパブリックではありません。`
+        );
+    }
   }
 }
 

@@ -604,7 +604,6 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
  * A type as Roslyn's diagnostics show it. With `qualified`, as its conversion errors do, a type outside the global
  * namespace carries its namespace, such as `System.Collections.Generic.List<int>`.
  */
-// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 /**
  * A type as Roslyn's messages show it; `qualified` adds the namespaces, and `annotated` the `?` of a nullable reference
  * type, which Roslyn shows for the types that declarations write.

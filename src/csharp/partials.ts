@@ -60,10 +60,9 @@ export function joinPartialType(first: TypeDeclaration, part: TypeDeclaration, r
  * implementing one (C# spec §15.6.9). A partial method that only has its definition and returns void without an access
  * modifier stays, without a body, as one whose calls are removed.
  */
-// code-gauge-allow functionCognitiveComplexity -- Each branch handles one rule of partial members.
 export function joinPartialMembers(owner: TypeDeclaration, report: Report): void {
   const isPartialType = owner.modifiers.set.has('partial');
-  const groups = new Map<string, (MethodDeclaration | PropertyDeclaration)[]>();
+  const groups = new Map<string, PartialMember[]>();
   const joined: MemberDeclaration[] = [];
   for (const member of owner.members) {
     if ((member.kind !== 'method' && member.kind !== 'property') || !member.modifiers.set.has('partial')) {
@@ -71,10 +70,7 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
       continue;
     }
     if (!isPartialType) {
-      if (member.kind === 'property' && !hasBody(member))
-        report(member, 'CS9248', `部分プロパティ '${owner.name}.${member.name}' には実装パーツが必要です。`);
-      report(member, 'CS0751', '部分メンバーは、部分型内で宣言される必要があります');
-      if (member.kind === 'method' && !member.body) member.isRemovedPartial = true;
+      reportOutsidePartialType(owner, member, report);
       joined.push(member);
       continue;
     }
@@ -86,65 +82,82 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
       joined.push(member);
     }
   }
-  for (const [, group] of groups) {
-    const index = joined.indexOf(group[0]);
-    const display = `${owner.name}.${group[0].name}${group[0].kind === 'method' ? `(${parameterText(group[0].parameters)})` : ''}`;
-    const definitions = group.filter((member) => !hasBody(member));
-    const implementations = group.filter((member) => hasBody(member));
-    if (definitions.length > 1 || implementations.length > 1) {
-      const duplicate = (definitions.length > 1 ? definitions[1] : implementations[1]) as MemberDeclaration;
-      if (group[0].kind === 'method') {
-        report(duplicate, 'CS0756', '部分メソッドには、複数の定義宣言を指定することはできません');
-        report(
-          duplicate,
-          'CS0111',
-          `型 '${owner.name}' は、'${group[0].name}' と呼ばれるメンバーを同じパラメーターの型で既に定義しています`
-        );
-      } else report(duplicate, 'CS0102', `型 '${owner.name}' は既に '${group[0].name}' の定義を含んでいます`);
-    }
-    const [definition] = definitions;
-    const [implementation] = implementations;
-    if (!definition) {
-      report(
-        implementation as MemberDeclaration,
-        'CS0759',
-        `部分メソッド '${display}' の実装宣言に対する定義宣言が見つかりませんでした`
-      );
-      joined[index] = implementation as MemberDeclaration;
-      continue;
-    }
-    if (!implementation) {
-      if (definition.kind === 'property' || ACCESS_MODIFIERS.some((modifier) => definition.modifiers.set.has(modifier)))
-        report(
-          definition,
-          definition.kind === 'property' ? 'CS9248' : 'CS8795',
-          definition.kind === 'property'
-            ? `部分プロパティ '${display}' には実装パーツが必要です。`
-            : `部分メソッド '${display}' にはアクセシビリティ修飾子があるため、実装部分が必要です。`
-        );
-      else if (definition.kind === 'method' && !isVoid(definition.returnType))
-        report(
-          definition,
-          'CS8796',
-          `部分メソッド '${display}' には、void 以外の戻り値の型が指定されているため、アクセシビリティ修飾子が必要です。`
-        );
-      if (definition.kind === 'method') definition.isRemovedPartial = true;
-      joined[index] = definition;
-      continue;
-    }
-    if (
-      definition.kind === 'method' &&
-      !ACCESS_MODIFIERS.some((modifier) => definition.modifiers.set.has(modifier)) &&
-      !isVoid(definition.returnType)
-    )
+  for (const group of groups.values()) joined[joined.indexOf(group[0])] = joinGroup(owner, group, report);
+  owner.members = joined;
+}
+
+type PartialMember = MethodDeclaration | PropertyDeclaration;
+
+/** A partial member of a type that is not partial (CS0751), which stays as it is written. */
+function reportOutsidePartialType(owner: TypeDeclaration, member: PartialMember, report: Report): void {
+  if (member.kind === 'property' && !hasBody(member))
+    report(member, 'CS9248', `部分プロパティ '${owner.name}.${member.name}' には実装パーツが必要です。`);
+  report(member, 'CS0751', '部分メンバーは、部分型内で宣言される必要があります');
+  if (member.kind === 'method' && !member.body) member.isRemovedPartial = true;
+}
+
+/** The one member that the declarations of a partial member join into, reporting what is missing or repeated. */
+function joinGroup(owner: TypeDeclaration, group: PartialMember[], report: Report): MemberDeclaration {
+  const [first] = group;
+  const display = `${owner.name}.${first.name}${first.kind === 'method' ? `(${parameterText(first.parameters)})` : ''}`;
+  const definitions = group.filter((member) => !hasBody(member));
+  const implementations = group.filter((member) => hasBody(member));
+  if (definitions.length > 1 || implementations.length > 1)
+    reportDuplicate(
+      owner,
+      first,
+      (definitions.length > 1 ? definitions[1] : implementations[1]) as PartialMember,
+      report
+    );
+  const [definition] = definitions;
+  const [implementation] = implementations;
+  if (!definition) {
+    report(
+      implementation as MemberDeclaration,
+      'CS0759',
+      `部分メソッド '${display}' の実装宣言に対する定義宣言が見つかりませんでした`
+    );
+    return implementation as MemberDeclaration;
+  }
+  const hasAccess = ACCESS_MODIFIERS.some((modifier) => definition.modifiers.set.has(modifier));
+  if (!implementation) {
+    if (definition.kind === 'property' || hasAccess)
       report(
         definition,
-        'CS8796',
-        `部分メソッド '${display}' には、void 以外の戻り値の型が指定されているため、アクセシビリティ修飾子が必要です。`
+        definition.kind === 'property' ? 'CS9248' : 'CS8795',
+        definition.kind === 'property'
+          ? `部分プロパティ '${display}' には実装パーツが必要です。`
+          : `部分メソッド '${display}' にはアクセシビリティ修飾子があるため、実装部分が必要です。`
       );
-    joined[index] = implementation;
+    else reportNonVoidWithoutAccess(definition, display, report);
+    if (definition.kind === 'method') definition.isRemovedPartial = true;
+    return definition;
   }
-  owner.members = joined;
+  if (!hasAccess) reportNonVoidWithoutAccess(definition, display, report);
+  return implementation;
+}
+
+function reportDuplicate(owner: TypeDeclaration, first: PartialMember, duplicate: PartialMember, report: Report): void {
+  if (first.kind !== 'method') {
+    report(duplicate, 'CS0102', `型 '${owner.name}' は既に '${first.name}' の定義を含んでいます`);
+    return;
+  }
+  report(duplicate, 'CS0756', '部分メソッドには、複数の定義宣言を指定することはできません');
+  report(
+    duplicate,
+    'CS0111',
+    `型 '${owner.name}' は、'${first.name}' と呼ばれるメンバーを同じパラメーターの型で既に定義しています`
+  );
+}
+
+/** A partial method without an access modifier must return void (CS8796). */
+function reportNonVoidWithoutAccess(definition: PartialMember, display: string, report: Report): void {
+  if (definition.kind === 'method' && !isVoid(definition.returnType))
+    report(
+      definition,
+      'CS8796',
+      `部分メソッド '${display}' には、void 以外の戻り値の型が指定されているため、アクセシビリティ修飾子が必要です。`
+    );
 }
 
 function hasBody(member: MethodDeclaration | PropertyDeclaration): boolean {

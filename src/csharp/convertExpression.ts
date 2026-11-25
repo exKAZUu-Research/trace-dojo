@@ -777,7 +777,6 @@ export class ExpressionConverter {
     return members;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertAnonymousMethod(node: Node): Expression {
     const modifiers = new Set(
       namedChildren(node)

@@ -464,32 +464,6 @@ export class FlowAnalyzer {
       case 'conditionalAccess': {
         return this.accessExpression(expression, state);
       }
-      case 'late': {
-        return this.expressions(expression.operands, state);
-      }
-      case 'refAssign': {
-        return this.reference(expression.target, state, expression.row);
-      }
-      case 'addressOf': {
-        // `&x` needs no value in x, and x is definitely assigned after it (C# spec §24.6.5).
-        return this.assignTarget(expression.target, this.targetPrefix(expression.target, state));
-      }
-      case 'deref': {
-        return this.expression(expression.pointer, state);
-      }
-      case 'pointerArith': {
-        return this.expression(expression.offset, this.expression(expression.pointer, state));
-      }
-      case 'pointerDiff':
-      case 'pointerCompare': {
-        return this.expression(expression.right, this.expression(expression.left, state));
-      }
-      case 'stackalloc': {
-        return this.expressions(expression.values ?? [], this.expression(expression.length, state));
-      }
-      case 'fixedAddress': {
-        return this.expression(expression.value, state);
-      }
       case 'new':
       case 'newArray':
       case 'newDelegate':
@@ -542,6 +516,41 @@ export class FlowAnalyzer {
         let current = state;
         for (const local of expression.locals) current = assign(current, local);
         return this.expression(expression.value, this.expressions(expression.sideEffects, current));
+      }
+      default: {
+        return this.lessCommonExpression(expression, state);
+      }
+    }
+  }
+
+  /** The expressions of `dynamic`, ref reassignment, and pointers, and the ones that read nothing. */
+  private lessCommonExpression(expression: BoundExpression, state: State): State {
+    switch (expression.kind) {
+      case 'late': {
+        return this.expressions(expression.operands, state);
+      }
+      case 'refAssign': {
+        return this.reference(expression.target, state, expression.row);
+      }
+      case 'addressOf': {
+        // `&x` needs no value in x, and x is definitely assigned after it (C# spec §24.6.5).
+        return this.assignTarget(expression.target, this.targetPrefix(expression.target, state));
+      }
+      case 'deref': {
+        return this.expression(expression.pointer, state);
+      }
+      case 'pointerArith': {
+        return this.expression(expression.offset, this.expression(expression.pointer, state));
+      }
+      case 'pointerDiff':
+      case 'pointerCompare': {
+        return this.expression(expression.right, this.expression(expression.left, state));
+      }
+      case 'stackalloc': {
+        return this.expressions(expression.values ?? [], this.expression(expression.length, state));
+      }
+      case 'fixedAddress': {
+        return this.expression(expression.value, state);
       }
       default: {
         return state;

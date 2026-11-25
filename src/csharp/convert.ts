@@ -241,7 +241,6 @@ export class Converter extends ExpressionConverter {
     return declaration;
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private convertNamespaceMember(node: Node): TypeDeclaration | NamespaceDeclaration {
     switch (node.type) {
       case 'namespace_declaration': {
@@ -425,8 +424,6 @@ export class Converter extends ExpressionConverter {
     return { name: nameNode.text, constraints, ...positionOf(node) };
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of member declaration.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     if (node.type === 'extension_declaration') return this.convertExtensionBlock(node, owner);
     const attributes = this.attributed(node);
@@ -936,6 +933,17 @@ export class Converter extends ExpressionConverter {
       case 'try_statement': {
         return this.convertTry(node);
       }
+      default: {
+        return this.convertLessCommonStatement(node);
+      }
+    }
+  }
+
+  /** The statements beyond the ones learners write first: `checked`, `lock`, `goto`, labels, `using`, `yield`, `unsafe`. */
+  private convertLessCommonStatement(node: Node): Statement {
+    const position = positionOf(node);
+    const parts = namedChildren(node);
+    switch (node.type) {
       case 'checked_statement': {
         return {
           kind: 'checked',

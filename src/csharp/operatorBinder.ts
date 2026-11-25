@@ -151,8 +151,6 @@ export abstract class OperatorBinder extends ConversionBinder {
    *
    * @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`.
    */
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   /**
    * The pointer operators of C# spec §24.6: a pointer plus or minus an integer, the difference of two pointers, and
    * comparisons of pointers (or a pointer and null) by address. `void*` has none but the comparisons (CS0242).

@@ -163,7 +163,6 @@ export class LookupBinder extends DeclarationBinder {
   }
 
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   /** Whether the binder binds a `dynamic` operation as it runs, where the runtime binder finds no extension methods. */
   protected isLateBinding = false;
 
@@ -192,27 +191,16 @@ export class LookupBinder extends DeclarationBinder {
   }
 
   /** The methods of the static classes in scope that satisfy a test, as extension methods are found. */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private lookupExtensionMembers(context: TypeContext, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
-    const result: MethodCandidate[] = [];
-    if (this.isLateBinding) return result;
-    const visit = (types: Map<string, TypeSymbol[]>): void => {
-      for (const list of types.values()) {
-        for (const symbol of list) {
-          if (!symbol.isStatic) continue;
-          for (const method of symbol.methods) {
-            if (matches(method)) result.push({ method, owner: symbol.declaredType });
-          }
-        }
-      }
-    };
-    for (const namespaces of this.enclosingNamespaces(context)) {
-      for (const namespace of namespaces) visit(namespace.types);
-    }
-    for (const group of context.usings) for (const namespace of group) visit(namespace.types);
-    for (const type of context.staticUsings ?? [])
-      for (const method of type.symbol.methods)
-        if (matches(method)) result.push({ method, owner: type.symbol.declaredType });
+    if (this.isLateBinding) return [];
+    const namespaces = [...this.enclosingNamespaces(context), ...context.usings].flat();
+    const classes = [
+      ...namespaces.flatMap((namespace) => [...namespace.types.values()].flat().filter((symbol) => symbol.isStatic)),
+      ...(context.staticUsings ?? []).map((type) => type.symbol),
+    ];
+    const result = classes.flatMap((symbol) =>
+      symbol.methods.filter(matches).map((method) => ({ method, owner: symbol.declaredType }))
+    );
     return result.filter(
       (candidate, index) => result.findIndex((other) => other.method === candidate.method) === index
     );

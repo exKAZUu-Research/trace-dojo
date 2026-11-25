@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The statementBinder module keeps one stage of the C# interpreter together.
 import type {
   Block,
   Expression,
@@ -30,6 +29,8 @@ import { PatternBinder } from './patternBinder';
 import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope, type PendingSwitch } from './scopes';
+// code-gauge-allow-file fileNcss -- The statementBinder module keeps one stage of the C# interpreter together.
+import { anyStatement } from './statementSearch';
 import { markSuspends } from './suspension';
 import {
   displayMethod,
@@ -139,7 +140,6 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   // code-gauge-allow functionNcss -- Each kind of storage has its own rule for assignment.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   checkAssignable(
     target: BoundExpression,
     position: Position,
@@ -161,57 +161,11 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
       case 'local': {
-        const { local } = target;
-        if (local.refKind === 'in' && use !== 'initializer') {
-          if (local.isRefLocal) this.reportNotAssignable(position, use);
-          else if (use === 'ref' || use === 'out')
-            this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
-          else
-            this.error(
-              position,
-              'CS8331',
-              `変数 に割り当てることができません。'${local.name}' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。`
-            );
-          return target;
-        }
-        if (local.isReadonly) {
-          this.error(
-            position,
-            'CS1656',
-            `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
-          );
-        }
+        this.checkLocalAssignable(target.local, position, use);
         return target;
       }
       case 'field': {
-        this.checkReadonlyField(target.field, context, position);
-        if (this.reportsReadonlyLocalMember(target.receiver, position)) return target;
-        const holder = target.receiver;
-        if (
-          (holder.kind === 'field' || holder.kind === 'staticField') &&
-          holder.field.isReadonly &&
-          isValueType(holder.field.type) &&
-          !this.canAssignReadonly(holder.field, context)
-        ) {
-          this.error(
-            position,
-            'CS1648',
-            `読み取り専用フィールド '${displayTypeSymbol(holder.field.owner)}.${holder.field.name}' のメンバーは変更できません (コンストラクターまたは変数初期化子では可)`
-          );
-          return target;
-        }
-        if (
-          target.receiver.type.kind === 'named' &&
-          target.receiver.type.symbol.isValueType &&
-          !isVariable(target.receiver, false) &&
-          use !== 'initializer'
-        ) {
-          this.error(
-            position,
-            'CS1612',
-            `変数ではないため、'${this.describeValue(target.receiver)}' の戻り値を変更できません`
-          );
-        }
+        this.checkFieldAssignable(target, position, context, use);
         return target;
       }
       case 'staticField': {
@@ -240,6 +194,64 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
     }
+  }
+
+  /** Reports assigning an `in` parameter, a ref readonly local, or a readonly local such as a foreach variable. */
+  private checkLocalAssignable(
+    local: LocalSymbol,
+    position: Position,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): void {
+    if (local.refKind === 'in' && use !== 'initializer') {
+      if (local.isRefLocal) this.reportNotAssignable(position, use);
+      else if (use === 'ref' || use === 'out')
+        this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+      else
+        this.error(
+          position,
+          'CS8331',
+          `変数 に割り当てることができません。'${local.name}' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。`
+        );
+      return;
+    }
+    if (local.isReadonly)
+      this.error(
+        position,
+        'CS1656',
+        `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
+      );
+  }
+
+  /** Reports assigning a readonly field, a member of a readonly struct field, or a field of a struct value. */
+  private checkFieldAssignable(
+    target: Extract<BoundExpression, { kind: 'field' }>,
+    position: Position,
+    context: BindContext,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): void {
+    this.checkReadonlyField(target.field, context, position);
+    if (this.reportsReadonlyLocalMember(target.receiver, position)) return;
+    const holder = target.receiver;
+    if (
+      (holder.kind === 'field' || holder.kind === 'staticField') &&
+      holder.field.isReadonly &&
+      isValueType(holder.field.type) &&
+      !this.canAssignReadonly(holder.field, context)
+    ) {
+      this.error(
+        position,
+        'CS1648',
+        `読み取り専用フィールド '${displayTypeSymbol(holder.field.owner)}.${holder.field.name}' のメンバーは変更できません (コンストラクターまたは変数初期化子では可)`
+      );
+      return;
+    }
+    if (
+      holder.type.kind === 'named' &&
+      holder.type.symbol.isValueType &&
+      !isVariable(holder, false) &&
+      use !== 'initializer'
+    )
+      this.error(position, 'CS1612', `変数ではないため、'${this.describeValue(holder)}' の戻り値を変更できません`);
   }
 
   private checkPropertyAssignable(
@@ -654,6 +666,22 @@ export abstract class StatementBinder extends PatternBinder {
       case 'try': {
         return this.bindTry(statement, context);
       }
+      default: {
+        return this.bindLessCommonStatement(statement, context);
+      }
+    }
+  }
+
+  /** The statements beyond the ones learners write first: labels, `goto`, `lock`, `checked`, `using`, `yield`, `unsafe`. */
+  private bindLessCommonStatement(
+    statement: Extract<
+      Statement,
+      { kind: 'labeled' | 'goto' | 'lock' | 'checked' | 'using' | 'yield' | 'unsafe' | 'fixed' }
+    >,
+    context: BindContext
+  ): BoundStatement {
+    const { row } = statement;
+    switch (statement.kind) {
       case 'labeled': {
         const label = this.findLabel(statement.label, context) as LabelSymbol;
         return {
@@ -1571,8 +1599,6 @@ export abstract class StatementBinder extends PatternBinder {
    * a public instance `GetEnumerator()`, else an implemented `IEnumerable`'s; on what it returns, a public instance
    * `bool MoveNext()` and a public instance `Current` with a getter; and disposal through `IDisposable` only.
    */
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   /** Whether a type has an accessible method of the name, which some foreach errors suggest by. */
   private hasMethod(type: Type, name: string, context: BindContext): boolean {
     return this.lookupMember(type, name, context.fn.typeContext).found?.kind === 'methods';
@@ -2189,43 +2215,5 @@ function collectDesignatedNames(node: unknown, names: string[]): void {
 
 /** Whether a statement holds a `yield` of its own function, which makes the function an iterator. */
 function containsYield(statement: Statement): boolean {
-  switch (statement.kind) {
-    case 'yield': {
-      return true;
-    }
-    case 'block': {
-      return statement.statements.some(containsYield);
-    }
-    case 'if': {
-      return (
-        containsYield(statement.consequence) ||
-        (statement.alternative !== undefined && containsYield(statement.alternative))
-      );
-    }
-    case 'while':
-    case 'do':
-    case 'for':
-    case 'foreach':
-    case 'lock':
-    case 'using':
-    case 'checked': {
-      return containsYield(statement.body);
-    }
-    case 'labeled': {
-      return containsYield(statement.statement);
-    }
-    case 'switch': {
-      return statement.sections.some((section) => section.statements.some(containsYield));
-    }
-    case 'try': {
-      return (
-        containsYield(statement.body) ||
-        statement.catches.some((clause) => containsYield(clause.body)) ||
-        (statement.finally !== undefined && containsYield(statement.finally))
-      );
-    }
-    default: {
-      return false;
-    }
-  }
+  return anyStatement(statement, (inner) => inner.kind === 'yield');
 }

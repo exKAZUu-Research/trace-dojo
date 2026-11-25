@@ -68,139 +68,168 @@ interface Conditional {
  * comments and strings; the scanner below follows those to know where lines start.
  */
 export function preprocess(source: string): PreprocessedSource {
-  const lines = source.split('\n');
-  const symbols = new Set(PREDEFINED_SYMBOLS);
-  const options: BuildOptions = { allowUnsafe: false, checkOverflow: false, implicitUsings: true, symbols: [] };
-  const diagnostics: SourceDiagnostic[] = [];
-  const conditionals: Conditional[] = [];
-  const regions: number[] = [];
-  const scanner = new LineScanner();
-  let tokenSeen = false;
-  const isActive = (): boolean => conditionals.length === 0 || isBranchActive(conditionals.at(-1) as Conditional);
-  for (let row = 0; row < lines.length; row++) {
-    const line = lines[row];
-    const directive = scanner.isInCode ? /^(\s*)#(.*)$/s.exec(line.replace(/\r$/, '')) : undefined;
-    if (!directive) {
-      if (isActive()) {
-        if (scanner.scan(line)) tokenSeen = true;
-      } else {
+  return new Preprocessor(source).run();
+}
+
+/** The state of one run of `preprocess`: the symbols, the open `#if`s and `#region`s, and the errors so far. */
+class Preprocessor {
+  private readonly lines: string[];
+  private readonly symbols = new Set(PREDEFINED_SYMBOLS);
+  private readonly options: BuildOptions = {
+    allowUnsafe: false,
+    checkOverflow: false,
+    implicitUsings: true,
+    symbols: [],
+  };
+  private readonly diagnostics: SourceDiagnostic[] = [];
+  private readonly conditionals: Conditional[] = [];
+  private readonly regions: number[] = [];
+  private readonly scanner = new LineScanner();
+  /** Whether a token came before, after which `#define`, `#undef`, and `#:` may not come. */
+  private tokenSeen = false;
+
+  constructor(source: string) {
+    this.lines = source.split('\n');
+  }
+
+  run(): PreprocessedSource {
+    const { lines, diagnostics } = this;
+    for (let row = 0; row < lines.length; row++) {
+      const line = lines[row];
+      const directive = this.scanner.isInCode ? /^(\s*)#(.*)$/s.exec(line.replace(/\r$/, '')) : undefined;
+      if (directive) {
         lines[row] = '';
-      }
-      continue;
+        this.directive(directive[2], row, directive[1].length === 0);
+      } else if (this.isActive()) {
+        if (this.scanner.scan(line)) this.tokenSeen = true;
+      } else lines[row] = '';
     }
-    lines[row] = '';
-    const column = directive[1].length + 1;
-    const body = directive[2];
-    if (row === 0 && column === 1 && body.startsWith('!')) continue;
+    const end = lines.length;
+    if (this.regions.length > 0)
+      diagnostics.push({ row: end - 1, message: 'CS1038: #endregion ディレクティブが必要です' });
+    if (this.conditionals.length > 0)
+      diagnostics.push({ row: end - 1, message: 'CS1027: #endif ディレクティブ が必要です' });
+    if (diagnostics.length > 0) throw new CompileError(diagnostics.map(({ row, message }) => ({ row, message })));
+    this.options.symbols = [...this.symbols];
+    return { text: lines.join('\n'), options: this.options };
+  }
+
+  private isActive(): boolean {
+    return this.conditionals.length === 0 || isBranchActive(this.conditionals.at(-1) as Conditional);
+  }
+
+  private error(row: number, code: string, message: string): void {
+    this.diagnostics.push({ row, message: `${code}: ${message}` });
+  }
+
+  /** Runs one directive, the text after its `#`; a `#!` on the first line, at its start, is a shebang. */
+  private directive(body: string, row: number, startsLine: boolean): void {
+    if (row === 0 && startsLine && body.startsWith('!')) return;
     const name = /^\s*([a-z]*)/.exec(body)?.[1] ?? '';
-    const restColumn = column + (/^\s*[a-z]*\s*/.exec(body)?.[0].length ?? 0);
-    const rest = body.slice(restColumn - column);
-    const error = (code: string, message: string, _column = column - 1): void => {
-      diagnostics.push({ row, message: `${code}: ${message}` });
-    };
+    const rest = body.slice(/^\s*[a-z]*\s*/.exec(body)?.[0].length ?? 0);
     if (body.startsWith(':')) {
-      if (tokenSeen)
-        error('CS9297', "ファイル内の最初のトークンの後に '#:' ディレクティブを指定することはできません", column);
-      else if (isActive()) applyFileDirective(body.slice(1), row, options);
-      continue;
+      if (this.tokenSeen)
+        this.error(row, 'CS9297', "ファイル内の最初のトークンの後に '#:' ディレクティブを指定することはできません");
+      else if (this.isActive()) applyFileDirective(body.slice(1), row, this.options);
+      return;
     }
-    if (!isActive() && !['if', 'elif', 'else', 'endif', 'region', 'endregion'].includes(name)) continue;
+    if (!this.isActive() && !['if', 'elif', 'else', 'endif', 'region', 'endregion'].includes(name)) return;
     switch (name) {
       case 'define':
       case 'undef': {
-        if (tokenSeen) {
-          error(
-            'CS1032',
-            'ファイルの最初のトークンの後でプリプロセッサのシンボルの定義または定義の解除を行えませんでした',
-            column
-          );
-          break;
-        }
-        const symbol = /^([\p{L}_][\p{L}\p{N}_]*)\s*(\/\/.*)?$/u.exec(rest.trimEnd());
-        if (!symbol || symbol[1] === 'true' || symbol[1] === 'false') {
-          error('CS1001', '識別子がありません', restColumn - 1);
-          break;
-        }
-        if (name === 'define') symbols.add(symbol[1]);
-        else symbols.delete(symbol[1]);
-        break;
+        this.defineOrUndefine(name, rest, row);
+        return;
       }
-      case 'if': {
-        const parentActive = isActive();
-        const value = parentActive ? evaluateCondition(rest, row, restColumn - 1, symbols, diagnostics) : false;
-        conditionals.push({
-          row,
-          taken: value,
-          parentActive,
-          hasElse: false,
-          regions: regions.length,
-        });
-        break;
-      }
+      case 'if':
       case 'elif':
-      case 'else': {
-        const current = conditionals.at(-1);
-        if (!current || current.hasElse) {
-          error('CS1028', '不適切なプリプロセッサ ディレクティブです');
-          break;
-        }
-        if (name === 'else') {
-          current.hasElse = true;
-          current.active = current.parentActive && !current.taken;
-          checkLineEnd(rest, row, restColumn - 1, diagnostics);
-        } else {
-          const value =
-            current.parentActive && !current.taken
-              ? evaluateCondition(rest, row, restColumn - 1, symbols, diagnostics)
-              : false;
-          current.active = value;
-        }
-        if (current.active) current.taken = true;
-        break;
-      }
+      case 'else':
       case 'endif': {
-        if (conditionals.length === 0) error('CS1028', '不適切なプリプロセッサ ディレクティブです');
-        else {
-          const { regions: openAtIf } = conditionals.pop() as Conditional;
-          if (regions.length > openAtIf) {
-            error('CS1038', '#endregion ディレクティブが必要です');
-            regions.length = openAtIf;
-          }
-          checkLineEnd(rest, row, restColumn - 1, diagnostics);
-        }
-        break;
+        this.conditional(name, rest, row);
+        return;
       }
       case 'region': {
-        regions.push(row);
-        break;
+        this.regions.push(row);
+        return;
       }
       case 'endregion': {
-        if (regions.length === 0) error('CS1028', '不適切なプリプロセッサ ディレクティブです');
-        else regions.pop();
-        break;
+        if (this.regions.length === 0) this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
+        else this.regions.pop();
+        return;
       }
       case 'error': {
-        error('CS1029', `#error: '${rest.trimEnd()}'`, restColumn - 1);
-        break;
+        this.error(row, 'CS1029', `#error: '${rest.trimEnd()}'`);
+        return;
       }
       case 'warning':
       case 'line':
       case 'pragma':
       case 'nullable': {
         // Warnings, nullable analysis, and line mapping change only the warnings and the lines that messages cite.
-        break;
+        return;
       }
       default: {
-        error('CS1024', 'プリプロセッサ ディレクティブが必要です', column);
+        this.error(row, 'CS1024', 'プリプロセッサ ディレクティブが必要です');
       }
     }
   }
-  const end = lines.length;
-  if (regions.length > 0) diagnostics.push({ row: end - 1, message: 'CS1038: #endregion ディレクティブが必要です' });
-  if (conditionals.length > 0) diagnostics.push({ row: end - 1, message: 'CS1027: #endif ディレクティブ が必要です' });
-  if (diagnostics.length > 0) throw new CompileError(diagnostics.map(({ row, message }) => ({ row, message })));
-  options.symbols = [...symbols];
-  return { text: lines.join('\n'), options };
+
+  private defineOrUndefine(name: 'define' | 'undef', rest: string, row: number): void {
+    if (this.tokenSeen) {
+      this.error(
+        row,
+        'CS1032',
+        'ファイルの最初のトークンの後でプリプロセッサのシンボルの定義または定義の解除を行えませんでした'
+      );
+      return;
+    }
+    const symbol = /^([\p{L}_][\p{L}\p{N}_]*)\s*(\/\/.*)?$/u.exec(rest.trimEnd());
+    if (!symbol || symbol[1] === 'true' || symbol[1] === 'false') {
+      this.error(row, 'CS1001', '識別子がありません');
+      return;
+    }
+    if (name === 'define') this.symbols.add(symbol[1]);
+    else this.symbols.delete(symbol[1]);
+  }
+
+  /** `#if`, `#elif`, `#else`, and `#endif`, which choose the branch whose lines stay. */
+  private conditional(name: 'if' | 'elif' | 'else' | 'endif', rest: string, row: number): void {
+    const { conditionals, diagnostics, symbols } = this;
+    if (name === 'if') {
+      const parentActive = this.isActive();
+      const value = parentActive ? evaluateCondition(rest, row, symbols, diagnostics) : false;
+      conditionals.push({ row, taken: value, parentActive, hasElse: false, regions: this.regions.length });
+      return;
+    }
+    if (name === 'endif') {
+      this.endConditional(rest, row);
+      return;
+    }
+    const current = conditionals.at(-1);
+    if (!current || current.hasElse) {
+      this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
+      return;
+    }
+    const isCandidate = current.parentActive && !current.taken;
+    if (name === 'else') {
+      current.hasElse = true;
+      current.active = isCandidate;
+      checkLineEnd(rest, row, diagnostics);
+    } else current.active = isCandidate ? evaluateCondition(rest, row, symbols, diagnostics) : false;
+    if (current.active) current.taken = true;
+  }
+
+  private endConditional(rest: string, row: number): void {
+    const closed = this.conditionals.pop();
+    if (!closed) {
+      this.error(row, 'CS1028', '不適切なプリプロセッサ ディレクティブです');
+      return;
+    }
+    if (this.regions.length > closed.regions) {
+      this.error(row, 'CS1038', '#endregion ディレクティブが必要です');
+      this.regions.length = closed.regions;
+    }
+    checkLineEnd(rest, row, this.diagnostics);
+  }
 }
 
 function isBranchActive(conditional: Conditional): boolean {
@@ -256,7 +285,7 @@ function applyFileDirective(text: string, row: number, options: BuildOptions): v
   unsupported({ row, column: 0 }, `\`#:property ${name}=${setting}\``);
 }
 
-function checkLineEnd(rest: string, row: number, column: number, diagnostics: SourceDiagnostic[]): void {
+function checkLineEnd(rest: string, row: number, diagnostics: SourceDiagnostic[]): void {
   const trimmed = rest.trimEnd();
   if (trimmed !== '' && !trimmed.startsWith('//'))
     diagnostics.push({ row, message: 'CS1025: 単一行コメントか行末が必要です' });
@@ -266,72 +295,90 @@ function checkLineEnd(rest: string, row: number, column: number, diagnostics: So
 function evaluateCondition(
   text: string,
   row: number,
-  column: number,
   symbols: ReadonlySet<string>,
   diagnostics: SourceDiagnostic[]
 ): boolean {
-  const tokens: { text: string; column: number }[] = [];
+  const tokens: string[] = [];
   const pattern = /\s*(\/\/.*$|\|\||&&|==|!=|[!()]|[\p{L}_][\p{L}\p{N}_]*|\S)/uy;
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     if (match[1].startsWith('//')) break;
-    tokens.push({
-      text: match[1],
-      column: column + match.index + match[0].length - match[1].length,
-    });
+    tokens.push(match[1]);
   }
-  let index = 0;
-  const fail = (code: string, message: string): never => {
-    throw new DirectiveError({ row, message: `${code}: ${message}` });
-  };
-  const primary = (): boolean => {
-    const token = tokens[index];
-    if (!token) return fail('CS1517', '無効なプリプロセッサの式です');
-    index++;
-    if (token.text === '!') return !primary();
-    if (token.text === '(') {
-      const value = or();
-      if (tokens[index]?.text !== ')') return fail('CS1026', ') が必要です');
-      index++;
-      return value;
-    }
-    if (token.text === 'true') return true;
-    if (token.text === 'false') return false;
-    if (/^[\p{L}_]/u.test(token.text)) return symbols.has(token.text);
-    index--;
-    return fail('CS1517', '無効なプリプロセッサの式です');
-  };
-  const equality = (): boolean => {
-    let value = primary();
-    while (tokens[index]?.text === '==' || tokens[index]?.text === '!=') {
-      const isEqual = tokens[index++].text === '==';
-      value = isEqual ? value === primary() : value !== primary();
-    }
-    return value;
-  };
-  const and = (): boolean => {
-    let value = equality();
-    while (tokens[index]?.text === '&&') {
-      index++;
-      value = equality() && value;
-    }
-    return value;
-  };
-  const or = (): boolean => {
-    let value = and();
-    while (tokens[index]?.text === '||') {
-      index++;
-      value = and() || value;
-    }
-    return value;
-  };
   try {
-    const value = or();
-    if (index < tokens.length) fail('CS1025', '単一行コメントか行末が必要です');
-    return value;
+    return new ConditionParser(tokens, row, symbols).parse();
   } catch (error) {
     if (!(error instanceof DirectiveError)) throw error;
     diagnostics.push(error.diagnostic);
     return false;
+  }
+}
+
+/** A recursive-descent parser of a directive's condition: `||`, then `&&`, then `==` and `!=`, then `!` and `()`. */
+class ConditionParser {
+  private index = 0;
+
+  constructor(
+    private readonly tokens: string[],
+    private readonly row: number,
+    private readonly symbols: ReadonlySet<string>
+  ) {}
+
+  parse(): boolean {
+    const value = this.or();
+    if (this.index < this.tokens.length) this.fail('CS1025', '単一行コメントか行末が必要です');
+    return value;
+  }
+
+  private fail(code: string, message: string): never {
+    throw new DirectiveError({ row: this.row, message: `${code}: ${message}` });
+  }
+
+  private next(): string | undefined {
+    return this.tokens[this.index];
+  }
+
+  private or(): boolean {
+    let value = this.and();
+    while (this.next() === '||') {
+      this.index++;
+      value = this.and() || value;
+    }
+    return value;
+  }
+
+  private and(): boolean {
+    let value = this.equality();
+    while (this.next() === '&&') {
+      this.index++;
+      value = this.equality() && value;
+    }
+    return value;
+  }
+
+  private equality(): boolean {
+    let value = this.primary();
+    while (this.next() === '==' || this.next() === '!=') {
+      const isEqual = this.tokens[this.index++] === '==';
+      value = isEqual ? value === this.primary() : value !== this.primary();
+    }
+    return value;
+  }
+
+  private primary(): boolean {
+    const token = this.next();
+    if (token === undefined) return this.fail('CS1517', '無効なプリプロセッサの式です');
+    this.index++;
+    if (token === '!') return !this.primary();
+    if (token === '(') {
+      const value = this.or();
+      if (this.next() !== ')') return this.fail('CS1026', ') が必要です');
+      this.index++;
+      return value;
+    }
+    if (token === 'true' || token === 'false') return token === 'true';
+    if (/^[\p{L}_]/u.test(token)) return this.symbols.has(token);
+    this.index--;
+    return this.fail('CS1517', '無効なプリプロセッサの式です');
   }
 }
 
@@ -361,70 +408,71 @@ class LineScanner {
   }
 
   /** Scans a line, returning whether it holds a token, not just whitespace and comments. */
-  // code-gauge-allow functionCognitiveComplexity -- A small lexer, with one branch per kind of token that spans lines.
   scan(line: string): boolean {
     let hasToken = false;
     let index = 0;
     while (index < line.length) {
       const state = this.stack.at(-1) as ScanState;
-      const char = line[index];
-      switch (state.kind) {
-        case 'blockComment': {
-          const end = line.indexOf('*/', index);
-          if (end === -1) return hasToken;
-          this.stack.pop();
-          index = end + 2;
-          break;
-        }
-        case 'verbatim':
-        case 'regular': {
-          if (state.kind === 'regular' && char === '\\') index += 2;
-          else if (char === '"') {
-            if (state.kind === 'verbatim' && line[index + 1] === '"') index += 2;
-            else {
-              this.stack.pop();
-              index++;
-            }
-          } else if (state.interpolated && char === '{') {
-            if (line[index + 1] === '{') index += 2;
-            else {
-              this.stack.push({ kind: 'code', braces: 0 });
-              index++;
-            }
-          } else index++;
-          break;
-        }
-        case 'raw': {
-          const quotes = '"'.repeat(state.quotes);
-          if (line.startsWith(quotes, index)) {
-            this.stack.pop();
-            index += state.quotes;
-          } else if (state.dollars > 0 && line.startsWith('{'.repeat(state.dollars), index)) {
-            index += state.dollars;
-            this.stack.push({ kind: 'code', braces: 0 });
-          } else index++;
-          break;
-        }
-        case 'code': {
-          if (/\s/.test(char)) {
-            index++;
-            break;
-          }
-          if (line.startsWith('//', index)) return hasToken;
-          if (line.startsWith('/*', index)) {
-            this.stack.push({ kind: 'blockComment' });
-            index += 2;
-            break;
-          }
-          hasToken = true;
-          index = this.scanCodeToken(line, index, state);
-        }
-      }
+      if (state.kind === 'code') {
+        const step = this.scanCode(line, index, state);
+        if (step === undefined) return hasToken;
+        hasToken ||= step.isToken;
+        index = step.index;
+      } else if (state.kind === 'blockComment') {
+        const end = line.indexOf('*/', index);
+        if (end === -1) return hasToken;
+        this.stack.pop();
+        index = end + 2;
+      } else index = state.kind === 'raw' ? this.scanRaw(line, index, state) : this.scanString(line, index, state);
     }
     // A regular string or character cannot go on past its line.
     const last = this.stack.at(-1) as ScanState;
     if (last.kind === 'regular') this.stack.pop();
     return hasToken;
+  }
+
+  /** One step in code: whitespace, a comment's start, or a token; undefined when a line comment ends the line. */
+  private scanCode(
+    line: string,
+    index: number,
+    state: Extract<ScanState, { kind: 'code' }>
+  ): { index: number; isToken: boolean } | undefined {
+    if (/\s/.test(line[index])) return { index: index + 1, isToken: false };
+    if (line.startsWith('//', index)) return undefined;
+    if (line.startsWith('/*', index)) {
+      this.stack.push({ kind: 'blockComment' });
+      return { index: index + 2, isToken: false };
+    }
+    return { index: this.scanCodeToken(line, index, state), isToken: true };
+  }
+
+  /** One step in a regular or verbatim string: an escape, a doubled quote, its end, or an interpolation's hole. */
+  private scanString(line: string, index: number, state: Extract<ScanState, { kind: 'verbatim' | 'regular' }>): number {
+    const char = line[index];
+    if (state.kind === 'regular' && char === '\\') return index + 2;
+    if (char === '"') {
+      if (state.kind === 'verbatim' && line[index + 1] === '"') return index + 2;
+      this.stack.pop();
+      return index + 1;
+    }
+    if (state.interpolated && char === '{') {
+      if (line[index + 1] === '{') return index + 2;
+      this.stack.push({ kind: 'code', braces: 0 });
+    }
+    return index + 1;
+  }
+
+  /** One step in a raw string: its closing quotes, an interpolation's hole, or another character. */
+  private scanRaw(line: string, index: number, state: Extract<ScanState, { kind: 'raw' }>): number {
+    if (line.startsWith('"'.repeat(state.quotes), index)) {
+      this.stack.pop();
+      return index + state.quotes;
+    }
+    if (state.dollars > 0 && line.startsWith('{'.repeat(state.dollars), index)) {
+      this.stack.push({ kind: 'code', braces: 0 });
+      return index + state.dollars;
+    }
+    return index + 1;
   }
 
   private scanCodeToken(line: string, index: number, state: Extract<ScanState, { kind: 'code' }>): number {

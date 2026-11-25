@@ -125,7 +125,6 @@ export abstract class PatternBinder extends ExpressionBinder {
    * an int, and sliceable for a slice pattern with a pattern. The length, an element, and a slice are read through
    * hidden locals, which matching sets for each element in turn.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one part of the C# rule.
   private bindListPattern(
     pattern: Extract<Pattern, { kind: 'listPattern' }>,
     inputType: Type,

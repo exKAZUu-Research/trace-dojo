@@ -107,7 +107,6 @@ export abstract class ConversionBinder extends LookupBinder {
    * conversion also takes `explicit` operators and standard explicit conversions around them, and a checked context
    * prefers an operator's `checked` form. A lifted operator converts between the nullable forms of its value types.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one step of the C# rule.
   protected userConversion(
     expression: BoundExpression,
     target: Type,
@@ -115,6 +114,37 @@ export abstract class ConversionBinder extends LookupBinder {
   ): UserConversion | { ambiguous: UserConversion[] } | undefined {
     const source = expression.type;
     if (source.kind === 'error' || target.kind === 'error' || source.kind === 'void') return undefined;
+    const candidates = this.conversionCandidates(expression, target, isExplicit);
+    if (candidates.length === 0) return undefined;
+    const preferred = preferCheckedForms(candidates);
+    // The most encompassed source and the most encompassing target, unless one is the exact type (§10.5.3).
+    const sourceType = this.mostSpecificType(
+      preferred.map((candidate) => candidate.from),
+      source,
+      true
+    );
+    const targetType = this.mostSpecificType(
+      preferred.map((candidate) => candidate.to),
+      target,
+      false
+    );
+    if (!sourceType || !targetType) return { ambiguous: preferred };
+    const chosen = preferred.filter(
+      (candidate) => sameType(candidate.from, sourceType) && sameType(candidate.to, targetType)
+    );
+    if (chosen.length !== 1) {
+      const unlifted = chosen.filter((candidate) => !candidate.isLifted);
+      return unlifted.length === 1 ? unlifted[0] : { ambiguous: chosen };
+    }
+    return chosen[0];
+  }
+
+  /**
+   * The conversion operators of the source's and the target's types that apply (§10.5.4): those whose types the
+   * value and the target convert from and to, and the lifted forms of those between value types.
+   */
+  private conversionCandidates(expression: BoundExpression, target: Type, isExplicit: boolean): UserConversion[] {
+    const source = expression.type;
     const owners = [withoutNullable(source), withoutNullable(target)].filter(
       (type): type is NamedType =>
         type.kind === 'named' && (type.symbol.kind === 'class' || type.symbol.kind === 'struct')
@@ -122,7 +152,6 @@ export abstract class ConversionBinder extends LookupBinder {
     const names = isExplicit ? ['op_Implicit', 'op_Explicit'] : ['op_Implicit'];
     if (isExplicit && this.checkedContext) names.push('op_CheckedExplicit');
     const operators = owners.flatMap((owner) => names.flatMap((name) => this.lookupOperators(owner, name)));
-    if (operators.length === 0) return undefined;
     const fromFits = (from: Type): boolean =>
       sameType(source, from) ||
       this.standardImplicitOf(expression, from) !== undefined ||
@@ -139,30 +168,20 @@ export abstract class ConversionBinder extends LookupBinder {
       if (candidates.some((candidate) => candidate.method === method)) continue;
       if (fromFits(from) && toFits(to)) candidates.push({ method, owner, from, to, isLifted: false });
       else if (
-        isValueType(from) &&
-        !nullableUnderlying(from) &&
-        isValueType(to) &&
-        !nullableUnderlying(to) &&
+        isPlainValueType(from) &&
+        isPlainValueType(to) &&
         nullableUnderlying(source) &&
         fromFits(this.nullableOf(from)) &&
         toFits(this.nullableOf(to))
       )
         candidates.push({ method, owner, from: this.nullableOf(from), to: this.nullableOf(to), isLifted: true });
     }
-    if (candidates.length === 0) return undefined;
-    // A checked context prefers `op_CheckedExplicit` over `op_Explicit` of the same types.
-    const preferred = candidates.filter(
-      (candidate) =>
-        candidate.method.name !== 'op_Explicit' ||
-        !candidates.some(
-          (other) =>
-            other.method.name === 'op_CheckedExplicit' &&
-            sameType(other.from, candidate.from) &&
-            sameType(other.to, candidate.to)
-        )
-    );
-    // The most encompassed source and the most encompassing target, unless one is the exact type (§10.5.3).
-    const mostSpecific = (types: Type[], exact: Type, isSource: boolean): Type | undefined =>
+    return candidates;
+  }
+
+  /** The type among some that every other converts to (a source) or from (a target), or the exact type if present. */
+  private mostSpecificType(types: Type[], exact: Type, isSource: boolean): Type | undefined {
+    return (
       types.find((type) => sameType(type, exact)) ??
       types.find((type) =>
         types.every(
@@ -170,26 +189,8 @@ export abstract class ConversionBinder extends LookupBinder {
             sameType(type, other) ||
             (isSource ? this.conversions.implicit(type, other) : this.conversions.implicit(other, type)) !== undefined
         )
-      );
-    const sourceType = mostSpecific(
-      preferred.map((candidate) => candidate.from),
-      source,
-      true
+      )
     );
-    const targetType = mostSpecific(
-      preferred.map((candidate) => candidate.to),
-      target,
-      false
-    );
-    if (!sourceType || !targetType) return { ambiguous: preferred };
-    const chosen = preferred.filter(
-      (candidate) => sameType(candidate.from, sourceType) && sameType(candidate.to, targetType)
-    );
-    if (chosen.length !== 1) {
-      const unlifted = chosen.filter((candidate) => !candidate.isLifted);
-      return unlifted.length === 1 ? unlifted[0] : { ambiguous: chosen };
-    }
-    return chosen[0];
   }
 
   /** Binds a user-defined conversion: the standard conversion to the operator's parameter, the call, and then the standard conversion of its result. */
@@ -542,4 +543,23 @@ export function constantText(value: unknown): string {
     return String(value);
   }
   return String(value);
+}
+
+/** A value type that is not nullable, between whose types a conversion operator lifts to their nullable forms. */
+function isPlainValueType(type: Type): boolean {
+  return isValueType(type) && !nullableUnderlying(type);
+}
+
+/** The candidates without an `op_Explicit` whose `op_CheckedExplicit` of the same types a checked context prefers. */
+function preferCheckedForms(candidates: UserConversion[]): UserConversion[] {
+  return candidates.filter(
+    (candidate) =>
+      candidate.method.name !== 'op_Explicit' ||
+      !candidates.some(
+        (other) =>
+          other.method.name === 'op_CheckedExplicit' &&
+          sameType(other.from, candidate.from) &&
+          sameType(other.to, candidate.to)
+      )
+  );
 }

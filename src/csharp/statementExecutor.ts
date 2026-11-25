@@ -104,6 +104,21 @@ export abstract class StatementExecutor extends PatternMatcher {
     return undefined;
   }
 
+  /** Gives a declared local its value, a ref local its variable, or a struct local its default fields. */
+  private declareLocalValue(statement: Extract<BoundStatement, { kind: 'localDeclaration' }>, frame: Frame): void {
+    if (statement.refTarget) this.bindReference(frame, statement.local, this.referenceTo(statement.refTarget, frame));
+    else if (statement.value) this.storeLocal(frame, statement.local, copyValue(this.evaluate(statement.value, frame)));
+    // A struct local without a value has its fields, which the program may assign one by one.
+    else if (isStructType(statement.local.type))
+      this.storeLocal(frame, statement.local, this.defaultOf(frame.resolve(statement.local.type)));
+  }
+
+  private executeReturn(statement: Extract<BoundStatement, { kind: 'return' }>, frame: Frame): Completion {
+    // A method that returns by reference returns the variable itself, which its call reads or assigns.
+    if (statement.refTarget) return { value: this.referenceTo(statement.refTarget, frame) as unknown as Value };
+    return { value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined };
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of statement.
   execute(statement: BoundStatement, frame: Frame): Completion {
     this.runtime.spend();
@@ -119,15 +134,7 @@ export abstract class StatementExecutor extends PatternMatcher {
         return undefined;
       }
       case 'localDeclaration': {
-        this.withStep(statement.row, statement.step, () => {
-          if (statement.refTarget)
-            this.bindReference(frame, statement.local, this.referenceTo(statement.refTarget, frame));
-          else if (statement.value)
-            this.storeLocal(frame, statement.local, copyValue(this.evaluate(statement.value, frame)));
-          // A struct local without a value has its fields, which the program may assign one by one.
-          else if (isStructType(statement.local.type))
-            this.storeLocal(frame, statement.local, this.defaultOf(frame.resolve(statement.local.type)));
-        });
+        this.withStep(statement.row, statement.step, () => this.declareLocalValue(statement, frame));
         return undefined;
       }
       case 'if': {
@@ -156,9 +163,7 @@ export abstract class StatementExecutor extends PatternMatcher {
         return CONTINUE;
       }
       case 'return': {
-        // A method that returns by reference returns the variable itself, which its call reads or assigns.
-        if (statement.refTarget) return { value: this.referenceTo(statement.refTarget, frame) as unknown as Value };
-        return { value: statement.value ? copyValue(this.evaluate(statement.value, frame)) : undefined };
+        return this.executeReturn(statement, frame);
       }
       case 'throw': {
         return this.executeThrow(statement, frame);
@@ -190,6 +195,14 @@ export abstract class StatementExecutor extends PatternMatcher {
     }
   }
 
+  /** Disposes a `using` resource unless it is null, returning what `Dispose` or `DisposeAsync` returned. */
+  protected disposeResource(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Value {
+    const resource = this.readLocal(frame, statement.local);
+    if (resource === undefined) return undefined;
+    const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
+    return this.invokeWithoutArguments(frame, dispose, resource, statement.row, this.runtime.runtimeTypeOf(resource));
+  }
+
   private executeUsing(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Completion {
     let isExiting = false;
     try {
@@ -199,11 +212,7 @@ export abstract class StatementExecutor extends PatternMatcher {
       isExiting = error instanceof ProgramExit;
       throw error;
     } finally {
-      const resource = this.readLocal(frame, statement.local);
-      if (!isExiting && resource !== undefined) {
-        const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
-        this.invokeWithoutArguments(frame, dispose, resource, statement.row, this.runtime.runtimeTypeOf(resource));
-      }
+      if (!isExiting) this.disposeResource(statement, frame);
     }
   }
 

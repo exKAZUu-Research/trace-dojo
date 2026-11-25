@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The compiler module keeps one stage of the C# interpreter together.
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import type {
@@ -25,6 +24,8 @@ import { NamespaceSymbol } from './namespaces';
 import { parseCSharp } from './parse';
 import { FunctionScope, LocalScope } from './scopes';
 import { isObjectCreation } from './statementBinder';
+// code-gauge-allow-file fileNcss -- The compiler module keeps one stage of the C# interpreter together.
+import { anyStatement } from './statementSearch';
 import {
   arrayType,
   displayMethod,
@@ -1001,47 +1002,9 @@ function containsAwait(node: unknown): boolean {
 }
 
 function containsValueReturn(statements: Statement[]): boolean {
-  const visit = (statement: Statement): boolean => {
-    switch (statement.kind) {
-      case 'return': {
-        return statement.value !== undefined;
-      }
-      case 'block': {
-        return statement.statements.some(visit);
-      }
-      case 'if': {
-        return visit(statement.consequence) || (statement.alternative !== undefined && visit(statement.alternative));
-      }
-      case 'while':
-      case 'do':
-      case 'for':
-      case 'foreach': {
-        return visit(statement.body);
-      }
-      case 'switch': {
-        return statement.sections.some((section) => section.statements.some(visit));
-      }
-      case 'checked':
-      case 'lock':
-      case 'using': {
-        return visit(statement.body);
-      }
-      case 'labeled': {
-        return visit(statement.statement);
-      }
-      case 'try': {
-        return (
-          visit(statement.body) ||
-          statement.catches.some((clause) => visit(clause.body)) ||
-          (statement.finally !== undefined && visit(statement.finally))
-        );
-      }
-      default: {
-        return false;
-      }
-    }
-  };
-  return statements.some(visit);
+  return statements.some((statement) =>
+    anyStatement(statement, (inner) => inner.kind === 'return' && inner.value !== undefined)
+  );
 }
 
 /** Lists in each scope the locals that lambdas or local functions capture, which then live in fresh cells. */

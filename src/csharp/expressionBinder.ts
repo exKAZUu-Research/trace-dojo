@@ -130,19 +130,43 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return this.bindInvocation(node, context);
       }
       case 'elementAccess': {
-        const target = this.bindTypedValue(node.target, context);
-        // `p[i]` is `*(p + i)`.
-        if (isPointerType(target.type) && node.args.length === 1) {
-          const index = this.bindValue(node.args[0].value, context);
-          return this.dereference(this.bindBinary('+', target, index, node.row), node);
-        }
-        const late = this.lateElementAccess(node, target, context);
-        if (late) return late;
-        return (
-          this.bindImplicitIndexOrRange(target, node, context) ??
-          this.bindElementAccess(target, node.args, node, context)
-        );
+        return this.bindElementAccessExpression(node, context);
       }
+      case 'tuple': {
+        return this.bindTuple(node, context);
+      }
+      case 'declaration': {
+        this.error(node, 'CS8185', '宣言はこのコンテキストでは許可されていません。');
+        return { kind: 'default', type: ERROR_TYPE, row };
+      }
+      default: {
+        return this.bindLessCommonPrimary(node, context);
+      }
+    }
+  }
+
+  /** `a[i]`: of a pointer, a `dynamic` value, an index from the end or a range, or an array or indexer. */
+  private bindElementAccessExpression(
+    node: Extract<Expression, { kind: 'elementAccess' }>,
+    context: BindContext
+  ): BindResult {
+    const target = this.bindTypedValue(node.target, context);
+    // `p[i]` is `*(p + i)`.
+    if (isPointerType(target.type) && node.args.length === 1) {
+      const index = this.bindValue(node.args[0].value, context);
+      return this.dereference(this.bindBinary('+', target, index, node.row), node);
+    }
+    const late = this.lateElementAccess(node, target, context);
+    if (late) return late;
+    return (
+      this.bindImplicitIndexOrRange(target, node, context) ?? this.bindElementAccess(target, node.args, node, context)
+    );
+  }
+
+  /** The primary expressions beyond the ones learners write first: `await`, `typeof`, pointers, indices and ranges. */
+  private bindLessCommonPrimary(node: Expression, context: BindContext): BindResult | undefined {
+    const row = node.row;
+    switch (node.kind) {
       case 'await': {
         return this.bindAwait(node, context);
       }
@@ -187,13 +211,6 @@ export abstract class ExpressionBinder extends LambdaBinder {
                 node
               );
         return this.libraryCreation('System.Range', [end(node.start, false), end(node.end, true)], node);
-      }
-      case 'tuple': {
-        return this.bindTuple(node, context);
-      }
-      case 'declaration': {
-        this.error(node, 'CS8185', '宣言はこのコンテキストでは許可されていません。');
-        return { kind: 'default', type: ERROR_TYPE, row };
       }
       default: {
         return undefined;
@@ -1453,7 +1470,6 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { kind: 'with', value, clone: undefined, assignments, temporary, type, row: node.row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   /** `d[i]` of a `dynamic` value or with a `dynamic` index, whose indexer is found when it runs. */
   private lateElementAccess(
     node: Extract<Expression, { kind: 'elementAccess' }>,
@@ -1531,22 +1547,55 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (lateAssignment) return lateAssignment;
     if (operator === '=' && node.value.kind === 'refExpression')
       return this.bindRefAssignment(node, node.value, context);
-    if (operator === '=') {
-      const target = this.bindLValue(node.target, context, 'assign');
-      const value = this.bindValue(node.value, context);
-      if (target.kind === 'discard') {
-        if (value.kind === 'unbound') return this.convert(value, this.naturalTypeOf(value) ?? ERROR_TYPE, node);
-        return { kind: 'assign', target: { ...target, type: value.type }, value, type: value.type, row: node.row };
-      }
-      return {
-        kind: 'assign',
-        target,
-        value: this.convert(value, target.type, node.value),
-        type: target.type,
-        row: node.row,
-      };
-    }
+    if (operator === '=') return this.bindSimpleAssignment(node, context);
     if (operator === '??=') return this.bindCoalesceAssignment(node, context);
+    return this.bindCompoundAssignment(node, context);
+  }
+
+  /** `x = y`, or `_ = y`, which takes the value's own type. */
+  private bindSimpleAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
+    const target = this.bindLValue(node.target, context, 'assign');
+    const value = this.bindValue(node.value, context);
+    if (target.kind === 'discard') {
+      if (value.kind === 'unbound') return this.convert(value, this.naturalTypeOf(value) ?? ERROR_TYPE, node);
+      return { kind: 'assign', target: { ...target, type: value.type }, value, type: value.type, row: node.row };
+    }
+    return {
+      kind: 'assign',
+      target,
+      value: this.convert(value, target.type, node.value),
+      type: target.type,
+      row: node.row,
+    };
+  }
+
+  /** `e += h` or `e -= h` of an event with `add` and `remove` accessors, which calls the accessor. */
+  private callEventAccessor(
+    target: BoundLValue,
+    method: MethodSymbol,
+    node: Extract<Expression, { kind: 'assign' }>,
+    context: BindContext
+  ): BoundExpression {
+    const receiver = target.kind === 'field' ? target.receiver : undefined;
+    return {
+      kind: 'call',
+      method,
+      receiver,
+      args: [this.bindAs(node.value, target.type, context)],
+      typeArgs: [],
+      owner:
+        target.kind === 'staticField'
+          ? target.owner
+          : ((receiver?.type as NamedType | undefined) ?? method.owner.declaredType),
+      isVirtual: method.isVirtual || method.isOverride || method.isAbstract,
+      type: VOID_TYPE,
+      row: node.row,
+    };
+  }
+
+  /** `x op= y`: an event's accessor, a C# 14 instance operator, or `x = (T)(x op y)` (C# spec §12.21.4). */
+  private bindCompoundAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
+    const { operator } = node;
     const binaryOperator = operator.slice(0, -1);
     const saved = this.subscriptionTarget;
     this.subscriptionTarget = binaryOperator === '+' || binaryOperator === '-' ? node.target : undefined;
@@ -1558,24 +1607,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
     }
     const eventAccessors =
       target.kind === 'field' || target.kind === 'staticField' ? target.field.eventAccessors : undefined;
-    if (eventAccessors && (binaryOperator === '+' || binaryOperator === '-')) {
-      const method = binaryOperator === '+' ? eventAccessors.add : eventAccessors.remove;
-      const receiver = target.kind === 'field' ? target.receiver : undefined;
-      return {
-        kind: 'call',
-        method,
-        receiver,
-        args: [this.bindAs(node.value, target.type, context)],
-        typeArgs: [],
-        owner:
-          target.kind === 'staticField'
-            ? target.owner
-            : ((receiver?.type as NamedType | undefined) ?? method.owner.declaredType),
-        isVirtual: method.isVirtual || method.isOverride || method.isAbstract,
-        type: VOID_TYPE,
-        row: node.row,
-      };
-    }
+    if (eventAccessors && (binaryOperator === '+' || binaryOperator === '-'))
+      return this.callEventAccessor(
+        target,
+        binaryOperator === '+' ? eventAccessors.add : eventAccessors.remove,
+        node,
+        context
+      );
     if (target.kind === 'field' && target.field.isEvent && (binaryOperator === '+' || binaryOperator === '-')) {
       const value = this.bindAs(node.value, target.type, context);
       if (context.fn.typeContext.type !== target.field.owner)
@@ -1763,11 +1801,15 @@ export abstract class ExpressionBinder extends LambdaBinder {
    * `RuntimeHelpers.GetSubArray` on an array.
    */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of receiver of the C# rule.
-  private bindImplicitIndexOrRange(
+  /**
+   * The argument of `a[i]` when C# lowers the access by the Index or Range it is (C# spec §12.8.12.3): a target with
+   * a length and an int indexer or a slice method, and no indexer of its own that takes the Index or the Range.
+   */
+  private implicitIndexArgument(
     target: BoundExpression,
     node: Extract<Expression, { kind: 'elementAccess' }>,
     context: BindContext
-  ): BoundExpression | undefined {
+  ): { value: BoundExpression; isRange: boolean } | undefined {
     const [arg] = node.args;
     if (node.args.length !== 1 || arg.name || arg.modifier || target.type.kind === 'error') return undefined;
     const syntax = arg.value;
@@ -1808,7 +1850,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
       return undefined;
     const value = this.bindValue(syntax, context);
     if (!isIndexOrRange(value.type)) return undefined;
-    const isRange = sameType(value.type, rangeType);
+    return { value, isRange: sameType(value.type, rangeType) };
+  }
+
+  private bindImplicitIndexOrRange(
+    target: BoundExpression,
+    node: Extract<Expression, { kind: 'elementAccess' }>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    const argument = this.implicitIndexArgument(target, node, context);
+    if (!argument) return undefined;
+    const { value, isRange } = argument;
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
     const locals: LocalSymbol[] = [];
@@ -1872,23 +1924,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
         inner
       );
     } else if (isArray) {
-      const helpers: Expression = {
-        kind: 'memberAccess',
-        target: member(
-          member(
-            member(
-              { kind: 'aliasQualified', alias: 'global', name: 'System', typeArgs: undefined, ...position },
-              'Runtime'
-            ),
-            'CompilerServices'
-          ),
-          'RuntimeHelpers'
-        ),
-        name: 'GetSubArray',
+      const system: Expression = {
+        kind: 'aliasQualified',
+        alias: 'global',
+        name: 'System',
         typeArgs: undefined,
-        nameRow: node.row,
         ...position,
       };
+      const helpers = member(
+        member(member(member(system, 'Runtime'), 'CompilerServices'), 'RuntimeHelpers'),
+        'GetSubArray'
+      );
       access = this.bindValue(call(helpers, [receiver, index]), inner);
     } else {
       // Roslyn computes both ends' offsets and passes their difference, leaving a reversed range to the slice method.

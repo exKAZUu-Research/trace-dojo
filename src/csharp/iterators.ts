@@ -381,24 +381,14 @@ export abstract class IteratorExecutor extends StatementExecutor {
       isExiting = error instanceof ProgramExit;
       throw error;
     } finally {
-      const resource = this.readLocal(frame, statement.local);
-      if (!isExiting && resource !== undefined) {
-        const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
-        const result = this.invokeWithoutArguments(
-          frame,
-          dispose,
-          resource,
-          statement.row,
-          this.runtime.runtimeTypeOf(resource)
-        );
-        // `await using` waits for the ValueTask that DisposeAsync returns.
-        if (statement.isAwait) {
-          const task = ((result as CsStruct).fields[0] as CsObject | undefined)?.native as TaskState | undefined;
-          if (task && !task.isDone) yield { awaiting: task };
-          // An exception from disposal replaces the one leaving the body, as it does in C#.
-          // oxlint-disable-next-line no-unsafe-finally
-          if (task?.status === 'faulted') throw task.firstThrown;
-        }
+      const result = isExiting ? undefined : this.disposeResource(statement, frame);
+      // `await using` waits for the ValueTask that DisposeAsync returns.
+      if (statement.isAwait && result !== undefined) {
+        const task = ((result as CsStruct).fields[0] as CsObject | undefined)?.native as TaskState | undefined;
+        if (task && !task.isDone) yield { awaiting: task };
+        // An exception from disposal replaces the one leaving the body, as it does in C#.
+        // oxlint-disable-next-line no-unsafe-finally
+        if (task?.status === 'faulted') throw task.firstThrown;
       }
     }
   }

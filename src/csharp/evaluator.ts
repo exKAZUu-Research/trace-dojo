@@ -73,6 +73,21 @@ type PointerExpression = Extract<
   { kind: 'addressOf' | 'deref' | 'pointerArith' | 'pointerDiff' | 'pointerCompare' | 'stackalloc' | 'fixedAddress' }
 >;
 
+const POINTER_KINDS: ReadonlySet<BoundExpression['kind']> = new Set([
+  'addressOf',
+  'deref',
+  'pointerArith',
+  'pointerDiff',
+  'pointerCompare',
+  'stackalloc',
+  'fixedAddress',
+]);
+
+/** Whether an expression works on pointers, which unsafe code alone writes. */
+function isPointerExpression(expression: BoundExpression): expression is PointerExpression {
+  return POINTER_KINDS.has(expression.kind);
+}
+
 type AccessExpression = Extract<
   BoundExpression,
   {
@@ -462,18 +477,10 @@ export class Evaluator extends AsyncExecutor {
       memo.delete(expression);
       return value;
     }
+    if (isPointerExpression(expression)) return this.evaluatePointer(expression, frame);
     switch (expression.kind) {
       case 'late': {
         return this.evaluateLate(expression, frame);
-      }
-      case 'addressOf':
-      case 'deref':
-      case 'pointerArith':
-      case 'pointerDiff':
-      case 'pointerCompare':
-      case 'stackalloc':
-      case 'fixedAddress': {
-        return this.evaluatePointer(expression, frame);
       }
       case 'constant':
       case 'local':
@@ -1288,6 +1295,16 @@ export class Evaluator extends AsyncExecutor {
     };
   }
 
+  /** The object or struct whose property an access reads or writes, or `this` for a property of its own. */
+  private propertyReceiver(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Value {
+    const { property } = target;
+    if (!target.receiver) return property.isStatic ? undefined : frame.thisValue;
+    const receiver = this.evaluate(target.receiver, frame);
+    if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
+    // An accessor of a struct runs on a copy of a value that is not a variable, as a method does.
+    return receiver instanceof CsStruct && !isVariable(target.receiver, true) ? receiver.clone() : receiver;
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
@@ -1298,15 +1315,7 @@ export class Evaluator extends AsyncExecutor {
       return this.propertyPlace({ ...target, property, owner: type, constrainedType: undefined }, frame);
     }
     const { property } = target;
-    let receiver: Value = undefined;
-    if (target.receiver) {
-      receiver = this.evaluate(target.receiver, frame);
-      if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
-      // An accessor of a struct runs on a copy of a value that is not a variable, as a method does.
-      if (receiver instanceof CsStruct && !isVariable(target.receiver, true)) receiver = receiver.clone();
-    } else if (!property.isStatic) {
-      receiver = frame.thisValue;
-    }
+    const receiver = this.propertyReceiver(target, frame);
     const isBase = (target.receiver as { isBase?: boolean } | undefined)?.isBase === true;
     const owner = frame.resolve(target.owner) as NamedType;
     if (property.isStatic && owner.symbol.staticConstructor) this.runtime.ensureInitialized(owner);
