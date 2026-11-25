@@ -42,7 +42,16 @@ export interface Operator extends QName {
 }
 
 export type Expr =
-  | { kind: 'var'; name: QName; span: Span }
+  | {
+      kind: 'var';
+      name: QName;
+      span: Span;
+      /**
+       * Whether the reference only evaluates the variable for a strict binding, which as GHC's leaves an overloaded
+       * binding uninstantiated: its value is then a function of its dictionaries, which evaluating does not run.
+       */
+      forcing?: true;
+    }
   | { kind: 'con'; name: QName; span: Span }
   | { kind: 'lit'; lit: Literal; span: Span }
   | { kind: 'app'; fn: Expr; arg: Expr; span: Span }

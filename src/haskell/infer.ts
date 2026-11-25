@@ -885,6 +885,11 @@ export class Checker {
         return field;
       }
       case 'var': {
+        if (expr.forcing && expr.ref.kind === 'local' && expr.ref.local.scheme?.preds.length) {
+          // Evaluating an overloaded binding's function of its dictionaries, which takes none.
+          expr.evidence = [];
+          return this.freshVar();
+        }
         return this.typeOfRef(expr.ref, expr.span, expr.name, expr);
       }
       case 'con': {

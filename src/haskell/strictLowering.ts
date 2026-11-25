@@ -338,7 +338,7 @@ function forcing(names: string[], expr: Expr, span: Span): Expr {
   let result = expr;
   for (const name of names.toReversed()) {
     const seq: Expr = { kind: 'support', name: 'seq', span };
-    const variable: Expr = { kind: 'var', name: { name, span }, span };
+    const variable: Expr = { kind: 'var', name: { name, span }, span, forcing: true };
     result = { kind: 'app', fn: { kind: 'app', fn: seq, arg: variable, span }, arg: result, span };
   }
   return result;
