@@ -2277,10 +2277,16 @@ function requireTemplateHaskell(features: ConvertContext, span: Span, quotes = f
 }
 
 /** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`. */
-function convertQuote(features: ConvertContext, node: Node, span: Span): Expr {
-  requireTemplateHaskell(features, span, true);
+function convertQuote(outer: ConvertContext, node: Node, span: Span): Expr {
+  requireTemplateHaskell(outer, span, true);
   const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
   if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
+  // A quote holds its literals as written, `LitE (StringL "abc")` and `ListE`; overloading them is for where they
+  // are spliced.
+  const features: ConvertContext = {
+    ...outer,
+    allows: (feature) => feature !== 'overloadedStrings' && feature !== 'overloadedLists' && outer.allows(feature),
+  };
   const body = (): QuoteBody => {
     switch (inner.type) {
       case 'quoted_pattern': {
