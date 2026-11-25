@@ -378,7 +378,7 @@ export abstract class StatementCompiler extends CallCompiler {
     alignment?: number
   ): LocalBinding {
     this.resolveStorage(type, value.span);
-    if (!isConst && this.context.comptimeDepth === 0 && this.requiresComptime(type, value.span))
+    if (!isConst && !this.runsAtCompileTime(value.span) && this.requiresComptime(type, value.span))
       this.error(
         value.span,
         `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
@@ -2703,13 +2703,21 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private checkedControlResult(value: TExpr, knownControl = false): TExpr {
-    // Code that the compiler runs gives its value when it runs, so no runtime condition chooses it: a comptime block's,
-    // and the body of a function whose return type only the compiler holds, which every call runs at compile time.
-    const instance = this.analyzedFunction();
-    const atRuntime =
-      this.context.comptimeDepth === 0 && !(instance && this.requiresComptime(instance.returnType, value.span));
-    if (atRuntime && !knownControl && !staticResultOf(value)) this.rejectRuntimeComptime(value.type, value.span);
+    // Code that the compiler runs gives its value when it runs, so no runtime condition chooses it.
+    if (!this.runsAtCompileTime(value.span) && !knownControl && !staticResultOf(value))
+      this.rejectRuntimeComptime(value.type, value.span);
     return value;
+  }
+
+  /**
+   * Whether the code being compiled is code the compiler runs: a comptime block's, or the body of a function whose
+   * return type only the compiler holds, which every call runs at compile time.
+   */
+  private runsAtCompileTime(span: Span): boolean {
+    const instance = this.analyzedFunction();
+    return (
+      this.context.comptimeDepth > 0 || (instance !== undefined && this.requiresComptime(instance.returnType, span))
+    );
   }
 
   private rejectRuntimeComptime(type: Type, span: Span): void {
