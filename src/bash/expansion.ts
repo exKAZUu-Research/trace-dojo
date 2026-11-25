@@ -35,7 +35,13 @@ import { type CompoundElement, isIdentifier } from './variables';
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
   | { kind: 'scalar'; value: string | undefined }
-  | { kind: 'list'; values: string[]; star: boolean; positional?: boolean; transformed?: boolean };
+  | {
+      kind: 'list';
+      values: string[];
+      star: boolean;
+      positional?: boolean;
+      assignmentJoin?: 'ifs' | 'quotedIfs';
+    };
 
 /** An expanded parameter subscript, preserving whether `@` or `*` was written as a whole-array operator. */
 export interface SubscriptRef {
@@ -541,7 +547,7 @@ export class Expander {
       const resolved = resolveTargetName(this.shell, name);
       const keys = this.shell.store.readArrayKeys(resolved);
       return this.valueSegments(
-        { kind: 'list', values: keys, star: subscript.text === '*', transformed: true },
+        { kind: 'list', values: keys, star: subscript.text === '*', assignmentJoin: 'quotedIfs' },
         ctx,
         expansion.text
       );
@@ -552,7 +558,7 @@ export class Expander {
           kind: 'list',
           values: this.shell.store.namesWithPrefix(name),
           star: expansion.operator === '*',
-          transformed: true,
+          assignmentJoin: 'quotedIfs',
         },
         ctx,
         expansion.text
@@ -643,19 +649,23 @@ export class Expander {
   }
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
-    if (!value.star) {
-      if (value.transformed && ctx.inAssignmentRhs) {
-        const ifsJoiner = this.ifsJoiner();
-        return breakSegment(ifsJoiner === '' ? 'field' : 'star', ifsJoiner, ctx.inDouble);
-      }
-      const rawJoiner = this.shell.store.readScalar('IFS') === '' ? '' : ' ';
-      return breakSegment(value.positional ? 'positional' : 'field', rawJoiner, ctx.inDouble);
-    }
+    if (!value.star) return this.nonStarSeparatorOf(value, ctx);
     const ifsJoiner = this.ifsJoiner();
     const spaceEmptyIfs = ctx.spacedStar && (Boolean(value.positional) || Boolean(ctx.spacedArrayStar));
     return spaceEmptyIfs && ifsJoiner === ''
       ? breakSegment('field', ifsJoiner, ctx.inDouble)
       : breakSegment('star', ifsJoiner, ctx.inDouble);
+  }
+
+  private nonStarSeparatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
+    const usesIfs =
+      ctx.inAssignmentRhs && (value.assignmentJoin === 'ifs' || (value.assignmentJoin === 'quotedIfs' && ctx.inDouble));
+    if (usesIfs) {
+      const ifsJoiner = this.ifsJoiner();
+      return breakSegment(ifsJoiner === '' ? 'field' : 'star', ifsJoiner, ctx.inDouble);
+    }
+    const rawJoiner = this.shell.store.readScalar('IFS') === '' ? '' : ' ';
+    return breakSegment(value.positional ? 'positional' : 'field', rawJoiner, ctx.inDouble);
   }
 
   ifsJoiner(): string {

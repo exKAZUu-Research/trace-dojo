@@ -84,11 +84,17 @@ export function applyOperator(
     case '//':
     case '/#':
     case '/%': {
-      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text);
+      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text, 'quotedIfs');
       const { pattern: patternParts, replacement } = splitReplacement(argument, operator === '/' || operator === '//');
       const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true));
       const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true);
-      return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
+      return mapValues(
+        expander,
+        value,
+        ctx,
+        (text) => substitute(text, pattern, replace, operator, shell),
+        'quotedIfs'
+      );
     }
     case ':': {
       return substring(expander, shell, expansion, value, name, ctx);
@@ -99,9 +105,9 @@ export function applyOperator(
     case ',,':
     case '~':
     case '~~': {
-      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text);
+      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text, 'quotedIfs');
       const pattern = argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true)) : '?';
-      return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
+      return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell), 'quotedIfs');
     }
     case '@': {
       return transform(expander, shell, expansion, value, name, ctx);
@@ -257,13 +263,14 @@ function mapValues(
   expander: Expander,
   value: ParameterValue,
   ctx: WordContext,
-  map: (text: string) => string
+  map: (text: string) => string,
+  assignmentJoin: 'ifs' | 'quotedIfs' = 'ifs'
 ): WordSegment[] {
   if (value.kind === 'scalar') {
     if (value.value === undefined) return [];
     return expander.valueSegments({ kind: 'scalar', value: map(value.value) }, ctx);
   }
-  return expander.valueSegments({ ...value, values: value.values.map(map), transformed: true }, ctx);
+  return expander.valueSegments({ ...value, values: value.values.map(map), assignmentJoin }, ctx);
 }
 
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
@@ -417,7 +424,7 @@ function substring(
   const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
   if (length !== undefined && length < 0n) negativeLength();
   return expander.valueSegments(
-    { ...value, values: length === undefined ? values : values.slice(0, Number(length)), transformed: true },
+    { ...value, values: length === undefined ? values : values.slice(0, Number(length)), assignmentJoin: 'quotedIfs' },
     ctx,
     expansion.text
   );
@@ -448,7 +455,10 @@ function sliceScalarSegments(
   if (value.kind === 'scalar') {
     return sliced === undefined ? [] : expander.valueSegments({ kind: 'scalar', value: sliced }, ctx);
   }
-  return expander.valueSegments({ ...value, values: sliced === undefined ? [] : [sliced], transformed: true }, ctx);
+  return expander.valueSegments(
+    { ...value, values: sliced === undefined ? [] : [sliced], assignmentJoin: 'quotedIfs' },
+    ctx
+  );
 }
 
 function sliceString(
@@ -700,7 +710,7 @@ function attributeTransformSegments(
   const flags = view ? ATTRIBUTE_ORDER.filter((attribute) => view.attributes.has(attribute)).join('') : '';
   if (value.kind === 'list') {
     const values = view?.kind === 'unset' ? (flags === '' ? [] : [flags]) : value.values.map(() => flags);
-    return expander.valueSegments({ ...value, values, transformed: true }, ctx);
+    return expander.valueSegments({ ...value, values, assignmentJoin: 'ifs' }, ctx);
   }
   return value.value === undefined && !view ? [] : expander.valueSegments({ kind: 'scalar', value: flags }, ctx);
 }
@@ -724,7 +734,7 @@ function declarationTransformSegments(
     isArray && !ctx.inAssignmentRhs && ctx.inDouble && !value.star
       ? splitQuotedDeclarationFields(text, expander.currentIfs())
       : [text];
-  return expander.valueSegments({ ...value, values, transformed: true }, ctx, target.expansionText);
+  return expander.valueSegments({ ...value, values, assignmentJoin: 'ifs' }, ctx, target.expansionText);
 }
 
 function positionalDeclarationSegments(
@@ -758,13 +768,17 @@ function wordPositionalDeclarationSegments(
   const ifs = expander.currentIfs();
   if (ctx.inDouble && !value.star) {
     const items = [...splitPrefixFields('set -- ', quotedValues[0], ifs), ...quotedValues.slice(1)];
-    return expander.valueSegments({ ...value, values: items, transformed: true }, ctx, expansionText);
+    return expander.valueSegments({ ...value, values: items, assignmentJoin: 'ifs' }, ctx, expansionText);
   }
-  const body = expander.valueSegments({ ...value, values: [...quotedValues], transformed: true }, ctx, expansionText);
+  const body = expander.valueSegments(
+    { ...value, values: [...quotedValues], assignmentJoin: 'ifs' },
+    ctx,
+    expansionText
+  );
   const raw = [...(ctx.inDouble ? [textSegment('set -- ', true, false)] : unquotedPositionalPrefix(ifs)), ...body];
   if (ctx.splittingFields || ctx.inDouble || value.star) return raw;
   const fields = splitWordSegments(raw, ifs).map((field) => field.map((fragment) => fragment.text).join(''));
-  return expander.valueSegments({ ...value, values: fields, transformed: true }, ctx, expansionText);
+  return expander.valueSegments({ ...value, values: fields, assignmentJoin: 'ifs' }, ctx, expansionText);
 }
 
 function scalarPositionalDeclarationSegment(
@@ -851,12 +865,12 @@ function keyValuePairs(
   if (value.values.length === 0) return expander.valueSegments({ ...value, values: [] }, ctx);
   const resolved = resolveTargetName(shell, name);
   if (!shell.store.isArrayName(resolved)) {
-    return expander.valueSegments({ ...value, values: value.values.map(quoteReusable), transformed: true }, ctx);
+    return expander.valueSegments({ ...value, values: value.values.map(quoteReusable), assignmentJoin: 'ifs' }, ctx);
   }
   const keys = shell.store.readArrayKeys(resolved);
   if (!quoted) {
     return expander.valueSegments(
-      { ...value, values: value.values.flatMap((element, index) => [keys[index], element]), transformed: true },
+      { ...value, values: value.values.flatMap((element, index) => [keys[index], element]), assignmentJoin: 'ifs' },
       ctx
     );
   }
