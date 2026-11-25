@@ -1,0 +1,4 @@
+(3,14): error TS18033: Type 'bigint' is not assignable to type 'number' as required for computed enum member values.
+(4,14): error TS18033: Type 'string' is not assignable to type 'number' as required for computed enum member values.
+(5,14): error TS18033: Type 'bigint' is not assignable to type 'number' as required for computed enum member values.
+(8,14): error TS18033: Type 'string' is not assignable to type 'number' as required for computed enum member values.

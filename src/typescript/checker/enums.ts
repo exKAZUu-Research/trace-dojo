@@ -99,7 +99,14 @@ export class Enums {
       if (isWithin(errorNode, node)) this.c.error(errorNode, message);
     for (const member of named(node.childForFieldName('body') as TreeNode)) {
       const value = member.childForFieldName('value');
-      if (value) this.c.expressions.check(value);
+      const type = value && this.c.expressions.check(value);
+      const name = memberNameOf(member);
+      const isComputed = name !== undefined && info?.members.get(name)?.value === undefined;
+      if (value && type && isComputed && !this.c.relations.isAssignable(type, numberType))
+        this.c.error(
+          value,
+          `型 '${this.c.print(this.c.widen(type))}' は、計算で決まる enum メンバーの値に必要な型 'number' に代入できません。`
+        );
       if (symbol) this.checkMergedNamespaceClash(member, symbol);
     }
   }
