@@ -1,0 +1,1 @@
+(7,18): error TS2694: Namespace 'Outer.E' has no exported member 'Q'.

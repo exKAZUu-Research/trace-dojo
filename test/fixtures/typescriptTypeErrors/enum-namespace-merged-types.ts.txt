@@ -1,0 +1,8 @@
+namespace Outer { export enum E { A } export namespace E { export type T = number } }
+const x: Outer.E.T = 1;
+const y: Outer.E.A = Outer.E.A;
+enum F { B } namespace F { export type U = string }
+const z: F.U = "s";
+const w: F.B = F.B;
+const v: Outer.E.Q = 1;
+console.log(x, y, z, w, v);
