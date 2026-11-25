@@ -2211,6 +2211,11 @@ class Renamer {
   private thVarCode(expr: Extract<Expr, { kind: 'thVar' }>, scope: LocalScope): Expr {
     const { span } = expr;
     if (expr.constructor) {
+      // A constructor nothing defines here (one of the module a splice is in, in the program that runs the splice)
+      // stays an unbound name for the code it is spliced into to bind, as GHC does.
+      if (!this.valuesNamed(expr.name).some((entity) => entity.sort === 'con')) {
+        return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
+      }
       const con = this.lookupCon(expr.name);
       return thCall(span, 'quoteGlobalCon', thString(span, this.thModule('con', con)), thString(span, con.name));
     }
@@ -2242,10 +2247,16 @@ class Renamer {
       // The types of special syntax have names of their own in GHC.
       const special = expr.name.qualifier ? undefined : specialTypeName(expr.name.name);
       if (special) return global('mkNameG_tc', special[0], special[1]);
+      // A type of the module the splice is in stays a name for the module to bind, as a constructor does.
+      if (this.runsSplice() && !this.typeExists(expr.name))
+        return thCall(span, 'mkName', thString(span, expr.name.name));
       const like = this.lookupType(expr.name);
       return global('mkNameG_tc', this.thModule('t', like.entity), like.entity.name);
     }
     if (expr.namespace === 'con') {
+      if (this.runsSplice() && !this.valuesNamed(expr.name).some((entity) => entity.sort === 'con')) {
+        return thCall(span, 'mkName', thString(span, expr.name.name));
+      }
       const con = this.lookupCon(expr.name);
       return global('mkNameG_d', this.thModule('con', con), con.name);
     }
@@ -2276,6 +2287,14 @@ class Renamer {
       return thCall(span, 'infixE', thCall(span, 'Just', left), operatorOf(node.op), thCall(span, 'Just', right));
     };
     return build(resolved);
+  }
+
+  /**
+   * Whether this module is the program that runs a splice, which lacks the declarations of the module the splice is
+   * in: a name of those it quotes stays a name for that module to bind.
+   */
+  private runsSplice(): boolean {
+    return this.module.imports.some((item) => item.module === 'Language.Haskell.TH.Runner');
   }
 
   /** The module GHC defines a name in, which Template Haskell shows it with. */
