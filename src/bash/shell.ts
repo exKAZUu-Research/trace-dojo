@@ -296,9 +296,7 @@ export class Shell implements ArithmeticHost {
     const values = statement.values
       ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
       : [...this.store.positionalArgs()];
-    const bindsObjects = values.some(
-      (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
-    );
+    const bindsObjects = values.some((value) => this.runtime.isTurtleHandle(value) || this.namesStructure(value));
     return this.restoringLine(() => this.runForIterations(statement, values, bindsObjects));
   }
 
