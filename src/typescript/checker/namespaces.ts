@@ -130,6 +130,10 @@ export class Namespaces {
       const next: Sym | undefined = current.namespaceExports
         ? this.exportedMember(current, part.text, isLast ? meaning : 'value')
         : current.enumMembers?.values.get(part.text);
+      if (!next && isLast && meaning === 'type' && current.namespaceExports?.values.has(part.text)) {
+        const name = `${qualifiedName(current)}.${part.text}`;
+        return { error: `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。` };
+      }
       if (!next || !(isLast || next.namespaceExports || (next.valueKind === 'enum' && index === rest.length - 2)))
         return {
           error: `名前空間 '${qualifiedName(current)}' には、エクスポートされたメンバー '${part.text}' がありません。`,
