@@ -14,7 +14,8 @@ export function alignmentOperand(sema: SemaApi, expression: Expression): number 
   const value = sema.knownValue(sema.coerce(sema.compile(expression, USIZE), USIZE, expression), '整列') as bigint;
   if (value < 1n) sema.error(expression, '整列の値は 1 以上にしてください。');
   if ((value & (value - 1n)) !== 0n) sema.error(expression, `整列の値 ${value} は、2 のべき乗ではありません。`);
-  if (value > 1n << 32n) sema.error(expression, `整列の値 ${value} が大きすぎます。`);
+  // Zig holds an alignment in a u29, whose largest power of two is 1 << 28.
+  if (value >= 1n << 29n) sema.error(expression, `整列の値 ${value} が大きすぎます（2^28 までです）。`);
   return Number(value);
 }
 
