@@ -1069,6 +1069,7 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
       throw syntaxError(spanOf(constructorsNode), 'newtype には、フィールドが 1 つの構成子を 1 つだけ書いてください。');
     }
     con = cons[0];
+    checkGadtNewtypeConstructor(con);
   } else {
     con = convertNewtypeConstructor(features, required(node, 'constructor'));
   }
@@ -1082,6 +1083,42 @@ function convertNewtype(features: FeatureGates<'convert'>, node: Node, isInstanc
     newtype: true,
     paramKinds: isInstance ? undefined : typeParamKinds(features, node),
   };
+}
+
+/**
+ * Checks what GHC requires of a newtype's constructor in GADT syntax: no context, no strictness, a result that is the
+ * type applied to distinct variables, and a field that uses no other variable.
+ */
+function checkGadtNewtypeConstructor(con: ConDecl): void {
+  if ((con.context?.length ?? 0) > 0) throw syntaxError(con.span, 'newtype の構成子には、文脈を書けません。');
+  if ((con.strictFields?.length ?? 0) > 0) {
+    throw syntaxError(con.span, 'newtype の構成子のフィールドには、! や ~ を付けられません。');
+  }
+  const params: string[] = [];
+  let head = con.result;
+  while (head?.kind === 'tapp') {
+    if (head.arg.kind !== 'tvar' || params.includes(head.arg.name)) {
+      throw syntaxError(con.span, 'newtype の構成子の型は、newtype に型変数だけを当てた型で終わらなければなりません。');
+    }
+    params.push(head.arg.name);
+    head = head.fn;
+  }
+  const used = new Set<string>();
+  collectTvars(con.fields[0], used);
+  if ([...used].some((name) => !params.includes(name))) {
+    throw syntaxError(con.span, 'newtype の構成子には、存在型の型変数を使えません。');
+  }
+}
+
+/** The type variables a type mentions, bound or free. */
+function collectTvars(value: unknown, into: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectTvars(item, into);
+  } else if (value && typeof value === 'object') {
+    const node = value as { kind?: string; name?: unknown };
+    if (node.kind === 'tvar' && typeof node.name === 'string') into.add(node.name);
+    for (const [key, child] of Object.entries(value)) if (key !== 'span') collectTvars(child, into);
+  }
 }
 
 function convertNewtypeConstructor(features: FeatureGates<'convert'>, constructor: Node): ConDecl {
