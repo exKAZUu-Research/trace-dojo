@@ -397,7 +397,7 @@ export abstract class IteratorExecutor extends StatementExecutor {
           if (task && !task.isDone) yield { awaiting: task };
           // An exception from disposal replaces the one leaving the body, as it does in C#.
           // oxlint-disable-next-line no-unsafe-finally
-          if (task?.status === 'faulted') throw task.exceptions[0];
+          if (task?.status === 'faulted') throw task.firstThrown;
         }
       }
     }

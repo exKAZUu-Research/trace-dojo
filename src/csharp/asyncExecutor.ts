@@ -2,7 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { BoundArgument, BoundBlock, BoundExpression, BoundLValue } from './bound';
 import { IteratorExecutor, type IteratorState, type Steps, type Suspension } from './iterators';
 import type { PendingException } from './numeric';
-import type { CsThrow, Frame } from './runtime';
+import type { Frame } from './runtime';
 import { taskObject, type TaskState, UnhandledAsyncException } from './tasks';
 import { type AsyncShape, type MethodSymbol, type NamedType } from './types';
 import { Cell, copyValue, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
@@ -278,11 +278,6 @@ export abstract class AsyncExecutor extends IteratorExecutor {
   /** Blocks the running code until a task is done, as `Wait()` and `Result` do, running the other work meanwhile. */
   waitFor(state: TaskState): void {
     this.runtime.scheduler.runUntil(() => state.isDone);
-  }
-
-  /** The first exception of a faulted task, which `await` and `GetResult` throw. */
-  firstException(state: TaskState): CsThrow {
-    return state.exceptions[0];
   }
 }
 

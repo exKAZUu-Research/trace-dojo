@@ -30,13 +30,18 @@ export class DeadlockError extends Error {
 export class TaskState {
   status: 'pending' | 'completed' | 'faulted' = 'pending';
   result: Value;
-  /** The exceptions of a faulted task: its own, or for `WhenAll` each faulted task's in order. */
+  /** The exceptions of a faulted task: its own, or for `WhenAll` each faulted task's in the order they faulted. */
   exceptions: CsThrow[] = [];
   /** The Task object, which `WhenAny` returns. */
   object: CsObject | undefined;
   private continuations: (() => void)[] = [];
 
   constructor(readonly id: number) {}
+
+  /** The exception that `await` and `GetResult` throw: the first one. */
+  get firstThrown(): CsThrow {
+    return this.exceptions[0];
+  }
 
   get isDone(): boolean {
     return this.status !== 'pending';

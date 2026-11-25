@@ -67,7 +67,7 @@ interface AggregateState extends ExceptionState {
 /** `GetResult()` of an awaiter: the result of its task, waiting for it, or its first exception. */
 function getResult(call: NativeCall, state: TaskState): Value {
   if (!state.isDone) waitFor(call, state);
-  if (state.status === 'faulted') throw state.exceptions[0];
+  if (state.status === 'faulted') throw state.firstThrown;
   return state.result;
 }
 
@@ -80,13 +80,14 @@ function taskStates(call: NativeCall, tasks: Value): TaskState[] {
   return states;
 }
 
-/** `Task.WhenAll`: done when every task is, faulted with their exceptions in order if any faulted. */
+/** `Task.WhenAll`: done when every task is, faulted with their exceptions if any faulted. */
 function whenAll(call: NativeCall, tasks: Value, resultType: Type | undefined): CsObject {
   const states = taskStates(call, tasks);
   const { state, object } = newTask(call, resultType ? { kind: 'array', element: resultType, rank: 1 } : undefined);
   let remaining = states.length;
+  // .NET 10 gathers the exceptions in the order the tasks faulted.
+  const faulted: CsThrow[] = [];
   const settle = (): void => {
-    const faulted = states.flatMap((task) => task.exceptions);
     if (faulted.length > 0) state.fault(faulted);
     else
       state.complete(
@@ -102,6 +103,7 @@ function whenAll(call: NativeCall, tasks: Value, resultType: Type | undefined): 
   if (remaining === 0) settle();
   for (const task of states)
     task.whenDone(() => {
+      faulted.push(...task.exceptions);
       remaining--;
       if (remaining === 0) settle();
     });

@@ -77,7 +77,7 @@ function runEntry(evaluator: Evaluator): string | undefined {
     if (entry.isAsync && result instanceof CsObject) {
       const state = result.native as TaskState;
       runtime.scheduler.runUntil(() => state.isDone);
-      if (state.status === 'faulted') throw state.exceptions[0];
+      if (state.status === 'faulted') throw state.firstThrown;
     }
     return undefined;
   } catch (error) {
