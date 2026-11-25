@@ -686,19 +686,24 @@ export class VariableStore {
     intent: DestinationIntent,
     name: string,
     initialContainer?: 'indexed' | 'associative',
-    checkAppendHostEnv = false
+    checkAppendHostEnv = false,
+    allowTempImport = initialContainer === undefined
   ): DestinationSelection {
-    if (intent === 'local') return this.selectLocalDestination(name, initialContainer);
+    if (intent === 'local') return this.selectLocalDestination(name, initialContainer, allowTempImport);
     return this.selectScopedDestination(intent, name, initialContainer, checkAppendHostEnv);
   }
 
-  private selectLocalDestination(name: string, initialContainer?: 'indexed' | 'associative'): DestinationSelection {
+  private selectLocalDestination(
+    name: string,
+    initialContainer?: 'indexed' | 'associative',
+    allowTempImport = initialContainer === undefined
+  ): DestinationSelection {
     const fnIdx = this.currentFunctionScopeIndex();
     if (fnIdx === undefined) throw new Error('local destination requested outside function');
     const localMap = this.scopes[fnIdx].map;
     const existing = localMap.get(name);
     if (existing) return { scope: 'local', name, cell: this.toHandle(existing), created: false };
-    const tempOrigin = initialContainer === undefined ? this.findTempPrefixAbove(fnIdx, name) : undefined;
+    const tempOrigin = allowTempImport ? this.findTempPrefixAbove(fnIdx, name) : undefined;
     const initialValue = this.createInitialContainer(initialContainer, tempOrigin?.scalar);
     const attrs = containerAttributes(initialContainer, Boolean(tempOrigin));
     const created = this.allocateCell(name, initialValue, attrs, false, Boolean(tempOrigin));

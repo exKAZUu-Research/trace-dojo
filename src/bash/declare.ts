@@ -17,6 +17,7 @@ import {
   type DestinationIntent,
   isIdentifier,
   pushCompoundElementRoots,
+  type VariableView,
 } from './variables';
 
 const USAGES: Record<string, string> = {
@@ -490,12 +491,7 @@ function executeScalarOrElementOperand(
       builtin
     );
   }
-  const existingForCheck =
-    intent === 'local'
-      ? shell.store.ownView(op.name)?.isCurrentLocal
-        ? shell.store.ownView(op.name)
-        : undefined
-      : shell.store.ownView(op.name);
+  const existingForCheck = priorDestinationView(shell, op.name, intent);
   rejectUnsupportedDeclarationOperand(builtin, op.name, set, {
     isSubscripted,
     isCompound: false,
@@ -526,9 +522,10 @@ function executeUnsubscriptedDeclaration(
   const failCtx = builtinFailureContext(builtin);
   const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
   if (targetName === undefined) return false;
-  const priorKind = intent === 'local' ? undefined : shell.store.ownView(targetName)?.kind;
+  const priorKind = priorDestinationView(shell, targetName, intent)?.kind;
   const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
-  const selected = shell.store.selectDestination(intent, targetName, undefined, op.append);
+  const createsArray = set.has('a') || set.has('A');
+  const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, !createsArray);
   if (!applyPreWriteAttributes(shell, builtin, selected.cell, set, op.value === undefined)) return false;
   if (op.value !== undefined) {
     const outcome = shell.store.writeScalar(
@@ -573,17 +570,13 @@ function executeSubscriptedDeclaration(
   onMaterialize?: () => void
 ): boolean {
   const failCtx = builtinFailureContext(builtin);
+  const scopedIntent = intent === 'local' ? 'local' : 'visible';
+  const prepared = prepareSubscriptedDestination(shell, builtin, op, set, scopedIntent);
+  if (!prepared) return false;
   const subInput =
     op.subscriptWord !== undefined
       ? ({ kind: 'word', word: op.subscriptWord } as const)
       : ({ kind: 'text', text: op.subscriptText ?? '' } as const);
-  const scopedIntent = intent === 'local' ? 'local' : 'visible';
-  const priorKind = scopedIntent === 'local' ? undefined : shell.store.ownView(op.name)?.kind;
-  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
-  const containerKind = op.value === undefined ? undefined : set.has('A') ? 'associative' : 'indexed';
-  const selected = shell.store.selectDestination(scopedIntent, op.name, containerKind, op.append);
-  const effectiveSet = set.has('A') ? set : new Set([...set, 'a']);
-  if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return false;
   const target = resolveSubscriptTarget(shell, {
     name: op.name,
     subscript: subInput,
@@ -597,7 +590,33 @@ function executeSubscriptedDeclaration(
     const outcome = writeResolvedTarget(shell, target, op.value, op.append);
     if (!outcome.ok) return shell.failures.handleStoreFailure(failCtx, outcome, builtin);
   }
-  return finalizeDeclaredCell(shell, builtin, selected.cell, set, wasMaterialized, onMaterialize);
+  return finalizeDeclaredCell(shell, builtin, prepared.cell, set, prepared.wasMaterialized, onMaterialize);
+}
+
+function prepareSubscriptedDestination(
+  shell: Shell,
+  builtin: string,
+  op: NormalizedOperand,
+  set: ReadonlySet<string>,
+  scopedIntent: 'local' | 'visible'
+): { cell: CellHandle; wasMaterialized: boolean } | undefined {
+  const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, scopedIntent);
+  if (targetName === undefined) return undefined;
+  const priorView = priorDestinationView(shell, targetName, scopedIntent);
+  const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
+  const existingAssoc = priorView?.kind === 'associative' || priorView?.attributes.has('A') === true;
+  const isAssoc = set.has('A') || (existingAssoc && !set.has('a'));
+  const containerKind = op.value === undefined ? undefined : isAssoc ? 'associative' : 'indexed';
+  const selected = shell.store.selectDestination(scopedIntent, targetName, containerKind, op.append, false);
+  const effectiveSet = isAssoc ? set : new Set([...set, 'a']);
+  if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return undefined;
+  return { cell: selected.cell, wasMaterialized };
+}
+
+function priorDestinationView(shell: Shell, name: string, intent: DestinationIntent): VariableView | undefined {
+  if (intent === 'global') return shell.store.ownView(name, 0);
+  const own = shell.store.ownView(name);
+  return intent === 'local' ? (own?.isCurrentLocal ? own : undefined) : own;
 }
 
 function applyPreWriteAttributes(
