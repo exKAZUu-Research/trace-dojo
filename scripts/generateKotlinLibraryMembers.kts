@@ -152,6 +152,7 @@ for ((kotlinName, javaType) in mapOf(
     "java.io.Closeable" to java.io.Closeable::class.java,
     "java.io.File" to java.io.File::class.java,
     "java.io.PrintWriter" to java.io.PrintWriter::class.java,
+    "java.util.AbstractMap" to java.util.AbstractMap::class.java,
     "java.util.AbstractSet" to java.util.AbstractSet::class.java,
     "java.util.Locale" to java.util.Locale::class.java,
     "java.util.NavigableSet" to java.util.NavigableSet::class.java,

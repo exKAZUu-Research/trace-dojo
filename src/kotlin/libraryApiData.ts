@@ -30,6 +30,8 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
     'absolute absolutePathString appendBytes appendLines appendText bufferedReader bufferedWriter copyTo copyToIgnoringExistingDirectory copyToRecursively createDirectories createDirectory createFile createLinkPointingTo createParentDirectories createSymbolicLinkPointingTo deleteExisting deleteIfExists deleteRecursively div exists extension fileAttributesView fileAttributesViewOrNull fileSize fileStore forEachDirectoryEntry forEachLine getAttribute getLastModifiedTime getOwner getPosixFilePermissions inputStream invariantSeparatorsPath invariantSeparatorsPathString isDirectory isExecutable isHidden isReadable isRegularFile isSameFileAs isSymbolicLink isWritable listDirectoryEntries moveTo name nameWithoutExtension notExists outputStream pathString readAttributes readBytes readLines readSymbolicLink readText reader relativeTo relativeToOrNull relativeToOrSelf setAttribute setLastModifiedTime setOwner setPosixFilePermissions useDirectoryEntries useLines visitFileTree walk writeBytes writeLines writeText writer',
   'java.time.Duration': 'toKotlinDuration',
   'java.time.Instant': 'toKotlinInstant',
+  'java.util.AbstractMap':
+    'clear compute computeIfAbsent computeIfPresent containsKey containsValue entrySet equals forEach get getOrDefault hashCode isEmpty keySet merge put putAll putIfAbsent remove replace replaceAll size toString values',
   'java.util.AbstractSet':
     'add addAll clear contains containsAll equals forEach hashCode isEmpty iterator parallelStream remove removeAll removeIf retainAll size spliterator stream toArray toString',
   'java.util.Comparator': 'reversed then thenBy thenByDescending thenComparator thenDescending',

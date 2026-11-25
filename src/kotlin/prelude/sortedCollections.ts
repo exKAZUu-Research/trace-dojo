@@ -44,27 +44,39 @@ interface NavigableSet<E> : SortedSet<E> {
 internal fun <T> compareInOrder(comparator: Comparator<in T>?, a: T, b: T): Int =
     if (comparator != null) comparator.compare(a, b) else (a as Comparable<Any?>).compareTo(b)
 
+/** A bound of a sorted map's view: the key it starts or ends at, and whether the key itself is in the view. */
+internal class OrderBound<K>(val key: K, val inclusive: Boolean)
+
+/** The entries of a TreeMap and of every view of it, in its order, with the count of changes iterators fail fast on. */
+internal class TreeStore<K, V> {
+    val nodes = ArrayList<TreeMapEntry<K, V>>()
+    var modCount = 0
+}
+
+/**
+ * A TreeMap, or a view of one between two bounds, as headMap, tailMap, and subMap give, which reads and writes the
+ * entries of the map it views, as java.util.TreeMap's views do.
+ */
 class TreeMap<K, V> private constructor(
     private val order: Comparator<in K>?,
-    private val nodes: ArrayList<TreeMapEntry<K, V>>
-) : SortedMap<K, V> {
-    constructor() : this(null, ArrayList())
-    constructor(comparator: Comparator<in K>?) : this(comparator, ArrayList())
-    constructor(map: Map<out K, V>) : this(null, ArrayList()) {
+    private val store: TreeStore<K, V>,
+    private val low: OrderBound<K>?,
+    private val high: OrderBound<K>?
+) : AbstractMap<K, V>(), SortedMap<K, V> {
+    constructor() : this(null, TreeStore(), null, null)
+    constructor(comparator: Comparator<in K>?) : this(comparator, TreeStore(), null, null)
+    constructor(map: Map<out K, V>) : this(null, TreeStore(), null, null) {
         putAll(map)
     }
 
-    /** The count of changes to the keys, by which iterators fail fast as java.util.TreeMap's do. */
-    internal var modCount = 0
-        private set
+    internal val modCount: Int get() = store.modCount
+    private val nodes: ArrayList<TreeMapEntry<K, V>> get() = store.nodes
 
     override fun comparator(): Comparator<in K>? = order
-    override val size: Int get() = nodes.size
-    override fun isEmpty(): Boolean = nodes.isEmpty()
 
     /**
-     * The index of the entry whose key the order counts as \`key\`, or -(the index it would go at + 1): the one search
-     * of the map, as java.util.TreeMap finds keys by comparing them, never by equals or hashCode.
+     * The index among all the entries of the entry whose key the order counts as \`key\`, or -(the index it would go at
+     * + 1): the one search of the map, as java.util.TreeMap finds keys by comparing them, never by equals or hashCode.
      */
     internal fun search(key: K): Int {
         var low = 0
@@ -77,70 +89,128 @@ class TreeMap<K, V> private constructor(
         return -(low + 1)
     }
 
+    private fun insertion(found: Int): Int = if (found >= 0) found else -(found + 1)
+
+    // The view's entries are those from lowIndex() up to before highIndex(), among all the entries.
+    internal fun lowIndex(): Int {
+        val bound = low ?: return 0
+        val found = search(bound.key)
+        return if (found >= 0 && !bound.inclusive) found + 1 else insertion(found)
+    }
+
+    internal fun highIndex(): Int {
+        val bound = high ?: return nodes.size
+        val found = search(bound.key)
+        return if (found >= 0 && bound.inclusive) found + 1 else insertion(found)
+    }
+
+    private fun tooLow(key: K): Boolean {
+        val bound = low ?: return false
+        val comparison = compareInOrder(order, key, bound.key)
+        return comparison < 0 || (comparison == 0 && !bound.inclusive)
+    }
+
+    private fun tooHigh(key: K): Boolean {
+        val bound = high ?: return false
+        val comparison = compareInOrder(order, key, bound.key)
+        return comparison > 0 || (comparison == 0 && !bound.inclusive)
+    }
+
+    internal fun inRange(key: K): Boolean = !tooLow(key) && !tooHigh(key)
+
     internal fun nodeAt(index: Int): TreeMapEntry<K, V> = nodes[index]
 
     internal fun removeNodeAt(index: Int): TreeMapEntry<K, V> {
-        modCount++
+        store.modCount++
         return nodes.removeAt(index)
     }
 
     private fun find(key: K): Int {
         if (order == null && key == null) throw NullPointerException()
-        return search(key)
+        return if (inRange(key)) search(key) else -1
     }
 
+    override val size: Int get() = highIndex() - lowIndex()
     override fun containsKey(key: K): Boolean = find(key) >= 0
-    override fun containsValue(value: V): Boolean = nodes.any { it.value == value }
     override fun get(key: K): V? = find(key).let { if (it >= 0) nodes[it].value else null }
 
     override fun put(key: K, value: V): V? {
         if (nodes.isEmpty()) compareInOrder(order, key, key)
+        if (!inRange(key)) throw IllegalArgumentException("key out of range")
         val index = search(key)
         if (index >= 0) return nodes[index].setValue(value)
         nodes.add(-(index + 1), TreeMapEntry(key, value))
-        modCount++
+        store.modCount++
         return null
-    }
-
-    override fun putAll(from: Map<out K, V>) {
-        for ((key, value) in from) put(key, value)
     }
 
     override fun remove(key: K): V? = find(key).let { if (it >= 0) removeNodeAt(it).value else null }
 
     override fun clear() {
-        nodes.clear()
-        modCount++
+        val from = lowIndex()
+        repeat(highIndex() - from) { nodes.removeAt(from) }
+        store.modCount++
     }
 
     override val keys: MutableSet<K> get() = TreeMapKeys(this)
     override val values: MutableCollection<V> get() = TreeMapValues(this)
     override val entries: MutableSet<MutableMap.MutableEntry<K, V>> get() = TreeMapEntries(this)
 
-    override fun firstKey(): K = if (nodes.isEmpty()) throw NoSuchElementException() else nodes[0].key
-    override fun lastKey(): K = if (nodes.isEmpty()) throw NoSuchElementException() else nodes[nodes.size - 1].key
-    override fun headMap(toKey: K): SortedMap<K, V> = filtered { compareInOrder(order, it, toKey) < 0 }
-    override fun tailMap(fromKey: K): SortedMap<K, V> = filtered { compareInOrder(order, it, fromKey) >= 0 }
-    override fun subMap(fromKey: K, toKey: K): SortedMap<K, V> =
-        filtered { compareInOrder(order, it, fromKey) >= 0 && compareInOrder(order, it, toKey) < 0 }
+    override fun firstKey(): K = lowIndex().let { if (it < highIndex()) nodes[it].key else throw NoSuchElementException() }
+    override fun lastKey(): K = (highIndex() - 1).let { if (it >= lowIndex()) nodes[it].key else throw NoSuchElementException() }
 
-    private fun filtered(predicate: (K) -> Boolean): SortedMap<K, V> {
-        val result = TreeMap<K, V>(order)
-        for (node in nodes) if (predicate(node.key)) result.put(node.key, node.value)
-        return result
+    // The keys around a key within the view, which a TreeSet's navigation reads.
+    internal fun keyAt(index: Int): List<K> = if (index >= lowIndex() && index < highIndex()) listOf(nodes[index].key) else listOf()
+    internal fun ceilingKey(key: K): List<K> = keyAt(maxOf(insertion(search(key)), lowIndex()))
+    internal fun higherKey(key: K): List<K> =
+        keyAt(maxOf(search(key).let { if (it >= 0) it + 1 else insertion(it) }, lowIndex()))
+    internal fun floorKey(key: K): List<K> =
+        keyAt(minOf(search(key).let { if (it >= 0) it else insertion(it) - 1 }, highIndex() - 1))
+    internal fun lowerKey(key: K): List<K> =
+        keyAt(minOf(search(key).let { if (it >= 0) it - 1 else insertion(it) - 1 }, highIndex() - 1))
+
+    override fun headMap(toKey: K): SortedMap<K, V> = view(low, narrowed(toKey, false))
+    override fun tailMap(fromKey: K): SortedMap<K, V> = view(narrowed(fromKey, true), high)
+    override fun subMap(fromKey: K, toKey: K): SortedMap<K, V> = subView(fromKey, true, toKey, false)
+
+    internal fun headView(toKey: K, inclusive: Boolean): TreeMap<K, V> = view(low, narrowed(toKey, inclusive))
+    internal fun tailView(fromKey: K, inclusive: Boolean): TreeMap<K, V> = view(narrowed(fromKey, inclusive), high)
+    internal fun subView(fromKey: K, fromInclusive: Boolean, toKey: K, toInclusive: Boolean): TreeMap<K, V> {
+        if (compareInOrder(order, fromKey, toKey) > 0) throw IllegalArgumentException("fromKey > toKey")
+        return view(narrowed(fromKey, fromInclusive), narrowed(toKey, toInclusive))
     }
 
-    // java.util.AbstractMap's equals, hashCode, and toString.
+    // A view's bound must lie within the view it narrows, as java.util.TreeMap's views require.
+    private fun narrowed(key: K, inclusive: Boolean): OrderBound<K> {
+        compareInOrder(order, key, key)
+        val within = if (inclusive) inRange(key) else !(low?.let { compareInOrder(order, key, it.key) < 0 } ?: false) &&
+            !(high?.let { compareInOrder(order, key, it.key) > 0 } ?: false)
+        if (!within) throw IllegalArgumentException("key out of range")
+        return OrderBound(key, inclusive)
+    }
+
+    private fun view(from: OrderBound<K>?, to: OrderBound<K>?): TreeMap<K, V> = TreeMap(order, store, from, to)
+}
+
+/** java.util.AbstractMap's members, which read the map through its entries. */
+abstract class AbstractMap<K, V> : MutableMap<K, V> {
+    override fun isEmpty(): Boolean = size == 0
+    override fun containsValue(value: V): Boolean = entries.any { it.value == value }
+
+    override fun putAll(from: Map<out K, V>) {
+        for ((key, value) in from) put(key, value)
+    }
+
     @Suppress("UNCHECKED_CAST")
     override fun equals(other: Any?): Boolean {
         if (other === this) return true
         if (other !is Map<*, *> || other.size != size) return false
         val map = other as Map<Any?, Any?>
-        for (node in nodes) {
-            val value = node.value
+        for (entry in entries) {
+            val value = entry.value
             if (value == null) {
-                if (!(map[node.key] == null && map.containsKey(node.key))) return false
-            } else if (value != map[node.key]) {
+                if (!(map[entry.key] == null && map.containsKey(entry.key))) return false
+            } else if (value != map[entry.key]) {
                 return false
             }
         }
@@ -149,11 +219,11 @@ class TreeMap<K, V> private constructor(
 
     override fun hashCode(): Int {
         var hash = 0
-        for (node in nodes) hash += node.hashCode()
+        for (entry in entries) hash += entry.hashCode()
         return hash
     }
 
-    override fun toString(): String = nodes.joinToString(", ", "{", "}")
+    override fun toString(): String = entries.joinToString(", ", "{", "}")
 }
 
 internal class TreeMapEntry<K, V>(override val key: K, override var value: V) : MutableMap.MutableEntry<K, V> {
@@ -168,29 +238,34 @@ internal class TreeMapEntry<K, V>(override val key: K, override var value: V) : 
     override fun toString(): String = "$key=$value"
 }
 
-/** An iterator over a TreeMap's entries in order, which removes through the map, and fails fast on other changes. */
+/**
+ * An iterator over a TreeMap's entries in its view, in order or in reverse, which removes through the map, and fails
+ * fast on other changes.
+ */
 internal class TreeMapIterator<K, V, T>(
     private val map: TreeMap<K, V>,
+    private val isDescending: Boolean,
     private val select: (TreeMapEntry<K, V>) -> T
 ) : MutableIterator<T> {
-    private var next = 0
+    private var next = if (isDescending) map.highIndex() - 1 else map.lowIndex()
     private var last = -1
     private var expected = map.modCount
 
-    override fun hasNext(): Boolean = next < map.size
+    override fun hasNext(): Boolean = if (isDescending) next >= map.lowIndex() else next < map.highIndex()
 
     override fun next(): T {
         if (map.modCount != expected) throw ConcurrentModificationException()
-        if (next >= map.size) throw NoSuchElementException()
+        if (!hasNext()) throw NoSuchElementException()
         last = next
-        return select(map.nodeAt(next++))
+        next = if (isDescending) next - 1 else next + 1
+        return select(map.nodeAt(last))
     }
 
     override fun remove() {
         if (last < 0) throw IllegalStateException()
         if (map.modCount != expected) throw ConcurrentModificationException()
         map.removeNodeAt(last)
-        next = last
+        if (!isDescending) next = last
         last = -1
         expected = map.modCount
     }
@@ -260,7 +335,7 @@ abstract class AbstractSet<E> : MutableSet<E> {
 private class TreeMapKeys<K, V>(private val map: TreeMap<K, V>) : AbstractSet<K>() {
     override val size: Int get() = map.size
     override fun contains(element: K): Boolean = map.containsKey(element)
-    override fun iterator(): MutableIterator<K> = TreeMapIterator(map) { it.key }
+    override fun iterator(): MutableIterator<K> = TreeMapIterator(map, false) { it.key }
     override fun add(element: K): Boolean = throw UnsupportedOperationException()
 
     override fun remove(element: K): Boolean {
@@ -274,16 +349,16 @@ private class TreeMapKeys<K, V>(private val map: TreeMap<K, V>) : AbstractSet<K>
 
 private class TreeMapEntries<K, V>(private val map: TreeMap<K, V>) : AbstractSet<MutableMap.MutableEntry<K, V>>() {
     override val size: Int get() = map.size
-    override fun iterator(): MutableIterator<MutableMap.MutableEntry<K, V>> = TreeMapIterator(map) { it }
+    override fun iterator(): MutableIterator<MutableMap.MutableEntry<K, V>> = TreeMapIterator(map, false) { it }
     override fun add(element: MutableMap.MutableEntry<K, V>): Boolean = throw UnsupportedOperationException()
 
     override fun contains(element: MutableMap.MutableEntry<K, V>): Boolean {
-        val index = map.search(element.key)
+        val index = if (map.inRange(element.key)) map.search(element.key) else -1
         return index >= 0 && map.nodeAt(index).value == element.value
     }
 
     override fun remove(element: MutableMap.MutableEntry<K, V>): Boolean {
-        val index = map.search(element.key)
+        val index = if (map.inRange(element.key)) map.search(element.key) else -1
         if (index < 0 || map.nodeAt(index).value != element.value) return false
         map.removeNodeAt(index)
         return true
@@ -297,7 +372,7 @@ private class TreeMapValues<K, V>(private val map: TreeMap<K, V>) : MutableColle
     override fun isEmpty(): Boolean = map.isEmpty()
     override fun contains(element: V): Boolean = map.containsValue(element)
     override fun containsAll(elements: Collection<V>): Boolean = elements.all { contains(it) }
-    override fun iterator(): MutableIterator<V> = TreeMapIterator(map) { it.value }
+    override fun iterator(): MutableIterator<V> = TreeMapIterator(map, false) { it.value }
     override fun add(element: V): Boolean = throw UnsupportedOperationException()
     override fun addAll(elements: Collection<V>): Boolean = throw UnsupportedOperationException()
 
@@ -330,85 +405,70 @@ private class TreeMapValues<K, V>(private val map: TreeMap<K, V>) : MutableColle
     }
 }
 
-class TreeSet<E> private constructor(private val map: TreeMap<E, Boolean>) : AbstractSet<E>(), NavigableSet<E> {
-    constructor() : this(TreeMap<E, Boolean>())
-    constructor(comparator: Comparator<in E>?) : this(TreeMap<E, Boolean>(comparator))
-    constructor(elements: Collection<E>) : this(TreeMap<E, Boolean>()) {
+/**
+ * A TreeSet, or a view of one, as headSet, tailSet, subSet, and descendingSet give: the keys of a TreeMap or of a
+ * view of it, in its order or in reverse, so that every view reads and writes the elements of the set it views.
+ */
+class TreeSet<E> private constructor(
+    private val map: TreeMap<E, Boolean>,
+    private val isDescending: Boolean
+) : AbstractSet<E>(), NavigableSet<E> {
+    constructor() : this(TreeMap<E, Boolean>(), false)
+    constructor(comparator: Comparator<in E>?) : this(TreeMap<E, Boolean>(comparator), false)
+    constructor(elements: Collection<E>) : this(TreeMap<E, Boolean>(), false) {
         addAll(elements)
     }
 
-    override fun comparator(): Comparator<in E>? = map.comparator()
+    override fun comparator(): Comparator<in E>? {
+        val order = map.comparator()
+        return if (isDescending) Comparator<E> { a, b -> compareInOrder(order, b, a) } else order
+    }
+
     override val size: Int get() = map.size
     override fun contains(element: E): Boolean = map.containsKey(element)
     override fun add(element: E): Boolean = map.put(element, true) == null
     override fun remove(element: E): Boolean = map.remove(element) != null
-    override fun iterator(): MutableIterator<E> = map.keys.iterator()
+    override fun iterator(): MutableIterator<E> = TreeMapIterator(map, isDescending) { it.key }
+    override fun descendingIterator(): MutableIterator<E> = TreeMapIterator(map, !isDescending) { it.key }
     override fun clear() = map.clear()
 
-    override fun first(): E = map.firstKey()
-    override fun last(): E = map.lastKey()
+    override fun first(): E = if (isDescending) map.lastKey() else map.firstKey()
+    override fun last(): E = if (isDescending) map.firstKey() else map.lastKey()
+
+    // In reverse, what is lower is higher in the map's order.
+    @Suppress("UNCHECKED_CAST")
+    private fun one(found: List<E>): E? = if (found.isEmpty()) null else found[0]
+    override fun lower(e: E): E? = one(if (isDescending) map.higherKey(e) else map.lowerKey(e))
+    override fun floor(e: E): E? = one(if (isDescending) map.ceilingKey(e) else map.floorKey(e))
+    override fun ceiling(e: E): E? = one(if (isDescending) map.floorKey(e) else map.ceilingKey(e))
+    override fun higher(e: E): E? = one(if (isDescending) map.lowerKey(e) else map.higherKey(e))
+
+    override fun pollFirst(): E? = poll(isDescending)
+    override fun pollLast(): E? = poll(!isDescending)
+
+    private fun poll(fromHigh: Boolean): E? {
+        if (map.isEmpty()) return null
+        return map.removeNodeAt(if (fromHigh) map.highIndex() - 1 else map.lowIndex()).key
+    }
+
     override fun headSet(toElement: E): SortedSet<E> = headSet(toElement, false)
     override fun tailSet(fromElement: E): SortedSet<E> = tailSet(fromElement, true)
     override fun subSet(fromElement: E, toElement: E): SortedSet<E> = subSet(fromElement, true, toElement, false)
+
     override fun headSet(toElement: E, inclusive: Boolean): NavigableSet<E> =
-        filtered { below(it, toElement, inclusive) }
+        TreeSet(if (isDescending) map.tailView(toElement, inclusive) else map.headView(toElement, inclusive), isDescending)
+
     override fun tailSet(fromElement: E, inclusive: Boolean): NavigableSet<E> =
-        filtered { below(fromElement, it, inclusive) }
+        TreeSet(if (isDescending) map.headView(fromElement, inclusive) else map.tailView(fromElement, inclusive), isDescending)
+
     override fun subSet(fromElement: E, fromInclusive: Boolean, toElement: E, toInclusive: Boolean): NavigableSet<E> {
-        if (compareInOrder(comparator(), fromElement, toElement) > 0) throw IllegalArgumentException("fromKey > toKey")
-        return filtered { below(fromElement, it, fromInclusive) && below(it, toElement, toInclusive) }
+        val view =
+            if (isDescending) map.subView(toElement, toInclusive, fromElement, fromInclusive)
+            else map.subView(fromElement, fromInclusive, toElement, toInclusive)
+        return TreeSet(view, isDescending)
     }
 
-    // The neighbors of a value, from where the map's one search finds it or would put it.
-    private fun keyAt(index: Int): E? = if (index in 0 until map.size) map.nodeAt(index).key else null
-    private fun insertion(found: Int): Int = if (found >= 0) found else -(found + 1)
-
-    override fun lower(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it - 1 else insertion(it) - 1) }
-    override fun floor(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it else insertion(it) - 1) }
-    override fun ceiling(e: E): E? = keyAt(insertion(map.search(e)))
-    override fun higher(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it + 1 else insertion(it)) }
-    override fun pollFirst(): E? = if (map.isEmpty()) null else map.removeNodeAt(0).key
-    override fun pollLast(): E? = if (map.isEmpty()) null else map.removeNodeAt(map.size - 1).key
-
-    override fun descendingSet(): NavigableSet<E> {
-        val order = comparator()
-        val result = TreeSet<E>(Comparator<E> { a, b -> compareInOrder(order, b, a) })
-        result.addAll(this)
-        return result
-    }
-
-    override fun descendingIterator(): MutableIterator<E> {
-        val set = this
-        val elements = toList().asReversed().iterator()
-        return object : MutableIterator<E> {
-            private var current: E? = null
-            private var hasCurrent = false
-            override fun hasNext(): Boolean = elements.hasNext()
-            override fun next(): E {
-                val element = elements.next()
-                current = element
-                hasCurrent = true
-                return element
-            }
-            @Suppress("UNCHECKED_CAST")
-            override fun remove() {
-                if (!hasCurrent) throw IllegalStateException()
-                set.remove(current as E)
-                hasCurrent = false
-            }
-        }
-    }
-
-    private fun below(a: E, b: E, inclusive: Boolean): Boolean {
-        val comparison = compareInOrder(comparator(), a, b)
-        return if (inclusive) comparison <= 0 else comparison < 0
-    }
-
-    private fun filtered(predicate: (E) -> Boolean): TreeSet<E> {
-        val result = TreeSet<E>(comparator())
-        for (element in this) if (predicate(element)) result.add(element)
-        return result
-    }
+    override fun descendingSet(): NavigableSet<E> = TreeSet(map, !isDescending)
 }
 `;
 

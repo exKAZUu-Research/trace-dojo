@@ -56,10 +56,13 @@ export function throwError(frame: Frame, qualifiedName: string, message?: string
  */
 export type TraceShape = { kind: 'array'; items: Value[] } | { kind: 'map'; entries: { key: Value; value: Value }[] };
 
-const traceShapes = new Map<string, (object: KObject) => TraceShape>();
+const traceShapes = new Map<string, (object: KObject) => TraceShape | undefined>();
 
-/** Declares how the objects of a library class, by its Kotlin name, show in a trace. */
-export function defineTraceShape(kotlinName: string, shape: (object: KObject) => TraceShape): void {
+/**
+ * Declares how the objects of a library class, by its Kotlin name, show in a trace; an object for which the
+ * declaration gives no shape shows as its fields.
+ */
+export function defineTraceShape(kotlinName: string, shape: (object: KObject) => TraceShape | undefined): void {
   traceShapes.set(kotlinName, shape);
 }
 

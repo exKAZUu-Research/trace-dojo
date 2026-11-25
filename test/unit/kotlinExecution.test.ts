@@ -6529,6 +6529,28 @@ test('finds and merges the elements of sorted sets and maps by their order, as j
   });
 });
 
+test("gives views of sorted sets and maps that read and write them, as java.util's do", () => {
+  const source = `fun main() {
+    val s = sortedSetOf(3, 1, 2)
+    val head = s.headSet(3)
+    val descending = s.descendingSet()
+    s.add(0)
+    val tail = s.tailSet(2)
+    tail.add(7)
+    println(listOf(head, descending, s))
+    try { tail.add(0) } catch (e: Exception) { println(e) }
+    val m = sortedMapOf(1 to "a", 2 to "b")
+    val headMap = m.headMap(2)
+    m[0] = "z"
+    println(headMap)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[0, 1, 2], [7, 3, 2, 1, 0], [0, 1, 2, 3, 7]]\njava.lang.IllegalArgumentException: key out of range\n{0=z, 1=a}\n',
+  });
+});
+
 test('removes elements of sorted sets by their order after their hash codes change', () => {
   const source = `data class P(val name: String, var score: Int)
 fun main() {
