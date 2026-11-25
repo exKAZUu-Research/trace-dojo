@@ -113,8 +113,8 @@ function readPlainArithmeticChunk(raw: string, i: number): { chunk: string; next
   const c = raw[i];
   if (c === "'") {
     const close = raw.indexOf("'", i + 1);
-    const end = close === -1 ? raw.length : close + 1;
-    return { chunk: unescapeArithmeticSingleQuoted(raw.slice(i, end)), next: end };
+    if (close === -1) return { chunk: raw.slice(i), next: raw.length };
+    return { chunk: `'${unescapeArithmeticSingleQuoted(raw.slice(i + 1, close))}'`, next: close + 1 };
   }
   const next = raw[i + 1];
   if (c === '\\' && next !== undefined) {
@@ -123,15 +123,29 @@ function readPlainArithmeticChunk(raw: string, i: number): { chunk: string; next
   return { chunk: c, next: i + 1 };
 }
 
-function unescapeArithmeticSingleQuoted(slice: string): string {
-  if (!slice.includes('\\') && !slice.includes('"')) return slice;
+function unescapeArithmeticSingleQuoted(inner: string): string {
+  if (!inner.includes('\\') && !inner.includes('"')) return inner;
   let out = '';
-  for (let i = 0; i < slice.length; i++) {
-    const c = slice[i];
-    if (c === '\\' && i + 1 < slice.length) out += unescapeArithmeticEscape(slice[++i]);
-    else if (c !== '"') out += c;
+  for (let i = 0; i < inner.length;) {
+    let end = i;
+    while (inner[end] === '\\') end++;
+    const step = formatSingleQuotedBackslashRun(end - i, inner[end]);
+    out += step.text;
+    i = end + step.consumed;
   }
   return out;
+}
+
+function formatSingleQuotedBackslashRun(runLen: number, after: string | undefined): { text: string; consumed: number } {
+  if (after === '$' || after === '`') return { text: `${'\\'.repeat(runLen)}${after}`, consumed: 1 };
+  const pairs = '\\'.repeat(Math.floor(runLen / 2));
+  if (runLen % 2 === 1) {
+    if (after === undefined) return { text: `${pairs}\\`, consumed: 0 };
+    const tail = after === '"' || after === '\n' ? after : `\\${after}`;
+    return { text: `${pairs}${tail}`, consumed: 1 };
+  }
+  if (after === undefined) return { text: pairs, consumed: 0 };
+  return { text: after === '"' ? pairs : `${pairs}${after}`, consumed: 1 };
 }
 
 function unescapeArithmeticEscape(next: string): string {
