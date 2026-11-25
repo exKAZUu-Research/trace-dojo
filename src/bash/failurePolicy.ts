@@ -68,12 +68,15 @@ export class FailurePolicy {
       case 'declarationGlobalCompound': {
         throw new DiscardSignal(1);
       }
+      case 'declarationLocalCompound': {
+        if (failure.reason === 'badSubscript') throw new DiscardSignal(1);
+        return false;
+      }
       case 'commandPrefix':
       case 'arithmeticCommand':
       case 'letBuiltin':
       case 'conditional':
       case 'forHeader':
-      case 'declarationLocalCompound':
       case 'declarationOperand':
       case 'regularBuiltin': {
         return false;

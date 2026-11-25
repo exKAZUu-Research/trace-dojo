@@ -1045,7 +1045,8 @@ export class VariableStore {
       const item = unpackIndexedElement(rawElement);
       const index = item.key === undefined ? next : hooks.evalIndex(cell.name, item.key);
       if (index === undefined) {
-        return { ok: false, reason: 'badSubscript', message: `${label}[${item.key ?? ''}]: bad array subscript` };
+        const shown = item.rawText ?? `[${item.key ?? ''}]${item.append ? '+=' : '='}${item.value}`;
+        return { ok: false, reason: 'badSubscript', message: `${shown}: bad array subscript` };
       }
       const prep = this.prepareConvertedString(
         cell,
