@@ -1103,6 +1103,13 @@ class _SuspendState {
   void _awaitUserDefinedFuture(Future future) {
     future.then((value) => _thenCallback!(value), onError: _errorCallback);
   }
+  // The VM's _awaitWithTypeCheck for a value that is not a Future<T>, even a future.
+  void _awaitNotFutureOfType(Object? object) {
+    if (_thenCallback == null) {
+      _createAsyncCallbacks();
+    }
+    _awaitNotFuture(object);
+  }
   void _await(Object? object) {
     if (_thenCallback == null) {
       _createAsyncCallbacks();

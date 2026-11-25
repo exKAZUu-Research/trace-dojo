@@ -182,7 +182,7 @@ export function futureValueType(type: DartType): DartType {
   const value = futureOrValue(base);
   if (value) return value;
   if (base.kind === 'void' || base.kind === 'dynamic') return base;
-  if (isObject(base) || isTop(type)) return type;
+  if (isObject(base) || isTop(type)) return objectType(true);
   return DYNAMIC;
 }
 

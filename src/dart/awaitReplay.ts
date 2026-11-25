@@ -8,7 +8,11 @@ import { Cell, IteratedMemo, type Value } from './values';
  * resumed with the value it completes with or thrown into with its error.
  */
 export class AwaitRequest {
-  constructor(readonly value: Value) {}
+  constructor(
+    readonly value: Value,
+    /** Whether the value, even a future, is the awaited value itself, as the VM's `_awaitNotFuture` takes it. */
+    readonly isNotFuture = false
+  ) {}
 }
 
 /**
@@ -32,7 +36,8 @@ export class AwaitSuspension {
     readonly slot: number,
     readonly value: Value,
     /** The iteration of the collection `for` elements the `await` is in, whose value its slot keeps apart. */
-    readonly key: string | undefined
+    readonly key: string | undefined,
+    readonly isNotFuture: boolean
   ) {}
 }
 
@@ -149,7 +154,7 @@ export function* evaluateResuming<T>(
         return run();
       } catch (error) {
         if (!(error instanceof AwaitSuspension)) throw error;
-        writeMemo(frame, error.slot, error.key, yield* awaitOutcome(error.value));
+        writeMemo(frame, error.slot, error.key, yield* awaitOutcome(new AwaitRequest(error.value, error.isNotFuture)));
       }
     }
   } finally {
@@ -157,9 +162,9 @@ export function* evaluateResuming<T>(
   }
 }
 
-function* awaitOutcome(value: Value): Generator<AwaitRequest, Cell, Value> {
+function* awaitOutcome(request: AwaitRequest): Generator<AwaitRequest, Cell, Value> {
   try {
-    return new Cell(yield new AwaitRequest(value));
+    return new Cell(yield request);
   } catch (error) {
     if (error instanceof DartThrow) return new AwaitedError(error);
     throw error;

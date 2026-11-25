@@ -86,7 +86,7 @@ function asyncMember(name: string): string {
 
 /** What a body that stopped running asks for: to wait, to add to its stream, or to end its future or stream. */
 type Outcome =
-  | { kind: 'await'; value: Value }
+  | { kind: 'await'; value: Value; isNotFuture: boolean }
   | { kind: 'yield'; value: Value }
   | { kind: 'yieldEach'; stream: Value }
   | { kind: 'return'; value: Value }
@@ -110,7 +110,7 @@ function advance(state: SuspendedBody, resumption: Resumption): Outcome {
     return { kind: 'return', value: completion?.kind === 'return' ? completion.value : undefined };
   }
   const request = result.value;
-  if (request instanceof AwaitRequest) return { kind: 'await', value: request.value };
+  if (request instanceof AwaitRequest) return { kind: 'await', value: request.value, isNotFuture: request.isNotFuture };
   if (request instanceof YieldEachRequest) return { kind: 'yieldEach', stream: request.stream };
   return { kind: 'yield', value: request as Value };
 }
@@ -139,7 +139,7 @@ function perform(
     }
     case 'await': {
       state.hasSuspended = true;
-      call('_await', outcome.value);
+      call(outcome.isNotFuture ? '_awaitNotFutureOfType' : '_await', outcome.value);
       return undefined;
     }
     default: {

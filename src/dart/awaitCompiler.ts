@@ -12,7 +12,7 @@ import {
 import type { LoopProgress, ProgressMemo } from './collectionLoops';
 import { type Compiled, CompilerBase } from './compilerBase';
 import type { Frame } from './runtime';
-import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isTop } from './types';
+import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype, isTop } from './types';
 import { Cell, type Value } from './values';
 
 /**
@@ -89,23 +89,36 @@ export abstract class AwaitCompiler extends CompilerBase {
         : undefined;
     const operand = this.compileExpression(expression.value, operandContext);
     if (operand.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
-    const awaited = this.awaiting(root, expression);
+    const type = flatten(operand.type);
+    // The VM awaits a future whose static type is not a Future only when it is a Future<flatten(T)>, as its
+    // `_awaitWithTypeCheck` checks, so that `await t` with `T t` keeps a Future that T stands for.
+    const awaitedType = isSubtype(operand.type, interfaceType(coreTypes.future, [DYNAMIC]))
+      ? undefined
+      : this.runtimeType(interfaceType(coreTypes.future, [type]));
+    const awaited = this.awaiting(root, expression, awaitedType);
     const { run } = operand;
-    return { type: flatten(operand.type), run: (frame) => awaited(frame, () => run(frame)), isConst: false };
+    return { type, run: (frame) => awaited(frame, () => run(frame)), isConst: false };
   }
 
   /**
    * Waits for a value inside a statement that awaits: suspends the statement with the future `compute` gives, and
    * once the statement runs again gives what the future completed with, or throws its error.
    */
-  protected awaiting(root: AwaitRoot, key: object): (frame: Frame, compute: () => Value) => Value {
+  protected awaiting(
+    root: AwaitRoot,
+    key: object,
+    awaitedType?: (frame: Frame) => DartType
+  ): (frame: Frame, compute: () => Value) => Value {
     const slot = this.awaitSlot(root, key);
     const iterated = root.iterated.has(slot);
     return (frame, compute) => {
       const cell = readMemo(frame, slot, iterated);
       if (cell instanceof AwaitedError) throw cell.error;
       if (cell) return cell.v;
-      throw new AwaitSuspension(slot, compute(), iterated ? iterationKey(frame) : undefined);
+      const value = compute();
+      const { runtime } = frame;
+      const isNotFuture = awaitedType !== undefined && !runtime.links.isValueOf(runtime, value, awaitedType(frame));
+      throw new AwaitSuspension(slot, value, iterated ? iterationKey(frame) : undefined, isNotFuture);
     };
   }
 
