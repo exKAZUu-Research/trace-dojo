@@ -749,7 +749,7 @@ export class Shell implements ArithmeticHost {
     }
     return resolveSubscriptTarget(this, {
       name,
-      subscript: { kind: 'text', text: rawSubscript, preExpanded: !expandSubscript },
+      subscript: expandSubscript ? { kind: 'text', text: rawSubscript } : { kind: 'arithmetic', text: rawSubscript },
       operation: willRead ? 'arithmeticRead' : 'arithmeticWrite',
     });
   }

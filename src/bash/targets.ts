@@ -48,7 +48,9 @@ export type ResolvedTarget =
 
 export type SubscriptInput =
   | { readonly kind: 'word'; readonly word: Word; readonly unquoteAnsiC?: boolean }
-  | { readonly kind: 'text'; readonly text: string; readonly preExpanded?: boolean };
+  | { readonly kind: 'evaluated'; readonly text: string }
+  | { readonly kind: 'arithmetic'; readonly text: string }
+  | { readonly kind: 'text'; readonly text: string };
 
 export type TargetOperation = 'read' | 'write' | 'unset' | 'testSet' | 'arithmeticRead' | 'arithmeticWrite';
 
@@ -270,14 +272,15 @@ function rawSubscriptText(input: SubscriptInput): string {
 
 function expandAssociativeSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandAssociativeKey(input.word);
-  if (input.preExpanded) return unquoteArithmeticAssociativeKey(input.text);
+  if (input.kind === 'evaluated') return input.text;
+  if (input.kind === 'arithmetic') return unquoteArithmeticAssociativeKey(input.text);
   rejectDynamicSubscriptSyntax(input.text);
   return input.text;
 }
 
 function expandIndexedSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandSubscriptString(input.word, Boolean(input.unquoteAnsiC));
-  if (input.preExpanded) return input.text;
+  if (input.kind === 'evaluated' || input.kind === 'arithmetic') return input.text;
   rejectDynamicSubscriptSyntax(input.text);
   return input.text;
 }

@@ -482,9 +482,11 @@ export class Expander {
       this.shell.reportError(`${name}: bad array subscript`);
       return { kind: 'scalar', value: undefined };
     }
+    const subText = subscript.text === '' ? '0' : subscript.text;
     const target = resolveSubscriptTarget(this.shell, {
       name,
-      subscript: { kind: 'text', text: subscript.text === '' ? '0' : subscript.text, preExpanded: true },
+      subscript:
+        subscript.indirect === undefined ? { kind: 'evaluated', text: subText } : { kind: 'text', text: subText },
       operation: 'read',
     });
     if (target.kind === 'invalid') {
