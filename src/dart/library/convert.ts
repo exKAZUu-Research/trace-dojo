@@ -285,7 +285,8 @@ class _Utf8ChunkSink implements EventSink<List<int>> {
     while (start >= 0 && start > end - 4 && (bytes[start] & 0xC0) == 0x80) start--;
     if (start >= 0) {
       var lead = bytes[start];
-      var length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+      // Only a byte that can begin a character, C2 to F4, waits for the rest of it.
+      var length = lead < 0xC2 || lead > 0xF4 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
       if (start + length > end) end = start;
     }
     _pending = bytes.sublist(end);

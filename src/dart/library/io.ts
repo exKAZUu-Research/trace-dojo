@@ -26,7 +26,8 @@ class _Utf8Bytes {
     for (var back = 1; back <= 3 && back <= bytes.length; back++) {
       final byte = bytes[bytes.length - back];
       if (byte & 0xC0 != 0x80) {
-        final length = byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : byte >= 0xC0 ? 2 : 1;
+        // Only a byte that can begin a character, C2 to F4, waits for the rest of it.
+        final length = byte < 0xC2 || byte > 0xF4 ? 1 : byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : 2;
         if (length > back) end = bytes.length - back;
         break;
       }
