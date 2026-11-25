@@ -72,7 +72,6 @@ import {
   UNDEFINED_TYPE,
   type UnionType,
   USIZE,
-  vectorOf,
   VOID,
 } from './types';
 import { decodeUtf8 } from './utf8';
@@ -1584,10 +1583,11 @@ export abstract class SemaBase implements SemaApi {
       return child ? optionalOf(child) : undefined;
     }
     if (a.kind === 'error_set' && b.kind === 'error_set') return mergeErrorSets(a, b);
-    // Vectors of one length resolve their elements as scalars do.
+    // Vectors of one length resolve to the one whose elements the other's widen to, without the known values that
+    // let scalars of other signedness meet.
     if (isVectorType(a) && isVectorType(b) && a.length === b.length) {
-      const child = this.peerPair(a.child, b.child, []);
-      return child && vectorOf(a.length, child);
+      if (widensTo(a.child, b.child)) return b;
+      return widensTo(b.child, a.child) ? a : undefined;
     }
     if (a.kind === 'error_union' || b.kind === 'error_union' || a.kind === 'error_set' || b.kind === 'error_set') {
       const setA = a.kind === 'error_union' ? a.errorSet : a.kind === 'error_set' ? a : undefined;
@@ -1752,6 +1752,13 @@ export function errorSetIncludes(set: ErrorSetType, subset: ErrorSetType): boole
   if (set.names === undefined) return true;
   if (subset.names === undefined) return false;
   return [...subset.names].every((name) => set.names?.has(name));
+}
+
+/** Whether every value of a number type is one of another, which a runtime value then coerces to. */
+function widensTo(from: Type, to: Type): boolean {
+  if (from.kind === 'int' && to.kind === 'int')
+    return from.signed === to.signed ? to.bits >= from.bits : !from.signed && to.bits > from.bits;
+  return from.kind === 'float' && to.kind === 'float' && to.bits >= from.bits;
 }
 
 export function mergeErrorSets(a: ErrorSetType, b: ErrorSetType): ErrorSetType {
