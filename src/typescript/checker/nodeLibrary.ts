@@ -1,6 +1,7 @@
 // Declarations of the Node.js features this interpreter runs, as @types/node declares them, which a program reads
 // standard input and files with. Derived from DefinitelyTyped's @types/node 26.6.7 (MIT License), whose other members of
-// `process`, its streams, and `fs` are declared too, only so that a program using one is told it is unavailable.
+// `process`, its streams, and `fs` are declared too, only so that a program using one is told it is unavailable. Data
+// written is a string only, as typed arrays are unavailable here.
 /** The members of @types/node's `process` other than those declared with their types. */
 const UNAVAILABLE_PROCESS_MEMBERS = [
   'abort',
@@ -312,7 +313,7 @@ interface Buffer extends Uint8Array {
 declare var Buffer: any;
 declare namespace NodeJS {
     interface WritableStream {
-        write(buffer: Uint8Array | string, cb?: (err?: Error | null) => void): boolean;
+        write(buffer: string, cb?: (err?: Error | null) => void): boolean;
         write(str: string, encoding?: BufferEncoding, cb?: (err?: Error | null) => void): boolean;
     }
     interface WriteStream extends WritableStream {
@@ -351,8 +352,8 @@ ${['fs', 'node:fs'].map((name) => `declare module "${name}" {
     function readFileSync(path: PathOrFileDescriptor, options?: { encoding?: null | undefined; flag?: string | undefined } | null): Buffer;
     function readFileSync(path: PathOrFileDescriptor, options: { encoding: BufferEncoding; flag?: string | undefined } | BufferEncoding): string;
     function readFileSync(path: PathOrFileDescriptor, options?: (ObjectEncodingOptions & { flag?: string | undefined }) | BufferEncoding | null): string | Buffer;
-    function writeFileSync(file: PathOrFileDescriptor, data: string | ArrayBufferView, options?: WriteFileOptions): void;
-    function appendFileSync(path: PathOrFileDescriptor, data: string | Uint8Array, options?: WriteFileOptions): void;
+    function writeFileSync(file: PathOrFileDescriptor, data: string, options?: WriteFileOptions): void;
+    function appendFileSync(path: PathOrFileDescriptor, data: string, options?: WriteFileOptions): void;
     function existsSync(path: PathLike): boolean;
     function mkdirSync(path: PathLike, options: MakeDirectoryOptions & { recursive: true }): string | undefined;
     function mkdirSync(path: PathLike, options?: Mode | (MakeDirectoryOptions & { recursive?: false | undefined }) | null): void;
@@ -365,6 +366,6 @@ ${['fs', 'node:fs'].map((name) => `declare module "${name}" {
     function unlinkSync(path: PathLike): void;
     function rmdirSync(path: PathLike): void;
     function renameSync(oldPath: PathLike, newPath: PathLike): void;
-${[...UNAVAILABLE_FS_MEMBERS].map((member) => `    function ${member}(...args: any[]): any;`).join('\n')}
+${[...UNAVAILABLE_FS_MEMBERS].map((member) => `    function ${member}(...args: any[]): any;${/^[A-Z]/.test(member) ? ` type ${member} = any;` : ''}`).join('\n')}
 }`).join('\n')}
 `;
