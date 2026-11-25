@@ -6531,6 +6531,49 @@ test('reads regex groups by name, as Kotlin/JVM does', () => {
   });
 });
 
+/**
+ * The forms a call takes, each of which chooses its receivers, its target, and whether it suspends on its own path:
+ * the declarations, with `S` where `suspend` goes, and a call of them that gives 42.
+ */
+const CALL_FORMS: [string, string, string][] = [
+  ['a function', 'S fun f(x: Int): Int = x + 1', 'f(41)'],
+  ['a member', 'class C { S fun f(x: Int): Int = x + 1 }', 'C().f(41)'],
+  ['a member extension', 'class C { S fun Int.f(): Int = this + 1 }', 'with(C()) { 41.f() }'],
+  [
+    'a member through super',
+    'open class A { open S fun f(x: Int): Int = x }\nclass B : A() { override S fun f(x: Int): Int = super.f(x) + 1 }',
+    'B().f(41)',
+  ],
+  [
+    'a member extension through super',
+    'open class A { open S fun Int.f(): Int = this }\nclass B : A() { override S fun Int.f(): Int = super.f() + 1 }',
+    'with(B()) { 41.f() }',
+  ],
+  ['an invoke operator', 'class C { S operator fun invoke(x: Int): Int = x + 1 }', 'C().let { c -> c(41) }'],
+  ['an extension invoke operator', 'class C\nS operator fun C.invoke(x: Int): Int = x + 1', 'C().let { c -> c(41) }'],
+];
+
+test.each(
+  CALL_FORMS.flatMap(([form, declarations, call]) =>
+    ['', 'suspend '].flatMap((modifier) =>
+      [false, true].map((isLocal) => [form, modifier, isLocal, declarations.replaceAll('S ', modifier), call] as const)
+    )
+  )
+)('calls %s %sdeclared locally: %s', (_form, modifier, isLocal, declarations, call) => {
+  const source = isLocal
+    ? `${modifier}fun main() {
+    var g: ${modifier}() -> Int = { 0 }
+    run {
+        ${declarations.replaceAll('\n', '\n        ')}
+        g = { ${call} }
+    }
+    println(g())
+}`
+    : `${declarations}
+${modifier}fun main() { println(${call}) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '42\n' });
+});
+
 test('calls suspend functions and member extensions through super', () => {
   const source = `open class A {
     open suspend fun f(x: Int): Int = x

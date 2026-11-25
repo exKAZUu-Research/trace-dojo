@@ -834,8 +834,13 @@ export abstract class SuspendCompiler extends LocalCompiler {
     if (variable?.suspendInvocable) return true;
     if (variable) {
       const type = resolved(variable.type);
-      return type.kind === 'function' && type.isSuspend === true;
+      if (type.kind === 'function') return type.isSuspend === true;
+      // A value of a class is called through its `invoke` operator, as `c(41)` calls `c.invoke(41)`.
+      return type.kind === 'class' && this.suspendFunctionNames.has('invoke');
     }
+    // A name that no variable in scope has may still be a lambda's parameter, which is typed only when the lambda is
+    // compiled: with a suspend `invoke` declared, calling it may suspend, and running it as a step is always correct.
+    if (callee.kind === 'name' && this.suspendFunctionNames.has('invoke')) return true;
     return this.suspendFunctionNames.has(name);
   }
 
