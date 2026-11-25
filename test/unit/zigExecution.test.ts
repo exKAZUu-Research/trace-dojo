@@ -6650,7 +6650,7 @@ test('shared nested layouts reach storage limits without expanding the type grap
 });
 
 test('shared packed and ordinary nested layouts preserve allocator byte offsets', () => {
-  const source = `const std=@import("std");const A=packed struct{x:u3,y:u5};const B=extern struct{a:A,b:A};const C=extern struct{a:B,b:B};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(C);p.*=.{.a=.{.a=.{.x=1,.y=2},.b=.{.x=3,.y=4}},.b=.{.a=.{.x=5,.y=6},.b=.{.x=7,.y=8}}};std.debug.print("{} {} {} {}",.{buf[0],buf[1],buf[2],buf[3]});}`;
+  const source = `const std=@import("std");const A=packed struct(u8){x:u3,y:u5};const B=extern struct{a:A,b:A};const C=extern struct{a:B,b:B};pub fn main()!void{var buf:[16]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const p=try f.allocator().create(C);p.*=.{.a=.{.a=.{.x=1,.y=2},.b=.{.x=3,.y=4}},.b=.{.a=.{.x=5,.y=6},.b=.{.x=7,.y=8}}};std.debug.print("{} {} {} {}",.{buf[0],buf[1],buf[2],buf[3]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '17 35 53 71',

@@ -13,6 +13,7 @@ import type {
   Span,
 } from './ast';
 import { unionTagValue } from './bufferMemory';
+import { externFieldType } from './cAbi';
 import { markRuntimeStorage } from './comptimeMemory';
 import { enumLookup } from './enumLookup';
 import { decodeFloat } from './floatEncoding';
@@ -746,11 +747,13 @@ export abstract class SemaBase implements SemaApi {
     else if (type.kind === 'error_union') this.resolveLayout(type.payload, span, seen);
     else if (type.kind === 'enum') this.enumFields(type);
     else if (type.kind === 'struct') {
-      for (const field of this.structFields(type, span)) {
+      const fields = this.structFields(type, span);
+      for (const field of fields) {
         this.spendCompilation();
         this.resolveLayout(field.type, span, seen);
       }
       this.checkPackedStructBacking(type);
+      if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     } else if (type.kind === 'union') {
       const fields = this.unionFields(type);
       for (const field of fields) {
@@ -758,10 +761,27 @@ export abstract class SemaBase implements SemaApi {
         this.resolveLayout(field.type, span, seen);
       }
       if (type.layout === 'packed') this.checkPackedUnion(fields, span);
+      if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     }
     if (this.resolvingFields === 0 && this.resolvingUnionFields === 0) {
       resolveTypeLayout(type, () => this.spendCompilation());
       resolveTypeSlots(type, () => this.spendCompilation());
+    }
+  }
+
+  /** Refuses a field of an extern struct or union whose type C cannot lay out, at the field's declaration. */
+  private checkExternFields(
+    type: Extract<Type, { kind: 'struct' | 'union' }>,
+    fields: readonly { type: Type }[],
+    span: Span
+  ): void {
+    const declared = type.namespace.syntax?.fields;
+    for (const [index, field] of fields.entries()) {
+      if (!externFieldType(field.type))
+        this.error(
+          declared?.[index] ?? span,
+          `extern ${type.kind} には、${typeName(field.type)} 型のフィールドは書けません。`
+        );
     }
   }
 
