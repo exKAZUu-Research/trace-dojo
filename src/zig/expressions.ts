@@ -604,8 +604,13 @@ export abstract class ExpressionCompiler extends SemaBase {
       (parent) => new Pointer(parent.load() as ZStruct, index)
     );
     const parent = this.knownAddress(base);
-    if (parent) return knownAt(field.type, project(parent), span);
-    const fieldPlace = this.projectedPlace(base, field.type, project);
+    // A pointer to a field carries the alignment that `align(n)` gives the field.
+    const { alignment } = field;
+    if (parent) {
+      const atField = knownAt(field.type, project(parent), span);
+      return alignment === undefined ? atField : { ...atField, place: { ...(atField.place as Place), alignment } };
+    }
+    const fieldPlace = this.projectedPlace(base, field.type, project, alignment);
     const facts = fieldFacts(valueFactsOf(base), index);
     const result = facts?.exact
       ? this.fixedResult(base, field.type, facts.exact.value, span)
@@ -707,13 +712,19 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
   }
 
-  private projectedPlace(base: TExpr, child: Type, project: (parent: Pointer) => Pointer): Place | undefined {
+  private projectedPlace(
+    base: TExpr,
+    child: Type,
+    project: (parent: Pointer) => Pointer,
+    alignment?: number
+  ): Place | undefined {
     const place = base.place;
     if (!place) return undefined;
     const stable = base.type.kind !== 'union' || staticResultOf(base) !== undefined;
-    const addressType = pointerTo(child, place.isConst);
+    const addressType = pointerOf('one', child, { isConst: place.isConst, alignment });
     return {
       isConst: place.isConst,
+      alignment,
       locate: (frame) => project(place.locate(frame)),
       compileTimePointer: stable && place.compileTimePointer ? project(place.compileTimePointer) : undefined,
       address: () => {
