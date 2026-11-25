@@ -62,7 +62,13 @@ export function pruneKind(kind: Kind): Kind {
 
 /** Replaces the kind variables nothing determined with `*`, as Haskell 98 defaults them. */
 export function defaultKind(kind: Kind): Kind {
+  return defaultKindExcept(kind, new Set());
+}
+
+/** Defaults the kind variables of a kind as {@link defaultKind} does, but those in `keep`. */
+export function defaultKindExcept(kind: Kind, keep: ReadonlySet<Kind>): Kind {
   return mapGraph<Kind>(kind, pruneKind, kindChildren, (node, mapped) => {
+    if (node.tag === 'kvar' && keep.has(node)) return node;
     if (node.tag === 'kvar') {
       node.ref = STAR;
       return STAR;

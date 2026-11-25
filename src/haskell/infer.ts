@@ -46,6 +46,7 @@ import { walkGraph } from './typeGraph';
 import {
   couldMatch,
   defaultKind,
+  defaultKindExcept,
   freshKindVar,
   freshSkolem,
   freshTypeVar,
@@ -605,7 +606,17 @@ export class Checker {
       type = inner.body;
     }
     const required = sig.forall?.flatMap((binder, index) => (binder.required ? [index] : []));
-    const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified, required };
+    // A kind variable the signature names (`k` in `forall k (a :: k).`) stays a variable of the scheme's kinds, which
+    // each use instantiates afresh; other unknown kinds default to Type.
+    const named = new Set([...kindVars.values()].map(pruneKind));
+    const scheme = {
+      kinds: kinds.map((kind) => defaultKindExcept(kind, named)),
+      names,
+      preds,
+      type,
+      specified,
+      required,
+    };
     if (!this.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
   }
