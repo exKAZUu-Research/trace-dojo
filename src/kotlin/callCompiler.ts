@@ -1246,6 +1246,9 @@ export abstract class CallCompiler extends CompilerCore {
   ): void {
     this.requireMemberOptIn(member, row);
     const { owner, visibility } = member;
+    // The library's internal members are the prelude's helpers, which programs, another module, cannot see.
+    if (owner && visibility === 'internal' && member.isLibrary && !this.file.isLibrary)
+      this.error(row, `${member.name} は internal なので、${owner.name} のモジュールの外からは使えません。`);
     if (!owner || visibility === 'public' || visibility === 'internal') return;
     const classes = this.enclosingClasses(scope);
     if (visibility === 'private') {
