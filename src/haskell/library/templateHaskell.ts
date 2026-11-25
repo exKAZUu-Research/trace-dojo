@@ -281,6 +281,42 @@ data Role = NominalR | RepresentationalR | PhantomR | InferR deriving (Eq, Ord, 
 
 newtype Q a = Q { unQ :: IO a }
 
+type ExpQ = Q Exp
+type PatQ = Q Pat
+type TypeQ = Q Type
+type KindQ = Q Kind
+type DecQ = Q Dec
+type DecsQ = Q [Dec]
+type MatchQ = Q Match
+type ClauseQ = Q Clause
+type BodyQ = Q Body
+type GuardQ = Q Guard
+type StmtQ = Q Stmt
+type RangeQ = Q Range
+type ConQ = Q Con
+type CxtQ = Q Cxt
+type PredQ = Q Pred
+type BangQ = Q Bang
+type BangTypeQ = Q BangType
+type VarBangTypeQ = Q VarBangType
+type StrictType = BangType
+type VarStrictType = VarBangType
+type StrictTypeQ = Q StrictType
+type VarStrictTypeQ = Q VarStrictType
+type FieldExpQ = Q FieldExp
+type FieldPatQ = Q FieldPat
+type DerivClauseQ = Q DerivClause
+type DerivStrategyQ = Q DerivStrategy
+type TyLitQ = Q TyLit
+type InfoQ = Q Info
+type SourceStrictnessQ = Q SourceStrictness
+type SourceUnpackednessQ = Q SourceUnpackedness
+type TExpQ a = Q (TExp a)
+type CodeQ = Code Q
+type TyVarBndrUnit = TyVarBndr ()
+type TyVarBndrSpec = TyVarBndr Specificity
+type TyVarBndrVis = TyVarBndr BndrVis
+
 -- In IO, a Q computation's fail reports its message and fails as GHC's Quasi IO does; in a splice, it fails the
 -- splice with its message alone.
 runQ :: Q a -> IO a
