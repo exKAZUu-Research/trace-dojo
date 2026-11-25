@@ -116,7 +116,6 @@ export function resolveScalarTarget(
 /**
  * Resolves a subscripted variable target once across assignments, arithmetic, expansions, builtins, and tests.
  */
-// code-gauge-allow functionCognitiveComplexity -- Unifies nameref traversal, capability gating, whole-array markers, associative keys, and single-evaluated indexed subscripts.
 export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOptions): ResolvedTarget | undefined {
   const { name, subscript, operation } = opts;
   const intent = opts.intent ?? 'visible';
@@ -146,7 +145,7 @@ export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOption
   }
   if (forMutation) rejectSpecialVariableMutation(resolved, false);
   const isAssoc = shell.store.isAssociativeName(resolved);
-  if ((rawSubText === '@' || rawSubText === '*') && !(operation === 'unset' && isAssoc)) {
+  if (!isAssoc && (rawSubText === '@' || rawSubText === '*')) {
     return resolveWholeArraySubscript(shell, name, resolved, rawSubText, operation);
   }
   if (isAssoc) return resolveAssociativeSubscript(shell, opts, resolved, rawSubText, forWrite);
