@@ -6,7 +6,7 @@ export function upperCase(text: string): string {
 
 export function lowerCase(text: string): string {
   return charactersOf(text)
-    .map((c) => mapCase(c, c.toLowerCase()))
+    .map((c) => (c === '\u0130' ? 'i' : mapCase(c, c.toLowerCase())))
     .join('');
 }
 
