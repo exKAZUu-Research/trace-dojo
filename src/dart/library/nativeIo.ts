@@ -89,11 +89,19 @@ define('_File._read', (runtime, _self, [path, failure]) =>
   withFileErrors(runtime, failure as string, () => runtime.io.files.readFile(stringArg(runtime, path, 'path')))
 );
 
-define('_File._write', (runtime, _self, [path, contents, append]) => {
-  withFileErrors(runtime, 'Cannot open file', () =>
-    runtime.io.files
-      .open(stringArg(runtime, path, 'path'), { create: 'always', truncate: append !== true, append: append === true })
-      .write(contents as string)
+define('_File._write', (runtime, _self, [path, contents, append, failure, shownPath]) => {
+  withFileErrors(
+    runtime,
+    failure as string,
+    () =>
+      runtime.io.files
+        .open(stringArg(runtime, path, 'path'), {
+          create: 'always',
+          truncate: append !== true,
+          append: append === true,
+        })
+        .write(contents as string),
+    shownPath as string | undefined
   );
   return;
 });

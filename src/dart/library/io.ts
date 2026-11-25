@@ -295,7 +295,8 @@ class _File extends FileSystemEntity implements File {
         return this;
       });
   File copySync(String newPath) {
-    _write(newPath, _read(path, "Cannot copy file to '" + newPath + "'"), false, "Cannot copy file to '" + newPath + "'");
+    final failure = "Cannot copy file to '" + newPath + "'";
+    _write(newPath, _read(path, failure), false, failure, path);
     return File(newPath);
   }
   Future<File> copy(String newPath) => Future(() => copySync(newPath));
@@ -332,7 +333,7 @@ class _File extends FileSystemEntity implements File {
   Stream<List<int>> openRead([int? start, int? end]) =>
       Stream<List<int>>.fromFuture(Future(() => readAsBytesSync().sublist(start ?? 0, end)));
   external static String _read(String path, String failure);
-  external static void _write(String path, String contents, bool append, String failure);
+  external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
   external static void _create(String path, bool recursive, bool exclusive);
 }
 
