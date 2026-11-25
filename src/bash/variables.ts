@@ -568,6 +568,19 @@ export class VariableStore {
     return undefined;
   }
 
+  isArrayName(resolvedName: string): boolean {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell) {
+      return (
+        cell.value?.kind === 'indexed' ||
+        cell.value?.kind === 'associative' ||
+        cell.attributes.has('a') ||
+        cell.attributes.has('A')
+      );
+    }
+    return this.isDynamic(resolvedName) && !SCALAR_DYNAMIC_VARIABLES.has(resolvedName);
+  }
+
   isAssociativeName(resolvedName: string): boolean {
     const cell = this.findOwnCell(resolvedName);
     return cell?.value?.kind === 'associative' || cell?.attributes.has('A') === true;

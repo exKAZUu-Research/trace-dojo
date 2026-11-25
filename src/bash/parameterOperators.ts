@@ -518,6 +518,7 @@ function substring(
   if (value.kind === 'list' && name !== '@' && name !== '*' && value.values.length === 0) {
     return expander.valueSegments({ ...value, values: [] }, ctx);
   }
+  const scalarTarget = value.kind === 'scalar' ? value.value : scalarWholeArrayText(shell, name, value);
   const evaluate = (parts: (string | WordPart)[]): bigint => {
     const expanded = expander.arithmeticTextWithMask({ pieces: parts, row: shell.currentRow }, true);
     return shell.evaluateText(expanded.text, undefined, expanded.quoted);
@@ -525,14 +526,14 @@ function substring(
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
     shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);
-  if (value.kind === 'scalar') {
+  if (value.kind === 'scalar' || scalarTarget !== undefined) {
     const sliced = sliceString(
-      value.value as string,
+      scalarTarget as string,
       offset,
       lengthParts && (() => evaluate(lengthParts)),
       negativeLength
     );
-    return sliced === undefined ? [] : expander.valueSegments({ kind: 'scalar', value: sliced }, ctx);
+    return sliceScalarSegments(expander, value, sliced, ctx);
   }
   const values = sliceList(shell, name, value, offset);
   if (values === undefined) return expander.valueSegments({ ...value, values: [] }, ctx);
@@ -542,6 +543,28 @@ function substring(
     { ...value, values: length === undefined ? values : values.slice(0, Number(length)), transformed: true },
     ctx
   );
+}
+
+function scalarWholeArrayText(
+  shell: Shell,
+  name: string,
+  value: Extract<ParameterValue, { kind: 'list' }>
+): string | undefined {
+  if (name === '@' || name === '*') return undefined;
+  const resolved = resolveTargetName(shell, name, false) ?? name;
+  return shell.store.isArrayName(resolved) ? undefined : value.values[0];
+}
+
+function sliceScalarSegments(
+  expander: Expander,
+  value: ParameterValue,
+  sliced: string | undefined,
+  ctx: WordContext
+): WordSegment[] {
+  if (value.kind === 'scalar') {
+    return sliced === undefined ? [] : expander.valueSegments({ kind: 'scalar', value: sliced }, ctx);
+  }
+  return expander.valueSegments({ ...value, values: sliced === undefined ? [] : [sliced], transformed: true }, ctx);
 }
 
 function sliceString(
@@ -852,14 +875,10 @@ function keyValuePairs(
     return expander.valueSegments({ kind: 'scalar', value: quoteReusable(value.value) }, ctx);
   }
   if (value.values.length === 0) return expander.valueSegments({ ...value, values: [] }, ctx);
-  const view = resolveTransformationView(shell, name);
-  const isArray =
-    view !== undefined &&
-    (view.kind === 'indexed' || view.kind === 'associative' || view.attributes.has('a') || view.attributes.has('A'));
-  if (!isArray) {
+  const resolved = resolveTargetName(shell, name, false) ?? name;
+  if (!shell.store.isArrayName(resolved)) {
     return expander.valueSegments({ ...value, values: value.values.map(quoteReusable) }, ctx);
   }
-  const resolved = resolveTargetName(shell, name, false) ?? name;
   const keys = shell.store.readArrayKeys(resolved);
   if (!quoted) {
     return expander.valueSegments(
