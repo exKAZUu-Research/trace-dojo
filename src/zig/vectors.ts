@@ -61,7 +61,6 @@ export abstract class VectorCompiler extends ReflectionCompiler {
           this.error(expression, `ベクトルの長さが合いません（${vector.length} と ${operand.type.length} です）。`);
         return operand;
       }
-      if (operand.type.kind === 'struct' && operand.type.isTuple) return this.coerce(operand, vector, operand.span);
       return this.error(
         index === 0 || expression.kind === 'unary' ? expression : operand.span,
         `ベクトルとスカラー（${typeName(operand.type)} 型）は混ぜて計算できません（@splat でベクトルにしてください）。`
