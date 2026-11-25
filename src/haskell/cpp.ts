@@ -256,7 +256,7 @@ class Preprocessor {
   }
 
   /** Expands the macros of a piece of code; a macro being expanded is not expanded again inside itself. */
-  private expand(code: string, active: ReadonlySet<string>, condition: boolean): string {
+  private expand(code: string, active: Set<string>, condition: boolean): string {
     let text = code;
     let result = '';
     let index = 0;
@@ -299,7 +299,7 @@ class Preprocessor {
     name: string,
     text: string,
     index: number,
-    active: ReadonlySet<string>,
+    active: Set<string>,
     condition: boolean
   ): { text: string; end: number } {
     if (name === '__LINE__') return { text: String(this.row + 1), end: index };
@@ -307,7 +307,7 @@ class Preprocessor {
     const macro = active.has(name) ? undefined : this.macros.get(name);
     if (!macro && !version) return { text: condition ? '0' : name, end: index };
     if (macro && !macro.params) {
-      return { text: this.expand(macro.body, new Set([...active, name]), condition), end: index };
+      return { text: this.blocking(active, name, () => this.expand(macro.body, active, condition)), end: index };
     }
     const call = /^\s*\(/.exec(text.slice(index));
     if (!call) return { text: name, end: index };
@@ -328,7 +328,17 @@ class Preprocessor {
       const position = params.indexOf(word);
       return position === -1 ? word : expandedArgs[position];
     });
-    return { text: this.expand(body, new Set([...active, name]), condition), end };
+    return { text: this.blocking(active, name, () => this.expand(body, active, condition)), end };
+  }
+
+  /** Expands with a macro blocked, in the one set of the macros being expanded, which nested expansions share. */
+  private blocking(active: Set<string>, name: string, expand: () => string): string {
+    active.add(name);
+    try {
+      return expand();
+    } finally {
+      active.delete(name);
+    }
   }
 
   private minVersion(packageName: string, args: string[]): number {
