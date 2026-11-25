@@ -483,8 +483,7 @@ export class Relations {
         return this.intrinsicTarget(s, t.name, relation);
       }
       case 'literal': {
-        if (s.kind === 'literal') return literalRelated(s, t, relation);
-        return relation === 'comparable' && s.kind === 'intrinsic' && s.name === typeof t.value;
+        return literalTargetRelated(s, t, relation);
       }
       case 'templateLiteral':
       case 'stringMapping': {
@@ -1455,6 +1454,13 @@ function tupleIdentity(tuple: TupleInfo): string {
     return element.optional ? '?' : '!';
   });
   return `tuple:${tuple.readonly}:${shape.join('')}`;
+}
+
+function literalTargetRelated(s: Type, t: LiteralType, relation: Relation): boolean {
+  if (s.kind === 'literal') return literalRelated(s, t, relation);
+  if (s.kind !== 'intrinsic' || s.name !== typeof t.value) return false;
+  // Any number is assignable to a member of a numeric enum, as bit flags combined with `|` are.
+  return relation === 'comparable' || (relation === 'assignable' && t.enumMember !== undefined && s.name === 'number');
 }
 
 /**

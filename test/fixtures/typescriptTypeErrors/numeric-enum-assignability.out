@@ -1,0 +1,4 @@
+(6,5): error TS2322: Type '3' is not assignable to type 'Perm'.
+(9,5): error TS2322: Type '2' is not assignable to type 'Perm.Read'.
+(11,5): error TS2322: Type 'string' is not assignable to type 'S'.
+(14,13): error TS2367: This comparison appears to be unintentional because the types 'Perm' and '5' have no overlap.
