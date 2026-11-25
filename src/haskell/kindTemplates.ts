@@ -5,7 +5,8 @@ import { freshKindVar, type Kind, kindArrow, type KindVar, pruneKind } from './t
 const templates = new WeakMap<object, { kind: Kind; binders: Kind[] }>();
 
 export function rememberKind(owner: object, kind: Kind, binders: readonly Kind[] = []): void {
-  if (freshKind(kind).variables.length === 0) {
+  // A binder the kind never mentions, `forall k. Type -> Type`, still takes a kind argument.
+  if (binders.length === 0 && freshKind(kind).variables.length === 0) {
     templates.delete(owner);
     return;
   }
