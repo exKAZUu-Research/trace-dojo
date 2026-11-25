@@ -1,21 +1,37 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { laterRunningTypes } from './expandos';
 import { type Type, typeCacheKey } from './types';
 
 export class ExpressionTypeCache {
   private readonly silentTypes = new Map<string, Type>();
   private readonly silentEnvironments = new Map<string, number>();
+  private readonly yieldingNodes = new Map<number, boolean>();
 
   constructor(private readonly c: Checker) {}
 
   check(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean, compute: () => Type): Type {
+    // Checking a `yield` records its type on the generator, which a cached type would skip.
+    if (this.yields(node)) return compute();
     const key = this.key(node, contextual, retainFreshBoolean);
     const cached = this.silentTypes.get(key);
     if (cached) return cached;
     const type = compute();
     if (key === this.key(node, contextual, retainFreshBoolean)) this.silentTypes.set(key, type);
     return type;
+  }
+
+  /** Whether an expression yields from the generator it is in, not only from a function it contains. */
+  private yields(node: TreeNode): boolean {
+    let yields = this.yieldingNodes.get(node.id);
+    if (yields === undefined) {
+      yields =
+        node.type === 'yield_expression' ||
+        node.namedChildren.some((child) => !laterRunningTypes.has(child.type) && this.yields(child));
+      this.yieldingNodes.set(node.id, yields);
+    }
+    return yields;
   }
 
   private key(node: TreeNode, contextual: Type | undefined, retainFreshBoolean: boolean): string {

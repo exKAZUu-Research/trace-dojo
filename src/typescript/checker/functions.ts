@@ -608,7 +608,8 @@ export class FunctionChecker {
     if (!generator) return anyType;
     const yielded = this.yieldedType(operand, operandType, delegated, isAsync);
     generator.yieldTypes.push(yielded);
-    if (generator.yieldType && yielded !== errorType)
+    // A contextual yield type only types the operand: the generator is checked against it as a whole, as tsc does.
+    if (generator.annotation && generator.yieldType && yielded !== errorType)
       this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
     if (delegated) return this.iterationTypesOf(operandType, isAsync)?.returnType ?? anyType;
     if (generator.nextType) return generator.nextType;
