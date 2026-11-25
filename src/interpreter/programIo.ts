@@ -234,6 +234,11 @@ export class FileHandle {
     this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
   }
+
+  /** Moves the next write to the current end of the file, as opening a file to append and writing at it does. */
+  seekToEnd(): void {
+    this.position = this.node.content.length;
+  }
 }
 
 type FileSystemNode = FileNode | DirectoryNode;

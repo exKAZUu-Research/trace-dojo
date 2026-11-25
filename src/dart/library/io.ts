@@ -347,7 +347,6 @@ class _File extends FileSystemEntity implements File {
       })).where((bytes) => bytes.isNotEmpty);
   external static String _read(String path, String failure);
   external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
-  external static void _writeAt(String path, int position, String contents);
   external static void _create(String path, bool recursive, bool exclusive);
 }
 
@@ -358,11 +357,6 @@ class _File extends FileSystemEntity implements File {
  */
 class _FileSink implements IOSink {
   final _File _file;
-  /**
-   * Where the sink writes next: from the start, or in append mode from the end the file had when opened, which other
-   * writes to the file do not move, as the VM writes at its file's own position.
-   */
-  int _position = 0;
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
@@ -370,8 +364,7 @@ class _FileSink implements IOSink {
   bool _writeScheduled = false;
   _FileSink(this._file, bool appends) {
     try {
-      _File._write(_file.path, "", appends, "Cannot open file");
-      if (appends) _position = _File._read(_file.path, "Cannot open file").length;
+      _open(_file.path, appends);
     } catch (error, stackTrace) {
       // The VM reports a failure to open the file to done, which is unhandled unless the program closes the sink.
       _failed = true;
@@ -421,10 +414,14 @@ class _FileSink implements IOSink {
   void _writeBuffered() {
     final contents = _buffer.toString();
     _buffer.clear();
-    if (contents.isEmpty) return;
-    _File._writeAt(_file.path, _position, contents);
-    _position += contents.length;
+    if (contents.isNotEmpty) _writeOpened(contents);
   }
+  /**
+   * Opens the sink's file: from its start, or in append mode at the end it has now, which other writes to the file do
+   * not move, and which the sink keeps writing to after the file is renamed or deleted, as the VM's open file does.
+   */
+  external void _open(String path, bool appends);
+  external void _writeOpened(String contents);
   void _startWrite() {
     if (_isClosed) throw StateError("StreamSink is closed");
     if (_failed || _writeScheduled) return;

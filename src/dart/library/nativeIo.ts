@@ -1,7 +1,7 @@
-import { FileSystemError, type FileSystemErrorCode, parentOf } from '../../interpreter/programIo';
+import { type FileHandle, FileSystemError, type FileSystemErrorCode, parentOf } from '../../interpreter/programIo';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
-import type { Value } from '../values';
+import type { DartObject, NativeState, Value } from '../values';
 import { define, intArg, stringArg } from './nativeSupport';
 
 /**
@@ -106,17 +106,29 @@ define('_File._write', (runtime, _self, [path, contents, append, failure, shownP
   return;
 });
 
-// Writing past the end leaves the gap as zero bytes, as a write at an offset does in a file.
-define('_File._writeAt', (runtime, _self, [path, position, contents]) => {
-  const { files } = runtime.io;
+/** The open file a `_FileSink` writes to. */
+class SinkFile implements NativeState {
+  [key: string]: unknown;
+
+  constructor(readonly handle: FileHandle) {}
+
+  *values(): Iterable<Value> {
+    // A file holds no values.
+  }
+}
+
+define('_FileSink._open', (runtime, self, [path, appends]) => {
   const text = stringArg(runtime, path, 'path');
-  const offset = Number(position);
-  const written = contents as string;
-  withFileErrors(runtime, 'Cannot open file', () => {
-    const current = files.kindOf(text) === 'file' ? files.readFile(text) : '';
-    const updated = current.slice(0, offset).padEnd(offset, '\0') + written + current.slice(offset + written.length);
-    files.open(text, { create: 'always', truncate: true, append: false }).write(updated);
-  });
+  const handle = withFileErrors(runtime, 'Cannot open file', () =>
+    runtime.io.files.open(text, { create: 'always', truncate: appends !== true, append: false })
+  );
+  if (appends === true) handle.seekToEnd();
+  (self as DartObject).native = new SinkFile(handle);
+  return;
+});
+
+define('_FileSink._writeOpened', (_runtime, self, [contents]) => {
+  ((self as DartObject).native as SinkFile).handle.write(contents as string);
   return;
 });
 
