@@ -22,6 +22,18 @@ function modifierPrefix(modifier: '+' | '-'): string {
   return modifier === '-' ? '-' : '';
 }
 
+/** As TypeScript prints a union, an enum all of whose members it has appears once, by its name, where its first member is. */
+function withWholeEnums(members: Type[]): Type[] {
+  const printed: Type[] = [];
+  for (const member of members) {
+    const enumType = member.kind === 'literal' ? member.enumMember?.base() : undefined;
+    const isWhole = enumType?.kind === 'union' && enumType.types.every((enumMember) => members.includes(enumMember));
+    if (!isWhole) printed.push(member);
+    else if (!printed.includes(enumType)) printed.push(enumType);
+  }
+  return printed;
+}
+
 function isNullish(member: Type): boolean {
   return member.kind === 'intrinsic' && (member.name === 'null' || member.name === 'undefined');
 }
@@ -75,7 +87,7 @@ export class Printer {
                 .filter((member) => member !== trueType)
                 .map((member) => (member === falseType ? booleanType : member))
             : members;
-        return this.printUnion(printedMembers);
+        return this.printUnion(withWholeEnums(printedMembers));
       }
       case 'intersection': {
         return boundedJoin(type.types, ' & ', (member) => this.wrap(member));
@@ -134,7 +146,7 @@ export class Printer {
   private wrap(type: Type): string {
     const text = this.print(type);
     if (type.kind === 'object' && type.isFunction && !type.aliasName) return `(${text})`;
-    if (type.kind === 'union' && type !== booleanType) return `(${text})`;
+    if (type.kind === 'union' && type !== booleanType && !type.enumName) return `(${text})`;
     if (type.kind === 'intersection') return `(${text})`;
     return text;
   }
