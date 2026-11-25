@@ -6,6 +6,7 @@
  * structured lvalue resolution.
  */
 
+import type { StepMeter } from './budget';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import { skipBalanced, SourceText, SyntaxFailure, UnknownSyntax } from './syntaxWords';
 import type { ResolvedTarget } from './targets';
@@ -18,8 +19,7 @@ export interface ArithmeticHost {
     name: string,
     rawSubscript: string | undefined,
     willRead: boolean,
-    expandSubscript?: boolean,
-    subscriptQuoted?: ReadonlySet<number>
+    expandSubscript?: boolean
   ): ArithmeticTarget;
   /** Reads the current string value of `target`, or `undefined` when unset. */
   readTarget(target: ArithmeticTarget): string | undefined;
@@ -91,14 +91,14 @@ type OperatorText =
 type LexToken =
   | { kind: 'eof' }
   | { kind: 'number'; value: bigint }
-  | { kind: 'identifier'; name: string; subscript: string | undefined; subscriptQuoted?: ReadonlySet<number> }
+  | { kind: 'identifier'; name: string; subscript: string | undefined }
   | { kind: 'op'; op: OperatorText };
 
 interface EvalOutcome {
   value: bigint;
   assignable: boolean;
   target?: ArithmeticTarget;
-  deferred?: { name: string; subscript: string | undefined; subscriptQuoted?: ReadonlySet<number> };
+  deferred?: { name: string; subscript: string | undefined };
 }
 
 interface ScannerSnapshot {
@@ -164,15 +164,13 @@ const isIdentStart = (c: string): boolean => (c >= 'a' && c <= 'z') || (c >= 'A'
 const isIdentPart = (c: string): boolean => isIdentStart(c) || (c >= '0' && c <= '9');
 const isAsciiAlnum = (c: string): boolean => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 
-const EMPTY_QUOTED_SET: ReadonlySet<number> = new Set();
-
 /** Evaluates an arithmetic string in 64-bit signed two's-complement integer arithmetic. */
 export function evaluateArithmetic(
   expression: string,
   host: ArithmeticHost,
   commandName: string | undefined,
-  spend: () => void,
-  preExpanded: boolean | ReadonlySet<number> = false
+  spend: StepMeter,
+  preExpanded = false
 ): bigint {
   return new ExpressionSession(host, commandName, spend).evaluateSubexpression(expression, preExpanded);
 }
@@ -185,14 +183,10 @@ export function splitSubscriptText(text: string): { name: string; subscript: str
   return close === text.length - 1 ? { name: text.slice(0, open), subscript: text.slice(open + 1, close) } : undefined;
 }
 
-/** Finds the index of the `]` matching the `[` at `start`, treating masked expansion characters as literal data. */
-export function skipSubscript(source: string, start: number, quotedMask?: ReadonlySet<number>): number {
+/** Finds the index of the `]` matching the `[` at `start`. */
+export function skipSubscript(source: string, start: number): number {
   if (source[start] !== '[') return source.length;
-  const scanSource =
-    quotedMask && quotedMask.size > 0 && !quotedMask.has(start)
-      ? maskQuotedSubscriptSource(source, start + 1, quotedMask)
-      : source;
-  const text = new SourceText(scanSource);
+  const text = new SourceText(source);
   text.parseSubstitution = (subStart) => skipBalanced(text, subStart - 1, '(', ')');
   try {
     return skipBalanced(text, start, '[', ']') - 1;
@@ -202,22 +196,16 @@ export function skipSubscript(source: string, start: number, quotedMask?: Readon
   }
 }
 
-function maskQuotedSubscriptSource(source: string, from: number, quotedMask: ReadonlySet<number>): string {
-  let out = source.slice(0, from);
-  for (let i = from; i < source.length; i++) out += quotedMask.has(i) ? 'x' : source[i];
-  return out;
-}
-
 class ExpressionSession {
   private depth = 0;
 
   constructor(
     readonly host: ArithmeticHost,
     readonly commandName: string | undefined,
-    readonly spend: () => void
+    readonly spend: StepMeter
   ) {}
 
-  evaluateSubexpression(source: string, preExpanded: boolean | ReadonlySet<number> = false): bigint {
+  evaluateSubexpression(source: string, preExpanded = false): bigint {
     let current = source;
     let entered = 0;
     try {
@@ -232,8 +220,7 @@ class ExpressionSession {
         entered++;
         const identMatch = SIMPLE_IDENTIFIER_EXPRESSION.exec(current);
         if (!identMatch) {
-          const mask = resolveInitialMask(preExpanded, entered);
-          return new FrameParser(this, current, mask === undefined, mask).parseAll();
+          return new FrameParser(this, current, !(preExpanded && entered === 1)).parseAll();
         }
         const nextRaw = this.host.readTarget(this.host.resolveTarget(identMatch[1], undefined, true));
         if (!nextRaw) return 0n;
@@ -262,14 +249,6 @@ function firstNonSpace(text: string): number {
   return i;
 }
 
-function resolveInitialMask(
-  preExpanded: boolean | ReadonlySet<number>,
-  entered: number
-): ReadonlySet<number> | undefined {
-  if (!preExpanded || entered > 1) return undefined;
-  return typeof preExpanded === 'boolean' ? EMPTY_QUOTED_SET : preExpanded;
-}
-
 class FrameParser {
   private cursor = 0;
   private errorStart = 0;
@@ -281,8 +260,7 @@ class FrameParser {
   constructor(
     private readonly session: ExpressionSession,
     private readonly source: string,
-    private readonly expandSubscripts = true,
-    private readonly quotedMask?: ReadonlySet<number>
+    private readonly expandSubscripts = true
   ) {}
 
   parseAll(): bigint {
@@ -322,13 +300,7 @@ class FrameParser {
       const target =
         left.deferred === undefined
           ? left.target
-          : this.session.host.resolveTarget(
-              left.deferred.name,
-              left.deferred.subscript,
-              false,
-              this.expandSubscripts,
-              left.deferred.subscriptQuoted
-            );
+          : this.session.host.resolveTarget(left.deferred.name, left.deferred.subscript, false, this.expandSubscripts);
       if (target) this.store(target, value);
     }
     return { value, assignable: false };
@@ -524,11 +496,9 @@ class FrameParser {
     if (this.current.kind !== 'identifier') {
       this.fail('identifier expected after pre-increment or pre-decrement');
     }
-    const { name, subscript, subscriptQuoted } = this.current;
+    const { name, subscript } = this.current;
     const target =
-      this.suppress > 0
-        ? undefined
-        : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts, subscriptQuoted);
+      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
     const current = this.readValue(target);
     const updated = wrap64(current + delta);
     if (this.suppress === 0 && target) this.store(target, updated);
@@ -556,16 +526,14 @@ class FrameParser {
   }
 
   private parseIdentifier(): EvalOutcome {
-    const { name, subscript, subscriptQuoted } = this.current as Extract<LexToken, { kind: 'identifier' }>;
+    const { name, subscript } = this.current as Extract<LexToken, { kind: 'identifier' }>;
     const peeked = this.peekAfterIdentifier();
     if (peeked.kind === 'op' && peeked.op === '=') {
       this.advance();
-      return { value: 0n, assignable: true, deferred: { name, subscript, subscriptQuoted } };
+      return { value: 0n, assignable: true, deferred: { name, subscript } };
     }
     const target =
-      this.suppress > 0
-        ? undefined
-        : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts, subscriptQuoted);
+      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
     const current = this.readValue(target);
     this.advance();
     if (this.isOp('post++') || this.isOp('post--')) {
@@ -651,13 +619,10 @@ class FrameParser {
     let end = start + 1;
     while (end < this.source.length && isIdentPart(this.source[end])) end++;
     let subscript: string | undefined;
-    let subscriptQuoted: ReadonlySet<number> | undefined;
     if (this.source[end] === '[') {
-      const close = skipSubscript(this.source, end, this.quotedMask);
+      const close = skipSubscript(this.source, end);
       if (close >= this.source.length || this.source[close] !== ']') this.fail('bad array subscript');
-      const subStart = end + 1;
-      subscript = this.source.slice(subStart, close);
-      subscriptQuoted = sliceQuotedMask(this.quotedMask, subStart, close);
+      subscript = this.source.slice(end + 1, close);
       end = close + 1;
     }
     this.current = {
@@ -667,7 +632,6 @@ class FrameParser {
         subscript === undefined ? end : start + this.source.slice(start, end).indexOf('[')
       ),
       subscript,
-      ...(subscriptQuoted ? { subscriptQuoted } : {}),
     };
     this.cursor = end;
   }
@@ -833,7 +797,7 @@ function shiftRight64(a: bigint, b: bigint): bigint {
   return a >> BigInt.asUintN(6, b);
 }
 
-function pow64(base: bigint, exponent: bigint, spend: () => void): bigint {
+function pow64(base: bigint, exponent: bigint, spend: StepMeter): bigint {
   let acc = 1n;
   let factor = base;
   let remaining = exponent;
@@ -882,18 +846,4 @@ function applyCompound(op: OperatorText, a: bigint, b: bigint): bigint {
       throw new Error(`Unsupported compound operator ${op}`);
     }
   }
-}
-
-function sliceQuotedMask(
-  mask: ReadonlySet<number> | undefined,
-  start: number,
-  end: number
-): ReadonlySet<number> | undefined {
-  if (!mask) return undefined;
-  if (mask.size === 0) return EMPTY_QUOTED_SET;
-  const sliced = new Set<number>();
-  for (let i = start; i < end; i++) {
-    if (mask.has(i)) sliced.add(i - start);
-  }
-  return sliced.size === 0 ? EMPTY_QUOTED_SET : sliced;
 }

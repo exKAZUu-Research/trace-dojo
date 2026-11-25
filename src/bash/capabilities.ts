@@ -1,3 +1,4 @@
+import { isIdentifier } from './associativeTable';
 import type { Assignment } from './ast';
 import { EXTERNAL_COMMANDS } from './externalCommands';
 import { quoteReusable } from './quoting';
@@ -80,6 +81,14 @@ export const ENVIRONMENT_VARIABLES = new Set([
 ]);
 
 export const DECLARATION_BUILTIN_NAMES = new Set(['declare', 'typeset', 'local', 'readonly', 'export']);
+
+export const DECLARATION_OPTIONS: Record<string, string> = {
+  declare: 'aAcfFgiIlnrtuxp',
+  typeset: 'aAcfFgiIlnrtuxp',
+  local: 'aAcfFgiIlnrtuxp',
+  readonly: 'aAfp',
+  export: 'fnp',
+};
 
 export const FILE_TEST_OPERATORS = new Set([
   '-a',
@@ -230,27 +239,100 @@ export function rejectUnsupportedSpecialVariable(name: string): void {
   }
 }
 
-/** Rejects special/dynamic variable mutations except plain scalar `RANDOM` seeding. */
-export function rejectSpecialVariableMutation(name: string, allowScalarRandomSeed = false): void {
+/** Single read gate for deferred special variables and host environment variables. */
+export function rejectUnsupportedVariableRead(name: string): void {
   rejectUnsupportedSpecialVariable(name);
+  if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
+}
+
+/** Single mutation/unset/declare gate for special and host environment variables (allowing plain scalar `RANDOM` seeding). */
+export function rejectUnsupportedVariableMutation(name: string, allowScalarRandomSeed = false): void {
+  rejectUnsupportedVariableRead(name);
   if (!SPECIAL_MUTATION_BLOCKED.has(name)) return;
   if (allowScalarRandomSeed && name === 'RANDOM') return;
   throw new UnsupportedFeatureError(`特殊変数（${name}）の変更`);
 }
 
-/** Rejects nameref targets that contain element designators or name special/unread-host-environment variables. */
-export function rejectUnsupportedNamerefTarget(target: string, isUnreadHostEnv: (name: string) => boolean): void {
-  if (target === '') return;
-  if (target.includes('[')) throw new UnsupportedFeatureError(`配列要素への名前参照（${target}）`);
-  rejectUnsupportedSpecialVariable(target);
-  if (SPECIAL_MUTATION_BLOCKED.has(target)) {
-    throw new UnsupportedFeatureError(`特殊変数への名前参照（${target}）`);
-  }
-  if (isUnreadHostEnv(target)) rejectUnsupportedHostEnv(target);
+export interface ExistingCellShape {
+  readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
+  readonly attributes: ReadonlySet<Attribute>;
 }
 
-export function rejectUnsupportedNamerefAppend(name: string): never {
-  throw new UnsupportedFeatureError(`名前参照（${name}）への追記`);
+/** Enforces that namerefs are declared only via initialized `local -n name=target` inside a function. */
+export function rejectUnsupportedNamerefDeclaration(
+  builtin: string,
+  name: string,
+  value: string | undefined,
+  inFunction: boolean,
+  hasExistingLocal: boolean
+): void {
+  if (builtin !== 'local' || !inFunction) {
+    throw new UnsupportedFeatureError(`関数外・local 以外での名前参照（${builtin} -n）`);
+  }
+  if (value === undefined) {
+    throw new UnsupportedFeatureError(`初期化子のない名前参照（${name}）`);
+  }
+  if (hasExistingLocal) {
+    throw new UnsupportedFeatureError(`既存ローカル変数（${name}）の名前参照化`);
+  }
+}
+
+/** Enforces that a nameref target names an existing non-nameref whole variable in an enclosing scope. */
+export function rejectUnsupportedNamerefTarget(
+  name: string,
+  target: string,
+  outerShape: ExistingCellShape | undefined
+): void {
+  if (target === '') return;
+  if (target.includes('[')) throw new UnsupportedFeatureError(`配列要素への名前参照（${target}）`);
+  rejectUnsupportedVariableMutation(target, false);
+  if (!isIdentifier(target)) return;
+  if (target === name) throw new UnsupportedFeatureError(`自己参照の名前参照（${name}）`);
+  if (!outerShape) throw new UnsupportedFeatureError(`未定義変数への名前参照（${target}）`);
+  if (outerShape.attributes.has('n')) {
+    throw new UnsupportedFeatureError(`多段の名前参照（${name} -> ${target}）`);
+  }
+}
+
+/** Rejects dereferencing a nameref whose target disappeared or was converted into a nameref. */
+export function rejectUnsupportedNamerefDereference(
+  name: string,
+  target: string,
+  targetShape: ExistingCellShape | undefined
+): void {
+  if (!targetShape || targetShape.attributes.has('n')) {
+    throw new UnsupportedFeatureError(`無効または多段の名前参照（${name} -> ${target}）`);
+  }
+}
+
+export function rejectUnsupportedNamerefShadowing(name: string): never {
+  throw new UnsupportedFeatureError(`名前参照先と同名のローカル宣言（${name}）`);
+}
+
+export function rejectUnsupportedNamerefMutation(kind: 'for' | 'unset' | 'indirect', name: string): never {
+  if (kind === 'for') throw new UnsupportedFeatureError(`名前参照ループ変数（${name}）`);
+  if (kind === 'unset') throw new UnsupportedFeatureError(`名前参照（${name}）の unset`);
+  throw new UnsupportedFeatureError(`名前参照に対する間接展開（\${!${name}}）`);
+}
+
+export function rejectSelfReferencingCompound(name: string): never {
+  throw new UnsupportedFeatureError(`複合代入（${name}=(...)）における同一変数の参照・変更`);
+}
+
+export function rejectListInScalarContext(expansionText: string): never {
+  throw new UnsupportedFeatureError(`パラメータ展開の引数や添字の中でのリスト展開（${expansionText}）`);
+}
+
+export function rejectQuotedSubscriptExpansion(chunk: string): void {
+  if (/['"\\[\]]/.test(chunk)) {
+    throw new UnsupportedFeatureError(`添字や算術式への展開結果に含まれる引用符・括弧（${chunk}）`);
+  }
+}
+
+export function rejectDynamicSubscriptSyntax(raw: string): void {
+  if (/[$`'"\\]/.test(raw)) {
+    throw new UnsupportedFeatureError(`実行時に組み立てた添字内の引用符・展開（${raw}）`);
+  }
 }
 
 export function rejectUnsupportedDeclarationPrefix(builtin: string): never {
@@ -291,18 +373,12 @@ export function rejectUnsupportedDeclarationOptions(
   }
 }
 
-export interface ExistingCellShape {
-  readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
-  readonly attributes: ReadonlySet<Attribute>;
-}
-
 export interface DeclarationOperandFlags {
   readonly isSubscripted: boolean;
   readonly isCompound: boolean;
   readonly append: boolean;
   readonly hasScalarValue: boolean;
   readonly hasEnclosingTempBinding: boolean;
-  readonly isUnreadHostTarget: boolean;
   readonly existing?: ExistingCellShape;
 }
 
@@ -313,7 +389,7 @@ export function rejectUnsupportedDeclarationOperand(
   effectiveSet: ReadonlySet<string>,
   flags: DeclarationOperandFlags
 ): void {
-  rejectSpecialVariableMutation(name, false);
+  rejectUnsupportedVariableMutation(name, false);
   if (flags.isSubscripted) {
     throw new UnsupportedFeatureError(`${builtin} での配列要素指定（${name}）`);
   }
@@ -323,14 +399,7 @@ export function rejectUnsupportedDeclarationOperand(
   if (flags.hasEnclosingTempBinding) {
     throw new UnsupportedFeatureError(`前置代入された変数（${name}）の宣言`);
   }
-  if (flags.isUnreadHostTarget && !flags.isCompound && !flags.hasScalarValue && hasShapeFlag(effectiveSet)) {
-    rejectUnsupportedHostEnv(name);
-  }
   if (flags.existing) rejectShapeChangingRedeclaration(name, effectiveSet, flags);
-}
-
-function hasShapeFlag(set: ReadonlySet<string>): boolean {
-  return set.has('a') || set.has('A') || set.has('i') || set.has('n');
 }
 
 function rejectShapeChangingRedeclaration(
@@ -366,7 +435,7 @@ export function rejectUnsupportedPrefixAssignment(
   if (assignment.subscript !== undefined || assignment.array !== undefined) {
     throw new UnsupportedFeatureError(`配列への前置代入（${assignment.name}）`);
   }
-  rejectSpecialVariableMutation(assignment.name, false);
+  rejectUnsupportedVariableMutation(assignment.name, false);
   if (!existingAttributes && !existingIsArray) return;
   if (existingIsArray || existingAttributes?.has('n') || existingAttributes?.has('i')) {
     throw new UnsupportedFeatureError(`属性付き変数・配列への前置代入（${assignment.name}）`);

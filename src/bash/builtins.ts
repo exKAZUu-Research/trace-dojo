@@ -114,7 +114,6 @@ function storePrintfTarget(shell: Shell, candidate: string, text: string): boole
         operation: 'write',
       })
     : resolveScalarTarget(shell, candidate, true);
-  if (!resolved) return false;
   const outcome = writeResolvedTarget(shell, resolved, text, false, 'printf');
   if (!outcome.ok) return shell.failures.handleStoreFailure('regularBuiltin', outcome, 'printf');
   return true;
@@ -218,7 +217,6 @@ function unsetSubscriptedOperand(shell: Shell, name: string, subscript: string):
     subscript: { kind: 'text', text: subscript },
     operation: 'unset',
   });
-  if (!target) return false;
   const failure = unsetResolvedElement(shell, target);
   return failure ? shell.failures.handleStoreFailure('regularBuiltin', failure, 'unset') : true;
 }

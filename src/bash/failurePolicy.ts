@@ -9,8 +9,8 @@ export type FailureContext =
   | 'letBuiltin'
   | 'conditional'
   | 'forHeader'
-  | 'declarationCompoundPhase1'
-  | 'declarationFunctionCompoundPhase1'
+  | 'declarationGlobalCompound'
+  | 'declarationLocalCompound'
   | 'declarationOperand'
   | 'regularBuiltin'
   | 'parameterRequire';
@@ -52,11 +52,6 @@ export class FailurePolicy {
     throw new DiscardSignal(status);
   }
 
-  exitWithMessage(message: string, status = 1): never {
-    this.report(message);
-    throw new ExitSignal(status);
-  }
-
   /** Handles a `StoreFailure` according to the enclosing `FailureContext`, returning `false` when execution continues. */
   handleStoreFailure(context: FailureContext, failure: StoreFailure, builtinPrefix?: string): false {
     if (!failure.alreadyReported && failure.message !== '') {
@@ -70,7 +65,7 @@ export class FailurePolicy {
       case 'fatalReadonlyArithmetic':
       case 'scriptAssignment':
       case 'expansion':
-      case 'declarationCompoundPhase1': {
+      case 'declarationGlobalCompound': {
         throw new DiscardSignal(1);
       }
       case 'commandPrefix':
@@ -78,7 +73,7 @@ export class FailurePolicy {
       case 'letBuiltin':
       case 'conditional':
       case 'forHeader':
-      case 'declarationFunctionCompoundPhase1':
+      case 'declarationLocalCompound':
       case 'declarationOperand':
       case 'regularBuiltin': {
         return false;

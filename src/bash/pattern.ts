@@ -4,6 +4,7 @@
  * Backslashes quote the following pattern character; unquoted `*`, `?`, and `[...]` act as wildcards.
  */
 
+import type { StepMeter } from './budget';
 import { rejectUnsupportedBracketClass } from './capabilities';
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
 
@@ -36,18 +37,18 @@ interface BracketScanMemo {
 }
 
 /** Whether the entire `text` matches `pattern`. */
-export function matchesPattern(pattern: string, text: string, spend: () => void, extmatch = false): boolean {
+export function matchesPattern(pattern: string, text: string, spend: StepMeter, extmatch = false): boolean {
   const chars = charactersOf(text);
   return matchesSlice(compileGlob(pattern, spend, extmatch), chars, 0, chars.length, spend);
 }
 
 /** Whether `pattern` contains any unescaped `*`, `?`, or closed `[...]` wildcard. */
-export function hasPatternCharacters(pattern: string, spend?: () => void): boolean {
+export function hasPatternCharacters(pattern: string, spend: StepMeter): boolean {
   return compileGlobInternal(pattern, spend, false, true).atoms.some((atom) => atom.kind !== 'char');
 }
 
 /** Whether `pattern` contains an unescaped extended-glob operator (`?(...)`, `*(...)`, `+(...)`, `@(...)`, `!(...)`) outside `[...]`. */
-export function hasExtendedGlob(pattern: string, spend?: () => void): boolean {
+export function hasExtendedGlob(pattern: string, spend: StepMeter): boolean {
   const chars = charactersOf(pattern);
   return scanExtendedGlob(chars, spend, createBracketScanMemo(chars.length)).closed;
 }
@@ -58,13 +59,13 @@ export function quotePattern(text: string): string {
 }
 
 /** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
-export function compileGlob(pattern: string, spend?: () => void, extmatch = false): CompiledGlob {
+export function compileGlob(pattern: string, spend: StepMeter, extmatch = false): CompiledGlob {
   return compileGlobInternal(pattern, spend, extmatch, false);
 }
 
 function compileGlobInternal(
   pattern: string,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   extmatch: boolean,
   allowUnsupportedSpecs: boolean
 ): CompiledGlob {
@@ -74,7 +75,7 @@ function compileGlobInternal(
   const atoms: GlobAtom[] = [];
   let hasStar = false;
   for (let i = 0; i < chars.length;) {
-    spend?.();
+    spend();
     if (literalFrom !== undefined && i >= literalFrom) {
       atoms.push({ kind: 'char', c: chars[i] });
       i++;
@@ -108,12 +109,12 @@ function createBracketScanMemo(length: number): BracketScanMemo {
 
 function scanExtendedGlob(
   chars: readonly string[],
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): { closed: boolean; firstUnclosedOpener: number | undefined } {
   const stack: (number | undefined)[] = [];
   for (let i = 0; i < chars.length;) {
-    spend?.();
+    spend();
     const c = chars[i];
     if (c === '\\') {
       i += 2;
@@ -142,7 +143,7 @@ function scanExtendedGlob(
 function readGlobAtom(
   chars: readonly string[],
   i: number,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): { atom: GlobAtom; next: number } {
   const c = chars[i];
@@ -402,7 +403,7 @@ interface BracketAtom {
 function readBracketExpression(
   chars: readonly string[],
   start: number,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): { negated: boolean; specs: BracketSpec[]; next: number } | undefined {
   let pos = start;
@@ -412,7 +413,7 @@ function readBracketExpression(
   const visited: number[] = [];
   let first = true;
   while (pos < chars.length) {
-    spend?.();
+    spend();
     if (!first) {
       if (memo.failedAfterFirst[pos]) return markBracketFailure(memo, visited);
       visited.push(pos);
@@ -430,7 +431,7 @@ function readBracketExpression(
 function readBracketSpecStep(
   chars: readonly string[],
   pos: number,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): { spec?: BracketSpec; next: number } | undefined {
   const subbracket = tryReadSubbracketSpec(chars, pos, spend, memo);
@@ -462,7 +463,7 @@ function buildRangeSpec(startAtom: BracketAtom, endAtom: BracketAtom): BracketSp
 function tryReadSubbracketSpec(
   chars: readonly string[],
   pos: number,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): { spec: BracketSpec; next: number } | undefined {
   const kind = chars[pos + 1];
@@ -481,7 +482,7 @@ function tryReadSubbracketSpec(
 function readBracketAtom(
   chars: readonly string[],
   pos: number,
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): BracketAtom | undefined {
   if (pos >= chars.length) return undefined;
@@ -499,13 +500,13 @@ function findSubbracketClose(
   chars: readonly string[],
   from: number,
   delimiter: ':' | '=' | '.',
-  spend: (() => void) | undefined,
+  spend: StepMeter,
   memo: BracketScanMemo
 ): number | undefined {
   const bit = delimiter === ':' ? 1 : delimiter === '=' ? 2 : 4;
   if (memo.failedSubbracket[from] & bit) return undefined;
   for (let i = from; i + 1 < chars.length; i++) {
-    spend?.();
+    spend();
     if (i > from && delimiter !== '.' && chars[i] === ']') {
       return markSubbracketFailure(memo.failedSubbracket, from, i, bit);
     }

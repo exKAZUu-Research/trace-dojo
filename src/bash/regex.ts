@@ -4,6 +4,7 @@
  * longest, `.` matching any character, a backslash quoting the character after it, and no `\d`-style classes.
  */
 
+import type { StepMeter } from './budget';
 import { rejectUnsupportedBracketClass } from './capabilities';
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
 
@@ -29,7 +30,7 @@ export interface CompiledRegex {
 
 const CLASSES = POSIX_CHARACTER_CLASSES;
 
-export function compileRegex(source: string, spend?: () => void): CompiledRegex {
+export function compileRegex(source: string, spend: StepMeter): CompiledRegex {
   const parser = new RegexParser(charactersOf(source), spend);
   const root = parser.parseAlternation();
   if (parser.position < parser.chars.length) throw new RegexSyntaxError('parentheses not balanced');
@@ -43,7 +44,7 @@ class RegexParser {
 
   constructor(
     readonly chars: string[],
-    private readonly spend?: () => void
+    private readonly spend: StepMeter
   ) {}
 
   parseAlternation(): RegexNode {
@@ -58,7 +59,7 @@ class RegexParser {
   private parseConcat(): RegexNode {
     const items: RegexNode[] = [];
     for (;;) {
-      this.spend?.();
+      this.spend();
       const c = this.chars[this.position];
       if (c === undefined || c === '|' || (c === ')' && this.groupDepth > 0)) break;
       items.push(this.parseRepeat());
@@ -112,7 +113,7 @@ class RegexParser {
     for (let i = from; i < this.chars.length; i++) {
       const ch = this.chars[i];
       if (ch < '0' || ch > '9') break;
-      this.spend?.();
+      this.spend();
       digits += ch;
     }
     return digits;
@@ -120,7 +121,7 @@ class RegexParser {
 
   // code-gauge-allow functionNcss -- One case per atom of a POSIX extended regular expression.
   private parseAtom(): RegexNode {
-    this.spend?.();
+    this.spend();
     const c = this.chars[this.position++];
     switch (c) {
       case '(': {
@@ -176,7 +177,7 @@ class RegexParser {
     if (negated) this.position++;
     let first = true;
     for (;;) {
-      this.spend?.();
+      this.spend();
       const c = this.chars[this.position];
       if (c === undefined) throw new RegexSyntaxError('brackets ([ ]) not balanced');
       if (c === ']' && !first) {
@@ -233,7 +234,7 @@ class RegexParser {
   private readSubbracketName(type: ':' | '=' | '.'): string {
     const start = this.position + 2;
     for (let i = start; i + 1 < this.chars.length; i++) {
-      this.spend?.();
+      this.spend();
       if (this.chars[i] === type && this.chars[i + 1] === ']') {
         const name = this.chars.slice(start, i).join('');
         this.position = i + 2;

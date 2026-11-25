@@ -43,7 +43,6 @@ export function runProgram(shell: Shell, program: Program, onEnd?: (frame: Frame
     else throw error;
   }
   onEnd?.(runtime.frames[0]);
-  runtime.collectGarbage();
   return {
     finalBoard: runtime.world.boardText(),
     finalTurtles: runtime.world.turtleTraces(),

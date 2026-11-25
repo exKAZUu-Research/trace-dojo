@@ -1,14 +1,12 @@
 import type { Word } from './ast';
 import {
-  rejectSpecialVariableMutation,
-  rejectUnsupportedHostEnv,
-  rejectUnsupportedNamerefAppend,
-  rejectUnsupportedSpecialVariable,
+  rejectDynamicSubscriptSyntax,
+  rejectUnsupportedVariableMutation,
+  rejectUnsupportedVariableRead,
 } from './capabilities';
-import { unquotePreExpandedAssociativeKey } from './expansion';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import type { Shell } from './shell';
-import { type CellHandle, type DestinationIntent, isIdentifier, type VariableView } from './variables';
+import { type DestinationIntent, isIdentifier, type VariableView } from './variables';
 
 export type ResolvedTarget =
   | { readonly kind: 'randomSeed' }
@@ -16,21 +14,21 @@ export type ResolvedTarget =
       readonly kind: 'scalar';
       readonly name: string;
       readonly reportedName: string;
-      readonly cell?: CellHandle;
+      readonly intent: DestinationIntent;
       readonly isDynamic: boolean;
     }
   | {
       readonly kind: 'associativeElement';
       readonly name: string;
       readonly reportedName: string;
-      readonly cell: CellHandle;
+      readonly intent: DestinationIntent;
       readonly key: string;
     }
   | {
       readonly kind: 'indexedElement';
       readonly name: string;
       readonly reportedName: string;
-      readonly cell?: CellHandle;
+      readonly intent: DestinationIntent;
       readonly index: bigint;
       readonly isDynamic: boolean;
     }
@@ -38,7 +36,6 @@ export type ResolvedTarget =
       readonly kind: 'wholeArray';
       readonly name: string;
       readonly reportedName: string;
-      readonly cell?: CellHandle;
       readonly star: boolean;
       readonly isDynamic: boolean;
     }
@@ -51,12 +48,7 @@ export type ResolvedTarget =
 
 export type SubscriptInput =
   | { readonly kind: 'word'; readonly word: Word; readonly unquoteAnsiC?: boolean }
-  | {
-      readonly kind: 'text';
-      readonly text: string;
-      readonly preExpanded?: boolean;
-      readonly quotedMask?: ReadonlySet<number>;
-    };
+  | { readonly kind: 'text'; readonly text: string; readonly preExpanded?: boolean };
 
 export type TargetOperation = 'read' | 'write' | 'unset' | 'testSet' | 'arithmeticRead' | 'arithmeticWrite';
 
@@ -68,66 +60,52 @@ export interface SubscriptTargetOptions {
   readonly append?: boolean;
 }
 
-/** Resolves whole-variable nameref chains through `VariableStore`, reporting circular references when requested. */
-export function resolveTargetName(shell: Shell, name: string, warnCycle = true): string | undefined {
-  const res = shell.store.resolveChain(name);
-  if (res.kind === 'resolved') return res.name;
-  if (warnCycle) shell.reportError(`warning: ${res.cyclicName}: circular name reference`);
-  return undefined;
+/** Resolves single-hop whole-variable namerefs through `VariableStore`. */
+export function resolveTargetName(shell: Shell, name: string): string {
+  return shell.store.resolveTargetName(name);
 }
 
-/** Resolves an unsubscripted variable target for reads or writes. */
+/** Resolves an unsubscripted variable target without mutating `VariableStore`. */
 export function resolveScalarTarget(
   shell: Shell,
   name: string,
   forWrite: boolean,
-  options?: { intent?: DestinationIntent; append?: boolean; warnCycle?: boolean }
-): ResolvedTarget | undefined {
+  options?: { intent?: DestinationIntent; append?: boolean }
+): ResolvedTarget {
   const intent = options?.intent ?? 'visible';
   const append = options?.append ?? false;
   if (!isIdentifier(name)) {
-    return {
-      kind: 'invalid',
-      raw: name,
-      failure: { ok: false, reason: 'invalidIdentifier', message: `\`${name}': not a valid identifier` },
-    };
+    return invalidTarget(name, 'invalidIdentifier', `\`${name}': not a valid identifier`);
   }
   if (forWrite && intent !== 'visible') {
-    rejectSpecialVariableMutation(name, false);
-    const selected = shell.store.selectDestination(intent, name, undefined, append);
-    return { kind: 'scalar', name, reportedName: name, cell: selected.cell, isDynamic: false };
+    rejectUnsupportedVariableMutation(name, false);
+    return { kind: 'scalar', name, reportedName: name, intent, isDynamic: false };
   }
-  const resolved = resolveTargetName(shell, name, options?.warnCycle ?? true);
-  if (resolved === undefined) return undefined;
+  const resolved = resolveTargetName(shell, name);
   if (!isIdentifier(resolved)) {
-    return {
-      kind: 'invalid',
-      raw: resolved,
-      failure: { ok: false, reason: 'invalidIdentifier', message: `\`${resolved}': not a valid identifier` },
-    };
+    return invalidTarget(resolved, 'invalidIdentifier', `\`${resolved}': not a valid identifier`);
   }
   if (forWrite) {
-    const allowRandom = !append;
-    rejectSpecialVariableMutation(resolved, allowRandom);
+    rejectUnsupportedVariableMutation(resolved, !append);
     if (resolved === 'RANDOM' && !shell.store.ownView('RANDOM')) return { kind: 'randomSeed' };
-    const selected = shell.store.selectDestination('visible', resolved, undefined, append);
-    return { kind: 'scalar', name: resolved, reportedName: name, cell: selected.cell, isDynamic: false };
+    return { kind: 'scalar', name: resolved, reportedName: name, intent: 'visible', isDynamic: false };
   }
-  rejectUnsupportedSpecialVariable(resolved);
+  rejectUnsupportedVariableRead(resolved);
   const view = shell.store.ownView(resolved);
   return {
     kind: 'scalar',
     name: resolved,
     reportedName: name,
-    ...(view?.handle ? { cell: view.handle } : {}),
+    intent: 'visible',
     isDynamic: !view && shell.store.isDynamic(resolved),
   };
 }
 
 /**
- * Resolves a subscripted variable target once across assignments, arithmetic, expansions, builtins, and tests.
+ * Resolves a subscripted variable target once across assignments, arithmetic, expansions, builtins, and tests
+ * without creating cells before write commit.
  */
-export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOptions): ResolvedTarget | undefined {
+export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOptions): ResolvedTarget {
   const { name, subscript, operation } = opts;
   const intent = opts.intent ?? 'visible';
   const rawSubText = rawSubscriptText(subscript);
@@ -136,14 +114,13 @@ export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOption
   }
   const emptyArith = rawSubText === '' ? emptyArithmeticSubscriptTarget(shell, name, operation) : undefined;
   if (emptyArith) return emptyArith;
-  const resolved = intent === 'visible' ? resolveTargetName(shell, name, operation !== 'testSet') : name;
-  if (resolved === undefined) return;
+  const resolved = intent === 'visible' ? resolveTargetName(shell, name) : name;
   if (!isIdentifier(resolved)) {
     return invalidTarget(resolved, 'invalidIdentifier', `\`${resolved}': not a valid identifier`);
   }
   const forWrite = operation === 'write' || operation === 'arithmeticWrite';
-  if (forWrite || operation === 'unset') rejectSpecialVariableMutation(resolved, false);
-  else rejectUnsupportedSpecialVariable(resolved);
+  if (forWrite || operation === 'unset') rejectUnsupportedVariableMutation(resolved, false);
+  else rejectUnsupportedVariableRead(resolved);
   const isAssoc = shell.store.isAssociativeName(resolved);
   if (!isAssoc && (rawSubText === '@' || rawSubText === '*')) {
     return resolveWholeArraySubscript(shell, name, resolved, rawSubText, operation);
@@ -197,12 +174,10 @@ function resolveWholeArraySubscript(
     );
   }
   const own = shell.store.ownView(resolved);
-  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   return {
     kind: 'wholeArray',
     name: resolved,
     reportedName,
-    ...(own?.handle ? { cell: own.handle } : {}),
     star: rawSubText === '*',
     isDynamic: !own && shell.store.isDynamic(resolved),
   };
@@ -226,17 +201,17 @@ function resolveAssociativeSubscript(
     if (opts.operation === 'arithmeticRead') shell.reportError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
-  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   const own = shell.store.ownView(resolved);
-  const cell =
-    own?.handle ??
-    (forWrite
-      ? shell.store.selectDestination(opts.intent ?? 'visible', resolved, 'associative', Boolean(opts.append)).cell
-      : undefined);
-  if (!cell) {
+  if (!own && !forWrite) {
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${resolved}: bad array subscript`);
   }
-  return { kind: 'associativeElement', name: resolved, reportedName: opts.name, cell, key };
+  return {
+    kind: 'associativeElement',
+    name: resolved,
+    reportedName: opts.name,
+    intent: opts.intent ?? 'visible',
+    key,
+  };
 }
 
 function resolveIndexedSubscript(
@@ -246,8 +221,7 @@ function resolveIndexedSubscript(
   rawSubText: string,
   forWrite: boolean
 ): ResolvedTarget {
-  if (rawSubText === '') return emptyIndexedSubscriptTarget(shell, opts.name, resolved, opts.operation);
-  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
+  if (rawSubText === '') return emptyIndexedSubscriptTarget(opts.name, resolved, opts.operation);
   const expanded = expandIndexedSubscript(shell, opts.subscript);
   const normalized = expanded === '' ? '0' : expanded;
   const rawIndex = shell.evaluateFatalReadonly(normalized, true);
@@ -258,27 +232,21 @@ function resolveIndexedSubscript(
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
   const own = shell.store.ownView(resolved);
-  const cell = forWrite
-    ? (own?.handle ??
-      shell.store.selectDestination(opts.intent ?? 'visible', resolved, undefined, Boolean(opts.append)).cell)
-    : own?.handle;
   return {
     kind: 'indexedElement',
     name: resolved,
     reportedName: opts.name,
-    ...(cell ? { cell } : {}),
+    intent: opts.intent ?? 'visible',
     index,
     isDynamic: !own && shell.store.isDynamic(resolved),
   };
 }
 
 function emptyIndexedSubscriptTarget(
-  shell: Shell,
   writtenName: string,
   resolved: string,
   operation: TargetOperation
 ): ResolvedTarget {
-  if (operation === 'unset' && shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   const label = operation === 'unset' ? '[]' : operation === 'testSet' ? resolved : `${writtenName}[]`;
   return invalidTarget(`${writtenName}[]`, 'badSubscript', `${label}: bad array subscript`);
 }
@@ -302,15 +270,37 @@ function rawSubscriptText(input: SubscriptInput): string {
 
 function expandAssociativeSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandAssociativeKey(input.word);
-  if (input.preExpanded) {
-    return input.quotedMask ? unquotePreExpandedAssociativeKey(input.text, input.quotedMask) : input.text;
-  }
-  return shell.expander.expandSubscriptText(input.text);
+  if (input.preExpanded) return unquoteArithmeticAssociativeKey(input.text);
+  rejectDynamicSubscriptSyntax(input.text);
+  return input.text;
 }
 
 function expandIndexedSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandSubscriptString(input.word, Boolean(input.unquoteAnsiC));
-  return input.preExpanded ? input.text : shell.expander.expandIndexedSubscriptText(input.text);
+  if (input.preExpanded) return input.text;
+  rejectDynamicSubscriptSyntax(input.text);
+  return input.text;
+}
+
+/** Strips source-written `'...'` and `\x` escapes from a pre-expanded arithmetic associative subscript. */
+function unquoteArithmeticAssociativeKey(raw: string): string {
+  let out = '';
+  let inSingle = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inSingle) {
+      if (c === "'") inSingle = false;
+      else out += c;
+    } else if (c === "'") {
+      inSingle = true;
+    } else if (c === '\\' && i + 1 < raw.length) {
+      const next = raw[++i];
+      if (next !== '\n') out += next;
+    } else {
+      out += c;
+    }
+  }
+  return out;
 }
 
 function invalidTarget(raw: string, reason: StoreFailure['reason'], message: string): ResolvedTarget {
@@ -322,10 +312,10 @@ function invalidTarget(raw: string, reason: StoreFailure['reason'], message: str
 export function readResolvedTarget(shell: Shell, target: ResolvedTarget): string | undefined {
   switch (target.kind) {
     case 'scalar': {
-      return shell.store.readScalar(target.name, (c) => shell.reportError(`warning: ${c}: circular name reference`));
+      return shell.store.readScalar(target.name);
     }
     case 'associativeElement': {
-      return shell.store.readAssociativeElement(target.cell, target.key);
+      return shell.store.readAssociativeElement(target.name, target.key);
     }
     case 'indexedElement': {
       return shell.store.readIndexedElement(target.name, target.index);
@@ -353,20 +343,28 @@ export function writeResolvedTarget(
       return { ok: true, stored: value };
     }
     case 'scalar': {
-      rejectSpecialVariableMutation(target.name, false);
-      const cell = target.cell ?? shell.store.selectDestination('visible', target.name, undefined, append).cell;
-      return shell.store.viewOfHandle(cell).attributes.has('n')
-        ? bindUnsetNameref(shell, cell, value, append, builtinPrefix)
-        : shell.store.writeScalar(cell, value, append, evalInt, target.name);
+      return shell.store.writeScalarNamed(target.name, value, {
+        intent: target.intent,
+        append,
+        evalInt,
+        reportedName: target.name,
+      });
     }
     case 'associativeElement': {
-      rejectSpecialVariableMutation(target.name, false);
-      return shell.store.writeAssociativeElement(target.cell, target.key, value, append, evalInt, target.name);
+      return shell.store.writeAssociativeElementNamed(target.name, target.key, value, {
+        intent: target.intent,
+        append,
+        evalInt,
+        reportedName: target.name,
+      });
     }
     case 'indexedElement': {
-      rejectSpecialVariableMutation(target.name, false);
-      const cell = target.cell ?? shell.store.selectDestination('visible', target.name, undefined, append).cell;
-      return shell.store.writeIndexedElement(cell, target.index, value, append, evalInt, target.name);
+      return shell.store.writeIndexedElementNamed(target.name, target.index, value, {
+        intent: target.intent,
+        append,
+        evalInt,
+        reportedName: target.name,
+      });
     }
     case 'wholeArray': {
       return {
@@ -381,33 +379,16 @@ export function writeResolvedTarget(
   }
 }
 
-function bindUnsetNameref(
-  shell: Shell,
-  cell: CellHandle,
-  value: string,
-  append: boolean,
-  builtinPrefix?: string
-): StoreOutcome {
-  if (append) rejectUnsupportedNamerefAppend(shell.store.viewOfHandle(cell).name);
-  const bound = shell.store.bindNameref(cell, value, shell.isInFunction);
-  if (!bound.ok) return bound;
-  if (bound.cycleWarning)
-    shell.reportError(builtinPrefix ? `${builtinPrefix}: ${bound.cycleWarning}` : bound.cycleWarning);
-  return { ok: true, stored: value };
-}
-
 export function unsetResolvedElement(shell: Shell, target: ResolvedTarget): StoreFailure | undefined {
   if (target.kind === 'invalid') return target.failure;
   if (target.kind === 'associativeElement') {
-    return shell.store.unsetElement(target.cell, { kind: 'associative', key: target.key }, target.name);
+    return shell.store.unsetElementNamed(target.name, { kind: 'associative', key: target.key }, target.name);
   }
   if (target.kind === 'wholeArray') {
-    if (!target.cell) return undefined;
-    return shell.store.unsetElement(target.cell, { kind: 'wholeArray' }, target.name);
+    return shell.store.unsetElementNamed(target.name, { kind: 'wholeArray' }, target.name);
   }
   if (target.kind === 'indexedElement') {
-    if (!target.cell) return undefined;
-    return shell.store.unsetElement(target.cell, { kind: 'indexed', index: target.index }, target.name);
+    return shell.store.unsetElementNamed(target.name, { kind: 'indexed', index: target.index }, target.name);
   }
   return undefined;
 }

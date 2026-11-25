@@ -4,6 +4,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Statement } from './ast';
+import { chargeStoreSlots, type StepMeter } from './budget';
 import type { VariableStore } from './variables';
 
 /** The name Bash reports the program by, in `$0` and in its error messages. */
@@ -31,11 +32,6 @@ export interface Frame extends TracedFrame {
   readonly store: VariableStore;
   /** The index of the frame's own scope among `store`'s scopes, which the trace reads its variables from. */
   readonly scopeIndex: number;
-}
-
-/** An active execution context contributing live string roots for turtle garbage collection. */
-export interface RootContext {
-  reachableStrings(): Iterable<string>;
 }
 
 /** Leaves loops, as `break n` does. */
@@ -77,17 +73,18 @@ export class DiscardSignal {
 }
 
 const TURTLE_HANDLE_PREFIX = 'Turtle@';
-const TURTLE_HANDLE_PATTERN = /Turtle@\d+/g;
 
-/** Shared per-run services: the turtle board, step tracker, execution budget, output streams, and active root registry. */
+/** Shared per-run services: the turtle board, step tracker, execution budget, output streams, and trace frame stack. */
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
+  readonly step: StepMeter = () => {
+    this.budget.spend(1);
+  };
   private readonly turtles = new Map<string, TurtleState>();
-  private readonly contexts = new Set<RootContext>();
   private nextTurtle = 1;
   private slots = 0;
 
@@ -100,16 +97,12 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   allocateSlots(count = 1): void {
-    this.slots += count;
-    if (this.slots > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
+    if (count <= 0) return;
+    this.slots = chargeStoreSlots(this.slots, count);
   }
 
-  registerContext(context: RootContext): void {
-    this.contexts.add(context);
-  }
-
-  unregisterContext(context: RootContext): void {
-    this.contexts.delete(context);
+  checkCallDepth(): void {
+    if (this.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
   }
 
   addTurtle(turtle: TurtleState): string {
@@ -118,30 +111,12 @@ export class Runtime implements TracedRuntime<Frame> {
     return handle;
   }
 
-  /** The live turtle a string names. */
+  /** The live turtle a string names, remaining alive until explicit removal or run end. */
   turtleOf(handle: string): TurtleState | undefined {
     const turtle = this.turtles.get(handle);
     return turtle?.isAlive ? turtle : undefined;
   }
 
-  /** Removes the turtles whose handles no active execution context holds any longer. */
-  collectGarbage(): void {
-    if (!this.world.hasTurtles) return;
-    const reached = new Set<TurtleState>();
-    for (const context of this.contexts) {
-      this.scanContextRoots(context, reached);
-    }
-    this.world.retain((turtle) => reached.has(turtle));
-    for (const [handle, turtle] of this.turtles) if (!turtle.isAlive) this.turtles.delete(handle);
-  }
-
-  private scanContextRoots(context: RootContext, reached: Set<TurtleState>): void {
-    for (const text of context.reachableStrings()) {
-      this.spend(Math.ceil(text.length / 1024));
-      for (const [handle] of text.matchAll(TURTLE_HANDLE_PATTERN)) {
-        const turtle = this.turtles.get(handle);
-        if (turtle) reached.add(turtle);
-      }
-    }
-  }
+  /** No-op for `TracedRuntime`: Bash string-handle turtles persist until explicit removal or run end. */
+  collectGarbage(): void {}
 }

@@ -1,4 +1,4 @@
-import { ATTRIBUTE_ORDER, rejectUnsupportedHostEnv, rejectUnsupportedSpecialVariable } from './capabilities';
+import { ATTRIBUTE_ORDER, rejectUnsupportedVariableRead } from './capabilities';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
 import type { Shell } from './shell';
 import { sortedElements, type VariableView } from './variables';
@@ -23,10 +23,9 @@ export function printDeclarations(
 }
 
 function declarationViewToShow(shell: Shell, builtin: string, name: string): VariableView | undefined {
-  rejectUnsupportedSpecialVariable(name);
+  rejectUnsupportedVariableRead(name);
   const found = shell.store.ownView(name);
   if (builtin !== 'local') {
-    if (shell.store.isUnreadHostEnv(name)) rejectUnsupportedHostEnv(name);
     return found ?? shell.store.dynamicView(name);
   }
   return found?.isCurrentLocal ? found : undefined;

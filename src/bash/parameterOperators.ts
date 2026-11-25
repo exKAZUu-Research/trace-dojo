@@ -1,17 +1,15 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's parameter expansion operators and transformations in one module.
 import type { ParameterExpansion, Word, WordPart } from './ast';
-import { ATTRIBUTE_ORDER, rejectUnsupportedExpansion } from './capabilities';
+import { appendMetered, joinMetered } from './budget';
+import { ATTRIBUTE_ORDER, rejectListInScalarContext, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
-import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
+import { type Expander, isListExpansionSyntax, type ParameterValue, type SubscriptRef } from './expansion';
 import {
-  breakSegment,
   EMPTY_LIST_SEGMENT,
-  isBreakSegment,
   QUOTED_EMPTY_SEGMENT,
   splitWordSegments,
-  type TextSegment,
   textSegment,
   type WordContext,
   type WordSegment,
@@ -51,72 +49,64 @@ export function applyOperator(
   subscript: SubscriptRef | undefined,
   ctx: WordContext
 ): WordSegment[] {
-  const roots = parameterValueRoots(value);
-  return shell.withValuesRoot(roots, () => {
-    const operator = expansion.operator as string;
-    const { argument } = expansion;
-    switch (operator) {
-      case ':-':
-      case '-':
-      case ':=':
-      case '=':
-      case ':?':
-      case '?':
-      case ':+':
-      case '+': {
-        const colon = operator.startsWith(':');
-        const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
-        const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, ctx.inDouble));
-        const kind = operator.at(-1) as string;
-        if (kind === '+') {
-          if (isNull) return value.kind === 'list' && !value.star && ctx.inDouble ? [EMPTY_LIST_SEGMENT] : [];
-          return expandArgument(expander, argument, { ...ctx, spacedStar: true }, false, roots);
-        }
-        if (!isNull) return expander.valueSegments(value, ctx);
-        return defaultValue(expander, shell, expansion, kind, colon, name, subscript, ctx, roots);
+  const operator = expansion.operator as string;
+  const { argument } = expansion;
+  rejectNestedListParts(argument);
+  switch (operator) {
+    case ':-':
+    case '-':
+    case ':=':
+    case '=':
+    case ':?':
+    case '?':
+    case ':+':
+    case '+': {
+      const colon = operator.startsWith(':');
+      const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
+      const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, ctx.inDouble));
+      const kind = operator.at(-1) as string;
+      if (kind === '+') {
+        if (isNull) return value.kind === 'list' && !value.star && ctx.inDouble ? [EMPTY_LIST_SEGMENT] : [];
+        return expandArgument(expander, argument, ctx, false);
       }
-      case '#':
-      case '##':
-      case '%':
-      case '%%': {
-        const pattern = expander.patternOf(expandArgument(expander, argument, ctx, true, roots));
-        return mapPatternRemoval(expander, shell, value, ctx, (text) => removePattern(text, pattern, operator, shell));
-      }
-      case '/':
-      case '//':
-      case '/#':
-      case '/%': {
-        const { pattern: patternParts, replacement } = splitReplacement(argument);
-        const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true, roots));
-        const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true, roots);
-        return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
-      }
-      case ':': {
-        return substring(expander, shell, expansion, value, name, ctx);
-      }
-      case '^':
-      case '^^':
-      case ',':
-      case ',,':
-      case '~':
-      case '~~': {
-        const pattern =
-          argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true, roots)) : '?';
-        return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
-      }
-      case '@': {
-        return transform(expander, shell, expansion, value, name, ctx);
-      }
-      default: {
-        return shell.discard(`${expansion.text}: bad substitution`);
-      }
+      if (!isNull) return expander.valueSegments(value, ctx, expansion.text);
+      return defaultValue(expander, shell, expansion, kind, colon, name, subscript, ctx);
     }
-  });
-}
-
-function parameterValueRoots(value: ParameterValue): string[] {
-  if (value.kind === 'list') return [...value.values];
-  return value.value === undefined ? [] : [value.value];
+    case '#':
+    case '##':
+    case '%':
+    case '%%': {
+      const pattern = expander.patternOf(expandArgument(expander, argument, ctx, true));
+      return mapPatternRemoval(expander, shell, value, ctx, (text) => removePattern(text, pattern, operator, shell));
+    }
+    case '/':
+    case '//':
+    case '/#':
+    case '/%': {
+      const { pattern: patternParts, replacement } = splitReplacement(argument);
+      const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true));
+      const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true);
+      return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
+    }
+    case ':': {
+      return substring(expander, shell, expansion, value, name, ctx);
+    }
+    case '^':
+    case '^^':
+    case ',':
+    case ',,':
+    case '~':
+    case '~~': {
+      const pattern = argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true)) : '?';
+      return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
+    }
+    case '@': {
+      return transform(expander, shell, expansion, value, name, ctx);
+    }
+    default: {
+      return shell.discard(`${expansion.text}: bad substitution`);
+    }
+  }
 }
 
 function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDouble: boolean): boolean {
@@ -126,165 +116,51 @@ function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDoub
   return value.values.every((element) => element === '');
 }
 
-function expandArgument(
-  expander: Expander,
-  parts: WordPart[],
-  ctx: WordContext,
-  isPattern: boolean,
-  roots: string[]
-): WordSegment[] {
+function rejectNestedListParts(parts: readonly WordPart[]): void {
+  for (const part of parts) {
+    if (part.kind === 'parameter' && isListExpansionSyntax(part)) rejectListInScalarContext(part.text);
+    else if (part.kind === 'double') rejectNestedListParts(part.parts);
+  }
+}
+
+/** Expands a scalar-only operator argument word (list expansions inside operator words are gated by `Expander`). */
+function expandArgument(expander: Expander, parts: WordPart[], ctx: WordContext, isPattern: boolean): WordSegment[] {
   if (isPattern) {
     expander.checkTilde(parts, false);
-    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar });
-    pushSegmentRoots(roots, expanded);
-    return expanded;
+    return expander.expandParts(parts, { inDouble: false, spacedStar: false, inOperatorWord: true });
   }
-  if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx, roots);
+  if (!ctx.inDouble) {
+    expander.checkTilde(parts, Boolean(ctx.inAssignmentValue));
+    const expanded = expander.expandParts(parts, {
+      inDouble: false,
+      spacedStar: false,
+      ...(ctx.inAssignmentValue ? { inAssignmentValue: true } : {}),
+      inOperatorWord: true,
+    });
+    return expanded.map((seg) =>
+      seg.kind === 'text' && !seg.quoted && !ctx.inAssignmentValue ? { ...seg, split: true } : seg
+    );
+  }
   const segments: WordSegment[] = [];
   for (const part of parts) {
-    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx.spacedStar);
-    pushSegmentRoots(roots, chunk);
-    segments.push(...chunk);
+    segments.push(...expandDoubleQuotedOperatorPart(expander, part));
   }
   const kept = segments.filter((seg) => seg.kind !== 'emptyList');
   return kept.length === 0 ? [QUOTED_EMPTY_SEGMENT] : kept;
 }
 
-function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
+function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
-  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true, inQuotedOperatorWord: true });
-}
-
-function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {
-  for (const seg of segments) {
-    if (seg.kind === 'text' && seg.text !== '') roots.push(seg.text);
-  }
-}
-
-type NonEmptySegment = Exclude<WordSegment, { kind: 'emptyList' }>;
-
-interface OperatorWordEntry {
-  readonly segment: NonEmptySegment;
-  readonly keepsFields: boolean;
-}
-
-function expandUnquotedOperatorWord(
-  expander: Expander,
-  parts: WordPart[],
-  ctx: WordContext,
-  roots: string[]
-): WordSegment[] {
-  expander.checkTilde(parts, false);
-  const entries = collectOperatorWordEntries(expander, parts, ctx, roots);
-  const ifs = expander.currentIfs();
-  if (!ctx.inAssignmentValue && ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
-    return joinOperatorWordFields(ifs, entries);
-  }
-  return entries.map(({ segment, keepsFields }) =>
-    isBreakSegment(segment) || segment.quoted || keepsFields || ctx.inAssignmentValue
-      ? segment
-      : { ...segment, split: true }
-  );
-}
-
-function collectOperatorWordEntries(
-  expander: Expander,
-  parts: WordPart[],
-  ctx: WordContext,
-  roots: string[]
-): OperatorWordEntry[] {
-  const entries: OperatorWordEntry[] = [];
-  const itemCtx: WordContext = {
-    inDouble: false,
-    spacedStar: ctx.spacedStar,
-    ...(ctx.inAssignmentValue ? { inAssignmentValue: true } : {}),
+  return expander.expandParts([part], {
+    inDouble,
+    spacedStar: false,
     inOperatorWord: true,
-  };
-  for (const part of parts) {
-    const keepsFields = keepsOperatorFields(part);
-    const expanded = expander.expandParts([part], itemCtx);
-    pushSegmentRoots(roots, expanded);
-    for (const seg of expanded) {
-      if (seg.kind === 'emptyList') continue;
-      const starJoiner = seg.kind === 'break' ? (seg.ifsJoiner ?? expander.ifsJoiner()) : '';
-      if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
-        entries.push({ segment: textSegment(starJoiner, false, true), keepsFields });
-        continue;
-      }
-      entries.push({ segment: seg, keepsFields });
-    }
-  }
-  return entries;
+    inQuotedOperatorWord: true,
+  });
 }
 
-function keepsOperatorFields(part: WordPart): boolean {
-  return (
-    part.kind === 'double' ||
-    (part.kind === 'parameter' && part.operator !== undefined && /^:?[-+]$/.test(part.operator))
-  );
-}
-
-function isUnquotedAtListEntry({ segment, keepsFields }: OperatorWordEntry): boolean {
-  return !keepsFields && segment.kind === 'text' && segment.atListElement === true;
-}
-
-function isProtectedFieldBreak({ segment, keepsFields }: OperatorWordEntry): boolean {
-  return keepsFields && isBreakSegment(segment);
-}
-
-function joinOperatorWordFields(ifs: string, entries: OperatorWordEntry[]): WordSegment[] {
-  const hasProtectedBreak = entries.some(isProtectedFieldBreak);
-  const groups = splitOperatorGroups(entries, hasProtectedBreak);
-  const result: WordSegment[] = [];
-  const ifsJoiner = charactersOf(ifs)[0] ?? '';
-  for (const [index, group] of groups.entries()) {
-    if (index > 0) result.push(breakSegment('field', ifsJoiner));
-    result.push(...joinOperatorGroup(ifs, group));
-  }
-  return result;
-}
-
-function splitOperatorGroups(entries: OperatorWordEntry[], hasProtectedBreak: boolean): OperatorWordEntry[][] {
-  const groups: OperatorWordEntry[][] = [[]];
-  for (const entry of entries) {
-    const isHardBreak =
-      (entry.keepsFields && isBreakSegment(entry.segment)) ||
-      (hasProtectedBreak && entry.segment.kind === 'break' && entry.segment.breakKind === 'positional');
-    if (isHardBreak) groups.push([]);
-    else (groups.at(-1) as OperatorWordEntry[]).push(entry);
-  }
-  return groups;
-}
-
-function joinOperatorGroup(ifs: string, entries: OperatorWordEntry[]): WordSegment[] {
-  const fields = splitWordSegments(entries.map(toOperatorSplitterSegment), ifs);
-  if (fields.length === 0) return [];
-  return joinNonEmptyOperatorFields(fields);
-}
-
-function toOperatorSplitterSegment({ segment, keepsFields }: OperatorWordEntry): WordSegment {
-  if (isBreakSegment(segment) || segment.quoted || keepsFields) return segment;
-  if (segment.atListElement) {
-    return segment.text === '' ? { ...segment, split: true, operatorNull: true } : { ...segment, split: false };
-  }
-  return { ...segment, split: true };
-}
-
-function joinNonEmptyOperatorFields(fields: TextSegment[][]): WordSegment[] {
-  const joined: WordSegment[] = [];
-  for (const [index, field] of fields.entries()) {
-    if (index > 0) joined.push(textSegment(' ', false, true));
-    if (field.length === 0) {
-      joined.push(textSegment('', false, true, { operatorNull: true }));
-      continue;
-    }
-    for (const fragment of field) joined.push({ ...fragment, split: false });
-  }
-  return joined;
-}
-
-// code-gauge-allow functionParameterCount -- Default and assignment operators take expansion metadata, explicit WordContext, and GC roots.
+// code-gauge-allow functionParameterCount -- Default and assignment operators take expansion metadata and explicit WordContext.
 function defaultValue(
   expander: Expander,
   shell: Shell,
@@ -293,27 +169,22 @@ function defaultValue(
   colon: boolean,
   name: string,
   subscript: SubscriptRef | undefined,
-  ctx: WordContext,
-  roots: string[]
+  ctx: WordContext
 ): WordSegment[] {
-  if (kind === '-') return expandArgument(expander, expansion.argument, { ...ctx, spacedStar: true }, false, roots);
+  if (kind === '-') return expandArgument(expander, expansion.argument, ctx, false);
   if (kind === '?') return failRequireOperator(expander, shell, expansion.argument, colon, name, subscript);
   const word = expandArgument(
     expander,
     expansion.argument,
     { inDouble: ctx.inDouble, spacedStar: false, inAssignmentValue: true },
-    false,
-    roots
+    false
   );
   const text = expander.joinSegments(word);
   const target = resolveAssignOperatorTarget(shell, name, subscript);
   const outcome = writeResolvedTarget(shell, target, text, false);
   if (!outcome.ok) shell.failures.handleStoreFailure('expansion', outcome);
   const stored = outcome.ok ? outcome.stored : '';
-  const fromList = word.some((seg) => seg.kind === 'text' && seg.fromList);
-  if (!fromList) return expander.valueSegments({ kind: 'scalar', value: stored }, ctx);
-  if (stored === '') return ctx.inDouble ? [textSegment('', true, false, { fromList: true })] : [];
-  return [textSegment(stored, ctx.inDouble, !ctx.inDouble, { fromList: true })];
+  return expander.valueSegments({ kind: 'scalar', value: stored }, ctx, expansion.text);
 }
 
 function failRequireOperator(
@@ -343,30 +214,27 @@ function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: Subs
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript?.wholeArray) {
     shell.discard(`$${name}: cannot assign in this way`);
   }
-  const target =
-    subscript === undefined
-      ? resolveScalarTarget(shell, name, true)
-      : resolveSubscriptTarget(shell, {
-          name,
-          subscript: { kind: 'word', word: subscript.word as Word, unquoteAnsiC: true },
-          operation: 'write',
-        });
-  if (!target) shell.discard(`${name}: circular name reference`);
-  return target;
+  return subscript === undefined
+    ? resolveScalarTarget(shell, name, true)
+    : resolveSubscriptTarget(shell, {
+        name,
+        subscript: { kind: 'word', word: subscript.word as Word, unquoteAnsiC: true },
+        operation: 'write',
+      });
 }
 
 function expandErrorWord(expander: Expander, shell: Shell, parts: WordPart[]): string {
   expander.checkTilde(parts, false);
-  const segments = expander.expandParts(parts, { inDouble: false, spacedStar: true });
+  const segments = expander.expandParts(parts, { inDouble: false, spacedStar: false, inOperatorWord: true });
   const spend = (cost?: number): void => shell.runtime.spend(cost);
   const fields = expander.splitFields(segments).map((field) =>
-    joinBounded(
+    joinMetered(
       field.map((fragment) => fragment.text),
       '',
       spend
     )
   );
-  return joinBounded(fields, ' ', spend);
+  return joinMetered(fields, ' ', spend);
 }
 
 function mapPatternRemoval(
@@ -378,7 +246,7 @@ function mapPatternRemoval(
 ): WordSegment[] {
   if (!ctx.inDouble && value.kind === 'list' && !value.positional && shell.store.readScalar('IFS') === '') {
     if (value.values.length === 0) return [];
-    const text = joinBounded(value.values.map(map), ' ', (cost) => shell.runtime.spend(cost));
+    const text = joinMetered(value.values.map(map), ' ', (cost) => shell.runtime.spend(cost));
     return text === '' ? [] : [textSegment(text, false, false)];
   }
   return mapValues(expander, value, ctx, map);
@@ -399,17 +267,17 @@ function mapValues(
 
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
-  const spend = (): void => shell.runtime.spend();
-  const glob = compileGlob(pattern, spend);
+  const step = shell.runtime.step;
+  const glob = compileGlob(pattern, step);
   if (operator === '#') {
-    const end = shortestPrefixMatch(glob, chars, 0, spend);
+    const end = shortestPrefixMatch(glob, chars, 0, step);
     return end === undefined ? text : chars.slice(end).join('');
   }
   if (operator === '##') {
-    const end = longestPrefixMatch(glob, chars, 0, spend);
+    const end = longestPrefixMatch(glob, chars, 0, step);
     return end === undefined ? text : chars.slice(end).join('');
   }
-  const start = operator === '%' ? shortestSuffixMatch(glob, chars, spend) : longestSuffixMatch(glob, chars, spend);
+  const start = operator === '%' ? shortestSuffixMatch(glob, chars, step) : longestSuffixMatch(glob, chars, step);
   return start === undefined ? text : chars.slice(0, start).join('');
 }
 
@@ -438,8 +306,8 @@ function replacementFor(replacement: readonly WordSegment[], matched: string, sp
   let text = '';
   for (const seg of replacement) {
     if (seg.kind === 'emptyList') continue;
-    if (seg.kind === 'break') text = appendBounded(text, ' ', spend);
-    else if (seg.quoted) text = appendBounded(text, seg.text, spend);
+    if (seg.kind === 'break') text = appendMetered(text, ' ', spend);
+    else if (seg.quoted) text = appendMetered(text, seg.text, spend);
     else text = appendUnquotedReplacement(text, seg.text, matched, spend);
   }
   return text;
@@ -456,15 +324,15 @@ function appendUnquotedReplacement(
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i];
     if (c === '\\' && i + 1 < raw.length && raw[i + 1] === '&') {
-      text = appendBounded(appendBounded(text, raw.slice(literalStart, i), spend), '&', spend);
+      text = appendMetered(appendMetered(text, raw.slice(literalStart, i), spend), '&', spend);
       i++;
       literalStart = i + 1;
     } else if (c === '&') {
-      text = appendBounded(appendBounded(text, raw.slice(literalStart, i), spend), matched, spend);
+      text = appendMetered(appendMetered(text, raw.slice(literalStart, i), spend), matched, spend);
       literalStart = i + 1;
     }
   }
-  return appendBounded(text, raw.slice(literalStart), spend);
+  return appendMetered(text, raw.slice(literalStart), spend);
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Shares leftmost-longest search and empty-match advance across `/`, `//`, `/#`, and `/%`.
@@ -478,28 +346,29 @@ function substitute(
   if (pattern === '' && operator !== '/#' && operator !== '/%') return text;
   const chars = charactersOf(text);
   const spend = (cost?: number): void => shell.runtime.spend(cost);
-  const glob = compileGlob(pattern, () => spend());
+  const step = shell.runtime.step;
+  const glob = compileGlob(pattern, step);
   const replace = (start: number, end: number): string =>
     replacementFor(replacement, chars.slice(start, end).join(''), spend);
   if (operator === '/#') {
-    const end = longestPrefixMatch(glob, chars, 0, () => spend());
-    return end === undefined ? text : appendBounded(replace(0, end), chars.slice(end).join(''), spend);
+    const end = longestPrefixMatch(glob, chars, 0, step);
+    return end === undefined ? text : appendMetered(replace(0, end), chars.slice(end).join(''), spend);
   }
   if (operator === '/%') {
-    const start = longestSuffixMatch(glob, chars, () => spend());
+    const start = longestSuffixMatch(glob, chars, step);
     return start === undefined
       ? text
-      : appendBounded(chars.slice(0, start).join(''), replace(start, chars.length), spend);
+      : appendMetered(chars.slice(0, start).join(''), replace(start, chars.length), spend);
   }
   let result = '';
   for (let position = 0; position <= chars.length;) {
-    const match = nextLeftmostLongestMatch(glob, chars, position, () => spend());
-    if (!match) return appendBounded(result, chars.slice(position).join(''), spend);
-    result = appendBounded(result, chars.slice(position, match.start).join(''), spend);
-    result = appendBounded(result, replace(match.start, match.end), spend);
-    if (operator === '/' || chars.length === 0) return appendBounded(result, chars.slice(match.end).join(''), spend);
+    const match = nextLeftmostLongestMatch(glob, chars, position, step);
+    if (!match) return appendMetered(result, chars.slice(position).join(''), spend);
+    result = appendMetered(result, chars.slice(position, match.start).join(''), spend);
+    result = appendMetered(result, replace(match.start, match.end), spend);
+    if (operator === '/' || chars.length === 0) return appendMetered(result, chars.slice(match.end).join(''), spend);
     if (match.end === match.start) {
-      result = appendBounded(result, chars[match.start] ?? '', spend);
+      result = appendMetered(result, chars[match.start] ?? '', spend);
       position = match.start + 1;
     } else position = match.end;
   }
@@ -518,12 +387,12 @@ function substring(
   const { offset: offsetParts, length: lengthParts } = splitSubstring(expansion.argument, ctx.inDouble);
   if (value.kind === 'scalar' && value.value === undefined) return [];
   if (value.kind === 'list' && name !== '@' && name !== '*' && value.values.length === 0) {
-    return expander.valueSegments({ ...value, values: [] }, ctx);
+    return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
   }
   const scalarTarget = value.kind === 'scalar' ? value.value : scalarWholeArrayText(shell, name, value);
   const evaluate = (parts: (string | WordPart)[]): bigint => {
-    const expanded = expander.arithmeticTextWithMask({ pieces: parts, row: shell.currentRow }, true);
-    return shell.evaluateText(expanded.text, undefined, expanded.quoted);
+    const expanded = expander.arithmeticText({ pieces: parts, row: shell.currentRow }, true, true);
+    return shell.evaluateText(expanded, undefined, true);
   };
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
@@ -538,12 +407,13 @@ function substring(
     return sliceScalarSegments(expander, value, sliced, ctx);
   }
   const values = sliceList(shell, name, value, offset);
-  if (values === undefined) return expander.valueSegments({ ...value, values: [] }, ctx);
+  if (values === undefined) return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
   const length = lengthParts === undefined ? undefined : evaluate(lengthParts);
   if (length !== undefined && length < 0n) negativeLength();
   return expander.valueSegments(
     { ...value, values: length === undefined ? values : values.slice(0, Number(length)), transformed: true },
-    ctx
+    ctx,
+    expansion.text
   );
 }
 
@@ -553,7 +423,7 @@ function scalarWholeArrayText(
   value: Extract<ParameterValue, { kind: 'list' }>
 ): string | undefined {
   if (name === '@' || name === '*') return undefined;
-  const resolved = resolveTargetName(shell, name, false) ?? name;
+  const resolved = resolveTargetName(shell, name);
   return shell.store.isArrayName(resolved) ? undefined : value.values[0];
 }
 
@@ -597,7 +467,7 @@ function sliceList(
     const offset = start < 0n ? start + total : start;
     return offset < 0n || offset > total ? undefined : ['main.sh', ...value.values].slice(Number(offset));
   }
-  const resolved = resolveTargetName(shell, name, false) ?? name;
+  const resolved = resolveTargetName(shell, name);
   if (shell.store.isAssociativeName(resolved)) return sliceAssociative(value.values, start);
   const keys = shell.store.readArrayKeys(resolved);
   const keyed: [bigint, string][] = value.values.map((element, index) => [BigInt(keys[index] ?? index), element]);
@@ -733,12 +603,12 @@ function updateSubstringNesting(c: string, state: SubstringScanState): boolean {
 
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
-  const spend = (): void => shell.runtime.spend();
-  const glob = compileGlob(pattern, spend);
+  const step = shell.runtime.step;
+  const glob = compileGlob(pattern, step);
   const all = operator.length === 2;
   for (let i = 0; i < chars.length; i++) {
     if (!all && i > 0) break;
-    if (!matchesSlice(glob, chars, i, i + 1, spend)) continue;
+    if (!matchesSlice(glob, chars, i, i + 1, step)) continue;
     const c = chars[i];
     if (operator.startsWith('^')) chars[i] = upperCase(c);
     else if (operator.startsWith(',')) chars[i] = lowerCase(c);
@@ -792,12 +662,12 @@ function transform(
     case 'A': {
       const { text, isArray } = formatDeclarationTransform(shell, name, value);
       if (value.kind === 'list') {
-        if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx);
+        if (text === '') return expander.valueSegments({ ...value, values: [] }, ctx, expansion.text);
         const values =
           isArray && ctx.inDouble && !value.star ? splitQuotedDeclarationFields(text, expander.currentIfs()) : [text];
-        return expander.valueSegments({ ...value, values, transformed: true }, ctx);
+        return expander.valueSegments({ ...value, values, transformed: true }, ctx, expansion.text);
       }
-      return expander.valueSegments({ kind: 'scalar', value: text }, ctx);
+      return expander.valueSegments({ kind: 'scalar', value: text }, ctx, expansion.text);
     }
     case 'K':
     case 'k': {
@@ -835,8 +705,7 @@ function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
 }
 
 function resolveTransformationView(shell: Shell, name: string): VariableView | undefined {
-  const resolved = resolveTargetName(shell, name, false);
-  if (resolved === undefined) return undefined;
+  const resolved = resolveTargetName(shell, name);
   return shell.store.ownView(resolved) ?? shell.store.dynamicView(resolved);
 }
 
@@ -877,7 +746,7 @@ function keyValuePairs(
     return expander.valueSegments({ kind: 'scalar', value: quoteReusable(value.value) }, ctx);
   }
   if (value.values.length === 0) return expander.valueSegments({ ...value, values: [] }, ctx);
-  const resolved = resolveTargetName(shell, name, false) ?? name;
+  const resolved = resolveTargetName(shell, name);
   if (!shell.store.isArrayName(resolved)) {
     return expander.valueSegments({ ...value, values: value.values.map(quoteReusable) }, ctx);
   }
@@ -894,11 +763,11 @@ function keyValuePairs(
     (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${quoteValue(element)}`
   );
   const text = isAssociative
-    ? joinBounded(
+    ? joinMetered(
         pairs.map((pair) => `${pair} `),
         '',
         spend
       )
-    : joinBounded(pairs, ' ', spend);
+    : joinMetered(pairs, ' ', spend);
   return expander.valueSegments({ kind: 'scalar', value: text }, ctx);
 }

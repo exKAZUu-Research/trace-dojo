@@ -6,6 +6,7 @@ export interface WordContext {
   readonly inAssignmentValue?: boolean;
   readonly inOperatorWord?: boolean;
   readonly inQuotedOperatorWord?: boolean;
+  readonly inSubscript?: boolean;
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };
@@ -15,9 +16,6 @@ export interface TextSegment {
   readonly text: string;
   readonly quoted: boolean;
   readonly split: boolean;
-  readonly atListElement?: boolean;
-  readonly operatorNull?: boolean;
-  readonly fromList?: boolean;
 }
 
 export interface BreakSegment {
@@ -39,13 +37,8 @@ export function breakSegment(breakKind: BreakSegment['breakKind'], ifsJoiner?: s
   return ifsJoiner === undefined ? { kind: 'break', breakKind } : { kind: 'break', breakKind, ifsJoiner };
 }
 
-export function textSegment(
-  text: string,
-  quoted: boolean,
-  split: boolean,
-  extra?: { atListElement?: boolean; operatorNull?: boolean; fromList?: boolean }
-): TextSegment {
-  return { kind: 'text', text, quoted, split, ...extra };
+export function textSegment(text: string, quoted: boolean, split: boolean): TextSegment {
+  return { kind: 'text', text, quoted, split };
 }
 
 export function isBreakSegment(segment: WordSegment): segment is BreakSegment {
@@ -67,32 +60,22 @@ class SplitterState {
   private field: TextSegment[] = [];
   private started = false;
   private afterWhite = false;
-  private afterListWhite = false;
   private afterDelimiter = false;
-  private readonly hasNonWhitePrimaryIfs: boolean;
 
-  constructor(private readonly ifs: string) {
-    this.hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
-  }
+  constructor(private readonly ifs: string) {}
 
   add(segment: WordSegment): void {
     if (segment.kind === 'emptyList') return;
     if (segment.kind === 'break') {
-      this.onFieldBreak();
+      this.onFieldBreak(segment.breakKind);
     } else if (!segment.split || this.ifs === '') {
       if (segment.text === '' && !segment.quoted) return;
       this.field.push({ ...segment, split: false });
       this.started = true;
       this.afterWhite = false;
-      this.afterListWhite = false;
       this.afterDelimiter = false;
     } else if (segment.text !== '') {
-      this.splitText(segment.text, Boolean(segment.fromList));
-    } else if (segment.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
-      this.started = true;
-      this.afterWhite = false;
-      this.afterListWhite = false;
-      this.afterDelimiter = false;
+      this.splitText(segment.text);
     }
   }
 
@@ -101,17 +84,9 @@ class SplitterState {
     return this.fields;
   }
 
-  private onFieldBreak(): void {
+  private onFieldBreak(breakKind: BreakSegment['breakKind']): void {
     if (this.ifs === '') {
-      if (this.started) this.end();
-      return;
-    }
-    if (this.afterListWhite) {
-      this.afterWhite = true;
-      this.afterListWhite = false;
-    }
-    if (this.hasNonWhitePrimaryIfs) {
-      this.separate(this.ifs[0]);
+      if (breakKind !== 'star' && this.started) this.end();
       return;
     }
     if (this.started) {
@@ -128,39 +103,34 @@ class SplitterState {
     this.started = false;
   }
 
-  private splitText(text: string, fromList: boolean): void {
+  private splitText(text: string): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
         run += c;
         this.started = true;
         this.afterWhite = false;
-        this.afterListWhite = false;
         this.afterDelimiter = false;
         continue;
       }
       if (run) this.field.push(textSegment(run, false, false));
       run = '';
-      this.separate(c, fromList);
+      this.separate(c);
     }
     if (run) this.field.push(textSegment(run, false, false));
   }
 
-  private separate(c: string, fromList = false): void {
+  private separate(c: string): void {
     if (c === ' ' || c === '\t' || c === '\n') {
       if (this.started) {
         this.end();
         this.afterWhite = true;
-      } else if (!this.afterDelimiter) {
-        if (fromList) this.afterWhite = true;
-        else this.afterListWhite = true;
       }
       return;
     }
     if (this.started) this.end();
     else if (!this.afterWhite) this.fields.push([]);
     this.afterWhite = false;
-    this.afterListWhite = false;
     this.afterDelimiter = true;
   }
 }

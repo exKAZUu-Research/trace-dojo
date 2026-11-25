@@ -70,6 +70,14 @@ export interface Assignment {
   text: string;
 }
 
+/** Pre-parsed leading literal option flags of a static declaration command (`declare`, `local`, `readonly`, `export`). */
+export interface StaticDeclarationOptions {
+  readonly set: readonly string[];
+  readonly unset: readonly string[];
+  readonly hasPlusOption: boolean;
+  readonly invalidOption?: string;
+}
+
 /** A redirection between standard output and standard error, the only ones a program can use here. */
 export interface Redirect {
   /** The descriptor that the redirection changes. */
@@ -106,8 +114,12 @@ export type Statement = StatementBase &
         kind: 'declaration';
         name: string;
         assignments: Assignment[];
-        /** Each argument in order, an assignment or a word. */
+        /** Pre-parsed leading literal option flags when all leading option words are plain literals. */
+        staticOptions?: StaticDeclarationOptions;
+        /** Remaining operand arguments when `staticOptions` is set; otherwise all arguments. */
         args: (Word | Assignment)[];
+        /** Unstripped argument list preserved when a user shell function shadows the declaration builtin name. */
+        rawArgs?: (Word | Assignment)[];
         redirects: Redirect[];
       }
     | { kind: 'arithmetic'; expression: ArithmeticSource }

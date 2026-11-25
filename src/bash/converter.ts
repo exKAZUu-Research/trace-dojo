@@ -10,11 +10,12 @@ import type {
   Program,
   Redirect,
   Statement,
+  StaticDeclarationOptions,
   TestExpression,
   Word,
   WordPart,
 } from './ast';
-import { type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
+import { DECLARATION_OPTIONS, type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { type AnalyzedBashSource, findForHeaderSemicolons } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
@@ -252,17 +253,25 @@ export class Converter {
       }
       return { row, lineRow: lineRowOf(node), kind: 'command', assignments, words, redirects };
     }
+    const name = node.childForFieldName('name')?.text ?? '';
     const args = this.fieldNodes(node, 'argument').map((argument) => {
       if (argument.type !== 'variable_assignment') return this.word(argument);
       return this.isAsciiAssignment(argument) ? this.assignment(argument) : this.assignmentAsWord(argument);
     });
+    const normalized = normalizeStaticDeclaration(name, args);
     return {
       row,
       lineRow: lineRowOf(node),
       kind: 'declaration',
-      name: node.childForFieldName('name')?.text ?? '',
+      name,
       assignments,
-      args,
+      ...(normalized
+        ? {
+            staticOptions: normalized.staticOptions,
+            args: normalized.operandArgs,
+            ...(normalized.consumedCount > 0 ? { rawArgs: args } : {}),
+          }
+        : { args }),
       redirects,
     };
   }
@@ -763,6 +772,64 @@ function restoreNormalizedChar(
   if (ch === '\u001F' && literalQuotes.has(index)) return originalSource[index];
   if (ch === '_' && declarationFunctionStarts.has(index)) return originalSource[index];
   return ch;
+}
+
+function normalizeStaticDeclaration(
+  builtin: string,
+  args: (Word | Assignment)[]
+): { staticOptions: StaticDeclarationOptions; operandArgs: (Word | Assignment)[]; consumedCount: number } | undefined {
+  const allowed = DECLARATION_OPTIONS[builtin];
+  if (allowed === undefined) return undefined;
+  const set = new Set<string>();
+  const unset = new Set<string>();
+  let hasPlusOption = false;
+  let invalidOption: string | undefined;
+  let index = 0;
+  for (; index < args.length; index++) {
+    const arg = args[index];
+    if ('append' in arg) break;
+    if (arg.parts.length !== 1 || arg.parts[0].kind !== 'literal' || /[\\{~*?[]/.test(arg.parts[0].text)) {
+      return undefined;
+    }
+    const token = arg.parts[0].text;
+    if (token === '--') {
+      index++;
+      break;
+    }
+    if (!/^[-+]./.test(token)) break;
+    const sign = token[0] as '-' | '+';
+    if (sign === '+') hasPlusOption = true;
+    invalidOption = scanStaticOptionFlags(token, sign, allowed, set, unset, invalidOption);
+  }
+  return {
+    staticOptions: {
+      set: [...set],
+      unset: [...unset],
+      hasPlusOption,
+      ...(invalidOption ? { invalidOption } : {}),
+    },
+    operandArgs: args.slice(index),
+    consumedCount: index,
+  };
+}
+
+function scanStaticOptionFlags(
+  token: string,
+  sign: '-' | '+',
+  allowed: string,
+  set: Set<string>,
+  unset: Set<string>,
+  invalidOption: string | undefined
+): string | undefined {
+  for (const ch of token.slice(1)) {
+    if (!allowed.includes(ch)) return invalidOption ?? `${sign}${ch}`;
+    if (ch === 'I' || ch === 'p') set.add(ch);
+    else if (sign === '+') {
+      unset.add(ch);
+      set.delete(ch);
+    } else if (!unset.has(ch)) set.add(ch);
+  }
+  return invalidOption;
 }
 
 function thenWord(owner: Node): Node {

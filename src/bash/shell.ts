@@ -1,5 +1,4 @@
-// code-gauge-allow-file fileNcss -- Coordinates statement execution, child substitution contexts, arithmetic host wiring, and scoped GC roots.
-import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+// code-gauge-allow-file fileNcss -- Coordinates statement execution, isolated child substitution contexts, and arithmetic host wiring.
 import {
   ArithmeticError,
   type ArithmeticHost,
@@ -9,11 +8,13 @@ import {
   splitSubscriptText,
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
+import { createCaptureBuffer } from './budget';
 import { REGULAR_BUILTINS } from './builtins';
 import {
   classifyCommandName,
   rejectUnsupportedDeclarationPrefix,
   rejectUnsupportedFeature,
+  rejectUnsupportedNamerefMutation,
   rejectUnsupportedPrefixAssignment,
 } from './capabilities';
 import { conditionalStatus } from './conditional';
@@ -34,7 +35,6 @@ import {
   type FunctionDefinition,
   type OutputTarget,
   ReturnSignal,
-  type RootContext,
   type Runtime,
 } from './runtime';
 import {
@@ -44,7 +44,7 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
-import { type CellHandle, isIdentifier, isValidFunctionName, VariableStore } from './variables';
+import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
 
 export { BASH_VERSION, type FunctionDefinition, type OutputTarget } from './runtime';
 export type { CompoundElement } from './variables';
@@ -59,9 +59,9 @@ interface ShellContextOptions {
 
 /**
  * One Bash execution context (top-level script or isolated child command substitution), owning its `VariableStore`,
- * `Expander`, `FailurePolicy`, file descriptors, control-flow counters, and scoped GC roots.
+ * `Expander`, `FailurePolicy`, file descriptors, and control-flow counters.
  */
-export class Shell implements ArithmeticHost, RootContext {
+export class Shell implements ArithmeticHost {
   readonly store: VariableStore;
   readonly failures: FailurePolicy;
   readonly expander: Expander;
@@ -73,9 +73,6 @@ export class Shell implements ArithmeticHost, RootContext {
   private loopDepth = 0;
   private conditionDepth = 0;
   private listConditionDepth = 0;
-  private readonly valueRoots: (readonly string[])[] = [];
-  private readonly builderRoots: { text: string }[] = [];
-  private readonly captureRoots: { text: string }[] = [];
 
   constructor(
     readonly runtime: Runtime,
@@ -92,35 +89,6 @@ export class Shell implements ArithmeticHost, RootContext {
       () => this.fd2
     );
     this.expander = new Expander(this);
-    if (!options?.store) runtime.registerContext(this);
-  }
-
-  // ---------------------------------------------------------------- scoped GC roots
-
-  withValuesRoot<T>(values: readonly string[], run: () => T): T {
-    this.valueRoots.push(values);
-    try {
-      return run();
-    } finally {
-      this.valueRoots.pop();
-    }
-  }
-
-  withBuilderRoot<T>(run: (builder: { text: string }) => T): T {
-    const builder = { text: '' };
-    this.builderRoots.push(builder);
-    try {
-      return run(builder);
-    } finally {
-      this.builderRoots.pop();
-    }
-  }
-
-  *reachableStrings(): Iterable<string> {
-    yield* this.store.storedReachableStrings();
-    for (const values of this.valueRoots) yield* values;
-    for (const builder of this.builderRoots) if (builder.text !== '') yield builder.text;
-    for (const capture of this.captureRoots) if (capture.text !== '') yield capture.text;
   }
 
   // ---------------------------------------------------------------- running
@@ -325,12 +293,10 @@ export class Shell implements ArithmeticHost, RootContext {
     const values = statement.values
       ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
       : [...this.store.positionalArgs()];
-    return this.withValuesRoot(values, () => {
-      const bindsObjects = values.some(
-        (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
-      );
-      return this.restoringLine(() => this.runForIterations(statement, values, bindsObjects));
-    });
+    const bindsObjects = values.some(
+      (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
+    );
+    return this.restoringLine(() => this.runForIterations(statement, values, bindsObjects));
   }
 
   private runForIterations(
@@ -353,22 +319,14 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   private bindLoopVariable(name: string, value: string, bindsObjects: boolean): boolean {
-    const own = this.store.ownView(name);
-    if (own?.attributes.has('n') && own.handle) {
-      const bound = this.store.bindNameref(own.handle, value, this.isInFunction);
-      if (!bound.ok) return this.failures.handleStoreFailure('forHeader', bound);
-      if (bound.cycleWarning) this.reportError(bound.cycleWarning);
-      return true;
+    if (this.store.ownView(name)?.attributes.has('n')) {
+      rejectUnsupportedNamerefMutation('for', name);
     }
     const target = resolveScalarTarget(this, name, true);
-    if (!target) return false;
     const outcome = writeResolvedTarget(this, target, value, false);
     if (!outcome.ok) return this.failures.handleStoreFailure('forHeader', outcome);
     if (target.kind === 'scalar') {
-      const targetView = target.cell ? this.store.viewOfHandle(target.cell) : this.store.ownView(target.name);
-      if (targetView?.handle && !targetView.attributes.has('n')) {
-        this.store.setNullReference(targetView.handle, bindsObjects && value === '');
-      }
+      this.store.setNullReferenceNamed(target.name, bindsObjects && value === '');
     }
     return true;
   }
@@ -377,8 +335,8 @@ export class Shell implements ArithmeticHost, RootContext {
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
     const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
-      const expanded = this.expander.arithmeticTextWithMask(source);
-      const value = this.tryEvaluate(expanded.text, '((', expanded.quoted);
+      const expanded = this.expander.arithmeticText(source);
+      const value = this.tryEvaluate(expanded, '((', true);
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
     };
@@ -470,20 +428,17 @@ export class Shell implements ArithmeticHost, RootContext {
 
   private executeCase(statement: Extract<Statement, { kind: 'case' }>): number {
     const value = this.leavingLine(() => this.expander.expandString(statement.value));
-    return this.withValuesRoot([value], () => {
-      let status = 0;
-      let falling = false;
-      for (const item of statement.items) {
-        const matches =
-          falling ||
-          item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern)));
-        if (!matches) continue;
-        status = this.runStatements(item.body);
-        if (item.terminator === ';;') return status;
-        falling = item.terminator === ';&';
-      }
-      return status;
-    });
+    let status = 0;
+    let falling = false;
+    for (const item of statement.items) {
+      const matches =
+        falling || item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern)));
+      if (!matches) continue;
+      status = this.runStatements(item.body);
+      if (item.terminator === ';;') return status;
+      falling = item.terminator === ';&';
+    }
+    return status;
   }
 
   withRedirects<T>(redirects: Redirect[], run: () => T): T {
@@ -514,18 +469,16 @@ export class Shell implements ArithmeticHost, RootContext {
     if (argv.length === 0) {
       return { status: this.executeAssignmentOnlyCommand(statement), conditionalStep: false, ranFunction: false };
     }
-    return this.withValuesRoot(argv, () => {
-      const [name, ...args] = argv;
-      const lastArg = argv.at(-1) as string;
-      const classified = classifyCommandName(name, this.store.hasFunction(name), Object.hasOwn(REGULAR_BUILTINS, name));
-      if (classified.kind === 'declarationBuiltin') {
-        return this.executeDynamicDeclaration(statement, name, args, lastArg);
-      }
-      if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
-        rejectUnsupportedFeature(classified.feature);
-      }
-      return this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
-    });
+    const [name, ...args] = argv;
+    const lastArg = argv.at(-1) as string;
+    const classified = classifyCommandName(name, this.store.hasFunction(name), Object.hasOwn(REGULAR_BUILTINS, name));
+    if (classified.kind === 'declarationBuiltin') {
+      return this.executeDynamicDeclaration(statement, name, args, lastArg);
+    }
+    if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
+      rejectUnsupportedFeature(classified.feature);
+    }
+    return this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
   }
 
   private executeDynamicDeclaration(
@@ -580,21 +533,23 @@ export class Shell implements ArithmeticHost, RootContext {
     this.expander.lastSubstitutionStatus = 0;
     const shadowingFn = this.store.getFunction(statement.name);
     if (shadowingFn) {
-      const argv = expandShadowedDeclarationArgs(this, statement.name, statement.args);
-      return this.withValuesRoot(argv, () => {
-        const status = this.withTemporaryScope(statement.assignments, () =>
-          this.withRedirects(statement.redirects, () => {
-            const code = this.callFunction(shadowingFn, argv.slice(1), statement.row);
-            this.store.lastArgument = argv.at(-1) as string;
-            return code;
-          })
-        );
-        return { status, conditionalStep: false, ranFunction: true };
-      });
+      const argv = expandShadowedDeclarationArgs(this, statement.name, statement.rawArgs ?? statement.args);
+      const status = this.withTemporaryScope(statement.assignments, () =>
+        this.withRedirects(statement.redirects, () => {
+          const code = this.callFunction(shadowingFn, argv.slice(1), statement.row);
+          this.store.lastArgument = argv.at(-1) as string;
+          return code;
+        })
+      );
+      return { status, conditionalStep: false, ranFunction: true };
     }
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
-    const { status, assignsAnswer } = executeDeclarationCommand(this, statement.name, statement.args, (run) =>
-      this.withRedirects(statement.redirects, run)
+    const { status, assignsAnswer } = executeDeclarationCommand(
+      this,
+      statement.name,
+      statement.staticOptions,
+      statement.args,
+      (run) => this.withRedirects(statement.redirects, run)
     );
     return { status, conditionalStep: !assignsAnswer, ranFunction: false };
   }
@@ -638,21 +593,14 @@ export class Shell implements ArithmeticHost, RootContext {
       existing?.attributes.has('A') === true;
     rejectUnsupportedPrefixAssignment(assignment, existing?.attributes, isArray);
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-    if (existing?.attributes.has('r')) {
-      this.failures.handleStoreFailure('commandPrefix', {
-        ok: false,
-        reason: 'readonly',
-        message: `${assignment.name}: readonly variable`,
-      });
-      return;
-    }
-    this.store.bindTemporaryScalar(scopeIndex, assignment.name, value, assignment.append);
+    const failure = this.store.bindTemporaryScalar(scopeIndex, assignment.name, value, assignment.append);
+    if (failure) this.failures.handleStoreFailure('commandPrefix', failure);
   }
 
   // ---------------------------------------------------------------- functions & child command substitutions
 
   callFunction(fn: FunctionDefinition, args: string[], callRow: number): number {
-    if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    this.runtime.checkCallDepth();
     const reportedRow = this.currentRow;
     const scopeIndex = this.store.pushFunctionScope(fn.name, reportedRow + 1, args);
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, store: this.store, scopeIndex };
@@ -686,8 +634,8 @@ export class Shell implements ArithmeticHost, RootContext {
 
   namesStructure(word: string): boolean {
     if (!isIdentifier(word)) return false;
-    const resolved = resolveTargetName(this, word, false);
-    return resolved !== undefined && this.store.ownView(resolved)?.kind === 'associative';
+    const resolved = resolveTargetName(this, word);
+    return this.store.ownView(resolved)?.kind === 'associative';
   }
 
   get isInFunction(): boolean {
@@ -702,22 +650,16 @@ export class Shell implements ArithmeticHost, RootContext {
     return this.loopDepth;
   }
 
-  /** Runs `$(...)` or `` `...` `` in a fresh child `Shell` context over a forked `VariableStore`. */
+  /** Runs `$(...)` or `` `...` `` in a fresh child `Shell` context over an eager metered `VariableStore` copy. */
   captureSubshell(body: Statement[], startRow?: number): { output: string; status: number } {
-    const buffer = { text: '' };
-    const captureTarget: OutputTarget = {
-      write: (text) => {
-        buffer.text += text;
-        if (buffer.text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-      },
-    };
-    if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    this.runtime.checkCallDepth();
+    const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
     const firstRow = body[0]?.row ?? startRow;
     const childShift = firstRow !== undefined ? firstRow - this.currentRow : this.lineShift;
     const childStore = this.store.fork(() => this.currentRow + 1);
     const childShell = new Shell(this.runtime, {
       store: childStore,
-      fd1: captureTarget,
+      fd1: capture.target,
       fd2: this.fd2,
       lineShift: childShift,
       readShift: childShift,
@@ -728,16 +670,12 @@ export class Shell implements ArithmeticHost, RootContext {
       store: childStore,
       scopeIndex: childStore.topScopeIndex,
     };
-    this.captureRoots.push(buffer);
-    this.runtime.registerContext(childShell);
     this.runtime.frames.push(subshellFrame);
     try {
       const status = runSubshellBody(childShell, body);
-      return { output: buffer.text, status };
+      return { output: capture.read(), status };
     } finally {
       this.runtime.frames.pop();
-      this.runtime.unregisterContext(childShell);
-      this.captureRoots.pop();
     }
   }
 
@@ -752,17 +690,12 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   evaluate(source: ArithmeticSource, commandName: string | undefined): bigint {
-    const expanded = this.expander.arithmeticTextWithMask(source);
-    return this.evaluateText(expanded.text, commandName, expanded.quoted);
+    return this.evaluateText(this.expander.arithmeticText(source), commandName, true);
   }
 
-  evaluateText(
-    text: string,
-    commandName: string | undefined,
-    preExpanded: boolean | ReadonlySet<number> = false
-  ): bigint {
+  evaluateText(text: string, commandName: string | undefined, preExpanded = false): bigint {
     try {
-      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
+      return evaluateArithmetic(text, this, commandName, this.runtime.step, preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) {
@@ -774,7 +707,7 @@ export class Shell implements ArithmeticHost, RootContext {
 
   evaluateFatalReadonly(text: string, preExpanded = false, commandName?: string): bigint {
     try {
-      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
+      return evaluateArithmetic(text, this, commandName, this.runtime.step, preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) {
@@ -785,18 +718,14 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   arithmeticStatus(source: ArithmeticSource, commandName: string): number {
-    const expanded = this.expander.arithmeticTextWithMask(source);
-    const value = this.tryEvaluate(expanded.text, commandName, expanded.quoted);
+    const expanded = this.expander.arithmeticText(source);
+    const value = this.tryEvaluate(expanded, commandName, true);
     return value === undefined || value === 0n ? 1 : 0;
   }
 
-  tryEvaluate(
-    text: string,
-    commandName: string | undefined,
-    preExpanded: boolean | ReadonlySet<number> = false
-  ): bigint | undefined {
+  tryEvaluate(text: string, commandName: string | undefined, preExpanded = false): bigint | undefined {
     try {
-      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
+      return evaluateArithmetic(text, this, commandName, this.runtime.step, preExpanded);
     } catch (error) {
       if (error instanceof ArithmeticStoreError) {
         this.failures.handleStoreFailure('letBuiltin', error.failure);
@@ -812,34 +741,16 @@ export class Shell implements ArithmeticHost, RootContext {
     name: string,
     rawSubscript: string | undefined,
     willRead: boolean,
-    expandSubscript = true,
-    subscriptQuoted?: ReadonlySet<number>
+    expandSubscript = true
   ): ArithmeticTarget {
     if (rawSubscript === undefined) {
-      return (
-        resolveScalarTarget(this, name, !willRead) ?? {
-          kind: 'invalid',
-          raw: name,
-          failure: { ok: false, reason: 'cannotAssign', message: '' },
-        }
-      );
+      return resolveScalarTarget(this, name, !willRead);
     }
-    return (
-      resolveSubscriptTarget(this, {
-        name,
-        subscript: {
-          kind: 'text',
-          text: rawSubscript,
-          preExpanded: !expandSubscript,
-          ...(!expandSubscript ? { quotedMask: subscriptQuoted ?? new Set<number>() } : {}),
-        },
-        operation: willRead ? 'arithmeticRead' : 'arithmeticWrite',
-      }) ?? {
-        kind: 'invalid',
-        raw: `${name}[${rawSubscript}]`,
-        failure: { ok: false, reason: 'cannotAssign', message: '' },
-      }
-    );
+    return resolveSubscriptTarget(this, {
+      name,
+      subscript: { kind: 'text', text: rawSubscript, preExpanded: !expandSubscript },
+      operation: willRead ? 'arithmeticRead' : 'arithmeticWrite',
+    });
   }
 
   readTarget(target: ArithmeticTarget): string | undefined {
@@ -850,10 +761,9 @@ export class Shell implements ArithmeticHost, RootContext {
     return writeResolvedTarget(this, target, value, false);
   }
 
-  evaluateCompoundIndex(cellHandle: CellHandle, rawKey: string): bigint | undefined {
-    const view = this.store.viewOfHandle(cellHandle);
+  evaluateCompoundIndex(resolvedName: string, rawKey: string): bigint | undefined {
     const idx = this.evaluateFatalReadonly(rawKey, true);
-    return idx >= 0n ? idx : this.store.translateNegativeIndex(view.name, idx, true);
+    return idx >= 0n ? idx : this.store.translateNegativeIndex(resolvedName, idx, true);
   }
 
   // ---------------------------------------------------------------- assignments & unset
@@ -868,10 +778,6 @@ export class Shell implements ArithmeticHost, RootContext {
     }
     if (assignment.array) return executeCompoundAssignment(this, assignment, context);
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-    return this.withValuesRoot([value], () => this.commitScalarOrElementAssignment(assignment, value, context));
-  }
-
-  private commitScalarOrElementAssignment(assignment: Assignment, value: string, context: 'scriptAssignment'): boolean {
     const target = assignment.subscript
       ? resolveSubscriptTarget(this, {
           name: assignment.name,
@@ -880,14 +786,12 @@ export class Shell implements ArithmeticHost, RootContext {
           append: assignment.append,
         })
       : resolveScalarTarget(this, assignment.name, true, { append: assignment.append });
-    if (!target) return this.failures.handleStoreFailure(context, { ok: false, reason: 'cannotAssign', message: '' });
     const outcome = writeResolvedTarget(this, target, value, assignment.append);
     return outcome.ok ? true : this.failures.handleStoreFailure(context, outcome);
   }
 
   unsetVariable(name: string, followReference = true): boolean {
-    const target = followReference ? (resolveTargetName(this, name, false) ?? name) : name;
-    const failure = this.store.unsetNamed(target);
+    const failure = this.store.unsetNamed(name, followReference);
     return failure ? this.failures.handleStoreFailure('regularBuiltin', failure, 'unset') : true;
   }
 

@@ -90,13 +90,14 @@ MyTurtle_new m
   });
 });
 
-test('a turtle that no variable holds any longer disappears, as garbage collection removes it', () => {
+test('a turtle whose handle is overwritten stays on the board until remove removes a turtle', () => {
   const program = `turtle_new t1
 turtle_new t2 3 3
 t2=$t1
 前に進む "$t2"
+remove "$t2"
 `;
   const trace = traceProgram('bash', program, program);
-  expect(trace.traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 2, 1, 1]);
-  expect(executeProgram('bash', program)).toMatchObject({ finalTurtles: [{ x: 0, y: 1, dir: 'N' }] });
+  expect(trace.traceItems.map(({ turtles }) => turtles.length)).toEqual([0, 1, 2, 2, 2, 1]);
+  expect(executeProgram('bash', program)).toMatchObject({ finalTurtles: [{ x: 3, y: 3, dir: 'N' }] });
 });

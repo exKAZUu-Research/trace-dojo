@@ -27,8 +27,8 @@ export function traceBashProgram(program: string, trace: TraceOptions, input?: P
 }
 
 /**
- * Pure frame-bounded variable projection from `VariableStore`: reads stored cells without evaluating expressions,
- * detaching copy-on-write state, drawing `RANDOM`, or mutating external turtle devices.
+ * Pure frame-bounded variable projection from `VariableStore`: reads stored cells without handles, expression
+ * evaluation, PRNG draws, or external device mutations.
  */
 function variablesOf(runtime: Runtime, frame: Frame): TraceVariables {
   const { store } = frame;

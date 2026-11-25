@@ -13,19 +13,6 @@ export class TurtleError extends Error {
 
 export type Builtin = (shell: Shell, args: string[], name: string) => number;
 
-function fail(shell: Shell, name: string, message: string): never {
-  const report = `main.sh: line ${shell.currentRow + 1}: ${name}: ${message}`;
-  shell.fd2.write(`${report}\n`);
-  throw new TurtleError(report);
-}
-
-function turtleArgument(shell: Shell, args: string[], name: string): TurtleState {
-  if (args.length !== 1) fail(shell, name, `亀を1つ渡してください（例: ${name} "$t"）。`);
-  const turtle = shell.runtime.turtleOf(args[0]);
-  if (!turtle) fail(shell, name, `亀（turtle_new で作ったもの）ではないもの（${args[0]}）を渡しました。`);
-  return turtle;
-}
-
 const NEW_USAGE =
   'turtle_new には、変数の名前だけか、変数の名前と x と y、または変数の名前と x と y と色（R など）を書いてください。';
 
@@ -42,22 +29,32 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
   const created = shell.runtime.world.create(coordinate(xText), coordinate(yText), color);
   if ('error' in created) fail(shell, name, created.error);
   const handle = shell.runtime.addTurtle(created);
-  return shell.withValuesRoot([handle], () => {
-    const target = split
-      ? resolveSubscriptTarget(shell, {
-          name: split.name,
-          subscript: { kind: 'text', text: split.subscript },
-          operation: 'write',
-        })
-      : resolveScalarTarget(shell, variable, true);
-    if (!target) return 1;
-    const outcome = writeResolvedTarget(shell, target, handle, false);
-    if (!outcome.ok) {
-      shell.failures.handleStoreFailure('regularBuiltin', outcome, name);
-      return 1;
-    }
-    return 0;
-  });
+  const target = split
+    ? resolveSubscriptTarget(shell, {
+        name: split.name,
+        subscript: { kind: 'text', text: split.subscript },
+        operation: 'write',
+      })
+    : resolveScalarTarget(shell, variable, true);
+  const outcome = writeResolvedTarget(shell, target, handle, false);
+  if (!outcome.ok) {
+    shell.failures.handleStoreFailure('regularBuiltin', outcome, name);
+    return 1;
+  }
+  return 0;
+}
+
+function turtleArgument(shell: Shell, args: string[], name: string): TurtleState {
+  if (args.length !== 1) fail(shell, name, `亀を1つ渡してください（例: ${name} "$t"）。`);
+  const turtle = shell.runtime.turtleOf(args[0]);
+  if (!turtle) fail(shell, name, `亀（turtle_new で作ったもの）ではないもの（${args[0]}）を渡しました。`);
+  return turtle;
+}
+
+function fail(shell: Shell, name: string, message: string): never {
+  const report = `main.sh: line ${shell.currentRow + 1}: ${name}: ${message}`;
+  shell.fd2.write(`${report}\n`);
+  throw new TurtleError(report);
 }
 
 export const TURTLE_BUILTINS: Record<string, Builtin> = { turtle_new: turtleNew };
@@ -86,11 +83,8 @@ for (const [names, quarters] of [
   }
 }
 for (const name of TURTLE_METHOD_NAMES.canMoveForward) {
-  TURTLE_BUILTINS[name] = (shell, args) => {
-    const turtle = turtleArgument(shell, args, name);
-    shell.runtime.collectGarbage();
-    return shell.runtime.world.canMoveForward(turtle) ? 0 : 1;
-  };
+  TURTLE_BUILTINS[name] = (shell, args) =>
+    shell.runtime.world.canMoveForward(turtleArgument(shell, args, name)) ? 0 : 1;
 }
 for (const name of TURTLE_METHOD_NAMES.isFrontPainted) {
   TURTLE_BUILTINS[name] = (shell, args) =>
