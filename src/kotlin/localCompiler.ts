@@ -756,6 +756,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
   protected compileLocalClass(scope: Scope, context: FunctionContext, decl: ClassDecl): Exec {
     if (decl.classKind === 'object') this.error(decl.row, '関数の中には、名前のある object を宣言できません。');
     if (decl.classKind === 'enum') this.error(decl.row, '関数の中には、enum class を宣言できません。');
+    if (decl.classKind === 'interface') this.error(decl.row, '関数の中には、インターフェースを宣言できません。');
     const misplaced = [...decl.modifiers.keywords].find((keyword) => LOCAL_CLASS_FORBIDDEN_MODIFIERS.has(keyword));
     if (misplaced) this.error(decl.row, `ローカルクラスには ${misplaced} 修飾子を付けられません。`);
     if (scope.classes.has(decl.name)) this.error(decl.row, `クラス ${decl.name} が2回宣言されています。`);
