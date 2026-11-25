@@ -1,6 +1,9 @@
 /**
- * dart:core's Uri and UriData from Dart SDK 3.13.7 (`sdk/lib/core/uri.dart`, with the VM's patches), comments removed.
- * `Uri.base` is the working directory of a run's files, and the platform is not Windows, as on macOS and Linux.
+ * dart:core's Uri and UriData from Dart SDK 3.13.7: `sdk/lib/core/uri.dart`, most of its comments removed, with the
+ * VM's `_makeQueryFromParameters` (`vm/lib/uri_patch.dart`) and `_uriEncode` (`vm_shared/lib/uri_encode_patch.dart`)
+ * inlined, and `hexDigitValue` and `parseHexByte` copied from dart:_internal. Where the SDK reads the platform,
+ * `Uri.base` is the working directory of a run's files (`Uri.directory("/")`) and `_isWindows` is false, as on macOS
+ * and Linux; `_Uint8List` stands for Uint8List, and `data:` URIs encode base64 by `convert` instead of a chunked sink.
  */
 export const URI_SOURCE = String.raw`
 const int _SPACE = 0x20;
