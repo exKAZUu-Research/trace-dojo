@@ -156,6 +156,8 @@ final Stdout stdout = Stdout._(false);
 final Stdout stderr = Stdout._(true);
 
 class Stdin extends Stream<List<int>> {
+  /** Whether a stream has read the input to its end, as the VM's does before it closes the descriptor. */
+  bool _closed = false;
   Stdin._();
   bool get hasTerminal => false;
   bool get supportsAnsiEscapes => false;
@@ -166,11 +168,24 @@ class Stdin extends Stream<List<int>> {
       throw const StdinException("Error setting terminal echo newline mode", _notTerminal);
   bool get lineMode => throw const StdinException("Error getting terminal line mode", _notTerminal);
   set lineMode(bool enabled) => throw const StdinException("Error setting terminal line mode", _notTerminal);
-  String? readLineSync({Encoding encoding = utf8, bool retainNewlines = false}) => _readLine(retainNewlines);
-  int readByteSync() => _readByte();
+  String? readLineSync({Encoding encoding = utf8, bool retainNewlines = false}) {
+    _checkOpen();
+    return _readLine(retainNewlines);
+  }
+  int readByteSync() {
+    _checkOpen();
+    return _readByte();
+  }
+  void _checkOpen() {
+    if (_closed) throw const StdinException("Error reading byte from stdin", OSError("Bad file descriptor", 9));
+  }
   StreamSubscription<List<int>> listen(void onData(List<int> event)?,
       {Function? onError, void onDone()?, bool? cancelOnError}) {
-    return Stream<List<int>>.fromFuture(Future(_readRest))
+    return Stream<List<int>>.fromFuture(Future(() {
+      final rest = _readRest();
+      _closed = true;
+      return rest;
+    }))
         .where((bytes) => bytes.isNotEmpty)
         .listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
