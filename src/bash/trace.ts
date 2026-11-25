@@ -39,7 +39,7 @@ function variablesOf(runtime: Runtime, frame: Frame): TraceVariables {
     addVariable(runtime, variables, view.name, resolved);
     if (view.attributes.has('n') && resolved.kind === 'associative') {
       for (const [key, element] of resolved.associative?.entries() ?? []) {
-        if (!turtleNode(runtime, element)) define(variables.vars, `${view.name}[${key}]`, element);
+        if (!runtime.isTurtleHandle(element)) define(variables.vars, `${view.name}[${key}]`, element);
       }
     }
   }
@@ -53,40 +53,55 @@ function define(record: object, name: string, value: unknown): void {
 // oxlint-disable-next-line unicorn/no-null -- Trace format represents null references as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity -- Projects scalars, null references, turtles, dense/sparse arrays, and associative objects.
 function addVariable(runtime: Runtime, variables: TraceVariables, name: string, view: VariableView): void {
   if (view.kind === 'unset') return;
   if (view.kind === 'scalar') {
-    const text = view.scalar ?? '';
-    const node = view.nullReference && text === '' ? NULL_NODE : turtleNode(runtime, text);
-    if (node) define(variables.referenceVars, name, node);
-    else define(variables.vars, name, text);
+    addScalarVariable(runtime, variables, name, view);
+    return;
+  }
+  if (view.kind === 'indexed') {
+    addIndexedVariable(runtime, variables, name, view);
     return;
   }
   const entries: Record<string, DisplayNode> = Object.create(null);
-  if (view.kind === 'indexed') {
-    const elements = sortedElements(view.indexed as ReadonlyMap<bigint, string>);
-    let isDense = true;
-    for (const [index, [key, element]] of elements.entries()) {
-      if (key !== BigInt(index)) isDense = false;
-      const turtle = turtleNode(runtime, element);
-      if (turtle) isDense = false;
-      define(entries, String(key), turtle ?? { kind: 'value', value: element });
-    }
-    if (isDense) {
-      define(
-        variables.vars,
-        name,
-        elements.map(([, element]) => element)
-      );
-    }
-    define(variables.referenceVars, name, { kind: 'array', entries });
-    return;
-  }
   for (const [key, element] of view.associative?.entries() ?? []) {
-    define(entries, key, turtleNode(runtime, element) ?? { kind: 'value', value: element });
+    const node = elementNode(runtime, element);
+    if (node) define(entries, key, node);
   }
   define(variables.referenceVars, name, { kind: 'object', entries });
+}
+
+function addScalarVariable(runtime: Runtime, variables: TraceVariables, name: string, view: VariableView): void {
+  const text = view.scalar ?? '';
+  if (runtime.isTurtleHandle(text)) {
+    const turtle = turtleNode(runtime, text);
+    if (turtle) define(variables.referenceVars, name, turtle);
+    return;
+  }
+  if (view.nullReference && text === '') define(variables.referenceVars, name, NULL_NODE);
+  else define(variables.vars, name, text);
+}
+
+function addIndexedVariable(runtime: Runtime, variables: TraceVariables, name: string, view: VariableView): void {
+  const entries: Record<string, DisplayNode> = Object.create(null);
+  const elements = sortedElements(view.indexed as ReadonlyMap<bigint, string>);
+  let isDense = true;
+  for (const [index, [key, element]] of elements.entries()) {
+    if (key !== BigInt(index) || runtime.isTurtleHandle(element)) isDense = false;
+    define(entries, String(key), elementNode(runtime, element) ?? NULL_NODE);
+  }
+  if (isDense) {
+    define(
+      variables.vars,
+      name,
+      elements.map(([, element]) => element)
+    );
+  }
+  define(variables.referenceVars, name, { kind: 'array', entries });
+}
+
+function elementNode(runtime: Runtime, text: string): DisplayNode | undefined {
+  return runtime.isTurtleHandle(text) ? turtleNode(runtime, text) : { kind: 'value', value: text };
 }
 
 function turtleNode(runtime: Runtime, text: string): DisplayNode | undefined {

@@ -111,6 +111,11 @@ export class Runtime implements TracedRuntime<Frame> {
     return handle;
   }
 
+  /** Whether `text` is a turtle handle created in this run, whether still alive or removed. */
+  isTurtleHandle(text: string): boolean {
+    return this.turtles.has(text);
+  }
+
   /** The live turtle a string names, remaining alive until explicit removal or run end. */
   turtleOf(handle: string): TurtleState | undefined {
     const turtle = this.turtles.get(handle);
