@@ -871,8 +871,9 @@ function openPath(
   const write = writes
     ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
     : undefined;
-  const read = mode === 1 ? undefined : files.openForReading(target);
-  const descriptor = frame.runtime.openFile({ path: target, read, position: 0, write, decoder: new TextDecoder() });
+  const content = files.openForReading(target);
+  const read = mode === 1 ? undefined : content;
+  const descriptor = frame.runtime.openFile({ content, read, position: 0, write, decoder: new TextDecoder() });
   return handle('file', { fd: descriptor });
 }
 
@@ -1013,5 +1014,5 @@ export function fileDescriptor(value: Value): number {
 /** The length of an open file in bytes. */
 export function openFileLength(frame: Frame, descriptor: number): bigint {
   const file = frame.runtime.openFileAt(descriptor);
-  return BigInt(file ? byteLength(frame.runtime.io.files.readFile(file.path)) : 0);
+  return BigInt(file ? byteLength(file.content()) : 0);
 }

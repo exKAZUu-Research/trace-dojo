@@ -269,7 +269,8 @@ interface Descriptor {
 
 /** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
 export interface OpenFile {
-  path: string;
+  /** The text of the file the descriptor refers to, which follows the file after a rename or a deletion. */
+  content: () => string;
   read?: () => string;
   /** How many bytes of the file reading has passed. */
   position: number;
