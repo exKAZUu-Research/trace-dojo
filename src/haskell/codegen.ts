@@ -1072,7 +1072,14 @@ export class Codegen {
       const args: Core[] = fieldSlots.map((fieldSlot): Core => ({ k: 'local', depth: 0, index: fieldSlot }));
       for (const value of values)
         args[value.field.positions.get(con) as number] = { k: 'local', depth: 0, index: value.slot };
-      alts.set(con.tag, { slots: fieldSlots, body: this.construct(con, args) });
+      // The dictionaries a constrained constructor holds go into the updated value too.
+      const dictSlots = (con.context ?? []).map(() => this.frame.alloc());
+      const dicts = dictSlots.map((dictSlot): Core => ({ k: 'local', depth: 0, index: dictSlot }));
+      alts.set(con.tag, {
+        slots: fieldSlots,
+        body: this.construct(con, args, dicts),
+        ...(dictSlots.length > 0 ? { dictSlots } : {}),
+      });
     }
     const owner = expr.fields[0].field.type;
     const body: Core = {
