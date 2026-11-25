@@ -81,33 +81,47 @@ export function findBashTraceAnnotations(source: string): TraceAnnotation[] {
  * Scans deferred arithmetic text into literal slices and `WordPart` expansions using the single `SourceText` lexer,
  * without synthetic-string reparsing.
  */
-// code-gauge-allow functionCognitiveComplexity -- Scans raw arithmetic text across quotes, line continuations, escapes, and shell expansions.
 export function rawArithmeticPieces(raw: string): (string | WordPart)[] {
   if (!/[$`"\\]/.test(raw)) return [raw];
   const text = createSubscriptSourceText(raw);
   const pieces: (string | WordPart)[] = [];
   let plain = '';
   for (let i = 0; i < raw.length;) {
-    const c = raw[i];
-    const next = raw[i + 1];
-    if (c === '\\' && next !== undefined && '$`\\\n'.includes(next)) {
-      if (next !== '\n') plain += next;
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === '`' || (c === '$' && next !== undefined && /['"{([A-Za-z_0-9@#?*!$-]/.test(next))) {
+    if (isArithmeticExpansionStart(raw, i)) {
       if (plain) pieces.push(plain);
       plain = '';
       const step = readLexicalPiece(raw, i, text, false);
       pieces.push(...step.parts);
       i = step.next;
-      continue;
+    } else {
+      const span = readPlainArithmeticChunk(raw, i);
+      plain += span.chunk;
+      i = span.next;
     }
-    plain += c;
-    i++;
   }
   if (plain) pieces.push(plain);
   return pieces;
+}
+
+function isArithmeticExpansionStart(raw: string, i: number): boolean {
+  const c = raw[i];
+  const next = raw[i + 1];
+  return c === '"' || c === '`' || (c === '$' && next !== undefined && /['"{([A-Za-z_0-9@#?*!$-]/.test(next));
+}
+
+function readPlainArithmeticChunk(raw: string, i: number): { chunk: string; next: number } {
+  const c = raw[i];
+  if (c === "'") {
+    const close = raw.indexOf("'", i + 1);
+    const end = close === -1 ? raw.length : close + 1;
+    return { chunk: raw.slice(i, end), next: end };
+  }
+  const next = raw[i + 1];
+  if (c === '\\' && next !== undefined) {
+    const chunk = `${'$`\\\n'.includes(next) ? '' : '\\'}${next === '\n' ? '' : next}`;
+    return { chunk, next: i + 2 };
+  }
+  return { chunk: c, next: i + 1 };
 }
 
 /**
