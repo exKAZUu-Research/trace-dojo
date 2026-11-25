@@ -105,7 +105,7 @@ import { THIS_MODULE } from './syntax';
 import { globalNameCode, QuoteBuilder, thString } from './thQuote';
 import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
-import { STAR } from './types';
+import { type Kind, STAR, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 export interface RDataDecl {
@@ -114,6 +114,8 @@ export interface RDataDecl {
   params: string[];
   /** For a data instance, the types it gives the family's parameters, in terms of `params`. */
   instanceArgs?: RType[];
+  /** For a data instance, its types and its variables' kinds once kinds are checked, with or without constructors. */
+  instanceHead?: { args: Type[]; kinds: Kind[] };
   paramKinds?: (RType | undefined)[];
   cons: RConDecl[];
   /** The constraints DatatypeContexts puts on the constructors, in terms of `params`. */

@@ -103,6 +103,7 @@ function inferDataInstance(checker: Checker, decl: RDataDecl): void {
   }
   checker.checkKinds();
   for (const { con } of decl.cons) con.instanceKinds = (con.instanceKinds ?? []).map(defaultKind);
+  decl.instanceHead = { args, kinds: kinds.map(defaultKind) };
 }
 
 /**

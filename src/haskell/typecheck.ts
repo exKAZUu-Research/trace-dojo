@@ -724,10 +724,8 @@ function registerInstance(checker: Checker, info: InstanceInfo, span: Span): voi
  * parameters, or for a data instance, the family applied to the instance's types.
  */
 function declHead(decl: RDataDecl): { kinds: Kind[]; head: Type } {
-  const first = decl.cons[0]?.con;
-  if (decl.instanceArgs) {
-    const kinds = first?.instanceKinds ?? decl.params.map(() => STAR);
-    return { kinds, head: tap(tcon(decl.entity), ...(first?.instanceArgs ?? [])) };
+  if (decl.instanceHead) {
+    return { kinds: decl.instanceHead.kinds, head: tap(tcon(decl.entity), ...decl.instanceHead.args) };
   }
   const kinds = typeParamKinds(decl.entity);
   return { kinds, head: tap(tcon(decl.entity), ...kinds.map((_, index): Type => ({ tag: 'tgen', index }))) };
