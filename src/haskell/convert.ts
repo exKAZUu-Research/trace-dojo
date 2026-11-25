@@ -2393,7 +2393,8 @@ function convertBlock(features: FeatureGates<'convert'>, node: Node, span: Span)
         if (!features.allows('recursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
         const last = statements.at(-1) as Stmt;
         const rest = statements.slice(0, -1);
-        return { kind: 'do', stmts: rest.length > 0 ? [{ kind: 'rec', stmts: rest, span }, last] : [last], span };
+        const stmts: Stmt[] = rest.length > 0 ? [{ kind: 'rec', stmts: rest, segmented: true, span }, last] : [last];
+        return { kind: 'do', stmts, span };
       }
       return { kind: 'do', stmts: statements, span };
     }

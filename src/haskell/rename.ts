@@ -1821,7 +1821,9 @@ class Renamer {
   private renameStmts(source: Stmt[], parent: LocalScope, isDo: boolean): { stmts: RStmt[]; scope: LocalScope } {
     let scope = parent;
     const result: RStmt[] = [];
-    const stmts = source.map((stmt) => (stmt.kind === 'rec' ? recursiveBind(stmt) : stmt));
+    const stmts = source.flatMap((stmt) =>
+      stmt.kind !== 'rec' ? [stmt] : stmt.segmented ? recursiveSegments(stmt) : [recursiveBind(stmt)]
+    );
     for (const [index, stmt] of stmts.entries()) {
       const isLast = index === stmts.length - 1;
       switch (stmt.kind) {
@@ -2901,17 +2903,62 @@ function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[])
 }
 
 /**
+ * The statements of an `mdo` as GHC segments them: a statement that uses a variable a statement at or after it binds
+ * shares a `rec` with every statement up to that one, overlapping groups join, and the others stay as they are.
+ */
+function recursiveSegments(stmt: Extract<Stmt, { kind: 'rec' }>): Stmt[] {
+  const bound = stmt.stmts.map((inner) => new Set(stmtBinders(inner).map((name) => name.name)));
+  const reach = stmt.stmts.map((inner, index) => {
+    const used = new Set<string>();
+    mentionedNames(inner, used);
+    let last = -1;
+    for (let later = index; later < stmt.stmts.length; later++) {
+      if ([...bound[later]].some((name) => used.has(name))) last = later;
+    }
+    return last;
+  });
+  const result: Stmt[] = [];
+  for (let index = 0; index < stmt.stmts.length; index++) {
+    if (reach[index] < index) {
+      result.push(stmt.stmts[index]);
+      continue;
+    }
+    let end = reach[index];
+    for (let inner = index; inner <= end; inner++) end = Math.max(end, reach[inner]);
+    result.push(recursiveBind({ kind: 'rec', stmts: stmt.stmts.slice(index, end + 1), span: stmt.span }));
+    index = end;
+  }
+  return result;
+}
+
+/** The names an expression, a pattern, or a statement mentions, as variables or operators, wherever they are bound. */
+function mentionedNames(node: unknown, into: Set<string>): void {
+  if (Array.isArray(node)) {
+    for (const item of node) mentionedNames(item, into);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  const record = node as { kind?: string; name?: { name?: string }; op?: { name?: string } };
+  if (record.kind === 'var' && record.name?.name) into.add(record.name.name);
+  if (record.kind === 'operator' && record.op?.name) into.add(record.op.name);
+  for (const [key, value] of Object.entries(node)) if (key !== 'span') mentionedNames(value, into);
+}
+
+function stmtBinders(stmt: Stmt): Name[] {
+  const names: Name[] = [];
+  if (stmt.kind === 'bind') collectPatNames(stmt.pat, names);
+  else if (stmt.kind === 'let') for (const binding of groupBindings(stmt.decls)) names.push(...binding.names);
+  else if (stmt.kind === 'rec') throw compileError(stmt.span, 'rec の中に rec は書けません。');
+  return names;
+}
+
+/**
  * A `rec` block as the bind `vs <- mfix (\~vs -> do { ss; return vs })`, where `vs` are the variables its statements
  * bind, which then refer to their own later values.
  */
 function recursiveBind(stmt: Extract<Stmt, { kind: 'rec' }>): Stmt {
   const { span } = stmt;
-  const names: Name[] = [];
-  for (const inner of stmt.stmts) {
-    if (inner.kind === 'bind') collectPatNames(inner.pat, names);
-    else if (inner.kind === 'let') for (const binding of groupBindings(inner.decls)) names.push(...binding.names);
-    else if (inner.kind === 'rec') throw compileError(inner.span, 'rec の中に rec は書けません。');
-  }
+  const names = stmt.stmts.flatMap(stmtBinders);
   const pattern = (): Pat =>
     tupleOf(
       names,

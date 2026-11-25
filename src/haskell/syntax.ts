@@ -212,8 +212,11 @@ export type Stmt =
   | { kind: 'exp'; expr: Expr; span: Span }
   /** `then f` or `then f by e` in a list comprehension, as TransformListComp allows. */
   | { kind: 'transform'; fn: Expr; by?: Expr; group: boolean; span: Span }
-  /** `rec { ... }` in a do block, whose statements may refer to the variables they bind later, via `mfix`. */
-  | { kind: 'rec'; stmts: Stmt[]; span: Span };
+  /**
+   * `rec { ... }` in a do block, whose statements may refer to the variables they bind later, via `mfix`; `segmented`
+   * for the statements of an `mdo`, which GHC splits into the smallest such groups.
+   */
+  | { kind: 'rec'; stmts: Stmt[]; segmented?: boolean; span: Span };
 
 export interface ConDecl {
   name: Name;
