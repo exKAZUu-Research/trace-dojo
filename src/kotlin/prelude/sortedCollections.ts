@@ -56,9 +56,15 @@ class TreeMap<K, V> private constructor(
 
     override fun comparator(): Comparator<in K>? = order
 
-    override fun put(key: K, value: V): V? {
-        if (table.containsKey(key)) return table.put(key, value)
+    // As java.util.TreeMap, the map finds a key by its order, so keys the order counts as equal are one key.
+    private fun heldKey(key: K): List<K> {
         compareInOrder(order, key, key)
+        return table.keys.filter { compareInOrder(order, it, key) == 0 }.take(1)
+    }
+
+    override fun put(key: K, value: V): V? {
+        val held = heldKey(key)
+        if (held.isNotEmpty()) return table.put(held[0], value)
         table.put(key, value)
         resort()
         return null
@@ -68,7 +74,9 @@ class TreeMap<K, V> private constructor(
         for ((key, value) in from) put(key, value)
     }
 
-    override fun get(key: K): V? = table[key]
+    override fun get(key: K): V? = heldKey(key).let { if (it.isEmpty()) null else table[it[0]] }
+    override fun containsKey(key: K): Boolean = heldKey(key).isNotEmpty()
+    override fun remove(key: K): V? = heldKey(key).let { if (it.isEmpty()) null else table.remove(it[0]) }
 
     private fun resort() {
         val entries = table.entries.map { it.key to it.value }.sortedWith { a, b -> compareInOrder(order, a.first, b.first) }
@@ -106,9 +114,35 @@ class TreeSet<E> private constructor(
 
     override fun comparator(): Comparator<in E>? = order
 
-    override fun add(element: E): Boolean {
+    // As java.util.TreeSet, the set finds an element by its order, so elements the order counts as equal are one.
+    private fun held(element: E): List<E> {
         compareInOrder(order, element, element)
-        if (table.contains(element)) return false
+        return table.filter { compareInOrder(order, it, element) == 0 }.take(1)
+    }
+
+    override fun contains(element: E): Boolean = held(element).isNotEmpty()
+    override fun containsAll(elements: Collection<E>): Boolean = elements.all { contains(it) }
+    override fun remove(element: E): Boolean = held(element).let { it.isNotEmpty() && table.remove(it[0]) }
+
+    // java.util.AbstractSet's removeAll, which removes through the set's own order when the set is the larger.
+    override fun removeAll(elements: Collection<E>): Boolean {
+        var modified = false
+        if (size > elements.size) {
+            for (element in elements) if (remove(element)) modified = true
+        } else {
+            val iterator = table.iterator()
+            while (iterator.hasNext()) {
+                if (elements.contains(iterator.next())) {
+                    iterator.remove()
+                    modified = true
+                }
+            }
+        }
+        return modified
+    }
+
+    override fun add(element: E): Boolean {
+        if (held(element).isNotEmpty()) return false
         table.add(element)
         val sorted = table.sortedWith { a, b -> compareInOrder(order, a, b) }
         table.clear()

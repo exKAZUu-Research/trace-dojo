@@ -6503,7 +6503,7 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '3\nabab\n' });
 });
 
-test('finds the neighbors of values in sorted sets, as java.util.TreeSet does', () => {
+test('finds and merges the elements of sorted sets and maps by their order, as java.util.TreeSet and TreeMap do', () => {
   const source = `fun main() {
     val t = sortedSetOf(5, 2, 9, 7)
     println(listOf(t.ceiling(3), t.floor(3), t.higher(7), t.lower(2)))
@@ -6511,10 +6511,14 @@ test('finds the neighbors of values in sorted sets, as java.util.TreeSet does', 
     println(t.subSet(2, false, 7, true))
     println(listOf(t.pollFirst(), t.pollLast()))
     println(t)
+    val parity = Comparator<Int> { a, b -> a % 2 - b % 2 }
+    val odd = sortedSetOf(parity, 1, 3)
+    println(listOf(odd, odd.add(5), odd.contains(7)))
+    println(sortedMapOf(parity, 1 to "a", 3 to "b"))
 }`;
   expect(executeProgram('kotlin', source)).toMatchObject({
     kind: 'executed',
-    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n',
+    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n[[1], false, true]\n{1=b}\n',
   });
 });
 
