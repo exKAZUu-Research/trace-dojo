@@ -161,9 +161,14 @@ class Stdout implements IOSink {
   }
   Future addStream(Stream<List<int>> stream) => stream.forEach(add);
   Future flush() => Future.value();
-  Future close() => Future.value();
-  Future get done => Future.value();
+  // The VM's standard output never completes these futures, and after close drops print and fails a write, which
+  // the interpreter does not reproduce, so it rejects them instead of running on with a different result.
+  Future close() => throw UnsupportedError(_unavailableStdoutMember(_isError, "close"));
+  Future get done => throw UnsupportedError(_unavailableStdoutMember(_isError, "done"));
 }
+
+String _unavailableStdoutMember(bool isError, String member) =>
+    (isError ? "stderr." : "stdout.") + member + " は、この採点環境では使えません。";
 
 final Stdout stdout = Stdout._(false);
 final Stdout stderr = Stdout._(true);
