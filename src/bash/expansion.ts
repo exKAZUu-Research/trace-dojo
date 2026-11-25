@@ -586,11 +586,7 @@ export class Expander {
   ): WordSegment[] {
     const { name } = expansion;
     const own = subscript === undefined ? this.shell.store.ownView(name) : undefined;
-    if (own?.attributes.has('n')) {
-      if (own.kind === 'unset') this.shell.discard(`${name}: invalid indirect expansion`);
-      const target = own.scalar as string;
-      return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, undefined, ctx);
-    }
+    if (own?.attributes.has('n')) return this.expandIndirectNameref(expansion, ctx);
     const direct = this.parameterValue(name, subscript, expansion);
     const reference =
       direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
@@ -607,6 +603,19 @@ export class Expander {
       target.subscript,
       ctx
     );
+  }
+
+  private expandIndirectNameref(expansion: ParameterExpansion, ctx: WordContext): WordSegment[] {
+    const { name } = expansion;
+    const chain = this.shell.store.resolveChain(name);
+    if (chain.kind === 'cycle') {
+      this.shell.reportError(`warning: ${chain.cyclicName}: circular name reference`);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, `!${name}`, undefined, ctx);
+    }
+    if (chain.cell && this.shell.store.viewOfHandle(chain.cell).attributes.has('n')) {
+      this.shell.discard(`${name}: invalid indirect expansion`);
+    }
+    return this.finishIndirect(expansion, { kind: 'scalar', value: chain.name }, chain.name, undefined, ctx);
   }
 
   private finishIndirect(
