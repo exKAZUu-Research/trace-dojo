@@ -83,6 +83,9 @@ export interface TypeArgumentMismatch {
 }
 
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
+/** The clauses whose names a class implements or an interface extends. */
+const heritageClauses = new Set(['implements_clause', 'extends_type_clause']);
+
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
   private readonly librarySymbols = new Map<string, LiteralType>();
@@ -657,7 +660,15 @@ export class TypeNodes {
       return this.enumMemberTypeNamed(node, enumSymbol, container.text);
     const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
     if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
-    if (resolved.error) this.c.error(node, resolved.error);
+    // As tsc does, a type reference names a value export it reaches, and a heritage clause reports it missing.
+    const isHeritage =
+      heritageClauses.has(node.parent?.type ?? '') || heritageClauses.has(node.parent?.parent?.type ?? '');
+    if (resolved.error && !isHeritage && this.c.namespaces.qualifiedValueSymbol(node))
+      this.c.error(
+        node,
+        `${node.text} は値であり、型としては使えません。型を表すには typeof ${node.text} と書いてください。`
+      );
+    else if (resolved.error) this.c.error(node, resolved.error);
     return errorType;
   }
 

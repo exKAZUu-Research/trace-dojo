@@ -143,12 +143,6 @@ export class Namespaces {
       ? this.exportedMember(container, name, meaning)
       : container.enumMembers?.values.get(name);
     if (symbol) return { symbol };
-    if (meaning === 'type' && container.namespaceExports?.values.has(name)) {
-      const qualified = `${qualifiedName(container)}.${name}`;
-      return {
-        error: `${qualified} は値であり、型としては使えません。型を表すには typeof ${qualified} と書いてください。`,
-      };
-    }
     return { error: missingMemberError(container, name) };
   }
 
