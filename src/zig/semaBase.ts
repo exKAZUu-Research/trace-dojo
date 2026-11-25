@@ -411,12 +411,24 @@ export abstract class SemaBase implements SemaApi {
 
   /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
   protected comptimeVariableHolding(target: Slots): LocalBinding | undefined {
+    // A pointer to a part of an array, as `arr[1..3]` gives, points to a holder of a view of the array.
+    const [held] = target.slots;
+    const view = target.slots.length === 1 && held instanceof ZArray ? held : undefined;
     for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
       for (const binding of scope.locals?.values() ?? []) {
         this.spendCompilation();
-        if (binding.comptimeCell && holdsStorage(binding.comptimeCell, target)) return binding;
+        const cell = binding.comptimeCell;
+        if (cell && (holdsStorage(cell, target) || (view && holdsStorage(cell, view)))) return binding;
       }
     return undefined;
+  }
+
+  /** Whether an expression's value is a pointer or a slice into a `comptime var`. */
+  protected pointsIntoComptimeVar(expression: TExpr): boolean {
+    const value = staticResultOf(expression)?.value;
+    return (
+      (value instanceof Pointer || value instanceof Slice) && this.comptimeVariableHolding(value.target) !== undefined
+    );
   }
 
   /**

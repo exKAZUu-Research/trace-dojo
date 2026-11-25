@@ -737,11 +737,9 @@ export abstract class ExpressionCompiler extends SemaBase {
    */
   private loadedComptimeElements(object: TExpr, span: Span): TExpr {
     const type = object.type;
-    const fact = staticResultOf(object);
-    const value = fact?.value;
-    if (this.comptimeDepth > 0 || type.kind !== 'pointer' || !(value instanceof Pointer || value instanceof Slice))
-      return object;
-    if (!this.comptimeVariableHolding(value.target)) return object;
+    const value = staticResultOf(object)?.value;
+    if (this.comptimeDepth > 0 || type.kind !== 'pointer' || !this.pointsIntoComptimeVar(object)) return object;
+    if (!(value instanceof Pointer || value instanceof Slice)) return object;
     if (type.size === 'one') return type.child.kind === 'array' ? this.dereferenced(object, span, false) : object;
     const copy = { slots: value.target.slots.map((slot) => copyForStorage(slot)) };
     const snapshot =
@@ -968,8 +966,11 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const object = this.loadedComptimeElements(this.compileLocation(expression.object), expression);
+    const location = this.compileLocation(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
+    if (this.comptimeDepth === 0 && !staticResultOf(index) && this.pointsIntoComptimeVar(location))
+      this.error(expression, 'comptime var を指すポインタは、実行時の値にできません。');
+    const object = this.loadedComptimeElements(location, expression);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
       const position = Number(this.knownValue(index, 'タプルの添字') as bigint);
