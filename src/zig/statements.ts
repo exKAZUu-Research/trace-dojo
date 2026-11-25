@@ -535,8 +535,13 @@ export abstract class StatementCompiler extends CallCompiler {
       case 'slice': {
         return this.comptimeVariableOf(target.object);
       }
+      case 'deref': {
+        // A store through a comptime var that holds a pointer reaches the variable the pointer points into.
+        const variable = this.comptimeVariableOf(target.operand);
+        const held = variable?.comptimeCell?.slots[0];
+        return (held !== undefined && this.comptimeVariableOwning(held)) || variable;
+      }
       case 'paren':
-      case 'deref':
       case 'unwrap': {
         return this.comptimeVariableOf(target.operand);
       }
