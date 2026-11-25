@@ -637,7 +637,7 @@ function findSubstringSeparator(text: string, state: SubstringScanState): number
       state.inSingle = true;
       continue;
     }
-    if (c === '\\' && '$`"\\\n'.includes(text[i + 1] ?? '')) {
+    if (c === '\\') {
       i++;
       continue;
     }
