@@ -429,11 +429,11 @@ function formatInteger(value: bigint, spec: Specification, host: PrintfHost): st
   let digits = magnitude.toString(base);
   if (conversion === 'X') digits = digits.toUpperCase();
   if (precision === 0 && magnitude === 0n) digits = '';
+  if (flags.includes("'") && base === 10) digits = groupThousands(digits, host);
   if (precision !== undefined) {
     if (precision > digits.length) host.spend(Math.ceil(precision / 256));
     digits = digits.padStart(precision, '0');
   }
-  if (flags.includes("'") && base === 10) digits = groupThousands(digits, host);
   if (flags.includes('#') && conversion === 'o' && !digits.startsWith('0')) digits = `0${digits}`;
   return padNumber(integerPrefix(negative, signed, magnitude, spec), digits, spec, precision === undefined);
 }
