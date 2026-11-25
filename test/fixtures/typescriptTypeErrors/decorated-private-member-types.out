@@ -1,0 +1,7 @@
+(5,4): error TS1241: Unable to resolve signature of method decorator when called as an expression.
+  Argument of type '(x: number) => number' is not assignable to parameter of type 'string'.
+(6,4): error TS1270: Decorator function return type '(v: string) => number' is not assignable to type 'void | ((this: K, value: string) => string)'.
+  Type '(v: string) => number' is not assignable to type '(this: K, value: string) => string'.
+    Type 'number' is not assignable to type 'string'.
+(7,4): error TS1241: Unable to resolve signature of method decorator when called as an expression.
+  Argument of type '(x: number) => number' is not assignable to parameter of type 'string'.

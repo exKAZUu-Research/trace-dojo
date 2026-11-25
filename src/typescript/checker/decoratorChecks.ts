@@ -59,7 +59,7 @@ export function checkDecorators(c: Checker, classNode: TreeNode, info: ClassInfo
     const thisType = isStatic ? classType : c.classes.selfType(info);
     const owner = isStatic ? info.staticType : info.instanceType;
     const name = nameNode.text;
-    const valueType = c.structureOf(owner).properties.get(name)?.type() ?? anyType;
+    const valueType = c.structureOf(owner).properties.get(c.classes.propertyKey(nameNode, nameNode))?.type() ?? anyType;
     const extra = { name, isPrivate: nameNode.type === 'private_property_identifier', isStatic };
     const context = contextType(c, kind, [thisType, valueType], name, extra);
     const decorated = decoratedValue(c, kind, thisType, valueType);

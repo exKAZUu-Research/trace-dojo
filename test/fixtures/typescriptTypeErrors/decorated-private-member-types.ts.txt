@@ -1,0 +1,11 @@
+function pm(target: string, ctx: ClassMethodDecoratorContext) {}
+function fld(_: undefined, ctx: ClassFieldDecoratorContext) { return (v: string) => v.length; }
+function ok(target: (x: number) => number, ctx: ClassMethodDecoratorContext) {}
+class K {
+  @pm #m(x: number) { return x; }
+  @fld #f = 'abc';
+  @pm 'q'(x: number) { return x; }
+  @ok #n(x: number) { return x; }
+  run() { return this.#m(1) + this.#f + this.#n(2); }
+}
+console.log(new K().run());
