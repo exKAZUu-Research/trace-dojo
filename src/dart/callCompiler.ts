@@ -18,6 +18,7 @@ import type { Frame, Runtime, TypeEnv } from './runtime';
 import { bodyKind, type FunctionContext } from './scope';
 import {
   closeInferenceHoles,
+  containsInferenceHole,
   INFERENCE_HOLE,
   inferExtensionReceiver,
   inferFromContext,
@@ -1406,17 +1407,12 @@ function chooseTypeArguments(
     const fromArguments = solution.get(param);
     const contextual = fromContext.get(param);
     const limit = upper.get(param);
-    if (
-      contextual &&
-      !isInferenceHole(contextual) &&
-      !mentionsTypeParams(contextual, params) &&
-      withinBound(param, contextual, type.typeParams)
-    ) {
-      return contextual;
-    }
+    // A context with a part still unknown, as FutureOr<_> from `Future.value(pick(1))`, does not decide the argument.
+    const known = contextual && !containsInferenceHole(contextual) ? contextual : undefined;
+    if (known && !mentionsTypeParams(known, params) && withinBound(param, known, type.typeParams)) return known;
     if (fromArguments && !isInferenceHole(fromArguments)) return fromArguments;
     if (limit && !isInferenceHole(limit)) return limit;
-    if (contextual && !isInferenceHole(contextual)) return contextual;
+    if (known) return known;
     return defaults[index];
   });
 }
