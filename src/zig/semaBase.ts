@@ -72,6 +72,7 @@ import {
   UNDEFINED_TYPE,
   type UnionType,
   USIZE,
+  vectorOf,
   VOID,
 } from './types';
 import { decodeUtf8 } from './utf8';
@@ -1299,6 +1300,8 @@ export abstract class SemaBase implements SemaApi {
 
   private coerceToArray(expression: TExpr, to: Extract<Type, { kind: 'array' }>, span: Span): TExpr | undefined {
     const from = expression.type;
+    if (from.kind === 'array' && isVectorType(to) && from.length === to.length && from.child !== to.child)
+      return this.coerceVectorElements(expression, from.child, to, span);
     if (from.kind === 'array') {
       if (from.length !== to.length || !inMemoryCoercible(from.child, to.child)) return undefined;
       if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
@@ -1315,6 +1318,45 @@ export abstract class SemaBase implements SemaApi {
       return this.aggregate(to, elements, span, (values) => newArray(values, to.sentinel));
     }
     return undefined;
+  }
+
+  /** A vector, or an array, coerced to a vector of other elements, which Zig coerces each element of as a scalar. */
+  private coerceVectorElements(expression: TExpr, from: Type, to: ArrayType, span: Span): TExpr | undefined {
+    if (expression.known) {
+      const elements = (expression.value as ZArray)
+        .values()
+        .map((value) => this.tryCoerce(known(from, value, span), to.child, span));
+      if (elements.some((element) => element === undefined)) return undefined;
+      return known(
+        to,
+        newArray(
+          elements.map((element) => (element as TExpr).value),
+          undefined
+        ),
+        span
+      );
+    }
+    let current: Value;
+    const element = this.tryCoerce(
+      runtime(from, () => current, span),
+      to.child,
+      span
+    );
+    if (!element) return undefined;
+    const evaluate = expression.eval;
+    const convert = element.eval;
+    return runtime(
+      to,
+      (frame) =>
+        newArray(
+          (evaluate(frame) as ZArray).values().map((value) => {
+            current = value;
+            return convert(frame);
+          }),
+          undefined
+        ),
+      span
+    );
   }
 
   private coerceToStruct(expression: TExpr, to: StructType, span: Span): TExpr | undefined {
@@ -1542,6 +1584,11 @@ export abstract class SemaBase implements SemaApi {
       return child ? optionalOf(child) : undefined;
     }
     if (a.kind === 'error_set' && b.kind === 'error_set') return mergeErrorSets(a, b);
+    // Vectors of one length resolve their elements as scalars do.
+    if (isVectorType(a) && isVectorType(b) && a.length === b.length) {
+      const child = this.peerPair(a.child, b.child, []);
+      return child && vectorOf(a.length, child);
+    }
     if (a.kind === 'error_union' || b.kind === 'error_union' || a.kind === 'error_set' || b.kind === 'error_set') {
       const setA = a.kind === 'error_union' ? a.errorSet : a.kind === 'error_set' ? a : undefined;
       const setB = b.kind === 'error_union' ? b.errorSet : b.kind === 'error_set' ? b : undefined;
