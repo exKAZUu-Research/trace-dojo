@@ -940,20 +940,29 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.flow = Flow.join(result.afterThen, this.flow);
       types.push(...result.body.types, ...(otherwise?.types ?? []));
       const test = subject.run;
-      const matches = (frame: Frame): boolean => {
-        try {
-          return result.pattern.match(frame, test(frame)) && (!result.guard || result.guard(frame) === true);
-        } finally {
-          for (const slot of slots) frame.locals[slot] = undefined;
-        }
-      };
+      const matches = (frame: Frame): boolean =>
+        result.pattern.match(frame, test(frame)) && (!result.guard || result.guard(frame) === true);
+      // The pattern's variables live until the branch that reads them has run.
+      const gen = conditionalElement(subjectSteps, matches, result.body, otherwise);
       return {
         isConst: false,
         run: (frame, add) => {
-          if (matches(frame)) result.body.run(frame, add);
-          else otherwise?.run(frame, add);
+          try {
+            if (matches(frame)) result.body.run(frame, add);
+            else otherwise?.run(frame, add);
+          } finally {
+            for (const slot of slots) frame.locals[slot] = undefined;
+          }
         },
-        gen: conditionalElement(subjectSteps, matches, result.body, otherwise),
+        gen:
+          gen &&
+          function* (frame, add) {
+            try {
+              yield* gen(frame, add);
+            } finally {
+              for (const slot of slots) frame.locals[slot] = undefined;
+            }
+          },
       };
     }
     const {
