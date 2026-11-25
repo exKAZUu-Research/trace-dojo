@@ -578,7 +578,7 @@ export class Expander {
       direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
     if (reference === undefined) {
       this.checkIndirectReference(name, subscript?.rawText);
-      const missingName = `!${name}[${subscript?.rawText ?? ''}]`;
+      const missingName = subscript === undefined ? `!${name}` : `!${name}[${subscript.rawText}]`;
       return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, missingName, undefined, ctx);
     }
     const target = this.indirectTarget(reference);
@@ -603,7 +603,10 @@ export class Expander {
   }
 
   private checkIndirectReference(name: string, subscript: string | undefined): void {
-    if (subscript === undefined) this.shell.discard(`${name}: invalid indirect expansion`);
+    if (subscript === undefined) {
+      if (isIdentifier(name)) this.shell.discard(`${name}: invalid indirect expansion`);
+      return;
+    }
     const resolved = resolveTargetName(this.shell, name);
     if (!this.shell.store.hasIndirectContainer(resolved)) {
       this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
