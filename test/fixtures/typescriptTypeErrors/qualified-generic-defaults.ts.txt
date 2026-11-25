@@ -1,0 +1,15 @@
+namespace N {
+  export interface Foo<T = number> { v: T }
+  export class C<T = number> { constructor(public v: T) {} }
+  export type Opt<T = number> = { v: T };
+  export interface I<T = string> { s: T }
+  export class Base<T = number> { b?: T }
+  export interface Box<T> { v: T }
+}
+const f: N.Foo = { v: 1 };
+const c: N.C = new N.C(1);
+const o: N.Opt = { v: 1 };
+class X extends N.Base implements N.I { s = 'x'; }
+const bad: N.Box = { v: 1 };
+const bad2: N.Box<number, string> = { v: 1 };
+console.log(f.v, c.v, o.v, new X().s, bad, bad2);

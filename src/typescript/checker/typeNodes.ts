@@ -102,7 +102,12 @@ export class TypeNodes {
           : (predefinedTypes[node.text] ?? anyType),
     ],
     ['type_identifier', (node) => this.typeReference(node, node, [])],
-    ['nested_type_identifier', (node) => this.qualifiedType(node)],
+    [
+      'nested_type_identifier',
+      // The name of `N.Box<number>` is typed with its arguments by the generic type around it.
+      (node) =>
+        node.parent?.type === 'generic_type' ? this.qualifiedType(node) : this.qualifiedReference(node, node, []),
+    ],
     ['identifier', (node) => this.typeReference(node, node, [])],
     ['generic_type', (node) => this.genericType(node)],
     ['parenthesized_type', (node) => this.typeFromNode(named(node)[0])],
@@ -233,12 +238,18 @@ export class TypeNodes {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
     const argumentNodes = argumentsNode ? named(argumentsNode) : [];
-    if (name.type !== 'nested_type_identifier') return this.typeReference(node, name, argumentNodes);
+    return name.type === 'nested_type_identifier'
+      ? this.qualifiedReference(node, name, argumentNodes)
+      : this.typeReference(node, name, argumentNodes);
+  }
+
+  /** `N.Box<number>` or `N.Box`: the generic a namespace exports, applied to its type arguments or its defaults. */
+  private qualifiedReference(node: TreeNode, name: TreeNode, argumentNodes: TreeNode[]): Type {
     const type = this.qualifiedType(name);
-    // `N.Box<number>`: the generic a namespace exports, applied to its type arguments.
     const symbol = type === errorType ? undefined : this.c.namespaces.qualifiedTypeSymbol(name).symbol;
     const parameters = symbol ? this.c.signatures.typeParametersOfSymbol(symbol) : [];
-    if (!symbol || parameters.length === 0 || argumentNodes.length === 0) return type;
+    if (!symbol || parameters.length === 0) return type;
+    if (!this.checkTypeArgumentCount(node, name.text, parameters, argumentNodes.length)) return errorType;
     return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
   }
 
@@ -589,7 +600,6 @@ export class TypeNodes {
     return eagerAliasContainers.has(node.type) && named(node).some((child) => this.mayResolveAlias(child, depth + 1));
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Checks local bindings, intrinsic types, unavailable symbols, and argument counts.
   private resolveTypeName(node: TreeNode, nameNode: TreeNode, argumentCount: number): ResolvedTypeName | undefined {
     const name = nameNode.text;
     const scope = this.c.scopeOf(nameNode);
@@ -615,17 +625,20 @@ export class TypeNodes {
       if (argumentCount > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
       return { symbol, parameters };
     }
+    return this.checkTypeArgumentCount(node, name, parameters, argumentCount) ? { symbol, parameters } : undefined;
+  }
+
+  /** Whether a generic gets as many type arguments as it requires and allows, reporting it when not. */
+  private checkTypeArgumentCount(node: TreeNode, name: string, parameters: TypeParameter[], count: number): boolean {
     const required = parameters.filter((parameter) => !parameter.default).length;
-    if (argumentCount < required || argumentCount > parameters.length) {
-      this.c.error(
-        node,
-        required === parameters.length
-          ? `ジェネリック型 ${name} には型引数が ${required} 個必要です。`
-          : `ジェネリック型 ${name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
-      );
-      return undefined;
-    }
-    return { symbol, parameters };
+    if (count >= required && count <= parameters.length) return true;
+    this.c.error(
+      node,
+      required === parameters.length
+        ? `ジェネリック型 ${name} には型引数が ${required} 個必要です。`
+        : `ジェネリック型 ${name} には型引数が ${required} 個から ${parameters.length} 個必要です。`
+    );
+    return false;
   }
 
   /** Reports a type the name cannot refer to here: an unsupported library type, or a class type parameter in a static member. */

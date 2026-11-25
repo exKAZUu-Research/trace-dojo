@@ -1,0 +1,2 @@
+(13,12): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).
+(14,13): error TS2314: Generic type 'Box<T>' requires 1 type argument(s).
