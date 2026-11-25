@@ -412,22 +412,24 @@ class _FileSink implements IOSink {
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
-  /** Why the file could not be opened, which writes and flushes report instead of writing. */
+  /**
+   * Why the file could not be opened, which the VM reports to the flush or addStream of data written since, to close,
+   * and otherwise as an unhandled error.
+   */
   Object? _openError;
   StackTrace? _openStackTrace;
   bool get _failed => _openError != null;
   bool _openErrorTaken = false;
+  bool _unwrittenSinceReport = false;
   bool _writeScheduled = false;
   _FileSink(this._file, bool appends) {
     try {
       _open(_file.path, appends);
     } catch (error, stackTrace) {
-      // The VM reports a failure to open the file to done, which is unhandled unless the program closes the sink.
       _openError = error;
       _openStackTrace = stackTrace;
-      // A flush before then takes the failure instead.
       Future(() {
-        if (!_openErrorTaken) addError(error, stackTrace);
+        if (!_openErrorTaken) Future<void>.error(error, stackTrace);
       });
     }
   }
@@ -459,18 +461,30 @@ class _FileSink implements IOSink {
   void addError(Object error, [StackTrace? stackTrace]) {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
   }
-  Future addStream(Stream<List<int>> stream) => stream.forEach(add);
+  Future addStream(Stream<List<int>> stream) {
+    _openErrorTaken = true;
+    return stream.forEach(add).then((_) => _reportUnwritten());
+  }
   Future flush() {
     if (!_failed) return Future(_writeBuffered);
+    // A program that flushes or closes the sink gets its failure there, not as an unhandled error.
     _openErrorTaken = true;
-    return Future.error(_openError!, _openStackTrace);
+    return Future(_reportUnwritten);
+  }
+  /** Fails the operation that carries data written to a sink whose file could not be opened. */
+  void _reportUnwritten() {
+    if (!_unwrittenSinceReport) return;
+    _unwrittenSinceReport = false;
+    Error.throwWithStackTrace(_openError!, _openStackTrace ?? StackTrace.empty);
   }
   Future close() {
     if (!_isClosed) _bytes.finish();
     if (!_isClosed) {
       _isClosed = true;
+      _openErrorTaken = true;
       Future(() {
-        if (!_failed) _writeBuffered();
+        if (_failed) Error.throwWithStackTrace(_openError!, _openStackTrace ?? StackTrace.empty);
+        _writeBuffered();
         return _file;
       }).then((file) {
         if (!_done.isCompleted) _done.complete();
@@ -494,6 +508,7 @@ class _FileSink implements IOSink {
   external void _writeOpened(String contents);
   void _startWrite() {
     if (_isClosed) throw StateError("StreamSink is closed");
+    if (_failed) _unwrittenSinceReport = true;
     if (_failed || _writeScheduled) return;
     _writeScheduled = true;
     Future(() {
