@@ -93,6 +93,13 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
 function specOfField(type: Type, params: CoercionSpec[]): CoercionSpec {
   const current = prune(type);
   if (current.tag === 'tgen') return params[current.index] ?? { k: 'refl' };
+  if (current.tag === 'forall') {
+    // A polymorphic field takes its constraints' dictionaries first, which pass through unchanged.
+    let spec = specOfField(current.body, params);
+    if (spec.k === 'refl') return spec;
+    for (let index = 0; index < current.preds.length; index++) spec = { k: 'fun', arg: { k: 'refl' }, res: spec };
+    return spec;
+  }
   if (current.tag !== 'tap') return { k: 'refl' };
   const { head, args } = splitApp(current);
   if (head.tag !== 'tcon') return { k: 'refl' };
