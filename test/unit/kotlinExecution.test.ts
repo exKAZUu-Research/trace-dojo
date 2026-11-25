@@ -6375,6 +6375,7 @@ fun g(x: Int): Int { log += "g$x "; return x }
 test.each([
   ['an operand before a suspend call', 'println(g(1) + f(2))', '3\ng1 f2 \n'],
   ['a variable read before a suspend call changes it', 'println(log.length + f(1))', '1\nf1 \n'],
+  ['a destructuring declaration', 'val (a, b) = Pair(f(1), f(2))\n    println(a + b)', '3\nf1 f2 \n'],
   [
     'indexed and compound assignments',
     'val a = intArrayOf(0, 0)\n    a[g(1)] = f(5)\n    a[0] += f(3)\n    println(a.toList())',
@@ -6710,6 +6711,21 @@ fun main() {
     println(listOf(V(6) / 3, 2 pow 3, with(Ops()) { V(2) * 5 }))
 }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[V(x=2), 8, V(x=10)]\n' });
+});
+
+test("catches only the exceptions of a reified type parameter's type", () => {
+  const source = `inline fun <reified E : Throwable> caught(block: () -> Unit): String {
+    try { block(); return "none" } catch (e: E) { return "caught" }
+}
+fun main() {
+    println(caught<IllegalStateException> { throw IllegalStateException("x") })
+    println(caught<IllegalArgumentException> { throw IllegalStateException("y") })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'caught\n',
+    uncaughtException: 'java.lang.IllegalStateException: y',
+  });
 });
 
 test('reads enum entries imported under an alias', () => {

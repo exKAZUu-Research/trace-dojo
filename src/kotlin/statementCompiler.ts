@@ -47,7 +47,7 @@ import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
 import { isHiddenSubject } from './suspendRewrites';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
-import { checkedRead, instanceTest } from './typeChecks';
+import { checkedRead } from './typeChecks';
 import { commonSupertype, isSubtype } from './typeRelations';
 import {
   type ClassType,
@@ -1785,7 +1785,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
     scope: Scope,
     context: FunctionContext,
     clause: Extract<Expression, { kind: 'try' }>['catches'][number]
-  ): { scope: Scope; test: (value: Value) => boolean; write: (frame: Frame, value: Value) => void; slot: number } {
+  ): {
+    scope: Scope;
+    test: (frame: Frame, value: Value) => boolean;
+    write: (frame: Frame, value: Value) => void;
+    slot: number;
+  } {
     const catchScope = new Scope(scope, context);
     const type = this.resolveType(scope, clause.type);
     if (!isSubtype(type, this.core.throwable.type))
@@ -1793,7 +1798,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
     this.flow.assigned.add(variable);
     const { write } = this.variableAccess(context, variable);
-    return { scope: catchScope, test: instanceTest(this.core, type), write, slot: variable.slot };
+    return { scope: catchScope, test: framedInstanceTest(this.core, type), write, slot: variable.slot };
   }
 
   private compileFinally(
