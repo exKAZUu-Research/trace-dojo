@@ -171,6 +171,7 @@ export class Checker {
 
   /** The given equalities on family applications in scope, which reduce those applications. */
   private readonly familyGivens: FamilyGiven[] = [];
+  private readonly matchingGivens = new Set<FamilyGiven>();
   /** Whether AllowAmbiguousTypes lets a signature have variables only its constraints mention. */
   allowAmbiguousTypes = false;
   /** Whether a binding without arguments or a signature stays monomorphic, as the monomorphism restriction says. */
@@ -319,12 +320,14 @@ export class Checker {
     givens: readonly { pred: Pred; evidence: Evidence }[]
   ): 'solved' | 'retained' | 'again' | undefined {
     const { pred } = hole;
-    if (pred.cls === literalClasses?.nat || pred.cls === literalClasses?.symbol) {
+    if (isLiteralClass(pred.cls)) {
       const literal = prune(this.reduceFamilies(pred.type));
       if (literal.tag === 'tcon' && literal.entity.literal !== undefined) {
         hole.solution = { kind: 'literal', value: literal.entity.literal };
         return 'solved';
       }
+      // A family application that does not reduce yet, `KnownNat (n + 1)`, may be given, or reduce later.
+      if (isFamilyApplication(literal)) return entailByGivens(givens, pred) ? undefined : 'retained';
       if (literal.tag === 'tcon' || literal.tag === 'tap') this.noInstance(hole);
       return undefined;
     }
@@ -487,9 +490,10 @@ export class Checker {
    * yet; for a closed family, an earlier equation that could still match stops the search.
    */
   private reduceFamilyApplication(family: TypeEntity, args: Type[]): Type | undefined {
-    if (family.reduceBuiltin) return family.reduceBuiltin(args);
+    const builtin = family.reduceBuiltin?.(args);
+    if (builtin) return builtin;
     const given = this.familyGivens.find(
-      (candidate) => candidate.family === family && candidate.args.every((arg, index) => typesEqual(arg, args[index]))
+      (candidate) => candidate.family === family && this.givenMatches(candidate, args)
     );
     if (given) return given.to;
     for (const equation of family.equations ?? []) {
@@ -504,6 +508,21 @@ export class Checker {
       if (family.closed && couldMatch(tap(tcon(family), ...equation.lhs), tap(tcon(family), ...args))) return undefined;
     }
     return undefined;
+  }
+
+  /**
+   * Whether a given equality's family application has the arguments `args`, which are reduced, once its own arguments
+   * are reduced under the givens; `G a` in `F (G a) ~ Bool` is `Int` while `G a ~ Int` is given. A given does not
+   * take part in reducing its own arguments, which `F (F a) ~ a` would otherwise make endless.
+   */
+  private givenMatches(given: FamilyGiven, args: readonly Type[]): boolean {
+    if (this.matchingGivens.has(given)) return false;
+    this.matchingGivens.add(given);
+    try {
+      return given.args.every((arg, index) => typesEqual(this.reduceFamilies(arg), args[index]));
+    } finally {
+      this.matchingGivens.delete(given);
+    }
   }
 
   noInstance(hole: EvidenceHole): never {
@@ -554,6 +573,7 @@ export class Checker {
         continue;
       }
       for (const hole of retained) {
+        if (isLiteralClass(hole.pred.cls) && typeVarsOf(hole.pred.type).size === 0) this.noInstance(hole);
         if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
       for (const [variable, holes] of holesByVariable(retained)) {
@@ -1764,6 +1784,10 @@ export class Checker {
   checkKinds(specialize = false): void {
     this.typeConversion.checkKinds(specialize);
   }
+}
+
+function isLiteralClass(cls: ClassEntity): boolean {
+  return cls === literalClasses?.nat || cls === literalClasses?.symbol;
 }
 
 /** Givens with their constraints written as types made the classes' constraints, once their heads are classes. */
