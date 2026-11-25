@@ -1299,7 +1299,8 @@ export abstract class SemaBase implements SemaApi {
 
   private coerceToArray(expression: TExpr, to: Extract<Type, { kind: 'array' }>, span: Span): TExpr | undefined {
     const from = expression.type;
-    if (from.kind === 'array' && isVectorType(to) && from.length === to.length && from.child !== to.child)
+    const vectors = isVectorType(from) || isVectorType(to);
+    if (from.kind === 'array' && vectors && from.length === to.length && from.child !== to.child)
       return this.coerceVectorElements(expression, from.child, to, span);
     if (from.kind === 'array') {
       if (from.length !== to.length || !inMemoryCoercible(from.child, to.child)) return undefined;
@@ -1319,7 +1320,7 @@ export abstract class SemaBase implements SemaApi {
     return undefined;
   }
 
-  /** A vector, or an array, coerced to a vector of other elements, which Zig coerces each element of as a scalar. */
+  /** A vector coerced to or from an array or a vector of other elements, which Zig coerces each element of as a scalar. */
   private coerceVectorElements(expression: TExpr, from: Type, to: ArrayType, span: Span): TExpr | undefined {
     if (expression.known) {
       const elements = (expression.value as ZArray)
