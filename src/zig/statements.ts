@@ -407,7 +407,6 @@ export abstract class StatementCompiler extends CallCompiler {
     alignment?: number
   ): LocalBinding {
     this.resolveStorage(type, value.span);
-    if (!isConst) this.rejectComptimeVarReference(value, value.span);
     if (!isConst && this.context.comptimeDepth === 0 && this.requiresComptime(type, value.span))
       this.error(
         value.span,
@@ -520,29 +519,18 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: () => {}, noreturn: false };
   }
 
-  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, `x[i]`, `p.*`, or `o.?` do. */
+  /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, or `x[i]` do. */
   private comptimeVariableOf(target: Expression): LocalBinding | undefined {
     switch (target.kind) {
       case 'identifier': {
         const binding = this.lookup(target.name);
-        if (binding?.kind !== 'local') return undefined;
-        if (binding.comptimeCell) return binding;
-        // A pointer to a comptime var, or into one, reaches the variable, also from a field of a value holding it.
-        return binding.known ? this.comptimeVariableOwning(binding.value) : undefined;
+        return binding?.kind === 'local' && binding.comptimeCell ? binding : undefined;
       }
       case 'field':
-      case 'index':
-      case 'slice': {
+      case 'index': {
         return this.comptimeVariableOf(target.object);
       }
-      case 'deref': {
-        // A store through a comptime var that holds a pointer reaches the variable the pointer points into.
-        const variable = this.comptimeVariableOf(target.operand);
-        const held = variable?.comptimeCell?.slots[0];
-        return (held !== undefined && this.comptimeVariableOwning(held)) || variable;
-      }
-      case 'paren':
-      case 'unwrap': {
+      case 'paren': {
         return this.comptimeVariableOf(target.operand);
       }
       default: {
@@ -822,7 +810,6 @@ export abstract class StatementCompiler extends CallCompiler {
       const anonymous = this.anonymousInitAssignment(expression.value, type, place);
       if (anonymous) return { exec: this.simple(row, false, anonymous), noreturn: false };
       const value = this.coerce(this.compile(expression.value, type), type, expression.value);
-      this.rejectComptimeVarReference(value, expression.value);
       const evaluate = value.eval;
       const onlyCalls = isObjectCreation(expression.value);
       return {

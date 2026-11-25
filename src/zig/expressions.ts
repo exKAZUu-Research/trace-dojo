@@ -369,21 +369,16 @@ export abstract class ExpressionCompiler extends SemaBase {
         isConst: false,
         locate: () => new Pointer(cell, 0),
         compileTimePointer: new Pointer(cell, 0),
+        inComptimeVar: true,
       };
       // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
       if (this.context.comptimeDepth > 0 && (!this.context.comptimeStore || this.context.comptimeStore === binding))
         return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
       // A value read here is a constant of the code that stands here, which later stores must not change: its parts
       // come from a copy, while stores still reach the variable.
-      const value = copyForStorage(cell.slots[0]);
       return {
-        ...known(binding.type, value, span),
-        place: {
-          isConst: false,
-          locate: place.locate,
-          address: () => known(pointerOf('one', binding.type, { isConst: false }), new Pointer(cell, 0), span),
-          snapshot: true,
-        },
+        ...known(binding.type, copyForStorage(cell.slots[0]), span),
+        place: { isConst: false, locate: place.locate, inComptimeVar: true, snapshot: true },
         local: binding,
       };
     }
@@ -725,6 +720,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return {
       isConst: place.isConst,
       alignment,
+      inComptimeVar: place.inComptimeVar,
       locate: (frame) => project(place.locate(frame)),
       compileTimePointer: stable && place.compileTimePointer ? project(place.compileTimePointer) : undefined,
       address: () => {
@@ -738,20 +734,9 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Pointers --------------------------------------------------------------------------------------------------------
 
-  /**
-   * What an index outside compile-time code reads through a pointer or slice into a comptime var: the elements as the
-   * variable holds them where the code stands, as Zig's comptime-known load gives them.
-   */
-  private loadedComptimeElements(object: TExpr, span: Span): TExpr {
-    const type = object.type;
-    const value = staticResultOf(object)?.value;
-    if (this.context.comptimeDepth > 0 || type.kind !== 'pointer') return object;
-    if (!(value instanceof Pointer || value instanceof Slice) || !this.comptimeVariableOwning(value)) return object;
-    if (type.size === 'one') return type.child.kind === 'array' ? this.dereferenced(object, span, false) : object;
-    const copy = { slots: value.target.slots.map((slot) => copyForStorage(slot)) };
-    const snapshot =
-      value instanceof Slice ? new Slice(copy, value.start, value.length) : new Pointer(copy, value.index);
-    return known(type, snapshot, span);
+  /** Refuses a pointer or slice that would refer into a `comptime var`, which the grader keeps none of. */
+  protected refuseComptimeVarPointer(operand: TExpr, span: Span): void {
+    if (operand.place?.inComptimeVar) this.error(span, unavailableMessage('syntax:comptimeVarPointer'));
   }
 
   /** `p.*`, or a pointer that a field access or an index goes through. */
@@ -784,9 +769,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
-    // Outside code the compiler runs, a load through a pointer into a comptime var reads the value it holds here.
-    if (this.context.comptimeDepth === 0 && fact?.value instanceof Pointer && this.comptimeVariableOwning(fact.value))
-      return { ...known(type.child, copyForStorage(fact.value.load()), span), place: { ...place, snapshot: true } };
     const result =
       type.isConst && isConstantData(fact?.value)
         ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
@@ -973,17 +955,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   // Indexing and slicing ----------------------------------------------------------------------------------------------
 
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
-    const location = this.compileLocation(expression.object);
+    const object = this.compileLocation(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
-    const locationValue = staticResultOf(location)?.value;
-    if (
-      this.context.comptimeDepth === 0 &&
-      !staticResultOf(index) &&
-      locationValue !== undefined &&
-      this.comptimeVariableOwning(locationValue)
-    )
-      this.error(expression, 'comptime var を指すポインタは、実行時の値にできません。');
-    const object = this.loadedComptimeElements(location, expression);
     const type = object.type;
     if (type.kind === 'struct' && type.isTuple) {
       const position = Number(this.knownValue(index, 'タプルの添字') as bigint);
@@ -1039,6 +1012,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (vectorElement && !staticResultOf(index) && !staticResultOf(object)) refuseRuntimeIndex();
     const place: Place = {
       isConst,
+      inComptimeVar: object.place?.inComptimeVar,
       address: () => ({
         ...(vectorElement && !staticResultOf(index)
           ? refuseRuntimeIndex()
@@ -1124,6 +1098,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const start = this.coerce(this.compile(expression.start, USIZE), USIZE, expression.start);
     const end = expression.end ? this.coerce(this.compile(expression.end, USIZE), USIZE, expression.end) : undefined;
     checkSliceOperand(this, type, expression);
+    this.refuseComptimeVarPointer(operand, expression);
     // Slicing an array slices it where it lives, as through a pointer to it.
     let base = operand;
     if (type.kind === 'array') {
@@ -1366,6 +1341,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       operandType = arrayOf(0, many.child, many.sentinel);
     }
     let operand = this.compileLocation(expression.operand, operandType);
+    this.refuseComptimeVarPointer(operand, expression);
     const valueType = many ? undefined : operandType;
     if (!operand.place && valueType && operand.type !== valueType)
       operand = this.coerce(operand, valueType, expression.operand);

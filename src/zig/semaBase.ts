@@ -110,6 +110,8 @@ export interface Place {
    * copy while addresses and stores still reach the variable.
    */
   readonly snapshot?: boolean;
+  /** Whether the place lies in a `comptime var`, which the grader lets no pointer or slice refer into. */
+  readonly inComptimeVar?: boolean;
   /** The alignment that `align(n)` gives the variable, which a pointer to it carries. */
   readonly alignment?: number;
 }
@@ -204,7 +206,6 @@ export interface LibraryFunctionOptions {
 
 export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
-  rejectComptimeVarReference(value: TExpr, span: Span): void;
   compileType(expression: Expression): Type;
   valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   reserveStorage(type: Type, span: Span): void;
@@ -447,49 +448,6 @@ export abstract class SemaBase implements SemaApi {
       const decl = scope.namespace?.decls.get(name);
       if (decl) return decl;
     }
-    return undefined;
-  }
-
-  /**
-   * The `comptime var` that a value refers into: through a pointer or slice into the variable's storage, at any depth
-   * of an optional or an aggregate holding one. Every way the compiler reaches a comptime var from a value resolves
-   * through it.
-   */
-  protected comptimeVariableOwning(value: Value): LocalBinding | undefined {
-    this.spendCompilation();
-    if (value instanceof Pointer || value instanceof Slice) return this.comptimeVariableHolding(value.target);
-    if (value instanceof Some) return this.comptimeVariableOwning(value.value);
-    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) {
-      for (const slot of value.slots) {
-        const variable = this.comptimeVariableOwning(slot);
-        if (variable) return variable;
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Refuses a value that holds a pointer into a `comptime var` where the value becomes one of the running program,
-   * such as a runtime variable's or a runtime argument's, since the variable exists only while the compiler runs.
-   */
-  rejectComptimeVarReference(value: TExpr, span: Span): void {
-    if (this.context.comptimeDepth > 0) return;
-    const fact = staticResultOf(value);
-    if (fact && this.comptimeVariableOwning(fact.value))
-      this.error(span, 'comptime var を指すポインタは、実行時の値にできません。');
-  }
-
-  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
-  private comptimeVariableHolding(target: Slots): LocalBinding | undefined {
-    // A pointer to a part of an array, as `arr[1..3]` gives, points to a holder of a view of the array.
-    const [held] = target.slots;
-    const view = target.slots.length === 1 && held instanceof ZArray ? held : undefined;
-    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
-      for (const binding of scope.locals?.values() ?? []) {
-        this.spendCompilation();
-        const cell = binding.comptimeCell;
-        if (cell && (holdsStorage(cell, target) || (view && holdsStorage(cell, view)))) return binding;
-      }
     return undefined;
   }
 
@@ -2100,18 +2058,6 @@ export function nullUnwrapPanic(): never {
 }
 
 export { BigFloat, BOOL, COMPTIME_FLOAT, COMPTIME_INT, NULL_TYPE, UNDEFINED_TYPE, arrayOf, isComptimeOnly };
-
-/** Whether `target` is `storage` or lies in it, a view of an array that shares its slots included. */
-function holdsStorage(storage: Slots, target: Slots): boolean {
-  return (
-    storage === target ||
-    storage.slots === target.slots ||
-    storage.slots.some(
-      (value) =>
-        (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
-    )
-  );
-}
 
 type PointerConversion = 'retype' | 'fromC' | 'sliceToMany' | 'arrayToMany' | 'arrayToSlice';
 

@@ -244,7 +244,6 @@ export abstract class CallCompiler extends VectorCompiler {
       if (index === 0 && receiver) bound = this.bindReceiver(compiled, declared, expression);
       else if (declared) bound = this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg);
       else bound = compiled;
-      if (!params[index].isComptime && !syntax.isInline) this.rejectComptimeVarReference(bound, bound.span);
       if (params[index].isComptime && !staticResultOf(bound))
         this.error(
           bound.span,
@@ -299,6 +298,7 @@ export abstract class CallCompiler extends VectorCompiler {
     if (!declared) return receiver;
     const type = receiver.type;
     if (declared.kind === 'pointer' && declared.size === 'one' && type === declared.child) {
+      this.refuseComptimeVarPointer(receiver, receiver.span);
       const address = this.addressOf(receiver);
       if (address.type.kind === 'pointer' && address.type.isConst && !declared.isConst) {
         this.error(
