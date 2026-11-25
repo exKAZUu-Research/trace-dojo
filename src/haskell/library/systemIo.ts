@@ -200,13 +200,13 @@ catches action handlers = catchSome action (\e -> foldr (\(Handler h) rest -> ca
   Just caught -> h caught
   Nothing -> rest) (throwIO e) handlers)
 
-mask :: ((IO a -> IO a) -> IO b) -> IO b
+mask :: ((forall a. IO a -> IO a) -> IO b) -> IO b
 mask f = f id
 
 mask_ :: IO a -> IO a
 mask_ action = action
 
-uninterruptibleMask :: ((IO a -> IO a) -> IO b) -> IO b
+uninterruptibleMask :: ((forall a. IO a -> IO a) -> IO b) -> IO b
 uninterruptibleMask f = f id
 
 uninterruptibleMask_ :: IO a -> IO a
