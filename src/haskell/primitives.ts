@@ -761,7 +761,16 @@ define('errorEmptyList', 1, [], ([name], runtime) => {
 });
 strict('primConTag', 1, ([a]) => BigInt((a as ConValue).con.tag));
 strict('primConCount', 1, ([a]) => BigInt((a as ConValue).con.type.cons.length));
-strict('primConAt', 2, ([a, n]) => nullary((a as ConValue).con.type.cons[Number(n as bigint)]));
+strict('primConAt', 2, ([a, n]) => {
+  const { cons, name } = (a as ConValue).con.type;
+  const tag = n as bigint;
+  if (tag < 0n || tag >= BigInt(cons.length)) {
+    throw haskellError(
+      `Enum.toEnum{${name}}: tag (${showSignedInt(tag)}) is outside of enumeration's range (0,${cons.length - 1})`
+    );
+  }
+  return nullary(cons[Number(tag)]);
+});
 
 define('ioReturn', 1, [], ([a]) => new IOReturn(a));
 define('ioBind', 2, [], ([m, k]) => new IOBind(m, k));

@@ -385,23 +385,7 @@ stderr = HandleStderr
 stdin :: Handle
 stdin = HandleStdin
 
-data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
-
-instance Eq IOMode where
-  a == b = primConTag a == primConTag b
-
-instance Ord IOMode where
-  compare a b = compare (primConTag a) (primConTag b)
-
-instance Show IOMode where
-  showsPrec _ ReadMode = showString "ReadMode"
-  showsPrec _ WriteMode = showString "WriteMode"
-  showsPrec _ AppendMode = showString "AppendMode"
-  showsPrec _ ReadWriteMode = showString "ReadWriteMode"
-
-instance Enum IOMode where
-  fromEnum = primConTag
-  toEnum n = primConAt ReadMode n
+data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode deriving (Eq, Ord, Enum, Bounded, Read, Show)
 
 data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 
