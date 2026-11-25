@@ -811,6 +811,14 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
+  /** The variable of a `ref` or `out` argument, reporting a receiver that is none for a `ref` receiver (CS1510). */
+  private refArgumentTarget(arg: ArgumentInfo, type: Type, row: number): BoundLValue {
+    if (arg.declareOut) return arg.declareOut(type);
+    if (arg.target) return arg.target;
+    if (arg.isReceiver) this.error(row, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+    return { kind: 'discard', type: ERROR_TYPE, row: arg.row };
+  }
+
   /** Converts the arguments to their parameters' types and orders them as the parameters, filling defaults and packing `params`. */
   private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArguments {
     const { method } = applicable.candidate;
@@ -822,11 +830,7 @@ export abstract class CallBinder extends OperatorBinder {
       const parameter = method.parameters[parameterIndex];
       const type = applicable.argumentTypes[index];
       if (parameter.refKind === 'ref' || parameter.refKind === 'out') {
-        if (arg.isReceiver && !arg.target)
-          this.error(row, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
-        const target: BoundLValue = arg.declareOut
-          ? arg.declareOut(type)
-          : (arg.target ?? { kind: 'discard', type: ERROR_TYPE, row: arg.row });
+        const target = this.refArgumentTarget(arg, type, row);
         result[parameterIndex] = { kind: 'refArgument', target, refKind: parameter.refKind, type, row: arg.row };
         continue;
       }

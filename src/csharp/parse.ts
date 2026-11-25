@@ -68,30 +68,27 @@ const NOT_IN_EXTENSION = 'CS9282: このメンバーは拡張ブロックでは�
  * events, constructors, conversion operators, nested types, and indexers, which C# 14 leaves in preview.
  */
 function extensionMemberErrors(root: Node): SourceDiagnostic[] {
-  const diagnostics: SourceDiagnostic[] = [];
-  for (const body of root.descendantsOfType('extension_body')) {
-    for (const member of body?.namedChildren ?? []) {
-      if (!member) continue;
-      const row = member.startPosition.row;
-      const name = member.childForFieldName('name');
-      const type = member.childForFieldName('type');
-      if (member.type === 'ERROR') {
-        diagnostics.push({ row, message: NOT_IN_EXTENSION });
-      } else if (member.type === 'property_declaration' && name?.text === 'this') {
-        diagnostics.push({
-          row,
-          message:
-            "CS8652: 機能 '拡張インデクサー' は現在、プレビュー段階であり、*サポートされていません*。プレビュー機能を使用するには、'preview' 言語バージョンを使用してください。",
-        });
-      } else if (member.type === 'property_declaration' && type && TYPE_DECLARATION_KEYWORDS.has(type.text)) {
-        diagnostics.push({ row, message: NOT_IN_EXTENSION });
-      } else if (member.type === 'method_declaration' && (!name || name.isMissing || name.text === '')) {
-        diagnostics.push({ row, message: 'CS1520: メソッドは戻り値の型を持たなければなりません' });
-        diagnostics.push({ row, message: NOT_IN_EXTENSION });
-      }
-    }
-  }
-  return diagnostics;
+  return root
+    .descendantsOfType('extension_body')
+    .flatMap((body) => body?.namedChildren ?? [])
+    .flatMap((member) =>
+      member ? extensionMemberMessages(member).map((message) => ({ row: member.startPosition.row, message })) : []
+    );
+}
+
+function extensionMemberMessages(member: Node): string[] {
+  const name = member.childForFieldName('name');
+  const type = member.childForFieldName('type');
+  if (member.type === 'ERROR') return [NOT_IN_EXTENSION];
+  if (member.type === 'property_declaration' && name?.text === 'this')
+    return [
+      "CS8652: 機能 '拡張インデクサー' は現在、プレビュー段階であり、*サポートされていません*。プレビュー機能を使用するには、'preview' 言語バージョンを使用してください。",
+    ];
+  if (member.type === 'property_declaration' && type && TYPE_DECLARATION_KEYWORDS.has(type.text))
+    return [NOT_IN_EXTENSION];
+  if (member.type === 'method_declaration' && (!name || name.isMissing || name.text === ''))
+    return ['CS1520: メソッドは戻り値の型を持たなければなりません', NOT_IN_EXTENSION];
+  return [];
 }
 
 const MODIFIERS = new Set([

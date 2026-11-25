@@ -476,10 +476,16 @@ export class Compiler extends AttributeBinder {
       if (parameter.defaultSyntax) this.bindParameterDefault(parameter, parameter.type);
     symbol.instanceInitializer = this.bindFieldInitializers(symbol, context, false);
     symbol.staticInitializer = this.bindFieldInitializers(symbol, context, true);
+    this.bindMethodsAndAccessors(symbol, context);
+    for (const constructor of symbol.constructors) this.bindConstructor(constructor, type);
+    if (symbol.staticConstructor) this.bindConstructor(symbol.staticConstructor, type);
+  }
+
+  /** Binds the methods and property accessors of a type in the order the program declares them, as Roslyn does. */
+  private bindMethodsAndAccessors(symbol: TypeSymbol, context: TypeContext): void {
     const accessors = symbol.properties
       .flatMap((property) => [property.getter, property.setter])
       .filter((accessor) => accessor?.declaration !== undefined) as MethodSymbol[];
-    // Roslyn binds the members in the order the program declares them, which orders their errors.
     for (const method of [...symbol.methods, ...accessors].toSorted((a, b) => a.row - b.row)) {
       if (method.kind === 'getter' || method.kind === 'setter') {
         const body = (method.declaration as unknown as { body: MethodDeclaration['body'] }).body;
@@ -488,8 +494,6 @@ export class Compiler extends AttributeBinder {
         this.bindDeclaredMethod(method, context);
       }
     }
-    for (const constructor of symbol.constructors) this.bindConstructor(constructor, type);
-    if (symbol.staticConstructor) this.bindConstructor(symbol.staticConstructor, type);
   }
 
   private bindDeclaredMethod(method: MethodSymbol, context: TypeContext): void {

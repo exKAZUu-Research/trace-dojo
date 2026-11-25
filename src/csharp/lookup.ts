@@ -161,18 +161,22 @@ export class LookupBinder extends DeclarationBinder {
         if (method.kind === 'operator' && method.name === name) result.push({ method, owner });
     }
     if (result.length > 0 || type.kind !== 'named') return result;
-    // Operators bind without the namespaces in scope, so every static class of the program offers its extension
-    // operators, where Roslyn looks only in those in scope.
-    for (const symbol of staticClassesOf(this.userRoot))
-      for (const method of symbol.methods)
-        if (
-          method.kind === 'operator' &&
-          method.name === name &&
-          method.staticExtensionOf &&
-          sameType(method.staticExtensionOf, type)
-        )
-          result.push({ method, owner: symbol.declaredType });
-    return result;
+    return this.extensionOperators(
+      name,
+      (method) => method.staticExtensionOf !== undefined && sameType(method.staticExtensionOf, type)
+    );
+  }
+
+  /**
+   * The operators of a name that the program's extension blocks declare. Operators bind without the namespaces in
+   * scope, so every static class of the program offers them, where Roslyn looks only in those in scope.
+   */
+  private extensionOperators(name: string, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
+    return staticClassesOf(this.userRoot).flatMap((symbol) =>
+      symbol.methods
+        .filter((method) => method.kind === 'operator' && method.name === name && matches(method))
+        .map((method) => ({ method, owner: symbol.declaredType }))
+    );
   }
 
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
@@ -189,16 +193,9 @@ export class LookupBinder extends DeclarationBinder {
 
   /** The instance compound assignment and `++`/`--` operators that extension blocks for a type declare. */
   lookupExtensionAssignmentOperators(type: Type, name: string): MethodCandidate[] {
-    return staticClassesOf(this.userRoot).flatMap((symbol) =>
-      symbol.methods
-        .filter(
-          (method) =>
-            method.kind === 'operator' &&
-            method.name === name &&
-            method.extensionAssignmentOf !== undefined &&
-            sameType(method.extensionAssignmentOf, type)
-        )
-        .map((method) => ({ method, owner: symbol.declaredType }))
+    return this.extensionOperators(
+      name,
+      (method) => method.extensionAssignmentOf !== undefined && sameType(method.extensionAssignmentOf, type)
     );
   }
 

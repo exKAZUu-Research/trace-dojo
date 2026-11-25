@@ -743,7 +743,6 @@ export class Converter extends ExpressionConverter {
    * found through the receiver's type, as an operator joins the type's operators. The block's type parameters and
    * constraints go to each member.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertExtensionBlock(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     if (!owner.modifiers.set.has('static') || owner.typeParameters.length > 0)
       throw new CompileError([
@@ -774,38 +773,47 @@ export class Converter extends ExpressionConverter {
       defaultValue: undefined,
       ...positionOf(receiverNode),
     };
-    const members: MemberDeclaration[] = [];
-    for (const memberNode of namedChildren(body)) {
-      if (memberNode.type === 'comment') continue;
-      for (const member of this.convertMember(memberNode, owner)) {
-        if (member.kind === 'operator') {
-          if (typeParameters.length > 0) unsupported(memberNode, 'ジェネリックな拡張ブロックの演算子');
-          const operand = receiverName ? { ...receiver, isThis: false } : undefined;
-          members.push(this.extensionOperator(member, memberNode, receiverType, operand));
-          continue;
-        }
-        for (const method of this.extensionMethods(member, memberNode, receiverType)) {
-          const isStatic = method.modifiers.set.has('static');
-          if (!isStatic && !receiverName)
-            throw new CompileError([
-              {
-                row: method.row,
-                message: `CS9303: '${method.extension?.property ?? method.name}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
-              },
-            ]);
-          const set = new Set<Modifier>([...method.modifiers.set, 'static']);
-          members.push({
-            ...method,
-            modifiers: { set, positions: method.modifiers.positions },
-            typeParameters: [...typeParameters, ...method.typeParameters],
-            constraints: [...constraints, ...method.constraints],
-            parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
-            extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
-          });
-        }
-      }
+    const block: ExtensionBlock = {
+      receiver,
+      hasReceiverName: receiverName !== undefined,
+      typeParameters,
+      constraints,
+    };
+    return namedChildren(body)
+      .filter((memberNode) => memberNode.type !== 'comment')
+      .flatMap((memberNode) =>
+        this.convertMember(memberNode, owner).flatMap((member) => this.extensionBlockMember(member, memberNode, block))
+      );
+  }
+
+  /** A member of an extension block as the members of the enclosing static class that stand for it. */
+  private extensionBlockMember(member: MemberDeclaration, node: Node, block: ExtensionBlock): MemberDeclaration[] {
+    const { receiver, typeParameters, constraints } = block;
+    const receiverType = receiver.type as TypeNode;
+    if (member.kind === 'operator') {
+      if (typeParameters.length > 0) unsupported(node, 'ジェネリックな拡張ブロックの演算子');
+      const operand = block.hasReceiverName ? { ...receiver, isThis: false } : undefined;
+      return [this.extensionOperator(member, node, receiverType, operand)];
     }
-    return members;
+    return this.extensionMethods(member, node, receiverType).map((method) => {
+      const isStatic = method.modifiers.set.has('static');
+      if (!isStatic && !block.hasReceiverName)
+        throw new CompileError([
+          {
+            row: method.row,
+            message: `CS9303: '${method.extension?.property ?? method.name}': 名前のないレシーバー パラメーターを持つ拡張ブロックでインスタンス メンバーを宣言することはできません`,
+          },
+        ]);
+      const set = new Set<Modifier>([...method.modifiers.set, 'static']);
+      return {
+        ...method,
+        modifiers: { set, positions: method.modifiers.positions },
+        typeParameters: [...typeParameters, ...method.typeParameters],
+        constraints: [...constraints, ...method.constraints],
+        parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
+        extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
+      };
+    });
   }
 
   /**
@@ -1337,6 +1345,14 @@ function rejectConstantsWithoutValues(declarators: VariableDeclarator[]): void {
   const missing = declarators.find((declarator) => !declarator.initializer);
   if (missing)
     throw new CompileError([{ row: missing.row, message: 'CS0145: const フィールドに値を指定する必要があります' }]);
+}
+
+/** What every member of an extension block shares: its receiver, and its type parameters and constraints. */
+interface ExtensionBlock {
+  receiver: Parameter;
+  hasReceiverName: boolean;
+  typeParameters: TypeParameterDeclaration[];
+  constraints: ConstraintClause[];
 }
 
 const ACCESS_MODIFIERS: ReadonlySet<Modifier> = new Set(['public', 'private', 'protected', 'internal']);

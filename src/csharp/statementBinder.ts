@@ -255,6 +255,7 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(position, 'CS1612', `変数ではないため、'${this.describeValue(holder)}' の戻り値を変更できません`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private checkPropertyAssignable(
     target: Extract<BoundExpression, { kind: 'property' }>,
     position: Position,
@@ -262,11 +263,8 @@ export abstract class StatementBinder extends PatternBinder {
     use: string
   ): BoundLValue {
     const { property } = target;
-    if (property.returnsByRef === 'ref') return target;
-    if (property.returnsByRef === 'readonly' && (use === 'ref' || use === 'out')) {
-      this.reportReadonlyRefProperty(property, position, 'CS8329');
-      return { kind: 'discard', type: ERROR_TYPE, row: position.row };
-    }
+    const byReference = this.refPropertyTarget(target, position, use);
+    if (byReference) return byReference;
     const declared = this.setterOf(property);
     // A library property's private setter stands for .NET's explicit IList<T> indexer, which leaves it read-only.
     const setter = declared?.access === 'private' && property.owner.isLibrary ? undefined : declared;
@@ -307,9 +305,7 @@ export abstract class StatementBinder extends PatternBinder {
     }
     this.checkAccessorUse(target, property, setter, 'set', position, context);
     if (target.receiver && this.reportsReadonlyLocalMember(target.receiver, position)) return target as BoundLValue;
-    // An extension property takes its receiver as its first argument, by value unless the block's receiver is `ref`.
-    const extensionReceiver = setter.extensionAccessorOf && property.parameters.length > 0 ? target.args[0] : undefined;
-    const holder = target.receiver ?? (extensionReceiver?.kind === 'refArgument' ? undefined : extensionReceiver);
+    const holder = target.receiver ?? extensionReceiverValue(target, setter);
     if (
       holder &&
       holder.type.kind === 'named' &&
@@ -320,6 +316,22 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(position, 'CS1612', `変数ではないため、'${this.describeValue(holder)}' の戻り値を変更できません`);
     }
     return target;
+  }
+
+  /**
+   * The variable that a property returning by reference names, which a `ref readonly` one does not give as a `ref`
+   * or `out` argument; its assignment reports CS8331 as a read-only property's does.
+   */
+  private refPropertyTarget(
+    target: Extract<BoundExpression, { kind: 'property' }>,
+    position: Position,
+    use: string
+  ): BoundLValue | undefined {
+    const { property } = target;
+    if (property.returnsByRef === 'ref') return target;
+    if (property.returnsByRef !== 'readonly' || (use !== 'ref' && use !== 'out')) return undefined;
+    this.reportReadonlyRefProperty(property, position, 'CS8329');
+    return { kind: 'discard', type: ERROR_TYPE, row: position.row };
   }
 
   /** Reports a `ref readonly` property used as a writable reference: an argument or local (CS8329) or a return. */
@@ -1261,16 +1273,21 @@ export abstract class StatementBinder extends PatternBinder {
       else this.error(operand, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
       return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
     }
-    if (isReadonly) return bound as BoundLValue;
+    if (isReadonly || this.reportsReadonlyReference(bound, operand, use)) return bound as BoundLValue;
+    return this.checkAssignable(bound, operand, context, 'ref');
+  }
+
+  /** Reports a call or property returning by `ref readonly` that a writable reference takes, telling whether it did. */
+  private reportsReadonlyReference(bound: BoundExpression, operand: Position, use: 'local' | 'return'): boolean {
     if (bound.kind === 'property' && bound.property.returnsByRef === 'readonly') {
       this.reportReadonlyRefProperty(bound.property, operand, use === 'return' ? 'CS8333' : 'CS8329');
-      return bound as BoundLValue;
+      return true;
     }
     if (bound.kind === 'call' && bound.method.returnsByRef === 'readonly') {
       this.error(operand, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
-      return bound as BoundLValue;
+      return true;
     }
-    return this.checkAssignable(bound, operand, context, 'ref');
+    return false;
   }
 
   /** Reports a variable of another type than a ref local's or a method's, which a reference may not convert. */
@@ -2284,4 +2301,14 @@ function collectDesignatedNames(node: unknown, names: string[]): void {
 /** Whether a statement holds a `yield` of its own function, which makes the function an iterator. */
 function containsYield(statement: Statement): boolean {
   return anyStatement(statement, (inner) => inner.kind === 'yield');
+}
+
+/** The receiver of an extension property that its setter takes by value, as its first argument. */
+function extensionReceiverValue(
+  target: Extract<BoundExpression, { kind: 'property' }>,
+  setter: MethodSymbol
+): BoundExpression | undefined {
+  if (!setter.extensionAccessorOf || target.property.parameters.length === 0) return undefined;
+  const [receiver] = target.args;
+  return receiver.kind === 'refArgument' ? undefined : receiver;
 }

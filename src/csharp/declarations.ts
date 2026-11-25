@@ -1057,7 +1057,7 @@ export class DeclarationBinder extends BinderBase {
   private declareExtensionAccessor(method: MethodSymbol, member: MethodDeclaration, context: TypeContext): void {
     const extension = member.extension as ExtensionMember;
     const name = extension.property as string;
-    const block = `${displayTypeSymbol(method.owner)}.extension(${displayType(this.resolveType(extension.receiver as TypeNode, context))})`;
+    const block = this.extensionOwnerName(method.owner, this.resolveType(extension.receiver as TypeNode, context));
     if (extension.accessor === 'init')
       this.error(member, 'CS9304', `'${block}.${name}': 拡張ブロックで init のみのアクセサーを宣言できません`);
     const key = extension.propertyKey as string;
@@ -1231,15 +1231,10 @@ export class DeclarationBinder extends BinderBase {
     const shownName = isIndexer ? 'this' : name;
     // The library declares `ref readonly` indexers, which read as values and refuse assignment as Roslyn does; the
     // program's ref properties return the variable, as its methods returning by reference do.
-    const refType = member.type.kind === 'refType' ? member.type : undefined;
-    const property = new PropertySymbol(
-      name,
-      this.resolveType(refType?.type ?? member.type, context),
-      symbol,
-      isIndexer
-    );
-    property.isRefReadonly = refType?.isReadonly === true;
-    if (refType && !this.isLibraryUnit) property.returnsByRef = refType.isReadonly ? 'readonly' : 'ref';
+    const { type: valueType, returnsByRef } = refTypeOf(member.type);
+    const property = new PropertySymbol(name, this.resolveType(valueType, context), symbol, isIndexer);
+    property.isRefReadonly = returnsByRef === 'readonly';
+    if (!this.isLibraryUnit) property.returnsByRef = returnsByRef;
     const modifiers = member.modifiers.set;
     property.isStatic = modifiers.has('static');
     property.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
@@ -1301,16 +1296,18 @@ export class DeclarationBinder extends BinderBase {
     }
     if (isAuto && !property.getter)
       this.error(member, 'CS8051', '自動実装プロパティは get アクセサーを持つ必要があります。');
-    if (property.returnsByRef) this.checkRefProperty(member, isAuto);
+    this.checkRefProperty(property, member, isAuto);
     this.addMember(symbol, property, member);
     symbol.properties.push(property);
   }
 
   /** Reports the accessors that a property returning by reference may not have, as Roslyn does. */
   private checkRefProperty(
+    property: PropertySymbol,
     member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>,
     isAuto: boolean
   ): void {
+    if (!property.returnsByRef) return;
     if (isAuto) this.error(member, 'CS8145', '自動実装プロパティは参照渡しで返すことができません');
     if (!member.accessors.some((accessor) => accessor.kind === 'get')) {
       this.error(member, 'CS8146', '参照渡しで返すプロパティは get アクセサーを持たなければなりません');
@@ -1372,9 +1369,10 @@ export class DeclarationBinder extends BinderBase {
     }
     method.row = accessor.row;
     method.returnType = isGetter ? property.type : VOID_TYPE;
-    if (isGetter) method.returnsByRef = property.returnsByRef;
-    method.parameters = [...property.parameters];
-    if (!isGetter) method.parameters.push({ name: 'value', type: property.type, refKind: undefined, isParams: false });
+    method.returnsByRef = isGetter ? property.returnsByRef : undefined;
+    method.parameters = isGetter
+      ? [...property.parameters]
+      : [...property.parameters, { name: 'value', type: property.type, refKind: undefined, isParams: false }];
     this.methodContexts.set(method, context);
     this.collectAttributes(accessor.attributes, 'method', method, context, {
       method,
@@ -1435,24 +1433,10 @@ export class DeclarationBinder extends BinderBase {
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);
     method.parameters = this.resolveParameters(member.parameters, context, method);
-    // An extension block's operator is one of the type that the block extends.
-    const extended = member.extension?.staticReceiver
-      ? this.resolveType(member.extension.staticReceiver, context)
-      : undefined;
-    method.staticExtensionOf = extended;
+    const parameterList = method.parameters.map((parameter) => displayType(parameter.type)).join(', ');
+    const extended = this.declareExtensionOperator(method, member, context);
     this.collectAttributes(member.attributes, 'method', method, context, { method, return: undefined });
-    const ownerName = extended
-      ? `${displayTypeSymbol(symbol)}.extension(${displayType(extended)})`
-      : displayTypeSymbol(symbol);
-    const signature = `${ownerName}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
-    const receiverParameter = member.extension?.receiverParameter;
-    if (receiverParameter) {
-      // An extension block's instance operator is a static method of its class, which takes the receiver first.
-      const [receiver] = this.resolveParameters([receiverParameter], context, method);
-      method.parameters = [receiver, ...method.parameters];
-      method.isStatic = true;
-      method.extensionAssignmentOf = receiver.type;
-    }
+    const signature = `${this.extensionOwnerName(symbol, extended)}.operator ${member.operator}(${parameterList})`;
     if (isInstanceAssignment) {
       if (!member.modifiers.set.has('public'))
         this.error(member, 'CS9308', `ユーザー定義演算子 '${signature}' は公開用として宣言する必要があります`);
@@ -1479,16 +1463,39 @@ export class DeclarationBinder extends BinderBase {
     if (member.operator === 'implicit' || member.operator === 'explicit') {
       this.checkConversionOperator(symbol, method, member);
     } else if (!isInstanceAssignment && !method.parameters.some((parameter) => isOwn(parameter.type))) {
-      if (extended) {
-        this.reportForeignExtensionOperator(member, isUnary);
-        return;
-      }
+      if (extended) return this.reportForeignExtensionOperator(member, isUnary);
       const code = isUnary ? 'CS0562' : 'CS0563';
       const what = isUnary ? '単項演算子のパラメーター' : '二項演算子のパラメーターのうち 1 つ';
       this.error(member, code, `${what}は、それを含んでいる型でなければなりません`);
     }
     this.attachNative(method, member.body === undefined);
     this.addMethod(symbol, method, member);
+  }
+
+  /**
+   * Makes an extension block's operator one of the type that the block extends, which it returns; an instance one
+   * becomes a static method of the class that takes the receiver first.
+   */
+  private declareExtensionOperator(
+    method: MethodSymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>,
+    context: TypeContext
+  ): Type | undefined {
+    const { extension } = member;
+    if (extension?.receiverParameter) {
+      const [receiver] = this.resolveParameters([extension.receiverParameter], context, method);
+      method.parameters = [receiver, ...method.parameters];
+      method.isStatic = true;
+      method.extensionAssignmentOf = receiver.type;
+      return receiver.type;
+    }
+    if (extension?.staticReceiver) method.staticExtensionOf = this.resolveType(extension.staticReceiver, context);
+    return method.staticExtensionOf;
+  }
+
+  /** How Roslyn names the type that declares a member, or for an extension block's, the block. */
+  private extensionOwnerName(symbol: TypeSymbol, extended: Type | undefined): string {
+    return extended ? `${displayTypeSymbol(symbol)}.extension(${displayType(extended)})` : displayTypeSymbol(symbol);
   }
 
   /** Reports an extension block's operator that takes none of the extended type, as Roslyn does. */
@@ -2519,4 +2526,10 @@ function constrainsBackTo(
   return from.constraintTypes.some(
     (constraint) => constraint.kind === 'typeParameter' && constrainsBackTo(constraint.symbol, target, seen)
   );
+}
+
+/** The type of a property's value, and how it returns by reference if its type is `ref T` or `ref readonly T`. */
+function refTypeOf(type: TypeNode): { type: TypeNode; returnsByRef: 'ref' | 'readonly' | undefined } {
+  if (type.kind !== 'refType') return { type, returnsByRef: undefined };
+  return { type: type.type, returnsByRef: type.isReadonly ? 'readonly' : 'ref' };
 }
