@@ -103,6 +103,7 @@ import {
   USIZE,
   wrapInt,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { concatenatedFacts, fieldFacts, payloadFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -306,11 +307,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private pointerTypeExpression(expression: ExpressionOf<'pointerType' | 'sliceType'>): Type {
     const child = this.compileType(expression.child);
     const size = expression.kind === 'sliceType' ? 'slice' : expression.size;
-    if (expression.bitRange)
-      this.error(
-        expression,
-        'packed struct のフィールドへのポインタの型（align(a:b:c)）は、この採点環境では使えません。'
-      );
+    if (expression.bitRange) this.error(expression, unavailableMessage('syntax:packedFieldPointer'));
     if (expression.addressSpace) this.addressSpace(expression.addressSpace);
     const sentinel = expression.sentinel ? this.sentinelValue(expression.sentinel, child) : undefined;
     return pointerOf(size, child, {
@@ -325,7 +322,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   /** `addrspace(.generic)`; the others name address spaces of particular CPUs. */
   protected addressSpace(expression: Expression): void {
     if (expression.kind !== 'enumLiteral' || expression.name !== 'generic')
-      this.error(expression, 'generic 以外のアドレス空間（CPU ごとに異なるもの）は、この採点環境では使えません。');
+      this.error(expression, unavailableMessage('syntax:addrspace'));
   }
 
   /** The calling convention that `callconv(.x)` names: Zig's own (`.auto`), or the C one (`.c`). */
@@ -334,10 +331,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (expression.kind === 'enumLiteral' && (expression.name === 'auto' || expression.name === 'inline'))
       return undefined;
     if (expression.kind === 'enumLiteral' && expression.name === 'c') return 'c';
-    return this.error(
-      expression,
-      'auto と c 以外の呼び出し規約（CPU ごとに異なるもの）は、この採点環境では使えません。'
-    );
+    return this.error(expression, unavailableMessage('syntax:callconv'));
   }
 
   /** Rejects the parameter and return types that the C calling convention cannot pass, as Zig does. */

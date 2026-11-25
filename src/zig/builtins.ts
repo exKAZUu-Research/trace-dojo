@@ -81,6 +81,7 @@ import {
   VOID,
   wrapInt,
 } from './types';
+import { UNAVAILABLE, unavailableMessage } from './unavailable';
 import { decodeIdentifierBytes, decodeUtf8, encodeIdentifierText, identifierTextByteLength } from './utf8';
 import {
   arrayPointerView,
@@ -97,62 +98,6 @@ import {
   ZStruct,
   type ZUnion,
 } from './values';
-
-/** Builtins of stages C and D, which this grader rejects with the stage's message. */
-const UNAVAILABLE = new Map<string, string>([
-  ['@cImport', 'C との連携（@cImport）'],
-  ['@cInclude', 'C との連携（@cInclude）'],
-  ['@cDefine', 'C との連携（@cDefine）'],
-  ['@cUndef', 'C との連携（@cUndef）'],
-  ['@embedFile', '@embedFile（ファイルの読み込み）'],
-  ['@extern', '@extern'],
-  ['@export', '@export'],
-  ['@ptrCast', '@ptrCast（メモリの表現に依存する変換）'],
-  ['@intFromPtr', '@intFromPtr（メモリの表現に依存する変換）'],
-  ['@ptrFromInt', '@ptrFromInt（メモリの表現に依存する変換）'],
-  ['@fieldParentPtr', '@fieldParentPtr（メモリの表現に依存する変換）'],
-  ['@alignCast', '@alignCast'],
-  ['@addrSpaceCast', '@addrSpaceCast'],
-  ['@atomicLoad', 'アトミック操作（@atomicLoad）'],
-  ['@atomicStore', 'アトミック操作（@atomicStore）'],
-  ['@atomicRmw', 'アトミック操作（@atomicRmw）'],
-  ['@cmpxchgStrong', 'アトミック操作（@cmpxchgStrong）'],
-  ['@cmpxchgWeak', 'アトミック操作（@cmpxchgWeak）'],
-  ['@frameAddress', '@frameAddress'],
-  ['@returnAddress', '@returnAddress'],
-  ['@breakpoint', '@breakpoint'],
-  ['@trap', '@trap'],
-  ['@wasmMemorySize', 'WebAssembly の組み込み関数'],
-  ['@wasmMemoryGrow', 'WebAssembly の組み込み関数'],
-  ['@workGroupId', 'GPU の組み込み関数'],
-  ['@workGroupSize', 'GPU の組み込み関数'],
-  ['@workItemId', 'GPU の組み込み関数'],
-  ['@SpirvType', 'GPU の組み込み関数'],
-  ['@cVaArg', '可変個の引数'],
-  ['@cVaCopy', '可変個の引数'],
-  ['@cVaEnd', '可変個の引数'],
-  ['@cVaStart', '可変個の引数'],
-  ['@intFromError', '@intFromError（エラーの番号）'],
-  ['@errorFromInt', '@errorFromInt（エラーの番号）'],
-  ['@errorReturnTrace', '@errorReturnTrace'],
-  ['@Pointer', '@Pointer（型の操作）'],
-  ['@Fn', '@Fn（型の操作）'],
-  ['@Struct', '@Struct（型の操作）'],
-  ['@Union', '@Union（型の操作）'],
-  ['@Enum', '@Enum（型の操作）'],
-]);
-
-/** Builtins whose answers depend on how memory represents a value, which programs cannot use. */
-const MEMORY_REPRESENTATION = new Map<string, string>([
-  ['@bitCast', '@bitCast（メモリの表現に依存する変換）'],
-  ['@sizeOf', '@sizeOf（メモリの表現）'],
-  ['@bitSizeOf', '@bitSizeOf（メモリの表現）'],
-  ['@alignOf', '@alignOf（メモリの表現）'],
-  ['@offsetOf', '@offsetOf（メモリの表現）'],
-  ['@bitOffsetOf', '@bitOffsetOf（メモリの表現）'],
-  ['@backingInt', '@backingInt（メモリの表現に依存する変換）'],
-  ['@fromBackingInt', '@fromBackingInt（メモリの表現に依存する変換）'],
-]);
 
 const ARGUMENT_COUNTS: Record<string, number> = {
   '@as': 2,
@@ -231,13 +176,9 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
 
   /** Refuses a builtin that this grader does not run, before any class of the compiler handles the call. */
   protected checkBuiltinAvailable(expression: ExpressionOf<'builtinCall'>): void {
-    const { name } = expression;
-    const unavailable = UNAVAILABLE.get(name);
-    if (unavailable) this.error(expression, `${unavailable}は、この採点環境では使えません。`);
-    // Library code ported from Zig's source uses these as primitives, which programs do not get.
-    const representation = MEMORY_REPRESENTATION.get(name);
-    if (representation && !this.enclosingNamespace().internal)
-      this.error(expression, `${representation}は、この採点環境では使えません。`);
+    const unavailable = UNAVAILABLE.get(expression.name);
+    if (unavailable && !(unavailable.inLibrary && this.enclosingNamespace().internal))
+      this.error(expression, unavailableMessage(expression.name));
   }
 
   protected compileBuiltin(expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {

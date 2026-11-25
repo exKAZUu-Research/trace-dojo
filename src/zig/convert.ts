@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The file holds one layer of the compiler, whose parts share its private state.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -29,6 +28,8 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { LiteralDecoder, parseFloatText, parseIntegerText, validateCommentText } from './literals';
+// code-gauge-allow-file fileNcss -- The file holds one layer of the compiler, whose parts share its private state.
+import { unavailableMessage } from './unavailable';
 
 /** Converts tree-sitter's tree of a file into the AST, rejecting the syntax this grader does not run. */
 export function convertFile(root: Node, budget = new ExecutionBudget()): SourceFile {
@@ -67,8 +68,8 @@ function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
 }
 
-export function unavailable(node: Node, what: string): never {
-  fail(node, `${what}は、この採点環境では使えません。`);
+export function unavailable(node: Node, key: string): never {
+  fail(node, unavailableMessage(key));
 }
 
 /** The children that stand for expressions: named nodes other than comments, and keyword values such as `null`. */
@@ -147,7 +148,7 @@ function testDeclaration(node: Node): TestDeclaration {
  */
 function rejectExtern(node: Node): void {
   for (const child of node.children) {
-    if (!child.isNamed && child.type === 'extern') unavailable(child, 'extern（外部で定義する関数・変数の宣言）');
+    if (!child.isNamed && child.type === 'extern') unavailable(child, 'syntax:extern');
   }
 }
 
@@ -161,7 +162,7 @@ interface Attributes {
 function attributesOf(node: Node): Attributes {
   const attributes: Attributes = {};
   for (const child of node.namedChildren) {
-    if (child.type === 'link_section') unavailable(child, 'linksection（OS ごとに書き方が異なるセクションの指定）');
+    if (child.type === 'link_section') unavailable(child, 'syntax:linksection');
     else if (child.type === 'byte_alignment') attributes.alignment = onlyChild(child);
     else if (child.type === 'address_space') attributes.addressSpace = onlyChild(child);
     else if (child.type === 'calling_convention') attributes.callingConvention = onlyChild(child);
@@ -213,7 +214,7 @@ function parameters(node: Node, hasCallingConvention: boolean): Parameter[] {
     if (child.type !== 'parameter') continue;
     if (hasToken(child, '...')) {
       // Zig rejects a variadic function unless it uses the C calling convention, for which it takes C's va_list.
-      if (hasCallingConvention) unavailable(child, 'C の可変個の引数（...）');
+      if (hasCallingConvention) unavailable(child, 'syntax:cVarargs');
       result.push({ ...spanOf(child), name: '_', isComptime: false, isNoalias: false, isVarargs: true });
       continue;
     }
@@ -676,8 +677,8 @@ export function expression(node: Node): Expression {
     }
     case 'function_signature': {
       const { callingConvention, alignment, addressSpace } = attributesOf(node);
-      if (alignment) unavailable(node, '関数の型の align');
-      if (addressSpace) unavailable(node, '関数の型の addrspace');
+      if (alignment) unavailable(node, 'syntax:fnTypeAlign');
+      if (addressSpace) unavailable(node, 'syntax:fnTypeAddrspace');
       const { returnType, inferredErrorSet } = returnTypeOf(node);
       if (inferredErrorSet) fail(node, '関数の型の戻り値に、推論されるエラー集合（!T）は書けません。');
       return {
@@ -715,7 +716,7 @@ export function expression(node: Node): Expression {
       return { kind: 'async', ...span };
     }
     case 'asm_expression': {
-      unavailable(node, 'インラインアセンブリ（asm）');
+      unavailable(node, 'syntax:asm');
       break;
     }
     case 'expression_statement': {
