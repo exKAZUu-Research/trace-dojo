@@ -403,7 +403,6 @@ export class Calls {
     return receiver ?? voidType;
   }
 
-  /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
   /**
    * `` tag`a${x}b` ``, a call of `tag` with a `TemplateStringsArray` of the strings and then the substitutions, which
    * `String.raw` turns into text.
