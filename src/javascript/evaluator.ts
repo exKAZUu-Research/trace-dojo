@@ -15,12 +15,14 @@ import type {
 } from './ast';
 import { createAsyncGeneratorObject } from './asyncGenerators';
 import {
+  classMetadata,
   decorateClass,
   decorateMembers,
   evaluateClassDecorators,
   type EvaluatedDecorators,
   type MemberDefinition,
   runInitializers,
+  shareMetadata,
 } from './decorators';
 import { nameFunction, patternNames } from './evaluatorBase';
 import { defineAccessor } from './expressionEvaluator';
@@ -660,14 +662,15 @@ export class Evaluator extends SuspendableStatementEvaluator {
     inferredName: Key | undefined
   ): { cls: JsFunction; initializers: Value[] } {
     const { runtime } = this;
-    // oxlint-disable-next-line unicorn/no-null -- The metadata object of a class without a decorated base has no prototype.
-    const metadata = runtime.newObject(null);
+    const metadata = classMetadata(runtime, fn);
     const added = decorateMembers(runtime, definitions, decorators, metadata);
     if (added.instanceMembers.length > 0) behavior.initializers = added.instanceMembers;
     if (added.staticMembers.length > 0)
       staticInitializers.unshift(() => runInitializers(runtime, added.staticMembers, fn));
     const name = behavior.node.name || (typeof inferredName === 'string' ? inferredName : '');
-    return decorateClass(runtime, fn, name, decorators.classDecorators, metadata);
+    const decorated = decorateClass(runtime, fn, name, decorators.classDecorators, metadata);
+    shareMetadata(decorated.cls, metadata);
+    return decorated;
   }
 
   private initializeStaticMembers(

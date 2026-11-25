@@ -104,6 +104,27 @@ export function decorateClass(
   return { cls: decorated, initializers };
 }
 
+/** The metadata object of each decorated class, which a decorated subclass's metadata inherits from. */
+const metadataOfClass = new WeakMap<JsObject, JsObject>();
+
+/**
+ * The metadata object a class's decorators share, which inherits from that of the nearest decorated superclass, as
+ * `context.metadata` does under the standard.
+ */
+export function classMetadata(runtime: Runtime, cls: JsFunction): JsObject {
+  let parent: JsObject | null = cls.proto;
+  while (parent && !metadataOfClass.has(parent)) parent = parent.proto;
+  // oxlint-disable-next-line unicorn/no-null -- The metadata object of a class without a decorated base has no prototype.
+  const metadata = runtime.newObject(parent ? (metadataOfClass.get(parent) ?? null) : null);
+  metadataOfClass.set(cls, metadata);
+  return metadata;
+}
+
+/** Records the metadata object for the class the class decorators returned, which subclasses of it inherit from. */
+export function shareMetadata(cls: JsFunction, metadata: JsObject): void {
+  metadataOfClass.set(cls, metadata);
+}
+
 /** Runs the functions decorators added, with `thisValue` as `this`. */
 export function runInitializers(runtime: Runtime, initializers: Value[], thisValue: Value): void {
   for (const initializer of initializers) runtime.call(initializer, thisValue, []);
