@@ -9,7 +9,17 @@ import { sizeOf } from '../layout';
 import { MemoryFault } from '../memoryFault';
 import { isArithmeticType } from '../operands';
 import type { Frame } from '../runtime';
-import { copyForStorage, known, newArray, runtime, type SemaApi, type TExpr, undefinedValue } from '../semaBase';
+import {
+  copyForStorage,
+  known,
+  newArray,
+  POINTER_OPERATIONS,
+  pointerShapeOf,
+  runtime,
+  type SemaApi,
+  type TExpr,
+  undefinedValue,
+} from '../semaBase';
 import { singleValueOf } from '../singleValue';
 import {
   arrayOf,
@@ -559,10 +569,12 @@ type SentinelSpanKind = 'span' | 'len' | 'sliceTo';
  * Whether `std.mem` takes the pointer: `span` and `len` take a many-item pointer with a sentinel or a C pointer, and
  * only `span` sees through an optional; `sliceTo` also takes a slice or a pointer to an array.
  */
-function acceptsOperand(kind: SentinelSpanKind, { type, optional, array, sentinel }: PointerOperand): boolean {
-  if (kind === 'sliceTo') return type.size !== 'one' || array !== undefined;
+function acceptsOperand(kind: SentinelSpanKind, { type, optional, sentinel }: PointerOperand): boolean {
+  const shape = pointerShapeOf(type);
+  if (kind === 'sliceTo') return shape !== 'one';
   if (kind === 'len' && optional) return false;
-  return type.size === 'c' || (type.size === 'many' && sentinel !== undefined);
+  const { span } = POINTER_OPERATIONS[shape];
+  return span === 'always' || (span === 'sentinel' && sentinel !== undefined);
 }
 
 /** The sentinel of the slice that `std.mem.span` or `sliceTo(…, end)` returns, which only an end it can rely on gets. */

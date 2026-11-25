@@ -53,6 +53,8 @@ import {
   newArray,
   nullUnwrapPanic,
   type Place,
+  POINTER_OPERATIONS,
+  pointerShapeOf,
   runtime,
   type Scope,
   SemaBase,
@@ -491,7 +493,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
-        if (name === 'ptr') {
+        if (name === 'ptr' && POINTER_OPERATIONS[pointerShapeOf(type)].ptr) {
           const array = type.child;
           const many = pointerOf('many', array.child, {
             isConst: type.isConst,
@@ -542,7 +544,7 @@ export abstract class ExpressionCompiler extends SemaBase {
             };
             return runtime(USIZE, (frame) => (evaluate(frame) as Slice).lengthValue, expression, lengthPlace);
           }
-          if (name === 'ptr') {
+          if (name === 'ptr' && POINTER_OPERATIONS[pointerShapeOf(type)].ptr) {
             this.checkMemoryHeader(base, expression);
             const many = pointerOf('many', type.child, {
               isConst: type.isConst,
@@ -904,7 +906,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const operand = location ? this.compileLocation(expression.operand) : this.compile(expression.operand);
     const type = operand.type;
     // `.?` checks a C pointer for null and keeps its type, though Zig refuses it where the result is a place.
-    if (type.kind === 'pointer' && type.size === 'c' && !location)
+    if (type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unwrap && !location)
       return this.derived(operand, type, (value) => (value === NULL ? nullUnwrapPanic() : value));
     if (type.kind !== 'optional')
       return this.error(expression, `${typeName(type)} 型は optional ではないので、.? は使えません。`);
@@ -1127,7 +1129,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let isConst: boolean;
     let staticLen: bigint | undefined;
     let sourceSentinel: Sentinel | undefined;
-    const many = type.kind === 'pointer' && (type.size === 'many' || type.size === 'c');
+    const many = type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(type)].unbounded;
     if (type.kind === 'pointer' && many) {
       child = type.child;
       isConst = type.isConst;
@@ -1630,7 +1632,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     // Zig gives the operands of arithmetic no result type, so `@floatFromInt(x) / 2` is an error.
     void resultType;
     let left = this.compile(expression.left);
-    if (left.type.kind === 'pointer' && (left.type.size === 'many' || left.type.size === 'c'))
+    if (left.type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(left.type)].unbounded)
       return this.pointerArithmetic(left, expression);
     let right = this.compile(expression.right, isVectorType(left.type) ? left.type : undefined);
     if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);

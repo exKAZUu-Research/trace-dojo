@@ -2100,7 +2100,7 @@ interface PointerCoercion {
 }
 
 /** The source's shape that Zig's pointer coercions tell apart: a pointer to an array, and a slice with a sentinel. */
-type PointerShape = 'one' | 'array' | 'many' | 'slice' | 'sentinelSlice' | 'c';
+export type PointerShape = 'one' | 'array' | 'many' | 'slice' | 'sentinelSlice' | 'c';
 
 const SAME_SIZE: PointerCoercion = { element: 'child', sentinel: 'target', convert: 'retype' };
 
@@ -2127,11 +2127,28 @@ const POINTER_COERCIONS: Partial<Record<`${PointerShape} ${PointerType['size']}`
 function pointerCoercionOf(from: PointerType, to: PointerType): PointerCoercion | undefined {
   // `*[N]T` converts by its elements, except to `[*c][N]T`, which takes it as the single-item pointer it is.
   const wholeArray = to.size === 'c' && pointerChildCoercible(from.child, to.child, to.isConst);
-  const shape: PointerShape =
-    from.size === 'one' && from.child.kind === 'array' && !wholeArray
-      ? 'array'
-      : from.size === 'slice' && from.sentinel !== undefined
-        ? 'sentinelSlice'
-        : from.size;
-  return POINTER_COERCIONS[`${shape} ${to.size}`];
+  return POINTER_COERCIONS[`${pointerShapeOf(from, wholeArray)} ${to.size}`];
 }
+
+/** The shape of a pointer type that Zig's pointer rules tell apart, a pointer to an array taken whole if asked. */
+export function pointerShapeOf(type: PointerType, wholeArray = false): PointerShape {
+  if (type.size === 'one' && type.child.kind === 'array' && !wholeArray) return 'array';
+  if (type.size === 'slice' && type.sentinel !== undefined) return 'sentinelSlice';
+  return type.size;
+}
+
+/**
+ * What each pointer shape allows besides coercion: `.ptr` to a many-item pointer, `.?` on a C pointer, `p + n` and an
+ * open-ended slice `p[n..]` on an unbounded pointer, and `std.mem.span` and `len`, which need a sentinel or C's 0.
+ */
+export const POINTER_OPERATIONS: Record<
+  PointerShape,
+  { ptr: boolean; unwrap: boolean; unbounded: boolean; span: 'never' | 'sentinel' | 'always' }
+> = {
+  one: { ptr: false, unwrap: false, unbounded: false, span: 'never' },
+  array: { ptr: true, unwrap: false, unbounded: false, span: 'never' },
+  many: { ptr: false, unwrap: false, unbounded: true, span: 'sentinel' },
+  slice: { ptr: true, unwrap: false, unbounded: false, span: 'never' },
+  sentinelSlice: { ptr: true, unwrap: false, unbounded: false, span: 'never' },
+  c: { ptr: false, unwrap: true, unbounded: true, span: 'always' },
+};
