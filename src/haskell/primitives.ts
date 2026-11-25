@@ -811,6 +811,9 @@ define(
 define('divZeroError', 0, [], () => {
   throw divideByZero();
 });
+define('overflowError', 0, [], () => {
+  throw new HaskellException('arithmetic overflow', { kind: 'arith' });
+});
 define('ioUnit', 0, [], () => new IOReturn(unit()));
 define(
   'failIO',

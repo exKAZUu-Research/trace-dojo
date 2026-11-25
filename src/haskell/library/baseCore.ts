@@ -427,6 +427,9 @@ gcd x y = gcd' (abs x) (abs y)
 divZeroError :: a
 divZeroError = primitive "divZeroError"
 
+overflowError :: a
+overflowError = primitive "overflowError"
+
 lcm :: Integral a => a -> a -> a
 lcm x y = if y == fromInteger 0 || x == fromInteger 0 then fromInteger 0 else abs ((x ${BT}quot${BT} (gcd x y)) * y)
 

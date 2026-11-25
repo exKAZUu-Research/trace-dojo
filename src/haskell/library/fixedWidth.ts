@@ -74,9 +74,9 @@ instance Enum ${name} where
   enumFromThenTo (${con} a) (${con} b) (${con} c) = map ${con} (enumFromThenTo a b c)
 
 instance Integral ${name} where
-  quot (${con} a) (${con} b) = ${wrap} (quot a b)
+  quot (${con} a) (${con} b) = if b == (-1) && a == (${lo}) then overflowError else ${wrap} (quot a b)
   rem (${con} a) (${con} b) = ${wrap} (rem a b)
-  div (${con} a) (${con} b) = ${wrap} (div a b)
+  div (${con} a) (${con} b) = if b == (-1) && a == (${lo}) then overflowError else ${wrap} (div a b)
   mod (${con} a) (${con} b) = ${wrap} (mod a b)
   quotRem x y = (quot x y, rem x y)
   divMod x y = (div x y, mod x y)
