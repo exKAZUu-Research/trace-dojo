@@ -352,6 +352,8 @@ class _LineSplitterSink implements EventSink<String> {
   bool _skipLineFeed = false;
   _LineSplitterSink(this._sink);
   void add(String chunk) {
+    // An empty chunk leaves the state as it is, as the SDK's sink skips it.
+    if (chunk.isEmpty) return;
     var text = _carry + chunk;
     if (_skipLineFeed && text.isNotEmpty && text.codeUnitAt(0) == 10) text = text.substring(1);
     var end = text.length;
