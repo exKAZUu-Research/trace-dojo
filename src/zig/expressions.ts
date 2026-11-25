@@ -2307,7 +2307,6 @@ function hasSentinel(type: Type): boolean {
   return false;
 }
 
-/** Whether a value of a type passes as it does in C, as `callconv(.c)` requires of parameters and results. */
 /** A many-item or C pointer's value, which must not be null. */
 function manyPointer(value: Value): Pointer {
   if (!(value instanceof Pointer)) throw new MemoryFault();
