@@ -68,15 +68,6 @@ strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
 
 export const unit = (): Value => nullary(UNIT_CON);
 
-/**
- * Checks that a handle is still open before output goes to it, which the handle table of ioPrimitives.ts, the owner of
- * handles, provides: stdout for putStr and putStrLn, any handle for hFlush.
- */
-export const outputHandles: {
-  checkStdout: (runtime: Runtime, location: string) => void;
-  checkHandle: (handle: Slot, runtime: Runtime, location: string) => void;
-} = { checkStdout: () => {}, checkHandle: () => {} };
-
 export function tuple(...items: Slot[]): Value {
   return new ConValue(tupleCon(items.length), items);
 }
@@ -727,8 +718,10 @@ define('ioReturn', 1, [], ([a]) => new IOReturn(a));
 define('ioBind', 2, [], ([m, k]) => new IOBind(m, k));
 define('ioThen', 2, [], ([m, n]) => new IOThen(m, n));
 
-/** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
-/** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
+/**
+ * Writes a string to a sink as it is evaluated, so that what precedes an error in it is still written, and that error,
+ * not one the sink raises for the rest, is what escapes.
+ */
 export function writeString(slot: Slot, runtime: Runtime, write: (chunk: string) => void): void {
   let buffer = '';
   try {
@@ -738,62 +731,24 @@ export function writeString(slot: Slot, runtime: Runtime, write: (chunk: string)
       const codePoint = character.codePointAt(0)!;
       buffer += codePoint >= 0xd8_00 && codePoint <= 0xdf_ff ? '?' : character;
       if (buffer.length >= 256) {
-        write(buffer);
+        const chunk = buffer;
         buffer = '';
+        write(chunk);
       }
       current = runtime.machine.force(current.fields[1]) as ConValue;
       runtime.spend();
     }
-  } finally {
-    write(buffer);
+  } catch (error) {
+    try {
+      write(buffer);
+    } catch {
+      // The string's own failure came first, so it is the one the program sees.
+    }
+    throw error;
   }
+  write(buffer);
 }
 
-define(
-  'putStr',
-  1,
-  [],
-  ([text], runtime) =>
-    new IOPrim(
-      'putStr',
-      () => {
-        outputHandles.checkStdout(runtime, 'hPutStr');
-        writeString(text, runtime, (chunk) => runtime.io.stdout.write(chunk));
-        return unit();
-      },
-      [text]
-    )
-);
-define(
-  'putStrLn',
-  1,
-  [],
-  ([text], runtime) =>
-    new IOPrim(
-      'putStrLn',
-      () => {
-        outputHandles.checkStdout(runtime, 'hPutStr');
-        writeString(text, runtime, (chunk) => runtime.io.stdout.write(chunk));
-        runtime.io.stdout.write('\n');
-        return unit();
-      },
-      [text]
-    )
-);
-define(
-  'hFlush',
-  1,
-  [],
-  ([handle], runtime) =>
-    new IOPrim(
-      'hFlush',
-      () => {
-        outputHandles.checkHandle(handle, runtime, 'hFlush');
-        return unit();
-      },
-      [handle]
-    )
-);
 define('divZeroError', 0, [], () => {
   throw divideByZero();
 });

@@ -231,8 +231,13 @@ export class FileHandle {
   }
 
   write(text: string): void {
-    this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
+    this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */
+  writeAt(position: number, text: string): void {
+    this.files.writeAt(this.node, position, text);
   }
 }
 
