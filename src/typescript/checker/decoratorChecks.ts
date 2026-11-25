@@ -166,10 +166,16 @@ function checkDecorator(c: Checker, decorator: TreeNode, kind: DecoratedKind, ar
   if (!expression) return;
   const type = c.expressions.check(expression);
   if (isAnyLike(type)) return;
-  const fitting = c
-    .signaturesOf(type, 'call')
-    .map((signature) => fit(c, signature, args))
-    .find(Boolean);
+  const signatures = c.signaturesOf(type, 'call');
+  // A decorator factory such as `() => (value, context) => {}` written without its call takes no parameter.
+  if (signatures.length > 0 && signatures.every((signature) => signature.parameters.length === 0)) {
+    c.error(
+      expression,
+      `'${expression.text}' は受け入れる引数が少なすぎるので、ここでデコレーターとして使用することができません。最初にこれを呼び出してから、'@${expression.text}()' を書き込むつもりでしたか?`
+    );
+    return;
+  }
+  const fitting = signatures.map((signature) => fit(c, signature, args)).find(Boolean);
   if (!fitting) {
     c.error(expression, failureMessages[kind]);
     return;
