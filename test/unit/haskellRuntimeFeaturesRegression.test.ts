@@ -62,6 +62,37 @@ test('a Template Haskell splice runs while the program compiles', () => {
 });
 
 test.each([
+  [
+    'a pattern quote binds its variables for the right side',
+    'foo :: (Char, String) -> String\nfoo $([p| (x, z) |]) = x : z\nmain = putStrLn (foo (\'a\', "bc"))',
+    'abc\n',
+  ],
+  [
+    'operators a declaration quote declares nest by its fixities',
+    '$([d| infixl 6 <+>; a <+> b = a - b; infixl 7 <**>; a <**> b = a * b; e = 10 <+> 2 <**> 3 |])\nmain = print e',
+    '4\n',
+  ],
+  [
+    'a view pattern sees the variable around the quote that its pattern shadows',
+    'f :: Int -> Int\nf = $(let x = (10 :: Int) in [| \\(subtract x -> x) -> x |])\nmain = print (f 15)',
+    '5\n',
+  ],
+  [
+    "a quoted data type's context stays",
+    'main = runQ [d| newtype Eq a => X a = X a |] >>= print',
+    '[NewtypeD [AppT (ConT GHC.Internal.Classes.Eq) (VarT a_2)] X_0 [PlainTV a_2 BndrReq] Nothing (NormalC X_1 [(Bang NoSourceUnpackedness NoSourceStrictness,VarT a_2)]) []]\n',
+  ],
+  [
+    "a splice's quote names the module's own definitions with their fixities",
+    'data T = MkT Int deriving Show\ninfixr 0 |>\n(|>) :: Int -> Int -> Int\na |> b = a - b\nmain = print $(do { e <- [| MkT (10 |> 3 |> 1) |]; runIO (print e); pure e })',
+    'AppE (ConE Main.MkT) (InfixE (Just (LitE (IntegerL 10))) (VarE Main.|>) (Just (InfixE (Just (LitE (IntegerL 3))) (VarE Main.|>) (Just (LitE (IntegerL 1))))))\nMkT 8\n',
+  ],
+])('Template Haskell: %s', (_name, body, stdout) => {
+  const source = `{-# LANGUAGE TemplateHaskell, ViewPatterns, DatatypeContexts #-}\nimport Language.Haskell.TH\n${body}`;
+  expect(run(source)).toMatchObject({ stdout });
+});
+
+test.each([
   ['the network', 'import Network.Socket\nmain = print 1'],
   ['threads', 'import Control.Concurrent\nmain = forkIO (print 1) >> print 2'],
   [

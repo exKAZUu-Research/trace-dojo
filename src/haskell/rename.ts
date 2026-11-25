@@ -40,6 +40,7 @@ import { NEWTYPE_STRICT_FIELDS } from './newtypes';
 import type {
   Binder,
   LocalVar,
+  QRef,
   RAlt,
   RBinder,
   RBindGroup,
@@ -82,6 +83,9 @@ import type {
   TypeExpr,
 } from './syntax';
 import { THIS_MODULE } from './syntax';
+import { globalNameCode, QuoteBuilder, thString } from './thQuote';
+import { type QuoteGlobals, type QuoteNamespace, QuoteRenamer } from './thRename';
+import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
 import { STAR } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -212,6 +216,12 @@ export interface RenameOptions {
 
   /** A library value that code the renamer generates refers to, such as `negate` for `-x`. */
   support?: (name: string) => ValueEntity;
+
+  /**
+   * For the program that runs a splice of a module, the names the module's own declarations define, which the
+   * program's quotes refer to as the module's: the program has none of those declarations.
+   */
+  spliceModule?: SpliceModuleNames;
 }
 
 class Candidates<T> {
@@ -1384,10 +1394,11 @@ class Renamer {
       case 'hole': {
         return { k: 'hole', name: expr.name, span };
       }
-      case 'thVar':
-      case 'thName':
-      case 'thChain': {
-        return this.renameExpr(this.templateHaskellCode(expr, scope), scope);
+      case 'thName': {
+        return this.renameExpr(this.thNameCode(expr, scope), scope);
+      }
+      case 'quote': {
+        return this.renameExpr(this.quoteCode(expr, scope), scope);
       }
       case 'thSplice': {
         throw compileError(span, 'Template Haskell のスプライスを、ここには書けません。');
@@ -2235,107 +2246,106 @@ class Renamer {
     }
   }
 
-  /** The code a quote builds for what needs the program's scope: names, and operator chains by their fixities. */
-  private templateHaskellCode(expr: Extract<Expr, { kind: 'thVar' | 'thName' | 'thChain' }>, scope: LocalScope): Expr {
-    if (expr.kind === 'thVar') return this.thVarCode(expr, scope);
-    if (expr.kind === 'thName') return this.thNameCode(expr, scope);
-    return this.thChainCode(expr, scope);
-  }
-
-  /** A variable or constructor of a quote: a global one's tree, a local one's lifted value, or an unbound name. */
-  private thVarCode(expr: Extract<Expr, { kind: 'thVar' }>, scope: LocalScope): Expr {
+  /**
+   * The code a quote builds: its body renamed in the quote's scope, then built into calls of the library's functions
+   * that build its tree. A typed quote also has its expression, which only gives the quote its type.
+   */
+  private quoteCode(expr: Extract<Expr, { kind: 'quote' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    if (expr.constructor) {
-      // A constructor nothing defines here (one of the module a splice is in, in the program that runs the splice)
-      // stays an unbound name for the code it is spliced into to bind, as GHC does.
-      if (!this.valuesNamed(expr.name).some((entity) => entity.sort === 'con')) {
-        return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
-      }
-      const con = this.lookupCon(expr.name);
-      return thCall(span, 'quoteGlobalCon', thString(span, this.thModule('con', con)), thString(span, con.name));
-    }
-    if (expr.implicit) {
-      const entity = this.supportValue(expr.name.name, span);
-      return thCall(span, 'quoteGlobalVar', thString(span, this.thModule('v', entity)), thString(span, entity.name));
-    }
-    // A name nothing binds stays unbound in the tree, for the code it is spliced into to bind, as GHC does.
-    if (!(!expr.name.qualifier && scope.lookup(expr.name.name)) && this.valuesNamed(expr.name).length === 0) {
-      return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
-    }
-    const ref = this.resolveVar(expr.name, scope);
-    // A variable of the program outside the quote is lifted: the tree of its value.
-    if (ref.kind === 'local') return thCall(span, 'lift', { kind: 'var', name: expr.name, span });
-    return thCall(
-      span,
-      'quoteGlobalVar',
-      thString(span, this.thModule('v', ref.entity)),
-      thString(span, ref.entity.name)
-    );
+    const globals: QuoteGlobals = {
+      lookup: (namespace, name, required) => this.quoteGlobal(namespace, name, required),
+      fixity: (op) => this.quoteFixity(op),
+      support: (name, at) => {
+        const entity = this.supportValue(name, at);
+        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
+      },
+      newLocal,
+    };
+    const built = new QuoteBuilder(span).build(new QuoteRenamer(globals).quote(expr.body, scope));
+    if (!expr.typed || expr.body.kind !== 'exp') return built;
+    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr.body.expr, span };
+    return thCall(span, 'typedQuote', typer, built);
   }
 
   /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
   private thNameCode(expr: Extract<Expr, { kind: 'thName' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    const global = (make: string, module: string, name: string): Expr =>
-      thCall(span, make, thString(span, thPackage(module)), thString(span, module), thString(span, name));
-    if (expr.namespace === 'type') {
-      // The types of special syntax have names of their own in GHC.
-      const special = expr.name.qualifier ? undefined : specialTypeName(expr.name.name);
-      if (special) return global('mkNameG_tc', special[0], special[1]);
-      // A type of the module the splice is in stays a name for the module to bind, as a constructor does.
-      if (this.runsSplice() && !this.typeExists(expr.name))
-        return thCall(span, 'mkName', thString(span, expr.name.name));
-      const like = this.lookupType(expr.name);
-      return global('mkNameG_tc', this.thModule('t', like.entity), like.entity.name);
-    }
-    if (expr.namespace === 'con') {
-      if (this.runsSplice() && !this.valuesNamed(expr.name).some((entity) => entity.sort === 'con')) {
-        return thCall(span, 'mkName', thString(span, expr.name.name));
-      }
-      const con = this.lookupCon(expr.name);
-      return global('mkNameG_d', this.thModule('con', con), con.name);
-    }
-    if (!expr.name.qualifier && scope.lookup(expr.name.name)) {
+    if (expr.namespace === 'var' && !expr.name.qualifier && scope.lookup(expr.name.name)) {
       return thCall(span, 'mkNameS', thString(span, expr.name.name));
     }
-    // A value of the module the splice is in, such as a record field, stays a name for the module to bind.
-    if (this.runsSplice() && this.valuesNamed(expr.name).length === 0) {
-      return thCall(span, 'mkName', thString(span, expr.name.name));
-    }
-    const entity = this.lookupValue(expr.name, false);
-    if (entity.con) return global('mkNameG_d', this.thModule('con', entity.con), entity.name);
-    return global('mkNameG_v', this.thModule('v', entity), entity.name);
-  }
-
-  /** An operator chain of a quote, whose fixities decide how its `InfixE` or `InfixP` trees nest. */
-  private thChainCode(expr: Extract<Expr, { kind: 'thChain' }>, scope: LocalScope): Expr {
-    const { span } = expr;
-    const resolved = resolveExprChain(expr.items, span, (op) =>
-      !op.qualifier && expr.local.has(op.name) ? DEFAULT_FIXITY : this.fixityOf(op, scope)
-    );
-    const operatorOf = (op: Operator): Expr => {
-      const found =
-        expr.operators.get(op) ??
-        [...expr.operators].find(([key]) => key.name === op.name && key.span.col === op.span.col)?.[1];
-      if (!found) throw compileError(op.span, '書き方に誤りがあります。');
-      return found;
-    };
-    const build = (node: Expr): Expr => {
-      if (node.kind === 'neg') return thCall(span, 'appE', expr.negate, build(node.expr));
-      if (node.kind !== 'binop') return node;
-      const [left, right] = [build(node.left), build(node.right)];
-      if (expr.pattern) return thCall(span, 'infixP', left, operatorOf(node.op), right);
-      return thCall(span, 'infixE', thCall(span, 'Just', left), operatorOf(node.op), thCall(span, 'Just', right));
-    };
-    return build(resolved);
+    // The types of special syntax have names of their own in GHC.
+    const special = expr.namespace === 'type' && !expr.name.qualifier ? specialTypeName(expr.name.name) : undefined;
+    if (special) return globalNameCode(span, 'tc', special[0], special[1]);
+    const ref = this.quoteGlobal(expr.namespace === 'var' ? 'value' : expr.namespace, expr.name, true);
+    if (ref.k === 'global') return globalNameCode(span, ref.space, ref.module, ref.name);
+    return thCall(span, 'mkName', thString(span, expr.name.name));
   }
 
   /**
-   * Whether this module is the program that runs a splice, which lacks the declarations of the module the splice is
-   * in: a name of those it quotes stays a name for that module to bind.
+   * The global name a quote refers to: one of the module whose splice this program runs, as its table of names has
+   * it, or one of the program's scope; otherwise an unbound name, which the code its tree is spliced into binds. A
+   * `required` name must be in scope, except in the program that runs a splice, whose module's own declarations
+   * (such as those other splices give) this program lacks, as GHC's stage restriction has it.
    */
-  private runsSplice(): boolean {
-    return this.module.imports.some((item) => item.module === 'Language.Haskell.TH.Runner');
+  private quoteGlobal(namespace: QuoteNamespace, name: QName, required: boolean): QRef {
+    const outer = this.options.spliceModule;
+    const outerSpace = outer && !name.qualifier ? spliceModuleSpace(outer, namespace, name.name) : undefined;
+    if (outer && outerSpace) return { k: 'global', space: outerSpace, module: outer.module, name: name.name };
+    const found = this.programGlobal(namespace, name);
+    if (found) return found;
+    if (required && !outer) {
+      // The lookup reports what the scope lacks.
+      if (namespace === 'con') this.lookupCon(name);
+      else if (namespace === 'type') this.lookupType(name);
+      else this.lookupValue(name, namespace === 'var');
+    }
+    return { k: 'unbound', name: name.name };
+  }
+
+  private programGlobal(namespace: QuoteNamespace, name: QName): QRef | undefined {
+    switch (namespace) {
+      case 'var': {
+        if (!this.valuesNamed(name).some((entity) => entity.sort !== 'con')) return undefined;
+        const entity = this.lookupValue(name, true);
+        if (entity.unsupported) throw unsupportedError(name.span, entity.unsupported);
+        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
+      }
+      case 'value': {
+        if (this.valuesNamed(name).length === 0) return undefined;
+        const entity = this.lookupValue(name, false);
+        if (entity.con) return { k: 'global', space: 'd', module: this.thModule('con', entity.con), name: entity.name };
+        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
+      }
+      case 'con': {
+        if (!this.conExists(name)) return undefined;
+        const con = this.lookupCon(name);
+        return { k: 'global', space: 'd', module: this.thModule('con', con), name: con.name };
+      }
+      case 'type': {
+        if (!this.typeExists(name)) return undefined;
+        const like = this.lookupType(name);
+        return { k: 'global', space: 'tc', module: this.thModule('t', like.entity), name: like.entity.name };
+      }
+    }
+  }
+
+  private conExists(name: QName): boolean {
+    if (!name.qualifier && (['()', '[]', ':'].includes(name.name) || /^\((,+)\)$/.test(name.name))) return true;
+    return this.valuesNamed(name).some((entity) => entity.sort === 'con');
+  }
+
+  /** The fixity of a global operator a quote applies, which an operator nothing defines lacks. */
+  private quoteFixity(op: Operator): Fixity {
+    const outer = this.options.spliceModule;
+    if (outer && !op.qualifier && (op.isConstructor ? outer.constructors : outer.values).has(op.name)) {
+      return outer.fixities.get(op.name) ?? DEFAULT_FIXITY;
+    }
+    if (op.isConstructor) {
+      if (!op.qualifier && this.patternSynonyms.has(op.name)) return DEFAULT_FIXITY;
+      return this.conExists(op) ? (this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY) : DEFAULT_FIXITY;
+    }
+    if (!this.valuesNamed(op).some((entity) => entity.sort !== 'con')) return DEFAULT_FIXITY;
+    return this.lookupValue(op, true).fixity ?? DEFAULT_FIXITY;
   }
 
   /** The module GHC defines a name in, which Template Haskell shows it with. */
@@ -3457,8 +3467,15 @@ function thNameModules(): Map<string, string> {
   return nameModules;
 }
 
-function thPackage(module: string): string {
-  return module.startsWith('GHC.') ? 'ghc-internal' : 'main';
+/** The space of the global name a module's table of names gives a name of a namespace, if the table has it. */
+function spliceModuleSpace(
+  names: SpliceModuleNames,
+  namespace: QuoteNamespace,
+  name: string
+): 'v' | 'd' | 'tc' | undefined {
+  if (namespace === 'type') return names.types.has(name) ? 'tc' : undefined;
+  if (namespace !== 'con' && names.values.has(name)) return 'v';
+  return namespace !== 'var' && names.constructors.has(name) ? 'd' : undefined;
 }
 
 /** GHC's names of the types of special syntax: lists, unit, tuples, and functions. */
@@ -3479,10 +3496,6 @@ function unboxedConstructor(name: string): ConInfo | undefined {
   const sum = /^\(#(\|*)_(\|*)#\)$/.exec(name);
   if (sum) return unboxedSumType(sum[1].length + sum[2].length + 1).cons[sum[1].length];
   return undefined;
-}
-
-function thString(span: Span, text: string): Expr {
-  return { kind: 'lit', lit: { kind: 'string', value: [...text] }, span };
 }
 
 /** A call of a library value the compiler chooses, which code a quote builds refers to. */

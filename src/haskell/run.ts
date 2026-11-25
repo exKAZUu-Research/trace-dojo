@@ -14,12 +14,12 @@ import { HaskellException, type Slot, type Value } from './values';
 // A splice runs as a program of its own while the program that has it compiles, on what is left of the compilation's
 // budget: it stores its tree, which the compiler grafts in its place, and what it prints is the compiler's output, as
 // runIO's is in GHC. An error it reports with reportError fails it, as does an exit or an end without a stored tree.
-setSpliceRunner((program, span, names) => {
+setSpliceRunner((program, span, names, module) => {
   const budget = new ExecutionBudget(LIMITS.maxMilliseconds, remainingCompilationWork());
   const runtime = new Runtime(undefined, budget);
   let run: ProgramRun;
   try {
-    run = runProgram(runtime, compileProgram(program));
+    run = runProgram(runtime, compileProgram(program, { spliceModule: module }));
   } finally {
     chargeTypeWork(budget.spent);
   }

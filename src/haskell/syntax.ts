@@ -93,26 +93,21 @@ export type Expr =
   | { kind: 'support'; name: string; span: Span }
   /** A typed hole, `_` or an unbound name starting with `_`, which GHC reports with its type. */
   | { kind: 'hole'; name: string; span: Span }
-  /**
-   * In code a Template Haskell quote builds, a variable or constructor the quote does not bind: a global one's tree,
-   * with the name GHC gives it, or a local one's value lifted into a tree.
-   */
-  | { kind: 'thVar'; name: QName; constructor: boolean; span: Span; implicit?: boolean }
-  /** A global name as a Template Haskell `Name`, as `'f`, `''T`, and a quote's constructors and fields give. */
+  /** A quoted name, `'f` or `''T`, as Template Haskell's `Name` of what it names. */
   | { kind: 'thName'; name: QName; namespace: 'var' | 'con' | 'type'; span: Span }
-  /** In code a quote builds, an operator chain, whose fixities decide how its `InfixE` or `InfixP` trees nest. */
-  | {
-      kind: 'thChain';
-      items: ChainItem<Expr>[];
-      operators: Map<Operator, Expr>;
-      /** The operators the quote's own declarations bind, which have the default fixity. */
-      local: ReadonlySet<string>;
-      pattern: boolean;
-      negate: Expr;
-      span: Span;
-    }
+  /**
+   * A Template Haskell quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]` (`typed`), whose body
+   * the renamer renames in the quote's scope before it becomes code that builds the body's tree.
+   */
+  | { kind: 'quote'; body: QuoteBody; typed?: boolean; span: Span }
   /** A splice inside a quote, `$(e)`, whose expression builds that part of the tree. */
   | { kind: 'thSplice'; expr: Expr; span: Span };
+
+export type QuoteBody =
+  | { kind: 'exp'; expr: Expr }
+  | { kind: 'pat'; pat: Pat }
+  | { kind: 'type'; type: TypeExpr }
+  | { kind: 'decs'; decls: Decl[] };
 
 export interface FieldBind {
   field: QName;

@@ -1,6 +1,6 @@
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
-import type { CompileError } from '../interpreter/diagnostics';
+import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import { unboxedSumConName, unboxedTupleName } from './builtinTypes';
 import { compileError as syntaxError, unsupportedError } from './errors';
@@ -30,6 +30,7 @@ import type {
   OverlapMode,
   Pat,
   QName,
+  QuoteBody,
   Rhs,
   Role,
   SigType,
@@ -41,7 +42,6 @@ import type {
   TyVarBinder,
 } from './syntax';
 import type { SpliceSyntax } from './thDecode';
-import { QuoteBuilder } from './thQuote';
 
 /** What each node type this environment does not support stands for, in the message that rejects it. */
 export const UNSUPPORTED_NODES: Record<string, string> = {
@@ -436,6 +436,25 @@ function convertOperator(node: Node): Operator {
 
 // ---------------------------------------------------------------------------------------------------------------
 // Declarations
+
+/**
+ * A module's top-level declarations other than its declaration splices, converted before the splices run; one that
+ * does not convert without what the splices give is left out, for the module's conversion to report.
+ */
+export function convertDeclarationsBeforeSplices(root: Node, extensions: Extensions): Decl[] {
+  const gates = extensions.gates('convert');
+  const features: ConvertContext = { allows: (feature) => gates.allows(feature), grafts: new Map() };
+  const declarationsNode = field(root, 'declarations');
+  return (declarationsNode ? namedChildren(declarationsNode) : []).flatMap((node) => {
+    if (node.type === 'top_splice') return [];
+    try {
+      return convertTopDecl(features, node);
+    } catch (error) {
+      if (error instanceof CompileError) return [];
+      throw error;
+    }
+  });
+}
 
 function convertTopDecl(features: ConvertContext, node: Node): Decl[] {
   // Pragmas among declarations only guide the compiler, which checkPragmas has checked.
@@ -2257,36 +2276,28 @@ function requireTemplateHaskell(features: ConvertContext, span: Span, quotes = f
   }
 }
 
-/** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`, into code building its tree. */
+/** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`. */
 function convertQuote(features: ConvertContext, node: Node, span: Span): Expr {
   requireTemplateHaskell(features, span, true);
-  const builder = new QuoteBuilder(span);
   const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
   if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-  switch (inner.type) {
-    case 'quoted_pattern': {
-      return builder.pattern(convertPattern(features, namedChildren(inner)[0]));
+  const body = (): QuoteBody => {
+    switch (inner.type) {
+      case 'quoted_pattern': {
+        return { kind: 'pat', pat: convertPattern(features, namedChildren(inner)[0]) };
+      }
+      case 'quoted_type': {
+        return { kind: 'type', type: convertType(features, namedChildren(inner)[0]) };
+      }
+      case 'quoted_decls': {
+        return { kind: 'decs', decls: fields(inner, 'declaration').flatMap((node) => convertTopDecl(features, node)) };
+      }
+      default: {
+        return { kind: 'exp', expr: convertExpr(features, namedChildren(inner)[0]) };
+      }
     }
-    case 'quoted_type': {
-      return builder.type(convertType(features, namedChildren(inner)[0]));
-    }
-    case 'quoted_decls': {
-      return builder.declarations(fields(inner, 'declaration').flatMap((node) => convertTopDecl(features, node)));
-    }
-    default: {
-      const expr = convertExpr(features, namedChildren(inner)[0]);
-      const built = builder.expression(expr);
-      if (node.type !== 'typed_quote') return built;
-      // The typed quote's function only gives the type of its expression, which it never runs.
-      const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr, span };
-      return {
-        kind: 'app',
-        fn: { kind: 'app', fn: { kind: 'support', name: 'typedQuote', span }, arg: typer, span },
-        arg: built,
-        span,
-      };
-    }
-  }
+  };
+  return { kind: 'quote', body: body(), typed: node.type === 'typed_quote', span };
 }
 
 function requireRecordDot(features: ConvertContext, span: Span): void {

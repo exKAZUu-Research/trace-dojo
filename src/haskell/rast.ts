@@ -1,5 +1,5 @@
 import type { ClassEntity, ConInfo, DictParam, Evidence, FieldInfo, Fixity, TypeEntity, ValueEntity } from './entities';
-import type { Literal, Pat, Span } from './syntax';
+import type { Expr, Literal, Pat, Span } from './syntax';
 import type { Scheme, Type } from './types';
 
 export interface LocalVar {
@@ -324,3 +324,146 @@ export function isConstraintType(type: RType): boolean {
   while (head.k === 'app') head = head.fn;
   return head.k === 'class' || (head.k === 'con' && CONSTRAINT_SYNONYMS.has(head.entity));
 }
+
+/**
+ * A name in a renamed Template Haskell quote: a binder of the quote, a variable of the code around it (whose value
+ * the tree holds lifted), a global name with the module GHC defines it in, or a name nothing binds, which the code
+ * the tree is spliced into binds.
+ */
+export type QRef =
+  | { k: 'bound'; local: LocalVar }
+  | { k: 'outer'; name: string }
+  | { k: 'global'; space: 'v' | 'd' | 'tc'; module: string; name: string }
+  | { k: 'unbound'; name: string };
+
+/** A renamed quoted expression, which keeps the structure the quote wrote. */
+export type QExpr =
+  | { k: 'var' | 'con'; ref: QRef }
+  | { k: 'lit'; lit: Literal }
+  | { k: 'app'; fn: QExpr; arg: QExpr }
+  /** An operator application or section, `InfixE`, nested by the operators' fixities. */
+  | { k: 'infix'; left?: QExpr; op: QExpr; right?: QExpr }
+  | { k: 'lambda'; pats: QPat[]; body: QExpr }
+  | { k: 'lamCase'; alts: QMatch[] }
+  | { k: 'tupleSection'; elems: (QExpr | undefined)[] }
+  | { k: 'let'; decls: QDecls; body: QExpr }
+  | { k: 'if'; cond: QExpr; ifTrue: QExpr; ifFalse: QExpr }
+  | { k: 'multiIf'; branches: QGuarded[] }
+  | { k: 'case'; scrutinee: QExpr; alts: QMatch[] }
+  | { k: 'do' | 'comp'; stmts: QStmt[] }
+  | { k: 'tuple' | 'list'; elems: QExpr[] }
+  | { k: 'arith'; from: QExpr; next?: QExpr; to?: QExpr }
+  | { k: 'sig'; expr: QExpr; type: QType }
+  | { k: 'recordCon'; con: QRef; fields: QFieldExp[] }
+  | { k: 'recordUpdate'; expr: QExpr; fields: QFieldExp[] }
+  | { k: 'tyapp'; expr: QExpr; type: QType }
+  /** A splice inside the quote, whose code, of the program around the quote, builds that part of the tree. */
+  | { k: 'splice'; code: Expr };
+
+export interface QFieldExp {
+  field: QRef;
+  value: QExpr;
+}
+
+export type QPat =
+  | { k: 'var'; local: LocalVar }
+  | { k: 'wild' }
+  | { k: 'lit'; lit: Literal; negative: boolean }
+  | { k: 'con'; con: QRef; args: QPat[] }
+  | { k: 'infix'; left: QPat; con: QRef; right: QPat }
+  | { k: 'tuple' | 'list'; elems: QPat[] }
+  | { k: 'as'; local: LocalVar; pat: QPat }
+  | { k: 'record'; con: QRef; fields: { field: QRef; pat: QPat }[] }
+  | { k: 'bang' | 'lazy'; pat: QPat }
+  | { k: 'view'; expr: QExpr; pat: QPat }
+  | { k: 'sig'; pat: QPat; type: QType };
+
+export type QType =
+  | { k: 'var' | 'con'; ref: QRef }
+  | { k: 'list' | 'arrow' }
+  | { k: 'tupleCon'; arity: number }
+  | { k: 'app'; fn: QType; arg: QType }
+  | { k: 'lit'; value: bigint | string }
+  | { k: 'forall'; binders: QTyVar[]; context: QType[]; body: QType }
+  | { k: 'splice'; code: Expr };
+
+/** A type variable a quote binds: by a `forall`, specified or inferred, or by a declaration's head. */
+export interface QTyVar {
+  local: LocalVar;
+  flag: 'specified' | 'inferred' | 'required';
+  /** Whether the binder has the kind annotation `Type`, the one kind quotes write. */
+  star?: boolean;
+}
+
+export interface QGuarded {
+  guards: QStmt[];
+  expr: QExpr;
+}
+
+export type QBody = { k: 'plain'; expr: QExpr } | { k: 'guarded'; branches: QGuarded[] };
+
+/** An alternative of a `case`, whose body sees its pattern's variables and its `where` bindings. */
+export interface QMatch {
+  pat: QPat;
+  body: QBody;
+  where: QDecls;
+}
+
+export type QStmt = { k: 'bind'; pat: QPat; expr: QExpr } | { k: 'let'; decls: QDecls } | { k: 'exp'; expr: QExpr };
+
+/** A group of declarations, with the names it binds in the order GHC gives them new names. */
+export interface QDecls {
+  binders: LocalVar[];
+  decls: QDecl[];
+}
+
+export interface QClause {
+  pats: QPat[];
+  body: QBody;
+  where: QDecls;
+}
+
+export type QDecl =
+  | { k: 'fun'; name: QRef; clauses: QClause[] }
+  | { k: 'val'; pat: QPat; body: QBody; where: QDecls }
+  | { k: 'sig'; name: QRef; type: QType }
+  | { k: 'fixity'; assoc: Fixity['assoc']; prec: number; name: QRef }
+  | {
+      k: 'data';
+      flavour: 'data' | 'newtype' | 'typeData';
+      context: QType[];
+      name: QRef;
+      params: QTyVar[];
+      cons: QCon[];
+      deriving: QDeriving[];
+    }
+  | { k: 'tySyn'; name: QRef; params: QTyVar[]; type: QType }
+  | {
+      k: 'class';
+      context: QType[];
+      name: QRef;
+      params: QTyVar[];
+      fundeps: { from: QRef[]; to: QRef[] }[];
+      decls: QDecl[];
+    }
+  /** An instance, which binds the type variables its head and context name. */
+  | { k: 'instance'; binders: LocalVar[]; context: QType[]; head: QType; decls: QDecl[] };
+
+export interface QCon {
+  name: QRef;
+  fields: { name?: QRef; strict: boolean; type: QType }[];
+  infix: boolean;
+}
+
+export interface QDeriving {
+  strategy?: 'stock' | 'anyclass' | 'newtype' | 'via';
+  via?: QType;
+  cls: QType;
+}
+
+/** A renamed quote: of an expression, a pattern, a type, or declarations. */
+export type QQuote =
+  | { k: 'exp'; expr: QExpr }
+  | { k: 'pat'; pat: QPat }
+  | { k: 'type'; type: QType }
+  | { k: 'decs'; decls: QDecls };

@@ -38,7 +38,7 @@ import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell, parseProgram, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
-import type { SpliceRunner } from './thSplice';
+import type { SpliceModuleNames, SpliceRunner } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
@@ -440,8 +440,18 @@ export interface CompiledProgram {
   compileErrorOutput?: string;
 }
 
+export interface CompileOptions {
+  atomicRows?: ReadonlySet<number>;
+  traceTypes?: boolean;
+  /** For the program that runs a splice, the names of the module the splice is in. */
+  spliceModule?: SpliceModuleNames;
+}
+
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
-export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
+export function compileProgram(
+  source: string,
+  { atomicRows, traceTypes = false, spliceModule }: CompileOptions = {}
+): CompiledProgram {
   const lib = (library ??= compileLibrary());
   return withCompilationBudget(() => {
     // Splices run within the program's budget: each splice's program compiles and runs on the budget that is left.
@@ -450,9 +460,9 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
       module: parsed,
       printed: compileOutput,
       printedError: compileErrorOutput,
-    } = parseProgram(preprocessProgram(source), (program, span, names) => {
+    } = parseProgram(preprocessProgram(source), (program, span, names, module) => {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      return spliceRunner(program, span, names);
+      return spliceRunner(program, span, names, module);
     });
     const renamed = renameModule(parsed, {
       modules: lib.modules,
@@ -461,6 +471,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
       weakValues: lib.weakValues,
       weakTypes: lib.weakTypes,
       support: lib.value,
+      spliceModule,
     });
     const checked = typecheckModule(renamed, {
       env: new ClassEnv(lib.env),

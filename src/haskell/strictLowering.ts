@@ -146,7 +146,7 @@ class StrictLowering {
     return { ...alt, pat: this.pat(alt.pat), rhs: this.rhs(alt.rhs) };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One short case per expression kind.
+  // code-gauge-allow functionNcss -- One short case per expression kind.
   private expr(expr: Expr): Expr {
     switch (expr.kind) {
       case 'var':
@@ -155,15 +155,15 @@ class StrictLowering {
       case 'implicit':
       case 'support':
       case 'hole':
-      case 'thVar':
-      case 'thName': {
+      case 'thName':
+      // A quote's tree keeps the syntax it quotes.
+      case 'quote': {
         return expr;
       }
       case 'app': {
         return { ...expr, fn: this.expr(expr.fn), arg: this.expr(expr.arg) };
       }
-      case 'chain':
-      case 'thChain': {
+      case 'chain': {
         return {
           ...expr,
           items: expr.items.map((item) => (item.kind === 'operand' ? { ...item, value: this.expr(item.value) } : item)),

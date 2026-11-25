@@ -1085,7 +1085,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
   'Language.Haskell.TH.Runner': {
     from: 'Language.Haskell.TH.Internal',
     types: [],
-    values: ['runSplice', 'runDecSplice', 'runTypedSplice', 'quoteExp', 'mkNameG_v', 'mkNameG_d', 'mkNameG_tc'],
+    values: ['runSplice', 'runDecSplice', 'runTypedSplice', 'quoteExp'],
   },
   'Data.Word': {
     from: 'Base',

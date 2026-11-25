@@ -61,7 +61,7 @@ function parseModule(
       if (!library) validateDialect(root, extensions);
       const spliced =
         run && features.allows('splices')
-          ? runSplices(root, run)
+          ? runSplices(root, extensions, run)
           : { grafts: new Map<number, SpliceSyntax>(), printed: '', printedError: '' };
       return {
         module: convertModule(root, extensions, defaultName, spliced.grafts),
