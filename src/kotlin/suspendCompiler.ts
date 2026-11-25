@@ -379,20 +379,31 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const isDoWhile = statement.kind === 'doWhile';
     const bodyScope = new Scope(scope, context);
     const conditionYields = this.mayYield(scope, statement.condition);
-    const compileTest = (testScope: Scope): Gen =>
-      conditionYields
-        ? this.compileSuspendValue(testScope, context, statement.condition, this.core.boolean.type).gen
-        : synchronous(this.compileCondition(testScope, context, statement.condition).compiled.eval);
+    // A condition that does not suspend narrows as an ordinary loop's does: its truth for the next run of the body,
+    // its falsity after the loop.
+    const tests: { exit?: Flow } = {};
+    const compileTest = (testScope: Scope): Gen => {
+      if (conditionYields)
+        return this.compileSuspendValue(testScope, context, statement.condition, this.core.boolean.type).gen;
+      const tested = this.compileCondition(testScope, context, statement.condition);
+      tests.exit = this.withNarrowing(this.flow, tested.whenFalse);
+      this.applyNarrowing(tested.whenTrue);
+      return synchronous(tested.compiled.eval);
+    };
     let condition = isDoWhile ? undefined : compileTest(scope);
     context.loops.push(loop);
     let body: Gen;
     try {
-      body = this.compileSuspendBlock(bodyScope, context, statement.body);
+      // A do-while's condition sees the variables its body declares.
+      body = this.compileSuspendStatements(bodyScope, context, statement.body.statements, isDoWhile);
     } finally {
       context.loops.pop();
     }
     if (isDoWhile) condition = compileTest(bodyScope);
-    this.flow = Flow.merge([before, this.flow, ...loop.breaks]);
+    // The loop ends where its condition is false, as far as the flow can tell, or where it breaks.
+    const { exit } = tests;
+    const ends = isDoWhile ? [exit ?? this.flow] : exit ? [exit] : [before, this.flow];
+    this.flow = Flow.merge([...ends, ...loop.breaks]);
     const test = condition as Gen;
     const { identity } = loop;
     return function* (frame) {

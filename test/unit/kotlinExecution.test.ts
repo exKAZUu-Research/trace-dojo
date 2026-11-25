@@ -6867,6 +6867,16 @@ test('runs declarations inside forEach and repeat lambdas that suspend', () => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 9]\n' });
 });
 
+test('narrows and scopes suspending loops as other loops', () => {
+  const source = `class Node(val value: Int, val next: Node?)
+fun main() {
+    val head = Node(1, Node(2, null))
+    println(sequence { var node: Node? = head; while (node != null) { yield(node.value); node = node.next } }.toList())
+    println(sequence { var i = 0; do { val v = i++; yield(v) } while (v < 2) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[0, 1, 2]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G
