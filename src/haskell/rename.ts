@@ -36,6 +36,7 @@ import type { FeatureGates } from './features';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
 import { TH_NAME_MODULES } from './library/thNames';
 import { type LocalNamespace, LocalScope } from './localScope';
+import { namesSpliceModule } from './moduleNameUses';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { NEWTYPE_STRICT_FIELDS } from './newtypes';
 import { libraryPackage } from './packages';
@@ -2462,7 +2463,12 @@ class Renamer {
     const { span } = expr;
     const built = new QuoteBuilder(span).build(this.renameQuote(expr.body, scope));
     if (!expr.witness) return built;
-    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr.witness, span };
+    // In the program that runs a splice, the module's own names are not there to check the witness against; the
+    // quote's type is then left to the code it is spliced into, which checks it.
+    const outer = this.options.spliceModule;
+    const witness: Expr =
+      outer && namesSpliceModule(expr.witness, outer) ? { kind: 'support', name: 'undefined', span } : expr.witness;
+    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: witness, span };
     return thCall(span, 'typedQuote', typer, built);
   }
 
