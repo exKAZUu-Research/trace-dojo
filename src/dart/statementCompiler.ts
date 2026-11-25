@@ -180,11 +180,6 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected readonly usedAtomicRows = new Set<number>();
 
   /**
-   * Whether a function declared to return `declared` must end with a `return` of a value, because `null` is not a
-   * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
-   * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
-   */
-  /**
    * The return type a function's body is checked against: the declared one, or for a function literal the one its
    * context gives, once that is known; a literal without a context infers its return type instead.
    */
@@ -193,6 +188,11 @@ export abstract class StatementCompiler extends PatternCompiler {
     return spec.returnType ?? (context && !containsInferenceHole(context) ? context : undefined);
   }
 
+  /**
+   * Whether a function declared to return `declared` must end with a `return` of a value, because `null` is not a
+   * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
+   * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
+   */
   protected mustReturnValue(declared: DartType, isAsync: boolean): boolean {
     if (isAsync && isNullable(declared)) return false;
     const type = isAsync && !isObject(declared) ? futureValueType(declared) : declared;
