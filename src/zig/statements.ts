@@ -2251,9 +2251,10 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private forOperand(compiled: TExpr, capture: Capture | undefined, span: Span): ForOperand {
-    this.refuseComptimeVarReference(compiled, span);
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
+    // Zig refuses a loop over a comptime var's memory only where it reads the elements or takes their addresses.
+    if (readsElement || byPointer) this.refuseComptimeVarReference(compiled, span);
     const type = compiled.type;
     let child: Type;
     let isConst: boolean;
