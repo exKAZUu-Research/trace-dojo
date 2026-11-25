@@ -6,6 +6,7 @@ import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { isConstAssertion, named, numberValue, skipParentheses, withoutAssertions } from './syntax';
 import {
   anyType,
+  baseTypeOfLiteral,
   bigintType,
   booleanType,
   emptyObjectType,
@@ -392,7 +393,7 @@ export class OperatorChecker {
     if (isNullishIntrinsic(l) || isNullishIntrinsic(r)) return;
     if (this.c.relations.isComparable(l, r)) return;
     // As TypeScript does, the message names the operands' base types when those do not overlap either.
-    const [leftBase, rightBase] = [baseTypeOfLiteral(l), baseTypeOfLiteral(r)];
+    const [leftBase, rightBase] = [mapType(l, baseTypeOfLiteral), mapType(r, baseTypeOfLiteral)];
     const [shownLeft, shownRight] = this.c.relations.isComparable(leftBase, rightBase) ? [l, r] : [leftBase, rightBase];
     this.c.error(
       node,
@@ -609,14 +610,6 @@ function syntacticNullishness(c: Checker, node: TreeNode): 'always' | 'never' | 
       return 'never';
     }
   }
-}
-
-/** TypeScript's base type of a literal type: its primitive, or `string` for a template literal or string mapping. */
-function baseTypeOfLiteral(type: Type): Type {
-  return mapType(type, (member) => {
-    if (member.kind === 'literal' && typeof member.value !== 'symbol') return primitiveOfLiteral(member);
-    return member.kind === 'templateLiteral' || member.kind === 'stringMapping' ? stringType : member;
-  });
 }
 
 /** The falsy values that `&&` gives for a type: `0` for a number, `""` for a string, and `0n` for a bigint. */
