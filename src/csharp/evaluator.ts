@@ -1383,6 +1383,8 @@ export class Evaluator extends AsyncExecutor {
         };
       }
     }
+    // A property returning by reference names the variable that its getter returns, which it calls once.
+    if (property.returnsByRef) return call(this.getterOf(property), []) as unknown as Reference;
     return {
       get: () => call(this.getterOf(property), []),
       set: (value) => {

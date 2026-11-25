@@ -260,6 +260,8 @@ export class PropertySymbol {
   isInitOnly = false;
   /** Whether the property returns a `ref readonly` variable, which the program may read but not assign. */
   isRefReadonly = false;
+  /** How a property of the program returns by reference (`ref T P`, `ref readonly T P`), if it does. */
+  returnsByRef: 'ref' | 'readonly' | undefined;
   isStatic = false;
   access: Accessibility = 'private';
   /** The backing field of an auto-property. */

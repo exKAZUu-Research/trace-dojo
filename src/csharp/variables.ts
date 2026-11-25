@@ -22,6 +22,12 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'implicitIndex': {
       return isVariable(expression.access, readonlyIsValue);
     }
+    case 'call': {
+      return expression.method.returnsByRef === 'ref';
+    }
+    case 'property': {
+      return expression.property.returnsByRef === 'ref';
+    }
     case 'field': {
       if (readonlyIsValue && expression.field.isReadonly) return false;
       const receiver = expression.receiver.type;

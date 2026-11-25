@@ -441,6 +441,71 @@ test('a class Main returning Task or Task<int> runs as the entry point and is wa
   });
 });
 
+// A property or indexer returning by reference names the variable its getter returns, which assignments, `++`, and
+// ref arguments write through; a `ref readonly` one is read-only.
+test('properties and indexers returning by reference read and write the variable they return', () => {
+  const program = String.raw`class Buffer {
+    private int[] items = new int[3];
+    private int count = 10;
+    public ref int this[int i] => ref items[i];
+    public ref int Count { get { return ref count; } }
+    public ref readonly int Fixed => ref count;
+    public string Show() => string.Join(",", items) + " " + count;
+}
+class Program {
+    static void Inc(ref int x) => x++;
+    static void Main() {
+        var b = new Buffer();
+        b[0] = 5;
+        b[0]++;
+        b[1] += 3;
+        Inc(ref b.Count);
+        ref int last = ref b[2];
+        last = 7;
+        Console.WriteLine(b.Show() + " " + b.Fixed);
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({ kind: 'executed', stdout: '6,3,7 11 11\n' });
+  const errors = String.raw`class C {
+    int f;
+    public ref readonly int A => ref f;
+    public ref int B => ref A;
+    void M() { A = 1; ref int r = ref A; }
+    static void Main() { }
+}
+`;
+  expect(executeProgram('csharp', errors)).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 3,
+        message:
+          "CS8333: プロパティ 'A' は読み取り専用の変数であるため、書き込み可能な参照によって返すことはできません",
+      },
+      {
+        row: 4,
+        message:
+          "CS8331: プロパティ に割り当てることができません。'A' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。",
+      },
+      {
+        row: 4,
+        message:
+          "CS8329: プロパティ 'A' は、読み取り専用の変数であるため、ref 値または out 値として使用することはできません",
+      },
+    ],
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'class C {\n    int f;\n    public ref int D { get => ref f; set { } }\n    static void Main() { }\n}\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'CS8147: 参照渡しで返すプロパティは set アクセサーを持つことができません' }],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',

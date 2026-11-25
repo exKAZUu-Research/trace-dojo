@@ -262,6 +262,11 @@ export abstract class StatementBinder extends PatternBinder {
     use: string
   ): BoundLValue {
     const { property } = target;
+    if (property.returnsByRef === 'ref') return target;
+    if (property.returnsByRef === 'readonly' && (use === 'ref' || use === 'out')) {
+      this.reportReadonlyRefProperty(property, position, 'CS8329');
+      return { kind: 'discard', type: ERROR_TYPE, row: position.row };
+    }
     const declared = this.setterOf(property);
     // A library property's private setter stands for .NET's explicit IList<T> indexer, which leaves it read-only.
     const setter = declared?.access === 'private' && property.owner.isLibrary ? undefined : declared;
@@ -316,6 +321,23 @@ export abstract class StatementBinder extends PatternBinder {
       );
     }
     return target;
+  }
+
+  /** Reports a `ref readonly` property used as a writable reference: an argument or local (CS8329) or a return. */
+  private reportReadonlyRefProperty(property: PropertySymbol, position: Position, code: 'CS8329' | 'CS8333'): void {
+    const name = property.isIndexer ? 'this' : property.name;
+    if (code === 'CS8329')
+      this.error(
+        position,
+        code,
+        `プロパティ '${name}' は、読み取り専用の変数であるため、ref 値または out 値として使用することはできません`
+      );
+    else
+      this.error(
+        position,
+        code,
+        `プロパティ '${name}' は読み取り専用の変数であるため、書き込み可能な参照によって返すことはできません`
+      );
   }
 
   private reportReadonlyProperty(property: PropertySymbol, display: string, position: Position): void {
@@ -430,7 +452,7 @@ export abstract class StatementBinder extends PatternBinder {
       return { kind: 'discard', type: ERROR_TYPE, row: node.row };
     }
     const value = this.toValue(bound, node);
-    if ((use === 'ref' || use === 'out') && value.kind === 'property') {
+    if ((use === 'ref' || use === 'out') && value.kind === 'property' && !value.property.returnsByRef) {
       this.error(
         node,
         'CS0206',
@@ -1221,7 +1243,8 @@ export abstract class StatementBinder extends PatternBinder {
     const bound = this.toValue(this.bindExpression(operand, context), operand);
     const isVariable =
       ['local', 'field', 'staticField', 'element', 'refValue'].includes(bound.kind) ||
-      (bound.kind === 'call' && bound.method.returnsByRef !== undefined);
+      (bound.kind === 'call' && bound.method.returnsByRef !== undefined) ||
+      (bound.kind === 'property' && bound.property.returnsByRef !== undefined);
     if (bound.type.kind === 'error') return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
     if (!isVariable) {
       if (use === 'return')
@@ -1240,6 +1263,10 @@ export abstract class StatementBinder extends PatternBinder {
       return { kind: 'discard', type: ERROR_TYPE, row: operand.row };
     }
     if (isReadonly) return bound as BoundLValue;
+    if (bound.kind === 'property' && bound.property.returnsByRef === 'readonly') {
+      this.reportReadonlyRefProperty(bound.property, operand, use === 'return' ? 'CS8333' : 'CS8329');
+      return bound as BoundLValue;
+    }
     if (bound.kind === 'call' && bound.method.returnsByRef === 'readonly') {
       this.error(operand, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
       return bound as BoundLValue;
@@ -1270,7 +1297,7 @@ export abstract class StatementBinder extends PatternBinder {
         // A field of an object lives on the heap; a field of a struct lives where the struct does.
         if (!isValueType(target.receiver.type)) return 'return';
         const receiver = target.receiver;
-        return ['local', 'field', 'staticField', 'element', 'call'].includes(receiver.kind)
+        return ['local', 'field', 'staticField', 'element', 'call', 'property'].includes(receiver.kind)
           ? this.refScopeOf(receiver as BoundLValue)
           : 'local';
       }
@@ -1278,7 +1305,8 @@ export abstract class StatementBinder extends PatternBinder {
       case 'element': {
         return 'return';
       }
-      case 'call': {
+      case 'call':
+      case 'property': {
         // What a method returns by reference lives as long as the variables passed to it by reference.
         return target.args.every((arg) => arg.kind !== 'refArgument' || this.refScopeOf(arg.target) === 'return')
           ? 'return'
@@ -1297,6 +1325,14 @@ export abstract class StatementBinder extends PatternBinder {
     while (root.kind === 'field' && isValueType(root.receiver.type)) {
       root = root.receiver;
       isMember = true;
+    }
+    if (root.kind === 'this') {
+      this.refSafetyError(
+        position,
+        'CS8170',
+        "構造体メンバーは 'this' または他のインスタンス メンバーを参照渡しで返すことができません"
+      );
+      return;
     }
     if (root.kind === 'local') {
       const { local } = root;

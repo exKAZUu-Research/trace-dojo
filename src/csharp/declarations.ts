@@ -1195,11 +1195,17 @@ export class DeclarationBinder extends BinderBase {
     const isIndexer = member.kind === 'indexer';
     const name = isIndexer ? 'Item' : member.name;
     const shownName = isIndexer ? 'this' : name;
-    // The library declares `ref readonly` indexers, which read as values and refuse assignment as Roslyn does.
-    const isRefReadonly = this.isLibraryUnit && member.type.kind === 'refType' && member.type.isReadonly;
-    const declaredType = member.type.kind === 'refType' && isRefReadonly ? member.type.type : member.type;
-    const property = new PropertySymbol(name, this.resolveType(declaredType, context), symbol, isIndexer);
-    property.isRefReadonly = isRefReadonly;
+    // The library declares `ref readonly` indexers, which read as values and refuse assignment as Roslyn does; the
+    // program's ref properties return the variable, as its methods returning by reference do.
+    const refType = member.type.kind === 'refType' ? member.type : undefined;
+    const property = new PropertySymbol(
+      name,
+      this.resolveType(refType?.type ?? member.type, context),
+      symbol,
+      isIndexer
+    );
+    property.isRefReadonly = refType?.isReadonly === true;
+    if (refType && !this.isLibraryUnit) property.returnsByRef = refType.isReadonly ? 'readonly' : 'ref';
     const modifiers = member.modifiers.set;
     property.isStatic = modifiers.has('static');
     property.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
@@ -1261,8 +1267,24 @@ export class DeclarationBinder extends BinderBase {
     }
     if (isAuto && !property.getter)
       this.error(member, 'CS8051', '自動実装プロパティは get アクセサーを持つ必要があります。');
+    if (property.returnsByRef) this.checkRefProperty(member, isAuto);
     this.addMember(symbol, property, member);
     symbol.properties.push(property);
+  }
+
+  /** Reports the accessors that a property returning by reference may not have, as Roslyn does. */
+  private checkRefProperty(
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>,
+    isAuto: boolean
+  ): void {
+    if (isAuto) this.error(member, 'CS8145', '自動実装プロパティは参照渡しで返すことができません');
+    if (!member.accessors.some((accessor) => accessor.kind === 'get')) {
+      this.error(member, 'CS8146', '参照渡しで返すプロパティは get アクセサーを持たなければなりません');
+      return;
+    }
+    for (const accessor of member.accessors)
+      if (accessor.kind !== 'get')
+        this.error(accessor, 'CS8147', '参照渡しで返すプロパティは set アクセサーを持つことができません');
   }
 
   private declareBackingField(
@@ -1316,6 +1338,7 @@ export class DeclarationBinder extends BinderBase {
     }
     method.row = accessor.row;
     method.returnType = isGetter ? property.type : VOID_TYPE;
+    if (isGetter) method.returnsByRef = property.returnsByRef;
     method.parameters = [...property.parameters];
     if (!isGetter) method.parameters.push({ name: 'value', type: property.type, refKind: undefined, isParams: false });
     this.methodContexts.set(method, context);
