@@ -110,13 +110,13 @@ export class Expander {
   }
 
   /** Expands an indexed array's subscript into text for arithmetic evaluation, preserving single-quote syntax. */
-  expandSubscriptString(word: Word): string {
+  expandSubscriptString(word: Word, unquoteAnsiC = false): string {
     const pieces = word.parts.map((part): string | WordPart => {
       if (part.kind === 'single') return `'${part.text}'`;
       if (part.kind === 'literal') return unescapeDoubleQuoted(part.text);
       return part;
     });
-    return this.arithmeticText({ pieces, row: word.row });
+    return this.arithmeticText({ pieces, row: word.row }, unquoteAnsiC);
   }
 
   /** Expands `$` expansions, command substitutions, and double quotes in a runtime indexed subscript, keeping `'...'`. */
@@ -278,13 +278,13 @@ export class Expander {
   }
 
   /** Substitutes expansions inside an arithmetic expression before evaluating it. */
-  arithmeticText(source: ArithmeticSource): string {
+  arithmeticText(source: ArithmeticSource, unquoteAnsiC = false): string {
     return this.shell.withBuilderRoot((builder) => {
       const spend = (cost?: number): void => this.spend(cost);
       const doubleCtx: WordContext = { inDouble: true, spacedStar: false };
       for (const piece of source.pieces) {
         if (typeof piece === 'string') builder.text = appendBounded(builder.text, piece, spend);
-        else if (piece.kind === 'ansiC') {
+        else if (piece.kind === 'ansiC' && !unquoteAnsiC) {
           builder.text = appendBounded(builder.text, `'${piece.text.replaceAll("'", String.raw`'\''`)}'`, spend);
         } else builder.text = appendBounded(builder.text, this.joinSegments(this.expandPart(piece, doubleCtx)), spend);
       }
@@ -424,7 +424,7 @@ export class Expander {
     }
     const target = resolveSubscriptTarget(this.shell, {
       name: expansion.name,
-      subscript: { kind: 'word', word: rawSubscript },
+      subscript: { kind: 'word', word: rawSubscript, unquoteAnsiC: true },
       operation: 'read',
     });
     if (!target) return { kind: 'scalar', value: '0' };
@@ -440,7 +440,7 @@ export class Expander {
     const resolved = resolveTargetName(this.shell, name, false) ?? name;
     const text = this.shell.store.isAssociativeName(resolved)
       ? this.expandAssociativeKey(subscript)
-      : this.expandSubscriptString(subscript);
+      : this.expandSubscriptString(subscript, true);
     return { text, wholeArray: false, rawText: raw };
   }
 

@@ -513,7 +513,7 @@ function substring(
     return expander.valueSegments({ ...value, values: [] }, ctx);
   }
   const evaluate = (parts: (string | WordPart)[]): bigint =>
-    shell.evaluateText(expander.arithmeticText({ pieces: parts, row: shell.currentRow }), undefined);
+    shell.evaluateText(expander.arithmeticText({ pieces: parts, row: shell.currentRow }, true), undefined);
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
     shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);

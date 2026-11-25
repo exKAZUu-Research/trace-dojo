@@ -45,7 +45,7 @@ export type ResolvedTarget =
     };
 
 export type SubscriptInput =
-  | { readonly kind: 'word'; readonly word: Word }
+  | { readonly kind: 'word'; readonly word: Word; readonly unquoteAnsiC?: boolean }
   | { readonly kind: 'text'; readonly text: string; readonly preExpanded?: boolean };
 
 export type TargetOperation = 'read' | 'write' | 'unset' | 'testSet' | 'arithmeticRead' | 'arithmeticWrite';
@@ -287,7 +287,7 @@ function expandAssociativeSubscript(shell: Shell, input: SubscriptInput): string
 }
 
 function expandIndexedSubscript(shell: Shell, input: SubscriptInput): string {
-  if (input.kind === 'word') return shell.expander.expandSubscriptString(input.word);
+  if (input.kind === 'word') return shell.expander.expandSubscriptString(input.word, Boolean(input.unquoteAnsiC));
   return input.preExpanded ? input.text : shell.expander.expandIndexedSubscriptText(input.text);
 }
 
