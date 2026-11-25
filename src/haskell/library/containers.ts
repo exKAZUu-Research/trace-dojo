@@ -419,6 +419,14 @@ instance Show a => Show (Set a) where
 
 instance Ord a => Semigroup (Set a) where
   (<>) = union
+  stimes = stimesIdempotentMonoid
+
+-- base's, which this library's Base lacks.
+stimesIdempotentMonoid :: (Integral b, Monoid a) => b -> a -> a
+stimesIdempotentMonoid n x = case compare n 0 of
+  LT -> errorWithoutStackTrace "stimesIdempotentMonoid: negative multiplier"
+  EQ -> mempty
+  GT -> x
 
 instance Ord a => Monoid (Set a) where
   mempty = empty
@@ -436,7 +444,9 @@ instance Foldable Set where
   toList = toAscList
   null = null
   length = size
-  elem x s = B.elem x (toAscList s)
+  elem = go
+    where go x STip = x ${BT}seq${BT} False
+          go x (SBin _ y l r) = x == y || go x l || go x r
   minimum = findMin
   maximum = findMax
   sum = foldl' (+) 0
@@ -1141,6 +1151,7 @@ instance Traversable (Map k) where
 
 instance Ord k => Semigroup (Map k v) where
   (<>) = union
+  stimes = S.stimesIdempotentMonoid
 
 instance Ord k => Monoid (Map k v) where
   mempty = Tip
