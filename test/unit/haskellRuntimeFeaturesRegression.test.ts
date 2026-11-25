@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { executeProgram } from '../../src/interpreter/program';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
 import type { ProgramInput } from '../../src/interpreter/programIo';
 
 function run(source: string, input?: ProgramInput): unknown {
@@ -78,4 +78,19 @@ test.each([
   if (execution.kind === 'compileError') {
     expect(execution.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
   }
+});
+
+test.each([
+  [
+    'a lazy read the program never forces',
+    'main = do\n  s <- readFile "a.txt"\n  writeFile "a.txt" "changed"\n  putStrLn "done"',
+  ],
+  [
+    'Debug.Trace output of a value the program never uses',
+    'import Debug.Trace\nmain = do\n  let x = trace "unused" (42 :: Int)\n  putStrLn "done"',
+  ],
+])('a trace performs the same effects as the run: %s', (_name, source) => {
+  const input = { files: { 'a.txt': 'original' } };
+  const { stdout, stderr, finalFiles, uncaughtException } = traceProgram('haskell', source, source, input);
+  expect({ stdout, stderr, finalFiles, uncaughtException }).toEqual(run(source, input));
 });

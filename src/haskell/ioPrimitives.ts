@@ -124,6 +124,7 @@ class Handle {
   }
 
   private lazyContents(reader: TextReader, runtime: Runtime): Value {
+    runtime.beginEffect();
     if (this.state === 'closed') {
       throw ioError('IllegalOperation', 'hGetContents', this.name, 'delayed read on closed handle');
     }
@@ -486,7 +487,11 @@ define('interleaveIO', 1, [], ([action], runtime) =>
   ioAction(
     'unsafeInterleaveIO',
     [action],
-    () => new Thunk(undefined, undefined, () => runtime.machine.runIOValue(action))
+    () =>
+      new Thunk(undefined, undefined, () => {
+        runtime.beginEffect();
+        return runtime.machine.runIOValue(action);
+      })
   )
 );
 
@@ -496,6 +501,7 @@ define('runIOPure', 1, [], ([action], runtime) => runtime.machine.runIOValue(act
 // Debugging
 
 define('trace', 2, [], ([message, value], runtime) => {
+  runtime.beginEffect();
   writeString(message, runtime, (chunk) => runtime.io.stderr.write(chunk));
   runtime.io.stderr.write('\n');
   return value;
