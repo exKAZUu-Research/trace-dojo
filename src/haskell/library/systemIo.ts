@@ -487,7 +487,7 @@ hIsOpen :: Handle -> IO Bool
 hIsOpen = primitive "hIsOpen"
 
 hIsClosed :: Handle -> IO Bool
-hIsClosed h = fmap not (hIsOpen h)
+hIsClosed = primitive "hIsClosed"
 
 hReady :: Handle -> IO Bool
 hReady h = fmap not (hIsEOF h)

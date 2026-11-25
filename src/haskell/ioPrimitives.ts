@@ -177,6 +177,11 @@ define('hIsOpen', 1, [], ([handle], runtime) =>
   ioAction('hIsOpen', [handle], () => bool(handleOf(handle, runtime).entry.state === 'open'))
 );
 
+// A semi-closed handle is neither open nor closed.
+define('hIsClosed', 1, [], ([handle], runtime) =>
+  ioAction('hIsClosed', [handle], () => bool(handleOf(handle, runtime).entry.state === 'closed'))
+);
+
 define('hPutStr', 2, [], ([handle, text], runtime) =>
   ioAction('hPutStr', [handle, text], () => {
     const { entry, channel } = handleOf(handle, runtime);
