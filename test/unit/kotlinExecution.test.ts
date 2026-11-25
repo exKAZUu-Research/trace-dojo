@@ -6823,6 +6823,12 @@ test('reports coroutine and thread functions written without their imports as un
   }
 });
 
+test('gives suspending lambdas their primitive receivers as values', () => {
+  const source =
+    'fun main() { println(sequence { with(3) { yield(this * 2) }; with(8L) { yield(this + 1) } }.toList()) }';
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 9]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

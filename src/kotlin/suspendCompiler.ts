@@ -203,6 +203,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const { info } = lambdaContext;
     const hasReceiver = receiverType !== undefined;
     const unboxers = paramReprs.map((repr) => this.reprConverter('ref', repr));
+    const unboxReceiver = receiverType && this.reprConverter('ref', reprOf(this.core, receiverType));
     const type: FunctionType = {
       kind: 'function',
       receiver: receiverType,
@@ -219,8 +220,9 @@ export abstract class SuspendCompiler extends LocalCompiler {
       eval: (frame) => {
         const env = build(frame);
         return suspendLambdaValue(functionClass, env, (caller, args) => {
-          const receiver = hasReceiver ? args[0] : undefined;
-          // Calls pass boxed values, which parameters of primitive types hold unboxed, after the context arguments.
+          // Calls pass boxed values, which a receiver and parameters of primitive types hold unboxed, after the context
+          // arguments.
+          const receiver = unboxReceiver?.(caller, args[0]);
           const contexts = expected.contextTypes?.length ?? 0;
           const values = (hasReceiver ? args.slice(1) : args).map((value, index) =>
             index < contexts ? value : unboxers[index - contexts](caller, value)
