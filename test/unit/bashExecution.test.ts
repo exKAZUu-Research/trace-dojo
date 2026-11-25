@@ -2,8 +2,8 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-// Every expected output below is what GNU Bash 5.3 printed for the same program, run as `main.sh` in the
-// `en_US.UTF-8` locale on arm64 macOS.
+// Every expected output below is what GNU Bash 5.3 printed for the same program, run as `main.sh` in an
+// `en_US.UTF-8` locale.
 
 test('associative arrays list their keys in Bash hash order, and a seeded RANDOM repeats Bash sequence', () => {
   const program = `declare -A m=([b]=1 [a]=2 [c]=3 [zz]=4 [k1]=5 [k2]=6)
@@ -83,7 +83,7 @@ echo end
   });
 });
 
-test('printf rounds and pads as macOS libc does, counting bytes, and echo -e reads escapes', () => {
+test('printf rounds and pads as Bash does, counting bytes, and echo -e reads escapes', () => {
   const program = `printf '%.0f %.0f %.2f %g %e %5.1f|%-6s|%05d|%x\\n' 0.5 2.5 1.005 0.0001 12345 3.14159 ab 42 255
 printf '%d\\n' 3.5 12abc
 printf '%5s|%.1s|\\n' 亀 ab

@@ -269,7 +269,6 @@ export class Converter {
         ? {
             staticOptions: normalized.staticOptions,
             args: normalized.operandArgs,
-            ...(normalized.consumedCount > 0 ? { rawArgs: args } : {}),
           }
         : { args }),
       redirects,
@@ -526,11 +525,15 @@ export class Converter {
       }
     }
     const nameNode = node.childForFieldName('name');
+    const name = nameNode ? this.restoreQuotes(nameNode.text, nameNode.startIndex) : '';
+    if (Object.hasOwn(DECLARATION_OPTIONS, name)) {
+      this.unsupported(node, 'shadowedDeclarationFunction', name);
+    }
     return {
       row,
       lineRow: row,
       kind: 'function',
-      name: nameNode ? this.restoreQuotes(nameNode.text, nameNode.startIndex) : '',
+      name,
       body: this.statement(body),
       isAtomic,
     };
@@ -777,7 +780,7 @@ function restoreNormalizedChar(
 function normalizeStaticDeclaration(
   builtin: string,
   args: (Word | Assignment)[]
-): { staticOptions: StaticDeclarationOptions; operandArgs: (Word | Assignment)[]; consumedCount: number } | undefined {
+): { staticOptions: StaticDeclarationOptions; operandArgs: (Word | Assignment)[] } | undefined {
   const allowed = DECLARATION_OPTIONS[builtin];
   if (allowed === undefined) return undefined;
   const set = new Set<string>();
@@ -809,7 +812,6 @@ function normalizeStaticDeclaration(
       ...(invalidOption ? { invalidOption } : {}),
     },
     operandArgs: args.slice(index),
-    consumedCount: index,
   };
 }
 

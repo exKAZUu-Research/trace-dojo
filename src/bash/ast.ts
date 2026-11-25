@@ -118,8 +118,6 @@ export type Statement = StatementBase &
         staticOptions?: StaticDeclarationOptions;
         /** Remaining operand arguments when `staticOptions` is set; otherwise all arguments. */
         args: (Word | Assignment)[];
-        /** Unstripped argument list preserved when a user shell function shadows the declaration builtin name. */
-        rawArgs?: (Word | Assignment)[];
         redirects: Redirect[];
       }
     | { kind: 'arithmetic'; expression: ArithmeticSource }

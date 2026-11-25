@@ -128,11 +128,15 @@ export type UnsupportedSyntaxKind =
   | 'redirect'
   | 'select'
   | 'subshellFunctionBody'
+  | 'shadowedDeclarationFunction'
   | 'processSubstitution'
   | 'extglob'
   | 'currentShellSubstitution';
 
-const UNSUPPORTED_SYNTAX_LABELS: Record<Exclude<UnsupportedSyntaxKind, 'redirect'>, string> = {
+const UNSUPPORTED_SYNTAX_LABELS: Record<
+  Exclude<UnsupportedSyntaxKind, 'redirect' | 'shadowedDeclarationFunction'>,
+  string
+> = {
   background: 'バックグラウンド実行（&）',
   pipeline: 'パイプ（|）',
   subshell: 'サブシェル（( ... )）',
@@ -151,6 +155,7 @@ const UNSUPPORTED_SYNTAX_LABELS: Record<Exclude<UnsupportedSyntaxKind, 'redirect
 /** Formats static unsupported-syntax diagnostics from one declarative catalog for `Converter`. */
 export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind, detail = ''): string {
   if (kind === 'redirect') return unsupportedMessage(`リダイレクト（${detail}）`);
+  if (kind === 'shadowedDeclarationFunction') return unsupportedMessage(`宣言ビルトインと同名の関数定義（${detail}）`);
   return unsupportedMessage(UNSUPPORTED_SYNTAX_LABELS[kind]);
 }
 
@@ -339,8 +344,8 @@ export function rejectUnsupportedDeclarationPrefix(builtin: string): never {
   throw new UnsupportedFeatureError(`宣言ビルトインへの前置代入（${builtin}）`);
 }
 
-export function rejectUnsupportedShadowedCompound(builtin: string): never {
-  throw new UnsupportedFeatureError(`関数で上書きされた宣言ビルトイン（${builtin}）での複合代入`);
+export function rejectUnsupportedDynamicDeclaration(builtin: string): never {
+  throw new UnsupportedFeatureError(`動的な宣言ビルトイン呼び出し（${builtin}）`);
 }
 
 export function rejectUnsupportedDeclarationListing(builtin: string): never {

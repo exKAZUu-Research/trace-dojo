@@ -13,17 +13,13 @@ import { REGULAR_BUILTINS } from './builtins';
 import {
   classifyCommandName,
   rejectUnsupportedDeclarationPrefix,
+  rejectUnsupportedDynamicDeclaration,
   rejectUnsupportedFeature,
   rejectUnsupportedNamerefMutation,
   rejectUnsupportedPrefixAssignment,
 } from './capabilities';
 import { conditionalStatus } from './conditional';
-import {
-  executeCompoundAssignment,
-  executeDeclarationCommand,
-  expandShadowedDeclarationArgs,
-  runDynamicDeclarationBuiltin,
-} from './declare';
+import { executeCompoundAssignment, executeDeclarationCommand } from './declare';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
 import {
@@ -484,7 +480,7 @@ export class Shell implements ArithmeticHost {
     const lastArg = argv.at(-1) as string;
     const classified = classifyCommandName(name, this.store.hasFunction(name), Object.hasOwn(REGULAR_BUILTINS, name));
     if (classified.kind === 'declarationBuiltin') {
-      return this.executeDynamicDeclaration(statement, name, args, lastArg);
+      rejectUnsupportedDynamicDeclaration(classified.name);
     }
     if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
       rejectUnsupportedFeature(classified.feature);
@@ -497,21 +493,6 @@ export class Shell implements ArithmeticHost {
       stepMode: isConditionBuiltin ? 'skip' : 'statement',
       ranFunction: classified.kind === 'function',
     };
-  }
-
-  private executeDynamicDeclaration(
-    statement: Extract<Statement, { kind: 'command' }>,
-    name: string,
-    args: readonly string[],
-    lastArg: string
-  ): { status: number; stepMode: StepMode; ranFunction: boolean } {
-    if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(name);
-    const status = this.withRedirects(statement.redirects, () => {
-      const code = runDynamicDeclarationBuiltin(this, name, args);
-      this.store.lastArgument = lastArg;
-      return code;
-    });
-    return { status, stepMode: 'statement', ranFunction: false };
   }
 
   private invokeOrdinaryCommand(
@@ -543,18 +524,6 @@ export class Shell implements ArithmeticHost {
     ranFunction: boolean;
   } {
     this.expander.lastSubstitutionStatus = 0;
-    const shadowingFn = this.store.getFunction(statement.name);
-    if (shadowingFn) {
-      const argv = expandShadowedDeclarationArgs(this, statement.name, statement.rawArgs ?? statement.args);
-      const status = this.withTemporaryScope(statement.assignments, () =>
-        this.withRedirects(statement.redirects, () => {
-          const code = this.callFunction(shadowingFn, argv.slice(1), statement.row);
-          this.store.lastArgument = argv.at(-1) as string;
-          return code;
-        })
-      );
-      return { status, stepMode: 'statement', ranFunction: true };
-    }
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
     const { status, assignsAnswer } = executeDeclarationCommand(
       this,

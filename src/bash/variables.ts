@@ -245,7 +245,7 @@ export class VariableStore {
       'BASH_VERSINFO',
       {
         kind: 'indexed',
-        elements: new Map(['5', '3', '0', '1', 'release', 'aarch64-apple-darwin20.0.0'].map((v, i) => [BigInt(i), v])),
+        elements: new Map(['5', '3', '0', '1', 'release', 'x86_64-pc-linux-gnu'].map((v, i) => [BigInt(i), v])),
       },
       ['a', 'r']
     );

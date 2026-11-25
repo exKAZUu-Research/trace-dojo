@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Keeps POSIX ERE parsing, NFA compilation, and single-pass tagged matching in one self-contained module.
 /**
- * POSIX extended regular expressions as macOS's `regcomp` reads them for `[[ s =~ re ]]`: the leftmost match that is
- * longest, `.` matching any character, a backslash quoting the character after it, and no `\d`-style classes.
+ * Clean-room POSIX extended regular expressions for `[[ s =~ re ]]`: leftmost-longest matching, `.` matching any
+ * character, a backslash quoting the character after it, and no `\d`-style classes.
  */
 
 import type { StepMeter } from './budget';
@@ -19,7 +19,7 @@ type RegexNode =
   | { kind: 'alternation'; options: RegexNode[] }
   | { kind: 'repeat'; body: RegexNode; min: number; max: number };
 
-/** A pattern that macOS rejects, with the message `regerror` gives. */
+/** A pattern rejected as invalid POSIX ERE syntax, with its diagnostic message. */
 export class RegexSyntaxError extends Error {}
 
 export interface CompiledRegex {

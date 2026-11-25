@@ -8,7 +8,6 @@ import {
   rejectUnsupportedDeclarationListing,
   rejectUnsupportedDeclarationOperand,
   rejectUnsupportedDeclarationOptions,
-  rejectUnsupportedShadowedCompound,
   rejectUnsupportedVariableMutation,
 } from './capabilities';
 import { printDeclarations } from './declarePrint';
@@ -130,47 +129,6 @@ export function executeDeclarationCommand(
   } finally {
     shell.store.leaveCompoundGuards(savedGuards);
   }
-}
-
-/** Runs a declaration builtin invoked through an expanded command word (`cmd=declare; $cmd x=1`). */
-export function runDynamicDeclarationBuiltin(shell: Shell, builtin: string, args: readonly string[]): number {
-  const options = createEmptyOptions();
-  const operands: ReadyOperand[] = [];
-  let optionsDone = false;
-  for (const arg of args) {
-    if (!optionsDone && arg === '--') {
-      optionsDone = true;
-      continue;
-    }
-    if (!optionsDone && consumeDeclarationOptionToken(builtin, arg, options)) continue;
-    optionsDone = true;
-    pushMeteredItem(operands, { kind: 'word', text: arg }, shell.runtime.step);
-  }
-  applyBuiltinImpliedFlags(builtin, options);
-  const headerCode = validateDeclarationHeader(shell, builtin, options);
-  if (headerCode !== undefined) return headerCode;
-  if (operands.length === 0) rejectUnsupportedDeclarationListing(builtin);
-  if (options.set.has('p') && builtin !== 'readonly' && builtin !== 'export') {
-    return printDeclarations(
-      shell,
-      builtin,
-      operands.map((op) => (op as Extract<ReadyOperand, { kind: 'word' }>).text)
-    );
-  }
-  const state: DeclarationRunState = { status: 0, assignsAnswer: false, lastArgText: args.at(-1) ?? builtin };
-  executeReadyOperands(shell, builtin, options.set, operands, state, (run) => run());
-  return state.status;
-}
-
-/** Expands a static declaration command's arguments when a shell function shadows the builtin name. */
-export function expandShadowedDeclarationArgs(
-  shell: Shell,
-  builtin: string,
-  rawArgs: readonly (Word | Assignment)[]
-): string[] {
-  const argv = [builtin];
-  for (const arg of rawArgs) appendShadowedArg(shell, builtin, arg, argv);
-  return argv;
 }
 
 /** Executes an ordinary `name=(...)` or `name+=(...)` compound assignment through the store's transactional writer. */
@@ -635,19 +593,6 @@ function resolveUnsubscriptedDeclareTarget(
 
 function nonReadonlyValueAttributes(set: ReadonlySet<string>): Set<Attribute> {
   return new Set<Attribute>([...set].filter((f): f is Attribute => VALUE_ATTRIBUTES.has(f) && f !== 'r'));
-}
-
-function appendShadowedArg(shell: Shell, builtin: string, arg: Word | Assignment, argv: string[]): void {
-  if (!('append' in arg)) {
-    for (const word of shell.expander.expandWords([arg])) {
-      pushMeteredItem(argv, word, shell.runtime.step);
-    }
-    return;
-  }
-  if (arg.array) rejectUnsupportedShadowedCompound(builtin);
-  for (const braced of braceExpandAssignment(shell, arg)) {
-    pushMeteredItem(argv, expandAssignmentOperand(shell, braced).text, shell.runtime.step);
-  }
 }
 
 function* braceExpandAssignment(shell: Shell, arg: Assignment): Generator<Assignment> {

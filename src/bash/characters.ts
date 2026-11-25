@@ -29,7 +29,7 @@ export function legalNumber(text: string): bigint | undefined {
   return value === BigInt.asIntN(64, value) ? value : undefined;
 }
 
-/** Shared POSIX bracket character-class predicates under macOS `en_US.UTF-8` (`isw*`). */
+/** Shared POSIX bracket character-class predicates in a UTF-8 locale. */
 export const POSIX_CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
   alnum: (c) => /^[\p{L}\p{Nd}]$/u.test(c),
   alpha: (c) => /^\p{L}$/u.test(c),

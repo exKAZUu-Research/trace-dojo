@@ -368,7 +368,7 @@ function invalidNumber(arg: string, host: PrintfHost): void {
   host.error(`${arg}: ${message}`);
 }
 
-/** Reads a floating-point argument as macOS's `strtold` (a `double` on arm64) does. */
+/** Reads a floating-point argument as IEEE-754 `double` `strtod` does, reporting Bash's conversion errors. */
 // code-gauge-allow functionCognitiveComplexity -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
 // code-gauge-allow functionNcss -- strtod's syntax (infinities, NaN, hexadecimal, decimal) with Bash's conversion errors.
 function parseFloatArgument(arg: string, host: PrintfHost, conversionError: () => void): number {
