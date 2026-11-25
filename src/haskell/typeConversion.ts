@@ -237,6 +237,12 @@ export class TypeConversion {
         if (head.k !== 'con') break;
         if (head.entity === TYPE_KIND && args.length === 0) return STAR;
         if (head.entity === CONSTRAINT_KIND && args.length === 0) return CONSTRAINT;
+        // A synonym used as a kind stands for its right side, with the arguments as written (kind variables
+        // included), which kind checking may not have converted yet.
+        if (head.entity.sort === 'synonym') {
+          const expanded = expandSynonymHead(type);
+          if (expanded !== type) return this.kindOf(expanded, kindVars);
+        }
         if (head.entity.sort === 'synonym' && head.entity.synonym) {
           const expanded = instantiateType(
             head.entity.synonym,
