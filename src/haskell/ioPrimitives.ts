@@ -94,17 +94,19 @@ const IO_ERROR_TEXT: Record<string, string> = {
   InvalidArgument: 'invalid argument',
 };
 
-/** Fails as GHC does for an operation on a handle that is closed or, for reading, semi-closed. */
-function checkUsable(entry: OpenHandle, location: string, reading: boolean): void {
-  if (entry.state === 'closed') throw ioError('IllegalOperation', location, entry.name, 'handle is closed');
-  if (reading && entry.state === 'semiClosed') {
-    throw ioError('IllegalOperation', location, entry.name, 'handle is semi-closed');
-  }
+/** Fails as GHC does for reading or writing a handle that is closed, or semi-closed after `hGetContents`. */
+function checkUsable(entry: OpenHandle, location: string): void {
+  checkOpen(entry, location);
+  if (entry.state === 'semiClosed') throw ioError('IllegalOperation', location, entry.name, 'handle is semi-closed');
 }
 
-outputHandles.checkStdout = (runtime, location) => checkUsable(tableOf(runtime).stdout, location, false);
-outputHandles.checkHandle = (handle, runtime, location) =>
-  checkUsable(handleOf(handle, runtime).entry, location, false);
+/** Fails as GHC does for an operation on a closed handle, which a semi-closed one still allows. */
+function checkOpen(entry: OpenHandle, location: string): void {
+  if (entry.state === 'closed') throw ioError('IllegalOperation', location, entry.name, 'handle is closed');
+}
+
+outputHandles.checkStdout = (runtime, location) => checkUsable(tableOf(runtime).stdout, location);
+outputHandles.checkHandle = (handle, runtime, location) => checkUsable(handleOf(handle, runtime).entry, location);
 
 function fileSystemError(error: unknown, location: string, path: string): never {
   if (!(error instanceof FileSystemError)) throw error;
@@ -178,6 +180,7 @@ define('hClose', 1, [], ([handle], runtime) =>
 define('hSetBuffering', 2, [], ([handle, mode], runtime) =>
   ioAction('hSetBuffering', [handle, mode], () => {
     const { entry } = handleOf(handle, runtime);
+    checkOpen(entry, 'hSetBuffering');
     const buffering = runtime.machine.force(mode) as ConValue;
     if (buffering.con.name === 'BlockBuffering') {
       const size = runtime.machine.force(buffering.fields[0]) as ConValue;
@@ -194,7 +197,9 @@ define('hSetBuffering', 2, [], ([handle, mode], runtime) =>
 
 define('hStoredBuffering', 1, [], ([handle], runtime) =>
   ioAction('hStoredBuffering', [handle], () => {
-    const { buffering } = handleOf(handle, runtime).entry;
+    const { entry } = handleOf(handle, runtime);
+    checkOpen(entry, 'hGetBuffering');
+    const { buffering } = entry;
     const maybe = ioSupport.maybe as { nothing: ConInfo; just: ConInfo };
     return buffering ? new ConValue(maybe.just, [buffering]) : nullary(maybe.nothing);
   })
@@ -212,7 +217,7 @@ define('hIsClosed', 1, [], ([handle], runtime) =>
 define('hPutStr', 2, [], ([handle, text], runtime) =>
   ioAction('hPutStr', [handle, text], () => {
     const { entry, channel } = handleOf(handle, runtime);
-    checkUsable(entry, 'hPutStr', false);
+    checkUsable(entry, 'hPutStr');
     if (channel) writeString(text, runtime, (chunk) => runtime.io[channel].write(chunk));
     else if (entry.writer) {
       const { reader, writer } = entry;
@@ -250,7 +255,7 @@ function writeString(slot: Slot, runtime: Runtime, write: (chunk: string) => voi
 }
 
 function readerOf(entry: OpenHandle, location: string): TextReader {
-  checkUsable(entry, location, true);
+  checkUsable(entry, location);
   if (!entry.reader) throw ioError('IllegalOperation', location, entry.name, 'handle is not open for reading');
   return entry.reader;
 }
