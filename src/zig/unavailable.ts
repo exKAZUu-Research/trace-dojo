@@ -58,6 +58,7 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@bitOffsetOf', { what: '@bitOffsetOf（メモリの表現）', inLibrary: true }],
   ['@backingInt', { what: '@backingInt（メモリの表現に依存する変換）', inLibrary: true }],
   ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）', inLibrary: true }],
+  ['@setRuntimeSafety(false)', { what: '@setRuntimeSafety(false)（実行時の検査を外す指定）' }],
   ['syntax:extern', { what: 'extern（外部で定義する関数・変数の宣言）' }],
   ['syntax:linksection', { what: 'linksection（OS ごとに書き方が異なるセクションの指定）' }],
   ['syntax:cVarargs', { what: 'C の可変個の引数（...）' }],

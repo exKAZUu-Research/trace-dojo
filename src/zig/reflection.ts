@@ -9,7 +9,7 @@ import { constantText } from './constantText';
 import { alignOf, bitSizeOf, fieldOffsets, sizeOf } from './layout';
 import { langNamespace } from './library/lang';
 import { memorySpace, spendMemory } from './memoryAccounting';
-import { known, runtime, type TExpr } from './semaBase';
+import { known, runtime, staticResultOf, type TExpr } from './semaBase';
 import {
   BOOL,
   COMPTIME_INT,
@@ -29,6 +29,7 @@ import {
   VOID,
   withPointerAttributes,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { decodeUtf8 } from './utf8';
 import { Cell, markConstantStorage, NULL, Pointer, Slice, type Value, ZArray, ZStruct, ZUnion } from './values';
 
@@ -284,7 +285,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { name, args } = expression;
     // The grader runs as a Debug build does: it keeps every safety check, and evaluates floats strictly.
     this.builtinArity(expression, name === '@prefetch' ? 2 : 1);
-    for (const arg of args) this.compile(arg);
+    const compiled = args.map((arg) => this.compile(arg));
+    if (name === '@setRuntimeSafety' && staticResultOf(compiled[0])?.value === false)
+      this.error(expression, unavailableMessage('@setRuntimeSafety(false)'));
     return known(VOID, undefined, expression);
   }
 
