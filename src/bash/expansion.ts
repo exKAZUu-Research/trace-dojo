@@ -14,6 +14,7 @@ import {
   splitWordSegments,
   type TextSegment,
   textSegment,
+  UNSPLIT_WORD_CONTEXT,
   type WordContext,
   type WordSegment,
 } from './fields';
@@ -76,29 +77,29 @@ export class Expander {
   /** Expands a word to one string without splitting it, as for `case` and the operands of `[[`. */
   expandString(word: Word): string {
     this.checkTilde(word.parts, false);
-    return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
+    return this.joinSegments(this.expandParts(word.parts, UNSPLIT_WORD_CONTEXT));
   }
 
   /** Expands an associative array's subscript, where Bash does not perform tilde expansion. */
   expandAssociativeKey(word: Word): string {
-    return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
+    return this.joinSegments(this.expandParts(word.parts, UNSPLIT_WORD_CONTEXT));
   }
 
   /** Expands an assignment's subscript in a declaration word (`a[k]=v`), joining list breaks with each list's `IFS` or a space. */
   expandAssignmentSubscript(word: Word): string {
-    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar: true }), true);
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar: true, noSplit: true }), true);
   }
 
   /** Expands an assignment's value, optionally joining `$*` with spaces when `IFS` is empty (`spacedStar`). */
   expandAssignmentValue(word: Word, spacedStar = false): string {
     this.checkTilde(word.parts, true);
-    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar }));
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar, noSplit: true }));
   }
 
   /** Expands a word into a glob pattern, quoting characters protected by quotes. */
   expandPattern(word: Word): string {
     this.checkTilde(word.parts, false);
-    return this.patternOf(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
+    return this.patternOf(this.expandParts(word.parts, UNSPLIT_WORD_CONTEXT));
   }
 
   /** Expands the right side of `=~` into an ERE, escaping characters protected by quotes. */
@@ -106,7 +107,7 @@ export class Expander {
     this.checkTilde(word.parts, false);
     let regex = '';
     const spend = (cost?: number): void => this.spend(cost);
-    for (const fragment of this.flatten(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT))) {
+    for (const fragment of this.flatten(this.expandParts(word.parts, UNSPLIT_WORD_CONTEXT))) {
       const chunk = fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text;
       regex = appendBounded(regex, chunk, spend);
     }
@@ -132,7 +133,7 @@ export class Expander {
   /** Expands `$` expansions, command substitutions, and quotes in a runtime associative key. */
   expandSubscriptText(text: string): string {
     if (!/[$`'"\\]/.test(text)) return text;
-    return this.joinSegments(this.expandParts(parseSubscriptWordParts(text), DEFAULT_WORD_CONTEXT));
+    return this.joinSegments(this.expandParts(parseSubscriptWordParts(text), UNSPLIT_WORD_CONTEXT));
   }
 
   matches(text: string, pattern: string, extmatch = false): boolean {
@@ -154,10 +155,10 @@ export class Expander {
       for (const word of words) {
         const keyed = splitKeyedElement(word);
         if (keyed) {
-          const key = this.joinSegments(this.expandParts(keyed.key, DEFAULT_WORD_CONTEXT));
+          const key = this.joinSegments(this.expandParts(keyed.key, UNSPLIT_WORD_CONTEXT));
           roots.push(key);
           this.checkTilde(keyed.value, true);
-          const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+          const value = this.joinSegments(this.expandParts(keyed.value, UNSPLIT_WORD_CONTEXT));
           roots.push(value);
           elements.push({ key, value, append: keyed.append, rawText: word.text });
           continue;
@@ -233,11 +234,11 @@ export class Expander {
     if (!keyed) {
       return { error: compoundItemValidationError({ plain: word.text, rawText: word.text }, false, reportedName) };
     }
-    const key = this.joinSegments(this.expandParts(keyed.key, DEFAULT_WORD_CONTEXT));
+    const key = this.joinSegments(this.expandParts(keyed.key, UNSPLIT_WORD_CONTEXT));
     if (key === '') return { error: `${word.text}: bad array subscript` };
     roots.push(key);
     this.checkTilde(keyed.value, true);
-    const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+    const value = this.joinSegments(this.expandParts(keyed.value, UNSPLIT_WORD_CONTEXT));
     roots.push(value);
     return { key, value, append: keyed.append, rawText: word.text };
   }
@@ -361,6 +362,7 @@ export class Expander {
     const inner = this.expandParts(parts, {
       inDouble: true,
       spacedStar: ctx.spacedStar,
+      ...(ctx.noSplit ? { noSplit: true } : {}),
       ...(ctx.inOperatorWord ? { inOperatorWord: true } : {}),
     });
     if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];

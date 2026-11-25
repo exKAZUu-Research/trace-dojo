@@ -70,7 +70,7 @@ export function applyOperator(
         const kind = operator.at(-1) as string;
         if (kind === '+') {
           if (isNull) return value.kind === 'list' && !value.star && ctx.inDouble ? [EMPTY_LIST_SEGMENT] : [];
-          return expandArgument(expander, argument, { inDouble: ctx.inDouble, spacedStar: true }, false, roots);
+          return expandArgument(expander, argument, { ...ctx, spacedStar: true }, false, roots);
         }
         if (!isNull) return expander.valueSegments(value, ctx);
         return defaultValue(expander, shell, expansion, kind, colon, name, subscript, ctx, roots);
@@ -135,14 +135,14 @@ function expandArgument(
 ): WordSegment[] {
   if (isPattern) {
     expander.checkTilde(parts, false);
-    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar });
+    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar, noSplit: true });
     pushSegmentRoots(roots, expanded);
     return expanded;
   }
-  if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx.spacedStar, roots);
+  if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx, roots);
   const segments: WordSegment[] = [];
   for (const part of parts) {
-    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx.spacedStar);
+    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx);
     pushSegmentRoots(roots, chunk);
     segments.push(...chunk);
   }
@@ -150,10 +150,15 @@ function expandArgument(
   return kept.length === 0 ? [QUOTED_EMPTY_SEGMENT] : kept;
 }
 
-function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
+function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, ctx: WordContext): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
-  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true });
+  return expander.expandParts([part], {
+    inDouble,
+    spacedStar: ctx.spacedStar,
+    ...(ctx.noSplit ? { noSplit: true } : {}),
+    inOperatorWord: true,
+  });
 }
 
 function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {
@@ -172,28 +177,33 @@ interface OperatorWordEntry {
 function expandUnquotedOperatorWord(
   expander: Expander,
   parts: WordPart[],
-  spacedStar: boolean,
+  ctx: WordContext,
   roots: string[]
 ): WordSegment[] {
   expander.checkTilde(parts, false);
-  const entries = collectOperatorWordEntries(expander, parts, spacedStar, roots);
+  const entries = collectOperatorWordEntries(expander, parts, ctx, roots);
   const ifs = expander.currentIfs();
-  if (ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
+  if (!ctx.noSplit && ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
     return joinOperatorWordFields(ifs, entries);
   }
   return entries.map(({ segment, keepsFields }) =>
-    isBreakSegment(segment) || segment.quoted || keepsFields ? segment : { ...segment, split: true }
+    isBreakSegment(segment) || segment.quoted || keepsFields || ctx.noSplit ? segment : { ...segment, split: true }
   );
 }
 
 function collectOperatorWordEntries(
   expander: Expander,
   parts: WordPart[],
-  spacedStar: boolean,
+  ctx: WordContext,
   roots: string[]
 ): OperatorWordEntry[] {
   const entries: OperatorWordEntry[] = [];
-  const itemCtx: WordContext = { inDouble: false, spacedStar, inOperatorWord: true };
+  const itemCtx: WordContext = {
+    inDouble: false,
+    spacedStar: ctx.spacedStar,
+    ...(ctx.noSplit ? { noSplit: true } : {}),
+    inOperatorWord: true,
+  };
   for (const part of parts) {
     const keepsFields = keepsOperatorFields(part);
     const expanded = expander.expandParts([part], itemCtx);
@@ -289,13 +299,12 @@ function defaultValue(
   ctx: WordContext,
   roots: string[]
 ): WordSegment[] {
-  if (kind === '-')
-    return expandArgument(expander, expansion.argument, { inDouble: ctx.inDouble, spacedStar: true }, false, roots);
+  if (kind === '-') return expandArgument(expander, expansion.argument, { ...ctx, spacedStar: true }, false, roots);
   if (kind === '?') return failRequireOperator(expander, shell, expansion.argument, colon, name, subscript);
   const word = expandArgument(
     expander,
     expansion.argument,
-    { inDouble: ctx.inDouble, spacedStar: false },
+    { inDouble: ctx.inDouble, spacedStar: false, noSplit: true },
     false,
     roots
   );

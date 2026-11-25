@@ -3,10 +3,12 @@
 export interface WordContext {
   readonly inDouble: boolean;
   readonly spacedStar: boolean;
+  readonly noSplit?: boolean;
   readonly inOperatorWord?: boolean;
 }
 
 export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };
+export const UNSPLIT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false, noSplit: true };
 
 export interface TextSegment {
   readonly kind: 'text';
