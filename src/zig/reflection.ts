@@ -288,6 +288,8 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { args } = expression;
     this.builtinArity(expression, 1);
     const type = this.compileType(args[0]);
+    // Zig lays out a container it reflects on, which checks its packed and extern fields.
+    if ((type.kind === 'struct' || type.kind === 'union') && !isComptimeOnly(type)) this.resolveStorage(type, args[0]);
     const info = this.langMember('Type', expression) as UnionType;
     return known(info, this.typeInfo(type, info, expression), expression);
   }

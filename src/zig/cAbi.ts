@@ -1,4 +1,3 @@
-import { bitSizeOf } from './layout';
 import type { Type } from './types';
 
 const C_INTEGER_BITS = new Set([8, 16, 32, 64, 128]);
@@ -34,9 +33,10 @@ export function cAbiType(type: Type, isReturn: boolean): boolean {
     case 'struct':
     case 'union': {
       // A packed type has a C ABI only through the backing integer that `packed struct(u8)` names, of a C width.
+      const backing = type.backingInteger;
       return (
         type.layout === 'extern' ||
-        (type.layout === 'packed' && type.namespace.syntax?.argument !== undefined && cInteger(bitSizeOf(type), false))
+        (type.layout === 'packed' && backing !== undefined && cInteger(backing.bits, backing.signed))
       );
     }
     default: {
