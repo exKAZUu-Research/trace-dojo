@@ -772,13 +772,11 @@ class ShellGrammarValidator {
     this.withBlock(open, () => {
       this.advance();
       const target = this.peek();
-      let allowsBraceBody = false;
+      let allowsBraceBody = true;
       if (this.hasOperator(target, '((') && open.value === 'for') {
         this.parseCStyleForHeader(open, target);
-        allowsBraceBody = true;
       } else {
-        const separated = this.parseWordListForHeader(target);
-        allowsBraceBody = open.value === 'for' && separated;
+        allowsBraceBody = this.parseWordListForHeader(target);
       }
       this.parseLoopBodyGroup(allowsBraceBody);
     });
