@@ -89,11 +89,12 @@ export abstract class VectorCompiler extends ReflectionCompiler {
     ) as bigint;
     if (length < 0n) this.error(lengthArg, `ベクトルの長さ ${length} は負の数です。`);
     const child = this.compileType(childArg);
+    const pointer = child.kind === 'optional' ? child.child : child;
     const scalar =
       child.kind === 'int' ||
       child.kind === 'float' ||
       child.kind === 'bool' ||
-      (child.kind === 'pointer' && child.size !== 'slice');
+      (pointer.kind === 'pointer' && pointer.size !== 'slice');
     if (!scalar)
       this.error(
         childArg,
