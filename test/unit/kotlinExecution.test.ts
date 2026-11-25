@@ -6823,6 +6823,18 @@ test("fails a sequence builder's iterator after its block throws or is resumed f
   });
 });
 
+test('returns from the lambdas of repeat and forEach that suspend by their implicit labels', () => {
+  const source = `fun main() {
+    val s = sequence {
+        repeat(4) { if (it == 1) return@repeat; if (it == 3) return@sequence; yield(it) }
+        yield(99)
+    }
+    println(s.toList())
+    println(sequence { listOf(1, 2, 3).forEach { if (it == 2) return@forEach; yield(it) } }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[0, 2]\n[1, 3]\n' });
+});
+
 test('stops single and joinToString on infinite sequences where kotlinc does', () => {
   const source = `fun main() {
     val naturals = generateSequence(1) { it + 1 }

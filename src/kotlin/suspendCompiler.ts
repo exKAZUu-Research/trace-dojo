@@ -880,7 +880,11 @@ export abstract class SuspendCompiler extends LocalCompiler {
       name: lambda.params?.[0]?.name ?? 'it',
       type: lambda.params?.[0]?.type as TypeRef | undefined,
     };
-    const body: Block = { row: lambda.row, endRow: lambda.endRow, statements: lambda.statements, isBraced: true };
+    // The lambda's label, written or the function's name, is the loop's, whose `return@repeat` goes on to its next turn.
+    const { callee } = call;
+    const label = lambda.label ?? (callee.kind === 'name' || callee.kind === 'member' ? callee.name : undefined);
+    const statements = (label ? returnsAsContinues(lambda.statements, label) : lambda.statements) as Statement[];
+    const body: Block = { row: lambda.row, endRow: lambda.endRow, statements, isBraced: true };
     const { row } = call;
     if (call.callee.kind === 'name') {
       const [count] = call.args;
@@ -892,14 +896,30 @@ export abstract class SuspendCompiler extends LocalCompiler {
         left: { kind: 'integer', row, text: '0', value: 0n, suffix: '' },
         right: count.value,
       };
-      return [{ kind: 'for', row, label: lambda.label, variable, iterable: range, body }];
+      return [{ kind: 'for', row, label, variable, iterable: range, body }];
     }
     if (call.callee.kind !== 'member') return undefined;
-    return [{ kind: 'for', row, label: lambda.label, variable, iterable: call.callee.receiver, body }];
+    return [{ kind: 'for', row, label, variable, iterable: call.callee.receiver, body }];
   }
 }
 
 type Eval = (frame: Frame) => Value;
+
+/**
+ * A lambda's code with each `return@label` that leaves the lambda replaced by the `continue@label` of the loop the
+ * lambda becomes; code that has a label of the same name of its own, a lambda or a call of the same function, keeps
+ * its returns.
+ */
+function returnsAsContinues(node: unknown, label: string): unknown {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map((each) => returnsAsContinues(each, label));
+  const expression = node as { kind?: string; label?: string; value?: unknown; callee?: { name?: string } };
+  if (expression.kind === 'return' && expression.label === label && expression.value === undefined)
+    return { kind: 'continue', row: (node as { row: number }).row, label };
+  if (expression.kind === 'lambda' && expression.label === label) return node;
+  if (expression.kind === 'call' && expression.callee?.name === label) return node;
+  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, returnsAsContinues(value, label)]));
+}
 
 /** A call with its receiver and arguments, which run in that order, replaced by what `inOrder` gives for them. */
 function withCallParts(
