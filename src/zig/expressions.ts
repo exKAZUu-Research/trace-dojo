@@ -2019,11 +2019,21 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // Initializers ----------------------------------------------------------------------------------------------------
 
+  /** Whether two values known at compile time are one value, as Zig interns them: a slice by its elements. */
+  private sameComptimeValue(type: Type, a: Value, b: Value): boolean {
+    if (!(type.kind === 'pointer' && type.size === 'slice' && a instanceof Slice && b instanceof Slice))
+      return valuesEqual(type, a, b, () => this.spendCompilation());
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index++)
+      if (!this.sameComptimeValue(type.child, a.get(index), b.get(index))) return false;
+    return true;
+  }
+
   /** A comptime field takes only its own value, which Zig checks where a literal gives it. */
   private checkComptimeField(compiled: TExpr, field: StructField, span: Span): void {
     const fact = staticResultOf(compiled);
     const expected = field.comptimeValue?.value;
-    if (!fact || !valuesEqual(field.type, fact.value, expected, () => this.spendCompilation()))
+    if (!fact || !this.sameComptimeValue(field.type, fact.value, expected))
       this.error(span, `comptime のフィールド「${field.name}」には、既定の値と同じ値しか入れられません。`);
   }
 
