@@ -524,7 +524,7 @@ readLn :: Read a => IO a
 readLn = getLine >>= readIO
 
 readIO :: Read a => String -> IO a
-readIO s = return () >>= \_ -> case [x | (x, t) <- reads s, ("", "") <- lex t] of
+readIO s = return () >>= \_ -> case [x | (x, t) <- reads s, onlySpaces t] of
   [x] -> return x
   [] -> ioError (userError "Prelude.readIO: no parse")
   _ -> ioError (userError "Prelude.readIO: ambiguous parse")

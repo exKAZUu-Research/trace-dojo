@@ -318,21 +318,27 @@ reads :: Read a => ReadS a
 reads = readsPrec 0
 
 read :: Read a => String -> a
-read s = case [x | (x, t) <- reads s, ("", "") <- lex t] of
+read s = case [x | (x, t) <- reads s, onlySpaces t] of
   [x] -> x
   [] -> errorWithoutStackTrace "Prelude.read: no parse"
   _ -> errorWithoutStackTrace "Prelude.read: ambiguous parse"
 
 readMaybe :: Read a => String -> Maybe a
-readMaybe s = case [x | (x, t) <- reads s, ("", "") <- lex t] of
+readMaybe s = case [x | (x, t) <- reads s, onlySpaces t] of
   [x] -> Just x
   _ -> Nothing
 
 readEither :: Read a => String -> Either String a
-readEither s = case [x | (x, t) <- reads s, ("", "") <- lex t] of
+readEither s = case [x | (x, t) <- reads s, onlySpaces t] of
   [x] -> Right x
   [] -> Left "Prelude.read: no parse"
   _ -> Left "Prelude.read: ambiguous parse"
+
+-- Whether what a parse leaves is only spaces, which is when lex gives it no token.
+onlySpaces :: String -> Bool
+onlySpaces t = case t of
+  [] -> True
+  (c:cs) -> isSpace c && onlySpaces cs
 
 readParen :: Bool -> ReadS a -> ReadS a
 readParen b g = if b then mandatory else optional
@@ -480,10 +486,28 @@ readSignedNumber conv neg r = direct r ++ paren r
                      ++ [(neg x, u) | ("-", t) <- lex s, (tok, u) <- lex t, Just x <- [conv tok]]
         paren s = [(x, u) | ("(", t) <- lex s, (x, t') <- direct t ++ paren t, (")", u) <- lex t']
 
+-- The parse of a plain decimal integer such as -12 after spaces and before a space, the end, or a closing bracket or
+-- comma, which the lexing parse gives as its only result, without lexing: reading input numbers is otherwise slow.
+readIntegral :: Num a => (String -> Maybe a) -> ReadS a
+readIntegral conv r = case plainNumber negate r of
+  Just parsed -> [parsed]
+  Nothing -> readSignedNumber conv negate r
+
+plainNumber :: Num a => (a -> a) -> String -> Maybe (a, String)
+plainNumber neg s = case plainDecimal s of
+  (True, negative, magnitude, rest) -> Just (if negative then neg (fromInteger magnitude) else fromInteger magnitude, rest)
+  _ -> Nothing
+
+plainDecimal :: String -> (Bool, Bool, Integer, String)
+plainDecimal = primitive "plainDecimal"
+
 convInteger :: String -> Maybe Integer
 convInteger tok = case convBased tok of
   Just n -> Just n
-  Nothing -> if not (null tok) && all isDigit tok then Just (readDecimal tok) else Nothing
+  Nothing -> if not (null tok) && allDigits tok then Just (readDecimal tok) else Nothing
+  where allDigits str = case str of
+          [] -> True
+          (c:cs) -> isDigit c && allDigits cs
 
 -- A hexadecimal, octal, or binary token such as 0x1F, which GHC's Read accepts for every number type.
 convBased :: String -> Maybe Integer
@@ -513,13 +537,13 @@ convFractional tok = case tok of
       _ -> Nothing
 
 instance Read Int where
-  readsPrec _ = readSignedNumber (fmap fromInteger . convInteger) negate
+  readsPrec _ = readIntegral (fmap fromInteger . convInteger)
 
 instance Read Integer where
-  readsPrec _ = readSignedNumber convInteger negate
+  readsPrec _ = readIntegral convInteger
 
 instance Read Word where
-  readsPrec _ = readSignedNumber (fmap fromInteger . convInteger) negate
+  readsPrec _ = readIntegral (fmap fromInteger . convInteger)
 
 instance (Integral a, Read a) => Read (Ratio a) where
   readsPrec p = readParen (p > 7) (\r -> [(x % y, u) | (x, s) <- readsPrec 8 r, ("%", t) <- lex s, (y, u) <- readsPrec 8 t])

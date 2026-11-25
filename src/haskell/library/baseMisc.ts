@@ -130,9 +130,7 @@ isPrint c = case generalCategory c of
   _ -> True
 
 isSpace :: Char -> Bool
-isSpace c =
-  let uc = ord c
-  in if uc <= 0x377 then uc == 32 || (uc >= 9 && uc <= 13) || uc == 0xa0 else generalCategory c == Space
+isSpace = primitive "isSpace"
 
 isUpper :: Char -> Bool
 isUpper c = case generalCategory c of

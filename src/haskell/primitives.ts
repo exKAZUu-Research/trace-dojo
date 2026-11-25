@@ -89,6 +89,36 @@ export function forceString(slot: Slot, runtime: Runtime): string {
   return text;
 }
 
+/**
+ * The decimal integer a string starts with, after ASCII spaces and an optional `-`, when the character after its
+ * digits cannot continue a number's lexeme (the end, a space, `)`, `]` or `,`); reads only the cells up to it.
+ */
+function plainDecimal(text: Slot, runtime: Runtime): { negative: boolean; magnitude: bigint; rest: Slot } | undefined {
+  let rest = text;
+  let cell = runtime.machine.force(rest) as ConValue;
+  const charOf = (): string | undefined =>
+    cell.con === CONS_CON ? (runtime.machine.force(cell.fields[0]) as string) : undefined;
+  const advance = (): void => {
+    rest = cell.fields[1];
+    cell = runtime.machine.force(rest) as ConValue;
+    runtime.spend();
+  };
+  while (charOf() !== undefined && ASCII_SPACE.test(charOf() as string)) advance();
+  const negative = charOf() === '-';
+  if (negative) advance();
+  let digits = '';
+  for (let char = charOf(); char !== undefined && char >= '0' && char <= '9'; char = charOf()) {
+    digits += char;
+    advance();
+  }
+  const next = charOf();
+  if (digits === '' || (next !== undefined && !ASCII_SPACE.test(next) && !')],'.includes(next))) return undefined;
+  return { negative, magnitude: BigInt(digits), rest };
+}
+
+/** The characters `isSpace` holds for below U+0080. */
+const ASCII_SPACE = /^[\t\n\v\f\r ]$/;
+
 function haskellError(message: string): HaskellException {
   return new HaskellException(message);
 }
@@ -582,6 +612,11 @@ const CATEGORY_PATTERNS: [string, RegExp][] = [
   ['Co', /\p{Co}/u],
 ];
 
+/** GHC's `isSpace`: the ASCII control spaces and the characters of category Zs, unlike JavaScript's `\s`. */
+strict('isSpace', 1, ([a]) => bool(HASKELL_SPACE.test(a as string)));
+
+const HASKELL_SPACE = /^[\t\n\v\f\r\p{Zs}]$/u;
+
 /** GHC's `generalCategory` as the index of its constructor in `GeneralCategory`. */
 strict('generalCategory', 1, ([a]) => {
   const char = a as string;
@@ -657,6 +692,12 @@ strict('toTitle', 1, ([a]) => {
 // Showing and reading numbers
 
 define('readDecimal', 1, [], ([text], runtime) => BigInt(forceString(text, runtime)));
+define('plainDecimal', 1, [], ([text], runtime) => {
+  const plain = plainDecimal(text, runtime);
+  return plain
+    ? tuple(bool(true), bool(plain.negative), plain.magnitude, plain.rest)
+    : tuple(bool(false), bool(false), 0n, text);
+});
 define('readFloatText', 1, [], ([text], runtime) => {
   const parts = decimalParts(forceString(text, runtime));
   return tuple(...decimalRatio(parts, runtime));
