@@ -2008,6 +2008,10 @@ export abstract class ExpressionCompiler extends SemaBase {
     read: (value: Value) => Value[];
   } {
     const type = operand.type;
+    // `++` takes no vector, which Zig does not count as indexable.
+    const target = type.kind === 'pointer' ? type.child : type;
+    if (target.kind === 'array' && target.isVector === true)
+      return this.error(span, `${typeName(type)} 型は ++ でつなげられません。`);
     if (type.kind === 'array') {
       return {
         child: type.child,
