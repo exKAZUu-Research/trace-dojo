@@ -6491,6 +6491,18 @@ fun main() { println(use(${reference})) }`;
   expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
 });
 
+test('calls values through invoke operators declared as extensions', () => {
+  const source = `class A(val n: Int)
+operator fun A.invoke(x: Int): Int = n + x
+operator fun String.invoke(k: Int) = repeat(k)
+fun main() {
+    val a = A(1)
+    println(a(2))
+    println("ab"(2))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '3\nabab\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

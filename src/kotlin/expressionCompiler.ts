@@ -1212,7 +1212,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const local =
       variable &&
       typeArgs.length === 0 &&
-      (resolved(variable.type).kind === 'function' || this.hasInvokeOperator(resolved(variable.type)))
+      (resolved(variable.type).kind === 'function' || this.hasInvokeOperator(scope, resolved(variable.type)))
         ? this.tryLocalFunction(scope, context, variable, args, hasTrailingLambda, row)
         : undefined;
     if (local && !(local instanceof CompileError)) return local;
@@ -1620,12 +1620,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const local = this.extensionFunctionCandidates(this.localFunctions(scope, name), receiver.type);
     if (local.length > 0) levels.push({ candidates: local, receiver });
     for (const dispatch of this.receiversOf(scope)) {
-      const candidates = this.memberCandidates(this.receiverTypeOf(dispatch), name)
-        .filter(({ symbol, substitution }) => {
-          const declared = symbol.extensionReceiver && substitute(symbol.extensionReceiver, substitution);
-          return declared !== undefined && matchExtensionReceiver(symbol.typeParameters, declared, receiver.type);
-        })
-        .map((candidate): Candidate => ({ ...candidate, kind: 'extension', receiverType: receiver.type, dispatch }));
+      const candidates = this.memberExtensionCandidates(dispatch, name, receiver.type);
       if (candidates.length > 0) levels.push({ candidates, receiver });
     }
     const properties = this.topLevelProperties(name, true);
@@ -1641,6 +1636,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (topLevelValue) levels.push({ functionValues: [topLevelValue] });
     }
     return levels;
+  }
+
+  /** The member extensions an implicit receiver's class declares for a receiver of the type, as `with(b) { 3.f() }` calls. */
+  private memberExtensionCandidates(dispatch: ReceiverSymbol, name: string, receiverType: KType): Candidate[] {
+    return this.memberCandidates(this.receiverTypeOf(dispatch), name)
+      .filter(({ symbol, substitution }) => {
+        const declared = symbol.extensionReceiver && substitute(symbol.extensionReceiver, substitution);
+        return declared !== undefined && matchExtensionReceiver(symbol.typeParameters, declared, receiverType);
+      })
+      .map((candidate): Candidate => ({ ...candidate, kind: 'extension', receiverType, dispatch }));
   }
 
   private extensionValueCandidate(
@@ -1861,11 +1866,18 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  /** Whether values of the type can be called as functions, through an `operator fun invoke`. */
-  protected hasInvokeOperator(type: KType): boolean {
+  /** Whether values of the type can be called as functions, through an `operator fun invoke` member or extension. */
+  protected hasInvokeOperator(scope: Scope, type: KType): boolean {
+    if (type.kind !== 'class') return false;
     return (
-      type.kind === 'class' &&
-      this.membersOf<FunctionSymbol>(type, 'invoke', 'function').some(({ symbol }) => symbol.isOperator)
+      this.membersOf<FunctionSymbol>(type, 'invoke', 'function').some(isOperator) ||
+      this.extensionFunctionCandidates(this.localFunctions(scope, 'invoke'), type).some(isOperator) ||
+      this.receiversOf(scope).some((dispatch) =>
+        this.memberExtensionCandidates(dispatch, 'invoke', type).some(isOperator)
+      ) ||
+      this.topLevelFunctions('invoke', true).some((level) =>
+        this.extensionFunctionCandidates(level, type).some(isOperator)
+      )
     );
   }
 
@@ -1884,7 +1896,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     void hasTrailingLambda;
     const type = resolved(functionValue.type);
-    if (type.kind === 'class' && !type.nullable && this.hasInvokeOperator(type)) {
+    if (type.kind === 'class' && !type.nullable && this.hasInvokeOperator(scope, type)) {
       if (explicitReceiver) return this.error(row, `${typeToString(type)} の値は呼び出せません。`);
       return this.compileMethodCall(
         scope,
@@ -2526,6 +2538,10 @@ const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arr
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 
 /** `s.isNullOrEmpty()` and `s.isNullOrBlank()` are false only for a receiver that is not null, as their contracts say. */
+function isOperator({ symbol }: { symbol: FunctionSymbol }): boolean {
+  return symbol.isOperator;
+}
+
 function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined): Compiled['narrowing'] {
   const { symbol } = call;
   const isNullCheck = symbol.isLibrary && (symbol.name === 'isNullOrEmpty' || symbol.name === 'isNullOrBlank');
