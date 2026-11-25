@@ -1189,7 +1189,8 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(expression, '実行時に呼ばれる関数は、コンパイルのときに実行するブロックの中から return できません。');
     const fn = this.currentFn(expression);
     const { target, returnType } = fn;
-    if (expression.value?.kind === 'container' && fn.typeName) {
+    // A type function names the container it returns after its call, as `main.List(i32)`.
+    if (expression.value?.kind === 'container' && fn.typeName && returnType.kind === 'type') {
       const type = known(TYPE, this.containerType(expression.value, fn.typeName), expression.value);
       return () => new Jump('return', target, type.value, TYPE);
     }
