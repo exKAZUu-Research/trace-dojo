@@ -87,9 +87,11 @@ export class Expander {
 
   /** Expands an assignment's subscript in a declaration word (`a[k]=v`), joining list breaks with `IFS` or a space. */
   expandAssignmentSubscript(word: Word): string {
+    const breakJoiner = this.ifsJoiner() || ' ';
     return this.joinSegments(
       this.expandParts(word.parts, { inDouble: false, spacedStar: true }),
-      this.ifsJoiner() || ' '
+      breakJoiner,
+      breakJoiner
     );
   }
 
@@ -671,13 +673,13 @@ export class Expander {
 
   // ---------------------------------------------------------------- splitting & joining
 
-  joinSegments(segments: readonly WordSegment[], listBreakJoiner = ' '): string {
+  joinSegments(segments: readonly WordSegment[], listBreakJoiner = ' ', starBreakJoiner = this.ifsJoiner()): string {
     let text = '';
     const spend = (cost?: number): void => this.spend(cost);
     for (const segment of segments) {
       if (segment.kind === 'emptyList') continue;
       const chunk =
-        segment.kind === 'break' ? (segment.breakKind === 'star' ? this.ifsJoiner() : listBreakJoiner) : segment.text;
+        segment.kind === 'break' ? (segment.breakKind === 'star' ? starBreakJoiner : listBreakJoiner) : segment.text;
       text = appendBounded(text, chunk, spend);
     }
     return text;
