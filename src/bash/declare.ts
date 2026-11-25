@@ -489,7 +489,9 @@ function executeScalarOrElementOperand(
   onMaterialize?: () => void
 ): boolean {
   const isSubscripted = op.subscriptWord !== undefined || op.subscriptText !== undefined;
-  if (!isIdentifier(op.name)) {
+  const rejectsSubscriptWithoutValue =
+    isSubscripted && op.value === undefined && (builtin === 'readonly' || builtin === 'export');
+  if (!isIdentifier(op.name) || rejectsSubscriptWithoutValue) {
     return shell.failures.handleStoreFailure(
       'declarationOperand',
       { ok: false, reason: 'invalidIdentifier', message: `\`${op.rawText}': not a valid identifier` },
@@ -537,11 +539,11 @@ function executeUnsubscriptedDeclaration(
   const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
   if (targetName === undefined) return false;
   const priorView = priorDestinationView(shell, targetName, intent);
-  if (builtin === 'readonly' && op.value === undefined && priorView?.attributes.has('r')) return true;
   const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
-  const declaredArrayKind = set.has('A') ? 'associative' : set.has('a') ? 'indexed' : undefined;
+  const effectiveSet = builtin === 'readonly' && op.value === undefined ? new Set<string>(['r']) : set;
+  const declaredArrayKind = effectiveSet.has('A') ? 'associative' : effectiveSet.has('a') ? 'indexed' : undefined;
   const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, declaredArrayKind);
-  if (!applyPreWriteAttributes(shell, builtin, selected.cell, set, op.value === undefined)) return false;
+  if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return false;
   if (op.value !== undefined) {
     const outcome = shell.store.writeScalar(
       selected.cell,
@@ -552,7 +554,7 @@ function executeUnsubscriptedDeclaration(
     );
     if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
   }
-  return finalizeDeclaredCell(shell, builtin, selected.cell, set, wasMaterialized, onMaterialize);
+  return finalizeDeclaredCell(shell, builtin, selected.cell, effectiveSet, wasMaterialized, onMaterialize);
 }
 
 function resolveUnsubscriptedDeclareTarget(
