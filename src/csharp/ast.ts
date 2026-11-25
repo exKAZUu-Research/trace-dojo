@@ -1,3 +1,5 @@
+import type { BuildOptions } from './preprocessor';
+
 /** The syntax tree of a C# program, converted from tree-sitter's tree with stage C and D syntax already rejected. */
 
 /** Where a node starts, by 0-based row and column, which diagnostics and steps refer to. */
@@ -10,6 +12,8 @@ export type TypeNode =
   | ({ kind: 'predefinedType'; name: string } & Position)
   | ({ kind: 'namedType'; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'qualifiedType'; left: TypeNode; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  /** A name qualified by a namespace alias, as `global::System` or `G::List<int>`. */
+  | ({ kind: 'aliasQualifiedType'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'arrayType'; element: TypeNode; rank: number } & Position)
   | ({ kind: 'nullableType'; inner: TypeNode } & Position)
   | ({ kind: 'tupleType'; elements: { type: TypeNode; name: string | undefined }[] } & Position)
@@ -44,7 +48,9 @@ export interface Modifiers {
 export interface Parameter extends Position {
   name: string;
   type: TypeNode | undefined;
-  modifier: 'ref' | 'out' | 'in' | 'params' | 'this' | undefined;
+  modifier: 'ref' | 'out' | 'in' | 'params' | undefined;
+  /** Whether the parameter is an extension method's receiver (`this int x`). */
+  isThis: boolean;
   defaultValue: Expression | undefined;
 }
 
@@ -118,6 +124,7 @@ export type Expression =
   | ({ kind: 'interpolated'; parts: InterpolationPart[] } & Position)
   | ({ kind: 'name'; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'predefinedTypeName'; name: string } & Position)
+  | ({ kind: 'aliasQualified'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'this' } & Position)
   | ({ kind: 'base' } & Position)
   | ({
@@ -403,9 +410,11 @@ export interface NamespaceDeclaration extends Position {
   members: (TypeDeclaration | NamespaceDeclaration)[];
 }
 
-export interface UsingDirective extends Position {
-  name: string[];
-}
+export type UsingDirective = (
+  | { kind: 'namespace'; name: TypeNode }
+  | { kind: 'static'; name: TypeNode }
+  | { kind: 'alias'; alias: string; name: TypeNode }
+) & { isGlobal: boolean } & Position;
 
 export interface CompilationUnit {
   usings: UsingDirective[];
@@ -414,4 +423,6 @@ export interface CompilationUnit {
   members: (TypeDeclaration | NamespaceDeclaration)[];
   /** The rows of `// atomic` annotations, which the trace uses. */
   sourceRows: number;
+  /** The compiler options that the program's `#:property` directives set; the library has none. */
+  options?: BuildOptions;
 }

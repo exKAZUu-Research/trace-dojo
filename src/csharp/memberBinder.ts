@@ -15,6 +15,7 @@ import {
   ERROR_TYPE,
   FieldSymbol,
   isReferenceType,
+  isValueType,
   LocalSymbol,
   type MethodSymbol,
   type NamedType,
@@ -304,9 +305,14 @@ export abstract class MemberBinder extends CallBinder {
     const inaccessibleType = this.inaccessibleNestedType;
     const parameter = typeArgs ? undefined : typeParameterNamed(name, typeContext);
     if (parameter) return { kind: 'typeRef', type: parameter, row: position.row };
+    const alias = typeArgs ? undefined : typeContext.aliases?.get(name);
+    if (alias?.kind === 'type') return { kind: 'typeRef', type: alias.type, row: position.row };
+    if (alias) return { kind: 'namespaceRef', path: alias.path, namespaces: alias.namespaces, row: position.row };
     const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
     if (symbol)
       return { kind: 'typeRef', type: this.construct(position, symbol, resolvedTypeArgs ?? []), row: position.row };
+    const imported = this.bindStaticImport(name, resolvedTypeArgs, isCallee, position, context);
+    if (imported) return imported;
     const namespaces = this.namespacesAt([name]);
     if (namespaces.length > 0 && !typeArgs)
       return { kind: 'namespaceRef', path: [name], namespaces, row: position.row };
@@ -321,6 +327,85 @@ export abstract class MemberBinder extends CallBinder {
     }
     this.reportUndefinedName(name, position);
     return { kind: 'default', type: ERROR_TYPE, row: position.row };
+  }
+
+  /**
+   * Binds a static member that `using static` imports: the methods of every imported type join one method group, and
+   * extension methods stay out of it, as C# spec §14.5.4 says.
+   */
+  private bindStaticImport(
+    name: string,
+    typeArgs: Type[] | undefined,
+    isCallee: boolean,
+    position: Position,
+    context: BindContext
+  ): BindResult | undefined {
+    const typeContext = context.fn.typeContext;
+    const candidates: MethodCandidate[] = [];
+    for (const type of typeContext.staticUsings ?? []) {
+      const { found } = this.lookupMember(type, name, typeContext, typeArgs?.length ?? 0, isCallee);
+      if (!found) continue;
+      if (found.kind === 'methods') {
+        candidates.push(
+          ...found.candidates.filter((candidate) => candidate.method.isStatic && !candidate.method.isExtension)
+        );
+        continue;
+      }
+      if (candidates.length > 0) continue;
+      if (found.kind === 'type')
+        return {
+          kind: 'typeRef',
+          type: this.construct(position, found.symbol, [...found.outerArgs, ...(typeArgs ?? [])]),
+          row: position.row,
+        };
+      const isStatic = found.kind === 'field' ? found.field.isStatic || found.field.isConst : found.property.isStatic;
+      if (isStatic) return this.memberAccessOn(undefined, found, position, context);
+    }
+    if (candidates.length === 0) return undefined;
+    return {
+      kind: 'methodGroup',
+      name,
+      candidates,
+      receiver: undefined,
+      isSimpleName: true,
+      typeArgs,
+      extensions: [],
+      isBaseAccess: false,
+      row: position.row,
+    };
+  }
+
+  /** Binds `alias::name`, which names a type or a namespace in the namespace the alias names. */
+  protected bindAliasQualified(
+    node: Extract<Expression, { kind: 'aliasQualified' }>,
+    context: BindContext
+  ): BindResult {
+    const typeContext = context.fn.typeContext;
+    const outer = this.aliasNamespaces(node.alias, node, typeContext);
+    if (!outer) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    const typeArgs = node.typeArgs?.map((arg) => this.resolveType(arg, typeContext)) ?? [];
+    for (const namespace of outer.namespaces) {
+      const type = namespace.findType(node.name, typeArgs.length);
+      if (type) return { kind: 'typeRef', type: this.construct(node, type, typeArgs), row: node.row };
+    }
+    const path = [...outer.path, node.name];
+    const namespaces = this.namespacesAt(path);
+    if (namespaces.length > 0 && !node.typeArgs) return { kind: 'namespaceRef', path, namespaces, row: node.row };
+    return {
+      kind: 'typeRef',
+      type: this.resolveType(
+        {
+          kind: 'aliasQualifiedType',
+          alias: node.alias,
+          name: node.name,
+          typeArgs: node.typeArgs,
+          row: node.row,
+          column: node.column,
+        },
+        typeContext
+      ),
+      row: node.row,
+    };
   }
 
   /** Binds a name that a local scope declares: a local, a local function, or a query's range variable. */
@@ -1190,12 +1275,16 @@ export abstract class MemberBinder extends CallBinder {
       this.diagnostics.length = saved;
     }
     const receiver = group.receiver as BoundExpression;
+    const isVariable =
+      ['local', 'field', 'staticField', 'element'].includes(receiver.kind) ||
+      (receiver.kind === 'this' && isValueType(receiver.type));
     const receiverArg: ArgumentInfo = {
       expression: receiver,
       name: undefined,
       refKind: undefined,
       row: receiver.row,
-      target: undefined,
+      target: isVariable ? (receiver as BoundLValue) : undefined,
+      isReceiver: true,
     };
     const resolved = this.resolveCall(group.extensions, [receiverArg, ...args], group.typeArgs, node.row, {
       ...description,

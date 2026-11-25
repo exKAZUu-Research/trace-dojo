@@ -50,15 +50,12 @@ const UNSUPPORTED_STATEMENTS: Record<string, string> = {
   unsafe_statement: '`unsafe` ブロック',
   using_statement: '`using` 文',
   yield_statement: '`yield` 文',
-  preproc_if: 'プリプロセッサ ディレクティブ（`#if` など）',
 };
 
 const UNSUPPORTED_DECLARATIONS: Record<string, string> = {
   conversion_operator_declaration: '変換演算子（`implicit operator`・`explicit operator`）の宣言',
   event_declaration: '`add`・`remove` を書いたイベントの宣言',
   extension_declaration: '拡張ブロック（`extension(...)`）',
-  conditional_method_declaration: 'プリプロセッサ ディレクティブ（`#if` など）',
-  preproc_if: 'プリプロセッサ ディレクティブ（`#if` など）',
 };
 
 const MODIFIERS: ReadonlySet<string> = new Set<Modifier>([
@@ -216,12 +213,11 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertUsing(node: Node): UsingDirective {
-    if (hasToken(node, 'static')) unsupported(node, '`using static`');
-    if (hasToken(node, 'global')) unsupported(node, '`global using`');
-    if (field(node, 'name') || hasToken(node, '=')) unsupported(node, '`using` による別名');
-    if (hasToken(node, 'unsafe')) unsupported(node, '`unsafe`');
-    const [nameNode] = namedChildren(node);
-    return { name: qualifiedNameParts(nameNode), ...positionOf(node) };
+    const aliasNode = field(node, 'name');
+    const target = namedChildren(node).find((child) => !sameNode(child, aliasNode)) as Node;
+    const common = { name: this.convertType(target), isGlobal: hasToken(node, 'global'), ...positionOf(node) };
+    if (aliasNode) return { kind: 'alias', alias: aliasNode.text, ...common };
+    return { kind: hasToken(node, 'static') ? 'static' : 'namespace', ...common };
   }
 
   private convertFileScopedNamespace(node: Node): NamespaceDeclaration {
@@ -280,15 +276,7 @@ export class Converter extends ExpressionConverter {
           },
         ]);
       }
-      case 'shebang_directive': {
-        return unsupported(node, '`#!` の行');
-      }
-      case 'file_directive': {
-        return unsupported(node, '`#:` ディレクティブ');
-      }
       default: {
-        if (node.type.startsWith('preproc_'))
-          unsupported(node, 'プリプロセッサ ディレクティブ（`#region`・`#if` など）');
         if (node.type === 'global_statement') {
           throw new CompileError([
             {
@@ -376,13 +364,11 @@ export class Converter extends ExpressionConverter {
     }
     for (const child of namedChildren(node)) {
       if (child.type === 'argument_list') declaration.baseArguments = this.convertArguments(child);
-      else if (child.type === 'preproc_if') unsupported(child, 'プリプロセッサ ディレクティブ（`#if` など）');
       else declaration.bases.push(this.convertType(child));
     }
   }
 
   private convertEnumMember(node: Node): EnumMember {
-    if (node.type !== 'enum_member_declaration') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
     this.rejectAttributes(node);
     const valueNode = field(node, 'value');
     return {
@@ -550,8 +536,6 @@ export class Converter extends ExpressionConverter {
         return [this.convertTypeDeclaration(node)];
       }
       default: {
-        if (node.type.startsWith('preproc_'))
-          unsupported(node, 'プリプロセッサ ディレクティブ（`#region`・`#if` など）');
         if (owner.typeKind === 'interface') unsupported(node, 'この宣言');
         throw new CompileError([
           {
@@ -655,14 +639,13 @@ export class Converter extends ExpressionConverter {
           name: nameNode.text,
           type: this.convertType(typeNode),
           modifier: 'params',
+          isThis: false,
           defaultValue: undefined,
           ...positionOf(nameNode),
         });
         index += 2;
       } else if (child.type === 'attribute_list') {
         unsupported(child, '属性');
-      } else if (child.isNamed && child.type.startsWith('preproc')) {
-        unsupported(child, 'プリプロセッサ ディレクティブ（`#if` など）');
       }
     }
     return parameters;
@@ -675,9 +658,8 @@ export class Converter extends ExpressionConverter {
       .map((child) => child.text);
     let modifier: Parameter['modifier'];
     for (const text of modifiers) {
-      if (text === 'this' && !this.isLibrary) unsupported(node, '拡張メソッド（`this` 引数）');
       if (text === 'scoped' || text === 'readonly') unsupported(node, `\`${text}\` 引数`);
-      if (['ref', 'out', 'in', 'params', 'this'].includes(text)) modifier = text as Parameter['modifier'];
+      if (['ref', 'out', 'in', 'params'].includes(text)) modifier = text as Parameter['modifier'];
     }
     const typeNode = field(node, 'type');
     // The grammar lets a parameter omit its type for lambdas, whose parameters convertLambda takes instead; Roslyn
@@ -690,6 +672,7 @@ export class Converter extends ExpressionConverter {
       name: requiredField(node, 'name').text,
       type: this.convertType(typeNode),
       modifier,
+      isThis: modifiers.includes('this'),
       defaultValue: defaultNode ? this.convertExpression(defaultNode) : undefined,
       ...positionOf(node),
     };
@@ -716,9 +699,7 @@ export class Converter extends ExpressionConverter {
   }
 
   private rejectAttributes(node: Node): void {
-    const attributes = namedChildren(node).find(
-      (child) => child.type === 'attribute_list' || child.type === 'preproc_if_in_attribute_list'
-    );
+    const attributes = namedChildren(node).find((child) => child.type === 'attribute_list');
     if (attributes) unsupported(attributes, '属性');
   }
 
@@ -813,8 +794,6 @@ export class Converter extends ExpressionConverter {
       default: {
         const what = UNSUPPORTED_STATEMENTS[node.type];
         if (what) unsupported(node, what);
-        if (node.type.startsWith('preproc_'))
-          unsupported(node, 'プリプロセッサ ディレクティブ（`#region`・`#if` など）');
         throw new CompileError([
           { row: node.startPosition.row, message: `CS1525: '${node.text.split(/\s/)[0]}' は無効です` },
         ]);
@@ -975,8 +954,6 @@ export class Converter extends ExpressionConverter {
     let pendingLabels: SwitchLabel[] = [];
     let pendingPosition: ReturnType<typeof positionOf> | undefined;
     for (const sectionNode of namedChildren(body)) {
-      if (sectionNode.type !== 'switch_section')
-        unsupported(sectionNode, 'プリプロセッサ ディレクティブ（`#if` など）');
       const { labels, statements } = this.convertSwitchSection(sectionNode);
       pendingLabels.push(...labels);
       pendingPosition ??= positionOf(sectionNode);
@@ -1063,7 +1040,8 @@ function qualifiedNameParts(node: Node): string[] {
       ...qualifiedNameParts(requiredField(node, 'name')),
     ];
   }
-  if (node.type === 'alias_qualified_name') unsupported(node, '`global::` などの別名で修飾した名前');
+  if (node.type === 'alias_qualified_name')
+    throw new CompileError([{ row: node.startPosition.row, message: 'CS7000: エイリアス名の予期しない使用方法です' }]);
   return unsupported(node, 'この名前');
 }
 

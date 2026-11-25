@@ -36,7 +36,6 @@ import {
 
 /** The syntax of each stage C or D expression node, named for learners. */
 const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  alias_qualified_name: '`global::` などの別名で修飾した名前',
   anonymous_method_expression: '`delegate` による匿名メソッド',
   checked_expression: '`checked`・`unchecked` 式',
   makeref_expression: '`__makeref`',
@@ -49,11 +48,9 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   await_expression: '`await`',
   stackalloc_expression: '`stackalloc`',
   implicit_stackalloc_expression: '`stackalloc`',
-  preproc_if: 'プリプロセッサ ディレクティブ（`#if` など）',
 };
 
 const UNSUPPORTED_TYPES: Record<string, string> = {
-  alias_qualified_name: '`global::` などの別名で修飾した名前',
   pointer_type: 'ポインター型',
   function_pointer_type: '関数ポインター型',
   ref_type: '`ref` 型',
@@ -116,6 +113,9 @@ export class ExpressionConverter {
         }
         return type;
       }
+      case 'alias_qualified_name': {
+        return { kind: 'aliasQualifiedType', ...this.aliasQualifiedParts(node), ...position };
+      }
       case 'nullable_type': {
         return { kind: 'nullableType', inner: this.convertType(requiredField(node, 'type')), ...position };
       }
@@ -132,6 +132,13 @@ export class ExpressionConverter {
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1031: 型が必要です' }]);
       }
     }
+  }
+
+  protected aliasQualifiedParts(node: Node): { alias: string; name: string; typeArgs: TypeNode[] | undefined } {
+    const nameNode = requiredField(node, 'name');
+    const [name, typeArgs] =
+      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
+    return { alias: requiredField(node, 'alias').text, name, typeArgs };
   }
 
   protected genericParts(node: Node): [string, TypeNode[]] {
@@ -179,6 +186,9 @@ export class ExpressionConverter {
       }
       case 'predefined_type': {
         return { kind: 'predefinedTypeName', name: node.text, ...position };
+      }
+      case 'alias_qualified_name': {
+        return { kind: 'aliasQualified', ...this.aliasQualifiedParts(node), ...position };
       }
       case 'this': {
         return { kind: 'this', ...position };
@@ -435,7 +445,6 @@ export class ExpressionConverter {
       default: {
         const what = UNSUPPORTED_EXPRESSIONS[node.type];
         if (what) unsupported(node, what);
-        if (node.type === 'unary_expression') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
       }
     }
@@ -488,7 +497,6 @@ export class ExpressionConverter {
 
   protected convertArgument(node: Node): Argument {
     if (node.type !== 'argument') {
-      if (node.type === 'preproc_if') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
       return {
         name: undefined,
         modifier: undefined,
@@ -622,7 +630,6 @@ export class ExpressionConverter {
 
   private convertCollectionElement(node: Node): CollectionElement {
     const [element] = namedChildren(node);
-    if (!element) unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
     const [value] = namedChildren(element);
     return { spread: element.type === 'spread_element', value: this.convertExpression(value), ...positionOf(node) };
   }

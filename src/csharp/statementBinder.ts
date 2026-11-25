@@ -1160,6 +1160,8 @@ export abstract class StatementBinder extends PatternBinder {
     this.methodContexts.set(method, typeContext);
     method.returnType = this.resolveType(declaration.returnType, typeContext);
     method.parameters = this.resolveParameters(declaration.parameters, typeContext, undefined);
+    if (declaration.parameters.some((parameter) => parameter.isThis))
+      this.error(declaration, 'CS1106', '拡張メソッドは、非ジェネリック静的クラスで定義される必要があります');
     if (context.scope.localFunctions.has(declaration.name) || context.scope.variables.has(declaration.name)) {
       this.error(
         declaration,

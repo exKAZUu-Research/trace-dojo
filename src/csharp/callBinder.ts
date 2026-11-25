@@ -40,6 +40,8 @@ export interface ArgumentInfo {
   isOutVar?: boolean;
   /** The argument's source text. */
   text?: string;
+  /** Whether the argument is the receiver of an extension method call, which a `ref this` parameter takes by reference. */
+  isReceiver?: boolean;
 }
 
 /** A candidate that the arguments fit, with how each argument maps to its parameters. */
@@ -308,6 +310,8 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   private argumentFits(arg: ArgumentInfo, type: Type, refKind: 'ref' | 'out' | 'in' | undefined): boolean {
+    if (arg.isReceiver && refKind === 'ref')
+      return arg.target !== undefined && (sameType(arg.expression.type, type) || arg.expression.type.kind === 'error');
     if (refKind === 'ref' || refKind === 'out') {
       if (arg.refKind !== refKind) return false;
       if (arg.isOutVar) return true;
@@ -1142,6 +1146,7 @@ export abstract class CallBinder extends OperatorBinder {
     position: number
   ): boolean {
     if (
+      arg.isReceiver ||
       parameter.refKind === arg.refKind ||
       (parameter.refKind !== 'ref' && parameter.refKind !== 'out' && arg.refKind !== 'ref' && arg.refKind !== 'out')
     )

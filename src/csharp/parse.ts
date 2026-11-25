@@ -5,19 +5,19 @@ import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAn
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { CompilationUnit } from './ast';
 import { Converter } from './convert';
+import { preprocess } from './preprocessor';
 
 const parser = await loadParser('@willbooster/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm');
 
 /** Parses a C# source file, throwing a `CompileError` for invalid or unsupported syntax. */
 export function parseCSharp(source: string, isLibrary = false): CompilationUnit {
+  const { text, options } = isLibrary ? { text: source, options: undefined } : preprocess(source);
   return parseSource(
     parser,
-    parenthesizeExpressionStatements(source),
+    parenthesizeExpressionStatements(text),
     MISSING_TOKEN_NAMES,
-    (root) => new Converter(isLibrary).convertCompilationUnit(root),
-    {
-      locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors),
-    }
+    (root) => ({ ...new Converter(isLibrary).convertCompilationUnit(root), options }),
+    { locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors) }
   );
 }
 

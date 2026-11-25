@@ -69,9 +69,45 @@ const KEYWORD_TYPES: Record<string, SpecialType | 'void'> = {
 export interface TypeContext {
   namespace: NamespaceSymbol[];
   usings: NamespaceSymbol[][];
+  /** The `using` aliases in scope. */
+  aliases?: ReadonlyMap<string, UsingAlias>;
+  /** The types whose static members `using static` imports. */
+  staticUsings?: readonly NamedType[];
   type: TypeSymbol | undefined;
   /** The type parameters of the enclosing methods, innermost last. */
   methodTypeParameters: TypeParameterSymbol[];
+}
+
+/** What a `using` alias names: a type, or a namespace by its path. */
+export type UsingAlias =
+  | { kind: 'type'; type: Type }
+  | { kind: 'namespace'; path: string[]; namespaces: NamespaceSymbol[] };
+
+/** The names that `using` directives bring into scope. */
+export interface Imports {
+  usings: NamespaceSymbol[][];
+  aliases: ReadonlyMap<string, UsingAlias>;
+  staticUsings: readonly NamedType[];
+}
+
+/** Imports of an inner scope before those of an outer one, whose aliases the inner ones hide. */
+function mergeImports(inner: Imports, outer: Imports): Imports {
+  return {
+    usings: [...inner.usings, ...outer.usings],
+    aliases: new Map([...outer.aliases, ...inner.aliases]),
+    staticUsings: [...inner.staticUsings, ...outer.staticUsings],
+  };
+}
+
+/** The dotted path of a using's target when it names a namespace or a non-generic type, with `global::` dropped. */
+function usingPath(node: TypeNode): string[] | undefined {
+  if (node.kind === 'namedType') return node.typeArgs ? undefined : [node.name];
+  if (node.kind === 'aliasQualifiedType') return node.alias === 'global' && !node.typeArgs ? [node.name] : undefined;
+  if (node.kind === 'qualifiedType' && !node.typeArgs) {
+    const left = usingPath(node.left);
+    return left ? [...left, node.name] : undefined;
+  }
+  return undefined;
 }
 
 /** The library's namespaces and the types the compiler knows by role, shared by every compilation. */
@@ -205,33 +241,133 @@ export class BinderBase {
     return type;
   }
 
-  /** The namespaces that a list of `using` directives imports, with the implicit ones of a file-based app. */
-  protected resolveUsings(usings: UsingDirective[], withImplicit = true): NamespaceSymbol[][] {
-    const result: NamespaceSymbol[][] = withImplicit ? IMPLICIT_USINGS.map((path) => this.namespacesAt(path)) : [];
+  /** Whether the program imports the implicit global usings of a file-based app, as it does unless it turns them off. */
+  implicitUsings = true;
+  private readonly importsCache = new Map<readonly UsingDirective[], Imports>();
+  private globalImportsCache: Imports | undefined;
+
+  /**
+   * The names that the compilation unit's global usings and the implicit usings bring into every scope, which also
+   * resolve the targets of the other `using` directives.
+   */
+  protected globalImports(unitUsings: readonly UsingDirective[]): Imports {
+    if (this.globalImportsCache) return this.globalImportsCache;
+    const implicit: Imports = {
+      usings: this.implicitUsings ? IMPLICIT_USINGS.map((path) => this.namespacesAt(path)) : [],
+      aliases: new Map(),
+      staticUsings: [],
+    };
+    this.globalImportsCache = implicit;
+    const globals = unitUsings.filter((using) => using.isGlobal);
+    const firstLocal = unitUsings.findIndex((using) => !using.isGlobal);
+    for (const using of unitUsings.slice(firstLocal === -1 ? unitUsings.length : firstLocal))
+      if (using.isGlobal)
+        this.error(
+          using,
+          'CS8915',
+          'グローバル using ディレクティブは、すべての非グローバル using ディレクティブの前に指定する必要があります。'
+        );
+    this.globalImportsCache = mergeImports(this.importUsings(globals, [this.userRoot, this.library.root]), implicit);
+    return this.globalImportsCache;
+  }
+
+  /**
+   * The names that the non-global `using` directives of a compilation unit or a namespace import, whose targets resolve
+   * in the namespace with only the global usings (C# spec §14.5: using directives do not affect each other).
+   */
+  protected resolveUsings(usings: readonly UsingDirective[], namespace: NamespaceSymbol[]): Imports {
+    const cached = this.importsCache.get(usings);
+    if (cached) return cached;
+    const imports = this.importUsings(
+      usings.filter((using) => !using.isGlobal),
+      namespace
+    );
+    this.importsCache.set(usings, imports);
+    return imports;
+  }
+
+  /** Sets what a declaration's context imports: its namespaces' usings, innermost first, then the unit's. */
+  protected importInto(
+    context: TypeContext,
+    levels: readonly { usings: readonly UsingDirective[]; namespace: NamespaceSymbol[] }[],
+    unitUsings: readonly UsingDirective[]
+  ): void {
+    let imports = this.globalImports(unitUsings);
+    imports = mergeImports(this.resolveUsings(unitUsings, [this.userRoot, this.library.root]), imports);
+    for (const level of levels) {
+      imports = mergeImports(this.resolveUsings(level.usings, level.namespace), imports);
+    }
+    context.usings = imports.usings;
+    context.aliases = imports.aliases;
+    context.staticUsings = imports.staticUsings;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of using directive.
+  private importUsings(usings: readonly UsingDirective[], namespace: NamespaceSymbol[]): Imports {
+    const imports = {
+      usings: [] as NamespaceSymbol[][],
+      aliases: new Map<string, UsingAlias>(),
+      staticUsings: [] as NamedType[],
+    };
+    const global = this.globalImportsCache;
+    const context: TypeContext = {
+      namespace,
+      usings: global?.usings ?? [],
+      aliases: global?.aliases,
+      staticUsings: global?.staticUsings,
+      type: undefined,
+      methodTypeParameters: [],
+    };
     for (const using of usings) {
-      const namespaces = this.namespacesAt(using.name);
-      if (namespaces.length === 0) {
-        const type = this.findTypeByPath(using.name);
-        if (type) {
+      if (using.kind === 'alias') {
+        if (imports.aliases.has(using.alias)) {
+          this.error(using, 'CS1537', `using エイリアス '${using.alias}' は以前にこの名前空間で使用されています`);
+          continue;
+        }
+        const path = usingPath(using.name);
+        const namespaces = path ? this.namespacesAt(path) : [];
+        if (path && namespaces.length > 0) {
+          imports.aliases.set(using.alias, { kind: 'namespace', path, namespaces });
+          continue;
+        }
+        // An alias whose target is missing still names it, so its uses report nothing more.
+        imports.aliases.set(using.alias, { kind: 'type', type: this.resolveType(using.name, context) });
+        continue;
+      }
+      const path = usingPath(using.name);
+      const namespaces = path ? this.namespacesAt(path) : [];
+      if (using.kind === 'static') {
+        if (namespaces.length > 0 && path) {
           this.error(
-            using,
-            'CS0138',
-            `using namespace' ディレクティブは名前空間に対してのみ適用できます。'${using.name.join('.')}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください。`
+            using.name,
+            'CS7007',
+            `using static' ディレクティブは型に対してのみ適用できます。'${path.join('.')}' は型ではなく名前空間です。代わりに 'using namespace' ディレクティブを使用することを検討してください。`
           );
           continue;
         }
-        const unavailable = unavailableNamespaceOf(using.name);
-        if (unavailable) this.unsupported(using, unavailable);
+        const type = this.resolveType(using.name, context);
+        if (type.kind === 'named') imports.staticUsings.push(type);
+        continue;
+      }
+      if (namespaces.length > 0) {
+        imports.usings.push(namespaces);
+        continue;
+      }
+      const display = path?.join('.') ?? '';
+      const type = path ? this.quietly(() => this.resolveType(using.name, context)) : undefined;
+      if (type && type.kind !== 'error') {
         this.error(
           using,
-          'CS0246',
-          `型または名前空間の名前 '${using.name[0]}' が見つかりませんでした (using ディレクティブまたはアセンブリ参照が指定されていることを確認してください)`
+          'CS0138',
+          `using namespace' ディレクティブは名前空間に対してのみ適用できます。'${display}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください。`
         );
         continue;
       }
-      result.push(namespaces);
+      const unavailable = path ? unavailableNamespaceOf(path) : undefined;
+      if (unavailable) this.unsupported(using, unavailable);
+      this.resolveType(using.name, context);
     }
-    return result;
+    return imports;
   }
 
   /**
@@ -257,15 +393,6 @@ export class BinderBase {
     );
   }
 
-  private findTypeByPath(path: readonly string[]): TypeSymbol | undefined {
-    const namespaces = this.namespacesAt(path.slice(0, -1));
-    for (const namespace of namespaces) {
-      const found = namespace.types.get(path.at(-1) as string)?.[0];
-      if (found) return found;
-    }
-    return undefined;
-  }
-
   /** Resolves a type in a declaration's context, reporting the names it cannot find. */
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
@@ -284,6 +411,12 @@ export class BinderBase {
       }
       case 'qualifiedType': {
         return this.resolveQualifiedType(node, context);
+      }
+      case 'aliasQualifiedType': {
+        const namespaces = this.aliasNamespaces(node.alias, node, context);
+        if (!namespaces) return ERROR_TYPE;
+        const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
+        return this.typeInNamespaces(node, namespaces.path, namespaces.namespaces, node.name, args);
       }
       case 'arrayType': {
         return this.resolveArrayType(node, context);
@@ -339,26 +472,8 @@ export class BinderBase {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private resolveQualifiedType(node: Extract<TypeNode, { kind: 'qualifiedType' }>, context: TypeContext): Type {
     const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
-    const path = qualifiedPath(node.left);
-    if (path) {
-      const namespaces = this.namespacesAt(path);
-      if (namespaces.length > 0) {
-        for (const namespace of namespaces) {
-          const found = namespace.findType(node.name, args.length);
-          if (found) return this.construct(node, found, args);
-        }
-        const unavailable =
-          this.unavailableType([...path, node.name].join('.'), node.name) ??
-          unavailableDotnetNamespace([...path, node.name]);
-        if (unavailable) this.unsupported(node, unavailable);
-        this.error(
-          node,
-          'CS0234',
-          `型または名前空間の名前 '${node.name}' が名前空間 '${path.join('.')}' に存在しません (アセンブリ参照があることを確認してください)`
-        );
-        return ERROR_TYPE;
-      }
-    }
+    const namespaces = this.namespaceOfQualifier(node.left, context);
+    if (namespaces) return this.typeInNamespaces(node, namespaces.path, namespaces.namespaces, node.name, args);
     const left = this.resolveType(node.left, context);
     if (left.kind === 'error') return ERROR_TYPE;
     if (left.kind === 'named') {
@@ -370,6 +485,80 @@ export class BinderBase {
       }
       this.error(node, 'CS0426', `型名 '${node.name}' が型 '${displayType(left)}' に存在しません`);
     }
+    return ERROR_TYPE;
+  }
+
+  /**
+   * The namespaces a qualifier names, when it names one: a dotted path from the global namespace, `global::N`, or a
+   * namespace alias, which takes the place of the path's first name.
+   */
+  private namespaceOfQualifier(
+    node: TypeNode,
+    context: TypeContext
+  ): { path: string[]; namespaces: NamespaceSymbol[] } | undefined {
+    if (node.kind === 'aliasQualifiedType' && !node.typeArgs) {
+      const outer = this.aliasNamespaces(node.alias, node, context);
+      if (!outer) return undefined;
+      const path = [...outer.path, node.name];
+      const namespaces = this.namespacesAt(path);
+      return namespaces.length > 0 ? { path, namespaces } : undefined;
+    }
+    let path = qualifiedPath(node);
+    if (!path) return undefined;
+    const alias = context.aliases?.get(path[0]);
+    if (alias?.kind === 'namespace') path = [...alias.path, ...path.slice(1)];
+    else if (alias) return undefined;
+    const namespaces = this.namespacesAt(path);
+    return namespaces.length > 0 ? { path, namespaces } : undefined;
+  }
+
+  /** The namespaces of the left side of `alias::name`, reporting an alias that names none. */
+  protected aliasNamespaces(
+    alias: string,
+    position: Position,
+    context: TypeContext
+  ): { path: string[]; namespaces: NamespaceSymbol[] } | undefined {
+    if (alias === 'global') return { path: [], namespaces: [this.userRoot, this.library.root] };
+    const target = context.aliases?.get(alias);
+    if (target?.kind === 'namespace') return target;
+    if (target)
+      this.error(
+        position,
+        'CS0431',
+        `エイリアスが型を参照しているため、エイリアス '${alias}' を '::' と使用できません。'.' を使用してください。`
+      );
+    else this.error(position, 'CS0432', `エイリアス '${alias}' が見つかりません`);
+    return undefined;
+  }
+
+  /** A type of a name in namespaces, reporting it as CS0234 when they lack it. */
+  private typeInNamespaces(
+    position: Position,
+    path: string[],
+    namespaces: NamespaceSymbol[],
+    name: string,
+    args: Type[]
+  ): Type {
+    for (const namespace of namespaces) {
+      const found = namespace.findType(name, args.length);
+      if (found) return this.construct(position, found, args);
+    }
+    const unavailable =
+      this.unavailableType([...path, name].join('.'), name) ?? unavailableDotnetNamespace([...path, name]);
+    if (unavailable) this.unsupported(position, unavailable);
+    if (path.length === 0) {
+      this.error(
+        position,
+        'CS0400',
+        `型または名前空間の名前 '${name}' はグローバル名前空間に見つかりませんでした (アセンブリ参照が存在することを確認してください)`
+      );
+      return ERROR_TYPE;
+    }
+    this.error(
+      position,
+      'CS0234',
+      `型または名前空間の名前 '${name}' が名前空間 '${path.join('.')}' に存在しません (アセンブリ参照があることを確認してください)`
+    );
     return ERROR_TYPE;
   }
 
@@ -390,6 +579,8 @@ export class BinderBase {
       if (lookup.nested) return this.construct(position, lookup.nested.symbol, [...lookup.nested.outerArgs, ...args]);
       inaccessible ??= lookup.inaccessible;
     }
+    const alias = args.length === 0 ? context.aliases?.get(name) : undefined;
+    if (alias?.kind === 'type') return alias.type;
     const found = this.findTypeInScope(name, args.length, context);
     if (found) return this.construct(position, found, args);
     if (inaccessible) {

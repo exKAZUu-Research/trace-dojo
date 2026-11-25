@@ -29,6 +29,7 @@ import {
   FieldSymbol,
   interfacesOf,
   isReferenceType,
+  isValueType,
   MethodSymbol,
   type NamedType,
   type ParameterSymbol,
@@ -44,6 +45,12 @@ import {
 } from './types';
 
 /** A type declared in source, with where its names resolve. */
+/** The `using` directives of a namespace declaration, with the namespace their targets resolve in. */
+interface UsingLevel {
+  usings: readonly UsingDirective[];
+  namespace: NamespaceSymbol[];
+}
+
 export interface DeclaredType {
   symbol: TypeSymbol;
   declaration: TypeDeclaration;
@@ -67,14 +74,9 @@ export class DeclarationBinder extends BinderBase {
     this.collectMembers(unit.members, root, rootContext, []);
     const declared = this.declaredTypes.slice(start);
     // Usings resolve once every namespace exists, since a using may name a namespace declared later.
-    const unitUsings = this.resolveUsings(unit.usings);
-    for (const type of declared) {
-      const chain = this.namespaceUsings.get(type) ?? [];
-      type.context.usings = [
-        ...chain.toReversed().flatMap((usings) => this.resolveUsings(usings, false)),
-        ...unitUsings,
-      ];
-    }
+    if (!isLibrary && unit.options) this.implicitUsings = unit.options.implicitUsings;
+    for (const type of declared)
+      this.importInto(type.context, (this.namespaceUsings.get(type) ?? []).toReversed(), unit.usings);
     for (const type of declared) this.resolveBases(type);
     this.breakInheritanceCycles(declared);
     const ordered = this.orderByInheritance(declared);
@@ -162,16 +164,19 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** The `using` directives of the namespaces around each type, outermost first. */
-  private readonly namespaceUsings = new Map<DeclaredType, UsingDirective[][]>();
+  private readonly namespaceUsings = new Map<DeclaredType, UsingLevel[]>();
 
   private collectMembers(
     members: (TypeDeclaration | NamespaceDeclaration)[],
     namespace: NamespaceSymbol,
     context: TypeContext,
-    usingChain: UsingDirective[][]
+    usingChain: UsingLevel[]
   ): void {
     for (const member of members) {
       if (member.kind === 'namespace') {
+        for (const using of member.usings)
+          if (using.isGlobal)
+            this.error(using, 'CS8914', 'グローバル using ディレクティブを名前空間宣言で使用することはできません。');
         const inner = namespace.resolve(member.name, true) as NamespaceSymbol;
         const namespaces = [
           inner,
@@ -179,7 +184,7 @@ export class DeclarationBinder extends BinderBase {
         ];
         this.collectMembers(member.members, inner, { ...context, namespace: namespaces }, [
           ...usingChain,
-          member.usings,
+          { usings: member.usings, namespace: namespaces },
         ]);
       } else {
         this.declareType(member, namespace, undefined, context, usingChain);
@@ -194,7 +199,7 @@ export class DeclarationBinder extends BinderBase {
     namespace: NamespaceSymbol,
     containing: TypeSymbol | undefined,
     outer: TypeContext,
-    usingChain: UsingDirective[][]
+    usingChain: UsingLevel[]
   ): void {
     const symbol = new TypeSymbol(
       declaration.name,
@@ -723,12 +728,40 @@ export class DeclarationBinder extends BinderBase {
     const methodContext = this.methodContexts.get(method) as TypeContext;
     method.returnType = this.resolveType(member.returnType, methodContext);
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
-    method.isExtension = member.parameters[0]?.modifier === 'this';
+    method.isExtension = member.parameters[0]?.isThis === true;
     this.attachNative(method, member.body === undefined);
     this.checkMethodBody(method, member.body !== undefined, member);
     if (method.name === symbol.name)
       this.error(member, 'CS0542', `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`);
     this.addMethod(symbol, method, member);
+  }
+
+  /** Checks where an extension method's `this` parameter may stand (C# spec §15.6.10). */
+  private checkExtensionReceiver(parameter: Parameter, type: Type, method: MethodSymbol, index: number): void {
+    const owner = method.owner;
+    if (index > 0) {
+      this.error(
+        parameter,
+        'CS1100',
+        `メソッド '${method.name}' には、最初のパラメーターではないパラメーター修飾子 'this' が指定されています`
+      );
+    } else if (!owner.isStatic || owner.typeParameters.length > 0 || method.kind === 'localFunction') {
+      this.error(owner.row, 'CS1106', '拡張メソッドは、非ジェネリック静的クラスで定義される必要があります');
+    } else if (owner.containing) {
+      this.error(
+        parameter,
+        'CS1109',
+        `拡張メソッドは、トップ レベルの静的クラスで定義される必要があります。${owner.name} は入れ子にされたクラスです`
+      );
+    } else if (!method.isStatic) {
+      this.error(parameter, 'CS1105', '拡張メソッドはスタティックでなければなりません');
+    } else if (parameter.modifier === 'ref' && !isValueType(type)) {
+      this.error(
+        parameter,
+        'CS8337',
+        `ref' 拡張メソッド '${method.name}' の最初のパラメーターは、値型または構造体に制限されたジェネリック型でなければなりません。`
+      );
+    }
   }
 
   private declareEnumMembers(type: DeclaredType): void {
@@ -1144,13 +1177,7 @@ export class DeclarationBinder extends BinderBase {
         if (type.kind !== 'array' && type.kind !== 'error')
           this.error(parameter, 'CS0225', 'params パラメーターには有効なコレクションの種類が必要です');
       }
-      if (
-        parameter.modifier === 'this' &&
-        method &&
-        (!method.owner.isStatic || method.owner.typeParameters.length > 0 || method.owner.containing)
-      ) {
-        this.error(parameter, 'CS1106', `拡張メソッドは、非ジェネリック静的クラスで定義される必要があります`);
-      }
+      if (parameter.isThis && method) this.checkExtensionReceiver(parameter, type, method, index);
       result.push({
         name: parameter.name,
         type,

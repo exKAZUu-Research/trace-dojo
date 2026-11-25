@@ -215,10 +215,11 @@ export class Compiler extends StatementBinder {
   private bindTopLevel(program: { entry: MethodSymbol; type: TypeSymbol }, unit: CompilationUnit): void {
     const typeContext: TypeContext = {
       namespace: [this.userRoot, this.library.root],
-      usings: this.resolveUsings(unit.usings),
+      usings: [],
       type: program.type,
       methodTypeParameters: [],
     };
+    this.importInto(typeContext, [], unit.usings);
     const block = {
       kind: 'block' as const,
       statements: unit.statements,
@@ -780,7 +781,7 @@ export class Compiler extends StatementBinder {
       undefined,
       parameter.defaultContext ?? {
         namespace: [this.userRoot, this.library.root],
-        usings: this.resolveUsings([]),
+        usings: this.globalImports([]).usings,
         type: undefined,
         methodTypeParameters: [],
       },

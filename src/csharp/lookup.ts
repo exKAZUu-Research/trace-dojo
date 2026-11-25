@@ -175,6 +175,9 @@ export class LookupBinder extends DeclarationBinder {
       for (const namespace of namespaces) visit(namespace.types);
     }
     for (const group of context.usings) for (const namespace of group) visit(namespace.types);
+    for (const type of context.staticUsings ?? [])
+      for (const method of type.symbol.methods)
+        if (method.isExtension && method.name === name) result.push({ method, owner: type.symbol.declaredType });
     return result.filter(
       (candidate, index) => result.findIndex((other) => other.method === candidate.method) === index
     );

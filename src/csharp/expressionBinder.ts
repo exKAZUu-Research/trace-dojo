@@ -75,6 +75,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
       case 'name': {
         return this.namingMemberOf(node, () => this.bindSimpleName(node.name, node.typeArgs, node, context));
       }
+      case 'aliasQualified': {
+        return this.bindAliasQualified(node, context);
+      }
       case 'predefinedTypeName': {
         return {
           kind: 'typeRef',
