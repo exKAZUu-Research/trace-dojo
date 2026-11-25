@@ -58,6 +58,8 @@ export class Sym {
   unsupportedCallOnly?: boolean;
   /** For a value whose declaration has no annotation, whose type the initializer gives. */
   isLibrary = false;
+  /** For an enum, the scope its members are declared in, which every declaration of it shares. */
+  enumMembers?: Scope;
   /** For a namespace, the names its declarations export, which every declaration of it sees. */
   namespaceExports?: Scope;
   /** The namespace that exports this name, which its declarations refer to it through. */

@@ -304,13 +304,14 @@ export class Binder {
   /** An enum is a value and a type; its initializers see its members by name. */
   private bindEnum(node: TreeNode, scope: Scope): void {
     const name = node.childForFieldName('name');
-    if (name) {
-      scope.declareValue(name.text, 'enum', node, name);
-      scope.declareType(name.text, 'enum', node, name);
-    }
+    const symbol = name ? scope.declareValue(name.text, 'enum', node, name) : undefined;
+    if (name) scope.declareType(name.text, 'enum', node, name);
     const body = node.childForFieldName('body');
     if (!body) return;
-    const membersScope = this.newScope(body, 'block', scope);
+    // Every declaration of an enum sees the members of the declarations before it by name.
+    const membersScope = symbol?.enumMembers ?? new Scope('block', scope, body);
+    if (symbol) symbol.enumMembers = membersScope;
+    this.scopes.set(body.id, membersScope);
     for (const member of named(body)) {
       const memberName = memberNameOf(member);
       if (memberName !== undefined)
