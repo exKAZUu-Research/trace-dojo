@@ -484,6 +484,19 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
+        if (name === 'ptr') {
+          const array = type.child;
+          const many = pointerOf('many', array.child, {
+            isConst: type.isConst,
+            isVolatile: type.isVolatile,
+            alignment: type.alignment,
+            sentinel: array.sentinel,
+          });
+          return this.derived(object, many, (value) => {
+            const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
+            return new Pointer(view, view.offset);
+          });
+        }
         return this.error(expression, `配列へのポインタには、フィールド「${name}」がありません。`);
       }
       base = this.dereferenced(object, expression, false);
