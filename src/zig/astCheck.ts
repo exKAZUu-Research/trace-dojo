@@ -611,7 +611,9 @@ class AstChecker {
       }
       case 'binary': {
         this.expression(expression.left, 'value');
-        this.expression(expression.right, 'value');
+        // The right side of `orelse` is the branch taken on null.
+        if (expression.operator === 'orelse') this.branchBody(expression.right);
+        else this.expression(expression.right, 'value');
         break;
       }
       case 'try': {
@@ -627,7 +629,7 @@ class AstChecker {
             this.error(expression.capture, 'エラーを捨てる |_| は、書かずに省いてください。');
           }
           this.capture(expression.capture);
-          this.expression(expression.handler, 'value');
+          this.branchBody(expression.handler);
         });
         break;
       }
