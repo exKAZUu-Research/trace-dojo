@@ -199,9 +199,11 @@ export class Compiler extends SuspendCompiler {
       const context = this.initializerContext(entry);
       const scope = this.initializerScope(entry, context);
       const type = entry.symbol.type as KType;
-      const compiled = this.withOptIns(entry.symbol.optIns, () =>
-        this.inPropertyInitializer(entry, context, () => this.compileExpression(scope, context, initializer, type))
-      );
+      const compiled =
+        entry.inferredObject ??
+        this.withOptIns(entry.symbol.optIns, () =>
+          this.inPropertyInitializer(entry, context, () => this.compileExpression(scope, context, initializer, type))
+        );
       const evaluate = convertRepr(
         this.expectType(compiled, type, initializer.row),
         reprOf(this.core, type),

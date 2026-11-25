@@ -106,6 +106,11 @@ export interface PropertyEntry {
   state: 'pending' | 'compiling' | 'done';
   /** The initializer, compiled in the class's initializer or the file's, when its type had to be inferred first. */
   initializer: Compiled | undefined;
+  /**
+   * An initializer that is an object expression, compiled once when the property's type is inferred: compiling it
+   * again would declare another anonymous class, which the type inferred from the first does not include.
+   */
+  inferredObject?: Compiled;
   /** The slot of a delegate the property is delegated to. */
   delegateSlot: number | undefined;
   /** For a top-level property, the global that holds its delegate. */

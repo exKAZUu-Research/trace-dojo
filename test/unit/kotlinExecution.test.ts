@@ -6592,6 +6592,18 @@ test.each([
   expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
 });
 
+test('keeps the anonymous types of private properties that object expressions initialize', () => {
+  const source = `interface Greeter { fun hi(): String }
+class Service(val name: String) {
+    private val greeter = object : Greeter { override fun hi() = "hello " + name }
+    private val counter = object { var n = 0 }
+    fun run(): String { counter.n++; return greeter.hi() + counter.n }
+}
+private val shared = object { fun twice(x: Int) = x * 2 }
+fun main() { println(Service("u").run()); println(shared.twice(3)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'hello u1\n6\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!

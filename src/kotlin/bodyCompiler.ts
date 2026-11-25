@@ -494,6 +494,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         );
         const type = this.approximatedDeclarationType(resolved(compiled.type), symbol.visibility);
         symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
+        if (decl.initializer.kind === 'object') entry.inferredObject = compiled;
       }
       if (decl.delegate) this.compileMemberDelegate(entry);
       else if (!symbol.type && decl.getter?.body) {
@@ -1175,7 +1176,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return this.withStep(member.row, store, delegate.isCreation === true);
     }
     if (!member.initializer || property.slot === undefined) return undefined;
-    const compiled = this.compileExpression(scope, context, member.initializer, property.type);
+    const compiled =
+      propertyEntry.inferredObject ?? this.compileExpression(scope, context, member.initializer, property.type);
     const type = property.type as KType;
     const evaluate = convertRepr(
       this.expectType(compiled, type, member.initializer.row),
