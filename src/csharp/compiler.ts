@@ -154,13 +154,12 @@ export class Compiler extends AttributeBinder {
       this.removeConditionalCalls(declared);
       // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
       if (this.diagnostics.length > 0) return;
+      // Roslyn reports a missing or misdeclared entry point before the errors of method bodies.
+      entry = program ? program.entry : this.findMain(declared);
       for (const type of declared) this.bindTypeMembers(type);
       if (program) {
         this.bindTopLevel(program, unit);
-        entry = program.entry;
         isTopLevel = true;
-      } else {
-        entry = this.findMain(declared);
       }
       this.checkTypeArguments();
       this.checkAtomicAnnotations();
@@ -169,10 +168,7 @@ export class Compiler extends AttributeBinder {
       for (const type of declared) this.assignSlots(type.symbol);
     });
     this.finishWithErrors();
-    if (!entry)
-      throw new CompileError([
-        { row: 0, message: "CS5001: プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません" },
-      ]);
+    if (!entry) throw new Error('A program without an entry point compiled without errors.');
     const types = declared.map((type) => type.symbol);
     if (isTopLevel && !types.includes(entry.owner)) types.push(entry.owner);
     return {
@@ -403,7 +399,7 @@ export class Compiler extends AttributeBinder {
   /** Finds the static `Main` method that the program starts from. */
   private findMain(declared: DeclaredType[]): MethodSymbol | undefined {
     // A method of a generic type, or of a type nested in one, is no entry point.
-    const candidates = declared.flatMap((type) =>
+    const mains = declared.flatMap((type) =>
       type.symbol.allTypeParameters.length > 0
         ? []
         : type.symbol.methods.filter(
@@ -411,8 +407,17 @@ export class Compiler extends AttributeBinder {
               method.name === 'Main' &&
               method.isStatic &&
               method.typeParameters.length === 0 &&
-              this.isEntrySignature(method)
+              this.hasEntryParameters(method)
           )
+    );
+    const shaped = mains.map((method) => ({ method, returns: this.entryReturnKind(method) }));
+    for (const { method, returns } of shaped)
+      if (method.isAsync && returns === 'plain')
+        this.error(method.row, 'CS4009', 'エントリ ポイントを返す void または int を async にすることはできません');
+    // Roslyn prefers a `Main` returning void or int to one returning a task, warning about the latter (CS8892).
+    const plain = shaped.filter(({ method, returns }) => returns === 'plain' && !method.isAsync);
+    const candidates = (plain.length > 0 ? plain : shaped.filter(({ returns }) => returns === 'task')).map(
+      ({ method }) => method
     );
     if (candidates.length > 1) {
       this.error(
@@ -422,14 +427,28 @@ export class Compiler extends AttributeBinder {
       );
       return undefined;
     }
+    // Roslyn reports this error without a location, which the first row stands for.
+    if (candidates.length === 0)
+      this.error(0, 'CS5001', "プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません");
     return candidates[0];
   }
 
-  private isEntrySignature(method: MethodSymbol): boolean {
-    const returns =
-      method.returnType.kind === 'void' ||
-      (method.returnType.kind === 'named' && method.returnType.symbol.special === 'int');
-    if (!returns) return false;
+  /** Whether an entry point returns void or int (`plain`), `Task` or `Task<int>` (`task`), or anything else. */
+  private entryReturnKind(method: MethodSymbol): 'plain' | 'task' | undefined {
+    const { returnType } = method;
+    if (returnType.kind === 'void') return 'plain';
+    if (returnType.kind !== 'named') return undefined;
+    if (returnType.symbol.special === 'int') return 'plain';
+    if (returnType.symbol === this.library.typeNamed('System.Threading.Tasks.Task', 0)) return 'task';
+    const [result] = returnType.args;
+    return returnType.symbol === this.library.typeNamed('System.Threading.Tasks.Task', 1) &&
+      result.kind === 'named' &&
+      result.symbol.special === 'int'
+      ? 'task'
+      : undefined;
+  }
+
+  private hasEntryParameters(method: MethodSymbol): boolean {
     if (method.parameters.length === 0) return true;
     const [parameter] = method.parameters;
     return (

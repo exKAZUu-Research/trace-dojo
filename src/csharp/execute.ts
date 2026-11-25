@@ -76,8 +76,8 @@ function runEntry(evaluator: Evaluator): string | undefined {
     // .NET initializes a type with a static constructor before any of its members runs, so before Main is called.
     runtime.ensureInitialized(entry.owner.declaredType);
     const result = evaluator.invoke(root, entry, undefined, args, undefined, new Map());
-    // An async entry point's task is waited for, as the generated `Main` does with `GetAwaiter().GetResult()`.
-    if (entry.isAsync && result instanceof CsObject) {
+    // An entry point's task is waited for, as the generated `Main` does with `GetAwaiter().GetResult()`.
+    if (result instanceof CsObject) {
       const state = result.native as TaskState;
       runtime.scheduler.runUntil(() => state.isDone);
       if (state.status === 'faulted') throw state.firstThrown;

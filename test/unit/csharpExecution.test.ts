@@ -413,6 +413,34 @@ Console.WriteLine(System.Text.Encoding.UTF8.GetString(b));
   });
 });
 
+// A Main returning a task is an entry point whose task the program waits for; an async one returning void or int is
+// not.
+test('a class Main returning Task or Task<int> runs as the entry point and is waited for', () => {
+  const program = String.raw`class Program {
+    static async Task<int> Main(string[] args) {
+        Console.WriteLine(args.Length);
+        await Task.Delay(1);
+        Console.WriteLine("after");
+        throw new InvalidOperationException("boom");
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['0', 'after', ''].join('\n'),
+    stderr: 'Unhandled exception. System.InvalidOperationException: boom\n',
+  });
+  expect(
+    executeProgram('csharp', 'class Program {\n    static async void Main() { await Task.Delay(1); }\n}\n')
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 1, message: 'CS4009: エントリ ポイントを返す void または int を async にすることはできません' },
+      { row: 0, message: "CS5001: プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません" },
+    ],
+  });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
     kind: 'compileError',
