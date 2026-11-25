@@ -103,6 +103,11 @@ test.each(rejected)('invalid kinds retain ordinary type diagnostics: %s', (_name
 
 const constraintKinds = [
   ['phantomClass', 'data P a=P\nx::P Show\nx=P\nmain=putStrLn "ok"', 'ok\n'],
+  [
+    'emptyConstraintArgument',
+    'import Data.Kind\ndata P(c::Constraint)=P\ntype S(c::Constraint)=Int\nx::P()\nx=P\ny::S()\ny=1\nmain=print y',
+    '1\n',
+  ],
   ['fieldClass', 'data P a=P\ndata R=R(P Eq)\nmain=putStrLn "ok"', 'ok\n'],
   [
     'instanceClass',

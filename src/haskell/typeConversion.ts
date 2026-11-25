@@ -102,10 +102,7 @@ export class TypeConversion {
   }
 
   convert(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
-    const { type: result, kind } =
-      pruneKind(expected).tag === 'constraint' && isTupleForm(type)
-        ? this.convertTuple(type, vars, varKinds, true)
-        : this.convertTypeKind(type, vars, varKinds);
+    const { type: result, kind } = this.convertAtKind(type, vars, varKinds, expected);
     if (!unifyKinds(kind, expected)) {
       throw compileError(
         type.span,
@@ -113,6 +110,18 @@ export class TypeConversion {
       );
     }
     return result;
+  }
+
+  /** Converts a type where a type of kind `expected` goes, which reads `()` and tuples as constraints for Constraint. */
+  private convertAtKind(
+    type: RType,
+    vars: ReadonlyMap<string, Type>,
+    varKinds: ReadonlyMap<string, Kind>,
+    expected: Kind
+  ): { type: Type; kind: Kind } {
+    return pruneKind(expected).tag === 'constraint' && isTupleForm(type)
+      ? this.convertTuple(type, vars, varKinds, true)
+      : this.convertTypeKind(type, vars, varKinds);
   }
 
   /** Whether PolyKinds lets a type of a polymorphic kind be used at different kinds. */
@@ -340,9 +349,11 @@ export class TypeConversion {
       if (args.length < entity.arity) {
         throw compileError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
       }
-      const synonymArgs = args.slice(0, entity.arity).map((arg) => this.convertTypeKind(arg, vars, varKinds));
       const appliedKind = this.instantiateKind(entity, entity.kind, head.span);
       const paramKinds = parameterKinds(appliedKind).slice(0, entity.arity);
+      const synonymArgs = args
+        .slice(0, entity.arity)
+        .map((arg, index) => this.convertAtKind(arg, vars, varKinds, paramKinds[index]));
       for (const [index, arg] of synonymArgs.entries()) {
         if (!unifyKinds(arg.kind, paramKinds[index])) {
           throw compileError(args[index].span, `型の種類（カインド）が合いません（${entity.name} の型引数）。`);
@@ -380,7 +391,11 @@ export class TypeConversion {
   ): { type: Type; kind: Kind } {
     let { type: result, kind } = head;
     for (const arg of args) {
-      const converted = this.convertTypeKind(arg, vars, varKinds);
+      const pruned = pruneKind(kind);
+      const converted =
+        pruned.tag === 'arrow'
+          ? this.convertAtKind(arg, vars, varKinds, pruned.from)
+          : this.convertTypeKind(arg, vars, varKinds);
       const resultKind = freshKindVar();
       if (!unifyKinds(kind, kindArrow(converted.kind, resultKind))) {
         throw compileError(
