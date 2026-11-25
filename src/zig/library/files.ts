@@ -214,8 +214,9 @@ export class ReaderView {
       end = found(this.seek + content);
     }
     if (end !== undefined) return this.part(this.seek, end + 1);
+    // A full buffer cannot tell the end from more input, so Zig reports the line too long unless a read met the end.
     const descriptor = this.descriptor;
-    if (descriptor === undefined || this.frame.runtime.inputAtEnd(descriptor)) throw new ReadError('EndOfStream');
+    if (descriptor === undefined || this.frame.runtime.sawInputEnd(descriptor)) throw new ReadError('EndOfStream');
     throw new ReadError('StreamTooLong');
   }
 
