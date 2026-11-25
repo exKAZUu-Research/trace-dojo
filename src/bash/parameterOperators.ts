@@ -135,14 +135,14 @@ function expandArgument(
 ): WordSegment[] {
   if (isPattern) {
     expander.checkTilde(parts, false);
-    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar, noSplit: true });
+    const expanded = expander.expandParts(parts, { inDouble: false, spacedStar: ctx.spacedStar });
     pushSegmentRoots(roots, expanded);
     return expanded;
   }
   if (!ctx.inDouble) return expandUnquotedOperatorWord(expander, parts, ctx, roots);
   const segments: WordSegment[] = [];
   for (const part of parts) {
-    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx);
+    const chunk = expandDoubleQuotedOperatorPart(expander, part, ctx.spacedStar);
     pushSegmentRoots(roots, chunk);
     segments.push(...chunk);
   }
@@ -150,15 +150,10 @@ function expandArgument(
   return kept.length === 0 ? [QUOTED_EMPTY_SEGMENT] : kept;
 }
 
-function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, ctx: WordContext): WordSegment[] {
+function expandDoubleQuotedOperatorPart(expander: Expander, part: WordPart, spacedStar: boolean): WordSegment[] {
   if (part.kind === 'single') return [textSegment(`'${part.text}'`, true, false)];
   const inDouble = part.kind !== 'double';
-  return expander.expandParts([part], {
-    inDouble,
-    spacedStar: ctx.spacedStar,
-    ...(ctx.noSplit ? { noSplit: true } : {}),
-    inOperatorWord: true,
-  });
+  return expander.expandParts([part], { inDouble, spacedStar, inOperatorWord: true });
 }
 
 function pushSegmentRoots(roots: string[], segments: readonly WordSegment[]): void {
@@ -183,11 +178,13 @@ function expandUnquotedOperatorWord(
   expander.checkTilde(parts, false);
   const entries = collectOperatorWordEntries(expander, parts, ctx, roots);
   const ifs = expander.currentIfs();
-  if (!ctx.noSplit && ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
+  if (!ctx.inAssignmentValue && ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
     return joinOperatorWordFields(ifs, entries);
   }
   return entries.map(({ segment, keepsFields }) =>
-    isBreakSegment(segment) || segment.quoted || keepsFields || ctx.noSplit ? segment : { ...segment, split: true }
+    isBreakSegment(segment) || segment.quoted || keepsFields || ctx.inAssignmentValue
+      ? segment
+      : { ...segment, split: true }
   );
 }
 
@@ -201,7 +198,7 @@ function collectOperatorWordEntries(
   const itemCtx: WordContext = {
     inDouble: false,
     spacedStar: ctx.spacedStar,
-    ...(ctx.noSplit ? { noSplit: true } : {}),
+    ...(ctx.inAssignmentValue ? { inAssignmentValue: true } : {}),
     inOperatorWord: true,
   };
   for (const part of parts) {
@@ -304,7 +301,7 @@ function defaultValue(
   const word = expandArgument(
     expander,
     expansion.argument,
-    { inDouble: ctx.inDouble, spacedStar: false, noSplit: true },
+    { inDouble: ctx.inDouble, spacedStar: false, inAssignmentValue: true },
     false,
     roots
   );
