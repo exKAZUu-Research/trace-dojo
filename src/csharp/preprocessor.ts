@@ -212,8 +212,10 @@ function isBranchActive(conditional: Conditional): boolean {
 function applyFileDirective(text: string, row: number, options: BuildOptions): void {
   const [kind, ...parts] = text.trim().split(/\s+/);
   const value = parts.join(' ');
-  if (kind !== 'property')
+  if (kind === 'package' || kind === 'project' || kind === 'sdk')
     unsupported({ row, column: 0 }, `\`#:${kind}\` ディレクティブ（外部のパッケージ・プロジェクト・SDK）`);
+  if (kind !== 'property')
+    throw new CompileError([{ row, message: `エラー: 認識されないディレクティブ '${kind}' です。` }]);
   const separator = value.indexOf('=');
   if (separator === -1) {
     throw new CompileError([
