@@ -1,0 +1,4 @@
+(2,10): error TS2315: Type 'Plain' is not generic.
+(3,10): error TS2315: Type 'Al' is not generic.
+(4,20): error TS2315: Type 'Plain' is not generic.
+(5,10): error TS2315: Type 'Plain' is not generic.

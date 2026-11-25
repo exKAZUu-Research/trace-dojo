@@ -248,7 +248,11 @@ export class TypeNodes {
     const type = this.qualifiedType(name);
     const symbol = type === errorType ? undefined : this.c.namespaces.qualifiedTypeSymbol(name).symbol;
     const parameters = symbol ? this.c.signatures.typeParametersOfSymbol(symbol) : [];
-    if (!symbol || parameters.length === 0) return type;
+    if (!symbol) return type;
+    if (parameters.length === 0) {
+      if (argumentNodes.length > 0) this.c.error(node, `型 ${name.text} は型引数をとりません。`);
+      return type;
+    }
     if (!this.checkTypeArgumentCount(node, name.text, parameters, argumentNodes.length)) return errorType;
     return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
   }
