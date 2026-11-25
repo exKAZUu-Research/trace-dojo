@@ -174,6 +174,7 @@ export class Runtime {
       return bytes;
     }
     const file = entry.target as OpenFile;
+    if (file.directory) return undefined;
     const content = new TextEncoder().encode((file.read as () => string)());
     const bytes = content.subarray(file.position, file.position + limit);
     file.position += bytes.length;
@@ -308,6 +309,8 @@ export interface OpenFile {
   /** The text of the file the descriptor refers to, which follows the file after a rename or a deletion. */
   content: () => string;
   read?: () => string;
+  /** Whether the descriptor refers to a directory, which opens for reading but fails each read, as the OS's do. */
+  readonly directory?: boolean;
   /** How many bytes of the file reading has passed. */
   position: number;
   write?: FileHandle;

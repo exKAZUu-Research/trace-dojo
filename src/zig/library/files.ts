@@ -705,7 +705,11 @@ pub const Dir = struct {
         var reader = file.reader(io, &.{});
         var list: std.ArrayList(u8) = .empty;
         defer list.deinit(gpa);
-        try reader.interface.appendRemaining(gpa, &list, limit);
+        // Zig reports the reason a read failed, which in the run's files is only that the path is a directory.
+        reader.interface.appendRemaining(gpa, &list, limit) catch |err| switch (err) {
+            error.ReadFailed => return error.IsDir,
+            else => |e| return e,
+        };
         return list.toOwnedSlice(gpa);
     }
 
@@ -890,7 +894,19 @@ function openPath(
 ): Value {
   const files = frame.runtime.io.files;
   const writes = mode !== 0;
-  if (files.kindOf(target) === 'directory' && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
+  const directory = files.kindOf(target) === 'directory';
+  if (directory && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
+  // Zig opens a directory for reading, as its open allows by default, and its first read fails.
+  if (directory) {
+    const descriptor = frame.runtime.openFile({
+      content: noText,
+      read: noText,
+      directory: true,
+      position: 0,
+      decoder: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }),
+    });
+    return handle('file', { fd: descriptor });
+  }
   const create = flags.create ? (flags.exclusive ? 'exclusive' : 'always') : 'never';
   const write = writes
     ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
@@ -906,6 +922,8 @@ function openPath(
   });
   return handle('file', { fd: descriptor });
 }
+
+const noText = (): string => '';
 
 /** The native functions that the ported library calls, which reach the run's standard input and files. */
 // code-gauge-allow functionNcss -- Each native is a short closure over the run's file system.
