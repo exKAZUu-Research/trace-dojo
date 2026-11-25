@@ -14,6 +14,7 @@ import {
   BOOL,
   COMPTIME_INT,
   ENUM_LITERAL,
+  type FnType,
   type IntType,
   intType,
   isComptimeOnly,
@@ -530,6 +531,22 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     return new ZStruct(fields.map((field) => (field.name in values ? values[field.name] : field.defaultValue)));
   }
 
+  /** The fields of `std.builtin.Type.Fn` for a function type. */
+  private fnInfo(type: FnType, fn: StructType, span: Span): Record<string, Value> {
+    const attributes = this.memberType(fn, 'Attributes', span) as StructType;
+    const paramAttributes = this.memberType(fn, 'ParamAttributes', span) as StructType;
+    // The C calling convention's tag in `attrs` names the CPU and the OS, as `aarch64_aapcs_darwin` does.
+    if (type.callingConvention === 'c') this.error(span, unavailableMessage('syntax:cCallingConventionInfo'));
+    const generic = type.genericParams;
+    return {
+      attrs: this.structValue(attributes, span, {}),
+      is_generic: generic !== undefined,
+      return_type: optionalValue(type.returnType === ANYTYPE ? undefined : type.returnType),
+      param_types: this.constSlice((generic ?? type.params).map((param) => optionalValue(param))),
+      param_attrs: this.constSlice(type.params.map(() => this.structValue(paramAttributes, span, {}))),
+    };
+  }
+
   private constSlice(values: Value[], sentinel = false): Slice {
     this.spendCompilation(values.length + 1);
     const array = new ZArray(sentinel ? [...values, 0n] : values, 0, values.length, sentinel);
@@ -655,19 +672,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         });
       }
       case 'fn': {
-        const fn = nested('Fn') as StructType;
-        const attributes = this.memberType(fn, 'Attributes', span) as StructType;
-        const paramAttributes = this.memberType(fn, 'ParamAttributes', span) as StructType;
-        // The C calling convention's tag in `attrs` names the CPU and the OS, as `aarch64_aapcs_darwin` does.
-        if (type.callingConvention === 'c') this.error(span, unavailableMessage('syntax:cCallingConventionInfo'));
-        const generic = type.genericParams;
-        return variant('fn', {
-          attrs: this.structValue(attributes, span, {}),
-          is_generic: generic !== undefined,
-          return_type: optionalValue(type.returnType === ANYTYPE ? undefined : type.returnType),
-          param_types: this.constSlice((generic ?? type.params).map((param) => optionalValue(param))),
-          param_attrs: this.constSlice(type.params.map(() => this.structValue(paramAttributes, span, {}))),
-        });
+        return variant('fn', this.fnInfo(type, nested('Fn') as StructType, span));
       }
       default: {
         return this.error(span, `${typeName(type)} 型の @typeInfo は、この採点環境では使えません。`);

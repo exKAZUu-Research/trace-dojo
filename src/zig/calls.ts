@@ -315,30 +315,13 @@ export abstract class CallCompiler extends VectorCompiler {
   private readonly declarationTypes = new WeakMap<Decl, FnType>();
   private readonly resolvingSignatures = new Set<Decl>();
 
-  // code-gauge-allow functionCognitiveComplexity -- Resolves each part of a function's type, as Zig's Sema does for a declaration.
-  // code-gauge-allow functionNcss -- Resolves each part of a function's type, as Zig's Sema does for a declaration.
   protected declarationType(decl: Extract<Decl, { kind: 'fn' }>, span: Span): FnType {
     const cached = this.declarationTypes.get(decl);
     if (cached) return cached;
     if (this.resolvingSignatures.has(decl)) return this.error(span, '関数の型が、それ自身に依存しています。');
     this.resolvingSignatures.add(decl);
     try {
-      const unknown = new Set<string>();
-      const params: Type[] = [];
-      const declared: (Type | undefined)[] = [];
-      for (const [index, param] of decl.syntax.params.entries()) {
-        if (param.isVarargs)
-          this.error(param, '可変個の引数（...）は、C の呼び出し規約（callconv(.c)）の関数にだけ書けます。');
-        const dependent = !param.type || this.dependsOnParameters(param.type, unknown);
-        const generic = dependent || param.isComptime;
-        declared.push(dependent ? undefined : (this.parameterType(decl, index, params) as Type));
-        params.push(generic ? ANYTYPE : (declared[index] as Type));
-        if (generic) unknown.add(param.name);
-        if (param.isNoalias) {
-          const type = params[index] === ANYTYPE ? undefined : params[index];
-          if (type && type.kind !== 'pointer') this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
-        }
-      }
+      const { params, declared, unknown } = this.signatureParams(decl);
       let result = this.dependsOnParameters(decl.syntax.returnType, unknown)
         ? ANYTYPE
         : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
@@ -369,6 +352,34 @@ export abstract class CallCompiler extends VectorCompiler {
     } finally {
       this.resolvingSignatures.delete(decl);
     }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Checks each parameter's syntax as Zig's Sema does for a declaration.
+  /**
+   * A function's parameter types, with anytype for a generic one; the types they declare, for `@typeInfo`; and the
+   * names of the generic ones, which make the types that use them generic too.
+   */
+  private signatureParams(decl: Extract<Decl, { kind: 'fn' }>): {
+    params: Type[];
+    declared: (Type | undefined)[];
+    unknown: Set<string>;
+  } {
+    const unknown = new Set<string>();
+    const params: Type[] = [];
+    const declared: (Type | undefined)[] = [];
+    for (const [index, param] of decl.syntax.params.entries()) {
+      if (param.isVarargs)
+        this.error(param, '可変個の引数（...）は、C の呼び出し規約（callconv(.c)）の関数にだけ書けます。');
+      const dependent = !param.type || this.dependsOnParameters(param.type, unknown);
+      const generic = dependent || param.isComptime;
+      declared.push(dependent ? undefined : (this.parameterType(decl, index, params) as Type));
+      params.push(generic ? ANYTYPE : (declared[index] as Type));
+      if (generic) unknown.add(param.name);
+      const type = params[index] === ANYTYPE ? undefined : params[index];
+      if (param.isNoalias && type && type.kind !== 'pointer')
+        this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
+    }
+    return { params, declared, unknown };
   }
 
   private dependsOnParameters(node: unknown, names: ReadonlySet<string>): boolean {
