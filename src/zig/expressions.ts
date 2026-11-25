@@ -381,7 +381,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         compileTimePointer: new Pointer(cell, 0),
       };
       // Code that the compiler runs reads the variable when it runs; other code, its value where the code stands.
-      if (this.comptimeDepth > 0 && (!this.comptimeStore || this.comptimeStore === binding))
+      if (this.context.comptimeDepth > 0 && (!this.context.comptimeStore || this.context.comptimeStore === binding))
         return { ...runtime(binding.type, () => cell.slots[0], span, place), local: binding };
       // A value read here is a constant of the code that stands here, which later stores must not change: its parts
       // come from a copy, while stores still reach the variable.
@@ -745,7 +745,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private loadedComptimeElements(object: TExpr, span: Span): TExpr {
     const type = object.type;
     const value = staticResultOf(object)?.value;
-    if (this.comptimeDepth > 0 || type.kind !== 'pointer' || !this.pointsIntoComptimeVar(object)) return object;
+    if (this.context.comptimeDepth > 0 || type.kind !== 'pointer' || !this.pointsIntoComptimeVar(object)) return object;
     if (!(value instanceof Pointer || value instanceof Slice)) return object;
     if (type.size === 'one') return type.child.kind === 'array' ? this.dereferenced(object, span, false) : object;
     const copy = { slots: value.target.slots.map((slot) => copyForStorage(slot)) };
@@ -785,7 +785,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
     // Outside code the compiler runs, a load through a pointer into a comptime var reads the value it holds here.
-    if (this.comptimeDepth === 0 && fact?.value instanceof Pointer && this.comptimeVariableHolding(fact.value.target))
+    if (
+      this.context.comptimeDepth === 0 &&
+      fact?.value instanceof Pointer &&
+      this.comptimeVariableHolding(fact.value.target)
+    )
       return { ...known(type.child, copyForStorage(fact.value.load()), span), place: { ...place, snapshot: true } };
     const result =
       type.isConst && isConstantData(fact?.value)
@@ -896,7 +900,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     const ref = expression.value as unknown as FnRef;
     if (!(ref instanceof FnRef)) this.error(span, 'この関数は、値として使えません。');
     const instance = this.instantiate(ref, [], span);
-    if (this.comptimeDepth === 0) this.callAtRuntime(instance);
+    if (this.context.comptimeDepth === 0) this.callAtRuntime(instance);
     return new FnValue(instance);
   }
 
@@ -975,7 +979,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
     const location = this.compileLocation(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
-    if (this.comptimeDepth === 0 && !staticResultOf(index) && this.pointsIntoComptimeVar(location))
+    if (this.context.comptimeDepth === 0 && !staticResultOf(index) && this.pointsIntoComptimeVar(location))
       this.error(expression, 'comptime var を指すポインタは、実行時の値にできません。');
     const object = this.loadedComptimeElements(location, expression);
     const type = object.type;

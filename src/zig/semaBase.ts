@@ -260,6 +260,50 @@ export function isType(value: Value): value is Type {
   );
 }
 
+/** What the analysis of one function or declaration tracks as it compiles the code. */
+export interface AnalysisContext {
+  /** How deep the compiler is in code that it runs itself, such as a `comptime` block. */
+  comptimeDepth: number;
+  /**
+   * The `comptime var` that the code the compiler runs stores to, when that code is such a store: it runs once where it
+   * stands, so the other `comptime var`s it reads have the values they hold there.
+   */
+  comptimeStore: LocalBinding | undefined;
+  /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
+  runtimeConditionDepth: number;
+  /**
+   * How many branches on `@inComptime()` enclose the code being compiled. Zig analyzes only the branch that a call
+   * takes, so a `@compileError` there fails only when it runs.
+   */
+  inComptimeBranchDepth: number;
+  /**
+   * How many blocks the code being compiled follows a return on a runtime branch in, as the rest of a block after
+   * `if (c) return;` does: it runs only on the other branch, which Zig analyzes only for the calls that reach it.
+   */
+  afterRuntimeReturnDepth: number;
+  /** The backward branches that the analysis has evaluated, against the evaluation quota. */
+  evalBranches: BranchCount;
+  /** The condition depths of the returns compiled so far, in order. */
+  returnDepths: ConditionDepths[];
+}
+
+export interface ConditionDepths {
+  readonly runtime: number;
+  readonly inComptime: number;
+}
+
+export function newAnalysisContext(): AnalysisContext {
+  return {
+    comptimeDepth: 0,
+    comptimeStore: undefined,
+    runtimeConditionDepth: 0,
+    inComptimeBranchDepth: 0,
+    afterRuntimeReturnDepth: 0,
+    evalBranches: { count: 0, quota: 1000 },
+    returnDepths: [],
+  };
+}
+
 export abstract class SemaBase implements SemaApi {
   protected readonly storage = new CompilationStorage();
   protected scope: Scope;
@@ -271,27 +315,8 @@ export abstract class SemaBase implements SemaApi {
   private readonly indexedFields = new WeakMap<readonly { name: string }[], ReadonlyMap<string, number>>();
   /** How many structs' fields are being resolved, during which function bodies wait to compile. */
   protected resolvingFields = 0;
-  /** How deep the compiler is in code that it runs itself, such as a `comptime` block. */
-  protected comptimeDepth = 0;
-  /**
-   * The `comptime var` that the code the compiler runs stores to, when that code is such a store: it runs once where it
-   * stands, so the other `comptime var`s it reads have the values they hold there.
-   */
-  protected comptimeStore: LocalBinding | undefined;
-  /** How many branches on runtime conditions and runtime loop bodies enclose the code being compiled. */
-  protected runtimeConditionDepth = 0;
-  /**
-   * How many branches on `@inComptime()` enclose the code being compiled. Zig analyzes only the branch that a call
-   * takes, so a `@compileError` there fails only when it runs.
-   */
-  protected inComptimeBranchDepth = 0;
-  /**
-   * How many blocks the code being compiled follows a return on a runtime branch in, as the rest of a block after
-   * `if (c) return;` does: it runs only on the other branch, which Zig analyzes only for the calls that reach it.
-   */
-  protected afterRuntimeReturnDepth = 0;
-  /** The backward branches that the analysis of the current function or declaration has evaluated. */
-  protected evalBranches: BranchCount = { count: 0, quota: 1000 };
+  /** The state of the analysis of the current function or declaration, which a separate analysis replaces as a unit. */
+  protected context: AnalysisContext = newAnalysisContext();
   private resolvingUnionFields = 0;
 
   constructor(
@@ -442,7 +467,7 @@ export abstract class SemaBase implements SemaApi {
    * such as a runtime variable's or a runtime argument's, since the variable exists only while the compiler runs.
    */
   rejectComptimeVarReference(value: TExpr, span: Span): void {
-    if (this.comptimeDepth > 0) return;
+    if (this.context.comptimeDepth > 0) return;
     const fact = staticResultOf(value);
     if (fact && this.referencesComptimeVar(fact.value))
       this.error(span, 'comptime var を指すポインタは、実行時の値にできません。');
@@ -1111,14 +1136,14 @@ export abstract class SemaBase implements SemaApi {
   private coerceToInt(expression: TExpr, to: IntType, span: Span): TExpr | undefined {
     const from = expression.type;
     if (from.kind === 'comptime_int' || (from.kind === 'int' && expression.known)) {
-      if (!expression.known && this.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
+      if (!expression.known && this.context.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
       if (!expression.known) return undefined;
       const value = expression.value as bigint;
       if (!fitsInt(value, to)) this.error(span, `${typeName(to)} 型では、整数 ${value} を表せません。`);
       return known(to, value, span);
     }
     if (from.kind === 'int' && intWidens(from, to)) return { ...expression, type: to };
-    if (from.kind === 'int' && this.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
+    if (from.kind === 'int' && this.context.comptimeDepth > 0) return this.checkedComptimeInt(expression, to);
     if (from.kind === 'int') return undefined;
     if ((from.kind === 'comptime_float' || from.kind === 'float') && expression.known) {
       const value = asBigFloat(expression.value as AnyFloat);

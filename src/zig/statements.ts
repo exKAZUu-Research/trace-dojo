@@ -12,6 +12,7 @@ import { hasValueDependentWrites, sizeOf } from './layout';
 import { memorySpace } from './memoryAccounting';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
+  type ConditionDepths,
   copyForFrame,
   copyForStorage,
   errorSetIncludes,
@@ -21,6 +22,7 @@ import {
   knownLengthOf,
   type LocalBinding,
   mergeErrorSets,
+  newAnalysisContext,
   runtime,
   type Scope,
   staticResultOf,
@@ -129,8 +131,6 @@ interface BreakSite {
 export abstract class StatementCompiler extends CallCompiler {
   protected fn: FnContext | undefined;
   private slotCounter = 0;
-  /** The condition depths of the returns compiled in the current function, in order. */
-  private returnDepths: ConditionDepths[] = [];
 
   /** The atomic annotations' rows, when the program is traced. */
   protected abstract readonly tracing: boolean;
@@ -150,36 +150,25 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   protected separateAnalysis<T>(run: () => T): T {
-    const { fn, comptimeDepth, runtimeConditionDepth, inComptimeBranchDepth, afterRuntimeReturnDepth } = this;
-    const { evalBranches, returnDepths } = this;
+    const { fn, context } = this;
     this.fn = undefined;
-    this.returnDepths = [];
-    this.comptimeDepth = 0;
-    this.runtimeConditionDepth = 0;
-    this.inComptimeBranchDepth = 0;
-    this.afterRuntimeReturnDepth = 0;
-    this.evalBranches = { count: 0, quota: 1000 };
+    this.context = newAnalysisContext();
     try {
       return run();
     } finally {
       this.fn = fn;
-      this.comptimeDepth = comptimeDepth;
-      this.runtimeConditionDepth = runtimeConditionDepth;
-      this.inComptimeBranchDepth = inComptimeBranchDepth;
-      this.afterRuntimeReturnDepth = afterRuntimeReturnDepth;
-      this.returnDepths = returnDepths;
-      this.evalBranches = evalBranches;
+      this.context = context;
     }
   }
 
   /** @param store The `comptime var` that the code stores to, when it is a store, which reads the others' values. */
   protected comptimeValue(compileCode: () => TExpr, span: Span, store?: LocalBinding): TExpr {
-    const outerStore = this.comptimeStore;
-    this.comptimeStore = store;
+    const outerStore = this.context.comptimeStore;
+    this.context.comptimeStore = store;
     try {
       return this.comptimeValueOf(compileCode, span);
     } finally {
-      this.comptimeStore = outerStore;
+      this.context.comptimeStore = outerStore;
     }
   }
 
@@ -195,12 +184,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     const from = fn.instance.slotCount;
     this.fn = fn;
-    this.comptimeDepth++;
+    this.context.comptimeDepth++;
     let compiled: TExpr;
     try {
       compiled = compileCode();
     } finally {
-      this.comptimeDepth--;
+      this.context.comptimeDepth--;
       this.fn = outer;
     }
     if (compiled.known) return compiled;
@@ -214,21 +203,21 @@ export abstract class StatementCompiler extends CallCompiler {
   /** Compiles code inside a branch on a runtime condition or a runtime loop's body, where a `comptime var` is fixed. */
   private underRuntimeCondition<T>(run: () => T): T {
     // A branch in code that the compiler runs is decided as it runs, so it is no runtime condition.
-    if (this.comptimeDepth > 0) return run();
-    this.runtimeConditionDepth++;
+    if (this.context.comptimeDepth > 0) return run();
+    this.context.runtimeConditionDepth++;
     try {
       return run();
     } finally {
-      this.runtimeConditionDepth--;
+      this.context.runtimeConditionDepth--;
     }
   }
 
   /** Counts an iteration that `inline for` or `inline while` unrolls, against the evaluation quota. */
   private countUnrolledIteration(span: Span): void {
-    if (++this.evalBranches.count > this.evalBranches.quota)
+    if (++this.context.evalBranches.count > this.context.evalBranches.quota)
       this.error(
         span,
-        `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${this.evalBranches.quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
+        `コンパイルのときの計算で、ループの繰り返しと関数の呼び出しが合わせて ${this.context.evalBranches.quota} 回を超えました（@setEvalBranchQuota で上限を上げられます）。`
       );
   }
 
@@ -335,9 +324,9 @@ export abstract class StatementCompiler extends CallCompiler {
     outer: ConditionDepths & { afterReturn: number }
   ): void {
     if (returns.some((depths) => depths.runtime > outer.runtime))
-      this.afterRuntimeReturnDepth = Math.max(this.afterRuntimeReturnDepth, outer.afterReturn + 1);
+      this.context.afterRuntimeReturnDepth = Math.max(this.context.afterRuntimeReturnDepth, outer.afterReturn + 1);
     if (returns.some((depths) => depths.inComptime > outer.inComptime))
-      this.inComptimeBranchDepth = Math.max(this.inComptimeBranchDepth, outer.inComptime + 1);
+      this.context.inComptimeBranchDepth = Math.max(this.context.inComptimeBranchDepth, outer.inComptime + 1);
   }
 
   protected blockStatements(statements: readonly Statement[], span: Span, keepLocals = false): Stmt {
@@ -348,13 +337,13 @@ export abstract class StatementCompiler extends CallCompiler {
       let hasDefers = false;
       let noreturn = false;
       const outer = {
-        runtime: this.runtimeConditionDepth,
-        inComptime: this.inComptimeBranchDepth,
-        afterReturn: this.afterRuntimeReturnDepth,
+        runtime: this.context.runtimeConditionDepth,
+        inComptime: this.context.inComptimeBranchDepth,
+        afterReturn: this.context.afterRuntimeReturnDepth,
       };
       try {
         for (const statement of statements) {
-          const mark = this.returnDepths.length;
+          const mark = this.context.returnDepths.length;
           const stmt = this.statement(statement);
           if (statement.kind === 'defer') hasDefers = true;
           compiled.push(stmt);
@@ -362,11 +351,11 @@ export abstract class StatementCompiler extends CallCompiler {
             noreturn = true;
             break;
           }
-          this.continueAfterReturns(this.returnDepths.slice(mark), outer);
+          this.continueAfterReturns(this.context.returnDepths.slice(mark), outer);
         }
       } finally {
-        this.inComptimeBranchDepth = outer.inComptime;
-        this.afterRuntimeReturnDepth = outer.afterReturn;
+        this.context.inComptimeBranchDepth = outer.inComptime;
+        this.context.afterRuntimeReturnDepth = outer.afterReturn;
       }
       void span;
       const slots = keepLocals ? [] : [...locals.values()].map((binding) => binding.slot);
@@ -427,7 +416,7 @@ export abstract class StatementCompiler extends CallCompiler {
   ): LocalBinding {
     this.resolveStorage(type, value.span);
     if (!isConst) this.rejectComptimeVarReference(value, value.span);
-    if (!isConst && this.comptimeDepth === 0 && this.requiresComptime(type, value.span))
+    if (!isConst && this.context.comptimeDepth === 0 && this.requiresComptime(type, value.span))
       this.error(
         value.span,
         `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
@@ -448,7 +437,7 @@ export abstract class StatementCompiler extends CallCompiler {
     };
     if (!isDiscardName({ name, quotedName })) {
       this.scope.locals?.set(name, binding);
-      if (this.comptimeDepth === 0) fn.instance.locals.push({ name, slot, type, isReceiver: false });
+      if (this.context.comptimeDepth === 0) fn.instance.locals.push({ name, slot, type, isReceiver: false });
     }
     return binding;
   }
@@ -526,7 +515,7 @@ export abstract class StatementCompiler extends CallCompiler {
           type: value.type,
           isConst: false,
           known: false,
-          comptimeCell: { slots: [copyForStorage(value.value)], conditionDepth: this.runtimeConditionDepth },
+          comptimeCell: { slots: [copyForStorage(value.value)], conditionDepth: this.context.runtimeConditionDepth },
         };
     if (!isDiscardName(statement)) this.scope.locals?.set(statement.name, binding);
     return { exec: () => {}, noreturn: false };
@@ -798,9 +787,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const variable = this.comptimeVariableOf(target);
     // A `comptime` block inside a runtime branch still stores under the branch's condition.
     const cell = variable?.comptimeCell;
-    if (cell && this.runtimeConditionDepth > cell.conditionDepth)
+    if (cell && this.context.runtimeConditionDepth > cell.conditionDepth)
       this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
-    if (cell && this.comptimeDepth === 0) {
+    if (cell && this.context.comptimeDepth === 0) {
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       this.comptimeValue(
         () => {
@@ -1153,7 +1142,10 @@ export abstract class StatementCompiler extends CallCompiler {
   /** The code of a jump: it computes the jump's value and gives the Jump that leaves its target. */
   private jumpMaker(expression: ExpressionOf<'break' | 'continue' | 'return'>): (frame: Frame) => Jump {
     if (expression.kind === 'return') {
-      this.returnDepths.push({ runtime: this.runtimeConditionDepth, inComptime: this.inComptimeBranchDepth });
+      this.context.returnDepths.push({
+        runtime: this.context.runtimeConditionDepth,
+        inComptime: this.context.inComptimeBranchDepth,
+      });
       return this.returnMaker(expression);
     }
     const target = this.findTarget(expression.label, expression.kind, expression);
@@ -1191,7 +1183,7 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private returnMaker(expression: ExpressionOf<'return'>): (frame: Frame) => Jump {
-    if (this.comptimeDepth > 0)
+    if (this.context.comptimeDepth > 0)
       this.error(expression, '実行時に呼ばれる関数は、コンパイルのときに実行するブロックの中から return できません。');
     const fn = this.currentFn(expression);
     const { target, returnType } = fn;
@@ -1509,11 +1501,11 @@ export abstract class StatementCompiler extends CallCompiler {
   /** Compiles the branches of a condition, counting them as branches on `@inComptime()` when the condition asks it. */
   private onInComptime<T>(condition: Expression, compileBranches: () => T): T {
     if (!asksInComptime(condition)) return compileBranches();
-    this.inComptimeBranchDepth++;
+    this.context.inComptimeBranchDepth++;
     try {
       return compileBranches();
     } finally {
-      this.inComptimeBranchDepth--;
+      this.context.inComptimeBranchDepth--;
     }
   }
 
@@ -3389,9 +3381,4 @@ function asksInComptime(condition: Expression): boolean {
   const expression = unwrapParens(condition);
   if (expression.kind === 'unary' && expression.operator === '!') return asksInComptime(expression.operand);
   return expression.kind === 'builtinCall' && expression.name === '@inComptime';
-}
-
-interface ConditionDepths {
-  readonly runtime: number;
-  readonly inComptime: number;
 }

@@ -200,7 +200,7 @@ class Compiler extends StatementCompiler {
     this.compilePendingBodies();
     const runtime = new Runtime(undefined, this.compilationBudget);
     runtime.bufferMemory = this.bufferMemory;
-    runtime.branchCount = this.evalBranches;
+    runtime.branchCount = this.context.evalBranches;
     const firstOwnSlot = ownSlots?.from ?? Number.POSITIVE_INFINITY;
     const frame = new Frame(
       runtime,
