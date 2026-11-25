@@ -1188,7 +1188,6 @@ export abstract class SemaBase implements SemaApi {
       : undefined;
   }
 
-  // code-gauge-allow functionNcss -- Checks each rule of Zig's type coercion or container analysis in turn.
   // code-gauge-allow functionCognitiveComplexity -- Checks each rule of Zig's type coercion or container analysis in turn.
   private coerceToPointer(expression: TExpr, to: Extract<Type, { kind: 'pointer' }>, span: Span): TExpr | undefined {
     const from = expression.type;

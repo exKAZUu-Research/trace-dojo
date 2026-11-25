@@ -165,7 +165,6 @@ export abstract class VectorCompiler extends ReflectionCompiler {
   }
 
   /** `@shuffle(T, a, b, mask)`: each element from `a[m]` for a mask element `m >= 0`, else from `b[~m]`. */
-  // code-gauge-allow functionNcss -- Checks each operand and mask element as Zig's Sema does.
   private shuffle(expression: ExpressionOf<'builtinCall'>): TExpr {
     this.arity(expression, 4);
     const [childArg, leftArg, rightArg, maskArg] = expression.args;

@@ -686,7 +686,6 @@ function optionalValue(value: Type | undefined): Value {
 }
 
 /** Whether `@bitCast` takes or gives a value of a type, which must have a fixed bit layout. */
-// code-gauge-allow duplicateLines -- Each classifies types by a different rule of Zig's (bit casts, packed fields, the C ABI).
 function bitCastable(type: Type): boolean {
   switch (type.kind) {
     case 'int':

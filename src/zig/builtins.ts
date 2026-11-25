@@ -336,34 +336,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.bitBuiltin(name, expression);
       }
       case '@mulAdd': {
-        const type = this.compileType(args[0]);
-        // Zig applies `@mulAdd` to each element of a vector type.
-        const scalar = isVectorType(type) ? type.child : type;
-        if (scalar.kind !== 'float' && scalar.kind !== 'comptime_float')
-          this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
-        const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
-        const bits = scalar.kind === 'float' ? scalar.bits : 128;
-        return this.combine(
-          [a, b, c],
-          type,
-          ([x, y, z], frame) => {
-            const fused = (p: Value, q: Value, r: Value): Value =>
-              fusedMultiplyAdd(
-                asBigFloat(p as AnyFloat),
-                asBigFloat(q as AnyFloat),
-                asBigFloat(r as AnyFloat),
-                bits,
-                (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
-              );
-            if (!isVectorType(type)) return fused(x, y, z);
-            const [ys, zs] = [y, z].map((operand) => (operand as ZArray).values());
-            return newArray(
-              (x as ZArray).values().map((element, index) => fused(element, ys[index], zs[index])),
-              undefined
-            );
-          },
-          expression
-        );
+        return this.mulAdd(expression);
       }
       case '@intFromEnum': {
         const operand = this.compile(args[0]);
@@ -737,7 +710,40 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
+  /** `@mulAdd(T, a, b, c)`: `a * b + c` rounded once, which Zig applies to each element of a vector type. */
+  private mulAdd(expression: ExpressionOf<'builtinCall'>): TExpr {
+    const { args } = expression;
+    const type = this.compileType(args[0]);
+    const scalar = isVectorType(type) ? type.child : type;
+    if (scalar.kind !== 'float' && scalar.kind !== 'comptime_float')
+      this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
+    const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
+    const bits = scalar.kind === 'float' ? scalar.bits : 128;
+    return this.combine(
+      [a, b, c],
+      type,
+      ([x, y, z], frame) => {
+        const fused = (p: Value, q: Value, r: Value): Value =>
+          fusedMultiplyAdd(
+            asBigFloat(p as AnyFloat),
+            asBigFloat(q as AnyFloat),
+            asBigFloat(r as AnyFloat),
+            bits,
+            (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
+          );
+        if (!isVectorType(type)) return fused(x, y, z);
+        const [ys, zs] = [y, z].map((operand) => (operand as ZArray).values());
+        return newArray(
+          (x as ZArray).values().map((element, index) => fused(element, ys[index], zs[index])),
+          undefined
+        );
+      },
+      expression
+    );
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Keeps checked overflow arithmetic and phase-specific work accounting together.
+  // code-gauge-allow functionNcss -- Keeps the scalar and vector forms of the overflow builtins together.
   /** `@addWithOverflow` and the like, which Zig applies to each element of a vector, with a vector of overflow bits. */
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
@@ -763,21 +769,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     ]);
     const work = integerOperationWork(name);
     const compute = (x: bigint, y: bigint, frame?: Frame): [bigint, bigint] => {
-      const spend = (cost: number): void => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost));
       if (name === '@shlWithOverflow') {
         checkShiftAmount(y, scalar);
-        spendIntegerShift(x, y, true, spend);
+        spendIntegerShift(x, y, true, (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)));
       } else this.integerWork(x, y, work, frame);
-      const exact =
-        name === '@addWithOverflow'
-          ? x + y
-          : name === '@subWithOverflow'
-            ? x - y
-            : name === '@mulWithOverflow'
-              ? x * y
-              : x << y;
-      const wrapped = wrapInt(exact, scalar);
-      return [wrapped, wrapped === exact ? 0n : 1n];
+      return wrappedWithOverflowBit(name, x, y, scalar);
     };
     const amounts = staticResultOf(right)?.value;
     if (name === '@shlWithOverflow' && amounts !== undefined)
@@ -790,16 +786,14 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         if (!vector) return new ZStruct(compute(a as bigint, b as bigint, frame));
         const ys = (b as ZArray).values() as bigint[];
         const results = ((a as ZArray).values() as bigint[]).map((x, index) => compute(x, ys[index], frame));
-        return new ZStruct([
-          newArray(
-            results.map(([wrapped]) => wrapped),
-            undefined
-          ),
-          newArray(
-            results.map(([, overflowed]) => overflowed),
-            undefined
-          ),
-        ]);
+        return new ZStruct(
+          [0, 1].map((part) =>
+            newArray(
+              results.map((result) => result[part]),
+              undefined
+            )
+          )
+        );
       },
       expression
     );
@@ -1169,3 +1163,17 @@ export function intFittingRange(low: bigint, high: bigint, sema: SemaApi, span: 
 }
 
 export { COMPTIME_INT, USIZE };
+
+/** The wrapped result of an overflow builtin on integers of the type, with 1 when it overflowed. */
+function wrappedWithOverflowBit(name: string, x: bigint, y: bigint, type: IntType): [bigint, bigint] {
+  const exact =
+    name === '@addWithOverflow'
+      ? x + y
+      : name === '@subWithOverflow'
+        ? x - y
+        : name === '@mulWithOverflow'
+          ? x * y
+          : x << y;
+  const wrapped = wrapInt(exact, type);
+  return [wrapped, wrapped === exact ? 0n : 1n];
+}

@@ -954,11 +954,11 @@ function nativeMembers(fileType: Type): Record<string, () => Member> {
           const target = joined(text(directory, frame), text(path, frame));
           const files = frame.runtime.io.files;
           // A trailing slash names the same last directory.
-          const kind = recursive === true ? files.kindOf(target.replace(/(?<=.)\/+$/, '')) : undefined;
+          const kind = files.kindOf(target.replace(/(?<=.)\/+$/, ''));
           // `createDirPath` succeeds when the directory exists already, as `mkdir -p` does.
-          if (kind === 'directory') return;
+          if (recursive === true && kind === 'directory') return;
           // A file where the last directory would go is not one, as Zig's createDirPath reports.
-          if (kind === 'file') throw new FileSystemError('ENOTDIR', target);
+          if (recursive === true && kind === 'file') throw new FileSystemError('ENOTDIR', target);
           files.createDirectory(target, recursive as boolean);
           return;
         })
