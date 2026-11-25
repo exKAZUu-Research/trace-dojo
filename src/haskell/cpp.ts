@@ -86,15 +86,14 @@ class Preprocessor {
       case 'ifdef':
       case 'ifndef': {
         const value =
-          active &&
-          (name === 'if' ? this.evaluate(rest) !== 0 : this.isDefined(this.macroName(rest)) === (name === 'ifdef'));
+          active && (name === 'if' ? this.evaluate(rest) : this.isDefined(this.macroName(rest)) === (name === 'ifdef'));
         stack.push({ active: value, taken: value, outerActive: active, seenElse: false, row: this.row });
         return;
       }
       case 'elif': {
         const top = this.top(stack, '#elif');
         if (top.seenElse) throw this.error(this.row, '#else の後に #elif は書けません。');
-        const value = top.outerActive && !top.taken && this.evaluate(rest) !== 0;
+        const value = top.outerActive && !top.taken && this.evaluate(rest);
         top.active = value;
         top.taken ||= value;
         return;
@@ -174,8 +173,8 @@ class Preprocessor {
     }
   }
 
-  /** Evaluates an `#if` condition: `defined`, integers, macros, and C's operators. */
-  private evaluate(expression: string): number {
+  /** Whether an `#if` condition holds: `defined`, integers, macros, and C's operators. */
+  private evaluate(expression: string): boolean {
     const withDefined = expression.replaceAll(
       /\bdefined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))/g,
       (_, inParens: string | undefined, bare: string | undefined) => {
@@ -185,7 +184,8 @@ class Preprocessor {
       }
     );
     const expanded = this.expand(withDefined, new Set(), true);
-    return new ConditionParser(expanded, (message) => this.error(this.row, message)).parse();
+    const error = (message: string): Error => this.error(this.row, message);
+    return evaluateCondition(new ConditionParser(expanded, error).parse(), error).value !== 0n;
   }
 
   /** Expands the macros of a line of code, outside its strings, characters, and comments. */
@@ -343,99 +343,138 @@ function splitArguments(
   throw error('マクロの呼び出しの ) がありません。');
 }
 
-/** Parses and evaluates the integer expression of an `#if`, after its macros are expanded. */
+/**
+ * An integer of the preprocessor's arithmetic, which C does in its widest types: a 64-bit `value`, signed (two's
+ * complement) unless `unsigned`.
+ */
+interface CInteger {
+  value: bigint;
+  unsigned: boolean;
+}
+
+/** The expression of an `#if`, parsed in full before any of it is evaluated. */
+type Condition =
+  | { k: 'integer'; integer: CInteger }
+  | { k: 'unary'; op: string; operand: Condition }
+  | { k: 'binary'; op: string; left: Condition; right: Condition }
+  | { k: 'conditional'; test: Condition; ifTrue: Condition; ifFalse: Condition };
+
+/**
+ * The integer constants of C, which both read tokens and give their values: a prefix with the digits it takes, and
+ * the suffixes C allows (`u` and `l` or `ll`, in either order, in one case each).
+ */
+const INTEGER_CONSTANT = {
+  prefixes: [
+    { pattern: /^0[xX]([\da-fA-F]+)$/, radix: 16 },
+    { pattern: /^0[bB]([01]+)$/, radix: 2 },
+    { pattern: /^(0[0-7]*)$/, radix: 8 },
+    { pattern: /^([1-9]\d*)$/, radix: 10 },
+  ],
+  suffixes: ['', 'u', 'l', 'll', 'ul', 'lu', 'ull', 'llu'].flatMap((suffix) => [
+    ...new Set([suffix, suffix.toUpperCase(), suffix.replace('u', 'U'), suffix.replace(/l+/, (l) => l.toUpperCase())]),
+  ]),
+};
+
+const INT64_MAX = (1n << 63n) - 1n;
+const UINT64_MAX = (1n << 64n) - 1n;
+
+/** The tokens of an `#if` expression: C's numbers (which a word character continues), characters, and operators. */
+const CONDITION_TOKEN = /\d[\w.]*|'(?:\\.[^']*|[^\\'])'|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g;
+
+const BINARY_LEVELS: readonly (readonly string[])[] = [
+  ['||'],
+  ['&&'],
+  ['|'],
+  ['^'],
+  ['&'],
+  ['==', '!='],
+  ['<', '>', '<=', '>='],
+  ['<<', '>>'],
+  ['+', '-'],
+  ['*', '/', '%'],
+];
+
+/**
+ * Parses the integer expression of an `#if`, after its macros are expanded, into a tree: the whole expression, so
+ * that a syntax error is reported even in an operand that evaluation skips.
+ */
 class ConditionParser {
   private readonly tokens: string[];
   private position = 0;
-  /** How many operands being read are ones C skips (after a deciding `&&` or `||`, or `?:`'s other branch). */
-  private skipping = 0;
 
   constructor(
     text: string,
     private readonly error: (message: string) => Error
   ) {
-    this.tokens = text.match(/(?:0[xX][\da-fA-F]+|\d+)[uUlL]*|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g) ?? [];
+    this.tokens = text.match(CONDITION_TOKEN) ?? [];
   }
 
-  parse(): number {
-    const value = this.ternary();
+  parse(): Condition {
+    const condition = this.ternary();
     if (this.position < this.tokens.length) throw this.error(`#if の式 ${this.tokens.join(' ')} に誤りがあります。`);
-    return value;
+    return condition;
   }
 
-  private ternary(): number {
-    const condition = this.binary(0);
-    if (this.tokens[this.position] !== '?') return condition;
+  private ternary(): Condition {
+    const test = this.binary(0);
+    if (this.tokens[this.position] !== '?') return test;
     this.position++;
-    const ifTrue = this.skipped(condition === 0, () => this.ternary());
+    const ifTrue = this.ternary();
     this.expect(':');
-    const ifFalse = this.skipped(condition !== 0, () => this.ternary());
-    return condition === 0 ? ifFalse : ifTrue;
+    const ifFalse = this.ternary();
+    return { k: 'conditional', test, ifTrue, ifFalse };
   }
 
-  private skipped(skip: boolean, read: () => number): number {
-    if (skip) this.skipping++;
-    try {
-      return read();
-    } finally {
-      if (skip) this.skipping--;
-    }
-  }
-
-  private static readonly LEVELS: string[][] = [
-    ['||'],
-    ['&&'],
-    ['|'],
-    ['^'],
-    ['&'],
-    ['==', '!='],
-    ['<', '>', '<=', '>='],
-    ['<<', '>>'],
-    ['+', '-'],
-    ['*', '/', '%'],
-  ];
-
-  private binary(level: number): number {
-    if (level >= ConditionParser.LEVELS.length) return this.unary();
+  private binary(level: number): Condition {
+    if (level >= BINARY_LEVELS.length) return this.unary();
     let left = this.binary(level + 1);
-    while (ConditionParser.LEVELS[level].includes(this.tokens[this.position])) {
-      const operator = this.tokens[this.position++];
-      const decided = (operator === '&&' && left === 0) || (operator === '||' && left !== 0);
-      const right = this.skipped(decided, () => this.binary(level + 1));
-      left = applyOperator(operator, left, right, this.skipping > 0 ? () => {} : this.error);
+    while (BINARY_LEVELS[level].includes(this.tokens[this.position])) {
+      const op = this.tokens[this.position++];
+      left = { k: 'binary', op, left, right: this.binary(level + 1) };
     }
     return left;
   }
 
-  private unary(): number {
+  private unary(): Condition {
     const token = this.tokens[this.position++];
     switch (token) {
-      case '!': {
-        return this.unary() === 0 ? 1 : 0;
-      }
-      case '-': {
-        return -this.unary();
-      }
-      case '+': {
-        return this.unary();
-      }
+      case '!':
+      case '-':
+      case '+':
       case '~': {
-        return ~this.unary();
+        return { k: 'unary', op: token, operand: this.unary() };
       }
       case '(': {
-        const value = this.ternary();
+        const inner = this.ternary();
         this.expect(')');
-        return value;
+        return inner;
       }
       default: {
-        // C's integer suffixes (u, l, and their combinations) do not change the value.
-        const digits = token?.replace(/[uUlL]+$/, '');
-        if (digits !== undefined && /^0[xX][\da-fA-F]+$/.test(digits)) return Number.parseInt(digits.slice(2), 16);
-        if (digits !== undefined && /^0[0-7]*$/.test(digits)) return Number.parseInt(digits, 8);
-        if (digits !== undefined && /^[1-9]\d*$/.test(digits)) return Number.parseInt(digits, 10);
-        throw this.error(`#if の式に誤りがあります（${token ?? '式の終わり'}）。`);
+        if (token === undefined) throw this.error('#if の式に誤りがあります（式の終わり）。');
+        if (token.startsWith("'")) return { k: 'integer', integer: { value: characterValue(token), unsigned: false } };
+        if (/^\d/.test(token)) return { k: 'integer', integer: this.integerConstant(token) };
+        throw this.error(`#if の式に誤りがあります（${token}）。`);
       }
     }
+  }
+
+  /** The value of an integer constant, which is unsigned when its suffix says so or only an unsigned type holds it. */
+  private integerConstant(token: string): CInteger {
+    if (token.includes('.') || /^\d+[eE]/.test(token)) throw this.error('#if の式に小数は書けません。');
+    for (const { pattern, radix } of INTEGER_CONSTANT.prefixes) {
+      for (const suffix of INTEGER_CONSTANT.suffixes) {
+        if (suffix !== '' && !token.endsWith(suffix)) continue;
+        const digits = pattern.exec(token.slice(0, token.length - suffix.length))?.[1];
+        if (digits === undefined) continue;
+        const value = [...digits].reduce(
+          (total, digit) => total * BigInt(radix) + BigInt(Number.parseInt(digit, 16)),
+          0n
+        );
+        if (value > UINT64_MAX) throw this.error(`#if の整数 ${token} は大きすぎます。`);
+        return { value, unsigned: /u/i.test(suffix) || value > INT64_MAX };
+      }
+    }
+    throw this.error(`#if の整数 ${token} の書き方に誤りがあります。`);
   }
 
   private expect(token: string): void {
@@ -444,69 +483,130 @@ class ConditionParser {
   }
 }
 
+/** The value of a character constant such as `'a'` or `'\n'`, which is an `int`. */
+function characterValue(token: string): bigint {
+  const body = token.slice(1, -1);
+  if (!body.startsWith('\\')) return BigInt(body.codePointAt(0) ?? 0);
+  const escapes: Record<string, number> = { n: 10, t: 9, r: 13, '0': 0, a: 7, b: 8, f: 12, v: 11 };
+  const escaped = body.slice(1);
+  if (/^x[\da-fA-F]+$/.test(escaped)) return BigInt(Number.parseInt(escaped.slice(1), 16));
+  if (/^[0-7]{1,3}$/.test(escaped)) return BigInt(Number.parseInt(escaped, 8));
+  return BigInt(escapes[escaped] ?? escaped.codePointAt(0) ?? 0);
+}
+
+/** A value of C's arithmetic, wrapped to 64 bits as its type is signed or not. */
+function cInteger(value: bigint, unsigned: boolean): CInteger {
+  return { value: unsigned ? BigInt.asUintN(64, value) : BigInt.asIntN(64, value), unsigned };
+}
+
+const truth = (value: boolean): CInteger => ({ value: value ? 1n : 0n, unsigned: false });
+
+/**
+ * Evaluates a parsed `#if` expression with C's rules: `&&`, `||`, and `?:` evaluate only the operands they select;
+ * an operand with an unsigned type makes the other unsigned too.
+ */
+function evaluateCondition(condition: Condition, error: (message: string) => Error): CInteger {
+  const evaluate = (node: Condition): CInteger => evaluateCondition(node, error);
+  switch (condition.k) {
+    case 'integer': {
+      return condition.integer;
+    }
+    case 'unary': {
+      const { value, unsigned } = evaluate(condition.operand);
+      if (condition.op === '!') return truth(value === 0n);
+      if (condition.op === '-') return cInteger(-value, unsigned);
+      if (condition.op === '~') return cInteger(~value, unsigned);
+      return { value, unsigned };
+    }
+    case 'conditional': {
+      const test = evaluate(condition.test).value !== 0n;
+      // The result has the type both branches convert to, though only the chosen branch is evaluated.
+      const unsigned = isUnsigned(condition.ifTrue) || isUnsigned(condition.ifFalse);
+      const chosen = evaluate(test ? condition.ifTrue : condition.ifFalse);
+      return cInteger(chosen.value, unsigned);
+    }
+    case 'binary': {
+      const { op } = condition;
+      if (op === '&&') return truth(evaluate(condition.left).value !== 0n && evaluate(condition.right).value !== 0n);
+      if (op === '||') return truth(evaluate(condition.left).value !== 0n || evaluate(condition.right).value !== 0n);
+      return applyOperator(op, evaluate(condition.left), evaluate(condition.right), error);
+    }
+  }
+}
+
+/** Whether an expression has an unsigned type, which C decides without evaluating it. */
+function isUnsigned(condition: Condition): boolean {
+  switch (condition.k) {
+    case 'integer': {
+      return condition.integer.unsigned;
+    }
+    case 'unary': {
+      return condition.op !== '!' && isUnsigned(condition.operand);
+    }
+    case 'conditional': {
+      return isUnsigned(condition.ifTrue) || isUnsigned(condition.ifFalse);
+    }
+    case 'binary': {
+      if (['||', '&&', '==', '!=', '<', '>', '<=', '>='].includes(condition.op)) return false;
+      if (condition.op === '<<' || condition.op === '>>') return isUnsigned(condition.left);
+      return isUnsigned(condition.left) || isUnsigned(condition.right);
+    }
+  }
+}
+
 // code-gauge-allow functionCognitiveComplexity -- One case per C operator.
-function applyOperator(
-  operator: string,
-  left: number,
-  right: number,
-  error: (message: string) => Error | undefined
-): number {
-  switch (operator) {
-    case '||': {
-      return left !== 0 || right !== 0 ? 1 : 0;
-    }
-    case '&&': {
-      return left !== 0 && right !== 0 ? 1 : 0;
-    }
+function applyOperator(op: string, left: CInteger, right: CInteger, error: (message: string) => Error): CInteger {
+  if (op === '<<' || op === '>>') {
+    const shift = right.unsigned ? right.value : BigInt.asIntN(64, right.value);
+    const value = left.unsigned ? left.value : BigInt.asIntN(64, left.value);
+    if (shift < 0n || shift >= 64n) return cInteger(0n, left.unsigned);
+    return cInteger(op === '<<' ? value << shift : value >> shift, left.unsigned);
+  }
+  // The usual arithmetic conversions: when either operand is unsigned, both are.
+  const unsigned = left.unsigned || right.unsigned;
+  const a = cInteger(left.value, unsigned).value;
+  const b = cInteger(right.value, unsigned).value;
+  switch (op) {
     case '|': {
-      return left | right;
+      return cInteger(a | b, unsigned);
     }
     case '^': {
-      return left ^ right;
+      return cInteger(a ^ b, unsigned);
     }
     case '&': {
-      return left & right;
+      return cInteger(a & b, unsigned);
     }
     case '==': {
-      return left === right ? 1 : 0;
+      return truth(a === b);
     }
     case '!=': {
-      return left === right ? 0 : 1;
+      return truth(a !== b);
     }
     case '<': {
-      return left < right ? 1 : 0;
+      return truth(a < b);
     }
     case '>': {
-      return left > right ? 1 : 0;
+      return truth(a > b);
     }
     case '<=': {
-      return left <= right ? 1 : 0;
+      return truth(a <= b);
     }
     case '>=': {
-      return left >= right ? 1 : 0;
-    }
-    case '<<': {
-      return left << right;
-    }
-    case '>>': {
-      return left >> right;
+      return truth(a >= b);
     }
     case '+': {
-      return left + right;
+      return cInteger(a + b, unsigned);
     }
     case '-': {
-      return left - right;
+      return cInteger(a - b, unsigned);
     }
     case '*': {
-      return left * right;
+      return cInteger(a * b, unsigned);
     }
     default: {
-      if (right === 0) {
-        const problem = error('#if の式で 0 で割っています。');
-        if (problem) throw problem;
-        return 0;
-      }
-      return operator === '/' ? Math.trunc(left / right) : left % right;
+      if (b === 0n) throw error('#if の式で 0 で割っています。');
+      // BigInt's division truncates toward zero and its remainder takes the dividend's sign, as C's do.
+      return cInteger(op === '/' ? a / b : a % b, unsigned);
     }
   }
 }
