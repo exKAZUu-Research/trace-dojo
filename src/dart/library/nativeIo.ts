@@ -106,6 +106,20 @@ define('_File._write', (runtime, _self, [path, contents, append, failure, shownP
   return;
 });
 
+// Writing past the end leaves the gap as zero bytes, as a write at an offset does in a file.
+define('_File._writeAt', (runtime, _self, [path, position, contents]) => {
+  const { files } = runtime.io;
+  const text = stringArg(runtime, path, 'path');
+  const offset = Number(position);
+  const written = contents as string;
+  withFileErrors(runtime, 'Cannot open file', () => {
+    const current = files.kindOf(text) === 'file' ? files.readFile(text) : '';
+    const updated = current.slice(0, offset).padEnd(offset, '\0') + written + current.slice(offset + written.length);
+    files.open(text, { create: 'always', truncate: true, append: false }).write(updated);
+  });
+  return;
+});
+
 define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
   const { files } = runtime.io;
   const text = stringArg(runtime, path, 'path');

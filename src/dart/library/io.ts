@@ -347,6 +347,7 @@ class _File extends FileSystemEntity implements File {
       })).where((bytes) => bytes.isNotEmpty);
   external static String _read(String path, String failure);
   external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
+  external static void _writeAt(String path, int position, String contents);
   external static void _create(String path, bool recursive, bool exclusive);
 }
 
@@ -357,15 +358,20 @@ class _File extends FileSystemEntity implements File {
  */
 class _FileSink implements IOSink {
   final _File _file;
-  bool _append;
+  /**
+   * Where the sink writes next: from the start, or in append mode from the end the file had when opened, which other
+   * writes to the file do not move, as the VM writes at its file's own position.
+   */
+  int _position = 0;
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
   bool _failed = false;
   bool _writeScheduled = false;
-  _FileSink(this._file, this._append) {
+  _FileSink(this._file, bool appends) {
     try {
-      _writeBuffered();
+      _File._write(_file.path, "", appends, "Cannot open file");
+      if (appends) _position = _File._read(_file.path, "Cannot open file").length;
     } catch (error, stackTrace) {
       // The VM reports a failure to open the file to done, which is unhandled unless the program closes the sink.
       _failed = true;
@@ -413,9 +419,11 @@ class _FileSink implements IOSink {
   }
   Future get done => _done.future;
   void _writeBuffered() {
-    _File._write(_file.path, _buffer.toString(), _append, "Cannot open file");
+    final contents = _buffer.toString();
     _buffer.clear();
-    _append = true;
+    if (contents.isEmpty) return;
+    _File._writeAt(_file.path, _position, contents);
+    _position += contents.length;
   }
   void _startWrite() {
     if (_isClosed) throw StateError("StreamSink is closed");
