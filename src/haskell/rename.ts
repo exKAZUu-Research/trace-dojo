@@ -2234,6 +2234,7 @@ class Renamer {
         return thCall(span, 'unboundVarE', thCall(span, 'mkName', thString(span, expr.name.name)));
       }
       const con = this.lookupCon(expr.name);
+      if (expr.name.qualifier) return thCall(span, 'conE', qualifiedThName(expr.name));
       return thCall(span, 'quoteGlobalCon', thString(span, this.thModule('con', con)), thString(span, con.name));
     }
     if (expr.implicit) {
@@ -2247,6 +2248,7 @@ class Renamer {
     const ref = this.resolveVar(expr.name, scope);
     // A variable of the program outside the quote is lifted: the tree of its value.
     if (ref.kind === 'local') return thCall(span, 'lift', { kind: 'var', name: expr.name, span });
+    if (expr.name.qualifier) return thCall(span, 'varE', qualifiedThName(expr.name));
     return thCall(
       span,
       'quoteGlobalVar',
@@ -2255,9 +2257,18 @@ class Renamer {
     );
   }
 
-  /** A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. */
+  /**
+   * A quoted name, `'f` or `''T`, as GHC's `Name` of what it names. A global one the program writes qualified keeps
+   * its qualifier, which the module the splice goes into reads it by: a quote is spliced only into its own module.
+   */
   private thNameCode(expr: Extract<Expr, { kind: 'thName' }>, scope: LocalScope): Expr {
     const { span } = expr;
+    if (expr.name.qualifier) {
+      if (expr.namespace === 'type') this.lookupType(expr.name);
+      else if (expr.namespace === 'con') this.lookupCon(expr.name);
+      else this.lookupValue(expr.name, false);
+      return qualifiedThName(expr.name);
+    }
     const global = (make: string, module: string, name: string): Expr =>
       thCall(span, make, thString(span, thPackage(module)), thString(span, module), thString(span, name));
     if (expr.namespace === 'type') {
@@ -2900,6 +2911,11 @@ function classParamIndex(decl: Extract<Decl, { kind: 'class' }>, name: Name): nu
 
 function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[]) => Expr | Pat): Expr | Pat {
   return items.length === 1 ? one(items[0]) : many(items);
+}
+
+/** A global name as the program writes it with its qualifier, which the module a splice goes into reads it by. */
+function qualifiedThName(name: QName): Expr {
+  return thCall(name.span, 'mkNameQ', thString(name.span, name.qualifier ?? ''), thString(name.span, name.name));
 }
 
 /**

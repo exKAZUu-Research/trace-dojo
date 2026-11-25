@@ -84,6 +84,9 @@ mkNameU occ u = Name (OccName occ) (NameU u)
 mkNameS :: String -> Name
 mkNameS occ = Name (OccName occ) NameS
 
+mkNameQ :: String -> String -> Name
+mkNameQ m occ = Name (OccName occ) (NameQ (ModName m))
+
 -- The syntax trees
 
 data Lit
