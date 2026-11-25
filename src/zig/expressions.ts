@@ -724,6 +724,8 @@ export abstract class ExpressionCompiler extends SemaBase {
     const type = pointer.type;
     if (type.kind === 'pointer' && type.size === 'c') {
       const single = this.derived(pointer, pointerOf('one', type.child, { isConst: type.isConst }), (value) => {
+        // Debug builds check a C pointer for null where it is used, as `.?` does.
+        if (value === NULL) return nullUnwrapPanic();
         if (!(value instanceof Pointer)) throw new MemoryFault();
         return value;
       });
