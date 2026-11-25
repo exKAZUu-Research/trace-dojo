@@ -154,21 +154,13 @@ function appendShadowedArg(shell: Shell, builtin: string, arg: Word | Assignment
   }
   if (arg.array) rejectUnsupportedShadowedCompound(builtin);
   for (const braced of braceExpandAssignment(shell, arg)) {
-    pushShadowedArg(argv, expandShadowedAssignmentOperand(shell, braced));
+    pushShadowedArg(argv, expandAssignmentOperand(shell, braced).text);
   }
 }
 
 function pushShadowedArg(argv: string[], value: string): void {
   argv.push(value);
   if (argv.length - 1 > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-}
-
-function expandShadowedAssignmentOperand(shell: Shell, arg: Assignment): string {
-  const lhs = arg.subscript ? `${arg.name}[${shell.expander.expandAssignmentSubscript(arg.subscript)}]` : arg.name;
-  const rhs = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : '';
-  const text = `${lhs}${arg.append ? '+=' : '='}${rhs}`;
-  if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
-  return text;
 }
 
 /** Executes an ordinary `name=(...)` or `name+=(...)` compound assignment through the single compound schedule. */
@@ -361,8 +353,9 @@ function buildDeclarationPlan(
     if ('append' in arg) {
       state.optionsDone = true;
       for (const braced of braceExpandAssignment(shell, arg)) {
-        state.lastArgText = braced.text;
-        pushPlannedOperand(state, planAssignmentOperand(shell, builtin, braced, state));
+        const planned = planAssignmentOperand(shell, builtin, braced, state);
+        state.lastArgText = planned.text;
+        pushPlannedOperand(state, planned);
       }
     } else {
       appendExpandedDeclareWords(shell, builtin, arg, state);
@@ -480,16 +473,24 @@ function planAssignmentOperand(
     pushCompoundElementRoots(state.roots, rawItems);
     return commitPhase1Compound(shell, builtin, arg, effective, rawItems);
   }
-  const value = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : undefined;
-  if (value !== undefined) state.roots.push(value);
+  const { value, text } = expandAssignmentOperand(shell, arg);
+  state.roots.push(value, text);
   return {
     kind: 'assignment',
     name: arg.name,
     ...(arg.subscript ? { subscript: arg.subscript } : {}),
     append: arg.append,
     value,
-    text: arg.text,
+    text,
   };
+}
+
+function expandAssignmentOperand(shell: Shell, arg: Assignment): { value: string; text: string } {
+  const lhs = arg.subscript ? `${arg.name}[${shell.expander.expandAssignmentSubscript(arg.subscript)}]` : arg.name;
+  const value = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : '';
+  const text = `${lhs}${arg.append ? '+=' : '='}${value}`;
+  if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  return { value, text };
 }
 
 function commitPhase1Compound(
@@ -504,7 +505,7 @@ function commitPhase1Compound(
     (effective.set.has('A') && effective.set.has('a')) ||
     (builtin === 'local' && !shell.isInFunction)
   ) {
-    return { kind: 'deferredCompound', name: arg.name, text: arg.text };
+    return { kind: 'deferredCompound', name: arg.name, text: arg.name };
   }
   rejectUnsupportedDeclarationOptions(builtin, effective.set, effective.unset, effective.hasPlusOption);
   const intent = destinationIntentOf(shell, builtin, effective.set);
@@ -533,13 +534,13 @@ function commitPhase1Compound(
     set: effective.set,
     context: failCtx,
   });
-  if (!committed) return { kind: 'failedCompound', name: arg.name, text: arg.text };
+  if (!committed) return { kind: 'failedCompound', name: arg.name, text: arg.name };
   return {
     kind: 'completedCompound',
     name: arg.name,
     cell: committed.cell,
     materializedArray: committed.materializedArray,
-    text: arg.text,
+    text: arg.name,
   };
 }
 
