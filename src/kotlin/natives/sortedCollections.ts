@@ -1,5 +1,4 @@
-import type { KObject} from '../values';
-import { indexedItems, type Value } from '../values';
+import { indexedItems, type KObject, type Value } from '../values';
 import { defineTraceShape, fieldValue } from './registry';
 
 /*
