@@ -9,7 +9,7 @@ import {
   rootCovers,
   writeMemo,
 } from './awaitReplay';
-import type { LoopProgress, ProgressMemo } from './collectionLoops';
+import type { ProgressMemo } from './collectionLoops';
 import { type Compiled, CompilerBase } from './compilerBase';
 import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype, isTop } from './types';
@@ -137,17 +137,17 @@ export abstract class AwaitCompiler extends CompilerBase {
   }
 
   /**
-   * Where a collection `for` element keeps its progress when an `await` inside or after it may evaluate the
+   * Where a collection literal or `for` element keeps its progress when an `await` inside or after it may evaluate the
    * statement again, kept apart for each iteration of the collection `for` elements enclosing it; undefined when no
-   * `await` can.
+   * `await` can. A collection `for` element that keeps its progress is therefore always in a literal that does.
    */
-  protected loopProgress(element: Span): ProgressMemo | undefined {
+  protected progressMemo<T extends Cell>(span: Span): ProgressMemo<T> | undefined {
     const root = this.awaitRoot;
-    if (!root || !(this.awaitsWithin(element) || this.precedesAwait(element))) return undefined;
+    if (!root || !(this.awaitsWithin(span) || this.precedesAwait(span))) return undefined;
     const slot = this.awaitSlot(root, {});
     const iterated = root.iterated.has(slot);
     return {
-      read: (frame) => readMemo(frame, slot, iterated) as LoopProgress | undefined,
+      read: (frame) => readMemo(frame, slot, iterated) as T | undefined,
       write: (frame, progress) => writeMemo(frame, slot, iterated ? iterationKey(frame) : undefined, progress),
     };
   }

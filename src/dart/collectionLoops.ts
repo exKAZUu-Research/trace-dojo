@@ -1,23 +1,103 @@
+import type { HashStore } from './hashStore';
 import type { Frame } from './runtime';
-import { type Cell, type DartObject, HoldingCell, type Value } from './values';
+import { type Cell, type DartList, type DartObject, HoldingCell, type Value } from './values';
 
 /** Adds an element, or a map entry, to the collection literal being built. */
 export type AddElement = ((key: Value, value?: Value) => void) & {
   target?: DartObject;
-  /** Applies an addition that writes `target` directly, through an add that records the additions it sees. */
+  /** Applies an addition that writes `target` directly, as one addition of the collection being built. */
   addAll?: (addition: Addition) => void;
+  /** Passes over additions that a resumed collection `for` element's completed iterations made before. */
+  skip?: (count: number) => void;
 };
 
-/** An addition to the collection being built, which a collection `for` element's progress may apply again. */
-export interface Addition {
-  apply: (add: AddElement) => void;
-  /** The values the addition adds, which garbage collection reaches while the statement waits. */
-  values: readonly Value[];
-}
+/** An addition to the collection being built, run with the collection's add. */
+export type Addition = (add: AddElement) => void;
 
 export function applyAddition(add: AddElement, addition: Addition): void {
   if (add.addAll) add.addAll(addition);
-  else addition.apply(add);
+  else addition(add);
+}
+
+/** Where a statement that awaits keeps the progress of a collection literal or `for` element across evaluations. */
+export interface ProgressMemo<T> {
+  read: (frame: Frame) => T | undefined;
+  write: (frame: Frame, progress: T) => void;
+}
+
+/** The collection a literal in a statement that awaits is building, and how many additions it has made. */
+export class BuildProgress extends HoldingCell {
+  applied = 0;
+  /** How many additions the current evaluation of the literal has reached. */
+  reached = 0;
+
+  constructor(readonly collection: DartObject) {
+    super();
+  }
+
+  *held(): Iterable<Value> {
+    yield this.collection;
+  }
+}
+
+/**
+ * Builds a collection literal. In a statement whose `await`s evaluate it again, the collection stays with the
+ * literal's progress, and evaluating the literal again passes over the additions it already made, so that each
+ * element is added, and its storage counted, once.
+ */
+export function build(
+  frame: Frame,
+  memo: ProgressMemo<BuildProgress> | undefined,
+  create: () => DartObject,
+  addTo: (collection: DartObject) => AddElement,
+  run: (frame: Frame, add: AddElement) => void
+): DartObject {
+  if (!memo) {
+    const collection = create();
+    // The elements built so far stay reachable while later ones are evaluated.
+    frame.temporaries.push(collection);
+    try {
+      run(frame, addTo(collection));
+    } finally {
+      frame.temporaries.pop();
+    }
+    return collection;
+  }
+  let progress = memo.read(frame);
+  if (!progress) {
+    progress = new BuildProgress(create());
+    memo.write(frame, progress);
+  }
+  progress.reached = 0;
+  run(frame, resumingAdd(addTo(progress.collection), progress));
+  return progress.collection;
+}
+
+export function addToList(list: DartObject): AddElement {
+  return (value) => {
+    (list as DartList).elements.push(value);
+  };
+}
+
+/** The add of a set or map, whose store keeps a set's elements as keys without values. */
+export function addToHashed(collection: DartObject): AddElement {
+  const store = collection.native as HashStore;
+  return Object.assign((key: Value, value?: Value) => store.set(key, value), { target: collection });
+}
+
+function resumingAdd(add: AddElement, progress: BuildProgress): AddElement {
+  const addAll = (addition: Addition): void => {
+    if (progress.reached++ < progress.applied) return;
+    progress.applied++;
+    addition(add);
+  };
+  return Object.assign((key: Value, value?: Value) => addAll((target) => target(key, value)), {
+    target: add.target,
+    addAll,
+    skip: (count: number) => {
+      progress.reached += count;
+    },
+  });
 }
 
 /** How a collection `for` element starts, tests, binds, and advances its iterations. */
@@ -32,11 +112,6 @@ export interface ElementLoop {
   afterIteration: (frame: Frame) => void;
   /** The slots of the loop's variables, whose cells the loop's progress restores. */
   variables: readonly number[];
-}
-
-export interface ProgressMemo {
-  read: (frame: Frame) => LoopProgress | undefined;
-  write: (frame: Frame, progress: LoopProgress) => void;
 }
 
 /** Runs a collection `for` element in a statement that no `await` suspends while the element runs. */
@@ -66,7 +141,8 @@ export class LoopProgress extends HoldingCell {
   done = false;
   /** The loop variables' cells after the last completed iteration. */
   variables: (Cell | undefined)[] = [];
-  readonly additions: Addition[] = [];
+  /** How many additions the completed iterations made. */
+  added = 0;
 
   constructor(readonly iterator: Value) {
     super();
@@ -80,17 +156,20 @@ export class LoopProgress extends HoldingCell {
     yield this.iterator;
     yield this.current?.value;
     for (const cell of this.variables) yield cell?.v;
-    for (const addition of this.additions) yield* addition.values;
   }
 }
 
 /**
  * Runs a collection `for` element in a statement whose `await`s, inside or after the element, evaluate the statement
- * again. The element's progress keeps its iterator, its loop variables, and what its completed iterations added, so
- * that evaluating the statement again applies those additions and continues with the iteration that suspended,
- * instead of running the completed iterations, their updates, and their iterator's code a second time.
+ * again. The element's progress keeps its iterator, its loop variables, and how many additions its completed
+ * iterations made, which the literal being built already holds, so that evaluating the statement again continues with
+ * the iteration that suspended, instead of running the completed iterations, their updates, and their iterator's code
+ * a second time.
  */
-export function runResumableLoop(loop: ElementLoop, memo: ProgressMemo): (frame: Frame, add: AddElement) => void {
+export function runResumableLoop(
+  loop: ElementLoop,
+  memo: ProgressMemo<LoopProgress>
+): (frame: Frame, add: AddElement) => void {
   return (frame, add) => {
     const progress = progressOf(frame, add, loop, memo);
     if (progress.done) return;
@@ -106,11 +185,12 @@ export function runResumableLoop(loop: ElementLoop, memo: ProgressMemo): (frame:
   };
 }
 
-/** The loop's progress, started now, or resumed by applying the completed iterations' additions again. */
-function progressOf(frame: Frame, add: AddElement, loop: ElementLoop, memo: ProgressMemo): LoopProgress {
+/** The loop's progress, started now, or resumed by passing over the completed iterations' additions. */
+function progressOf(frame: Frame, add: AddElement, loop: ElementLoop, memo: ProgressMemo<LoopProgress>): LoopProgress {
   const remembered = memo.read(frame);
   if (remembered) {
-    for (const addition of remembered.additions) applyAddition(add, addition);
+    if (!add.skip) throw new Error('A collection for element resumes only inside a collection literal that resumes.');
+    add.skip(remembered.added);
     for (const [index, cell] of remembered.variables.entries()) frame.locals[loop.variables[index]] = cell;
     return remembered;
   }
@@ -129,9 +209,9 @@ function runIteration(frame: Frame, add: AddElement, loop: ElementLoop, progress
       return false;
     }
     loop.bind?.(frame, progress.current.value);
-    const additions: Addition[] = [];
-    loop.body(frame, recordingAdd(add, additions));
-    for (const addition of additions) progress.additions.push(addition);
+    const counted = { additions: 0 };
+    loop.body(frame, countingAdd(add, counted));
+    progress.added += counted.additions;
     progress.bodyDone = true;
   }
   loop.afterIteration(frame);
@@ -142,14 +222,17 @@ function runIteration(frame: Frame, add: AddElement, loop: ElementLoop, progress
   return true;
 }
 
-/** An add that also records each addition in `additions`, so that they can be applied again later. */
-function recordingAdd(add: AddElement, additions: Addition[]): AddElement {
+function countingAdd(add: AddElement, counted: { additions: number }): AddElement {
   const addAll = (addition: Addition): void => {
-    additions.push(addition);
+    counted.additions++;
     applyAddition(add, addition);
   };
-  return Object.assign(
-    (key: Value, value?: Value) => addAll({ apply: (target) => target(key, value), values: [key, value] }),
-    { target: add.target, addAll }
-  );
+  return Object.assign((key: Value, value?: Value) => addAll((target) => target(key, value)), {
+    target: add.target,
+    addAll,
+    skip: (count: number) => {
+      counted.additions += count;
+      add.skip?.(count);
+    },
+  });
 }

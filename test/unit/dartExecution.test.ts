@@ -10105,12 +10105,13 @@ void main() async {
   var count = 0;
   print([for (var i = 0; i < 3; i += 1, count++) if (i.isEven) await later(i) else count += 10, count]);
   print([for (var x in numbers()) x, await later(3)]);
+  print({for (var i = 0; i < 1000; i++) i: await Future.value(i)}.length);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
       'later 0\nlater 1\nnumbers 1\nlater 1\nnumbers 2\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\n' +
-      'later 0\nlater 2\n[0, 11, 20, 13]\nnumbers 1\nnumbers 2\nlater 3\n[1, 2, 30]\n',
+      'later 0\nlater 2\n[0, 11, 20, 13]\nnumbers 1\nnumbers 2\nlater 3\n[1, 2, 30]\n1000\n',
   });
 });
 

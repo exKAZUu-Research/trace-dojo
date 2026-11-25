@@ -1,14 +1,23 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
-import { type AddElement, applyAddition, type ElementLoop, runLoop, runResumableLoop } from './collectionLoops';
+import {
+  type AddElement,
+  addToHashed,
+  applyAddition,
+  build,
+  type BuildProgress,
+  type ElementLoop,
+  type LoopProgress,
+  runLoop,
+  runResumableLoop,
+} from './collectionLoops';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { branchesType } from './contextTypes';
 import { ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
-import type { HashStore } from './hashStore';
 import { forEachValue, implicitCast, iterableValues } from './library/nativeSupport';
 import { wrap } from './operators';
 import { PatternCache } from './patternCompiler';
@@ -852,13 +861,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const map = run(frame);
       if (nullAware && map === undefined) return;
       // The VM adds a spread map by the literal's `addAll`, whose hashing may run learner code while the map is unnamed.
-      applyAddition(add, {
-        apply: (target) =>
-          frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
-            frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
-          ),
-        values: [map],
-      });
+      applyAddition(add, (target) =>
+        frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
+          frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
+        )
+      );
     };
   }
 
@@ -983,7 +990,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const elementType = element.isAwait
       ? this.elementTypeOfStream(iterable, element.iterable)
       : this.elementTypeOfIterable(iterable, element.iterable);
-    const progress = this.loopProgress(element);
+    const progress = this.progressMemo<LoopProgress>(element);
     const start = element.isAwait
       ? this.streamIteratorOf(iterable, elementType)
       : this.iteratorOf(this.iterableSource(iterable));
@@ -1045,7 +1052,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
-    const progress = this.loopProgress(element);
+    const progress = this.progressMemo<LoopProgress>(element);
     const { initExec, loopSlots } = this.compileForInit(element);
     this.enterLoop(element);
     const { condition, afterLoop, body, updates } = this.inCollectionLoop(() => {
@@ -1081,47 +1088,33 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return progress ? runResumableLoop(loop, progress) : runLoop(loop);
   }
 
-  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  protected buildSet(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
-    const elementType = (type as InterfaceType).args[0];
-    const resolve = this.runtimeType(elementType);
-    const build: Eval = (frame) => {
-      const set = frame.runtime.links.newSet(frame.runtime, resolve(frame), isConst);
-      frame.temporaries.push(set);
-      try {
-        const store = set.native as HashStore;
-        run(
-          frame,
-          Object.assign((key: Value) => store.set(key, undefined), { target: set })
-        );
-      } finally {
-        frame.temporaries.pop();
-      }
-      return set;
-    };
-    return { type, run: isConst ? this.canonicalized(build) : build, isConst };
+  protected buildSet(
+    span: Span,
+    type: DartType,
+    run: (frame: Frame, add: AddElement) => void,
+    isConst: boolean
+  ): Compiled {
+    const resolve = this.runtimeType((type as InterfaceType).args[0]);
+    const memo = this.progressMemo<BuildProgress>(span);
+    const create = (frame: Frame): DartObject => frame.runtime.links.newSet(frame.runtime, resolve(frame), isConst);
+    const built: Eval = (frame) => build(frame, memo, () => create(frame), addToHashed, run);
+    return { type, run: isConst ? this.canonicalized(built) : built, isConst };
   }
 
-  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  protected buildMap(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
+  protected buildMap(
+    span: Span,
+    type: DartType,
+    run: (frame: Frame, add: AddElement) => void,
+    isConst: boolean
+  ): Compiled {
     const [keyType, valueType] = (type as InterfaceType).args;
     const resolveKey = this.runtimeType(keyType);
     const resolveValue = this.runtimeType(valueType);
-    const build: Eval = (frame) => {
-      const map = frame.runtime.links.newMap(frame.runtime, resolveKey(frame), resolveValue(frame), isConst);
-      frame.temporaries.push(map);
-      try {
-        const store = map.native as HashStore;
-        run(
-          frame,
-          Object.assign((key: Value, value?: Value) => store.set(key, value), { target: map })
-        );
-      } finally {
-        frame.temporaries.pop();
-      }
-      return map;
-    };
-    return { type, run: isConst ? this.canonicalized(build) : build, isConst };
+    const memo = this.progressMemo<BuildProgress>(span);
+    const create = (frame: Frame): DartObject =>
+      frame.runtime.links.newMap(frame.runtime, resolveKey(frame), resolveValue(frame), isConst);
+    const built: Eval = (frame) => build(frame, memo, () => create(frame), addToHashed, run);
+    return { type, run: isConst ? this.canonicalized(built) : built, isConst };
   }
 
   // Switch expressions
@@ -1265,7 +1258,7 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
 
 function addIterableElements(frame: Frame, iterable: Value, elementType: DartType | undefined, add: AddElement): void {
   if (add.addAll) {
-    add.addAll({ apply: (target) => addIterableElements(frame, iterable, elementType, target), values: [iterable] });
+    add.addAll((target) => addIterableElements(frame, iterable, elementType, target));
     return;
   }
   const { runtime } = frame;

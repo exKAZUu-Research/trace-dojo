@@ -17,6 +17,7 @@ import type {
 import { chainHead, isDotShorthand } from './astWalk';
 import { AwaitCompiler } from './awaitCompiler';
 import type { ClassInfo, FieldMember, Member } from './classes';
+import { type AddElement, addToList, build, type BuildProgress } from './collectionLoops';
 import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import {
   elementTypeOfContext,
@@ -63,6 +64,7 @@ import {
   type Callable,
   type Cell,
   DartList,
+  type DartObject,
   DartRecord,
   DartTypeValue,
   LateInitializer,
@@ -699,21 +701,14 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     const resolve = this.runtimeType(elementType);
     // Inside a constant context, a literal without `const` is constant too.
     const isConst = expression.isConst || (this.inConstContext && elements.isConst);
-    const build: Eval = (frame) => {
-      const list = new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
-      // The elements built so far stay reachable while later ones are evaluated.
-      frame.temporaries.push(list);
-      try {
-        elements.run(frame, (value) => {
-          list.elements.push(value);
-        });
-      } finally {
-        frame.temporaries.pop();
-      }
+    const memo = this.progressMemo<BuildProgress>(expression);
+    const built: Eval = (frame) => {
+      const create = (): DartObject => new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
+      const list = build(frame, memo, create, addToList, elements.run) as DartList;
       frame.runtime.allocate(list.elements.length);
       return list;
     };
-    return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
+    return { type, run: isConst ? this.canonicalized(built) : built, isConst, creates: elements.creates };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -758,6 +753,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
           compiled.types.map((type) => type.key)
         );
       return this.buildSet(
+        expression,
         interfaceType(coreTypes.set, [elementType]),
         compiled.run,
         expression.isConst || (this.inConstContext && compiled.isConst)
@@ -784,6 +780,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
         compiled.types.map((type) => type.value ?? DYNAMIC)
       );
     return this.buildMap(
+      expression,
       interfaceType(coreTypes.map, [keyType, valueType]),
       compiled.run,
       expression.isConst || (this.inConstContext && compiled.isConst)
@@ -898,13 +895,15 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
   }
 
   protected abstract buildSet(
+    span: Span,
     type: DartType,
-    run: (frame: Frame, add: (key: Value) => void) => void,
+    run: (frame: Frame, add: AddElement) => void,
     isConst: boolean
   ): Compiled;
   protected abstract buildMap(
+    span: Span,
     type: DartType,
-    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void,
+    run: (frame: Frame, add: AddElement) => void,
     isConst: boolean
   ): Compiled;
 
