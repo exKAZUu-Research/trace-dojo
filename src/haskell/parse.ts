@@ -57,28 +57,33 @@ export function preprocessProgram(source: string): string {
  * The splices of a program that uses Template Haskell, which run before it compiles, with the pragmas and imports
  * the programs that run them keep.
  */
-export function findProgramSplices(source: string): { sites: SpliceSite[]; header: string } | undefined {
+export function findProgramSplices(
+  source: string
+): { sites: SpliceSite[]; header: string; source: string } | undefined {
   const features = readExtensions(source).gates('parse');
   if (!features.allows('splices')) return undefined;
-  return parseSource(extendedParser, withDeclarationQuoteBraces(features, source), MISSING_TOKEN_NAMES, (root) => ({
+  // The sites' offsets are in the text with the declaration quotes' braces, which the splices then replace in.
+  const text = withDeclarationQuoteBraces(features, source);
+  return parseSource(extendedParser, text, MISSING_TOKEN_NAMES, (root) => ({
     sites: collectSplices(root),
     header: spliceHeader(root),
+    source: text,
   }));
 }
 
 /**
  * Writes the layout of each declaration quote, `[d| ... |]`, with explicit braces and semicolons, which the grammar
  * reads where its layout fails (a first declaration on the quote's line): each goes in place of a space where there
- * is one, so that rows and columns stay.
+ * is one, so that rows stay, and a declaration at the left margin gets its semicolon before it.
  */
 function withDeclarationQuoteBraces(features: FeatureGates<'parse'>, source: string): string {
   if (!features.allows('declarationQuotes')) return source;
   let result = source;
   let from = 0;
   for (;;) {
-    const open = result.indexOf('[d|', from);
+    const open = codeIndexOf(result, '[d|', from);
     if (open === -1) return result;
-    const close = result.indexOf('|]', open + 3);
+    const close = codeIndexOf(result, '|]', open + 3);
     if (close === -1) return result;
     const body = result.slice(open + 3, close);
     const first = /\S/.exec(body);
@@ -92,8 +97,8 @@ function withDeclarationQuoteBraces(features: FeatureGates<'parse'>, source: str
     const rebuilt = lines.map((line, index) => {
       if (index === 0) return line;
       const indent = /^ */.exec(line)?.[0].length ?? 0;
-      if (indent !== column || indent === 0 || line.length === indent) return line;
-      return `${line.slice(0, indent - 1)};${line.slice(indent)}`;
+      if (indent !== column || line.length === indent) return line;
+      return indent === 0 ? `;${line}` : `${line.slice(0, indent - 1)};${line.slice(indent)}`;
     });
     let inner = rebuilt.join('\n');
     inner = inner.startsWith(' ') ? `{${inner.slice(1)}` : `{${inner}`;
@@ -101,6 +106,36 @@ function withDeclarationQuoteBraces(features: FeatureGates<'parse'>, source: str
     result = result.slice(0, open + 3) + inner + result.slice(close);
     from = open + 3 + inner.length + 2;
   }
+}
+
+/** Where a text occurs in code from a position on, outside string and character literals and comments, or -1. */
+function codeIndexOf(source: string, text: string, from: number): number {
+  let index = from;
+  while (index < source.length) {
+    if (source.startsWith(text, index)) return index;
+    if (source.startsWith('{-', index)) {
+      let depth = 1;
+      index += 2;
+      while (index < source.length && depth > 0) {
+        if (source.startsWith('{-', index)) depth++;
+        else if (source.startsWith('-}', index)) depth--;
+        index += source.startsWith('{-', index) || source.startsWith('-}', index) ? 2 : 1;
+      }
+    } else if (/^--+(?![!#$%&*+./<=>?@\\^|~:])/.test(source.slice(index, index + 64))) {
+      const end = source.indexOf('\n', index);
+      index = end === -1 ? source.length : end;
+    } else if (
+      source[index] === '"' ||
+      (/^'(\\.[^']*|[^\\'])'/.test(source.slice(index, index + 16)) && !/[\w']/.test(source[index - 1] ?? ''))
+    ) {
+      const quote = source[index];
+      index++;
+      while (index < source.length && source[index] !== quote && source[index] !== '\n')
+        index += source[index] === '\\' ? 2 : 1;
+      index++;
+    } else index++;
+  }
+  return -1;
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

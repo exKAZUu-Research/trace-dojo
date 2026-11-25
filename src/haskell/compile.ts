@@ -527,7 +527,12 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     let compileOutput = '';
     if (splices && splices.sites.length > 0) {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      ({ source: expanded, printed: compileOutput } = expandSplices(text, splices.header, splices.sites, spliceRunner));
+      ({ source: expanded, printed: compileOutput } = expandSplices(
+        splices.source,
+        splices.header,
+        splices.sites,
+        spliceRunner
+      ));
     }
     const parsed = parseHaskell(expanded);
     const renamed = renameModule(parsed, {
