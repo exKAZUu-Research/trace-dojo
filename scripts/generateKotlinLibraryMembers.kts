@@ -145,6 +145,19 @@ for ((kotlinName, javaType) in mapOf(
     "kotlin.collections.LinkedHashSet" to java.util.LinkedHashSet::class.java,
     // The prelude declares System.out's class beside System, in java.lang.
     "java.lang.PrintStream" to java.io.PrintStream::class.java,
+    // The JVM classes the prelude and the natives declare under their own names, whose members they leave out read
+    // as unavailable.
+    "java.io.BufferedReader" to java.io.BufferedReader::class.java,
+    "java.io.BufferedWriter" to java.io.BufferedWriter::class.java,
+    "java.io.Closeable" to java.io.Closeable::class.java,
+    "java.io.File" to java.io.File::class.java,
+    "java.io.PrintWriter" to java.io.PrintWriter::class.java,
+    "java.util.Locale" to java.util.Locale::class.java,
+    "java.util.NavigableSet" to java.util.NavigableSet::class.java,
+    "java.util.SortedMap" to java.util.SortedMap::class.java,
+    "java.util.SortedSet" to java.util.SortedSet::class.java,
+    "java.util.TreeMap" to java.util.TreeMap::class.java,
+    "java.util.TreeSet" to java.util.TreeSet::class.java,
 )) {
     val names = members.getOrPut(kotlinName) { sortedSetOf() }
     for (method in javaType.methods) {

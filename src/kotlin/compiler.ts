@@ -14,7 +14,6 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
-import { unavailableMessage } from './convertSupport';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { jvmParameterDescriptor } from './jvmSignatures';
 import { libraryClass } from './natives/registry';
@@ -104,21 +103,6 @@ export interface CompileOptions {
   /** Whether the program records the steps of its statements, for a trace. */
   recordsSteps?: boolean;
 }
-
-/** The names of functions of the standard library that read input, files, or the network, by what they need. */
-const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
-  thread: 'スレッド（thread）',
-  runBlocking: 'コルーチン（runBlocking）',
-  launch: 'コルーチン（launch）',
-  async: 'コルーチン（async）',
-  delay: 'コルーチン（delay）',
-  sequence: 'シーケンスを作る sequence { }',
-  iterator: 'イテレータを作る iterator { }',
-  sequenceOf: 'シーケンス（sequenceOf）',
-  generateSequence: 'シーケンス（generateSequence）',
-  runCatching: '失敗を値として受け取る runCatching（Result）',
-  Regex: '正規表現（Regex）',
-};
 
 export class Compiler extends SuspendCompiler {
   constructor(
@@ -590,8 +574,6 @@ export class Compiler extends SuspendCompiler {
   }
 
   protected reportUnknownFunction(name: string, row: number): never {
-    // An own property only, as a name such as `valueOf` would otherwise find Object.prototype's.
-    if (Object.hasOwn(UNAVAILABLE_FUNCTIONS, name)) this.error(row, unavailableMessage(UNAVAILABLE_FUNCTIONS[name]));
     this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }
