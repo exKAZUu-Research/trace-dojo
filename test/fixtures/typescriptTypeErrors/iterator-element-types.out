@@ -1,3 +1,4 @@
 (6,35): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
 (11,12): error TS2488: Type 'number' must have a '[Symbol.iterator]()' method that returns an iterator.
 (15,42): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(26,17): error TS2490: The type returned by the 'next()' method of an iterator must have a 'value' property.

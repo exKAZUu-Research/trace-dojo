@@ -666,16 +666,16 @@ export class BindingPatterns {
     const next = this.c.propertyOf(iteratorType, 'next');
     const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
     const settled = result && (method === 'asyncIterator' ? awaitedType(this.c, result) : result);
-    const yielded = settled
-      ? (settled.kind === 'union' ? settled.types : [settled]).filter((member) => !this.isDoneResult(member))
-      : [];
-    const values = yielded.flatMap((member) => {
-      const value = this.c.propertyOf(member, 'value');
-      return value ? [value.type()] : [];
-    });
+    if (!settled) return iteratorType.typeArguments?.[0];
+    if (isAnyLike(settled)) return anyType;
+    const results = settled.kind === 'union' ? settled.types : [settled];
+    // tsc rejects an iterator a result of which has no value (TS2490).
+    if (results.some((member) => !this.c.propertyOf(member, 'value'))) return undefined;
+    const values = results
+      .filter((member) => !this.isDoneResult(member))
+      .flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
     // tsc gives an iterator whose results are all done elements of type any.
-    if (settled && yielded.length === 0) return anyType;
-    return values.length > 0 ? unionOf(values) : iteratorType.typeArguments?.[0];
+    return values.length > 0 ? unionOf(values) : anyType;
   }
 
   /** Whether an iterator result says it is done, as `IteratorReturnResult` does, so it yields no element. */
