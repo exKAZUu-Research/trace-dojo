@@ -6574,6 +6574,11 @@ test.each([
 
 test.each([
   [
+    'an interface declared in a function body',
+    'fun main() {\n  interface I { fun f() = 1 }\n  class C : I\n  println(C().f())\n}',
+    false,
+  ],
+  [
     'a spread argument for a parameter that is not vararg',
     'fun f(x: Int) = x\nfun main() { println(f(*intArrayOf(1))) }',
     false,
