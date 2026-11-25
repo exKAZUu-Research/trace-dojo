@@ -2,7 +2,7 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
 import type { DisplayTypeScope, TypeHint, TypeHintRef } from './displayTypeHints';
 import type { ConInfo, InstanceInfo } from './entities';
-import type { RunNext, TailCall } from './machine';
+import type { RunCatching, RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
 
 /**
@@ -166,7 +166,7 @@ export class IOThen {
 export class IOPrim {
   constructor(
     readonly name: string,
-    readonly run: () => Slot | RunNext,
+    readonly run: () => Slot | RunNext | RunCatching,
     /** The slots the action uses, which keep the turtles they reach alive. */
     readonly refs: Slot[] = []
   ) {}

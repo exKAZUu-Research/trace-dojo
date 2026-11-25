@@ -71,6 +71,7 @@ export type Frame =
   | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
+  | { k: 'catch'; handle: (error: HaskellException) => Slot }
   | { k: 'ioBind'; next: Slot }
   | { k: 'ioThen'; next: Slot }
   | DoFrame
@@ -123,6 +124,14 @@ export class TailCall {
 
 export class RunNext {
   constructor(readonly action: Slot) {}
+}
+
+/** What `catch` runs: an action, and the handler action an exception escaping it runs instead. */
+export class RunCatching {
+  constructor(
+    readonly action: Slot,
+    readonly handle: (error: HaskellException) => Slot
+  ) {}
 }
 
 export type PrimResult = Slot | TailCall;
@@ -225,42 +234,50 @@ export class Machine {
     stack.push({ k: 'base' });
     const state = new RunState(start);
     if (start.mode === 'runSlotIO') stack.push({ k: 'runIO' });
-    try {
-      for (;;) {
-        switch (state.mode) {
-          case 'eval': {
-            this.stepEval(state);
-            break;
-          }
-          case 'enter': {
-            this.stepEnter(state);
-            break;
-          }
-          case 'apply': {
-            this.stepApply(state);
-            break;
-          }
-          case 'primNext': {
-            this.stepPrim(state);
-            break;
-          }
-          case 'return': {
-            if (this.stepReturn(state)) return state.value;
-            break;
-          }
-          case 'io': {
-            this.stepIO(state);
-            break;
-          }
-          case 'ioDone': {
-            if (this.stepIODone(state)) return state.value;
-            break;
-          }
+    for (;;) {
+      try {
+        return this.loop(state);
+      } catch (error) {
+        if (error instanceof HaskellException && this.handleException(base, state, error)) continue;
+        this.unwind(base);
+        throw error;
+      }
+    }
+  }
+
+  // code-gauge-allow functionNcss -- The main loop dispatches on the machine mode.
+  private loop(state: RunState): Slot {
+    for (;;) {
+      switch (state.mode) {
+        case 'eval': {
+          this.stepEval(state);
+          break;
+        }
+        case 'enter': {
+          this.stepEnter(state);
+          break;
+        }
+        case 'apply': {
+          this.stepApply(state);
+          break;
+        }
+        case 'primNext': {
+          this.stepPrim(state);
+          break;
+        }
+        case 'return': {
+          if (this.stepReturn(state)) return state.value;
+          break;
+        }
+        case 'io': {
+          this.stepIO(state);
+          break;
+        }
+        case 'ioDone': {
+          if (this.stepIODone(state)) return state.value;
+          break;
         }
       }
-    } catch (error) {
-      this.unwind(base);
-      throw error;
     }
   }
 
@@ -699,6 +716,9 @@ export class Machine {
       if (result instanceof RunNext) {
         this.stack.push({ k: 'runIO' });
         state.enter(result.action);
+      } else if (result instanceof RunCatching) {
+        this.stack.push({ k: 'catch', handle: result.handle }, { k: 'runIO' });
+        state.enter(result.action);
       } else {
         state.ioResult(result);
       }
@@ -717,6 +737,9 @@ export class Machine {
       }
       case 'ioScope': {
         this.runtime.popFrame(frame.frame);
+        return false;
+      }
+      case 'catch': {
         return false;
       }
       case 'ioBind': {
@@ -741,6 +764,20 @@ export class Machine {
 
   private inAtomicScope(): boolean {
     return this.runtime.frames.some((frame) => frame.isAtomic);
+  }
+
+  /**
+   * Runs the handler of the innermost `catch` of this run that an exception escapes to, restoring what the frames
+   * above it were evaluating; false when no `catch` of this run is there.
+   */
+  private handleException(base: number, state: RunState, error: HaskellException): boolean {
+    const index = this.stack.findLastIndex((frame, position) => position > base && frame.k === 'catch');
+    if (index === -1) return false;
+    this.unwind(index + 1);
+    const frame = this.stack.pop() as Extract<Frame, { k: 'catch' }>;
+    this.stack.push({ k: 'runIO' });
+    state.enter(frame.handle(error));
+    return true;
   }
 
   private unwind(base: number): void {

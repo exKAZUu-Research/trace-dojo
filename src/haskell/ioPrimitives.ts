@@ -7,7 +7,8 @@ import {
 } from '../interpreter/programIo';
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
-import { cons, NIL, nullary, RunNext, TailCall, unpackString } from './machine';
+import type { RunNext} from './machine';
+import { cons, NIL, nullary, RunCatching, TailCall, unpackString } from './machine';
 import { bool, define, forceString, showSignedInt, unit, writeString } from './primitives';
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
@@ -426,17 +427,15 @@ define('throwSome', 1, [], ([exception]) => {
 
 /** Runs an action, and if an exception escapes it, the handler with the exception's value. */
 define('catchSome', 2, [], ([action, handler], runtime) =>
-  ioAction('catch', [action, handler], () => {
-    try {
-      return runtime.machine.runIOValue(action);
-    } catch (error) {
-      if (!(error instanceof HaskellException)) throw error;
-      const exception = exceptionValue(error, runtime);
-      return new RunNext(
-        new Thunk(undefined, undefined, () => new TailCall(runtime.machine.force(handler), [exception]))
-      );
-    }
-  })
+  ioAction(
+    'catch',
+    [action, handler],
+    () =>
+      new RunCatching(action, (error) => {
+        const exception = exceptionValue(error, runtime);
+        return new Thunk(undefined, undefined, () => new TailCall(runtime.machine.force(handler), [exception]));
+      })
+  )
 );
 
 /** The `SomeException` value of an exception: the one the program threw, or one for a built-in failure. */
@@ -522,6 +521,6 @@ define('trace', 2, [], ([message, value], runtime) => {
   return value;
 });
 
-function ioAction(name: string, refs: Slot[], run: () => Slot | RunNext): IOPrim {
+function ioAction(name: string, refs: Slot[], run: () => Slot | RunNext | RunCatching): IOPrim {
   return new IOPrim(name, run, refs);
 }
