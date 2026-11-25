@@ -126,7 +126,7 @@ export class QuoteBuilder {
         return generated ? this.local(generated) : this.call('mkName', this.str(ref.local.name));
       }
       case 'global': {
-        return globalNameCode(this.span, ref.space, ref.module, ref.name);
+        return globalNameCode(this.span, ref.space, ref.package, ref.module, ref.name);
       }
       case 'outer': {
         return this.call('mkNameS', this.str(ref.name));
@@ -637,8 +637,13 @@ function qpatLocals(pats: QPat[]): LocalVar[] {
 }
 
 /** A global name as code building its `Name`, `mkNameG_v`, `mkNameG_d`, or `mkNameG_tc`. */
-export function globalNameCode(span: Span, space: 'v' | 'd' | 'tc', module: string, name: string): Expr {
-  const package_ = module.startsWith('GHC.') ? 'ghc-internal' : 'main';
+export function globalNameCode(
+  span: Span,
+  space: 'v' | 'd' | 'tc',
+  package_: string,
+  module: string,
+  name: string
+): Expr {
   let result: Expr = { kind: 'support', name: `mkNameG_${space}`, span };
   for (const arg of [package_, module, name]) result = { kind: 'app', fn: result, arg: thString(span, arg), span };
   return result;

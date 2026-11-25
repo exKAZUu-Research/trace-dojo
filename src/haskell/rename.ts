@@ -38,6 +38,7 @@ import { TH_NAME_MODULES } from './library/thNames';
 import { type LocalNamespace, LocalScope } from './localScope';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { NEWTYPE_STRICT_FIELDS } from './newtypes';
+import { libraryPackage } from './packages';
 import type {
   Binder,
   LocalVar,
@@ -2575,7 +2576,7 @@ class Renamer {
         const entity = this.supportValue('negate', expr.span);
         const negate: QExpr = {
           k: 'var',
-          ref: { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name },
+          ref: this.globalRef('v', this.thModule('v', entity), entity.name),
         };
         return { k: 'app', fn: negate, arg: this.quoteExpr(expr.expr, scope) };
       }
@@ -3188,7 +3189,7 @@ class Renamer {
     const found = cls.k === 'global' && this.typeExists(className) ? this.lookupType(className) : undefined;
     const method =
       found?.kind === 'class' ? found.entity.methods.find((entity) => entity.name === name.name) : undefined;
-    if (method) return { k: 'global', space: 'v', module: this.thModule('v', method), name: method.name };
+    if (method) return this.globalRef('v', this.thModule('v', method), method.name);
     return this.quoteGlobal('var', name, false);
   }
 
@@ -3203,9 +3204,9 @@ class Renamer {
     if (local && expr.namespace === 'var') return thCall(span, 'mkNameS', thString(span, expr.name.name));
     // The types of special syntax have names of their own in GHC.
     const special = expr.namespace === 'type' && !expr.name.qualifier ? specialTypeName(expr.name.name) : undefined;
-    if (special) return globalNameCode(span, 'tc', special[0], special[1]);
+    if (special) return globalNameCode(span, 'tc', 'ghc-internal', special[0], special[1]);
     const ref = this.quoteGlobal(expr.namespace === 'var' ? 'value' : expr.namespace, expr.name, true);
-    if (ref.k === 'global') return globalNameCode(span, ref.space, ref.module, ref.name);
+    if (ref.k === 'global') return globalNameCode(span, ref.space, ref.package, ref.module, ref.name);
     return thCall(span, 'mkName', thString(span, expr.name.name));
   }
 
@@ -3220,7 +3221,7 @@ class Renamer {
     // `M.x` with the module's own name refers to its definition as `x` does.
     const own = outer && (!name.qualifier || name.qualifier === outer.module);
     const outerSpace = own ? spliceModuleSpace(outer, namespace, name.name) : undefined;
-    if (outer && outerSpace) return { k: 'global', space: outerSpace, module: outer.module, name: name.name };
+    if (outer && outerSpace) return this.globalRef(outerSpace, outer.module, name.name);
     const found = this.programGlobal(namespace, name);
     if (found) return found;
     if (required && !outer) {
@@ -3238,23 +3239,23 @@ class Renamer {
         if (!this.valuesNamed(name).some((entity) => entity.sort !== 'con')) return undefined;
         const entity = this.lookupValue(name, true);
         if (entity.unsupported) throw unsupportedError(name.span, entity.unsupported);
-        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
+        return this.globalRef('v', this.thModule('v', entity), entity.name);
       }
       case 'value': {
         if (this.valuesNamed(name).length === 0) return undefined;
         const entity = this.lookupValue(name, false);
-        if (entity.con) return { k: 'global', space: 'd', module: this.thModule('con', entity.con), name: entity.name };
-        return { k: 'global', space: 'v', module: this.thModule('v', entity), name: entity.name };
+        if (entity.con) return this.globalRef('d', this.thModule('con', entity.con), entity.name);
+        return this.globalRef('v', this.thModule('v', entity), entity.name);
       }
       case 'con': {
         if (!this.conExists(name)) return undefined;
         const con = this.lookupCon(name);
-        return { k: 'global', space: 'd', module: this.thModule('con', con), name: con.name };
+        return this.globalRef('d', this.thModule('con', con), con.name);
       }
       case 'type': {
         if (!this.typeExists(name)) return undefined;
         const like = this.lookupType(name);
-        return { k: 'global', space: 'tc', module: this.thModule('t', like.entity), name: like.entity.name };
+        return this.globalRef('tc', this.thModule('t', like.entity), like.entity.name);
       }
     }
   }
@@ -3280,6 +3281,12 @@ class Renamer {
   }
 
   /** The module GHC defines a name in, which Template Haskell shows it with. */
+  /** A global name of a quote, with the package of its module: the program's own, `main`, or the library's. */
+  private globalRef(space: 'v' | 'd' | 'tc', module: string, name: string): QRef {
+    const own = module === this.module.name || module === this.options.spliceModule?.module;
+    return { k: 'global', space, package: own ? 'main' : libraryPackage(module), module, name };
+  }
+
   private thModule(kind: 'v' | 't' | 'con', of: ValueEntity | ConInfo | TypeEntity | ClassEntity): string {
     if ('tag' in of && 'arity' in of && 'fieldTypes' in of) {
       const con = of as ConInfo;

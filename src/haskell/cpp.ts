@@ -1,4 +1,5 @@
 import { compileError, unsupportedError } from './errors';
+import { PACKAGE_VERSIONS } from './packages';
 import { RecursionBudget } from './recursionBudget';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -23,19 +24,6 @@ interface Token {
   /** Whether the name was met inside the expansion of its own macro, after which C never expands it ("blue paint"). */
   painted?: boolean;
 }
-
-/** The versions GHC 9.14.1 comes with of the packages whose modules this environment has. */
-const PACKAGE_VERSIONS: Record<string, string> = {
-  array: '0.5.8.0',
-  base: '4.22.0.0',
-  bytestring: '0.12.2.0',
-  containers: '0.8',
-  mtl: '2.3.1',
-  stm: '2.5.3.1',
-  'template-haskell': '2.24.0.0',
-  text: '2.1.3',
-  transformers: '0.6.1.2',
-};
 
 /**
  * The macros GHC defines for each package, as Cabal generates them: `VERSION_pkg`, the version as a string, and

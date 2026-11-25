@@ -305,7 +305,7 @@ export function isConstraintType(type: RType): boolean {
 export type QRef =
   | { k: 'bound'; local: LocalVar }
   | { k: 'outer'; name: string }
-  | { k: 'global'; space: 'v' | 'd' | 'tc'; module: string; name: string }
+  | { k: 'global'; space: 'v' | 'd' | 'tc'; package: string; module: string; name: string }
   | { k: 'unbound'; name: string };
 
 /** A renamed quoted expression, which keeps the structure the quote wrote. */
