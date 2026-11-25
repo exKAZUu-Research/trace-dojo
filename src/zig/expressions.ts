@@ -890,7 +890,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       return new FnValue(callableNative(this, expression.value, span));
     const ref = expression.value as unknown as FnRef;
     if (!(ref instanceof FnRef)) this.error(span, 'この関数は、値として使えません。');
-    return new FnValue(this.instantiate(ref, [], span));
+    const instance = this.instantiate(ref, [], span);
+    if (this.comptimeDepth === 0) this.markRuntimeUse(instance);
+    return new FnValue(instance);
   }
 
   private unwrapOptional(expression: ExpressionOf<'unwrap'>, location = false): TExpr {

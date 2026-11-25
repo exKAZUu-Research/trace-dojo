@@ -121,9 +121,10 @@ class Compiler extends StatementCompiler {
     for (const exported of this.root.decls.values())
       if (exported.kind === 'fn' && exported.syntax.isExport) {
         this.declarationType(exported, exported.syntax);
-        this.instantiate(new FnRef(exported), [], exported.syntax);
+        this.markRuntimeUse(this.instantiate(new FnRef(exported), [], exported.syntax));
       }
     const main = this.instantiate(new FnRef(decl), argTypes, syntax);
+    this.markRuntimeUse(main);
     this.compilePendingBodies();
     this.checkMainReturn(main, syntax);
     return {

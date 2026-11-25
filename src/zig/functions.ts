@@ -1,3 +1,4 @@
+import type { CompileError } from '../interpreter/diagnostics';
 import type { Span } from './ast';
 import type { Frame } from './runtime';
 import type { SemaApi } from './semaBase';
@@ -28,6 +29,10 @@ export class FunctionInstance {
   recordsSteps = false;
   internal = false;
   state: 'pending' | 'compiling' | 'compiled' = 'pending';
+  /** Whether the program, not only the compiler, runs the function, which Zig analyzes on every branch then. */
+  runsAtRuntime = false;
+  /** A `@compileError` on a branch that only the analysis for the program's calls reaches, which such a call reports. */
+  pendingCompileError?: CompileError;
   /** Whether the function's name marks it as one that creates an object, as Java's constructors do. */
   readonly createsObject: boolean;
 

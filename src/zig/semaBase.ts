@@ -380,6 +380,8 @@ export abstract class SemaBase implements SemaApi {
   protected abstract comptimeValue(compileCode: () => TExpr, span: Span, store?: LocalBinding): TExpr;
   /** Runs an analysis of its own, as Zig analyzes each function and declaration apart from the one that uses it. */
   protected abstract separateAnalysis<T>(run: () => T): T;
+  /** The function whose body the compiler is analyzing, if any. */
+  protected abstract analyzedFunction(): FunctionInstance | undefined;
   protected abstract alignmentValue(expression: Expression): number;
   protected abstract addressSpace(expression: Expression): void;
   /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
@@ -436,6 +438,12 @@ export abstract class SemaBase implements SemaApi {
     if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion)
       return value.slots.some((slot) => this.referencesComptimeVar(slot));
     return false;
+  }
+
+  /** Records that the program runs a function, which reports a `@compileError` that only such a call's analysis meets. */
+  protected markRuntimeUse(instance: FunctionInstance): void {
+    if (instance.pendingCompileError) throw instance.pendingCompileError;
+    instance.runsAtRuntime = true;
   }
 
   /** The innermost container whose scope the compiler is in, which `@This()` names. */

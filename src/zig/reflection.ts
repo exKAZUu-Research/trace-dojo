@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss -- The builtins that inspect types share the analysis of `std.lang.Type`'s values.
 import { PANIC, panic } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
@@ -151,8 +152,15 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     this.builtinArity(expression, 1);
     const message = this.comptimeText(args[0]);
     // Code that the compiler runs, and a branch on `@inComptime()`, reach the call only on the path that runs it.
-    if (this.comptimeDepth > 0 || this.inComptimeBranchDepth > 0)
-      return runtime(NORETURN, () => this.error(expression, message), expression);
+    const deferred = runtime(NORETURN, () => this.error(expression, message), expression);
+    if (this.comptimeDepth > 0 || this.inComptimeBranchDepth > 0) return deferred;
+    // Zig analyzes a branch on a runtime condition only for the program's calls; a call at compile time with known
+    // arguments analyzes the branch its arguments take.
+    const instance = this.analyzedFunction();
+    if (instance && this.runtimeConditionDepth > 0 && !instance.runsAtRuntime) {
+      instance.pendingCompileError ??= new CompileError([{ row: expression.row, message }]);
+      return deferred;
+    }
     return this.error(expression, message);
   }
 

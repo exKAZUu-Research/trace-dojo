@@ -301,6 +301,10 @@ export abstract class StatementCompiler extends CallCompiler {
     return this.fn?.instance.name;
   }
 
+  protected analyzedFunction(): FunctionInstance | undefined {
+    return this.fn?.instance;
+  }
+
   private currentFn(span: Span): FnContext {
     if (!this.fn) return this.error(span, 'この式は、関数の中でだけ書けます。');
     return this.fn;
