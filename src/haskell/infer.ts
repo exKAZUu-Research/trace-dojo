@@ -1105,6 +1105,9 @@ export class Checker {
     for (const [index, fixed] of con.equalities ?? []) {
       const target = prune(args[index]);
       const assumed = instantiateType(fixed, all);
+      // An equality the scrutinee's type already has, as `a ~ a` for `Refl` at `Eq1 a a`, assumes nothing; binding a
+      // rigid type to itself would make it its own cycle.
+      if (prune(assumed) === target) continue;
       if (target.tag === 'tvar' && target.skolem) {
         target.ref = assumed;
         scope.assumed.push(target);
