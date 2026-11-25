@@ -54,6 +54,7 @@ import {
   type IntType,
   intType,
   isComptimeOnly,
+  isVectorType,
   type Namespace,
   NULL_TYPE,
   optionalOf,
@@ -1656,8 +1657,10 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     return errorSetIncludes(to.errorSet, from.errorSet) && inMemoryCoercible(from.payload, to.payload);
   }
   if (from.kind === 'array' && to.kind === 'array') {
+    // A vector's elements lie as an array's do, but Zig keeps the two types apart in memory.
     return (
       from.length === to.length &&
+      isVectorType(from) === isVectorType(to) &&
       inMemoryCoercible(from.child, to.child) &&
       (to.sentinel === undefined || sameSentinel(from.sentinel, to.sentinel))
     );
@@ -2081,7 +2084,8 @@ function pointerCoercionOf(from: PointerType, to: PointerType): PointerCoercion 
 
 /** The shape of a pointer type that Zig's pointer rules tell apart, a pointer to an array taken whole if asked. */
 export function pointerShapeOf(type: PointerType, wholeArray = false): PointerShape {
-  if (type.size === 'one' && type.child.kind === 'array' && !wholeArray) return 'array';
+  // A pointer to a vector is a single-item pointer: Zig coerces it to no slice or many-item pointer.
+  if (type.size === 'one' && type.child.kind === 'array' && !isVectorType(type.child) && !wholeArray) return 'array';
   if (type.size === 'slice' && type.sentinel !== undefined) return 'sentinelSlice';
   return type.size;
 }
