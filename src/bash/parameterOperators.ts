@@ -85,7 +85,7 @@ export function applyOperator(
     case '/#':
     case '/%': {
       if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text);
-      const { pattern: patternParts, replacement } = splitReplacement(argument);
+      const { pattern: patternParts, replacement } = splitReplacement(argument, operator === '/' || operator === '//');
       const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true));
       const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true);
       return mapValues(expander, value, ctx, (text) => substitute(text, pattern, replace, operator, shell));
@@ -281,11 +281,15 @@ function removePattern(text: string, pattern: string, operator: string, shell: S
   return start === undefined ? text : chars.slice(0, start).join('');
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Finds the first unquoted slash across the argument's parts.
-function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement: WordPart[] | undefined } {
+// code-gauge-allow functionCognitiveComplexity -- Finds the first unquoted slash delimiter across the argument's parts.
+function splitReplacement(
+  parts: WordPart[],
+  skipLeadingSlash: boolean
+): { pattern: WordPart[]; replacement: WordPart[] | undefined } {
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') continue;
-    for (let i = 0; i < part.text.length; i++) {
+    const start = skipLeadingSlash && index === 0 && part.text.startsWith('/') ? 1 : 0;
+    for (let i = start; i < part.text.length; i++) {
       if (part.text[i] === '\\') {
         i++;
         continue;
