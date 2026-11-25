@@ -760,7 +760,7 @@ export abstract class SemaBase implements SemaApi {
         this.spendCompilation();
         this.resolveLayout(field.type, span, seen);
       }
-      this.checkPackedStructBacking(type);
+      this.checkPackedBacking(type);
       if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     } else if (type.kind === 'union') {
       const fields = this.unionFields(type);
@@ -768,7 +768,10 @@ export abstract class SemaBase implements SemaApi {
         this.spendCompilation();
         this.resolveLayout(field.type, span, seen);
       }
-      if (type.layout === 'packed') this.checkPackedUnion(fields, span);
+      if (type.layout === 'packed') {
+        this.checkPackedUnion(fields, span);
+        this.checkPackedBacking(type);
+      }
       if (type.layout === 'extern') this.checkExternFields(type, fields, span);
     }
     if (this.resolvingFields === 0 && this.resolvingUnionFields === 0) {
@@ -793,16 +796,20 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  private checkPackedStructBacking(type: StructType): void {
+  /** Checks the backing integer that `packed struct(u8)` or `packed union(u8)` names against the fields' bits. */
+  private checkPackedBacking(type: Extract<Type, { kind: 'struct' | 'union' }>): void {
     const syntax = type.namespace.syntax;
     if (type.layout !== 'packed' || !syntax?.argument) return;
     const argument = syntax.argument;
     this.inContainerScope(type.namespace, () => {
       const backing = this.compileType(argument);
-      if (backing.kind !== 'int') this.error(argument, 'packed struct の基底型には整数型を指定してください。');
+      if (backing.kind !== 'int') this.error(argument, `packed ${type.kind} の基底型には整数型を指定してください。`);
       const bits = bitSizeOf(type, () => this.spendCompilation());
       if (backing.bits !== bits)
-        this.error(argument, `packed struct の基底型は、フィールドの合計と同じ ${bits} ビットにしてください。`);
+        this.error(
+          argument,
+          `packed ${type.kind} の基底型は、${type.kind === 'struct' ? 'フィールドの合計' : 'フィールド'}と同じ ${bits} ビットにしてください。`
+        );
     });
   }
 
@@ -936,7 +943,7 @@ export abstract class SemaBase implements SemaApi {
           unionOf: type,
         };
         this.enumFields(type.tagType);
-      } else if (syntax.argument) {
+      } else if (syntax.argument && type.layout !== 'packed') {
         const tagType = this.compileType(syntax.argument);
         if (tagType.kind !== 'enum') this.error(syntax, 'union(T) の T は enum の型にしてください。');
         const tagFields = this.enumFields(tagType);

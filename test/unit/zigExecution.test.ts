@@ -10236,7 +10236,8 @@ const T8 = packed struct(u0) {};
 const T9 = packed struct(u16) { a: u16 };
 const T10 = packed struct(i8) { a: u8 };
 const T11 = packed struct(u24) { a: u24 };
-const T12 = enum(u8) { a, _ };`;
+const T12 = enum(u8) { a, _ };
+const T13 = packed union(u8) { a: u8, b: i8 };`;
   // Whether `zig run` accepts each type as a C parameter, an extern struct's field, and a C return type.
   const types: [type: string, accepted: string][] = [
     ['u0', '111'],
@@ -10300,6 +10301,7 @@ const T12 = enum(u8) { a, _ };`;
     ['T10', '111'],
     ['T11', '000'],
     ['T12', '111'],
+    ['T13', '111'],
   ];
   const uses = [
     (type: string) => `fn f(x: ${type}) callconv(.c) void { _ = x; } pub fn main() void { _ = &f; }`,
