@@ -75,7 +75,10 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
     }
     case 'io': {
       const next = oneArgument('coerce', (result) => new IOReturn(convert(spec.res, result, forward, leaves, runtime)));
-      return new IOBind(value, next);
+      return lazily(() => {
+        force(value);
+        return new IOBind(value, next);
+      });
     }
     case 'data': {
       return lazily(() => {
