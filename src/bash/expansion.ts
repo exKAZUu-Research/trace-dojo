@@ -732,8 +732,12 @@ export function isListExpansionSyntax(expansion: ParameterExpansion): boolean {
 }
 
 function firstWordSegments(segments: readonly WordSegment[]): readonly WordSegment[] {
-  const breakIndex = segments.findIndex((seg) => seg.kind === 'break' && seg.breakKind !== 'star');
+  const breakIndex = segments.findIndex(isCasePatternWordBreak);
   return breakIndex === -1 ? segments : segments.slice(0, breakIndex);
+}
+
+function isCasePatternWordBreak(seg: WordSegment): boolean {
+  return seg.kind === 'break' && seg.breakKind !== 'star' && Boolean(seg.quoted) && seg.ifsJoiner !== '';
 }
 
 function compoundItemValidationError(
