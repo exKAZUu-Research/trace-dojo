@@ -222,9 +222,10 @@ export class Namespaces {
     return this.resolvePath(qualifiedPath(node), 'type');
   }
 
-  /** The symbol of the value a qualified name such as `N.E` names, or undefined when it names nothing. */
+  /** The symbol of the value a qualified name such as `N.E` names, or undefined when it names no value at run time. */
   qualifiedValueSymbol(node: TreeNode): Sym | undefined {
-    return this.resolvePath(qualifiedPath(node), 'value').symbol;
+    const { symbol } = this.resolvePath(qualifiedPath(node), 'value');
+    return symbol?.valueKind === 'namespace' && !this.isInstantiated(symbol) ? undefined : symbol;
   }
 
   /** Checks a namespace's body, whose code runs once where the namespace is declared, from a flow of its own. */
