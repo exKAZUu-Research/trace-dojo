@@ -381,7 +381,7 @@ export type QPat =
 
 export type QType =
   | { k: 'var' | 'con'; ref: QRef }
-  | { k: 'list' | 'arrow' }
+  | { k: 'list' | 'arrow' | 'star' | 'constraint' }
   | { k: 'tupleCon'; arity: number }
   | { k: 'app'; fn: QType; arg: QType }
   | { k: 'lit'; value: bigint | string }
@@ -392,8 +392,8 @@ export type QType =
 export interface QTyVar {
   local: LocalVar;
   flag: 'specified' | 'inferred' | 'required';
-  /** Whether the binder has the kind annotation `Type`, the one kind quotes write. */
-  star?: boolean;
+  /** The kind the binder's annotation gives it. */
+  kind?: QType;
 }
 
 export interface QGuarded {

@@ -1,3 +1,4 @@
+import { unsupportedError } from './errors';
 import type {
   LocalVar,
   QBody,
@@ -363,6 +364,10 @@ export class QuoteBuilder {
       case 'arrow': {
         return this.sup('arrowT');
       }
+      case 'star':
+      case 'constraint': {
+        return this.call('pure', this.kindTree(type));
+      }
       case 'tupleCon': {
         return this.call('tupleT', this.int(type.arity));
       }
@@ -395,9 +400,42 @@ export class QuoteBuilder {
         const flag = this.sup(
           { required: 'BndrReq', inferred: 'InferredSpec', specified: 'SpecifiedSpec' }[binder.flag]
         );
-        return binder.star ? this.call('KindedTV', name, flag, this.sup('StarT')) : this.call('PlainTV', name, flag);
+        return binder.kind
+          ? this.call('KindedTV', name, flag, this.kindTree(binder.kind))
+          : this.call('PlainTV', name, flag);
       })
     );
+  }
+
+  /** A kind as the tree itself, which a binder holds outside the monad the code builds trees in. */
+  private kindTree(kind: QType): Expr {
+    switch (kind.k) {
+      case 'star': {
+        return this.sup('StarT');
+      }
+      case 'constraint': {
+        return this.sup('ConstraintT');
+      }
+      case 'arrow': {
+        return this.sup('ArrowT');
+      }
+      case 'list': {
+        return this.sup('ListT');
+      }
+      case 'tupleCon': {
+        return this.call('TupleT', this.int(kind.arity));
+      }
+      case 'var':
+      case 'con': {
+        return this.call(kind.k === 'var' ? 'VarT' : 'ConT', this.nameOf(kind.ref));
+      }
+      case 'app': {
+        return this.call('AppT', this.kindTree(kind.fn), this.kindTree(kind.arg));
+      }
+      default: {
+        throw unsupportedError(this.span, 'Template Haskell のクォートの中のこの種類の注釈');
+      }
+    }
   }
 
   private context(constraints: QType[]): Expr {

@@ -2891,7 +2891,7 @@ class Renamer {
       return {
         local,
         flag: binder.inferred ? 'inferred' : 'specified',
-        star: binder.kind && this.quoteStarKind(binder.kind),
+        kind: binder.kind && this.quoteKind(binder.kind, scope),
       };
     });
     const inner = withLocals(
@@ -2907,15 +2907,46 @@ class Renamer {
     };
   }
 
-  /** Whether a binder's kind is `Type`, the one kind the trees of quotes hold. */
-  private quoteStarKind(kind: TypeExpr): true {
-    if (kind.kind === 'tcon' && (kind.name.name === 'Type' || kind.name.name === '*')) return true;
-    throw this.unsupportedInQuote(kind.span, 'この種類の注釈');
+  /** A binder's kind annotation, whose `Type` and `Constraint` the tree holds as `StarT` and `ConstraintT`. */
+  private quoteKind(kind: TypeExpr, scope: LocalScope): QType {
+    switch (kind.kind) {
+      case 'tcon': {
+        if (kind.name.qualifier) break;
+        if (kind.name.name === 'Type' || kind.name.name === '*') return { k: 'star' };
+        if (kind.name.name === 'Constraint') return { k: 'constraint' };
+        break;
+      }
+      case 'tfun': {
+        const from: QType = { k: 'app', fn: { k: 'arrow' }, arg: this.quoteKind(kind.from, scope) };
+        return { k: 'app', fn: from, arg: this.quoteKind(kind.to, scope) };
+      }
+      case 'tapp': {
+        return { k: 'app', fn: this.quoteKind(kind.fn, scope), arg: this.quoteKind(kind.arg, scope) };
+      }
+      default: {
+        break;
+      }
+    }
+    return this.quoteType(kind, scope);
   }
 
-  /** The type variables a declaration's head binds, each of which it requires, with the scope they are in. */
-  private quoteHeadTyVars(params: Name[], scope: LocalScope): { params: QTyVar[]; scope: LocalScope } {
-    const tyVars = params.map((param): QTyVar => ({ local: this.newBinder(param.name, param.span), flag: 'required' }));
+  /**
+   * The type variables a declaration's head binds, each of which it requires, with the kinds their annotations give
+   * them, and the scope they are in.
+   */
+  private quoteHeadTyVars(
+    params: Name[],
+    kinds: (TypeExpr | undefined)[] | undefined,
+    scope: LocalScope
+  ): { params: QTyVar[]; scope: LocalScope } {
+    const tyVars = params.map((param, index): QTyVar => {
+      const kind = kinds?.[index];
+      return {
+        local: this.newBinder(param.name, param.span),
+        flag: 'required',
+        ...(kind ? { kind: this.quoteKind(kind, scope) } : {}),
+      };
+    });
     return {
       params: tyVars,
       scope: withLocals(
@@ -3042,7 +3073,7 @@ class Renamer {
         return [this.quoteDataDecl(decl, scope)];
       }
       case 'typeSyn': {
-        const head = this.quoteHeadTyVars(decl.params, scope);
+        const head = this.quoteHeadTyVars(decl.params, decl.paramKinds, scope);
         const type = this.quoteType(decl.type, head.scope);
         return [{ k: 'tySyn', name: this.quoteTypeRef(decl.name, scope), params: head.params, type }];
       }
@@ -3060,7 +3091,7 @@ class Renamer {
 
   private quoteDataDecl(decl: Extract<Decl, { kind: 'data' }>, scope: LocalScope): QDecl {
     if (decl.instanceOf || decl.kindSig) throw this.unsupportedInQuote(decl.span, 'この data 宣言');
-    const head = this.quoteHeadTyVars(decl.params, scope);
+    const head = this.quoteHeadTyVars(decl.params, decl.paramKinds, scope);
     return {
       k: 'data',
       flavour: decl.typeData ? 'typeData' : decl.newtype ? 'newtype' : 'data',
@@ -3090,8 +3121,7 @@ class Renamer {
   }
 
   private quoteClassDecl(decl: Extract<Decl, { kind: 'class' }>, scope: LocalScope): QDecl {
-    if (decl.paramKinds?.some(Boolean)) throw this.unsupportedInQuote(decl.span, 'この class 宣言');
-    const head = this.quoteHeadTyVars(decl.params, scope);
+    const head = this.quoteHeadTyVars(decl.params, decl.paramKinds, scope);
     const tyVar = (name: Name): QRef => this.quoteTyVarRef(name.name, head.scope);
     return {
       k: 'class',
