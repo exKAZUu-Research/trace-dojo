@@ -851,6 +851,8 @@ export abstract class CallCompiler extends CompilerCore {
         if (value.kind === 'lambda' ? !this.lambdaFits(value, paramType) : !this.referenceFits(paramType)) return false;
         continue;
       }
+      // A spread argument goes only to a vararg parameter, as kotlinc requires.
+      if (args[index].isSpread === true && !param.isVararg) return false;
       if (passesArray(args[index], param)) {
         if (!this.acceptsArgument(compiled, this.varargArrayOf(param, paramType))) return false;
         continue;
