@@ -836,6 +836,8 @@ interface ByteView extends Iterable<number> {
 }
 
 export function stringBytes(value: Value, type?: Type): ByteView {
+  // std.mem.span asserts that a C pointer is not null.
+  if (value === NULL) panic(PANIC.unreachable);
   const end = type?.kind === 'pointer' && type.size !== 'one' && type.size !== 'slice' ? sentinelOf(type) : undefined;
   const source =
     end === undefined
