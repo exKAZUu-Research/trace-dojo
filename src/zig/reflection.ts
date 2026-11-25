@@ -6,7 +6,6 @@ import { bitSizeOf } from './layout';
 import { langNamespace } from './library/lang';
 import { known, runtime, type TExpr } from './semaBase';
 import {
-  ANYTYPE,
   BOOL,
   ENUM_LITERAL,
   type FnType,
@@ -407,12 +406,11 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
   private fnInfo(type: FnType, fn: StructType, span: Span): Record<string, Value> {
     const attributes = this.memberType(fn, 'Attributes', span) as StructType;
     const paramAttributes = this.memberType(fn, 'ParamAttributes', span) as StructType;
-    const generic = type.genericParams;
     return {
       attrs: this.structValue(attributes, span, {}),
-      is_generic: generic !== undefined,
-      return_type: optionalValue(type.returnType === ANYTYPE ? undefined : type.returnType),
-      param_types: this.constSlice((generic ?? type.params).map((param) => optionalValue(param))),
+      is_generic: false,
+      return_type: optionalValue(type.returnType),
+      param_types: this.constSlice(type.params.map((param) => optionalValue(param))),
       param_attrs: this.constSlice(type.params.map(() => this.structValue(paramAttributes, span, {}))),
     };
   }
@@ -502,7 +500,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       }
       case 'struct': {
         if (type.namespace.syntax?.containerKind === 'opaque')
-          return variant('opaque', { decl_names: this.declNames(type) });
+          return this.error(span, unavailableMessage('@typeInfo:opaque'));
         // A native type that leaves out some of Zig's fields cannot list them all.
         const leftOut = type.native?.leftOutFields?.[0];
         if (leftOut !== undefined) this.refuseLeftOutField(type, leftOut, span);
@@ -544,6 +542,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         });
       }
       case 'fn': {
+        if (type.genericParams) return this.error(span, unavailableMessage('@typeInfo:genericFn'));
         return variant('fn', this.fnInfo(type, nested('Fn') as StructType, span));
       }
       default: {

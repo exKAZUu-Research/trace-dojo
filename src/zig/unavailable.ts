@@ -56,6 +56,8 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@bitOffsetOf', { what: '@bitOffsetOf（メモリの表現）' }],
   ['@backingInt', { what: '@backingInt（メモリの表現に依存する変換）' }],
   ['@fromBackingInt', { what: '@fromBackingInt（メモリの表現に依存する変換）' }],
+  ['@typeInfo:opaque', { what: 'opaque 型の @typeInfo' }],
+  ['@typeInfo:genericFn', { what: 'generic な関数の型の @typeInfo' }],
   ['@Vector', { what: 'ベクトル（@Vector）' }],
   ['@reduce', { what: 'ベクトル（@reduce）' }],
   ['@shuffle', { what: 'ベクトル（@shuffle）' }],
