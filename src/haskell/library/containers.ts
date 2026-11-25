@@ -421,13 +421,6 @@ instance Ord a => Semigroup (Set a) where
   (<>) = union
   stimes = stimesIdempotentMonoid
 
--- base's, which this library's Base lacks.
-stimesIdempotentMonoid :: (Integral b, Monoid a) => b -> a -> a
-stimesIdempotentMonoid n x = case compare n 0 of
-  LT -> errorWithoutStackTrace "stimesIdempotentMonoid: negative multiplier"
-  EQ -> mempty
-  GT -> x
-
 instance Ord a => Monoid (Set a) where
   mempty = empty
 
@@ -1151,7 +1144,7 @@ instance Traversable (Map k) where
 
 instance Ord k => Semigroup (Map k v) where
   (<>) = union
-  stimes = S.stimesIdempotentMonoid
+  stimes = stimesIdempotentMonoid
 
 instance Ord k => Monoid (Map k v) where
   mempty = Tip

@@ -1000,6 +1000,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'mtimesDefault',
       'stimesMonoid',
       'stimesIdempotent',
+      'stimesIdempotentMonoid',
     ],
   },
   'Data.List.NonEmpty': {

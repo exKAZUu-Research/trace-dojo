@@ -30,7 +30,7 @@ instance Monad NonEmpty where
     b :| bs -> b :| (bs ++ (as >>= \x -> case f x of c :| cs -> c : cs))
 
 instance Semigroup (NonEmpty a) where
-  (a :| as) <> (b :| bs) = a :| (as ++ b : bs)
+  (a :| as) <> ~(b :| bs) = a :| (as ++ b : bs)
 
 -- Monoids
 
@@ -38,12 +38,19 @@ newtype Dual a = Dual { getDual :: a } deriving (Eq, Ord, Show, Read, Bounded)
 
 instance Semigroup a => Semigroup (Dual a) where
   Dual a <> Dual b = Dual (b <> a)
+  stimes n (Dual a) = Dual (stimes n a)
 
 instance Monoid a => Monoid (Dual a) where
   mempty = Dual mempty
 
 instance Functor Dual where
   fmap f (Dual a) = Dual (f a)
+
+instance Foldable Dual where
+  foldr f z (Dual a) = f a z
+
+instance Traversable Dual where
+  traverse f (Dual a) = fmap Dual (f a)
 
 newtype Endo a = Endo { appEndo :: a -> a }
 
@@ -57,6 +64,7 @@ newtype All = All { getAll :: Bool } deriving (Eq, Ord, Show, Read, Bounded)
 
 instance Semigroup All where
   All a <> All b = All (a && b)
+  stimes = stimesIdempotentMonoid
 
 instance Monoid All where
   mempty = All True
@@ -65,6 +73,7 @@ newtype Any = Any { getAny :: Bool } deriving (Eq, Ord, Show, Read, Bounded)
 
 instance Semigroup Any where
   Any a <> Any b = Any (a || b)
+  stimes = stimesIdempotentMonoid
 
 instance Monoid Any where
   mempty = Any False
@@ -77,6 +86,12 @@ instance Num a => Semigroup (Sum a) where
 
 instance Num a => Monoid (Sum a) where
   mempty = Sum 0
+
+instance Foldable Sum where
+  foldr f z (Sum a) = f a z
+
+instance Traversable Sum where
+  traverse f (Sum a) = fmap Sum (f a)
 
 instance Functor Sum where
   fmap f (Sum a) = Sum (f a)
@@ -97,6 +112,12 @@ instance Num a => Semigroup (Product a) where
 instance Num a => Monoid (Product a) where
   mempty = Product 1
 
+instance Foldable Product where
+  foldr f z (Product a) = f a z
+
+instance Traversable Product where
+  traverse f (Product a) = fmap Product (f a)
+
 instance Functor Product where
   fmap f (Product a) = Product (f a)
 
@@ -116,6 +137,12 @@ instance Semigroup (First a) where
 instance Monoid (First a) where
   mempty = First Nothing
 
+instance Foldable First where
+  foldr f z (First a) = foldr f z a
+
+instance Traversable First where
+  traverse f (First a) = fmap First (traverse f a)
+
 instance Functor First where
   fmap f (First a) = First (fmap f a)
 
@@ -127,6 +154,12 @@ instance Semigroup (Last a) where
 
 instance Monoid (Last a) where
   mempty = Last Nothing
+
+instance Foldable Last where
+  foldr f z (Last a) = foldr f z a
+
+instance Traversable Last where
+  traverse f (Last a) = fmap Last (traverse f a)
 
 instance Functor Last where
   fmap f (Last a) = Last (fmap f a)
@@ -148,6 +181,12 @@ instance Alternative f => Semigroup (Alt f a) where
 instance Alternative f => Monoid (Alt f a) where
   mempty = Alt empty
 
+instance Foldable f => Foldable (Alt f) where
+  foldr f z (Alt a) = foldr f z a
+
+instance Traversable f => Traversable (Alt f) where
+  traverse f (Alt a) = fmap Alt (traverse f a)
+
 instance Functor f => Functor (Alt f) where
   fmap f (Alt a) = Alt (fmap f a)
 
@@ -167,6 +206,12 @@ instance (Applicative f, Semigroup a) => Semigroup (Ap f a) where
 
 instance (Applicative f, Monoid a) => Monoid (Ap f a) where
   mempty = Ap (pure mempty)
+
+instance Foldable f => Foldable (Ap f) where
+  foldr f z (Ap a) = foldr f z a
+
+instance Traversable f => Traversable (Ap f) where
+  traverse f (Ap a) = fmap Ap (traverse f a)
 
 instance Functor f => Functor (Ap f) where
   fmap f (Ap a) = Ap (fmap f a)
@@ -243,7 +288,7 @@ instance (Applicative f, Applicative g) => Applicative (Compose f g) where
 /** `Data.Semigroup`'s own types: the semigroups of the least, the greatest, the first, and the last value. */
 export const SEMIGROUP_SOURCE = String.raw`module Data.Semigroup.Internal
   ( Min(..), Max(..), First(..), Last(..), WrappedMonoid(..), Arg(..), ArgMin, ArgMax
-  , diff, cycle1, mtimesDefault, stimesMonoid, stimesIdempotent
+  , diff, cycle1, mtimesDefault, stimesMonoid, stimesIdempotent, stimesIdempotentMonoid
   , Semigroup(..), Dual(..), Endo(..), All(..), Any(..), Sum(..), Product(..), NonEmpty(..)
   ) where
 
@@ -257,6 +302,12 @@ instance Ord a => Semigroup (Min a) where
 
 instance (Ord a, Bounded a) => Monoid (Min a) where
   mempty = maxBound
+
+instance Foldable Min where
+  foldr f z (Min a) = f a z
+
+instance Traversable Min where
+  traverse f (Min a) = fmap Min (f a)
 
 instance Functor Min where
   fmap f (Min a) = Min (f a)
@@ -280,6 +331,12 @@ instance Ord a => Semigroup (Max a) where
 instance (Ord a, Bounded a) => Monoid (Max a) where
   mempty = minBound
 
+instance Foldable Max where
+  foldr f z (Max a) = f a z
+
+instance Traversable Max where
+  traverse f (Max a) = fmap Max (f a)
+
 instance Functor Max where
   fmap f (Max a) = Max (f a)
 
@@ -299,6 +356,12 @@ instance Semigroup (First a) where
   a <> _ = a
   stimes = stimesIdempotent
 
+instance Foldable First where
+  foldr f z (First a) = f a z
+
+instance Traversable First where
+  traverse f (First a) = fmap First (f a)
+
 instance Functor First where
   fmap f (First a) = First (f a)
 
@@ -307,6 +370,12 @@ newtype Last a = Last { getLast :: a } deriving (Eq, Ord, Show, Read, Bounded)
 instance Semigroup (Last a) where
   _ <> b = b
   stimes = stimesIdempotent
+
+instance Foldable Last where
+  foldr f z (Last a) = f a z
+
+instance Traversable Last where
+  traverse f (Last a) = fmap Last (f a)
 
 instance Functor Last where
   fmap f (Last a) = Last (f a)
@@ -353,10 +422,10 @@ stimesIdempotent n x
   | otherwise = x
 
 stimesMonoid :: (Integral b, Monoid a) => b -> a -> a
-stimesMonoid n x
-  | n < 0 = errorWithoutStackTrace "stimesMonoid: negative multiplier"
-  | n == 0 = mempty
-  | otherwise = mconcat (replicate (fromIntegral n) x)
+stimesMonoid n x = case compare n 0 of
+  LT -> errorWithoutStackTrace "stimesMonoid: negative multiplier"
+  EQ -> mempty
+  GT -> stimesBySquaring mappend n x
 `;
 
 /** `Data.List.NonEmpty`'s functions, whose names are those of the list functions they mirror. */
@@ -400,7 +469,7 @@ length :: NonEmpty a -> Int
 length (_ :| as) = 1 + B.length as
 
 (<|) :: a -> NonEmpty a -> NonEmpty a
-a <| (b :| bs) = a :| (b : bs)
+a <| ~(b :| bs) = a :| (b : bs)
 
 cons :: a -> NonEmpty a -> NonEmpty a
 cons = (<|)
@@ -436,10 +505,10 @@ liftNE :: ([a] -> [b]) -> NonEmpty a -> NonEmpty b
 liftNE f = fromList . f . toList
 
 zip :: NonEmpty a -> NonEmpty b -> NonEmpty (a, b)
-zip (a :| as) (b :| bs) = (a, b) :| B.zip as bs
+zip ~(a :| as) ~(b :| bs) = (a, b) :| B.zip as bs
 
 zipWith :: (a -> b -> c) -> NonEmpty a -> NonEmpty b -> NonEmpty c
-zipWith f (a :| as) (b :| bs) = f a b :| B.zipWith f as bs
+zipWith f ~(a :| as) ~(b :| bs) = f a b :| B.zipWith f as bs
 
 unzip :: Functor f => f (a, b) -> (f a, f b)
 unzip xs = (fmap fst xs, fmap snd xs)
@@ -544,7 +613,7 @@ tails :: Foldable f => f a -> NonEmpty [a]
 tails = fromList . B.tails . B.foldr (:) []
 
 append :: NonEmpty a -> NonEmpty a -> NonEmpty a
-append (a :| as) (b :| bs) = a :| (as ++ b : bs)
+append = (<>)
 
 unfold :: (a -> (b, Maybe a)) -> a -> NonEmpty b
 unfold = unfoldr

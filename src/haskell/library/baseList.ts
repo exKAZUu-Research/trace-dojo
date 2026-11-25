@@ -237,7 +237,26 @@ class Semigroup a where
   stimes :: Integral b => b -> a -> a
   sconcat (a :| as) = sconcatList a as
   stimes n x = if n <= fromInteger 0 then errorWithoutStackTrace "stimes: positive multiplier expected"
-               else if n == fromInteger 1 then x else x <> stimes (n - fromInteger 1) x
+               else stimesBySquaring (<>) n x
+
+stimesIdempotentMonoid :: (Integral b, Monoid a) => b -> a -> a
+stimesIdempotentMonoid n x = case compare n 0 of
+  LT -> errorWithoutStackTrace "stimesIdempotentMonoid: negative multiplier"
+  EQ -> mempty
+  GT -> x
+
+-- By repeated squaring, as base's stimesDefault and stimesMonoid are.
+stimesBySquaring :: Integral b => (a -> a -> a) -> b -> a -> a
+stimesBySquaring op y0 x0 = f x0 y0
+  where
+    f x y
+      | even y = f (op x x) (y ${'`'}quot${'`'} 2)
+      | y == 1 = x
+      | otherwise = g (op x x) (y ${'`'}quot${'`'} 2) x
+    g x y z
+      | even y = g (op x x) (y ${'`'}quot${'`'} 2) z
+      | y == 1 = op x z
+      | otherwise = g (op x x) (y ${'`'}quot${'`'} 2) (op x z)
 
 sconcatList :: Semigroup a => a -> [a] -> a
 sconcatList b (c : cs) = b <> sconcatList c cs
