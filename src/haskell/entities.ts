@@ -14,6 +14,8 @@ export interface TypeEntity {
   module: string;
   /** A `family` is a type family, which its equations reduce. */
   sort: 'data' | 'synonym' | 'prim' | 'family';
+  /** The class an associated family is declared in, of the same module, which imports it as a child. */
+  associatedClass?: string;
   /** A type family's equations, in order, with their own variables as `TGen` indices. */
   equations?: { kinds: Kind[]; lhs: Type[]; rhs: Type }[];
   /** Whether a type family is closed: its equations apply in order, each only once earlier ones cannot apply. */

@@ -470,7 +470,15 @@ class Renamer {
       throw unsupportedError(item.name.span, entry.entity.entity.unsupported);
     }
     into.types.set(name, { entity: entry.entity, children: [] });
-    const children = importChildren(item, entry.children, imp.hiding);
+    const associated = associatedTypes(exports, entry.entity);
+    const listed = item.children === 'all' ? undefined : (item.children ?? []);
+    const selected = listed ? associated.filter(([type]) => listed.some((child) => child.name === type)) : associated;
+    for (const [type, typeEntry] of selected) into.types.set(type, typeEntry);
+    const children = importChildren(
+      listed ? { ...item, children: listed.filter((child) => !selected.some(([type]) => type === child.name)) } : item,
+      entry.children,
+      imp.hiding
+    );
     for (const child of children) {
       // `T(..)` brings in the children this environment lacks too, as GHC's does; a use of one reports it.
       if (!imp.hiding && item.children !== 'all' && child.unsupported) {
@@ -582,6 +590,7 @@ class Renamer {
           fields: new Map(),
           span: decl.span,
           ...(decl.kind === 'dataFamily' ? { dataFamily: true } : {}),
+          ...(decl.associatedWith ? { associatedClass: decl.associatedWith } : {}),
         };
         this.declareOwnType(decl.name, { kind: 'type', entity });
         this.ownTypeChildren.set(this.ownTypes.get(decl.name.name) as TypeLike, []);
@@ -1531,12 +1540,9 @@ class Renamer {
       }
       case 'comprehension': {
         if (expr.quals.some((qual) => qual.kind === 'transform'))
-          return this.renameExpr(withoutTransforms(expr), scope);
+          return this.renameExpr(withoutTransforms(this.withRecordWildcards(expr)), scope);
         if (this.features.allows('monadComprehensions') && expr.parallel) {
-          return this.renameExpr(
-            parallelMonadComprehension(expr, (name) => this.recordFieldNames(name, () => this.lookupCon(name))),
-            scope
-          );
+          return this.renameExpr(parallelMonadComprehension(this.withRecordWildcards(expr)), scope);
         }
         if (this.features.allows('monadComprehensions') && !expr.parallel) {
           // `[e | x <- m, cond]` is `do { x <- m; guard cond; return e }` in any monad.
@@ -1847,12 +1853,52 @@ class Renamer {
     return { pat, rhs: this.renameRhs(alt.rhs, inner), span: alt.span };
   }
 
+  /**
+   * A comprehension whose qualifiers have the `..` of their record patterns replaced by the fields they bind, which
+   * the lowerings that collect the qualifiers' binders must see.
+   */
+  private withRecordWildcards(
+    expr: Extract<Expr, { kind: 'comprehension' }>
+  ): Extract<Expr, { kind: 'comprehension' }> {
+    return {
+      ...expr,
+      quals: this.stmtsWithRecordWildcards(expr.quals),
+      ...(expr.parallel ? { parallel: expr.parallel.map((quals) => this.stmtsWithRecordWildcards(quals)) } : {}),
+    };
+  }
+
+  private stmtsWithRecordWildcards(stmts: Stmt[]): Stmt[] {
+    const resolve = (name: QName): readonly string[] => this.recordFieldNames(name, () => this.lookupCon(name));
+    return stmts.map((stmt): Stmt => {
+      switch (stmt.kind) {
+        case 'bind': {
+          return { ...stmt, pat: expandRecordWildcards(stmt.pat, resolve) };
+        }
+        case 'let': {
+          return { ...stmt, decls: this.expandBindingWildcards(stmt.decls, resolve) };
+        }
+        case 'rec': {
+          return { ...stmt, stmts: this.stmtsWithRecordWildcards(stmt.stmts) };
+        }
+        case 'exp':
+        case 'transform': {
+          return stmt;
+        }
+        default: {
+          return stmt satisfies never;
+        }
+      }
+    });
+  }
+
   private renameStmts(source: Stmt[], parent: LocalScope, isDo: boolean): { stmts: RStmt[]; scope: LocalScope } {
     let scope = parent;
     const result: RStmt[] = [];
-    const stmts = source.flatMap((stmt) =>
-      stmt.kind !== 'rec' ? [stmt] : stmt.segmented ? recursiveSegments(stmt) : [recursiveBind(stmt)]
-    );
+    const stmts = source.flatMap((written) => {
+      if (written.kind !== 'rec') return [written];
+      const stmt = { ...written, stmts: this.stmtsWithRecordWildcards(written.stmts) };
+      return stmt.segmented ? recursiveSegments(stmt) : [recursiveBind(stmt)];
+    });
     for (const [index, stmt] of stmts.entries()) {
       const isLast = index === stmts.length - 1;
       switch (stmt.kind) {
@@ -2998,25 +3044,11 @@ function tupleOf<T>(items: T[], one: (item: T) => Expr | Pat, many: (items: T[])
  * A parallel monad comprehension, `[e | qs1 | qs2]`, as GHC desugars it: each branch a comprehension of the tuple of
  * the variables it binds, the branches zipped with `mzip`, and `e` over their variables.
  */
-function parallelMonadComprehension(
-  expr: Extract<Expr, { kind: 'comprehension' }>,
-  recordFields: (con: QName) => readonly string[]
-): Expr {
+function parallelMonadComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
   const { span } = expr;
   const support = (name: string): Expr => ({ kind: 'support', name, span });
   const unit: Name = { name: '()', span };
-  const branches = [expr.quals, ...(expr.parallel ?? [])].map((written) => {
-    // A record wildcard's fields are among the names the branch binds.
-    const quals = written.map((stmt): Stmt => {
-      if (stmt.kind === 'bind') return { ...stmt, pat: expandRecordWildcards(stmt.pat, recordFields) };
-      if (stmt.kind !== 'let') return stmt;
-      return {
-        ...stmt,
-        decls: stmt.decls.map((decl) =>
-          decl.kind === 'patBind' ? { ...decl, pat: expandRecordWildcards(decl.pat, recordFields) } : decl
-        ),
-      };
-    });
+  const branches = [expr.quals, ...(expr.parallel ?? [])].map((quals) => {
     // A name a later qualifier binds again is the later one's.
     const names = [...new Map(quals.flatMap((stmt) => stmtBinders(stmt)).map((name) => [name.name, name])).values()];
     const vars: Expr[] = names.map((name) => ({ kind: 'var', name: { name: name.name, span }, span }));
@@ -3444,6 +3476,21 @@ function rtypeMentions(type: RType, name: string): boolean {
       );
     }
   }
+}
+
+/** The associated families of a class a module exports, which `C(..)` and `C(F)` import with it. */
+function associatedTypes(
+  exports: ExportTable,
+  parent: TypeLike
+): [string, { entity: TypeLike; children: ValueEntity[] }][] {
+  if (parent.kind !== 'class') return [];
+  const cls = parent.entity;
+  return [...exports.types].filter(
+    ([, entry]) =>
+      entry.entity.kind === 'type' &&
+      entry.entity.entity.associatedClass === cls.name &&
+      entry.entity.entity.module === cls.module
+  );
 }
 
 function importChildren(item: ImportItem, available: ValueEntity[], hiding: boolean): ValueEntity[] {
