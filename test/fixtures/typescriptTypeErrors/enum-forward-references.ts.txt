@@ -1,0 +1,9 @@
+enum F { X = Y, Y = 1 }
+enum G { A = 1, B = A + C, C = 4 }
+enum H { P = H.Q, Q = 2 }
+const A = 1;
+const K = A;
+enum I { M = K, A = 3 }
+enum Merged { First = 1 }
+enum Merged { Second = First + 1 }
+console.log(F.X, G.B, H.P, I.M, Merged.Second);

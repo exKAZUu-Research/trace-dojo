@@ -20,6 +20,13 @@ import {
 
 type EnumValue = number | string;
 
+/** What an enum initializer is evaluated in: its enum, the members evaluated before it, and the errors found. */
+interface Evaluation {
+  symbol: Sym;
+  members: Map<string, EnumMember>;
+  errors: EnumInfo['errors'];
+}
+
 interface EnumMember {
   name: string;
   /** The constant value, or undefined for a computed member, whose value only running the program gives. */
@@ -159,11 +166,11 @@ export class Enums {
   private memberValue(
     memberNode: TreeNode,
     previous: EnumMember | undefined,
-    context: { symbol: Sym; members: Map<string, EnumMember>; errors: EnumInfo['errors']; isConst: boolean }
+    context: Evaluation & { isConst: boolean }
   ): EnumValue | undefined {
     const initializer = memberNode.childForFieldName('value');
     if (initializer) {
-      const value = this.evaluate(initializer, context.symbol, context.members);
+      const value = this.evaluate(initializer, context);
       if (value === undefined && context.isConst)
         context.errors.push({
           node: initializer,
@@ -180,7 +187,7 @@ export class Enums {
   /** The value of a constant enum expression, as TypeScript's `evaluate` computes it, or undefined for another one. */
   // code-gauge-allow functionCognitiveComplexity -- Evaluates each kind of constant expression TypeScript allows in an enum.
   // code-gauge-allow functionNcss -- Evaluates each kind of constant expression TypeScript allows in an enum.
-  private evaluate(node: TreeNode, symbol: Sym, members: Map<string, EnumMember>): EnumValue | undefined {
+  private evaluate(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'number': {
@@ -196,14 +203,17 @@ export class Enums {
           : expression.text.slice(1, -1);
       }
       case 'identifier': {
-        return members.get(expression.text)?.value ?? this.constantVariableValue(expression, symbol);
+        return (
+          this.ownMemberValue(expression, expression.text, evaluation) ??
+          this.constantVariableValue(expression, evaluation)
+        );
       }
       case 'member_expression':
       case 'subscript_expression': {
-        return this.otherEnumMember(expression, symbol, members);
+        return this.otherEnumMember(expression, evaluation);
       }
       case 'unary_expression': {
-        const operand = this.evaluate(expression.childForFieldName('argument') as TreeNode, symbol, members);
+        const operand = this.evaluate(expression.childForFieldName('argument') as TreeNode, evaluation);
         if (typeof operand !== 'number') return undefined;
         const operator = expression.childForFieldName('operator')?.text;
         if (operator === '-') return -operand;
@@ -211,8 +221,8 @@ export class Enums {
         return operator === '~' ? ~operand : undefined;
       }
       case 'binary_expression': {
-        const left = this.evaluate(expression.childForFieldName('left') as TreeNode, symbol, members);
-        const right = this.evaluate(expression.childForFieldName('right') as TreeNode, symbol, members);
+        const left = this.evaluate(expression.childForFieldName('left') as TreeNode, evaluation);
+        const right = this.evaluate(expression.childForFieldName('right') as TreeNode, evaluation);
         if (left === undefined || right === undefined) return undefined;
         return binaryValue(expression.childForFieldName('operator')?.text ?? '', left, right);
       }
@@ -223,21 +233,21 @@ export class Enums {
   }
 
   /** The value of a `const` an initializer names, when a constant expression initializes it, as tsc evaluates it. */
-  private constantVariableValue(name: TreeNode, symbol: Sym): EnumValue | undefined {
+  private constantVariableValue(name: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const variable = this.c.scopeOf(name).lookupValue(name.text);
     const declaration = variable?.valueDeclaration;
     const value = declaration?.type === 'variable_declarator' ? declaration.childForFieldName('value') : undefined;
     if (variable?.valueKind !== 'const' || !value || this.evaluatingConstants.has(variable.id)) return undefined;
     this.evaluatingConstants.add(variable.id);
     try {
-      return this.evaluate(value, symbol, new Map());
+      return this.evaluate(value, { ...evaluation, members: new Map() });
     } finally {
       this.evaluatingConstants.delete(variable.id);
     }
   }
 
   /** The value of `E.A` or `E["A"]`, a member of this or another enum. */
-  private otherEnumMember(node: TreeNode, symbol: Sym, members: Map<string, EnumMember>): EnumValue | undefined {
+  private otherEnumMember(node: TreeNode, evaluation: Evaluation): EnumValue | undefined {
     const object = node.childForFieldName('object');
     if (object?.type !== 'identifier') return undefined;
     const key =
@@ -248,10 +258,32 @@ export class Enums {
             return index?.type === 'string' ? stringValue(index) : undefined;
           })();
     if (key === undefined) return undefined;
-    if (object.text === symbol.name) return members.get(key)?.value;
     const other = this.c.scopeOf(object).lookupValue(object.text);
     if (other?.valueKind !== 'enum') return undefined;
-    return this.infoOf(other)?.members.get(key)?.value;
+    if (other.id === evaluation.symbol.id) return this.ownMemberValue(node, key, evaluation);
+    const member = this.infoOf(other)?.members.get(key);
+    if (member && member.node.startIndex > node.startIndex) return this.forwardReference(node, evaluation);
+    return member?.value;
+  }
+
+  /** The value of a member of the enum being evaluated, which only a member declared before may read. */
+  private ownMemberValue(reference: TreeNode, name: string, evaluation: Evaluation): EnumValue | undefined {
+    const member = evaluation.members.get(name);
+    if (member) return member.value;
+    const declared = evaluation.symbol.enumMembers?.values.get(name);
+    const isMember =
+      declared !== undefined &&
+      (reference.type !== 'identifier' || this.c.scopeOf(reference).lookupValue(name)?.id === declared.id);
+    return isMember ? this.forwardReference(reference, evaluation) : undefined;
+  }
+
+  private forwardReference(reference: TreeNode, evaluation: Evaluation): undefined {
+    evaluation.errors.push({
+      node: reference,
+      message:
+        '列挙型宣言のメンバー初期化子は、他の列挙型で定義されたメンバーを含め、その後で宣言されたメンバーを参照できません。',
+    });
+    return undefined;
   }
 }
 
