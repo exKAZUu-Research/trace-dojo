@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { isAmbient, isInstantiatedNamespace } from '../namespaceInstantiation';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import { FlowState } from './flow';
@@ -17,7 +18,6 @@ import {
 } from './types';
 
 /** The declarations that declare only types, which leave a namespace without an object at run time. */
-const typeOnlyDeclarations = new Set(['interface_declaration', 'type_alias_declaration', 'comment']);
 
 /**
  * Namespaces: the object a namespace's exported values make, the types it exports, and the checks of its declarations.
@@ -60,30 +60,7 @@ export class Namespaces {
 
   /** Whether a namespace has values, which give it an object; one that only declares types has none. */
   isInstantiated(symbol: Sym): boolean {
-    return symbol.valueDeclarations.some(
-      (declaration) =>
-        (declaration.type === 'internal_module' || declaration.type === 'module') &&
-        (isAmbient(declaration) || this.bodyHasValues(declaration, symbol))
-    );
-  }
-
-  private bodyHasValues(declaration: TreeNode, symbol: Sym): boolean {
-    const name = declaration.childForFieldName('name');
-    // In `namespace A.B { ... }`, the body belongs to the last name, and `A` holds the namespace `B`.
-    if (name?.type === 'nested_identifier' && name.childForFieldName('property')?.text !== symbol.name) {
-      const exports = symbol.namespaceExports;
-      return [...(exports?.values.values() ?? [])].some((member) => this.isInstantiated(member));
-    }
-    const body = declaration.childForFieldName('body');
-    return named(body ?? declaration).some((statement) => {
-      const declared = statement.type === 'export_statement' ? statement.childForFieldName('declaration') : statement;
-      if (!declared || typeOnlyDeclarations.has(declared.type)) return false;
-      const inner = declared.type === 'expression_statement' ? named(declared)[0] : declared;
-      if (inner?.type !== 'internal_module') return true;
-      const innerName = inner.childForFieldName('name');
-      const innerSymbol = innerName ? this.c.scopeOf(inner).lookupValue(innerName.text) : undefined;
-      return !innerSymbol || this.isInstantiated(innerSymbol);
-    });
+    return isInstantiatedNamespace(symbol);
   }
 
   /** A namespace that only declares types has no object to use as a value. */
@@ -263,13 +240,6 @@ export class Namespaces {
       this.c.flow.current = outer;
     }
   }
-}
-
-/** Whether a declaration is in an ambient context, as in `declare namespace`, which declares without code to run. */
-export function isAmbient(node: TreeNode): boolean {
-  for (let current: TreeNode | null = node; current; current = current.parent)
-    if (current.type === 'ambient_declaration') return true;
-  return false;
 }
 
 /** The names of a qualified type name, as `A`, `B`, and `T` of `A.B.T`. */

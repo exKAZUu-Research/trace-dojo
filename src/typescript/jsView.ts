@@ -13,6 +13,7 @@ import {
   erasedStatementTypes,
   erasedTypeNodes,
 } from './erasedSyntax';
+import { blockHasRuntimeCode, isInstantiatedNamespace } from './namespaceInstantiation';
 
 /**
  * The type of a synthesized statement that copies a constructor's parameter properties to `this`, which the
@@ -20,11 +21,10 @@ import {
  */
 export const PARAMETER_PROPERTY_ASSIGNMENT = 'parameter_property_assignment';
 
-/** The statements the view adds that record no step of their own, as the assignments that export a namespace's members. */
-export const unsteppedStatements = new WeakSet<Node>();
-
 /** A node of the view, which may stand for a tree-sitter node or be synthesized from one. */
 class ViewNode implements Node {
+  /** Whether the view added this statement without a step of its own, as an assignment exporting a namespace's member. */
+  isUnstepped = false;
   readonly startIndex: number;
   readonly endIndex: number;
   readonly startPosition: { row: number; column: number };
@@ -269,24 +269,15 @@ function token(position: TreeNode, text: string): ViewNode {
 function namespaceView(node: TreeNode, binder: Binder): ViewNode {
   const name = node.childForFieldName('name');
   const body = node.childForFieldName('body');
-  if (!name || !body || name.type === 'string' || !hasRuntimeCode(body)) return leaf(node, 'empty_statement');
+  if (!name || !body || name.type === 'string' || !blockHasRuntimeCode(body)) return leaf(node, 'empty_statement');
   const path = namespacePathOf(name);
   const statements = nestedNamespaceStatements(node, body, path, binder);
   const outermost = path[0].text;
-  const symbol = binder.lookupValue(node, outermost);
-  // The first declaration with run-time code creates the object, as one that only declares types compiles to nothing.
-  const creating = symbol?.valueDeclarations.find((declaration) => {
-    const declarationBody = declaration.childForFieldName('body');
-    return declarationBody !== null && hasRuntimeCode(declarationBody);
-  });
-  const declaresObject = symbol?.valueEntries[0]?.kind === 'namespace' && creating?.id === node.id;
-  const call = namespaceCall(
-    node,
-    outermost,
-    statements,
-    declaresObject ? orEmptyObject(node, outermost) : leaf(node, 'identifier', outermost)
-  );
-  return declaresObject ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
+  const call = namespaceCall(node, outermost, statements, orEmptyObject(node, outermost));
+  // Every block passes the object the blocks before it made, or a new one, so no block needs to know whether it is
+  // first; a class, function, or enum declared before the namespace already declares its name.
+  const isNamespaceFirst = binder.lookupValue(node, outermost)?.valueEntries[0]?.kind === 'namespace';
+  return isNamespaceFirst ? varDeclaration(node, outermost, call) : expressionStatement(node, call);
 }
 
 /**
@@ -373,11 +364,7 @@ function importAliasView(node: TreeNode, binder: Binder): ViewNode {
   const root = binder.lookupValue(target, path[0].text);
   const hasValue =
     root !== undefined &&
-    root.valueDeclarations.some(
-      (declaration) =>
-        !['internal_module', 'module'].includes(declaration.type) ||
-        hasRuntimeCode(declaration.childForFieldName('body') ?? declaration)
-    );
+    (root.valueEntries.some((entry) => entry.kind !== 'namespace') || isInstantiatedNamespace(root));
   if (!hasValue) return leaf(node, 'empty_statement');
   let value = leaf(path[0], 'identifier', path[0].text);
   let text = path[0].text;
@@ -434,7 +421,7 @@ function exportStatements(declaration: TreeNode, namespaceName: string, binder: 
 function exportedNamespace(node: TreeNode, outerName: string, binder: Binder): ViewNode[] {
   const name = node.childForFieldName('name');
   const body = node.childForFieldName('body');
-  if (!name || !body || !hasRuntimeCode(body)) return [];
+  if (!name || !body || !blockHasRuntimeCode(body)) return [];
   const path = namespacePathOf(name);
   const statements = nestedNamespaceStatements(node, body, path, binder);
   return exportedNamespaceStatements(node, path[0].text, outerName, statements, false);
@@ -607,21 +594,13 @@ function expressionStatement(node: TreeNode, expression: ViewNode): ViewNode {
 }
 
 function unstepped(statement: ViewNode): ViewNode {
-  unsteppedStatements.add(statement);
+  statement.isUnstepped = true;
   return statement;
 }
 
-/** Whether a namespace's body has code to run, rather than only types and namespaces of types. */
-function hasRuntimeCode(body: TreeNode): boolean {
-  return body.namedChildren.some((child) => {
-    if (!child || child.type === 'comment') return false;
-    const declaration = child.type === 'export_statement' ? child.childForFieldName('declaration') : child;
-    if (!declaration || erasedStatementTypes.has(declaration.type)) return false;
-    const inner = declaration.type === 'expression_statement' ? declaration.namedChildren[0] : declaration;
-    if (inner?.type !== 'internal_module' && inner?.type !== 'module') return true;
-    const innerBody = inner.childForFieldName('body');
-    return innerBody !== null && hasRuntimeCode(innerBody);
-  });
+/** Whether the view added a statement that records no step of its own. */
+export function isUnsteppedStatement(node: Node): boolean {
+  return node instanceof ViewNode && node.isUnstepped;
 }
 
 function namespacePathOf(name: TreeNode): TreeNode[] {

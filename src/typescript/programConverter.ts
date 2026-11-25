@@ -5,7 +5,7 @@ import { nameOf, type Node, rowOf, unwrapParentheses } from '../javascript/conve
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { countedEnumValue, type FoldedValue, foldEnumValue } from './enumFolding';
-import { PARAMETER_PROPERTY_ASSIGNMENT, unsteppedStatements } from './jsView';
+import { isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
@@ -167,7 +167,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   }
 
   protected override stepRowOf(node: Node): number | undefined {
-    return unsteppedStatements.has(node) ? undefined : super.stepRowOf(node);
+    return isUnsteppedStatement(node) ? undefined : super.stepRowOf(node);
   }
 
   protected override duplicate(node: Node, name: string): never {
