@@ -10,7 +10,13 @@ export interface Position {
 
 export type TypeNode =
   | ({ kind: 'predefinedType'; name: string } & Position)
-  | ({ kind: 'namedType'; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  | ({
+      kind: 'namedType';
+      name: string;
+      typeArgs: TypeNode[] | undefined;
+      /** For an unbound generic type in `typeof(List<>)`, how many type arguments it leaves out. */
+      unboundArity?: number;
+    } & Position)
   | ({ kind: 'qualifiedType'; left: TypeNode; name: string; typeArgs: TypeNode[] | undefined } & Position)
   /** A name qualified by a namespace alias, as `global::System` or `G::List<int>`. */
   | ({ kind: 'aliasQualifiedType'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
@@ -184,6 +190,8 @@ export type Expression =
   | ({ kind: 'throw'; value: Expression } & Position)
   | ({ kind: 'with'; value: Expression; members: MemberInitializer[] } & Position)
   | ({ kind: 'query'; clauses: QueryClause[] } & Position)
+  | ({ kind: 'typeof'; type: TypeNode } & Position)
+  | ({ kind: 'sizeof'; type: TypeNode } & Position)
   /** `^n`, an index from the end. */
   | ({ kind: 'fromEnd'; operand: Expression } & Position)
   /** `a..b`, a range whose omitted ends are the start and the end. */

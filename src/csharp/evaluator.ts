@@ -11,6 +11,7 @@ import type { CompiledProgram } from './compiler';
 import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
 import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
 import { formatValue } from './library/formatting';
+import { typeObjectOf } from './library/nativesCore';
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
 import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
@@ -74,6 +75,7 @@ type AccessExpression = Extract<
       | 'element'
       | 'property'
       | 'implicitIndex'
+      | 'typeOf'
       | 'compoundOperand'
       | 'conditionalAccess';
   }
@@ -402,6 +404,7 @@ export class Evaluator extends StatementExecutor {
       case 'element':
       case 'property':
       case 'implicitIndex':
+      case 'typeOf':
       case 'compoundOperand':
       case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
@@ -474,6 +477,9 @@ export class Evaluator extends StatementExecutor {
       case 'implicitIndex': {
         for (const step of expression.setup) this.evaluate(step, frame);
         return this.evaluate(expression.access, frame);
+      }
+      case 'typeOf': {
+        return typeObjectOf(this.runtime, frame.resolve(expression.target));
       }
       case 'compoundOperand': {
         return frame.operands.at(-1) as Value;

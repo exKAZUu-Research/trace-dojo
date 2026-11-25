@@ -34,7 +34,7 @@ import {
   unboxed,
   valuesEqual,
 } from '../objects';
-import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
+import { CsThrow, type ExceptionState, ProgramExit, type Runtime } from '../runtime';
 import {
   type FieldSymbol,
   MAX_TUPLE_ARITY,
@@ -193,17 +193,22 @@ defineNatives({
  * name of a LINQ iterator, which stands for .NET's internal classes.
  */
 function typeObject(call: NativeCall, type: Type | string): CsObject {
-  // .NET has one `Type` object per type, so that `==` and `ReferenceEquals` compare types.
-  let objects = typeObjects.get(call.frame.runtime);
+  return typeObjectOf(call.frame.runtime, type);
+}
+
+/** The run's one `Type` object of a type, which `GetType()` and `typeof` give, so that `==` compares types. */
+export function typeObjectOf(runtime: Runtime, type: Type | string): CsObject {
+  let objects = typeObjects.get(runtime);
   if (!objects) {
     objects = new Map();
-    typeObjects.set(call.frame.runtime, objects);
+    typeObjects.set(runtime, objects);
   }
-  const key = typeof type === 'string' ? type : runtimeTypeName(type);
+  const target = typeof type !== 'string' && type.kind === 'void' ? 'System.Void' : type;
+  const key = typeof target === 'string' ? target : runtimeTypeName(target);
   let object = objects.get(key);
   if (!object) {
-    object = new CsObject(libraryType(call, 'System.Type'), []);
-    object.native = type;
+    object = new CsObject(namedType(runtime.library.typeNamed('System.Type')), []);
+    object.native = target;
     objects.set(key, object);
   }
   return object;

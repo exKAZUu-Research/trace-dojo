@@ -40,8 +40,6 @@ const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
   reftype_expression: '`__reftype`',
   refvalue_expression: '`__refvalue`',
   ref_expression: '`ref` 式',
-  sizeof_expression: '`sizeof`',
-  typeof_expression: '`typeof`',
   await_expression: '`await`',
   stackalloc_expression: '`stackalloc`',
   implicit_stackalloc_expression: '`stackalloc`',
@@ -78,6 +76,12 @@ export class ExpressionConverter {
       }
       case 'generic_name': {
         const [name, args] = this.genericParts(node);
+        const [, argsNode] = namedChildren(node);
+        // `List<>` and `Dictionary<,>` leave their type arguments out, which only `typeof` allows.
+        if (args.length === 0) {
+          const unboundArity = childrenOf(argsNode).filter((child) => child.type === ',').length + 1;
+          return { kind: 'namedType', name, typeArgs: undefined, unboundArity, ...position };
+        }
         return { kind: 'namedType', name, typeArgs: args, ...position };
       }
       case 'qualified_name': {
@@ -431,6 +435,12 @@ export class ExpressionConverter {
       }
       case 'anonymous_method_expression': {
         return this.convertAnonymousMethod(node);
+      }
+      case 'typeof_expression': {
+        return { kind: 'typeof', type: this.convertType(requiredField(node, 'type')), ...position };
+      }
+      case 'sizeof_expression': {
+        return { kind: 'sizeof', type: this.convertType(requiredField(node, 'type')), ...position };
       }
       case 'range_expression': {
         const children = childrenOf(node);

@@ -189,6 +189,8 @@ export type BoundExpression =
       parts: (string | { value: BoundExpression; alignment: number | undefined; format: string | undefined })[];
     } & Base)
   | ({ kind: 'tuple'; elements: BoundExpression[] } & Base)
+  /** `typeof(T)`, the one System.Type object of a type. */
+  | ({ kind: 'typeOf'; target: Type } & Base)
   | ({
       kind: 'conditionalAccess';
       receiver: BoundExpression;

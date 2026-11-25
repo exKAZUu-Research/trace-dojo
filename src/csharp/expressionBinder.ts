@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
-import type { Designation, Expression, Pattern, Position } from './ast';
+import type { Designation, Expression, Pattern, Position, TypeNode } from './ast';
 import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
 import type { ArgumentInfo } from './callBinder';
 import { isEnum, isNumeric } from './conversions';
@@ -121,6 +121,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
           this.bindImplicitIndexOrRange(target, node, context) ??
           this.bindElementAccess(target, node.args, node, context)
         );
+      }
+      case 'typeof': {
+        return {
+          kind: 'typeOf',
+          target: this.typeofTarget(node.type, context),
+          type: namedType(this.library.typeNamed('System.Type')),
+          row,
+        };
+      }
+      case 'sizeof': {
+        return this.bindSizeof(node, context);
       }
       case 'fromEnd': {
         const operand = this.bindAs(node.operand, this.intType, context);
@@ -1474,6 +1485,29 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { kind: 'compoundAssign', target, operation: converted, type: target.type, row: node.row };
   }
 
+  /** The type of `typeof`, where an unbound generic type (`List<>`) stands for its definition. */
+  private typeofTarget(node: TypeNode, context: BindContext): Type {
+    if (node.kind === 'namedType' && node.unboundArity !== undefined) {
+      const symbol = this.findTypeInScope(node.name, node.unboundArity, context.fn.typeContext);
+      if (symbol) return symbol.declaredType;
+    }
+    return this.resolveType(node, context.fn.typeContext);
+  }
+
+  /** `sizeof` of a type with a size the language defines (C# spec §23.6.9); others need an unsafe context. */
+  private bindSizeof(node: Extract<Expression, { kind: 'sizeof' }>, context: BindContext): BoundExpression {
+    const type = this.resolveType(node.type, context.fn.typeContext);
+    const size = sizeOfType(type);
+    if (size !== undefined) return this.constant(size, this.intType, node.row);
+    if (type.kind !== 'error')
+      this.error(
+        node,
+        'CS0233',
+        `'${displayType(type)}' には定義済みのサイズが指定されていないため、sizeof は unsafe コンテキストでのみ使用できます`
+      );
+    return { kind: 'default', type: this.intType, row: node.row };
+  }
+
   /** `new T(args)` of a library struct whose constructor takes exactly the arguments' types. */
   private libraryCreation(fullName: string, args: BoundExpression[], node: Position): BoundExpression {
     const type = namedType(this.library.typeNamed(fullName));
@@ -2054,4 +2088,27 @@ function isTypelessConditional(value: BoundExpression): boolean {
 
 function isStringValue(value: BoundExpression): boolean {
   return value.kind !== 'unbound' && value.type.kind === 'named' && value.type.symbol.special === 'string';
+}
+
+/** The sizes of the types whose `sizeof` is a constant outside unsafe code. */
+const PREDEFINED_SIZES: Partial<Record<string, number>> = {
+  sbyte: 1,
+  byte: 1,
+  bool: 1,
+  short: 2,
+  ushort: 2,
+  char: 2,
+  int: 4,
+  uint: 4,
+  float: 4,
+  long: 8,
+  ulong: 8,
+  double: 8,
+  decimal: 16,
+};
+
+function sizeOfType(type: Type): number | undefined {
+  if (type.kind !== 'named') return undefined;
+  const special = type.symbol.kind === 'enum' ? type.symbol.enumUnderlying?.symbol.special : type.symbol.special;
+  return special ? PREDEFINED_SIZES[special] : undefined;
 }
