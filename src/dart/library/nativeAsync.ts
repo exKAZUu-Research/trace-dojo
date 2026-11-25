@@ -205,6 +205,10 @@ define('_Timer._reschedule', (runtime, self, [period]) => {
   return;
 });
 
+define('_Timer._skipMissedTicks', (runtime, self, [period]) =>
+  BigInt(runtime.events.skipMissedTicks(self as DartObject, Number(period)))
+);
+
 define('_Timer._unschedule', (runtime, self) => {
   runtime.events.unschedule(self as DartObject);
   return;

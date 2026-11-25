@@ -1039,13 +1039,18 @@ final class _Timer implements Timer {
   void _run() {
     var callback = _callback;
     if (callback == null) return;
-    if (!_repeating) _callback = null;
+    if (!_repeating) {
+      _callback = null;
+    } else if (_milliSeconds > 0) {
+      _tick += _skipMissedTicks(_milliSeconds);
+    }
     _tick += 1;
     callback(this);
     if (_repeating && _callback != null) _reschedule(_milliSeconds);
   }
   external void _schedule(int delay);
   external void _reschedule(int period);
+  external int _skipMissedTicks(int period);
   external void _unschedule();
 }
 

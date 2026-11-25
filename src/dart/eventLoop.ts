@@ -45,6 +45,19 @@ export class EventLoop {
     this.add({ timer, wakeup, id: this.nextId++ });
   }
 
+  /**
+   * Moves the due time of a periodic tick that fires more than a period late, as after `sleep`, past the ticks it
+   * missed, giving how many it missed, as the VM's `_runTimers` does before the tick's callback.
+   */
+  skipMissedTicks(timer: DartObject, period: number): number {
+    const entry = this.entries.get(timer);
+    const overdue = entry ? this.now - entry.wakeup : 0;
+    if (!entry || overdue <= period) return 0;
+    const missed = Math.floor(overdue / period);
+    entry.wakeup += missed * period;
+    return missed;
+  }
+
   unschedule(timer: DartObject): void {
     const entry = this.entries.get(timer);
     const index = entry ? this.timers.indexOf(entry) : -1;
