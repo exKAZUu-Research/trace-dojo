@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's parameter expansion operators and transformations in one module.
-import type { ParameterExpansion, WordPart } from './ast';
+import type { ParameterExpansion, Word, WordPart } from './ast';
 import { ATTRIBUTE_ORDER, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
@@ -334,6 +334,9 @@ function failRequireOperator(
 }
 
 function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: SubscriptRef | undefined): ResolvedTarget {
+  if (subscript?.indirect !== undefined) {
+    shell.discard(`${subscript.indirect}: invalid variable name`);
+  }
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || subscript?.wholeArray) {
     shell.discard(`$${name}: cannot assign in this way`);
   }
@@ -342,9 +345,7 @@ function resolveAssignOperatorTarget(shell: Shell, name: string, subscript: Subs
       ? resolveScalarTarget(shell, name, true)
       : resolveSubscriptTarget(shell, {
           name,
-          subscript: subscript.word
-            ? { kind: 'word', word: subscript.word, unquoteAnsiC: true }
-            : { kind: 'text', text: subscript.rawText, preExpanded: false },
+          subscript: { kind: 'word', word: subscript.word as Word, unquoteAnsiC: true },
           operation: 'write',
         });
   if (!target) shell.discard(`${name}: circular name reference`);

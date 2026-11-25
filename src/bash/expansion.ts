@@ -37,6 +37,7 @@ export interface SubscriptRef {
   readonly wholeArray: boolean;
   readonly rawText: string;
   readonly word?: Word;
+  readonly indirect?: string;
 }
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
@@ -619,13 +620,13 @@ export class Expander {
     if (split && isIdentifier(split.name) && split.subscript !== '') {
       const raw = split.subscript;
       if (raw === '@' || raw === '*') {
-        return { name: split.name, subscript: { text: raw, wholeArray: true, rawText: raw } };
+        return { name: split.name, subscript: { text: raw, wholeArray: true, rawText: raw, indirect: reference } };
       }
       const resolved = resolveTargetName(this.shell, split.name, false) ?? split.name;
       const expanded = this.shell.store.isAssociativeName(resolved)
         ? this.expandSubscriptText(raw)
         : this.expandIndexedSubscriptText(raw);
-      return { name: split.name, subscript: { text: expanded, wholeArray: false, rawText: raw } };
+      return { name: split.name, subscript: { text: expanded, wholeArray: false, rawText: raw, indirect: reference } };
     }
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
     return { name: reference, subscript: undefined };
