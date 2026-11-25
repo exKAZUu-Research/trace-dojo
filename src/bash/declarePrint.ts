@@ -51,11 +51,11 @@ export function declarationText(variable: Variable): string {
   return `${prefix}=(${body})`;
 }
 
-function quoteValue(text: string): string {
+export function quoteValue(text: string): string {
   return ansicShouldQuote(text) ? ansicQuote(text) : doubleQuote(text);
 }
 
-function quoteKey(key: string): string {
+export function quoteKey(key: string): string {
   if (ansicShouldQuote(key)) return ansicQuote(key);
   if (containsShellMetas(key) || key === '@' || key === '*') return doubleQuote(key);
   return key;

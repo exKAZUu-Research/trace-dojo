@@ -612,14 +612,11 @@ function declareOne(
   if (isElementAliasAttributeBuiltin(builtin, isSubscripted, destination)) {
     return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
   }
-  const preUnsetStore = resolvePreUnsetNamerefStore(
-    shell,
-    name,
-    destination.variable,
-    options,
+  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination.variable, options, {
     isLocal,
-    assignMode !== 'none'
-  );
+    assigns: assignMode !== 'none',
+    isSubscripted,
+  });
   if (
     !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, operand, assignMode, isSubscripted)
   ) {
@@ -655,8 +652,10 @@ function applyDeclaredAttributes(
   isSubscripted: boolean
 ): boolean {
   const assigns = assignMode !== 'none' || isCompound(operand);
-  if (preUnsetStore?.deferUnsetN && !isSubscripted && (options.set.has('a') || options.set.has('A'))) {
-    if (!applyReferentArrayKind(shell, builtin, preUnsetStore, options)) return false;
+  if (preUnsetStore?.deferUnsetN && (isSubscripted || options.set.has('a') || options.set.has('A'))) {
+    if (!applyReferentArrayKind(shell, builtin, destination.variable.name, preUnsetStore, options, isSubscripted)) {
+      return false;
+    }
     return applyAttributes(
       shell,
       builtin,
@@ -703,22 +702,27 @@ function convertSubscriptedNameref(shell: Shell, variable: Variable, { set, unse
 function applyReferentArrayKind(
   shell: Shell,
   builtin: string,
+  reportedName: string,
   preUnsetStore: PreUnsetNamerefStore,
-  options: Options
+  options: Options,
+  isSubscripted: boolean
 ): boolean {
   const referent = preUnsetStore.variable;
-  const arrayOpts: Options = {
-    set: new Set([...options.set].filter((f) => f === 'a' || f === 'A')),
-    unset: new Set(),
-    attemptedSet: new Set(),
-  };
+  const becomesAssoc = options.set.has('A');
+  const becomesIndexed =
+    options.set.has('a') ||
+    (isSubscripted && !becomesAssoc && !referent.attributes.has('A') && referent.value?.kind !== 'associative');
+  const effectiveSet = new Set<string>();
+  if (becomesAssoc) effectiveSet.add('A');
+  if (becomesIndexed) effectiveSet.add('a');
+  const arrayOpts: Options = { set: effectiveSet, unset: new Set(), attemptedSet: new Set() };
   if (checkReadonlyConflict(shell, builtin, referent.name, referent, arrayOpts, false)) return false;
-  const kindErr = incompatibleArrayKindError(referent, arrayOpts.set);
+  const kindErr = incompatibleArrayKindError(referent, options.set);
   if (kindErr) {
-    shell.reportError(`${builtin}: ${referent.name}: ${kindErr}`);
+    shell.reportError(`${builtin}: ${reportedName}: ${kindErr}`);
     return false;
   }
-  applyArrayKindAttributes(shell, referent, arrayOpts.set.has('A'), arrayOpts.set.has('a'), false);
+  applyArrayKindAttributes(shell, referent, becomesAssoc, becomesIndexed, false);
   if (options.set.has('g') && isIndexedCell(referent) && preUnsetStore.preResolved === undefined) {
     preUnsetStore.preResolved = resolveNameInScopes(shell.state.scopes, preUnsetStore.operandName);
   }
@@ -1018,10 +1022,14 @@ function resolvePreUnsetNamerefStore(
   operandName: string,
   finalLink: Variable | undefined,
   { set, unset }: Options,
-  isLocal: boolean,
-  assigns: boolean
+  ctx: { isLocal: boolean; assigns: boolean; isSubscripted: boolean }
 ): PreUnsetNamerefStore | undefined {
-  if (isLocal || !unset.has('n') || !finalLink?.attributes.has('n') || (!assigns && !set.has('a') && !set.has('A'))) {
+  if (
+    ctx.isLocal ||
+    !unset.has('n') ||
+    !finalLink?.attributes.has('n') ||
+    (!ctx.assigns && !set.has('a') && !set.has('A') && !ctx.isSubscripted)
+  ) {
     return undefined;
   }
   const globalOnly = set.has('g');
@@ -1035,7 +1043,7 @@ function resolvePreUnsetNamerefStore(
   );
   if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
   if (referencedSubscript !== undefined) {
-    return assigns
+    return ctx.assigns && !ctx.isSubscripted
       ? resolvePreUnsetElementStore(shell, operandName, finalLink, targetName, referencedSubscript, globalOnly)
       : undefined;
   }
@@ -1617,7 +1625,7 @@ function resolveDeclaredTarget(
   globalOnly = set.has('g'),
   localScope?: Map<string, Variable>
 ): { targetName: string; referencedSubscript?: string } {
-  if (set.has('n') || isSubscripted) return { targetName: name };
+  if (set.has('n') || (isSubscripted && !unset.has('n'))) return { targetName: name };
   if (localScope && !localScope.has(name)) return { targetName: name };
   if (unset.has('n')) {
     if (localScope) return { targetName: resolveLocalElementNamerefTarget(shell, name) ?? name };

@@ -471,6 +471,12 @@ export class Expander {
       const arr = shell.resolveNameOrUndefined(split.name);
       return { kind: 'list', values: arr === undefined ? [] : shell.arrayValues(arr), star: split.subscript === '*' };
     }
+    if (expansion?.prefix === '#' && split) {
+      const arr = shell.resolveNameOrUndefined(split.name);
+      if (arr === undefined || !this.hasMaterializedLengthTarget(arr)) {
+        return { kind: 'scalar', value: undefined };
+      }
+    }
     return { kind: 'scalar', value: shell.scalarValue(name) };
   }
 

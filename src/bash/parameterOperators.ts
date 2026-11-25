@@ -2,7 +2,7 @@
 import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
-import { declarationText } from './declarePrint';
+import { declarationText, quoteKey, quoteValue } from './declarePrint';
 import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
 import {
   EMPTY_LIST,
@@ -24,7 +24,7 @@ import {
   shortestPrefixMatch,
   shortestSuffixMatch,
 } from './pattern';
-import { doubleQuote, quoteReusable } from './quoting';
+import { quoteReusable } from './quoting';
 import { DiscardSignal, ExitSignal } from './runtime';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -747,7 +747,7 @@ function keyValuePairs(
   const isAssociative = shell.isAssociative(shell.resolveName(name));
   const spend = (cost?: number): void => shell.runtime.spend(cost);
   const pairs = value.values.map(
-    (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${doubleQuote(element)}`
+    (element, index) => `${isAssociative ? quoteKey(keys[index]) : keys[index]} ${quoteValue(element)}`
   );
   const text = isAssociative
     ? joinBounded(
@@ -757,8 +757,4 @@ function keyValuePairs(
       )
     : joinBounded(pairs, ' ', spend);
   return expander.valuePieces({ kind: 'scalar', value: text }, inDouble);
-}
-
-function quoteKey(key: string): string {
-  return /^[A-Za-z0-9_]+$/.test(key) ? key : doubleQuote(key);
 }
