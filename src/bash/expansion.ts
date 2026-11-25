@@ -610,7 +610,7 @@ export class Expander {
     const chain = this.shell.store.resolveChain(name);
     if (chain.kind === 'cycle') {
       this.shell.reportError(`warning: ${chain.cyclicName}: circular name reference`);
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, `!${name}`, undefined, ctx);
+      this.shell.discard(`${name}: invalid indirect expansion`);
     }
     if (chain.cell && this.shell.store.viewOfHandle(chain.cell).attributes.has('n')) {
       this.shell.discard(`${name}: invalid indirect expansion`);
