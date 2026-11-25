@@ -1,11 +1,9 @@
 import { power } from '../../interpreter/power';
-import type { OutputChannel } from '../../interpreter/programIo';
-import { encodableText, stringOf } from '../format';
+import { encodableText } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { toDouble } from './nativeNumbers';
-import { characterOf } from './nativeStrings';
-import { closedSinks, define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
+import { closedSinks, define, defineConstructor, intArg, numArg } from './nativeSupport';
 
 // dart:math
 
@@ -164,59 +162,20 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 
 // dart:io
 
-/** A standard sink's writes, which fail once it is closed, except for empty text, which the VM's sink never passes on. */
-function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
-  const isError = isStderr(receiver);
-  const channel = isError ? runtime.io.stderr : runtime.io.stdout;
-  return {
-    write: (text: string) => {
-      if (text === '') return;
-      requireOpen(runtime, isError);
-      channel.write(text, encodableText);
-    },
-  };
-}
-
-function requireOpen(runtime: Runtime, isError: boolean): void {
-  if (closedSinks.get(runtime)?.has(isError)) runtime.throwError('StateError', '', ['StreamSink is closed']);
-}
-
-define('Stdout._requireOpen', (runtime, receiver) => {
-  requireOpen(runtime, isStderr(receiver));
-  return;
-});
-
 function isStderr(receiver: Value): boolean {
   return (receiver as DartObject).fields[0] === true;
 }
 
+define('Stdout._write', (runtime, receiver, [text]) => {
+  const channel = isStderr(receiver) ? runtime.io.stderr : runtime.io.stdout;
+  channel.write(text as string, encodableText);
+  return;
+});
+// print reads whether standard output is closed, after which it drops what it prints.
 define('Stdout._close', (runtime, receiver) => {
   const closed = closedSinks.get(runtime) ?? new Set<boolean>();
   closed.add(isStderr(receiver));
   closedSinks.set(runtime, closed);
-  return;
-});
-
-define('Stdout.write', (runtime, receiver, [value]) => {
-  sinkOf(runtime, receiver).write(stringOf(runtime, value));
-  return;
-});
-define('Stdout.writeln', (runtime, receiver, args) => {
-  sinkOf(runtime, receiver).write(`${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`);
-  return;
-});
-define('Stdout.writeAll', (runtime, receiver, [objects, separator = '']) => {
-  const sink = sinkOf(runtime, receiver);
-  let first = true;
-  forEachValue(runtime, objects, (value) => {
-    if (!first) sink.write(separator as string);
-    first = false;
-    sink.write(stringOf(runtime, value));
-  });
-  return;
-});
-define('Stdout.writeCharCode', (runtime, receiver, [code]) => {
-  sinkOf(runtime, receiver).write(characterOf(runtime, intArg(runtime, code, 'charCode')));
   return;
 });
 define('exit', (runtime, _receiver, [code]) => {

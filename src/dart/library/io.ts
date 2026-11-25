@@ -139,9 +139,14 @@ abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
   Future get done;
 }
 
+/**
+ * Standard output or error, checked as the SDK's IOSink checks a write, a flush, a close and an added stream, and
+ * written at once, as the VM's synchronous sink controller writes it, so that its text and print's stay in order.
+ */
 class Stdout implements IOSink {
   final bool _isError;
   final Completer<void> _closed = Completer<void>();
+  bool _isBound = false;
   Stdout._(this._isError);
   Encoding get encoding => utf8;
   set encoding(Encoding value) => _requireUtf8(value);
@@ -149,34 +154,74 @@ class Stdout implements IOSink {
   bool get supportsAnsiEscapes => false;
   int get terminalColumns => throw const StdoutException("Could not get terminal size", _notTerminal);
   int get terminalLines => throw const StdoutException("Could not get terminal size", _notTerminal);
-  external void write(Object? object);
-  external void writeln([Object? object = ""]);
-  external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
-  external void writeCharCode(int charCode);
+  void write(Object? object) {
+    String string = '$object';
+    if (string.isEmpty) return;
+    _add(string);
+  }
+  void writeln([Object? object = ""]) {
+    _add('$object\n');
+  }
+  void writeAll(Iterable objects, [String separator = ""]) {
+    Iterator iterator = objects.iterator;
+    if (!iterator.moveNext()) return;
+    if (separator.isEmpty) {
+      do {
+        write(iterator.current);
+      } while (iterator.moveNext());
+    } else {
+      write(iterator.current);
+      while (iterator.moveNext()) {
+        write(separator);
+        write(iterator.current);
+      }
+    }
+  }
+  void writeCharCode(int charCode) {
+    write(String.fromCharCode(charCode));
+  }
   void add(List<int> data) {
-    // Bytes reach the sink even when there are none, so adding fails once it is closed.
-    _requireOpen();
+    _requireWritable();
     // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
-    write(_textOfBytes(data));
+    _write(_textOfBytes(data));
+  }
+  void _add(String text) {
+    _requireWritable();
+    _write(text);
+  }
+  /** Fails a write as the SDK's sink does: once it is closed, and while a stream is added to it. */
+  void _requireWritable() {
+    if (_closed.isCompleted) throw StateError("StreamSink is closed");
+    if (_isBound) throw StateError("StreamSink is bound to a stream");
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
   }
-  Future addStream(Stream<List<int>> stream) => stream.forEach((data) {
-        // The VM's sink hands a stream to the file itself, which fails each chunk, even an empty one, once closed.
-        if (_closed.isCompleted) throw const FileSystemException("File closed", "");
-        write(_textOfBytes(data));
-      });
-  Future flush() => Future.value();
+  Future addStream(Stream<List<int>> stream) {
+    if (_isBound) throw StateError("StreamSink is already bound to a stream");
+    _isBound = true;
+    return stream.forEach((data) {
+      // The VM's sink hands a stream to the file itself, which fails each chunk, even an empty one, once closed.
+      if (_closed.isCompleted) throw const FileSystemException("File closed", "");
+      _write(_textOfBytes(data));
+    }).whenComplete(() {
+      _isBound = false;
+    });
+  }
+  Future flush() {
+    if (_isBound) throw StateError("StreamSink is bound to a stream");
+    return Future.value(this);
+  }
   // Closing completes, and so does done, once closed; afterwards a write fails, and print drops what it prints.
   Future close() {
+    if (_isBound) throw StateError("StreamSink is bound to a stream");
     _close();
     if (!_closed.isCompleted) _closed.complete();
     return _closed.future;
   }
   Future get done => _closed.future;
+  external void _write(String text);
   external void _close();
-  external void _requireOpen();
 }
 
 final Stdout stdout = Stdout._(false);
