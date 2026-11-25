@@ -11,9 +11,11 @@ String _textOfBytes(List<int> bytes) {
   try {
     return utf8.decode(bytes);
   } on FormatException {
-    throw UnsupportedError("UTF-8 でないバイト列の書き込みは、この採点環境では使えません。");
+    _rejectBytes();
   }
 }
+
+Never _rejectBytes() => throw UnsupportedError("UTF-8 でないバイト列の書き込みは、この採点環境では使えません。");
 
 /** The bytes a sink is given in parts, whose last character may continue in its next part. */
 class _Utf8Bytes {
@@ -31,6 +33,10 @@ class _Utf8Bytes {
     }
     _pending = bytes.sublist(end);
     return _textOfBytes(bytes.sublist(0, end));
+  }
+  /** Ends the parts before text or the sink's end, which leave a character the bytes began unfinished. */
+  void finish() {
+    if (_pending.isNotEmpty) _rejectBytes();
   }
 }
 
@@ -121,9 +127,7 @@ abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
 }
 
 class Stdout implements IOSink {
-  // The natives of Stdout read this field as the first one.
   final bool _isError;
-  final _Utf8Bytes _bytes = _Utf8Bytes();
   Stdout._(this._isError);
   Encoding get encoding => utf8;
   bool get hasTerminal => false;
@@ -135,7 +139,8 @@ class Stdout implements IOSink {
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
   external void writeCharCode(int charCode);
   void add(List<int> data) {
-    write(_bytes.text(data));
+    // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
+    write(_textOfBytes(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
@@ -405,22 +410,27 @@ class _FileSink implements IOSink {
   Encoding get encoding => utf8;
   void write(Object? object) {
     _startWrite();
+    _bytes.finish();
     _buffer.write(object);
   }
   void writeln([Object? object = ""]) {
     _startWrite();
+    _bytes.finish();
     _buffer.writeln(object);
   }
   void writeAll(Iterable<dynamic> objects, [String separator = ""]) {
     _startWrite();
+    _bytes.finish();
     _buffer.writeAll(objects, separator);
   }
   void writeCharCode(int charCode) {
     _startWrite();
+    _bytes.finish();
     _buffer.writeCharCode(charCode);
   }
   void add(List<int> data) {
-    write(_bytes.text(data));
+    _startWrite();
+    _buffer.write(_bytes.text(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
@@ -428,6 +438,7 @@ class _FileSink implements IOSink {
   Future addStream(Stream<List<int>> stream) => stream.forEach(add);
   Future flush() => Future(_writeBuffered);
   Future close() {
+    if (!_isClosed) _bytes.finish();
     if (!_isClosed) {
       _isClosed = true;
       Future(() {
