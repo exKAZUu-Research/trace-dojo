@@ -9,6 +9,7 @@ import { BASE_SMALL_MODULES, TREE_SOURCE } from './extraModules';
 import { FIXED_WIDTH_LIFT, FIXED_WIDTH_PRINTF, FIXED_WIDTH_SOURCE } from './fixedWidth';
 import { GHC_EXPORTS } from './ghcExports';
 import { BASE_MONOID, NON_EMPTY_SOURCE, SEMIGROUP_SOURCE } from './monoid';
+import { NATURAL_SOURCE, TYPE_NATS_SOURCE } from './natural';
 import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
 import { SEQUENCE_SOURCE, SEQUENCE_VALUES } from './sequence';
@@ -25,6 +26,7 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
       BASE_LIST,
       BASE_TEXT,
       BASE_MISC,
+      NATURAL_SOURCE,
       FIXED_WIDTH_SOURCE,
       BASE_SMALL_MODULES,
       SYSTEM_IO,
@@ -36,6 +38,7 @@ export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   { name: 'Data.Semigroup.Internal', source: SEMIGROUP_SOURCE },
   { name: 'Data.List.NonEmpty.Internal', source: NON_EMPTY_SOURCE },
   { name: 'Data.Tree.Internal', source: TREE_SOURCE },
+  { name: 'GHC.TypeNats.Internal', source: TYPE_NATS_SOURCE },
   { name: 'Data.Bifunctor.Internal', source: BIFUNCTOR_SOURCE },
   { name: 'Control.Arrow.Internal', source: ARROW_SOURCE },
   { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE + FIXED_WIDTH_LIFT },
@@ -935,8 +938,10 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['Natural', 'none'],
       ['KnownNat', 'none'],
     ],
-    values: ['natVal'],
+    values: [],
+    overrides: { from: 'GHC.TypeNats.Internal', values: ['natVal'] },
   },
+  'Numeric.Natural': { from: 'Base', types: [['Natural', 'none']], values: ['minusNaturalMaybe'] },
   'Data.Monoid': {
     from: 'Base',
     types: [

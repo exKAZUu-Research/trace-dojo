@@ -154,6 +154,10 @@ function divideByZero(): HaskellException {
   return new HaskellException('divide by zero', { kind: 'arith', error: 'DivideByZero' });
 }
 
+function underflow(): HaskellException {
+  return new HaskellException('arithmetic underflow', { kind: 'arith', error: 'Underflow' });
+}
+
 /** Floor division and modulus, as Haskell's `div` and `mod` round toward negative infinity. */
 function floorDiv(a: bigint, b: bigint): bigint {
   const q = a / b;
@@ -815,6 +819,14 @@ define('ratioZeroDenominatorError', 0, [], () => {
 });
 define('overflowError', 0, [], () => {
   throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
+});
+define('underflowError', 0, [], () => {
+  throw underflow();
+});
+strict('naturalToInteger', 1, ([a]) => a);
+strict('integerToNatural', 1, ([a]) => {
+  if ((a as bigint) < 0n) throw underflow();
+  return a;
 });
 define('ioUnit', 0, [], () => new IOReturn(unit()));
 define(

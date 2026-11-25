@@ -430,6 +430,7 @@ export const GHC_EXPORTS: Record<string, GhcModuleExports> = {
       '^': '',
     },
   },
+  'Numeric.Natural': { values: 'minusNaturalMaybe', types: { Natural: '' } },
   'Data.Monoid': {
     values:
       '<> All Alt Any Ap Dual Endo First Last Product Sum appEndo getAll getAlt getAny getAp getDual getFirst getLast getProduct getSum mappend mconcat mempty',
