@@ -1,10 +1,4 @@
-/**
- * The monoids of `Data.Monoid`, the non-empty lists of `Data.List.NonEmpty`, and the functors of
- * `Data.Functor.Identity`, `Data.Functor.Const`, and `Data.Functor.Compose`, as GHC's base defines them.
- */
 export const BASE_MONOID = String.raw`
--- Non-empty lists
-
 infixr 5 :|
 
 data NonEmpty a = a :| [a] deriving (Eq, Ord, Show, Read)
@@ -31,8 +25,6 @@ instance Monad NonEmpty where
 
 instance Semigroup (NonEmpty a) where
   (a :| as) <> ~(b :| bs) = a :| (as ++ b : bs)
-
--- Monoids
 
 newtype Dual a = Dual { getDual :: a } deriving (Eq, Ord, Show, Read, Bounded)
 
@@ -231,8 +223,6 @@ instance Traversable f => Traversable (Ap f) where
 instance Functor f => Functor (Ap f) where
   fmap f (Ap a) = Ap (fmap f a)
 
--- Functors
-
 newtype Identity a = Identity { runIdentity :: a } deriving (Eq, Ord)
 
 instance Show a => Show (Identity a) where
@@ -314,7 +304,6 @@ instance (Applicative f, Applicative g) => Applicative (Compose f g) where
   Compose f <*> Compose a = Compose (liftA2 (<*>) f a)
 `;
 
-/** `Data.Semigroup`'s own types: the semigroups of the least, the greatest, the first, and the last value. */
 export const SEMIGROUP_SOURCE = String.raw`module Data.Semigroup.Internal
   ( Min(..), Max(..), First(..), Last(..), WrappedMonoid(..), Arg(..), ArgMin, ArgMax
   , diff, cycle1, mtimesDefault, stimesMonoid, stimesIdempotent, stimesIdempotentMonoid
@@ -451,7 +440,6 @@ stimesIdempotent n x
   | otherwise = x
 `;
 
-/** `Data.List.NonEmpty`'s functions, whose names are those of the list functions they mirror. */
 export const NON_EMPTY_SOURCE = String.raw`module Data.List.NonEmpty.Internal where
 
 import Base hiding (map, head, tail, last, init, length, reverse, filter, takeWhile, dropWhile, span, break, zip, zipWith, unzip, iterate, repeat, cycle, (!!), sort, sortBy, sortOn, group, groupBy, nub, nubBy, partition, splitAt, take, drop, scanl, scanr, scanl1, scanr1, insert, transpose, toList, xor, singleton, cons, uncons, intersperse, isPrefixOf, some1, sortWith, groupWith, groupAllWith, unfoldr, inits, tails, append, unfold)

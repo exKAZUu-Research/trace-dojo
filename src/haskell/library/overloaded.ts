@@ -1,4 +1,3 @@
-/** The classes of overloaded literals: strings, lists, and labels, which OverloadedStrings and the like use. */
 export const OVERLOADED_SOURCE = String.raw`
 import Base
 import qualified Data.Set.Internal as S

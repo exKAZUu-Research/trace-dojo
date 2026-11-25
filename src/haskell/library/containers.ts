@@ -8,7 +8,6 @@ import qualified Base as B
 
 infixl 9 \\
 
--- Data.IntSet's sets, which are sets of Int.
 type IntSet = Set Int
 
 type Key = Int
@@ -502,7 +501,6 @@ import qualified Data.Set.Internal as S
 
 infixl 9 !, !?, \\
 
--- Data.IntMap's maps, which are maps from Int.
 type IntMap = Map Int
 
 type Key = Int

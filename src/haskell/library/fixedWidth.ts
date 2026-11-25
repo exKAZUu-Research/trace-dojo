@@ -1,6 +1,5 @@
 const BT = '`';
 
-/** The fixed-width integer types of `Data.Int` and `Data.Word`: their names, sizes in bits, and signedness. */
 export const FIXED_WIDTH_TYPES: readonly { name: string; bits: number; signed: boolean }[] = [
   { name: 'Int8', bits: 8, signed: true },
   { name: 'Int16', bits: 16, signed: true },
@@ -113,7 +112,6 @@ export const FIXED_WIDTH_SOURCE = FIXED_WIDTH_TYPES.map(({ name, bits, signed })
   fixedWidthSource(name, bits, signed)
 ).join('\n');
 
-/** The instances of Text.Printf's PrintfArg for the fixed-width types, which format them as integers. */
 export const FIXED_WIDTH_PRINTF = FIXED_WIDTH_TYPES.map(
   ({ name, bits, signed }) => String.raw`
 instance PrintfArg ${name} where
@@ -121,7 +119,6 @@ instance PrintfArg ${name} where
 `
 ).join('\n');
 
-/** The instances of Template Haskell's Lift for the fixed-width types. */
 export const FIXED_WIDTH_LIFT = FIXED_WIDTH_TYPES.map(
   ({ name }) => String.raw`
 instance Lift ${name} where

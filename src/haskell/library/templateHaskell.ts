@@ -1,14 +1,8 @@
-/**
- * Template Haskell's library, `Language.Haskell.TH`: the syntax trees of expressions, patterns, types, and
- * declarations as the template-haskell package that GHC 9.14.1 comes with defines them, the `Q` monad, the functions
- * that build the trees, `Lift`, and `pprint`.
- */
+/** The syntax trees follow the template-haskell package that GHC 9.14.1 comes with. */
 export const TEMPLATE_HASKELL_SOURCE = String.raw`module Language.Haskell.TH.Internal where
 
 import Base
 import qualified Base as B
-
--- Names
 
 newtype ModName = ModName String deriving (Eq, Ord, Show)
 
@@ -86,8 +80,6 @@ mkNameS occ = Name (OccName occ) NameS
 
 mkNameQ :: String -> String -> Name
 mkNameQ m occ = Name (OccName occ) (NameQ (ModName m))
-
--- The syntax trees
 
 data Lit
   = CharL Char
@@ -277,8 +269,6 @@ data NamespaceSpecifier = NoNamespaceSpecifier | TypeNamespaceSpecifier | DataNa
 
 data Role = NominalR | RepresentationalR | PhantomR | InferR deriving (Eq, Ord, Show)
 
--- The Q monad
-
 newtype Q a = Q { unQ :: IO a }
 
 type ExpQ = Q Exp
@@ -445,8 +435,6 @@ isExtEnabled _ = fail "isExtEnabled"
 extsEnabled :: Q [Extension]
 extsEnabled = fail "extsEnabled"
 
--- Typed expressions
-
 newtype TExp a = TExp { unType :: Exp }
 
 newtype Code m a = Code { examineCode :: m (TExp a) }
@@ -472,8 +460,6 @@ joinCode m = Code (m >>= examineCode)
 -- The typed quote [|| e ||] of an expression of type a, whose function only fixes a, never running.
 typedQuote :: Quote m => (() -> a) -> m Exp -> Code m a
 typedQuote _ = unsafeCodeCoerce
-
--- Lifting values into expressions
 
 class Lift t where
   lift :: Quote m => t -> m Exp
@@ -555,8 +541,6 @@ liftString s = return (LitE (StringL s))
 liftData :: (Quote m, Lift a) => a -> m Exp
 liftData = lift
 
--- Building the trees: literals
-
 integerL :: Integer -> Lit
 integerL = IntegerL
 
@@ -583,8 +567,6 @@ doublePrimL = DoublePrimL
 
 charPrimL :: Char -> Lit
 charPrimL = CharPrimL
-
--- Expressions
 
 varE :: Quote m => Name -> m Exp
 varE = return . VarE
@@ -739,8 +721,6 @@ typedSpliceE = fmap TypedSpliceE
 typeE :: Quote m => m Type -> m Exp
 typeE = fmap TypeE
 
--- Patterns
-
 litP :: Quote m => Lit -> m Pat
 litP = return . LitP
 
@@ -789,8 +769,6 @@ sigP = liftA2 SigP
 viewP :: Quote m => m Exp -> m Pat -> m Pat
 viewP = liftA2 ViewP
 
--- Bodies, guards, statements, matches, and clauses
-
 normalB :: Quote m => m Exp -> m Body
 normalB = fmap NormalB
 
@@ -829,8 +807,6 @@ match p b ds = Match <$> p <*> b <*> sequenceA ds
 
 clause :: Quote m => [m Pat] -> m Body -> [m Dec] -> m Clause
 clause ps b ds = Clause <$> sequenceA ps <*> b <*> sequenceA ds
-
--- Declarations
 
 funD :: Quote m => Name -> [m Clause] -> m Dec
 funD n cs = FunD n <$> sequenceA cs
@@ -925,7 +901,6 @@ sourceLazy = return SourceLazy
 sourceStrict :: Quote m => m SourceStrictness
 sourceStrict = return SourceStrict
 
--- A via deriving clause of a quote, whose via type the quote builds.
 quoteDerivVia :: Quote m => m Type -> [m Pred] -> m DerivClause
 quoteDerivVia t ps = (\via cs -> DerivClause (Just (ViaStrategy via)) cs) <$> t <*> sequenceA ps
 
@@ -940,8 +915,6 @@ kindedTV n k = KindedTV n () k
 
 plainBndrTV :: Name -> TyVarBndr BndrVis
 plainBndrTV n = PlainTV n BndrReq
-
--- Types
 
 conT :: Quote m => Name -> m Type
 conT = return . ConT
@@ -1005,8 +978,6 @@ infixT a n b = (\x y -> InfixT x n y) <$> a <*> b
 
 parensT :: Quote m => m Type -> m Type
 parensT = fmap ParensT
-
--- Pretty printing, as pprint shows trees
 
 class Ppr a where
   ppr :: a -> String
@@ -1301,8 +1272,6 @@ pprStrategy AnyclassStrategy = "anyclass "
 pprStrategy NewtypeStrategy = "newtype "
 pprStrategy (ViaStrategy t) = "via " ++ pprType 2 t ++ " "
 
--- What a splice gives, which the compiler grafts in its place.
-
 data SpliceResult = SpliceExp Exp | SplicePat Pat | SpliceType Type | SpliceDecs [Dec] deriving (Show)
 
 class Splice a where
@@ -1345,16 +1314,12 @@ runDecSplice = runSplice
 runTypedSplice :: Code Q a -> IO ()
 runTypedSplice code = runSplice (unTypeCode code)
 
--- Quasi-quoters, whose functions turn a quasi-quote's text into trees
-
 data QuasiQuoter = QuasiQuoter
   { quoteExp :: String -> Q Exp
   , quotePat :: String -> Q Pat
   , quoteType :: String -> Q Type
   , quoteDec :: String -> Q [Dec]
   }
-
--- The names the quotes of a program refer to
 
 quoteGlobalVar :: Quote m => String -> String -> m Exp
 quoteGlobalVar m occ = return (VarE (mkNameG_v (packageOf m) m occ))

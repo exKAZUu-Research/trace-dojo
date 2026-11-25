@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** The core of the library: the basic types, the standard classes, and the numeric instances. */
 export const BASE_CORE = String.raw`module Base where
 
 infixr 9 .
@@ -40,8 +39,6 @@ type Rational = Ratio Integer
 type ShowS = String -> String
 type ReadS a = String -> [(a, String)]
 type FilePath = String
-
--- Functions
 
 id :: a -> a
 id x = x
@@ -106,8 +103,6 @@ primConAt = primitive "primConAt"
 errorEmptyList :: [Char] -> a
 errorEmptyList = primitive "errorEmptyList"
 
--- Booleans
-
 (&&) :: Bool -> Bool -> Bool
 True && x = x
 False && _ = False
@@ -127,8 +122,6 @@ bool :: a -> a -> Bool -> a
 bool f _ False = f
 bool _ t True = t
 
--- Tuples
-
 fst :: (a, b) -> a
 fst (x, _) = x
 
@@ -144,8 +137,6 @@ uncurry f p = f (fst p) (snd p)
 swap :: (a, b) -> (b, a)
 swap (a, b) = (b, a)
 
--- Maybe and Either
-
 maybe :: b -> (a -> b) -> Maybe a -> b
 maybe n _ Nothing = n
 maybe _ f (Just x) = f x
@@ -153,8 +144,6 @@ maybe _ f (Just x) = f x
 either :: (a -> c) -> (b -> c) -> Either a b -> c
 either f _ (Left x) = f x
 either _ g (Right y) = g y
-
--- Eq and Ord
 
 class Eq a where
   (==), (/=) :: a -> a -> Bool
@@ -320,8 +309,6 @@ instance Ord Float where
   (>) = primitive "floatGt"
   (>=) = primitive "floatGe"
   compare x y = if x < y then LT else if x == y then EQ else GT
-
--- Numbers
 
 class Num a where
   (+), (-), (*) :: a -> a -> a
@@ -699,8 +686,6 @@ floatToRational :: RealFloat a => a -> Rational
 floatToRational x = let (m, e) = decodeFloat x
                     in if e >= 0 then (m * 2 ^ e) :% 1 else reduce m (2 ^ negate e)
 
--- Rationals
-
 reduce :: Integral a => a -> a -> Ratio a
 reduce x y = if y == fromInteger 0 then ratioZeroDenominatorError
              else let d = gcd x y in (x ${BT}quot${BT} d) :% (y ${BT}quot${BT} d)
@@ -741,8 +726,6 @@ instance Integral a => Real (Ratio a) where
 
 instance Integral a => RealFrac (Ratio a) where
   properFraction (x :% y) = let (q, r) = quotRem x y in (fromInteger (toInteger q), r :% y)
-
--- Enum and Bounded
 
 class Enum a where
   succ, pred :: a -> a

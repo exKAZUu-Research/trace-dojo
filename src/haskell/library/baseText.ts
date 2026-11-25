@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** `Show` and `Read`, the lexer they share, number formatting as GHC.Float does it, and `Numeric`. */
 export const BASE_TEXT = String.raw`
 class Show a where
   showsPrec :: Int -> a -> ShowS
@@ -301,8 +300,6 @@ numericError message = errorWithoutStackTrace ("GHC.Internal.Numeric." ++ messag
 
 showSigned :: Real a => (a -> ShowS) -> Int -> a -> ShowS
 showSigned showPos p x = if x < fromInteger 0 then showParen (p > 6) (showChar '-' . showPos (negate x)) else showPos x
-
--- Read
 
 class Read a where
   readsPrec :: Int -> ReadS a

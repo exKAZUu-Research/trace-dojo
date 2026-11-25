@@ -1,10 +1,4 @@
-/**
- * Standard input, files, exceptions, mutable references, the ST monad, the program's exit, and debugging output, as
- * GHC's base defines them. Primitives read and write the run's standard streams and its virtual file system.
- */
 export const SYSTEM_IO = String.raw`
--- Exceptions
-
 data SomeException = forall e. Exception e => SomeException e
 
 class Show e => Exception e where
@@ -111,7 +105,6 @@ primException kind message ioType location file = case kind of
   "exit" -> toException (if message == "0" then ExitSuccess else ExitFailure (read message))
   _ -> toException (ErrorCall message)
 
--- The ArithException a failure is, by the constructor its cause names.
 arithException :: String -> ArithException
 arithException constructor = case constructor of
   "Overflow" -> Overflow
@@ -221,8 +214,6 @@ uninterruptibleMask_ action = action
 
 assert :: Bool -> a -> a
 assert condition x = if condition then x else throw (AssertionFailed "Assertion failed")
-
--- IO errors
 
 data IOErrorType = AlreadyExists | NoSuchThing | ResourceBusy | ResourceExhausted | EOF | IllegalOperation
   | PermissionDenied | UserError | UnsatisfiedConstraints | SystemError | ProtocolError | OtherError | InvalidArgument
@@ -372,8 +363,6 @@ isEOFErrorType = (== EOF)
 isIllegalOperationErrorType = (== IllegalOperation)
 isPermissionErrorType = (== PermissionDenied)
 isUserErrorType = (== UserError)
-
--- Handles
 
 data Handle = HandleStdout | HandleStderr | HandleStdin | HandleFile Int String
 
@@ -529,8 +518,6 @@ readIO s = return () >>= \_ -> case [x | (x, t) <- reads s, onlySpaces t] of
   [] -> ioError (userError "Prelude.readIO: no parse")
   _ -> ioError (userError "Prelude.readIO: ambiguous parse")
 
--- Exit and environment
-
 exitWith :: ExitCode -> IO a
 exitWith code = case code of
   ExitFailure 0 -> ioError (IOError Nothing InvalidArgument "exitWith" "ExitFailure 0" Nothing Nothing)
@@ -567,8 +554,6 @@ getEnv name = ioError (IOError Nothing NoSuchThing "getEnv" "no environment vari
 
 withArgs :: [String] -> IO a -> IO a
 withArgs args action = bracket (getArgs >>= \old -> setArgs args >> return old) setArgs (\_ -> action)
-
--- Mutable references
 
 newIORef :: a -> IO (IORef a)
 newIORef = primitive "newIORef"
@@ -648,8 +633,6 @@ modifySTRef (STRef ref) f = ST (modifyIORef ref f)
 
 modifySTRef' :: STRef s a -> (a -> a) -> ST s ()
 modifySTRef' (STRef ref) f = ST (modifyIORef' ref f)
-
--- Type-level literals and proxies
 
 data Proxy t = Proxy
 
