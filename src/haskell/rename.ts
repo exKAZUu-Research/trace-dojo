@@ -2291,6 +2291,10 @@ class Renamer {
     if (!expr.name.qualifier && scope.lookup(expr.name.name)) {
       return thCall(span, 'mkNameS', thString(span, expr.name.name));
     }
+    // A value of the module the splice is in, such as a record field, stays a name for the module to bind.
+    if (this.runsSplice() && this.valuesNamed(expr.name).length === 0) {
+      return thCall(span, 'mkName', thString(span, expr.name.name));
+    }
     const entity = this.lookupValue(expr.name, false);
     if (entity.con) return global('mkNameG_d', this.thModule('con', entity.con), entity.name);
     return global('mkNameG_v', this.thModule('v', entity), entity.name);
