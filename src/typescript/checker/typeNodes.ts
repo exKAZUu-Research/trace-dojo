@@ -640,16 +640,24 @@ export class TypeNodes {
     const value = this.c.scopeOf(root).lookupValue(root.text);
     if (value?.valueKind === 'enum' && root.id === node.childForFieldName('module')?.id)
       return this.enumMemberTypeNamed(node, value, root.text);
-    if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import') {
-      const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
-      if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
-      if (resolved.error) this.c.error(node, resolved.error);
-      return errorType;
-    }
+    if (value?.namespaceExports || value?.valueKind === 'importAlias' || value?.valueKind === 'import')
+      return this.namespaceMemberType(node, root);
     this.c.error(
       node,
       symbol?.unsupported ? unsupportedMessage(symbol.unsupported) : `名前空間 ${root.text} が見つかりません。`
     );
+    return errorType;
+  }
+
+  /** `N.T` or `A.B.T`, a type a namespace exports, or `N.E.A`, a member of an enum a namespace exports. */
+  private namespaceMemberType(node: TreeNode, root: TreeNode): Type {
+    const container = node.childForFieldName('module');
+    const enumSymbol = container && container.id !== root.id && this.c.namespaces.qualifiedValueSymbol(container);
+    if (enumSymbol && enumSymbol.valueKind === 'enum')
+      return this.enumMemberTypeNamed(node, enumSymbol, container.text);
+    const resolved = this.c.namespaces.qualifiedTypeSymbol(node);
+    if (resolved.symbol) return this.declaredTypeOf(resolved.symbol);
+    if (resolved.error) this.c.error(node, resolved.error);
     return errorType;
   }
 

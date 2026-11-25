@@ -117,16 +117,20 @@ export class Namespaces {
   /** The symbol the last name of a path names, as a value or a type, through the namespaces of the names before it. */
   private resolvePath(path: TreeNode[], meaning: 'value' | 'type'): { symbol?: Sym; error?: string } {
     const [root, ...rest] = path;
-    let current = this.unaliased(this.c.scopeOf(root).lookupValue(root.text), 'value');
+    const rootValue = this.unaliased(this.c.scopeOf(root).lookupValue(root.text), 'value');
     if (rest.length === 0)
       return {
-        symbol: meaning === 'value' ? current : this.unaliased(this.c.scopeOf(root).lookupType(root.text), 'type'),
+        symbol: meaning === 'value' ? rootValue : this.unaliased(this.c.scopeOf(root).lookupType(root.text), 'type'),
       };
-    if (!current?.namespaceExports) return { error: `名前空間 ${root.text} が見つかりません。` };
+    if (!rootValue?.namespaceExports) return { error: `名前空間 ${root.text} が見つかりません。` };
+    let current: Sym = rootValue;
     for (const [index, part] of rest.entries()) {
       const isLast = index === rest.length - 1;
-      const next = this.exportedMember(current, part.text, isLast ? meaning : 'value');
-      if (!next || !(isLast || next.namespaceExports))
+      // An enum's members are the last name of a path, as in `import X = N.E.A`.
+      const next: Sym | undefined = current.namespaceExports
+        ? this.exportedMember(current, part.text, isLast ? meaning : 'value')
+        : current.enumMembers?.values.get(part.text);
+      if (!next || !(isLast || next.namespaceExports || (next.valueKind === 'enum' && index === rest.length - 2)))
         return {
           error: `名前空間 '${qualifiedName(current)}' には、エクスポートされたメンバー '${part.text}' がありません。`,
         };
@@ -196,6 +200,11 @@ export class Namespaces {
   /** The symbol of the type a qualified name such as `N.T` or `A.B.T` names, through the namespaces of its path. */
   qualifiedTypeSymbol(node: TreeNode): { symbol?: Sym; error?: string } {
     return this.resolvePath(qualifiedPath(node), 'type');
+  }
+
+  /** The symbol of the value a qualified name such as `N.E` names, or undefined when it names nothing. */
+  qualifiedValueSymbol(node: TreeNode): Sym | undefined {
+    return this.resolvePath(qualifiedPath(node), 'value').symbol;
   }
 
   /** Checks a namespace's body, whose code runs once where the namespace is declared, from a flow of its own. */
