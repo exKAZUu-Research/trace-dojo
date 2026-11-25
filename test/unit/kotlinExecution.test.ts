@@ -6673,6 +6673,15 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test('checks reified type arguments in both the ordinary and the suspend version of an inline function', () => {
+  const source = `inline fun <reified T> isOf(x: Any, f: (Int) -> Unit): Boolean { f(1); return x is T }
+fun main() {
+    println(listOf(isOf<String>("a") { }, isOf<String>(5) { }))
+    println(sequence { yield(if (isOf<String>(5) { yield(8) }) 1 else 0) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[true, false]\n[8, 0]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

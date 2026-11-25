@@ -15,10 +15,16 @@ export interface ReifiedAccess {
   index: number;
 }
 
-const accesses = new WeakMap<TypeParameterSymbol, ReifiedAccess>();
+/**
+ * Where each compiled version of an inline function, as its ordinary and its suspend version, receives a reified type
+ * parameter's argument: the versions share the parameter, and a run reads the one whose frame it runs in.
+ */
+const accesses = new WeakMap<TypeParameterSymbol, ReifiedAccess[]>();
 
 export function setReifiedAccess(param: TypeParameterSymbol, access: ReifiedAccess): void {
-  accesses.set(param, access);
+  const known = accesses.get(param);
+  if (known) known.push(access);
+  else accesses.set(param, [access]);
 }
 
 /** Whether a type mentions a reified type parameter, whose type argument only a run knows. */
@@ -50,12 +56,15 @@ export function runtimeType(type: KType, frame: Frame): KType {
 function collect(type: KType, frame: Frame, substitution: Map<TypeParameterSymbol, KType>): void {
   switch (type.kind) {
     case 'param': {
-      const access = accesses.get(type.param);
-      if (!access || substitution.has(type.param)) return;
-      const owner = ownerFrame(frame, access.info);
-      const passed = owner?.locals[access.slot] as unknown as KType[] | undefined;
-      const argument = passed?.[access.index];
-      if (argument) substitution.set(type.param, argument);
+      if (substitution.has(type.param)) return;
+      for (const access of accesses.get(type.param) ?? []) {
+        const owner = ownerFrame(frame, access.info);
+        if (!owner) continue;
+        const passed = owner.locals[access.slot] as unknown as KType[] | undefined;
+        const argument = passed?.[access.index];
+        if (argument) substitution.set(type.param, argument);
+        return;
+      }
       return;
     }
     case 'class': {
