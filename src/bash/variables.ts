@@ -791,6 +791,9 @@ export class VariableStore {
     if (cell.attributes.has('r')) {
       return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
     }
+    if (isArrayCell(cell)) {
+      return { ok: false, reason: 'incompatibleArray', message: `${cell.name}: reference variable cannot be an array` };
+    }
     if (target !== undefined) {
       rejectUnsupportedNamerefTarget(target, (n) => this.isUnreadHostEnv(n));
       if (target !== '' && !isIdentifier(target)) {
