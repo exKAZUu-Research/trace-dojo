@@ -128,13 +128,23 @@ export function typeError(span: Span, message: string): never {
 }
 
 /** The state of a construct whose patterns may give existential types, constraints, and GADT equalities. */
+/** A given equality on a family application, `F a ~ Bool`, under which the application reduces to the other side. */
+interface FamilyGiven {
+  family: TypeEntity;
+  args: Type[];
+  to: Type;
+}
+
+/** What a given equality assumes, undone when its scope ends: a rigid variable's binding, or a family's reduction. */
+type Assumption = TVar | FamilyGiven;
+
 interface PatternScope {
   outer: number;
   /** The wanted constraints outside the scope, set once a pattern gives something the scope solves under. */
   savedWanted?: EvidenceHole[];
   givens: { pred: Pred; evidence: Evidence }[];
   /** The rigid types GADT equalities stand for in the scope. */
-  assumed: TVar[];
+  assumed: Assumption[];
 }
 
 export class Checker {
@@ -159,6 +169,8 @@ export class Checker {
     return this.typeConversion.polyKinds;
   }
 
+  /** The given equalities on family applications in scope, which reduce those applications. */
+  private readonly familyGivens: FamilyGiven[] = [];
   /** Whether AllowAmbiguousTypes lets a signature have variables only its constraints mention. */
   allowAmbiguousTypes = false;
   /** Whether a binding without arguments or a signature stays monomorphic, as the monomorphism restriction says. */
@@ -476,6 +488,10 @@ export class Checker {
    */
   private reduceFamilyApplication(family: TypeEntity, args: Type[]): Type | undefined {
     if (family.reduceBuiltin) return family.reduceBuiltin(args);
+    const given = this.familyGivens.find(
+      (candidate) => candidate.family === family && candidate.args.every((arg, index) => typesEqual(arg, args[index]))
+    );
+    if (given) return given.to;
     for (const equation of family.equations ?? []) {
       const bindings: (Type | undefined)[] = [];
       if (equation.lhs.every((pattern, index) => matchType(pattern, args[index], bindings))) {
@@ -990,7 +1006,7 @@ export class Checker {
       if (scope.savedWanted) {
         if (completed) this.leaveImplication(scope);
         else {
-          for (const variable of scope.assumed) variable.ref = undefined;
+          for (const assumption of scope.assumed) this.undoAssumption(assumption);
           this.level = scope.outer;
           this.wanted = scope.savedWanted;
         }
@@ -1031,7 +1047,7 @@ export class Checker {
       for (const variable of vars) if (variable.level > scope.outer) variable.level = scope.outer;
       deferred.push(hole);
     }
-    for (const variable of scope.assumed) variable.ref = undefined;
+    for (const assumption of scope.assumed) this.undoAssumption(assumption);
     this.wanted.push(...deferred);
   }
 
@@ -1681,7 +1697,7 @@ export class Checker {
         `${printer.showPred(hole.pred)} を導けません（${hole.origin}）。型シグネチャの文脈に制約を加えてください。`
       );
     }
-    for (const variable of assumed) variable.ref = undefined;
+    for (const assumption of assumed) this.undoAssumption(assumption);
     this.wanted.push(...deferred);
     return params;
   }
@@ -1709,7 +1725,7 @@ export class Checker {
    * Assumes a given equality `a ~ t` while the constraints of its scope are checked: a rigid variable on one side
    * stands for the other side. The returned variables are the ones to restore afterwards.
    */
-  assumeEquality(pred: Pred): TVar[] {
+  assumeEquality(pred: Pred): Assumption[] {
     if (pred.cls !== EQUALITY_CLASS) return [];
     const [left, right] = splitApp(pred.type).args.map(prune);
     if (left.tag === 'tvar' && left.skolem && left !== right) {
@@ -1720,8 +1736,25 @@ export class Checker {
       right.ref = left;
       return [right];
     }
+    // A family application that does not reduce, `F a ~ Bool`, reduces to the other side while the given holds.
+    for (const [application, to] of [
+      [left, right],
+      [right, left],
+    ] as const) {
+      const { head, args } = splitApp(application);
+      if (head.tag === 'tcon' && head.entity.sort === 'family' && args.length === head.entity.arity) {
+        const given: FamilyGiven = { family: head.entity, args, to };
+        this.familyGivens.push(given);
+        return [given];
+      }
+    }
     this.unify(left, right, { row: 0, col: 0, endRow: 0, endCol: 0 }, '型の等しさの制約');
     return [];
+  }
+
+  private undoAssumption(assumption: Assumption): void {
+    if ('tag' in assumption) assumption.ref = undefined;
+    else this.familyGivens.splice(this.familyGivens.indexOf(assumption), 1);
   }
 
   classKind(entity: ClassEntity, span: Span): Kind {
