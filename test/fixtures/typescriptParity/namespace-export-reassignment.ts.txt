@@ -1,0 +1,5 @@
+namespace N { export function f() { return 1; } export class C {} export enum E { A } }
+N.f = () => 2;
+N.C = class D {} as any;
+N.E = 1 as any;
+console.log(N.f(), typeof N.C, N.E);

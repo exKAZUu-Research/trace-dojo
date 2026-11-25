@@ -1,0 +1,11 @@
+namespace N { export function f() { return 1; } export class C {} export enum E { A } export namespace M { export const x = 1; } export const k = 1; export let v = 1; }
+N.f = () => 2;
+N.C = class D {} as any;
+N.E = 1 as any;
+N.M = {} as any;
+N.k = 2;
+N.v = 2;
+const enum X { A = 1 / 0, B = -1 / 0, C = 0 / 0 }
+const enum Y { A = 1 }
+enum Y { B = 2 }
+console.log(N.f());

@@ -166,6 +166,12 @@ export class Enums {
     const errors: EnumInfo['errors'] = [];
     const declarations = symbol.valueDeclarations.filter((declaration) => declaration.type === 'enum_declaration');
     const isConst = declarations.some((declaration) => hasToken(declaration, 'const'));
+    if (isConst && !declarations.every((declaration) => hasToken(declaration, 'const')))
+      for (const declaration of declarations)
+        errors.push({
+          node: declaration.childForFieldName('name') ?? declaration,
+          message: 'enum の宣言は、名前空間かほかの enum の宣言とだけ統合できます。',
+        });
     for (const declaration of declarations) {
       let previous: EnumMember | undefined;
       for (const memberNode of named(declaration.childForFieldName('body') as TreeNode)) {
@@ -192,13 +198,8 @@ export class Enums {
     const initializer = memberNode.childForFieldName('value');
     if (initializer) {
       const value = this.evaluate(initializer, context);
-      if (value === undefined && (context.isConst || isAmbient(memberNode)))
-        context.errors.push({
-          node: initializer,
-          message: context.isConst
-            ? 'const enum のメンバーの初期値は、定数式でなければいけません。'
-            : 'アンビエントの enum 宣言では、メンバーの初期値は定数式でなければいけません。',
-        });
+      const message = initializerError(value, context.isConst, isAmbient(memberNode));
+      if (message) context.errors.push({ node: initializer, message });
       return value;
     }
     if (!previous) return 0;
@@ -406,4 +407,16 @@ export function isAllowedConstEnumUse(node: TreeNode): boolean {
   let outer: TreeNode | null = parent;
   while (outer?.type === 'member_expression') outer = outer.parent;
   return outer?.type !== 'type_query';
+}
+
+/** What tsc reports of a const or ambient enum member's evaluated initializer, if anything. */
+function initializerError(value: EnumValue | undefined, isConst: boolean, isAmbientEnum: boolean): string | undefined {
+  if (isConst && typeof value === 'number' && !Number.isFinite(value))
+    return Number.isNaN(value)
+      ? "'const' enum のメンバーの初期値が、使えない値 'NaN' になりました。"
+      : "'const' enum のメンバーの初期値が、有限でない値になりました。";
+  if (value !== undefined || !(isConst || isAmbientEnum)) return undefined;
+  return isConst
+    ? 'const enum のメンバーの初期値は、定数式でなければいけません。'
+    : 'アンビエントの enum 宣言では、メンバーの初期値は定数式でなければいけません。';
 }
