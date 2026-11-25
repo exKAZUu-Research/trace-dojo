@@ -98,19 +98,23 @@ export class Enums {
     const info = symbol ? this.infoOf(symbol) : undefined;
     for (const { node: errorNode, message } of info?.errors ?? [])
       if (isWithin(errorNode, node)) this.c.error(errorNode, message);
-    for (const member of named(node.childForFieldName('body') as TreeNode)) {
-      const value = member.childForFieldName('value');
-      const type = value && this.c.expressions.check(value);
-      const name = memberNameOf(member);
-      // An ambient enum's computed member is reported as not constant instead.
-      const isComputed = name !== undefined && info?.members.get(name)?.value === undefined && !isAmbient(member);
-      if (value && type && isComputed && !this.c.relations.isAssignable(type, numberType))
-        this.c.error(
-          value,
-          `型 '${this.c.print(this.c.widen(type))}' は、計算で決まる enum メンバーの値に必要な型 'number' に代入できません。`
-        );
-      if (symbol) this.checkMergedNamespaceClash(member, symbol);
-    }
+    for (const member of named(node.childForFieldName('body') as TreeNode)) this.checkMember(member, symbol, info);
+  }
+
+  private checkMember(member: TreeNode, symbol: Sym | undefined, info: EnumInfo | undefined): void {
+    const value = member.childForFieldName('value');
+    const type = value && this.c.expressions.check(value);
+    const name = memberNameOf(member);
+    // An ambient enum's computed member is reported as not constant instead.
+    const isComputed = name !== undefined && info?.members.get(name)?.value === undefined && !isAmbient(member);
+    if (value && type && isComputed && !this.c.relations.isAssignable(type, numberType))
+      this.c.error(
+        value,
+        `型 '${this.c.print(this.c.widen(type))}' は、計算で決まる enum メンバーの値に必要な型 'number' に代入できません。`
+      );
+    if (symbol) this.checkMergedNamespaceClash(member, symbol);
+    const nameNode = member.type === 'enum_assignment' ? member.childForFieldName('name') : member;
+    if (nameNode && isNumericName(nameNode)) this.c.error(nameNode, 'enum のメンバーには数値の名前を付けられません。');
   }
 
   /** Reports a member that a namespace merged with its enum also exports, at both declarations, as tsc does. */
@@ -419,4 +423,12 @@ function initializerError(value: EnumValue | undefined, isConst: boolean, isAmbi
   return isConst
     ? 'const enum のメンバーの初期値は、定数式でなければいけません。'
     : 'アンビエントの enum 宣言では、メンバーの初期値は定数式でなければいけません。';
+}
+
+/** Whether a member name is a number, or a string that spells a finite number the way JavaScript prints it. */
+function isNumericName(name: TreeNode): boolean {
+  if (name.type === 'number') return true;
+  if (name.type !== 'string') return false;
+  const text = stringValue(name);
+  return Number.isFinite(Number(text)) && String(Number(text)) === text;
 }
