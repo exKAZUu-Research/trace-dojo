@@ -253,10 +253,9 @@ class Printf {
     } else if (conversion === 'c') {
       const arg = this.takeArgument();
       this.push(padPrintfBytes(arg === undefined || arg === '' ? [0] : [encodeText(arg)[0]], spec));
-    } else if (conversion === 's' && !spec.flags.includes('#')) {
+    } else if (conversion === 's') {
       this.push(padPrintfBytes(truncate(encodeText(this.takeArgument() ?? ''), precision), spec));
-    } else if (conversion === 's' || conversion === 'b') {
-      // `%#s` is `%b`, as in Bash.
+    } else if (conversion === 'b') {
       const { out, stop } = expandB(this.takeArgument() ?? '', this.host);
       this.push(padPrintfBytes(truncate(out, precision), spec, false));
       if (stop) throw new StopOutput();
