@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss -- The renamer resolves every construct of the language against one scope structure.
+import { CompileError } from '../interpreter/diagnostics';
 import {
   CONS_CON,
   EQUALITY_CLASS,
@@ -2464,12 +2465,26 @@ class Renamer {
     const built = new QuoteBuilder(span).build(this.renameQuote(expr.body, scope));
     if (!expr.witness) return built;
     // In the program that runs a splice, the module's own names are not there to check the witness against; the
-    // quote's type is then left to the code it is spliced into, which checks it.
+    // quote's type is then left to the code it is spliced into, which checks it. A witness whose names resolve here,
+    // a local that shadows one of them included, keeps its type.
     const outer = this.options.spliceModule;
     const witness: Expr =
-      outer && namesSpliceModule(expr.witness, outer) ? { kind: 'support', name: 'undefined', span } : expr.witness;
+      outer && namesSpliceModule(expr.witness, outer) && !this.renames(expr.witness, scope)
+        ? { kind: 'support', name: 'undefined', span }
+        : expr.witness;
     const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: witness, span };
     return thCall(span, 'typedQuote', typer, built);
+  }
+
+  /** Whether an expression's names all resolve in a scope. */
+  private renames(expr: Expr, scope: LocalScope): boolean {
+    try {
+      this.renameExpr(expr, scope);
+      return true;
+    } catch (error) {
+      if (error instanceof CompileError) return false;
+      throw error;
+    }
   }
 
   /**
