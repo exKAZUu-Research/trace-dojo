@@ -27,14 +27,15 @@ const MAX_NESTING = 300;
 /** A nesting too deep to read, which the tree's own check then rejects. */
 export class UnknownSyntax extends Error {}
 
-/** A balanced arithmetic or compound-subscript region whose evaluation Bash defers until run time. */
+/** A balanced arithmetic, compound-subscript, or parameter-expansion region whose evaluation Bash defers until run time. */
 export interface DeferredRegion {
-  opener: '((' | '$((' | '$[' | '[';
+  opener: '((' | '$((' | '$[' | '[' | '${';
   openStart: number;
   start: number;
   end: number;
   closeEnd: number;
   keepsSemicolons: boolean;
+  inDouble?: boolean;
 }
 
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
@@ -178,17 +179,28 @@ function skipBraces(text: SourceText, open: number, inDouble = false): number {
   return text.nested(() => {
     const { source } = text;
     let i = open + 1;
+    let closeEnd: number;
     if (inDouble) {
       i = skipParameterHeader(text, i);
-      if (usesDoubleQuotedBraceBody(source, i)) {
-        return skipDoubleQuotedBraceBody(text, open, i);
-      }
+      closeEnd = usesDoubleQuotedBraceBody(source, i)
+        ? skipDoubleQuotedBraceBody(text, open, i)
+        : skipUnquotedBraceBody(text, open, i);
+    } else {
+      closeEnd = skipUnquotedBraceBody(text, open, i);
     }
-    while (i < source.length) {
-      if (source[i] === '}') return i + 1;
-      i = skipWordPiece(text, i);
+    const first = source[open + 1];
+    if (first !== undefined && !' \t\n|}'.includes(first)) {
+      text.arithmeticRegions.push({
+        opener: '${',
+        openStart: open - 1,
+        start: open + 1,
+        end: closeEnd - 1,
+        closeEnd,
+        keepsSemicolons: false,
+        ...(inDouble ? { inDouble: true } : {}),
+      });
     }
-    return text.unclosed(open, '}');
+    return closeEnd;
   });
 }
 
@@ -206,13 +218,28 @@ function skipParameterHeader(text: SourceText, start: number): number {
   if (source[i] === '!' || (source[i] === '#' && source[i + 1] !== '}')) i++;
   if (/[A-Za-z_]/.test(source[i] ?? '')) {
     while (/[A-Za-z0-9_]/.test(source[i] ?? '')) i++;
-    if (source[i] === '[') i = skipBalanced(text, i, '[', ']');
+    if (source[i] === '[') i = skipHeaderSubscript(text, i);
   } else if (/\d/.test(source[i] ?? '')) {
     while (/\d/.test(source[i] ?? '')) i++;
   } else if ('@#?*!$_-'.includes(source[i] ?? '')) {
     i++;
   }
   return i;
+}
+
+function skipHeaderSubscript(text: SourceText, open: number): number {
+  return text.nested(() => {
+    const { source } = text;
+    let depth = 0;
+    for (let i = open; i < source.length;) {
+      const c = source[i];
+      if (c === '[') depth++;
+      else if (c === ']' && --depth === 0) return i + 1;
+      else if (c === '}') return i;
+      i = c === '[' || c === ']' ? i + 1 : skipWordPiece(text, i);
+    }
+    return source.length;
+  });
 }
 
 function skipDoubleQuotedBraceBody(text: SourceText, open: number, start: number): number {
@@ -229,6 +256,16 @@ function skipDoubleQuotedBraceBody(text: SourceText, open: number, start: number
     else if (c === '$' && source[i + 1] === '{') i = skipBraces(text, i + 1, true);
     else if (c === '$') i = skipWordPiece(text, i);
     else i++;
+  }
+  return text.unclosed(open, '}');
+}
+
+function skipUnquotedBraceBody(text: SourceText, open: number, start: number): number {
+  const { source } = text;
+  let i = start;
+  while (i < source.length) {
+    if (source[i] === '}') return i + 1;
+    i = skipWordPiece(text, i);
   }
   return text.unclosed(open, '}');
 }

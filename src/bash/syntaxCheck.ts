@@ -24,10 +24,16 @@ import {
 } from './syntaxWords';
 import { isIdentifier } from './variables';
 
+export interface DeferredExpansion {
+  readonly slice: string;
+  readonly inDouble: boolean;
+}
+
 export interface AnalyzedBashSource {
   readonly originalSource: string;
   readonly grammarSource: string;
   readonly deferredArithmetic: ReadonlyMap<number, string>;
+  readonly deferredExpansions: ReadonlyMap<number, DeferredExpansion>;
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
   readonly literalQuotes: ReadonlySet<number>;
   readonly declarationFunctionStarts: ReadonlySet<number>;
@@ -46,14 +52,18 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     ...backquotes.declarationFunctionStarts,
   ]);
   const normalized = applySourceNormalizations(backquotes.source, literalQuotes, declarationFunctionStarts);
-  const regions = [...checked.arithmeticRegions, ...backquotes.arithmeticRegions].toSorted(
-    (a, b) => a.openStart - b.openStart
+  const regions = sortDeferredRegions([...checked.arithmeticRegions, ...backquotes.arithmeticRegions]);
+  const { grammarSource, deferredArithmetic, deferredExpansions } = resolveDeferredArithmeticRegions(
+    parser,
+    normalized,
+    source,
+    regions
   );
-  const { grammarSource, deferredArithmetic } = resolveDeferredArithmeticRegions(parser, normalized, regions);
   return {
     originalSource: source,
     grammarSource,
     deferredArithmetic,
+    deferredExpansions,
     backquoteErrors: backquotes.errors,
     literalQuotes,
     declarationFunctionStarts,
@@ -166,7 +176,28 @@ function mapDeferredRegion(
   const end = mapOffset(region.end);
   const closeEnd = mapOffset(region.closeEnd);
   if (openStart === undefined || start === undefined || end === undefined || closeEnd === undefined) return undefined;
-  return { opener: region.opener, openStart, start, end, closeEnd, keepsSemicolons: region.keepsSemicolons };
+  return {
+    opener: region.opener,
+    openStart,
+    start,
+    end,
+    closeEnd,
+    keepsSemicolons: region.keepsSemicolons,
+    ...(region.inDouble ? { inDouble: true } : {}),
+  };
+}
+
+function sortDeferredRegions(regions: readonly DeferredRegion[]): DeferredRegion[] {
+  return regions.toSorted((a, b) => {
+    const aIsBrace = a.opener === '${' ? 1 : 0;
+    const bIsBrace = b.opener === '${' ? 1 : 0;
+    if (aIsBrace !== bIsBrace) return aIsBrace - bIsBrace;
+    if (aIsBrace === 1) {
+      const spanDiff = a.closeEnd - a.openStart - (b.closeEnd - b.openStart);
+      if (spanDiff !== 0) return spanDiff;
+    }
+    return a.openStart - b.openStart;
+  });
 }
 
 function applySourceNormalizations(
@@ -185,39 +216,70 @@ function applySourceNormalizations(
 function resolveDeferredArithmeticRegions(
   parser: Parser,
   source: string,
+  originalSource: string,
   regions: readonly DeferredRegion[]
-): { grammarSource: string; deferredArithmetic: Map<number, string> } {
+): {
+  grammarSource: string;
+  deferredArithmetic: Map<number, string>;
+  deferredExpansions: Map<number, DeferredExpansion>;
+} {
   const deferredArithmetic = new Map<number, string>();
-  if (regions.length === 0) return { grammarSource: source, deferredArithmetic };
+  const deferredExpansions = new Map<number, DeferredExpansion>();
+  if (regions.length === 0) return { grammarSource: source, deferredArithmetic, deferredExpansions };
   let text = source;
   for (;;) {
     const tree = parser.parse(text);
     if (!tree) throw new Error('The parser returned no tree');
     try {
-      const failing = findFirstFailingRegion(tree.rootNode, regions, deferredArithmetic);
+      const failing = findFirstFailingRegion(tree.rootNode, regions, deferredArithmetic, deferredExpansions);
       if (!failing) break;
-      if (deferredArithmetic.has(failing.start)) {
-        throw new Error(`Deferred arithmetic region at ${failing.start} was selected twice`);
-      }
-      const original = source.slice(failing.start, failing.end);
-      deferredArithmetic.set(failing.start, original);
-      const blank = blankDeferredSlice(original, failing.keepsSemicolons);
-      text = text.slice(0, failing.start) + blank + text.slice(failing.end);
+      text = maskFailingRegion(text, source, originalSource, failing, deferredArithmetic, deferredExpansions);
     } finally {
       tree.delete();
     }
   }
-  return { grammarSource: text, deferredArithmetic };
+  return { grammarSource: text, deferredArithmetic, deferredExpansions };
+}
+
+function maskFailingRegion(
+  text: string,
+  source: string,
+  originalSource: string,
+  failing: DeferredRegion,
+  deferredArithmetic: Map<number, string>,
+  deferredExpansions: Map<number, DeferredExpansion>
+): string {
+  if (failing.opener === '${') {
+    if (deferredExpansions.has(failing.openStart)) {
+      throw new Error(`Deferred expansion region at ${failing.openStart} was selected twice`);
+    }
+    deferredExpansions.set(failing.openStart, {
+      slice: originalSource.slice(failing.openStart, failing.closeEnd),
+      inDouble: Boolean(failing.inDouble),
+    });
+    const masked = text.slice(failing.start, failing.end).replaceAll(/[^\n]/g, '_');
+    return text.slice(0, failing.start) + masked + text.slice(failing.end);
+  }
+  if (deferredArithmetic.has(failing.start)) {
+    throw new Error(`Deferred arithmetic region at ${failing.start} was selected twice`);
+  }
+  const original = source.slice(failing.start, failing.end);
+  deferredArithmetic.set(failing.start, original);
+  const blank = blankDeferredSlice(original, failing.keepsSemicolons);
+  return text.slice(0, failing.start) + blank + text.slice(failing.end);
 }
 
 function findFirstFailingRegion(
   root: Node,
   regions: readonly DeferredRegion[],
-  deferred: ReadonlyMap<number, string>
+  deferredArithmetic: ReadonlyMap<number, string>,
+  deferredExpansions: ReadonlyMap<number, DeferredExpansion>
 ): DeferredRegion | undefined {
-  const errors = root.hasError ? collectCstErrorNodes(root) : [];
+  const errors = root.hasError ? nonBenignCstErrors(root) : [];
   for (const region of regions) {
-    if (deferred.has(region.start) || region.end === region.start) continue;
+    const alreadyDeferred =
+      region.opener === '${' ? deferredExpansions.has(region.openStart) : deferredArithmetic.has(region.start);
+    if (alreadyDeferred || region.end === region.start) continue;
     const misparsedSubshell =
       region.opener === '((' && root.descendantForIndex(region.openStart, region.openStart + 2)?.type !== '((';
     const fails =
@@ -225,6 +287,10 @@ function findFirstFailingRegion(
     if (fails) return region;
   }
   return undefined;
+}
+
+function nonBenignCstErrors(root: Node): Node[] {
+  return collectCstErrorNodes(root).filter((node) => !isBenignEmptySubscript(node));
 }
 
 function collectCstErrorNodes(root: Node): Node[] {
@@ -247,6 +313,10 @@ function collectCstErrorNodes(root: Node): Node[] {
     if (!childHasError) errors.push(node);
   }
   return errors;
+}
+
+function isBenignEmptySubscript(node: Node): boolean {
+  return node.type === 'raw_string' && node.startIndex === node.endIndex && node.parent?.type === 'subscript';
 }
 
 function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {

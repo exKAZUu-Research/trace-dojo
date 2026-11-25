@@ -32,6 +32,14 @@ const EXPANSION_TYPES = new Set([
   'translated_string',
 ]);
 
+export interface ConverterHooks {
+  readonly rawPieces: (raw: string) => (string | WordPart)[];
+  /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
+  readonly reparse: (text: string, row: number) => Statement[];
+  readonly parseSubscriptParts?: (raw: string) => WordPart[];
+  readonly parseBracedExpansion?: (slice: string, inDouble: boolean, row: number) => ParameterExpansion;
+}
+
 /** Converts the tree of a program into statements, consulting `capabilities.ts` for unsupported syntax. */
 export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
@@ -44,10 +52,7 @@ export class Converter {
   constructor(
     private readonly analyzed: AnalyzedBashSource,
     private readonly atomicRows: ReadonlySet<number>,
-    private readonly rawPieces: (raw: string) => (string | WordPart)[],
-    /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
-    private readonly reparse: (text: string, row: number) => Statement[],
-    private readonly parseSubscriptParts: (raw: string) => WordPart[] = (raw) => [{ kind: 'single', text: raw }]
+    private readonly hooks: ConverterHooks
   ) {}
 
   convertProgram(root: Node): Program {
@@ -288,7 +293,7 @@ export class Converter {
     const parts = restored === undefined ? undefined : splitForHeader(restored);
     const part = (index: number, field: string): ArithmeticSource | undefined => {
       if (!parts) return this.optionalArithmetic(node, field);
-      return parts[index].trim() === '' ? undefined : { pieces: this.rawPieces(parts[index]), row: base.row };
+      return parts[index].trim() === '' ? undefined : { pieces: this.hooks.rawPieces(parts[index]), row: base.row };
     };
     return {
       ...base,
@@ -339,7 +344,7 @@ export class Converter {
     return {
       parts: mergeLiterals(parts),
       row: node.startPosition.row,
-      text: this.restoreQuotes(node.text, node.startIndex),
+      text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
     };
   }
 
@@ -353,7 +358,7 @@ export class Converter {
       append,
       value: undefined,
       row: node.startPosition.row,
-      text: node.text,
+      text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
     };
     if (nameNode.type === 'subscript') assignment.subscript = this.subscriptWord(nameNode);
     if (valueNode?.type === 'array') assignment.array = this.arrayElements(valueNode);
@@ -383,7 +388,7 @@ export class Converter {
       const joined: Word = {
         parts: mergeLiterals(parts),
         row: words[i].row,
-        text: this.restoreQuotes(this.source.slice(nodes[i].startIndex, nodes[end].endIndex), nodes[i].startIndex),
+        text: this.analyzed.originalSource.slice(nodes[i].startIndex, nodes[end].endIndex),
       };
       elements.push(this.restoreMaskedKeyedElement(joined, nodes[i].startIndex, nodes[end].endIndex));
       i = end;
@@ -399,10 +404,13 @@ export class Converter {
     const prefixLen = 1 + maskedSub.length;
     if (first.text.length <= prefixLen || first.text[prefixLen] !== ']') return word;
     const restoredSub = this.restoreQuotes(maskedSub, startIndex + 1);
+    const subParts = this.hooks.parseSubscriptParts
+      ? this.hooks.parseSubscriptParts(restoredSub)
+      : [{ kind: 'single' as const, text: restoredSub }];
     return {
       parts: [
         { kind: 'literal', text: '[' },
-        ...this.parseSubscriptParts(restoredSub),
+        ...subParts,
         { kind: 'literal', text: first.text.slice(prefixLen) },
         ...restParts,
       ],
@@ -432,7 +440,7 @@ export class Converter {
     return {
       parts: mergeLiterals(parts),
       row: node.startPosition.row,
-      text: this.restoreQuotes(this.source.slice(start, end), start),
+      text: this.analyzed.originalSource.slice(start, end),
     };
   }
 
@@ -598,7 +606,7 @@ export class Converter {
     const end = closing?.startIndex ?? node.endIndex;
     const raw = this.analyzed.deferredArithmetic.get(start);
     if (raw !== undefined) {
-      return { pieces: this.rawPieces(this.restoreQuotes(raw, start)), row: node.startPosition.row };
+      return { pieces: this.hooks.rawPieces(this.restoreQuotes(raw, start)), row: node.startPosition.row };
     }
     return this.arithmeticOf(
       start,
@@ -645,7 +653,7 @@ export class Converter {
     return {
       parts: mergeLiterals(this.wordParts(node)),
       row: node.startPosition.row,
-      text: this.restoreQuotes(node.text, node.startIndex),
+      text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
     };
   }
 
@@ -730,12 +738,16 @@ export class Converter {
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';
     const body = /\\[$`\\]/.test(inner)
-      ? this.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), row)
+      ? this.hooks.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), row)
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
     return { kind: 'commandSubstitution', body, text, row };
   }
 
   private expansion(node: Node): ParameterExpansion {
+    const deferred = this.analyzed.deferredExpansions.get(node.startIndex);
+    if (deferred && this.hooks.parseBracedExpansion) {
+      return this.hooks.parseBracedExpansion(deferred.slice, deferred.inDouble, node.startPosition.row);
+    }
     const parameter = node.childForFieldName('parameter');
     const operator = node.childForFieldName('operator')?.text;
     const prefix = node.childForFieldName('prefix')?.text as '#' | '!' | undefined;
@@ -744,7 +756,7 @@ export class Converter {
       kind: 'parameter',
       name: '',
       argument: mergeLiterals(argument),
-      text: this.restoreQuotes(node.text, node.startIndex),
+      text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
       braced: true,
     };
     if (operator !== undefined) expansion.operator = operator;

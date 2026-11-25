@@ -34,13 +34,12 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
     analyzed.grammarSource,
     {},
     (root) => {
-      const converter = new Converter(
-        analyzed,
-        atomicRows,
-        rawArithmeticPieces,
-        reparseBackquoted,
-        parseSubscriptWordParts
-      );
+      const converter = new Converter(analyzed, atomicRows, {
+        rawPieces: rawArithmeticPieces,
+        reparse: reparseBackquoted,
+        parseSubscriptParts: parseSubscriptWordParts,
+        parseBracedExpansion: parseBracedParameterExpansion,
+      });
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
         if (!converter.claimedAtomicRows.has(row)) {
@@ -417,11 +416,11 @@ const UNQUOTED_ARGUMENT_OPERATORS = new Set([
   ':?',
 ]);
 
-function parseBracedParameterExpansion(slice: string, inDouble: boolean): ParameterExpansion {
+export function parseBracedParameterExpansion(slice: string, inDouble: boolean, row = 0): ParameterExpansion {
   const inner = slice.slice(2, -1);
   if (inner === '') return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
   const { prefix, pos: afterPrefix } = readParameterPrefix(inner);
-  const header = readParameterNameAndSubscript(inner, afterPrefix);
+  const header = readParameterNameAndSubscript(inner, afterPrefix, row);
   if (!header) return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
   if (header.next >= inner.length) {
     return {
@@ -460,7 +459,8 @@ function readParameterPrefix(inner: string): { prefix?: '#' | '!'; pos: number }
 
 function readParameterNameAndSubscript(
   inner: string,
-  pos: number
+  pos: number,
+  row = 0
 ): { name: string; subscript?: { parts: WordPart[]; row: number; text: string }; next: number } | undefined {
   const rest = inner.slice(pos);
   const idMatch = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest);
@@ -479,7 +479,7 @@ function readParameterNameAndSubscript(
     if (inner[closeEnd] === '[') name = '';
     return {
       name,
-      subscript: { parts: scanWordSliceParts(subRaw, false, false), row: 0, text: subRaw },
+      subscript: { parts: scanWordSliceParts(subRaw, false, false), row, text: subRaw },
       next: closeEnd,
     };
   }
