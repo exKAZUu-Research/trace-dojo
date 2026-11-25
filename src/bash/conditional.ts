@@ -72,7 +72,7 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
 
 function conditionalNumber(shell: Shell, text: string): bigint | undefined {
   try {
-    return evaluateArithmetic(text, shell, undefined, shell.runtime.step);
+    return evaluateArithmetic(text, shell, '[[', shell.runtime.step);
   } catch (error) {
     if (error instanceof ArithmeticStoreError) {
       shell.failures.handleStoreFailure('conditional', error.failure);
