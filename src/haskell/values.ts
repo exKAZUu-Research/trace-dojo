@@ -226,7 +226,7 @@ export type ExceptionCause =
   | { kind: 'value'; value: Slot }
   | { kind: 'arith'; error: ArithError }
   | { kind: 'pattern' }
-  | { kind: 'io'; type: string; location: string; file?: string; description: string };
+  | { kind: 'io'; type: string; location: string; file?: string; description: string; handle?: Slot };
 
 export type ArithError =
   | 'Overflow'

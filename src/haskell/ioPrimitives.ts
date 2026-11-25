@@ -15,7 +15,7 @@ import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thu
 
 export const ioSupport: {
   maybe?: { nothing: ConInfo; just: ConInfo };
-  /** `primException kind message ioType location file`, the exception value of a built-in failure. */
+  /** `primException kind message ioType location file handle`, the exception value of a built-in failure. */
   exception?: GlobalDef;
   display?: GlobalDef;
   /** `primIsExit`, whether an exception is an `ExitCode`, which ends the program without a message. */
@@ -38,6 +38,8 @@ interface HandleStreams {
 class Handle {
   /** `semiClosed` after `hGetContents`, which reads the rest lazily. */
   private state: 'open' | 'semiClosed' | 'closed' = 'open';
+  /** The program's `Handle` value for this handle, which the IO errors of its operations carry. */
+  value?: Slot;
 
   constructor(
     /** The name messages give the handle: `<stdin>`, or the file's path as the program gave it. */
@@ -91,7 +93,7 @@ class Handle {
 
   readLine(runtime: Runtime): Value {
     const reader = this.reader('hGetLine');
-    if (reader.isAtEnd) throw ioError('EOF', 'hGetLine', this.name, '');
+    if (reader.isAtEnd) throw ioError('EOF', 'hGetLine', this.name, '', this.value);
     // GHC ends a line at `\n` alone, keeping a `\r` before it.
     const { text } = reader;
     const end = text.indexOf('\n', reader.position);
@@ -103,7 +105,7 @@ class Handle {
 
   readChar(): string {
     const character = readCharacter(this.reader('hGetChar'));
-    if (character === undefined) throw ioError('EOF', 'hGetChar', this.name, '');
+    if (character === undefined) throw ioError('EOF', 'hGetChar', this.name, '', this.value);
     return character;
   }
 
@@ -113,7 +115,7 @@ class Handle {
 
   /** Whether input is available, which a handle with none left to read answers with GHC's end-of-file error. */
   waitForInput(): boolean {
-    if (this.reader('hWaitForInput').isAtEnd) throw ioError('EOF', 'hWaitForInput', this.name, '');
+    if (this.reader('hWaitForInput').isAtEnd) throw ioError('EOF', 'hWaitForInput', this.name, '', this.value);
     return true;
   }
 
@@ -131,7 +133,7 @@ class Handle {
   private lazyContents(reader: TextReader, runtime: Runtime): Value {
     runtime.beginEffect();
     if (this.state === 'closed') {
-      throw ioError('IllegalOperation', 'hGetContents', this.name, 'delayed read on closed handle');
+      throw ioError('IllegalOperation', 'hGetContents', this.name, 'delayed read on closed handle', this.value);
     }
     runtime.spend();
     const character = readCharacter(reader);
@@ -146,7 +148,7 @@ class Handle {
     this.checkUsable(location);
     const { output, reader, writer } = this.streams;
     if (output) return (chunk) => output.write(chunk);
-    if (!writer) throw ioError('IllegalOperation', location, this.name, 'handle is not open for writing');
+    if (!writer) throw ioError('IllegalOperation', location, this.name, 'handle is not open for writing', this.value);
     if (!reader) return (chunk) => writer.write(chunk);
     return (chunk) => {
       writer.writeAt(reader.position, chunk);
@@ -157,18 +159,19 @@ class Handle {
   private reader(location: string): TextReader {
     this.checkUsable(location);
     const { reader } = this.streams;
-    if (!reader) throw ioError('IllegalOperation', location, this.name, 'handle is not open for reading');
+    if (!reader) throw ioError('IllegalOperation', location, this.name, 'handle is not open for reading', this.value);
     return reader;
   }
 
   /** Fails as GHC does for reading or writing a handle that is closed, or semi-closed after `hGetContents`. */
   private checkUsable(location: string): void {
     this.checkNotClosed(location);
-    if (this.state === 'semiClosed') throw ioError('IllegalOperation', location, this.name, 'handle is semi-closed');
+    if (this.state === 'semiClosed')
+      throw ioError('IllegalOperation', location, this.name, 'handle is semi-closed', this.value);
   }
 
   private checkNotClosed(location: string): void {
-    if (this.state === 'closed') throw ioError('IllegalOperation', location, this.name, 'handle is closed');
+    if (this.state === 'closed') throw ioError('IllegalOperation', location, this.name, 'handle is closed', this.value);
   }
 }
 
@@ -217,6 +220,12 @@ function tableOf(runtime: Runtime): HandleTable {
 
 /** The constructors of `Handle` in order: `HandleStdout`, `HandleStderr`, `HandleStdin`, `HandleFile id path`. */
 function handleOf(slot: Slot, runtime: Runtime): Handle {
+  const handle = handleOfValue(slot, runtime);
+  handle.value ??= slot;
+  return handle;
+}
+
+function handleOfValue(slot: Slot, runtime: Runtime): Handle {
   const value = runtime.machine.force(slot) as ConValue;
   const table = tableOf(runtime);
   switch (value.con.tag) {
@@ -236,9 +245,22 @@ function handleOf(slot: Slot, runtime: Runtime): Handle {
   }
 }
 
-function ioError(type: string, location: string, file: string | undefined, description: string): HaskellException {
+function ioError(
+  type: string,
+  location: string,
+  file: string | undefined,
+  description: string,
+  handle?: Slot
+): HaskellException {
   const message = `${file ? `${file}: ` : ''}${location ? `${location}: ` : ''}${IO_ERROR_TEXT[type] ?? 'failed'}${description ? ` (${description})` : ''}`;
-  return new HaskellException(message, { kind: 'io', type, location, file, description });
+  return new HaskellException(message, {
+    kind: 'io',
+    type,
+    location,
+    file,
+    description,
+    ...(handle ? { handle } : {}),
+  });
 }
 
 const IO_ERROR_TEXT: Record<string, string> = {
@@ -443,14 +465,17 @@ export function exceptionValue(error: HaskellException, runtime: Runtime): Slot 
       : cause?.kind === 'arith'
         ? ['arith', error.display, cause.error, '', '']
         : [cause?.kind ?? 'error', error.display, '', '', ''];
+  const maybe = ioSupport.maybe as { nothing: ConInfo; just: ConInfo };
+  const handle =
+    cause?.kind === 'io' && cause.handle ? new ConValue(maybe.just, [cause.handle]) : nullary(maybe.nothing);
   return new Thunk(
     undefined,
     undefined,
     () =>
-      new TailCall(
-        runtime.machine.force(runtime.global(ioSupport.exception as GlobalDef)),
-        strings.map((text) => unpackString(text, 0))
-      )
+      new TailCall(runtime.machine.force(runtime.global(ioSupport.exception as GlobalDef)), [
+        ...strings.map((text) => unpackString(text, 0)),
+        handle,
+      ])
   );
 }
 
