@@ -9,6 +9,7 @@ import {
   rootCovers,
   writeMemo,
 } from './awaitReplay';
+import type { LoopProgress, ProgressMemo } from './collectionLoops';
 import { type Compiled, CompilerBase } from './compilerBase';
 import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isTop } from './types';
@@ -122,26 +123,19 @@ export abstract class AwaitCompiler extends CompilerBase {
     }
   }
 
-  /** A value remembered for each iteration of the collection `for` elements being compiled. */
-  protected rememberEachIteration(key: object): (frame: Frame, compute: () => Value) => Value {
-    const root = this.awaitRoot;
-    return root ? this.remembering(root, key) : (_frame, compute) => compute();
-  }
-
   /**
-   * What each iteration of the collection `for` elements being compiled remembers once it completes, which an
-   * evaluation of the statement again after a later iteration's `await` reuses instead of running the iteration again.
+   * Where a collection `for` element keeps its progress when an `await` inside or after it may evaluate the
+   * statement again, kept apart for each iteration of the collection `for` elements enclosing it; undefined when no
+   * `await` can.
    */
-  protected completedIterations<T>(key: object): {
-    read: (frame: Frame) => T | undefined;
-    write: (frame: Frame, outcome: T) => void;
-  } {
+  protected loopProgress(element: Span): ProgressMemo | undefined {
     const root = this.awaitRoot;
-    if (!root) throw new Error('Only a statement that awaits remembers its iterations.');
-    const slot = this.awaitSlot(root, key);
+    if (!root || !(this.awaitsWithin(element) || this.precedesAwait(element))) return undefined;
+    const slot = this.awaitSlot(root, {});
+    const iterated = root.iterated.has(slot);
     return {
-      read: (frame) => (readMemo(frame, slot, true) as CompletedIteration<T> | undefined)?.outcome,
-      write: (frame, outcome) => writeMemo(frame, slot, iterationKey(frame), new CompletedIteration(outcome)),
+      read: (frame) => readMemo(frame, slot, iterated) as LoopProgress | undefined,
+      write: (frame, progress) => writeMemo(frame, slot, iterated ? iterationKey(frame) : undefined, progress),
     };
   }
 
@@ -178,11 +172,5 @@ export abstract class AwaitCompiler extends CompilerBase {
       if (root.loopDepth > 0) root.iterated.add(slot);
     }
     return slot;
-  }
-}
-
-class CompletedIteration<T> extends Cell {
-  constructor(readonly outcome: T) {
-    super(undefined);
   }
 }

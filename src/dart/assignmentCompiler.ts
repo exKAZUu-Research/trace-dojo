@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
+import { type AddElement, applyAddition, type ElementLoop, runLoop, runResumableLoop } from './collectionLoops';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { branchesType } from './contextTypes';
 import { ControlCompiler } from './controlCompiler';
@@ -804,23 +805,20 @@ export abstract class AssignmentCompiler extends ControlCompiler {
    * `await` does not iterate a lazy iterable, whose iteration may run code, a second time.
    */
   private listedBeforeAwait(element: Span, compiled: Compiled): Compiled {
-    return { ...compiled, run: this.listedOnce(element, compiled.run) };
-  }
-
-  /** An iterable that a later `await` follows, listed when first evaluated, unless it is a list already. */
-  private listedOnce(element: Span, run: Eval): Eval {
     const remember =
       this.precedesAwait(element) || this.awaitsWithin(element)
         ? this.rememberBeforeAwait(element, element, [{ kind: 'await' }])
         : undefined;
-    if (!remember) return run;
-    return (frame) =>
+    if (!remember) return compiled;
+    const { run } = compiled;
+    const listed: Eval = (frame) =>
       remember(frame, () => {
         const value = run(frame);
         if (value === undefined || value instanceof DartList) return value;
         const { runtime } = frame;
         return runtime.links.newList(runtime, DYNAMIC, iterableValues(runtime, value), true);
       });
+    return { ...compiled, run: listed };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Validate both map type arguments before configuring the spread.
@@ -854,11 +852,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const map = run(frame);
       if (nullAware && map === undefined) return;
       // The VM adds a spread map by the literal's `addAll`, whose hashing may run learner code while the map is unnamed.
-      applyAddition(add, (target) =>
-        frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
-          frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
-        )
-      );
+      applyAddition(add, {
+        apply: (target) =>
+          frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
+            frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
+          ),
+        values: [map],
+      });
     };
   }
 
@@ -983,73 +983,50 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const elementType = element.isAwait
       ? this.elementTypeOfStream(iterable, element.iterable)
       : this.elementTypeOfIterable(iterable, element.iterable);
-    const iterates = this.awaitsWithin(element);
-    const source = element.isAwait
-      ? this.streamIteratorOf(element, iterable, elementType)
-      : this.iterableSource(iterable);
+    const progress = this.loopProgress(element);
+    const start = element.isAwait
+      ? this.streamIteratorOf(iterable, elementType)
+      : this.iteratorOf(this.iterableSource(iterable));
     this.enterLoop(element);
     const afterSource = this.flow;
-    const { bind, body, moveNext, current } = this.inCollectionLoop(() => {
+    const { bind, body, moveNext } = this.inCollectionLoop(() => {
       const savedRecords = this.recordsSteps;
       this.recordsSteps = false;
       const binding = this.compileForInBinding(element.binding, elementType, element);
       this.recordsSteps = savedRecords;
       return {
         bind: binding,
-        body: this.compileElementLoopBody(element, iterates, kind, elementContext, valueContext),
+        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
         moveNext: element.isAwait ? this.awaitedMoveNext(element) : syncMoveNext,
-        // The stream iterator, created once, has moved past the elements of the iterations its statement runs again.
-        current: element.isAwait ? this.rememberEachIteration(element.binding) : undefined,
       };
     });
     types.push(...body.types);
     this.finishLoop(afterSource);
-    const listed = iterates && !element.isAwait ? this.listedOnce(element, source) : source;
-    const iteratorOf: Eval = element.isAwait
-      ? listed
-      : (frame) => frame.runtime.getProperty(listed(frame), 'iterator', undefined);
-    return forInElementLoop(iteratorOf, iterates, { moveNext, current, bind, body: body.run });
-  }
-
-  /**
-   * The body of a collection `for` element. When an `await` in it may suspend the statement, an iteration that
-   * completed replays what it added when the statement runs again after a later iteration's `await`, instead of
-   * running again, so that parts written after the `await` that an earlier iteration ran keep their effects once.
-   */
-  private compileElementLoopBody(
-    element: Extract<CollectionElement, { kind: 'forElement' | 'forInElement' }>,
-    iterates: boolean,
-    kind: 'list' | 'set' | 'map',
-    elementContext: DartType | undefined,
-    valueContext: DartType | undefined
-  ): { types: ElementTypes[]; run: (frame: Frame, add: AddElement) => void } {
-    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
-    if (!iterates) return body;
-    const { read, write } = this.completedIterations<AddOperation[]>({});
-    return {
-      types: body.types,
-      run: (frame, add) => {
-        const completed = read(frame);
-        if (completed) {
-          for (const operation of completed) applyAddition(add, operation);
-          return;
-        }
-        const operations: AddOperation[] = [];
-        body.run(frame, recordingAdd(add, operations));
-        write(frame, operations);
-      },
+    const loop: ElementLoop = {
+      start,
+      next: (frame, iterator) =>
+        moveNext(frame, iterator) === true
+          ? { value: frame.runtime.getProperty(iterator, 'current', undefined) }
+          : undefined,
+      bind,
+      body: body.run,
+      afterIteration: (frame) => frame.runtime.spend(),
+      variables: [],
     };
+    return progress ? runResumableLoop(loop, progress) : runLoop(loop);
   }
 
-  /** The `StreamIterator` an `await for` element reads, created once while its statement runs again after awaits. */
-  private streamIteratorOf(element: Span, stream: Compiled, elementType: DartType): Eval {
+  private iteratorOf(iterable: Eval): Eval {
+    return (frame) => frame.runtime.getProperty(iterable(frame), 'iterator', undefined);
+  }
+
+  /** The `StreamIterator` an `await for` element reads. */
+  private streamIteratorOf(stream: Compiled, elementType: DartType): Eval {
     const resolve = this.runtimeType(elementType);
-    const create = (frame: Frame): Value =>
+    return (frame) =>
       frame.runtime.links.construct(frame.runtime, '_StreamIterator', '', [stream.run(frame)], undefined, [
         resolve(frame),
       ]);
-    const remember = this.rememberBeforeAwait(stream, element, [{ kind: 'await' }]);
-    return remember ? (frame) => remember(frame, () => create(frame)) : create;
   }
 
   /** The `moveNext` of an `await for` element, which awaits each element. */
@@ -1068,9 +1045,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     valueContext: DartType | undefined,
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
+    const progress = this.loopProgress(element);
     const { initExec, loopSlots } = this.compileForInit(element);
     this.enterLoop(element);
-    const iterates = this.awaitsWithin(element);
     const { condition, afterLoop, body, updates } = this.inCollectionLoop(() => {
       const compiledCondition = element.condition ? this.compileCondition(element.condition) : undefined;
       const exit = compiledCondition?.flow.whenFalse ?? this.flow.unreachable;
@@ -1078,25 +1055,30 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       return {
         condition: compiledCondition,
         afterLoop: exit,
-        body: this.compileElementLoopBody(element, iterates, kind, elementContext, valueContext),
+        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
         updates: this.withoutRemembering(() => element.updates.map((update) => this.compileExpression(update).run)),
       };
     });
     types.push(...body.types);
     const test = condition?.compiled.run;
     this.finishLoop(afterLoop);
-    return (frame, add) => {
-      initExec?.(frame);
-      eachIteration(frame, iterates, () => {
-        if (test && !test(frame)) return false;
-        body.run(frame, add);
+    const loop: ElementLoop = {
+      start: (frame) => {
+        initExec?.(frame);
+        return;
+      },
+      next: (frame) => (!test || test(frame) ? { value: undefined } : undefined),
+      bind: undefined,
+      body: body.run,
+      afterIteration: (frame) => {
         // Each iteration has its own loop variables, which closures created in the body keep.
         for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
         for (const update of updates) update(frame);
         frame.runtime.spend();
-        return true;
-      });
+      },
+      variables: loopSlots,
     };
+    return progress ? runResumableLoop(loop, progress) : runLoop(loop);
   }
 
   // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
@@ -1219,63 +1201,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
 export type { Member };
 
-/** How a collection for-in element reads its iterator and adds each element's values. */
-interface ForInElementParts {
-  moveNext: (frame: Frame, iterator: Value) => Value;
-  current: ((frame: Frame, compute: () => Value) => Value) | undefined;
-  bind: (frame: Frame, value: Value) => void;
-  body: (frame: Frame, add: AddElement) => void;
-}
-
-function forInElementLoop(
-  iteratorOf: Eval,
-  iterates: boolean,
-  { moveNext, current, bind, body }: ForInElementParts
-): (frame: Frame, add: AddElement) => void {
-  return (frame, add) => {
-    const { runtime } = frame;
-    const iterator = iteratorOf(frame);
-    frame.temporaries.push(iterator);
-    try {
-      eachIteration(frame, iterates, () => {
-        if (moveNext(frame, iterator) !== true) return false;
-        const read = (): Value => runtime.getProperty(iterator, 'current', undefined);
-        bind(frame, current ? current(frame, read) : read());
-        body(frame, add);
-        runtime.spend();
-        return true;
-      });
-    } finally {
-      frame.temporaries.pop();
-    }
-  };
-}
-
 function syncMoveNext(frame: Frame, iterator: Value): Value {
   return frame.runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
-}
-
-/**
- * Runs a collection `for` element's iterations until `iteration` tells it to stop. In a statement that awaits, each
- * iteration is numbered, so that the values its expressions remember stay apart when the statement runs again.
- */
-function eachIteration(frame: Frame, numbered: boolean, iteration: () => boolean): void {
-  if (!numbered) {
-    while (iteration()) {
-      // Each call runs one iteration.
-    }
-    return;
-  }
-  const { iterationPath } = frame;
-  const depth = iterationPath.push(0) - 1;
-  try {
-    for (let index = 0; ; index++) {
-      iterationPath[depth] = index;
-      if (!iteration()) return;
-    }
-  } finally {
-    iterationPath.length = depth;
-  }
 }
 
 function withPrepared(target: AssignableTarget, action: (frame: Frame, prepared: unknown) => Value): Eval {
@@ -1328,32 +1255,6 @@ interface ElementTypes {
   value?: DartType;
 }
 /** Adds an element to a collection literal being built; a set or map literal names itself as the target. */
-type AddElement = ((key: Value, value?: Value) => void) & {
-  target?: DartObject;
-  /** Adds what `operation` adds, through which an add that records the additions sees an addition writing `target`. */
-  addAll?: (operation: AddOperation) => void;
-};
-
-/** An addition to the collection being built, run with the collection's add. */
-type AddOperation = (add: AddElement) => void;
-
-function applyAddition(add: AddElement, operation: AddOperation): void {
-  if (add.addAll) add.addAll(operation);
-  else operation(add);
-}
-
-/** An add that also records each addition in `operations`, so that they can be applied again later. */
-function recordingAdd(add: AddElement, operations: AddOperation[]): AddElement {
-  const addAll = (operation: AddOperation): void => {
-    operations.push(operation);
-    applyAddition(add, operation);
-  };
-  return Object.assign((key: Value, value?: Value) => addAll((target) => target(key, value)), {
-    target: add.target,
-    addAll,
-  });
-}
-
 function collectionName(kind: 'list' | 'set' | 'map'): string {
   return kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
 }
@@ -1364,7 +1265,7 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
 
 function addIterableElements(frame: Frame, iterable: Value, elementType: DartType | undefined, add: AddElement): void {
   if (add.addAll) {
-    add.addAll((target) => addIterableElements(frame, iterable, elementType, target));
+    add.addAll({ apply: (target) => addIterableElements(frame, iterable, elementType, target), values: [iterable] });
     return;
   }
   const { runtime } = frame;

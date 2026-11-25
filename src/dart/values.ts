@@ -48,11 +48,21 @@ export class IteratedMemo extends Cell {
   }
 }
 
+/** What a slot of a statement that awaits remembers beyond a value, whose values garbage collection reaches. */
+export abstract class HoldingCell extends Cell {
+  constructor() {
+    super(undefined);
+  }
+
+  abstract held(): Iterable<Value>;
+}
+
 /** The values a slot holds, including those an iterated memo remembers. */
 export function* slotValues(cell: Cell | undefined): Generator<Value> {
   if (!cell) return;
   yield cell.v;
-  if (cell instanceof IteratedMemo) for (const inner of cell.cells.values()) yield inner.v;
+  if (cell instanceof HoldingCell) yield* cell.held();
+  if (cell instanceof IteratedMemo) for (const inner of cell.cells.values()) yield* slotValues(inner);
 }
 
 let nextIdentity = 1;
