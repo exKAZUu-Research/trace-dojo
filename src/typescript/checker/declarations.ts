@@ -173,8 +173,13 @@ function checkTypeDuplicates(c: Checker, symbol: Sym): void {
   const entries = symbol.typeEntries;
   if (entries.length < 2) return;
   const kinds = entries.map((entry) => entry.kind);
-  // Enums merge with each other, and conflict with other declarations as values.
-  if (kinds.includes('enum')) return;
+  // Enums merge with each other, conflict with a class as values, and conflict with a type-only declaration here.
+  if (kinds.includes('enum')) {
+    if (kinds.some((kind) => kind === 'alias' || kind === 'interface'))
+      for (const entry of entries)
+        c.error(entry.name, '列挙型の宣言は、名前空間または他の列挙型の宣言とのみマージできます。');
+    return;
+  }
   // Interfaces merge with each other and with a class; any other pair declares the name twice.
   const merges =
     kinds.every((kind) => kind === 'interface' || kind === 'class') &&

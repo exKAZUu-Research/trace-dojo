@@ -1,0 +1,10 @@
+enum E { A, B }
+type E = string;
+enum F { X }
+interface F { y: number }
+enum G { P }
+enum G { Q = 2 }
+interface G { z: number }
+enum H { R }
+namespace H { export const s = 1; }
+console.log(E.A, F.X, G.P, H.s);

@@ -1,0 +1,7 @@
+(1,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(2,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(3,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(4,11): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(5,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(6,6): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+(7,11): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
