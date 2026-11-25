@@ -669,11 +669,11 @@ export class BindingPatterns {
     if (!settled) return iteratorType.typeArguments?.[0];
     if (isAnyLike(settled)) return anyType;
     const results = settled.kind === 'union' ? settled.types : [settled];
-    // tsc rejects an iterator a result of which has no value (TS2490).
-    if (results.some((member) => !this.c.propertyOf(member, 'value'))) return undefined;
-    const values = results
-      .filter((member) => !this.isDoneResult(member))
-      .flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+    const yielding = results.filter((member) => !this.isDoneResult(member));
+    // tsc rejects an iterator whose results have no value, or one that yields without one (TS2490).
+    const hasValue = (member: Type): boolean => this.c.propertyOf(member, 'value') !== undefined;
+    if (!results.some(hasValue) || !yielding.every(hasValue)) return undefined;
+    const values = yielding.flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
     // tsc gives an iterator whose results are all done elements of type any.
     return values.length > 0 ? unionOf(values) : anyType;
   }

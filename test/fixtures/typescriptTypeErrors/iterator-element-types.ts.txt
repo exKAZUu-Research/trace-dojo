@@ -24,3 +24,14 @@ const anyNext = { [Symbol.iterator]() { return { next(): any { return { done: tr
 for (const x of anyNext) { const n: number = x; console.log(x.foo); }
 const noValue = { [Symbol.iterator]() { return { next(): { done: true } { return { done: true }; } }; } };
 for (const x of noValue) console.log(x);
+const a = { [Symbol.iterator]() { return { next(): { done: true } | { value: number; done: false } { return { done: true }; } }; } };
+for (const x of a) { const s: string = x; }
+const b = { [Symbol.iterator]() { return { next(): { done: true } | { value: number; done: boolean } { return { done: true }; } }; } };
+for (const x of b) { const s: string = x; }
+const c = { [Symbol.iterator]() { return { next(): { done: false } | { value: number; done: false } { return { done: false }; } }; } };
+for (const x of c) console.log(x);
+const d = { [Symbol.iterator]() { return { next(): { done: boolean } { return { done: true }; } }; } };
+for (const x of d) console.log(x);
+const e = [...a];
+const [f] = a;
+const g: string = e[0];
