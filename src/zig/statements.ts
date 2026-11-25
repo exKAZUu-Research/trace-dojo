@@ -818,6 +818,7 @@ export abstract class StatementCompiler extends CallCompiler {
     if (cell && this.context.comptimeDepth === 0) {
       const stored =
         expression.operator === '=' ? this.comptimeStoredValue(target, expression.value, variable) : undefined;
+      if (!stored) this.requireComptimeOperand(this.compile(expression.value), variable);
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       this.comptimeValue(
         () => {
@@ -897,9 +898,14 @@ export abstract class StatementCompiler extends CallCompiler {
   private comptimeStoredValue(target: Expression, value: Expression, variable: LocalBinding): TExpr {
     const { type } = this.compile(target);
     const stored = this.coerce(this.compile(value, type), type, value);
-    if (!staticResultOf(stored))
-      this.error(value, `実行時に決まる値は、comptime var「${variable.name}」には入れられません。`);
+    this.requireComptimeOperand(stored, variable);
     return stored;
+  }
+
+  /** The operand of a store into a `comptime var`, which, analyzed where the assignment stands, must be known then. */
+  private requireComptimeOperand(operand: TExpr, variable: LocalBinding): void {
+    if (!staticResultOf(operand))
+      this.error(operand.span, `実行時に決まる値は、comptime var「${variable.name}」には入れられません。`);
   }
 
   private rejectDiscardedError(type: Type, span: Span): void {
