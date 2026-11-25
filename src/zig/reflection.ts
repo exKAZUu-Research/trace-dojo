@@ -198,7 +198,10 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const { name, args } = expression;
     this.builtinArity(expression, 1);
     const type = this.sizedType(args[0], name);
-    const size = name === '@sizeOf' ? sizeOf(type) : name === '@alignOf' ? alignOf(type) : bitSizeOf(type);
+    const bits = name === '@bitSizeOf' ? reflectedBitSize(type) : undefined;
+    if (name === '@bitSizeOf' && bits === undefined)
+      this.error(args[0], `${typeName(type)} 型にはビット数がありません（packed でない構造体などを含みます）。`);
+    const size = name === '@sizeOf' ? sizeOf(type) : name === '@alignOf' ? alignOf(type) : (bits as number);
     return known(COMPTIME_INT, BigInt(size), expression);
   }
 
@@ -708,4 +711,31 @@ function reinterpret(value: Value, from: Type, to: Type): Value {
   const bytes = Array.from<Value>({ length }).fill(0n);
   new BufferMemory(bytes, spendMemory, memorySpace()).write(from, 0, value);
   return new BufferMemory(bytes, spendMemory, memorySpace()).read(to, 0);
+}
+
+/**
+ * What `@bitSizeOf` gives: an array's elements' bits without padding, its sentinel included, and none for what Zig lays out only
+ * in bytes, a struct or union that is not packed, an optional that is not a pointer, or an error union.
+ */
+function reflectedBitSize(type: Type): number | undefined {
+  switch (type.kind) {
+    case 'struct':
+    case 'union': {
+      return type.layout === 'packed' ? bitSizeOf(type) : undefined;
+    }
+    case 'array': {
+      const element = reflectedBitSize(type.child);
+      const length = Number(type.length) + (type.sentinel === undefined ? 0 : 1);
+      return element === undefined ? undefined : length * element;
+    }
+    case 'optional': {
+      return type.child.kind === 'pointer' ? bitSizeOf(type) : undefined;
+    }
+    case 'error_union': {
+      return undefined;
+    }
+    default: {
+      return bitSizeOf(type);
+    }
+  }
 }
