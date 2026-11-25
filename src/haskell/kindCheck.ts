@@ -1,6 +1,6 @@
 import { stronglyConnected } from './dependencies';
 import { type ClassEntity, nextId, type TypeEntity, type ValueEntity } from './entities';
-import { compileError } from './errors';
+import { compileError, unsupportedError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { instantiateKind, rememberKind } from './kindTemplates';
@@ -427,6 +427,10 @@ function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['metho
     const binder = sig.forall?.find((candidate) => candidate.name === name);
     names.push(name);
     visibilities.push(binder ? binderVisibility(binder) : sig.forall ? 'inferred' : 'specified');
+  }
+  // A method's required binder needs the instance's clauses to bind a type from a term, GHC's term-to-type mapping.
+  if (visibilities.includes('required')) {
+    throw unsupportedError(sig.span, 'forall a -> で型を受け取るクラスのメソッド（RequiredTypeArguments）');
   }
   const paramKinds = classParamKinds(decl.entity);
   const kinds: Kind[] = names.map((_, index) => paramKinds[index] ?? freshKindVar());
