@@ -253,10 +253,10 @@ export class Codegen {
   }
 
   /**
-   * Generates a constructor's function, for uses that do not apply it to all its fields, and for every use of a
-   * constructor with strict fields, which evaluates them from left to right before building the value as GHC does.
+   * Generates a constructor's function, which takes the dictionaries of its constraints first, then its fields: for
+   * uses that do not apply it to all its fields, and for every use of a constructor with strict fields, which
+   * evaluates them from left to right before building the value as GHC does.
    */
-  /** A constructor's function, which takes the dictionaries of its constraints first, then its fields. */
   static constructorGlobal(con: ConInfo): GlobalDef {
     const def = globalOf(con, con.name);
     if (def.code) return def;
