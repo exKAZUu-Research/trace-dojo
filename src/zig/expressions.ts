@@ -1985,6 +1985,20 @@ export abstract class ExpressionCompiler extends SemaBase {
         read: (value) => ((value as Pointer).load() as ZArray).values(),
       };
     }
+    // A slice known at compile time has a known length, as Zig reads it for `++`.
+    const known = type.kind === 'pointer' && type.size === 'slice' ? staticResultOf(operand) : undefined;
+    if (type.kind === 'pointer' && known) {
+      return {
+        child: type.child,
+        length: (known.value as Slice).lengthValue,
+        sentinel: type.sentinel,
+        viaPointer: true,
+        read: (value) => {
+          const slice = value as Slice;
+          return Array.from({ length: slice.length }, (_, index) => slice.get(index));
+        },
+      };
+    }
     if (type.kind === 'struct' && type.isTuple) {
       const fields = type.fields ?? [];
       return {
