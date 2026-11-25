@@ -471,7 +471,6 @@ const SET_VALUES = [
   'deleteFindMax',
 ];
 
-/** The modules a program may import, by name. */
 /** The names `Language.Haskell.TH` and its modules export: those its source declares, but its own helpers. */
 const TEMPLATE_HASKELL_MODULE: PublicModule = (() => {
   const internal =
@@ -489,6 +488,7 @@ const TEMPLATE_HASKELL_MODULE: PublicModule = (() => {
   };
 })();
 
+/** The modules a program may import, by name. */
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
   'Data.List': { from: 'Base', types: [], values: DATA_LIST_VALUES },
@@ -1317,7 +1317,7 @@ export const UNIMPLEMENTED_LIBRARY_VALUES: Record<string, readonly string[]> = {
     'pathsToRoot',
     'pathsFromRoot',
   ],
-  'Data.Fixed': ['resolution', 'showFixed', "mod'", 'MkFixed'],
+  'Data.Fixed': ['resolution', 'showFixed', 'MkFixed'],
   'Data.List.NonEmpty': [
     'prependList',
     'appendList',
@@ -1327,7 +1327,6 @@ export const UNIMPLEMENTED_LIBRARY_VALUES: Record<string, readonly string[]> = {
     'permutations1',
     'groupAllWith1',
     'groupWith1',
-    'sortWith',
   ],
 };
 
