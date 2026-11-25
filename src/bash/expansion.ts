@@ -722,7 +722,7 @@ export class Expander {
   }
 }
 
-export function isListExpansionSyntax(expansion: ParameterExpansion): boolean {
+function isListExpansionSyntax(expansion: ParameterExpansion): boolean {
   if (expansion.prefix === '#') return false;
   if (expansion.name === '@' || expansion.name === '*') return true;
   if (expansion.subscript?.text === '@' || expansion.subscript?.text === '*') return true;

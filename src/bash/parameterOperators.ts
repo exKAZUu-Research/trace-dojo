@@ -5,7 +5,7 @@ import { ATTRIBUTE_ORDER, rejectListInScalarContext, rejectUnsupportedExpansion 
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
-import { type Expander, isListExpansionSyntax, type ParameterValue, type SubscriptRef } from './expansion';
+import { type Expander, type ParameterValue, type SubscriptRef } from './expansion';
 import {
   breakSegment,
   EMPTY_LIST_SEGMENT,
@@ -52,7 +52,6 @@ export function applyOperator(
 ): WordSegment[] {
   const operator = expansion.operator as string;
   const { argument } = expansion;
-  rejectNestedListParts(argument);
   switch (operator) {
     case ':-':
     case '-':
@@ -63,7 +62,7 @@ export function applyOperator(
     case ':+':
     case '+': {
       const colon = operator.startsWith(':');
-      const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
+      const isUnset = hasNoTargetValues(value);
       const isNull = isUnset || (colon && isEmptyParameterValue(expander, value, ctx.inDouble));
       const kind = operator.at(-1) as string;
       if (kind === '+') {
@@ -77,6 +76,7 @@ export function applyOperator(
     case '##':
     case '%':
     case '%%': {
+      if (hasNoTargetValues(value)) return mapPatternRemoval(expander, shell, value, ctx, (text) => text);
       const pattern = expander.patternOf(expandArgument(expander, argument, ctx, true));
       return mapPatternRemoval(expander, shell, value, ctx, (text) => removePattern(text, pattern, operator, shell));
     }
@@ -84,6 +84,7 @@ export function applyOperator(
     case '//':
     case '/#':
     case '/%': {
+      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text);
       const { pattern: patternParts, replacement } = splitReplacement(argument);
       const pattern = expander.patternOf(expandArgument(expander, patternParts, ctx, true));
       const replace = replacement === undefined ? [] : expandArgument(expander, replacement, ctx, true);
@@ -98,6 +99,7 @@ export function applyOperator(
     case ',,':
     case '~':
     case '~~': {
+      if (hasNoTargetValues(value)) return mapValues(expander, value, ctx, (text) => text);
       const pattern = argument.length > 0 ? expander.patternOf(expandArgument(expander, argument, ctx, true)) : '?';
       return mapValues(expander, value, ctx, (text) => changeCase(text, pattern, operator, shell));
     }
@@ -110,18 +112,15 @@ export function applyOperator(
   }
 }
 
+function hasNoTargetValues(value: ParameterValue): boolean {
+  return value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
+}
+
 function isEmptyParameterValue(expander: Expander, value: ParameterValue, inDouble: boolean): boolean {
   if (value.kind === 'scalar') return (value.value ?? '') === '';
   const sep = value.star && inDouble ? expander.ifsJoiner() : ' ';
   if (value.values.length > 1 && sep !== '') return false;
   return value.values.every((element) => element === '');
-}
-
-function rejectNestedListParts(parts: readonly WordPart[]): void {
-  for (const part of parts) {
-    if (part.kind === 'parameter' && isListExpansionSyntax(part)) rejectListInScalarContext(part.text);
-    else if (part.kind === 'double') rejectNestedListParts(part.parts);
-  }
 }
 
 /** Expands a scalar-only operator argument word (list expansions inside operator words are gated by `Expander`). */
