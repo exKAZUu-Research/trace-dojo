@@ -78,6 +78,18 @@ interface CallableShape {
 const functionExpressionTypes = new Set(['arrow_function', 'function_expression', 'generator_function']);
 
 /** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
+/** The kinds of names whose type tsc takes as declared explicitly, which an assertion call may go through. */
+const explicitlyTypedKinds = new Set(['class', 'function', 'namespace', 'enum']);
+/** The declarations of a namespace's exports whose type tsc takes as declared explicitly. */
+const explicitlyTypedDeclarations = new Set([
+  'function_declaration',
+  'generator_function_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+  'internal_module',
+  'enum_declaration',
+]);
+
 export class Calls {
   /** The signature each call resolved to, for the type predicates that narrow its arguments. */
   private readonly resolved = new Map<number, Signature>();
@@ -583,7 +595,7 @@ export class Calls {
         const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
         if (!symbol) return undefined;
         const declaration = symbol.valueDeclaration;
-        if (symbol.valueKind === 'class' || symbol.valueKind === 'function' || declaration?.childForFieldName('type'))
+        if (explicitlyTypedKinds.has(symbol.valueKind ?? '') || declaration?.childForFieldName('type'))
           return this.c.expressions.valueTypeOf(symbol);
         return undefined;
       }
@@ -602,7 +614,12 @@ export class Calls {
           this.c.relations.removeNullish(receiver),
           this.c.classes.propertyKey(expression, property)
         );
-        return member?.isMethod || member?.declaration?.childForFieldName('type') ? member.type() : undefined;
+        const declaration = member?.declaration;
+        const isExplicit =
+          member?.isMethod ||
+          explicitlyTypedDeclarations.has(declaration?.type ?? '') ||
+          declaration?.childForFieldName('type');
+        return isExplicit ? member?.type() : undefined;
       }
       default: {
         return undefined;
