@@ -468,8 +468,8 @@ test('a trace records a model program that reads standard input', () => {
 test.each([
   [
     'reads standard input',
-    String.raw`const fs = require('fs'); const [n, ...rest] = fs.readFileSync(0, 'utf8').trim().split('\n').map(Number); console.log(n, rest.reduce((a, b) => a + b, 0)); console.log(fs.readFileSync('/dev/stdin', 'utf8') === '');`,
-    { stdout: '2 30\ntrue\n', stderr: '', finalFiles: { 'in.txt': 'abc' } },
+    String.raw`const fs = require('fs'); const [n, ...rest] = fs.readFileSync(0, 'utf8').trim().split('\n').map(Number); console.log(n, rest.reduce((a, b) => a + b, 0)); console.log(fs.readFileSync('/dev/stdin', 'utf8') === '', fs.readFileSync('/dev/fd/0', 'utf8') === '');`,
+    { stdout: '2 30\ntrue true\n', stderr: '', finalFiles: { 'in.txt': 'abc' } },
   ],
   [
     'writes files',

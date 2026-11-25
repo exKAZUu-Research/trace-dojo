@@ -20,8 +20,8 @@ export interface ProgramOutput {
 
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
-/** The path that reads standard input as a file, as on Linux. */
-const STDIN_PATH = '/dev/stdin';
+/** The paths that read standard input as a file, as on Linux. */
+const STDIN_PATHS = new Set(['/dev/stdin', '/dev/fd/0']);
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which
@@ -52,10 +52,10 @@ export class ProgramIO {
 
   /**
    * Opens a file to read, which reads what the file holds as it reads, as a POSIX file descriptor does, and where
-   * `/dev/stdin` reads what remains of standard input.
+   * `/dev/stdin` or `/dev/fd/0` reads what remains of standard input.
    */
   openReader(path: string): TextReader {
-    if (resolvePath(path) === STDIN_PATH) return this.stdin.reader;
+    if (STDIN_PATHS.has(resolvePath(path))) return this.stdin.reader;
     return new TextReader(this.files.openForReading(path), this.budget);
   }
 
