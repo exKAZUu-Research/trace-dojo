@@ -15,7 +15,7 @@ import {
 } from './compilerBase';
 import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
-import { propertyRepr, returnRepr } from './dispatch';
+import { instanceOf, propertyRepr, returnRepr } from './dispatch';
 import { setReifiedAccess } from './reified';
 import { Frame, type FunctionInfo, localEnvOf, MISSING, UNASSIGNED } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
@@ -275,7 +275,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       }
       if (dispatch) {
         dispatch.slot = context.allocate('\0dispatchReceiver', dispatch.type, false);
-        symbol.passesDispatchReceiver = true;
+        symbol.dispatchReceiverIndex = dispatch.slot;
       }
       const reified = symbol.typeParameters.filter((param) => param.isReified);
       if (reified.length > 0 && decl.body) {
@@ -446,7 +446,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const local = this.localCapture(symbol.owner, context);
     symbol.invoke = local
       ? (caller, receiver, args, callRow) => {
-          const { captured, enclosing } = local(caller, receiver);
+          const { captured, enclosing } = local(caller, instanceOf(symbol, receiver, args));
           return caller.runtime.call(info, caller, captured, receiver, args, callRow, runs, enclosing);
         }
       : (caller, receiver, args, callRow) => caller.runtime.call(info, caller, none, receiver, args, callRow, runs);

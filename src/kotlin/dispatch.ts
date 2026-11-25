@@ -39,6 +39,11 @@ export function isVirtual(member: FunctionSymbol | PropertySymbol): boolean {
   return member.isAbstract || member.isOpen || (member.isOverride && owner.isInheritable) || owner.isInterface;
 }
 
+/** The instance a member of a class runs on: the receiver, or for a member extension, the value its call passes. */
+export function instanceOf(symbol: FunctionSymbol, receiver: Value, args: Value[]): Value {
+  return symbol.dispatchReceiverIndex === undefined ? receiver : args[symbol.dispatchReceiverIndex];
+}
+
 /** How the arguments of a function are held, which a call converts them to. */
 export function parameterReprs(symbol: FunctionSymbol): Repr[] {
   const classes = coreClasses();

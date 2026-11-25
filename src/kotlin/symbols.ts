@@ -206,8 +206,11 @@ export class FunctionSymbol implements MemberBase {
   isInline = false;
   /** The context parameters of `context(name: Type) fun f()`, which calls pass after the arguments. */
   contextParameters: { name: string; type: KType }[] = [];
-  /** Whether calls pass the instance of the class that declares the extension, after the context arguments. */
-  passesDispatchReceiver = false;
+  /**
+   * For a member extension, the index among the values a call passes of the instance of the class that declares it,
+   * which calls pass after the context arguments.
+   */
+  dispatchReceiverIndex: number | undefined;
   /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
   passesTypeArguments = false;
   /** The opt-in markers on the function, which its calls need. */

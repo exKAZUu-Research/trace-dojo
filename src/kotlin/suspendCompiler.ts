@@ -11,7 +11,7 @@ import {
   Scope,
 } from './compilerBase';
 import { type FunctionEntry } from './declarationCompiler';
-import { returnRepr } from './dispatch';
+import { instanceOf, returnRepr } from './dispatch';
 import { LocalCompiler } from './localCompiler';
 import { framedInstanceTest } from './reified';
 import { type Frame, KotlinThrow, LoopSignal, MISSING, ReturnSignal, SuspendCall, type Suspension } from './runtime';
@@ -70,7 +70,10 @@ export abstract class SuspendCompiler extends LocalCompiler {
     const local = this.localCapture(symbol.owner, context);
     const none: unknown[] = [];
     symbol.invokeSuspend = (caller, receiver, args, callRow) => {
-      const { captured, enclosing } = local?.(caller, receiver) ?? { captured: none, enclosing: undefined };
+      const { captured, enclosing } = local?.(caller, instanceOf(symbol, receiver, args)) ?? {
+        captured: none,
+        enclosing: undefined,
+      };
       return caller.runtime.callSuspend(info, caller, captured, receiver, args, callRow, run, enclosing);
     };
     symbol.invoke = suspendOnly(symbol.name);

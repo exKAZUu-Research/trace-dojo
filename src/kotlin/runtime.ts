@@ -50,16 +50,15 @@ export interface LocalEnv {
 }
 
 /**
- * What the declaration of a local function or class made, as the frame calling it sees it: what the caller's code
- * captured, as a lambda that outlives the declaring block does, or the slot of the declaring frame the caller runs in.
+ * What the declaration of a local function or class made, as the frame calling it sees it: the slot of the declaring
+ * frame, when the call is in the declaring code itself, or else what the caller's code captured, as every other use
+ * registers it to.
  */
 export function localEnvOf(caller: Frame, key: unknown, declaringInfo: FunctionInfo, slot: number): LocalEnv {
+  if (caller.info === declaringInfo) return caller.locals[slot] as unknown as LocalEnv;
   const index = caller.info.localEnvs?.get(key);
-  if (index !== undefined) return caller.captured[index] as LocalEnv;
-  for (let frame: Frame | undefined = caller; frame; frame = frame.enclosing) {
-    if (frame.info === declaringInfo) return frame.locals[slot] as unknown as LocalEnv;
-  }
-  throw new Error('A local function or class was used outside the code that declares it');
+  if (index === undefined) throw new Error('A local function or class was used by code that does not capture it');
+  return caller.captured[index] as LocalEnv;
 }
 
 export type Invoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
