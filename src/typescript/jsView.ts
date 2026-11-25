@@ -296,7 +296,7 @@ function namespaceView(node: TreeNode, binder: Binder): ViewNode {
  */
 function importView(node: TreeNode): ViewNode {
   const clause = node.childForFieldName('import_clause');
-  const source = node.childForFieldName('source') ?? clause?.childForFieldName('source');
+  const source = node.childForFieldName('source');
   if (!clause || !source || node.children.some((child) => child?.type === 'type')) return leaf(node, 'empty_statement');
   const bindings = importBindings(node, clause, source);
   if (bindings.length === 0) return leaf(node, 'empty_statement');
@@ -334,13 +334,11 @@ function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [st
         fieldName: 'arguments',
       },
     ]);
-  const parts = clause.type === 'import_require_clause' ? [clause] : clause.namedChildren;
-  return parts.flatMap((part): [string, ViewNode][] => {
+  return clause.namedChildren.flatMap((part): [string, ViewNode][] => {
     // A default import is the whole module, as tsx's interop gives a CommonJS module without a default export.
     if (part?.type === 'identifier') return [[part.text, required()]];
     const name = part?.namedChildren[0];
-    if ((part?.type === 'import_require_clause' || part?.type === 'namespace_import') && name)
-      return [[name.text, required()]];
+    if (part?.type === 'namespace_import' && name) return [[name.text, required()]];
     if (part?.type !== 'named_imports') return [];
     return part.namedChildren.flatMap((specifier): [string, ViewNode][] => {
       const imported = specifier?.childForFieldName('name');

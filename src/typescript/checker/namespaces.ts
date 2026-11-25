@@ -205,6 +205,12 @@ export class Namespaces {
       );
     const source = node.childForFieldName('source');
     const clause = node.childForFieldName('import_clause');
+    // tsc without `--module` compiles to ECMAScript modules, which have no `import x = require("m")`.
+    if (clause?.type === 'import_require_clause')
+      this.c.error(
+        node,
+        `ECMAScript モジュールを対象にする場合は、インポート代入を使用できません。代わりに 'import * as ns from "mod"'、'import {a} from "mod"'、'import d from "mod"' などのモジュール書式の使用をご検討ください。`
+      );
     if (!source || !clause || clause.type === 'import_require_clause') return;
     const module = this.moduleNamed(stringValue(source));
     if (!module) return;
