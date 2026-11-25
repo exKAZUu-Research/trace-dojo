@@ -3,6 +3,7 @@ import type { ClassEntity, ConInfo, ValueEntity } from './entities';
 import { compileError } from './errors';
 import type { LocalVar, RBinding, RClause, RExpr, RPat } from './rast';
 import { newLocal, type RDataDecl } from './rename';
+import { rolesOf } from './roles';
 import type { Span } from './syntax';
 import { splitApp, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -64,6 +65,7 @@ export function deriveInstance(decl: RDataDecl, cls: ClassEntity, support: Suppo
     case 'Functor':
     case 'Foldable':
     case 'Traversable': {
+      if (rolesOf(decl.entity).at(-1) === 'phantom') return derivePhantomFunctorLike(builder, cls.name);
       return deriveFunctorLike(new FieldShapes(builder, decl.entity.arity - 1), cls.name, cons);
     }
     case 'Lift': {
@@ -291,6 +293,25 @@ function rebuild(
     result = builder.call('<*>', result, builder.app(part.effect as RExpr, builder.local(part.value)));
   }
   return result;
+}
+
+/**
+ * GHC's instances for a type whose last parameter is phantom, which never look at the value: `fmap _ = coerce`,
+ * `foldMap _ _ = mempty`, and `traverse _ z = pure (coerce z)`.
+ */
+function derivePhantomFunctorLike(b: Builder, className: string): RBinding[] {
+  switch (className) {
+    case 'Functor': {
+      return [b.method('fmap', [b.clause([b.wild()], b.global('coerce'))])];
+    }
+    case 'Foldable': {
+      return [b.method('foldMap', [b.clause([b.wild(), b.wild()], b.global('mempty'))])];
+    }
+    default: {
+      const z = b.newVar('z');
+      return [b.method('traverse', [b.clause([b.wild(), b.pvar(z)], b.call('pure', b.call('coerce', b.local(z))))])];
+    }
+  }
 }
 
 function deriveFunctorLike(shapes: FieldShapes, className: string, cons: ConInfo[]): RBinding[] {
