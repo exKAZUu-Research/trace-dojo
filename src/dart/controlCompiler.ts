@@ -19,12 +19,13 @@ import { type CompiledPattern, PatternCache } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
 import { type ConditionFlow, Flow, type LocalVar } from './scope';
 import {
-  advanceCountedLoop,
   type Completion,
+  copyLoopVariables,
   type CountedLoop,
   type Exec,
   type GenExec,
   loopCompletion,
+  runLoopUpdates,
   startCountedLoop,
   StatementCompiler,
 } from './statementCompiler';
@@ -1053,7 +1054,9 @@ function genForLoop(
         const outcome = loopCompletion(completion, labels);
         if (outcome !== 'continue') return outcome;
       }
-      yield* evaluateParts(frame, resume.update, () => advanceCountedLoop(loop, frame));
+      // The copy comes before the update's steps, which may already assign the loop variable.
+      copyLoopVariables(loop, frame);
+      yield* evaluateParts(frame, resume.update, () => runLoopUpdates(loop, frame));
     }
   };
 }
