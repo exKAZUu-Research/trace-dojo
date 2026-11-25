@@ -1,4 +1,5 @@
 import { type FileHandle, FileSystemError, type TextReader } from '../../interpreter/programIo';
+import { normalizeSlashes } from '../../java/builtinIoSupport';
 import { stringHash, stringOf } from '../format';
 import { type Frame, ProgramExit } from '../runtime';
 import { KObject, NULL, type Value } from '../values';
@@ -32,10 +33,11 @@ function newFile(path: string): KObject {
 }
 
 /** The path of `child` under `parent`, which Java joins with `/` unless `parent` is empty. */
+/** A File's path from its parent's and its own, normalized as java.io.File normalizes them, as the Java interpreter does. */
 function joined(parent: string | undefined, child: string): string {
-  if (parent === undefined) return child;
-  if (parent === '') return `/${child}`;
-  return parent.endsWith('/') ? `${parent}${child}` : `${parent}/${child}`;
+  if (parent === undefined) return normalizeSlashes(child);
+  if (parent === '') return normalizeSlashes(`/${child}`);
+  return normalizeSlashes(`${parent}/${child}`);
 }
 
 function nameOf(path: string): string {
@@ -84,7 +86,7 @@ function utf8Length(text: string): number {
 }
 
 defineNative('java.io.File.<init>(String)', (_frame, receiver, [path]) => {
-  (receiver as KObject).native = { path };
+  (receiver as KObject).native = { path: normalizeSlashes(path as string) };
 });
 defineNative('java.io.File.<init>(String?, String)', (_frame, receiver, [parent, child]) => {
   (receiver as KObject).native = { path: joined(parent === NULL ? undefined : (parent as string), child as string) };

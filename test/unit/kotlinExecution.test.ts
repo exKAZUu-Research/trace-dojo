@@ -6682,6 +6682,12 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[true, false]\n[8, 0]\n' });
 });
 
+test('normalizes the paths of files as java.io.File does', () => {
+  const source = `import java.io.File
+fun main() { println(listOf(File("a/b/").name, File("a", "/b").path, File("a") == File("a/"))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[b, a/b, true]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G
