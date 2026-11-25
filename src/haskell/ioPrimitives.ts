@@ -1,9 +1,8 @@
 import { type FileHandle as FileWriter, FileSystemError, resolvePath, type TextReader } from '../interpreter/programIo';
-import { CONS_CON } from './builtinTypes';
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
 import { cons, NIL, nullary, RunNext, TailCall, unpackString } from './machine';
-import { bool, define, forceString, outputHandles, showSignedInt, unit } from './primitives';
+import { bool, define, forceString, outputHandles, showSignedInt, unit, writeString } from './primitives';
 import type { Runtime } from './runtime';
 import { ConValue, type Dict, HaskellException, IOPrim, RefValue, type Slot, Thunk, type Value } from './values';
 
@@ -232,27 +231,6 @@ define('hPutStr', 2, [], ([handle, text], runtime) =>
     return unit();
   })
 );
-
-/** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
-function writeString(slot: Slot, runtime: Runtime, write: (chunk: string) => void): void {
-  let buffer = '';
-  try {
-    let current = runtime.machine.force(slot) as ConValue;
-    while (current.con === CONS_CON) {
-      const character = runtime.machine.force(current.fields[0]) as string;
-      const codePoint = character.codePointAt(0)!;
-      buffer += codePoint >= 0xd8_00 && codePoint <= 0xdf_ff ? '?' : character;
-      if (buffer.length >= 256) {
-        write(buffer);
-        buffer = '';
-      }
-      current = runtime.machine.force(current.fields[1]) as ConValue;
-      runtime.spend();
-    }
-  } finally {
-    write(buffer);
-  }
-}
 
 function readerOf(entry: OpenHandle, location: string): TextReader {
   checkUsable(entry, location);

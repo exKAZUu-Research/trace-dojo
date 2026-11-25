@@ -728,9 +728,9 @@ define('ioBind', 2, [], ([m, k]) => new IOBind(m, k));
 define('ioThen', 2, [], ([m, n]) => new IOThen(m, n));
 
 /** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
-function writeLazily(slot: Slot, runtime: Runtime, channel: 'stdout' | 'stderr', suffix: string): void {
+/** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
+export function writeString(slot: Slot, runtime: Runtime, write: (chunk: string) => void): void {
   let buffer = '';
-  const out = runtime.io[channel];
   try {
     let current = runtime.machine.force(slot) as ConValue;
     while (current.con === CONS_CON) {
@@ -738,16 +738,15 @@ function writeLazily(slot: Slot, runtime: Runtime, channel: 'stdout' | 'stderr',
       const codePoint = character.codePointAt(0)!;
       buffer += codePoint >= 0xd8_00 && codePoint <= 0xdf_ff ? '?' : character;
       if (buffer.length >= 256) {
-        out.write(buffer);
+        write(buffer);
         buffer = '';
       }
       current = runtime.machine.force(current.fields[1]) as ConValue;
       runtime.spend();
     }
   } finally {
-    out.write(buffer);
+    write(buffer);
   }
-  if (suffix) out.write(suffix);
 }
 
 define(
@@ -759,7 +758,7 @@ define(
       'putStr',
       () => {
         outputHandles.checkStdout(runtime, 'hPutStr');
-        writeLazily(text, runtime, 'stdout', '');
+        writeString(text, runtime, (chunk) => runtime.io.stdout.write(chunk));
         return unit();
       },
       [text]
@@ -774,7 +773,8 @@ define(
       'putStrLn',
       () => {
         outputHandles.checkStdout(runtime, 'hPutStr');
-        writeLazily(text, runtime, 'stdout', '\n');
+        writeString(text, runtime, (chunk) => runtime.io.stdout.write(chunk));
+        runtime.io.stdout.write('\n');
         return unit();
       },
       [text]
