@@ -7,7 +7,7 @@ import {
 } from '../interpreter/programIo';
 import type { GlobalDef } from './core';
 import type { ConInfo } from './entities';
-import type { RunNext} from './machine';
+import type { RunNext } from './machine';
 import { cons, NIL, nullary, RunCatching, TailCall, unpackString } from './machine';
 import { bool, define, forceString, showSignedInt, unit, writeString } from './primitives';
 import type { Runtime } from './runtime';
