@@ -193,7 +193,8 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     const variable = this.newVariable(scope, context, BOUND_RECEIVER, compiled.type, false, expression.row, false);
     this.flow.assigned.add(variable);
     const { write } = this.variableAccess(context, variable);
-    const value = coerce(compiled, 'ref');
+    // The variable holds the receiver as its type holds values, as an Int's raw number, which reads of it expect.
+    const value = coerce(compiled, reprOf(this.core, compiled.type));
     return {
       kind: 'bound',
       receiver: { ...compiled, eval: (frame) => (write(frame, value(frame)), undefined) },
