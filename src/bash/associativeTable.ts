@@ -65,11 +65,10 @@ export function unpackIndexedElement(rawElement: CompoundElement): {
   key: string | undefined;
   value: string;
   append: boolean;
-  rawText?: string;
 } {
   if (typeof rawElement === 'string') return { key: undefined, value: rawElement, append: false };
   if ('plain' in rawElement) return { key: undefined, value: rawElement.plain, append: false };
-  return { key: rawElement.key, value: rawElement.value, append: rawElement.append, rawText: rawElement.rawText };
+  return { key: rawElement.key, value: rawElement.value, append: rawElement.append };
 }
 
 interface BucketEntry {
