@@ -420,12 +420,12 @@ function parseHexFloat(text: string): number {
   return sign === '-' ? -value : value;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- C's rules for the integer conversions: sign, precision, grouping, and alternate prefixes.
 function formatInteger(value: bigint, spec: Specification, host: PrintfHost): string {
   const { flags, precision, conversion } = spec;
-  const negative = (conversion === 'd' || conversion === 'i') && value < 0n;
+  const signed = conversion === 'd' || conversion === 'i';
+  const negative = signed && value < 0n;
   const magnitude = negative ? -value : value;
-  const base = conversion === 'o' ? 8 : conversion === 'x' || conversion === 'X' ? 16 : 10;
+  const base = integerBase(conversion);
   let digits = magnitude.toString(base);
   if (conversion === 'X') digits = digits.toUpperCase();
   if (precision === 0 && magnitude === 0n) digits = '';
@@ -434,15 +434,22 @@ function formatInteger(value: bigint, spec: Specification, host: PrintfHost): st
     digits = digits.padStart(precision, '0');
   }
   if (flags.includes("'") && base === 10) digits = groupThousands(digits, host);
-  let prefix = '';
-  if (negative) prefix = '-';
-  else if ((conversion === 'd' || conversion === 'i') && flags.includes('+')) prefix = '+';
-  else if ((conversion === 'd' || conversion === 'i') && flags.includes(' ')) prefix = ' ';
-  if (flags.includes('#')) {
-    if (conversion === 'o' && !digits.startsWith('0')) digits = `0${digits}`;
-    else if ((conversion === 'x' || conversion === 'X') && magnitude !== 0n) prefix += conversion === 'x' ? '0x' : '0X';
+  if (flags.includes('#') && conversion === 'o' && !digits.startsWith('0')) digits = `0${digits}`;
+  return padNumber(integerPrefix(negative, signed, magnitude, spec), digits, spec, precision === undefined);
+}
+
+function integerBase(conversion: string): number {
+  if (conversion === 'o') return 8;
+  return conversion === 'x' || conversion === 'X' ? 16 : 10;
+}
+
+function integerPrefix(negative: boolean, signed: boolean, magnitude: bigint, spec: Specification): string {
+  const { flags, conversion } = spec;
+  let prefix = negative ? '-' : signed && flags.includes('+') ? '+' : signed && flags.includes(' ') ? ' ' : '';
+  if (flags.includes('#') && (conversion === 'x' || conversion === 'X') && magnitude !== 0n) {
+    prefix += conversion === 'x' ? '0x' : '0X';
   }
-  return padNumber(prefix, digits, spec, precision === undefined);
+  return prefix;
 }
 
 function padNumber(prefix: string, digits: string, spec: Specification, zeroAllowed: boolean): string {
