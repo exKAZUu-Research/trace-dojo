@@ -231,7 +231,11 @@ export class Runtime {
     nativeCallRow: number | undefined,
     run: (frame: Frame) => T
   ): T {
-    if (this.frames.length >= LIMITS.maxCallDepth) throw new StackOverflow();
+    if (this.frames.length >= LIMITS.maxCallDepth) {
+      // Code that the compiler runs ends at its evaluation quota first, as Zig's does for deep recursion.
+      if (this.branchCount) throw new BranchQuotaExceeded(callRow, this.branchCount.quota);
+      throw new StackOverflow();
+    }
     const slots = fn.slotCount;
     if (!this.canAllocate(slots)) throw new ExecutionLimitError('storage');
     this.spend(Math.ceil(slots / 16));
