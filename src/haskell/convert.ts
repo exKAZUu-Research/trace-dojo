@@ -1055,10 +1055,9 @@ function declarationHead(features: ConvertContext, node: Node): { name: QName; n
 }
 
 function convertNewtype(features: ConvertContext, node: Node, isInstance = false): Decl {
-  for (const name of ['forall', 'kind']) {
-    const child = field(node, name);
-    if (child) throw unsupported(child);
-  }
+  const forallNode = field(node, 'forall');
+  if (forallNode) throw unsupported(forallNode);
+  const kindNode = field(node, 'kind');
   const contextNode = field(node, 'context');
   if (contextNode && !features.allows('datatypeContexts')) {
     throw syntaxError(spanOf(contextNode), 'newtype 宣言に文脈を書くには、DatatypeContexts の拡張が要ります。');
@@ -1092,6 +1091,7 @@ function convertNewtype(features: ConvertContext, node: Node, isInstance = false
     deriving: convertDerivingClauses(features, node),
     span: spanOf(node),
     newtype: true,
+    ...(kindNode ? { kindSig: convertKind(features, kindNode) } : {}),
     paramKinds: isInstance ? undefined : typeParamKinds(features, node),
   };
 }
