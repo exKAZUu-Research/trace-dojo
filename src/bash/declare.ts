@@ -2,6 +2,7 @@
 import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
 import { expandBraces } from './braces';
+import { assignDeclaredOperand, assignLocally, findOperandEquals, hasValue, isCompound } from './declareAssign';
 import { type PrefixedDeclareHooks, tryDeclarePrefixed } from './declarePrefixed';
 import { printDeclarations } from './declarePrint';
 import { DiscardSignal } from './runtime';
@@ -509,6 +510,7 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
 interface DeclarationDestination {
   variable: Variable;
   referencedSubscript?: string;
+  createdGlobal?: boolean;
 }
 
 interface PreUnsetNamerefStore extends DeclarationDestination {
@@ -519,6 +521,7 @@ interface PreUnsetNamerefStore extends DeclarationDestination {
   elementBaseName?: string;
   failedBase?: boolean;
   invalidBaseTarget?: string;
+  nestedInvalidTarget?: string;
   preResolved?: { resolved: string } | { cyclicName: string };
 }
 
@@ -616,6 +619,8 @@ function declareOne(
     isLocal,
     assigns: assignMode !== 'none',
     isSubscripted,
+    operand,
+    parsed,
   });
   if (
     !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, {
@@ -641,7 +646,11 @@ function declareOne(
           parsed,
           assignMode
         );
-  finishDeclarationEffects(ok, destination.variable, preUnsetStore, options.set.has('r'), priorKind, onMaterialize);
+  finishDeclarationEffects(ok, destination, preUnsetStore, options.set.has('r'), priorKind, {
+    pendingNameref: pendingRef !== undefined,
+    onMaterialize,
+    globalScope: shell.state.scopes[0],
+  });
   return ok;
 }
 
@@ -654,6 +663,9 @@ function applyDeclaredAttributes(
   ctx: { operandName: string; operand: DeclarationArgument; assignMode: AssignMode; isSubscripted: boolean }
 ): boolean {
   const { operandName, operand, assignMode, isSubscripted } = ctx;
+  if (rejectPreUnsetDeclarationHeader(shell, builtin, destination.variable.name, preUnsetStore, assignMode)) {
+    return false;
+  }
   const assigns = assignMode !== 'none' || isCompound(operand);
   const subscriptsStore = isSubscripted && assignMode !== 'none';
   if (preUnsetStore?.deferUnsetN && (subscriptsStore || options.set.has('a') || options.set.has('A'))) {
@@ -695,6 +707,24 @@ function applyDeclaredAttributes(
   );
 }
 
+function rejectPreUnsetDeclarationHeader(
+  shell: Shell,
+  builtin: string,
+  linkName: string,
+  preUnsetStore: PreUnsetNamerefStore | undefined,
+  assignMode: AssignMode
+): boolean {
+  if (preUnsetStore?.nestedInvalidTarget !== undefined) {
+    shell.reportError(`${builtin}: \`${preUnsetStore.nestedInvalidTarget}': not a valid identifier`);
+    return true;
+  }
+  if (preUnsetStore?.deferUnsetN && assignMode !== 'none' && preUnsetStore.variable.attributes.has('r')) {
+    shell.reportError(`${builtin}: ${linkName}: readonly variable`);
+    return true;
+  }
+  return false;
+}
+
 function convertSubscriptedNameref(shell: Shell, variable: Variable, { set, unset }: Options): void {
   if (!variable.attributes.has('n') || conversionError(variable, set, unset, true)) return;
   variable.attributes.delete('n');
@@ -729,8 +759,14 @@ function applyReferentArrayKind(
     shell.reportError(`${builtin}: ${reportedName}: ${kindErr}`);
     return false;
   }
-  applyArrayKindAttributes(shell, referent, becomesAssoc, becomesIndexed, false);
-  if (options.set.has('g') && isIndexedCell(referent) && preUnsetStore.preResolved === undefined) {
+  if (shell.isScalarDynamic(referent.name)) {
+    const materialized = materializeDeclaredScalarDynamic(shell, referent.name, options.set, isSubscripted);
+    shell.state.scopes[0].set(referent.name, materialized);
+    preUnsetStore.variable = materialized;
+  }
+  const targetReferent = preUnsetStore.variable;
+  applyArrayKindAttributes(shell, targetReferent, becomesAssoc, becomesIndexed, false);
+  if (options.set.has('g') && isIndexedCell(targetReferent) && preUnsetStore.preResolved === undefined) {
     preUnsetStore.preResolved = resolveNameInScopes(shell.state.scopes, preUnsetStore.operandName);
   }
   return true;
@@ -849,16 +885,21 @@ function finishElementAliasAttributeBuiltin(
 
 function finishDeclarationEffects(
   ok: boolean,
-  variable: Variable,
+  destination: DeclarationDestination,
   preUnsetStore: PreUnsetNamerefStore | undefined,
   setsReadonly: boolean,
   priorKind: VariableValue['kind'] | undefined,
-  onMaterialize: (() => void) | undefined
+  ctx: { pendingNameref: boolean; onMaterialize: (() => void) | undefined; globalScope: Map<string, Variable> }
 ): void {
+  const { variable } = destination;
+  if (!ok && ctx.pendingNameref && destination.createdGlobal) {
+    ctx.globalScope.delete(variable.name);
+    return;
+  }
   if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
   if (ok && preUnsetStore?.extraUnsetLink) preUnsetStore.extraUnsetLink.attributes.delete('n');
   if (setsReadonly) variable.attributes.add('r');
-  notifyIfArrayMaterialized(ok, variable, priorKind, onMaterialize);
+  notifyIfArrayMaterialized(ok, variable, priorKind, ctx.onMaterialize);
 }
 
 function rejectSubscriptedAttributeBuiltin(
@@ -1029,7 +1070,13 @@ function resolvePreUnsetNamerefStore(
   operandName: string,
   finalLink: Variable | undefined,
   { set, unset }: Options,
-  ctx: { isLocal: boolean; assigns: boolean; isSubscripted: boolean }
+  ctx: {
+    isLocal: boolean;
+    assigns: boolean;
+    isSubscripted: boolean;
+    operand: DeclarationArgument;
+    parsed: { subscript?: string; append: boolean; value?: string } | undefined;
+  }
 ): PreUnsetNamerefStore | undefined {
   if (
     ctx.isLocal ||
@@ -1050,9 +1097,23 @@ function resolvePreUnsetNamerefStore(
   );
   if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
   if (referencedSubscript !== undefined) {
-    return ctx.assigns && !ctx.isSubscripted
-      ? resolvePreUnsetElementStore(shell, operandName, finalLink, targetName, referencedSubscript, globalOnly)
-      : undefined;
+    if (!ctx.assigns) return undefined;
+    if (ctx.isSubscripted) {
+      return {
+        operandName,
+        variable: finalLink,
+        finalLink,
+        deferUnsetN: true,
+        nestedInvalidTarget: formatNestedSubscriptOperand(
+          shell,
+          `${targetName}[${referencedSubscript}]`,
+          operandName,
+          ctx.operand,
+          ctx.parsed
+        ),
+      };
+    }
+    return resolvePreUnsetElementStore(shell, operandName, finalLink, targetName, referencedSubscript, globalOnly);
   }
   const variable = ensurePreUnsetScalarStore(shell, targetName, globalOnly);
   const preResolved =
@@ -1064,6 +1125,21 @@ function resolvePreUnsetNamerefStore(
     deferUnsetN: true,
     ...(preResolved ? { preResolved } : {}),
   };
+}
+
+function formatNestedSubscriptOperand(
+  shell: Shell,
+  prefix: string,
+  operandName: string,
+  operand: DeclarationArgument,
+  parsed: { subscript?: string; append: boolean; value?: string } | undefined
+): string {
+  if (typeof operand === 'string') return `${prefix}${operand.slice(operandName.length)}`;
+  const subText = operandSubscriptText(operand, parsed);
+  const valText = operand.value
+    ? shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word))
+    : '';
+  return `${prefix}[${subText}]${operand.append ? '+=' : '='}${valText}`;
 }
 
 function resolvePreUnsetElementStore(
@@ -1106,11 +1182,11 @@ function resolvePreUnsetElementStore(
 }
 
 function ensurePreUnsetScalarStore(shell: Shell, targetName: string, globalOnly: boolean): Variable {
-  let storeVariable = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
-  if (!storeVariable) {
-    storeVariable = { name: targetName, value: undefined, attributes: new Set() };
-    shell.state.scopes[0].set(targetName, storeVariable);
-  }
+  const existing = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
+  if (existing) return existing;
+  if (shell.isDynamic(targetName)) return shell.ensureDynamicAttributeCell(targetName);
+  const storeVariable: Variable = { name: targetName, value: undefined, attributes: new Set() };
+  shell.state.scopes[0].set(targetName, storeVariable);
   return storeVariable;
 }
 
@@ -1211,44 +1287,6 @@ function commitNamerefTarget(
 function convertNamerefTarget(shell: Shell, variable: Variable, target: string): string {
   const raw = variable.attributes.has('i') ? String(BigInt.asIntN(64, shell.evaluateFatalReadonly(target))) : target;
   return applyCaseAttributes(variable, raw);
-}
-
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, declared/store variables, raw/parsed operand, nameref subscript, and +n flag.
-function assignDeclaredOperand(
-  shell: Shell,
-  builtin: string,
-  variable: Variable,
-  storeVariable: Variable,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  referencedSubscript?: string,
-  bypassNamerefTarget = false
-): boolean {
-  const assignsNamerefTarget = variable.attributes.has('n') && !bypassNamerefTarget;
-  if (parsed?.value !== undefined) {
-    if (assignsNamerefTarget && parsed.subscript === undefined) {
-      return assignReferenceTarget(shell, builtin, variable, parsed.value);
-    }
-    if (parsed.subscript !== undefined) {
-      const sub = expandDeclaredSubscript(shell, storeVariable, parsed.subscript);
-      return shell.assignElementTo(storeVariable, sub, parsed.value, parsed.append);
-    }
-    if (referencedSubscript !== undefined) {
-      const sub = expandDeclaredSubscript(shell, storeVariable, referencedSubscript);
-      return shell.assignElementTo(storeVariable, sub, parsed.value, parsed.append);
-    }
-    return shell.assignScalarTo(storeVariable, parsed.value, parsed.append);
-  }
-  if (typeof operand === 'string') return true;
-  return assignsNamerefTarget
-    ? assignReference(shell, builtin, variable, operand)
-    : assignLocally(shell, storeVariable, operand, referencedSubscript);
-}
-
-function expandDeclaredSubscript(shell: Shell, variable: Variable, rawSubscript: string): string {
-  const expanded = shell.expandDynamicSubscript(rawSubscript);
-  const isAssoc = variable.value?.kind === 'associative' || variable.attributes.has('A');
-  return expanded === '' && rawSubscript !== '' && !isAssoc ? '0' : expanded;
 }
 
 function buildPrefixedHooks(): PrefixedDeclareHooks {
@@ -1370,22 +1408,39 @@ function declaredDestination(
     return undefined;
   }
   const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
-  if (!variable) {
-    const newVarErr = conversionError(candidate, set, unset, isSubscripted || assignsCompound);
-    if (newVarErr) {
-      shell.reportError(`${builtin}: ${targetName}: ${newVarErr}`);
-      return undefined;
-    }
+  if (
+    !variable &&
+    rejectNewDeclaredCandidate(shell, builtin, targetName, candidate, set, unset, isSubscripted || assignsCompound)
+  ) {
+    return undefined;
   }
   if (!variable && targetScope) targetScope.set(targetName, candidate);
   if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assignMode !== 'none')) {
     return undefined;
   }
-  if (!variable && !targetScope) scopes[0].set(targetName, candidate);
+  const createdGlobal = !variable && !targetScope;
+  if (createdGlobal) scopes[0].set(targetName, candidate);
   return {
     variable: candidate,
-    ...(referencedSubscript === undefined ? {} : { referencedSubscript }),
+    createdGlobal,
+    referencedSubscript,
   };
+}
+
+// code-gauge-allow functionParameterCount -- Reports initial conversion errors on newly declared variables.
+function rejectNewDeclaredCandidate(
+  shell: Shell,
+  builtin: string,
+  targetName: string,
+  candidate: Variable,
+  set: Set<string>,
+  unset: Set<string>,
+  impliesArray: boolean
+): boolean {
+  const error = conversionError(candidate, set, unset, impliesArray);
+  if (!error) return false;
+  shell.reportError(`${builtin}: ${targetName}: ${error}`);
+  return true;
 }
 
 function effectiveTargetSet(options: Options): Set<string> {
@@ -1592,11 +1647,19 @@ function resolveElementStoreVariable(
 }
 
 function ensureStoreVariable(shell: Shell, storeName: string): Variable {
-  let storeVariable = shell.findVariable(storeName, false);
-  if (!storeVariable) {
-    storeVariable = { name: storeName, value: undefined, attributes: new Set() };
-    shell.state.scopes[0].set(storeName, storeVariable);
+  const existing = shell.findVariable(storeName, false);
+  if (existing) return existing;
+  if (shell.isDynamic(storeName)) {
+    if (shell.isReadonlyDynamic(storeName) || !shell.isScalarDynamic(storeName)) {
+      return shell.ensureDynamicAttributeCell(storeName);
+    }
+    const materialized = shell.dynamicDeclaration(storeName) as Variable;
+    shell.state.dynamicAttributes.delete(storeName);
+    shell.state.scopes[0].set(storeName, materialized);
+    return materialized;
   }
+  const storeVariable: Variable = { name: storeName, value: undefined, attributes: new Set() };
+  shell.state.scopes[0].set(storeName, storeVariable);
   return storeVariable;
 }
 
@@ -1787,114 +1850,4 @@ function conversionError(
   if (unset.has('a') && variable.value?.kind === 'indexed') return 'cannot destroy array variables in this way';
   if (unset.has('A') && variable.value?.kind === 'associative') return 'cannot destroy array variables in this way';
   return undefined;
-}
-
-/** `declare -n ref=name`, which stores the name a reference refers to, after checking that it can name a variable. */
-function assignReference(shell: Shell, builtin: string, variable: Variable, assignment: Assignment): boolean {
-  if (assignment.value === undefined || assignment.array) return assignLocally(shell, variable, assignment);
-  const target = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(assignment.value as Word));
-  return assignReferenceTarget(shell, builtin, variable, target);
-}
-
-function assignReferenceTarget(shell: Shell, builtin: string, variable: Variable, target: string): boolean {
-  if (!shell.isValidNamerefTarget(target)) {
-    shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
-    variable.attributes.delete('n');
-    return false;
-  }
-  variable.value = { kind: 'scalar', value: target };
-  variable.userAssigned = true;
-  if (shell.hasNamerefCycle(variable)) {
-    shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
-  }
-  return true;
-}
-
-function hasValue(operand: DeclarationArgument, parsed: { value?: string } | undefined): boolean {
-  return typeof operand === 'string'
-    ? parsed?.value !== undefined
-    : operand.value !== undefined || operand.array !== undefined || findOperandEquals(operand.text) !== -1;
-}
-
-function isCompound(operand: DeclarationArgument): boolean {
-  return typeof operand !== 'string' && operand.array !== undefined;
-}
-
-/** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global or vice versa. */
-function assignLocally(
-  shell: Shell,
-  variable: Variable,
-  assignment: Assignment & { expandedElements?: CompoundElement[] },
-  referencedSubscript?: string
-): boolean {
-  const { append } = assignment;
-  if (!assignment.array && assignment.value === undefined && findOperandEquals(assignment.text) === -1) {
-    if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
-    if (variable.attributes.has('A') && !variable.value)
-      variable.value = { kind: 'associative', table: new AssociativeTable() };
-    return true;
-  }
-  const { scopes } = shell.state;
-  const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
-  if (!owner) return true;
-  if (assignment.array) return assignLocallyCompound(shell, variable, assignment, referencedSubscript);
-  const value = assignment.value
-    ? shell.expander.withSpacedStar(() =>
-        shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>)
-      )
-    : '';
-  if (assignment.subscript) {
-    const subscript = variable.attributes.has('A')
-      ? shell.expander.expandAssociativeKey(assignment.subscript)
-      : shell.expander.expandSubscriptString(assignment.subscript);
-    return shell.assignElementTo(variable, subscript, value, assignment.append);
-  }
-  if (referencedSubscript !== undefined) {
-    return shell.assignElementTo(
-      variable,
-      expandDeclaredSubscript(shell, variable, referencedSubscript),
-      value,
-      append
-    );
-  }
-  return shell.assignScalarTo(variable, value, append);
-}
-
-function findOperandEquals(word: string): number {
-  for (let i = 0; i < word.length; i++) {
-    if (word[i] === '[') {
-      const close = skipSubscript(word, i);
-      if (close < word.length) i = close;
-      continue;
-    }
-    if (word[i] === '=') return i;
-  }
-  return -1;
-}
-
-function assignLocallyCompound(
-  shell: Shell,
-  variable: Variable,
-  assignment: Assignment & { expandedElements?: CompoundElement[]; committedCompound?: boolean },
-  referencedSubscript?: string
-): boolean {
-  if (assignment.committedCompound) return true;
-  if (assignment.subscript || referencedSubscript !== undefined) {
-    const sub = assignment.subscript?.text ?? referencedSubscript ?? '';
-    shell.reportError(`${variable.name}[${sub}]: cannot assign list to array member`);
-    return false;
-  }
-  const { elements, error } = assignment.expandedElements
-    ? shell.expander.validateCompoundItems(
-        assignment.expandedElements,
-        variable.attributes.has('A'),
-        true,
-        variable.name
-      )
-    : shell.expander.expandCompound(assignment.array as Word[], variable.attributes.has('A'), true, variable.name);
-  if (variable.attributes.has('A') && !variable.value)
-    variable.value = { kind: 'associative', table: new AssociativeTable() };
-  const ok = shell.assignCompoundTo(variable, elements, assignment.append);
-  if (error) shell.discard(error);
-  return ok;
 }
