@@ -2,7 +2,7 @@ import type { SourceFile } from '../ast';
 import { parseZig } from '../parse';
 import { addDecls } from '../semaBase';
 import type { Namespace, StructType } from '../types';
-import { withPublicSurface } from './portedSurface';
+import { addMembers, unavailableDeclarations } from './native';
 
 /**
  * The declarations of Zig 0.17's `std.lang` (also `std.builtin`) that the language's builtins return or take, such as
@@ -262,9 +262,12 @@ let lang: StructType | undefined;
 /** `std.lang`, whose declarations the compiler analyzes from their source on first use. */
 export function langNamespace(): StructType {
   if (lang) return lang;
-  const file: SourceFile = withPublicSurface(parseZig(SOURCE), 'lang');
+  const file: SourceFile = parseZig(SOURCE);
   const namespace: Namespace = { name: 'lang', decls: new Map(), internal: true };
   addDecls(namespace, file.members);
   lang = { kind: 'struct', isTuple: false, namespace, layout: 'auto', fields: [] };
+  // The declarations of Zig's std.lang that the source leaves out report 「使えません」, as native namespaces' do.
+  const missing = Object.entries(unavailableDeclarations('lang')).filter(([name]) => !namespace.decls.has(name));
+  addMembers(lang, Object.fromEntries(missing));
   return lang;
 }

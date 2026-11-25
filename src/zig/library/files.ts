@@ -1,822 +1,497 @@
 import { FileSystemError, type FileSystemErrorCode } from '../../interpreter/programIo';
-import type { SourceFile, Span } from '../ast';
-import { parseZig } from '../parse';
+import { PANIC, panic } from '../arith';
 import type { Frame } from '../runtime';
-import { addDecls, runtime, type SemaApi } from '../semaBase';
+import { known, type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
   BOOL,
   CONST_U8_SLICE,
-  type Decl,
   type EnumType,
   errorSetOf,
   errorUnionOf,
-  type Namespace,
+  fnType,
   optionalOf,
+  pointerTo,
   sliceOf,
   type StructType,
-  TYPE,
   type Type,
   U8,
   USIZE,
   VOID,
 } from '../types';
-import { decodeUtf8 } from '../utf8';
-import { ErrorValue, type NativeHandle, NULL, type Slice, type Value, ZStruct } from '../values';
-import { compileArgs, expectArgs, fnMember, handle, type Member } from './native';
-import { withPublicSurface } from './portedSurface';
+import { ErrorValue, NULL, type Pointer, Slice, type Value, ZStruct } from '../values';
+import { allocatingWriter, freeWriter, ownWriterSlice } from './allocatingWriter';
+import { allocatorArg } from './common';
+import { allocatorState, ERROR_OUT_OF_MEMORY } from './heap';
+import {
+  addMembers,
+  compileArgs,
+  expectArgs,
+  fnMember,
+  type Member,
+  nativeStruct,
+  receiverAddress,
+  typeMember,
+} from './native';
+import { WRITER, writerState, writeTo } from './writer';
 
 /**
- * The parts of `std.Io` that read standard input and files and that manage files and directories, ported from Zig
- * 0.17's library. Native functions read and write the run's virtual file system, which Java's programs share.
+ * `std.Io`'s Reader and Limit, which read standard input and files from the run's virtual file system, which Java's
+ * programs share. They cover what learners' programs use; the members of Zig's library they leave out report
+ * 「使えません」.
  */
-const SOURCE = `
-const std = @import("std");
 
-pub const Limit = enum(usize) {
-    nothing = 0,
-    unlimited = std.math.maxInt(usize),
-    _,
+// std.Io.Limit --------------------------------------------------------------------------------------------------------
 
-    pub fn limited(n: usize) Limit {
-        return @enumFromInt(n);
-    }
+export const UNLIMITED = (1n << 64n) - 1n;
 
-    pub fn slice(l: Limit, s: []u8) []u8 {
-        return s[0..@min(s.len, @intFromEnum(l))];
-    }
+/** `std.Io.Limit`, a count of bytes or `.unlimited`. */
+export const LIMIT: EnumType = {
+  kind: 'enum',
+  namespace: { name: 'Io.Limit', decls: new Map() },
+  tagType: USIZE,
+  fields: [
+    { name: 'nothing', value: 0n },
+    { name: 'unlimited', value: UNLIMITED },
+  ],
+  exhaustive: false,
 };
 
-pub const Reader = struct {
-    buffer: []u8,
-    seek: usize,
-    end: usize,
-    descriptor: ?usize,
+addMembers(LIMIT, {
+  limited: fnMember(
+    'std.Io.Limit.limited',
+    (sema, call) => {
+      const [count] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Limit.limited'), [USIZE]);
+      return count.known ? known(LIMIT, count.value, call.span) : { ...count, type: LIMIT };
+    },
+    () => ({ type: fnType([USIZE], LIMIT) })
+  ),
+});
 
-    pub const Error = error{ ReadFailed, EndOfStream };
-    pub const ShortError = error{ReadFailed};
-    pub const DelimiterError = error{ ReadFailed, EndOfStream, StreamTooLong };
-    pub const LimitedAllocError = std.mem.Allocator.Error || ShortError || error{StreamTooLong};
-    pub const StreamError = error{ ReadFailed, WriteFailed, EndOfStream };
-    pub const StreamRemainingError = error{ ReadFailed, WriteFailed };
-    pub const StreamDelimiterLimitError = error{ ReadFailed, WriteFailed, StreamTooLong };
-    pub const DiscardDelimiterLimitError = error{ ReadFailed, StreamTooLong };
-    pub const ReadAllocError = Error || std.mem.Allocator.Error;
-    pub const TakeEnumError = Error || error{InvalidEnumTag};
-
-    pub fn fixed(bytes: []const u8) Reader {
-        return .{ .buffer = @constCast(bytes), .seek = 0, .end = bytes.len, .descriptor = null };
-    }
-
-    pub fn buffered(r: *Reader) []u8 {
-        return r.buffer[r.seek..r.end];
-    }
-
-    pub fn bufferedLen(r: *const Reader) usize {
-        return r.end - r.seek;
-    }
-
-    pub fn toss(r: *Reader, n: usize) void {
-        r.seek += n;
-        if (r.seek > r.end) @panic("reached unreachable code");
-    }
-
-    pub fn tossBuffered(r: *Reader) void {
-        r.seek = r.end;
-    }
-
-    fn readMore(r: *Reader) Error!void {
-        const descriptor = r.descriptor orelse return error.EndOfStream;
-        const n = try readInput(descriptor, r.buffer[r.end..]);
-        if (n == 0) return error.EndOfStream;
-        r.end += n;
-    }
-
-    pub fn rebase(r: *Reader, capacity: usize) Error!void {
-        if (r.buffer.len - r.seek >= capacity) return;
-        // A fixed reader ends where its bytes end, as endingRebase does.
-        if (r.descriptor == null) return error.EndOfStream;
-        if (capacity > r.buffer.len) @panic("reached unreachable code");
-        const data = r.buffer[r.seek..r.end];
-        @memmove(r.buffer[0..data.len], data);
-        r.seek = 0;
-        r.end = data.len;
-    }
-
-    pub fn fill(r: *Reader, n: usize) Error!void {
-        if (r.seek + n <= r.end) return;
-        try r.rebase(n);
-        while (r.end < r.seek + n) try r.readMore();
-    }
-
-    pub fn fillMore(r: *Reader) Error!void {
-        try r.rebase(r.end - r.seek + 1);
-        try r.readMore();
-    }
-
-    pub fn peek(r: *Reader, n: usize) Error![]u8 {
-        try r.fill(n);
-        return r.buffer[r.seek..][0..n];
-    }
-
-    pub fn peekGreedy(r: *Reader, n: usize) Error![]u8 {
-        try r.fill(n);
-        return r.buffer[r.seek..r.end];
-    }
-
-    pub fn take(r: *Reader, n: usize) Error![]u8 {
-        const result = try r.peek(n);
-        r.toss(n);
-        return result;
-    }
-
-    pub fn takeArray(r: *Reader, comptime n: usize) Error!*[n]u8 {
-        return (try r.take(n))[0..n];
-    }
-
-    pub fn peekArray(r: *Reader, comptime n: usize) Error!*[n]u8 {
-        return (try r.peek(n))[0..n];
-    }
-
-    pub fn peekByte(r: *Reader) Error!u8 {
-        if (r.seek < r.end) return r.buffer[r.seek];
-        try r.fill(1);
-        return r.buffer[r.seek];
-    }
-
-    pub fn takeByte(r: *Reader) Error!u8 {
-        const result = try r.peekByte();
-        r.seek += 1;
-        return result;
-    }
-
-    pub fn takeByteSigned(r: *Reader) Error!i8 {
-        return @bitCast(try r.takeByte());
-    }
-
-    pub fn discardAll(r: *Reader, n: usize) Error!void {
-        if ((try r.discardShort(n)) != n) return error.EndOfStream;
-    }
-
-    pub fn discardShort(r: *Reader, n: usize) ShortError!usize {
-        var remaining = n;
-        while (remaining > 0) {
-            if (r.seek == r.end) r.fillMore() catch |err| switch (err) {
-                error.EndOfStream => return n - remaining,
-                error.ReadFailed => return error.ReadFailed,
-            };
-            const step = @min(remaining, r.end - r.seek);
-            r.seek += step;
-            remaining -= step;
-        }
-        return n;
-    }
-
-    pub fn discardRemaining(r: *Reader) ShortError!usize {
-        var count: usize = 0;
-        if (r.buffer.len == 0) {
-            var spare: [4096]u8 = undefined;
-            while (true) {
-                const n = try readInput(r.descriptor orelse return count, &spare);
-                if (n == 0) return count;
-                count += n;
-            }
-        }
-        while (true) {
-            count += r.end - r.seek;
-            r.seek = r.end;
-            r.fillMore() catch |err| switch (err) {
-                error.EndOfStream => return count,
-                error.ReadFailed => return error.ReadFailed,
-            };
-        }
-    }
-
-    pub fn readSliceShort(r: *Reader, buffer: []u8) ShortError!usize {
-        var i: usize = 0;
-        while (i < buffer.len) {
-            if (r.buffer.len == 0) {
-                // An unbuffered reader reads straight into the destination.
-                const n = try readInput(r.descriptor orelse return i, buffer[i..]);
-                if (n == 0) return i;
-                i += n;
-                continue;
-            }
-            if (r.seek == r.end) r.fillMore() catch |err| switch (err) {
-                error.EndOfStream => return i,
-                error.ReadFailed => return error.ReadFailed,
-            };
-            const n = @min(buffer.len - i, r.end - r.seek);
-            @memcpy(buffer[i..][0..n], r.buffer[r.seek..][0..n]);
-            r.seek += n;
-            i += n;
-        }
-        return i;
-    }
-
-    pub fn readSliceAll(r: *Reader, buffer: []u8) Error!void {
-        const n = try r.readSliceShort(buffer);
-        if (n != buffer.len) return error.EndOfStream;
-    }
-
-    pub fn peekDelimiterInclusive(r: *Reader, delimiter: u8) DelimiterError![]u8 {
-        if (std.mem.findScalarPos(u8, r.buffer[0..r.end], r.seek, delimiter)) |end| return r.buffer[r.seek .. end + 1];
-        while (true) {
-            const content_len = r.end - r.seek;
-            if (r.buffer.len - content_len == 0) break;
-            try r.fillMore();
-            if (std.mem.findScalarPos(u8, r.buffer[0..r.end], r.seek + content_len, delimiter)) |end|
-                return r.buffer[r.seek .. end + 1];
-        }
-        const descriptor = r.descriptor orelse return error.EndOfStream;
-        if (inputAtEnd(descriptor)) return error.EndOfStream;
-        return error.StreamTooLong;
-    }
-
-    pub fn takeDelimiterInclusive(r: *Reader, delimiter: u8) DelimiterError![]u8 {
-        const result = try r.peekDelimiterInclusive(delimiter);
-        r.toss(result.len);
-        return result;
-    }
-
-    pub fn peekDelimiterExclusive(r: *Reader, delimiter: u8) DelimiterError![]u8 {
-        const result = r.peekDelimiterInclusive(delimiter) catch |err| switch (err) {
-            error.EndOfStream => {
-                const remaining = r.buffer[r.seek..r.end];
-                if (remaining.len == 0) return error.EndOfStream;
-                return remaining;
-            },
-            else => |e| return e,
-        };
-        return result[0 .. result.len - 1];
-    }
-
-    pub fn takeDelimiterExclusive(r: *Reader, delimiter: u8) DelimiterError![]u8 {
-        const result = try r.peekDelimiterExclusive(delimiter);
-        r.toss(result.len);
-        return result;
-    }
-
-    pub fn takeDelimiter(r: *Reader, delimiter: u8) error{ ReadFailed, StreamTooLong }!?[]u8 {
-        const inclusive = r.peekDelimiterInclusive(delimiter) catch |err| switch (err) {
-            error.EndOfStream => {
-                const remaining = r.buffer[r.seek..r.end];
-                if (remaining.len == 0) return null;
-                r.toss(remaining.len);
-                return remaining;
-            },
-            else => |e| return e,
-        };
-        r.toss(inclusive.len);
-        return inclusive[0 .. inclusive.len - 1];
-    }
-
-    pub fn discardDelimiterInclusive(r: *Reader, delimiter: u8) Error!usize {
-        var count: usize = 0;
-        while (true) {
-            if (std.mem.findScalarPos(u8, r.buffer[0..r.end], r.seek, delimiter)) |end| {
-                count += end + 1 - r.seek;
-                r.seek = end + 1;
-                return count;
-            }
-            count += r.end - r.seek;
-            r.seek = r.end;
-            try r.fillMore();
-        }
-    }
-
-    pub fn stream(r: *Reader, w: *Io.Writer, limit: Limit) StreamError!usize {
-        if (r.buffer.len == 0) {
-            // An unbuffered reader passes what it reads straight to the writer.
-            var spare: [4096]u8 = undefined;
-            const n = try readInput(r.descriptor orelse return error.EndOfStream, limit.slice(&spare));
-            if (n == 0) return error.EndOfStream;
-            try w.writeAll(spare[0..n]);
-            return n;
-        }
-        if (r.seek == r.end) try r.fillMore();
-        const buffer = limit.slice(r.buffer[r.seek..r.end]);
-        try w.writeAll(buffer);
-        r.seek += buffer.len;
-        return buffer.len;
-    }
-
-    pub fn streamExact(r: *Reader, w: *Io.Writer, n: usize) StreamError!void {
-        var remaining = n;
-        while (remaining != 0) remaining -= try r.stream(w, .limited(remaining));
-    }
-
-    pub fn streamExact64(r: *Reader, w: *Io.Writer, n: u64) StreamError!void {
-        try r.streamExact(w, @intCast(n));
-    }
-
-    pub fn streamRemaining(r: *Reader, w: *Io.Writer) StreamRemainingError!usize {
-        var offset: usize = 0;
-        while (true) {
-            offset += r.stream(w, .unlimited) catch |err| switch (err) {
-                error.EndOfStream => return offset,
-                else => |e| return e,
-            };
-        }
-    }
-
-    pub fn streamDelimiter(r: *Reader, w: *Io.Writer, delimiter: u8) StreamError!usize {
-        const n = r.streamDelimiterLimit(w, delimiter, .unlimited) catch |err| switch (err) {
-            error.StreamTooLong => unreachable,
-            else => |e| return e,
-        };
-        if (r.seek == r.end) return error.EndOfStream;
-        return n;
-    }
-
-    pub fn streamDelimiterEnding(r: *Reader, w: *Io.Writer, delimiter: u8) StreamRemainingError!usize {
-        return r.streamDelimiterLimit(w, delimiter, .unlimited) catch |err| switch (err) {
-            error.StreamTooLong => unreachable,
-            else => |e| return e,
-        };
-    }
-
-    pub fn streamDelimiterLimit(r: *Reader, w: *Io.Writer, delimiter: u8, limit: Limit) StreamDelimiterLimitError!usize {
-        var remaining = @intFromEnum(limit);
-        while (remaining != 0) {
-            const available = Limit.limited(remaining).slice(r.peekGreedy(1) catch |err| switch (err) {
-                error.ReadFailed => |e| return e,
-                error.EndOfStream => return @intFromEnum(limit) - remaining,
-            });
-            if (std.mem.findScalar(u8, available, delimiter)) |delimiter_index| {
-                try w.writeAll(available[0..delimiter_index]);
-                r.toss(delimiter_index);
-                remaining -= delimiter_index;
-                return @intFromEnum(limit) - remaining;
-            }
-            try w.writeAll(available);
-            r.toss(available.len);
-            remaining -= available.len;
-        }
-        return error.StreamTooLong;
-    }
-
-    pub fn discardDelimiterExclusive(r: *Reader, delimiter: u8) ShortError!usize {
-        return r.discardDelimiterLimit(delimiter, .unlimited) catch |err| switch (err) {
-            error.StreamTooLong => unreachable,
-            else => |e| return e,
-        };
-    }
-
-    pub fn discardDelimiterLimit(r: *Reader, delimiter: u8, limit: Limit) DiscardDelimiterLimitError!usize {
-        var remaining = @intFromEnum(limit);
-        while (remaining != 0) {
-            const available = Limit.limited(remaining).slice(r.peekGreedy(1) catch |err| switch (err) {
-                error.ReadFailed => |e| return e,
-                error.EndOfStream => return @intFromEnum(limit) - remaining,
-            });
-            if (std.mem.findScalar(u8, available, delimiter)) |delimiter_index| {
-                r.toss(delimiter_index);
-                remaining -= delimiter_index;
-                return @intFromEnum(limit) - remaining;
-            }
-            r.toss(available.len);
-            remaining -= available.len;
-        }
-        return error.StreamTooLong;
-    }
-
-    pub fn discard(r: *Reader, limit: Limit) Error!usize {
-        if (r.seek == r.end) try r.fillMore();
-        const n = @min(r.end - r.seek, @intFromEnum(limit));
-        r.seek += n;
-        return n;
-    }
-
-    pub fn discardAll64(r: *Reader, n: u64) Error!void {
-        try r.discardAll(@intCast(n));
-    }
-
-    pub fn peekSentinel(r: *Reader, comptime sentinel: u8) DelimiterError![:sentinel]u8 {
-        const result = try r.peekDelimiterInclusive(sentinel);
-        return result[0 .. result.len - 1 :sentinel];
-    }
-
-    pub fn takeSentinel(r: *Reader, comptime sentinel: u8) DelimiterError![:sentinel]u8 {
-        const result = try r.peekSentinel(sentinel);
-        r.toss(result.len + 1);
-        return result;
-    }
-
-    pub fn readAllocAll(r: *Reader, allocator: std.mem.Allocator, len: usize) ReadAllocError![]u8 {
-        const dest = try allocator.alloc(u8, len);
-        errdefer allocator.free(dest);
-        try r.readSliceAll(dest);
-        return dest;
-    }
-
-    pub fn readAllocShort(r: *Reader, allocator: std.mem.Allocator, len: usize) ReadAllocError![]u8 {
-        const dest = try allocator.alloc(u8, len);
-        errdefer allocator.free(dest);
-        const n = try r.readSliceShort(dest);
-        if (n == dest.len) return dest;
-        return try allocator.realloc(dest, n);
-    }
-
-    pub fn appendRemaining(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), limit: Limit) LimitedAllocError!void {
-        var remaining: usize = if (limit == .unlimited) std.math.maxInt(usize) else @intFromEnum(limit);
-        var spare: [4096]u8 = undefined;
-        while (remaining != 0) {
-            const data = if (r.buffer.len == 0) blk: {
-                const descriptor = r.descriptor orelse return;
-                const n = try readInput(descriptor, spare[0..@min(spare.len, remaining)]);
-                if (n == 0) return;
-                break :blk spare[0..n];
-            } else blk: {
-                if (r.seek == r.end) r.fillMore() catch |err| switch (err) {
-                    error.EndOfStream => return,
-                    error.ReadFailed => return error.ReadFailed,
-                };
-                const n = @min(r.end - r.seek, remaining);
-                defer r.seek += n;
-                break :blk r.buffer[r.seek .. r.seek + n];
-            };
-            try list.appendSlice(gpa, data);
-            remaining -= data.len;
-        }
-        return error.StreamTooLong;
-    }
-
-    pub fn appendExact(r: *Reader, gpa: std.mem.Allocator, list: *std.ArrayList(u8), n: usize) (std.mem.Allocator.Error || Error)!void {
-        const data = try r.take(n);
-        try list.appendSlice(gpa, data);
-    }
-
-    pub inline fn takeInt(r: *Reader, comptime T: type, endian: std.builtin.Endian) Error!T {
-        const n = @divExact(@typeInfo(T).int.bits, 8);
-        return readInt(T, try r.take(n), endian);
-    }
-
-    pub inline fn peekInt(r: *Reader, comptime T: type, endian: std.builtin.Endian) Error!T {
-        const n = @divExact(@typeInfo(T).int.bits, 8);
-        return readInt(T, try r.peek(n), endian);
-    }
-
-    pub fn takeVarInt(r: *Reader, comptime Int: type, endian: std.builtin.Endian, n: usize) Error!Int {
-        return readInt(Int, try r.take(n), endian);
-    }
-
-    pub fn takeEnum(r: *Reader, comptime Enum: type, endian: std.builtin.Endian) TakeEnumError!Enum {
-        const Tag = @typeInfo(Enum).@"enum".tag_type;
-        const int = try r.takeInt(Tag, endian);
-        return std.enums.fromInt(Enum, int) orelse return error.InvalidEnumTag;
-    }
-
-    fn readInt(comptime T: type, bytes: []const u8, endian: std.builtin.Endian) T {
-        const U = @Int(.unsigned, @typeInfo(T).int.bits);
-        var result: U = 0;
-        for (0..bytes.len) |i| {
-            const byte = if (endian == .little) bytes[bytes.len - 1 - i] else bytes[i];
-            result = if (@bitSizeOf(U) > 8) (result << 8) | byte else byte;
-        }
-        return @bitCast(result);
-    }
-
-    pub fn allocRemaining(r: *Reader, gpa: std.mem.Allocator, limit: Limit) LimitedAllocError![]u8 {
-        var list: std.ArrayList(u8) = .empty;
-        defer list.deinit(gpa);
-        try r.appendRemaining(gpa, &list, switch (limit) {
-            .unlimited => limit,
-            else => .limited(@intFromEnum(limit) + 1),
-        });
-        return list.toOwnedSlice(gpa);
-    }
-};
-
-pub const File = struct {
-    pub const OpenError = error{
-        SharingViolation,
-        PipeBusy,
-        NoDevice,
-        PathAlreadyExists,
-        FileNotFound,
-        AccessDenied,
-        PermissionDenied,
-        FileTooBig,
-        IsDir,
-        SymLinkLoop,
-        ProcessFdQuotaExceeded,
-        SystemFdQuotaExceeded,
-        NameTooLong,
-        SystemResources,
-        NoSpaceLeft,
-        NotDir,
-        DeviceBusy,
-        FileLocksUnsupported,
-        FileBusy,
-        WouldBlock,
-        BadPathName,
-        NetworkNotFound,
-        Unexpected,
-        Canceled,
-    };
-
-    pub const Kind = enum {
-        block_device,
-        character_device,
-        directory,
-        named_pipe,
-        sym_link,
-        file,
-        unix_domain_socket,
-        whiteout,
-        door,
-        event_port,
-        unknown,
-    };
-
-    pub const Stat = struct {
-        size: u64,
-        kind: Kind,
-    };
-
-    pub const Reader = struct {
-        interface: Io.Reader,
-
-        pub fn atEnd(r: *File.Reader) bool {
-            // Zig knows the file's size only once a read has met the end.
-            return r.interface.bufferedLen() == 0 and sawInputEnd(r.interface.descriptor.?);
-        }
-    };
-};
-
-pub fn Future(Result: type) type {
-    return struct {
-        result: Result,
-
-        pub fn cancel(f: *@This(), io: Io) Result {
-            _ = io;
-            return f.result;
-        }
-
-        pub fn await(f: *@This(), io: Io) Result {
-            _ = io;
-            return f.result;
-        }
-    };
+export function limitOf(value: Value): number {
+  const limit = value as bigint;
+  return limit >= BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : Number(limit);
 }
 
-/// Runs the function to its end when it is called, so that what runs asynchronously runs in the order it starts.
-pub fn async(io: Io, function: anytype, args: anytype) Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
-    _ = io;
-    return .{ .result = @call(.auto, function, args) };
-}
+// std.Io.Reader -------------------------------------------------------------------------------------------------------
 
-pub fn concurrent(io: Io, function: anytype, args: anytype) error{ConcurrencyUnavailable}!Future(@typeInfo(@TypeOf(function)).@"fn".return_type.?) {
-    _ = io;
-    return .{ .result = @call(.auto, function, args) };
-}
+/** `std.Io.Reader`, whose value holds its buffer, the part of it read, and the descriptor it reads from. */
+export const READER: StructType = nativeStruct(
+  'Io.Reader',
+  {},
+  [
+    { name: 'buffer', type: sliceOf(U8, false), hasDefault: false },
+    { name: 'seek', type: USIZE, hasDefault: false },
+    { name: 'end', type: USIZE, hasDefault: false },
+  ],
+  { kind: 'reader', args: [], storageSlots: 4, byteSize: 40 }
+);
 
-pub const Group = struct {
-    state: usize,
-
-    pub const init: Group = .{ .state = 0 };
-
-    pub fn async(g: *Group, io: Io, function: anytype, args: anytype) void {
-        _ = g;
-        _ = io;
-        _ = @as(error{Canceled}!void, @call(.auto, function, args)) catch {};
-    }
-
-    pub fn concurrent(g: *Group, io: Io, function: anytype, args: anytype) error{ConcurrencyUnavailable}!void {
-        g.async(io, function, args);
-    }
-
-    pub fn await(g: *Group, io: Io) error{Canceled}!void {
-        _ = g;
-        _ = io;
-    }
-
-    pub fn cancel(g: *Group, io: Io) void {
-        _ = g;
-        _ = io;
-    }
-};
-
-/// The errors that the virtual file system gives, which each function below may return.
-pub const FsError = error{ FileNotFound, PathAlreadyExists, IsDir, NotDir, DirNotEmpty, BadPathName };
-
-pub const Dir = struct {
-    path: []const u8,
-
-    pub const OpenFileOptions = struct {
-        mode: Mode = .read_only,
-
-        pub const Mode = enum { read_only, write_only, read_write };
-    };
-
-    pub const CreateFileOptions = struct {
-        read: bool = false,
-        truncate: bool = true,
-        exclusive: bool = false,
-    };
-
-    pub const WriteFileOptions = struct {
-        sub_path: []const u8,
-        data: []const u8,
-        flags: CreateFileOptions = .{},
-    };
-
-    pub const OpenOptions = struct {
-        access_sub_paths: bool = true,
-        iterate: bool = false,
-        follow_symlinks: bool = true,
-    };
-
-    pub const AccessOptions = struct {
-        read: bool = false,
-        write: bool = false,
-        execute: bool = false,
-        follow_symlinks: bool = true,
-    };
-
-    pub const StatFileOptions = struct {
-        follow_symlinks: bool = true,
-    };
-
-    pub const Permissions = struct {
-        bits: u32,
-
-        pub const default_dir: Permissions = .{ .bits = 0o755 };
-        pub const default_file: Permissions = .{ .bits = 0o644 };
-    };
-
-    pub const Entry = struct {
-        name: []const u8,
-        kind: File.Kind,
-    };
-
-    pub const Iterator = struct {
-        dir: Dir,
-        index: usize = 0,
-
-        pub fn next(it: *Iterator, io: Io) error{ AccessDenied, PermissionDenied, SystemResources, Unexpected, Canceled }!?Entry {
-            _ = io;
-            const entry = listEntry(it.dir.path, it.index) orelse return null;
-            it.index += 1;
-            return .{ .name = entry, .kind = kindOf(it.dir.path, entry) };
-        }
-
-        pub fn reset(it: *Iterator) void {
-            it.index = 0;
-        }
-    };
-
-    pub fn cwd() Dir {
-        return .{ .path = "." };
-    }
-
-    pub fn close(dir: Dir, io: Io) void {
-        _ = dir;
-        _ = io;
-    }
-
-    pub fn openFile(dir: Dir, io: Io, sub_path: []const u8, options: OpenFileOptions) (File.OpenError || FsError)!Io.File {
-        _ = io;
-        return openPath(dir.path, sub_path, @intFromEnum(options.mode), false, false, false);
-    }
-
-    pub fn createFile(dir: Dir, io: Io, sub_path: []const u8, flags: CreateFileOptions) (File.OpenError || FsError)!Io.File {
-        _ = io;
-        return openPath(dir.path, sub_path, if (flags.read) 2 else 1, true, flags.truncate, flags.exclusive);
-    }
-
-    pub fn writeFile(dir: Dir, io: Io, options: WriteFileOptions) (File.OpenError || FsError || Io.File.Writer.Error)!void {
-        const file = try dir.createFile(io, options.sub_path, options.flags);
-        defer file.close(io);
-        try file.writeStreamingAll(io, options.data);
-    }
-
-    pub fn readFile(dir: Dir, io: Io, file_path: []const u8, buffer: []u8) (File.OpenError || FsError || Io.Reader.ShortError)![]u8 {
-        const file = try dir.openFile(io, file_path, .{});
-        defer file.close(io);
-        var reader = file.reader(io, &.{});
-        const n = try reader.interface.readSliceShort(buffer);
-        return buffer[0..n];
-    }
-
-    pub fn readFileAlloc(dir: Dir, io: Io, file_path: []const u8, gpa: std.mem.Allocator, limit: Limit) (File.OpenError || FsError || Io.Reader.LimitedAllocError)![]u8 {
-        const file = try dir.openFile(io, file_path, .{});
-        defer file.close(io);
-        var reader = file.reader(io, &.{});
-        var list: std.ArrayList(u8) = .empty;
-        defer list.deinit(gpa);
-        // Zig reports the reason a read failed, which in the run's files is only that the path is a directory.
-        reader.interface.appendRemaining(gpa, &list, limit) catch |err| switch (err) {
-            error.ReadFailed => return error.IsDir,
-            else => |e| return e,
-        };
-        return list.toOwnedSlice(gpa);
-    }
-
-    pub fn deleteFile(dir: Dir, io: Io, sub_path: []const u8) (FsError || error{ FileNotFound, IsDir, NotDir, AccessDenied, PermissionDenied, FileBusy, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
-        _ = io;
-        return removePath(dir.path, sub_path, 0);
-    }
-
-    pub fn deleteDir(dir: Dir, io: Io, sub_path: []const u8) (FsError || error{ DirNotEmpty, FileNotFound, NotDir, AccessDenied, PermissionDenied, FileBusy, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
-        _ = io;
-        return removePath(dir.path, sub_path, 1);
-    }
-
-    pub fn createDir(dir: Dir, io: Io, sub_path: []const u8, permissions: Permissions) (FsError || error{ PathAlreadyExists, FileNotFound, NotDir, AccessDenied, PermissionDenied, NoSpaceLeft, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
-        _ = io;
-        _ = permissions;
-        return makeDirectory(dir.path, sub_path, false);
-    }
-
-    pub fn createDirPath(dir: Dir, io: Io, sub_path: []const u8) (FsError || error{ PathAlreadyExists, FileNotFound, NotDir, AccessDenied, PermissionDenied, NoSpaceLeft, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
-        _ = io;
-        return makeDirectory(dir.path, sub_path, true);
-    }
-
-    pub fn rename(old_dir: Dir, old_sub_path: []const u8, new_dir: Dir, new_sub_path: []const u8, io: Io) (FsError || error{ FileNotFound, PathAlreadyExists, IsDir, NotDir, DirNotEmpty, AccessDenied, PermissionDenied, FileBusy, NameTooLong, SystemResources, BadPathName, RenameAcrossMountPoints, Unexpected, Canceled })!void {
-        _ = io;
-        return renamePath(old_dir.path, old_sub_path, new_dir.path, new_sub_path);
-    }
-
-    pub fn access(dir: Dir, io: Io, sub_path: []const u8, options: AccessOptions) (FsError || error{ FileNotFound, AccessDenied, PermissionDenied, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!void {
-        _ = io;
-        _ = options;
-        _ = try statPath(dir.path, sub_path);
-    }
-
-    pub fn statFile(dir: Dir, io: Io, sub_path: []const u8, options: StatFileOptions) (FsError || error{ FileNotFound, AccessDenied, PermissionDenied, NotDir, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!File.Stat {
-        _ = io;
-        _ = options;
-        return statPath(dir.path, sub_path);
-    }
-
-    pub fn openDir(dir: Dir, io: Io, sub_path: []const u8, options: OpenOptions) (FsError || error{ FileNotFound, NotDir, AccessDenied, PermissionDenied, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!Dir {
-        _ = io;
-        _ = options;
-        const info = try statPath(dir.path, sub_path);
-        if (info.kind != .directory) return error.NotDir;
-        return .{ .path = joinPath(dir.path, sub_path) };
-    }
-
-    pub fn iterate(dir: Dir) Iterator {
-        return .{ .dir = dir };
-    }
-};
-`;
-
-let io: StructType | undefined;
-let nativeTypes: { io: Type; file: Type } | undefined;
-
-/** Gives the ported library the native `std.Io` and `std.Io.File` types, which its declarations refer to. */
-export function configureFiles(ioType: Type, fileType: Type): void {
-  nativeTypes = { io: ioType, file: fileType };
-}
-
-/** The namespace of the ported library, whose types the native `std.Io` members refer to. */
-export function filesNamespace(): StructType {
-  if (io) return io;
-  const types = nativeTypes;
-  if (!types) throw new Error('configureFiles has not run');
-  const file: SourceFile = withPublicSurface(parseZig(SOURCE), 'Io', false);
-  const namespace: Namespace = { name: 'Io', decls: new Map(), internal: true };
-  addDecls(namespace, file.members);
-  const native = (name: string, member: () => Member): void => {
-    let resolved: Member | undefined;
-    namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        resolved ??= member();
-        return resolved;
-      },
-    });
-  };
-  native('Io', () => ({ type: TYPE, value: types.io }));
-  for (const [name, member] of Object.entries(nativeMembers(types.file))) native(name, member);
-  io = { kind: 'struct', isTuple: false, namespace, layout: 'auto', fields: [] };
-  return io;
-}
-
-/** A declaration of the ported library by its name, such as the function `async`. */
-export function filesDecl(name: string): Decl {
-  const decl = filesNamespace().namespace.decls.get(name);
-  if (!decl) throw new Error(`Io.${name} is missing`);
-  return decl;
-}
-
-/** A declaration of the ported library, such as `Reader` or `File.Reader`, as a type. */
-export function filesType(sema: SemaApi, path: string, span: Span): Type {
-  let type: Type = filesNamespace();
-  for (const name of path.split('.')) {
-    const decl = sema.findDecl(type, name);
-    if (!decl) throw new Error(`Io.${path} is missing`);
-    type = sema.knownValue(sema.resolveDecl(decl, span), '型') as Type;
+/** `std.Io.File.Reader`, whose `interface` field is the `std.Io.Reader` to read through. */
+export const FILE_READER: StructType = nativeStruct(
+  'Io.File.Reader',
+  {},
+  [{ name: 'interface', type: READER, hasDefault: false }],
+  {
+    kind: 'fileReader',
+    args: [],
+    storageSlots: 0,
+    byteSize: 72,
   }
-  return type;
+);
+
+/** A reader's value: its buffer, the read and filled ends of it, and its descriptor, none for `Reader.fixed`. */
+export function readerValue(buffer: Slice, descriptor: number | undefined, end = 0): ZStruct {
+  return new ZStruct([buffer, 0n, BigInt(end), descriptor === undefined ? undefined : BigInt(descriptor)]);
 }
 
-const ERROR_NAMES: Record<FileSystemErrorCode, string> = {
+/** A failure of a reader, which its method returns as the Zig error of that name. */
+export class ReadError extends Error {
+  constructor(readonly error: string) {
+    super(error);
+    this.name = 'ReadError';
+  }
+}
+
+/** The reader that a method's receiver points to, as Zig's Reader functions see it. */
+export class ReaderView {
+  constructor(
+    private readonly header: ZStruct,
+    private readonly frame: Frame
+  ) {}
+
+  get buffer(): Slice {
+    return this.header.slots[0] as Slice;
+  }
+  get seek(): number {
+    return Number(this.header.slots[1] as bigint);
+  }
+  set seek(value: number) {
+    this.header.slots[1] = BigInt(value);
+  }
+  get end(): number {
+    return Number(this.header.slots[2] as bigint);
+  }
+  set end(value: number) {
+    this.header.slots[2] = BigInt(value);
+  }
+  get descriptor(): number | undefined {
+    const value = this.header.slots[3];
+    return value === undefined ? undefined : Number(value as bigint);
+  }
+
+  /** The buffer from `start` up to `end`, which the caller sees as a slice of the reader's buffer. */
+  part(start: number, end: number): Slice {
+    return new Slice(this.buffer.target, this.buffer.start + start, end - start);
+  }
+
+  byte(index: number): number {
+    return Number(this.buffer.get(index) as bigint);
+  }
+
+  /** Reads into `destination` at most its length, as Zig's readVec does: none at the end. */
+  read(destination: Slice): number {
+    const descriptor = this.descriptor;
+    if (descriptor === undefined) return 0;
+    const bytes = this.frame.runtime.readInput(descriptor, destination.length);
+    if (!bytes) throw new ReadError('ReadFailed');
+    for (const [index, byte] of bytes.entries()) destination.set(index, BigInt(byte));
+    return bytes.length;
+  }
+
+  readMore(): void {
+    const n = this.read(this.part(this.end, this.buffer.length));
+    if (n === 0) throw new ReadError('EndOfStream');
+    this.end += n;
+  }
+
+  rebase(capacity: number): void {
+    if (this.buffer.length - this.seek >= capacity) return;
+    if (this.descriptor === undefined) throw new ReadError('EndOfStream');
+    if (capacity > this.buffer.length) panic(PANIC.unreachable);
+    const data = Array.from({ length: this.end - this.seek }, (_, index) => this.buffer.get(this.seek + index));
+    for (const [index, value] of data.entries()) this.buffer.set(index, value);
+    this.seek = 0;
+    this.end = data.length;
+  }
+
+  fill(n: number): void {
+    if (this.seek + n <= this.end) return;
+    this.rebase(n);
+    while (this.end < this.seek + n) this.readMore();
+  }
+
+  fillMore(): void {
+    this.rebase(this.end - this.seek + 1);
+    this.readMore();
+  }
+
+  toss(n: number): void {
+    this.seek += n;
+    if (this.seek > this.end) panic(PANIC.unreachable);
+  }
+
+  take(n: number): Slice {
+    this.fill(n);
+    const result = this.part(this.seek, this.seek + n);
+    this.seek += n;
+    return result;
+  }
+
+  /** The bytes up to and including the delimiter, which must fit in the buffer. */
+  peekDelimiterInclusive(delimiter: number): Slice {
+    const found = (from: number): number | undefined => {
+      for (let index = from; index < this.end; index++) {
+        this.frame.runtime.spend();
+        if (this.byte(index) === delimiter) return index;
+      }
+      return undefined;
+    };
+    let end = found(this.seek);
+    while (end === undefined) {
+      const content = this.end - this.seek;
+      if (this.buffer.length - content === 0) break;
+      this.fillMore();
+      end = found(this.seek + content);
+    }
+    if (end !== undefined) return this.part(this.seek, end + 1);
+    const descriptor = this.descriptor;
+    if (descriptor === undefined || this.frame.runtime.inputAtEnd(descriptor)) throw new ReadError('EndOfStream');
+    throw new ReadError('StreamTooLong');
+  }
+
+  /** The bytes before the delimiter, or the rest at the end of the input. */
+  peekDelimiterExclusive(delimiter: number): Slice {
+    try {
+      const result = this.peekDelimiterInclusive(delimiter);
+      return this.part(this.seek, this.seek + result.length - 1);
+    } catch (error) {
+      if (!(error instanceof ReadError) || error.error !== 'EndOfStream' || this.end === this.seek) throw error;
+      return this.part(this.seek, this.end);
+    }
+  }
+
+  readSliceShort(destination: Slice): number {
+    let i = 0;
+    while (i < destination.length) {
+      if (this.buffer.length === 0) {
+        const n = this.read(new Slice(destination.target, destination.start + i, destination.length - i));
+        if (n === 0) return i;
+        i += n;
+        continue;
+      }
+      if (this.seek === this.end && !this.fillMoreOrEnd()) return i;
+      const n = Math.min(destination.length - i, this.end - this.seek);
+      for (let index = 0; index < n; index++) destination.set(i + index, this.buffer.get(this.seek + index));
+      this.seek += n;
+      i += n;
+    }
+    return i;
+  }
+
+  /** Reads the rest of the input as `appendRemaining` does: at most `limit` bytes, failing when it reaches them. */
+  remaining(limit: number): number[] {
+    const bytes: number[] = [];
+    let left = limit;
+    const spare = new Slice({ slots: Array.from({ length: 4096 }, () => 0n) }, 0, 4096);
+    while (left !== 0) {
+      let chunk: number[];
+      if (this.buffer.length === 0) {
+        const n = this.read(new Slice(spare.target, 0, Math.min(spare.length, left)));
+        if (n === 0) return bytes;
+        chunk = Array.from({ length: n }, (_, index) => Number(spare.get(index) as bigint));
+      } else {
+        if (this.seek === this.end && !this.fillMoreOrEnd()) return bytes;
+        const n = Math.min(this.end - this.seek, left);
+        chunk = Array.from({ length: n }, (_, index) => this.byte(this.seek + index));
+        this.seek += n;
+      }
+      this.frame.runtime.spend(chunk.length);
+      bytes.push(...chunk);
+      left -= chunk.length;
+    }
+    throw new ReadError('StreamTooLong');
+  }
+
+  /** Fills more of the buffer, telling whether the input had more. */
+  fillMoreOrEnd(): boolean {
+    try {
+      this.fillMore();
+      return true;
+    } catch (error) {
+      if (error instanceof ReadError && error.error === 'EndOfStream') return false;
+      throw error;
+    }
+  }
+
+  /** Whether a read has met the end of the input and nothing is left in the buffer, as File.Reader.atEnd tells. */
+  atEnd(): boolean {
+    const descriptor = this.descriptor;
+    return this.end === this.seek && descriptor !== undefined && this.frame.runtime.sawInputEnd(descriptor);
+  }
+}
+
+export const READ_FAILED = errorSetOf(['ReadFailed']);
+const READ_ERROR = errorSetOf(['ReadFailed', 'EndOfStream']);
+const DELIMITER_ERROR = errorSetOf(['ReadFailed', 'EndOfStream', 'StreamTooLong']);
+const STREAM_REMAINING_ERROR = errorSetOf(['ReadFailed', 'WriteFailed']);
+export const LIMITED_ALLOC_ERROR = errorSetOf(['OutOfMemory', 'ReadFailed', 'StreamTooLong']);
+
+/** A method of `std.Io.Reader`, which runs `body` on the reader its receiver points to. */
+function readerMethod(
+  name: string,
+  params: readonly Type[],
+  result: Type,
+  body: (reader: ReaderView, values: Value[], frame: Frame) => Value
+): () => Member {
+  return receiverMethod(
+    `Reader.${name}`,
+    pointerTo(READER, false),
+    (sema, call) => receiverAddress(sema, call, READER),
+    params,
+    result,
+    (frame, target, values) => body(new ReaderView((target as Pointer).load() as ZStruct, frame), values, frame)
+  );
+}
+
+export const SLICE = sliceOf(U8, false);
+
+addMembers(READER, {
+  Error: typeMember(() => READ_ERROR),
+  ShortError: typeMember(() => READ_FAILED),
+  DelimiterError: typeMember(() => DELIMITER_ERROR),
+  StreamRemainingError: typeMember(() => STREAM_REMAINING_ERROR),
+  LimitedAllocError: typeMember(() => LIMITED_ALLOC_ERROR),
+  fixed: fnMember(
+    'std.Io.Reader.fixed',
+    (sema, call) => {
+      const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'std.Io.Reader.fixed'), [CONST_U8_SLICE]);
+      const evaluate = bytes.eval;
+      return runtime(
+        READER,
+        (frame) => {
+          const slice = evaluate(frame) as Slice;
+          return readerValue(slice, undefined, slice.length);
+        },
+        call.span
+      );
+    },
+    () => ({ type: fnType([CONST_U8_SLICE], READER) })
+  ),
+  buffered: readerMethod('buffered', [], SLICE, (r) => r.part(r.seek, r.end)),
+  bufferedLen: readerMethod('bufferedLen', [], USIZE, (r) => BigInt(r.end - r.seek)),
+  toss: readerMethod('toss', [USIZE], VOID, (r, [n]) => {
+    r.toss(Number(n as bigint));
+    return;
+  }),
+  tossBuffered: readerMethod('tossBuffered', [], VOID, (r) => {
+    r.seek = r.end;
+    return;
+  }),
+  peek: readerMethod('peek', [USIZE], errorUnionOf(READ_ERROR, SLICE), (r, [n]) => {
+    r.fill(Number(n as bigint));
+    return r.part(r.seek, r.seek + Number(n as bigint));
+  }),
+  take: readerMethod('take', [USIZE], errorUnionOf(READ_ERROR, SLICE), (r, [n]) => r.take(Number(n as bigint))),
+  peekByte: readerMethod('peekByte', [], errorUnionOf(READ_ERROR, U8), (r) => {
+    r.fill(1);
+    return BigInt(r.byte(r.seek));
+  }),
+  takeByte: readerMethod('takeByte', [], errorUnionOf(READ_ERROR, U8), (r) => {
+    r.fill(1);
+    const byte = r.byte(r.seek);
+    r.seek += 1;
+    return BigInt(byte);
+  }),
+  readSliceShort: readerMethod('readSliceShort', [SLICE], errorUnionOf(READ_FAILED, USIZE), (r, [buffer]) =>
+    BigInt(r.readSliceShort(buffer as Slice))
+  ),
+  readSliceAll: readerMethod('readSliceAll', [SLICE], errorUnionOf(READ_ERROR, VOID), (r, [buffer]) => {
+    if (r.readSliceShort(buffer as Slice) !== (buffer as Slice).length) throw new ReadError('EndOfStream');
+    return;
+  }),
+  peekDelimiterInclusive: readerMethod('peekDelimiterInclusive', [U8], errorUnionOf(DELIMITER_ERROR, SLICE), (r, [d]) =>
+    r.peekDelimiterInclusive(Number(d as bigint))
+  ),
+  takeDelimiterInclusive: readerMethod(
+    'takeDelimiterInclusive',
+    [U8],
+    errorUnionOf(DELIMITER_ERROR, SLICE),
+    (r, [d]) => {
+      const result = r.peekDelimiterInclusive(Number(d as bigint));
+      r.toss(result.length);
+      return result;
+    }
+  ),
+  peekDelimiterExclusive: readerMethod('peekDelimiterExclusive', [U8], errorUnionOf(DELIMITER_ERROR, SLICE), (r, [d]) =>
+    r.peekDelimiterExclusive(Number(d as bigint))
+  ),
+  takeDelimiterExclusive: readerMethod(
+    'takeDelimiterExclusive',
+    [U8],
+    errorUnionOf(DELIMITER_ERROR, SLICE),
+    (r, [d]) => {
+      const result = r.peekDelimiterExclusive(Number(d as bigint));
+      r.toss(result.length);
+      return result;
+    }
+  ),
+  takeDelimiter: readerMethod(
+    'takeDelimiter',
+    [U8],
+    errorUnionOf(errorSetOf(['ReadFailed', 'StreamTooLong']), optionalOf(SLICE)),
+    (r, [d]) => {
+      try {
+        const inclusive = r.peekDelimiterInclusive(Number(d as bigint));
+        r.toss(inclusive.length);
+        return r.part(r.seek - inclusive.length, r.seek - 1);
+      } catch (error) {
+        if (!(error instanceof ReadError) || error.error !== 'EndOfStream') throw error;
+        if (r.end === r.seek) return NULL;
+        const rest = r.part(r.seek, r.end);
+        r.toss(rest.length);
+        return rest;
+      }
+    }
+  ),
+  discardRemaining: readerMethod('discardRemaining', [], errorUnionOf(READ_FAILED, USIZE), (r) =>
+    BigInt(r.remaining(Number.POSITIVE_INFINITY).length)
+  ),
+  streamRemaining: fnMember('Reader.streamRemaining', (sema, call) => streamRemaining(sema, call)),
+  allocRemaining: fnMember('Reader.allocRemaining', (sema, call) => allocRemaining(sema, call)),
+});
+
+/** `r.streamRemaining(w)`: writes the rest of the input to a writer, returning how many bytes it wrote. */
+function streamRemaining(sema: SemaApi, call: NativeCall): TExpr {
+  const pointer = receiverAddress(sema, call, READER);
+  const [writer] = compileArgs(sema, expectArgs(sema, call, 1, 'streamRemaining'), [pointerTo(WRITER, false)]);
+  const [evaluateReader, evaluateWriter] = [pointer.eval, writer.eval];
+  return runtime(
+    errorUnionOf(STREAM_REMAINING_ERROR, USIZE),
+    (frame) => {
+      const reader = new ReaderView((evaluateReader(frame) as Pointer).load() as ZStruct, frame);
+      const target = evaluateWriter(frame) as Pointer;
+      return attempt(() => {
+        const bytes = reader.remaining(Number.POSITIVE_INFINITY);
+        const written = writeTo(frame, writerState(target.load(), target), bytes);
+        return written instanceof ErrorValue ? written : BigInt(bytes.length);
+      });
+    },
+    call.span
+  );
+}
+
+/** `r.allocRemaining(gpa, limit)`: the rest of the input in memory from the allocator, which reaching the limit fails. */
+function allocRemaining(sema: SemaApi, call: NativeCall): TExpr {
+  const pointer = receiverAddress(sema, call, READER);
+  const [allocatorExpression, limitExpression] = expectArgs(sema, call, 2, 'allocRemaining');
+  const allocator = allocatorArg(sema, allocatorExpression);
+  const [limit] = compileArgs(sema, [limitExpression], [LIMIT]);
+  const evaluators = [pointer, allocator, limit].map((arg) => arg.eval);
+  return runtime(
+    errorUnionOf(LIMITED_ALLOC_ERROR, SLICE),
+    (frame) => {
+      const [target, gpa, count] = evaluators.map((evaluate) => evaluate(frame));
+      const reader = new ReaderView((target as Pointer).load() as ZStruct, frame);
+      // Zig's allocRemaining reads one byte past the limit, failing only when there is more.
+      const bound = (count as bigint) === UNLIMITED ? Number.POSITIVE_INFINITY : limitOf(count) + 1;
+      return attempt(() => ownBytes(frame, gpa, reader.remaining(bound)));
+    },
+    call.span
+  );
+}
+
+/** Bytes in memory that the allocator gives, as the caller then owns. */
+export function ownBytes(frame: Frame, allocatorValue: Value, bytes: readonly number[]): Value {
+  const allocator = allocatorState(allocatorValue);
+  const writer = allocatingWriter(frame, allocator, bytes.length);
+  if (!writer) return ERROR_OUT_OF_MEMORY;
+  const written = writeTo(frame, writer, bytes);
+  if (written instanceof ErrorValue) {
+    freeWriter(allocator, writer);
+    return ERROR_OUT_OF_MEMORY;
+  }
+  return ownWriterSlice(frame, allocator, writer);
+}
+
+addMembers(FILE_READER, {
+  atEnd: fnMember(
+    'File.Reader.atEnd',
+    (sema, call) => {
+      const pointer = receiverAddress(sema, call, FILE_READER, false);
+      expectArgs(sema, call, 0, 'atEnd');
+      const evaluate = pointer.eval;
+      return runtime(
+        BOOL,
+        (frame) => new ReaderView(((evaluate(frame) as Pointer).load() as ZStruct).slots[0] as ZStruct, frame).atEnd(),
+        call.span
+      );
+    },
+    () => ({ type: fnType([pointerTo(FILE_READER, true)], BOOL), receiver: true })
+  ),
+});
+
+/** The errors that the virtual file system's failures give. */
+export const FILE_SYSTEM_ERROR_NAMES: Record<FileSystemErrorCode, string> = {
   ENOENT: 'FileNotFound',
   EEXIST: 'PathAlreadyExists',
   EISDIR: 'IsDir',
@@ -825,252 +500,59 @@ const ERROR_NAMES: Record<FileSystemErrorCode, string> = {
   EINVAL: 'BadPathName',
 };
 
+/**
+ * A method of a native library type: it compiles the receiver and the arguments to the parameter types and runs `run`
+ * with their values, failing with the Zig error that a file system or reader failure gives.
+ */
+export function receiverMethod(
+  name: string,
+  receiverType: Type,
+  receiver: (sema: SemaApi, call: NativeCall) => TExpr,
+  params: readonly Type[] | (() => readonly Type[]),
+  result: Type,
+  run: (frame: Frame, receiver: Value, values: Value[]) => Value
+): () => Member {
+  const paramTypes = typeof params === 'function' ? params : () => params;
+  return fnMember(
+    name,
+    (sema, call) => {
+      const evaluators = [
+        receiver(sema, call),
+        ...compileArgs(sema, expectArgs(sema, call, paramTypes().length, name), paramTypes()),
+      ].map((arg) => arg.eval);
+      return runtime(
+        result,
+        (frame) => {
+          const [target, ...values] = evaluators.map((evaluate) => evaluate(frame));
+          frame.runtime.spend();
+          return attempt(() => run(frame, target, values));
+        },
+        call.span
+      );
+    },
+    () => ({ type: fnType([receiverType, ...paramTypes()], result), receiver: true })
+  );
+}
+
 /** Runs a file system operation, giving the Zig error that a failure of it returns. */
-function attempt(run: () => Value): Value {
+export function attempt(run: () => Value): Value {
   try {
     return run();
   } catch (error) {
-    if (error instanceof FileSystemError) return ErrorValue.of(ERROR_NAMES[error.code]);
+    if (error instanceof FileSystemError) return ErrorValue.of(FILE_SYSTEM_ERROR_NAMES[error.code]);
+    if (error instanceof ReadError) return ErrorValue.of(error.error);
     throw error;
   }
 }
 
-function text(value: Value, frame: Frame): string {
-  const slice = value as Slice;
-  frame.runtime.spend(slice.length);
-  return decodeUtf8(slice.values().map(Number));
+let ioType: Type | undefined;
+
+export function IO_TYPE(): Type {
+  if (!ioType) throw new Error('std.Io is not configured');
+  return ioType;
 }
 
-function joined(directory: string, path: string): string {
-  return path.startsWith('/') || directory === '.' ? path : `${directory}/${path}`;
-}
-
-function byteLength(text: string): number {
-  return new TextEncoder().encode(text).length;
-}
-
-/** The errors that the virtual file system's failures give, which every function of the library may return. */
-const FILE_SYSTEM_ERROR = errorSetOf(Object.values(ERROR_NAMES));
-const ANY_ERROR_UNION = (payload: Type): Type => errorUnionOf(FILE_SYSTEM_ERROR, payload);
-
-/** A native function of the library, which compiles its arguments to the parameter types and runs `run`. */
-function call(
-  name: string,
-  params: readonly Type[],
-  result: (sema: SemaApi, span: Span) => Type,
-  run: (frame: Frame, values: Value[], sema: SemaApi) => Value
-): () => Member {
-  return fnMember(name, (sema, nativeCall) => {
-    const args = compileArgs(sema, expectArgs(sema, nativeCall, params.length, name), params);
-    const evaluators = args.map((arg) => arg.eval);
-    return runtime(
-      result(sema, nativeCall.span),
-      (frame) =>
-        run(
-          frame,
-          evaluators.map((evaluate) => evaluate(frame)),
-          sema
-        ),
-      nativeCall.span
-    );
-  });
-}
-
-/** The value of a field of `File.Kind` by its name. */
-function kindValue(sema: SemaApi, span: Span): (name: string) => bigint {
-  const fields = sema.enumFields(filesType(sema, 'File.Kind', span) as EnumType);
-  return (name) => (fields.find((field) => field.name === name) as { value: bigint }).value;
-}
-
-/**
- * Opens a file for `std.Io.File`: to read when `mode` is 0, to write when 1, and both when 2, creating it with
- * `create`, as `openFile` and `createFile` do.
- */
-function openPath(
-  frame: Frame,
-  target: string,
-  mode: number,
-  flags: { create: boolean; truncate: boolean; exclusive: boolean }
-): Value {
-  const files = frame.runtime.io.files;
-  const writes = mode !== 0;
-  const directory = files.kindOf(target) === 'directory';
-  if (directory && (writes || flags.create)) throw new FileSystemError('EISDIR', target);
-  // Zig opens a directory for reading, as its open allows by default, and its first read fails.
-  if (directory) {
-    const descriptor = frame.runtime.openFile({
-      content: noText,
-      read: noText,
-      directory: true,
-      position: 0,
-      decoder: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }),
-    });
-    return handle('file', { fd: descriptor });
-  }
-  const create = flags.create ? (flags.exclusive ? 'exclusive' : 'always') : 'never';
-  const write = writes
-    ? files.open(target, { create, truncate: flags.create && flags.truncate, append: false })
-    : undefined;
-  const content = files.openForReading(target);
-  const read = mode === 1 ? undefined : content;
-  const descriptor = frame.runtime.openFile({
-    content,
-    read,
-    position: 0,
-    write,
-    decoder: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }),
-  });
-  return handle('file', { fd: descriptor });
-}
-
-const noText = (): string => '';
-
-/** The native functions that the ported library calls, which reach the run's standard input and files. */
-// code-gauge-allow functionNcss -- Each native is a short closure over the run's file system.
-// code-gauge-allow functionCognitiveComplexity -- Each native is a short closure over the run's file system.
-function nativeMembers(fileType: Type): Record<string, () => Member> {
-  return {
-    readInput: call(
-      'readInput',
-      [USIZE, sliceOf(U8, false)],
-      () => errorUnionOf(errorSetOf(['ReadFailed']), USIZE),
-      (frame, [descriptor, destination]) => {
-        const slice = destination as Slice;
-        const bytes = frame.runtime.readInput(Number(descriptor as bigint), slice.length);
-        if (!bytes) return ErrorValue.of('ReadFailed');
-        for (const [index, byte] of bytes.entries()) slice.set(index, BigInt(byte));
-        return BigInt(bytes.length);
-      }
-    ),
-    sawInputEnd: call(
-      'sawInputEnd',
-      [USIZE],
-      () => BOOL,
-      (frame, [descriptor]) => frame.runtime.sawInputEnd(Number(descriptor as bigint))
-    ),
-    inputAtEnd: call(
-      'inputAtEnd',
-      [USIZE],
-      () => BOOL,
-      (frame, [descriptor]) => frame.runtime.inputAtEnd(Number(descriptor as bigint))
-    ),
-    openPath: call(
-      'openPath',
-      [CONST_U8_SLICE, CONST_U8_SLICE, U8, BOOL, BOOL, BOOL],
-      () => ANY_ERROR_UNION(fileType),
-      (frame, [directory, path, mode, create, truncate, exclusive]) =>
-        attempt(() =>
-          openPath(frame, joined(text(directory, frame), text(path, frame)), Number(mode as bigint), {
-            create: create === true,
-            truncate: truncate === true,
-            exclusive: exclusive === true,
-          })
-        )
-    ),
-    removePath: call(
-      'removePath',
-      [CONST_U8_SLICE, CONST_U8_SLICE, U8],
-      () => ANY_ERROR_UNION(VOID),
-      (frame, args) =>
-        attempt(() => {
-          const [directory, path, kind] = args;
-          frame.runtime.io.files.remove(
-            joined(text(directory, frame), text(path, frame)),
-            kind === 0n ? 'file' : 'directory'
-          );
-          return;
-        })
-    ),
-    makeDirectory: call(
-      'makeDirectory',
-      [CONST_U8_SLICE, CONST_U8_SLICE, BOOL],
-      () => ANY_ERROR_UNION(VOID),
-      (frame, [directory, path, recursive]) =>
-        attempt(() => {
-          const target = joined(text(directory, frame), text(path, frame));
-          const files = frame.runtime.io.files;
-          // A trailing slash names the same last directory.
-          const kind = files.kindOf(target.replace(/(?<=.)\/+$/, ''));
-          // `createDirPath` succeeds when the directory exists already, as `mkdir -p` does.
-          if (recursive === true && kind === 'directory') return;
-          // A file where the last directory would go is not one, as Zig's createDirPath reports.
-          if (recursive === true && kind === 'file') throw new FileSystemError('ENOTDIR', target);
-          files.createDirectory(target, recursive as boolean);
-          return;
-        })
-    ),
-    renamePath: call(
-      'renamePath',
-      [CONST_U8_SLICE, CONST_U8_SLICE, CONST_U8_SLICE, CONST_U8_SLICE],
-      () => ANY_ERROR_UNION(VOID),
-      (frame, [fromDirectory, from, toDirectory, to]) =>
-        attempt(() => {
-          frame.runtime.io.files.rename(
-            joined(text(fromDirectory, frame), text(from, frame)),
-            joined(text(toDirectory, frame), text(to, frame))
-          );
-          return;
-        })
-    ),
-    statPath: fnMember('statPath', (sema, nativeCall) => {
-      const args = compileArgs(sema, expectArgs(sema, nativeCall, 2, 'statPath'), [CONST_U8_SLICE, CONST_U8_SLICE]);
-      const statType = filesType(sema, 'File.Stat', nativeCall.span);
-      const kindOf = kindValue(sema, nativeCall.span);
-      const [directory, path] = args.map((arg) => arg.eval);
-      return runtime(
-        ANY_ERROR_UNION(statType),
-        (frame) => {
-          const target = joined(text(directory(frame), frame), text(path(frame), frame));
-          const files = frame.runtime.io.files;
-          const kind = files.kindOf(target);
-          if (!kind) return ErrorValue.of('FileNotFound');
-          const size = kind === 'file' ? byteLength(files.readFile(target)) : 0;
-          return new ZStruct([BigInt(size), kindOf(kind === 'directory' ? 'directory' : 'file')]);
-        },
-        nativeCall.span
-      );
-    }),
-    kindOf: fnMember('kindOf', (sema, nativeCall) => {
-      const args = compileArgs(sema, expectArgs(sema, nativeCall, 2, 'kindOf'), [CONST_U8_SLICE, CONST_U8_SLICE]);
-      const kindType = filesType(sema, 'File.Kind', nativeCall.span);
-      const kindOf = kindValue(sema, nativeCall.span);
-      const [directory, name] = args.map((arg) => arg.eval);
-      return runtime(
-        kindType,
-        (frame) => {
-          const kind = frame.runtime.io.files.kindOf(joined(text(directory(frame), frame), text(name(frame), frame)));
-          return kindOf(kind === 'directory' ? 'directory' : kind === 'file' ? 'file' : 'unknown');
-        },
-        nativeCall.span
-      );
-    }),
-    listEntry: call(
-      'listEntry',
-      [CONST_U8_SLICE, USIZE],
-      () => optionalOf(CONST_U8_SLICE),
-      (frame, args, sema) =>
-        attempt(() => {
-          const [directory, index] = args;
-          const name = frame.runtime.io.files.list(text(directory, frame))[Number(index as bigint)];
-          return name === undefined ? NULL : sema.nameSlice(name, frame);
-        })
-    ),
-    joinPath: call(
-      'joinPath',
-      [CONST_U8_SLICE, CONST_U8_SLICE],
-      () => CONST_U8_SLICE,
-      (frame, [directory, path], sema) => sema.nameSlice(joined(text(directory, frame), text(path, frame)), frame)
-    ),
-  };
-}
-
-/** The descriptor of a `std.Io.File`: 0 to 2 for the standard streams, and more for the files the program opened. */
-export function fileDescriptor(value: Value): number {
-  return (value as NativeHandle).state.fd as number;
-}
-
-/** The length of an open file in bytes. */
-export function openFileLength(frame: Frame, descriptor: number): bigint {
-  const file = frame.runtime.openFileAt(descriptor);
-  return BigInt(file ? byteLength(file.content()) : 0);
+/** Records the `std.Io` type, which the native members take as their `io` argument. */
+export function configureIo(io: Type): void {
+  ioType = io;
 }

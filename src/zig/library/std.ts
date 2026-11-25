@@ -24,8 +24,10 @@ import {
 } from '../types';
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, NativeHandle, Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
-import { configureFiles, fileDescriptor, filesDecl, filesType, openFileLength } from './files';
+import { addDirMembers, DIR, FILE_KIND, FILE_OPEN_ERROR, FILE_STAT, fileDescriptor, openFileLength } from './dir';
+import { configureIo, FILE_READER, LIMIT, READER, readerValue } from './files';
 import { ALLOCATOR, allocatorMembers, ARENA_ALLOCATOR, arenaValue, heapNamespace } from './heap';
+import { asyncMember, futureType, GROUP } from './ioAsync';
 import { langNamespace } from './lang';
 import {
   addMembers,
@@ -235,8 +237,9 @@ const FILE_WRITER: StructType = nativeStruct(
 
 const WRITE_ERROR = errorSetOf(['WriteFailed']);
 
-configureFiles(IO, FILE);
+configureIo(IO);
 addIoMembers();
+addDirMembers(IO, FILE, FILE_WRITE_ERROR);
 
 // code-gauge-allow functionNcss -- Declares the members of one library namespace, each a short closure.
 function addIoMembers(): void {
@@ -332,37 +335,24 @@ function addIoMembers(): void {
       () => ({ type: fnType([FILE, IO, CONST_U8_SLICE], errorUnionOf(FILE_WRITE_ERROR, VOID)), receiver: true })
     ),
   });
-  for (const [owner, name, path] of [
-    [IO, 'Reader', 'Reader'],
-    [IO, 'Dir', 'Dir'],
-    [IO, 'Limit', 'Limit'],
-    [IO, 'Future', 'Future'],
-    [IO, 'Group', 'Group'],
-    [FILE, 'Reader', 'File.Reader'],
-    [FILE, 'OpenError', 'File.OpenError'],
-    [FILE, 'Kind', 'File.Kind'],
-    [FILE, 'Stat', 'File.Stat'],
-  ] as const) {
-    owner.namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        throw new Error(`Io.${path} needs the compiler`);
-      },
-      resolveWith: (sema: SemaApi, span: Span) => known(TYPE, filesType(sema, path, span), span),
-    });
-  }
-  // `io.async(...)` and `io.concurrent(...)` call functions that the library declares in Zig.
-  for (const name of ['async', 'concurrent']) {
-    IO.namespace.decls.set(name, {
-      kind: 'native',
-      name,
-      resolve: () => {
-        throw new Error(`Io.${name} needs the compiler`);
-      },
-      resolveWith: (sema: SemaApi, span: Span) => sema.resolveDecl(filesDecl(name), span),
-    });
-  }
+  addMembers(IO, {
+    Reader: typeMember(() => READER),
+    Dir: typeMember(() => DIR),
+    Limit: typeMember(() => LIMIT),
+    Group: typeMember(() => GROUP),
+    Future: fnMember('std.Io.Future', (sema, call) => {
+      const [result] = expectArgs(sema, call, 1, 'std.Io.Future');
+      return known(TYPE, futureType(sema.compileType(result)), call.span);
+    }),
+    async: asyncMember('async'),
+    concurrent: asyncMember('concurrent'),
+  });
+  addMembers(FILE, {
+    Reader: typeMember(() => FILE_READER),
+    OpenError: typeMember(() => FILE_OPEN_ERROR),
+    Kind: typeMember(() => FILE_KIND),
+    Stat: typeMember(() => FILE_STAT),
+  });
   addWriterMembers();
 }
 
@@ -529,15 +519,14 @@ function fileReader(sema: SemaApi, call: NativeCall): TExpr {
   const [, buffer] = expectArgs(sema, call, 2, 'reader');
   const [io] = compileArgs(sema, [call.args[0]], [IO]);
   const slice = sema.coerce(sema.compile(buffer, sliceOf(U8, false)), sliceOf(U8, false), buffer);
-  const type = filesType(sema, 'File.Reader', call.span);
   const evaluateFile = file.eval;
   const evaluateBuffer = slice.eval;
   return runtime(
-    type,
+    FILE_READER,
     (frame) => {
-      const descriptor = BigInt(fileDescriptor(evaluateFile(frame)));
+      const descriptor = fileDescriptor(evaluateFile(frame));
       io.eval(frame);
-      return new ZStruct([new ZStruct([evaluateBuffer(frame), 0n, 0n, descriptor])]);
+      return new ZStruct([readerValue(evaluateBuffer(frame) as Slice, descriptor)]);
     },
     call.span
   );
