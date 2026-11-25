@@ -2,7 +2,6 @@ import { compileError } from './errors';
 import type { LocalVar, RBindGroup, RBinding, RExpr, RPat, RRhs } from './rast';
 import { functionParts, zonk } from './types';
 
-/** How many times an expression uses a variable: not at all, exactly once, or any other number of times. */
 type Usage = 0 | 1 | 'many';
 
 function add(a: Usage, b: Usage): Usage {
@@ -11,7 +10,6 @@ function add(a: Usage, b: Usage): Usage {
   return 'many';
 }
 
-/** The usage several expressions give together. */
 function total<T>(items: readonly T[], usage: (item: T) => Usage): Usage {
   let result: Usage = 0;
   for (const item of items) result = add(result, usage(item));
@@ -231,7 +229,6 @@ class UsageCounter {
     return expr ? this.expr(expr) : 0;
   }
 
-  /** Whether a comprehension's qualifiers use the variable. */
   private mentions(expr: Extract<RExpr, { k: 'comp' }>): boolean {
     return expr.quals.some((stmt) => (stmt.k === 'let' ? this.group(stmt.binds) : this.expr(stmt.expr)) !== 0);
   }

@@ -20,7 +20,6 @@ export class LocalScope {
     this.bindings = parent?.bindings ?? PersistentMap<string, LocalVar>();
   }
 
-  /** The variables this scope defines itself. */
   get vars(): ReadonlyMap<string, LocalVar> {
     return this.own;
   }

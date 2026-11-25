@@ -4,13 +4,12 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 type Charge = (units: number) => void;
 
 let spend: Charge | undefined;
-/** The budget of the compilation in progress, which every producer of compile-time work charges. */
 let compilation: Charge | undefined;
 let compilationRemaining = 0;
 
 /**
- * Runs a compilation within the one compilation budget. A compilation inside another one, such as that of a Template
- * Haskell splice's program, spends the enclosing budget rather than starting afresh.
+ * A compilation inside another one, such as that of a Template Haskell splice's program, spends the enclosing
+ * budget rather than starting afresh.
  */
 export function withCompilationBudget<T>(work: () => T): T {
   if (compilation) return withTypeWorkBudget(compilation, work);

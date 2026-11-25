@@ -25,7 +25,6 @@ export function coercionPrimitive(spec: CoercionSpec, leafCount: number): Primit
   };
 }
 
-// `coerce`, which applies the evidence of `Coercible a b` forward to a value.
 define(
   'coerceApply',
   2,
@@ -93,7 +92,6 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
   }
 }
 
-/** How a field converts, given how the data type's parameters do. */
 function specOfField(type: Type, params: CoercionSpec[]): CoercionSpec {
   const current = prune(type);
   if (current.tag === 'tgen') return params[current.index] ?? { k: 'refl' };

@@ -597,7 +597,6 @@ function etaReduce(field: Type, arity: number, dropped: number): Type | undefine
   return type;
 }
 
-/** Instances that `deriving instance` declares, with the contexts they state. */
 function deriveStandaloneInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
   return module.standaloneDerivings.map((standalone) => {
     const instanceDecl = {

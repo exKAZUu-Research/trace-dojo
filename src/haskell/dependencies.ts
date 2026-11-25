@@ -86,7 +86,6 @@ function collectBindingRefs(binding: RBinding, visit: (node: VarNode) => void): 
   }
 }
 
-/** Collects the references of the expressions of a pattern's view patterns. */
 function collectPatRefs(pat: RPat, visit: (node: VarNode) => void): void {
   const pending = [pat];
   while (pending.length > 0) {
@@ -113,7 +112,6 @@ function collectRhsRefs(rhs: RRhs, visit: (node: VarNode) => void): void {
   }
 }
 
-/** Visits the variable occurrences of statements, wherever they are nested. */
 export function forEachVar(stmts: RStmt[], visit: (node: VarNode) => void): void {
   for (const stmt of stmts) {
     if (stmt.k === 'let') for (const binding of stmt.binds.bindings) collectBindingRefs(binding, visit);

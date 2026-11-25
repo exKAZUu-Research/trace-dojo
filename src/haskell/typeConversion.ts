@@ -126,7 +126,6 @@ export class TypeConversion {
       : this.convertTypeKind(type, vars, varKinds);
   }
 
-  /** Whether PolyKinds lets a type of a polymorphic kind be used at different kinds. */
   polyKinds = false;
 
   checkKinds(specialize = false): void {
@@ -335,7 +334,6 @@ export class TypeConversion {
       throw compileError(type.span, '種類の変数を決めていない型には、@ で種類を渡せません。');
     }
     if (head.k === 'con' && head.entity.sort === 'synonym' && !head.entity.synonym && kindArgs.length === 0) {
-      // A synonym of constraints stands for what it is written as.
       const expanded = expandSynonymHead(type);
       if (expanded !== type) return this.convertTypeKind(expanded, vars, varKinds);
     }
@@ -447,7 +445,6 @@ export class TypeConversion {
   }
 }
 
-/** The constraints a context stands for, with its tuples of constraints and its synonyms expanded. */
 function expandConstraintSynonyms(context: readonly RConstraint[]): RConstraint[] {
   const result: RConstraint[] = [];
   const pending = [...context].toReversed();

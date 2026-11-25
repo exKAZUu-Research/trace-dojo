@@ -66,7 +66,6 @@ export class TypePrinter {
     return precedence > 1 ? `(${text})` : text;
   }
 
-  /** An application of a type GHC writes in a syntax of its own: functions, lists, and the kinds of tuples. */
   private showSpecial(entity: TypeEntity, args: Type[], precedence: number): string | undefined {
     const arrow = (text: string): string => (precedence > 0 ? `(${text})` : text);
     if (entity.name === 'FUN' && entity.module === 'GHC.Types' && args.length === 3) {

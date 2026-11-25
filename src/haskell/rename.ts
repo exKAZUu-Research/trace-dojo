@@ -122,7 +122,6 @@ export interface RDataDecl {
   params: string[];
   /** For a data instance, the types it gives the family's parameters, in terms of `params`. */
   instanceArgs?: RType[];
-  /** The kinds the parameters' annotations give, by position. */
   paramKinds?: (RType | undefined)[];
   cons: RConDecl[];
   /** The constraints DatatypeContexts puts on the constructors, in terms of `params`. */
@@ -160,11 +159,9 @@ export interface RConDecl {
    */
   ownVars?: RBinder[];
   context?: RConstraint[];
-  /** For a constructor in GADT syntax, the type it constructs. */
   result?: RType;
 }
 
-/** `deriving instance ctx => C (T a)`, which derives an instance with the context it states. */
 export interface RStandaloneDeriving {
   cls: ClassEntity;
   type: RType;
@@ -210,7 +207,6 @@ export interface RModule {
   classes: RClassDecl[];
   instances: RInstanceDecl[];
   standaloneDerivings: RStandaloneDeriving[];
-  /** The roles `type role` declares for the module's own types. */
   roleAnnotations: { entity: TypeEntity; roles: (Role | undefined)[]; span: Span }[];
   typeFamilies: RTypeFamily[];
   /** The equations of open type families, including the associated types' defaults that instances use. */
@@ -345,9 +341,7 @@ class Renamer {
   private quoteBinders?: Set<LocalVar>;
   /** The namespace of each binder of a quote, which a splice inside the quote binds its name in. */
   private readonly quoteNamespaces = new WeakMap<LocalVar, LocalNamespace>();
-  /** The methods of the classes quotes declare, by name. */
   private readonly quoteClassMethods = new Map<LocalVar, Map<string, LocalVar>>();
-  /** The features of the module's extensions that resolving names decides. */
   private readonly features: FeatureGates<'rename'>;
 
   constructor(
@@ -2093,7 +2087,6 @@ class Renamer {
     return { k: 'bind', pat: bound.pat, expr: applyExpr(this.supportExpr('mfix', span), [fn], span), span };
   }
 
-  /** A library value the compiler chooses, as an expression. */
   private supportExpr(name: string, span: Span): RExpr {
     const entity = this.supportValue(name, span);
     return entity.con ? { k: 'con', con: entity.con, span } : { k: 'var', ref: { kind: 'global', entity }, name, span };
@@ -2639,7 +2632,6 @@ class Renamer {
     }
   }
 
-  /** Sequences, comprehensions, signatures, records, type applications, and splices in a quote. */
   private quoteOtherExpr(expr: Expr, scope: LocalScope): QExpr {
     switch (expr.kind) {
       case 'arith': {
@@ -3897,7 +3889,6 @@ function addCandidate<T>(map: Map<string, T[]>, key: string, item: T, identity: 
 /** The namespaces of global names a quote refers to; `value` has constructors besides variables and fields. */
 type QuoteNamespace = 'var' | 'value' | 'con' | 'type';
 
-/** A scope that has locals besides those of its parent. */
 function withLocals(parent: LocalScope, locals: Iterable<LocalVar>, namespace: LocalNamespace = 'value'): LocalScope {
   const scope = new LocalScope(parent);
   for (const local of locals) scope.define(local.name, local, namespace);
@@ -3927,7 +3918,6 @@ interface RecursiveBlock {
   span: Span;
 }
 
-/** Sets the fixities that local fixity declarations declare on the variables they name. */
 function applyLocalFixities(decls: Decl[], lookup: (name: string) => LocalVar | undefined): void {
   for (const decl of decls) {
     if (decl.kind !== 'fixity') continue;

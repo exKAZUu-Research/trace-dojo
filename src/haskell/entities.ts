@@ -7,7 +7,6 @@ export function nextId(): number {
   return nextEntityId++;
 }
 
-/** A type constructor: a data type, a type synonym, or a primitive type such as `Int`. */
 export interface TypeEntity {
   id: number;
   name: string;
@@ -26,17 +25,13 @@ export interface TypeEntity {
   reduceBuiltin?: (args: Type[]) => Type | undefined;
   unsupported?: string;
   kind: Kind;
-  /** The number of type parameters a data type or synonym declares. */
   arity: number;
   cons: ConInfo[];
-  /** The fields of a record type by name. */
   fields: Map<string, FieldInfo>;
   /** What a synonym stands for, with its parameters as `TGen` indices. */
   synonym?: Type;
   span?: Span;
-  /** The fixity a type operator was declared with, if any. */
   fixity?: Fixity;
-  /** For a type-level literal, the string or number it is. */
   literal?: string | bigint;
   /** The variables the `forall` of a standalone kind signature binds, in order, which kind applications `T @k` set. */
   kindBinders?: { kind: Kind; visibility: Visibility }[];
@@ -98,13 +93,11 @@ export interface FieldInfo {
   entity: ValueEntity;
   type: TypeEntity;
   name: string;
-  /** The position of the field in each constructor that has it. */
   positions: Map<ConInfo, number>;
   /** The field's type with the data type's parameters as `TGen` indices. */
   fieldType: Type;
 }
 
-/** A value-level name defined at the top of a module: a variable, a constructor, a field selector, or a method. */
 export interface ValueEntity {
   id: number;
   name: string;
@@ -117,7 +110,6 @@ export interface ValueEntity {
   span?: Span;
   /** A name this environment provides beyond GHC's (the Turtle API), which a program's own definitions hide. */
   weak?: boolean;
-  /** The fixity an operator was declared with, if any. */
   fixity?: Fixity;
   /** What to name when rejecting a use of a library value this environment does not support. */
   unsupported?: string;
@@ -147,7 +139,6 @@ export interface ClassEntity {
   superTypes?: Type[];
   /** The functional dependencies, by parameter position. */
   fundeps?: { from: number[]; to: number[] }[];
-  /** The fixity a class operator was declared with, if any. */
   fixity?: Fixity;
   supers: ClassEntity[];
   methods: ValueEntity[];
@@ -162,7 +153,6 @@ export interface ClassEntity {
   span?: Span;
 }
 
-/** How a class constraint is satisfied: a dictionary parameter, an instance, or a superclass of another. */
 export type Evidence =
   | { kind: 'param'; param: DictParam }
   /** The evidence of a type equality, `a ~ b`, or of the empty constraint, `()`, which holds no value at run time. */
@@ -230,7 +220,6 @@ export type Role = 'nominal' | 'representational' | 'phantom';
  * `a`, which reverses each step.
  */
 export type CoercionSpec =
-  /** The types are the same. */
   | { k: 'refl' }
   /** A given constraint's conversion, reversed when `flipped`. */
   | { k: 'leaf'; index: number; flipped: boolean }

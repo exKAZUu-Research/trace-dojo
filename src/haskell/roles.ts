@@ -4,12 +4,10 @@ import { prune, splitApp, type Type } from './types';
 
 const ORDER: Record<Role, number> = { phantom: 0, representational: 1, nominal: 2 };
 
-/** The stricter of two roles. */
 export function stricterRole(a: Role, b: Role): Role {
   return ORDER[a] >= ORDER[b] ? a : b;
 }
 
-/** Whether a role allows no more conversions than another. */
 export function atLeastAsStrict(role: Role, than: Role): boolean {
   return ORDER[role] >= ORDER[than];
 }
