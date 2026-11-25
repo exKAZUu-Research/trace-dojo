@@ -9,7 +9,7 @@ import { forceString } from './primitives';
 import { Runtime, type TraceFrame } from './runtime';
 import { decodeSplice } from './thDecode';
 import { chargeTypeWork, remainingCompilationWork } from './typeWorkBudget';
-import { HaskellException, type Slot, type Value } from './values';
+import { type ConValue, HaskellException, type Slot, type Value } from './values';
 
 // A splice runs as a program of its own while the program that has it compiles, on what is left of the compilation's
 // budget: it stores its tree, which the compiler grafts in its place, and what it prints is the compiler's output, as
@@ -64,7 +64,7 @@ function uncaughtMessage(runtime: Runtime, error: HaskellException): string | un
       (error.cause as { value: Slot }).value,
     ]);
   try {
-    if ((runtime.machine.force(apply(ioSupport.exitCode)) as bigint) >= 0n) return undefined;
+    if ((runtime.machine.force(apply(ioSupport.isExit)) as ConValue).con.name === 'True') return undefined;
     return forceString(apply(ioSupport.display), runtime);
   } catch (error_) {
     if (!(error_ instanceof HaskellException)) throw error_;

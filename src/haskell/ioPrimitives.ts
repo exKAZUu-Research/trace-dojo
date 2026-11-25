@@ -19,8 +19,8 @@ export const ioSupport: {
   exception?: GlobalDef;
   /** `primDisplayException`, the message of an exception the program throws. */
   display?: GlobalDef;
-  /** `primExitCode`, the code an `ExitCode` exception ends the program with, or -1 for other exceptions. */
-  exitCode?: GlobalDef;
+  /** `primIsExit`, whether an exception is an `ExitCode`, which ends the program without a message. */
+  isExit?: GlobalDef;
 } = {};
 
 type BufferMode = { kind: 'NoBuffering' | 'LineBuffering' } | { kind: 'BlockBuffering'; size?: bigint };

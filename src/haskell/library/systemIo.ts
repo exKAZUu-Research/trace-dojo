@@ -121,12 +121,11 @@ arithException constructor = case constructor of
   "RatioZeroDenominator" -> RatioZeroDenominator
   _ -> DivideByZero
 
--- Whether an exception ends the program without a message: an exit code.
-primExitCode :: SomeException -> Int
-primExitCode e = case fromException e of
-  Just ExitSuccess -> 0
-  Just (ExitFailure n) -> n
-  Nothing -> -1
+-- Whether an exception ends the program without a message: an exit code, whatever its number.
+primIsExit :: SomeException -> Bool
+primIsExit e = case fromException e :: Maybe ExitCode of
+  Just _ -> True
+  Nothing -> False
 
 primDisplayException :: SomeException -> String
 primDisplayException = displayException

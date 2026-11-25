@@ -81,7 +81,7 @@ function compileLibrary(): Library {
   for (const [key, name] of [
     ['exception', 'primException'],
     ['display', 'primDisplayException'],
-    ['exitCode', 'primExitCode'],
+    ['isExit', 'primIsExit'],
   ] as const) {
     const entity = compiler.baseValue(name);
     ioSupport[key] = globalOf(entity, entity.name, entity);
