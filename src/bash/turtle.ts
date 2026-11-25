@@ -42,20 +42,22 @@ function turtleNew(shell: Shell, args: string[], name: string): number {
   const created = shell.runtime.world.create(coordinate(xText), coordinate(yText), color);
   if ('error' in created) fail(shell, name, created.error);
   const handle = shell.runtime.addTurtle(created);
-  const target = split
-    ? resolveSubscriptTarget(shell, {
-        name: split.name,
-        subscript: { kind: 'text', text: split.subscript },
-        operation: 'write',
-      })
-    : resolveScalarTarget(shell, variable, true);
-  if (!target) return 1;
-  const outcome = writeResolvedTarget(shell, target, handle, false);
-  if (!outcome.ok) {
-    shell.failures.handleStoreFailure('regularBuiltin', outcome, name);
-    return 1;
-  }
-  return 0;
+  return shell.withValuesRoot([handle], () => {
+    const target = split
+      ? resolveSubscriptTarget(shell, {
+          name: split.name,
+          subscript: { kind: 'text', text: split.subscript },
+          operation: 'write',
+        })
+      : resolveScalarTarget(shell, variable, true);
+    if (!target) return 1;
+    const outcome = writeResolvedTarget(shell, target, handle, false);
+    if (!outcome.ok) {
+      shell.failures.handleStoreFailure('regularBuiltin', outcome, name);
+      return 1;
+    }
+    return 0;
+  });
 }
 
 export const TURTLE_BUILTINS: Record<string, Builtin> = { turtle_new: turtleNew };
