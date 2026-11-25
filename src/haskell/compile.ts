@@ -526,7 +526,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
       expanded = expandSplices(text, splices.header, splices.sites, spliceRunner);
     }
-    const parsed = parseHaskell(expanded, 'Main', false, true);
+    const parsed = parseHaskell(expanded);
     const renamed = renameModule(parsed, {
       modules: lib.modules,
       implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),
