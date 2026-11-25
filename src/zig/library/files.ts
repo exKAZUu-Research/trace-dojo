@@ -667,7 +667,7 @@ pub const Dir = struct {
         try file.writeStreamingAll(io, options.data);
     }
 
-    pub fn readFile(dir: Dir, io: Io, file_path: []const u8, buffer: []u8) (File.OpenError || FsError || Reader.ShortError)![]u8 {
+    pub fn readFile(dir: Dir, io: Io, file_path: []const u8, buffer: []u8) (File.OpenError || FsError || Io.Reader.ShortError)![]u8 {
         const file = try dir.openFile(io, file_path, .{});
         defer file.close(io);
         var reader = file.reader(io, &.{});
@@ -675,7 +675,7 @@ pub const Dir = struct {
         return buffer[0..n];
     }
 
-    pub fn readFileAlloc(dir: Dir, io: Io, file_path: []const u8, gpa: std.mem.Allocator, limit: Limit) (File.OpenError || FsError || Reader.LimitedAllocError)![]u8 {
+    pub fn readFileAlloc(dir: Dir, io: Io, file_path: []const u8, gpa: std.mem.Allocator, limit: Limit) (File.OpenError || FsError || Io.Reader.LimitedAllocError)![]u8 {
         const file = try dir.openFile(io, file_path, .{});
         defer file.close(io);
         var buffer: [4096]u8 = undefined;
@@ -724,8 +724,8 @@ pub const Dir = struct {
     pub fn openDir(dir: Dir, io: Io, sub_path: []const u8, options: OpenOptions) (FsError || error{ FileNotFound, NotDir, AccessDenied, PermissionDenied, NameTooLong, SystemResources, BadPathName, Unexpected, Canceled })!Dir {
         _ = io;
         _ = options;
-        const stat = try statPath(dir.path, sub_path);
-        if (stat.kind != .directory) return error.NotDir;
+        const info = try statPath(dir.path, sub_path);
+        if (info.kind != .directory) return error.NotDir;
         return .{ .path = joinPath(dir.path, sub_path) };
     }
 

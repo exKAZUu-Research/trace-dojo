@@ -22,8 +22,24 @@ function complete(members: ContainerMember[], path: string, ownSurface: boolean)
   if (!ownSurface || !Object.hasOwn(PUBLIC_STD_MEMBERS, path)) return;
   const declared = new Set(members.map((member) => member.name));
   const missing = PUBLIC_STD_MEMBERS[path].filter((name) => !declared.has(name));
+  // A placeholder would hide the outer declaration that the port's own code names.
+  const used = identifiersIn(members);
+  const shadowed = missing.filter((name) => used.has(name));
+  if (shadowed.length > 0)
+    throw new Error(`std.${path} uses ${shadowed.join(', ')}, which only the reference declares there`);
   const stubs = missing.map(
     (name) => `pub const @"${name}" = @compileError("std.${path}.${name} は、この採点環境では使えません。");`
   );
   members.push(...parseZig(stubs.join('\n')).members);
+}
+
+function identifiersIn(node: unknown, names = new Set<string>()): Set<string> {
+  if (Array.isArray(node)) {
+    for (const each of node) identifiersIn(each, names);
+  } else if (node && typeof node === 'object') {
+    const record = node as Record<string, unknown>;
+    if (record.kind === 'identifier' && typeof record.name === 'string') names.add(record.name);
+    for (const value of Object.values(record)) identifiersIn(value, names);
+  }
+  return names;
 }

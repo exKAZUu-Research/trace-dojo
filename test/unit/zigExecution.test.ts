@@ -10081,6 +10081,23 @@ pub fn main(init: std.process.Init) !void {
   });
 });
 
+test('a directory reads a whole file into a buffer or an allocation', () => {
+  const program = `const std = @import("std");
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const cwd = std.Io.Dir.cwd();
+    var buf: [16]u8 = undefined;
+    const text = try cwd.readFile(io, "in.txt", &buf);
+    const all = try cwd.readFileAlloc(io, "in.txt", init.gpa, .unlimited);
+    defer init.gpa.free(all);
+    std.debug.print("{s}|{s}", .{ text, all });
+}`;
+  expect(executeProgram('zig', program, { files: { 'in.txt': 'hi\n' } })).toMatchObject({
+    stderr: 'hi\n|hi\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('vectors apply operators and builtins to each element', () => {
   const program = `const std = @import("std");
 pub fn main() void {
