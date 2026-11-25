@@ -142,7 +142,8 @@ interface SuperclassStep {
 
 /** The superclass positions that lead from a constraint to another it implies, if it does. */
 function superclassPath(given: Pred, pred: Pred): number[] | undefined {
-  const seen = new Set<ClassEntity>();
+  // The constraints reached so far, by class.
+  const seen = new Map<ClassEntity, Pred[]>();
   const work: { pred: Pred; step: SuperclassStep | undefined }[] = [{ pred: given, step: undefined }];
   while (work.length > 0) {
     chargeTypeWork();
@@ -152,9 +153,12 @@ function superclassPath(given: Pred, pred: Pred): number[] | undefined {
       for (let step = current.step; step; step = step.parent) path.push(step.index);
       return path.toReversed();
     }
-    // A class reached again only repeats what it implies, unless its superclasses apply to other types.
-    if (seen.has(current.pred.cls) && !current.pred.cls.superTypes) continue;
-    seen.add(current.pred.cls);
+    // A constraint reached again (the same class at the same type) only repeats what it implies; one reached at
+    // another type may imply other constraints. Superclasses that grow the type (UndecidableSuperClasses) stop at the
+    // compilation budget, which every step charges.
+    const sameClass = seen.get(current.pred.cls) ?? [];
+    if (sameClass.some((other) => predsEqual(other, current.pred))) continue;
+    seen.set(current.pred.cls, [...sameClass, current.pred]);
     for (let index = current.pred.cls.supers.length - 1; index >= 0; index--) {
       work.push({ pred: superPred(current.pred, index), step: { index, parent: current.step } });
     }
