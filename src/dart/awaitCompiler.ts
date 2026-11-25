@@ -51,6 +51,8 @@ export abstract class AwaitCompiler extends CompilerBase {
     if (!parent) {
       return awaits ? this.error(expression, 'この位置の await は、この採点環境では使えません。') : compile();
     }
+    // Only a null-aware selector before this part shorts it, so the chain is read before the part adds its own.
+    const isShorted = parent.isShorted?.() ?? false;
     const own = awaits && !handlesAwaitItself(expression) ? newStaging(suspensionStarts(expression, false)) : undefined;
     if (own) Object.assign(own, { isShorted: this.shortingProbe() });
     this.staging = own;
@@ -65,7 +67,7 @@ export abstract class AwaitCompiler extends CompilerBase {
     const precedes = parent.awaitStarts.some((start) => start >= expression.end);
     if (!compiled.gen && !(precedes && isLiftable(compiled))) return compiled;
     // A null-aware selector earlier in the chain shorts what follows it, which a step would evaluate anyway.
-    if (compiled.gen && parent.isShorted?.()) {
+    if (compiled.gen && isShorted) {
       return this.error(expression, 'null 認識の選択子より後の await は、この採点環境では使えません。');
     }
     return this.lift(root, parent, compiled);
