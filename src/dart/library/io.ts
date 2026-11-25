@@ -6,6 +6,15 @@
 export const IO_SOURCE = String.raw`
 abstract interface class IOException implements Exception {}
 
+/** The text of bytes written to a file or a standard stream, which hold text, so that bytes that are not UTF-8 cannot be kept. */
+String _textOfBytes(List<int> bytes) {
+  try {
+    return utf8.decode(bytes);
+  } on FormatException {
+    throw UnsupportedError("UTF-8 でないバイト列の書き込みは、この採点環境では使えません。");
+  }
+}
+
 class OSError implements IOException {
   static const int noErrorCode = -1;
   final String message;
@@ -105,7 +114,7 @@ class Stdout implements IOSink {
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
   external void writeCharCode(int charCode);
   void add(List<int> data) {
-    write(utf8.decode(data, allowMalformed: true));
+    write(_textOfBytes(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
@@ -324,7 +333,7 @@ class _File extends FileSystemEntity implements File {
         return this;
       });
   void writeAsBytesSync(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) {
-    writeAsStringSync(utf8.decode(bytes, allowMalformed: true), mode: mode);
+    writeAsStringSync(_textOfBytes(bytes), mode: mode);
   }
   Future<File> writeAsBytes(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) => Future(() {
         writeAsBytesSync(bytes, mode: mode);
@@ -389,7 +398,7 @@ class _FileSink implements IOSink {
     _buffer.writeCharCode(charCode);
   }
   void add(List<int> data) {
-    write(utf8.decode(data, allowMalformed: true));
+    write(_textOfBytes(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
