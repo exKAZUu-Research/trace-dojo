@@ -178,18 +178,28 @@ function prepareDeclarations(checker: Checker, module: RModule): KindDeclaration
 
 function kindDependencies(entry: KindDeclaration): Set<object> {
   const found = new Set<object>();
+  // Every part that may name a type, a promoted constructor among them, whose kind this declaration's depends on.
   const work: RType[] = [];
   if (entry.kind === 'data') {
-    for (const con of entry.decl.cons) work.push(...con.fields, ...(con.context ?? []));
-  } else if (entry.kind === 'synonym') work.push(entry.decl.rhs);
+    work.push(...writtenKinds(entry.decl.paramKinds), ...(entry.decl.datatypeContext ?? []));
+    for (const con of entry.decl.cons) {
+      work.push(...con.fields, ...(con.context ?? []), ...writtenKinds(con.ownVars?.map((binder) => binder.kind)));
+      if (con.result) work.push(con.result);
+    }
+  } else if (entry.kind === 'synonym') work.push(entry.decl.rhs, ...writtenKinds(entry.decl.paramKinds));
   else if (entry.kind === 'family') {
+    work.push(...writtenKinds(entry.decl.paramKinds), ...writtenKinds([entry.decl.resultKind]));
     for (const equation of entry.decl.equations) work.push(...equation.patterns, equation.rhs);
   } else {
-    work.push(...entry.decl.supers);
+    work.push(...entry.decl.supers, ...writtenKinds(entry.decl.paramKinds));
     for (const method of entry.decl.methods) work.push(method.sig.type, ...method.sig.context);
   }
   for (const entity of typeEntities(work)) found.add(('promotedFrom' in entity && entity.promotedFrom?.type) || entity);
   return found;
+}
+
+function writtenKinds(annotations: readonly (RType | undefined)[] | undefined): RType[] {
+  return (annotations ?? []).filter((kind): kind is RType => kind !== undefined);
 }
 
 function inferGroup(checker: Checker, group: KindDeclaration[]): void {
