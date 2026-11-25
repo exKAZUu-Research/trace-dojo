@@ -44,17 +44,7 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
 
 // code-gauge-allow functionNcss -- Lists the builtin methods, each a small closure of its own.
 function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
-  builder.method(fs, 'readFileSync', 2, ({ runtime, args }) => {
-    // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
-    if (runtime.unavailableMember && !namesEncoding(runtime, args[1]))
-      rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
-    // File descriptor 0 is standard input.
-    if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
-    const path = requirePath(runtime, args[0]);
-    // Node.js names no path when reading a directory fails, since it reads from a file descriptor it opened.
-    if (path !== '' && runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
-    return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
-  });
+  builder.method(fs, 'readFileSync', 2, ({ runtime, args }) => readFileSync(runtime, args));
   for (const [name, defaultFlag] of [
     ['writeFileSync', 'w'],
     ['appendFileSync', 'a'],
@@ -100,6 +90,18 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     withErrors(runtime, 'rename', from, () => runtime.io.files.rename(from, to), to);
     return;
   });
+}
+
+function readFileSync(runtime: Runtime, args: Value[]): Value {
+  // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
+  if (runtime.unavailableMember && !namesEncoding(runtime, args[1]))
+    rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
+  // File descriptor 0 is standard input.
+  if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
+  const path = requirePath(runtime, args[0]);
+  // Node.js names no path when reading a directory fails, since it reads from a file descriptor it opened.
+  if (path !== '' && runtime.io.files.kindOf(path) === 'directory') throwNodeError(runtime, 'EISDIR', 'read');
+  return withErrors(runtime, 'open', path, () => runtime.io.openReader(path).readRest());
 }
 
 /** The `readdirSync` option this interpreter does not run, which lists more than names as strings, if one is given. */
