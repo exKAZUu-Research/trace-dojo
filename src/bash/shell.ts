@@ -290,45 +290,17 @@ export class Shell implements ArithmeticHost, RootContext {
     return statement.elseBody ? this.runStatements(statement.elseBody) : 0;
   }
 
-  private iterate(body: Statement[], last: { status: number }): 'next' | 'stop' {
-    try {
-      last.status = this.runStatements(body);
-      return 'next';
-    } catch (error) {
-      if (error instanceof BreakSignal) {
-        last.status = error.status;
-        this.store.setCommandStatus(error.status);
-        if (--error.count > 0) throw error;
-        return 'stop';
-      }
-      if (error instanceof ContinueSignal) {
-        last.status = 0;
-        this.store.setCommandStatus(0);
-        if (--error.count > 0) throw error;
-        return 'next';
-      }
-      throw error;
-    }
-  }
-
-  private loop(run: (last: { status: number }) => void): number {
-    const last = { status: 0 };
-    this.loopDepth++;
-    try {
-      run(last);
-    } finally {
-      this.loopDepth--;
-    }
-    return last.status;
-  }
-
   private executeWhile(statement: Extract<Statement, { kind: 'while' }>): number {
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        const condition = this.runCondition(statement.condition);
-        if ((condition === 0) === statement.until) return;
-        if (this.iterate(statement.body, last) === 'stop') return;
+        const outcome = this.runLoopIteration(last, () => {
+          const condition = this.runCondition(statement.condition);
+          if ((condition === 0) === statement.until) return 'stop';
+          last.status = this.runStatements(statement.body);
+          return 'next';
+        });
+        if (outcome === 'stop') return;
       }
     });
   }
@@ -414,6 +386,44 @@ export class Shell implements ArithmeticHost, RootContext {
         }
       }
     });
+  }
+
+  private loop(run: (last: { status: number }) => void): number {
+    const last = { status: 0 };
+    this.loopDepth++;
+    try {
+      run(last);
+    } finally {
+      this.loopDepth--;
+    }
+    return last.status;
+  }
+
+  private iterate(body: Statement[], last: { status: number }): 'next' | 'stop' {
+    return this.runLoopIteration(last, () => {
+      last.status = this.runStatements(body);
+      return 'next';
+    });
+  }
+
+  private runLoopIteration(last: { status: number }, step: () => 'next' | 'stop'): 'next' | 'stop' {
+    try {
+      return step();
+    } catch (error) {
+      if (error instanceof BreakSignal) {
+        last.status = error.status;
+        this.store.setCommandStatus(error.status);
+        if (--error.count > 0) throw error;
+        return 'stop';
+      }
+      if (error instanceof ContinueSignal) {
+        last.status = 0;
+        this.store.setCommandStatus(0);
+        if (--error.count > 0) throw error;
+        return 'next';
+      }
+      throw error;
+    }
   }
 
   private restoringLine<T>(run: () => T): T {
