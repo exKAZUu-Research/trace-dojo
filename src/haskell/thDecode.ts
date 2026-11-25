@@ -1,7 +1,13 @@
 import { CONS_CON } from './builtinTypes';
 import { unsupportedError } from './errors';
 import type { FeatureGates } from './features';
-import { overloadedList, overloadedListPattern, overloadedSequence } from './overloadedLists';
+import {
+  overloadedList,
+  overloadedListPattern,
+  overloadedSequence,
+  overloadedString,
+  overloadedStringPattern,
+} from './overloadedLiterals';
 import { define, forceString, unit } from './primitives';
 import type { Runtime } from './runtime';
 import type {
@@ -454,7 +460,8 @@ class SpliceDecoder {
         if (literal.kind === 'int' && literal.value < 0n) {
           return { kind: 'paren', expr: { kind: 'neg', expr: this.integer(-literal.value), span }, span };
         }
-        return { kind: 'lit', lit: literal, span };
+        const expr: Extract<Expr, { kind: 'lit' }> = { kind: 'lit', lit: literal, span };
+        return literal.kind === 'string' && this.site.allows('overloadedStrings') ? overloadedString(expr) : expr;
       }
       case 'AppE': {
         const arg = this.con(f[1]);
@@ -777,7 +784,11 @@ class SpliceDecoder {
           const value = negative ? -literal.value : literal.value;
           return { kind: 'plit', lit: { kind: 'int', value, text: String(value) }, negative, span };
         }
-        return { kind: 'plit', lit: { ...literal, text: '' }, negative: false, span };
+        const written: SourceLiteral = { ...literal, text: '' };
+        if (written.kind === 'string' && this.site.allows('overloadedStrings')) {
+          return overloadedStringPattern(written, span);
+        }
+        return { kind: 'plit', lit: written, negative: false, span };
       }
       case 'VarP': {
         return { kind: 'pvar', name: this.binder(f[0]), span };

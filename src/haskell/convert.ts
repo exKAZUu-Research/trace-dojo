@@ -16,7 +16,13 @@ import {
   withImplicitWhere,
 } from './implicitBindings';
 import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
-import { overloadedList, overloadedListPattern, overloadedSequence } from './overloadedLists';
+import {
+  overloadedList,
+  overloadedListPattern,
+  overloadedSequence,
+  overloadedString,
+  overloadedStringPattern,
+} from './overloadedLiterals';
 import { sourceColumns } from './sourceCoordinates';
 import { lowerStrictBindings } from './strictLowering';
 import type {
@@ -1924,9 +1930,14 @@ export function convertExpr(features: ConvertContext, node: Node): Expr {
       };
     }
     case 'literal': {
-      const literal: Expr = { kind: 'lit', lit: convertLiteral(features, namedChildren(node)[0] ?? node), span };
-      if (literal.lit.kind !== 'string' || !features.allows('overloadedStrings')) return literal;
-      return { kind: 'app', fn: { kind: 'support', name: 'overloadedFromString', span }, arg: literal, span };
+      const literal: Extract<Expr, { kind: 'lit' }> = {
+        kind: 'lit',
+        lit: convertLiteral(features, namedChildren(node)[0] ?? node),
+        span,
+      };
+      return literal.lit.kind === 'string' && features.allows('overloadedStrings')
+        ? overloadedString(literal)
+        : literal;
     }
     case 'label': {
       if (!features.allows('overloadedLabels'))
@@ -2725,23 +2736,7 @@ export function convertPattern(features: ConvertContext, node: Node): Pat {
     }
     case 'literal': {
       const lit = convertLiteral(features, namedChildren(node)[0] ?? node);
-      if (lit.kind === 'string' && features.allows('overloadedStrings')) {
-        // GHC matches an overloaded string by (==) with the literal's value at the pattern's type.
-        const matches: Expr = {
-          kind: 'app',
-          fn: { kind: 'support', name: 'overloadedStringEq', span },
-          arg: { kind: 'lit', lit, span },
-          span,
-        };
-        return {
-          kind: 'pview',
-          expr: matches,
-          exprText: '==',
-          pat: { kind: 'pcon', con: { name: 'True', span }, args: [], span },
-          written: { kind: 'plit', lit, negative: false, span },
-          span,
-        };
-      }
+      if (lit.kind === 'string' && features.allows('overloadedStrings')) return overloadedStringPattern(lit, span);
       return { kind: 'plit', lit, negative: false, span };
     }
     case 'negation': {
