@@ -631,7 +631,6 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
   return chars.join('');
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Dispatches @Q/@E/@P/@u/@U/@L/@a/@A/@K/@k parameter transformations.
 // code-gauge-allow functionNcss -- One case per transformation letter of Bash's parameter expansion.
 function transform(
   expander: Expander,
@@ -672,12 +671,7 @@ function transform(
       return mapValues(expander, value, ctx, lowerCase);
     }
     case 'a': {
-      const view = resolveTransformationView(shell, name);
-      const flags = view ? ATTRIBUTE_ORDER.filter((attribute) => view.attributes.has(attribute)).join('') : '';
-      if (value.kind === 'list') {
-        return expander.valueSegments({ ...value, values: value.values.map(() => flags) }, ctx);
-      }
-      return value.value === undefined && !view ? [] : expander.valueSegments({ kind: 'scalar', value: flags }, ctx);
+      return attributeTransformSegments(expander, shell, name, value, ctx);
     }
     case 'A': {
       const { text, isArray } = formatDeclarationTransform(shell, name, value);
@@ -697,6 +691,22 @@ function transform(
       throw new Error(`Unknown transformation ${letter}`);
     }
   }
+}
+
+function attributeTransformSegments(
+  expander: Expander,
+  shell: Shell,
+  name: string,
+  value: ParameterValue,
+  ctx: WordContext
+): WordSegment[] {
+  const view = resolveTransformationView(shell, name);
+  const flags = view ? ATTRIBUTE_ORDER.filter((attribute) => view.attributes.has(attribute)).join('') : '';
+  if (value.kind === 'list') {
+    const values = view?.kind === 'unset' ? (flags === '' ? [] : [flags]) : value.values.map(() => flags);
+    return expander.valueSegments({ ...value, values }, ctx);
+  }
+  return value.value === undefined && !view ? [] : expander.valueSegments({ kind: 'scalar', value: flags }, ctx);
 }
 
 function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
