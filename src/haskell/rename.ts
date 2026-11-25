@@ -2211,29 +2211,7 @@ class Renamer {
     scope: LocalScope | undefined
   ): RPat {
     const synonym = source.con.qualifier ? undefined : this.patternSynonyms.get(source.con.name);
-    if (synonym?.fields) {
-      const fields = synonym.fields;
-      const args = fields.map((name): Pat => {
-        const given = source.fields.find((field) => field.field.name === name);
-        if (given) return given.pat;
-        if (source.wildcard) return { kind: 'pvar', name: { name, span: source.span }, span: source.span };
-        return { kind: 'pwild', span: source.span };
-      });
-      for (const field of source.fields) {
-        if (!fields.includes(field.field.name)) {
-          throw compileError(
-            field.span,
-            `パターンシノニム ${synonym.name} には、フィールド ${field.field.name} がありません。`
-          );
-        }
-      }
-      return this.renameSynonymPattern(
-        synonym,
-        { kind: 'pcon', con: source.con, args, span: source.span },
-        binders,
-        scope
-      );
-    }
+    if (synonym?.fields) return this.renameSynonymRecordPattern(synonym, synonym.fields, source, binders, scope);
     const pat = expandRecordWildcards(source, (name) =>
       this.recordFieldNames(name, () => this.lookupCon(name))
     ) as typeof source;
@@ -2255,6 +2233,31 @@ class Renamer {
       order.push(position);
     }
     return { k: 'con', con, args, order, span };
+  }
+
+  /** A record pattern of a record pattern synonym, as the use of the synonym with its fields in order. */
+  private renameSynonymRecordPattern(
+    synonym: PatternSynonymInfo,
+    fields: string[],
+    source: Extract<Pat, { kind: 'precord' }>,
+    binders: Map<string, LocalVar>,
+    scope: LocalScope | undefined
+  ): RPat {
+    for (const field of source.fields) {
+      if (!fields.includes(field.field.name)) {
+        throw compileError(
+          field.span,
+          `パターンシノニム ${synonym.name} には、フィールド ${field.field.name} がありません。`
+        );
+      }
+    }
+    const { span } = source;
+    const args = fields.map((name): Pat => {
+      const given = source.fields.find((field) => field.field.name === name);
+      if (given) return given.pat;
+      return source.wildcard ? { kind: 'pvar', name: { name, span }, span } : { kind: 'pwild', span };
+    });
+    return this.renameSynonymPattern(synonym, { kind: 'pcon', con: source.con, args, span }, binders, scope);
   }
 
   /** The variable a pattern binds: a new one, or the one a declaration group `declared` for its name. */
