@@ -987,18 +987,42 @@ export abstract class CallCompiler extends CompilerCore {
         if (!param || passesArray(args[index], param)) return true;
         const paramType = substitute(param.type, attempt.substitution);
         const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
-        const sam = this.samOf(elementType);
-        const functionType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
-        if (!functionType) return true;
+        // The probe's bounds on the candidate's type variables are undone, as a candidate kept is checked again.
+        const bounds = attempt.variables.map((variable) => ({
+          lower: [...variable.lower],
+          upper: [...variable.upper],
+        }));
         let fits = false;
         const error = this.probeApplicability(context, (probe) => {
-          const reference = this.compileExpression(scope, probe, args[index].value, functionType);
-          fits = this.acceptsArgument(reference, functionType);
+          fits = this.compileReferenceArgument(scope, probe, args[index].value, elementType, attempt).fits;
         });
+        for (const [variableIndex, variable] of attempt.variables.entries()) {
+          variable.lower = bounds[variableIndex].lower;
+          variable.upper = bounds[variableIndex].upper;
+        }
         return !error && fits;
       })
     );
     return fitting.length > 0 ? fitting : attempts;
+  }
+
+  /**
+   * A callable reference compiled for a parameter's type, and whether it fits: the one place a reference is checked,
+   * for a function type and a fun interface's function alike. Relating the reference's type to the expected one gives
+   * the call's type variables their types, as `R` of `map(String::length)`.
+   */
+  private compileReferenceArgument(
+    scope: Scope,
+    context: FunctionContext,
+    value: Expression,
+    elementType: KType,
+    attempt: Attempt
+  ): { reference: Compiled; sam: ReturnType<CallCompiler['samOf']>; fits: boolean } {
+    const sam = this.samOf(elementType);
+    const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
+    const reference = this.compileExpression(scope, context, value, lambdaType ?? elementType);
+    const fits = this.acceptsArgument(reference, sam ? (lambdaType ?? sam.functionType) : elementType);
+    return { reference, sam, fits };
   }
 
   /** Whether a callable reference may stand for a value of the type, which its expected function type then selects. */
@@ -1420,18 +1444,13 @@ export abstract class CallCompiler extends CompilerCore {
     const sam = this.samOf(elementType);
     const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
     if (argument.value.kind === 'reference') {
-      const reference = this.compileExpression(scope, context, argument.value, lambdaType ?? elementType);
-      if (sam) {
-        // A wrapped reference has the interface's type, which argumentEvaluations then accepts; the reference itself
-        // must have the type of the interface's function.
-        if (!this.acceptsArgument(reference, lambdaType ?? sam.functionType))
-          this.error(argument.row, typeMismatchMessage(elementType, reference.type));
-        return this.samWrap(reference, sam, resolved(elementType));
-      }
-      // Relating the reference's type to the parameter's gives the call's type variables their types, as `R` of
-      // `map(String::length)`; acceptsArgument checks the argument later.
-      isSubtype(reference.type, elementType);
-      return reference;
+      const {
+        reference,
+        sam: referenceSam,
+        fits,
+      } = this.compileReferenceArgument(scope, context, argument.value, elementType, attempt);
+      if (!fits) this.error(argument.row, typeMismatchMessage(elementType, reference.type));
+      return referenceSam ? this.samWrap(reference, referenceSam, resolved(elementType)) : reference;
     }
     const compiled = this.compileLambda(
       scope,
