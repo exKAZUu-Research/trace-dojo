@@ -9,6 +9,9 @@ class IsString a where
 instance (a ~ Char) => IsString [a] where
   fromString xs = xs
 
+instance IsString a => IsString (Identity a) where
+  fromString = Identity . fromString
+
 class IsList l where
   type Item l
   fromList :: [Item l] -> l

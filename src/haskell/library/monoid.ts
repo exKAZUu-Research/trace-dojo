@@ -223,10 +223,24 @@ instance Traversable f => Traversable (Ap f) where
 instance Functor f => Functor (Ap f) where
   fmap f (Ap a) = Ap (fmap f a)
 
-newtype Identity a = Identity { runIdentity :: a } deriving (Eq, Ord)
+newtype Identity a = Identity { runIdentity :: a }
+  deriving (Eq, Ord, Bounded, Num, Real, Integral, Fractional, Floating, RealFrac, RealFloat, Semigroup, Monoid, Bits, FiniteBits)
+
+instance Enum a => Enum (Identity a) where
+  succ = coerce (succ :: a -> a)
+  pred = coerce (pred :: a -> a)
+  toEnum = coerce (toEnum :: Int -> a)
+  fromEnum = coerce (fromEnum :: a -> Int)
+  enumFrom = coerce (enumFrom :: a -> [a])
+  enumFromThen = coerce (enumFromThen :: a -> a -> [a])
+  enumFromTo = coerce (enumFromTo :: a -> a -> [a])
+  enumFromThenTo = coerce (enumFromThenTo :: a -> a -> a -> [a])
+
+instance Read a => Read (Identity a) where
+  readsPrec d = readParen (d > 10) (\r -> [(Identity x, t) | ("Identity", s) <- lex r, (x, t) <- readsPrec 11 s])
 
 instance Show a => Show (Identity a) where
-  showsPrec d (Identity a) = showParen (d >= 11) (showString "Identity " . showsPrec 11 a)
+  showsPrec d (Identity x) = showParen (d > 10) (showString "Identity " . showsPrec 11 x)
 
 instance Functor Identity where
   fmap f (Identity a) = Identity (f a)
