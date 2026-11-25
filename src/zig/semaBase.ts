@@ -725,7 +725,8 @@ export abstract class SemaBase implements SemaApi {
         );
       }
     }
-    void span;
+    // Zig checks a packed type's backing integer as it declares the type, however the program uses it.
+    if (type.layout === 'packed') this.resolveStorage(type, span);
     return fields;
   }
 
@@ -814,6 +815,7 @@ export abstract class SemaBase implements SemaApi {
   }
 
   private checkPackedUnion(fields: readonly { type: Type }[], span: Span): void {
+    if (fields.length === 0) this.error(span, 'packed union にはフィールドを書いてください。');
     let width: number | undefined;
     for (const field of fields) {
       this.spendCompilation();
@@ -967,6 +969,7 @@ export abstract class SemaBase implements SemaApi {
       }
     });
     this.resolvingUnionFields--;
+    if (type.layout === 'packed') this.resolveStorage(type, syntax);
     return type.fields ?? [];
   }
 
