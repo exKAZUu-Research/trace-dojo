@@ -1545,12 +1545,27 @@ class Renamer {
       case 'recordCon': {
         const synonym = expr.con.qualifier ? undefined : this.patternSynonyms.get(expr.con.name);
         if (synonym?.fields) {
+          const declared = synonym.fields;
+          for (const field of expr.fields) {
+            if (!declared.includes(field.field.name)) {
+              throw compileError(
+                field.span,
+                `パターンシノニム ${synonym.name} には、フィールド ${field.field.name} がありません。`
+              );
+            }
+          }
           let result: Expr = { kind: 'con', name: expr.con, span };
-          for (const name of synonym.fields) {
+          for (const name of declared) {
             const given = expr.fields.find((field) => field.field.name === name);
-            if (!given)
+            // `..` takes a field the construction leaves out from a variable of its name in scope.
+            const value: Expr | undefined =
+              given?.value ??
+              (expr.wildcard && this.wildcardDefined(name, scope)
+                ? { kind: 'var', name: { name, span }, span }
+                : undefined);
+            if (!value)
               throw compileError(span, `パターンシノニム ${synonym.name} のフィールド ${name} がありません。`);
-            result = { kind: 'app', fn: result, arg: given.value, span };
+            result = { kind: 'app', fn: result, arg: value, span };
           }
           return this.renameExpr(result, scope);
         }
@@ -1735,13 +1750,18 @@ class Renamer {
     const named = new Set(given.map((bind) => bind.field.name));
     return (con.fieldNames ?? []).flatMap((name) => {
       if (named.has(name)) return [];
-      const defined =
-        scope.lookup(name) !== undefined ||
-        this.scope.values.get(name).some((entity) => entity.sort === 'var' && entity.module === this.module.name);
-      return defined
+      return this.wildcardDefined(name, scope)
         ? [{ field: { name, span }, value: { kind: 'var', name: { name, span }, span } as Expr, span }]
         : [];
     });
+  }
+
+  /** Whether `..` in a construction takes a field from a variable of its name: a local or a top-level one here. */
+  private wildcardDefined(name: string, scope: LocalScope): boolean {
+    return (
+      scope.lookup(name) !== undefined ||
+      this.scope.values.get(name).some((entity) => entity.sort === 'var' && entity.module === this.module.name)
+    );
   }
 
   private renameFieldBinds(fields: FieldBind[], scope: LocalScope, cons: ConInfo[] | undefined): RFieldBind[] {
