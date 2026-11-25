@@ -445,7 +445,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.skipOnNull(receiver, nullAware);
     const prepare = preparingReceiver(receiver.run, nullAware);
     const memberName = this.runtimeMemberName(name);
-    const dispatchType = this.dynamicDispatchType(receiver);
+    const dispatchType = this.dynamicDispatchType(receiver, nullAware);
     if (dispatchType) {
       return {
         writeType: DYNAMIC,
@@ -504,7 +504,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let indexContext: DartType | undefined;
     let readContext: DartType | undefined;
     let writeType: DartType = DYNAMIC;
-    const dispatchType = this.dynamicDispatchType(receiver);
+    const dispatchType = this.dynamicDispatchType(receiver, nullAware);
     let readType: DartType | undefined = dispatchType ?? DYNAMIC;
     let setter: ResolvedMember | undefined;
     let getter: ResolvedMember | undefined;

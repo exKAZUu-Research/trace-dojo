@@ -38,6 +38,7 @@ import {
   makeNullable,
   mentionsTypeParams,
   NEVER,
+  nonNullable,
   NULL,
   objectType,
   resolveBound,
@@ -679,10 +680,14 @@ export abstract class CompilerBase {
     return mentionsTypeParams(type, params);
   }
 
-  protected dynamicDispatchType(receiver: Compiled): DartType | undefined {
+  /**
+   * The type a member access on `receiver` gives when it dispatches at run time, decided on the type its lookup
+   * uses: the non-null part of the receiver's type when the access is null-aware, which is Never for a Null receiver.
+   */
+  protected dynamicDispatchType(receiver: Compiled, nullAware: boolean): DartType | undefined {
     if (receiver.extensionOverride) return;
     if (receiver.type.kind === 'dynamic') return DYNAMIC;
-    return isNeverType(receiver.type) ? NEVER : undefined;
+    return isNeverType(nullAware ? nonNullable(receiver.type) : receiver.type) ? NEVER : undefined;
   }
 
   /** Whether a member may be used on a receiver that may be null: Object's members and extensions on nullable types. */

@@ -456,7 +456,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    if (this.dynamicDispatchType(receiver)) {
+    if (this.dynamicDispatchType(receiver, nullAware)) {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;

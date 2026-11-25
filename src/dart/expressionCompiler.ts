@@ -1367,7 +1367,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     this.skipOnNull(receiver, nullAware);
-    const dispatchType = this.dynamicDispatchType(receiver);
+    const dispatchType = this.dynamicDispatchType(receiver, nullAware);
     if (dispatchType) {
       const { run } = receiver;
       const memberName = this.runtimeMemberName(name);
