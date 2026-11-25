@@ -955,9 +955,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       const pointer = new Pointer(element.slots, element.position);
       return zero ? this.zeroPointer(pointer, child, source) : pointer;
     };
+    // Zig rejects a known index past the memory a known pointer points into, which reading it would fault on.
+    const projectKnown = (source: Value, position: bigint): Pointer => {
+      try {
+        return projectElement(source, position);
+      } catch (error) {
+        if (error instanceof MemoryFault)
+          this.error(expression, `添字 ${position} は、${typeName(type)} が指している先の範囲の外です。`);
+        throw error;
+      }
+    };
     const arrayAddress = index.known && type.kind === 'array' ? this.knownAddress(object) : undefined;
     if (index.known && (arrayAddress || (object.known && type.kind !== 'array' && isConstantData(object.value)))) {
-      const pointer = projectElement(arrayAddress ?? object.value, index.value as bigint);
+      const pointer = projectKnown(arrayAddress ?? object.value, index.value as bigint);
       return knownAt(child, pointer, expression);
     }
     const base = this.deferredLoad(object);
@@ -984,13 +994,13 @@ export abstract class ExpressionCompiler extends SemaBase {
         ...runtime(addressType, locatePointer, expression),
         staticResult: this.constantResult(
           [type.kind === 'array' ? base.operand : object, index],
-          ([value, position]) => projectElement(value, position as bigint),
+          ([value, position]) => projectKnown(value, position as bigint),
           expression
         ),
       }),
       locate: locatePointer,
       compileTimePointer:
-        index.known && staticSource !== undefined ? projectElement(staticSource, index.value as bigint) : undefined,
+        index.known && staticSource !== undefined ? projectKnown(staticSource, index.value as bigint) : undefined,
     };
     const facts =
       !zero && index.known && type.kind === 'array' ? fieldFacts(valueFactsOf(object), Number(index.value)) : undefined;
