@@ -1726,7 +1726,8 @@ export abstract class StatementCompiler extends CallCompiler {
       breaks: [],
       broken: false,
     };
-    const condition = this.compile(expression.condition);
+    // A runtime loop evaluates its condition on every iteration, as its body is.
+    const condition = this.underRuntimeCondition(() => this.compile(expression.condition));
     const fact = staticResultOf(condition);
     const kind = conditionKind(condition.type, expression.capture !== undefined);
     const infallible = errorUnionCannotFail(condition);
