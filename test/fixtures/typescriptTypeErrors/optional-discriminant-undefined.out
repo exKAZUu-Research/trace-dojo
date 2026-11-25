@@ -1,0 +1,5 @@
+(7,7): error TS2322: Type 'Shape' is not assignable to type 'Strict'.
+  Type 'Shape' is not assignable to type '{ kind: "b"; size: number; }'.
+    Types of property 'kind' are incompatible.
+      Type '"a" | "b" | undefined' is not assignable to type '"b"'.
+        Type 'undefined' is not assignable to type '"b"'.

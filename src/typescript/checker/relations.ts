@@ -751,7 +751,8 @@ export class Relations {
     const discriminants = [...this.c.structureOf(source).properties.values()]
       .filter((property) => this.c.flow.isDiscriminant(union, property.name))
       .map((property) => {
-        const type = property.type();
+        // An optional discriminant may also be absent, which reads as undefined.
+        const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
         return { property, values: type.kind === 'union' ? type.types : [type] };
       })
       .filter(({ values }) => values.length > 1 && values.every((value) => isUnit(value)));
