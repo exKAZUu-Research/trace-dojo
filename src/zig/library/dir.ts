@@ -84,10 +84,20 @@ export const FILE_KIND: EnumType = nativeEnum('Io.File.Kind', [
   'unknown',
 ]);
 
-export const FILE_STAT: StructType = nativeStruct('Io.File.Stat', {}, [
-  { name: 'size', type: U64, hasDefault: false },
-  { name: 'kind', type: FILE_KIND, hasDefault: false },
-]);
+export const FILE_STAT: StructType = nativeStruct(
+  'Io.File.Stat',
+  {},
+  [
+    { name: 'size', type: U64, hasDefault: false },
+    { name: 'kind', type: FILE_KIND, hasDefault: false },
+  ],
+  // The run's files have no inodes, permissions, or timestamps of their own.
+  {
+    kind: 'fileStat',
+    args: [],
+    leftOutFields: ['inode', 'nlink', 'permissions', 'atime', 'mtime', 'ctime', 'block_size'],
+  }
+);
 
 function kindValue(name: 'directory' | 'file' | 'unknown'): bigint {
   return (FILE_KIND.fields?.find((field) => field.name === name) as { value: bigint }).value;

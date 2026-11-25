@@ -145,6 +145,8 @@ export interface NativeStruct {
   readonly kind: string;
   /** The type arguments of a generic native type. */
   readonly args: readonly Type[];
+  /** Fields of Zig's type that the grader leaves out, which a program's use of reports as unavailable. */
+  readonly leftOutFields?: readonly string[];
 }
 
 export interface EnumField {
