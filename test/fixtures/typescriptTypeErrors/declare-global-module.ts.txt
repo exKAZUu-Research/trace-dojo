@@ -1,0 +1,15 @@
+export {};
+declare global {
+  interface Array<T> {
+    total(): number;
+  }
+  interface Window {
+    x: number;
+  }
+  var appName: string | undefined;
+}
+Array.prototype.total = function (this: number[]) {
+  return this.reduce((sum, value) => sum + value, 0);
+};
+console.log([1, 2, 3].total(), typeof appName);
+const wrong: string = [1].total();

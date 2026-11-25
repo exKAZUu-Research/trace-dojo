@@ -201,10 +201,10 @@ export class StatementChecker {
     }
   }
 
-  /** `declare global` augments the globals only from a module, which this program never is. */
+  /** `declare global` augments the globals only from a module. */
   private ambientDeclaration(node: TreeNode): void {
     for (const child of named(node)) {
-      if (child.type === 'statement_block')
+      if (child.type === 'statement_block' && !this.c.isModule)
         this.c.error(
           node,
           'グローバルスコープの拡張は、外部モジュールかアンビエントモジュールの宣言の中に直接書くことしかできません。'

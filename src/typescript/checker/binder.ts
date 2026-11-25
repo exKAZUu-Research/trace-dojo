@@ -448,8 +448,12 @@ export class Binder {
         break;
       }
       case 'statement_block': {
-        // `declare global { ... }` augments the globals from the library's modules, but nothing from a script.
-        const augments = this.options?.deferLibraryTypes ? this.moduleScope : undefined;
+        // `declare global { ... }` augments the globals from a module (the library's own included), but not from a script.
+        const augments = this.options?.deferLibraryTypes
+          ? this.moduleScope
+          : this.options?.rootScope
+            ? undefined
+            : this.globalScope;
         this.bindAmbient(child, this.newScope(child, 'block', scope, augments));
         break;
       }

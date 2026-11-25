@@ -102,6 +102,8 @@ export class Checker {
   /** While positive, speculative errors are suppressed, as when inferring a function's return type. */
   silent = 0;
   readonly binder: Binder;
+  /** Whether the program has an `import` or an `export`, which makes it a module. */
+  readonly isModule: boolean;
   readonly libraryBinder: Binder;
   readonly localeOptionsBinder: Binder;
   readonly reducedTypes = new ReducedTypes(this);
@@ -151,7 +153,8 @@ export class Checker {
     this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
     // A program with an import or an export is a module, whose declarations shadow the globals rather than merge with them.
-    this.binder = isModule(root)
+    this.isModule = isModule(root);
+    this.binder = this.isModule
       ? new Binder(root, this.libraryBinder.moduleScope, { budget })
       : new Binder(root, this.libraryBinder.globalScope, { rootScope: this.libraryBinder.moduleScope, budget });
   }
