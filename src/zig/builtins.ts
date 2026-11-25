@@ -748,7 +748,8 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
-    let right = this.compile(rightSyntax, left.type);
+    // Zig gives a vector operation's operand no result type, so `@addWithOverflow(v, @splat(1))` has none for the @splat.
+    let right = this.compile(rightSyntax, isVectorType(left.type) ? undefined : left.type);
     if (left.type.kind === 'comptime_int' && right.type.kind === 'int') left = this.compile(leftSyntax, right.type);
     const type = name === '@shlWithOverflow' ? left.type : this.peerType([left, right], expression);
     const vector = isVectorType(type) ? type : undefined;
