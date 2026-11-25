@@ -309,6 +309,12 @@ class _File extends FileSystemEntity implements File {
   List<int> readAsBytesSync() => utf8.encode(readAsStringSync());
   Future<List<int>> readAsBytes() => Future(readAsBytesSync);
   void writeAsStringSync(String contents, {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) {
+    if (mode == FileMode.read) {
+      // The VM opens the file to read, which only an empty write leaves unchanged without an error.
+      _read(path, "Cannot open file");
+      if (contents.isNotEmpty) throw FileSystemException("writeFrom failed", path, const OSError("Bad file descriptor", 9));
+      return;
+    }
     _write(path, contents, mode._appends, "Cannot open file");
   }
   Future<File> writeAsString(String contents,
