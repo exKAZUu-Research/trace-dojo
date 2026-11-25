@@ -10,20 +10,18 @@ import { PARAMETER_PROPERTY_ASSIGNMENT, unsteppedStatements } from './jsView';
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
 export class TypeScriptProgramConverter extends ProgramConverter {
   /**
-   * The reference runs a file without `import` or `export` as a CommonJS script, which is not strict mode code, and
-   * compiles one with them to strict mode CommonJS.
+   * tsx compiles every file, one with `import` or `export` included, to CommonJS that is not strict mode code unless
+   * it says `"use strict"`.
    */
-  protected override isStrictByDefault = false;
+  protected override readonly isStrictByDefault = false;
   protected override readonly hasAutoAccessors = true;
   /** What esbuild knows of the members of the enums converted so far, by enum and member. */
   private readonly foldedEnums = new Map<string, Map<string, FoldedValue>>();
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */
   private readonly statementErrors: SourceDiagnostic[] = [];
 
-  /** @param isModule Whether the program has an `import` or an `export`, which makes it a module. */
-  constructor(source: string, trace: TraceOptions | undefined, isModule: boolean) {
+  constructor(source: string, trace: TraceOptions | undefined) {
     super(source, trace);
-    this.isStrictByDefault = isModule;
     this.recoverFromStatementErrors();
     const convertReturn = this.statementConverters.return_statement;
     this.statementConverters.return_statement = (node) => {

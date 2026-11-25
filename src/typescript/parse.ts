@@ -6,7 +6,7 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
-import { checkTypeScript, isModule } from './checker/checker';
+import { checkTypeScript } from './checker/checker';
 import { hasInvalidCharacterEscape, isRawTypeTemplateFragment } from './checker/syntax';
 import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
@@ -68,7 +68,7 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
       let program: Program | undefined;
       let converterErrors: SourceDiagnostic[] = [];
       try {
-        program = new TypeScriptProgramConverter(source, trace, isModule(root)).convert(javaScriptViewOf(root, budget));
+        program = new TypeScriptProgramConverter(source, trace).convert(javaScriptViewOf(root, budget));
       } catch (error) {
         if (!(error instanceof CompileError)) throw error;
         converterErrors = error.diagnostics;

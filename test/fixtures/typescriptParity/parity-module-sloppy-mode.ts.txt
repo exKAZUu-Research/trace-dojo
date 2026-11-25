@@ -1,0 +1,11 @@
+import { readFileSync } from 'fs';
+declare global {
+  var counter: number;
+}
+function read() {
+  return counter;
+}
+counter = 3;
+const point = Object.freeze({ x: 1 });
+(point as { x: number }).x = 2;
+console.log(read(), point.x, typeof readFileSync, (function (this: unknown) { return this === undefined; })());

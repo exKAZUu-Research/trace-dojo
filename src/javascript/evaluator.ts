@@ -526,7 +526,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
       : undefined;
   }
 
-  private globalReceiver(): JsObject {
+  /** The object holding the globals a program's sloppy mode assignments create, as properties of the global object. */
+  globalReceiver(): JsObject {
     return (this.implicitReceiver ??= this.runtime.newObject());
   }
 

@@ -148,7 +148,10 @@ export abstract class EvaluatorBase {
     if (!binding) {
       const receiver = runtime.evaluator.globalReceiverFor(name);
       if (receiver) return runtime.set(receiver, name, value, undefined, this.isStrict());
-      return runtime.throwError('ReferenceError', `${name} is not defined`);
+      if (this.isStrict()) return runtime.throwError('ReferenceError', `${name} is not defined`);
+      // Sloppy mode code assigning a name nothing declares creates a property of the global object.
+      runtime.set(runtime.evaluator.globalReceiver(), name, value, undefined, false);
+      return;
     }
     if (mode === 'initialize') {
       binding.value = value;
