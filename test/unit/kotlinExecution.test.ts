@@ -6572,11 +6572,6 @@ const CALL_FORMS: [string, string, string][] = [
     'open class A { open S fun f(x: Int): Int = x }\nclass B : A() { override S fun f(x: Int): Int = super.f(x) + 1 }',
     'B().f(41)',
   ],
-  [
-    'a member extension through super',
-    'open class A { open S fun Int.f(): Int = this }\nclass B : A() { override S fun Int.f(): Int = super.f() + 1 }',
-    'with(B()) { 41.f() }',
-  ],
   ['an invoke operator', 'class C { S operator fun invoke(x: Int): Int = x + 1 }', 'C().let { c -> c(41) }'],
   ['an extension invoke operator', 'class C\nS operator fun C.invoke(x: Int): Int = x + 1', 'C().let { c -> c(41) }'],
 ];
@@ -6602,17 +6597,22 @@ ${modifier}fun main() { println(${call}) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '42\n' });
 });
 
-test('calls suspend functions and member extensions through super', () => {
+test('calls suspend functions through super, but not member extensions, which super cannot receive', () => {
   const source = `open class A {
     open suspend fun f(x: Int): Int = x
-    open suspend fun Int.g(): Int = this + 1
+    open fun g(): Int = 1
+    open fun Int.g(): Int = this + 1
 }
 class B : A() {
     override suspend fun f(x: Int): Int = super.f(x) * 2
-    override suspend fun Int.g(): Int = super.g() * 2
+    fun h(): Int = with(10) { super.g() }
 }
-suspend fun main() { println(B().f(5)); with(B()) { println(10.g()) } }`;
-  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '10\n22\n' });
+suspend fun main() { println(B().f(5)); println(B().h()) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '10\n1\n' });
+  const extension = `open class A { open fun Int.f(): Int = this }
+class B : A() { override fun Int.f(): Int = super.f() + 1 }
+fun main() { with(B()) { println(41.f()) } }`;
+  expect(executeProgram('kotlin', extension).kind).toBe('compileError');
 });
 
 test('calls suspend member extensions, dispatching on the value of their class', () => {
