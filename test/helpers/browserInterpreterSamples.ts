@@ -5,6 +5,10 @@ import type { ProgrammingLanguage } from '../../src/interpreter/program';
  * takes the 6 from a capture group and prints through a replacement.
  */
 export const SAMPLE_PROGRAMS: Record<ProgrammingLanguage, string> = {
+  bash: `[[ x=6 =~ x=([0-9]+) ]]
+x=$((BASH_REMATCH[1] * 7))
+s="<$x>"
+echo "\${s//[<>]/}"`,
   c: `#include <stdio.h>
 int main(void) {
   int x = 6;
