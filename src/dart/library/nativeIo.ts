@@ -45,7 +45,26 @@ function intList(runtime: Runtime, values: number[]): Value {
 /** The UTF-8 bytes of standard input that `readByteSync` has read part of a character's encoding from. */
 const pendingBytes = new WeakMap<Runtime, number[]>();
 
+/**
+ * Standard input's state, which every read checks: listened to once its stream has a listener, and closed once that
+ * stream has read the input to its end, after which the VM's descriptor is closed.
+ */
+const stdinStates = new WeakMap<Runtime, 'listened' | 'closed'>();
+
+function readOpenStdin(runtime: Runtime): void {
+  if (stdinStates.get(runtime) !== 'closed') return;
+  const osError = runtime.links.construct(runtime, 'OSError', '', ['Bad file descriptor', 9n]);
+  runtime.throwError('StdinException', '', ['Error reading byte from stdin', osError]);
+}
+
+define('Stdin._listen', (runtime) => {
+  if (stdinStates.has(runtime)) runtime.throwError('StateError', '', ['Stream has already been listened to.']);
+  stdinStates.set(runtime, 'listened');
+  return;
+});
+
 define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
+  readOpenStdin(runtime);
   const { reader } = runtime.io.stdin;
   if (pendingBytes.get(runtime)?.length) {
     // The line starts inside the character readByteSync began, which the VM fails to decode, dropping the line.
@@ -68,6 +87,7 @@ define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
 });
 
 define('Stdin._readByte', (runtime) => {
+  readOpenStdin(runtime);
   let pending = pendingBytes.get(runtime);
   if (!pending?.length) {
     const { reader } = runtime.io.stdin;
@@ -81,6 +101,7 @@ define('Stdin._readByte', (runtime) => {
 });
 
 define('Stdin._readRest', (runtime) => {
+  stdinStates.set(runtime, 'closed');
   const pending = pendingBytes.get(runtime) ?? [];
   pendingBytes.delete(runtime);
   return intList(runtime, [...pending, ...new TextEncoder().encode(runtime.io.stdin.reader.readRest())]);
