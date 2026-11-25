@@ -52,7 +52,7 @@ test('exceptions are caught by their types', () => {
 
 test('exitWith ends the program without a message', () => {
   const source = 'import System.Exit\nmain = putStrLn "before" >> exitWith (ExitFailure 3) >> putStrLn "after"';
-  expect(run(source)).toMatchObject({ stdout: 'before\n', uncaughtException: undefined });
+  expect(run(source)).toMatchObject({ stdout: 'before\n', stderr: '', uncaughtException: undefined });
 });
 
 test('a Template Haskell splice runs while the program compiles', () => {
