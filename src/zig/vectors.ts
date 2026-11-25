@@ -67,10 +67,15 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         `ベクトルとスカラー（${typeName(operand.type)} 型）は混ぜて計算できません（@splat でベクトルにしてください）。`
       );
     });
+    // A bool vector's `&`, `|`, and `^` combine each pair of elements as `and`, `or`, and `!=` do.
+    const boolOperator =
+      vector.child.kind === 'bool' && expression.kind === 'binary'
+        ? ({ '&': 'and', '|': 'or', '^': '!=' } as const)[expression.operator as '&' | '|' | '^']
+        : undefined;
     return this.elementwise(coerced, (elements) =>
       expression.kind === 'unary'
         ? { ...expression, operand: elements[0] }
-        : { ...expression, left: elements[0], right: elements[1] }
+        : { ...expression, operator: boolOperator ?? expression.operator, left: elements[0], right: elements[1] }
     );
   }
 
