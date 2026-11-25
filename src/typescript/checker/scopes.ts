@@ -128,7 +128,9 @@ export class Scope {
       symbol = new Sym(name, this);
       this.values.set(name, symbol);
     }
-    symbol.valueKind ??= kind;
+    // An enum merges into a namespace declared before it, whose object then holds the enum's members too.
+    if (symbol.valueKind === undefined || (symbol.valueKind === 'namespace' && kind === 'enum'))
+      symbol.valueKind = kind;
     symbol.valueDeclarations.push(declaration);
     symbol.valueEntries.push({ kind, name: nameNode });
     return symbol;

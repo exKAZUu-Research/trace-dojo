@@ -1,0 +1,6 @@
+namespace E { export const x = 1; }
+enum E { A = 1 }
+namespace F { export const y = 2; }
+enum F { B }
+enum F { C = 5 }
+console.log(E.A, E.x, F.B, F.y, F.C, F[0]);
