@@ -23,6 +23,7 @@ import {
   copyLoopVariables,
   type CountedLoop,
   type Exec,
+  functionLabel,
   type GenExec,
   loopCompletion,
   runLoopUpdates,
@@ -423,10 +424,11 @@ export abstract class ControlCompiler extends StatementCompiler {
         : this.compileGenBlock(functionBody.block, false);
     if (functionBody.kind === 'block' && this.flow.reachable) {
       this.fn.returnTypes?.push(NULL);
-      if (declared && this.mustReturnValue(declared, true)) {
+      const checked = this.checkedReturnType(spec);
+      if (checked && this.mustReturnValue(checked, true)) {
         this.error(
           { row: functionBody.block.row },
-          `戻り値の型が ${typeName(declared)} の関数 ${spec.name} は、最後に値を return しなければなりません。`
+          `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
         );
       }
     }

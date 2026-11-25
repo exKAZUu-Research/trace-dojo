@@ -21,7 +21,7 @@ import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
 import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar } from './scope';
-import { closeInferenceHoles } from './typeInference';
+import { closeInferenceHoles, containsInferenceHole } from './typeInference';
 import {
   coreTypes,
   type DartType,
@@ -136,10 +136,11 @@ export abstract class StatementCompiler extends PatternCompiler {
         const block = this.compileBlock(spec.body.block, false);
         if (this.flow.reachable) {
           fn.returnTypes?.push(NULL);
-          if (spec.returnType && this.mustReturnValue(spec.returnType, false)) {
+          const checked = this.checkedReturnType(spec);
+          if (checked && this.mustReturnValue(checked, false)) {
             this.error(
               { row: spec.body.block.row },
-              `戻り値の型が ${typeName(spec.returnType)} の関数 ${displayName(spec.name)} は、最後に値を return しなければなりません。`
+              `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
             );
           }
         }
@@ -183,6 +184,15 @@ export abstract class StatementCompiler extends PatternCompiler {
    * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
    * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
    */
+  /**
+   * The return type a function's body is checked against: the declared one, or for a function literal the one its
+   * context gives, once that is known; a literal without a context infers its return type instead.
+   */
+  protected checkedReturnType(spec: FunctionSpec): DartType | undefined {
+    const context = spec.contextReturnType;
+    return spec.returnType ?? (context && !containsInferenceHole(context) ? context : undefined);
+  }
+
   protected mustReturnValue(declared: DartType, isAsync: boolean): boolean {
     if (isAsync && isNullable(declared)) return false;
     const type = isAsync && !isObject(declared) ? futureValueType(declared) : declared;
@@ -1427,6 +1437,12 @@ function isSubtypeOfSame(a: DartType, b: DartType): boolean {
 
 function isCreation(compiled: Compiled): boolean {
   return compiled.creates === true;
+}
+
+/** How a diagnostic names a function: by its name, or as a function literal without one. */
+export function functionLabel(name: string): string {
+  const shown = displayName(name);
+  return shown ? `関数 ${shown} ` : '関数リテラル';
 }
 
 function displayName(name: string): string {
