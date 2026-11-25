@@ -1152,6 +1152,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (decl.modifiers.keywords.has('abstract') && (decl.getter?.body || decl.setter?.body))
       this.error(decl.row, `abstract なプロパティ ${decl.name} には get() や set() の中身を書けません。`);
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
+    // What the modifiers make the property, which the library's declarations need too, as Int.MAX_VALUE is a constant.
+    symbol.isConst = decl.modifiers.keywords.has('const');
     if (!file.isLibrary) this.checkPropertyModifiers(decl, symbol, cls?.symbol, scope);
     const entry: PropertyEntry = {
       kind: 'property',
@@ -1190,7 +1192,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.checkLateinitType(symbol.type, decl.row);
     }
     if (keywords.has('const')) {
-      symbol.isConst = true;
+      const type = symbol.type && resolved(symbol.type);
+      const isConstantType =
+        type?.kind === 'class' &&
+        !type.nullable &&
+        (this.core.primitives.has(type.cls) || type.cls === this.core.string);
+      if (type && !isConstantType) this.error(decl.row, 'const val の型は、基本型か String にしてください。');
       if (owner && !owner.isObject) this.error(decl.row, 'const val は、トップレベルか object の中にだけ書けます。');
       if (decl.isVar) this.error(decl.row, 'const は val にだけ付けられます。');
       if (decl.getter?.body || decl.delegate) this.error(decl.row, 'const val には get や by を書けません。');

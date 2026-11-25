@@ -6559,6 +6559,14 @@ test("gives regexes Kotlin/JVM's options, escapes, and errors", () => {
   });
 });
 
+test.each([
+  ["the library's constants", 'const val M = Int.MAX_VALUE + 0L\nfun main() { println(M) }', true],
+  ['a type that may be null', 'const val Y: Int? = 1\nfun main() { println(Y) }', false],
+  ['a type that is not primitive', 'const val X: Any = 1\nfun main() { println(X) }', false],
+])('compiles const vals of %s only as kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
