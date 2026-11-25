@@ -316,7 +316,7 @@ class _File extends FileSystemEntity implements File {
   }
   Future<File> rename(String newPath) => Future(() => renameSync(newPath));
   void deleteSync({bool recursive = false}) {
-    _delete(path, false, recursive, "Cannot delete file");
+    _delete(path, false, recursive, recursive ? "Deletion failed" : "Cannot delete file");
   }
   Future<File> delete({bool recursive = false}) => Future(() {
         deleteSync(recursive: recursive);
