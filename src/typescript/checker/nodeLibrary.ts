@@ -2,87 +2,7 @@
 // standard input and files with. Derived from DefinitelyTyped's @types/node 26.6.7 (MIT License), whose other members of
 // `process`, its streams, and `fs` are declared too, only so that a program using one is told it is unavailable. Data
 // written is a string only, as typed arrays are unavailable here.
-/** The members of @types/node's `process` other than those declared with their types. */
-const UNAVAILABLE_PROCESS_MEMBERS = [
-  'abort',
-  'addListener',
-  'addUncaughtExceptionCaptureCallback',
-  'allowedNodeEnvironmentFlags',
-  'arch',
-  'argv0',
-  'availableMemory',
-  'channel',
-  'chdir',
-  'config',
-  'connected',
-  'constrainedMemory',
-  'cpuUsage',
-  'cwd',
-  'debugPort',
-  'disconnect',
-  'dlopen',
-  'emit',
-  'emitWarning',
-  'eventNames',
-  'execArgv',
-  'execPath',
-  'execve',
-  'features',
-  'finalization',
-  'getActiveResourcesInfo',
-  'getBuiltinModule',
-  'getMaxListeners',
-  'getegid',
-  'geteuid',
-  'getgid',
-  'getgroups',
-  'getuid',
-  'hasUncaughtExceptionCaptureCallback',
-  'hrtime',
-  'kill',
-  'listenerCount',
-  'listeners',
-  'loadEnvFile',
-  'mainModule',
-  'memoryUsage',
-  'nextTick',
-  'noDeprecation',
-  'off',
-  'once',
-  'permission',
-  'pid',
-  'platform',
-  'ppid',
-  'prependListener',
-  'prependOnceListener',
-  'rawListeners',
-  'ref',
-  'release',
-  'removeAllListeners',
-  'removeListener',
-  'report',
-  'resourceUsage',
-  'send',
-  'setMaxListeners',
-  'setSourceMapsEnabled',
-  'setUncaughtExceptionCaptureCallback',
-  'setegid',
-  'seteuid',
-  'setgid',
-  'setgroups',
-  'setuid',
-  'sourceMapsEnabled',
-  'threadCpuUsage',
-  'throwDeprecation',
-  'title',
-  'traceDeprecation',
-  'traceProcessWarnings',
-  'umask',
-  'unref',
-  'uptime',
-  'version',
-  'versions',
-];
+import { unavailableProcessMembers } from '../../javascript/unavailableMembers';
 
 /** The members of @types/node's `process.stdout` other than `write`. */
 const UNAVAILABLE_STREAM_MEMBERS = [
@@ -329,7 +249,7 @@ ${UNAVAILABLE_STREAM_MEMBERS.map((name) => `        ${name}: any;`).join('\n')}
         exitCode?: number | string | undefined;
         exit(code?: number | string | null): never;
         on(event: string, listener: (...args: any[]) => void): this;
-${UNAVAILABLE_PROCESS_MEMBERS.map((name) => `        ${name}: any;`).join('\n')}
+${unavailableProcessMembers.map((name) => `        ${name}: any;`).join('\n')}
     }
     interface Require {
         (id: string): any;

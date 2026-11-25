@@ -179,6 +179,7 @@ test.each([
 
 test.each([
   ["const path = require('path');", "モジュール 'path' の require は、この採点環境では使えません。"],
+  ['const p: any = process; p.exit(0);', 'process.exit は、この採点環境では使えません。'],
   [
     "process.stdout.write('6869', 'hex');",
     'process.stdout.write のエンコーディング指定は、この採点環境では使えません。',

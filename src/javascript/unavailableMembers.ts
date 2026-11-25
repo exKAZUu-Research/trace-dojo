@@ -45,6 +45,102 @@ export const unavailableRegExpStatics = new Set([
   '$9',
 ]);
 
+/**
+ * The members of @types/node's `process` (26.6.7) other than its standard streams, which a TypeScript program sees
+ * declared but may not use.
+ */
+export const unavailableProcessMembers = [
+  'abort',
+  'addListener',
+  'addUncaughtExceptionCaptureCallback',
+  'allowedNodeEnvironmentFlags',
+  'arch',
+  'argv0',
+  'availableMemory',
+  'channel',
+  'chdir',
+  'config',
+  'connected',
+  'constrainedMemory',
+  'cpuUsage',
+  'cwd',
+  'debugPort',
+  'disconnect',
+  'dlopen',
+  'emit',
+  'emitWarning',
+  'eventNames',
+  'execArgv',
+  'execPath',
+  'execve',
+  'features',
+  'finalization',
+  'getActiveResourcesInfo',
+  'getBuiltinModule',
+  'getMaxListeners',
+  'getegid',
+  'geteuid',
+  'getgid',
+  'getgroups',
+  'getuid',
+  'hasUncaughtExceptionCaptureCallback',
+  'hrtime',
+  'kill',
+  'listenerCount',
+  'listeners',
+  'loadEnvFile',
+  'mainModule',
+  'memoryUsage',
+  'nextTick',
+  'noDeprecation',
+  'off',
+  'once',
+  'permission',
+  'pid',
+  'platform',
+  'ppid',
+  'prependListener',
+  'prependOnceListener',
+  'rawListeners',
+  'ref',
+  'release',
+  'removeAllListeners',
+  'removeListener',
+  'report',
+  'resourceUsage',
+  'send',
+  'setMaxListeners',
+  'setSourceMapsEnabled',
+  'setUncaughtExceptionCaptureCallback',
+  'setegid',
+  'seteuid',
+  'setgid',
+  'setgroups',
+  'setuid',
+  'sourceMapsEnabled',
+  'threadCpuUsage',
+  'throwDeprecation',
+  'title',
+  'traceDeprecation',
+  'traceProcessWarnings',
+  'umask',
+  'unref',
+  'uptime',
+  'version',
+  'versions',
+];
+
+/** The members of `process` a TypeScript program may not read, which include those @types/node declares with types. */
+const unavailableProcessMemberNames = new Set<Key | undefined>([
+  ...unavailableProcessMembers,
+  'stdin',
+  'argv',
+  'env',
+  'exitCode',
+  'exit',
+  'on',
+]);
+
 const unavailableSymbolNames = new Map(Object.entries(WELL_KNOWN_SYMBOLS).map(([name, value]) => [value, name]));
 
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
@@ -69,7 +165,10 @@ export function unavailableMemberCheck(runtime: Runtime): UnavailableMemberCheck
     });
   defineUnavailableRegExpStatics(runtime);
   orderBuiltinMembers(realm);
-  return (value, key) => unavailableSymbolFeature(value, key, symbol);
+  const process = realm.globals.lookup('process')?.value;
+  return (value, key) =>
+    unavailableSymbolFeature(value, key, symbol) ??
+    (value === process && unavailableProcessMemberNames.has(key) ? `process.${String(key)}` : undefined);
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
