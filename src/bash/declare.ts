@@ -549,7 +549,7 @@ function executeUnsubscriptedDeclaration(
       selected.cell,
       op.value,
       op.append,
-      (expr) => shell.evaluateFatalReadonly(expr, false),
+      (expr) => shell.evaluateFatalReadonly(expr, false, builtin),
       targetName
     );
     if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
@@ -604,7 +604,7 @@ function executeSubscriptedDeclaration(
   if (target.kind === 'invalid')
     return shell.failures.handleStoreFailure('declarationOperand', target.failure, builtin);
   if (op.value !== undefined) {
-    const outcome = writeResolvedTarget(shell, target, op.value, op.append);
+    const outcome = writeResolvedTarget(shell, target, op.value, op.append, builtin);
     if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
   }
   return finalizeDeclaredCell(shell, builtin, prepared.cell, set, prepared.wasMaterialized, onMaterialize);

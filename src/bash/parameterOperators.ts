@@ -512,8 +512,10 @@ function substring(
   if (value.kind === 'list' && name !== '@' && name !== '*' && value.values.length === 0) {
     return expander.valueSegments({ ...value, values: [] }, ctx);
   }
-  const evaluate = (parts: (string | WordPart)[]): bigint =>
-    shell.evaluateText(expander.arithmeticText({ pieces: parts, row: shell.currentRow }, true), undefined);
+  const evaluate = (parts: (string | WordPart)[]): bigint => {
+    const expanded = expander.arithmeticTextWithMask({ pieces: parts, row: shell.currentRow }, true);
+    return shell.evaluateText(expanded.text, undefined, expanded.quoted);
+  };
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
     shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);

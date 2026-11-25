@@ -18,7 +18,8 @@ export interface ArithmeticHost {
     name: string,
     rawSubscript: string | undefined,
     willRead: boolean,
-    expandSubscript?: boolean
+    expandSubscript?: boolean,
+    subscriptQuoted?: ReadonlySet<number>
   ): ArithmeticTarget;
   /** Reads the current string value of `target`, or `undefined` when unset. */
   readTarget(target: ArithmeticTarget): string | undefined;
@@ -90,14 +91,14 @@ type OperatorText =
 type LexToken =
   | { kind: 'eof' }
   | { kind: 'number'; value: bigint }
-  | { kind: 'identifier'; name: string; subscript: string | undefined }
+  | { kind: 'identifier'; name: string; subscript: string | undefined; subscriptQuoted?: ReadonlySet<number> }
   | { kind: 'op'; op: OperatorText };
 
 interface EvalOutcome {
   value: bigint;
   assignable: boolean;
   target?: ArithmeticTarget;
-  deferred?: { name: string; subscript: string | undefined };
+  deferred?: { name: string; subscript: string | undefined; subscriptQuoted?: ReadonlySet<number> };
 }
 
 interface ScannerSnapshot {
@@ -163,13 +164,15 @@ const isIdentStart = (c: string): boolean => (c >= 'a' && c <= 'z') || (c >= 'A'
 const isIdentPart = (c: string): boolean => isIdentStart(c) || (c >= '0' && c <= '9');
 const isAsciiAlnum = (c: string): boolean => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 
+const EMPTY_QUOTED_SET: ReadonlySet<number> = new Set();
+
 /** Evaluates an arithmetic string in 64-bit signed two's-complement integer arithmetic. */
 export function evaluateArithmetic(
   expression: string,
   host: ArithmeticHost,
   commandName: string | undefined,
   spend: () => void,
-  preExpanded = false
+  preExpanded: boolean | ReadonlySet<number> = false
 ): bigint {
   return new ExpressionSession(host, commandName, spend).evaluateSubexpression(expression, preExpanded);
 }
@@ -204,7 +207,7 @@ class ExpressionSession {
     readonly spend: () => void
   ) {}
 
-  evaluateSubexpression(source: string, preExpanded = false): bigint {
+  evaluateSubexpression(source: string, preExpanded: boolean | ReadonlySet<number> = false): bigint {
     let current = source;
     let entered = 0;
     try {
@@ -218,7 +221,10 @@ class ExpressionSession {
         this.depth++;
         entered++;
         const identMatch = SIMPLE_IDENTIFIER_EXPRESSION.exec(current);
-        if (!identMatch) return new FrameParser(this, current, !preExpanded || entered > 1).parseAll();
+        if (!identMatch) {
+          const mask = resolveInitialMask(preExpanded, entered);
+          return new FrameParser(this, current, mask === undefined, mask).parseAll();
+        }
         const nextRaw = this.host.readTarget(this.host.resolveTarget(identMatch[1], undefined, true));
         if (!nextRaw) return 0n;
         current = nextRaw;
@@ -246,6 +252,14 @@ function firstNonSpace(text: string): number {
   return i;
 }
 
+function resolveInitialMask(
+  preExpanded: boolean | ReadonlySet<number>,
+  entered: number
+): ReadonlySet<number> | undefined {
+  if (!preExpanded || entered > 1) return undefined;
+  return typeof preExpanded === 'boolean' ? EMPTY_QUOTED_SET : preExpanded;
+}
+
 class FrameParser {
   private cursor = 0;
   private errorStart = 0;
@@ -257,7 +271,8 @@ class FrameParser {
   constructor(
     private readonly session: ExpressionSession,
     private readonly source: string,
-    private readonly expandSubscripts = true
+    private readonly expandSubscripts = true,
+    private readonly quotedMask?: ReadonlySet<number>
   ) {}
 
   parseAll(): bigint {
@@ -297,7 +312,13 @@ class FrameParser {
       const target =
         left.deferred === undefined
           ? left.target
-          : this.session.host.resolveTarget(left.deferred.name, left.deferred.subscript, false, this.expandSubscripts);
+          : this.session.host.resolveTarget(
+              left.deferred.name,
+              left.deferred.subscript,
+              false,
+              this.expandSubscripts,
+              left.deferred.subscriptQuoted
+            );
       if (target) this.store(target, value);
     }
     return { value, assignable: false };
@@ -493,9 +514,11 @@ class FrameParser {
     if (this.current.kind !== 'identifier') {
       this.fail('identifier expected after pre-increment or pre-decrement');
     }
-    const { name, subscript } = this.current;
+    const { name, subscript, subscriptQuoted } = this.current;
     const target =
-      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
+      this.suppress > 0
+        ? undefined
+        : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts, subscriptQuoted);
     const current = this.readValue(target);
     const updated = wrap64(current + delta);
     if (this.suppress === 0 && target) this.store(target, updated);
@@ -523,14 +546,16 @@ class FrameParser {
   }
 
   private parseIdentifier(): EvalOutcome {
-    const { name, subscript } = this.current as Extract<LexToken, { kind: 'identifier' }>;
+    const { name, subscript, subscriptQuoted } = this.current as Extract<LexToken, { kind: 'identifier' }>;
     const peeked = this.peekAfterIdentifier();
     if (peeked.kind === 'op' && peeked.op === '=') {
       this.advance();
-      return { value: 0n, assignable: true, deferred: { name, subscript } };
+      return { value: 0n, assignable: true, deferred: { name, subscript, subscriptQuoted } };
     }
     const target =
-      this.suppress > 0 ? undefined : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts);
+      this.suppress > 0
+        ? undefined
+        : this.session.host.resolveTarget(name, subscript, true, this.expandSubscripts, subscriptQuoted);
     const current = this.readValue(target);
     this.advance();
     if (this.isOp('post++') || this.isOp('post--')) {
@@ -616,10 +641,13 @@ class FrameParser {
     let end = start + 1;
     while (end < this.source.length && isIdentPart(this.source[end])) end++;
     let subscript: string | undefined;
+    let subscriptQuoted: ReadonlySet<number> | undefined;
     if (this.source[end] === '[') {
       const close = skipSubscript(this.source, end);
       if (close >= this.source.length || this.source[close] !== ']') this.fail('bad array subscript');
-      subscript = this.source.slice(end + 1, close);
+      const subStart = end + 1;
+      subscript = this.source.slice(subStart, close);
+      subscriptQuoted = sliceQuotedMask(this.quotedMask, subStart, close);
       end = close + 1;
     }
     this.current = {
@@ -629,6 +657,7 @@ class FrameParser {
         subscript === undefined ? end : start + this.source.slice(start, end).indexOf('[')
       ),
       subscript,
+      ...(subscriptQuoted ? { subscriptQuoted } : {}),
     };
     this.cursor = end;
   }
@@ -843,4 +872,18 @@ function applyCompound(op: OperatorText, a: bigint, b: bigint): bigint {
       throw new Error(`Unsupported compound operator ${op}`);
     }
   }
+}
+
+function sliceQuotedMask(
+  mask: ReadonlySet<number> | undefined,
+  start: number,
+  end: number
+): ReadonlySet<number> | undefined {
+  if (!mask) return undefined;
+  if (mask.size === 0) return EMPTY_QUOTED_SET;
+  const sliced = new Set<number>();
+  for (let i = start; i < end; i++) {
+    if (mask.has(i)) sliced.add(i - start);
+  }
+  return sliced.size === 0 ? EMPTY_QUOTED_SET : sliced;
 }

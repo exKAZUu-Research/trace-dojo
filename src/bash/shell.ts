@@ -382,7 +382,8 @@ export class Shell implements ArithmeticHost, RootContext {
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
     const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
-      const value = this.tryEvaluate(this.expander.arithmeticText(source), '((', true);
+      const expanded = this.expander.arithmeticTextWithMask(source);
+      const value = this.tryEvaluate(expanded.text, '((', expanded.quoted);
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
     };
@@ -752,10 +753,15 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   evaluate(source: ArithmeticSource, commandName: string | undefined): bigint {
-    return this.evaluateText(this.expander.arithmeticText(source), commandName, true);
+    const expanded = this.expander.arithmeticTextWithMask(source);
+    return this.evaluateText(expanded.text, commandName, expanded.quoted);
   }
 
-  evaluateText(text: string, commandName: string | undefined, preExpanded = false): bigint {
+  evaluateText(
+    text: string,
+    commandName: string | undefined,
+    preExpanded: boolean | ReadonlySet<number> = false
+  ): bigint {
     try {
       return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
     } catch (error) {
@@ -767,11 +773,11 @@ export class Shell implements ArithmeticHost, RootContext {
     }
   }
 
-  evaluateFatalReadonly(text: string, preExpanded = false): bigint {
+  evaluateFatalReadonly(text: string, preExpanded = false, commandName?: string): bigint {
     try {
-      return evaluateArithmetic(text, this, undefined, () => this.runtime.spend(), preExpanded);
+      return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
     } catch (error) {
-      if (error instanceof ArithmeticError) this.failures.exitWithMessage(error.message);
+      if (error instanceof ArithmeticError) this.discard(error.message);
       if (error instanceof ArithmeticStoreError) {
         this.failures.handleStoreFailure('fatalReadonlyArithmetic', error.failure);
       }
@@ -780,11 +786,16 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   arithmeticStatus(source: ArithmeticSource, commandName: string): number {
-    const value = this.tryEvaluate(this.expander.arithmeticText(source), commandName, true);
+    const expanded = this.expander.arithmeticTextWithMask(source);
+    const value = this.tryEvaluate(expanded.text, commandName, expanded.quoted);
     return value === undefined || value === 0n ? 1 : 0;
   }
 
-  tryEvaluate(text: string, commandName: string | undefined, preExpanded = false): bigint | undefined {
+  tryEvaluate(
+    text: string,
+    commandName: string | undefined,
+    preExpanded: boolean | ReadonlySet<number> = false
+  ): bigint | undefined {
     try {
       return evaluateArithmetic(text, this, commandName, () => this.runtime.spend(), preExpanded);
     } catch (error) {
@@ -802,7 +813,8 @@ export class Shell implements ArithmeticHost, RootContext {
     name: string,
     rawSubscript: string | undefined,
     willRead: boolean,
-    expandSubscript = true
+    expandSubscript = true,
+    subscriptQuoted?: ReadonlySet<number>
   ): ArithmeticTarget {
     if (rawSubscript === undefined) {
       return (
@@ -816,7 +828,12 @@ export class Shell implements ArithmeticHost, RootContext {
     return (
       resolveSubscriptTarget(this, {
         name,
-        subscript: { kind: 'text', text: rawSubscript, preExpanded: !expandSubscript },
+        subscript: {
+          kind: 'text',
+          text: rawSubscript,
+          preExpanded: !expandSubscript,
+          ...(!expandSubscript ? { quotedMask: subscriptQuoted ?? new Set<number>() } : {}),
+        },
         operation: willRead ? 'arithmeticRead' : 'arithmeticWrite',
       }) ?? {
         kind: 'invalid',

@@ -1,5 +1,6 @@
 import type { Word } from './ast';
 import { rejectSpecialVariableMutation } from './capabilities';
+import { unquotePreExpandedAssociativeKey } from './expansion';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -46,7 +47,12 @@ export type ResolvedTarget =
 
 export type SubscriptInput =
   | { readonly kind: 'word'; readonly word: Word; readonly unquoteAnsiC?: boolean }
-  | { readonly kind: 'text'; readonly text: string; readonly preExpanded?: boolean };
+  | {
+      readonly kind: 'text';
+      readonly text: string;
+      readonly preExpanded?: boolean;
+      readonly quotedMask?: ReadonlySet<number>;
+    };
 
 export type TargetOperation = 'read' | 'write' | 'unset' | 'testSet' | 'arithmeticRead' | 'arithmeticWrite';
 
@@ -284,7 +290,10 @@ function rawSubscriptText(input: SubscriptInput): string {
 
 function expandAssociativeSubscript(shell: Shell, input: SubscriptInput): string {
   if (input.kind === 'word') return shell.expander.expandAssociativeKey(input.word);
-  return input.preExpanded ? input.text : shell.expander.expandSubscriptText(input.text);
+  if (input.preExpanded) {
+    return input.quotedMask ? unquotePreExpandedAssociativeKey(input.text, input.quotedMask) : input.text;
+  }
+  return shell.expander.expandSubscriptText(input.text);
 }
 
 function expandIndexedSubscript(shell: Shell, input: SubscriptInput): string {
@@ -317,8 +326,14 @@ export function readResolvedTarget(shell: Shell, target: ResolvedTarget): string
   }
 }
 
-export function writeResolvedTarget(shell: Shell, target: ResolvedTarget, value: string, append = false): StoreOutcome {
-  const evalInt = (expr: string): bigint => shell.evaluateFatalReadonly(expr, false);
+export function writeResolvedTarget(
+  shell: Shell,
+  target: ResolvedTarget,
+  value: string,
+  append = false,
+  builtinPrefix?: string
+): StoreOutcome {
+  const evalInt = (expr: string): bigint => shell.evaluateFatalReadonly(expr, false, builtinPrefix);
   switch (target.kind) {
     case 'randomSeed': {
       const seed = shell.tryEvaluate(value, undefined);

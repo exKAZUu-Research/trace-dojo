@@ -279,16 +279,31 @@ export class Expander {
 
   /** Substitutes expansions inside an arithmetic expression before evaluating it. */
   arithmeticText(source: ArithmeticSource, unquoteAnsiC = false): string {
+    return this.arithmeticTextWithMask(source, unquoteAnsiC).text;
+  }
+
+  /** Substitutes expansions inside an arithmetic expression and records indices produced by expanded/quoted parts. */
+  arithmeticTextWithMask(
+    source: ArithmeticSource,
+    unquoteAnsiC = false
+  ): { text: string; quoted: ReadonlySet<number> } {
     return this.shell.withBuilderRoot((builder) => {
       const spend = (cost?: number): void => this.spend(cost);
       const doubleCtx: WordContext = { inDouble: true, spacedStar: false };
+      const quoted = new Set<number>();
       for (const piece of source.pieces) {
-        if (typeof piece === 'string') builder.text = appendBounded(builder.text, piece, spend);
-        else if (piece.kind === 'ansiC' && !unquoteAnsiC) {
-          builder.text = appendBounded(builder.text, `'${piece.text.replaceAll("'", String.raw`'\''`)}'`, spend);
-        } else builder.text = appendBounded(builder.text, this.joinSegments(this.expandPart(piece, doubleCtx)), spend);
+        if (typeof piece === 'string') {
+          builder.text = appendBounded(builder.text, piece, spend);
+        } else if (piece.kind === 'ansiC' && !unquoteAnsiC) {
+          builder.text = appendMaskedAnsiC(builder.text, piece.text, quoted, spend);
+        } else {
+          const chunk = this.joinSegments(this.expandPart(piece, doubleCtx));
+          const start = builder.text.length;
+          builder.text = appendBounded(builder.text, chunk, spend);
+          for (let i = start; i < builder.text.length; i++) quoted.add(i);
+        }
       }
-      return builder.text;
+      return { text: builder.text, quoted };
     });
   }
 
@@ -723,6 +738,76 @@ export function appendBounded(current: string, addition: string, spend: (cost?: 
   spend(Math.ceil(addition.length / 256));
   if (current.length + addition.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
   return current + addition;
+}
+
+function appendMaskedAnsiC(
+  initial: string,
+  decoded: string,
+  quoted: Set<number>,
+  spend: (cost?: number) => void
+): string {
+  let text = appendBounded(initial, "'", spend);
+  for (const ch of decoded) {
+    if (ch === "'") {
+      text = appendBounded(text, String.raw`'\''`, spend);
+    } else {
+      const idx = text.length;
+      text = appendBounded(text, ch, spend);
+      quoted.add(idx);
+    }
+  }
+  return appendBounded(text, "'", spend);
+}
+
+/** Removes syntactic quotes and escapes from a pre-expanded arithmetic associative subscript while keeping masked text verbatim. */
+export function unquotePreExpandedAssociativeKey(raw: string, quoted: ReadonlySet<number>): string {
+  let out = '';
+  const state = { inSingle: false, inDouble: false };
+  for (let i = 0; i < raw.length; i++) {
+    if (quoted.has(i)) {
+      out += raw[i];
+      continue;
+    }
+    const step = unquoteSubscriptChar(raw, i, state, quoted);
+    out += step.emit;
+    i = step.nextIndex;
+  }
+  return out;
+}
+
+function unquoteSubscriptChar(
+  raw: string,
+  index: number,
+  state: { inSingle: boolean; inDouble: boolean },
+  quoted: ReadonlySet<number>
+): { emit: string; nextIndex: number } {
+  const c = raw[index];
+  if (state.inSingle) {
+    state.inSingle = c !== "'";
+    return { emit: state.inSingle ? c : '', nextIndex: index };
+  }
+  if (c === "'" && !state.inDouble) {
+    state.inSingle = true;
+    return { emit: '', nextIndex: index };
+  }
+  if (c === '"') {
+    state.inDouble = !state.inDouble;
+    return { emit: '', nextIndex: index };
+  }
+  const escaped = tryUnescapeSubscriptChar(raw, index, state.inDouble, quoted);
+  return escaped ?? { emit: c, nextIndex: index };
+}
+
+function tryUnescapeSubscriptChar(
+  raw: string,
+  index: number,
+  inDouble: boolean,
+  quoted: ReadonlySet<number>
+): { emit: string; nextIndex: number } | undefined {
+  if (raw[index] !== '\\' || index + 1 >= raw.length || quoted.has(index + 1)) return undefined;
+  const next = raw[index + 1];
+  if (inDouble && !'$`"\\\n'.includes(next)) return undefined;
+  return { emit: next === '\n' ? '' : next, nextIndex: index + 1 };
 }
 
 export function joinBounded(items: readonly string[], separator: string, spend: (cost?: number) => void): string {
