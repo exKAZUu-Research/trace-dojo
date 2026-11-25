@@ -1,14 +1,20 @@
-// code-gauge-allow-file fileNcss -- Mutual recursion across shell command, compound construct, and token-stream validation rules.
+// code-gauge-allow-file fileNcss -- Single source-aware Bash validator and span analyzer over mutual-recursion shell grammar rules.
 /**
- * Clean-room pre-execution Bash syntax validator from POSIX.1-2017 XCU §2.3/§2.10 and GNU Bash Reference Manual §3.2–3.4.
- * Supplements tree-sitter-bash where error recovery or token boundaries differ from Bash 5.3, while collecting backquoted
- * substitutions whose bodies Bash parses only when executed.
+ * Clean-room pre-execution Bash syntax validator and source-span analyzer from POSIX.1-2017 XCU §2.3/§2.10 and
+ * GNU Bash Reference Manual §3.2–3.4. Owns syntax diagnostics, contextual literal-quote offsets, deferred backquote
+ * diagnostics, and deferred balanced arithmetic/subscript spans in one pass for tree-sitter CST conversion.
  */
+import type { Node, Parser } from '@willbooster/web-tree-sitter';
+
+import { CompileError } from '../interpreter/diagnostics';
 import { skipSubscript } from './arithmetic';
+import type { BackquoteSyntaxError } from './ast';
 import { parseConditional } from './conditionalSyntax';
+import { syntaxErrorMessage } from './syntaxErrors';
 import {
   arithmeticEnd,
   type BashSyntaxError,
+  type DeferredRegion,
   skipBalanced,
   skipBlanks,
   skipWordPiece,
@@ -18,17 +24,217 @@ import {
 } from './syntaxWords';
 import { isIdentifier } from './variables';
 
+const MAX_ARITHMETIC_PASSES = 50;
+
+export interface AnalyzedBashSource {
+  readonly originalSource: string;
+  readonly grammarSource: string;
+  readonly deferredArithmetic: ReadonlyMap<number, string>;
+  readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
+  readonly literalQuotes: ReadonlySet<number>;
+}
+
+/** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
+export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashSource {
+  const checked = checkBashSyntax(source);
+  if (checked.error && checked.error !== 'unknown') {
+    throw new CompileError([{ row: checked.error.row, message: syntaxErrorMessage(checked.error.text) }]);
+  }
+  const backquotes = analyzeBackquotes(source, checked.backquotes);
+  const literalQuotes = new Set([...checked.literalSingleQuotes, ...backquotes.literalSingleQuotes]);
+  const quoteNormalized = applyLiteralQuotePlaceholders(backquotes.source, literalQuotes);
+  const regions = [...checked.arithmeticRegions, ...backquotes.arithmeticRegions].toSorted(
+    (a, b) => a.openStart - b.openStart
+  );
+  const { grammarSource, deferredArithmetic } = resolveDeferredArithmeticRegions(parser, quoteNormalized, regions);
+  return {
+    originalSource: source,
+    grammarSource,
+    deferredArithmetic,
+    backquoteErrors: backquotes.errors,
+    literalQuotes,
+  };
+}
+
 export function checkBashSyntax(source: string): {
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number }[];
   literalSingleQuotes: number[];
+  arithmeticRegions: DeferredRegion[];
 } {
   const text = createValidatorSourceText(source);
   return {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
     literalSingleQuotes: text.literalSingleQuotes,
+    arithmeticRegions: text.arithmeticRegions,
   };
+}
+
+/** Inspects an unescaped backquoted body at `row` for runtime syntax errors. */
+export function inspectUnescapedBackquoteBody(body: string, row: number): BackquoteSyntaxError | undefined {
+  const text = `${'\n'.repeat(row)}${body}\n`;
+  const { error } = checkBashSyntax(text);
+  if (!error || error === 'unknown') return undefined;
+  const messages = error.near === undefined ? [error.text] : [error.text, `syntax error near \`${error.near}'`];
+  const shows = (messages.at(-1) as string).startsWith('syntax error near');
+  return { row: error.row, messages, ...(shows ? { line: text.split('\n')[error.row] } : {}) };
+}
+
+function analyzeBackquotes(
+  source: string,
+  backquotes: readonly { start: number; end: number }[]
+): {
+  source: string;
+  errors: Map<number, BackquoteSyntaxError>;
+  literalSingleQuotes: number[];
+  arithmeticRegions: DeferredRegion[];
+} {
+  const errors = new Map<number, BackquoteSyntaxError>();
+  const literalSingleQuotes: number[] = [];
+  const arithmeticRegions: DeferredRegion[] = [];
+  let normalized = source;
+  for (const { start, end } of backquotes) {
+    const inspected = inspectBackquoteSpan(source, start, end);
+    if (inspected.error) {
+      errors.set(start, inspected.error);
+      const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
+      normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
+    } else {
+      literalSingleQuotes.push(...inspected.quoteOffsets);
+      arithmeticRegions.push(...inspected.arithmeticRegions);
+    }
+  }
+  return { source: normalized, errors, literalSingleQuotes, arithmeticRegions };
+}
+
+function inspectBackquoteSpan(
+  source: string,
+  start: number,
+  end: number
+): { error?: BackquoteSyntaxError; quoteOffsets: number[]; arithmeticRegions: DeferredRegion[] } {
+  let body = '';
+  const bodyOffsets: number[] = [];
+  for (let i = start + 1; i < end - 1; i++) {
+    if (source[i] === '\\' && i + 1 < end - 1 && '$`\\'.includes(source[i + 1])) i++;
+    bodyOffsets.push(i);
+    body += source[i];
+  }
+  bodyOffsets.push(end - 1);
+  const row = source.slice(0, start).split('\n').length - 1;
+  const pad = '\n'.repeat(row);
+  const padded = `${pad}${body}\n`;
+  const checked = checkBashSyntax(padded);
+  if (checked.error && checked.error !== 'unknown') {
+    return { error: inspectUnescapedBackquoteBody(body, row), quoteOffsets: [], arithmeticRegions: [] };
+  }
+  const nested = analyzeBackquotes(padded, checked.backquotes);
+  const mapOffset = (idx: number): number | undefined => {
+    const rel = idx - pad.length;
+    return rel >= 0 && rel < bodyOffsets.length ? bodyOffsets[rel] : undefined;
+  };
+  const quoteOffsets = [...checked.literalSingleQuotes, ...nested.literalSingleQuotes]
+    .map(mapOffset)
+    .filter((v): v is number => v !== undefined);
+  const arithmeticRegions = [...checked.arithmeticRegions, ...nested.arithmeticRegions]
+    .map((r): DeferredRegion | undefined => {
+      const openStart = mapOffset(r.openStart);
+      const regionStart = mapOffset(r.start);
+      const regionEnd = mapOffset(r.end);
+      const closeEnd = mapOffset(r.closeEnd);
+      if (openStart === undefined || regionStart === undefined || regionEnd === undefined || closeEnd === undefined) {
+        return undefined;
+      }
+      return {
+        opener: r.opener,
+        openStart,
+        start: regionStart,
+        end: regionEnd,
+        closeEnd,
+        keepsSemicolons: r.keepsSemicolons,
+      };
+    })
+    .filter((r): r is DeferredRegion => r !== undefined);
+  return { quoteOffsets, arithmeticRegions };
+}
+
+function applyLiteralQuotePlaceholders(source: string, offsets: ReadonlySet<number>): string {
+  if (offsets.size === 0) return source;
+  let out = '';
+  for (let i = 0; i < source.length; i++) out += offsets.has(i) ? '\u001F' : source[i];
+  return out;
+}
+
+function resolveDeferredArithmeticRegions(
+  parser: Parser,
+  source: string,
+  regions: readonly DeferredRegion[]
+): { grammarSource: string; deferredArithmetic: Map<number, string> } {
+  const deferredArithmetic = new Map<number, string>();
+  if (regions.length === 0) return { grammarSource: source, deferredArithmetic };
+  let text = source;
+  for (let pass = 0; pass < MAX_ARITHMETIC_PASSES; pass++) {
+    const tree = parser.parse(text);
+    if (!tree) throw new Error('The parser returned no tree');
+    try {
+      const failing = findFirstFailingRegion(tree.rootNode, regions, deferredArithmetic);
+      if (!failing) break;
+      const original = source.slice(failing.start, failing.end);
+      deferredArithmetic.set(failing.start, original);
+      const blank = blankDeferredSlice(original, failing.keepsSemicolons);
+      text = text.slice(0, failing.start) + blank + text.slice(failing.end);
+    } finally {
+      tree.delete();
+    }
+  }
+  return { grammarSource: text, deferredArithmetic };
+}
+
+function findFirstFailingRegion(
+  root: Node,
+  regions: readonly DeferredRegion[],
+  deferred: ReadonlyMap<number, string>
+): DeferredRegion | undefined {
+  const errors = root.hasError ? collectCstErrorNodes(root) : [];
+  for (const region of regions) {
+    if (deferred.has(region.start) || region.end === region.start) continue;
+    const misparsedSubshell =
+      region.opener === '((' && root.descendantForIndex(region.openStart, region.openStart + 2)?.type !== '((';
+    const fails =
+      misparsedSubshell || errors.some((err) => err.startIndex <= region.closeEnd && err.endIndex >= region.openStart);
+    if (fails) return region;
+  }
+  return undefined;
+}
+
+function collectCstErrorNodes(root: Node): Node[] {
+  const errors: Node[] = [];
+  const pending: Node[] = [root];
+  while (pending.length > 0) {
+    const node = pending.pop() as Node;
+    if (node.isError || node.isMissing) {
+      errors.push(node);
+      continue;
+    }
+    if (!node.hasError) continue;
+    let childHasError = false;
+    for (const child of node.children) {
+      if (child.hasError || child.isError || child.isMissing) {
+        childHasError = true;
+        pending.push(child);
+      }
+    }
+    if (!childHasError) errors.push(node);
+  }
+  return errors;
+}
+
+function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {
+  if (!keepsSemicolons) return slice.replaceAll(/[^\n]/g, ' ');
+  const semis = new Set(findForHeaderSemicolons(slice));
+  let out = '';
+  for (let i = 0; i < slice.length; i++) out += slice[i] === '\n' || semis.has(i) ? slice[i] : ' ';
+  return out;
 }
 
 export function createValidatorSourceText(source: string): SourceText {
@@ -273,7 +479,18 @@ class ShellTokenStream {
 
   private consumeBracketedCompoundElement(): void {
     const { source } = this.text;
-    const closeEnd = skipBalanced(this.text, this.position, '[', ']');
+    const openStart = this.position;
+    const closeEnd = skipBalanced(this.text, openStart, '[', ']');
+    if (source.startsWith('+=', closeEnd) || source.startsWith('=', closeEnd)) {
+      this.text.arithmeticRegions.push({
+        opener: '[',
+        openStart,
+        start: openStart + 1,
+        end: closeEnd - 1,
+        closeEnd,
+        keepsSemicolons: false,
+      });
+    }
     if (source.startsWith('+=', closeEnd)) this.position = closeEnd + 2;
     else if (source.startsWith('=', closeEnd)) this.position = closeEnd + 1;
     else this.position = closeEnd;
@@ -486,6 +703,14 @@ class ShellGrammarValidator {
     const open = this.peek();
     const closeEnd = arithmeticEnd(this.text, open.start);
     if (closeEnd !== undefined) {
+      this.text.arithmeticRegions.push({
+        opener: '((',
+        openStart: open.start,
+        start: open.start + 2,
+        end: closeEnd - 2,
+        closeEnd,
+        keepsSemicolons: false,
+      });
       this.seekTo(closeEnd);
       return true;
     }
@@ -557,6 +782,14 @@ class ShellGrammarValidator {
     const sections = forHeaderSemicolons(this.text, openParens.start + 2, closeEnd - 2).length + 1;
     if (sections < 3) this.text.fail(forKeyword.row, 'syntax error: arithmetic expression required');
     if (sections > 3) this.text.fail(forKeyword.row, "syntax error: `;' unexpected");
+    this.text.arithmeticRegions.push({
+      opener: '((',
+      openStart: openParens.start,
+      start: openParens.start + 2,
+      end: closeEnd - 2,
+      closeEnd,
+      keepsSemicolons: true,
+    });
     this.seekTo(closeEnd);
     if (this.hasOperator(this.peek(), ';')) this.advance();
     this.consumeNewlines();
@@ -722,6 +955,7 @@ class ShellGrammarValidator {
       const { start } = this.cached;
       while ((this.text.backquotes.at(-1)?.start ?? -1) >= start) this.text.backquotes.pop();
       while ((this.text.literalSingleQuotes.at(-1) ?? -1) >= start) this.text.literalSingleQuotes.pop();
+      while ((this.text.arithmeticRegions.at(-1)?.openStart ?? -1) >= start) this.text.arithmeticRegions.pop();
       this.stream.position = start;
       this.cached = undefined;
     }

@@ -10,9 +10,15 @@ import {
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { REGULAR_BUILTINS } from './builtins';
-import { classifyCommandName, rejectSpecialVariableMutation, rejectUnsupportedPrefixAssignment } from './capabilities';
+import {
+  classifyCommandName,
+  rejectUnsupportedDeclarationPrefix,
+  rejectUnsupportedFeature,
+  rejectUnsupportedNamerefAppend,
+  rejectUnsupportedPrefixAssignment,
+} from './capabilities';
 import { conditionalStatus } from './conditional';
-import { executeDeclarationCommand, runDynamicDeclarationBuiltin } from './declare';
+import { executeCompoundAssignment, executeDeclarationCommand, runDynamicDeclarationBuiltin } from './declare';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
 import {
@@ -34,14 +40,7 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
-import { UnsupportedFeatureError } from './unsupported';
-import {
-  type CellHandle,
-  isIdentifier,
-  isValidFunctionName,
-  pushCompoundElementRoots,
-  VariableStore,
-} from './variables';
+import { type CellHandle, isIdentifier, isValidFunctionName, VariableStore } from './variables';
 
 export { BASH_VERSION, type FunctionDefinition, type OutputTarget } from './runtime';
 export type { CompoundElement } from './variables';
@@ -131,7 +130,7 @@ export class Shell implements ArithmeticHost, RootContext {
           this.runStatements(unit);
         } catch (error) {
           if (!(error instanceof DiscardSignal)) throw error;
-          this.store.setCommandStatus(error.status);
+          this.store.lastStatus = error.status;
           if (error.leftRow !== undefined) this.readShift = (program.unitEndRows[index] as number) - error.leftRow;
         }
       }
@@ -279,7 +278,7 @@ export class Shell implements ArithmeticHost, RootContext {
 
   private withStatus(run: () => number): number {
     const status = run();
-    this.store.setCommandStatus(status);
+    this.store.lastStatus = status;
     return status;
   }
 
@@ -309,18 +308,8 @@ export class Shell implements ArithmeticHost, RootContext {
     try {
       return { action: 'normal', status: this.runCondition(condition) };
     } catch (error) {
-      if (error instanceof BreakSignal) {
-        last.status = error.status;
-        this.store.setCommandStatus(error.status);
-        if (--error.count > 0) throw error;
-        return { action: 'break', status: error.status };
-      }
-      if (error instanceof ContinueSignal) {
-        this.store.setCommandStatus(0);
-        if (--error.count > 0) throw error;
-        return { action: 'continue', status: 0 };
-      }
-      throw error;
+      const loopAction = this.consumeLoopSignal(error, last, false);
+      return { action: loopAction.action, status: loopAction.status };
     }
   }
 
@@ -430,20 +419,28 @@ export class Shell implements ArithmeticHost, RootContext {
     try {
       return step();
     } catch (error) {
-      if (error instanceof BreakSignal) {
-        last.status = error.status;
-        this.store.setCommandStatus(error.status);
-        if (--error.count > 0) throw error;
-        return 'stop';
-      }
-      if (error instanceof ContinueSignal) {
-        last.status = 0;
-        this.store.setCommandStatus(0);
-        if (--error.count > 0) throw error;
-        return 'next';
-      }
-      throw error;
+      return this.consumeLoopSignal(error, last, true).action === 'break' ? 'stop' : 'next';
     }
+  }
+
+  private consumeLoopSignal(
+    error: unknown,
+    last: { status: number },
+    resetLastOnContinue: boolean
+  ): { action: 'break' | 'continue'; status: number } {
+    if (error instanceof BreakSignal) {
+      last.status = error.status;
+      this.store.lastStatus = error.status;
+      if (--error.count > 0) throw error;
+      return { action: 'break', status: error.status };
+    }
+    if (error instanceof ContinueSignal) {
+      if (resetLastOnContinue) last.status = 0;
+      this.store.lastStatus = 0;
+      if (--error.count > 0) throw error;
+      return { action: 'continue', status: 0 };
+    }
+    throw error;
   }
 
   private restoringLine<T>(run: () => T): T {
@@ -519,7 +516,7 @@ export class Shell implements ArithmeticHost, RootContext {
         return this.executeDynamicDeclaration(statement, name, args, lastArg);
       }
       if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
-        throw new UnsupportedFeatureError(classified.feature);
+        rejectUnsupportedFeature(classified.feature);
       }
       return this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
     });
@@ -531,9 +528,7 @@ export class Shell implements ArithmeticHost, RootContext {
     args: readonly string[],
     lastArg: string
   ): { status: number; conditionalStep: boolean; ranFunction: boolean } {
-    if (statement.assignments.length > 0) {
-      throw new UnsupportedFeatureError(`宣言ビルトインへの前置代入（${name}）`);
-    }
+    if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(name);
     const status = this.withRedirects(statement.redirects, () => {
       const code = runDynamicDeclarationBuiltin(this, name, args);
       this.store.lastArgument = lastArg;
@@ -591,9 +586,7 @@ export class Shell implements ArithmeticHost, RootContext {
         return { status, conditionalStep: false, ranFunction: true };
       });
     }
-    if (statement.assignments.length > 0) {
-      throw new UnsupportedFeatureError(`宣言ビルトインへの前置代入（${statement.name}）`);
-    }
+    if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
     const { status, assignsAnswer } = executeDeclarationCommand(this, statement.name, statement.args, (run) =>
       this.withRedirects(statement.redirects, run)
     );
@@ -867,7 +860,7 @@ export class Shell implements ArithmeticHost, RootContext {
         message: `\`${assignment.text}': not a valid identifier`,
       });
     }
-    if (assignment.array) return this.performCompoundAssignment(assignment, context);
+    if (assignment.array) return executeCompoundAssignment(this, assignment, context);
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
     return this.withValuesRoot([value], () => this.commitScalarOrElementAssignment(assignment, value, context));
   }
@@ -897,103 +890,11 @@ export class Shell implements ArithmeticHost, RootContext {
   ): boolean | undefined {
     const own = this.store.ownView(assignment.name);
     if (!own?.attributes.has('n') || !own.handle || !(own.kind === 'unset' || own.scalar === '')) return undefined;
-    if (assignment.append) throw new UnsupportedFeatureError(`名前参照（${assignment.name}）への追記`);
+    if (assignment.append) rejectUnsupportedNamerefAppend(assignment.name);
     const bound = this.store.bindNameref(own.handle, value, this.isInFunction);
     if (!bound.ok) return this.failures.handleStoreFailure(context, bound);
     if (bound.cycleWarning) this.reportError(bound.cycleWarning);
     return true;
-  }
-
-  private performCompoundAssignment(assignment: Assignment, context: 'scriptAssignment'): boolean {
-    if (assignment.subscript) {
-      return this.failures.handleStoreFailure(context, {
-        ok: false,
-        reason: 'cannotAssign',
-        message: `${assignment.name}[${assignment.subscript.text}]: cannot assign list to array member`,
-      });
-    }
-    const resolved = resolveTargetName(this, assignment.name);
-    if (resolved === undefined) {
-      return this.failures.handleStoreFailure(context, { ok: false, reason: 'cannotAssign', message: '' });
-    }
-    rejectSpecialVariableMutation(resolved, false);
-    if (!isIdentifier(resolved)) {
-      return this.failures.handleStoreFailure(context, {
-        ok: false,
-        reason: 'invalidIdentifier',
-        message: `\`${resolved}': not a valid identifier`,
-      });
-    }
-    const existing = this.store.ownView(resolved);
-    if (existing?.attributes.has('r')) {
-      return this.failures.handleStoreFailure(context, {
-        ok: false,
-        reason: 'readonly',
-        message: `${resolved}: readonly variable`,
-      });
-    }
-    const isAssoc = this.store.isAssociativeName(resolved);
-    if (assignment.append && existing && isAssoc && existing.handle) {
-      return this.appendAssociativeCompound(existing.handle, assignment.array as Word[], assignment.name, context);
-    }
-    return this.writeStandardCompoundAssignment(assignment, resolved, isAssoc, context);
-  }
-
-  private writeStandardCompoundAssignment(
-    assignment: Assignment,
-    resolved: string,
-    isAssoc: boolean,
-    context: 'scriptAssignment'
-  ): boolean {
-    const roots: string[] = [];
-    return this.withValuesRoot(roots, () => {
-      const { elements, error } = this.expander.expandCompound(
-        assignment.array as Word[],
-        isAssoc,
-        false,
-        assignment.name
-      );
-      pushCompoundElementRoots(roots, elements);
-      const selected = this.store.selectDestination(
-        'visible',
-        resolved,
-        isAssoc ? 'associative' : 'indexed',
-        assignment.append
-      );
-      const outcome = this.store.writeCompound(selected.cell, elements, {
-        append: assignment.append,
-        reportedName: assignment.name,
-        evalIndex: (cellHandle, rawKey) => this.evaluateCompoundIndex(cellHandle, rawKey),
-        evalInt: (expr) => this.evaluateFatalReadonly(expr, false),
-        onItemError: (msg) => this.reportError(msg),
-      });
-      if (error !== undefined) this.discard(error);
-      return outcome.ok ? true : this.failures.handleStoreFailure(context, outcome);
-    });
-  }
-
-  private appendAssociativeCompound(
-    handle: CellHandle,
-    words: Word[],
-    reportedName: string,
-    context: 'scriptAssignment'
-  ): boolean {
-    const prepFailure = this.store.prepareAssociativeAppend(handle, reportedName);
-    if (prepFailure) return this.failures.handleStoreFailure(context, prepFailure);
-    let lastOutcome: StoreOutcome = { ok: true, stored: '' };
-    const error = this.expander.expandAssociativeAppend(words, reportedName, (key, value, append) => {
-      lastOutcome = this.store.writeAssociativeElement(
-        handle,
-        key,
-        value,
-        append,
-        (expr) => this.evaluateFatalReadonly(expr, false),
-        reportedName
-      );
-      return lastOutcome.ok;
-    });
-    if (error !== undefined) this.discard(error);
-    return lastOutcome.ok ? true : this.failures.handleStoreFailure(context, lastOutcome);
   }
 
   unsetVariable(name: string, followReference = true): boolean {

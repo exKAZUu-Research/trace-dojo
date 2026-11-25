@@ -4,14 +4,13 @@ import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { skipSubscript } from './arithmetic';
-import { maskInvalidArithmetic } from './arithmeticMasking';
-import type { Program, Statement, WordPart } from './ast';
-import { hideInvalidBackquotes } from './backquotes';
+import type { ParameterExpansion, Program, Statement, WordPart } from './ast';
+import { rejectUnsupportedFeature, unsupportedSyntaxMessage } from './capabilities';
 import { Converter, decodeAnsiC } from './converter';
-import { checkBashSyntax, createValidatorSourceText } from './syntaxCheck';
-import { syntaxErrorMessage, syntaxErrorsOf } from './syntaxErrors';
-import { skipBalanced, skipWordPiece, SourceText } from './syntaxWords';
-import { UnsupportedFeatureError } from './unsupported';
+import { analyzeBashSource, createValidatorSourceText, inspectUnescapedBackquoteBody } from './syntaxCheck';
+import { syntaxErrorsOf } from './syntaxErrors';
+import type { SourceText } from './syntaxWords';
+import { arithmeticEnd, skipBalanced, skipWordPiece } from './syntaxWords';
 
 const parser = await loadParser('@willbooster/tree-sitter-bash/tree-sitter-bash.wasm');
 
@@ -29,27 +28,17 @@ export function parseBash(source: string, trace?: TraceOptions): Program {
 }
 
 function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
-  const { error, backquotes, literalSingleQuotes } = checkBashSyntax(source);
-  if (error && error !== 'unknown')
-    throw new CompileError([{ row: error.row, message: syntaxErrorMessage(error.text) }]);
-  const hidden = hideInvalidBackquotes(source, backquotes);
-  const quoteSet = new Set([...literalSingleQuotes, ...hidden.literalSingleQuotes]);
-  const quoteNormalized = maskLiteralSingleQuotes(hidden.source, quoteSet);
-  const { source: parsedSource, masked } = maskInvalidArithmetic(parser, quoteNormalized);
+  const analyzed = analyzeBashSource(parser, source);
   return parseSource(
     parser,
-    parsedSource,
+    analyzed.grammarSource,
     {},
     (root) => {
       const converter = new Converter(
-        parsedSource,
+        analyzed,
         atomicRows,
-        masked,
         rawArithmeticPieces,
         reparseBackquoted,
-        hidden.errors,
-        quoteSet,
-        source,
         parseSubscriptWordParts
       );
       const program = converter.convertProgram(root);
@@ -61,55 +50,15 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
       return program;
     },
     {
-      locateErrors: (root: Node) => syntaxErrorsOf(root, parsedSource, isEmptySubscript),
+      locateErrors: (root: Node) => syntaxErrorsOf(root, analyzed.grammarSource, isEmptySubscript),
       isBenignError: isEmptySubscript,
     }
   );
 }
 
-function maskLiteralSingleQuotes(source: string, offsets: ReadonlySet<number>): string {
-  if (offsets.size === 0) return source;
-  let out = '';
-  for (let i = 0; i < source.length; i++) out += offsets.has(i) ? '\u001F' : source[i];
-  return out;
-}
-
 /** An empty subscript (`a[]`), which the grammar fills with a missing token but Bash rejects only when it runs. */
 function isEmptySubscript(node: Node): boolean {
   return node.type === 'raw_string' && node.startIndex === node.endIndex && node.parent?.type === 'subscript';
-}
-
-/**
- * The pieces of arithmetic text the grammar could not read, whose expansions Bash still performs before it evaluates
- * the text: the text is read as a double-quoted string, as Bash treats it.
- */
-// code-gauge-allow functionCognitiveComplexity -- Scans raw arithmetic text across quotes, line continuations, escapes, and shell expansions.
-export function rawArithmeticPieces(raw: string): (string | WordPart)[] {
-  if (!/[$`"\\]/.test(raw)) return [raw];
-  const text = createValidatorSourceText(raw);
-  const pieces: (string | WordPart)[] = [];
-  let plain = '';
-  for (let i = 0; i < raw.length;) {
-    const c = raw[i];
-    const next = raw[i + 1];
-    if (c === '\\' && next !== undefined && '$`\\\n'.includes(next)) {
-      if (next !== '\n') plain += next;
-      i += 2;
-      continue;
-    }
-    if (c === '"' || c === '`' || (c === '$' && next !== undefined && /['"{([A-Za-z_0-9@#?*!$-]/.test(next))) {
-      if (plain) pieces.push(plain);
-      plain = '';
-      const step = readSubscriptPiece(raw, i, text);
-      pieces.push(...step.parts);
-      i = step.next;
-      continue;
-    }
-    plain += c;
-    i++;
-  }
-  if (plain) pieces.push(plain);
-  return pieces;
 }
 
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
@@ -129,42 +78,121 @@ export function findBashTraceAnnotations(source: string): TraceAnnotation[] {
 }
 
 /**
- * Parses an associative-array subscript taken from an arithmetic string (`let 'a[$k]+=1'`, `let 'a["x"]+=1'`) into
- * word parts whose quotes are stripped and whose `$` / backquote expansions run while keeping plain spaces intact.
+ * Scans deferred arithmetic text into literal slices and `WordPart` expansions using the single `SourceText` lexer,
+ * without synthetic-string reparsing.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Scans raw arithmetic text across quotes, line continuations, escapes, and shell expansions.
+export function rawArithmeticPieces(raw: string): (string | WordPart)[] {
+  if (!/[$`"\\]/.test(raw)) return [raw];
+  const text = createSubscriptSourceText(raw);
+  const pieces: (string | WordPart)[] = [];
+  let plain = '';
+  for (let i = 0; i < raw.length;) {
+    const c = raw[i];
+    const next = raw[i + 1];
+    if (c === '\\' && next !== undefined && '$`\\\n'.includes(next)) {
+      if (next !== '\n') plain += next;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === '`' || (c === '$' && next !== undefined && /['"{([A-Za-z_0-9@#?*!$-]/.test(next))) {
+      if (plain) pieces.push(plain);
+      plain = '';
+      const step = readLexicalPiece(raw, i, text, false);
+      pieces.push(...step.parts);
+      i = step.next;
+      continue;
+    }
+    plain += c;
+    i++;
+  }
+  if (plain) pieces.push(plain);
+  return pieces;
+}
+
+/**
+ * Scans an associative-array subscript taken from runtime or deferred text into `WordPart`s without invoking
+ * `parser.parse` on synthetic fragments.
  */
 export function parseSubscriptWordParts(raw: string): WordPart[] {
-  const parts: WordPart[] = [];
-  const text = new SourceText(raw);
+  return scanWordSliceParts(raw, false, true);
+}
+
+function createSubscriptSourceText(raw: string): SourceText {
+  const text = createValidatorSourceText(raw);
   text.parseSubstitution = (start) => skipBalanced(text, start - 1, '(', ')');
+  return text;
+}
+
+function scanWordSliceParts(raw: string, inDouble: boolean, subscriptMode = false): WordPart[] {
+  const parts: WordPart[] = [];
+  const text = createSubscriptSourceText(raw);
   for (let i = 0; i < raw.length;) {
-    const piece = readSubscriptPiece(raw, i, text);
-    parts.push(...piece.parts);
-    i = piece.next;
+    const step = inDouble ? readDoubleInnerPiece(raw, i, text) : readLexicalPiece(raw, i, text, subscriptMode);
+    for (const part of step.parts) appendWordPart(parts, part);
+    i = step.next;
   }
   return parts;
 }
 
-function readSubscriptPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+function appendWordPart(parts: WordPart[], part: WordPart): void {
+  const prev = parts.at(-1);
+  if (part.kind === 'literal' && prev?.kind === 'literal') prev.text += part.text;
+  else parts.push(part);
+}
+
+// code-gauge-allow functionCognitiveComplexity -- Dispatches single/double/ANSI-C quotes, escapes, command substitutions, arithmetic, and parameters.
+function readLexicalPiece(
+  raw: string,
+  i: number,
+  text: SourceText,
+  subscriptMode: boolean
+): { parts: WordPart[]; next: number } {
   const c = raw[i];
+  if ((c === '<' || c === '>') && raw[i + 1] === '(') rejectUnsupportedFeature('プロセス置換（<( ... )）');
   if (c === "'") return readSingleQuotedSubscript(raw, i);
-  if (c === '\\') return readEscapedSubscript(raw, i);
-  if (c === '$' && raw[i + 1] === "'") {
+  if (c === '\\') return readEscapedPiece(raw, i, subscriptMode);
+  if (c === '"' || (c === '$' && raw[i + 1] === '"')) return readDoubleQuotedPiece(raw, i, text);
+  if (c === '`') return readBackquotedPiece(raw, i, text);
+  if (c !== '$') {
+    return { parts: [{ kind: subscriptMode ? 'single' : 'literal', text: c }], next: i + 1 };
+  }
+  if (raw[i + 1] === "'") {
     const ansi = tryReadAnsiCSubscript(raw, i);
     if (ansi) return ansi;
   }
-  if (c === '"' || c === '`' || (c === '$' && `"{([`.includes(raw[i + 1] ?? ''))) {
-    return readTreeParsedSubscript(raw, i, text);
+  if (raw[i + 1] === '{') return readBracedExpansionPiece(raw, i, text, false);
+  if (raw[i + 1] === '(' || raw[i + 1] === '[') return readDollarGroupPiece(raw, i, text);
+  const simple = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$_-])/.exec(raw.slice(i));
+  if (simple) {
+    return {
+      parts: [{ kind: 'parameter', name: simple[0].slice(1), argument: [], text: simple[0], braced: false }],
+      next: i + simple[0].length,
+    };
   }
+  return { parts: [{ kind: subscriptMode ? 'single' : 'literal', text: '$' }], next: i + 1 };
+}
+
+function readDoubleInnerPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  const c = raw[i];
+  if (c === '\\') {
+    if (i + 1 < raw.length && raw[i + 1] === '\n') return { parts: [], next: i + 2 };
+    const end = Math.min(i + 2, raw.length);
+    return { parts: [{ kind: 'literal', text: raw.slice(i, end) }], next: end };
+  }
+  if (c === '`') return readBackquotedPiece(raw, i, text);
   if (c === '$') {
-    const match = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$-])/.exec(raw.slice(i));
-    if (match) {
+    if (raw[i + 1] === '{') return readBracedExpansionPiece(raw, i, text, true);
+    if (raw[i + 1] === '(' || raw[i + 1] === '[') return readDollarGroupPiece(raw, i, text);
+    const simple = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@#?*!$_-])/.exec(raw.slice(i));
+    if (simple) {
       return {
-        parts: [{ kind: 'parameter', name: match[0].slice(1), argument: [], text: match[0], braced: false }],
-        next: i + match[0].length,
+        parts: [{ kind: 'parameter', name: simple[0].slice(1), argument: [], text: simple[0], braced: false }],
+        next: i + simple[0].length,
       };
     }
   }
-  return { parts: [{ kind: 'single', text: c }], next: i + 1 };
+  return { parts: [{ kind: 'literal', text: c }], next: i + 1 };
 }
 
 function readSingleQuotedSubscript(raw: string, i: number): { parts: WordPart[]; next: number } {
@@ -173,10 +201,14 @@ function readSingleQuotedSubscript(raw: string, i: number): { parts: WordPart[];
   return { parts: [{ kind: 'single', text: raw.slice(i + 1, close) }], next: close + 1 };
 }
 
-function readEscapedSubscript(raw: string, i: number): { parts: WordPart[]; next: number } {
-  if (i + 1 >= raw.length) return { parts: [{ kind: 'single', text: '\\' }], next: i + 2 };
+function readEscapedPiece(raw: string, i: number, subscriptMode: boolean): { parts: WordPart[]; next: number } {
+  if (i + 1 >= raw.length) {
+    return { parts: [{ kind: subscriptMode ? 'single' : 'literal', text: '\\' }], next: i + 2 };
+  }
   if (raw[i + 1] === '\n') return { parts: [], next: i + 2 };
-  return { parts: [{ kind: 'single', text: raw[i + 1] }], next: i + 2 };
+  return subscriptMode
+    ? { parts: [{ kind: 'single', text: raw[i + 1] }], next: i + 2 }
+    : { parts: [{ kind: 'literal', text: raw.slice(i, i + 2) }], next: i + 2 };
 }
 
 function tryReadAnsiCSubscript(raw: string, i: number): { parts: WordPart[]; next: number } | undefined {
@@ -186,34 +218,232 @@ function tryReadAnsiCSubscript(raw: string, i: number): { parts: WordPart[]; nex
   return { parts: [{ kind: 'ansiC', text: decodeAnsiC(raw.slice(i + 2, close)) }], next: close + 1 };
 }
 
-function readTreeParsedSubscript(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
-  let end = i + 1;
+function readDoubleQuotedPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  const quoteStart = raw[i] === '$' ? i + 1 : i;
+  let end = raw.length;
   try {
     end = skipWordPiece(text, i);
   } catch {
-    end = raw.length;
+    return { parts: [{ kind: 'single', text: raw[i] }], next: i + 1 };
   }
-  return { parts: parsePiece(raw.slice(i, end)), next: end };
+  const inner = raw.slice(quoteStart + 1, end - 1);
+  return { parts: [{ kind: 'double', parts: scanWordSliceParts(inner, true, false) }], next: end };
 }
 
-function parsePiece(piece: string): WordPart[] {
-  const tree = parser.parse(piece);
-  if (!tree) return [{ kind: 'single', text: piece }];
+function readBackquotedPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  let end = raw.length;
   try {
-    const first = tree.rootNode.namedChildren[0];
-    const target = first?.type === 'command' ? (first.childForFieldName('name')?.namedChildren[0] ?? first) : first;
-    if (tree.rootNode.hasError || !target) return [{ kind: 'single', text: piece }];
-    return new Converter(piece, new Set(), new Map(), () => [piece], reparseBackquoted, new Map()).word(target).parts;
+    end = skipWordPiece(text, i);
+  } catch {
+    return { parts: [{ kind: 'single', text: '`' }], next: i + 1 };
+  }
+  const slice = raw.slice(i, end);
+  const unescaped = slice.slice(1, -1).replaceAll(/\\([$`\\])/g, '$1');
+  const syntaxError = inspectUnescapedBackquoteBody(unescaped, 0);
+  if (syntaxError) {
+    return { parts: [{ kind: 'commandSubstitution', body: [], text: slice, row: 0, syntaxError }], next: end };
+  }
+  return {
+    parts: [{ kind: 'commandSubstitution', body: reparseBackquoted(unescaped, 0), text: slice, row: 0 }],
+    next: end,
+  };
+}
+
+function readDollarGroupPiece(raw: string, i: number, text: SourceText): { parts: WordPart[]; next: number } {
+  if (raw[i + 1] === '[') {
+    let end = raw.length;
+    try {
+      end = skipBalanced(text, i + 1, '[', ']');
+    } catch {
+      return { parts: [{ kind: 'single', text: '$[' }], next: i + 2 };
+    }
+    const inner = raw.slice(i + 2, end - 1);
+    return {
+      parts: [{ kind: 'arithmeticExpansion', expression: { pieces: rawArithmeticPieces(inner), row: 0 } }],
+      next: end,
+    };
+  }
+  if (raw[i + 2] === '(') {
+    let closeEnd: number | undefined;
+    try {
+      closeEnd = arithmeticEnd(text, i + 1);
+    } catch {
+      return { parts: [{ kind: 'single', text: '$((' }], next: i + 3 };
+    }
+    if (closeEnd !== undefined) {
+      const inner = raw.slice(i + 3, closeEnd - 2);
+      return {
+        parts: [{ kind: 'arithmeticExpansion', expression: { pieces: rawArithmeticPieces(inner), row: 0 } }],
+        next: closeEnd,
+      };
+    }
+  }
+  let end = raw.length;
+  try {
+    end = skipBalanced(text, i + 1, '(', ')');
+  } catch {
+    return { parts: [{ kind: 'single', text: '$(' }], next: i + 2 };
+  }
+  const slice = raw.slice(i, end);
+  const body = parseSafeSubstitutionBody(raw.slice(i + 2, end - 1));
+  return {
+    parts: body ? [{ kind: 'commandSubstitution', body, text: slice, row: 0 }] : [{ kind: 'single', text: slice }],
+    next: end,
+  };
+}
+
+function parseSafeSubstitutionBody(inner: string): Statement[] | undefined {
+  try {
+    return parseText(inner, new Set()).units.flat();
   } catch (error) {
     if (error instanceof CompileError) {
-      const message = error.diagnostics[0]?.message ?? '';
-      if (message.endsWith('は、この採点環境では使えません。')) throw new UnsupportedFeatureError(message);
-      return [{ kind: 'single', text: piece }];
+      const msg = error.diagnostics[0]?.message ?? '';
+      if (msg.endsWith('は、この採点環境では使えません。')) {
+        rejectUnsupportedFeature(msg.slice(0, -'は、この採点環境では使えません。'.length));
+      }
+      return undefined;
     }
     throw error;
-  } finally {
-    tree.delete();
   }
+}
+
+function readBracedExpansionPiece(
+  raw: string,
+  i: number,
+  text: SourceText,
+  inDouble: boolean
+): { parts: WordPart[]; next: number } {
+  let end = raw.length;
+  try {
+    end = skipWordPiece(text, i);
+  } catch {
+    return { parts: [{ kind: 'single', text: '${' }], next: i + 2 };
+  }
+  const slice = raw.slice(i, end);
+  if (/^\$\{[ \t\n|]/.test(slice)) {
+    const msg = unsupportedSyntaxMessage('currentShellSubstitution');
+    rejectUnsupportedFeature(msg.slice(0, -'は、この採点環境では使えません。'.length));
+  }
+  return { parts: [parseBracedParameterExpansion(slice, inDouble)], next: end };
+}
+
+const ORDERED_PARAMETER_OPERATORS = [
+  ':-',
+  ':=',
+  ':?',
+  ':+',
+  '##',
+  '%%',
+  '//',
+  '/#',
+  '/%',
+  '^^',
+  ',,',
+  '~~',
+  '-',
+  '=',
+  '?',
+  '+',
+  '#',
+  '%',
+  '/',
+  ':',
+  '^',
+  ',',
+  '~',
+  '@',
+  '*',
+];
+
+const UNQUOTED_ARGUMENT_OPERATORS = new Set([
+  '#',
+  '##',
+  '%',
+  '%%',
+  '/',
+  '//',
+  '/#',
+  '/%',
+  '^',
+  '^^',
+  ',',
+  ',,',
+  '~',
+  '~~',
+  '?',
+  ':?',
+]);
+
+function parseBracedParameterExpansion(slice: string, inDouble: boolean): ParameterExpansion {
+  const inner = slice.slice(2, -1);
+  if (inner === '') return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
+  const { prefix, pos: afterPrefix } = readParameterPrefix(inner);
+  const header = readParameterNameAndSubscript(inner, afterPrefix);
+  if (!header) return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
+  if (header.next >= inner.length) {
+    return {
+      kind: 'parameter',
+      name: header.name,
+      ...(header.subscript ? { subscript: header.subscript } : {}),
+      ...(prefix ? { prefix } : {}),
+      argument: [],
+      text: slice,
+      braced: true,
+    };
+  }
+  const operator = ORDERED_PARAMETER_OPERATORS.find((op) => inner.startsWith(op, header.next));
+  if (!operator) return { kind: 'parameter', name: '', argument: [], text: slice, braced: true };
+  const argSlice = inner.slice(header.next + operator.length);
+  const argInDouble = inDouble && !UNQUOTED_ARGUMENT_OPERATORS.has(operator);
+  return {
+    kind: 'parameter',
+    name: header.name,
+    ...(header.subscript ? { subscript: header.subscript } : {}),
+    ...(prefix ? { prefix } : {}),
+    operator,
+    argument: scanWordSliceParts(argSlice, argInDouble, false),
+    text: slice,
+    braced: true,
+  };
+}
+
+function readParameterPrefix(inner: string): { prefix?: '#' | '!'; pos: number } {
+  if (inner[0] === '!') return { prefix: '!', pos: 1 };
+  if (inner[0] !== '#') return { pos: 0 };
+  const second = inner[1] ?? '';
+  const isLengthPrefix = /[A-Za-z_0-9]/.test(second) || (inner.length === 2 && '@*?!$_-'.includes(second));
+  return isLengthPrefix ? { prefix: '#', pos: 1 } : { pos: 0 };
+}
+
+function readParameterNameAndSubscript(
+  inner: string,
+  pos: number
+): { name: string; subscript?: { parts: WordPart[]; row: number; text: string }; next: number } | undefined {
+  const rest = inner.slice(pos);
+  const idMatch = /^[A-Za-z_][A-Za-z0-9_]*/.exec(rest);
+  if (idMatch) {
+    let name = idMatch[0];
+    const afterName = pos + name.length;
+    if (inner[afterName] !== '[') return { name, next: afterName };
+    const text = createSubscriptSourceText(inner);
+    let closeEnd = inner.length;
+    try {
+      closeEnd = skipBalanced(text, afterName, '[', ']');
+    } catch {
+      return undefined;
+    }
+    const subRaw = inner.slice(afterName + 1, closeEnd - 1);
+    if (inner[closeEnd] === '[') name = '';
+    return {
+      name,
+      subscript: { parts: scanWordSliceParts(subRaw, false, false), row: 0, text: subRaw },
+      next: closeEnd,
+    };
+  }
+  const numMatch = /^\d+/.exec(rest);
+  if (numMatch) return { name: numMatch[0], next: pos + numMatch[0].length };
+  if ('@#?*!$_-'.includes(rest[0] ?? '')) return { name: rest[0], next: pos + 1 };
+  return undefined;
 }
 
 /** Extracts the unexpanded `length` slice from `${name:offset:length}` for Bash's negative-length diagnostic. */

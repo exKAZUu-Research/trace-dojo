@@ -1,5 +1,6 @@
 import { formatFloatField, padPrintfBytes } from '../interpreter/floatFormat';
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { rejectUnsupportedPrintfConversion } from './capabilities';
 import { charactersOf } from './characters';
 import {
   ansicQuote,
@@ -9,7 +10,6 @@ import {
   SIMPLE_ESCAPE_BYTES,
   singleQuote,
 } from './quoting';
-import { UnsupportedFeatureError } from './unsupported';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -258,8 +258,7 @@ class Printf {
       this.push(padPrintfBytes(truncate(out, precision), spec, false));
       if (stop) throw new StopOutput();
     } else if (conversion === 'q' || conversion === 'Q') this.quote(spec);
-    else if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
-    else if (conversion === '(') throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
+    else if (conversion === 'n' || conversion === '(') rejectUnsupportedPrintfConversion(conversion);
     else this.fail(`\`${conversion}': invalid format character`);
   }
 

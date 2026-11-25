@@ -152,29 +152,31 @@ test('whole-variable namerefs, declare -g globals, and temporary scalar prefixes
   local shadow=inner
   declare -gi global_sum=2+3
   ref[k]=updated
-  echo "$shadow|\${ref[k]}|$global_sum"
+  echo "\${FUNCNAME[0]}|$shadow|\${ref[k]}|$global_sum"
 }
 declare -A box=([k]=old)
 shadow=outer
 TMP=scoped f box
 echo "$shadow|\${box[k]}|$global_sum|\${TMP-unset}"
-false
-echo "\${PIPESTATUS[0]}|\${BASH_SUBSHELL}"
 `;
   expect(executeProgram('bash', program)).toMatchObject({
     kind: 'executed',
-    stdout: 'inner|updated|5\nouter|updated|5|unset\n1|0\n',
+    stdout: 'f|inner|updated|5\nouter|updated|5|unset\n',
     stderr: '',
   });
-  expect(executeProgram('bash', 'p=temp export p=new\n')).toMatchObject({
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-  });
-  expect(executeProgram('bash', 'a=(1 2); local_fn() { local -n r="a[0]"; }; local_fn\n')).toMatchObject({
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-  });
-  expect(executeProgram('bash', 'unset RANDOM\n')).toMatchObject({
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-  });
+  for (const unsupported of [
+    'p=temp export p=new\n',
+    'f() { local TMP; }; TMP=scoped f\n',
+    'x=1; declare -a x\n',
+    'a=(1 2); local_fn() { local -n r="a[0]"; }; local_fn\n',
+    'echo "${PIPESTATUS[0]}"\n',
+    'unset RANDOM\n',
+    'f() { local PATH=x; declare -g PATH; }; f; echo "${PATH-unset}"\n',
+  ]) {
+    expect(executeProgram('bash', unsupported)).toMatchObject({
+      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    });
+  }
 });
 
 test('a syntax error rejects the program before it runs, naming the token and line Bash reports', () => {

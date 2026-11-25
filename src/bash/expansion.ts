@@ -2,6 +2,7 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
+import { rejectUnsupportedExpansion, rejectUnsupportedPathnameExpansion } from './capabilities';
 import { charactersOf } from './characters';
 import {
   DEFAULT_WORD_CONTEXT,
@@ -20,11 +21,10 @@ import {
 import { applyOperator } from './parameterOperators';
 import { parseSubscriptWordParts, rawArithmeticPieces } from './parse';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
-import { quoteReusable, singleQuote } from './quoting';
+import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { Shell } from './shell';
 import { readResolvedTarget, resolveSubscriptTarget, resolveTargetName } from './targets';
-import { UnsupportedFeatureError } from './unsupported';
 import { type CompoundElement, isIdentifier } from './variables';
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
@@ -394,7 +394,7 @@ export class Expander {
           continue;
         }
         if (atPrefix && c === '~' && hasUnquotedTildePrefix(parts, index, i + 1, afterColon)) {
-          throw new UnsupportedFeatureError('~ の展開');
+          rejectUnsupportedExpansion('tilde');
         }
         atPrefix = afterColon && c === ':';
       }
@@ -532,16 +532,16 @@ export class Expander {
         return { kind: 'scalar', value: 'hB' };
       }
       case '$': {
-        throw new UnsupportedFeatureError('プロセス番号（$$）');
+        return rejectUnsupportedExpansion('pid');
       }
       case '!': {
-        throw new UnsupportedFeatureError('バックグラウンドのプロセス番号（$!）');
+        return rejectUnsupportedExpansion('bgPid');
       }
       case '0': {
         return { kind: 'scalar', value: SCRIPT_NAME };
       }
       case '_': {
-        if (this.shell.store.lastArgument === undefined) throw new UnsupportedFeatureError('Bash のパス（最初の $_）');
+        if (this.shell.store.lastArgument === undefined) rejectUnsupportedExpansion('initialLastArg');
         return { kind: 'scalar', value: this.shell.store.lastArgument };
       }
     }
@@ -692,9 +692,7 @@ export class Expander {
       const chunk = fragment.quoted ? quotePattern(fragment.text) : fragment.text;
       pattern = appendBounded(pattern, chunk, spend);
     }
-    if (hasExtendedGlob(pattern, () => this.spend())) {
-      throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
-    }
+    if (hasExtendedGlob(pattern, () => this.spend())) rejectUnsupportedExpansion('extglob');
     return pattern;
   }
 
@@ -710,11 +708,7 @@ export class Expander {
     }
     const unquoted = field.map((fragment) => (fragment.quoted ? quotePattern(fragment.text) : fragment.text)).join('');
     const result = field.map((fragment) => fragment.text).join('');
-    if (hasPatternCharacters(unquoted, () => this.spend())) {
-      throw new UnsupportedFeatureError(
-        `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(result)} のように引用符で囲む）`
-      );
-    }
+    if (hasPatternCharacters(unquoted, () => this.spend())) rejectUnsupportedPathnameExpansion(result);
     return result;
   }
 

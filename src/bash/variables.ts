@@ -4,7 +4,6 @@ import {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
-  CONVERTED_BUCKETS,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
@@ -20,19 +19,20 @@ import {
   DYNAMIC_VARIABLES,
   ENVIRONMENT_VARIABLES,
   rejectSpecialVariableMutation,
+  rejectUnsupportedHostEnv,
   rejectUnsupportedNamerefTarget,
+  rejectUnsupportedPrefixListing,
+  rejectUnsupportedSpecialVariable,
   SCALAR_DYNAMIC_VARIABLES,
+  UNSUPPORTED_SPECIAL_VARIABLES,
 } from './capabilities';
-import { capitalize, lowerCase, upperCase } from './characters';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
-import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
-import { UnsupportedFeatureError } from './unsupported';
+import { BASH_VERSION, type FunctionDefinition, type Runtime } from './runtime';
 
 export {
   ASSOCIATIVE_BUCKETS,
   AssociativeTable,
   type CompoundElement,
-  CONVERTED_BUCKETS,
   isIdentifier,
   isValidFunctionName,
   maxElementIndex,
@@ -100,7 +100,6 @@ export interface DestinationSelection {
   readonly name: string;
   readonly cell: CellHandle;
   readonly created: boolean;
-  readonly importedFrom?: 'tempPrefix';
 }
 
 export type NamerefResolution =
@@ -183,10 +182,8 @@ export class VariableStore {
   private rematch: string[];
   private readonly prng: RandomStream;
   lastStatus = 0;
-  private lastPipeStatus = 0;
-  private hasCommandStatus = false;
   lastArgument: string | undefined;
-  readonly subshellLevel: number;
+  private readonly subshellLevel: number;
 
   constructor(
     private readonly runtime: Runtime,
@@ -200,8 +197,6 @@ export class VariableStore {
       rematch: string[];
       prng: RandomStream;
       lastStatus: number;
-      lastPipeStatus: number;
-      hasCommandStatus: boolean;
       lastArgument: string | undefined;
       subshellLevel: number;
     }
@@ -218,8 +213,6 @@ export class VariableStore {
       this.rematch = forked.rematch;
       this.prng = forked.prng;
       this.lastStatus = forked.lastStatus;
-      this.lastPipeStatus = forked.lastPipeStatus;
-      this.hasCommandStatus = forked.hasCommandStatus;
       this.lastArgument = forked.lastArgument;
       this.subshellLevel = forked.subshellLevel;
       return;
@@ -325,8 +318,6 @@ export class VariableStore {
       rematch: [...this.rematch],
       prng: this.prng.fork(nextLevel),
       lastStatus: this.lastStatus,
-      lastPipeStatus: this.lastPipeStatus,
-      hasCommandStatus: this.hasCommandStatus,
       lastArgument: this.lastArgument,
       subshellLevel: nextLevel,
     });
@@ -345,6 +336,14 @@ export class VariableStore {
       if (this.scopes[i].kind === 'function') return i;
     }
     return undefined;
+  }
+
+  /** Whether an enclosing command-prefix `'temp'` scope binds `name`. */
+  hasTemporaryBinding(name: string): boolean {
+    for (let i = this.scopes.length - 1; i >= 1; i--) {
+      if (this.scopes[i].kind === 'temp' && this.scopes[i].map.has(name)) return true;
+    }
+    return false;
   }
 
   pushFunctionScope(fnName: string, callLine: number, args: string[]): number {
@@ -377,7 +376,7 @@ export class VariableStore {
   }
 
   bindTemporaryScalar(scopeIndex: number, name: string, value: string, append: boolean): void {
-    if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    if (append && this.isUnreadHostEnv(name)) rejectUnsupportedHostEnv(name);
     const base = append ? (this.readScalar(name) ?? '') : '';
     const combined = base + value;
     this.checkStringLength(combined);
@@ -388,7 +387,7 @@ export class VariableStore {
     map.set(name, cell);
   }
 
-  // ---------------------------------------------------------------- functions, status, positional
+  // ---------------------------------------------------------------- functions, positional, PRNG
 
   getFunction(name: string): FunctionDefinition | undefined {
     return this.functions.get(name);
@@ -404,12 +403,6 @@ export class VariableStore {
 
   deleteFunction(name: string): boolean {
     return this.functions.delete(name);
-  }
-
-  setCommandStatus(status: number): void {
-    this.lastStatus = status;
-    this.lastPipeStatus = status;
-    this.hasCommandStatus = true;
   }
 
   positionalArgs(): readonly string[] {
@@ -438,9 +431,9 @@ export class VariableStore {
 
   // ---------------------------------------------------------------- lookup & single access gate
 
-  isUnreadHostEnv(name: string): boolean {
+  isUnreadHostEnv(name: string, maxScopeIndex = this.scopes.length - 1): boolean {
     if (!ENVIRONMENT_VARIABLES.has(name) || this.unsetHostEnv.has(name)) return false;
-    const cell = this.findOwnCell(name);
+    const cell = this.findOwnCell(name, maxScopeIndex);
     return !cell || cell.unreadHostEnv;
   }
 
@@ -449,7 +442,8 @@ export class VariableStore {
   }
 
   private checkPostDereferenceAccess(name: string): void {
-    if (this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    rejectUnsupportedSpecialVariable(name);
+    if (this.isUnreadHostEnv(name)) rejectUnsupportedHostEnv(name);
   }
 
   private findOwnCell(name: string, maxScopeIndex = this.scopes.length - 1): Cell | undefined {
@@ -511,14 +505,10 @@ export class VariableStore {
   private readDynamicScalar(name: string): string | undefined {
     if (name === 'RANDOM') return String(this.prng.next());
     if (name === 'LINENO') return String(this.currentLine());
-    if (name === 'BASH_SUBSHELL') return String(this.subshellLevel);
     return this.readDynamicElements(name)?.get(0n);
   }
 
   private readDynamicElements(name: string): Map<bigint, string> | undefined {
-    if (name === 'PIPESTATUS') {
-      return this.hasCommandStatus ? new Map([[0n, String(this.lastPipeStatus)]]) : undefined;
-    }
     if (name === 'BASH_REMATCH') {
       return new Map(this.rematch.map((v, i) => [BigInt(i), v]));
     }
@@ -527,18 +517,11 @@ export class VariableStore {
       const items = [...this.calls.toReversed().map((c) => c.name), 'main'];
       return new Map(items.map((v, i) => [BigInt(i), v]));
     }
-    if (name === 'BASH_LINENO') {
-      const items = [...this.calls.toReversed().map((c) => String(c.line)), '0'];
-      return new Map(items.map((v, i) => [BigInt(i), v]));
-    }
-    if (name === 'BASH_SOURCE') {
-      const items = [...this.calls.toReversed().map(() => SCRIPT_NAME), SCRIPT_NAME];
-      return new Map(items.map((v, i) => [BigInt(i), v]));
-    }
     return undefined;
   }
 
   dynamicView(name: string): VariableView | undefined {
+    rejectUnsupportedSpecialVariable(name);
     if (!this.isDynamic(name)) return undefined;
     if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
       const attributes = new Set<Attribute>(name === 'RANDOM' ? ['i'] : []);
@@ -554,7 +537,7 @@ export class VariableStore {
       };
     }
     const elements = this.readDynamicElements(name);
-    if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) return undefined;
+    if (!elements) return undefined;
     return {
       name,
       attributes: new Set<Attribute>(['a']),
@@ -574,9 +557,10 @@ export class VariableStore {
       onCycle?.(res.cyclicName);
       return undefined;
     }
+    rejectUnsupportedSpecialVariable(res.name);
     if (res.cell) {
       const cell = this.getCell(res.cell);
-      if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+      if (cell.unreadHostEnv) rejectUnsupportedHostEnv(cell.name);
       return cellScalarZero(cell.value);
     }
     if (this.isDynamic(res.name)) return this.readDynamicScalar(res.name);
@@ -590,6 +574,7 @@ export class VariableStore {
   }
 
   hasMaterializedTarget(resolvedName: string): boolean {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell && !cell.unreadHostEnv) return cell.value !== undefined;
     this.checkPostDereferenceAccess(resolvedName);
@@ -598,6 +583,7 @@ export class VariableStore {
   }
 
   translateNegativeIndex(resolvedName: string, index: bigint, allowScalarWrite: boolean): bigint | undefined {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     let length = 0n;
     if (cell?.value?.kind === 'indexed') {
@@ -623,11 +609,12 @@ export class VariableStore {
 
   readAssociativeElement(handle: CellHandle, key: string): string | undefined {
     const cell = this.getCell(handle);
-    if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+    if (cell.unreadHostEnv) rejectUnsupportedHostEnv(cell.name);
     return cell.value?.kind === 'associative' ? cell.value.table.get(key) : undefined;
   }
 
   readIndexedElement(resolvedName: string, index: bigint): string | undefined {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementAt(cell.value, index);
     if (this.isDynamic(resolvedName)) {
@@ -642,6 +629,7 @@ export class VariableStore {
   }
 
   readArrayLength(resolvedName: string): number {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementCount(cell.value);
     if (this.isDynamic(resolvedName)) {
@@ -653,6 +641,7 @@ export class VariableStore {
   }
 
   readArrayValues(resolvedName: string): string[] {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementValues(cell.value);
     if (this.isDynamic(resolvedName)) {
@@ -665,6 +654,7 @@ export class VariableStore {
   }
 
   readArrayKeys(resolvedName: string): string[] {
+    rejectUnsupportedSpecialVariable(resolvedName);
     const cell = this.findOwnCell(resolvedName);
     if (cell?.value) return cellElementKeys(cell.value);
     if (this.isDynamic(resolvedName)) {
@@ -687,23 +677,22 @@ export class VariableStore {
     for (const scope of this.scopes) {
       for (const cell of scope.map.values()) {
         if (!cell.name.startsWith(prefix)) continue;
-        if (cell.isSystem && !cell.userAssigned) {
-          throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
-        }
-        if (cell.value !== undefined) names.add(cell.name);
+        if (cell.isSystem && !cell.userAssigned) rejectUnsupportedPrefixListing(prefix);
+        if (cell.value !== undefined && !cell.unreadHostEnv) names.add(cell.name);
       }
     }
     return names;
   }
 
   private rejectUnsupportedPrefixQuery(prefix: string): void {
+    for (const unsupported of UNSUPPORTED_SPECIAL_VARIABLES) {
+      if (unsupported.startsWith(prefix)) rejectUnsupportedSpecialVariable(unsupported);
+    }
     for (const envName of ENVIRONMENT_VARIABLES) {
-      if (envName.startsWith(prefix) && this.isUnreadHostEnv(envName)) {
-        throw new UnsupportedFeatureError(`環境変数（${envName}）`);
-      }
+      if (envName.startsWith(prefix) && this.isUnreadHostEnv(envName)) rejectUnsupportedHostEnv(envName);
     }
     if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
-      throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
+      rejectUnsupportedPrefixListing(prefix);
     }
   }
 
@@ -718,7 +707,7 @@ export class VariableStore {
     declaredArrayKind?: 'indexed' | 'associative'
   ): DestinationSelection {
     if (intent === 'local') return this.selectLocalDestination(name, initialContainer, declaredArrayKind);
-    return this.selectScopedDestination(intent, name, initialContainer, checkAppendHostEnv);
+    return this.selectScopedDestination(intent, name, initialContainer, checkAppendHostEnv, declaredArrayKind);
   }
 
   private selectLocalDestination(
@@ -731,59 +720,41 @@ export class VariableStore {
     const localMap = this.scopes[fnIdx].map;
     const existing = localMap.get(name);
     if (existing) return { scope: 'local', name, cell: this.toHandle(existing), created: false };
-    const tempOrigin = this.findTempPrefixAbove(fnIdx, name);
-    const effectiveContainer = initialContainer ?? (tempOrigin ? declaredArrayKind : undefined);
-    const importedScalar =
-      effectiveContainer === undefined && declaredArrayKind === undefined ? tempOrigin?.scalar : undefined;
-    const initialValue = this.createInitialContainer(effectiveContainer, importedScalar);
-    const attrs = containerAttributes(effectiveContainer ?? declaredArrayKind, Boolean(tempOrigin));
-    const created = this.allocateCell(name, initialValue, attrs, false, Boolean(tempOrigin));
-    localMap.set(name, created);
-    return {
-      scope: 'local',
+    const created = this.allocateCell(
       name,
-      cell: this.toHandle(created),
-      created: true,
-      ...(tempOrigin ? { importedFrom: 'tempPrefix' } : {}),
-    };
+      this.createInitialContainer(initialContainer),
+      containerAttributes(initialContainer ?? declaredArrayKind)
+    );
+    localMap.set(name, created);
+    return { scope: 'local', name, cell: this.toHandle(created), created: true };
   }
 
   private selectScopedDestination(
     intent: 'global' | 'visible',
     name: string,
     initialContainer: 'indexed' | 'associative' | undefined,
-    checkAppendHostEnv: boolean
+    checkAppendHostEnv: boolean,
+    declaredArrayKind?: 'indexed' | 'associative'
   ): DestinationSelection {
-    if (checkAppendHostEnv && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    const maxScope = intent === 'global' ? 0 : this.scopes.length - 1;
+    if (checkAppendHostEnv && this.isUnreadHostEnv(name, maxScope)) rejectUnsupportedHostEnv(name);
     const existing = intent === 'global' ? this.scopes[0].map.get(name) : this.findOwnCell(name);
     if (existing) return { scope: intent, name, cell: this.toHandle(existing), created: false };
-    const unreadHostEnv = initialContainer === undefined && this.isUnreadHostEnv(name);
+    const unreadHostEnv = initialContainer === undefined && this.isUnreadHostEnv(name, maxScope);
     const created = this.allocateCell(
       name,
       this.createInitialContainer(initialContainer),
-      containerAttributes(initialContainer, false)
+      containerAttributes(initialContainer ?? declaredArrayKind)
     );
     created.unreadHostEnv = unreadHostEnv;
     this.scopes[0].map.set(name, created);
     return { scope: intent, name, cell: this.toHandle(created), created: true };
   }
 
-  private findTempPrefixAbove(fnIdx: number, name: string): { scalar: string } | undefined {
-    for (let i = fnIdx - 1; i >= 1; i--) {
-      if (this.scopes[i].kind === 'function') break;
-      const cell = this.scopes[i].map.get(name);
-      if (cell?.value?.kind === 'scalar') return { scalar: cell.value.value };
-    }
-    return undefined;
-  }
-
-  private createInitialContainer(
-    kind: 'indexed' | 'associative' | undefined,
-    importedScalar?: string
-  ): CellValue | undefined {
+  private createInitialContainer(kind: 'indexed' | 'associative' | undefined): CellValue | undefined {
     if (kind === 'indexed') return { kind: 'indexed', elements: new Map() };
     if (kind === 'associative') return { kind: 'associative', table: new AssociativeTable() };
-    return importedScalar === undefined ? undefined : { kind: 'scalar', value: importedScalar };
+    return undefined;
   }
 
   /** Returns a readonly failure if creating a new local variable in the current function would shadow an outer readonly variable. */
@@ -796,7 +767,7 @@ export class VariableStore {
       : undefined;
   }
 
-  /** Applies declaration attributes (`a`, `A`, `i`, `r`, `x`, `l`, `u`) to `handle`, converting scalars when needed. */
+  /** Applies declaration attributes (`a`, `A`, `i`, `r`, `x`) to `handle` after capability validation. */
   applyAttributes(
     handle: CellHandle,
     toAdd: ReadonlySet<Attribute>,
@@ -806,20 +777,7 @@ export class VariableStore {
     if (cell.attributes.has('r') && !canApplyToReadonlyCell(toAdd, allowReadonlyAlreadySet)) {
       return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
     }
-    const incompatible = checkIncompatibleArrayConversion(cell, toAdd);
-    if (incompatible) return { ok: false, reason: 'incompatibleArray', message: `${cell.name}: ${incompatible}` };
     this.detachShared(cell);
-    if (toAdd.has('a') && cell.value?.kind === 'scalar') {
-      this.runtime.allocateSlots(1);
-      cell.value = { kind: 'indexed', elements: new Map([[0n, cell.value.value]]) };
-    } else if (toAdd.has('A') && cell.value?.kind === 'scalar') {
-      const table = new AssociativeTable(CONVERTED_BUCKETS);
-      this.runtime.allocateSlots(1);
-      table.set('0', cell.value.value);
-      cell.value = { kind: 'associative', table };
-    }
-    if (toAdd.has('l')) cell.attributes.delete('u');
-    if (toAdd.has('u')) cell.attributes.delete('l');
     for (const attr of toAdd) cell.attributes.add(attr);
     return undefined;
   }
@@ -852,6 +810,7 @@ export class VariableStore {
       cell.value = { kind: 'scalar', value: target };
       cell.shared = false;
       cell.nullReference = false;
+      cell.unreadHostEnv = false;
       cell.userAssigned = true;
     }
     cell.attributes.add('n');
@@ -893,7 +852,7 @@ export class VariableStore {
         ? this.writeAssociativeElement(handle, '0', rawText, append, evalInt, label)
         : this.writeIndexedElement(handle, 0n, rawText, append, evalInt, label);
     }
-    if (append && cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+    if (append && cell.unreadHostEnv) rejectUnsupportedHostEnv(cell.name);
     const base = append && cell.value?.kind === 'scalar' ? cell.value.value : '';
     const prep = this.prepareConvertedString(cell, rawText, base, append, evalInt);
     if (!prep.ok) return prep;
@@ -940,9 +899,7 @@ export class VariableStore {
   ): StoreOutcome {
     const target = this.writableCellOrFailure(handle, opts.reportedName);
     if (!target.ok) return target;
-    if (opts.append && target.cell.unreadHostEnv) {
-      throw new UnsupportedFeatureError(`環境変数（${target.cell.name}）`);
-    }
+    if (opts.append && target.cell.unreadHostEnv) rejectUnsupportedHostEnv(target.cell.name);
     const map = getMap(target.cell);
     const base = opts.append ? (map.get(key) ?? '') : '';
     const prep = this.prepareConvertedString(target.cell, opts.rawText, base, opts.append, opts.evalInt);
@@ -959,7 +916,7 @@ export class VariableStore {
     const target = this.writableCellOrFailure(handle, hooks.reportedName);
     if (!target.ok) return target;
     const { cell, label } = target;
-    if (hooks.append && cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+    if (hooks.append && cell.unreadHostEnv) rejectUnsupportedHostEnv(cell.name);
     this.detachShared(cell);
     if (cell.value?.kind === 'associative' || cell.attributes.has('A')) {
       return this.writeAssociativeCompound(cell, elements, hooks, label);
@@ -1041,19 +998,32 @@ export class VariableStore {
     return undefined;
   }
 
-  prepareAssociativeAppend(handle: CellHandle, reportedName?: string): StoreFailure | undefined {
-    const cell = this.getCell(handle);
-    if (cell.attributes.has('r')) {
-      return { ok: false, reason: 'readonly', message: `${reportedName ?? cell.name}: readonly variable` };
-    }
-    if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+  /** Streams incremental associative `+=(...)` pairs through the single store compound writer. */
+  writeAssociativeCompoundStream(
+    handle: CellHandle,
+    reportedName: string,
+    evalInt: IntEvaluator,
+    drivePairs: (commitPair: (key: string, value: string, append: boolean) => boolean) => string | undefined
+  ): { outcome: StoreOutcome; syntaxError?: string } {
+    const target = this.writableCellOrFailure(handle, reportedName);
+    if (!target.ok) return { outcome: target };
+    const { cell } = target;
+    if (cell.unreadHostEnv) rejectUnsupportedHostEnv(cell.name);
     this.detachShared(cell);
-    if (cell.value?.kind !== 'associative') {
-      cell.value = { kind: 'associative', table: new AssociativeTable() };
-    }
-    cell.attributes.add('A');
+    const table = this.ensureAssociativeTable(cell);
+    cell.unreadHostEnv = false;
     cell.userAssigned = true;
-    return undefined;
+    let streamFailure: StoreFailure | undefined;
+    const syntaxError = drivePairs((key, value, append) => {
+      const failure = this.storeAssociativeCompoundPair(cell, table, table, { key, value, append }, evalInt);
+      if (failure) {
+        streamFailure = failure;
+        return false;
+      }
+      return true;
+    });
+    if (streamFailure) return { outcome: streamFailure };
+    return { outcome: { ok: true, stored: '' }, ...(syntaxError !== undefined ? { syntaxError } : {}) };
   }
 
   unsetNamed(target: string): StoreFailure | undefined {
@@ -1234,17 +1204,17 @@ export class VariableStore {
     append: boolean,
     evalInt: IntEvaluator
   ): string | undefined {
-    if (!cell.attributes.has('i')) return applyCaseTransform(cell.attributes, base + rawValue);
+    if (!cell.attributes.has('i')) return base + rawValue;
     if (append) {
       const lhs = evalInt(base || '0');
       if (lhs === undefined) return undefined;
       const rhs = evalInt(rawValue);
       if (rhs === undefined) return undefined;
-      return applyCaseTransform(cell.attributes, String(BigInt.asIntN(64, lhs + rhs)));
+      return String(BigInt.asIntN(64, lhs + rhs));
     }
     const evaluated = evalInt(rawValue);
     if (evaluated === undefined) return undefined;
-    return applyCaseTransform(cell.attributes, String(BigInt.asIntN(64, evaluated)));
+    return String(BigInt.asIntN(64, evaluated));
   }
 
   private checkStringLength(value: string): void {
@@ -1253,10 +1223,8 @@ export class VariableStore {
   }
 }
 
-function containerAttributes(kind: 'indexed' | 'associative' | undefined, hasTempOrigin: boolean): Attribute[] {
-  const attrs: Attribute[] = kind === 'associative' ? ['A'] : kind === 'indexed' ? ['a'] : [];
-  if (hasTempOrigin) attrs.push('x');
-  return attrs;
+function containerAttributes(kind: 'indexed' | 'associative' | undefined): Attribute[] {
+  return kind === 'associative' ? ['A'] : kind === 'indexed' ? ['a'] : [];
 }
 
 function* cellStrings(value: CellValue): Iterable<string> {
@@ -1286,21 +1254,6 @@ function canApplyToReadonlyCell(toAdd: ReadonlySet<Attribute>, allowReadonlyAlre
     if (attr !== 'r' && attr !== 'x') return false;
   }
   return true;
-}
-
-function checkIncompatibleArrayConversion(cell: Cell, toAdd: ReadonlySet<Attribute>): string | undefined {
-  const isAssoc = cell.value?.kind === 'associative' || cell.attributes.has('A');
-  const isIndexed = cell.value?.kind === 'indexed' || cell.attributes.has('a');
-  if (toAdd.has('a') && isAssoc) return 'cannot convert associative to indexed array';
-  if (toAdd.has('A') && isIndexed) return 'cannot convert indexed to associative array';
-  return undefined;
-}
-
-function applyCaseTransform(attributes: ReadonlySet<Attribute>, text: string): string {
-  if (attributes.has('u')) return upperCase(text);
-  if (attributes.has('l')) return lowerCase(text);
-  if (attributes.has('c')) return capitalize(text);
-  return text;
 }
 
 function cellScalarZero(value: CellValue | undefined): string | undefined {

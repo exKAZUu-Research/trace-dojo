@@ -27,20 +27,30 @@ const MAX_NESTING = 300;
 /** A nesting too deep to read, which the tree's own check then rejects. */
 export class UnknownSyntax extends Error {}
 
+/** A balanced arithmetic or compound-subscript region whose evaluation Bash defers until run time. */
+export interface DeferredRegion {
+  opener: '((' | '$((' | '$[' | '[';
+  openStart: number;
+  start: number;
+  end: number;
+  closeEnd: number;
+  keepsSemicolons: boolean;
+}
+
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
 export class SourceText {
   private readonly lineStarts: number[] = [0];
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
   readonly backquotes: { start: number; end: number }[] = [];
-  /** Offsets masked as literal characters for tree-sitter (`'` in `"${...}"` and `$` before non-ASCII text). */
+  /** Offsets of characters that are contextual literals in Bash (`'` in `"${...}"`, `$` before non-ASCII, etc.). */
   readonly literalSingleQuotes: number[] = [];
+  /** Balanced arithmetic and compound-subscript spans collected during the single lexical/validation pass. */
+  readonly arithmeticRegions: DeferredRegion[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
   };
-  /** Optional observer notified whenever `$((...))` or `$[...]` is scanned inside a word or string. */
-  onArithmetic?: (opener: '$((' | '$[', openStart: number, start: number, end: number, closeEnd: number) => void;
 
   constructor(readonly source: string) {
     for (let i = 0; i < source.length; i++) if (source[i] === '\n') this.lineStarts.push(i + 1);
@@ -102,7 +112,14 @@ export function skipWordPiece(text: SourceText, index: number): number {
   if (next === '{') return skipBraces(text, index + 1);
   if (next === '[') {
     const closeEnd = skipBalanced(text, index + 1, '[', ']');
-    text.onArithmetic?.('$[', index, index + 2, closeEnd - 1, closeEnd);
+    text.arithmeticRegions.push({
+      opener: '$[',
+      openStart: index,
+      start: index + 2,
+      end: closeEnd - 1,
+      closeEnd,
+      keepsSemicolons: false,
+    });
     return closeEnd;
   }
   if (next === '(') return skipDollarParenthesis(text, index + 1);
@@ -235,7 +252,14 @@ function skipDollarParenthesis(text: SourceText, open: number): number {
     if (text.source[open + 1] === '(') {
       const closeEnd = arithmeticEnd(text, open);
       if (closeEnd !== undefined) {
-        text.onArithmetic?.('$((', open - 1, open + 2, closeEnd - 2, closeEnd);
+        text.arithmeticRegions.push({
+          opener: '$((',
+          openStart: open - 1,
+          start: open + 2,
+          end: closeEnd - 2,
+          closeEnd,
+          keepsSemicolons: false,
+        });
         return closeEnd;
       }
       return skipBalanced(text, open, '(', ')');

@@ -1,3 +1,4 @@
+import { rejectUnsupportedSetArgs } from './capabilities';
 import { legalNumber } from './characters';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
@@ -6,7 +7,6 @@ import type { Shell } from './shell';
 import { resolveScalarTarget, resolveSubscriptTarget, unsetResolvedElement, writeResolvedTarget } from './targets';
 import { testBuiltin } from './testBuiltin';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
-import { UnsupportedFeatureError } from './unsupported';
 import { isIdentifier } from './variables';
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
@@ -310,13 +310,13 @@ function loopControl(kind: 'break' | 'continue'): Builtin {
 }
 
 function set(shell: Shell, args: string[]): number {
-  if (args.length === 0) throw new UnsupportedFeatureError('set の変数の一覧');
+  if (args.length === 0) rejectUnsupportedSetArgs();
   if (args[0] === '--' || args[0] === '-' || !/^[-+]/.test(args[0])) {
     const rest = args[0] === '--' || args[0] === '-' ? args.slice(1) : args;
     shell.store.setPositionalArgs(rest);
     return 0;
   }
-  throw new UnsupportedFeatureError(`シェルのオプション（set ${args[0]}）`);
+  rejectUnsupportedSetArgs(args[0]);
 }
 
 export const REGULAR_BUILTINS: Record<string, Builtin> = {

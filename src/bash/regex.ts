@@ -4,8 +4,8 @@
  * longest, `.` matching any character, a backslash quoting the character after it, and no `\d`-style classes.
  */
 
+import { rejectUnsupportedBracketClass } from './capabilities';
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { UnsupportedFeatureError } from './unsupported';
 
 type RegexNode =
   | { kind: 'char'; c: string }
@@ -208,7 +208,7 @@ class RegexParser {
     const type = this.chars[this.position + 1];
     if (c !== '[' || (type !== ':' && type !== '=' && type !== '.')) return undefined;
     const name = this.readSubbracketName(type);
-    if (type !== ':') throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+    if (type !== ':') rejectUnsupportedBracketClass();
     return parseCharacterClassSubbracket(name, this.hasRangeContinuation());
   }
 
@@ -222,7 +222,7 @@ class RegexParser {
     const type = this.chars[this.position + 1];
     if (this.chars[this.position] === '[' && (type === '.' || type === ':' || type === '=')) {
       this.readSubbracketName(type);
-      if (type !== ':') throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+      if (type !== ':') rejectUnsupportedBracketClass();
       throw new RegexSyntaxError('invalid character range');
     }
     const end = this.chars[this.position++];

@@ -1,8 +1,3 @@
-export function capitalize(text: string): string {
-  const [first = '', ...rest] = charactersOf(text);
-  return upperCase(first) + lowerCase(rest.join(''));
-}
-
 export function upperCase(text: string): string {
   return charactersOf(text)
     .map((c) => mapCase(c, c.toUpperCase()))

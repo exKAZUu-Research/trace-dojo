@@ -4,13 +4,14 @@ import { expandBraces } from './braces';
 import {
   type Attribute,
   rejectSpecialVariableMutation,
+  rejectUnsupportedDeclarationListing,
   rejectUnsupportedDeclarationOperand,
   rejectUnsupportedDeclarationOptions,
 } from './capabilities';
 import { printDeclarations } from './declarePrint';
+import type { FailureContext } from './failurePolicy';
 import type { Shell } from './shell';
-import { resolveSubscriptTarget, resolveTargetName, writeResolvedTarget } from './targets';
-import { UnsupportedFeatureError } from './unsupported';
+import { resolveTargetName } from './targets';
 import {
   type CellHandle,
   type CompoundElement,
@@ -36,7 +37,7 @@ const OPTIONS: Record<string, string> = {
   export: 'fnp',
 };
 
-const VALUE_ATTRIBUTES = new Set<string>(['a', 'A', 'i', 'l', 'u', 'x', 'r']);
+const VALUE_ATTRIBUTES = new Set<string>(['a', 'A', 'i', 'x', 'r']);
 
 interface ParsedOptions {
   readonly set: Set<string>;
@@ -72,7 +73,19 @@ interface DeclarationPlan {
   readonly lastArgText: string;
 }
 
-/** Runs a static `declaration_command` (`declare`, `typeset`, `local`, `readonly`, `export`) via an explicit two-phase plan. */
+export interface CompoundCommitRequest {
+  readonly builtin?: string;
+  readonly name: string;
+  readonly subscript?: Word;
+  readonly append: boolean;
+  readonly words: Word[];
+  readonly rawItems?: CompoundElement[];
+  readonly intent: DestinationIntent;
+  readonly set: ReadonlySet<string>;
+  readonly context: 'scriptAssignment' | 'declarationCompoundPhase1' | 'declarationFunctionCompoundPhase1';
+}
+
+/** Runs a static `declaration_command` (`declare`, `typeset`, `local`, `readonly`, `export`) via the shared schedule. */
 export function executeDeclarationCommand(
   shell: Shell,
   builtin: string,
@@ -116,6 +129,169 @@ export function runDynamicDeclarationBuiltin(shell: Shell, builtin: string, args
     lastArgText: args.at(-1) ?? builtin,
   };
   return runDeclarationPlan(shell, plan);
+}
+
+/** Executes an ordinary `name=(...)` or `name+=(...)` compound assignment through the single compound schedule. */
+export function executeCompoundAssignment(shell: Shell, assignment: Assignment, context: 'scriptAssignment'): boolean {
+  const outcome = executeCompoundOperation(shell, {
+    name: assignment.name,
+    subscript: assignment.subscript,
+    append: assignment.append,
+    words: assignment.array as Word[],
+    intent: 'visible',
+    set: new Set(),
+    context,
+  });
+  return outcome !== undefined;
+}
+
+// ---------------------------------------------------------------- shared compound expand-prepare-commit schedule
+
+function executeCompoundOperation(
+  shell: Shell,
+  req: CompoundCommitRequest
+): { cell: CellHandle; materializedArray: boolean } | undefined {
+  if (req.subscript) {
+    shell.failures.handleStoreFailure(req.context, {
+      ok: false,
+      reason: 'cannotAssign',
+      message: `${req.name}[${req.subscript.text}]: cannot assign list to array member`,
+    });
+    return undefined;
+  }
+  const targetName = resolveCompoundTargetName(shell, req);
+  if (targetName === undefined) return undefined;
+  const priorView = priorDestinationView(shell, targetName, req.intent);
+  if (req.builtin !== undefined) {
+    rejectUnsupportedDeclarationOperand(req.builtin, req.name, req.set, {
+      isSubscripted: false,
+      isCompound: true,
+      append: req.append,
+      hasScalarValue: false,
+      hasEnclosingTempBinding: shell.store.hasTemporaryBinding(req.name),
+      isUnreadHostTarget: isUnreadHostAtIntent(shell, targetName, req.intent),
+      existing: priorView,
+    });
+  } else if (priorView?.attributes.has('r')) {
+    shell.failures.handleStoreFailure(req.context, {
+      ok: false,
+      reason: 'readonly',
+      message: `${targetName}: readonly variable`,
+    });
+    return undefined;
+  }
+  const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
+  const existingIsAssoc = priorView?.kind === 'associative' || priorView?.attributes.has('A') === true;
+  const isAssoc = req.set.has('A') || existingIsAssoc;
+  if (req.builtin === undefined && req.append && existingIsAssoc && priorView?.handle) {
+    const ok = streamAssociativeAppend(shell, priorView.handle, req.words, req.name, req.context);
+    return ok ? { cell: priorView.handle, materializedArray: !wasMaterialized } : undefined;
+  }
+  return commitPreparedCompound(shell, req, targetName, isAssoc, wasMaterialized);
+}
+
+function resolveCompoundTargetName(shell: Shell, req: CompoundCommitRequest): string | undefined {
+  const targetName = req.intent === 'visible' ? resolveTargetName(shell, req.name) : req.name;
+  if (targetName === undefined) {
+    if (req.builtin === undefined) {
+      shell.failures.handleStoreFailure(req.context, { ok: false, reason: 'cannotAssign', message: '' });
+    }
+    return undefined;
+  }
+  rejectSpecialVariableMutation(targetName, false);
+  if (!isIdentifier(targetName)) {
+    shell.failures.handleStoreFailure(req.context, {
+      ok: false,
+      reason: 'invalidIdentifier',
+      message: `\`${targetName}': not a valid identifier`,
+    });
+    return undefined;
+  }
+  const outerRo = req.intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
+  if (outerRo) {
+    shell.failures.handleStoreFailure(req.context, outerRo, req.builtin);
+    return undefined;
+  }
+  return targetName;
+}
+
+function streamAssociativeAppend(
+  shell: Shell,
+  handle: CellHandle,
+  words: Word[],
+  reportedName: string,
+  context: FailureContext
+): boolean {
+  const { outcome, syntaxError } = shell.store.writeAssociativeCompoundStream(
+    handle,
+    reportedName,
+    (expr) => shell.evaluateFatalReadonly(expr, false),
+    (commitPair) => shell.expander.expandAssociativeAppend(words, reportedName, commitPair)
+  );
+  if (syntaxError !== undefined) shell.discard(syntaxError);
+  return outcome.ok ? true : shell.failures.handleStoreFailure(context, outcome);
+}
+
+function commitPreparedCompound(
+  shell: Shell,
+  req: CompoundCommitRequest,
+  targetName: string,
+  isAssoc: boolean,
+  wasMaterialized: boolean
+): { cell: CellHandle; materializedArray: boolean } | undefined {
+  const roots: string[] = [];
+  return shell.withValuesRoot(roots, () => {
+    const isDeclaration = req.builtin !== undefined;
+    const expanded = expandCompoundElements(shell, req, isAssoc, isDeclaration);
+    pushCompoundElementRoots(roots, expanded.elements);
+    const cell = prepareCompoundDestinationCell(shell, req, targetName, isAssoc, isDeclaration);
+    if (!cell) return;
+    const outcome = shell.store.writeCompound(cell, expanded.elements, {
+      append: req.append,
+      reportedName: req.name,
+      evalIndex: (cellHandle, rawKey) => shell.evaluateCompoundIndex(cellHandle, rawKey),
+      evalInt: (expr) => shell.evaluateFatalReadonly(expr, false),
+      onItemError: (msg) => shell.reportError(msg),
+    });
+    if (expanded.error !== undefined) shell.discard(expanded.error);
+    if (!outcome.ok) {
+      shell.failures.handleStoreFailure(isDeclaration ? 'declarationCompoundPhase1' : req.context, outcome);
+      return;
+    }
+    const finalKind = shell.store.viewOfHandle(cell).kind;
+    return { cell, materializedArray: !wasMaterialized && (finalKind === 'indexed' || finalKind === 'associative') };
+  });
+}
+
+function expandCompoundElements(
+  shell: Shell,
+  req: CompoundCommitRequest,
+  isAssoc: boolean,
+  isDeclaration: boolean
+): { elements: CompoundElement[]; error?: string } {
+  return req.rawItems
+    ? shell.expander.validateCompoundItems(req.rawItems, isAssoc, true, req.name)
+    : shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
+}
+
+function prepareCompoundDestinationCell(
+  shell: Shell,
+  req: CompoundCommitRequest,
+  targetName: string,
+  isAssoc: boolean,
+  isDeclaration: boolean
+): CellHandle | undefined {
+  const selected = shell.store.selectDestination(
+    req.intent,
+    targetName,
+    isAssoc ? 'associative' : 'indexed',
+    req.append
+  );
+  if (!isDeclaration) return selected.cell;
+  const attrFailure = shell.store.applyAttributes(selected.cell, nonReadonlyValueAttributes(req.set), false);
+  if (!attrFailure) return selected.cell;
+  shell.failures.handleStoreFailure(req.context, attrFailure);
+  return undefined;
 }
 
 // ---------------------------------------------------------------- Phase 1: plan construction & eager compound commit
@@ -285,97 +461,37 @@ function commitPhase1Compound(
   }
   rejectUnsupportedDeclarationOptions(builtin, effective.set, effective.unset, effective.hasPlusOption);
   const intent = destinationIntentOf(shell, builtin, effective.set);
-  const existingOwn = intent === 'local' ? undefined : shell.store.ownView(arg.name);
-  rejectUnsupportedDeclarationOperand(builtin, arg.name, effective.set, {
-    isSubscripted: Boolean(arg.subscript),
-    isCompound: true,
-    append: arg.append,
-    existingIsNameref: Boolean(existingOwn?.attributes.has('n') && intent === 'global'),
-  });
+  if (arg.subscript) {
+    rejectUnsupportedDeclarationOperand(builtin, arg.name, effective.set, {
+      isSubscripted: true,
+      isCompound: true,
+      append: arg.append,
+      hasScalarValue: false,
+      hasEnclosingTempBinding: shell.store.hasTemporaryBinding(arg.name),
+      isUnreadHostTarget: isUnreadHostAtIntent(shell, arg.name, intent),
+    });
+  }
   const failCtx =
     shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
       ? 'declarationFunctionCompoundPhase1'
       : 'declarationCompoundPhase1';
-  if (arg.subscript) {
-    shell.failures.handleStoreFailure(failCtx, {
-      ok: false,
-      reason: 'cannotAssign',
-      message: `${arg.name}[${arg.subscript.text}]: cannot assign list to array member`,
-    });
-    return { kind: 'failedCompound', name: arg.name, text: arg.text };
-  }
-  const targetName = resolvePhase1CompoundTarget(shell, builtin, arg.name, intent, failCtx);
-  if (targetName === undefined) return { kind: 'failedCompound', name: arg.name, text: arg.text };
-  return writePhase1CompoundToCell(shell, arg, effective, rawItems, intent, targetName, failCtx);
-}
-
-function resolvePhase1CompoundTarget(
-  shell: Shell,
-  builtin: string,
-  rawName: string,
-  intent: DestinationIntent,
-  failCtx: 'declarationFunctionCompoundPhase1' | 'declarationCompoundPhase1'
-): string | undefined {
-  const targetName = intent === 'visible' ? resolveTargetName(shell, rawName) : rawName;
-  if (targetName === undefined) return undefined;
-  rejectSpecialVariableMutation(targetName, false);
-  if (!isIdentifier(targetName)) {
-    shell.failures.handleStoreFailure(failCtx, {
-      ok: false,
-      reason: 'invalidIdentifier',
-      message: `\`${targetName}': not a valid identifier`,
-    });
-    return undefined;
-  }
-  const outerRo = intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
-  if (outerRo) {
-    shell.failures.handleStoreFailure(failCtx, outerRo, builtin);
-    return undefined;
-  }
-  return targetName;
-}
-
-// code-gauge-allow functionParameterCount -- Commits validated Phase-1 compound elements onto the selected destination cell.
-function writePhase1CompoundToCell(
-  shell: Shell,
-  arg: Assignment,
-  effective: ParsedOptions,
-  rawItems: CompoundElement[],
-  intent: DestinationIntent,
-  targetName: string,
-  failCtx: 'declarationFunctionCompoundPhase1' | 'declarationCompoundPhase1'
-): PlannedOperand {
-  const containerKind = effective.set.has('A') ? 'associative' : 'indexed';
-  const priorKind = intent === 'local' ? undefined : shell.store.ownView(targetName)?.kind;
-  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
-  const selected = shell.store.selectDestination(intent, targetName, containerKind, arg.append);
-  const attrFailure = shell.store.applyAttributes(selected.cell, nonReadonlyValueAttributes(effective.set), false);
-  if (attrFailure) {
-    shell.failures.handleStoreFailure(failCtx, attrFailure);
-    return { kind: 'failedCompound', name: arg.name, text: arg.text };
-  }
-  const viewAfterAttr = shell.store.viewOfHandle(selected.cell);
-  const isAssoc = viewAfterAttr.kind === 'associative' || viewAfterAttr.attributes.has('A');
-  const { elements, error } = shell.expander.validateCompoundItems(rawItems, isAssoc, true, arg.name);
-  const outcome = shell.store.writeCompound(selected.cell, elements, {
+  const committed = executeCompoundOperation(shell, {
+    builtin,
+    name: arg.name,
+    subscript: arg.subscript,
     append: arg.append,
-    reportedName: arg.name,
-    evalIndex: (cellHandle, rawKey) => shell.evaluateCompoundIndex(cellHandle, rawKey),
-    evalInt: (expr) => shell.evaluateFatalReadonly(expr, false),
-    onItemError: (msg) => shell.reportError(msg),
+    words: arg.array as Word[],
+    rawItems,
+    intent,
+    set: effective.set,
+    context: failCtx,
   });
-  if (error !== undefined) shell.discard(error);
-  if (!outcome.ok) {
-    shell.failures.handleStoreFailure('declarationCompoundPhase1', outcome);
-    return { kind: 'failedCompound', name: arg.name, text: arg.text };
-  }
-  const finalKind = shell.store.viewOfHandle(selected.cell).kind;
-  const materializedArray = !wasMaterialized && (finalKind === 'indexed' || finalKind === 'associative');
+  if (!committed) return { kind: 'failedCompound', name: arg.name, text: arg.text };
   return {
     kind: 'completedCompound',
     name: arg.name,
-    cell: selected.cell,
-    materializedArray,
+    cell: committed.cell,
+    materializedArray: committed.materializedArray,
     text: arg.text,
   };
 }
@@ -398,7 +514,7 @@ function runDeclarationPlan(shell: Shell, plan: DeclarationPlan, onMaterialize?:
     return 1;
   }
   rejectUnsupportedDeclarationOptions(builtin, options.set, options.unset, options.hasPlusOption);
-  if (operands.length === 0) throw new UnsupportedFeatureError(`${builtin} の変数の一覧`);
+  if (operands.length === 0) rejectUnsupportedDeclarationListing(builtin);
   if (options.set.has('p') && builtin !== 'readonly' && builtin !== 'export') {
     return printDeclarations(
       shell,
@@ -440,12 +556,12 @@ function executePlannedOperand(
   }
   if (operand.kind === 'word') {
     const parsed = parseWordOperand(operand.text);
-    return executeScalarOrElementOperand(
+    return executeScalarDeclarationOperand(
       shell,
       builtin,
       {
         name: parsed.name,
-        subscriptText: parsed.subscript,
+        isSubscripted: parsed.subscript !== undefined,
         append: parsed.append,
         value: parsed.value,
         rawText: operand.text,
@@ -455,12 +571,12 @@ function executePlannedOperand(
       onMaterialize
     );
   }
-  return executeScalarOrElementOperand(
+  return executeScalarDeclarationOperand(
     shell,
     builtin,
     {
       name: operand.name,
-      subscriptWord: operand.subscript,
+      isSubscripted: operand.subscript !== undefined,
       append: operand.append,
       value: operand.value,
       rawText: operand.text,
@@ -471,47 +587,44 @@ function executePlannedOperand(
   );
 }
 
-interface NormalizedOperand {
+interface NormalizedScalarOperand {
   readonly name: string;
-  readonly subscriptWord?: Word;
-  readonly subscriptText?: string;
+  readonly isSubscripted: boolean;
   readonly append: boolean;
   readonly value: string | undefined;
   readonly rawText: string;
 }
 
-function executeScalarOrElementOperand(
+function executeScalarDeclarationOperand(
   shell: Shell,
   builtin: string,
-  op: NormalizedOperand,
+  op: NormalizedScalarOperand,
   set: ReadonlySet<string>,
   intent: DestinationIntent,
   onMaterialize?: () => void
 ): boolean {
-  const isSubscripted = op.subscriptWord !== undefined || op.subscriptText !== undefined;
-  const rejectsSubscriptWithoutValue =
-    isSubscripted && op.value === undefined && (builtin === 'readonly' || builtin === 'export');
-  if (!isIdentifier(op.name) || rejectsSubscriptWithoutValue) {
+  if (!isIdentifier(op.name)) {
     return shell.failures.handleStoreFailure(
       'declarationOperand',
       { ok: false, reason: 'invalidIdentifier', message: `\`${op.rawText}': not a valid identifier` },
       builtin
     );
   }
-  const existingForCheck = priorDestinationView(shell, op.name, intent);
-  rejectUnsupportedDeclarationOperand(builtin, op.name, set, {
-    isSubscripted,
+  const effectiveSet = builtin === 'readonly' && op.value === undefined ? new Set<string>(['r']) : set;
+  const existingOwn = priorDestinationView(shell, op.name, intent);
+  rejectUnsupportedDeclarationOperand(builtin, op.name, effectiveSet, {
+    isSubscripted: op.isSubscripted,
     isCompound: false,
     append: op.append,
-    existingIsNameref: Boolean(existingForCheck?.attributes.has('n')),
+    hasScalarValue: op.value !== undefined && !effectiveSet.has('n'),
+    hasEnclosingTempBinding: shell.store.hasTemporaryBinding(op.name),
+    isUnreadHostTarget: isUnreadHostAtIntent(shell, op.name, intent),
+    existing: existingOwn,
   });
   const outerRo = intent === 'local' ? shell.store.outerReadonlyFailure(op.name) : undefined;
   if (outerRo) return shell.failures.handleStoreFailure('declarationOperand', outerRo, builtin);
-  if (set.has('n')) return bindPlannedNamerefOperand(shell, builtin, op.name, op.value, intent);
-  if (isSubscripted) {
-    return executeSubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
-  }
-  return executeUnsubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
+  if (effectiveSet.has('n')) return bindPlannedNamerefOperand(shell, builtin, op.name, op.value, intent);
+  return executeUnsubscriptedDeclaration(shell, builtin, op, effectiveSet, intent, onMaterialize);
 }
 
 function bindPlannedNamerefOperand(
@@ -531,16 +644,26 @@ function bindPlannedNamerefOperand(
 function executeUnsubscriptedDeclaration(
   shell: Shell,
   builtin: string,
-  op: NormalizedOperand,
-  set: ReadonlySet<string>,
+  op: NormalizedScalarOperand,
+  effectiveSet: ReadonlySet<string>,
   intent: DestinationIntent,
   onMaterialize?: () => void
 ): boolean {
   const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
   if (targetName === undefined) return false;
   const priorView = priorDestinationView(shell, targetName, intent);
+  if (targetName !== op.name) {
+    rejectUnsupportedDeclarationOperand(builtin, targetName, effectiveSet, {
+      isSubscripted: false,
+      isCompound: false,
+      append: op.append,
+      hasScalarValue: op.value !== undefined,
+      hasEnclosingTempBinding: shell.store.hasTemporaryBinding(targetName),
+      isUnreadHostTarget: isUnreadHostAtIntent(shell, targetName, intent),
+      existing: priorView,
+    });
+  }
   const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
-  const effectiveSet = builtin === 'readonly' && op.value === undefined ? new Set<string>(['r']) : set;
   const declaredArrayKind = effectiveSet.has('A') ? 'associative' : effectiveSet.has('a') ? 'indexed' : undefined;
   const selected = shell.store.selectDestination(intent, targetName, undefined, op.append, declaredArrayKind);
   if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return false;
@@ -578,63 +701,15 @@ function resolveUnsubscriptedDeclareTarget(
   return resolved;
 }
 
-function executeSubscriptedDeclaration(
-  shell: Shell,
-  builtin: string,
-  op: NormalizedOperand,
-  set: ReadonlySet<string>,
-  intent: DestinationIntent,
-  onMaterialize?: () => void
-): boolean {
-  const scopedIntent = intent === 'local' ? 'local' : 'visible';
-  const prepared = prepareSubscriptedDestination(shell, builtin, op, set, scopedIntent);
-  if (!prepared) return false;
-  const subInput =
-    op.subscriptWord !== undefined
-      ? ({ kind: 'word', word: op.subscriptWord } as const)
-      : ({ kind: 'text', text: op.subscriptText ?? '' } as const);
-  const target = resolveSubscriptTarget(shell, {
-    name: op.name,
-    subscript: subInput,
-    operation: op.value === undefined ? 'read' : 'write',
-    intent: scopedIntent,
-    append: op.append,
-  });
-  if (!target) return false;
-  if (target.kind === 'invalid')
-    return shell.failures.handleStoreFailure('declarationOperand', target.failure, builtin);
-  if (op.value !== undefined) {
-    const outcome = writeResolvedTarget(shell, target, op.value, op.append, builtin);
-    if (!outcome.ok) return shell.failures.handleStoreFailure('declarationOperand', outcome, builtin);
-  }
-  return finalizeDeclaredCell(shell, builtin, prepared.cell, set, prepared.wasMaterialized, onMaterialize);
-}
-
-function prepareSubscriptedDestination(
-  shell: Shell,
-  builtin: string,
-  op: NormalizedOperand,
-  set: ReadonlySet<string>,
-  scopedIntent: 'local' | 'visible'
-): { cell: CellHandle; wasMaterialized: boolean } | undefined {
-  const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, scopedIntent);
-  if (targetName === undefined) return undefined;
-  const priorView = priorDestinationView(shell, targetName, scopedIntent);
-  const wasMaterialized = priorView?.kind === 'indexed' || priorView?.kind === 'associative';
-  const existingAssoc = priorView?.kind === 'associative' || priorView?.attributes.has('A') === true;
-  const isAssoc = set.has('A') || (existingAssoc && !set.has('a'));
-  const arrayKind = isAssoc ? 'associative' : 'indexed';
-  const containerKind = op.value === undefined ? undefined : arrayKind;
-  const selected = shell.store.selectDestination(scopedIntent, targetName, containerKind, op.append, arrayKind);
-  const effectiveSet = isAssoc ? set : new Set([...set, 'a']);
-  if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return undefined;
-  return { cell: selected.cell, wasMaterialized };
-}
-
 function priorDestinationView(shell: Shell, name: string, intent: DestinationIntent): VariableView | undefined {
   if (intent === 'global') return shell.store.ownView(name, 0);
   const own = shell.store.ownView(name);
   return intent === 'local' ? (own?.isCurrentLocal ? own : undefined) : own;
+}
+
+function isUnreadHostAtIntent(shell: Shell, name: string, intent: DestinationIntent): boolean {
+  if (intent === 'local') return false;
+  return shell.store.isUnreadHostEnv(name, intent === 'global' ? 0 : undefined);
 }
 
 function applyPreWriteAttributes(

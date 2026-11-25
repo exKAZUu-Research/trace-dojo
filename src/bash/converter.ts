@@ -2,11 +2,9 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import type { MaskedArithmetic } from './arithmeticMasking';
 import type {
   ArithmeticSource,
   Assignment,
-  BackquoteSyntaxError,
   CaseItem,
   ParameterExpansion,
   Program,
@@ -16,10 +14,10 @@ import type {
   Word,
   WordPart,
 } from './ast';
+import { type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
-import { findForHeaderSemicolons } from './syntaxCheck';
+import { type AnalyzedBashSource, findForHeaderSemicolons } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
-import { unsupportedMessage } from './unsupported';
 import { isIdentifier } from './variables';
 
 /** The node types that expand inside a word, which arithmetic substitutes into its text. */
@@ -33,23 +31,21 @@ const EXPANSION_TYPES = new Set([
   'translated_string',
 ]);
 
-/** Converts the tree of a program into statements, rejecting the syntax this environment does not support. */
+/** Converts the tree of a program into statements, consulting `capabilities.ts` for unsupported syntax. */
 export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
 
-  // code-gauge-allow functionParameterCount -- Carries parsed/original sources, annotations, masked arithmetic, backquote/subscript hooks, and literal-quote offsets.
+  private get source(): string {
+    return this.analyzed.grammarSource;
+  }
+
   constructor(
-    private readonly source: string,
+    private readonly analyzed: AnalyzedBashSource,
     private readonly atomicRows: ReadonlySet<number>,
-    private readonly masked: MaskedArithmetic,
     private readonly rawPieces: (raw: string) => (string | WordPart)[],
     /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
     private readonly reparse: (text: string, row: number) => Statement[],
-    /** The syntax errors of backquoted bodies, which Bash reports when it runs them, by the index of their `` ` ``. */
-    private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>,
-    private readonly literalQuotes: ReadonlySet<number> = new Set(),
-    private readonly originalSource: string = source,
     private readonly parseSubscriptParts: (raw: string) => WordPart[] = (raw) => [{ kind: 'single', text: raw }]
   ) {}
 
@@ -86,12 +82,12 @@ export class Converter {
     throw new CompileError([{ row: node.startPosition.row, message }]);
   }
 
-  private unsupported(node: Node, feature: string): never {
-    this.fail(node, unsupportedMessage(feature));
+  private unsupported(node: Node, kind: UnsupportedSyntaxKind, detail?: string): never {
+    this.fail(node, unsupportedSyntaxMessage(kind, detail));
   }
 
   private checkTerminator(node: Node): void {
-    if (node.type === '&') this.unsupported(node, 'バックグラウンド実行（&）');
+    if (node.type === '&') this.unsupported(node, 'background');
   }
 
   private statements(nodes: Node[]): Statement[] {
@@ -180,10 +176,10 @@ export class Converter {
         return this.redirectedStatement(node, base);
       }
       case 'pipeline': {
-        return this.unsupported(node, 'パイプ（|）');
+        return this.unsupported(node, 'pipeline');
       }
       case 'subshell': {
-        return this.unsupported(node, 'サブシェル（( ... )）');
+        return this.unsupported(node, 'subshell');
       }
       case 'coproc_command': {
         return this.unsupported(node, 'coproc');
@@ -199,7 +195,7 @@ export class Converter {
 
   private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const bodyNode = node.childForFieldName('body');
-    if (bodyNode?.type === 'function_definition') this.unsupported(node, '関数の定義に付けたリダイレクト');
+    if (bodyNode?.type === 'function_definition') this.unsupported(node, 'functionRedirect');
     const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
     if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
     const converted = this.statement(bodyNode);
@@ -279,7 +275,7 @@ export class Converter {
 
   private arithmeticForStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const opening = node.children.find((child) => child.type === '((');
-    const raw = opening ? this.masked.get(opening.endIndex) : undefined;
+    const raw = opening ? this.analyzed.deferredArithmetic.get(opening.endIndex) : undefined;
     const restored = raw === undefined || !opening ? undefined : this.restoreQuotes(raw, opening.endIndex);
     const parts = restored === undefined ? undefined : splitForHeader(restored);
     const part = (index: number, field: string): ArithmeticSource | undefined => {
@@ -389,7 +385,7 @@ export class Converter {
 
   private restoreMaskedKeyedElement(word: Word, startIndex: number, endIndex: number): Word {
     if (this.source[startIndex] !== '[') return word;
-    const maskedSub = this.masked.get(startIndex + 1);
+    const maskedSub = this.analyzed.deferredArithmetic.get(startIndex + 1);
     const [first, ...restParts] = word.parts;
     if (maskedSub === undefined || first?.kind !== 'literal') return word;
     const prefixLen = 1 + maskedSub.length;
@@ -403,7 +399,7 @@ export class Converter {
         ...restParts,
       ],
       row: word.row,
-      text: this.originalSource.slice(startIndex, endIndex),
+      text: this.analyzed.originalSource.slice(startIndex, endIndex),
     };
   }
 
@@ -433,8 +429,8 @@ export class Converter {
   }
 
   private redirect(node: Node): Redirect {
-    if (node.type === 'heredoc_redirect') this.unsupported(node, 'ヒアドキュメント（<<）');
-    if (node.type === 'herestring_redirect') this.unsupported(node, 'ヒアストリング（<<<）');
+    if (node.type === 'heredoc_redirect') this.unsupported(node, 'heredoc');
+    if (node.type === 'herestring_redirect') this.unsupported(node, 'herestring');
     const operator = node.childForFieldName('operator')?.type ?? '';
     const descriptor = node.childForFieldName('descriptor')?.text;
     const destination = node.childForFieldName('destination');
@@ -443,7 +439,7 @@ export class Converter {
     const isCopy =
       (operator === '>&' || operator === '<&') && (fd === 1 || fd === 2) && (target === '1' || target === '2');
     if (isCopy && (operator === '>&' || fd === Number(target))) return { fd, target: Number(target) as 1 | 2 };
-    return this.unsupported(node, `リダイレクト（${node.text}）`);
+    return this.unsupported(node, 'redirect', node.text);
   }
 
   private ifStatement(node: Node): Statement {
@@ -479,7 +475,7 @@ export class Converter {
 
   private forStatement(node: Node): Statement {
     const row = node.startPosition.row;
-    if (node.childForFieldName('keyword')?.type === 'select') this.unsupported(node, 'select（標準入力を読む）');
+    if (node.childForFieldName('keyword')?.type === 'select') this.unsupported(node, 'select');
     const hasIn = node.children.some((child) => child.type === 'in');
     return {
       row,
@@ -510,7 +506,7 @@ export class Converter {
   private functionDefinition(node: Node): Statement {
     const row = node.startPosition.row;
     const body = node.childForFieldName('body') as Node;
-    if (body.type === 'subshell') this.unsupported(body, 'サブシェルを本体にした関数（f() ( ... )）');
+    if (body.type === 'subshell') this.unsupported(body, 'subshellFunctionBody');
     const opening = body.type === 'compound_statement' ? body.child(0) : undefined;
     const headerEnd = opening?.startPosition.row ?? body.startPosition.row;
     let isAtomic = false;
@@ -587,7 +583,7 @@ export class Converter {
     const closing = children.findLast((child) => child.type === close);
     const start = opening?.endIndex ?? node.startIndex;
     const end = closing?.startIndex ?? node.endIndex;
-    const raw = this.masked.get(start);
+    const raw = this.analyzed.deferredArithmetic.get(start);
     if (raw !== undefined) {
       return { pieces: this.rawPieces(this.restoreQuotes(raw, start)), row: node.startPosition.row };
     }
@@ -620,11 +616,13 @@ export class Converter {
   }
 
   private restoreQuotes(text: string, startIndex: number): string {
-    if (this.literalQuotes.size === 0 || !text.includes('\u001F')) return text;
+    if (this.analyzed.literalQuotes.size === 0 || !text.includes('\u001F')) return text;
     let out = '';
     for (let i = 0; i < text.length; i++) {
       out +=
-        text[i] === '\u001F' && this.literalQuotes.has(startIndex + i) ? this.originalSource[startIndex + i] : text[i];
+        text[i] === '\u001F' && this.analyzed.literalQuotes.has(startIndex + i)
+          ? this.analyzed.originalSource[startIndex + i]
+          : text[i];
     }
     return out;
   }
@@ -681,10 +679,10 @@ export class Converter {
         ];
       }
       case 'process_substitution': {
-        return this.unsupported(node, 'プロセス置換（<( ... )）');
+        return this.unsupported(node, 'processSubstitution');
       }
       case 'extglob_pattern': {
-        return this.unsupported(node, '拡張パターン（@( ... ) など）');
+        return this.unsupported(node, 'extglob');
       }
       default: {
         return this.fail(node, unexpectedTokenMessage(node.text));
@@ -707,14 +705,14 @@ export class Converter {
   private commandSubstitution(node: Node): WordPart {
     const opening = node.child(0);
     if (opening && opening.type !== '$(' && opening.type !== '`') {
-      this.unsupported(node, '現在のシェルで実行するコマンド置換（${ ...; }）');
+      this.unsupported(node, 'currentShellSubstitution');
     }
     const row = node.startPosition.row;
     const text =
       opening?.type === '`'
-        ? this.originalSource.slice(node.startIndex, node.endIndex)
+        ? this.analyzed.originalSource.slice(node.startIndex, node.endIndex)
         : this.restoreQuotes(node.text, node.startIndex);
-    const syntaxError = opening?.type === '`' ? this.backquoteErrors.get(node.startIndex) : undefined;
+    const syntaxError = opening?.type === '`' ? this.analyzed.backquoteErrors.get(node.startIndex) : undefined;
     if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';

@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- Keeps Bash's parameter expansion operators and transformations in one module.
 import type { ParameterExpansion, WordPart } from './ast';
-import { ATTRIBUTE_ORDER } from './capabilities';
+import { ATTRIBUTE_ORDER, rejectUnsupportedExpansion } from './capabilities';
 import { charactersOf, lowerCase, upperCase } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
@@ -36,7 +36,6 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
-import { UnsupportedFeatureError } from './unsupported';
 import type { VariableView } from './variables';
 
 /** Applies the operator of `${name<operator>argument}` to the parameter's value. */
@@ -656,7 +655,7 @@ function transform(
       return mapValues(expander, value, ctx, decodeAnsiC);
     }
     case 'P': {
-      throw new UnsupportedFeatureError('プロンプトの展開（${x@P}）');
+      return rejectUnsupportedExpansion('promptTransform');
     }
     case 'u': {
       return mapValues(

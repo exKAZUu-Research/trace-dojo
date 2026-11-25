@@ -1,28 +1,28 @@
 import type { Assignment } from './ast';
 import { EXTERNAL_COMMANDS } from './externalCommands';
-import { UnsupportedFeatureError } from './unsupported';
+import { quoteReusable } from './quoting';
+import { UnsupportedFeatureError, unsupportedMessage } from './unsupported';
 
-/** Variable attribute flags recognized by `declare` and listed by `declare -p`. */
-export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 't' | 'x' | 'c' | 'l' | 'u';
+/** Variable attribute flags recognized by the supported declaration surface and listed by `declare -p`. */
+export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 'x';
 
 /** Canonical display order of variable attribute flags for `declare -p` and `${x@a}`. */
-export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 't', 'x', 'c', 'l', 'u'];
+export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 'x'];
 
-/** Dynamic variables computed on read through store-owned descriptors. */
-export const DYNAMIC_VARIABLES = new Set([
-  'RANDOM',
-  'LINENO',
-  'FUNCNAME',
-  'BASH_LINENO',
-  'BASH_SOURCE',
-  'BASH_SUBSHELL',
-  'PIPESTATUS',
-]);
+/** Supported dynamic variables computed on read through store-owned descriptors. */
+export const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME']);
 
-export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
+export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO']);
+
+/** Deferred Bash internal variables whose reads, writes, declarations, tests, and unsets are rejected. */
+export const UNSUPPORTED_SPECIAL_VARIABLES = new Set(['PIPESTATUS', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
 
 /** Special variables whose user writes, unsets, and declarations are rejected except scalar `RANDOM` seeding. */
-export const SPECIAL_MUTATION_BLOCKED = new Set([...DYNAMIC_VARIABLES, 'BASH_REMATCH']);
+export const SPECIAL_MUTATION_BLOCKED = new Set([
+  ...DYNAMIC_VARIABLES,
+  'BASH_REMATCH',
+  ...UNSUPPORTED_SPECIAL_VARIABLES,
+]);
 
 /** Host environment variables absent in the browser grading sandbox. */
 export const ENVIRONMENT_VARIABLES = new Set([
@@ -80,6 +80,70 @@ export const ENVIRONMENT_VARIABLES = new Set([
 ]);
 
 export const DECLARATION_BUILTIN_NAMES = new Set(['declare', 'typeset', 'local', 'readonly', 'export']);
+
+export const FILE_TEST_OPERATORS = new Set([
+  '-a',
+  '-b',
+  '-c',
+  '-d',
+  '-e',
+  '-f',
+  '-g',
+  '-h',
+  '-k',
+  '-p',
+  '-r',
+  '-s',
+  '-u',
+  '-w',
+  '-x',
+  '-G',
+  '-L',
+  '-N',
+  '-O',
+  '-S',
+  '-nt',
+  '-ot',
+  '-ef',
+]);
+
+export type UnsupportedSyntaxKind =
+  | 'background'
+  | 'pipeline'
+  | 'subshell'
+  | 'coproc'
+  | 'time'
+  | 'functionRedirect'
+  | 'heredoc'
+  | 'herestring'
+  | 'redirect'
+  | 'select'
+  | 'subshellFunctionBody'
+  | 'processSubstitution'
+  | 'extglob'
+  | 'currentShellSubstitution';
+
+const UNSUPPORTED_SYNTAX_LABELS: Record<Exclude<UnsupportedSyntaxKind, 'redirect'>, string> = {
+  background: 'バックグラウンド実行（&）',
+  pipeline: 'パイプ（|）',
+  subshell: 'サブシェル（( ... )）',
+  coproc: 'coproc',
+  time: 'time',
+  functionRedirect: '関数の定義に付けたリダイレクト',
+  heredoc: 'ヒアドキュメント（<<）',
+  herestring: 'ヒアストリング（<<<）',
+  select: 'select（標準入力を読む）',
+  subshellFunctionBody: 'サブシェルを本体にした関数（f() ( ... )）',
+  processSubstitution: 'プロセス置換（<( ... )）',
+  extglob: '拡張パターン（@( ... ) など）',
+  currentShellSubstitution: '現在のシェルで実行するコマンド置換（${ ...; }）',
+};
+
+/** Formats static unsupported-syntax diagnostics from one declarative catalog for `Converter`. */
+export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind, detail = ''): string {
+  if (kind === 'redirect') return unsupportedMessage(`リダイレクト（${detail}）`);
+  return unsupportedMessage(UNSUPPORTED_SYNTAX_LABELS[kind]);
+}
 
 export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
   read: '標準入力（read）',
@@ -151,8 +215,24 @@ export function classifyCommandName(
   return { kind: 'notFound' };
 }
 
+export function rejectUnsupportedFeature(feature: string): never {
+  throw new UnsupportedFeatureError(feature);
+}
+
+export function rejectUnsupportedHostEnv(name: string): never {
+  throw new UnsupportedFeatureError(`環境変数（${name}）`);
+}
+
+/** Rejects deferred special variables (`PIPESTATUS`, `BASH_LINENO`, `BASH_SOURCE`, `BASH_SUBSHELL`) on any access. */
+export function rejectUnsupportedSpecialVariable(name: string): void {
+  if (UNSUPPORTED_SPECIAL_VARIABLES.has(name)) {
+    throw new UnsupportedFeatureError(`特殊変数（${name}）`);
+  }
+}
+
 /** Rejects special/dynamic variable mutations except plain scalar `RANDOM` seeding. */
 export function rejectSpecialVariableMutation(name: string, allowScalarRandomSeed = false): void {
+  rejectUnsupportedSpecialVariable(name);
   if (!SPECIAL_MUTATION_BLOCKED.has(name)) return;
   if (allowScalarRandomSeed && name === 'RANDOM') return;
   throw new UnsupportedFeatureError(`特殊変数（${name}）の変更`);
@@ -162,15 +242,26 @@ export function rejectSpecialVariableMutation(name: string, allowScalarRandomSee
 export function rejectUnsupportedNamerefTarget(target: string, isUnreadHostEnv: (name: string) => boolean): void {
   if (target === '') return;
   if (target.includes('[')) throw new UnsupportedFeatureError(`配列要素への名前参照（${target}）`);
+  rejectUnsupportedSpecialVariable(target);
   if (SPECIAL_MUTATION_BLOCKED.has(target)) {
     throw new UnsupportedFeatureError(`特殊変数への名前参照（${target}）`);
   }
-  if (isUnreadHostEnv(target)) {
-    throw new UnsupportedFeatureError(`環境変数（${target}）`);
-  }
+  if (isUnreadHostEnv(target)) rejectUnsupportedHostEnv(target);
 }
 
-const UNSUPPORTED_DECLARE_SET_OPTIONS = new Set(['I', 'c', 't']);
+export function rejectUnsupportedNamerefAppend(name: string): never {
+  throw new UnsupportedFeatureError(`名前参照（${name}）への追記`);
+}
+
+export function rejectUnsupportedDeclarationPrefix(builtin: string): never {
+  throw new UnsupportedFeatureError(`宣言ビルトインへの前置代入（${builtin}）`);
+}
+
+export function rejectUnsupportedDeclarationListing(builtin: string): never {
+  throw new UnsupportedFeatureError(`${builtin} の変数の一覧`);
+}
+
+const UNSUPPORTED_DECLARE_SET_OPTIONS = new Set(['I', 'c', 't', 'l', 'u']);
 
 /** Enforces the declaration option capability boundary before any operand mutates state. */
 export function rejectUnsupportedDeclarationOptions(
@@ -196,26 +287,73 @@ export function rejectUnsupportedDeclarationOptions(
   }
 }
 
-/** Rejects excluded declaration operand combinations (`-g` with subscripts/namerefs, nameref conversions, special targets). */
+export interface ExistingCellShape {
+  readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
+  readonly attributes: ReadonlySet<Attribute>;
+}
+
+export interface DeclarationOperandFlags {
+  readonly isSubscripted: boolean;
+  readonly isCompound: boolean;
+  readonly append: boolean;
+  readonly hasScalarValue: boolean;
+  readonly hasEnclosingTempBinding: boolean;
+  readonly isUnreadHostTarget: boolean;
+  readonly existing?: ExistingCellShape;
+}
+
+/** Rejects excluded declaration operands, enclosing temp-scope bindings, and shape/type-changing redeclarations. */
 export function rejectUnsupportedDeclarationOperand(
   builtin: string,
   name: string,
-  options: ReadonlySet<string>,
-  flags: { isSubscripted: boolean; isCompound: boolean; append: boolean; existingIsNameref: boolean }
+  effectiveSet: ReadonlySet<string>,
+  flags: DeclarationOperandFlags
 ): void {
   rejectSpecialVariableMutation(name, false);
-  if (options.has('n') && (flags.isSubscripted || flags.isCompound || flags.append)) {
-    throw new UnsupportedFeatureError(`${builtin} -n での配列・複合代入・追記`);
+  if (flags.isSubscripted) {
+    throw new UnsupportedFeatureError(`${builtin} での配列要素指定（${name}）`);
   }
-  if (options.has('g') && flags.isSubscripted) {
-    throw new UnsupportedFeatureError(`${builtin} -g での配列要素指定`);
+  if (effectiveSet.has('n') && (flags.isCompound || flags.append)) {
+    throw new UnsupportedFeatureError(`${builtin} -n での複合代入・追記`);
   }
-  if (flags.existingIsNameref && !options.has('n')) {
-    throw new UnsupportedFeatureError(`名前参照（${name}）への宣言・属性変更`);
+  if (flags.hasEnclosingTempBinding) {
+    throw new UnsupportedFeatureError(`前置代入された変数（${name}）の宣言`);
+  }
+  if (flags.isUnreadHostTarget && !flags.isCompound && !flags.hasScalarValue && hasShapeFlag(effectiveSet)) {
+    rejectUnsupportedHostEnv(name);
+  }
+  if (flags.existing) rejectShapeChangingRedeclaration(name, effectiveSet, flags);
+}
+
+function hasShapeFlag(set: ReadonlySet<string>): boolean {
+  return set.has('a') || set.has('A') || set.has('i') || set.has('n');
+}
+
+function rejectShapeChangingRedeclaration(
+  name: string,
+  effectiveSet: ReadonlySet<string>,
+  flags: DeclarationOperandFlags
+): void {
+  const existing = flags.existing as ExistingCellShape;
+  if (existing.attributes.has('n') !== effectiveSet.has('n')) {
+    throw new UnsupportedFeatureError(`名前参照（${name}）と通常変数の相互変換`);
+  }
+  const existingIsIndexed = existing.kind === 'indexed' || existing.attributes.has('a');
+  const existingIsAssoc = existing.kind === 'associative' || existing.attributes.has('A');
+  const wantsAssoc = effectiveSet.has('A');
+  const wantsIndexed = effectiveSet.has('a') || (flags.isCompound && !wantsAssoc && !existingIsAssoc);
+  if ((wantsIndexed && !existingIsIndexed) || (wantsAssoc && !existingIsAssoc)) {
+    throw new UnsupportedFeatureError(`既存変数（${name}）の型・配列変換`);
+  }
+  if (effectiveSet.has('i') && !existing.attributes.has('i')) {
+    throw new UnsupportedFeatureError(`既存変数（${name}）への整数属性の追加`);
+  }
+  if ((existingIsIndexed || existingIsAssoc) && flags.hasScalarValue) {
+    throw new UnsupportedFeatureError(`配列変数（${name}）へのスカラー宣言代入`);
   }
 }
 
-/** Rejects command-prefix bindings before declaration builtins or onto non-plain-scalar targets. */
+/** Rejects command-prefix bindings onto non-plain-scalar targets. */
 export function rejectUnsupportedPrefixAssignment(
   assignment: Assignment,
   existingAttributes: ReadonlySet<Attribute> | undefined,
@@ -226,14 +364,52 @@ export function rejectUnsupportedPrefixAssignment(
   }
   rejectSpecialVariableMutation(assignment.name, false);
   if (!existingAttributes && !existingIsArray) return;
-  if (
-    existingIsArray ||
-    existingAttributes?.has('n') ||
-    existingAttributes?.has('i') ||
-    existingAttributes?.has('l') ||
-    existingAttributes?.has('u') ||
-    existingAttributes?.has('c')
-  ) {
+  if (existingIsArray || existingAttributes?.has('n') || existingAttributes?.has('i')) {
     throw new UnsupportedFeatureError(`属性付き変数・配列への前置代入（${assignment.name}）`);
   }
+}
+
+export function rejectUnsupportedTestOperator(operator: string): never {
+  if (operator === '-o') throw new UnsupportedFeatureError('シェルのオプションを調べる演算子（-o）');
+  if (operator === '-t') throw new UnsupportedFeatureError('端末を調べる演算子（-t）');
+  throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
+}
+
+export function rejectUnsupportedPrintfConversion(conversion: 'n' | '('): never {
+  if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
+  throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
+}
+
+export function rejectUnsupportedSetArgs(firstArg?: string): never {
+  if (firstArg === undefined) throw new UnsupportedFeatureError('set の変数の一覧');
+  throw new UnsupportedFeatureError(`シェルのオプション（set ${firstArg}）`);
+}
+
+export function rejectUnsupportedBracketClass(): never {
+  throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+}
+
+export type UnsupportedExpansionKind = 'tilde' | 'pid' | 'bgPid' | 'initialLastArg' | 'extglob' | 'promptTransform';
+
+const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
+  tilde: '~ の展開',
+  pid: 'プロセス番号（$$）',
+  bgPid: 'バックグラウンドのプロセス番号（$!）',
+  initialLastArg: 'Bash のパス（最初の $_）',
+  extglob: '拡張パターン（@( ... ) など）',
+  promptTransform: 'プロンプトの展開（${x@P}）',
+};
+
+export function rejectUnsupportedExpansion(kind: UnsupportedExpansionKind): never {
+  throw new UnsupportedFeatureError(UNSUPPORTED_EXPANSION_LABELS[kind]);
+}
+
+export function rejectUnsupportedPathnameExpansion(word: string): never {
+  throw new UnsupportedFeatureError(
+    `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(word)} のように引用符で囲む）`
+  );
+}
+
+export function rejectUnsupportedPrefixListing(prefix: string): never {
+  throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
 }

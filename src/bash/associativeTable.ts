@@ -86,9 +86,8 @@ interface BucketEntry {
   hash: number;
 }
 
-/** Initial hash bucket count for associative arrays (1024) and scalar-to-associative conversions (128). */
+/** Initial hash bucket count for associative arrays (1024). */
 export const ASSOCIATIVE_BUCKETS = 1024;
-export const CONVERTED_BUCKETS = 128;
 
 const UTF8_ENCODER = new TextEncoder();
 

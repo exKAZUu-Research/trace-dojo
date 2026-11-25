@@ -4,8 +4,8 @@
  * Backslashes quote the following pattern character; unquoted `*`, `?`, and `[...]` act as wildcards.
  */
 
+import { rejectUnsupportedBracketClass } from './capabilities';
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { UnsupportedFeatureError } from './unsupported';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -86,7 +86,7 @@ function compileGlobInternal(
       atom.kind === 'bracket' &&
       atom.specs.some((s) => s.kind === 'unsupportedCollating')
     ) {
-      throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+      rejectUnsupportedBracketClass();
     }
     if (atom.kind === 'star') {
       hasStar = true;

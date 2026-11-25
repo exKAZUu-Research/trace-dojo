@@ -1,9 +1,12 @@
 import type { Word } from './ast';
-import { rejectSpecialVariableMutation } from './capabilities';
+import {
+  rejectSpecialVariableMutation,
+  rejectUnsupportedHostEnv,
+  rejectUnsupportedSpecialVariable,
+} from './capabilities';
 import { unquotePreExpandedAssociativeKey } from './expansion';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import type { Shell } from './shell';
-import { UnsupportedFeatureError } from './unsupported';
 import { type CellHandle, type DestinationIntent, isIdentifier, type VariableView } from './variables';
 
 export type ResolvedTarget =
@@ -109,6 +112,7 @@ export function resolveScalarTarget(
     const selected = shell.store.selectDestination('visible', resolved, undefined, append);
     return { kind: 'scalar', name: resolved, reportedName: name, cell: selected.cell, isDynamic: false };
   }
+  rejectUnsupportedSpecialVariable(resolved);
   const view = shell.store.ownView(resolved);
   return {
     kind: 'scalar',
@@ -126,17 +130,39 @@ export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOption
   const { name, subscript, operation } = opts;
   const intent = opts.intent ?? 'visible';
   const rawSubText = rawSubscriptText(subscript);
-  const forWrite = operation === 'write' || operation === 'arithmeticWrite';
-  const forMutation = forWrite || operation === 'unset';
   if (!isIdentifier(name)) {
     return invalidTarget(`${name}[${rawSubText}]`, 'invalidIdentifier', `\`${name}': not a valid identifier`);
   }
-  if (operation === 'arithmeticRead' && rawSubText === '') {
+  const emptyArith = rawSubText === '' ? emptyArithmeticSubscriptTarget(shell, name, operation) : undefined;
+  if (emptyArith) return emptyArith;
+  const resolved = intent === 'visible' ? resolveTargetName(shell, name, operation !== 'testSet') : name;
+  if (resolved === undefined) return;
+  if (!isIdentifier(resolved)) {
+    return invalidTarget(resolved, 'invalidIdentifier', `\`${resolved}': not a valid identifier`);
+  }
+  const forWrite = operation === 'write' || operation === 'arithmeticWrite';
+  if (forWrite || operation === 'unset') rejectSpecialVariableMutation(resolved, false);
+  else rejectUnsupportedSpecialVariable(resolved);
+  const isAssoc = shell.store.isAssociativeName(resolved);
+  if (!isAssoc && (rawSubText === '@' || rawSubText === '*')) {
+    return resolveWholeArraySubscript(shell, name, resolved, rawSubText, operation);
+  }
+  return isAssoc
+    ? resolveAssociativeSubscript(shell, opts, resolved, rawSubText, forWrite)
+    : resolveIndexedSubscript(shell, opts, resolved, rawSubText, forWrite);
+}
+
+function emptyArithmeticSubscriptTarget(
+  shell: Shell,
+  name: string,
+  operation: TargetOperation
+): ResolvedTarget | undefined {
+  if (operation === 'arithmeticRead') {
     shell.reportError(`${name}[]: bad array subscript`);
     shell.reportError(`${name}[]: bad array subscript`);
     return invalidTarget(`${name}[]`, 'badSubscript', '');
   }
-  if (operation === 'arithmeticWrite' && rawSubText === '') {
+  if (operation === 'arithmeticWrite') {
     return {
       kind: 'invalid',
       raw: `${name}[]`,
@@ -144,18 +170,7 @@ export function resolveSubscriptTarget(shell: Shell, opts: SubscriptTargetOption
       failure: { ok: false, reason: 'invalidIdentifier', message: `\`${name}[]': not a valid identifier` },
     };
   }
-  const resolved = intent === 'visible' ? resolveTargetName(shell, name, operation !== 'testSet') : name;
-  if (resolved === undefined) return undefined;
-  if (!isIdentifier(resolved)) {
-    return invalidTarget(resolved, 'invalidIdentifier', `\`${resolved}': not a valid identifier`);
-  }
-  if (forMutation) rejectSpecialVariableMutation(resolved, false);
-  const isAssoc = shell.store.isAssociativeName(resolved);
-  if (!isAssoc && (rawSubText === '@' || rawSubText === '*')) {
-    return resolveWholeArraySubscript(shell, name, resolved, rawSubText, operation);
-  }
-  if (isAssoc) return resolveAssociativeSubscript(shell, opts, resolved, rawSubText, forWrite);
-  return resolveIndexedSubscript(shell, opts, resolved, rawSubText, forWrite);
+  return undefined;
 }
 
 function resolveWholeArraySubscript(
@@ -181,7 +196,7 @@ function resolveWholeArraySubscript(
     );
   }
   const own = shell.store.ownView(resolved);
-  if (shell.store.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   return {
     kind: 'wholeArray',
     name: resolved,
@@ -210,7 +225,7 @@ function resolveAssociativeSubscript(
     if (opts.operation === 'arithmeticRead') shell.reportError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
-  if (shell.store.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   const own = shell.store.ownView(resolved);
   const cell =
     own?.handle ??
@@ -231,9 +246,7 @@ function resolveIndexedSubscript(
   forWrite: boolean
 ): ResolvedTarget {
   if (rawSubText === '') return emptyIndexedSubscriptTarget(shell, opts.name, resolved, opts.operation);
-  if (shell.store.isUnreadHostEnv(resolved)) {
-    throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
-  }
+  if (shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   const expanded = expandIndexedSubscript(shell, opts.subscript);
   const normalized = expanded === '' ? '0' : expanded;
   const rawIndex = shell.evaluateFatalReadonly(normalized, true);
@@ -264,9 +277,7 @@ function emptyIndexedSubscriptTarget(
   resolved: string,
   operation: TargetOperation
 ): ResolvedTarget {
-  if (operation === 'unset' && shell.store.isUnreadHostEnv(resolved)) {
-    throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
-  }
+  if (operation === 'unset' && shell.store.isUnreadHostEnv(resolved)) rejectUnsupportedHostEnv(resolved);
   const label = operation === 'unset' ? '[]' : operation === 'testSet' ? resolved : `${writtenName}[]`;
   return invalidTarget(`${writtenName}[]`, 'badSubscript', `${label}: bad array subscript`);
 }

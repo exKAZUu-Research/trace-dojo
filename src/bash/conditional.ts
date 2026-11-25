@@ -1,39 +1,14 @@
 import { ArithmeticError, ArithmeticStoreError, evaluateArithmetic } from './arithmetic';
 import type { TestExpression } from './ast';
+import { FILE_TEST_OPERATORS, rejectUnsupportedTestOperator } from './capabilities';
 import { charactersOf, legalNumber } from './characters';
 import { compareCollated } from './collation';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
 import { isResolvedTargetSet, resolveScalarTarget, resolveSubscriptTarget } from './targets';
-import { UnsupportedFeatureError } from './unsupported';
 import { isIdentifier } from './variables';
 
-/** The file tests, which read the file system this environment does not have. */
-export const FILE_TEST_OPERATORS = new Set([
-  '-a',
-  '-b',
-  '-c',
-  '-d',
-  '-e',
-  '-f',
-  '-g',
-  '-h',
-  '-k',
-  '-p',
-  '-r',
-  '-s',
-  '-u',
-  '-w',
-  '-x',
-  '-G',
-  '-L',
-  '-N',
-  '-O',
-  '-S',
-  '-nt',
-  '-ot',
-  '-ef',
-]);
+export { FILE_TEST_OPERATORS };
 
 export const ARITHMETIC_OPERATORS: Record<string, (a: bigint, b: bigint) => boolean> = {
   '-eq': (a, b) => a === b,
@@ -85,7 +60,7 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
     const right = expander.expandString(expression.right);
     if (operator === '<') return compareCollated(left, right) < 0;
     if (operator === '>') return compareCollated(left, right) > 0;
-    if (FILE_TEST_OPERATORS.has(operator)) throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
+    if (FILE_TEST_OPERATORS.has(operator)) rejectUnsupportedTestOperator(operator);
     const compare = ARITHMETIC_OPERATORS[operator];
     return compare(conditionalNumber(shell, left), conditionalNumber(shell, right));
   });
@@ -134,14 +109,8 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
       const view = shell.store.ownView(operand);
       return view?.attributes.has('n') === true && view.kind !== 'unset';
     }
-    case '-o': {
-      throw new UnsupportedFeatureError('シェルのオプションを調べる演算子（-o）');
-    }
-    case '-t': {
-      throw new UnsupportedFeatureError('端末を調べる演算子（-t）');
-    }
     default: {
-      throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
+      return rejectUnsupportedTestOperator(operator);
     }
   }
 }
