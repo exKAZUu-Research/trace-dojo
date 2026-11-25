@@ -345,11 +345,6 @@ export abstract class CallCompiler extends VectorCompiler {
       const callingConvention = syntax.isExport ? 'c' : this.callingConvention(syntax.callingConvention);
       if (syntax.alignment) alignmentOperand(this, syntax.alignment);
       if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
-      if (callingConvention) {
-        if (unknown.size > 0)
-          this.error(syntax, 'C の呼び出し規約の関数には、comptime や anytype の引数を書けません。');
-        this.checkCAbi(params, result, syntax.params, syntax);
-      }
       if (decl.syntax.inferredErrorSet && result !== ANYTYPE)
         result = errorUnionOf(
           {
@@ -360,6 +355,12 @@ export abstract class CallCompiler extends VectorCompiler {
           },
           result
         );
+      // The C calling convention checks the type the function returns, an inferred error union included.
+      if (callingConvention) {
+        if (unknown.size > 0)
+          this.error(syntax, 'C の呼び出し規約の関数には、comptime や anytype の引数を書けません。');
+        this.checkCAbi(params, result, syntax.params, syntax);
+      }
       const type = fnType(params, result, callingConvention);
       this.declarationTypes.set(decl, type);
       return type;
