@@ -339,6 +339,7 @@ const ELEMENTWISE_BUILTINS = new Set([
   '@popCount',
   '@byteSwap',
   '@bitReverse',
+  '@intFromBool',
   '@shlExact',
   '@shrExact',
 ]);
