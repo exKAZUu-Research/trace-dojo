@@ -158,6 +158,7 @@ final Stdout stderr = Stdout._(true);
 class Stdin extends Stream<List<int>> {
   /** Whether a stream has read the input to its end, as the VM's does before it closes the descriptor. */
   bool _closed = false;
+  bool _listened = false;
   Stdin._();
   bool get hasTerminal => false;
   bool get supportsAnsiEscapes => false;
@@ -181,6 +182,9 @@ class Stdin extends Stream<List<int>> {
   }
   StreamSubscription<List<int>> listen(void onData(List<int> event)?,
       {Function? onError, void onDone()?, bool? cancelOnError}) {
+    // stdin is a single-subscription stream.
+    if (_listened) throw StateError("Stream has already been listened to.");
+    _listened = true;
     return Stream<List<int>>.fromFuture(Future(() {
       final rest = _readRest();
       _closed = true;
