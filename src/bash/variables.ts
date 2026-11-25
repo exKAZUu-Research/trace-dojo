@@ -58,6 +58,7 @@ interface Cell {
   userAssigned: boolean;
   shared: boolean;
   nullReference: boolean;
+  unreadHostEnv: boolean;
 }
 
 interface ScopeEntry {
@@ -182,6 +183,7 @@ export class VariableStore {
   private rematch: string[];
   private readonly prng: RandomStream;
   lastStatus = 0;
+  private lastPipeStatus = 0;
   private hasCommandStatus = false;
   lastArgument: string | undefined;
   readonly subshellLevel: number;
@@ -198,6 +200,7 @@ export class VariableStore {
       rematch: string[];
       prng: RandomStream;
       lastStatus: number;
+      lastPipeStatus: number;
       hasCommandStatus: boolean;
       lastArgument: string | undefined;
       subshellLevel: number;
@@ -215,6 +218,7 @@ export class VariableStore {
       this.rematch = forked.rematch;
       this.prng = forked.prng;
       this.lastStatus = forked.lastStatus;
+      this.lastPipeStatus = forked.lastPipeStatus;
       this.hasCommandStatus = forked.hasCommandStatus;
       this.lastArgument = forked.lastArgument;
       this.subshellLevel = forked.subshellLevel;
@@ -271,6 +275,7 @@ export class VariableStore {
       userAssigned,
       shared: false,
       nullReference: false,
+      unreadHostEnv: false,
     };
     this.cellsById.set(cell.id, cell);
     return cell;
@@ -305,6 +310,7 @@ export class VariableStore {
           userAssigned: cell.userAssigned,
           shared: isContainer,
           nullReference: cell.nullReference,
+          unreadHostEnv: cell.unreadHostEnv,
         });
       }
       return { kind: entry.kind, map };
@@ -319,6 +325,7 @@ export class VariableStore {
       rematch: [...this.rematch],
       prng: this.prng.fork(nextLevel),
       lastStatus: this.lastStatus,
+      lastPipeStatus: this.lastPipeStatus,
       hasCommandStatus: this.hasCommandStatus,
       lastArgument: this.lastArgument,
       subshellLevel: nextLevel,
@@ -401,6 +408,7 @@ export class VariableStore {
 
   setCommandStatus(status: number): void {
     this.lastStatus = status;
+    this.lastPipeStatus = status;
     this.hasCommandStatus = true;
   }
 
@@ -431,7 +439,9 @@ export class VariableStore {
   // ---------------------------------------------------------------- lookup & single access gate
 
   isUnreadHostEnv(name: string): boolean {
-    return ENVIRONMENT_VARIABLES.has(name) && !this.unsetHostEnv.has(name) && !this.findOwnCell(name);
+    if (!ENVIRONMENT_VARIABLES.has(name) || this.unsetHostEnv.has(name)) return false;
+    const cell = this.findOwnCell(name);
+    return !cell || cell.unreadHostEnv;
   }
 
   isDynamic(name: string): boolean {
@@ -507,7 +517,7 @@ export class VariableStore {
 
   private readDynamicElements(name: string): Map<bigint, string> | undefined {
     if (name === 'PIPESTATUS') {
-      return this.hasCommandStatus ? new Map([[0n, String(this.lastStatus)]]) : undefined;
+      return this.hasCommandStatus ? new Map([[0n, String(this.lastPipeStatus)]]) : undefined;
     }
     if (name === 'BASH_REMATCH') {
       return new Map(this.rematch.map((v, i) => [BigInt(i), v]));
@@ -564,7 +574,11 @@ export class VariableStore {
       onCycle?.(res.cyclicName);
       return undefined;
     }
-    if (res.cell) return cellScalarZero(this.getCell(res.cell).value);
+    if (res.cell) {
+      const cell = this.getCell(res.cell);
+      if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
+      return cellScalarZero(cell.value);
+    }
     if (this.isDynamic(res.name)) return this.readDynamicScalar(res.name);
     this.checkPostDereferenceAccess(res.name);
     return undefined;
@@ -577,7 +591,7 @@ export class VariableStore {
 
   hasMaterializedTarget(resolvedName: string): boolean {
     const cell = this.findOwnCell(resolvedName);
-    if (cell) return cell.value !== undefined;
+    if (cell && !cell.unreadHostEnv) return cell.value !== undefined;
     this.checkPostDereferenceAccess(resolvedName);
     if (!this.isDynamic(resolvedName)) return false;
     return resolvedName !== 'FUNCNAME' || this.calls.length > 0;
@@ -609,6 +623,7 @@ export class VariableStore {
 
   readAssociativeElement(handle: CellHandle, key: string): string | undefined {
     const cell = this.getCell(handle);
+    if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
     return cell.value?.kind === 'associative' ? cell.value.table.get(key) : undefined;
   }
 
@@ -739,14 +754,16 @@ export class VariableStore {
     initialContainer: 'indexed' | 'associative' | undefined,
     checkAppendHostEnv: boolean
   ): DestinationSelection {
+    if (checkAppendHostEnv && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
     const existing = intent === 'global' ? this.scopes[0].map.get(name) : this.findOwnCell(name);
     if (existing) return { scope: intent, name, cell: this.toHandle(existing), created: false };
-    if (checkAppendHostEnv && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    const unreadHostEnv = initialContainer === undefined && this.isUnreadHostEnv(name);
     const created = this.allocateCell(
       name,
       this.createInitialContainer(initialContainer),
       containerAttributes(initialContainer, false)
     );
+    created.unreadHostEnv = unreadHostEnv;
     this.scopes[0].map.set(name, created);
     return { scope: intent, name, cell: this.toHandle(created), created: true };
   }
@@ -876,12 +893,14 @@ export class VariableStore {
         ? this.writeAssociativeElement(handle, '0', rawText, append, evalInt, label)
         : this.writeIndexedElement(handle, 0n, rawText, append, evalInt, label);
     }
+    if (append && cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
     const base = append && cell.value?.kind === 'scalar' ? cell.value.value : '';
     const prep = this.prepareConvertedString(cell, rawText, base, append, evalInt);
     if (!prep.ok) return prep;
     cell.value = { kind: 'scalar', value: prep.value };
     cell.shared = false;
     cell.nullReference = false;
+    cell.unreadHostEnv = false;
     cell.userAssigned = true;
     return { ok: true, stored: prep.value };
   }
@@ -921,12 +940,16 @@ export class VariableStore {
   ): StoreOutcome {
     const target = this.writableCellOrFailure(handle, opts.reportedName);
     if (!target.ok) return target;
+    if (opts.append && target.cell.unreadHostEnv) {
+      throw new UnsupportedFeatureError(`環境変数（${target.cell.name}）`);
+    }
     const map = getMap(target.cell);
     const base = opts.append ? (map.get(key) ?? '') : '';
     const prep = this.prepareConvertedString(target.cell, opts.rawText, base, opts.append, opts.evalInt);
     if (!prep.ok) return prep;
     if (!map.has(key)) this.runtime.allocateSlots(1);
     map.set(key, prep.value);
+    target.cell.unreadHostEnv = false;
     target.cell.userAssigned = true;
     return { ok: true, stored: prep.value };
   }
@@ -936,6 +959,7 @@ export class VariableStore {
     const target = this.writableCellOrFailure(handle, hooks.reportedName);
     if (!target.ok) return target;
     const { cell, label } = target;
+    if (hooks.append && cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
     this.detachShared(cell);
     if (cell.value?.kind === 'associative' || cell.attributes.has('A')) {
       return this.writeAssociativeCompound(cell, elements, hooks, label);
@@ -945,6 +969,7 @@ export class VariableStore {
       cell.value = { kind: 'indexed', elements: map };
       cell.attributes.add('a');
     }
+    cell.unreadHostEnv = false;
     cell.userAssigned = true;
     let next = hooks.append ? maxElementIndex(map) + 1n : 0n;
     for (const rawElement of elements) {
@@ -989,12 +1014,14 @@ export class VariableStore {
       if (failure) {
         cell.value = { kind: 'associative', table };
         cell.attributes.add('A');
+        cell.unreadHostEnv = false;
         cell.userAssigned = true;
         return failure;
       }
     }
     cell.value = { kind: 'associative', table };
     cell.attributes.add('A');
+    cell.unreadHostEnv = false;
     cell.userAssigned = true;
     return { ok: true, stored: '' };
   }
@@ -1019,6 +1046,7 @@ export class VariableStore {
     if (cell.attributes.has('r')) {
       return { ok: false, reason: 'readonly', message: `${reportedName ?? cell.name}: readonly variable` };
     }
+    if (cell.unreadHostEnv) throw new UnsupportedFeatureError(`環境変数（${cell.name}）`);
     this.detachShared(cell);
     if (cell.value?.kind !== 'associative') {
       cell.value = { kind: 'associative', table: new AssociativeTable() };

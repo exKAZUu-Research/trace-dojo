@@ -175,7 +175,7 @@ function resolveWholeArraySubscript(
     );
   }
   const own = shell.store.ownView(resolved);
-  if (!own && shell.store.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
+  if (shell.store.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   return {
     kind: 'wholeArray',
     name: resolved,
@@ -204,6 +204,7 @@ function resolveAssociativeSubscript(
     if (opts.operation === 'arithmeticRead') shell.reportError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
+  if (shell.store.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   const own = shell.store.ownView(resolved);
   const cell =
     own?.handle ??
@@ -224,7 +225,7 @@ function resolveIndexedSubscript(
   forWrite: boolean
 ): ResolvedTarget {
   if (rawSubText === '') return emptyIndexedSubscriptTarget(shell, opts.name, resolved, opts.operation);
-  if (!shell.store.ownView(resolved) && shell.store.isUnreadHostEnv(resolved)) {
+  if (shell.store.isUnreadHostEnv(resolved)) {
     throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   }
   const expanded = expandIndexedSubscript(shell, opts.subscript);
@@ -257,7 +258,7 @@ function emptyIndexedSubscriptTarget(
   resolved: string,
   operation: TargetOperation
 ): ResolvedTarget {
-  if (operation === 'unset' && !shell.store.ownView(resolved) && shell.store.isUnreadHostEnv(resolved)) {
+  if (operation === 'unset' && shell.store.isUnreadHostEnv(resolved)) {
     throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
   }
   const label = operation === 'unset' ? '[]' : operation === 'testSet' ? resolved : `${writtenName}[]`;

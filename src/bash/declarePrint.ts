@@ -26,7 +26,7 @@ export function printDeclarations(
 function declarationViewToShow(shell: Shell, builtin: string, name: string): VariableView | undefined {
   const found = shell.store.ownView(name);
   if (builtin !== 'local') {
-    if (!found && shell.store.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    if (shell.store.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
     return found ?? shell.store.dynamicView(name);
   }
   return found?.isCurrentLocal ? found : undefined;
