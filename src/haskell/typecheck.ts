@@ -65,6 +65,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   const features = module.extensions.gates('typecheck');
   checker.allowAmbiguousTypes = !options.isProgram || features.allows('ambiguousTypes');
   checker.polyKinds = features.allows('polyKinds');
+  checker.monomorphismRestriction = !options.isProgram || features.allows('monomorphismRestriction');
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);

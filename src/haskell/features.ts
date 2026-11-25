@@ -116,6 +116,7 @@ export const FEATURES = {
   promotion: { phase: 'rename', any: ['DataKinds'] },
   // Checking types.
   ambiguousTypes: { phase: 'typecheck', any: ['AllowAmbiguousTypes'] },
+  monomorphismRestriction: { phase: 'typecheck', any: ['MonomorphismRestriction'] },
   polyKinds: { phase: 'typecheck', any: ['PolyKinds'] },
   undecidableSuperClasses: { phase: 'typecheck', any: ['UndecidableSuperClasses'] },
   undecidableInstances: { phase: 'typecheck', any: ['UndecidableInstances'] },

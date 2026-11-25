@@ -160,6 +160,8 @@ export class Checker {
 
   /** Whether AllowAmbiguousTypes lets a signature have variables only its constraints mention. */
   allowAmbiguousTypes = false;
+  /** Whether a binding without arguments or a signature stays monomorphic, as the monomorphism restriction says. */
+  monomorphismRestriction = true;
   /** Whether ExtendedDefaultRules relaxes defaulting as GHCi does. */
   extendedDefaults = false;
   /** The typed holes found so far with their types, which the module reports once it is checked. */
@@ -1431,7 +1433,10 @@ export class Checker {
     deferred: EvidenceHole[],
     outer: number
   ): EvidenceHole[] {
-    const restricted = bindings.some((binding) => binding.k === 'pat' || binding.clauses[0].pats.length === 0);
+    // A pattern binding stays monomorphic even without the restriction, whose generalization this checker lacks.
+    const restricted = bindings.some(
+      (binding) => binding.k === 'pat' || (this.monomorphismRestriction && binding.clauses[0].pats.length === 0)
+    );
     const types = bindings.flatMap((binding) =>
       binding.k === 'pat' ? binding.binders.map((local) => local.type as Type) : [monoTypes.get(binding) as Type]
     );
