@@ -461,7 +461,7 @@ export class VariableStore {
     let fromNameref = false;
     for (;;) {
       const cell = this.findOwnCell(current, maxScopeIndex);
-      if (!cell?.attributes.has('n') || cell.value?.kind !== 'scalar' || cell.value.value === '') {
+      if (!cell?.attributes.has('n') || cell.value?.kind !== 'scalar') {
         return { kind: 'resolved', name: current, ...(cell ? { cell: this.toHandle(cell) } : {}), fromNameref };
       }
       if (seen.has(cell)) return { kind: 'cycle', cyclicName: cell.name };
@@ -795,6 +795,15 @@ export class VariableStore {
     return undefined;
   }
 
+  /** Removes a newly created global cell when its initial nameref target binding fails. */
+  discardCreatedGlobal(selection: DestinationSelection): void {
+    if (!selection.created || selection.scope === 'local') return;
+    const cell = this.cellsById.get(selection.cell.id);
+    if (!cell) return;
+    this.scopes[0].map.delete(cell.name);
+    this.cellsById.delete(cell.id);
+  }
+
   /** Binds a whole-variable nameref target onto `handle`, returning any store failure or cycle warning. */
   bindNameref(
     handle: CellHandle,
@@ -810,7 +819,7 @@ export class VariableStore {
     }
     if (target !== undefined) {
       rejectUnsupportedNamerefTarget(target, (n) => this.isUnreadHostEnv(n));
-      if (target !== '' && !isIdentifier(target)) {
+      if (!isIdentifier(target)) {
         return { ok: false, reason: 'invalidIdentifier', message: `\`${target}': not a valid identifier` };
       }
       if (!inFunction && target === cell.name) {
@@ -839,8 +848,7 @@ export class VariableStore {
     for (let cur: Cell | undefined = start; cur?.attributes.has('n') && cur.value?.kind === 'scalar';) {
       if (seen.has(cur)) return true;
       seen.add(cur);
-      const target: string = cur.value.value;
-      cur = target === '' ? undefined : this.findOwnCell(target);
+      cur = this.findOwnCell(cur.value.value);
     }
     return false;
   }
@@ -1131,7 +1139,6 @@ export class VariableStore {
       if (visited.has(cur.id)) return undefined;
       visited.add(cur.id);
       const ref: string = cur.value.value;
-      if (ref === '') return this.cellToView(cur);
       if (!isIdentifier(ref)) return undefined;
       cur = this.findOwnCell(ref, maxScopeIndex);
     }

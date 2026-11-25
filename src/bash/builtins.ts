@@ -115,7 +115,7 @@ function storePrintfTarget(shell: Shell, candidate: string, text: string): boole
       })
     : resolveScalarTarget(shell, candidate, true);
   if (!resolved) return false;
-  const outcome = writeResolvedTarget(shell, resolved, text, false);
+  const outcome = writeResolvedTarget(shell, resolved, text, false, 'printf');
   if (!outcome.ok) return shell.failures.handleStoreFailure('regularBuiltin', outcome, 'printf');
   return true;
 }

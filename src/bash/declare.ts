@@ -664,7 +664,10 @@ function bindPlannedNamerefOperand(
 ): boolean {
   const selected = shell.store.selectDestination(intent, name);
   const bound = shell.store.bindNameref(selected.cell, value, shell.isInFunction);
-  if (!bound.ok) return shell.failures.handleStoreFailure('declarationOperand', bound, builtin);
+  if (!bound.ok) {
+    shell.store.discardCreatedGlobal(selected);
+    return shell.failures.handleStoreFailure('declarationOperand', bound, builtin);
+  }
   if (bound.cycleWarning) shell.reportError(bound.cycleWarning);
   return true;
 }

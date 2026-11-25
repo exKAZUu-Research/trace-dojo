@@ -14,7 +14,6 @@ import {
   classifyCommandName,
   rejectUnsupportedDeclarationPrefix,
   rejectUnsupportedFeature,
-  rejectUnsupportedNamerefAppend,
   rejectUnsupportedPrefixAssignment,
 } from './capabilities';
 import { conditionalStatus } from './conditional';
@@ -366,8 +365,10 @@ export class Shell implements ArithmeticHost, RootContext {
     const outcome = writeResolvedTarget(this, target, value, false);
     if (!outcome.ok) return this.failures.handleStoreFailure('forHeader', outcome);
     if (target.kind === 'scalar') {
-      const targetHandle = target.cell ?? this.store.ownView(target.name)?.handle;
-      if (targetHandle) this.store.setNullReference(targetHandle, bindsObjects && value === '');
+      const targetView = target.cell ? this.store.viewOfHandle(target.cell) : this.store.ownView(target.name);
+      if (targetView?.handle && !targetView.attributes.has('n')) {
+        this.store.setNullReference(targetView.handle, bindsObjects && value === '');
+      }
     }
     return true;
   }
@@ -871,10 +872,6 @@ export class Shell implements ArithmeticHost, RootContext {
   }
 
   private commitScalarOrElementAssignment(assignment: Assignment, value: string, context: 'scriptAssignment'): boolean {
-    if (!assignment.subscript) {
-      const rebound = this.tryRebindEmptyNameref(assignment, value, context);
-      if (rebound !== undefined) return rebound;
-    }
     const target = assignment.subscript
       ? resolveSubscriptTarget(this, {
           name: assignment.name,
@@ -886,20 +883,6 @@ export class Shell implements ArithmeticHost, RootContext {
     if (!target) return this.failures.handleStoreFailure(context, { ok: false, reason: 'cannotAssign', message: '' });
     const outcome = writeResolvedTarget(this, target, value, assignment.append);
     return outcome.ok ? true : this.failures.handleStoreFailure(context, outcome);
-  }
-
-  private tryRebindEmptyNameref(
-    assignment: Assignment,
-    value: string,
-    context: 'scriptAssignment'
-  ): boolean | undefined {
-    const own = this.store.ownView(assignment.name);
-    if (!own?.attributes.has('n') || !own.handle || !(own.kind === 'unset' || own.scalar === '')) return undefined;
-    if (assignment.append) rejectUnsupportedNamerefAppend(assignment.name);
-    const bound = this.store.bindNameref(own.handle, value, this.isInFunction);
-    if (!bound.ok) return this.failures.handleStoreFailure(context, bound);
-    if (bound.cycleWarning) this.reportError(bound.cycleWarning);
-    return true;
   }
 
   unsetVariable(name: string, followReference = true): boolean {

@@ -2,6 +2,7 @@ import type { Word } from './ast';
 import {
   rejectSpecialVariableMutation,
   rejectUnsupportedHostEnv,
+  rejectUnsupportedNamerefAppend,
   rejectUnsupportedSpecialVariable,
 } from './capabilities';
 import { unquotePreExpandedAssociativeKey } from './expansion';
@@ -354,7 +355,9 @@ export function writeResolvedTarget(
     case 'scalar': {
       rejectSpecialVariableMutation(target.name, false);
       const cell = target.cell ?? shell.store.selectDestination('visible', target.name, undefined, append).cell;
-      return shell.store.writeScalar(cell, value, append, evalInt, target.name);
+      return shell.store.viewOfHandle(cell).attributes.has('n')
+        ? bindUnsetNameref(shell, cell, value, append, builtinPrefix)
+        : shell.store.writeScalar(cell, value, append, evalInt, target.name);
     }
     case 'associativeElement': {
       rejectSpecialVariableMutation(target.name, false);
@@ -376,6 +379,21 @@ export function writeResolvedTarget(
       return target.failure;
     }
   }
+}
+
+function bindUnsetNameref(
+  shell: Shell,
+  cell: CellHandle,
+  value: string,
+  append: boolean,
+  builtinPrefix?: string
+): StoreOutcome {
+  if (append) rejectUnsupportedNamerefAppend(shell.store.viewOfHandle(cell).name);
+  const bound = shell.store.bindNameref(cell, value, shell.isInFunction);
+  if (!bound.ok) return bound;
+  if (bound.cycleWarning)
+    shell.reportError(builtinPrefix ? `${builtinPrefix}: ${bound.cycleWarning}` : bound.cycleWarning);
+  return { ok: true, stored: value };
 }
 
 export function unsetResolvedElement(shell: Shell, target: ResolvedTarget): StoreFailure | undefined {
