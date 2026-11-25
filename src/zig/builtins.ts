@@ -70,7 +70,6 @@ import {
   type FloatType,
   type IntType,
   intType,
-  isVectorType,
   maxInt,
   minInt,
   sliceOf,
@@ -79,7 +78,6 @@ import {
   typeName,
   U8,
   USIZE,
-  vectorOf,
   VOID,
   wrapInt,
 } from './types';
@@ -710,94 +708,55 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     return this.derived(operand, type, apply);
   }
 
-  /** `@mulAdd(T, a, b, c)`: `a * b + c` rounded once, which Zig applies to each element of a vector type. */
+  /** `@mulAdd(T, a, b, c)`: `a * b + c` rounded once. */
   private mulAdd(expression: ExpressionOf<'builtinCall'>): TExpr {
     const { args } = expression;
     const type = this.compileType(args[0]);
-    const scalar = isVectorType(type) ? type.child : type;
-    if (scalar.kind !== 'float' && scalar.kind !== 'comptime_float')
+    if (type.kind !== 'float' && type.kind !== 'comptime_float')
       this.error(args[0], '@mulAdd は浮動小数点数の型にだけ使えます。');
     const [a, b, c] = args.slice(1).map((arg) => this.coerce(this.compile(arg, type), type, arg));
-    const bits = scalar.kind === 'float' ? scalar.bits : 128;
+    const bits = type.kind === 'float' ? type.bits : 128;
     return this.combine(
       [a, b, c],
       type,
-      ([x, y, z], frame) => {
-        const fused = (p: Value, q: Value, r: Value): Value =>
-          fusedMultiplyAdd(
-            asBigFloat(p as AnyFloat),
-            asBigFloat(q as AnyFloat),
-            asBigFloat(r as AnyFloat),
-            bits,
-            (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
-          );
-        if (!isVectorType(type)) return fused(x, y, z);
-        const [ys, zs] = [y, z].map((operand) => (operand as ZArray).values());
-        return newArray(
-          (x as ZArray).values().map((element, index) => fused(element, ys[index], zs[index])),
-          undefined
-        );
-      },
+      ([x, y, z], frame) =>
+        fusedMultiplyAdd(
+          asBigFloat(x as AnyFloat),
+          asBigFloat(y as AnyFloat),
+          asBigFloat(z as AnyFloat),
+          bits,
+          (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost))
+        ),
       expression
     );
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Keeps checked overflow arithmetic and phase-specific work accounting together.
-  // code-gauge-allow functionNcss -- Keeps the scalar and vector forms of the overflow builtins together.
-  /** `@addWithOverflow` and the like, which Zig applies to each element of a vector, with a vector of overflow bits. */
   private overflowBuiltin(name: string, expression: ExpressionOf<'builtinCall'>): TExpr {
     const [leftSyntax, rightSyntax] = expression.args;
     let left = this.compile(leftSyntax);
-    // Zig gives a vector operation's operand no result type, so `@addWithOverflow(v, @splat(1))` has none for the @splat.
-    let right = this.compile(rightSyntax, isVectorType(left.type) ? undefined : left.type);
+    let right = this.compile(rightSyntax, left.type);
     if (left.type.kind === 'comptime_int' && right.type.kind === 'int') left = this.compile(leftSyntax, right.type);
     const type = name === '@shlWithOverflow' ? left.type : this.peerType([left, right], expression);
-    const vector = isVectorType(type) ? type : undefined;
-    const scalar = vector ? vector.child : type;
-    if (scalar.kind !== 'int')
+    if (type.kind !== 'int')
       return this.error(expression, `${name} は整数の型にだけ使えます（${typeName(type)} 型です）。`);
-    const amountType = log2IntType(scalar);
     left = this.coerce(left, type, leftSyntax);
-    right = this.coerce(
-      right,
-      name !== '@shlWithOverflow' ? type : vector ? vectorOf(vector.length, amountType) : amountType,
-      rightSyntax
-    );
+    right = this.coerce(right, name === '@shlWithOverflow' ? log2IntType(type) : type, rightSyntax);
+    if (name === '@shlWithOverflow') this.checkKnownShift(right, type, rightSyntax);
     const bit = intType(false, 1);
     const tuple = this.tupleType([
       { name: '0', type, hasDefault: false },
-      { name: '1', type: vector ? vectorOf(vector.length, bit) : bit, hasDefault: false },
+      { name: '1', type: bit, hasDefault: false },
     ]);
     const work = integerOperationWork(name);
-    const compute = (x: bigint, y: bigint, frame?: Frame): [bigint, bigint] => {
+    const compute = (x: bigint, y: bigint, frame?: Frame): Value => {
       if (name === '@shlWithOverflow') {
-        checkShiftAmount(y, scalar);
+        checkShiftAmount(y, type);
         spendIntegerShift(x, y, true, (cost) => (frame ? frame.runtime.spend(cost) : this.spendCompilation(cost)));
       } else this.integerWork(x, y, work, frame);
-      return wrappedWithOverflowBit(name, x, y, scalar);
+      return new ZStruct(wrappedWithOverflowBit(name, x, y, type));
     };
-    const amounts = staticResultOf(right)?.value;
-    if (name === '@shlWithOverflow' && amounts !== undefined)
-      for (const amount of vector ? ((amounts as ZArray).values() as bigint[]) : [amounts as bigint])
-        this.checkKnownShift(known(amountType, amount, rightSyntax), scalar, rightSyntax);
-    return this.combine(
-      [left, right],
-      tuple,
-      ([a, b], frame) => {
-        if (!vector) return new ZStruct(compute(a as bigint, b as bigint, frame));
-        const ys = (b as ZArray).values() as bigint[];
-        const results = ((a as ZArray).values() as bigint[]).map((x, index) => compute(x, ys[index], frame));
-        return new ZStruct(
-          [0, 1].map((part) =>
-            newArray(
-              results.map((result) => result[part]),
-              undefined
-            )
-          )
-        );
-      },
-      expression
-    );
+    return this.combine([left, right], tuple, ([a, b], frame) => compute(a as bigint, b as bigint, frame), expression);
   }
 
   private exactShift(name: string, expression: ExpressionOf<'builtinCall'>, resultType: Type | undefined): TExpr {

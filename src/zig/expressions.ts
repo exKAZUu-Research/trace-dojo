@@ -1,4 +1,4 @@
-import { alignmentOperand, checkFieldOperand, checkSliceOperand } from './admissibility';
+import { alignmentOperand } from './admissibility';
 import { valueSlots } from './allocation';
 import {
   checked,
@@ -81,7 +81,6 @@ import {
   indexableChild,
   type IntType,
   intType,
-  isVectorType,
   maxInt,
   minInt,
   NULL_TYPE,
@@ -101,7 +100,6 @@ import {
   U8,
   UNDEFINED_TYPE,
   USIZE,
-  vectorOf,
   wrapInt,
 } from './types';
 import { unavailableMessage } from './unavailable';
@@ -160,8 +158,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected abstract compileTry(expression: ExpressionOf<'try'>, resultType: Type | undefined): TExpr;
   protected abstract compileCatch(expression: ExpressionOf<'catch'>, resultType: Type | undefined): TExpr;
   protected abstract localSlot(): number;
-  /** An operator on vectors, which applies it to each element. */
-  protected abstract vectorOperation(expression: ExpressionOf<'binary' | 'unary'>, operands: TExpr[]): TExpr;
 
   compile(expression: Expression, resultType?: Type): TExpr {
     this.compilationBudget.spend();
@@ -476,7 +472,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     let base = object;
     let type = object.type;
-    checkFieldOperand(this, type, expression);
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);
@@ -1007,19 +1002,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const staticSource =
       type.kind === 'array' ? object.place?.compileTimePointer : object.known ? object.value : undefined;
     const addressType = pointerTo(child, isConst);
-    // A vector's elements have no addresses: a runtime index reads only a vector known at compile time, and never
-    // picks an element to point to.
-    const vectorElement = isVectorType(type) || (type.kind === 'pointer' && isVectorType(type.child));
-    const refuseRuntimeIndex = (): never =>
-      this.error(expression, 'ベクトルの要素の添字は、コンパイルのときに決まっていなければなりません。');
-    if (vectorElement && !staticResultOf(index) && !staticResultOf(object)) refuseRuntimeIndex();
     const place: Place = {
       isConst,
       inComptimeVar: object.place?.inComptimeVar,
       address: () => ({
-        ...(vectorElement && !staticResultOf(index)
-          ? refuseRuntimeIndex()
-          : runtime(addressType, locatePointer, expression)),
+        ...runtime(addressType, locatePointer, expression),
         staticResult: this.constantResult(
           [type.kind === 'array' ? base.operand : object, index],
           ([value, position]) => projectElement(value, position as bigint),
@@ -1100,7 +1087,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     let type = operand.type;
     const start = this.coerce(this.compile(expression.start, USIZE), USIZE, expression.start);
     const end = expression.end ? this.coerce(this.compile(expression.end, USIZE), USIZE, expression.end) : undefined;
-    checkSliceOperand(this, type, expression);
     this.refuseComptimeVarPointer(operand, expression);
     // Slicing an array slices it where it lives, as through a pointer to it.
     let base = operand;
@@ -1288,7 +1274,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   private unary(expression: ExpressionOf<'unary'>, resultType: Type | undefined): TExpr {
     if (expression.operator === '&') return this.addressOperand(expression, resultType);
     const operand = this.compile(expression.operand, expression.operator === '!' ? BOOL : resultType);
-    if (isVectorType(operand.type)) return this.vectorOperation(expression, [operand]);
     const type = operand.type;
     switch (expression.operator) {
       case '!': {
@@ -1499,10 +1484,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private comparison(expression: ExpressionOf<'binary'>): TExpr {
     const { operator } = expression;
     let left = this.compile(expression.left);
-    // Zig gives a vector comparison's operand no result type, so `v < @splat(3)` has no type for the @splat.
-    const rightType = left.type.kind === 'null' || isVectorType(left.type) ? undefined : unionTag(left.type);
-    let right = this.compile(expression.right, rightType);
-    if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
+    let right = this.compile(expression.right, left.type.kind === 'null' ? undefined : unionTag(left.type));
     if (left.type.kind === 'enum_literal' && right.type.kind !== 'enum_literal')
       left = this.compile(expression.left, unionTag(right.type));
     // A tagged union compares with an enum value by its active tag.
@@ -1626,9 +1608,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let left = this.compile(expression.left);
     if (left.type.kind === 'pointer' && POINTER_OPERATIONS[pointerShapeOf(left.type)].unbounded)
       return this.pointerArithmetic(left, expression);
-    // Zig gives an arithmetic operand no result type, so `v * @splat(2)` has no type for the @splat.
     let right = this.compile(expression.right);
-    if (isVectorType(left.type) || isVectorType(right.type)) return this.vectorOperation(expression, [left, right]);
     const bitwise = operator === '&' || operator === '|' || operator === '^';
     if (bitwise && (left.type.kind === 'bool' || right.type.kind === 'bool')) {
       this.error(expression, `bool の値には ${operator} ではなく and・or を使います。`);
@@ -1808,12 +1788,6 @@ export abstract class ExpressionCompiler extends SemaBase {
   // code-gauge-allow functionCognitiveComplexity -- Keeps unbounded and fixed-width shift contracts together.
   private shift(expression: ExpressionOf<'binary'>, resultType: Type | undefined): TExpr {
     const left = this.compile(expression.left, resultType);
-    if (isVectorType(left.type)) {
-      // A shift amount takes its type from the shifted vector: a vector of the elements' log2 integers.
-      const child = left.type.child;
-      const amount = child.kind === 'int' ? vectorOf(left.type.length, log2IntType(child)) : undefined;
-      return this.vectorOperation(expression, [left, this.compile(expression.right, amount)]);
-    }
     const type = left.type;
     if (type.kind !== 'int' && type.kind !== 'comptime_int') {
       return this.error(expression, `シフトは整数の型にだけ使えます（${typeName(type)} 型です）。`);
@@ -2008,10 +1982,6 @@ export abstract class ExpressionCompiler extends SemaBase {
     read: (value: Value) => Value[];
   } {
     const type = operand.type;
-    // `++` takes no vector, which Zig does not count as indexable.
-    const target = type.kind === 'pointer' ? type.child : type;
-    if (target.kind === 'array' && target.isVector === true)
-      return this.error(span, `${typeName(type)} 型は ++ でつなげられません。`);
     if (type.kind === 'array') {
       return {
         child: type.child,

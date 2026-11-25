@@ -54,7 +54,6 @@ import {
   type IntType,
   intType,
   isComptimeOnly,
-  isVectorType,
   type Namespace,
   NULL_TYPE,
   optionalOf,
@@ -1299,9 +1298,6 @@ export abstract class SemaBase implements SemaApi {
 
   private coerceToArray(expression: TExpr, to: Extract<Type, { kind: 'array' }>, span: Span): TExpr | undefined {
     const from = expression.type;
-    const vectors = isVectorType(from) || isVectorType(to);
-    if (from.kind === 'array' && vectors && from.length === to.length && from.child !== to.child)
-      return this.coerceVectorElements(expression, from.child, to, span);
     if (from.kind === 'array') {
       if (from.length !== to.length || !inMemoryCoercible(from.child, to.child)) return undefined;
       if (to.sentinel !== undefined && !sameSentinel(from.sentinel, to.sentinel)) return undefined;
@@ -1318,45 +1314,6 @@ export abstract class SemaBase implements SemaApi {
       return this.aggregate(to, elements, span, (values) => newArray(values, to.sentinel));
     }
     return undefined;
-  }
-
-  /** A vector coerced to or from an array or a vector of other elements, which Zig coerces each element of as a scalar. */
-  private coerceVectorElements(expression: TExpr, from: Type, to: ArrayType, span: Span): TExpr | undefined {
-    if (expression.known) {
-      const elements = (expression.value as ZArray)
-        .values()
-        .map((value) => this.tryCoerce(known(from, value, span), to.child, span));
-      if (elements.some((element) => element === undefined)) return undefined;
-      return known(
-        to,
-        newArray(
-          elements.map((element) => (element as TExpr).value),
-          to.sentinel
-        ),
-        span
-      );
-    }
-    let current: Value;
-    const element = this.tryCoerce(
-      runtime(from, () => current, span),
-      to.child,
-      span
-    );
-    if (!element) return undefined;
-    const evaluate = expression.eval;
-    const convert = element.eval;
-    return runtime(
-      to,
-      (frame) =>
-        newArray(
-          (evaluate(frame) as ZArray).values().map((value) => {
-            current = value;
-            return convert(frame);
-          }),
-          to.sentinel
-        ),
-      span
-    );
   }
 
   private coerceToStruct(expression: TExpr, to: StructType, span: Span): TExpr | undefined {
@@ -1584,12 +1541,6 @@ export abstract class SemaBase implements SemaApi {
       return child ? optionalOf(child) : undefined;
     }
     if (a.kind === 'error_set' && b.kind === 'error_set') return mergeErrorSets(a, b);
-    // Vectors of one length resolve to the one whose elements the other's widen to, without the known values that
-    // let scalars of other signedness meet.
-    if (isVectorType(a) && isVectorType(b) && a.length === b.length) {
-      if (widensTo(a.child, b.child)) return b;
-      return widensTo(b.child, a.child) ? a : undefined;
-    }
     if (a.kind === 'error_union' || b.kind === 'error_union' || a.kind === 'error_set' || b.kind === 'error_set') {
       const setA = a.kind === 'error_union' ? a.errorSet : a.kind === 'error_set' ? a : undefined;
       const setB = b.kind === 'error_union' ? b.errorSet : b.kind === 'error_set' ? b : undefined;
@@ -1705,10 +1656,8 @@ export function inMemoryCoercible(from: Type, to: Type): boolean {
     return errorSetIncludes(to.errorSet, from.errorSet) && inMemoryCoercible(from.payload, to.payload);
   }
   if (from.kind === 'array' && to.kind === 'array') {
-    // A vector's elements lie as an array's do, but Zig keeps the two types apart in memory.
     return (
       from.length === to.length &&
-      isVectorType(from) === isVectorType(to) &&
       inMemoryCoercible(from.child, to.child) &&
       (to.sentinel === undefined || sameSentinel(from.sentinel, to.sentinel))
     );
@@ -1753,13 +1702,6 @@ export function errorSetIncludes(set: ErrorSetType, subset: ErrorSetType): boole
   if (set.names === undefined) return true;
   if (subset.names === undefined) return false;
   return [...subset.names].every((name) => set.names?.has(name));
-}
-
-/** Whether every value of a number type is one of another, which a runtime value then coerces to. */
-function widensTo(from: Type, to: Type): boolean {
-  if (from.kind === 'int' && to.kind === 'int')
-    return from.signed === to.signed ? to.bits >= from.bits : !from.signed && to.bits > from.bits;
-  return from.kind === 'float' && to.kind === 'float' && to.bits >= from.bits;
 }
 
 export function mergeErrorSets(a: ErrorSetType, b: ErrorSetType): ErrorSetType {
@@ -2139,8 +2081,7 @@ function pointerCoercionOf(from: PointerType, to: PointerType): PointerCoercion 
 
 /** The shape of a pointer type that Zig's pointer rules tell apart, a pointer to an array taken whole if asked. */
 export function pointerShapeOf(type: PointerType, wholeArray = false): PointerShape {
-  // A pointer to a vector is a single-item pointer: Zig coerces it to no slice or many-item pointer.
-  if (type.size === 'one' && type.child.kind === 'array' && !isVectorType(type.child) && !wholeArray) return 'array';
+  if (type.size === 'one' && type.child.kind === 'array' && !wholeArray) return 'array';
   if (type.size === 'slice' && type.sentinel !== undefined) return 'sentinelSlice';
   return type.size;
 }

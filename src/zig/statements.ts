@@ -1,4 +1,4 @@
-import { alignmentOperand, checkFieldOperand } from './admissibility';
+import { alignmentOperand } from './admissibility';
 import { valueSlots } from './allocation';
 // code-gauge-allow-file duplicateLines -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
@@ -2176,8 +2176,6 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   private forOperand(compiled: TExpr, capture: Capture | undefined, span: Span): ForOperand {
-    // `for` reads its operand's length, which a vector does not have.
-    checkFieldOperand(this, compiled.type, span);
     const byPointer = capture?.byPointer ?? false;
     const readsElement = capture !== undefined && !isDiscardName(capture) && !byPointer;
     const type = compiled.type;

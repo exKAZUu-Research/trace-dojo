@@ -55,8 +55,6 @@ export interface ArrayType {
   readonly length: bigint;
   readonly child: Type;
   readonly sentinel?: Sentinel;
-  /** Whether the type is `@Vector(n, T)`, whose operators work on each element, rather than `[n]T`. */
-  readonly isVector?: boolean;
 }
 
 export interface PointerType {
@@ -397,20 +395,6 @@ export function arrayOf(length: number | bigint, child: Type, sentinel?: Value |
   }));
 }
 
-/** `@Vector(length, child)`, which holds its elements as an array does. */
-export function vectorOf(length: number | bigint, child: Type): ArrayType {
-  return intern(`vector ${length} ${typeId(child)}`, () => ({
-    kind: 'array',
-    length: BigInt(length),
-    child,
-    isVector: true,
-  }));
-}
-
-export function isVectorType(type: Type): type is ArrayType {
-  return type.kind === 'array' && type.isVector === true;
-}
-
 export function pointerTo(child: Type, isConst: boolean): PointerType {
   return pointerOf('one', child, { isConst });
 }
@@ -636,7 +620,6 @@ export function typeName(type: Type): string {
       return `f${type.bits}`;
     }
     case 'array': {
-      if (type.isVector) return `@Vector(${type.length}, ${typeName(type.child)})`;
       const sentinel = type.sentinel === undefined ? '' : `:${constantText(type.sentinel.value, type.child, typeName)}`;
       return `[${type.length}${sentinel}]${typeName(type.child)}`;
     }

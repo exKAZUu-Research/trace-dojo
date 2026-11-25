@@ -273,9 +273,6 @@ export interface TypeInfo {
   unionFields(type: UnionType): { name: string; type: Type }[];
 }
 
-/** The specifiers that Zig's `printValue` applies to each element of a vector. */
-const VECTOR_SPECIFIERS = new Set(['d', 'b', 'o', 'x', 'X']);
-
 /** Reports the compile errors `printValue` gives for a specifier and a type, as Zig does before running. */
 export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions: boolean, depth = MAX_DEPTH): void {
   const invalid = (): never => {
@@ -283,12 +280,6 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
   };
   const kind = type.kind;
   if (kind === 'enum') info.enumFields(type);
-  if (type.kind === 'array' && type.isVector && spec !== 'any' && spec !== '') {
-    // Zig prints a vector element by element only for the number specifiers.
-    if (!VECTOR_SPECIFIERS.has(spec)) invalid();
-    checkFormat(spec, type.child, info, hasOptions, depth);
-    return;
-  }
   const special = SPECIAL_SPECIFIERS.get(spec);
   if (special) {
     if (!special.accepts(type)) invalid();
@@ -419,9 +410,7 @@ export function checkFormat(spec: string, type: Type, info: TypeInfo, hasOptions
       return;
     }
     case 'array': {
-      // A vector formats its elements with the specifier, as `{ 1, 2 }`.
-      if (!isAny && !type.isVector)
-        throw new FormatError('cannot format array without a specifier (i.e. {s} or {any})');
+      if (!isAny) throw new FormatError('cannot format array without a specifier (i.e. {s} or {any})');
       if (depth > 0) checkFormat(spec, type.child, info, hasOptions, depth - 1);
       return;
     }
@@ -511,8 +500,6 @@ export function printValue(
         if (kind === 'enum') return printInt(out, value as bigint, type.tagType as Type, base, upper, options);
         if (kind === 'float' || kind === 'comptime_float')
           return printFloatHex(out, value as AnyFloat, floatBits(type), upper, options);
-        // A vector prints each element in the base, as an aggregate does below.
-        if (kind === 'array' && type.isVector) break;
         // A byte string in hexadecimal, which Zig asserts has no width or precision.
         forbidOptions(options);
         const bytes = stringBytes(value, type);

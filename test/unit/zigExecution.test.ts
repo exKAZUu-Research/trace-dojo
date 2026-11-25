@@ -10098,24 +10098,6 @@ pub fn main(init: std.process.Init) !void {
   });
 });
 
-test('vectors apply operators and builtins to each element', () => {
-  const program = `const std = @import("std");
-pub fn main() void {
-    const V = @Vector(4, i32);
-    const a: V = .{ 1, 2, 3, 4 };
-    var b: V = @splat(10);
-    b[2] = 7;
-    const gt = a > @as(V, @splat(2));
-    std.debug.print("{any} {} {any}\\n", .{ a * b, @reduce(.Add, a + b), @select(i32, gt, a, b) });
-    var c: @Vector(2, u8) = .{ 200, 100 };
-    c += @splat(100);
-}`;
-  expect(executeProgram('zig', program)).toMatchObject({
-    stderr: '{ 10, 20, 21, 40 } 47 { 10, 10, 3, 4 }\n',
-    uncaughtException: 'panic: integer overflow',
-  });
-});
-
 test('std.testing checks values outside tests and reports a failure as Zig does', () => {
   const program = `const std = @import("std");
 const P = struct { x: i32, y: ?u8 };
@@ -10260,9 +10242,6 @@ const T13 = packed union(u8) { a: u8, b: i8 };`;
     ['f128', '111'],
     ['bool', '111'],
     ['void', '011'],
-    ['@Vector(4, f32)', '101'],
-    ['@Vector(3, u8)', '101'],
-    ['@Vector(2, bool)', '101'],
     ['[2]u8', '010'],
     ['?*u8', '111'],
     ['*u8', '111'],

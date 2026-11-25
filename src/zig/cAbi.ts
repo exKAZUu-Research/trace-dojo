@@ -17,9 +17,6 @@ export function cAbiType(type: Type, isReturn: boolean): boolean {
     case 'void': {
       return isReturn;
     }
-    case 'array': {
-      return type.isVector === true;
-    }
     case 'pointer': {
       return cPointer(type);
     }
@@ -53,7 +50,7 @@ function cInteger(bits: number, signed: boolean): boolean {
 /** Whether an extern struct or union may hold a field of the type, as Zig 0.17 allows. */
 export function externFieldType(type: Type): boolean {
   if (type.kind === 'void') return true;
-  if (type.kind === 'array') return !type.isVector && externFieldType(type.child);
+  if (type.kind === 'array') return externFieldType(type.child);
   return cAbiType(type, false);
 }
 

@@ -191,7 +191,6 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
       return type.size === 'slice' ? { size: 16, align: 8 } : { size: 8, align: 8 };
     }
     case 'array': {
-      if (type.isVector) return vectorLayout(type, query);
       const child = query.layout(type.child);
       return {
         size: child.size * Number(type.length + (type.sentinel === undefined ? 0n : 1n)),
@@ -254,14 +253,6 @@ function computeLayout(type: Type, query: LayoutQuery): Layout {
       return { size: 0, align: 1 };
     }
   }
-}
-
-/** A vector packs its elements' bits into the next power of two bytes, aligned as LLVM's vectors are. */
-function vectorLayout(type: Extract<Type, { kind: 'array' }>, query: LayoutQuery): Layout {
-  const bytes = Math.ceil((query.bits(type.child) * Number(type.length)) / 8);
-  let size = 1;
-  while (size < bytes) size *= 2;
-  return { size: bytes === 0 ? 0 : size, align: Math.min(size, 16) };
 }
 
 function unionLayout(type: UnionType, query: LayoutQuery): Layout {

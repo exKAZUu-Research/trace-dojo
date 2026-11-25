@@ -5,6 +5,7 @@ import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } 
 import { constantKey, unwrapResult } from './expressions';
 import { FunctionInstance } from './functions';
 import { callableNative } from './nativeAdapter';
+import { ReflectionCompiler } from './reflection';
 import { type Frame, Jump } from './runtime';
 import {
   addDecls,
@@ -38,7 +39,6 @@ import {
   VOID,
 } from './types';
 import { FnValue, Pointer, type Value } from './values';
-import { VectorCompiler } from './vectors';
 
 /** The value of `std.lang.CallModifier.compile_time`, the seventh of its fields. */
 const COMPILE_TIME_MODIFIER = 6n;
@@ -55,7 +55,7 @@ export interface FunctionCompilation {
   isMethod: boolean;
 }
 
-export abstract class CallCompiler extends VectorCompiler {
+export abstract class CallCompiler extends ReflectionCompiler {
   private readonly instances = new Map<string, FunctionInstance>();
   private readonly parameterScopes = new Map<string, Scope>();
   private readonly instanceIds = new WeakMap<object, number>();

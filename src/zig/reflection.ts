@@ -608,7 +608,6 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         return variant('error_set', { error_names: type.names ? this.names([...type.names]) : NULL });
       }
       case 'array': {
-        if (type.isVector) return variant('vector', { len: type.length, child: type.child });
         return variant('array', {
           len: type.length,
           child: type.child,
