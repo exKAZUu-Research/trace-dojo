@@ -745,8 +745,8 @@ export abstract class ExpressionCompiler extends SemaBase {
   private loadedComptimeElements(object: TExpr, span: Span): TExpr {
     const type = object.type;
     const value = staticResultOf(object)?.value;
-    if (this.context.comptimeDepth > 0 || type.kind !== 'pointer' || !this.pointsIntoComptimeVar(object)) return object;
-    if (!(value instanceof Pointer || value instanceof Slice)) return object;
+    if (this.context.comptimeDepth > 0 || type.kind !== 'pointer') return object;
+    if (!(value instanceof Pointer || value instanceof Slice) || !this.comptimeVariableOwning(value)) return object;
     if (type.size === 'one') return type.child.kind === 'array' ? this.dereferenced(object, span, false) : object;
     const copy = { slots: value.target.slots.map((slot) => copyForStorage(slot)) };
     const snapshot =
@@ -785,11 +785,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
     // Outside code the compiler runs, a load through a pointer into a comptime var reads the value it holds here.
-    if (
-      this.context.comptimeDepth === 0 &&
-      fact?.value instanceof Pointer &&
-      this.comptimeVariableHolding(fact.value.target)
-    )
+    if (this.context.comptimeDepth === 0 && fact?.value instanceof Pointer && this.comptimeVariableOwning(fact.value))
       return { ...known(type.child, copyForStorage(fact.value.load()), span), place: { ...place, snapshot: true } };
     const result =
       type.isConst && isConstantData(fact?.value)
@@ -979,7 +975,13 @@ export abstract class ExpressionCompiler extends SemaBase {
   protected index(expression: ExpressionOf<'index'>, load = true): TExpr {
     const location = this.compileLocation(expression.object);
     const index = this.coerce(this.compile(expression.index, USIZE), USIZE, expression.index);
-    if (this.context.comptimeDepth === 0 && !staticResultOf(index) && this.pointsIntoComptimeVar(location))
+    const locationValue = staticResultOf(location)?.value;
+    if (
+      this.context.comptimeDepth === 0 &&
+      !staticResultOf(index) &&
+      locationValue !== undefined &&
+      this.comptimeVariableOwning(locationValue)
+    )
       this.error(expression, 'comptime var を指すポインタは、実行時の値にできません。');
     const object = this.loadedComptimeElements(location, expression);
     const type = object.type;

@@ -529,7 +529,7 @@ export abstract class StatementCompiler extends CallCompiler {
         if (binding?.kind !== 'local') return undefined;
         if (binding.comptimeCell) return binding;
         // A pointer to a comptime var, or into one, reaches the variable, also from a field of a value holding it.
-        return binding.known ? this.comptimeVariableReferencedBy(binding.value) : undefined;
+        return binding.known ? this.comptimeVariableOwning(binding.value) : undefined;
       }
       case 'field':
       case 'index':

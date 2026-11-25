@@ -440,26 +440,22 @@ export abstract class SemaBase implements SemaApi {
     return undefined;
   }
 
-  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
-  protected comptimeVariableHolding(target: Slots): LocalBinding | undefined {
-    // A pointer to a part of an array, as `arr[1..3]` gives, points to a holder of a view of the array.
-    const [held] = target.slots;
-    const view = target.slots.length === 1 && held instanceof ZArray ? held : undefined;
-    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
-      for (const binding of scope.locals?.values() ?? []) {
-        this.spendCompilation();
-        const cell = binding.comptimeCell;
-        if (cell && (holdsStorage(cell, target) || (view && holdsStorage(cell, view)))) return binding;
+  /**
+   * The `comptime var` that a value refers into: through a pointer or slice into the variable's storage, at any depth
+   * of an optional or an aggregate holding one. Every way the compiler reaches a comptime var from a value resolves
+   * through it.
+   */
+  protected comptimeVariableOwning(value: Value): LocalBinding | undefined {
+    this.spendCompilation();
+    if (value instanceof Pointer || value instanceof Slice) return this.comptimeVariableHolding(value.target);
+    if (value instanceof Some) return this.comptimeVariableOwning(value.value);
+    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) {
+      for (const slot of value.slots) {
+        const variable = this.comptimeVariableOwning(slot);
+        if (variable) return variable;
       }
+    }
     return undefined;
-  }
-
-  /** Whether an expression's value is a pointer or a slice into a `comptime var`. */
-  protected pointsIntoComptimeVar(expression: TExpr): boolean {
-    const value = staticResultOf(expression)?.value;
-    return (
-      (value instanceof Pointer || value instanceof Slice) && this.comptimeVariableHolding(value.target) !== undefined
-    );
   }
 
   /**
@@ -469,25 +465,21 @@ export abstract class SemaBase implements SemaApi {
   rejectComptimeVarReference(value: TExpr, span: Span): void {
     if (this.context.comptimeDepth > 0) return;
     const fact = staticResultOf(value);
-    if (fact && this.referencesComptimeVar(fact.value))
+    if (fact && this.comptimeVariableOwning(fact.value))
       this.error(span, 'comptime var を指すポインタは、実行時の値にできません。');
   }
 
-  private referencesComptimeVar(value: Value): boolean {
-    return this.comptimeVariableReferencedBy(value) !== undefined;
-  }
-
-  /** The `comptime var` that a pointer or slice in a value, at any depth, points into. */
-  protected comptimeVariableReferencedBy(value: Value): LocalBinding | undefined {
-    this.spendCompilation();
-    if (value instanceof Pointer || value instanceof Slice) return this.comptimeVariableHolding(value.target);
-    if (value instanceof Some) return this.comptimeVariableReferencedBy(value.value);
-    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) {
-      for (const slot of value.slots) {
-        const variable = this.comptimeVariableReferencedBy(slot);
-        if (variable) return variable;
+  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
+  private comptimeVariableHolding(target: Slots): LocalBinding | undefined {
+    // A pointer to a part of an array, as `arr[1..3]` gives, points to a holder of a view of the array.
+    const [held] = target.slots;
+    const view = target.slots.length === 1 && held instanceof ZArray ? held : undefined;
+    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
+      for (const binding of scope.locals?.values() ?? []) {
+        this.spendCompilation();
+        const cell = binding.comptimeCell;
+        if (cell && (holdsStorage(cell, target) || (view && holdsStorage(cell, view)))) return binding;
       }
-    }
     return undefined;
   }
 
