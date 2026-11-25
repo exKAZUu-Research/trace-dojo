@@ -46,7 +46,7 @@ export function defineNodeBuiltins(builder: RealmBuilder): void {
 function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
   builder.method(fs, 'readFileSync', 2, ({ runtime, args }) => {
     // Node.js reads into a Buffer without an encoding, which a TypeScript program sees as unavailable.
-    if (runtime.unavailableMember && args[1] === undefined)
+    if (runtime.unavailableMember && !namesEncoding(runtime, args[1]))
       rejectUnavailableMember('エンコーディングを指定しない readFileSync（Buffer）', runtime.currentRow);
     // File descriptor 0 is standard input.
     if (args[0] === 0) return runtime.io.openReader('/dev/stdin').readRest();
@@ -98,6 +98,14 @@ function defineFileSystem(builder: RealmBuilder, fs: JsObject): void {
     withErrors(runtime, 'rename', from, () => runtime.io.files.rename(from, to), to);
     return;
   });
+}
+
+/** Whether `readFileSync`'s options name an encoding, as a string or an object's `encoding`, so it reads a string. */
+function namesEncoding(runtime: Runtime, options: Value): boolean {
+  if (typeof options === 'string') return true;
+  if (!isObject(options)) return false;
+  const encoding = runtime.get(options, 'encoding');
+  return encoding !== undefined && encoding !== null;
 }
 
 /** The shortest prefix of a path, as the program spelled it, that names a directory given by its absolute path. */

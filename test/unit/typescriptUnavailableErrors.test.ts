@@ -186,6 +186,14 @@ test.each([
   ["const { readFile } = require('fs');", 'fs.readFile は、この採点環境では使えません。'],
   ["import { readFile } from 'fs';", 'fs.readFile は、この採点環境では使えません。'],
   ['const { cwd } = process;', 'process.cwd は、この採点環境では使えません。'],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', null);",
+    'エンコーディングを指定しない readFileSync（Buffer）は、この採点環境では使えません。',
+  ],
+  [
+    "const fs = require('fs'); fs.readFileSync('x', { flag: 'r' });",
+    'エンコーディングを指定しない readFileSync（Buffer）は、この採点環境では使えません。',
+  ],
   ["import * as fs from 'fs'; fs.readFile('x', () => {});", 'fs.readFile は、この採点環境では使えません。'],
   ['console.log(process.cwd());', 'process.cwd は、この採点環境では使えません。'],
   ['console.log(process.stdout.columns);', 'process.stdout.columns は、この採点環境では使えません。'],
