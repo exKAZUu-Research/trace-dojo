@@ -1,7 +1,7 @@
 import { checkMaskElement, vectorOperand } from './admissibility';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { ReflectionCompiler } from './reflection';
-import { known, type LocalBinding, newArray, runtime, staticResultOf, type TExpr } from './semaBase';
+import { known, type LocalBinding, newArray, runtime, staticResultOf, type TExpr, undefinedValue } from './semaBase';
 import { type ArrayType, BOOL, I32, isVectorType, TYPE, type Type, typeName, vectorOf } from './types';
 import { UNASSIGNED, type Value, type ZArray } from './values';
 
@@ -158,6 +158,8 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         const source = fromLeft ? left : right;
         const element = fromLeft ? index : ~index;
         const span = { row: maskArg.row, col: maskArg.col, endRow: maskArg.endRow };
+        // An undefined mask element selects an undefined element.
+        if (index === undefinedValue(I32)) return { kind: 'undefined', ...span };
         // An undefined operand has the other operand's length, which a mask element must still fall within.
         const sized = source ?? left ?? right;
         checkMaskElement(this, index, sized ? (sized.type as ArrayType).length : 0n, position, maskArg);
