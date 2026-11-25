@@ -112,21 +112,25 @@ export class Extensions {
   constructor(items: readonly string[] = []) {
     const language = items.findLast((item) => Object.hasOwn(LANGUAGES, item)) ?? 'GHC2021';
     this.enabled = new Set(words(LANGUAGES[language]));
-    for (const item of items) if (!Object.hasOwn(LANGUAGES, item)) this.apply(item);
+    for (const item of items) if (!Object.hasOwn(LANGUAGES, item)) this.apply(item, true);
   }
 
   has(name: string): boolean {
     return this.enabled.has(canonical(name));
   }
 
-  private apply(item: string): void {
+  /**
+   * Turns an extension on or off. One a pragma names turns on what it implies even when the language already has it,
+   * as GHC does; one only implied stops there.
+   */
+  private apply(item: string, written = false): void {
     const negated = item.startsWith('No') && isKnown(item.slice(2));
     const name = canonical(negated ? item.slice(2) : item);
     if (negated) {
       this.enabled.delete(name);
       return;
     }
-    if (this.enabled.has(name)) return;
+    if (this.enabled.has(name) && !written) return;
     this.enabled.add(name);
     for (const implied of words(IMPLICATIONS[name] ?? '')) {
       if (implied.startsWith('+')) this.apply(implied.slice(1));
