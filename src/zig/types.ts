@@ -186,6 +186,11 @@ export interface FnType {
   readonly returnType: Type;
   /** `c` for `callconv(.c)`, which `export` also gives; undefined for Zig's own convention. */
   readonly callingConvention?: 'c';
+  /**
+   * For a generic function, each parameter's declared type, or undefined for `anytype` and for a type that depends on an
+   * earlier parameter; a `comptime` parameter, which `params` holds as anytype, keeps the type it declares.
+   */
+  readonly genericParams?: readonly (Type | undefined)[];
 }
 
 /** A container-level declaration, which the compiler analyzes when the program first refers to it. */
@@ -468,13 +473,20 @@ export function errorUnionOf(errorSet: ErrorSetType, payload: Type): ErrorUnionT
   }));
 }
 
-export function fnType(params: readonly Type[], returnType: Type, callingConvention?: 'c'): FnType {
-  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${callingConvention ?? ''}`;
+export function fnType(
+  params: readonly Type[],
+  returnType: Type,
+  callingConvention?: 'c',
+  genericParams?: readonly (Type | undefined)[]
+): FnType {
+  const generic = genericParams?.map((param) => (param ? typeId(param) : '?')).join(',') ?? '';
+  const key = `fn ${params.map((param) => typeId(param)).join(',')} ${typeId(returnType)} ${callingConvention ?? ''} ${generic}`;
   return intern(key, () => ({
     kind: 'fn',
     params,
     returnType,
     ...(callingConvention ? { callingConvention } : {}),
+    ...(genericParams ? { genericParams } : {}),
   }));
 }
 

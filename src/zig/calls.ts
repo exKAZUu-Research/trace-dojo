@@ -325,11 +325,14 @@ export abstract class CallCompiler extends VectorCompiler {
     try {
       const unknown = new Set<string>();
       const params: Type[] = [];
+      const declared: (Type | undefined)[] = [];
       for (const [index, param] of decl.syntax.params.entries()) {
         if (param.isVarargs)
           this.error(param, '可変個の引数（...）は、C の呼び出し規約（callconv(.c)）の関数にだけ書けます。');
-        const generic = !param.type || param.isComptime || this.dependsOnParameters(param.type, unknown);
-        params.push(generic ? ANYTYPE : (this.parameterType(decl, index, params) as Type));
+        const dependent = !param.type || this.dependsOnParameters(param.type, unknown);
+        const generic = dependent || param.isComptime;
+        declared.push(dependent ? undefined : (this.parameterType(decl, index, params) as Type));
+        params.push(generic ? ANYTYPE : (declared[index] as Type));
         if (generic) unknown.add(param.name);
         if (param.isNoalias) {
           const type = params[index] === ANYTYPE ? undefined : params[index];
@@ -359,7 +362,8 @@ export abstract class CallCompiler extends VectorCompiler {
           this.error(syntax, 'C の呼び出し規約の関数には、comptime や anytype の引数を書けません。');
         this.checkCAbi(params, result, syntax.params, syntax);
       }
-      const type = fnType(params, result, callingConvention);
+      const isGeneric = unknown.size > 0 || result === ANYTYPE;
+      const type = fnType(params, result, callingConvention, isGeneric ? declared : undefined);
       this.declarationTypes.set(decl, type);
       return type;
     } finally {

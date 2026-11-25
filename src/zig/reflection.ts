@@ -10,6 +10,7 @@ import { langNamespace } from './library/lang';
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { known, runtime, staticResultOf, type TExpr } from './semaBase';
 import {
+  ANYTYPE,
   BOOL,
   COMPTIME_INT,
   ENUM_LITERAL,
@@ -658,11 +659,12 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
         const fn = nested('Fn') as StructType;
         const attributes = this.memberType(fn, 'Attributes', span) as StructType;
         const paramAttributes = this.memberType(fn, 'ParamAttributes', span) as StructType;
+        const generic = type.genericParams;
         return variant('fn', {
           attrs: this.structValue(attributes, span, {}),
-          is_generic: false,
-          return_type: type.returnType,
-          param_types: this.constSlice([...type.params]),
+          is_generic: generic !== undefined,
+          return_type: optionalValue(type.returnType === ANYTYPE ? undefined : type.returnType),
+          param_types: this.constSlice((generic ?? type.params).map((param) => optionalValue(param))),
           param_attrs: this.constSlice(type.params.map(() => this.structValue(paramAttributes, span, {}))),
         });
       }
