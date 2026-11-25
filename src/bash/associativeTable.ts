@@ -8,12 +8,11 @@ export function isKeyedCompoundList(elements: readonly CompoundElement[]): boole
   return elements.length > 0 && typeof elements[0] !== 'string' && !('plain' in elements[0]);
 }
 
-/** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
+/** Reads one validated `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
 export function readAssociativePair(
   elements: CompoundElement[],
   index: number,
   element: CompoundElement,
-  reportedName: string,
   keyedMode = isKeyedCompoundList(elements)
 ): {
   key: string;
@@ -22,24 +21,12 @@ export function readAssociativePair(
   consumedNext: boolean;
   error?: string;
 } {
-  if (keyedMode) {
-    if (typeof element === 'string' || 'plain' in element) {
-      const invalidPlain = typeof element === 'string' ? element : element.plain;
-      return {
-        key: '',
-        value: '',
-        append: false,
-        consumedNext: false,
-        error: `${reportedName}: ${invalidPlain}: must use subscript when assigning associative array`,
-      };
-    }
-    const rawKey = element.rawText ?? element.key;
+  if (keyedMode && typeof element !== 'string' && !('plain' in element)) {
     return {
       key: element.key,
       value: element.value,
       append: element.append,
       consumedNext: false,
-      ...(element.key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
     };
   }
   const key = compoundElementPlainText(element);

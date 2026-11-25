@@ -165,11 +165,7 @@ export class Expander {
         continue;
       }
       if (isAssociative) {
-        pushMeteredItem(
-          elements,
-          { plain: this.expandAssignmentValue(word), rawText: word.text },
-          this.shell.runtime.step
-        );
+        pushMeteredItem(elements, { plain: word.text, rawText: word.text }, this.shell.runtime.step);
         continue;
       }
       for (const field of this.expandWords([word])) {
@@ -789,9 +785,10 @@ function compoundItemValidationError(
   reportedName: string
 ): string | undefined {
   if (typeof item === 'string' || 'plain' in item) {
-    const invalidPlain = typeof item === 'string' ? item : item.plain;
+    const rawPlain = typeof item === 'string' ? item : item.rawText;
+    const shown = declared ? singleQuote(rawPlain) : rawPlain;
     const prefix = reportedName === '' ? '' : `${reportedName}: `;
-    return `${prefix}${invalidPlain}: must use subscript when assigning associative array`;
+    return `${prefix}${shown}: must use subscript when assigning associative array`;
   }
   if (item.key === '') {
     const text = declared ? `[${singleQuote(item.key)}]=${singleQuote(item.value)}` : (item.rawText ?? '');

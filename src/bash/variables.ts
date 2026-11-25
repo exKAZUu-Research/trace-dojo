@@ -1029,9 +1029,8 @@ export class VariableStore {
   private writeCompoundCell(cell: Cell, elements: CompoundElement[], hooks: CompoundWriteHooks): StoreOutcome {
     const target = writableCellOrFailure(cell, hooks.reportedName);
     if (!target.ok) return target;
-    const { label } = target;
     if (cell.value?.kind === 'associative' || cell.attributes.has('A')) {
-      return this.writeAssociativeCompound(cell, elements, hooks, label);
+      return this.writeAssociativeCompound(cell, elements, hooks);
     }
     const map = hooks.append ? this.ensureIndexedMap(cell) : new IndexedTable();
     if (!hooks.append) {
@@ -1059,18 +1058,13 @@ export class VariableStore {
     return { ok: true, stored: '' };
   }
 
-  private writeAssociativeCompound(
-    cell: Cell,
-    elements: CompoundElement[],
-    hooks: CompoundWriteHooks,
-    label: string
-  ): StoreOutcome {
+  private writeAssociativeCompound(cell: Cell, elements: CompoundElement[], hooks: CompoundWriteHooks): StoreOutcome {
     const previous = cell.value?.kind === 'associative' ? cell.value.table : undefined;
     const table = hooks.append && previous ? previous : new AssociativeTable(previous?.bucketCount);
     if (hooks.append) cell.value = { kind: 'associative', table };
     const baseTable = hooks.append ? table : previous;
     for (let i = 0; i < elements.length; i++) {
-      const entry = readAssociativePair(elements, i, elements[i], label);
+      const entry = readAssociativePair(elements, i, elements[i]);
       if (entry.consumedNext) i++;
       if (entry.error !== undefined) {
         hooks.onItemError(entry.error);
