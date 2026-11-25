@@ -580,6 +580,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
   // code-gauge-allow functionCognitiveComplexity -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
   evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
     const { runtime } = this;
+    // The class's decorators are evaluated before its heritage, in the scope around the class.
+    const decorators = evaluateClassDecorators(cls.decorators, cls.members, (expression) => this.evaluate(expression));
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
     if (cls.name) classScope.bindings.set(cls.name, { value: UNINITIALIZED, isMutable: false });
@@ -620,7 +622,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     });
-    return this.defineDecoratedMembers(cls, fn, prototype, behavior, inferredName, binding);
+    return this.defineDecoratedMembers(cls, fn, prototype, behavior, decorators, { inferredName, binding });
   }
 
   /** Defines the members of a class, applies its decorators, and initializes it, returning the class decorators gave. */
@@ -629,13 +631,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
     fn: JsFunction,
     prototype: JsObject,
     behavior: Extract<ClassBehavior, { kind: 'class' }>,
-    inferredName: Key | undefined,
-    binding: Binding | undefined
+    decorators: EvaluatedDecorators | undefined,
+    { inferredName, binding }: { inferredName: Key | undefined; binding: Binding | undefined }
   ): JsFunction {
     const classScope = behavior.scope;
-    const decorators = evaluateClassDecorators(cls.decorators, cls.members, (expression) =>
-      this.inScope(classScope, () => this.evaluate(expression))
-    );
     const definitions: MemberDefinition[] = [];
     const staticInitializers = this.inScope(classScope, () =>
       this.defineMembers(cls, fn, prototype, behavior, { definitions, decorators })
