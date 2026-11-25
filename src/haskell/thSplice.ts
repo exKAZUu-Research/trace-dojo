@@ -159,10 +159,9 @@ export function runSplices(
 ): { grafts: Map<number, SpliceSyntax>; printed: string; printedError: string } {
   const header = spliceHeader(root);
   const moduleNode = root.namedChildren.find((child) => child?.type === 'header')?.childForFieldName('module');
-  const module = spliceModuleNames(
-    moduleNode?.text.trim() ?? 'Main',
-    convertDeclarationsBeforeSplices(root, extensions)
-  );
+  const moduleName = moduleNode?.text.trim() ?? 'Main';
+  const declared = convertDeclarationsBeforeSplices(root, extensions);
+  let module = spliceModuleNames(moduleName, declared);
   const names = new SpliceNames();
   const grafts = new Map<number, SpliceSyntax>();
   let printed = '';
@@ -176,6 +175,11 @@ export function runSplices(
       printed += output.printed;
       printedError += output.printedError;
       grafts.set(site.key, output.result);
+      // What a declaration splice declares is the module's for the splices after it.
+      if (output.result.kind === 'decs') {
+        declared.push(...output.result.decls);
+        module = spliceModuleNames(moduleName, declared);
+      }
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       const detail = error.diagnostics[0]?.message ?? '';
