@@ -536,7 +536,8 @@ export abstract class StatementCompiler extends CallCompiler {
         return value instanceof Pointer || value instanceof Slice ? this.comptimeVarReferences.get(value) : undefined;
       }
       case 'field':
-      case 'index': {
+      case 'index':
+      case 'slice': {
         return this.comptimeVariableOf(target.object);
       }
       case 'paren':

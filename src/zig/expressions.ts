@@ -1256,7 +1256,8 @@ export abstract class ExpressionCompiler extends SemaBase {
       }
       return new Pointer(view, 0);
     };
-    const variable = this.comptimeVarOf(loaded.operand);
+    // A slice of a comptime var, or of a slice known to refer into one, refers into the same variable.
+    const variable = this.comptimeVarOf(loaded.operand) ?? this.comptimeVarOf(base);
     if (variable && this.context.comptimeDepth === 0) {
       if (!operands.every((each) => each.known)) return this.error(expression, RUNTIME_COMPTIME_VAR_POSITION);
       const slice = known(resultType, render(operands.map((each) => each.value as Value)), expression);
