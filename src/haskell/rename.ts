@@ -460,7 +460,10 @@ class Renamer {
     into.types.set(name, { entity: entry.entity, children: [] });
     const children = importChildren(item, entry.children, imp.hiding);
     for (const child of children) {
-      if (!imp.hiding && child.unsupported) throw unsupportedError(item.name.span, child.unsupported);
+      // `T(..)` brings in the children this environment lacks too, as GHC's does; a use of one reports it.
+      if (!imp.hiding && item.children !== 'all' && child.unsupported) {
+        throw unsupportedError(item.name.span, child.unsupported);
+      }
       into.values.set(child.name, child);
       (into.types.get(name) as { children: ValueEntity[] }).children.push(child);
     }

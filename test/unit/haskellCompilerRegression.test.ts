@@ -414,7 +414,6 @@ test.each([
   ['Text.Printf (PrintfArg(parseFormat))', 'parseFormat'],
   ['Text.Read (Read(readPrec))', 'readPrec'],
   ['Text.Read (Read(readListPrec))', 'readListPrec'],
-  ['Text.Read (Read(..))', 'readListPrec'],
 ])('known class methods retain unsupported diagnostics: %s', (item, method) => {
   const result = executeProgram('haskell', `import ${item}\nmain=print(1::Int)`);
   expect(result).toMatchObject({
@@ -427,16 +426,19 @@ test.each([
     expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
 });
 
-test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read hiding (Read(readPrec))'])(
-  'supported and hidden class selections remain usable: %s',
-  (item) => {
-    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
-      kind: 'executed',
-      stdout: '1\n',
-      uncaughtException: undefined,
-    });
-  }
-);
+test.each([
+  'Text.Read (Read(readsPrec))',
+  'Text.Printf (PrintfArg)',
+  'Text.Read hiding (Read(readPrec))',
+  'Text.Read (Read(..))',
+  'Control.Exception (ErrorCall(..))',
+])('supported and hidden class selections remain usable: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
 
 test.each([false, true])('long binding chains compile without host recursion (cyclic=%s)', (cyclic) => {
   const count = 30_000;
