@@ -96,6 +96,7 @@ function collectPatRefs(pat: RPat, visit: (node: VarNode) => void): void {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity -- A right side's where bindings, guards, and bodies each hold references.
 function collectRhsRefs(rhs: RRhs, visit: (node: VarNode) => void): void {
   for (const binding of rhs.where.bindings) collectBindingRefs(binding, visit);
   if (rhs.body.k === 'plain') {
