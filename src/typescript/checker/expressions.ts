@@ -459,7 +459,11 @@ export class ExpressionChecker {
     const symbol = this.c.scopeOf(node).lookupValue(name);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
-    if (symbol.valueKind === 'importAlias' && !this.c.namespaces.imported(symbol, 'value')) {
+    const isTypeAlias =
+      symbol.valueKind === 'importAlias' &&
+      !this.c.namespaces.imported(symbol, 'value') &&
+      this.c.namespaces.imported(symbol, 'type') !== undefined;
+    if (isTypeAlias) {
       // `import X = N.T` of a type only declares a type, as tsc reports where it is read as a value.
       this.c.error(node, `${name} は型であり、値としては使えません。`);
       return errorType;
@@ -467,7 +471,7 @@ export class ExpressionChecker {
     if (symbol === this.c.libraryBinder.moduleScope.lookupValue('require')) return this.reportRequireValue(node);
     this.checkUsedBeforeDeclaration(node, symbol);
     if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
-    if (symbol.valueKind === 'namespace') this.c.namespaces.checkValueUse(node, symbol);
+    if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
     return this.variableReferenceType(node, symbol, contextual);
   }
 

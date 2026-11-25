@@ -64,10 +64,11 @@ export class Namespaces {
     return isInstantiatedNamespace(symbol);
   }
 
-  /** A namespace that only declares types has no object to use as a value. */
-  checkValueUse(node: TreeNode, symbol: Sym): void {
-    if (symbol.valueEntries.every((entry) => entry.kind === 'namespace') && !this.isInstantiated(symbol))
-      this.c.error(node, `名前空間 '${symbol.name}' は値として使えません。`);
+  /** Whether a namespace has an object to use as a value, reporting one that only declares types. */
+  checkValueUse(node: TreeNode, symbol: Sym): boolean {
+    if (symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || this.isInstantiated(symbol)) return true;
+    this.c.error(node, `名前空間 '${symbol.name}' は値として使えません。`);
+    return false;
   }
 
   /** What `import X = N.Y` names, as a value or as a type, or undefined when its path names nothing. */
