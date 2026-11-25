@@ -137,7 +137,8 @@ export function flatten(type: DartType): DartType {
   if (type.kind === 'typeParam') {
     const bound = type.promoted ?? boundOf(type.param);
     const flattened = flatten(bound);
-    return flattened === bound || !isFutureLike(bound) ? type : flattened;
+    if (flattened === bound || !isFutureLike(bound)) return type;
+    return type.nullable ? makeNullable(flattened) : flattened;
   }
   if (type.kind !== 'interface') return type;
   if (type.nullable) {
@@ -264,10 +265,8 @@ export function nonNullable(type: DartType): DartType {
       return { ...type, nullable: false, promoted };
     }
     default: {
-      const nonNull = type.nullable ? { ...type, nullable: false } : type;
-      // NonNull(FutureOr<T>) is FutureOr<NonNull(T)>, so that no type isNullable accepts stays nullable.
-      const value = futureOrValue(nonNull);
-      return value && isNullable(value) ? interfaceType(coreTypes.futureOr, [nonNullable(value)]) : nonNull;
+      // Only the outer `?` goes: NonNull keeps FutureOr<int?> as it is, as the SDK does.
+      return type.nullable ? { ...type, nullable: false } : type;
     }
   }
 }
@@ -632,7 +631,12 @@ function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (b.kind === 'never' && !b.nullable) return a;
   if (a.kind === 'null' || (a.kind === 'never' && a.nullable)) return makeNullable(b);
   if (b.kind === 'null' || (b.kind === 'never' && b.nullable)) return makeNullable(a);
-  if (isNullable(a) || isNullable(b)) return makeNullable(upperBound(nonNullable(a), nonNullable(b)));
+  if (isNullable(a) || isNullable(b)) {
+    // A type nullable only through FutureOr's argument, as FutureOr<int?>, has no `?` to take off.
+    const left = nonNullable(a);
+    const right = nonNullable(b);
+    if (left !== a || right !== b) return makeNullable(upperBound(left, right));
+  }
   if (isObject(a) || isObject(b)) return objectType();
   if (a.kind === 'typeParam' || b.kind === 'typeParam') return typeParamUpperBound(a, b);
   if (futureOrValue(a) || futureOrValue(b)) return futureOrUpperBound(a, b);
