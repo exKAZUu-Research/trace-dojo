@@ -101,6 +101,11 @@ export interface Place {
   readonly locate: (frame: Frame) => Pointer;
   readonly compileTimePointer?: Pointer;
   readonly address?: () => TExpr;
+  /**
+   * Whether the value read here is a copy of a `comptime var`'s value where the code stands, whose parts come from the
+   * copy while addresses and stores still reach the variable.
+   */
+  readonly snapshot?: boolean;
   /** The alignment that `align(n)` gives the variable, which a pointer to it carries. */
   readonly alignment?: number;
 }
@@ -195,6 +200,7 @@ export interface LibraryFunctionOptions {
 
 export interface SemaApi {
   compile(expression: Expression, resultType?: Type): TExpr;
+  rejectComptimeVarReference(value: TExpr, span: Span): void;
   compileType(expression: Expression): Type;
   valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   reserveStorage(type: Type, span: Span): void;
@@ -397,6 +403,37 @@ export abstract class SemaBase implements SemaApi {
       if (decl) return decl;
     }
     return undefined;
+  }
+
+  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
+  protected comptimeVariableHolding(target: Slots): LocalBinding | undefined {
+    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
+      for (const binding of scope.locals?.values() ?? []) {
+        this.spendCompilation();
+        if (binding.comptimeCell && holdsStorage(binding.comptimeCell, target)) return binding;
+      }
+    return undefined;
+  }
+
+  /**
+   * Refuses a value that holds a pointer into a `comptime var` where the value becomes one of the running program,
+   * such as a runtime variable's or a runtime argument's, since the variable exists only while the compiler runs.
+   */
+  rejectComptimeVarReference(value: TExpr, span: Span): void {
+    if (this.comptimeDepth > 0) return;
+    const fact = staticResultOf(value);
+    if (fact && this.referencesComptimeVar(fact.value))
+      this.error(span, 'comptime var を指すポインタは、実行時の値にできません。');
+  }
+
+  private referencesComptimeVar(value: Value): boolean {
+    this.spendCompilation();
+    if (value instanceof Pointer || value instanceof Slice)
+      return this.comptimeVariableHolding(value.target) !== undefined;
+    if (value instanceof Some) return this.referencesComptimeVar(value.value);
+    if (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion)
+      return value.slots.some((slot) => this.referencesComptimeVar(slot));
+    return false;
   }
 
   /** The innermost container whose scope the compiler is in, which `@This()` names. */
@@ -1937,3 +1974,13 @@ export function nullUnwrapPanic(): never {
 }
 
 export { BigFloat, BOOL, COMPTIME_FLOAT, COMPTIME_INT, NULL_TYPE, UNDEFINED_TYPE, arrayOf, isComptimeOnly };
+
+function holdsStorage(storage: Slots, target: Slots): boolean {
+  return (
+    storage === target ||
+    storage.slots.some(
+      (value) =>
+        (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
+    )
+  );
+}

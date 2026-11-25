@@ -145,7 +145,11 @@ export function expectArgs(sema: SemaApi, call: NativeCall, count: number, name:
 
 /** Compiles arguments with their expected types, coercing each. */
 export function compileArgs(sema: SemaApi, args: readonly Expression[], types: readonly Type[]): TExpr[] {
-  return args.map((arg, index) => sema.coerce(sema.compile(arg, types[index]), types[index], arg));
+  return args.map((arg, index) => {
+    const value = sema.coerce(sema.compile(arg, types[index]), types[index], arg);
+    sema.rejectComptimeVarReference(value, arg);
+    return value;
+  });
 }
 
 export function structReceiver(

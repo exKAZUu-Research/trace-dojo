@@ -243,6 +243,7 @@ export abstract class CallCompiler extends VectorCompiler {
       if (index === 0 && receiver) bound = this.bindReceiver(compiled, declared, expression);
       else if (declared) bound = this.coerce(compiled, declared, isTExpr(arg) ? arg.span : arg);
       else bound = compiled;
+      if (!params[index].isComptime && !syntax.isInline) this.rejectComptimeVarReference(bound, bound.span);
       if (params[index].isComptime && !staticResultOf(bound))
         this.error(
           bound.span,

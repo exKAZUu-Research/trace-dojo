@@ -49,6 +49,9 @@ import {
   VOID,
 } from './types';
 import { payloadFacts, valueFactsOf } from './valueFacts';
+import type {
+  ZStruct,
+  ZUnion} from './values';
 import {
   arrayPointerView,
   Cell,
@@ -63,9 +66,7 @@ import {
   Some,
   storeInto,
   type Value,
-  ZArray,
-  ZStruct,
-  ZUnion,
+  ZArray
 } from './values';
 
 /** Runs a statement, returning the jump that leaves it, if any. */
@@ -387,6 +388,7 @@ export abstract class StatementCompiler extends CallCompiler {
     alignment?: number
   ): LocalBinding {
     this.resolveStorage(type, value.span);
+    if (!isConst) this.rejectComptimeVarReference(value, value.span);
     if (!isConst && this.comptimeDepth === 0 && this.requiresComptime(type, value.span))
       this.error(
         value.span,
@@ -490,16 +492,6 @@ export abstract class StatementCompiler extends CallCompiler {
         };
     if (!isDiscardName(statement)) this.scope.locals?.set(statement.name, binding);
     return { exec: () => {}, noreturn: false };
-  }
-
-  /** The `comptime var` in scope whose storage holds `target`, which a pointer taken from the variable points into. */
-  private comptimeVariableHolding(target: Slots): LocalBinding | undefined {
-    for (let scope: Scope | undefined = this.scope; scope; scope = scope.parent)
-      for (const binding of scope.locals?.values() ?? []) {
-        this.spendCompilation();
-        if (binding.comptimeCell && holdsStorage(binding.comptimeCell, target)) return binding;
-      }
-    return undefined;
   }
 
   /** The `comptime var` that an assignment's target names or reaches into, as `x`, `x.f`, `x[i]`, or `p.*` do. */
@@ -797,6 +789,7 @@ export abstract class StatementCompiler extends CallCompiler {
       const anonymous = this.anonymousInitAssignment(expression.value, type, place);
       if (anonymous) return { exec: this.simple(row, false, anonymous), noreturn: false };
       const value = this.coerce(this.compile(expression.value, type), type, expression.value);
+      this.rejectComptimeVarReference(value, expression.value);
       const evaluate = value.eval;
       const onlyCalls = isObjectCreation(expression.value);
       return {
@@ -3347,16 +3340,6 @@ function errorUnionCannotFail(value: TExpr): boolean {
   return result
     ? !(result.value instanceof ErrorValue)
     : value.type.errorSet.resolved !== false && value.type.errorSet.names?.size === 0;
-}
-
-function holdsStorage(storage: Slots, target: Slots): boolean {
-  return (
-    storage === target ||
-    storage.slots.some(
-      (value) =>
-        (value instanceof ZStruct || value instanceof ZArray || value instanceof ZUnion) && holdsStorage(value, target)
-    )
-  );
 }
 
 /** Whether a condition is `@inComptime()` or its negation. */

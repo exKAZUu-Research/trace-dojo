@@ -387,6 +387,7 @@ export abstract class ExpressionCompiler extends SemaBase {
           isConst: false,
           locate: place.locate,
           address: () => known(pointerOf('one', binding.type, { isConst: false }), new Pointer(cell, 0), span),
+          snapshot: true,
         },
         local: binding,
       };
@@ -747,6 +748,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     };
     if (zero) return { ...this.fixedResult(pointer, type.child, undefinedValue(type.child), span), place };
     const fact = staticResultOf(pointer);
+    // Outside code the compiler runs, a load through a pointer into a comptime var reads the value it holds here.
+    if (this.comptimeDepth === 0 && fact?.value instanceof Pointer && this.comptimeVariableHolding(fact.value.target))
+      return { ...known(type.child, copyForStorage(fact.value.load()), span), place: { ...place, snapshot: true } };
     const result =
       type.isConst && isConstantData(fact?.value)
         ? { ...this.derived(pointer, type.child, (value) => (value as Pointer).load()), span, place }
@@ -838,8 +842,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected knownAddress(expression: TExpr): Pointer | undefined {
-    // A comptime var's value read here is a copy, whose parts must not follow the variable's later stores.
-    if (!expression.known || expression.local?.comptimeCell) return undefined;
+    if (!expression.known || expression.place?.snapshot) return undefined;
     const address = this.addressOf(expression);
     return address.known && address.value instanceof Pointer ? address.value : undefined;
   }

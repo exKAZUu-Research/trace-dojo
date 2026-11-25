@@ -78,6 +78,7 @@ export function compilePrint(sema: SemaApi, formatArg: Expression, argsArg: Expr
       '書式の文字列は、コンパイルのときに決まっていなければなりません（文字列のリテラルを書いてください）。'
     );
   const args = sema.compile(argsArg);
+  sema.rejectComptimeVarReference(args, argsArg);
   const type = args.type;
   if (type.kind !== 'struct') {
     return sema.error(argsArg, `書式の引数は .{ ... } で渡してください（${typeName(type)} 型です）。`);
