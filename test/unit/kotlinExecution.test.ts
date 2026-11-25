@@ -6391,6 +6391,11 @@ test.each([
     '3\nf3 \n',
   ],
   [
+    'when whose every branch returns',
+    'suspend fun sign(x: Int): Int { when (x) { 0 -> return f(0); else -> return f(x / kotlin.math.abs(x)) } }\n    println(sign(-3))',
+    '-1\nf-1 \n',
+  ],
+  [
     'try as a value',
     'val x = try { f(1) / 0 } catch (e: ArithmeticException) { f(7) } finally { g(9) }\n    println(x)',
     '7\nf1 f7 g9 \n',

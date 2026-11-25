@@ -72,8 +72,11 @@ export function forAsWhile(statement: Extract<Statement, { kind: 'for' }>): Stat
   ];
 }
 
-/** `when` as the `if` chain it stands for, testing a subject held in a variable. */
-export function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Expression {
+/**
+ * `when` as the statements it stands for: its subject held in a variable, then the `if` chain that tests it, which a
+ * scope of their own must hold so that the variable ends with the `when`.
+ */
+export function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Statement[] {
   const { row } = expression;
   // `when (val x = ...)` reads its subject through its own variable, which its branches see.
   const subjectName = expression.subjectVariable?.name ?? hiddenName(SUBJECT);
@@ -124,17 +127,10 @@ export function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Exp
       ],
     };
   }
-  const statements: Statement[] = [
+  return [
     ...(expression.subject ? [subjectStatement(expression, subjectName, expression.subject)] : []),
     ...(chain?.statements ?? []),
   ];
-  return {
-    kind: 'if',
-    row,
-    condition: { kind: 'boolean', row, value: true },
-    thenBranch: { row, endRow: row, isBraced: true, statements },
-    elseBranch: undefined,
-  };
 }
 
 function subjectStatement(
@@ -194,7 +190,7 @@ export function assignedForm(expression: Expression, assign: (value: Expression)
     }
     case 'when': {
       const entries = expression.entries.map((entry) => ({ ...entry, body: assignLast(entry.body) }));
-      return [expressionStatement(whenAsIf({ ...expression, entries }))];
+      return whenAsIf({ ...expression, entries });
     }
     case 'try': {
       const catches = expression.catches.map((clause) => ({ ...clause, body: assignLast(clause.body) }));

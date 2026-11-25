@@ -468,7 +468,11 @@ export abstract class SuspendCompiler extends LocalCompiler {
       }
       case 'when': {
         if (asValue) return this.compileBranchValue(scope, context, expression, expected);
-        return this.compileSuspendValue(scope, context, whenAsIf(expression), expected, false);
+        return {
+          gen: this.compileSuspendStatements(scope, context, whenAsIf(expression)),
+          type: this.unitType,
+          repr: 'ref',
+        };
       }
       case 'try': {
         if (asValue) return this.compileBranchValue(scope, context, expression, expected);
