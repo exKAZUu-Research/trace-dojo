@@ -937,6 +937,8 @@ function nativeMembers(fileType: Type): Record<string, () => Member> {
           const files = frame.runtime.io.files;
           // `createDirPath` succeeds when the directory exists already, as `mkdir -p` does.
           if (recursive === true && files.kindOf(target) === 'directory') return;
+          // A file where the last directory would go is not one, as Zig's createDirPath reports.
+          if (recursive === true && files.kindOf(target) === 'file') throw new FileSystemError('ENOTDIR', target);
           files.createDirectory(target, recursive as boolean);
           return;
         })
