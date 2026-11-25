@@ -2,6 +2,7 @@ import type { SourceFile } from '../ast';
 import { parseZig } from '../parse';
 import { addDecls } from '../semaBase';
 import type { Namespace, StructType } from '../types';
+import { withPublicSurface } from './portedSurface';
 
 /**
  * `std.testing` ported from Zig 0.17's library, which a program may call outside a test as well. The failure reports
@@ -412,7 +413,7 @@ let testing: StructType | undefined;
 /** `std.testing`, whose declarations the compiler analyzes from their source on first use. */
 export function testingNamespace(): StructType {
   if (testing) return testing;
-  const file: SourceFile = parseZig(SOURCE);
+  const file: SourceFile = withPublicSurface(parseZig(SOURCE), 'testing');
   const namespace: Namespace = { name: 'testing', decls: new Map(), internal: true };
   addDecls(namespace, file.members);
   testing = { kind: 'struct', isTuple: false, namespace, layout: 'auto', fields: [] };

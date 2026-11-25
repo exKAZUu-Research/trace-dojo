@@ -49,9 +49,6 @@ import {
   VOID,
 } from './types';
 import { payloadFacts, valueFactsOf } from './valueFacts';
-import type {
-  ZStruct,
-  ZUnion} from './values';
 import {
   arrayPointerView,
   Cell,
@@ -66,7 +63,9 @@ import {
   Some,
   storeInto,
   type Value,
-  ZArray
+  ZArray,
+  type ZStruct,
+  type ZUnion,
 } from './values';
 
 /** Runs a statement, returning the jump that leaves it, if any. */

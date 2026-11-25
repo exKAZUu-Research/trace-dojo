@@ -23,6 +23,7 @@ import {
 import { decodeUtf8 } from '../utf8';
 import { ErrorValue, type NativeHandle, NULL, type Slice, type Value, ZStruct } from '../values';
 import { compileArgs, expectArgs, fnMember, handle, type Member } from './native';
+import { withPublicSurface } from './portedSurface';
 
 /**
  * The parts of `std.Io` that read standard input and files and that manage files and directories, ported from Zig
@@ -61,18 +62,6 @@ pub const Reader = struct {
     pub const DiscardDelimiterLimitError = error{ ReadFailed, StreamTooLong };
     pub const ReadAllocError = Error || std.mem.Allocator.Error;
     pub const TakeEnumError = Error || error{InvalidEnumTag};
-
-    pub const limited = @compileError("std.Io.Reader.limited は、この採点環境では使えません。");
-    pub const hashed = @compileError("std.Io.Reader.hashed は、この採点環境では使えません。");
-    pub const readVec = @compileError("std.Io.Reader.readVec は、この採点環境では使えません。");
-    pub const readVecAll = @compileError("std.Io.Reader.readVecAll は、この採点環境では使えません。");
-    pub const takeStruct = @compileError("std.Io.Reader.takeStruct は、この採点環境では使えません。");
-    pub const peekStruct = @compileError("std.Io.Reader.peekStruct は、この採点環境では使えません。");
-    pub const takeStructPointer = @compileError("std.Io.Reader.takeStructPointer は、この採点環境では使えません。");
-    pub const peekStructPointer = @compileError("std.Io.Reader.peekStructPointer は、この採点環境では使えません。");
-    pub const takeLeb128 = @compileError("std.Io.Reader.takeLeb128 は、この採点環境では使えません。");
-    pub const allocRemainingAlignedSentinel = @compileError("std.Io.Reader.allocRemainingAlignedSentinel は、この採点環境では使えません。");
-    pub const appendRemainingAligned = @compileError("std.Io.Reader.appendRemainingAligned は、この採点環境では使えません。");
 
     pub fn fixed(bytes: []const u8) Reader {
         return .{ .buffer = @constCast(bytes), .seek = 0, .end = bytes.len, .descriptor = null };
@@ -759,7 +748,7 @@ export function filesNamespace(): StructType {
   if (io) return io;
   const types = nativeTypes;
   if (!types) throw new Error('configureFiles has not run');
-  const file: SourceFile = parseZig(SOURCE);
+  const file: SourceFile = withPublicSurface(parseZig(SOURCE), 'Io', false);
   const namespace: Namespace = { name: 'Io', decls: new Map(), internal: true };
   addDecls(namespace, file.members);
   const native = (name: string, member: () => Member): void => {
