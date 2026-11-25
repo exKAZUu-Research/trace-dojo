@@ -71,7 +71,8 @@ export type Expr =
   | { kind: 'recordUpdate'; expr: Expr; fields: FieldBind[]; span: Span }
   | { kind: 'paren'; expr: Expr; span: Span }
   /** A visible type application, `f @Int`, or `f @_`, which leaves the argument to inference. */
-  | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; span: Span }
+  /** `e @t`, or `e (type t)` (`required`), which only a `forall a ->` binder takes. */
+  | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; required?: boolean; span: Span }
   /** An implicit parameter, `?x`. */
   | { kind: 'implicit'; name: string; span: Span }
   /** `let ?x = e in body`, which gives the body the implicit parameters. */

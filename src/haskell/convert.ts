@@ -1822,7 +1822,13 @@ export function convertExpr(node: Node): Expr {
             '(type t) を使うには、RequiredTypeArguments と ExplicitNamespaces の拡張が要ります。'
           );
         }
-        return { kind: 'tyapp', expr: convertExpr(fn), type: convertType(required(argument, 'type')), span };
+        return {
+          kind: 'tyapp',
+          expr: convertExpr(fn),
+          type: convertType(required(argument, 'type')),
+          required: true,
+          span,
+        };
       }
       if (argument.type === 'type_application') {
         if (!extensions.has('TypeApplications')) {

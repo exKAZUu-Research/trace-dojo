@@ -54,7 +54,7 @@ export type RExpr = (
   | { k: 'recordCon'; con: ConInfo; fields: RFieldBind[]; span: Span; evidence?: Evidence[] }
   | { k: 'recordUpdate'; expr: RExpr; fields: RFieldBind[]; span: Span; cons?: ConInfo[] }
   | { k: 'hole'; name: string; span: Span }
-  | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; span: Span }
+  | { k: 'tyapp'; expr: RExpr; typeArg: RType | undefined; required?: boolean; span: Span }
   | { k: 'implicit'; name: string; span: Span; evidence?: Evidence }
   | {
       k: 'implicitLet';

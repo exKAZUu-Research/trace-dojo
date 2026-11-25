@@ -309,6 +309,8 @@ export interface Scheme {
    * the order GHC specifies them. A scheme that inference found has none.
    */
   specified?: number[];
+  /** The variables of `forall a ->` binders, as `TGen` indices, which only `(type t)` arguments instantiate. */
+  required?: number[];
   preds: Pred[];
   type: Type;
 }

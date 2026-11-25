@@ -588,7 +588,8 @@ export class Checker {
           const index = names.indexOf(name);
           return index === -1 ? [] : [index];
         });
-    const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified };
+    const required = sig.forall?.flatMap((binder, index) => (binder.required ? [index] : []));
+    const scheme = { kinds: kinds.map(defaultKind), names, preds, type, specified, required };
     if (!this.allowAmbiguousTypes) checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
   }
@@ -804,12 +805,13 @@ export class Checker {
    * arguments instantiate them in order.
    */
   private inferTypeApplication(expr: Extract<RExpr, { k: 'tyapp' }>): Type {
-    const typeArgs: (RType | undefined)[] = [];
+    const applications: Extract<RExpr, { k: 'tyapp' }>[] = [];
     let head: RExpr = expr;
     while (head.k === 'tyapp') {
-      typeArgs.unshift(head.typeArg);
+      applications.unshift(head);
       head = head.expr;
     }
+    const typeArgs = applications.map((application) => application.typeArg);
     const scheme =
       head.k === 'con'
         ? conScheme(head.con)
@@ -828,6 +830,9 @@ export class Checker {
     for (const [position, typeArg] of typeArgs.entries()) {
       if (!typeArg) continue;
       const index = specified[position];
+      if (applications[position].required && !scheme.required?.includes(index)) {
+        typeError(applications[position].span, '(type t) を渡せるのは、forall a -> で型を受け取る引数だけです。');
+      }
       const scoped = new Map([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
       const type = this.convertType(typeArg, this.scopedTypes, scoped, (args[index] as TVar).kind);
       this.checkKinds();

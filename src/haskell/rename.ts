@@ -1405,6 +1405,7 @@ class Renamer {
           k: 'tyapp',
           expr: this.renameExpr(expr.expr, scope),
           typeArg: expr.type && this.renameType(expr.type, vars),
+          required: expr.required,
           span,
         };
       }
