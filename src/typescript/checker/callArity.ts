@@ -118,15 +118,24 @@ export class CallArity {
       count += args.length(arg) ?? 1;
       if (count > maximum) excess ??= arg;
     }
+    const strings = stringsArgumentCount(node);
     const message =
       maximum === Number.POSITIVE_INFINITY
-        ? `引数は少なくとも ${minimum} 個必要ですが、${count} 個渡されています。`
+        ? `引数は少なくとも ${minimum + strings} 個必要ですが、${count + strings} 個渡されています。`
         : minimum === maximum
-          ? `引数は ${minimum} 個必要ですが、${count} 個渡されています。`
-          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${count} 個渡されています。`;
+          ? `引数は ${minimum + strings} 個必要ですが、${count + strings} 個渡されています。`
+          : `引数は ${minimum + strings} 個から ${maximum + strings} 個必要ですが、${count + strings} 個渡されています。`;
     const at = excess ?? (callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node);
     this.c.error(at, message);
   }
+}
+
+/**
+ * 1 for a tagged template, whose strings TypeScript counts as the first argument, though its signatures are resolved
+ * against the substitutions alone.
+ */
+export function stringsArgumentCount(call: TreeNode): number {
+  return call.type === 'call_expression' && call.childForFieldName('arguments')?.type === 'template_string' ? 1 : 0;
 }
 
 /**

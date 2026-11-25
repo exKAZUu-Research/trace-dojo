@@ -1,7 +1,14 @@
 // code-gauge-allow-file fileNcss -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { CallArity, ExpressionListFlow, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
+import {
+  CallArity,
+  ExpressionListFlow,
+  minimumArguments,
+  stringsArgumentCount,
+  tupleArgumentContexts,
+  tupleTypeAt,
+} from './callArity';
 import { CallTypeArguments } from './callTypeArguments';
 import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
@@ -423,6 +430,11 @@ export class Calls {
     }
     const strings = this.c.globalType('TemplateStringsArray');
     const fitting = signatures.filter((signature) => this.takesStrings(signature, strings));
+    if (fitting.length === 0 && signatures.every((signature) => signature.parameters.length === 0)) {
+      // The strings are the first argument, so a tag that takes none is given one more than the substitutions.
+      this.c.error(template, `引数は 0 個必要ですが、${substitutions.length + 1} 個渡されています。`);
+      return this.checkArgumentsOnly(substitutions, errorType);
+    }
     if (fitting.length === 0) {
       const parameter = signatures[0].parameters[0];
       this.c.error(
@@ -449,7 +461,7 @@ export class Calls {
   /** Whether a signature's first parameter takes the strings of a tagged template. */
   private takesStrings(signature: Signature, strings: Type): boolean {
     const parameter = signature.parameters[0];
-    if (!parameter) return true;
+    if (!parameter) return false;
     const type = parameter.rest ? this.c.restElementType(parameter.type) : parameter.type;
     return this.c.relations.isAssignable(strings, type);
   }
@@ -705,11 +717,13 @@ export class Calls {
       this.checkArgumentsOnly(args.nodes);
       const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
       const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
+      const strings = stringsArgumentCount(node);
+      const [least, most, count] = [minimum + strings, maximum + strings, args.nodes.length + strings];
       this.c.error(
         args.nodes.length > maximum ? args.nodes[maximum] : node,
         maximum === Number.POSITIVE_INFINITY || minimum === maximum
-          ? `引数は ${minimum} 個必要ですが、${args.nodes.length} 個渡されています。`
-          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${args.nodes.length} 個渡されています。`
+          ? `引数は ${least} 個必要ですが、${count} 個渡されています。`
+          : `引数は ${least} 個から ${most} 個必要ですが、${count} 個渡されています。`
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
