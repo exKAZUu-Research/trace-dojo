@@ -2189,9 +2189,11 @@ function convertLambdaCase(features: ConvertContext, node: Node, span: Span): Ex
   }
   const clauses = alternativeNodes.map((alternative) => {
     const patternsNode = field(alternative, 'patterns');
-    const pats = patternsNode
-      ? namedChildren(patternsNode).map((node) => convertPattern(features, node))
-      : [convertPattern(features, required(alternative, 'pattern'))];
+    const pats = (
+      patternsNode
+        ? namedChildren(patternsNode).map((node) => convertPattern(features, node))
+        : [convertPattern(features, required(alternative, 'pattern'))]
+    ).map((pat) => strictPattern(features, pat));
     return { pats, rhs: convertRhs(features, alternative, '->'), span: spanOf(alternative) };
   });
   const arity = clauses[0]?.pats.length ?? 0;
