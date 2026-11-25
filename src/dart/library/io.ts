@@ -15,6 +15,25 @@ String _textOfBytes(List<int> bytes) {
   }
 }
 
+/** The bytes a sink is given in parts, whose last character may continue in its next part. */
+class _Utf8Bytes {
+  List<int> _pending = const <int>[];
+  String text(List<int> data) {
+    final bytes = <int>[..._pending, ...data];
+    var end = bytes.length;
+    for (var back = 1; back <= 3 && back <= bytes.length; back++) {
+      final byte = bytes[bytes.length - back];
+      if (byte & 0xC0 != 0x80) {
+        final length = byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : byte >= 0xC0 ? 2 : 1;
+        if (length > back) end = bytes.length - back;
+        break;
+      }
+    }
+    _pending = bytes.sublist(end);
+    return _textOfBytes(bytes.sublist(0, end));
+  }
+}
+
 class OSError implements IOException {
   static const int noErrorCode = -1;
   final String message;
@@ -102,7 +121,9 @@ abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
 }
 
 class Stdout implements IOSink {
+  // The natives of Stdout read this field as the first one.
   final bool _isError;
+  final _Utf8Bytes _bytes = _Utf8Bytes();
   Stdout._(this._isError);
   Encoding get encoding => utf8;
   bool get hasTerminal => false;
@@ -114,7 +135,7 @@ class Stdout implements IOSink {
   external void writeAll(Iterable<dynamic> objects, [String separator = ""]);
   external void writeCharCode(int charCode);
   void add(List<int> data) {
-    write(_textOfBytes(data));
+    write(_bytes.text(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
@@ -366,6 +387,7 @@ class _File extends FileSystemEntity implements File {
  */
 class _FileSink implements IOSink {
   final _File _file;
+  final _Utf8Bytes _bytes = _Utf8Bytes();
   final StringBuffer _buffer = StringBuffer();
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
@@ -398,7 +420,7 @@ class _FileSink implements IOSink {
     _buffer.writeCharCode(charCode);
   }
   void add(List<int> data) {
-    write(_textOfBytes(data));
+    write(_bytes.text(data));
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     if (!_done.isCompleted) _done.completeError(error, stackTrace);
