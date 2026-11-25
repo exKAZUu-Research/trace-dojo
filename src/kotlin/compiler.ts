@@ -488,16 +488,6 @@ export class Compiler extends SuspendCompiler {
     };
   }
 
-  protected nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value {
-    const { symbol, evaluateArgs, callRow } = call;
-    return (frame, receiver) => {
-      const values = evaluateArgs(frame);
-      return frame.runtime.withNativeRoots([receiver, values], () =>
-        (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, values, callRow)
-      );
-    };
-  }
-
   protected constructorCandidates(cls: ClassSymbol, row: number): Candidate[] {
     if (cls.isInterface) this.error(row, `インターフェース ${cls.name} のインスタンスは作れません。`);
     if (cls.isObject) return [];

@@ -1850,19 +1850,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (resolvedCall.usesDefaultArguments) this.error(row, 'super の呼び出しで引数を省略できません。');
     // `super.f()` calls the superclass's implementation itself, without dispatching on the instance's class.
     const symbol = resolvedCall.symbol;
-    const staticCall = this.nonVirtualCall(resolvedCall);
+    const { nonVirtualCall } = resolvedCall;
     const receiverEval = convertRepr(receiver, 'ref', resolvedCall.receiverRepr);
     return {
       type: resolvedCall.type,
       repr: resolvedCall.repr,
-      eval: (frame) => staticCall(frame, receiverEval(frame)),
+      eval: (frame) => nonVirtualCall(frame, receiverEval(frame)),
       isCall: true,
       isCreation: symbol.isConstructor,
     };
   }
-
-  /** The call of a resolved function on a receiver, without virtual dispatch, as `super.f()` makes. */
-  protected abstract nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value;
 
   /** Whether values of the type can be called as functions, through an `operator fun invoke`. */
   protected hasInvokeOperator(type: KType): boolean {

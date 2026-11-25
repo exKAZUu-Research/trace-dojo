@@ -117,6 +117,8 @@ export interface ResolvedCall {
   repr: ReturnType<typeof reprOf>;
   /** Evaluates the arguments in the order they are written and calls the function on the receiver. */
   call: (frame: Frame, receiver: Value) => Value;
+  /** As `call`, calling the resolved function itself without dispatching on the receiver's class, as `super.f()` does. */
+  nonVirtualCall: (frame: Frame, receiver: Value) => Value;
   /** Evaluates the arguments in the order they are written, as the function's parameters receive them. */
   evaluateArgs: (frame: Frame) => Value[];
   callRow: number | undefined;
@@ -206,8 +208,9 @@ export function allowsSuspendCalls(context: FunctionContext): boolean {
 }
 
 /**
- * A call of a function, or of a suspend function as the coroutine running the caller performs it. A suspend function
- * dispatches on `dispatcher`: the receiver, or for a member extension, the value of its class that the call passes.
+ * A call of a function, or of a suspend function as the coroutine running the caller performs it, dispatching on
+ * `dispatcher`: the receiver, or for a member extension, the value of its class that the call passes. A call without a
+ * dispatcher, as `super.f()` makes, calls the function itself.
  */
 function callOrSuspend(
   symbol: FunctionSymbol,
@@ -215,11 +218,12 @@ function callOrSuspend(
   receiver: Value,
   values: Value[],
   callRow: number | undefined,
-  dispatcher = receiver
+  dispatcher: Value | undefined
 ): Value {
-  return symbol.isSuspend
-    ? suspendCall(symbol, receiver, values, callRow, dispatcher)
-    : callFunction(symbol, frame, receiver, values, callRow);
+  if (symbol.isSuspend) return suspendCall(symbol, receiver, values, callRow, dispatcher);
+  if (dispatcher === undefined)
+    return (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, values, callRow);
+  return callFunction(symbol, frame, receiver, values, callRow);
 }
 
 /** A call of a suspend function, which the coroutine running the caller performs, dispatching on `dispatcher`. */
@@ -228,10 +232,10 @@ function suspendCall(
   receiver: Value,
   args: Value[],
   callRow: number | undefined,
-  dispatcher: Value
+  dispatcher: Value | undefined
 ): Value {
   return new SuspendCall((caller) => {
-    const target = isVirtual(symbol) ? runtimeClassOf(dispatcher).dispatch(symbol) : symbol;
+    const target = dispatcher !== undefined && isVirtual(symbol) ? runtimeClassOf(dispatcher).dispatch(symbol) : symbol;
     const invoke = target.invokeSuspend;
     if (!invoke) throw new Error(`The suspend function ${symbol.name} has no implementation`);
     return invoke(caller, receiver, args, callRow);
@@ -1276,31 +1280,48 @@ export abstract class CallCompiler extends CompilerCore {
       .filter((param) => param.isReified)
       .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
     const suspendVersion = this.checkSuspendCall(context, symbol, compiledArgs, row);
-    const call = (frame: Frame, receiver: Value): Value => {
-      const { temporaries } = frame;
-      const mark = temporaries.length;
-      temporaries.push(receiver);
-      try {
-        if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
-        const values = evaluateArgs(frame);
-        for (const evaluate of contextEvals) values.push(evaluate(frame));
-        if (dispatchEval) {
-          const dispatch = dispatchEval(frame);
-          values.push(dispatch);
+    // A virtual call dispatches on the instance's class; `super.f()` calls the function it resolved to itself.
+    const callOf =
+      (virtual: boolean) =>
+      (frame: Frame, receiver: Value): Value => {
+        const { temporaries } = frame;
+        const mark = temporaries.length;
+        temporaries.push(receiver);
+        try {
+          if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
+          const values = evaluateArgs(frame);
+          for (const evaluate of contextEvals) values.push(evaluate(frame));
+          if (dispatchEval) {
+            const dispatch = dispatchEval(frame);
+            values.push(dispatch);
+            if (symbol.passesTypeArguments)
+              values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
+            for (const value of values) temporaries.push(value);
+            const target = virtual && isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
+            return callOrSuspend(
+              suspendVersion ?? target,
+              frame,
+              receiver,
+              values,
+              callRow,
+              virtual ? dispatch : undefined
+            );
+          }
           if (symbol.passesTypeArguments)
             values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
           for (const value of values) temporaries.push(value);
-          const target = isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
-          return callOrSuspend(suspendVersion ?? target, frame, receiver, values, callRow, dispatch);
+          return callOrSuspend(
+            suspendVersion ?? symbol,
+            frame,
+            receiver,
+            values,
+            callRow,
+            virtual ? receiver : undefined
+          );
+        } finally {
+          temporaries.length = mark;
         }
-        if (symbol.passesTypeArguments)
-          values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
-        for (const value of values) temporaries.push(value);
-        return callOrSuspend(suspendVersion ?? symbol, frame, receiver, values, callRow);
-      } finally {
-        temporaries.length = mark;
-      }
-    };
+      };
     const typeArguments = new Map<TypeParameterSymbol, KType>();
     for (const param of this.inferredTypeParameters(candidate))
       typeArguments.set(param, resolved(substitution.get(param) as KType));
@@ -1309,7 +1330,8 @@ export abstract class CallCompiler extends CompilerCore {
       candidate,
       type: this.callResultType(attempt, typeArguments, row),
       repr: candidate.kind === 'constructor' ? 'ref' : returnRepr(symbol),
-      call,
+      call: callOf(true),
+      nonVirtualCall: callOf(false),
       evaluateArgs,
       callRow,
       argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),

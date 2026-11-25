@@ -6487,6 +6487,13 @@ test('reads regex groups by name, as Kotlin/JVM does', () => {
   });
 });
 
+test('calls suspend functions through super', () => {
+  const source = `open class A { open suspend fun f(x: Int): Int = x }
+class B : A() { override suspend fun f(x: Int): Int = super.f(x) * 2 }
+suspend fun main() { println(B().f(5)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '10\n' });
+});
+
 test('calls suspend member extensions, dispatching on the value of their class', () => {
   const source = `open class A { open suspend fun Int.tag(): String = "A$this" }
 class C : A() { override suspend fun Int.tag(): String = "C$this" }
