@@ -486,10 +486,10 @@ hIsClosed :: Handle -> IO Bool
 hIsClosed = primitive "hIsClosed"
 
 hReady :: Handle -> IO Bool
-hReady h = fmap not (hIsEOF h)
+hReady h = hWaitForInput h 0
 
 hWaitForInput :: Handle -> Int -> IO Bool
-hWaitForInput h _ = hReady h
+hWaitForInput h _ = primitive "hWaitForInput" h
 
 getLine :: IO String
 getLine = hGetLine stdin

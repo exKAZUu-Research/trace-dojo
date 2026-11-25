@@ -112,6 +112,12 @@ class Handle {
     return this.reader('hIsEOF').isAtEnd;
   }
 
+  /** Whether input is available, which a handle with none left to read answers with GHC's end-of-file error. */
+  waitForInput(): boolean {
+    if (this.reader('hWaitForInput').isAtEnd) throw ioError('EOF', 'hWaitForInput', this.name, '');
+    return true;
+  }
+
   /**
    * Reads the rest lazily, as GHC's `hGetContents` does: the handle is semi-closed until the string's end is reached,
    * which closes it; closing it earlier makes reading further fail.
@@ -384,6 +390,10 @@ define('hGetLine', 1, [], ([handle], runtime) =>
 
 define('hGetChar', 1, [], ([handle], runtime) =>
   ioAction('hGetChar', [handle], () => handleOf(handle, runtime).readChar())
+);
+
+define('hWaitForInput', 1, [], ([handle], runtime) =>
+  ioAction('hWaitForInput', [handle], () => bool(handleOf(handle, runtime).waitForInput()))
 );
 
 define('hIsEOF', 1, [], ([handle], runtime) =>
