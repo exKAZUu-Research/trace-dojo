@@ -4,7 +4,7 @@ import type { ExecutionBudget } from '../interpreter/limits';
 import { nameOf, type Node } from '../javascript/convertNodes';
 import { isConstructorDefinition } from '../javascript/programConverter';
 import { Binder } from './checker/binder';
-import { Scope } from './checker/scopes';
+import { Scope, type Sym } from './checker/scopes';
 import { isParameterProperty } from './checker/syntax';
 import {
   assertedExpression,
@@ -102,8 +102,9 @@ export function javaScriptViewOf(root: TreeNode, budget: ExecutionBudget): Node 
   return view(root, binder);
 }
 
-/** The TypeScript declarations that compile to code of their own. */
+/** The TypeScript declarations that compile to code of their own, and the names a namespace's exports change. */
 const compiledDeclarations: Record<string, (node: TreeNode, binder: Binder) => ViewNode> = {
+  shorthand_property_identifier: (node, binder) => shorthandPropertyView(node, binder),
   module: (node, binder) => namespaceView(node, binder),
   internal_module: (node, binder) => namespaceView(node, binder),
   import_alias: (node, binder) => importAliasView(node, binder),
@@ -155,20 +156,39 @@ function view(node: TreeNode, binder: Binder): ViewNode {
 
 function identifierView(node: TreeNode, binder: Binder): ViewNode {
   const symbol = binder.lookupValue(node, nameOf(node));
-  // A namespace's exported variable is a property of the namespace's object, which its declarations read, as is any
-  // export that another declaration of the namespace reads, where the name has no binding of its own.
-  if (
-    symbol?.exportedFrom &&
-    (exportedVariableKinds.has(symbol.valueKind ?? '') ||
-      namespaceBodyOf(node)?.id !== namespaceBodyOf(symbol.valueDeclaration)?.id)
-  )
-    return memberReference(node, symbol.exportedFrom.name, nameOf(node));
+  const namespace = namespaceOfReference(node, symbol);
+  if (namespace) return memberReference(node, namespace, nameOf(node));
   // An enum's initializers refer to its members by name, which compiles to reading them from the enum object.
   if (symbol?.valueKind === 'enumMember') return enumMemberReference(node, symbol.valueDeclaration as TreeNode);
   // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
   return nameOf(node) === 'undefined' && !symbol
     ? leaf(node, 'undefined', '(void 0)')
     : generic(node, node.type, binder);
+}
+
+/** `{ x }` naming a namespace's export, as `{ x: N.x }`, which reads it from the namespace's object. */
+function shorthandPropertyView(node: TreeNode, binder: Binder): ViewNode {
+  const name = nameOf(node);
+  const namespace = namespaceOfReference(node, binder.lookupValue(node, name));
+  if (!namespace) return generic(node, node.type, binder);
+  return assemble(node, 'pair', [
+    { node: leaf(node, 'property_identifier', name), fieldName: 'key' },
+    { node: token(node, ':'), fieldName: undefined },
+    { node: memberReference(node, namespace, name), fieldName: 'value' },
+  ]);
+}
+
+/**
+ * The namespace whose object a name is read from: a namespace's exported variable is a property of its object, which
+ * its declarations read, as is any export that another declaration of the namespace reads, where the name has no
+ * binding of its own.
+ */
+function namespaceOfReference(node: TreeNode, symbol: Sym | undefined): string | undefined {
+  if (!symbol?.exportedFrom) return undefined;
+  const isProperty =
+    exportedVariableKinds.has(symbol.valueKind ?? '') ||
+    namespaceBodyOf(node)?.id !== namespaceBodyOf(symbol.valueDeclaration)?.id;
+  return isProperty ? symbol.exportedFrom.name : undefined;
 }
 
 /** The body of the namespace declaration a node is in, whose function binds the names it declares. */
@@ -351,6 +371,9 @@ function importBindings(node: TreeNode, clause: TreeNode, source: TreeNode): [st
  */
 function exportView(node: TreeNode, binder: Binder): ViewNode {
   const declaration = node.childForFieldName('declaration');
+  // `export default class { }` declares no name, so its class is only evaluated, as a class expression.
+  if (declaration?.type === 'class_declaration' && !declaration.childForFieldName('name'))
+    return expressionStatement(node, generic(declaration, 'class', binder));
   if (declaration) return view(declaration, binder);
   const value = node.childForFieldName('value');
   return value ? expressionStatement(node, view(value, binder)) : leaf(node, 'empty_statement');

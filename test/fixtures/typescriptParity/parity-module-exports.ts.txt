@@ -1,0 +1,7 @@
+export function f(x: number): number;
+export function f(x: string): string;
+export function f(x: any) { return x; }
+export default class {
+  hi() { return 1; }
+}
+console.log(f(2), f("a"));
