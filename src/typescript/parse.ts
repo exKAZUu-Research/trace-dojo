@@ -172,7 +172,41 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return errors.toSorted((left, right) => left.row - right.row);
+  return withPostfixOptionalTypes(root, errors).toSorted((left, right) => left.row - right.row);
+}
+
+/**
+ * Names `let a: string?`, which the parser cannot read past the `?`, as tsc does: the `?` written after a type, with
+ * the union it suggests in its place, instead of the syntax error the parser gives there.
+ */
+function withPostfixOptionalTypes(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const postfix = root.descendantsOfType('ERROR').flatMap((node): SourceDiagnostic[] => {
+    const type = node?.text === '?' ? postfixMarkedType(node) : undefined;
+    if (!type) return [];
+    return [
+      {
+        row: type.startPosition.row,
+        message: `'?' が型の末尾にある書き方は、TypeScript では使えません。'${type.text} | undefined' と書くつもりでしたか？`,
+      },
+    ];
+  });
+  const rows = new Set(postfix.map((error) => error.row));
+  return [
+    ...errors.filter((error) => !rows.has(error.row) || error.message !== '書き方に誤りがあります。'),
+    ...postfix,
+  ];
+}
+
+/**
+ * The type an unread `?` follows: a variable's, a property's, or a parameter's, but not a return type's, after which
+ * tsc expects the body and reports a syntax error.
+ */
+function postfixMarkedType(mark: Node): Node | undefined {
+  const before = mark.previousSibling;
+  if (!before || mark.parent?.childForFieldName('return_type')?.id === before.id) return undefined;
+  // A parameter's annotation ends the parameter, which the `?` then follows.
+  const annotation = before.type === 'type_annotation' ? before : before.childForFieldName('type');
+  return annotation?.type === 'type_annotation' ? (annotation.namedChildren[0] ?? undefined) : undefined;
 }
 
 /**
