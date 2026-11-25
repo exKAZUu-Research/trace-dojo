@@ -1164,6 +1164,7 @@ export class VariableStore {
     }
     for (const args of this.positional) yield* args;
     yield* this.rematch;
+    if (this.lastArgument !== undefined) yield this.lastArgument;
   }
 
   // ---------------------------------------------------------------- private cell helpers
