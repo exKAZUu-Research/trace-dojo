@@ -519,13 +519,15 @@ liftNE :: ([a] -> [b]) -> NonEmpty a -> NonEmpty b
 liftNE f = fromList . f . toList
 
 zip :: NonEmpty a -> NonEmpty b -> NonEmpty (a, b)
-zip ~(a :| as) ~(b :| bs) = (a, b) :| B.zip as bs
+zip (a :| as) (b :| bs) = (a, b) :| B.zip as bs
 
 zipWith :: (a -> b -> c) -> NonEmpty a -> NonEmpty b -> NonEmpty c
-zipWith f ~(a :| as) ~(b :| bs) = f a b :| B.zipWith f as bs
+zipWith f (a :| as) (b :| bs) = f a b :| B.zipWith f as bs
 
-unzip :: Functor f => f (a, b) -> (f a, f b)
-unzip xs = (fmap fst xs, fmap snd xs)
+unzip :: NonEmpty (a, b) -> (NonEmpty a, NonEmpty b)
+unzip ((a, b) :| asbs) = (a :| as, b :| bs)
+  where
+    (as, bs) = B.unzip asbs
 
 filter :: (a -> Bool) -> NonEmpty a -> [a]
 filter p = B.filter p . toList
