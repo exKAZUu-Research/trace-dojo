@@ -2,7 +2,7 @@ import { patternSyntaxMessage } from '../../java/builtinText';
 import { translateJavaRegex, UnsupportedRegexError } from '../../java/javaRegex';
 import { javaReplacer, ReplacementError } from '../../java/javaReplacement';
 import type { Frame } from '../runtime';
-import { KObject, NULL, type Value } from '../values';
+import { indexedItems, KObject, NULL, type Value } from '../values';
 import { defineNative, defineNativeProperty, newItems, throwError } from './registry';
 
 interface CompiledRegex {
@@ -24,11 +24,13 @@ const OPTION_FLAGS: Record<string, string> = {
   DOT_MATCHES_ALL: 's',
 };
 
-/** The options a Regex was given: none, one, or a set of them. */
+/** The options a Regex was given: none, one, or the array its constructor makes of a set of them. */
 function optionValues(options: Value): Value[] {
   if (options === NULL) return [];
   if (options instanceof KObject && options.native?.name !== undefined) return [options];
-  return ((options as KObject).store?.entries ?? []).map((entry) => entry.key);
+  const items = indexedItems(options as KObject);
+  if (!items) throw new Error('Regex options that are not an array of options');
+  return items;
 }
 
 function optionNames(options: Value): string[] {
@@ -78,7 +80,7 @@ defineNative('kotlin.text.Regex.<init>(String)', (frame, receiver, [pattern]) =>
 defineNative('kotlin.text.Regex.<init>(String, RegexOption)', (frame, receiver, [pattern, option]) => {
   initialize(frame, receiver, pattern, option);
 });
-defineNative('kotlin.text.Regex.<init>(String, Set<RegexOption>)', (frame, receiver, [pattern, options]) => {
+defineNative('kotlin.text.Regex.<init>(String, Array<RegexOption>)', (frame, receiver, [pattern, options]) => {
   initialize(frame, receiver, pattern, options);
 });
 defineNativeProperty('kotlin.text.Regex.pattern', (_frame, receiver) => regexOf(receiver).pattern);

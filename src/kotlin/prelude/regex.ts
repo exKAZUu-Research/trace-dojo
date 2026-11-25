@@ -79,7 +79,7 @@ internal class MatcherMatchResult(private val regex: Regex, private val input: S
 external class Regex {
     external constructor(pattern: String)
     external constructor(pattern: String, option: RegexOption)
-    external constructor(pattern: String, options: Set<RegexOption>)
+    internal external constructor(pattern: String, options: Array<RegexOption>)
     external val pattern: String
     // A set however the options are given, as Kotlin/JVM's Regex keeps them.
     val options: Set<RegexOption> get() = optionList().toSet()
@@ -164,6 +164,9 @@ external class Regex {
 
 fun String.toRegex(): Regex = Regex(this)
 fun String.toRegex(option: RegexOption): Regex = Regex(this, option)
+// Regex's constructor of a set of options, whose elements reach the native code as an array: only Kotlin code can
+// iterate every kind of set.
+fun Regex(pattern: String, options: Set<RegexOption>): Regex = Regex(pattern, options.toTypedArray())
 fun String.toRegex(options: Set<RegexOption>): Regex = Regex(this, options)
 fun CharSequence.replace(regex: Regex, replacement: String): String = regex.replace(this, replacement)
 fun CharSequence.replace(regex: Regex, transform: (MatchResult) -> CharSequence): String = regex.replace(this, transform)
