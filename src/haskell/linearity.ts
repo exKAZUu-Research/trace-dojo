@@ -1,5 +1,5 @@
 import { compileError } from './errors';
-import { type LocalVar, type RBindGroup, type RBinding, type RExpr, type RPat, rpatChildren, type RRhs } from './rast';
+import type { LocalVar, RBindGroup, RBinding, RExpr, RPat, RRhs } from './rast';
 import { functionParts, zonk } from './types';
 
 /** How many times an expression uses a variable: not at all, exactly once, or any other number of times. */
@@ -60,20 +60,44 @@ export function checkLinearUses(locals: readonly LocalVar[], rhs: RRhs): void {
  * discards part of the value, which a linear value may not have, so it is an error as in GHC.
  */
 export function linearLocals(pat: RPat): LocalVar[] {
-  const result: LocalVar[] = [];
-  const pending = [pat];
-  while (pending.length > 0) {
-    const current = pending.pop() as RPat;
-    if (current.k === 'wild') {
-      throw compileError(
-        current.span,
-        '線形の値を _ で捨てることはできません。どの場合もちょうど 1 回使ってください。'
-      );
+  switch (pat.k) {
+    case 'var': {
+      return [pat.local];
     }
-    if (current.k === 'var' || current.k === 'as') result.push(current.local);
-    pending.push(...rpatChildren(current).toReversed());
+    case 'wild': {
+      throw compileError(pat.span, '線形の値を _ で捨てることはできません。どの場合もちょうど 1 回使ってください。');
+    }
+    case 'lit': {
+      return [];
+    }
+    case 'as': {
+      return [pat.local, ...linearLocals(pat.pat)];
+    }
+    case 'con': {
+      return pat.args.flatMap((arg) => linearLocals(arg));
+    }
+    case 'bang':
+    case 'lazy':
+    case 'view':
+    case 'sig': {
+      return linearLocals(pat.pat);
+    }
+    case 'or': {
+      return pat.alts.flatMap((alt) => linearLocals(alt));
+    }
+    default: {
+      // Every pattern form has a case above; a new one is a type error here until it has its own.
+      return unhandledPattern(pat);
+    }
   }
-  return result;
+}
+
+function unhandledPattern(pat: never): never {
+  throw new Error(`The linearity check has no case for the pattern ${(pat as RPat).k}`);
+}
+
+function unhandledExpression(_expr: never): Usage {
+  return 'many';
 }
 
 class UsageCounter {
@@ -183,8 +207,16 @@ class UsageCounter {
         const binds = total(expr.binds, (bind) => this.expr(bind.expr));
         return add(scale(binds, false), this.expr(expr.body));
       }
-      default: {
+      case 'con':
+      case 'lit':
+      case 'hole':
+      case 'implicit': {
         return 0;
+      }
+      default: {
+        // Every expression kind has a case above; a new one is a type error here until it has its own, and until
+        // then it counts as any number of uses, which rejects rather than accepts.
+        return unhandledExpression(expr);
       }
     }
   }
