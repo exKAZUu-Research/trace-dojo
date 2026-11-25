@@ -156,6 +156,11 @@ export class Codegen {
     }
     const whole = globalOf(binding, '<pattern>');
     const patternOwner = { name: '<pattern>', row: binding.span.row, isAtomic: false };
+    const params = binding.dictParams ?? [];
+    if (params.length > 0) {
+      this.compilePolymorphicTopPattern(binding, whole, params, patternOwner);
+      return;
+    }
     const frame = new FrameScope(undefined);
     whole.code = this.withFrame(frame, () => {
       const slot = frame.alloc();
@@ -180,6 +185,42 @@ export class Codegen {
         functionResult: global.scheme ? isFunctionType(global.scheme.type) : false,
       };
     }
+  }
+
+  /**
+   * A pattern binding generalized with constraints, as it is without the monomorphism restriction: its match and each
+   * of its variables take the constraints' dictionaries, each variable matching the binding at the ones it is given.
+   */
+  private compilePolymorphicTopPattern(
+    binding: Extract<RBinding, { k: 'pat' }>,
+    whole: GlobalDef,
+    params: DictParam[],
+    patternOwner: FunctionInfo
+  ): void {
+    const globals = binding.globals as ValueEntity[];
+    for (const global of globals) this.ownDictParams.set(global, params);
+    whole.code = this.compileDictionaryLambda(params, 0, () => this.matchedPattern(binding), { info: patternOwner });
+    for (const [index, global] of globals.entries()) {
+      globalOf(global, global.name, global).code = this.compileDictionaryLambda(
+        params,
+        0,
+        () => this.projectAt(binding, { k: 'global', global: whole }, params, index),
+        { info: { name: global.name, row: binding.span.row, isAtomic: false, patternOwner } }
+      );
+    }
+  }
+
+  /** A pattern binding's match of its right-hand side, in the current frame. */
+  private matchedPattern(binding: Extract<RBinding, { k: 'pat' }>): Core {
+    const slot = this.frame.alloc();
+    const rhs = this.compileRhs(binding.rhs, this.patternFail(binding.span));
+    return { k: 'let', binds: [{ index: slot, expr: rhs }], body: this.matchBoundPattern(binding, slot) };
+  }
+
+  /** A variable of a polymorphic pattern binding: the binding's match at the current dictionaries, projected. */
+  private projectAt(binding: Extract<RBinding, { k: 'pat' }>, whole: Core, params: DictParam[], index: number): Core {
+    const matched: Core = { k: 'app', fn: whole, args: params.map((param) => this.paramRef(param)) };
+    return patternProjection(matched, index, binding.binders.length);
   }
 
   /** Registers how a module's instance's dictionary is built. */
@@ -436,6 +477,9 @@ export class Codegen {
         if (binding.dictParams && binding.dictParams.length > 0) this.ownDictParams.set(local, binding.dictParams);
       } else {
         const own: number[] = [];
+        if (binding.dictParams && binding.dictParams.length > 0) {
+          for (const local of binding.binders) this.ownDictParams.set(local, binding.dictParams);
+        }
         for (const local of binding.binders) {
           const slot = this.frame.alloc();
           this.frame.slots.set(local, slot);
@@ -450,6 +494,20 @@ export class Codegen {
       if (binding.k === 'fun') {
         const local = (binding.binder as { kind: 'local'; local: LocalVar }).local;
         binds.push({ index: own[0], expr: this.compileFunction(binding, local.name, false) });
+        continue;
+      }
+      const params = binding.dictParams ?? [];
+      if (params.length > 0) {
+        const whole = this.frame.alloc();
+        binds.push({ index: whole, expr: this.compileDictionaryLambda(params, 0, () => this.matchedPattern(binding)) });
+        for (const index of binding.binders.keys()) {
+          binds.push({
+            index: own[index],
+            expr: this.compileDictionaryLambda(params, 0, () =>
+              this.projectAt(binding, { k: 'local', depth: 1, index: whole }, params, index)
+            ),
+          });
+        }
         continue;
       }
       const whole = this.frame.alloc();

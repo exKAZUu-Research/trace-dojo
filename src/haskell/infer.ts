@@ -1698,10 +1698,9 @@ export class Checker {
     deferred: EvidenceHole[],
     outer: number
   ): EvidenceHole[] {
-    // A pattern binding stays monomorphic even without the restriction, whose generalization this checker lacks.
-    const restricted = bindings.some(
-      (binding) => binding.k === 'pat' || (this.monomorphismRestriction && binding.clauses[0].pats.length === 0)
-    );
+    const restricted =
+      this.monomorphismRestriction &&
+      bindings.some((binding) => binding.k === 'pat' || binding.clauses[0].pats.length === 0);
     const types = bindings.flatMap((binding) =>
       binding.k === 'pat' ? binding.binders.map((local) => local.type as Type) : [monoTypes.get(binding) as Type]
     );
