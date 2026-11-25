@@ -342,11 +342,14 @@ class _File extends FileSystemEntity implements File {
   File get absolute => isAbsolute ? this : _File(FileSystemEntity._absolutePath(path));
   bool existsSync() => FileSystemEntity._kindOf(path) == 0;
   File renameSync(String newPath) {
-    _rename(path, newPath, "Cannot rename file to '" + newPath + "'");
+    final failure = "Cannot rename file to '" + newPath + "'";
+    _requireFile(failure);
+    _rename(path, newPath, failure);
     return File(newPath);
   }
   Future<File> rename(String newPath) => Future(() => renameSync(newPath));
   void deleteSync({bool recursive = false}) {
+    if (!recursive) _requireFile("Cannot delete file");
     _delete(path, false, recursive, recursive ? "Deletion failed" : "Cannot delete file");
   }
   Future<File> delete({bool recursive = false}) => Future(() {
@@ -362,10 +365,21 @@ class _File extends FileSystemEntity implements File {
       });
   File copySync(String newPath) {
     final failure = "Cannot copy file to '" + newPath + "'";
+    _requireFile(failure);
     _write(newPath, _read(path, failure), false, failure, path);
     return File(newPath);
   }
   Future<File> copy(String newPath) => Future(() => copySync(newPath));
+  /**
+   * Fails unless the path names a file, as the VM checks before it renames, copies or deletes one: a directory is
+   * reported as one, and a file named with a trailing separator, which names no file, as not found.
+   */
+  void _requireFile(String failure) {
+    final kind = FileSystemEntity._kindOf(path);
+    if (kind == 0) return;
+    if (kind == 1) throw FileSystemException(failure, path, const OSError("Is a directory", 21));
+    throw PathNotFoundException(path, const OSError("No such file or directory", 2), failure);
+  }
   int lengthSync() => utf8.encode(_read(path, "Cannot retrieve length of file")).length;
   Future<int> length() => Future(lengthSync);
   String readAsStringSync({Encoding encoding = utf8}) {

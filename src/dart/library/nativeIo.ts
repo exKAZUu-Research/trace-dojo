@@ -16,6 +16,17 @@ const OS_ERRORS: Record<FileSystemErrorCode, [string, bigint]> = {
   ENOTEMPTY: ['Directory not empty', 66n],
 };
 
+/**
+ * The error the OS gives for a failure at a path written as a directory, as `a.txt/`: a missing name is not found,
+ * and a file moved onto an existing directory fails because the target is one, whatever the file system reported.
+ */
+function reportedCode(runtime: Runtime, code: FileSystemErrorCode, errorPath: string): FileSystemErrorCode {
+  if (!/[^/]\/+$/u.test(errorPath)) return code;
+  const kind = runtime.io.files.kindOf(errorPath.replace(/\/+$/u, ''));
+  if (kind === undefined) return 'ENOENT';
+  return kind === 'directory' && code === 'ENOTDIR' ? 'EISDIR' : code;
+}
+
 /** Runs a file system operation, turning its failure into the exception dart:io throws, with the path shown. */
 function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, shownPath?: string): T {
   try {
@@ -23,10 +34,7 @@ function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, show
   } catch (error) {
     if (!(error instanceof FileSystemError)) throw error;
     const { code, path: errorPath } = error;
-    // The VM reports a missing name written as a directory, as `a.txt/`, as not found, where Node.js reports EISDIR.
-    const isMissingName =
-      /[^/]\/+$/u.test(errorPath) && runtime.io.files.kindOf(errorPath.replace(/\/+$/u, '')) === undefined;
-    const reported = isMissingName ? 'ENOENT' : code;
+    const reported = reportedCode(runtime, code, errorPath);
     const [message, errno] = OS_ERRORS[reported];
     const osError = runtime.links.construct(runtime, 'OSError', '', [message, errno]);
     const path = shownPath ?? errorPath;
