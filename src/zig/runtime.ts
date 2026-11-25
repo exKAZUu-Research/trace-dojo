@@ -245,12 +245,12 @@ export class Runtime {
   }
 }
 
-/** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
 type StandardStream = 'stdin' | 'stdout' | 'stderr';
 
 /** What a descriptor refers to: a standard stream, or a file that the program opened. */
 type Descriptor = { readonly stream: StandardStream } | OpenFile;
 
+/** A file that the program opened, which reads the file's text as UTF-8 bytes and writes text it decodes. */
 export interface OpenFile {
   path: string;
   read?: () => string;
