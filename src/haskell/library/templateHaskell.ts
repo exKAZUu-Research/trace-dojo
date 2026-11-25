@@ -278,8 +278,18 @@ data Role = NominalR | RepresentationalR | PhantomR | InferR deriving (Eq, Ord, 
 
 newtype Q a = Q { unQ :: IO a }
 
+-- In IO, a Q computation's fail reports its message and fails as GHC's Quasi IO does; in a splice, it fails the
+-- splice with its message alone.
 runQ :: Q a -> IO a
-runQ (Q io) = io
+runQ (Q io) = io ${'`'}catch${'`'} \(QFail message) ->
+  hPutStrLn stderr ("Template Haskell error: " ++ message) >> ioError (userError "Q monad failure")
+
+newtype QFail = QFail String
+
+instance Show QFail where
+  show (QFail message) = message
+
+instance Exception QFail
 
 runIO :: IO a -> Q a
 runIO = Q
@@ -295,7 +305,7 @@ instance Monad Q where
   Q m >>= k = Q (m >>= \x -> unQ (k x))
 
 instance MonadFail Q where
-  fail s = Q (ioError (userError s))
+  fail s = Q (throwIO (QFail s))
 
 instance MonadFix Q where
   mfix f = Q (mfix (unQ . f))
