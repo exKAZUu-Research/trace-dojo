@@ -7,6 +7,7 @@ import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
 import { type Expander, isListExpansionSyntax, type ParameterValue, type SubscriptRef } from './expansion';
 import {
+  breakSegment,
   EMPTY_LIST_SEGMENT,
   QUOTED_EMPTY_SEGMENT,
   splitWordSegments,
@@ -721,19 +722,39 @@ function positionalDeclarationSegments(
   if (value.values.length === 0) {
     return expander.valueSegments({ ...value, values: [] }, ctx, expansionText);
   }
-  const items = ['set', '--'];
+  const quotedValues: string[] = [];
   for (const element of value.values) {
-    pushMeteredItem(items, quoteReusable(element), shell.runtime.step);
+    pushMeteredItem(quotedValues, quoteReusable(element), shell.runtime.step);
   }
-  return expander.valueSegments({ ...value, values: items, transformed: true }, ctx, expansionText);
+  if (ctx.inDouble && !value.star) {
+    const items = [...splitPrefixFields('set -- ', quotedValues[0], expander.currentIfs()), ...quotedValues.slice(1)];
+    return expander.valueSegments({ ...value, values: items, transformed: true }, ctx, expansionText);
+  }
+  const body = expander.valueSegments({ ...value, values: quotedValues, transformed: true }, ctx, expansionText);
+  const prefix = ctx.inDouble ? [textSegment('set -- ', true, false)] : unquotedPositionalPrefix(expander.currentIfs());
+  return [...prefix, ...body];
+}
+
+function unquotedPositionalPrefix(ifs: string): WordSegment[] {
+  if (ifs !== '') return [textSegment('set -- ', false, true)];
+  return [
+    textSegment('set', false, true),
+    breakSegment('positional', ' ', false),
+    textSegment('--', false, true),
+    breakSegment('positional', ' ', false),
+  ];
 }
 
 function splitQuotedDeclarationFields(text: string, ifs: string): string[] {
   const eqIndex = text.indexOf('=');
-  const segs: WordSegment[] =
-    eqIndex === -1
-      ? [textSegment(text, false, true)]
-      : [textSegment(text.slice(0, eqIndex + 1), false, true), textSegment(text.slice(eqIndex + 1), true, false)];
+  return eqIndex === -1
+    ? splitPrefixFields(text, undefined, ifs)
+    : splitPrefixFields(text.slice(0, eqIndex + 1), text.slice(eqIndex + 1), ifs);
+}
+
+function splitPrefixFields(prefix: string, tail: string | undefined, ifs: string): string[] {
+  const segs: WordSegment[] = [textSegment(prefix, false, true)];
+  if (tail !== undefined) segs.push(textSegment(tail, true, false));
   return splitWordSegments(segs, ifs || ' ').map((field) => field.map((fragment) => fragment.text).join(''));
 }
 
