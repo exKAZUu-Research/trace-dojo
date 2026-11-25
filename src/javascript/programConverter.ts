@@ -478,8 +478,8 @@ export class ProgramConverter extends ExpressionConverter {
   }
 
   /** The decorators of a class or a class member, which JavaScript as Node.js runs it does not have. */
-  protected decoratorsOf(node: Node, isClass: boolean): Expression[] | undefined {
-    return isClass && namedChildren(node).some((child) => child.type === 'decorator')
+  protected decoratorsOf(node: Node): Expression[] | undefined {
+    return namedChildren(node).some((child) => child.type === 'decorator')
       ? unsupported(node, 'デコレータ')
       : undefined;
   }
@@ -488,7 +488,7 @@ export class ProgramConverter extends ExpressionConverter {
   protected readonly hasAutoAccessors: boolean = false;
 
   private strictClassNode(node: Node, name: string): ClassNode {
-    const decorators = this.decoratorsOf(node, true);
+    const decorators = this.decoratorsOf(node);
     const heritage = namedChildren(node).find((child) => child.type === 'class_heritage');
     const superClass = heritage ? this.expression(namedChildren(heritage)[0]) : undefined;
     const members: ClassMember[] = [];
@@ -526,7 +526,7 @@ export class ProgramConverter extends ExpressionConverter {
         isStatic,
         key,
         fn: this.functionNode(member, kind, keyName(key)),
-        decorators: this.decoratorsOf(member, false),
+        decorators: this.decoratorsOf(member),
       };
     }
     if (member.type === 'field_definition') {
@@ -543,7 +543,7 @@ export class ProgramConverter extends ExpressionConverter {
         key,
         value,
         row: rowOf(member),
-        decorators: this.decoratorsOf(member, false),
+        decorators: this.decoratorsOf(member),
         isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
       };
       const recordsStep = value !== undefined && !constant;
