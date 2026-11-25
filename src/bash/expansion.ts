@@ -658,9 +658,7 @@ export class Expander {
   }
 
   private nonStarSeparatorOf(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): WordSegment {
-    const usesIfs =
-      ctx.inAssignmentRhs && (value.assignmentJoin === 'ifs' || (value.assignmentJoin === 'quotedIfs' && ctx.inDouble));
-    if (usesIfs) {
+    if (usesAssignmentIfs(value, ctx)) {
       const ifsJoiner = this.ifsJoiner();
       return breakSegment(ifsJoiner === '' ? 'field' : 'star', ifsJoiner, ctx.inDouble);
     }
@@ -756,6 +754,12 @@ export class Expander {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
+}
+
+function usesAssignmentIfs(value: Extract<ParameterValue, { kind: 'list' }>, ctx: WordContext): boolean {
+  if (ctx.spacedArrayStar) return true;
+  if (!ctx.inAssignmentRhs) return false;
+  return value.assignmentJoin === 'ifs' || (value.assignmentJoin === 'quotedIfs' && ctx.inDouble);
 }
 
 function isListExpansionSyntax(expansion: ParameterExpansion): boolean {
