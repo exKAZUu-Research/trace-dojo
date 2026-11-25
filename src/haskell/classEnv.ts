@@ -4,6 +4,7 @@ import {
   instantiateType,
   matchType,
   type Pred,
+  prune,
   splitApp,
   type Type,
   typesEqual,
@@ -103,8 +104,19 @@ function overlapping(instance: InstanceInfo): boolean {
 /** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */
 export function hasConstructorHead(type: Type): boolean {
   const { head } = splitApp(type);
-  // A type family's application that has not reduced is no constructor yet: what it reduces to may still be learned.
-  return head.tag === 'tcon' && head.entity.sort !== 'family';
+  // A type family's application that has not reduced, at the head or inside, decides no instance yet: what it
+  // reduces to may still be learned.
+  return head.tag === 'tcon' && !hasFamilyApplication(type);
+}
+
+function hasFamilyApplication(type: Type): boolean {
+  const pending = [type];
+  for (let current = pending.pop(); current; current = pending.pop()) {
+    const { head, args } = splitApp(prune(current));
+    if (head.tag === 'tcon' && head.entity.sort === 'family') return true;
+    pending.push(...args);
+  }
+  return false;
 }
 
 export function superPred(pred: Pred, index: number): Pred {
