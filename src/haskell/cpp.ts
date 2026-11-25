@@ -309,9 +309,13 @@ class Expansion {
     }
   }
 
-  /** Emits a name that is not expanded, which a condition reads as `0` unless it may yet be a call. */
+  /**
+   * Emits a name that is not expanded, which a condition reads as `0`; a function-like macro's name in an argument
+   * stays, which the call's replacement may still apply.
+   */
   private emitName(token: Token, functionLike: boolean): void {
-    this.emit(this.condition && !functionLike ? { kind: 'other', text: '0', row: token.row } : token);
+    const zero = this.condition && (!functionLike || this.sinks.length === 1);
+    this.emit(zero ? { kind: 'other', text: '0', row: token.row } : token);
   }
 
   private emit(token: Token): void {
@@ -374,7 +378,7 @@ class Expansion {
       const punctuation = token.kind === 'other' ? token.text : '';
       if (punctuation === ')' && depth-- === 0) {
         args.push(trimSpaces(current));
-        return args.length === 1 && args[0].length === 0 ? [] : args;
+        return args;
       }
       if (punctuation === ',' && depth === 0) {
         args.push(trimSpaces(current));
@@ -396,7 +400,11 @@ class Expansion {
   }
 
   private call(call: Call): void {
-    const { name, macro, version, args } = call;
+    const { name, macro, version } = call;
+    // `()` gives one empty argument to a macro of one parameter and none to a macro of none.
+    const empty = call.args.length === 1 && call.args[0].length === 0;
+    const args = empty && (macro?.params ?? []).length !== 1 ? [] : call.args;
+    call.args = args;
     if (version !== undefined && !Object.hasOwn(PACKAGE_VERSIONS, version)) {
       throw this.preprocessor.error(this.preprocessor.row, `パッケージ ${version} の版のマクロはありません。`);
     }
