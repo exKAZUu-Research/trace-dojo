@@ -120,6 +120,8 @@ export const FEATURES = {
   polyKinds: { phase: 'typecheck', any: ['PolyKinds'] },
   undecidableSuperClasses: { phase: 'typecheck', any: ['UndecidableSuperClasses'] },
   undecidableInstances: { phase: 'typecheck', any: ['UndecidableInstances'] },
+  overlappingInstances: { phase: 'typecheck', any: ['OverlappingInstances'] },
+  incoherentInstances: { phase: 'typecheck', any: ['IncoherentInstances'] },
   extendedDefaultRules: { phase: 'typecheck', any: ['ExtendedDefaultRules'] },
   anyclassByDefault: { phase: 'typecheck', any: ['DeriveAnyClass'] },
   newtypeByDefault: { phase: 'typecheck', any: ['GeneralisedNewtypeDeriving'] },

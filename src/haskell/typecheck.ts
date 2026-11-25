@@ -66,6 +66,11 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   checker.allowAmbiguousTypes = !options.isProgram || features.allows('ambiguousTypes');
   checker.polyKinds = features.allows('polyKinds');
   checker.monomorphismRestriction = !options.isProgram || features.allows('monomorphismRestriction');
+  checker.defaultOverlap = features.allows('incoherentInstances')
+    ? 'INCOHERENT'
+    : features.allows('overlappingInstances')
+      ? 'OVERLAPS'
+      : undefined;
   inferKinds(checker, module);
   applyDefaultDecls(checker, module);
   for (const decl of module.dataDecls) defineConstructors(decl);
@@ -722,6 +727,7 @@ export function makeInstance(
 }
 
 function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
+  info.overlap ??= checker.defaultOverlap;
   for (const existing of checker.env.instancesOf(info.cls)) {
     if (matchType(existing.head, info.head, []) && matchType(info.head, existing.head, [])) {
       const printer = new TypePrinter();

@@ -40,7 +40,7 @@ import {
   type VarRef,
 } from './rast';
 import { RecursionBudget } from './recursionBudget';
-import type { Span } from './syntax';
+import type { OverlapMode, Span } from './syntax';
 import { constraintPreds, TypeConversion } from './typeConversion';
 import { walkGraph } from './typeGraph';
 import {
@@ -165,6 +165,8 @@ export class Checker {
   monomorphismRestriction = true;
   /** Whether ExtendedDefaultRules relaxes defaulting as GHCi does. */
   extendedDefaults = false;
+  /** The overlap mode of the module's instances that name none: OverlappingInstances' or IncoherentInstances'. */
+  defaultOverlap: OverlapMode | undefined;
   /** The typed holes found so far with their types, which the module reports once it is checked. */
   readonly holes: { hole: Extract<RExpr, { k: 'hole' }>; type: Type }[] = [];
 

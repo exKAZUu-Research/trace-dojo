@@ -36,7 +36,7 @@ export const KNOWN_EXTENSIONS = new Set(
  * and the unsupported extensions below, these account for every extension GHC knows, which a test checks.
  */
 export const UNGATED_EXTENSIONS = new Set(
-  `OverlappingInstances IncoherentInstances MonoLocalBinds DeepSubsumption RelaxedPolyRec
+  `MonoLocalBinds DeepSubsumption RelaxedPolyRec
   ForeignFunctionInterface UnliftedNewtypes UnliftedDatatypes TypeInType DisambiguateRecordFields DoAndIfThenElse
   ConstraintKinds TypeData DeriveDataTypeable DeriveGeneric TypeSynonymInstances FlexibleContexts
   FlexibleInstances ConstrainedClassMethods PostfixOperators LiberalTypeSynonyms ImpredicativeTypes RelaxedLayout
