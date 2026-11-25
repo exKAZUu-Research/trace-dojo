@@ -1,3 +1,4 @@
+import { alignmentOperand, checkFieldOperand } from './admissibility';
 import { valueSlots } from './allocation';
 import {
   checked,
@@ -316,17 +317,9 @@ export abstract class ExpressionCompiler extends SemaBase {
       isConst: expression.isConst,
       isVolatile: expression.isVolatile,
       allowZero: expression.allowZero,
-      alignment: expression.alignment ? this.alignmentValue(expression.alignment) : undefined,
+      alignment: expression.alignment ? alignmentOperand(this, expression.alignment) : undefined,
       sentinel,
     });
-  }
-
-  protected alignmentValue(expression: Expression): number {
-    const value = this.knownValue(this.coerce(this.compile(expression, USIZE), USIZE, expression), '整列') as bigint;
-    if (value < 1n) this.error(expression, '整列の値は 1 以上にしてください。');
-    if ((value & (value - 1n)) !== 0n) this.error(expression, `整列の値 ${value} は、2 のべき乗ではありません。`);
-    if (value > 1n << 32n) this.error(expression, `整列の値 ${value} が大きすぎます。`);
-    return Number(value);
   }
 
   /** `addrspace(.generic)`; the others name address spaces of particular CPUs. */
@@ -488,8 +481,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     let base = object;
     let type = object.type;
-    const vector = isVectorType(type) || (type.kind === 'pointer' && type.size === 'one' && isVectorType(type.child));
-    if (vector) return this.error(expression, `${typeName(type)} 型は、フィールドを参照できません。`);
+    checkFieldOperand(this, type, expression);
     if (type.kind === 'pointer' && type.size === 'one') {
       if (type.child.kind === 'array') {
         if (name === 'len') return this.fixedResult(object, USIZE, type.child.length, expression);

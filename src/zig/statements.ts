@@ -1,3 +1,4 @@
+import { alignmentOperand } from './admissibility';
 import { valueSlots } from './allocation';
 // code-gauge-allow-file duplicateLines -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
@@ -480,7 +481,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const type = value.type;
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
     if (statement.addressSpace) this.addressSpace(statement.addressSpace);
-    const alignment = statement.alignment ? this.alignmentValue(statement.alignment) : undefined;
+    const alignment = statement.alignment ? alignmentOperand(this, statement.alignment) : undefined;
     const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName, alignment);
     const { slot } = binding;
     const evaluate = value.eval;

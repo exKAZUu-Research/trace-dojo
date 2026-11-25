@@ -1,3 +1,4 @@
+import { checkMaskElement, vectorOperand } from './admissibility';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { ReflectionCompiler } from './reflection';
 import { known, type LocalBinding, newArray, runtime, staticResultOf, type TExpr } from './semaBase';
@@ -118,7 +119,7 @@ export abstract class VectorCompiler extends ReflectionCompiler {
     this.arity(expression, 4);
     const [childArg, predicateArg, leftArg, rightArg] = expression.args;
     const child = this.compileType(childArg);
-    const predicate = this.asVector(this.compile(predicateArg), BOOL, predicateArg, '@select の条件');
+    const predicate = vectorOperand(this, this.compile(predicateArg), BOOL, predicateArg, '@select の条件');
     if (!isVectorType(predicate.type)) return predicate;
     const vector = vectorOf(predicate.type.length, child);
     const left = this.coerce(this.compile(leftArg, vector), vector, leftArg);
@@ -142,11 +143,11 @@ export abstract class VectorCompiler extends ReflectionCompiler {
     const child = this.compileType(childArg);
     const operand = (arg: Expression): TExpr | undefined => {
       if (arg.kind === 'undefined') return undefined;
-      return this.asVector(this.compile(arg), child, arg, '@shuffle の値');
+      return vectorOperand(this, this.compile(arg), child, arg, '@shuffle の値');
     };
     const left = operand(leftArg);
     const right = operand(rightArg);
-    const mask = this.asVector(this.compile(maskArg), I32, maskArg, '@shuffle のマスク');
+    const mask = vectorOperand(this, this.compile(maskArg), I32, maskArg, '@shuffle のマスク');
     const indexes = (this.knownValue(mask, 'マスク') as ZArray).values() as bigint[];
     const sources = [left, right].filter((each): each is TExpr => each !== undefined);
     return this.elementwise(
@@ -159,9 +160,7 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         const span = { row: maskArg.row, col: maskArg.col, endRow: maskArg.endRow };
         // An undefined operand has the other operand's length, which a mask element must still fall within.
         const sized = source ?? left ?? right;
-        const length = sized ? (sized.type as ArrayType).length : 0n;
-        if (element >= length)
-          this.error(maskArg, `@shuffle のマスクの ${position} 番目 ${index} は、ベクトルの範囲の外です。`);
+        checkMaskElement(this, index, sized ? (sized.type as ArrayType).length : 0n, position, maskArg);
         if (!source) return { kind: 'undefined', ...span };
         const holder = elements[sources.indexOf(source)];
         return {
@@ -261,17 +260,6 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         }
       },
     };
-  }
-
-  /** An operand that a vector builtin takes as a vector of `element`s, which an array of them also gives. */
-  private asVector(value: TExpr, element: Type, span: Span, what: string): TExpr {
-    const type = value.type;
-    if (type.kind !== 'array')
-      return this.error(
-        span,
-        `${what}には ${typeName(element)} のベクトルか配列を渡してください（${typeName(type)} 型です）。`
-      );
-    return this.coerce(value, vectorOf(type.length, element), span);
   }
 
   private arity(expression: ExpressionOf<'builtinCall'>, count: number): void {

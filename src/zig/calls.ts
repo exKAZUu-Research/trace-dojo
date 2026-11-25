@@ -1,3 +1,4 @@
+import { alignmentOperand } from './admissibility';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
@@ -342,7 +343,7 @@ export abstract class CallCompiler extends VectorCompiler {
         : this.inParameterScope(decl, params, () => this.compileType(decl.syntax.returnType));
       const syntax = decl.syntax;
       const callingConvention = syntax.isExport ? 'c' : this.callingConvention(syntax.callingConvention);
-      if (syntax.alignment) this.alignmentValue(syntax.alignment);
+      if (syntax.alignment) alignmentOperand(this, syntax.alignment);
       if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
       if (callingConvention) {
         if (unknown.size > 0)

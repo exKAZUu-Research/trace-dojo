@@ -1,5 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
+import { alignmentOperand } from './admissibility';
 import { CompilationStorage, resolveTypeSlots, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
@@ -413,7 +414,6 @@ export abstract class SemaBase implements SemaApi {
   protected abstract separateAnalysis<T>(run: () => T): T;
   /** The function whose body the compiler is analyzing, if any. */
   protected abstract analyzedFunction(): FunctionInstance | undefined;
-  protected abstract alignmentValue(expression: Expression): number;
   protected abstract addressSpace(expression: Expression): void;
   /** Whether `set` is the inferred error set (`!T`) of the function being analyzed, which takes in any error. */
   protected abstract growsErrorSet(set: ErrorSetType): boolean;
@@ -670,7 +670,7 @@ export abstract class SemaBase implements SemaApi {
         decl.cell = { slots: [this.copyForCompilation(compiled.value, compiled.type, syntax)] };
         decl.type = compiled.type;
         if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);
-        if (syntax.alignment) decl.alignment = this.alignmentValue(syntax.alignment);
+        if (syntax.alignment) decl.alignment = alignmentOperand(this, syntax.alignment);
         if (decl.kind === 'const') {
           decl.value = compiled.value;
           markConstantStorage(decl.cell, compiled.type);
@@ -727,7 +727,7 @@ export abstract class SemaBase implements SemaApi {
           defaultValue,
           hasDefault: field.value !== undefined,
           ...(field.isComptime ? { comptimeValue: { value: defaultValue } } : {}),
-          ...(field.alignment ? { alignment: this.alignmentValue(field.alignment) } : {}),
+          ...(field.alignment ? { alignment: alignmentOperand(this, field.alignment) } : {}),
         });
       }
     });
