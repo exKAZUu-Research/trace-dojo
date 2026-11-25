@@ -353,11 +353,16 @@ export function isConstEnum(symbol: Sym): boolean {
   return symbol.valueDeclarations.some((declaration) => hasToken(declaration, 'const'));
 }
 
-/** Whether a const enum's name is used where TypeScript allows it: as the object of an access, or in a type query. */
+/**
+ * Whether a const enum's name is used where TypeScript allows it: as the object of an access, or as a whole type query,
+ * though not as the object of one such as `typeof E.A`.
+ */
 export function isAllowedConstEnumUse(node: TreeNode): boolean {
   const parent = node.parent;
-  const isObjectOfAccess =
-    (parent?.type === 'member_expression' || parent?.type === 'subscript_expression') &&
-    parent.childForFieldName('object')?.id === node.id;
-  return isObjectOfAccess || parent?.type === 'type_query';
+  if (parent?.type === 'type_query') return true;
+  if (parent?.type !== 'member_expression' && parent?.type !== 'subscript_expression') return false;
+  if (parent.childForFieldName('object')?.id !== node.id) return false;
+  let outer: TreeNode | null = parent;
+  while (outer?.type === 'member_expression') outer = outer.parent;
+  return outer?.type !== 'type_query';
 }

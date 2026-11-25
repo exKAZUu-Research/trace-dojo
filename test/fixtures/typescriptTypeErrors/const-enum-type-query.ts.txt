@@ -1,0 +1,5 @@
+const enum K { A = 1 }
+let a: typeof K.A = 1;
+let b: typeof K | undefined;
+let c: typeof K["A"] = 1;
+console.log(a, c, K.A);

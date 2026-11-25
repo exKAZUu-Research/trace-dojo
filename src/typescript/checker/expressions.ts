@@ -446,6 +446,7 @@ export class ExpressionChecker {
   private queryIdentifier(node: TreeNode): Type {
     const symbol = this.c.scopeOf(node).lookupValue(node.text);
     if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
+    if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
     return this.reportUnavailableValue(node, symbol)
       ? errorType
       : this.variableReferenceType(node, symbol, undefined, true);
