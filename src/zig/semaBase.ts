@@ -1775,7 +1775,7 @@ function dropsArraySentinel(from: Type, to: Type): boolean {
 }
 
 function pointerSentinel(pointer: Extract<Type, { kind: 'pointer' }>): Sentinel | undefined {
-  if (pointer.size === 'slice') return pointer.sentinel;
+  if (pointer.size !== 'one') return pointer.sentinel;
   return pointer.child.kind === 'array' ? pointer.child.sentinel : undefined;
 }
 
