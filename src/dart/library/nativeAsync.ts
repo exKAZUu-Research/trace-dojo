@@ -162,11 +162,6 @@ define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) 
   let next: Resumption | undefined;
   if (exception !== undefined) {
     next = { kind: 'throw', error: runtime.newThrow(exception, stackTrace) };
-  } else if (state.atStart && value === true) {
-    // The listener cancelled before the body started, which then never runs.
-    state.generator = undefined;
-    perform(runtime, state, { kind: 'return', value: undefined });
-    return;
   } else if (state.atYield && value === true) {
     next = { kind: 'next', value: LISTENER_CANCELLED };
   } else {
