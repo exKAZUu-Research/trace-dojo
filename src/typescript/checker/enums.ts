@@ -84,12 +84,7 @@ export class Enums {
 
   /** A `const enum` has no object to use as a value, only members to read, which TypeScript compiles to their values. */
   checkConstEnumUse(node: TreeNode, symbol: Sym): void {
-    if (!symbol.valueDeclarations.some((declaration) => hasToken(declaration, 'const'))) return;
-    const parent = node.parent;
-    const isObjectOfAccess =
-      (parent?.type === 'member_expression' || parent?.type === 'subscript_expression') &&
-      parent.childForFieldName('object')?.id === node.id;
-    if (isObjectOfAccess || parent?.type === 'type_query') return;
+    if (!isConstEnum(symbol) || isAllowedConstEnumUse(node)) return;
     this.c.error(
       node,
       "'const' enum は、プロパティやインデックスのアクセス式、import 宣言やエクスポート代入の右辺、型のクエリーでしか使えません。"
@@ -352,4 +347,17 @@ function binaryValue(operator: string, left: EnumValue, right: EnumValue): EnumV
   if (operator === '+' && (typeof left === 'string' || typeof right === 'string')) return `${left}${right}`;
   if (typeof left !== 'number' || typeof right !== 'number' || !arithmeticOperators.has(operator)) return undefined;
   return numberArithmetic(operator, left, right);
+}
+
+export function isConstEnum(symbol: Sym): boolean {
+  return symbol.valueDeclarations.some((declaration) => hasToken(declaration, 'const'));
+}
+
+/** Whether a const enum's name is used where TypeScript allows it: as the object of an access, or in a type query. */
+export function isAllowedConstEnumUse(node: TreeNode): boolean {
+  const parent = node.parent;
+  const isObjectOfAccess =
+    (parent?.type === 'member_expression' || parent?.type === 'subscript_expression') &&
+    parent.childForFieldName('object')?.id === node.id;
+  return isObjectOfAccess || parent?.type === 'type_query';
 }
