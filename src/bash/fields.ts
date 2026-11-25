@@ -21,6 +21,7 @@ export interface TextSegment {
 export interface BreakSegment {
   readonly kind: 'break';
   readonly breakKind: 'field' | 'positional' | 'star';
+  readonly ifsJoiner?: string;
 }
 
 export interface EmptyListSegment {
@@ -30,10 +31,11 @@ export interface EmptyListSegment {
 export type WordSegment = TextSegment | BreakSegment | EmptyListSegment;
 
 export const EMPTY_LIST_SEGMENT: EmptyListSegment = { kind: 'emptyList' };
-export const FIELD_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'field' };
-export const POSITIONAL_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'positional' };
-export const STAR_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'star' };
 export const QUOTED_EMPTY_SEGMENT: TextSegment = { kind: 'text', text: '', quoted: true, split: false };
+
+export function breakSegment(breakKind: BreakSegment['breakKind'], ifsJoiner?: string): BreakSegment {
+  return ifsJoiner === undefined ? { kind: 'break', breakKind } : { kind: 'break', breakKind, ifsJoiner };
+}
 
 export function textSegment(
   text: string,

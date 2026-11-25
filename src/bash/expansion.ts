@@ -5,14 +5,13 @@ import { expandBraces } from './braces';
 import { rejectUnsupportedExpansion, rejectUnsupportedPathnameExpansion } from './capabilities';
 import { charactersOf } from './characters';
 import {
+  type BreakSegment,
+  breakSegment,
   DEFAULT_WORD_CONTEXT,
   EMPTY_LIST_SEGMENT,
-  FIELD_BREAK_SEGMENT,
   isBreakSegment,
-  POSITIONAL_BREAK_SEGMENT,
   QUOTED_EMPTY_SEGMENT,
   splitWordSegments,
-  STAR_BREAK_SEGMENT,
   type TextSegment,
   textSegment,
   type WordContext,
@@ -85,14 +84,9 @@ export class Expander {
     return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
   }
 
-  /** Expands an assignment's subscript in a declaration word (`a[k]=v`), joining list breaks with `IFS` or a space. */
+  /** Expands an assignment's subscript in a declaration word (`a[k]=v`), joining list breaks with each list's `IFS` or a space. */
   expandAssignmentSubscript(word: Word): string {
-    const breakJoiner = this.ifsJoiner() || ' ';
-    return this.joinSegments(
-      this.expandParts(word.parts, { inDouble: false, spacedStar: true }),
-      breakJoiner,
-      breakJoiner
-    );
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar: true }), true);
   }
 
   /** Expands an assignment's value, optionally joining `$*` with spaces when `IFS` is empty (`spacedStar`). */
@@ -657,8 +651,11 @@ export class Expander {
   }
 
   private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, spacedStar: boolean): WordSegment {
-    if (!value.star) return value.positional ? POSITIONAL_BREAK_SEGMENT : FIELD_BREAK_SEGMENT;
-    return value.positional && spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK_SEGMENT : STAR_BREAK_SEGMENT;
+    const ifsJoiner = this.ifsJoiner();
+    if (!value.star) return breakSegment(value.positional ? 'positional' : 'field', ifsJoiner);
+    return value.positional && spacedStar && ifsJoiner === ''
+      ? breakSegment('field', ifsJoiner)
+      : breakSegment('star', ifsJoiner);
   }
 
   ifsJoiner(): string {
@@ -673,16 +670,21 @@ export class Expander {
 
   // ---------------------------------------------------------------- splitting & joining
 
-  joinSegments(segments: readonly WordSegment[], listBreakJoiner = ' ', starBreakJoiner = this.ifsJoiner()): string {
+  joinSegments(segments: readonly WordSegment[], useSubscriptIfs = false): string {
     let text = '';
     const spend = (cost?: number): void => this.spend(cost);
     for (const segment of segments) {
       if (segment.kind === 'emptyList') continue;
-      const chunk =
-        segment.kind === 'break' ? (segment.breakKind === 'star' ? starBreakJoiner : listBreakJoiner) : segment.text;
+      const chunk = segment.kind === 'break' ? this.breakJoinerOf(segment, useSubscriptIfs) : segment.text;
       text = appendBounded(text, chunk, spend);
     }
     return text;
+  }
+
+  private breakJoinerOf(segment: BreakSegment, useSubscriptIfs: boolean): string {
+    const ifsJoiner = segment.ifsJoiner ?? this.ifsJoiner();
+    if (useSubscriptIfs) return ifsJoiner || ' ';
+    return segment.breakKind === 'star' ? ifsJoiner : ' ';
   }
 
   flatten(segments: readonly WordSegment[]): TextSegment[] {
@@ -690,7 +692,7 @@ export class Expander {
     for (const segment of segments) {
       if (segment.kind === 'emptyList') continue;
       if (segment.kind === 'break') {
-        out.push(textSegment(segment.breakKind === 'star' ? this.ifsJoiner() : ' ', true, false));
+        out.push(textSegment(this.breakJoinerOf(segment, false), true, false));
       } else out.push(segment);
     }
     return out;

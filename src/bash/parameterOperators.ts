@@ -6,8 +6,8 @@ import { decodeAnsiC } from './converter';
 import { declarationText, quoteKey, quoteValue } from './declarePrint';
 import { appendBounded, type Expander, joinBounded, type ParameterValue, type SubscriptRef } from './expansion';
 import {
+  breakSegment,
   EMPTY_LIST_SEGMENT,
-  FIELD_BREAK_SEGMENT,
   isBreakSegment,
   QUOTED_EMPTY_SEGMENT,
   splitWordSegments,
@@ -176,8 +176,8 @@ function expandUnquotedOperatorWord(
   roots: string[]
 ): WordSegment[] {
   expander.checkTilde(parts, false);
+  const entries = collectOperatorWordEntries(expander, parts, spacedStar, roots);
   const ifs = expander.currentIfs();
-  const entries = collectOperatorWordEntries(expander, parts, spacedStar, expander.ifsJoiner(), roots);
   if (ifs !== '' && ifs[0] !== ' ' && entries.some(isUnquotedAtListEntry)) {
     return joinOperatorWordFields(ifs, entries);
   }
@@ -190,7 +190,6 @@ function collectOperatorWordEntries(
   expander: Expander,
   parts: WordPart[],
   spacedStar: boolean,
-  starJoiner: string,
   roots: string[]
 ): OperatorWordEntry[] {
   const entries: OperatorWordEntry[] = [];
@@ -201,6 +200,7 @@ function collectOperatorWordEntries(
     pushSegmentRoots(roots, expanded);
     for (const seg of expanded) {
       if (seg.kind === 'emptyList') continue;
+      const starJoiner = seg.kind === 'break' ? (seg.ifsJoiner ?? expander.ifsJoiner()) : '';
       if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
         entries.push({ segment: textSegment(starJoiner, false, true), keepsFields });
         continue;
@@ -230,8 +230,9 @@ function joinOperatorWordFields(ifs: string, entries: OperatorWordEntry[]): Word
   const hasProtectedBreak = entries.some(isProtectedFieldBreak);
   const groups = splitOperatorGroups(entries, hasProtectedBreak);
   const result: WordSegment[] = [];
+  const ifsJoiner = charactersOf(ifs)[0] ?? '';
   for (const [index, group] of groups.entries()) {
-    if (index > 0) result.push(FIELD_BREAK_SEGMENT);
+    if (index > 0) result.push(breakSegment('field', ifsJoiner));
     result.push(...joinOperatorGroup(ifs, group));
   }
   return result;
