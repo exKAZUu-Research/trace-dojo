@@ -1,5 +1,5 @@
 import { type FileHandle, FileSystemError, type TextReader } from '../../interpreter/programIo';
-import { normalizeSlashes } from '../../java/builtinIoSupport';
+import { normalizeSlashes, parentPathOf } from '../../java/builtinIoSupport';
 import { stringHash, stringOf } from '../format';
 import { type Frame, ProgramExit } from '../runtime';
 import { KObject, NULL, type Value } from '../values';
@@ -43,12 +43,6 @@ function joined(parent: string | undefined, child: string): string {
 function nameOf(path: string): string {
   const index = path.lastIndexOf('/');
   return index === -1 ? path : path.slice(index + 1);
-}
-
-function parentOf(path: string): string | undefined {
-  const index = path.lastIndexOf('/');
-  if (index === -1) return undefined;
-  return index === 0 ? '/' : path.slice(0, index);
 }
 
 /** Rethrows a file system's error as the exception Java's file streams throw, as `a.txt (No such file or directory)`. */
@@ -100,9 +94,9 @@ defineNativeProperty('java.io.File.absolutePath', (_frame, receiver) => {
   const path = pathOf(receiver);
   return path.startsWith('/') ? path : joined('', path);
 });
-defineNativeProperty('java.io.File.parent', (_frame, receiver) => parentOf(pathOf(receiver)) ?? NULL);
+defineNativeProperty('java.io.File.parent', (_frame, receiver) => parentPathOf(pathOf(receiver)) ?? NULL);
 defineNativeProperty('java.io.File.parentFile', (_frame, receiver) => {
-  const parent = parentOf(pathOf(receiver));
+  const parent = parentPathOf(pathOf(receiver));
   return parent === undefined ? NULL : newFile(parent);
 });
 defineNativeProperty(
