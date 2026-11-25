@@ -59,8 +59,13 @@ cis theta = cos theta :+ sin theta
 polar :: RealFloat a => Complex a -> (a, a)
 polar z = (magnitude z, phase z)
 
+-- As GHC's, scaling the parts first so that their squares do not overflow.
 magnitude :: RealFloat a => Complex a -> a
-magnitude (x :+ y) = sqrt (x * x + y * y)
+magnitude (x :+ y) = scaleFloat k (sqrt (sqr (scaleFloat mk x) + sqr (scaleFloat mk y)))
+  where
+    k = max (exponent x) (exponent y)
+    mk = negate k
+    sqr z = z * z
 
 phase :: RealFloat a => Complex a -> a
 phase (0 :+ 0) = 0
@@ -81,8 +86,11 @@ instance RealFloat a => Num (Complex a) where
 
 instance RealFloat a => Fractional (Complex a) where
   (x :+ y) / (x' :+ y') =
-    let d = x' * x' + y' * y'
-    in ((x * x' + y * y') / d) :+ ((y * x' - x * y') / d)
+    let k = negate (max (exponent x') (exponent y'))
+        x'' = scaleFloat k x'
+        y'' = scaleFloat k y'
+        d = x' * x'' + y' * y''
+    in ((x * x'' + y * y'') / d) :+ ((y * x'' - x * y'') / d)
   fromRational a = fromRational a :+ 0
 
 instance RealFloat a => Floating (Complex a) where
