@@ -186,11 +186,19 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return property.type ?? anyType(true);
   }
 
-  /** Starts the flow of code compiled on its own, where only the constructor parameters initializers see are assigned. */
+  /**
+   * Starts the flow of code compiled on its own, where only the constructor parameters initializers see, and the
+   * variables assigned where a local class is declared, are assigned.
+   */
   protected startFlow(): void {
+    this.startOwnFlow();
+    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
+  }
+
+  /** Starts a flow where only the variables assigned where a local class is declared are assigned. */
+  private startOwnFlow(): void {
     this.flow = new Flow();
     for (const variable of this.localFlowBase?.assigned ?? []) this.flow.assigned.add(variable);
-    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
   }
 
   /**
@@ -836,8 +844,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const owner = { cls: entry, scope: entry.scope, file: entry.file };
     const context = this.initializerContext(owner);
     const scope = this.initializerScope(owner, context);
-    this.flow = new Flow();
-    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
+    this.startFlow();
     const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
     // Without a primary constructor, each `constructor(...)` calls the superclass's own constructor.
     const delegatesToSecondaries = !entry.decl.primaryConstructor && entry.secondaryConstructors.length > 0;
@@ -902,7 +909,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       this.secondaryConstructorContexts.set(context, entry);
       const base = this.withOuterReceivers(entry.scope, entry.symbol, context);
       const headerScope = new Scope(base, context);
-      this.flow = new Flow();
+      this.startOwnFlow();
       const variables = ctor.params.map((param, index) => {
         const variable = this.newParameter(headerScope, context, param.name, param.type, decl.params[index].row);
         this.flow.assigned.add(variable);

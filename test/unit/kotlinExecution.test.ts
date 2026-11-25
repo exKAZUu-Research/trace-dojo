@@ -6429,6 +6429,16 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test("reads the variables of the enclosing function in local classes' initializers and constructors", () => {
+  const source = `fun main() {
+    val seed = 7
+    val o = object { val v = seed }
+    class C(val x: Int) { val v = seed + x; constructor() : this(seed) }
+    println(listOf(o.v, C(1).v, C().v))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[7, 8, 14]\n' });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
