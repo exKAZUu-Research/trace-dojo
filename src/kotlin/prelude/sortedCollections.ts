@@ -2,8 +2,8 @@ import { kotlin } from './source';
 
 /**
  * `java.util.TreeMap` and `TreeSet`, which Kotlin's `sortedMapOf` and `sortedSetOf` create: a map or set whose
- * iteration follows its keys' order. Each keeps its entries in an insertion-ordered table, which it re-sorts when a key
- * is added, so that its views and iterators follow the order as the JVM's do.
+ * iteration follows its keys' order. A TreeMap keeps its entries in a list sorted by its order, where one binary search
+ * finds keys by comparing them, as the JVM's tree does; a TreeSet is the keys of a TreeMap, as the JVM's is.
  */
 export const SORTED_COLLECTIONS_SOURCE = kotlin`
 package java.util
@@ -46,27 +46,59 @@ internal fun <T> compareInOrder(comparator: Comparator<in T>?, a: T, b: T): Int 
 
 class TreeMap<K, V> private constructor(
     private val order: Comparator<in K>?,
-    private val table: LinkedHashMap<K, V>
-) : SortedMap<K, V>, MutableMap<K, V> by table {
-    constructor() : this(null, LinkedHashMap())
-    constructor(comparator: Comparator<in K>?) : this(comparator, LinkedHashMap())
-    constructor(map: Map<out K, V>) : this(null, LinkedHashMap()) {
+    private val nodes: ArrayList<TreeMapEntry<K, V>>
+) : SortedMap<K, V> {
+    constructor() : this(null, ArrayList())
+    constructor(comparator: Comparator<in K>?) : this(comparator, ArrayList())
+    constructor(map: Map<out K, V>) : this(null, ArrayList()) {
         putAll(map)
     }
 
-    override fun comparator(): Comparator<in K>? = order
+    /** The count of changes to the keys, by which iterators fail fast as java.util.TreeMap's do. */
+    internal var modCount = 0
+        private set
 
-    // As java.util.TreeMap, the map finds a key by its order, so keys the order counts as equal are one key.
-    private fun heldKey(key: K): List<K> {
-        compareInOrder(order, key, key)
-        return table.keys.filter { compareInOrder(order, it, key) == 0 }.take(1)
+    override fun comparator(): Comparator<in K>? = order
+    override val size: Int get() = nodes.size
+    override fun isEmpty(): Boolean = nodes.isEmpty()
+
+    /**
+     * The index of the entry whose key the order counts as \`key\`, or -(the index it would go at + 1): the one search
+     * of the map, as java.util.TreeMap finds keys by comparing them, never by equals or hashCode.
+     */
+    internal fun search(key: K): Int {
+        var low = 0
+        var high = nodes.size - 1
+        while (low <= high) {
+            val middle = (low + high) ushr 1
+            val comparison = compareInOrder(order, nodes[middle].key, key)
+            if (comparison < 0) low = middle + 1 else if (comparison > 0) high = middle - 1 else return middle
+        }
+        return -(low + 1)
     }
 
+    internal fun nodeAt(index: Int): TreeMapEntry<K, V> = nodes[index]
+
+    internal fun removeNodeAt(index: Int): TreeMapEntry<K, V> {
+        modCount++
+        return nodes.removeAt(index)
+    }
+
+    private fun find(key: K): Int {
+        if (order == null && key == null) throw NullPointerException()
+        return search(key)
+    }
+
+    override fun containsKey(key: K): Boolean = find(key) >= 0
+    override fun containsValue(value: V): Boolean = nodes.any { it.value == value }
+    override fun get(key: K): V? = find(key).let { if (it >= 0) nodes[it].value else null }
+
     override fun put(key: K, value: V): V? {
-        val held = heldKey(key)
-        if (held.isNotEmpty()) return table.put(held[0], value)
-        table.put(key, value)
-        resort()
+        if (nodes.isEmpty()) compareInOrder(order, key, key)
+        val index = search(key)
+        if (index >= 0) return nodes[index].setValue(value)
+        nodes.add(-(index + 1), TreeMapEntry(key, value))
+        modCount++
         return null
     }
 
@@ -74,18 +106,19 @@ class TreeMap<K, V> private constructor(
         for ((key, value) in from) put(key, value)
     }
 
-    override fun get(key: K): V? = heldKey(key).let { if (it.isEmpty()) null else table[it[0]] }
-    override fun containsKey(key: K): Boolean = heldKey(key).isNotEmpty()
-    override fun remove(key: K): V? = heldKey(key).let { if (it.isEmpty()) null else table.remove(it[0]) }
+    override fun remove(key: K): V? = find(key).let { if (it >= 0) removeNodeAt(it).value else null }
 
-    private fun resort() {
-        val entries = table.entries.map { it.key to it.value }.sortedWith { a, b -> compareInOrder(order, a.first, b.first) }
-        table.clear()
-        for ((key, value) in entries) table.put(key, value)
+    override fun clear() {
+        nodes.clear()
+        modCount++
     }
 
-    override fun firstKey(): K = if (table.isEmpty()) throw NoSuchElementException() else table.keys.first()
-    override fun lastKey(): K = if (table.isEmpty()) throw NoSuchElementException() else table.keys.last()
+    override val keys: MutableSet<K> get() = TreeMapKeys(this)
+    override val values: MutableCollection<V> get() = TreeMapValues(this)
+    override val entries: MutableSet<MutableMap.MutableEntry<K, V>> get() = TreeMapEntries(this)
+
+    override fun firstKey(): K = if (nodes.isEmpty()) throw NoSuchElementException() else nodes[0].key
+    override fun lastKey(): K = if (nodes.isEmpty()) throw NoSuchElementException() else nodes[nodes.size - 1].key
     override fun headMap(toKey: K): SortedMap<K, V> = filtered { compareInOrder(order, it, toKey) < 0 }
     override fun tailMap(fromKey: K): SortedMap<K, V> = filtered { compareInOrder(order, it, fromKey) >= 0 }
     override fun subMap(fromKey: K, toKey: K): SortedMap<K, V> =
@@ -93,44 +126,93 @@ class TreeMap<K, V> private constructor(
 
     private fun filtered(predicate: (K) -> Boolean): SortedMap<K, V> {
         val result = TreeMap<K, V>(order)
-        for ((key, value) in table) if (predicate(key)) result.put(key, value)
+        for (node in nodes) if (predicate(node.key)) result.put(node.key, node.value)
         return result
     }
 
-    override fun equals(other: Any?): Boolean = table == other
-    override fun hashCode(): Int = table.hashCode()
-    override fun toString(): String = table.toString()
+    // java.util.AbstractMap's equals, hashCode, and toString.
+    @Suppress("UNCHECKED_CAST")
+    override fun equals(other: Any?): Boolean {
+        if (other === this) return true
+        if (other !is Map<*, *> || other.size != size) return false
+        val map = other as Map<Any?, Any?>
+        for (node in nodes) {
+            val value = node.value
+            if (value == null) {
+                if (!(map[node.key] == null && map.containsKey(node.key))) return false
+            } else if (value != map[node.key]) {
+                return false
+            }
+        }
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var hash = 0
+        for (node in nodes) hash += node.hashCode()
+        return hash
+    }
+
+    override fun toString(): String = nodes.joinToString(", ", "{", "}")
 }
 
-class TreeSet<E> private constructor(
-    private val order: Comparator<in E>?,
-    private val table: LinkedHashSet<E>
-) : NavigableSet<E>, MutableSet<E> by table {
-    constructor() : this(null, LinkedHashSet())
-    constructor(comparator: Comparator<in E>?) : this(comparator, LinkedHashSet())
-    constructor(elements: Collection<E>) : this(null, LinkedHashSet()) {
-        addAll(elements)
+internal class TreeMapEntry<K, V>(override val key: K, override var value: V) : MutableMap.MutableEntry<K, V> {
+    override fun setValue(newValue: V): V {
+        val old = value
+        value = newValue
+        return old
     }
 
-    override fun comparator(): Comparator<in E>? = order
+    override fun equals(other: Any?): Boolean = other is Map.Entry<*, *> && key == other.key && value == other.value
+    override fun hashCode(): Int = (key?.hashCode() ?: 0) xor (value?.hashCode() ?: 0)
+    override fun toString(): String = "$key=$value"
+}
 
-    // As java.util.TreeSet, the set finds an element by its order, so elements the order counts as equal are one.
-    private fun held(element: E): List<E> {
-        compareInOrder(order, element, element)
-        return table.filter { compareInOrder(order, it, element) == 0 }.take(1)
+/** An iterator over a TreeMap's entries in order, which removes through the map, and fails fast on other changes. */
+internal class TreeMapIterator<K, V, T>(
+    private val map: TreeMap<K, V>,
+    private val select: (TreeMapEntry<K, V>) -> T
+) : MutableIterator<T> {
+    private var next = 0
+    private var last = -1
+    private var expected = map.modCount
+
+    override fun hasNext(): Boolean = next < map.size
+
+    override fun next(): T {
+        if (map.modCount != expected) throw ConcurrentModificationException()
+        if (next >= map.size) throw NoSuchElementException()
+        last = next
+        return select(map.nodeAt(next++))
     }
 
-    override fun contains(element: E): Boolean = held(element).isNotEmpty()
+    override fun remove() {
+        if (last < 0) throw IllegalStateException()
+        if (map.modCount != expected) throw ConcurrentModificationException()
+        map.removeNodeAt(last)
+        next = last
+        last = -1
+        expected = map.modCount
+    }
+}
+
+/** java.util.AbstractSet's members, which find elements through the set's own contains and remove. */
+abstract class AbstractSet<E> : MutableSet<E> {
+    override fun isEmpty(): Boolean = size == 0
     override fun containsAll(elements: Collection<E>): Boolean = elements.all { contains(it) }
-    override fun remove(element: E): Boolean = held(element).let { it.isNotEmpty() && table.remove(it[0]) }
 
-    // java.util.AbstractSet's removeAll, which removes through the set's own order when the set is the larger.
+    override fun addAll(elements: Collection<E>): Boolean {
+        var changed = false
+        for (element in elements) if (add(element)) changed = true
+        return changed
+    }
+
     override fun removeAll(elements: Collection<E>): Boolean {
         var modified = false
         if (size > elements.size) {
             for (element in elements) if (remove(element)) modified = true
         } else {
-            val iterator = table.iterator()
+            val iterator = iterator()
             while (iterator.hasNext()) {
                 if (elements.contains(iterator.next())) {
                     iterator.remove()
@@ -141,23 +223,130 @@ class TreeSet<E> private constructor(
         return modified
     }
 
-    override fun add(element: E): Boolean {
-        if (held(element).isNotEmpty()) return false
-        table.add(element)
-        val sorted = table.sortedWith { a, b -> compareInOrder(order, a, b) }
-        table.clear()
-        table.addAll(sorted)
+    override fun retainAll(elements: Collection<E>): Boolean {
+        var modified = false
+        val iterator = iterator()
+        while (iterator.hasNext()) {
+            if (!elements.contains(iterator.next())) {
+                iterator.remove()
+                modified = true
+            }
+        }
+        return modified
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    override fun equals(other: Any?): Boolean {
+        if (other === this) return true
+        if (other !is Set<*> || other.size != size) return false
+        return try {
+            containsAll(other as Collection<E>)
+        } catch (e: ClassCastException) {
+            false
+        } catch (e: NullPointerException) {
+            false
+        }
+    }
+
+    override fun hashCode(): Int {
+        var hash = 0
+        for (element in this) hash += element?.hashCode() ?: 0
+        return hash
+    }
+
+    override fun toString(): String = joinToString(", ", "[", "]")
+}
+
+private class TreeMapKeys<K, V>(private val map: TreeMap<K, V>) : AbstractSet<K>() {
+    override val size: Int get() = map.size
+    override fun contains(element: K): Boolean = map.containsKey(element)
+    override fun iterator(): MutableIterator<K> = TreeMapIterator(map) { it.key }
+    override fun add(element: K): Boolean = throw UnsupportedOperationException()
+
+    override fun remove(element: K): Boolean {
+        val before = map.size
+        map.remove(element)
+        return map.size != before
+    }
+
+    override fun clear() = map.clear()
+}
+
+private class TreeMapEntries<K, V>(private val map: TreeMap<K, V>) : AbstractSet<MutableMap.MutableEntry<K, V>>() {
+    override val size: Int get() = map.size
+    override fun iterator(): MutableIterator<MutableMap.MutableEntry<K, V>> = TreeMapIterator(map) { it }
+    override fun add(element: MutableMap.MutableEntry<K, V>): Boolean = throw UnsupportedOperationException()
+
+    override fun contains(element: MutableMap.MutableEntry<K, V>): Boolean {
+        val index = map.search(element.key)
+        return index >= 0 && map.nodeAt(index).value == element.value
+    }
+
+    override fun remove(element: MutableMap.MutableEntry<K, V>): Boolean {
+        val index = map.search(element.key)
+        if (index < 0 || map.nodeAt(index).value != element.value) return false
+        map.removeNodeAt(index)
         return true
     }
 
-    override fun addAll(elements: Collection<E>): Boolean {
-        var changed = false
-        for (element in elements) if (add(element)) changed = true
-        return changed
+    override fun clear() = map.clear()
+}
+
+private class TreeMapValues<K, V>(private val map: TreeMap<K, V>) : MutableCollection<V> {
+    override val size: Int get() = map.size
+    override fun isEmpty(): Boolean = map.isEmpty()
+    override fun contains(element: V): Boolean = map.containsValue(element)
+    override fun containsAll(elements: Collection<V>): Boolean = elements.all { contains(it) }
+    override fun iterator(): MutableIterator<V> = TreeMapIterator(map) { it.value }
+    override fun add(element: V): Boolean = throw UnsupportedOperationException()
+    override fun addAll(elements: Collection<V>): Boolean = throw UnsupportedOperationException()
+
+    override fun remove(element: V): Boolean {
+        val iterator = iterator()
+        while (iterator.hasNext()) {
+            if (iterator.next() == element) {
+                iterator.remove()
+                return true
+            }
+        }
+        return false
     }
 
-    override fun first(): E = if (table.isEmpty()) throw NoSuchElementException() else table.iterator().next()
-    override fun last(): E = if (table.isEmpty()) throw NoSuchElementException() else table.toList().last()
+    override fun removeAll(elements: Collection<V>): Boolean = removeWhere { it in elements }
+    override fun retainAll(elements: Collection<V>): Boolean = removeWhere { it !in elements }
+    override fun clear() = map.clear()
+    override fun toString(): String = joinToString(", ", "[", "]")
+
+    private fun removeWhere(predicate: (V) -> Boolean): Boolean {
+        var modified = false
+        val iterator = iterator()
+        while (iterator.hasNext()) {
+            if (predicate(iterator.next())) {
+                iterator.remove()
+                modified = true
+            }
+        }
+        return modified
+    }
+}
+
+class TreeSet<E> private constructor(private val map: TreeMap<E, Boolean>) : AbstractSet<E>(), NavigableSet<E> {
+    constructor() : this(TreeMap<E, Boolean>())
+    constructor(comparator: Comparator<in E>?) : this(TreeMap<E, Boolean>(comparator))
+    constructor(elements: Collection<E>) : this(TreeMap<E, Boolean>()) {
+        addAll(elements)
+    }
+
+    override fun comparator(): Comparator<in E>? = map.comparator()
+    override val size: Int get() = map.size
+    override fun contains(element: E): Boolean = map.containsKey(element)
+    override fun add(element: E): Boolean = map.put(element, true) == null
+    override fun remove(element: E): Boolean = map.remove(element) != null
+    override fun iterator(): MutableIterator<E> = map.keys.iterator()
+    override fun clear() = map.clear()
+
+    override fun first(): E = map.firstKey()
+    override fun last(): E = map.lastKey()
     override fun headSet(toElement: E): SortedSet<E> = headSet(toElement, false)
     override fun tailSet(fromElement: E): SortedSet<E> = tailSet(fromElement, true)
     override fun subSet(fromElement: E, toElement: E): SortedSet<E> = subSet(fromElement, true, toElement, false)
@@ -166,23 +355,31 @@ class TreeSet<E> private constructor(
     override fun tailSet(fromElement: E, inclusive: Boolean): NavigableSet<E> =
         filtered { below(fromElement, it, inclusive) }
     override fun subSet(fromElement: E, fromInclusive: Boolean, toElement: E, toInclusive: Boolean): NavigableSet<E> {
-        compareInOrder(order, fromElement, toElement).let { if (it > 0) throw IllegalArgumentException("fromKey > toKey") }
+        if (compareInOrder(comparator(), fromElement, toElement) > 0) throw IllegalArgumentException("fromKey > toKey")
         return filtered { below(fromElement, it, fromInclusive) && below(it, toElement, toInclusive) }
     }
 
-    override fun lower(e: E): E? = table.lastOrNull { compareInOrder(order, it, e) < 0 }
-    override fun floor(e: E): E? = table.lastOrNull { compareInOrder(order, it, e) <= 0 }
-    override fun ceiling(e: E): E? = table.firstOrNull { compareInOrder(order, it, e) >= 0 }
-    override fun higher(e: E): E? = table.firstOrNull { compareInOrder(order, it, e) > 0 }
-    override fun pollFirst(): E? = table.firstOrNull()?.also { table.remove(it) }
-    override fun pollLast(): E? = table.lastOrNull()?.also { table.remove(it) }
+    // The neighbors of a value, from where the map's one search finds it or would put it.
+    private fun keyAt(index: Int): E? = if (index in 0 until map.size) map.nodeAt(index).key else null
+    private fun insertion(found: Int): Int = if (found >= 0) found else -(found + 1)
+
+    override fun lower(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it - 1 else insertion(it) - 1) }
+    override fun floor(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it else insertion(it) - 1) }
+    override fun ceiling(e: E): E? = keyAt(insertion(map.search(e)))
+    override fun higher(e: E): E? = map.search(e).let { keyAt(if (it >= 0) it + 1 else insertion(it)) }
+    override fun pollFirst(): E? = if (map.isEmpty()) null else map.removeNodeAt(0).key
+    override fun pollLast(): E? = if (map.isEmpty()) null else map.removeNodeAt(map.size - 1).key
+
     override fun descendingSet(): NavigableSet<E> {
+        val order = comparator()
         val result = TreeSet<E>(Comparator<E> { a, b -> compareInOrder(order, b, a) })
-        result.addAll(table)
+        result.addAll(this)
         return result
     }
+
     override fun descendingIterator(): MutableIterator<E> {
-        val elements = table.toList().asReversed().iterator()
+        val set = this
+        val elements = toList().asReversed().iterator()
         return object : MutableIterator<E> {
             private var current: E? = null
             private var hasCurrent = false
@@ -196,26 +393,22 @@ class TreeSet<E> private constructor(
             @Suppress("UNCHECKED_CAST")
             override fun remove() {
                 if (!hasCurrent) throw IllegalStateException()
-                table.remove(current as E)
+                set.remove(current as E)
                 hasCurrent = false
             }
         }
     }
 
     private fun below(a: E, b: E, inclusive: Boolean): Boolean {
-        val comparison = compareInOrder(order, a, b)
+        val comparison = compareInOrder(comparator(), a, b)
         return if (inclusive) comparison <= 0 else comparison < 0
     }
 
     private fun filtered(predicate: (E) -> Boolean): TreeSet<E> {
-        val result = TreeSet<E>(order)
-        for (element in table) if (predicate(element)) result.add(element)
+        val result = TreeSet<E>(comparator())
+        for (element in this) if (predicate(element)) result.add(element)
         return result
     }
-
-    override fun equals(other: Any?): Boolean = table == other
-    override fun hashCode(): Int = table.hashCode()
-    override fun toString(): String = table.toString()
 }
 `;
 

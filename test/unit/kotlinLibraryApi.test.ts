@@ -5,14 +5,13 @@ import { libraryMemberNames } from '../../src/kotlin/libraryApiData';
 import { PRELUDE_SOURCES } from '../../src/kotlin/prelude';
 
 // A member the prelude leaves out of a JVM class reads as unavailable only when the generated table lists the class.
+// Internal and private classes are the prelude's own, which programs cannot name.
 test('lists the JVM members of every JVM class the prelude declares', () => {
   const declared = PRELUDE_SOURCES.flatMap((source) => {
     const pkg = /^package ([\w.]+)/m.exec(source)?.[1];
     if (!pkg?.startsWith('java.')) return [];
     return [
-      ...source.matchAll(
-        /^(?:(?:public|open|abstract|data|sealed|final|internal) )*(?:class|interface|object) (\w+)/gm
-      ),
+      ...source.matchAll(/^(?:(?:public|open|abstract|data|sealed|final) )*(?:class|interface|object) (\w+)/gm),
     ].map((match) => `${pkg}.${match[1]}`);
   });
   expect(declared).toContain('java.util.TreeSet');

@@ -6514,12 +6514,35 @@ test('finds and merges the elements of sorted sets and maps by their order, as j
     val parity = Comparator<Int> { a, b -> a % 2 - b % 2 }
     val odd = sortedSetOf(parity, 1, 3)
     println(listOf(odd, odd.add(5), odd.contains(7)))
-    println(sortedMapOf(parity, 1 to "a", 3 to "b"))
+    val m = sortedMapOf(parity, 1 to "a", 3 to "b")
+    println(listOf(m, 5 in m.keys, odd == setOf(7)))
 }`;
   expect(executeProgram('kotlin', source)).toMatchObject({
     kind: 'executed',
-    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n[[1], false, true]\n{1=b}\n',
+    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n[[1], false, true]\n[{1=b}, true, true]\n',
   });
+});
+
+test('removes elements of sorted sets by their order after their hash codes change', () => {
+  const source = `data class P(val name: String, var score: Int)
+fun main() {
+    val s = sortedSetOf(compareBy<P> { it.name }, P("a", 1), P("b", 2))
+    s.first().score = 9
+    println(listOf(s.pollFirst(), s.size))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[P(name=a, score=9), 1]\n' });
+});
+
+test('looks keys up in sorted sets and maps within the operation limit', () => {
+  const source = `fun main() {
+    val s = sortedSetOf<Int>()
+    val m = sortedMapOf<Int, Int>()
+    for (i in 0 until 100) { s.add(i); m[i] = i }
+    var count = 0
+    for (i in 0 until 5000) if (i % 100 in s && m[i % 100] == i % 100) count++
+    println(count)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '5000\n' });
 });
 
 test('reads regex groups by name, as Kotlin/JVM does', () => {
