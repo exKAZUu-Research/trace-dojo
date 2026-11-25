@@ -43,7 +43,7 @@ import {
   KNOWN_LIBRARY_VALUES,
 } from './library/knownValues';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
-import { findProgramSplices, misplacedHaskellAtomicMessage, parseHaskell } from './parse';
+import { findProgramSplices, misplacedHaskellAtomicMessage, parseHaskell, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
 import { renameModule, type RModule } from './rename';
 import { expandSplices } from './thSplice';
@@ -517,14 +517,16 @@ export interface CompiledProgram {
 export function compileProgram(source: string, atomicRows?: ReadonlySet<number>, traceTypes = false): CompiledProgram {
   const lib = (library ??= compileLibrary());
   return withCompilationBudget(() => {
-    // Splices run within the program's budget: each splice's program compiles on the budget that is left.
-    const splices = findProgramSplices(source);
-    let expanded = source;
+    // Splices run within the program's budget: each splice's program compiles on the budget that is left. They are
+    // found in the text the C preprocessor leaves, as the program is.
+    const text = preprocessProgram(source);
+    const splices = findProgramSplices(text);
+    let expanded = text;
     if (splices && splices.sites.length > 0) {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      expanded = expandSplices(source, splices.header, splices.sites, spliceRunner);
+      expanded = expandSplices(text, splices.header, splices.sites, spliceRunner);
     }
-    const parsed = parseHaskell(expanded);
+    const parsed = parseHaskell(expanded, 'Main', false, true);
     const renamed = renameModule(parsed, {
       modules: lib.modules,
       implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),

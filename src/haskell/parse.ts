@@ -24,12 +24,12 @@ export const misplacedHaskellAtomicMessage =
   '-- atomic は、関数を宣言する行（型シグネチャか、定義の最初の行）に付けてください。';
 
 /** Parses a module, throwing a `CompileError` for syntax errors and for syntax this environment does not support. */
-export function parseHaskell(source: string, defaultName = 'Main', library = false): Module {
+export function parseHaskell(source: string, defaultName = 'Main', library = false, preprocessed = false): Module {
   const extensions = library
     ? new Extensions(['TypeFamilies', 'DataKinds', 'RoleAnnotations'])
     : readExtensions(source);
   const features = extensions.gates('parse');
-  const text = withDeclarationQuoteBraces(features, !library && features.allows('cpp') ? preprocess(source) : source);
+  const text = withDeclarationQuoteBraces(features, preprocessed ? source : preprocessProgram(source, library));
   return parseSource(
     features.allows('extendedGrammar') ? extendedParser : parser,
     text,
@@ -39,6 +39,14 @@ export function parseHaskell(source: string, defaultName = 'Main', library = fal
       return convertModule(root, extensions, defaultName);
     }
   );
+}
+
+/**
+ * A program's text after the C preprocessor, when the program enables CPP, which every later step reads: the splices
+ * a branch `#if` leaves out are not run.
+ */
+export function preprocessProgram(source: string, library = false): string {
+  return !library && readExtensions(source).gates('parse').allows('cpp') ? preprocess(source) : source;
 }
 
 /**
