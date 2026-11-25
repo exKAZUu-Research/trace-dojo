@@ -34,9 +34,18 @@ export interface ParsedOptions {
   invalidOption?: string;
 }
 
+interface NormalizedScalarOperand {
+  readonly name: string;
+  readonly isSubscripted: boolean;
+  readonly append: boolean;
+  readonly value: string | undefined;
+  readonly rawText: string;
+}
+
 type ReadyOperand =
   | { readonly kind: 'word'; readonly text: string }
-  | { readonly kind: 'ast'; readonly arg: Assignment };
+  | { readonly kind: 'scalar'; readonly parsed: NormalizedScalarOperand }
+  | { readonly kind: 'compound'; readonly arg: Assignment };
 
 interface DeclarationRunState {
   status: number;
@@ -77,34 +86,50 @@ export function executeDeclarationCommand(
   args: readonly (Word | Assignment)[],
   withRedirects: <T>(run: () => T) => T
 ): { status: number; assignsAnswer: boolean } {
-  const prepared = staticOptions
-    ? prepareNormalizedDeclaration(builtin, staticOptions, args)
-    : prepareRuntimeOptionDeclaration(shell, builtin, args);
-  const state: DeclarationRunState = {
-    status: 0,
-    assignsAnswer: false,
-    lastArgText: prepared.initialLastArg,
-  };
-  const headerCode = withRedirects(() => validateDeclarationHeader(shell, builtin, prepared.options));
-  if (headerCode !== undefined) {
-    withRedirects(() => {
-      shell.store.lastArgument = state.lastArgText;
-    });
-    return { status: headerCode, assignsAnswer: false };
+  const savedGuards = shell.store.compoundGuardDepth();
+  try {
+    const prepared = staticOptions
+      ? prepareNormalizedDeclaration(builtin, staticOptions, args)
+      : prepareRuntimeOptionDeclaration(shell, builtin, args);
+    const state: DeclarationRunState = {
+      status: 0,
+      assignsAnswer: false,
+      lastArgText: prepared.initialLastArg,
+    };
+    if (hasValidBuiltinContext(shell, builtin, prepared.options)) {
+      rejectUnsupportedDeclarationOptions(
+        builtin,
+        prepared.options.set,
+        prepared.options.unset,
+        prepared.options.hasPlusOption
+      );
+    }
+    const operands = collectReadyOperands(shell, prepared.operandArgs, state);
+    shell.store.leaveCompoundGuards(savedGuards);
+    const headerCode = withRedirects(() => validateDeclarationHeader(shell, builtin, prepared.options));
+    if (headerCode !== undefined) {
+      withRedirects(() => {
+        shell.store.lastArgument = state.lastArgText;
+      });
+      return { status: headerCode, assignsAnswer: false };
+    }
+    if (operands.length === 0) rejectUnsupportedDeclarationListing(builtin);
+    if (prepared.options.set.has('p') && builtin !== 'readonly' && builtin !== 'export') {
+      const status = withRedirects(() => {
+        const names = operands.map((op) =>
+          op.kind === 'word' ? op.text : op.kind === 'scalar' ? op.parsed.name : op.arg.name
+        );
+        const code = printDeclarations(shell, builtin, names);
+        shell.store.lastArgument = state.lastArgText;
+        return code;
+      });
+      return { status, assignsAnswer: false };
+    }
+    executeReadyOperands(shell, builtin, prepared.options.set, operands, state, withRedirects);
+    return { status: state.status, assignsAnswer: state.assignsAnswer };
+  } finally {
+    shell.store.leaveCompoundGuards(savedGuards);
   }
-  const operands = collectReadyOperands(shell, prepared.operandArgs, state);
-  if (operands.length === 0) rejectUnsupportedDeclarationListing(builtin);
-  if (prepared.options.set.has('p') && builtin !== 'readonly' && builtin !== 'export') {
-    const status = withRedirects(() => {
-      const names = operands.map((op) => (op.kind === 'word' ? op.text : op.arg.name));
-      const code = printDeclarations(shell, builtin, names);
-      shell.store.lastArgument = state.lastArgText;
-      return code;
-    });
-    return { status, assignsAnswer: false };
-  }
-  executeReadyOperands(shell, builtin, prepared.options.set, operands, state, withRedirects);
-  return { status: state.status, assignsAnswer: state.assignsAnswer };
 }
 
 /** Runs a declaration builtin invoked through an expanded command word (`cmd=declare; $cmd x=1`). */
@@ -225,6 +250,14 @@ function applyBuiltinImpliedFlags(builtin: string, options: ParsedOptions): void
   }
 }
 
+function hasValidBuiltinContext(shell: Shell, builtin: string, options: ParsedOptions): boolean {
+  return (
+    options.invalidOption === undefined &&
+    !(options.set.has('A') && options.set.has('a')) &&
+    !(builtin === 'local' && !shell.isInFunction)
+  );
+}
+
 function validateDeclarationHeader(shell: Shell, builtin: string, options: ParsedOptions): number | undefined {
   if (options.invalidOption !== undefined) {
     shell.reportError(`${builtin}: ${options.invalidOption}: invalid option`);
@@ -255,8 +288,29 @@ function collectReadyOperands(
       continue;
     }
     if ('append' in item) {
+      if (item.array) {
+        state.lastArgText = item.name;
+        shell.store.enterCompoundGuard(item.name);
+        pushMeteredItem(ready, { kind: 'compound', arg: item }, shell.runtime.step);
+        continue;
+      }
       for (const braced of braceExpandAssignment(shell, item)) {
-        pushMeteredItem(ready, { kind: 'ast', arg: braced }, shell.runtime.step);
+        const expanded = expandAssignmentOperand(shell, braced);
+        state.lastArgText = expanded.text;
+        pushMeteredItem(
+          ready,
+          {
+            kind: 'scalar',
+            parsed: {
+              name: braced.name,
+              isSubscripted: braced.subscript !== undefined,
+              append: braced.append,
+              value: expanded.value,
+              rawText: expanded.text,
+            },
+          },
+          shell.runtime.step
+        );
       }
       continue;
     }
@@ -278,25 +332,29 @@ function executeReadyOperands(
 ): void {
   const intent = destinationIntentOf(shell, builtin, set);
   const setsNameref = builtin !== 'export' && set.has('n');
-  const savedGuards = shell.store.compoundGuardDepth();
-  try {
-    for (const operand of operands) {
-      const ok =
-        operand.kind === 'ast'
-          ? executeAstOperand(shell, builtin, operand.arg, set, intent, setsNameref, state, withRedirects)
-          : executeWordOperand(shell, builtin, operand.text, set, intent, setsNameref, state, withRedirects);
-      if (!ok) state.status = 1;
-    }
-  } finally {
-    shell.store.leaveCompoundGuards(savedGuards);
+  for (const operand of operands) {
+    const ok =
+      operand.kind === 'compound'
+        ? executeCompoundDeclarationOperand(shell, builtin, operand.arg, set, intent, setsNameref, state, withRedirects)
+        : executePreparedScalarOperand(
+            shell,
+            builtin,
+            operand.kind === 'scalar' ? operand.parsed : parseWordOperand(operand.text),
+            set,
+            intent,
+            setsNameref,
+            state,
+            withRedirects
+          );
+    if (!ok) state.status = 1;
   }
   withRedirects(() => {
     shell.store.lastArgument = state.lastArgText;
   });
 }
 
-// code-gauge-allow functionParameterCount -- Threads static AST assignment, declaration flags, state, and redirect wrapper.
-function executeAstOperand(
+// code-gauge-allow functionParameterCount -- Threads static compound AST assignment, declaration flags, state, and redirect wrapper.
+function executeCompoundDeclarationOperand(
   shell: Shell,
   builtin: string,
   arg: Assignment,
@@ -306,64 +364,40 @@ function executeAstOperand(
   state: DeclarationRunState,
   withRedirects: <T>(run: () => T) => T
 ): boolean {
-  if (arg.array) {
-    state.lastArgText = arg.name;
-    if (!setsNameref) state.assignsAnswer = true;
-    const failCtx: FailureContext =
-      shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
-        ? 'declarationLocalCompound'
-        : 'declarationGlobalCompound';
-    const committed = withRedirects(() =>
-      commitCompoundOperand(shell, {
-        builtin,
-        name: arg.name,
-        subscript: arg.subscript,
-        append: arg.append,
-        words: arg.array as Word[],
-        intent,
-        set,
-        context: failCtx,
-      })
-    );
-    if (committed.materialized) state.assignsAnswer = true;
-    return committed.ok;
-  }
-  const expanded = expandAssignmentOperand(shell, arg);
-  state.lastArgText = expanded.text;
+  state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
-  return withRedirects(() =>
-    executeScalarDeclarationOperand(
-      shell,
+  const failCtx: FailureContext =
+    shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
+      ? 'declarationLocalCompound'
+      : 'declarationGlobalCompound';
+  const committed = withRedirects(() =>
+    commitCompoundOperand(shell, {
       builtin,
-      {
-        name: arg.name,
-        isSubscripted: arg.subscript !== undefined,
-        append: arg.append,
-        value: expanded.value,
-        rawText: expanded.text,
-      },
-      set,
+      name: arg.name,
+      subscript: arg.subscript,
+      append: arg.append,
+      words: arg.array as Word[],
       intent,
-      () => {
-        state.assignsAnswer = true;
-      }
-    )
+      set,
+      context: failCtx,
+    })
   );
+  if (committed.materialized) state.assignsAnswer = true;
+  return committed.ok;
 }
 
-// code-gauge-allow functionParameterCount -- Threads word operand text, declaration flags, state, and redirect wrapper.
-function executeWordOperand(
+// code-gauge-allow functionParameterCount -- Threads prepared scalar operand, declaration flags, state, and redirect wrapper.
+function executePreparedScalarOperand(
   shell: Shell,
   builtin: string,
-  wordText: string,
+  parsed: NormalizedScalarOperand,
   set: ReadonlySet<string>,
   intent: DestinationIntent,
   setsNameref: boolean,
   state: DeclarationRunState,
   withRedirects: <T>(run: () => T) => T
 ): boolean {
-  state.lastArgText = wordText;
-  const parsed = parseWordOperand(wordText);
+  state.lastArgText = parsed.rawText;
   if (!setsNameref && parsed.value !== undefined) state.assignsAnswer = true;
   return withRedirects(() =>
     executeScalarDeclarationOperand(shell, builtin, parsed, set, intent, () => {
@@ -509,14 +543,6 @@ function expandAndCommitCompound(
     return { ok: false, materialized: false };
   }
   return { ok: true, materialized: materializedArray };
-}
-
-interface NormalizedScalarOperand {
-  readonly name: string;
-  readonly isSubscripted: boolean;
-  readonly append: boolean;
-  readonly value: string | undefined;
-  readonly rawText: string;
 }
 
 function executeScalarDeclarationOperand(
