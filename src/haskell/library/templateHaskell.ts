@@ -1165,9 +1165,9 @@ pprDec (DataD c n vs _ cons ders) =
   "data " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons cons ++ pprDerivs ders
 pprDec (NewtypeD c n vs _ con ders) =
   "newtype " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons [con] ++ pprDerivs ders
-pprDec (ClassD c n vs _ ds) =
-  "class " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprMembers ds
-pprDec (InstanceD _ c t ds) = "instance " ++ pprCxt c ++ pprType 0 t ++ pprMembers ds
+pprDec (ClassD c n vs fds ds) =
+  "class " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprFunDeps fds ++ pprMembers ds
+pprDec (InstanceD o c t ds) = "instance " ++ maybe "" renderOverlap o ++ pprCxt c ++ pprType 0 t ++ pprMembers ds
 pprDec (StandaloneDerivD _ c t) = "deriving instance " ++ pprCxt c ++ pprType 0 t
 pprDec (DefaultSigD n t) = "default " ++ pprNamePrefix n ++ " :: " ++ pprType 0 t
 pprDec (InfixD (Fixity p d) _ n) = dir d ++ " " ++ show p ++ " " ++ pprNameInfix n
@@ -1198,7 +1198,16 @@ pprBang (Bang _ SourceLazy) = "~"
 pprBang _ = ""
 
 pprDerivs :: [DerivClause] -> String
-pprDerivs ds = concat ["\n    deriving (" ++ intercalate ", " (map (pprType 0) c) ++ ")" | DerivClause _ c <- ds]
+pprDerivs ds = concat ["\n    deriving " ++ pprDeriv s c | DerivClause s c <- ds]
+  where
+    classes [t] = pprType 0 t
+    classes c = "(" ++ intercalate ", " (map (pprType 0) c) ++ ")"
+    pprDeriv (Just (ViaStrategy t)) c = classes c ++ " via " ++ pprType 0 t
+    pprDeriv s c = maybe "" renderStrategy s ++ classes c
+
+pprFunDeps :: [FunDep] -> String
+pprFunDeps [] = ""
+pprFunDeps fds = " | " ++ intercalate ", " [unwords (map pprNamePrefix a) ++ " -> " ++ unwords (map pprNamePrefix b) | FunDep a b <- fds]
 
 indent :: String -> String
 indent s = intercalate "\n" (map ("    " ++) (lines s))
