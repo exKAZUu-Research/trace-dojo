@@ -502,7 +502,7 @@ function splitSubstring(
   const unescapeState = { inSingle: false };
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') {
-      offset.push(part.kind === 'single' ? `'${part.text}'` : part);
+      offset.push(preserveSubstringPart(part));
       continue;
     }
     const splitAt = findSubstringSeparator(part.text, state);
@@ -520,11 +520,14 @@ function splitSubstring(
 function formatSubstringRest(after: string, tail: readonly WordPart[], inDouble: boolean): (string | WordPart)[] {
   const state = { inSingle: false };
   const head = unescapeSubstringSlice(after, inDouble, state);
-  const rest = tail.map((item): string | WordPart => {
-    if (item.kind === 'single') return `'${item.text}'`;
-    return item.kind === 'literal' ? unescapeSubstringSlice(item.text, inDouble, state) : item;
-  });
+  const rest = tail.map((item): string | WordPart =>
+    item.kind === 'literal' ? unescapeSubstringSlice(item.text, inDouble, state) : preserveSubstringPart(item)
+  );
   return head ? [head, ...rest] : rest;
+}
+
+function preserveSubstringPart(part: WordPart): string | WordPart {
+  return part.kind === 'single' || part.kind === 'ansiC' ? `'${part.text}'` : part;
 }
 
 function unescapeSubstringSlice(text: string, inDouble: boolean, state: { inSingle: boolean }): string {
