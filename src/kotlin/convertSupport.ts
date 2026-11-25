@@ -18,6 +18,34 @@ export function unavailableJavaFeature(path: string): string | undefined {
   return undefined;
 }
 
+/** What an import of a package this environment does not run names, for its message. */
+export function describeUnavailableImport(path: string): string {
+  if (path.startsWith('kotlin.io.path')) return 'kotlin.io.path のファイルの読み書き（java.io.File を使ってください）';
+  if (path.startsWith('io.ktor')) return 'ネットワーク';
+  if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
+  if (path.startsWith('kotlin.reflect')) return 'リフレクション';
+  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
+  return `標準ライブラリ以外のライブラリ（${path}）`;
+}
+
+/**
+ * The packages of the functions that start coroutines and threads, which learners write without their imports from
+ * examples: an unresolved call of one is reported as unavailable, as its import is, instead of as a missing name.
+ */
+const UNAVAILABLE_FUNCTION_PACKAGES: Readonly<Record<string, string>> = {
+  runBlocking: 'kotlinx.coroutines',
+  launch: 'kotlinx.coroutines',
+  async: 'kotlinx.coroutines',
+  delay: 'kotlinx.coroutines',
+  thread: 'kotlin.concurrent',
+};
+
+/** What an unresolved simple name is when it names a function of a package this environment does not run. */
+export function unavailableFunction(name: string): string | undefined {
+  const owner = Object.hasOwn(UNAVAILABLE_FUNCTION_PACKAGES, name) ? UNAVAILABLE_FUNCTION_PACKAGES[name] : undefined;
+  return owner && `${describeUnavailableImport(`${owner}.${name}`)}（${name}）`;
+}
+
 export function syntaxError(node: Node, message: string): CompileError {
   return new CompileError([{ row: node.startPosition.row, message }]);
 }

@@ -14,7 +14,7 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
-import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
+import { unavailableFunction, unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import { keyOf } from './flowKeys';
 import { assignedNames } from './flowWrites';
 import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
@@ -125,6 +125,8 @@ export abstract class CompilerCore {
       this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
     }
     if (known) this.unavailable(row, known);
+    const unavailableName = unavailableFunction(path);
+    if (unavailableName) this.unavailable(row, unavailableName);
   }
 
   /** Checks the annotations of a declaration written at `site`, as kotlinc does. */

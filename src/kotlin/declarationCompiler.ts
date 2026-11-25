@@ -22,7 +22,7 @@ import type {
 } from './ast';
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
 import type { FileContext, MemberRef } from './compilerCore';
-import { unavailableMessage } from './convertSupport';
+import { describeUnavailableImport, unavailableMessage } from './convertSupport';
 import { type DataArrayField, dataArrayField, dataFieldString } from './dataFields';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, valueEquals } from './format';
@@ -1917,15 +1917,6 @@ function nativeParameterText(param: ParameterDecl): string {
 }
 
 /** What an import names that this environment cannot run, by the feature it stands for. */
-function describeUnavailableImport(path: string): string {
-  if (path.startsWith('kotlin.io.path')) return 'kotlin.io.path のファイルの読み書き（java.io.File を使ってください）';
-  if (path.startsWith('io.ktor')) return 'ネットワーク';
-  if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
-  if (path.startsWith('kotlin.reflect')) return 'リフレクション';
-  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
-  return `標準ライブラリ以外のライブラリ（${path}）`;
-}
-
 function declaredFunction(symbol: ClassSymbol, name: string, paramCount: number): FunctionSymbol | undefined {
   return symbol.members
     .get(name)

@@ -6814,6 +6814,15 @@ fun main() { K(1) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '50\n' });
 });
 
+test('reports coroutine and thread functions written without their imports as unavailable', () => {
+  for (const name of ['runBlocking', 'launch', 'thread']) {
+    expect(executeProgram('kotlin', `fun main() { ${name} { println(1) } }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('この採点環境では使えません') }],
+    });
+  }
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G
