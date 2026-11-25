@@ -2299,7 +2299,9 @@ class Renamer {
   /** An operator chain of a quote, whose fixities decide how its `InfixE` or `InfixP` trees nest. */
   private thChainCode(expr: Extract<Expr, { kind: 'thChain' }>, scope: LocalScope): Expr {
     const { span } = expr;
-    const resolved = resolveExprChain(expr.items, span, (op) => this.fixityOf(op, scope));
+    const resolved = resolveExprChain(expr.items, span, (op) =>
+      !op.qualifier && expr.local.has(op.name) ? DEFAULT_FIXITY : this.fixityOf(op, scope)
+    );
     const operatorOf = (op: Operator): Expr => {
       const found =
         expr.operators.get(op) ??

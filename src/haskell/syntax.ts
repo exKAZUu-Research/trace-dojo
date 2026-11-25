@@ -103,6 +103,8 @@ export type Expr =
       kind: 'thChain';
       items: ChainItem<Expr>[];
       operators: Map<Operator, Expr>;
+      /** The operators the quote's own declarations bind, which have the default fixity. */
+      local: ReadonlySet<string>;
       pattern: boolean;
       negate: Expr;
       span: Span;

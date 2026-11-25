@@ -301,16 +301,18 @@ export class QuoteBuilder {
   /** An operator chain, whose fixities the renamer resolves before it builds `InfixE` or `InfixP`. */
   private chain(items: ChainItem<Expr>[] | ChainItem<Pat>[], span: Span, pattern: boolean): Expr {
     const operators = new Map<Operator, Expr>();
+    const local = new Set<string>();
     const built: ChainItem<Expr>[] = items.map((item): ChainItem<Expr> => {
       if (item.kind === 'operand') {
         return { kind: 'operand', value: pattern ? this.pat(item.value as Pat) : this.expr(item.value as Expr) };
       }
       if (item.kind === 'operator') {
         operators.set(item.op, pattern ? this.globalName(item.op, 'con') : this.operator(item.op));
+        if (!item.op.qualifier && this.env.has(item.op.name)) local.add(item.op.name);
       }
       return item;
     });
-    return { kind: 'thChain', items: built, operators, pattern, negate: this.negate(span), span };
+    return { kind: 'thChain', items: built, operators, local, pattern, negate: this.negate(span), span };
   }
 
   private caseExpr(expr: Extract<Expr, { kind: 'case' }>): Expr {
