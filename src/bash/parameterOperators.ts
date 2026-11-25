@@ -506,7 +506,7 @@ function substring(
   ctx: WordContext
 ): WordSegment[] {
   if (expansion.argument.length === 0) shell.discard(`${expansion.text}: bad substitution`);
-  const { offset: offsetParts, length: lengthParts } = splitSubstring(expansion.argument);
+  const { offset: offsetParts, length: lengthParts } = splitSubstring(expansion.argument, ctx.inDouble);
   if (value.kind === 'scalar' && value.value === undefined) return [];
   if (value.kind === 'list' && name !== '@' && name !== '*' && value.values.length === 0) {
     return expander.valueSegments({ ...value, values: [] }, ctx);
@@ -588,13 +588,16 @@ interface SubstringScanState {
   inSingle: boolean;
 }
 
-function splitSubstring(parts: WordPart[]): {
+function splitSubstring(
+  parts: WordPart[],
+  inDouble: boolean
+): {
   offset: (string | WordPart)[];
   length: (string | WordPart)[] | undefined;
 } {
   const offset: (string | WordPart)[] = [];
   const state: SubstringScanState = { depth: 0, conditional: 0, inSingle: false };
-  const continuationState = { inSingle: false };
+  const unescapeState = { inSingle: false };
   for (const [index, part] of parts.entries()) {
     if (part.kind !== 'literal') {
       offset.push(part);
@@ -602,47 +605,67 @@ function splitSubstring(parts: WordPart[]): {
     }
     const splitAt = findSubstringSeparator(part.text, state);
     if (splitAt === -1) {
-      offset.push(stripSubstringContinuations(part.text, continuationState));
+      offset.push(unescapeSubstringSlice(part.text, inDouble, unescapeState));
       continue;
     }
-    const before = stripSubstringContinuations(part.text.slice(0, splitAt), continuationState);
+    const before = unescapeSubstringSlice(part.text.slice(0, splitAt), inDouble, unescapeState);
     if (before) offset.push(before);
-    return { offset, length: formatSubstringRest(part.text.slice(splitAt + 1), parts.slice(index + 1)) };
+    return { offset, length: formatSubstringRest(part.text.slice(splitAt + 1), parts.slice(index + 1), inDouble) };
   }
   return { offset, length: undefined };
 }
 
-function formatSubstringRest(after: string, tail: readonly WordPart[]): (string | WordPart)[] {
+function formatSubstringRest(after: string, tail: readonly WordPart[], inDouble: boolean): (string | WordPart)[] {
   const state = { inSingle: false };
-  const head = stripSubstringContinuations(after, state);
+  const head = unescapeSubstringSlice(after, inDouble, state);
   const rest = tail.map((item): string | WordPart =>
-    item.kind === 'literal' ? stripSubstringContinuations(item.text, state) : item
+    item.kind === 'literal' ? unescapeSubstringSlice(item.text, inDouble, state) : item
   );
   return head ? [head, ...rest] : rest;
 }
 
-function stripSubstringContinuations(text: string, state: { inSingle: boolean }): string {
+function unescapeSubstringSlice(text: string, inDouble: boolean, state: { inSingle: boolean }): string {
   let out = '';
   for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (state.inSingle) {
-      if (c === "'") state.inSingle = false;
-      out += c;
-      continue;
-    }
-    if (c === "'") {
-      state.inSingle = true;
-      out += c;
-      continue;
-    }
-    if (c === '\\' && i + 1 < text.length) {
-      if (text[i + 1] !== '\n') out += text.slice(i, i + 2);
-      i++;
-      continue;
-    }
-    out += c;
+    const step = stepSubstringChar(text, i, inDouble, state);
+    out += step.emit;
+    i = step.nextIndex;
   }
   return out;
+}
+
+function stepSubstringChar(
+  text: string,
+  index: number,
+  inDouble: boolean,
+  state: { inSingle: boolean }
+): { emit: string; nextIndex: number } {
+  const c = text[index];
+  if (state.inSingle) return stepSingleQuotedSubstringChar(text, index, inDouble, state);
+  if (c === "'") {
+    state.inSingle = true;
+    return { emit: c, nextIndex: index };
+  }
+  if (c !== '\\' || index + 1 >= text.length) return { emit: c, nextIndex: index };
+  const next = text[index + 1];
+  if (next === '\n') return { emit: '', nextIndex: index + 1 };
+  const unescape = inDouble && '$`"\\'.includes(next);
+  return { emit: unescape ? next : text.slice(index, index + 2), nextIndex: index + 1 };
+}
+
+function stepSingleQuotedSubstringChar(
+  text: string,
+  index: number,
+  inDouble: boolean,
+  state: { inSingle: boolean }
+): { emit: string; nextIndex: number } {
+  const c = text[index];
+  if (inDouble && c === '\\' && index + 1 < text.length && '"\\\n'.includes(text[index + 1])) {
+    const next = text[index + 1];
+    return { emit: next === '\n' ? '' : next, nextIndex: index + 1 };
+  }
+  if (c === "'") state.inSingle = false;
+  return { emit: c, nextIndex: index };
 }
 
 function findSubstringSeparator(text: string, state: SubstringScanState): number {
