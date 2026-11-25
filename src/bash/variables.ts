@@ -786,7 +786,7 @@ export class VariableStore {
     allowReadonlyAlreadySet = true
   ): StoreFailure | undefined {
     const cell = this.getCell(handle);
-    if (cell.attributes.has('r') && !canApplyToReadonlyCell(cell, toAdd, allowReadonlyAlreadySet)) {
+    if (cell.attributes.has('r') && !canApplyToReadonlyCell(toAdd, allowReadonlyAlreadySet)) {
       return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
     }
     const incompatible = checkIncompatibleArrayConversion(cell, toAdd);
@@ -1251,10 +1251,10 @@ function isArrayCell(cell: Cell): boolean {
   );
 }
 
-function canApplyToReadonlyCell(cell: Cell, toAdd: ReadonlySet<Attribute>, allowReadonlyAlreadySet: boolean): boolean {
+function canApplyToReadonlyCell(toAdd: ReadonlySet<Attribute>, allowReadonlyAlreadySet: boolean): boolean {
   if (!allowReadonlyAlreadySet) return false;
   for (const attr of toAdd) {
-    if (attr !== 'r' && attr !== 'x' && !cell.attributes.has(attr)) return false;
+    if (attr !== 'r' && attr !== 'x') return false;
   }
   return true;
 }
