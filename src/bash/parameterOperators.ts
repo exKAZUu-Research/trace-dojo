@@ -203,7 +203,7 @@ function collectOperatorWordEntries(
     for (const seg of expanded) {
       if (seg.kind === 'emptyList') continue;
       if (seg.kind === 'break' && seg.breakKind === 'star' && !keepsFields && starJoiner !== '') {
-        entries.push({ segment: textSegment(starJoiner, false, true), keepsFields });
+        entries.push({ segment: textSegment(starJoiner, false, true, { fromList: true }), keepsFields });
         continue;
       }
       entries.push({ segment: seg, keepsFields });
@@ -303,7 +303,11 @@ function defaultValue(
   const target = resolveAssignOperatorTarget(shell, name, subscript);
   const outcome = writeResolvedTarget(shell, target, text, false);
   if (!outcome.ok) shell.failures.handleStoreFailure('expansion', outcome);
-  return expander.valueSegments({ kind: 'scalar', value: outcome.ok ? outcome.stored : '' }, ctx);
+  const stored = outcome.ok ? outcome.stored : '';
+  const fromList = !ctx.inDouble && word.some((seg) => seg.kind === 'text' && seg.fromList);
+  return fromList && stored !== ''
+    ? [textSegment(stored, false, true, { fromList: true })]
+    : expander.valueSegments({ kind: 'scalar', value: stored }, ctx);
 }
 
 function failRequireOperator(
