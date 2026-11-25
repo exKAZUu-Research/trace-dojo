@@ -1217,17 +1217,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const expected = this.returnValueType();
     if (!statement.value) {
       this.fn.returnTypes?.push(NULL);
-      if (
-        expected &&
-        expected.kind !== 'void' &&
-        expected.kind !== 'dynamic' &&
-        expected.kind !== 'null' &&
-        !this.fn.kind.isConstructor
-      ) {
-        // A function literal's return type comes from its context, which `return;` fits when it allows null.
-        if (this.fn.kind.returnType === undefined && isNullable(expected)) this.fn.contextBareReturns.push(statement);
-        else this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
-      }
+      if (expected) this.checkBareReturn(statement, expected);
       this.flow = this.flow.unreachable;
       const completion: Completion = { kind: 'return', value: undefined };
       return () => completion;
@@ -1240,6 +1230,15 @@ export abstract class StatementCompiler extends PatternCompiler {
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });
+  }
+
+  /** Rejects `return;` where the function's value type requires a value. */
+  private checkBareReturn(statement: Span, expected: DartType): void {
+    if (expected.kind === 'void' || expected.kind === 'dynamic' || expected.kind === 'null') return;
+    if (this.fn.kind.isConstructor) return;
+    // A function literal's return type comes from its context, which `return;` fits when it allows null.
+    if (this.fn.kind.returnType === undefined && isNullable(expected)) this.fn.contextBareReturns.push(statement);
+    else this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
   }
 
   /** The slots holding the exceptions of the catch clauses being compiled, innermost last. */
