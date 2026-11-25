@@ -1,5 +1,6 @@
 import { assert } from 'es-toolkit';
 
+import { CompileError } from '../interpreter/diagnostics';
 import { COERCIBLE_CLASS, COERCIBLE_TYPES, EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
 import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
@@ -611,10 +612,20 @@ function deriveStandaloneInstances(checker: Checker, module: RModule, options: T
       return declareInstance(checker, instanceDecl, module.name, undecidable, standalone.via).declared;
     }
     const { head } = splitRType(standalone.type);
-    const decl = head.k === 'con' ? module.dataDecls.find((candidate) => candidate.entity === head.entity) : undefined;
-    if (!decl) throw unsupportedError(standalone.span, 'このプログラムで定義していない型の deriving');
-    const how = derivingStrategy(module, options, decl, standalone.cls, standalone.strategy, standalone.span);
+    const candidates = head.k === 'con' ? module.dataDecls.filter((candidate) => candidate.entity === head.entity) : [];
+    if (candidates.length === 0) throw unsupportedError(standalone.span, 'このプログラムで定義していない型の deriving');
     const { declared } = declareInstance(checker, instanceDecl, module.name, undecidable);
+    // A data family's instances share the family; the one derived for is the instance its type matches.
+    const decl = candidates.find(
+      (candidate) => !candidate.instanceHead || matchType(declHead(candidate).head, declared.info.head, [])
+    );
+    if (!decl) {
+      throw compileError(
+        standalone.span,
+        `${new TypePrinter().show(declared.info.head)} の data instance がありません。`
+      );
+    }
+    const how = derivingStrategy(module, options, decl, standalone.cls, standalone.strategy, standalone.span);
     if (how === 'newtype') {
       const { rep } = coercedDerivingHead(checker, decl, standalone.cls, 'newtype', undefined, standalone.span);
       declared.rep = instantiateType(rep, splitApp(declared.info.head).args);
@@ -662,7 +673,14 @@ function derivingStrategy(
   if (derive && !features.allows(derive[0])) {
     throw compileError(span, `${cls.name} を deriving するには、${extension} の拡張が要ります。`);
   }
-  checkDerivable(decl, cls, span);
+  try {
+    checkDerivable(decl, cls, span);
+  } catch (error) {
+    // A newtype takes its representation's instance when stock deriving cannot apply, unless stock was asked for.
+    if (!(error instanceof CompileError) || strategy !== undefined || !isNewtype) throw error;
+    if (!features.allows('newtypeByDefault')) throw error;
+    return 'newtype';
+  }
   return 'stock';
 }
 
