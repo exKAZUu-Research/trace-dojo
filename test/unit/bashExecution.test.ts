@@ -146,44 +146,34 @@ f() { break; echo after; }; for i in 1; do f; done
   });
 });
 
-test('declare -g and prefixed export propagate globals, elements, and attributes as Bash does', () => {
-  const program = `declare -n r=g
-f() {
-  local g=local a=old
-  declare -g r=updated
-  declare -gi a[0]=2+3
-  echo "$g|$r|$(declare -p a)"
+test('whole-variable namerefs, declare -g globals, and temporary scalar prefixes work while niche combinations fail explicitly', () => {
+  const program = `f() {
+  local -n ref=$1
+  local shadow=inner
+  declare -gi global_sum=2+3
+  ref[k]=updated
+  echo "$shadow|\${ref[k]}|$global_sum"
 }
-a=global
-f
-declare -p g a
-u=(g0 g1); v=(b0 b1); declare -n nr=u
-h() { local -n nr=v; declare -gu nr[1]=new; }
-h
-declare -p u v nr
-export p=old
-p=temp export -n p=new p
-echo "$p|$(declare -p p)"
-p=temp export -n p+=more
-p2=temp export p2=a p2+=last
-declare -i cnt=0; idx=0; cnt=1 export cnt=idx++ idx=7
+declare -A box=([k]=old)
+shadow=outer
+TMP=scoped f box
+echo "$shadow|\${box[k]}|$global_sum|\${TMP-unset}"
 false
-echo "$p|$p2|$cnt:$idx|\${PIPESTATUS[0]}|\${BASH_SUBSHELL[0]}"
+echo "\${PIPESTATUS[0]}|\${BASH_SUBSHELL}"
 `;
   expect(executeProgram('bash', program)).toMatchObject({
     kind: 'executed',
-    stdout: [
-      'local|local|declare -a a=([0]="2+3")',
-      'declare -- g="updated"',
-      'declare -ai a=([0]="global")',
-      'declare -a u=([0]="g0" [1]="g1")',
-      'declare -a v=([0]="b0" [1]="new")',
-      'declare -au nr=()',
-      'new|declare -x p="new"',
-      'newmore|last|1:7|1|0',
-      '',
-    ].join('\n'),
+    stdout: 'inner|updated|5\nouter|updated|5|unset\n1|0\n',
     stderr: '',
+  });
+  expect(executeProgram('bash', 'p=temp export p=new\n')).toMatchObject({
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+  expect(executeProgram('bash', 'a=(1 2); local_fn() { local -n r="a[0]"; }; local_fn\n')).toMatchObject({
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+  expect(executeProgram('bash', 'unset RANDOM\n')).toMatchObject({
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
   });
 });
 

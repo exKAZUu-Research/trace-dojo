@@ -1,39 +1,17 @@
-// code-gauge-allow-file fileNcss -- Keeps Bash's declaration builtins (declare, typeset, local, readonly, export) together.
 import { skipSubscript } from './arithmetic';
 import type { Assignment, Word } from './ast';
 import { expandBraces } from './braces';
-import { assignDeclaredOperand, assignLocally, findOperandEquals, hasValue, isCompound } from './declareAssign';
-import { type PrefixedDeclareHooks, tryDeclarePrefixed } from './declarePrefixed';
-import { printDeclarations } from './declarePrint';
-import { DiscardSignal } from './runtime';
-import type { CompoundElement, Shell } from './shell';
-import { UnsupportedFeatureError } from './unsupported';
 import {
-  applyCaseAttributes,
-  AssociativeTable,
   type Attribute,
-  cloneValue,
-  CONVERTED_BUCKETS,
-  findEnclosingVariable,
-  isIdentifier,
-  resolveNameInScopes,
-  type Variable,
-  type VariableValue,
-} from './variables';
-
-/** An argument of a declaration builtin: an assignment the shell parsed, or a word it expanded. */
-export type DeclarationArgument =
-  | string
-  | (Assignment & {
-      expandedElements?: CompoundElement[];
-      committedCompound?: boolean;
-      failedCompound?: boolean;
-      committedTarget?: {
-        variable: Variable;
-        priorKind: VariableValue['kind'] | undefined;
-        localElementLink?: boolean;
-      };
-    });
+  rejectSpecialVariableMutation,
+  rejectUnsupportedDeclarationOperand,
+  rejectUnsupportedDeclarationOptions,
+} from './capabilities';
+import { printDeclarations } from './declarePrint';
+import type { Shell } from './shell';
+import { resolveSubscriptTarget, resolveTargetName, writeResolvedTarget } from './targets';
+import { UnsupportedFeatureError } from './unsupported';
+import { type CellHandle, type CompoundElement, type DestinationIntent, isIdentifier } from './variables';
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -51,43 +29,183 @@ const OPTIONS: Record<string, string> = {
   export: 'fnp',
 };
 
-/** The options a declaration builtin got: the attributes it sets with `-` and removes with `+`. */
-export type DeclarationOptions = Options;
+const VALUE_ATTRIBUTES = new Set<string>(['a', 'A', 'i', 'l', 'u', 'x', 'r']);
 
-interface Options {
-  set: Set<string>;
-  unset: Set<string>;
-  attemptedSet: Set<string>;
-  suppressedNameref?: boolean;
+interface ParsedOptions {
+  readonly set: Set<string>;
+  readonly unset: Set<string>;
+  readonly hasPlusOption: boolean;
+  readonly invalidOption?: string;
 }
 
-/** Expands declaration command arguments left-to-right before prefix bindings and `runDeclaration` execute. */
-export function expandDeclarationArguments(
+type PlannedOperand =
+  | { readonly kind: 'word'; readonly text: string }
+  | {
+      readonly kind: 'assignment';
+      readonly name: string;
+      readonly subscript?: Word;
+      readonly append: boolean;
+      readonly value: string | undefined;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'completedCompound';
+      readonly name: string;
+      readonly cell: CellHandle;
+      readonly materializedArray: boolean;
+      readonly text: string;
+    }
+  | { readonly kind: 'failedCompound'; readonly name: string; readonly text: string }
+  | { readonly kind: 'deferredCompound'; readonly name: string; readonly text: string };
+
+interface DeclarationPlan {
+  readonly builtin: string;
+  readonly options: ParsedOptions;
+  readonly operands: PlannedOperand[];
+  readonly lastArgText: string;
+}
+
+/** Runs a static `declaration_command` (`declare`, `typeset`, `local`, `readonly`, `export`) via an explicit two-phase plan. */
+export function executeDeclarationCommand(
   shell: Shell,
   builtin: string,
-  rawArgs: (Word | Assignment)[]
-): DeclarationArgument[] {
-  const args: DeclarationArgument[] = [];
-  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
-  let optionsDone = false;
-  for (const arg of rawArgs) {
-    if ('append' in arg) {
-      optionsDone = true;
-      for (const braced of braceExpandDeclarationAssignment(shell, arg)) {
-        args.push(expandDeclarationAssignment(shell, builtin, braced, options));
-      }
-      continue;
-    }
-    const words = shell.expander.expandWords([arg]);
-    for (const word of words) {
-      if (!optionsDone) optionsDone = recordOptionWord(word, options);
-      args.push(word);
-    }
-  }
-  return args;
+  rawArgs: readonly (Word | Assignment)[],
+  withRedirects: <T>(run: () => T) => T
+): { status: number; assignsAnswer: boolean } {
+  const plan = buildDeclarationPlan(shell, builtin, rawArgs);
+  let assignsAnswer = planAssignsAnswer(plan);
+  const status = withRedirects(() => {
+    const code = runDeclarationPlan(shell, plan, () => {
+      assignsAnswer = true;
+    });
+    shell.store.lastArgument = plan.lastArgText;
+    return code;
+  });
+  return { status, assignsAnswer };
 }
 
-function braceExpandDeclarationAssignment(shell: Shell, arg: Assignment): Assignment[] {
+/** Runs a declaration builtin invoked through an expanded command word (`cmd=declare; $cmd x=1`). */
+export function runDynamicDeclarationBuiltin(shell: Shell, builtin: string, args: readonly string[]): number {
+  const options = createEmptyOptions();
+  const operands: PlannedOperand[] = [];
+  let optionsDone = false;
+  for (const arg of args) {
+    if (!optionsDone && arg === '--') {
+      optionsDone = true;
+      continue;
+    }
+    if (!optionsDone && consumeOptionToken(builtin, arg, options)) continue;
+    optionsDone = true;
+    operands.push({ kind: 'word', text: arg });
+  }
+  applyBuiltinImpliedFlags(builtin, options);
+  const plan: DeclarationPlan = {
+    builtin,
+    options,
+    operands,
+    lastArgText: args.at(-1) ?? builtin,
+  };
+  return runDeclarationPlan(shell, plan);
+}
+
+// ---------------------------------------------------------------- Phase 1: plan construction & eager compound commit
+
+function buildDeclarationPlan(shell: Shell, builtin: string, rawArgs: readonly (Word | Assignment)[]): DeclarationPlan {
+  const options = createEmptyOptions();
+  const operands: PlannedOperand[] = [];
+  const state = { optionsDone: false, lastArgText: builtin };
+  for (const arg of rawArgs) {
+    if ('append' in arg) {
+      state.optionsDone = true;
+      for (const braced of braceExpandAssignment(shell, arg)) {
+        state.lastArgText = braced.text;
+        operands.push(planAssignmentOperand(shell, builtin, braced, options));
+      }
+    } else {
+      appendExpandedDeclareWords(shell, builtin, arg, options, operands, state);
+    }
+  }
+  applyBuiltinImpliedFlags(builtin, options);
+  return { builtin, options, operands, lastArgText: state.lastArgText };
+}
+
+function appendExpandedDeclareWords(
+  shell: Shell,
+  builtin: string,
+  arg: Word,
+  options: { set: Set<string>; unset: Set<string>; hasPlusOption: boolean; invalidOption?: string },
+  operands: PlannedOperand[],
+  state: { optionsDone: boolean; lastArgText: string }
+): void {
+  for (const word of shell.expander.expandWords([arg])) {
+    state.lastArgText = word;
+    if (!state.optionsDone && word === '--') {
+      state.optionsDone = true;
+      continue;
+    }
+    if (!state.optionsDone && consumeOptionToken(builtin, word, options)) continue;
+    state.optionsDone = true;
+    operands.push({ kind: 'word', text: word });
+  }
+}
+
+function createEmptyOptions(): {
+  set: Set<string>;
+  unset: Set<string>;
+  hasPlusOption: boolean;
+  invalidOption?: string;
+} {
+  return { set: new Set(), unset: new Set(), hasPlusOption: false };
+}
+
+function consumeOptionToken(
+  builtin: string,
+  token: string,
+  options: { set: Set<string>; unset: Set<string>; hasPlusOption: boolean; invalidOption?: string }
+): boolean {
+  if (token === '--') return false;
+  if (!/^[-+]./.test(token)) return false;
+  const sign = token[0] as '-' | '+';
+  if (sign === '+') options.hasPlusOption = true;
+  for (const ch of token.slice(1)) {
+    if (!OPTIONS[builtin].includes(ch)) {
+      options.invalidOption ??= `${sign}${ch}`;
+      return true;
+    }
+    if (ch === 'I' || ch === 'p') {
+      options.set.add(ch);
+      continue;
+    }
+    if (sign === '+') {
+      options.unset.add(ch);
+      options.set.delete(ch);
+    } else if (!options.unset.has(ch)) {
+      options.set.add(ch);
+    }
+  }
+  return true;
+}
+
+function applyBuiltinImpliedFlags(builtin: string, options: { set: Set<string>; unset: Set<string> }): void {
+  if (builtin === 'readonly') options.set.add('r');
+  else if (builtin === 'export') {
+    if (options.set.delete('n')) options.unset.add('x');
+    else options.set.add('x');
+  }
+}
+
+function snapshotEffectiveOptions(builtin: string, rawOptions: ParsedOptions): ParsedOptions {
+  const copy = {
+    set: new Set(rawOptions.set),
+    unset: new Set(rawOptions.unset),
+    hasPlusOption: rawOptions.hasPlusOption,
+    ...(rawOptions.invalidOption ? { invalidOption: rawOptions.invalidOption } : {}),
+  };
+  applyBuiltinImpliedFlags(builtin, copy);
+  return copy;
+}
+
+function braceExpandAssignment(shell: Shell, arg: Assignment): Assignment[] {
   if (arg.array) return [arg];
   const spend = (): void => shell.runtime.spend();
   const subPartsList = arg.subscript ? expandBraces(arg.subscript.parts, spend) : [undefined];
@@ -105,388 +223,409 @@ function braceExpandDeclarationAssignment(shell: Shell, arg: Assignment): Assign
   return expanded;
 }
 
-const SIGN_INDEPENDENT_MODE_FLAGS = new Set(['I', 'p']);
-
-function recordOptionWord(word: string, options: Options): boolean {
-  if (word === '--' || !/^[-+]./.test(word)) return true;
-  for (const ch of word.slice(1)) applyOptionSign(options, word[0] as '-' | '+', ch);
-  return false;
-}
-
-function applyOptionSign(options: Options, sign: '-' | '+', ch: string): void {
-  if (SIGN_INDEPENDENT_MODE_FLAGS.has(ch)) {
-    options.set.add(ch);
-    return;
-  }
-  if (sign === '+') {
-    if (ch === 'g') return;
-    options.unset.add(ch);
-    options.set.delete(ch);
-    return;
-  }
-  options.attemptedSet.add(ch);
-  if (!options.unset.has(ch)) options.set.add(ch);
-}
-
-function expandDeclarationAssignment(
+function planAssignmentOperand(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  rawOptions: Options
-): DeclarationArgument {
-  const builtinOptions = withBuiltinImpliedOptions(builtin, rawOptions);
-  const options = isLocalDeclaration(shell, builtin, builtinOptions)
-    ? builtinOptions
-    : normalizeArrayNamerefPrecedence(builtinOptions);
-  const subscript = arg.subscript && literalWord(arg.subscript, shell.expander.expandAssociativeKey(arg.subscript));
-  const value =
-    arg.value &&
-    literalWord(
-      arg.value,
-      shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(arg.value as Word))
-    );
+  rawOptions: ParsedOptions
+): PlannedOperand {
+  const effective = snapshotEffectiveOptions(builtin, rawOptions);
   if (arg.array) {
-    const rawItems = shell.expander.expandRawCompoundItems(arg.array, options.set.has('A') && !options.set.has('a'));
-    const committed = commitCompoundDeclaration(shell, builtin, arg, rawOptions, options, rawItems);
-    return {
-      ...arg,
-      ...(subscript ? { subscript } : {}),
-      ...(committed === 'failed'
-        ? { failedCompound: true }
-        : committed
-          ? { committedCompound: true, committedTarget: committed }
-          : { expandedElements: rawItems }),
-    };
+    const isAssocFlag = effective.set.has('A') && !effective.set.has('a');
+    const rawItems = shell.expander.expandRawCompoundItems(arg.array, isAssocFlag);
+    return commitPhase1Compound(shell, builtin, arg, effective, rawItems);
   }
+  const value = arg.value ? shell.expander.expandAssignmentValue(arg.value, true) : undefined;
   return {
-    ...arg,
-    ...(subscript ? { subscript } : {}),
-    ...(value ? { value } : {}),
+    kind: 'assignment',
+    name: arg.name,
+    ...(arg.subscript ? { subscript: arg.subscript } : {}),
+    append: arg.append,
+    value,
+    text: arg.text,
   };
 }
 
-function withBuiltinImpliedOptions(builtin: string, rawOptions: Options): Options {
-  if (builtin !== 'readonly' && builtin !== 'export') return rawOptions;
-  const set = new Set(rawOptions.set);
-  const unset = new Set(rawOptions.unset);
-  if (builtin === 'readonly') set.add('r');
-  else if (set.delete('n')) unset.add('x');
-  else set.add('x');
-  return { ...rawOptions, set, unset };
-}
-
-function commitCompoundDeclaration(
+function commitPhase1Compound(
   shell: Shell,
   builtin: string,
   arg: Assignment,
-  rawOptions: Options,
-  options: Options,
+  effective: ParsedOptions,
   rawItems: CompoundElement[]
-):
-  | { variable: Variable; priorKind: VariableValue['kind'] | undefined; localElementLink?: boolean }
-  | 'failed'
-  | undefined {
-  if (!hasValidCompoundContext(shell, builtin, rawOptions)) return undefined;
-  if (isLocalDeclaration(shell, builtin, rawOptions) && rawOptions.attemptedSet.has('n')) return undefined;
-  if (options.set.has('n')) return undefined;
-  const phase1Options = buildPhase1CompoundOptions(options);
-  const { localScope, targetName, referencedSubscript, fromNameref, localElementLink } = resolvePhase1CompoundTarget(
-    shell,
-    builtin,
-    arg,
-    phase1Options,
-    rawOptions.unset.has('n')
-  );
-  if (arg.subscript || referencedSubscript !== undefined) {
-    return rejectCompoundArrayMember(shell, builtin, { arg, rawOptions, localScope, targetName, referencedSubscript });
-  }
-  const visibleStore = Boolean(fromNameref);
+): PlannedOperand {
   if (
-    !validateCompoundDeclarationTarget(shell, builtin, targetName, arg.append, phase1Options, localScope, visibleStore)
+    effective.invalidOption ||
+    (effective.set.has('A') && effective.set.has('a')) ||
+    (builtin === 'local' && !shell.isInFunction)
   ) {
-    return undefined;
+    return { kind: 'deferredCompound', name: arg.name, text: arg.text };
   }
-  const storeVariable = ensureCompoundTargetVariable(shell, targetName, phase1Options.set, localScope, visibleStore);
-  const priorKind = storeVariable.value?.kind;
-  if (!applyAttributes(shell, builtin, storeVariable, phase1Options, true, false, false, true)) return undefined;
-  const isAssoc = storeVariable.attributes.has('A') || storeVariable.value?.kind === 'associative';
-  const { elements, error } = shell.expander.validateCompoundItems(rawItems, isAssoc, true, arg.name);
-  const ok = shell.assignCompoundTo(storeVariable, elements, arg.append, arg.name);
-  if (error) shell.discard(error);
-  if (!ok) throw new DiscardSignal();
-  return { variable: storeVariable, priorKind, ...(localElementLink ? { localElementLink: true } : {}) };
-}
-
-function rejectCompoundArrayMember(
-  shell: Shell,
-  builtin: string,
-  ctx: {
-    arg: Assignment;
-    rawOptions: Options;
-    localScope: Map<string, Variable> | undefined;
-    targetName: string;
-    referencedSubscript: string | undefined;
+  rejectUnsupportedDeclarationOptions(builtin, effective.set, effective.unset, effective.hasPlusOption);
+  const intent = destinationIntentOf(shell, builtin, effective.set);
+  const existingOwn = intent === 'local' ? undefined : shell.store.ownView(arg.name);
+  rejectUnsupportedDeclarationOperand(builtin, arg.name, effective.set, {
+    isSubscripted: Boolean(arg.subscript),
+    isCompound: true,
+    append: arg.append,
+    existingIsNameref: Boolean(existingOwn?.attributes.has('n') && intent === 'global'),
+  });
+  const failCtx =
+    shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
+      ? 'declarationFunctionCompoundPhase1'
+      : 'declarationCompoundPhase1';
+  if (arg.subscript) {
+    shell.failures.handleStoreFailure(failCtx, {
+      ok: false,
+      reason: 'cannotAssign',
+      message: `${arg.name}[${arg.subscript.text}]: cannot assign list to array member`,
+    });
+    return { kind: 'failedCompound', name: arg.name, text: arg.text };
   }
-): 'failed' {
-  unlinkElementNamerefOnCompoundError(shell, ctx.arg.name, ctx.rawOptions, ctx.localScope);
-  const sub = ctx.arg.subscript?.text ?? ctx.referencedSubscript ?? '';
-  const errBase = ctx.referencedSubscript === undefined ? ctx.arg.name : ctx.targetName;
-  const message = `${errBase}[${sub}]: cannot assign list to array member`;
-  if (shell.isInFunction && builtin !== 'readonly' && builtin !== 'export') {
-    shell.reportError(message);
-    return 'failed';
-  }
-  shell.discard(message);
-}
-
-function buildPhase1CompoundOptions(options: Options): Options {
-  const set = new Set([...options.set].filter((f) => f !== 'n' && f !== 'r'));
-  const unset = new Set([...options.unset].filter((f) => f !== 'n' && f !== 'a' && f !== 'A'));
-  return { set, unset, attemptedSet: new Set() };
-}
-
-function unlinkElementNamerefOnCompoundError(
-  shell: Shell,
-  name: string,
-  rawOptions: Options,
-  localScope: Map<string, Variable> | undefined
-): void {
-  if (!rawOptions.unset.has('n')) return;
-  if (localScope) {
-    localScope.get(name)?.attributes.delete('n');
-    return;
-  }
-  const globalOnly = rawOptions.set.has('g');
-  const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
-  if (start?.attributes.has('n')) findFinalNamerefLink(shell, start, globalOnly).attributes.delete('n');
+  const targetName = resolvePhase1CompoundTarget(shell, arg.name, intent, failCtx);
+  if (targetName === undefined) return { kind: 'failedCompound', name: arg.name, text: arg.text };
+  return writePhase1CompoundToCell(shell, arg, effective, rawItems, intent, targetName, failCtx);
 }
 
 function resolvePhase1CompoundTarget(
   shell: Shell,
-  builtin: string,
+  rawName: string,
+  intent: DestinationIntent,
+  failCtx: 'declarationFunctionCompoundPhase1' | 'declarationCompoundPhase1'
+): string | undefined {
+  const targetName = intent === 'visible' ? resolveTargetName(shell, rawName) : rawName;
+  if (targetName === undefined) return undefined;
+  rejectSpecialVariableMutation(targetName, false);
+  if (!isIdentifier(targetName)) {
+    shell.failures.handleStoreFailure(failCtx, {
+      ok: false,
+      reason: 'invalidIdentifier',
+      message: `\`${targetName}': not a valid identifier`,
+    });
+    return undefined;
+  }
+  return targetName;
+}
+
+// code-gauge-allow functionParameterCount -- Commits validated Phase-1 compound elements onto the selected destination cell.
+function writePhase1CompoundToCell(
+  shell: Shell,
   arg: Assignment,
-  phase1Options: Options,
-  rawUnsetN: boolean
-): {
-  localScope: Map<string, Variable> | undefined;
-  targetName: string;
-  referencedSubscript?: string;
-  fromNameref?: boolean;
-  localElementLink?: boolean;
-} {
-  const { set, unset } = phase1Options;
-  const isLocal = isLocalDeclaration(shell, builtin, phase1Options);
-  const { scopes, functionScopes } = shell.state;
-  const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
-  if (localScope && rawUnsetN && !arg.subscript && localScope.get(arg.name)?.attributes.has('n')) {
-    const localElementTarget = resolveLocalElementNamerefTarget(shell, arg.name);
-    if (localElementTarget !== undefined) return { localScope, targetName: localElementTarget, localElementLink: true };
-  }
-  if (!localScope && set.has('g') && !arg.subscript) {
-    const firstHop = resolveGlobalNamerefFirstHop(scopes[0].get(arg.name));
-    if (firstHop !== '') {
-      return { localScope, ...resolveVisibleReferentTarget(shell, firstHop), fromNameref: true };
-    }
-  }
-  const resolved = resolveDeclaredTarget(shell, arg.name, set, unset, Boolean(arg.subscript), set.has('g'), localScope);
-  return { localScope, ...resolved };
-}
-
-function resolveGlobalNamerefFirstHop(globalStart: Variable | undefined): string {
-  return globalStart?.attributes.has('n') && globalStart.value?.kind === 'scalar' ? globalStart.value.value : '';
-}
-
-// code-gauge-allow functionParameterCount -- Checks host-env append, readonly boundary, array-kind clash, and conversion error for compound targets.
-function validateCompoundDeclarationTarget(
-  shell: Shell,
-  builtin: string,
+  effective: ParsedOptions,
+  rawItems: CompoundElement[],
+  intent: DestinationIntent,
   targetName: string,
-  append: boolean,
-  options: Options,
-  localScope: Map<string, Variable> | undefined,
-  visibleStore = false
-): boolean {
-  const { set, unset } = options;
-  if (!localScope && shell.isDynamic(targetName) && !shell.isScalarDynamic(targetName)) return false;
-  const lookupSet = visibleStore ? new Set([...set].filter((f) => f !== 'g')) : set;
-  const existing = resolveCompoundExisting(shell, targetName, lookupSet, localScope);
-  if (!existing && !localScope && append && shell.isUnreadHostEnv(targetName)) {
-    throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
+  failCtx: 'declarationFunctionCompoundPhase1' | 'declarationCompoundPhase1'
+): PlannedOperand {
+  const containerKind = effective.set.has('A') ? 'associative' : 'indexed';
+  const priorKind = intent === 'local' ? undefined : shell.store.ownView(targetName)?.kind;
+  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
+  const selected = shell.store.selectDestination(intent, targetName, containerKind, arg.append);
+  const attrFailure = shell.store.applyAttributes(selected.cell, nonReadonlyValueAttributes(effective.set), false);
+  if (attrFailure) {
+    shell.failures.handleStoreFailure(failCtx, attrFailure);
+    return { kind: 'failedCompound', name: arg.name, text: arg.text };
   }
-  if (
-    existing?.attributes.has('r') ||
-    Boolean(localScope && !localScope.has(targetName) && isReadonlyGlobal(shell, targetName))
-  ) {
-    if (shell.isInFunction && builtin !== 'readonly' && builtin !== 'export') return false;
-    shell.discard(`${targetName}: readonly variable`);
+  const viewAfterAttr = shell.store.viewOfHandle(selected.cell);
+  const isAssoc = viewAfterAttr.kind === 'associative' || viewAfterAttr.attributes.has('A');
+  const { elements, error } = shell.expander.validateCompoundItems(rawItems, isAssoc, true, arg.name);
+  const outcome = shell.store.writeCompound(selected.cell, elements, {
+    append: arg.append,
+    reportedName: arg.name,
+    evalIndex: (cellHandle, rawKey) => shell.evaluateCompoundIndex(cellHandle, rawKey),
+    evalInt: (expr) => shell.evaluateFatalReadonly(expr, false),
+    onItemError: (msg) => shell.reportError(msg),
+  });
+  if (error !== undefined) shell.discard(error);
+  if (!outcome.ok) {
+    shell.failures.handleStoreFailure('declarationCompoundPhase1', outcome);
+    return { kind: 'failedCompound', name: arg.name, text: arg.text };
   }
-  const kindErr = existing && incompatibleArrayKindError(existing, set);
-  if (kindErr) shell.discard(`${targetName}: ${kindErr}`);
-  if (set.has('n')) return false;
-  return !(existing && conversionError(existing, set, unset));
+  const finalKind = shell.store.viewOfHandle(selected.cell).kind;
+  const materializedArray = !wasMaterialized && (finalKind === 'indexed' || finalKind === 'associative');
+  return {
+    kind: 'completedCompound',
+    name: arg.name,
+    cell: selected.cell,
+    materializedArray,
+    text: arg.text,
+  };
 }
 
-function hasValidCompoundContext(shell: Shell, builtin: string, { set, unset }: Options): boolean {
-  if (builtin === 'local' && !shell.isInFunction) return false;
-  if (set.has('A') && set.has('a')) return false;
-  const allowed = OPTIONS[builtin] ?? '';
-  return [...set, ...unset].every((opt) => allowed.includes(opt) || (builtin === 'export' && opt === 'x'));
-}
+// ---------------------------------------------------------------- Phase 2: plan validation & operand completion
 
-function ensureCompoundTargetVariable(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  localScope: Map<string, Variable> | undefined,
-  visibleStore = false
-): Variable {
-  const { scopes } = shell.state;
-  let variable = localScope
-    ? localScope.get(targetName)
-    : !visibleStore && (set.has('n') || set.has('g'))
-      ? scopes[0].get(targetName)
-      : shell.findVariable(targetName, false);
-  if (!variable) {
-    variable = createCompoundVariable(shell, targetName, set, localScope);
-    (localScope ?? scopes[0]).set(targetName, variable);
+function runDeclarationPlan(shell: Shell, plan: DeclarationPlan, onMaterialize?: () => void): number {
+  const { builtin, options, operands } = plan;
+  if (options.invalidOption !== undefined) {
+    shell.reportError(`${builtin}: ${options.invalidOption}: invalid option`);
+    shell.fd2.write(`${builtin}: usage: ${USAGES[builtin]}\n`);
+    return 2;
   }
-  return variable;
-}
-
-function createCompoundVariable(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  localScope: Map<string, Variable> | undefined
-): Variable {
-  if (!localScope && shell.isScalarDynamic(targetName)) {
-    return materializeDeclaredScalarDynamic(shell, targetName, set);
+  if (options.set.has('A') && options.set.has('a')) {
+    shell.reportError(`${builtin}: -a: invalid option`);
+    return 2;
   }
-  const origin = localScope ? resolveLocalOrigin(shell, localScope, targetName, set.has('I')) : undefined;
-  return createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed');
-}
-
-function resolveCompoundExisting(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  localScope: Map<string, Variable> | undefined
-): Variable | undefined {
-  const { scopes } = shell.state;
-  if (localScope) {
-    const existing = localScope.get(targetName);
-    if (existing) return existing;
-    const origin = resolveLocalOrigin(shell, localScope, targetName, set.has('I'));
-    return origin ? createDeclaredVariable(targetName, origin, set.has('A') ? 'associative' : 'indexed') : undefined;
-  }
-  if (shell.isReadonlyDynamic(targetName)) return shell.ensureDynamicAttributeCell(targetName);
-  return set.has('g') || set.has('n') ? scopes[0].get(targetName) : shell.findVariable(targetName, false);
-}
-
-function literalWord(origin: Word, text: string): Word {
-  return { parts: [{ kind: 'single', text }], row: origin.row, text: origin.text };
-}
-
-/** Whether an executed declaration explicitly assigns a non-nameref value (`declare x=1`, `declare "x=3"`). */
-export function declarationAssignsAnswer(builtin: string, args: readonly DeclarationArgument[]): boolean {
-  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
-  let optionsDone = false;
-  let hasAssignment = false;
-  for (const arg of args) {
-    if (typeof arg !== 'string') {
-      optionsDone = true;
-      hasAssignment = true;
-      continue;
-    }
-    if (!optionsDone && !recordOptionWord(arg, options)) continue;
-    optionsDone = true;
-    hasAssignment ||= arg.includes('=');
-  }
-  const setsNameref = builtin !== 'export' && options.set.has('n') && !options.set.has('a') && !options.set.has('A');
-  return hasAssignment && !setsNameref;
-}
-
-/** `declare`, `typeset`, `local`, `readonly`, and `export`. */
-export function runDeclaration(
-  shell: Shell,
-  name: string,
-  args: DeclarationArgument[],
-  onMaterialize?: () => void
-): number {
-  const parsed = parseOptions(shell, name, args);
-  if (!parsed) return 2;
-  const { operands } = parsed;
-  if (name === 'local' && !shell.isInFunction) {
+  if (builtin === 'local' && !shell.isInFunction) {
     shell.reportError('local: can only be used in a function');
     return 1;
   }
-  if (parsed.options.set.has('f') || parsed.options.set.has('F') || parsed.options.unset.has('f')) {
-    throw new UnsupportedFeatureError(`${name} -f（関数の一覧）`);
+  rejectUnsupportedDeclarationOptions(builtin, options.set, options.unset, options.hasPlusOption);
+  if (operands.length === 0) throw new UnsupportedFeatureError(`${builtin} の変数の一覧`);
+  if (options.set.has('p') && builtin !== 'readonly' && builtin !== 'export') {
+    return printDeclarations(
+      shell,
+      builtin,
+      operands.map((op) => (op.kind === 'word' ? op.text : op.name))
+    );
   }
-  if (operands.length === 0) throw new UnsupportedFeatureError(`${name} の変数の一覧`);
-  // `readonly -p` and `export -p` print only without names; with names, they set the attribute as without `-p`.
-  if (parsed.options.set.has('p') && name !== 'readonly' && name !== 'export') {
-    return printDeclarations(shell, name, operands);
-  }
-  const isLocal = isLocalDeclaration(shell, name, parsed.options);
-  const options = isLocal ? parsed.options : normalizeArrayNamerefPrecedence(parsed.options);
+  const intent = destinationIntentOf(shell, builtin, options.set);
   let status = 0;
   for (const operand of operands) {
-    if (!declareOperand(shell, name, operand, options, isLocal, onMaterialize)) status = 1;
+    if (!executePlannedOperand(shell, builtin, operand, options.set, intent, onMaterialize)) status = 1;
   }
   return status;
 }
 
-function isLocalDeclaration(shell: Shell, builtin: string, { set }: Options): boolean {
-  return shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset');
-}
-
-function normalizeArrayNamerefPrecedence(options: Options): Options {
-  if (!options.set.has('n') || (!options.set.has('a') && !options.set.has('A'))) return options;
-  const set = new Set(options.set);
-  set.delete('n');
-  return { ...options, set, suppressedNameref: true };
-}
-
-/** Reads the options before the operands, reporting an invalid one with the builtin's usage as Bash does. */
-// code-gauge-allow functionCognitiveComplexity -- Bash's option parsing shared by the declaration builtins, with export -n's special case and declare's conflicting -a and -A.
-function parseOptions(
-  shell: Shell,
-  name: string,
-  args: DeclarationArgument[]
-): { options: Options; operands: DeclarationArgument[] } | undefined {
-  const options: Options = { set: new Set(), unset: new Set(), attemptedSet: new Set() };
-  let index = 0;
-  for (; index < args.length; index++) {
-    const arg = args[index];
-    if (typeof arg !== 'string' || !/^[-+]./.test(arg)) break;
-    if (arg === '--') {
-      index++;
-      break;
-    }
-    for (const option of arg.slice(1)) {
-      if (!OPTIONS[name].includes(option)) {
-        shell.reportError(`${name}: ${arg[0]}${option}: invalid option`);
-        shell.state.fd2.write(`${name}: usage: ${USAGES[name]}\n`);
-        return undefined;
-      }
-      applyOptionSign(options, arg[0] as '-' | '+', option);
-    }
+function destinationIntentOf(shell: Shell, builtin: string, set: ReadonlySet<string>): DestinationIntent {
+  if (shell.isInFunction && !set.has('g') && (builtin === 'local' || builtin === 'declare' || builtin === 'typeset')) {
+    return 'local';
   }
-  if (options.set.has('A') && options.set.has('a')) {
-    shell.reportError(`${name}: -a: invalid option`);
+  return set.has('g') ? 'global' : 'visible';
+}
+
+function executePlannedOperand(
+  shell: Shell,
+  builtin: string,
+  operand: PlannedOperand,
+  set: ReadonlySet<string>,
+  intent: DestinationIntent,
+  onMaterialize?: () => void
+): boolean {
+  if (operand.kind === 'failedCompound' || operand.kind === 'deferredCompound') return false;
+  if (operand.kind === 'completedCompound') {
+    if (operand.materializedArray) onMaterialize?.();
+    if (set.has('r')) {
+      const err = shell.store.applyAttributes(operand.cell, new Set<Attribute>(['r']), true);
+      if (err) return shell.failures.handleStoreFailure(builtinFailureContext(builtin), err, builtin);
+    }
+    return true;
+  }
+  if (operand.kind === 'word') {
+    const parsed = parseWordOperand(operand.text);
+    return executeScalarOrElementOperand(
+      shell,
+      builtin,
+      {
+        name: parsed.name,
+        subscriptText: parsed.subscript,
+        append: parsed.append,
+        value: parsed.value,
+        rawText: operand.text,
+      },
+      set,
+      intent,
+      onMaterialize
+    );
+  }
+  return executeScalarOrElementOperand(
+    shell,
+    builtin,
+    {
+      name: operand.name,
+      subscriptWord: operand.subscript,
+      append: operand.append,
+      value: operand.value,
+      rawText: operand.text,
+    },
+    set,
+    intent,
+    onMaterialize
+  );
+}
+
+interface NormalizedOperand {
+  readonly name: string;
+  readonly subscriptWord?: Word;
+  readonly subscriptText?: string;
+  readonly append: boolean;
+  readonly value: string | undefined;
+  readonly rawText: string;
+}
+
+function executeScalarOrElementOperand(
+  shell: Shell,
+  builtin: string,
+  op: NormalizedOperand,
+  set: ReadonlySet<string>,
+  intent: DestinationIntent,
+  onMaterialize?: () => void
+): boolean {
+  const isSubscripted = op.subscriptWord !== undefined || op.subscriptText !== undefined;
+  const failCtx = builtinFailureContext(builtin);
+  if (!isIdentifier(op.name)) {
+    return shell.failures.handleStoreFailure(
+      failCtx,
+      { ok: false, reason: 'invalidIdentifier', message: `\`${op.rawText}': not a valid identifier` },
+      builtin
+    );
+  }
+  const existingForCheck =
+    intent === 'local'
+      ? shell.store.ownView(op.name)?.isCurrentLocal
+        ? shell.store.ownView(op.name)
+        : undefined
+      : shell.store.ownView(op.name);
+  rejectUnsupportedDeclarationOperand(builtin, op.name, set, {
+    isSubscripted,
+    isCompound: false,
+    append: op.append,
+    existingIsNameref: Boolean(existingForCheck?.attributes.has('n')),
+  });
+  if (set.has('n')) {
+    const selected = shell.store.selectDestination(intent, op.name);
+    const bound = shell.store.bindNameref(selected.cell, op.value, shell.isInFunction);
+    if (!bound.ok) return shell.failures.handleStoreFailure(failCtx, bound, builtin);
+    if (bound.cycleWarning) shell.reportError(bound.cycleWarning);
+    return true;
+  }
+  if (isSubscripted) {
+    return executeSubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
+  }
+  return executeUnsubscriptedDeclaration(shell, builtin, op, set, intent, onMaterialize);
+}
+
+function executeUnsubscriptedDeclaration(
+  shell: Shell,
+  builtin: string,
+  op: NormalizedOperand,
+  set: ReadonlySet<string>,
+  intent: DestinationIntent,
+  onMaterialize?: () => void
+): boolean {
+  const failCtx = builtinFailureContext(builtin);
+  const targetName = resolveUnsubscriptedDeclareTarget(shell, builtin, op.name, intent);
+  if (targetName === undefined) return false;
+  const priorKind = intent === 'local' ? undefined : shell.store.ownView(targetName)?.kind;
+  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
+  const selected = shell.store.selectDestination(intent, targetName, undefined, op.append);
+  if (!applyPreWriteAttributes(shell, builtin, selected.cell, set, op.value === undefined)) return false;
+  if (op.value !== undefined) {
+    const outcome = shell.store.writeScalar(
+      selected.cell,
+      op.value,
+      op.append,
+      (expr) => shell.evaluateFatalReadonly(expr, false),
+      targetName
+    );
+    if (!outcome.ok) return shell.failures.handleStoreFailure(failCtx, outcome, builtin);
+  }
+  return finalizeDeclaredCell(shell, builtin, selected.cell, set, wasMaterialized, onMaterialize);
+}
+
+function resolveUnsubscriptedDeclareTarget(
+  shell: Shell,
+  builtin: string,
+  rawName: string,
+  intent: DestinationIntent
+): string | undefined {
+  if (intent !== 'visible') return rawName;
+  const resolved = resolveTargetName(shell, rawName);
+  if (resolved === undefined) return undefined;
+  if (!isIdentifier(resolved)) {
+    shell.failures.handleStoreFailure(
+      builtinFailureContext(builtin),
+      { ok: false, reason: 'invalidIdentifier', message: `\`${resolved}': not a valid identifier` },
+      builtin
+    );
     return undefined;
   }
-  if (name === 'readonly') options.set.add('r');
-  if (name === 'export') {
-    // `export -n` removes the export attribute instead of setting a name reference.
-    if (options.set.delete('n')) options.unset.add('x');
-    else options.set.add('x');
-  }
-  return { options, operands: args.slice(index) };
+  rejectSpecialVariableMutation(resolved, false);
+  return resolved;
 }
 
-/** Splits a word like `x=1`, `a[2]+=x`, or `y` that a declaration builtin got from an expansion. */
+function executeSubscriptedDeclaration(
+  shell: Shell,
+  builtin: string,
+  op: NormalizedOperand,
+  set: ReadonlySet<string>,
+  intent: DestinationIntent,
+  onMaterialize?: () => void
+): boolean {
+  const failCtx = builtinFailureContext(builtin);
+  const subInput =
+    op.subscriptWord !== undefined
+      ? ({ kind: 'word', word: op.subscriptWord } as const)
+      : ({ kind: 'text', text: op.subscriptText ?? '' } as const);
+  const scopedIntent = intent === 'local' ? 'local' : 'visible';
+  const priorKind = scopedIntent === 'local' ? undefined : shell.store.ownView(op.name)?.kind;
+  const wasMaterialized = priorKind === 'indexed' || priorKind === 'associative';
+  const containerKind = op.value === undefined ? undefined : set.has('A') ? 'associative' : 'indexed';
+  const selected = shell.store.selectDestination(scopedIntent, op.name, containerKind, op.append);
+  const effectiveSet = set.has('A') ? set : new Set([...set, 'a']);
+  if (!applyPreWriteAttributes(shell, builtin, selected.cell, effectiveSet, op.value === undefined)) return false;
+  const target = resolveSubscriptTarget(shell, {
+    name: op.name,
+    subscript: subInput,
+    operation: op.value === undefined ? 'read' : 'write',
+    intent: scopedIntent,
+    append: op.append,
+  });
+  if (!target) return false;
+  if (target.kind === 'invalid') return shell.failures.handleStoreFailure(failCtx, target.failure, builtin);
+  if (op.value !== undefined) {
+    const outcome = writeResolvedTarget(shell, target, op.value, op.append);
+    if (!outcome.ok) return shell.failures.handleStoreFailure(failCtx, outcome, builtin);
+  }
+  return finalizeDeclaredCell(shell, builtin, selected.cell, set, wasMaterialized, onMaterialize);
+}
+
+function applyPreWriteAttributes(
+  shell: Shell,
+  builtin: string,
+  cell: CellHandle,
+  set: ReadonlySet<string>,
+  allowReadonlyAlreadySet: boolean
+): boolean {
+  const attrFailure = shell.store.applyAttributes(cell, nonReadonlyValueAttributes(set), allowReadonlyAlreadySet);
+  if (!attrFailure) return true;
+  return shell.failures.handleStoreFailure(builtinFailureContext(builtin), attrFailure, builtin);
+}
+
+function finalizeDeclaredCell(
+  shell: Shell,
+  builtin: string,
+  cell: CellHandle,
+  set: ReadonlySet<string>,
+  wasMaterialized: boolean,
+  onMaterialize?: () => void
+): boolean {
+  if (set.has('r')) {
+    const roFailure = shell.store.applyAttributes(cell, new Set<Attribute>(['r']), true);
+    if (roFailure) return shell.failures.handleStoreFailure(builtinFailureContext(builtin), roFailure, builtin);
+  }
+  const nextKind = shell.store.viewOfHandle(cell).kind;
+  if (!wasMaterialized && (nextKind === 'indexed' || nextKind === 'associative')) onMaterialize?.();
+  return true;
+}
+
+function nonReadonlyValueAttributes(set: ReadonlySet<string>): Set<Attribute> {
+  return new Set<Attribute>([...set].filter((f): f is Attribute => VALUE_ATTRIBUTES.has(f) && f !== 'r'));
+}
+
+function builtinFailureContext(builtin: string): 'declarationFatalBuiltin' | 'declarationOperand' {
+  return builtin === 'readonly' || builtin === 'export' ? 'declarationFatalBuiltin' : 'declarationOperand';
+}
+
+function planAssignsAnswer(plan: DeclarationPlan): boolean {
+  const setsNameref = plan.builtin !== 'export' && plan.options.set.has('n');
+  if (setsNameref) return false;
+  return plan.operands.some((op) => {
+    if (op.kind === 'completedCompound') return true;
+    if (op.kind === 'assignment') return op.value !== undefined;
+    if (op.kind === 'word') return op.text.includes('=');
+    return false;
+  });
+}
+
 function parseWordOperand(word: string): { name: string; subscript?: string; append: boolean; value?: string } {
   const eqIndex = findOperandEquals(word);
   if (eqIndex === -1) {
@@ -507,1347 +646,14 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
   return { name: lhs, append, value };
 }
 
-interface DeclarationDestination {
-  variable: Variable;
-  referencedSubscript?: string;
-  createdGlobal?: boolean;
-}
-
-interface PreUnsetNamerefStore extends DeclarationDestination {
-  operandName: string;
-  finalLink: Variable;
-  deferUnsetN: boolean;
-  extraUnsetLink?: Variable;
-  elementBaseName?: string;
-  failedBase?: boolean;
-  invalidBaseTarget?: string;
-  nestedInvalidTarget?: string;
-  preResolved?: { resolved: string } | { cyclicName: string };
-}
-
-function declareOperand(
-  shell: Shell,
-  builtin: string,
-  operand: DeclarationArgument,
-  options: Options,
-  isLocal: boolean,
-  onMaterialize?: () => void
-): boolean {
-  if (typeof operand !== 'string' && operand.failedCompound) return false;
-  if (typeof operand !== 'string' && operand.committedTarget) {
-    notifyIfArrayMaterialized(true, operand.committedTarget.variable, operand.committedTarget.priorKind, onMaterialize);
-    if (operand.committedTarget.localElementLink) {
-      return completeLocalElementLinkCompound(shell, builtin, operand.name, options, onMaterialize);
+function findOperandEquals(word: string): number {
+  for (let i = 0; i < word.length; i++) {
+    if (word[i] === '[') {
+      const close = skipSubscript(word, i);
+      if (close > i) i = close;
+      continue;
     }
-    const phase2Options = !isLocal && options.unset.has('n') ? withoutArraySetOptions(options) : options;
-    return declareOne(shell, builtin, operand.name, phase2Options, isLocal);
+    if (word[i] === '=') return i;
   }
-  return declareOne(shell, builtin, operand, options, isLocal, onMaterialize);
-}
-
-function withoutArraySetOptions(options: Options): Options {
-  if (!options.set.has('a') && !options.set.has('A')) return options;
-  return { ...options, set: new Set([...options.set].filter((flag) => flag !== 'a' && flag !== 'A')) };
-}
-
-function completeLocalElementLinkCompound(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  options: Options,
-  onMaterialize: (() => void) | undefined
-): boolean {
-  const localVar = shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(name);
-  if (!localVar) return false;
-  if (checkReadonlyConflict(shell, builtin, name, localVar, options, false)) return false;
-  const priorKind = localVar.value?.kind;
-  if (
-    localVar.attributes.has('n') &&
-    (options.set.has('a') || options.set.has('A')) &&
-    !conversionError(localVar, options.set, options.unset)
-  ) {
-    localVar.value = undefined;
-  }
-  if (!applyAttributes(shell, builtin, localVar, options, true, false, false, false)) return false;
-  if (options.set.has('r')) localVar.attributes.add('r');
-  notifyIfArrayMaterialized(true, localVar, priorKind, onMaterialize);
-  return true;
-}
-
-function declareOne(
-  shell: Shell,
-  builtin: string,
-  operand: DeclarationArgument,
-  options: Options,
-  isLocal: boolean,
-  onMaterialize?: () => void
-): boolean {
-  const parsed = typeof operand === 'string' ? parseWordOperand(operand) : undefined;
-  const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
-  const isSubscripted =
-    parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
-  if (rejectOperandHeader(shell, builtin, name, operand, parsed, isSubscripted)) return false;
-  const dynamicOutcome = !isLocal
-    ? materializeOrHandleDynamic(shell, builtin, name, operand, parsed, options, isSubscripted)
-    : 'notDynamic';
-  if (dynamicOutcome !== 'notDynamic') return dynamicOutcome === 'handled';
-  const assignMode = resolveAssignMode(operand, parsed);
-  const prefixed = tryDeclarePrefixed(shell, builtin, name, operand, parsed, options, {
-    isLocal,
-    isSubscripted,
-    hooks: buildPrefixedHooks(),
-  });
-  if (prefixed !== undefined) return prefixed;
-  const pendingRef = checkPendingNameref(shell, builtin, name, operand, parsed, { options, isLocal, isSubscripted });
-  if (pendingRef === false) return false;
-  const priorKind = shell.findVariable(name, !options.set.has('n') && !options.unset.has('n'))?.value?.kind;
-  const destination = declaredDestination(
-    shell,
-    builtin,
-    name,
-    options,
-    isLocal,
-    isSubscripted,
-    assignMode,
-    isCompound(operand)
-  );
-  if (!destination || rejectUnsetArrayThroughNameref(shell, builtin, name, destination.variable, options)) return false;
-  if (isElementAliasAttributeBuiltin(builtin, isSubscripted, destination)) {
-    return finishElementAliasAttributeBuiltin(shell, builtin, destination, operand, parsed, assignMode);
-  }
-  const preUnsetStore = resolvePreUnsetNamerefStore(shell, name, destination.variable, options, {
-    isLocal,
-    assigns: assignMode !== 'none',
-    isSubscripted,
-    operand,
-    parsed,
-  });
-  if (
-    !applyDeclaredAttributes(shell, builtin, destination, preUnsetStore, options, {
-      operandName: name,
-      operand,
-      assignMode,
-      isSubscripted,
-    })
-  ) {
-    return false;
-  }
-  const ok =
-    pendingRef !== undefined
-      ? commitNamerefTarget(shell, builtin, destination.variable, pendingRef, shell.isInFunction)
-      : storeSelectedDeclaration(
-          shell,
-          builtin,
-          name,
-          destination,
-          preUnsetStore,
-          options,
-          operand,
-          parsed,
-          assignMode
-        );
-  finishDeclarationEffects(ok, destination, preUnsetStore, options.set.has('r'), priorKind, {
-    pendingNameref: pendingRef !== undefined,
-    onMaterialize,
-    globalScope: shell.state.scopes[0],
-  });
-  return ok;
-}
-
-function applyDeclaredAttributes(
-  shell: Shell,
-  builtin: string,
-  destination: DeclarationDestination,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  options: Options,
-  ctx: { operandName: string; operand: DeclarationArgument; assignMode: AssignMode; isSubscripted: boolean }
-): boolean {
-  const { operandName, operand, assignMode, isSubscripted } = ctx;
-  if (rejectPreUnsetDeclarationHeader(shell, builtin, destination.variable.name, preUnsetStore, assignMode)) {
-    return false;
-  }
-  const assigns = assignMode !== 'none' || isCompound(operand);
-  const subscriptsStore = isSubscripted && assignMode !== 'none';
-  if (preUnsetStore?.deferUnsetN && (subscriptsStore || options.set.has('a') || options.set.has('A'))) {
-    if (!applyReferentArrayKind(shell, builtin, destination.variable.name, preUnsetStore, options, subscriptsStore)) {
-      return false;
-    }
-    return applyAttributes(
-      shell,
-      builtin,
-      destination.variable,
-      withoutArraySetOptions(options),
-      assigns,
-      false,
-      true,
-      isCompound(operand)
-    );
-  }
-  const redirectsGlobalScalarStore =
-    options.set.has('g') &&
-    assignMode !== 'none' &&
-    !isCompound(operand) &&
-    !isSubscripted &&
-    destination.referencedSubscript === undefined &&
-    !options.set.has('A') &&
-    !destination.variable.attributes.has('A');
-  if (subscriptsStore) convertSubscriptedNameref(shell, destination.variable, options);
-  const bareSubscriptUnlink =
-    isSubscripted && assignMode === 'none' && options.unset.has('n') && destination.variable.attributes.has('n');
-  return applyAttributes(
-    shell,
-    builtin,
-    destination.variable,
-    options,
-    assigns && !redirectsGlobalScalarStore,
-    (isSubscripted && !bareSubscriptUnlink) || destination.referencedSubscript !== undefined,
-    Boolean(preUnsetStore?.deferUnsetN),
-    isCompound(operand),
-    isSubscripted ? operandName : destination.variable.name
-  );
-}
-
-function rejectPreUnsetDeclarationHeader(
-  shell: Shell,
-  builtin: string,
-  linkName: string,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  assignMode: AssignMode
-): boolean {
-  if (preUnsetStore?.nestedInvalidTarget !== undefined) {
-    shell.reportError(`${builtin}: \`${preUnsetStore.nestedInvalidTarget}': not a valid identifier`);
-    return true;
-  }
-  if (preUnsetStore?.deferUnsetN && assignMode !== 'none' && preUnsetStore.variable.attributes.has('r')) {
-    shell.reportError(`${builtin}: ${linkName}: readonly variable`);
-    return true;
-  }
-  return false;
-}
-
-function convertSubscriptedNameref(shell: Shell, variable: Variable, { set, unset }: Options): void {
-  if (!variable.attributes.has('n') || conversionError(variable, set, unset, true)) return;
-  variable.attributes.delete('n');
-  if (!unset.has('n') && !set.has('g')) {
-    shell.reportError(`warning: ${variable.name}: removing nameref attribute`);
-  }
-  variable.value = set.has('A')
-    ? { kind: 'associative', table: new AssociativeTable() }
-    : { kind: 'indexed', elements: new Map() };
-}
-
-function applyReferentArrayKind(
-  shell: Shell,
-  builtin: string,
-  reportedName: string,
-  preUnsetStore: PreUnsetNamerefStore,
-  options: Options,
-  isSubscripted: boolean
-): boolean {
-  const referent = preUnsetStore.variable;
-  const becomesAssoc = options.set.has('A');
-  const becomesIndexed =
-    options.set.has('a') ||
-    (isSubscripted && !becomesAssoc && !referent.attributes.has('A') && referent.value?.kind !== 'associative');
-  const effectiveSet = new Set<string>();
-  if (becomesAssoc) effectiveSet.add('A');
-  if (becomesIndexed) effectiveSet.add('a');
-  const arrayOpts: Options = { set: effectiveSet, unset: new Set(), attemptedSet: new Set() };
-  if (checkReadonlyConflict(shell, builtin, referent.name, referent, arrayOpts, false)) return false;
-  const kindErr = incompatibleArrayKindError(referent, options.set);
-  if (kindErr) {
-    shell.reportError(`${builtin}: ${reportedName}: ${kindErr}`);
-    return false;
-  }
-  if (shell.isScalarDynamic(referent.name)) {
-    const materialized = materializeDeclaredScalarDynamic(shell, referent.name, options.set, isSubscripted);
-    shell.state.scopes[0].set(referent.name, materialized);
-    preUnsetStore.variable = materialized;
-  }
-  const targetReferent = preUnsetStore.variable;
-  applyArrayKindAttributes(shell, targetReferent, becomesAssoc, becomesIndexed, false);
-  if (options.set.has('g') && isIndexedCell(targetReferent) && preUnsetStore.preResolved === undefined) {
-    preUnsetStore.preResolved = resolveNameInScopes(shell.state.scopes, preUnsetStore.operandName);
-  }
-  return true;
-}
-
-function rejectOperandHeader(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string } | undefined,
-  isSubscripted: boolean
-): boolean {
-  return (
-    rejectInvalidDeclarationName(shell, builtin, name, operand) ||
-    rejectSubscriptedAttributeBuiltin(shell, builtin, name, operand, parsed, isSubscripted)
-  );
-}
-
-function isElementAliasAttributeBuiltin(
-  builtin: string,
-  isSubscripted: boolean,
-  destination: DeclarationDestination
-): boolean {
-  return (
-    !isSubscripted && destination.referencedSubscript !== undefined && (builtin === 'readonly' || builtin === 'export')
-  );
-}
-
-function checkPendingNameref(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  ctx: { options: Options; isLocal: boolean; isSubscripted: boolean }
-): string | false | undefined {
-  const target = resolvePendingNamerefTarget(shell, name, operand, parsed, ctx.options, ctx.isLocal, ctx.isSubscripted);
-  if (target === undefined) return undefined;
-  return validatePendingNamerefTarget(shell, builtin, name, target, shell.isInFunction) ? target : false;
-}
-
-// code-gauge-allow functionParameterCount -- Selects the effective store cell and writes the declared operand value.
-function storeSelectedDeclaration(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  destination: DeclarationDestination,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  options: Options,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  assignMode: AssignMode
-): boolean {
-  const isSubscripted =
-    parsed?.subscript !== undefined || (typeof operand !== 'string' && operand.subscript !== undefined);
-  const selected = selectDeclarationStore(
-    shell,
-    builtin,
-    name,
-    destination,
-    preUnsetStore,
-    options,
-    isSubscripted,
-    assignMode !== 'none' && !isCompound(operand)
-  );
-  if (selected.kind !== 'store') return selected.kind === 'skipStore';
-  return assignDeclaredOperand(
-    shell,
-    builtin,
-    destination.variable,
-    selected.storeVariable,
-    operand,
-    parsed,
-    selected.effectiveSubscript,
-    preUnsetStore !== undefined
-  );
-}
-
-function rejectInvalidDeclarationName(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  operand: DeclarationArgument
-): boolean {
-  if (isIdentifier(name)) return false;
-  shell.reportError(`${builtin}: \`${typeof operand === 'string' ? operand : operand.text}': not a valid identifier`);
-  return true;
-}
-
-function finishElementAliasAttributeBuiltin(
-  shell: Shell,
-  builtin: string,
-  destination: DeclarationDestination,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  assignMode: AssignMode
-): boolean {
-  const ok =
-    assignMode === 'none' ||
-    assignDeclaredOperand(
-      shell,
-      builtin,
-      destination.variable,
-      destination.variable,
-      operand,
-      parsed,
-      destination.referencedSubscript
-    );
-  if (!ok) return false;
-  shell.reportError(
-    `${builtin}: \`${destination.variable.name}[${destination.referencedSubscript}]': not a valid identifier`
-  );
-  return true;
-}
-
-function finishDeclarationEffects(
-  ok: boolean,
-  destination: DeclarationDestination,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  setsReadonly: boolean,
-  priorKind: VariableValue['kind'] | undefined,
-  ctx: { pendingNameref: boolean; onMaterialize: (() => void) | undefined; globalScope: Map<string, Variable> }
-): void {
-  const { variable } = destination;
-  if (!ok && ctx.pendingNameref && destination.createdGlobal) {
-    ctx.globalScope.delete(variable.name);
-    return;
-  }
-  if (ok && preUnsetStore?.deferUnsetN) preUnsetStore.finalLink.attributes.delete('n');
-  if (ok && preUnsetStore?.extraUnsetLink) preUnsetStore.extraUnsetLink.attributes.delete('n');
-  if (setsReadonly) variable.attributes.add('r');
-  notifyIfArrayMaterialized(ok, variable, priorKind, ctx.onMaterialize);
-}
-
-function rejectSubscriptedAttributeBuiltin(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string } | undefined,
-  isSubscripted: boolean
-): boolean {
-  if (!isSubscripted || (builtin !== 'readonly' && builtin !== 'export')) return false;
-  shell.reportError(`${builtin}: \`${name}[${operandSubscriptText(operand, parsed)}]': not a valid identifier`);
-  return true;
-}
-
-type SelectedDeclarationStore =
-  | { kind: 'store'; storeVariable: Variable; effectiveSubscript: string | undefined }
-  | { kind: 'skipStore' }
-  | { kind: 'failed' };
-
-// code-gauge-allow functionParameterCount -- Selects the destination or visible local element store for a declaration operand.
-function selectDeclarationStore(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  destination: DeclarationDestination,
-  preUnsetStore: PreUnsetNamerefStore | undefined,
-  { set, unset }: Options,
-  isSubscripted: boolean,
-  assignsNonCompound: boolean
-): SelectedDeclarationStore {
-  if (preUnsetStore && rejectPreUnsetElementStore(shell, builtin, preUnsetStore)) {
-    return { kind: 'failed' };
-  }
-  const base = preUnsetStore ?? destination;
-  const { variable, referencedSubscript } = base;
-  const implicitIndexedZero =
-    assignsNonCompound && !isSubscripted && referencedSubscript === undefined && isIndexedCell(variable);
-  if (set.has('g') && implicitIndexedZero) {
-    return resolveImplicitIndexedStore(shell, builtin, name, preUnsetStore?.preResolved);
-  }
-  if (preUnsetStore) {
-    return { kind: 'store', storeVariable: variable, effectiveSubscript: referencedSubscript };
-  }
-  const storeVariable =
-    set.has('g') && (isSubscripted || referencedSubscript !== undefined)
-      ? resolveElementStoreVariable(shell, name, variable.name, set, unset, isSubscripted)
-      : variable;
-  return { kind: 'store', storeVariable, effectiveSubscript: referencedSubscript };
-}
-
-function rejectPreUnsetElementStore(shell: Shell, builtin: string, preUnsetStore: PreUnsetNamerefStore): boolean {
-  if (preUnsetStore.failedBase) {
-    if (preUnsetStore.invalidBaseTarget !== undefined) {
-      shell.reportError(`${builtin}: \`${preUnsetStore.invalidBaseTarget}': not a valid identifier`);
-    }
-    return true;
-  }
-  if (preUnsetStore.elementBaseName !== undefined && preUnsetStore.variable.attributes.has('r')) {
-    shell.reportError(`${builtin}: ${preUnsetStore.elementBaseName}: readonly variable`);
-    return true;
-  }
-  return false;
-}
-
-function resolveImplicitIndexedStore(
-  shell: Shell,
-  builtin: string,
-  baseName: string,
-  preResolved?: { resolved: string } | { cyclicName: string }
-): SelectedDeclarationStore {
-  const resolved = preResolved ? unwrapPreResolvedName(shell, preResolved) : shell.resolveNameOrUndefined(baseName);
-  if (resolved === undefined) return { kind: 'failed' };
-  const direct = resolved.includes('[') ? shell.findOwnVariable(resolved) : undefined;
-  if (!direct && !isIdentifier(resolved)) {
-    shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
-    return { kind: 'skipStore' };
-  }
-  const storeVariable = direct ?? ensureStoreVariable(shell, resolved);
-  materializeRedirectedIndexedCell(storeVariable);
-  return { kind: 'store', storeVariable, effectiveSubscript: '0' };
-}
-
-function unwrapPreResolvedName(
-  shell: Shell,
-  outcome: { resolved: string } | { cyclicName: string }
-): string | undefined {
-  if ('resolved' in outcome) return outcome.resolved;
-  shell.reportError(`warning: ${outcome.cyclicName}: circular name reference`);
-  return undefined;
-}
-
-function materializeRedirectedIndexedCell(variable: Variable): void {
-  if (variable.attributes.has('r')) return;
-  if (variable.value?.kind === 'associative' || variable.attributes.has('A')) {
-    variable.attributes.delete('A');
-    variable.attributes.add('a');
-    variable.value = { kind: 'indexed', elements: new Map() };
-  }
-}
-
-function isIndexedCell(variable: Variable): boolean {
-  return !variable.attributes.has('n') && (variable.value?.kind === 'indexed' || variable.attributes.has('a'));
-}
-
-function notifyIfArrayMaterialized(
-  ok: boolean,
-  variable: Variable,
-  priorKind: VariableValue['kind'] | undefined,
-  onMaterialize: (() => void) | undefined
-): void {
-  if (
-    ok &&
-    !variable.attributes.has('n') &&
-    variable.value !== undefined &&
-    variable.value.kind !== 'scalar' &&
-    priorKind !== variable.value.kind
-  ) {
-    onMaterialize?.();
-  }
-}
-
-function operandSubscriptText(operand: DeclarationArgument, parsed: { subscript?: string } | undefined): string {
-  if (typeof operand === 'string') return parsed?.subscript ?? '';
-  const first = operand.subscript?.parts[0];
-  return first?.kind === 'single' && operand.subscript?.parts.length === 1
-    ? first.text
-    : (operand.subscript?.text ?? '');
-}
-
-function rejectUnsetArrayThroughNameref(
-  shell: Shell,
-  builtin: string,
-  operandName: string,
-  variable: Variable,
-  { unset }: Options
-): boolean {
-  if (!unset.has('n') || !variable.attributes.has('n') || (!unset.has('a') && !unset.has('A'))) return false;
-  const firstHop = variable.value?.kind === 'scalar' ? variable.value.value : '';
-  if (firstHop === '' || firstHop.includes('[')) return false;
-  const { targetName, referencedSubscript } = resolveVisibleReferentTarget(shell, firstHop);
-  if (referencedSubscript !== undefined) return false;
-  const referent = shell.findVariable(targetName, false);
-  const destroysArray =
-    (unset.has('a') && referent?.value?.kind === 'indexed') ||
-    (unset.has('A') && referent?.value?.kind === 'associative');
-  if (!destroysArray) return false;
-  shell.reportError(`${builtin}: ${operandName}: cannot destroy array variables in this way`);
-  return true;
-}
-
-function resolveVisibleReferentTarget(
-  shell: Shell,
-  firstHop: string
-): { targetName: string; referencedSubscript?: string } {
-  const direct = firstHop.includes('[') ? shell.findOwnVariable(firstHop) : undefined;
-  if (direct) return { targetName: firstHop };
-  const split = shell.splitSubscript(firstHop);
-  if (split) {
-    const resolvedArr = resolveDeclaredTarget(shell, split.name, new Set(), new Set(), false, false).targetName;
-    return { targetName: resolvedArr, referencedSubscript: split.subscript };
-  }
-  return resolveDeclaredTarget(shell, firstHop, new Set(), new Set(), false, false);
-}
-
-function resolvePreUnsetNamerefStore(
-  shell: Shell,
-  operandName: string,
-  finalLink: Variable | undefined,
-  { set, unset }: Options,
-  ctx: {
-    isLocal: boolean;
-    assigns: boolean;
-    isSubscripted: boolean;
-    operand: DeclarationArgument;
-    parsed: { subscript?: string; append: boolean; value?: string } | undefined;
-  }
-): PreUnsetNamerefStore | undefined {
-  if (
-    ctx.isLocal ||
-    !unset.has('n') ||
-    !finalLink?.attributes.has('n') ||
-    (!ctx.assigns && !set.has('a') && !set.has('A'))
-  ) {
-    return undefined;
-  }
-  const globalOnly = set.has('g');
-  const { targetName, referencedSubscript } = resolveDeclaredTarget(
-    shell,
-    finalLink.name,
-    new Set(),
-    new Set(),
-    false,
-    globalOnly
-  );
-  if (targetName === finalLink.name && referencedSubscript === undefined) return undefined;
-  if (referencedSubscript !== undefined) {
-    if (!ctx.assigns) return undefined;
-    if (ctx.isSubscripted) {
-      return {
-        operandName,
-        variable: finalLink,
-        finalLink,
-        deferUnsetN: true,
-        nestedInvalidTarget: formatNestedSubscriptOperand(
-          shell,
-          `${targetName}[${referencedSubscript}]`,
-          operandName,
-          ctx.operand,
-          ctx.parsed
-        ),
-      };
-    }
-    return resolvePreUnsetElementStore(shell, operandName, finalLink, targetName, referencedSubscript, globalOnly);
-  }
-  const variable = ensurePreUnsetScalarStore(shell, targetName, globalOnly);
-  const preResolved =
-    globalOnly && isIndexedCell(variable) ? resolveNameInScopes(shell.state.scopes, operandName) : undefined;
-  return {
-    operandName,
-    variable,
-    finalLink,
-    deferUnsetN: true,
-    ...(preResolved ? { preResolved } : {}),
-  };
-}
-
-function formatNestedSubscriptOperand(
-  shell: Shell,
-  prefix: string,
-  operandName: string,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined
-): string {
-  if (typeof operand === 'string') return `${prefix}${operand.slice(operandName.length)}`;
-  const subText = operandSubscriptText(operand, parsed);
-  const valText = operand.value
-    ? shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word))
-    : '';
-  return `${prefix}[${subText}]${operand.append ? '+=' : '='}${valText}`;
-}
-
-function resolvePreUnsetElementStore(
-  shell: Shell,
-  operandName: string,
-  finalLink: Variable,
-  baseName: string,
-  referencedSubscript: string,
-  globalOnly: boolean
-): PreUnsetNamerefStore {
-  const baseStart = globalOnly ? shell.state.scopes[0].get(baseName) : shell.findOwnVariable(baseName);
-  const extraUnsetLink = baseStart?.attributes.has('n')
-    ? findFinalNamerefLink(shell, baseStart, globalOnly)
-    : undefined;
-  const resolvedBase = shell.resolveNameOrUndefined(baseName);
-  if (resolvedBase === undefined) {
-    return { operandName, variable: finalLink, finalLink, deferUnsetN: false, failedBase: true, referencedSubscript };
-  }
-  const direct = resolvedBase.includes('[') ? shell.findOwnVariable(resolvedBase) : undefined;
-  if (!direct && !isIdentifier(resolvedBase)) {
-    return {
-      operandName,
-      variable: finalLink,
-      finalLink,
-      deferUnsetN: false,
-      failedBase: true,
-      invalidBaseTarget: `${resolvedBase}[${referencedSubscript}]`,
-      referencedSubscript,
-    };
-  }
-  return {
-    operandName,
-    variable: direct ?? ensureStoreVariable(shell, resolvedBase),
-    finalLink,
-    deferUnsetN: false,
-    elementBaseName: baseName,
-    referencedSubscript,
-    ...(extraUnsetLink ? { extraUnsetLink } : {}),
-  };
-}
-
-function ensurePreUnsetScalarStore(shell: Shell, targetName: string, globalOnly: boolean): Variable {
-  const existing = globalOnly ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
-  if (existing) return existing;
-  if (shell.isDynamic(targetName)) return shell.ensureDynamicAttributeCell(targetName);
-  const storeVariable: Variable = { name: targetName, value: undefined, attributes: new Set() };
-  shell.state.scopes[0].set(targetName, storeVariable);
-  return storeVariable;
-}
-
-// code-gauge-allow functionParameterCount -- Inspects operand, parsed string form, options, scope mode, and subscript presence.
-function resolvePendingNamerefTarget(
-  shell: Shell,
-  name: string,
-  operand: DeclarationArgument,
-  parsed: { subscript?: string; append: boolean; value?: string } | undefined,
-  { set, unset }: Options,
-  isLocal: boolean,
-  isSubscripted: boolean
-): string | undefined {
-  if (isSubscripted || set.has('a') || set.has('A') || unset.has('n')) return undefined;
-  const { scopes, functionScopes } = shell.state;
-  const localScope = isLocal ? scopes[functionScopes.at(-1) as number] : undefined;
-  const existing = findDeclarationExisting(shell, name, set.has('g'), localScope);
-  if (existing && isArrayCell(existing)) return undefined;
-  if (!set.has('n') && !(existing?.attributes.has('n') && existing.value === undefined)) return undefined;
-  const pending = extractPendingNamerefValue(shell, operand, parsed);
-  if (!pending) return undefined;
-  if (!pending.append) return pending.value;
-  const origin = !existing && localScope ? resolveLocalOrigin(shell, localScope, name, set.has('I')) : undefined;
-  const baseSource = existing ?? origin?.source;
-  const base = baseSource?.value?.kind === 'scalar' ? baseSource.value.value : '';
-  return base + pending.value;
-}
-
-function findDeclarationExisting(
-  shell: Shell,
-  name: string,
-  globalOnly: boolean,
-  localScope: Map<string, Variable> | undefined
-): Variable | undefined {
-  if (localScope) return localScope.get(name);
-  return globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
-}
-
-function extractPendingNamerefValue(
-  shell: Shell,
-  operand: DeclarationArgument,
-  parsed: { append: boolean; value?: string } | undefined
-): { value: string; append: boolean } | undefined {
-  if (typeof operand === 'string') {
-    return parsed?.value === undefined ? undefined : { value: parsed.value, append: parsed.append };
-  }
-  if (operand.array) return undefined;
-  if (operand.value !== undefined) {
-    const value = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(operand.value as Word));
-    return { value, append: operand.append };
-  }
-  return findOperandEquals(operand.text) !== -1 ? { value: '', append: operand.append } : undefined;
-}
-
-function validatePendingNamerefTarget(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  target: string,
-  inFunction: boolean
-): boolean {
-  if (!shell.isValidNamerefTarget(target)) {
-    shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
-    return false;
-  }
-  if (!inFunction && target === name) {
-    shell.reportError(`${builtin}: ${name}: nameref variable self reference not allowed`);
-    return false;
-  }
-  return true;
-}
-
-function commitNamerefTarget(
-  shell: Shell,
-  builtin: string,
-  variable: Variable,
-  target: string,
-  isLocal: boolean
-): boolean {
-  const converted = convertNamerefTarget(shell, variable, target);
-  if (!shell.isValidNamerefTarget(converted)) {
-    variable.attributes.delete('n');
-    return false;
-  }
-  if (!isLocal && converted === variable.name) {
-    shell.reportError(`${builtin}: ${variable.name}: nameref variable self reference not allowed`);
-    variable.attributes.delete('n');
-    return false;
-  }
-  variable.value = { kind: 'scalar', value: converted };
-  variable.userAssigned = true;
-  if ((isLocal && converted === variable.name) || shell.hasNamerefCycle(variable)) {
-    shell.reportError(`${builtin}: warning: ${variable.name}: circular name reference`);
-  }
-  return true;
-}
-
-function convertNamerefTarget(shell: Shell, variable: Variable, target: string): string {
-  const raw = variable.attributes.has('i') ? String(BigInt.asIntN(64, shell.evaluateFatalReadonly(target))) : target;
-  return applyCaseAttributes(variable, raw);
-}
-
-function buildPrefixedHooks(): PrefixedDeclareHooks {
-  return {
-    resolveTargetName: (shell, name, options) =>
-      resolveDeclaredTarget(shell, name, options.set, options.unset, false, false).targetName,
-    hasValue,
-    isCompound,
-    findOperandEquals,
-    checkReadonlyConflict,
-    applyAttributes,
-    assignLocally,
-  };
-}
-
-// code-gauge-allow functionParameterCount -- Handles dynamic variable materialization, readonly checks, and persistent attributes.
-function materializeOrHandleDynamic(
-  shell: Shell,
-  builtin: string,
-  operandName: string,
-  operand: DeclarationArgument,
-  parsed: { name: string; subscript?: string; value?: string } | undefined,
-  options: Options,
-  isSubscripted: boolean
-): 'notDynamic' | 'handled' | 'failed' {
-  const name =
-    !options.set.has('n') && !options.unset.has('n') && !isSubscripted
-      ? resolveDeclaredTarget(
-          shell,
-          operandName,
-          effectiveTargetSet(options),
-          options.unset,
-          false,
-          options.set.has('g')
-        ).targetName
-      : operandName;
-  if (!shell.isDynamic(name)) return 'notDynamic';
-  const dynCell = shell.ensureDynamicAttributeCell(name);
-  if (checkReadonlyConflict(shell, builtin, name, dynCell, options, hasValue(operand, parsed))) return 'failed';
-  if (options.set.has('n')) {
-    if (dynCell.attributes.has('a')) {
-      shell.reportError(`${builtin}: ${name}: reference variable cannot be an array`);
-      return 'failed';
-    }
-    shell.state.dynamicAttributes.delete(name);
-    return 'notDynamic';
-  }
-  const convertsToArray =
-    shell.isScalarDynamic(name) &&
-    (options.set.has('a') || options.set.has('A') || isSubscripted || isCompound(operand));
-  if (convertsToArray) {
-    shell.state.scopes[0].set(name, materializeDeclaredScalarDynamic(shell, name, options.set, isSubscripted));
-    return 'notDynamic';
-  }
-  return declareDynamic(shell, builtin, name, dynCell, operand, parsed, options) ? 'handled' : 'failed';
-}
-
-/** A global declaration of a dynamic variable, which assigns it as an assignment word does and keeps it dynamic. */
-// code-gauge-allow functionParameterCount -- Applies attributes, initial value, and readonly state to a dynamic variable cell.
-function declareDynamic(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  dynCell: Variable,
-  operand: DeclarationArgument,
-  parsed: { name: string; value?: string } | undefined,
-  options: Options
-): boolean {
-  if (!applyAttributes(shell, builtin, dynCell, options, false, isCompound(operand))) return false;
-  const value =
-    typeof operand === 'string' ? parsed?.value : operand.value && shell.expander.expandAssignmentValue(operand.value);
-  if (value !== undefined) shell.assignDynamic(name, value, true);
-  if (options.set.has('r')) dynCell.attributes.add('r');
-  return true;
-}
-
-type AssignMode = 'none' | 'replace' | 'append';
-
-function resolveAssignMode(
-  operand: DeclarationArgument,
-  parsed: { append: boolean; value?: string } | undefined
-): AssignMode {
-  if (!hasValue(operand, parsed)) return 'none';
-  const append = typeof operand === 'string' ? Boolean(parsed?.append) : operand.append;
-  return append ? 'append' : 'replace';
-}
-
-/** Resolves the target variable and any nameref element subscript for a declaration operand. */
-// code-gauge-allow functionParameterCount -- Needs shell, builtin, operand name, flags, scope mode, subscript presence, assignment mode, and compound flag.
-function declaredDestination(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  options: Options,
-  isLocal: boolean,
-  isSubscripted: boolean,
-  assignMode: AssignMode,
-  assignsCompound = false
-): DeclarationDestination | undefined {
-  const { set, unset } = options;
-  const lookupSet = effectiveTargetSet(options);
-  const { scopes } = shell.state;
-  const scope = isLocal ? scopes[shell.state.functionScopes.at(-1) as number] : undefined;
-  const { targetName, referencedSubscript } = resolveDeclaredTarget(
-    shell,
-    name,
-    lookupSet,
-    unset,
-    isSubscripted && assignMode !== 'none',
-    set.has('g'),
-    scope
-  );
-  const targetScope = referencedSubscript === undefined ? scope : undefined;
-  const variable = lookupDeclaredVariable(shell, targetName, lookupSet, targetScope);
-  if (rejectDeclaredTarget(shell, builtin, targetName, variable, targetScope, assignMode, isSubscripted)) {
-    return undefined;
-  }
-  if (rejectArrayNameref(shell, builtin, targetName, variable, targetScope, options, assignMode !== 'none')) {
-    return undefined;
-  }
-  const candidate = variable ?? createNewDeclaredVariable(shell, targetName, set, isSubscripted, targetScope);
-  if (
-    !variable &&
-    rejectNewDeclaredCandidate(shell, builtin, targetName, candidate, set, unset, isSubscripted || assignsCompound)
-  ) {
-    return undefined;
-  }
-  if (!variable && targetScope) targetScope.set(targetName, candidate);
-  if (checkReadonlyConflict(shell, builtin, targetName, candidate, options, assignMode !== 'none')) {
-    return undefined;
-  }
-  const createdGlobal = !variable && !targetScope;
-  if (createdGlobal) scopes[0].set(targetName, candidate);
-  return {
-    variable: candidate,
-    createdGlobal,
-    referencedSubscript,
-  };
-}
-
-// code-gauge-allow functionParameterCount -- Reports initial conversion errors on newly declared variables.
-function rejectNewDeclaredCandidate(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  candidate: Variable,
-  set: Set<string>,
-  unset: Set<string>,
-  impliesArray: boolean
-): boolean {
-  const error = conversionError(candidate, set, unset, impliesArray);
-  if (!error) return false;
-  shell.reportError(`${builtin}: ${targetName}: ${error}`);
-  return true;
-}
-
-function effectiveTargetSet(options: Options): Set<string> {
-  return options.suppressedNameref ? new Set([...options.set, 'n']) : options.set;
-}
-
-// code-gauge-allow functionParameterCount -- Validates local and existing-global array cells when -n is combined with -a/-A.
-function rejectArrayNameref(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  variable: Variable | undefined,
-  targetScope: Map<string, Variable> | undefined,
-  options: Options,
-  assigns: boolean
-): boolean {
-  return targetScope
-    ? rejectLocalArrayNameref(shell, builtin, targetName, variable, targetScope, options)
-    : rejectGlobalExistingArrayNameref(shell, builtin, targetName, variable, options, assigns);
-}
-
-function rejectLocalArrayNameref(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  variable: Variable | undefined,
-  targetScope: Map<string, Variable> | undefined,
-  options: Options
-): boolean {
-  const { set, attemptedSet } = options;
-  if (!targetScope || !attemptedSet.has('n') || (!set.has('a') && !set.has('A'))) return false;
-  if (!variable) {
-    const kindAttr: Attribute = set.has('A') ? 'A' : 'a';
-    targetScope.set(targetName, { name: targetName, value: undefined, attributes: new Set([kindAttr]) });
-  } else if (checkReadonlyConflict(shell, builtin, targetName, variable, options, false)) {
-    return true;
-  } else {
-    const kindErr = incompatibleArrayKindError(variable, set);
-    if (kindErr) {
-      shell.reportError(`${builtin}: ${targetName}: ${kindErr}`);
-      return true;
-    }
-    applyArrayKindAttributes(shell, variable, set.has('A'), set.has('a'), false);
-  }
-  shell.reportError(`${builtin}: ${targetName}: reference variable cannot be an array`);
-  return true;
-}
-
-function rejectGlobalExistingArrayNameref(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  variable: Variable | undefined,
-  options: Options,
-  assigns: boolean
-): boolean {
-  if (!options.suppressedNameref || !variable || !isArrayCell(variable)) return false;
-  if (checkReadonlyConflict(shell, builtin, targetName, variable, options, assigns)) return true;
-  const kindErr = incompatibleArrayKindError(variable, options.set);
-  shell.reportError(`${builtin}: ${targetName}: ${kindErr ?? 'reference variable cannot be an array'}`);
-  return true;
-}
-
-// code-gauge-allow functionParameterCount -- Validates readonly global local-shadows and unread host variables.
-function rejectDeclaredTarget(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  variable: Variable | undefined,
-  targetScope: Map<string, Variable> | undefined,
-  assignMode: AssignMode,
-  isSubscripted: boolean
-): boolean {
-  if (targetScope && !variable && isReadonlyGlobal(shell, targetName)) {
-    // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
-    shell.reportError(`${builtin}: ${targetName}: readonly variable`);
-    return true;
-  }
-  if (!targetScope && !variable && shell.isUnreadHostEnv(targetName) && (assignMode !== 'replace' || isSubscripted)) {
-    throw new UnsupportedFeatureError(`環境変数（${targetName}）`);
-  }
-  return false;
-}
-
-function lookupDeclaredVariable(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  targetScope: Map<string, Variable> | undefined
-): Variable | undefined {
-  if (targetScope) return targetScope.get(targetName);
-  return set.has('n') || set.has('g') ? shell.state.scopes[0].get(targetName) : shell.findVariable(targetName, false);
-}
-
-function createNewDeclaredVariable(
-  shell: Shell,
-  targetName: string,
-  set: Set<string>,
-  isSubscripted: boolean,
-  targetScope: Map<string, Variable> | undefined
-): Variable {
-  if (!targetScope && shell.isScalarDynamic(targetName) && (set.has('a') || set.has('A') || isSubscripted)) {
-    return materializeDeclaredScalarDynamic(shell, targetName, set, isSubscripted);
-  }
-  const origin = targetScope ? resolveLocalOrigin(shell, targetScope, targetName, set.has('I')) : undefined;
-  const arrayKind = set.has('A') ? 'associative' : set.has('a') || isSubscripted ? 'indexed' : undefined;
-  return createDeclaredVariable(targetName, origin, arrayKind);
-}
-
-function materializeDeclaredScalarDynamic(
-  shell: Shell,
-  name: string,
-  set: Set<string>,
-  isSubscripted = false
-): Variable {
-  if ((set.has('a') || set.has('A')) && !isSubscripted) {
-    shell.scalarValue(name);
-  }
-  const variable = shell.dynamicDeclaration(name) as Variable;
-  shell.state.dynamicAttributes.delete(name);
-  return variable;
-}
-
-interface LocalOrigin {
-  source: Variable;
-  inheritAttributes: boolean;
-  fromTempEnv: boolean;
-}
-
-function resolveLocalOrigin(
-  shell: Shell,
-  targetScope: Map<string, Variable>,
-  name: string,
-  inheritEnclosing: boolean
-): LocalOrigin | undefined {
-  const tempBinding = findCallPrefixBinding(shell, targetScope, name);
-  if (tempBinding) return { source: tempBinding, inheritAttributes: inheritEnclosing, fromTempEnv: true };
-  if (!inheritEnclosing) return undefined;
-  const inherited = findEnclosingVariable(shell.state.scopes, targetScope, name);
-  if (!inherited && shell.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
-  return inherited
-    ? { source: inherited, inheritAttributes: true, fromTempEnv: Boolean(inherited.fromTempEnv) }
-    : undefined;
-}
-
-function findCallPrefixBinding(shell: Shell, targetScope: Map<string, Variable>, name: string): Variable | undefined {
-  const { scopes } = shell.state;
-  for (let i = scopes.indexOf(targetScope) - 1; i >= 1; i--) {
-    const found = scopes[i].get(name);
-    if (found) return found.fromTempEnv ? found : undefined;
-  }
-  return undefined;
-}
-
-function createDeclaredVariable(
-  name: string,
-  origin: LocalOrigin | undefined,
-  arrayKind?: 'indexed' | 'associative'
-): Variable {
-  if (!origin) return { name, value: undefined, attributes: new Set() };
-  const { source, inheritAttributes, fromTempEnv } = origin;
-  const attributes = inheritAttributes
-    ? new Set([...source.attributes].filter((a) => a !== 'n'))
-    : new Set<Attribute>(source.attributes.has('x') ? ['x'] : []);
-  let value: Variable['value'];
-  if (arrayKind !== undefined && (!inheritAttributes || !isArrayCell(source))) {
-    attributes.add(arrayKind === 'associative' ? 'A' : 'a');
-    value =
-      arrayKind === 'associative'
-        ? { kind: 'associative', table: new AssociativeTable() }
-        : { kind: 'indexed', elements: new Map() };
-  } else {
-    value = cloneValue(source.value);
-  }
-  return {
-    name,
-    value,
-    attributes,
-    ...(fromTempEnv ? { fromTempEnv: true } : {}),
-  };
-}
-
-function isArrayCell(variable: Variable): boolean {
-  return (
-    variable.value?.kind === 'indexed' ||
-    variable.value?.kind === 'associative' ||
-    variable.attributes.has('a') ||
-    variable.attributes.has('A')
-  );
-}
-
-function resolveElementStoreVariable(
-  shell: Shell,
-  name: string,
-  targetName: string,
-  set: Set<string>,
-  unset: Set<string>,
-  isSubscripted: boolean
-): Variable {
-  const storeName = isSubscripted
-    ? resolveDeclaredTarget(shell, name, set, unset, false, false).targetName
-    : targetName;
-  return ensureStoreVariable(shell, storeName);
-}
-
-function ensureStoreVariable(shell: Shell, storeName: string): Variable {
-  const existing = shell.findVariable(storeName, false);
-  if (existing) return existing;
-  if (shell.isDynamic(storeName)) {
-    if (shell.isReadonlyDynamic(storeName) || !shell.isScalarDynamic(storeName)) {
-      return shell.ensureDynamicAttributeCell(storeName);
-    }
-    const materialized = shell.dynamicDeclaration(storeName) as Variable;
-    shell.state.dynamicAttributes.delete(storeName);
-    shell.state.scopes[0].set(storeName, materialized);
-    return materialized;
-  }
-  const storeVariable: Variable = { name: storeName, value: undefined, attributes: new Set() };
-  shell.state.scopes[0].set(storeName, storeVariable);
-  return storeVariable;
-}
-
-const PROTECTED_READONLY_UNSET = new Set(['r', 'i', 'a', 'A', 'l', 'u', 'c']);
-const READONLY_SAFE_SET = new Set(['r', 'x', 't', 'p', 'g', 'I']);
-
-function checkReadonlyConflict(
-  shell: Shell,
-  builtin: string,
-  targetName: string,
-  variable: Variable | undefined,
-  { set, unset, attemptedSet }: Options,
-  assigns: boolean
-): boolean {
-  if (!variable?.attributes.has('r')) return false;
-  const adds = [...set, ...attemptedSet].some((a) => !READONLY_SAFE_SET.has(a));
-  const removes = [...unset].some(
-    (a) => PROTECTED_READONLY_UNSET.has(a) || (a === 'n' && variable.attributes.has('n'))
-  );
-  if (!assigns && !adds && !removes) return false;
-  shell.reportError(`${builtin}: ${targetName}: readonly variable`);
-  return true;
-}
-
-// code-gauge-allow functionCognitiveComplexity -- Resolves -n/+n, -g, -I local inheritance, and chained nameref element targets.
-// code-gauge-allow functionParameterCount -- Needs shell, operand name, set/unset flags, subscript flag, global-only flag, and optional local scope.
-function resolveDeclaredTarget(
-  shell: Shell,
-  name: string,
-  set: Set<string>,
-  unset: Set<string>,
-  isSubscripted: boolean,
-  globalOnly = set.has('g'),
-  localScope?: Map<string, Variable>
-): { targetName: string; referencedSubscript?: string } {
-  if (set.has('n') || (isSubscripted && !unset.has('n'))) return { targetName: name };
-  if (localScope && !localScope.has(name)) return { targetName: name };
-  if (unset.has('n')) {
-    if (localScope) return { targetName: resolveLocalElementNamerefTarget(shell, name) ?? name };
-    const start = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
-    return { targetName: start?.attributes.has('n') ? findFinalNamerefLink(shell, start, globalOnly).name : name };
-  }
-  let current = globalOnly ? shell.state.scopes[0].get(name) : shell.findOwnVariable(name);
-  let target = name;
-  for (let depth = 0; depth < 8; depth++) {
-    if (!current?.attributes.has('n') || current.value?.kind !== 'scalar' || current.value.value === '') break;
-    target = current.value.value;
-    const direct = target.includes('[') ? shell.findOwnVariable(target) : undefined;
-    if (direct) return { targetName: target };
-    const split = shell.splitSubscript(target);
-    if (split) {
-      return { targetName: split.name, ...(isSubscripted ? {} : { referencedSubscript: split.subscript }) };
-    }
-    current = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
-  }
-  return { targetName: target };
-}
-
-function resolveLocalElementNamerefTarget(shell: Shell, name: string): string | undefined {
-  let current = shell.findOwnVariable(name);
-  const seen = new Set<Variable>();
-  while (current?.attributes.has('n') && current.value?.kind === 'scalar' && current.value.value !== '') {
-    if (seen.has(current)) return undefined;
-    seen.add(current);
-    const target = current.value.value;
-    if (shell.splitSubscript(target)) return target;
-    current = shell.findOwnVariable(target);
-  }
-  return undefined;
-}
-
-function findFinalNamerefLink(shell: Shell, start: Variable, globalOnly: boolean): Variable {
-  const seen = new Set<Variable>([start]);
-  let current = start;
-  while (current.attributes.has('n') && current.value?.kind === 'scalar' && current.value.value !== '') {
-    const target = current.value.value;
-    if (shell.splitSubscript(target)) break;
-    const next = globalOnly ? shell.state.scopes[0].get(target) : shell.findOwnVariable(target);
-    if (!next?.attributes.has('n') || seen.has(next)) break;
-    seen.add(next);
-    current = next;
-  }
-  return current;
-}
-
-function isReadonlyGlobal(shell: Shell, name: string): boolean {
-  if (shell.isReadonlyDynamic(name)) return true;
-  const variable = shell.findVariable(name, false);
-  return variable?.attributes.has('r') === true && shell.state.scopes[0].get(name) === variable;
-}
-
-const VALUE_CONVERSION_ATTRIBUTES: Attribute[] = ['i', 'l', 'u', 'c'];
-
-/** Sets and removes a declaration's attributes, converting the value as Bash does, or reports why it cannot. */
-// code-gauge-allow functionCognitiveComplexity -- Bash's attribute rules for declare: conversions, exclusive case attributes, and array kinds.
-// code-gauge-allow functionParameterCount -- Carries shell, builtin, target variable, flags, assignment/subscript flags, and deferred +n mode.
-function applyAttributes(
-  shell: Shell,
-  builtin: string,
-  variable: Variable,
-  { set, unset }: Options,
-  assigns: boolean,
-  impliesIndexed: boolean,
-  deferUnsetN = false,
-  assignsCompound = false,
-  reportedName = variable.name
-): boolean {
-  const error = conversionError(variable, set, unset, impliesIndexed || assignsCompound);
-  if (error) {
-    shell.reportError(`${builtin}: ${reportedName}: ${error}`);
-    return false;
-  }
-  const becomesIndexed =
-    set.has('a') ||
-    (impliesIndexed && !set.has('A') && !variable.attributes.has('A') && variable.value?.kind !== 'associative');
-  if ((set.has('A') || becomesIndexed) && variable.attributes.delete('n') && !set.has('a') && !set.has('A')) {
-    variable.value = { kind: 'indexed', elements: new Map() };
-  }
-  if (set.has('n')) {
-    for (const attribute of VALUE_CONVERSION_ATTRIBUTES) variable.attributes.delete(attribute);
-  }
-  for (const attribute of ['i', 'l', 'u', 'c', 'n', 'x', 't'] as Attribute[]) {
-    if (set.has(attribute)) variable.attributes.add(attribute);
-    if (unset.has(attribute) && !(attribute === 'n' && deferUnsetN)) variable.attributes.delete(attribute);
-  }
-  // The case attributes exclude each other.
-  for (const [attribute, others] of CASE_ATTRIBUTES) {
-    if (set.has(attribute)) for (const other of others) variable.attributes.delete(other);
-  }
-  applyArrayKindAttributes(shell, variable, set.has('A'), becomesIndexed, assigns);
-  return true;
-}
-
-function applyArrayKindAttributes(
-  shell: Shell,
-  variable: Variable,
-  becomesAssociative: boolean,
-  becomesIndexed: boolean,
-  assigns: boolean
-): void {
-  if (becomesAssociative) {
-    variable.attributes.add('A');
-    if (variable.value?.kind === 'scalar') {
-      const table = new AssociativeTable(CONVERTED_BUCKETS);
-      table.set('0', variable.value.value);
-      variable.value = { kind: 'associative', table };
-      variable.userAssigned = true;
-    }
-    if (!variable.value && assigns) variable.value = { kind: 'associative', table: new AssociativeTable() };
-  }
-  if (becomesIndexed) {
-    variable.attributes.add('a');
-    if (variable.value?.kind === 'scalar') {
-      shell.indexedElements(variable);
-      variable.userAssigned = true;
-    }
-    if (!variable.value && assigns) variable.value = { kind: 'indexed', elements: new Map() };
-  }
-}
-
-const CASE_ATTRIBUTES: [Attribute, Attribute[]][] = [
-  ['u', ['l', 'c']],
-  ['l', ['u', 'c']],
-  ['c', ['u', 'l']],
-];
-
-function incompatibleArrayKindError(variable: Variable, set: Set<string>): string | undefined {
-  if (set.has('A') && (variable.value?.kind === 'indexed' || variable.attributes.has('a'))) {
-    return 'cannot convert indexed to associative array';
-  }
-  if (set.has('a') && (variable.value?.kind === 'associative' || variable.attributes.has('A'))) {
-    return 'cannot convert associative to indexed array';
-  }
-  return undefined;
-}
-
-function conversionError(
-  variable: Variable,
-  set: Set<string>,
-  unset: Set<string>,
-  impliesArray = false
-): string | undefined {
-  const kindErr = incompatibleArrayKindError(variable, set);
-  if (kindErr) return kindErr;
-  if (set.has('n') && (isArrayCell(variable) || impliesArray)) {
-    return 'reference variable cannot be an array';
-  }
-  if (unset.has('a') && variable.value?.kind === 'indexed') return 'cannot destroy array variables in this way';
-  if (unset.has('A') && variable.value?.kind === 'associative') return 'cannot destroy array variables in this way';
-  return undefined;
+  return -1;
 }

@@ -1,27 +1,20 @@
 import { legalNumber } from './characters';
-import { type DeclarationArgument, runDeclaration } from './declare';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { BreakSignal, ContinueSignal, ExitSignal, ReturnSignal } from './runtime';
 import type { Shell } from './shell';
+import { resolveScalarTarget, resolveSubscriptTarget, unsetResolvedElement, writeResolvedTarget } from './targets';
 import { testBuiltin } from './testBuiltin';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
-import {
-  ensureWritable,
-  isIdentifier,
-  PERMANENT_DYNAMIC_VARIABLES,
-  SCALAR_DYNAMIC_VARIABLES,
-  unsetDynamicArrayElement,
-  type Variable,
-} from './variables';
+import { isIdentifier } from './variables';
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
 function operands(args: string[]): string[] {
   return args[0] === '--' ? args.slice(1) : args;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Bash's echo option scan, which stops at the first word that is not wholly options.
+// code-gauge-allow functionCognitiveComplexity -- Bash's echo option scan stops at the first word that is not wholly options.
 function echo(shell: Shell, args: string[]): number {
   let newline = true;
   let escapes = false;
@@ -41,14 +34,14 @@ function echo(shell: Shell, args: string[]): number {
       const { out, stop } = echoEscapes(word);
       appendBytes(bytes, out);
       if (stop) {
-        shell.state.fd1.write(decodeBytes(bytes));
+        shell.fd1.write(decodeBytes(bytes));
         return 0;
       }
     } else appendBytes(bytes, encodeText(word));
     if (position < words.length - 1) bytes.push(32);
   }
   if (newline) bytes.push(10);
-  shell.state.fd1.write(decodeBytes(bytes));
+  shell.fd1.write(decodeBytes(bytes));
   return 0;
 }
 
@@ -56,7 +49,6 @@ function appendBytes(target: number[], source: readonly number[]): void {
   for (const byte of source) target.push(byte);
 }
 
-/** Decodes `echo -e` backslash escapes into output bytes, stopping early on `\c`. */
 function echoEscapes(text: string): { out: number[]; stop: boolean } {
   const bytes = encodeText(text);
   const out: number[] = [];
@@ -74,7 +66,6 @@ function echoEscapes(text: string): { out: number[]; stop: boolean } {
   return { out, stop: false };
 }
 
-/** Decodes one `echo -e` escape whose letter `c` is at `index`, returning its bytes and last consumed byte index. */
 // code-gauge-allow functionCognitiveComplexity -- Handles simple escapes, \0nnn octal, and \x/\u/\U hex escapes for echo -e.
 function echoEscape(bytes: number[], index: number, c: string): { out: number[]; last: number } {
   if (Object.hasOwn(SIMPLE_ESCAPE_BYTES, c)) return { out: [SIMPLE_ESCAPE_BYTES[c]], last: index };
@@ -97,7 +88,7 @@ function printf(shell: Shell, args: string[]): number {
   if (typeof parsed === 'number') return parsed;
   const { target, rest: list } = parsed;
   if (list.length === 0) {
-    shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
+    shell.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
     return 2;
   }
   const [format, ...rest] = list;
@@ -105,17 +96,28 @@ function printf(shell: Shell, args: string[]): number {
     error: (message) => shell.reportError(`printf: ${message}`),
     spend: (cost) => shell.runtime.spend(cost),
   });
-  if (target === undefined) shell.state.fd1.write(decodeBytes(output));
+  if (target === undefined) shell.fd1.write(decodeBytes(output));
   else {
     const nul = output.indexOf(0);
     const text = decodeBytes(nul === -1 ? output : output.slice(0, nul));
-    const split = shell.splitSubscript(target);
-    const stored = split
-      ? assignSubscriptedBuiltinTarget(shell, 'printf', split.name, split.subscript, text)
-      : shell.assignScalar(target, text);
-    if (!stored) return 1;
+    if (!storePrintfTarget(shell, target, text)) return 1;
   }
   return ok ? 0 : 1;
+}
+
+function storePrintfTarget(shell: Shell, candidate: string, text: string): boolean {
+  const split = shell.splitSubscript(candidate);
+  const resolved = split
+    ? resolveSubscriptTarget(shell, {
+        name: split.name,
+        subscript: { kind: 'text', text: split.subscript },
+        operation: 'write',
+      })
+    : resolveScalarTarget(shell, candidate, true);
+  if (!resolved) return false;
+  const outcome = writeResolvedTarget(shell, resolved, text, false);
+  if (!outcome.ok) return shell.failures.handleStoreFailure('regularBuiltin', outcome, 'printf');
+  return true;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Scans repeated and attached -v options until `--` or the format operand.
@@ -131,13 +133,13 @@ function parsePrintfOptions(shell: Shell, args: string[]): { target: string | un
     if (!arg.startsWith('-') || arg === '-') break;
     if (arg[1] !== 'v') {
       shell.reportError(`printf: -${arg[1]}: invalid option`);
-      shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
+      shell.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
       return 2;
     }
     const candidate = arg.length > 2 ? arg.slice(2) : args[index + 1];
     if (candidate === undefined) {
       shell.reportError('printf: -v: option requires an argument');
-      shell.state.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
+      shell.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
       return 2;
     }
     const split = shell.splitSubscript(candidate);
@@ -149,36 +151,6 @@ function parsePrintfOptions(shell: Shell, args: string[]): { target: string | un
     index += arg.length > 2 ? 1 : 2;
   }
   return { target, rest: args.slice(index) };
-}
-
-export function assignSubscriptedBuiltinTarget(
-  shell: Shell,
-  builtin: string,
-  name: string,
-  subscript: string,
-  value: string
-): boolean {
-  const resolved = shell.resolveNameOrUndefined(name);
-  if (resolved === undefined) return false;
-  if (!shell.isAssociative(resolved)) {
-    const expanded = shell.expandDynamicSubscript(subscript);
-    const normalized = expanded === '' && subscript !== '' ? '0' : expanded;
-    if (!isIdentifier(resolved) && !shell.findOwnVariable(resolved)) {
-      if (normalized === '' || shell.arrayIndex(resolved, normalized, true) === undefined) {
-        shell.reportError(`${builtin}: [${subscript}]: bad array subscript`);
-      } else {
-        shell.reportError(`${builtin}: \`${resolved}': not a valid identifier`);
-      }
-      return false;
-    }
-    return shell.assignElement(resolved, normalized, value, false);
-  }
-  const key = shell.expander.expandSubscriptText(subscript);
-  if (key === '') {
-    shell.reportError(`${builtin}: ${name}[${subscript}]: bad array subscript`);
-    return false;
-  }
-  return shell.assignElement(resolved, key, value, false, true);
 }
 
 function letBuiltin(shell: Shell, args: string[]): number {
@@ -206,7 +178,6 @@ function unsetBuiltin(shell: Shell, args: string[]): number {
 
 type UnsetMode = 'any' | 'v' | 'f' | 'n';
 
-/** The last of `-v`, `-f`, and `-n`, or `undefined` after reporting an option `unset` does not take, as Bash does. */
 function parseUnsetOptions(shell: Shell, args: string[]): { mode: UnsetMode; names: string[] } | undefined {
   let mode: UnsetMode = 'any';
   let index = 0;
@@ -214,156 +185,53 @@ function parseUnsetOptions(shell: Shell, args: string[]): { mode: UnsetMode; nam
   const invalid = /^-(?!-$)[vfn]*([^vfn])/.exec(args[index] ?? '');
   if (invalid) {
     shell.reportError(`unset: -${invalid[1]}: invalid option`);
-    shell.state.fd2.write('unset: usage: unset [-f] [-v] [-n] [name ...]\n');
+    shell.fd2.write('unset: usage: unset [-f] [-v] [-n] [name ...]\n');
     return undefined;
   }
   return { mode, names: operands(args.slice(index)) };
 }
 
-/** Unsets one operand of `unset`: a function, an array element, or a variable, telling whether it succeeded. */
 function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
-  const split = shell.splitSubscript(name);
   if (mode === 'f') {
-    shell.state.functions.delete(name);
+    shell.store.deleteFunction(name);
     return true;
   }
-  if (mode === 'n') return unsetNameref(shell, name);
+  if (mode === 'n') {
+    return isIdentifier(name) && shell.store.ownView(name)?.attributes.has('n')
+      ? shell.unsetVariable(name, false)
+      : true;
+  }
+  const split = shell.splitSubscript(name);
   if (split && isIdentifier(split.name) && split.subscript !== '') {
-    return unsetElement(shell, split.name, split.subscript);
+    return unsetSubscriptedOperand(shell, split.name, split.subscript);
   }
-  if (!isIdentifier(name)) {
-    if (mode === 'v') {
-      shell.reportError(`unset: \`${name}': not a valid identifier`);
-      return false;
-    }
-    // A word that cannot name a variable names a function, which Bash then unsets if there is one.
-    shell.state.functions.delete(name);
-    return true;
-  }
-  // A name that no variable has unsets the function of that name.
-  if (!shell.findOwnVariable(name) && mode === 'any' && shell.state.functions.has(name)) {
-    return shell.state.functions.delete(name);
+  if (!isIdentifier(name)) return unsetNonIdentifierOperand(shell, name, mode);
+  if (!shell.store.ownView(name) && mode === 'any' && shell.store.hasFunction(name)) {
+    return shell.store.deleteFunction(name);
   }
   return shell.unsetVariable(name, true);
 }
 
-function unsetNameref(shell: Shell, name: string): boolean {
-  return isIdentifier(name) && shell.findOwnVariable(name)?.attributes.has('n')
-    ? shell.unsetVariable(name, false)
-    : true;
+function unsetSubscriptedOperand(shell: Shell, name: string, subscript: string): boolean {
+  const target = resolveSubscriptTarget(shell, {
+    name,
+    subscript: { kind: 'text', text: subscript },
+    operation: 'unset',
+  });
+  if (!target) return false;
+  const failure = unsetResolvedElement(shell, target);
+  return failure ? shell.failures.handleStoreFailure('regularBuiltin', failure, 'unset') : true;
 }
 
-/** `unset 'name[subscript]'`, which clears an indexed array for `@` or `*` and expands an associative key. */
-export function unsetElement(shell: Shell, name: string, subscript: string, viaReference = false): boolean {
-  const resolved = shell.resolveNameOrUndefined(name);
-  if (resolved === undefined) return false;
-  if (!isIdentifier(resolved) && !shell.findOwnVariable(resolved)) {
-    if (shell.isValidNamerefTarget(resolved)) return true;
-    shell.reportError(`unset: \`${resolved}': not a valid identifier`);
+function unsetNonIdentifierOperand(shell: Shell, name: string, mode: UnsetMode): boolean {
+  if (mode === 'v') {
+    shell.reportError(`unset: \`${name}': not a valid identifier`);
     return false;
   }
-  const variable = shell.findVariable(resolved);
-  if (variable?.attributes.has('r')) {
-    shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
-    return false;
-  }
-  if (variable?.value?.kind === 'associative' || variable?.attributes.has('A')) {
-    return unsetAssociativeElement(shell, variable, subscript);
-  }
-  if (!variable) return unsetSpecialOrMissingElement(shell, resolved, subscript, viaReference);
-  if (subscript === '@' || subscript === '*') return clearIndexedOrScalar(shell, variable, resolved, viaReference);
-  const expanded = shell.expandDynamicSubscript(subscript);
-  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded, false, true);
-  if (index === undefined) {
-    shell.reportError(`unset: [${subscript}]: bad array subscript`);
-    return false;
-  }
-  return deleteIndexedOrScalarElement(shell, variable, resolved, index);
-}
-
-function unsetSpecialOrMissingElement(
-  shell: Shell,
-  resolved: string,
-  subscript: string,
-  viaReference: boolean
-): boolean {
-  if (shell.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
-  if (!shell.isDynamic(resolved)) return true;
-  if (shell.isReadonlyDynamic(resolved)) {
-    shell.reportError(`unset: ${resolved}: cannot unset: readonly variable`);
-    return false;
-  }
-  if (PERMANENT_DYNAMIC_VARIABLES.has(resolved)) {
-    shell.reportError(`unset: ${resolved}: cannot unset`);
-    return false;
-  }
-  if (subscript === '') return true;
-  if (resolved === 'RANDOM') shell.scalarValue('RANDOM');
-  if (subscript === '@' || subscript === '*') return unsetAllDynamicElements(shell, resolved, viaReference);
-  const expanded = shell.expandDynamicSubscript(subscript);
-  const index = shell.arrayIndex(resolved, expanded === '' && subscript !== '' ? '0' : expanded, false, true);
-  if (index === undefined) {
-    shell.reportError(`unset: [${subscript}]: bad array subscript`);
-    return false;
-  }
-  if (!SCALAR_DYNAMIC_VARIABLES.has(resolved)) {
-    unsetDynamicArrayElement(shell.state, resolved, index);
-    return true;
-  }
-  if (index === 0n) return shell.unsetVariable(resolved, false);
-  shell.reportError(`unset: ${resolved}: not an array variable`);
-  return false;
-}
-
-function unsetAllDynamicElements(shell: Shell, resolved: string, viaReference: boolean): boolean {
-  if (!SCALAR_DYNAMIC_VARIABLES.has(resolved)) {
-    unsetDynamicArrayElement(shell.state, resolved, 'all');
-    return true;
-  }
-  if (viaReference) return true;
-  shell.reportError(`unset: ${resolved}: not an array variable`);
-  return false;
-}
-
-function deleteIndexedOrScalarElement(shell: Shell, variable: Variable, resolved: string, index: bigint): boolean {
-  if (variable.value?.kind === 'indexed') {
-    ensureWritable(variable);
-    variable.value.elements.delete(index);
-    return true;
-  }
-  if (variable.attributes.has('a')) return true;
-  if (index === 0n) return shell.unsetVariable(resolved, false);
-  shell.reportError(`unset: ${resolved}: not an array variable`);
-  return false;
-}
-
-function clearIndexedOrScalar(shell: Shell, variable: Variable, resolved: string, viaReference: boolean): boolean {
-  if (variable.value?.kind === 'indexed') {
-    ensureWritable(variable);
-    variable.value.elements.clear();
-    return true;
-  }
-  if (!variable.attributes.has('a') && !viaReference) {
-    shell.reportError(`unset: ${resolved}: not an array variable`);
-    return false;
-  }
+  shell.store.deleteFunction(name);
   return true;
 }
 
-function unsetAssociativeElement(shell: Shell, variable: Variable, subscript: string): boolean {
-  const key = shell.expander.expandSubscriptText(subscript);
-  if (key === '') {
-    shell.reportError(`unset: [${subscript}]: bad array subscript`);
-    return false;
-  }
-  if (variable.value?.kind === 'associative') {
-    ensureWritable(variable);
-    variable.value.table.delete(key);
-  }
-  return true;
-}
-
-/** Bash's `no_args`: a builtin given more operands than it takes abandons the line with status 2. */
 function rejectExtraOperands(shell: Shell, name: string, extra: string[]): void {
   if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2);
 }
@@ -380,14 +248,11 @@ function shift(shell: Shell, args: string[]): number {
     rejectExtraOperands(shell, 'shift', extra);
     count = parsed;
   }
-  const positional = shell.state.positional.at(-1) as string[];
   if (count < 0n) {
     shell.reportError(`shift: ${countText}: shift count out of range`);
     return 1;
   }
-  if (count > BigInt(positional.length)) return 1;
-  positional.splice(0, Number(count));
-  return 0;
+  return shell.store.shiftPositionalArgs(Number(count)) ? 0 : 1;
 }
 
 function returnBuiltin(shell: Shell, args: string[]): number {
@@ -396,7 +261,7 @@ function returnBuiltin(shell: Shell, args: string[]): number {
     return 2;
   }
   const [statusText, ...extra] = operands(args);
-  if (statusText === undefined) throw new ReturnSignal(shell.state.lastStatus);
+  if (statusText === undefined) throw new ReturnSignal(shell.store.lastStatus);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`return: ${statusText}: numeric argument required`);
@@ -408,7 +273,7 @@ function returnBuiltin(shell: Shell, args: string[]): number {
 
 function exitBuiltin(shell: Shell, args: string[]): number {
   const [statusText, ...extra] = operands(args);
-  if (statusText === undefined) throw new ExitSignal(shell.state.lastStatus);
+  if (statusText === undefined) throw new ExitSignal(shell.store.lastStatus);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
@@ -429,13 +294,11 @@ function loopControl(kind: 'break' | 'continue'): Builtin {
     if (countText !== undefined) {
       const parsed = legalNumber(countText);
       if (parsed === undefined) {
-        // A non-interactive Bash exits at a count that is not a number.
         shell.reportError(`${kind}: ${countText}: numeric argument required`);
         throw new ExitSignal(2);
       }
       rejectExtraOperands(shell, kind, extra);
       if (parsed < 1n) {
-        // Bash then leaves every loop, for `continue` too.
         shell.reportError(`${kind}: ${countText}: loop count out of range`);
         throw new BreakSignal(shell.loopCount, 1);
       }
@@ -450,24 +313,13 @@ function set(shell: Shell, args: string[]): number {
   if (args.length === 0) throw new UnsupportedFeatureError('set の変数の一覧');
   if (args[0] === '--' || args[0] === '-' || !/^[-+]/.test(args[0])) {
     const rest = args[0] === '--' || args[0] === '-' ? args.slice(1) : args;
-    const positional = shell.state.positional.at(-1) as string[];
-    positional.splice(0, positional.length, ...rest);
+    shell.store.setPositionalArgs(rest);
     return 0;
   }
   throw new UnsupportedFeatureError(`シェルのオプション（set ${args[0]}）`);
 }
 
-function declarationBuiltin(name: string): Builtin {
-  return (shell, args) => runDeclaration(shell, name, args as DeclarationArgument[]);
-}
-
-function unavailable(feature: string): Builtin {
-  return () => {
-    throw new UnsupportedFeatureError(feature);
-  };
-}
-
-export const BUILTINS: Record<string, Builtin> = {
+export const REGULAR_BUILTINS: Record<string, Builtin> = {
   echo,
   printf,
   ':': () => 0,
@@ -483,51 +335,5 @@ export const BUILTINS: Record<string, Builtin> = {
   break: loopControl('break'),
   continue: loopControl('continue'),
   set,
-  declare: declarationBuiltin('declare'),
-  typeset: declarationBuiltin('typeset'),
-  local: declarationBuiltin('local'),
-  readonly: declarationBuiltin('readonly'),
-  export: declarationBuiltin('export'),
   ...TURTLE_BUILTINS,
-  read: unavailable('標準入力（read）'),
-  mapfile: unavailable('標準入力（mapfile）'),
-  readarray: unavailable('標準入力（readarray）'),
-  eval: unavailable('文字列の評価（eval）'),
-  source: unavailable('別ファイルの読み込み（source）'),
-  '.': unavailable('別ファイルの読み込み（.）'),
-  exec: unavailable('exec'),
-  trap: unavailable('trap'),
-  wait: unavailable('wait'),
-  jobs: unavailable('ジョブ制御（jobs）'),
-  fg: unavailable('ジョブ制御（fg）'),
-  bg: unavailable('ジョブ制御（bg）'),
-  kill: unavailable('kill'),
-  disown: unavailable('disown'),
-  suspend: unavailable('suspend'),
-  cd: unavailable('ディレクトリの移動（cd）'),
-  pwd: unavailable('pwd'),
-  pushd: unavailable('pushd'),
-  popd: unavailable('popd'),
-  dirs: unavailable('dirs'),
-  umask: unavailable('umask'),
-  ulimit: unavailable('ulimit'),
-  times: unavailable('times'),
-  type: unavailable('type'),
-  command: unavailable('command'),
-  builtin: unavailable('builtin'),
-  caller: unavailable('caller'),
-  getopts: unavailable('getopts'),
-  hash: unavailable('hash'),
-  enable: unavailable('enable'),
-  help: unavailable('help'),
-  history: unavailable('history'),
-  fc: unavailable('fc'),
-  bind: unavailable('bind'),
-  alias: unavailable('エイリアス（alias）'),
-  unalias: unavailable('エイリアス（unalias）'),
-  complete: unavailable('complete'),
-  compgen: unavailable('compgen'),
-  compopt: unavailable('compopt'),
-  logout: unavailable('logout'),
-  shopt: unavailable('シェルのオプション（shopt）'),
 };

@@ -1,29 +1,31 @@
-// code-gauge-allow-file fileNcss -- Keeps word, brace, tilde, parameter, arithmetic, and field-splitting expansions in one cohesive Expander class.
+// code-gauge-allow-file fileNcss -- Keeps word, brace, tilde, parameter, arithmetic, and field-splitting expansions in one cohesive stateless Expander.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
 import { charactersOf } from './characters';
 import {
-  EMPTY_LIST,
-  FIELD_BREAK,
-  FieldSplitter,
-  type Fragment,
-  isFieldBreak,
-  type Piece,
-  POSITIONAL_BREAK,
-  STAR_BREAK,
+  DEFAULT_WORD_CONTEXT,
+  EMPTY_LIST_SEGMENT,
+  FIELD_BREAK_SEGMENT,
+  isBreakSegment,
+  POSITIONAL_BREAK_SEGMENT,
+  QUOTED_EMPTY_SEGMENT,
+  splitWordSegments,
+  STAR_BREAK_SEGMENT,
+  type TextSegment,
+  textSegment,
+  type WordContext,
+  type WordSegment,
 } from './fields';
 import { applyOperator } from './parameterOperators';
 import { parseSubscriptWordParts } from './parse';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { quoteReusable, singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
-import type { CompoundElement, Shell } from './shell';
+import type { Shell } from './shell';
+import { readResolvedTarget, resolveSubscriptTarget, resolveTargetName } from './targets';
 import { UnsupportedFeatureError } from './unsupported';
-import { ENVIRONMENT_VARIABLES, isIdentifier } from './variables';
-
-/** Marks a quoted part that expands to nothing, which still makes a field (`""`), unlike `"$@"` with no elements. */
-const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
+import { type CompoundElement, isIdentifier } from './variables';
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
@@ -32,18 +34,20 @@ export type ParameterValue =
 
 /** An expanded parameter subscript, preserving whether `@` or `*` was written as a whole-array operator. */
 export interface SubscriptRef {
-  text: string;
-  wholeArray: boolean;
+  readonly text: string;
+  readonly wholeArray: boolean;
+  readonly rawText: string;
 }
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 
-/** Expands words as Bash does: braces, parameters, arithmetic, command substitutions, splitting, and quotes. */
+/**
+ * Stateless per-word expander: passes immutable `WordContext` explicitly and emits typed `WordSegment` lists
+ * split by the pure `splitWordSegments` function, while registering live builders in `Shell` for turtle GC.
+ */
 export class Expander {
-  /** The status of the last command substitution, which a command of assignments alone returns. */
+  /** Status of the most recent command substitution within the current simple command. */
   lastSubstitutionStatus = 0;
-  private spacedStar = false;
-  private partialTail = '';
 
   constructor(private readonly shell: Shell) {}
 
@@ -51,49 +55,16 @@ export class Expander {
     this.shell.runtime.spend(cost);
   }
 
-  private withIsolatedTail<T>(run: () => T): T {
-    const saved = this.partialTail;
-    this.partialTail = '';
-    try {
-      return run();
-    } finally {
-      this.partialTail = saved;
-    }
-  }
-
-  private withSubshellContext<T>(run: () => T): T {
-    const savedTail = this.partialTail;
-    const savedSpacedStar = this.spacedStar;
-    this.partialTail = '';
-    this.spacedStar = false;
-    try {
-      return run();
-    } finally {
-      this.partialTail = savedTail;
-      this.spacedStar = savedSpacedStar;
-    }
-  }
-
-  private withRestoredTail<T>(run: () => T): T {
-    const saved = this.partialTail;
-    try {
-      return run();
-    } finally {
-      this.partialTail = saved;
-    }
-  }
-
   // ---------------------------------------------------------------- whole words
 
-  /** Expands words into fields, as for a command's arguments. */
+  /** Expands words into split fields, as for a command's arguments or a `for` header. */
   expandWords(words: Word[]): string[] {
-    return this.withIsolatedTail(() => {
-      const fields: string[] = [];
+    const fields: string[] = [];
+    return this.shell.withValuesRoot(fields, () => {
       for (const word of words) {
         for (const parts of expandBraces(word.parts, () => this.spend())) {
-          this.partialTail = '';
           this.checkTilde(parts, false);
-          for (const field of this.splitFields(this.expandParts(parts, false))) {
+          for (const field of this.splitFields(this.expandParts(parts, DEFAULT_WORD_CONTEXT))) {
             fields.push(this.finishField(field));
             if (fields.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
           }
@@ -105,94 +76,92 @@ export class Expander {
 
   /** Expands a word to one string without splitting it, as for `case` and the operands of `[[`. */
   expandString(word: Word): string {
-    return this.withIsolatedTail(() => {
-      this.checkTilde(word.parts, false);
-      return this.joinPieces(this.expandParts(word.parts, false));
-    });
+    this.checkTilde(word.parts, false);
+    return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
   }
 
   /** Expands an associative array's subscript, where Bash does not perform tilde expansion. */
   expandAssociativeKey(word: Word): string {
-    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(word.parts, false)));
+    return this.joinSegments(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
   }
 
-  /** Expands an assignment's value, which Bash neither splits nor matches against file names. */
-  expandAssignmentValue(word: Word): string {
-    return this.withIsolatedTail(() => {
-      this.checkTilde(word.parts, true);
-      return this.joinPieces(this.expandParts(word.parts, false));
-    });
+  /** Expands an assignment's value, optionally joining `$*` with spaces when `IFS` is empty (`spacedStar`). */
+  expandAssignmentValue(word: Word, spacedStar = false): string {
+    this.checkTilde(word.parts, true);
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: false, spacedStar }));
   }
 
-  /** Expands a word into a pattern, quoting the characters that quotes protected. */
+  /** Expands a word into a glob pattern, quoting characters protected by quotes. */
   expandPattern(word: Word): string {
-    return this.withIsolatedTail(() => {
-      this.checkTilde(word.parts, false);
-      return this.patternOf(this.expandParts(word.parts, false));
-    });
+    this.checkTilde(word.parts, false);
+    return this.patternOf(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT));
   }
 
-  /** Expands the right side of `=~` into an extended regular expression, escaping what quotes protected. */
+  /** Expands the right side of `=~` into an ERE, escaping characters protected by quotes. */
   expandRegex(word: Word): string {
-    return this.withIsolatedTail(() => {
-      this.checkTilde(word.parts, false);
-      let regex = '';
-      const spend = (cost?: number): void => this.spend(cost);
-      for (const fragment of this.flatten(this.expandParts(word.parts, false))) {
-        const chunk = fragment.quoted
-          ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`)
-          : fragment.text;
-        regex = appendBounded(regex, chunk, spend);
-      }
-      return regex;
-    });
+    this.checkTilde(word.parts, false);
+    let regex = '';
+    const spend = (cost?: number): void => this.spend(cost);
+    for (const fragment of this.flatten(this.expandParts(word.parts, DEFAULT_WORD_CONTEXT))) {
+      const chunk = fragment.quoted ? fragment.text.replaceAll(/[\\^$.|?*+()[\]{}]/g, String.raw`\$&`) : fragment.text;
+      regex = appendBounded(regex, chunk, spend);
+    }
+    return regex;
   }
 
-  /** The subscript of an indexed array, expanded as text that the arithmetic evaluator then reads. */
+  /** Expands an indexed array's subscript into text for arithmetic evaluation. */
   expandSubscriptString(word: Word): string {
-    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(word.parts, true)));
+    return this.joinSegments(this.expandParts(word.parts, { inDouble: true, spacedStar: false }));
   }
 
-  /** Expands `$` expansions, command substitutions, and quotes in an associative subscript from arithmetic text. */
+  /** Expands `$` expansions, command substitutions, and quotes in a runtime string subscript. */
   expandSubscriptText(text: string): string {
     if (!/[$`'"\\]/.test(text)) return text;
-    return this.withIsolatedTail(() => this.joinPieces(this.expandParts(parseSubscriptWordParts(text), false)));
+    return this.joinSegments(this.expandParts(parseSubscriptWordParts(text), DEFAULT_WORD_CONTEXT));
   }
 
   matches(text: string, pattern: string, extmatch = false): boolean {
     return matchesPattern(pattern, text, () => this.spend(), extmatch);
   }
 
-  /** Expands the raw elements of `name=(...)` before destination subscript/integer evaluation. */
+  /** Expands raw compound items of `name=(...)` while keeping completed items rooted for turtle GC. */
   expandRawCompoundItems(words: Word[], isAssociative = false): CompoundElement[] {
-    if (isAssociative && words.length > 0 && !splitKeyedElement(words[0])) {
-      return words.map((word) => ({ plain: this.expandAssignmentValue(word), rawText: word.text }));
-    }
-    const elements: CompoundElement[] = [];
-    for (const word of words) {
-      const keyed = splitKeyedElement(word);
-      if (keyed) {
-        const key = this.joinPieces(this.expandParts(keyed.key, false));
-        this.checkTilde(keyed.value, true);
-        const value = this.joinPieces(this.expandParts(keyed.value, false));
-        elements.push({ key, value, append: keyed.append, rawText: word.text });
-        continue;
+    const roots: string[] = [];
+    return this.shell.withValuesRoot(roots, () => {
+      if (isAssociative && words.length > 0 && !splitKeyedElement(words[0])) {
+        return words.map((word) => {
+          const plain = this.expandAssignmentValue(word);
+          roots.push(plain);
+          return { plain, rawText: word.text };
+        });
       }
-      if (isAssociative) {
-        elements.push({ plain: this.expandAssignmentValue(word), rawText: word.text });
-        continue;
+      const elements: CompoundElement[] = [];
+      for (const word of words) {
+        const keyed = splitKeyedElement(word);
+        if (keyed) {
+          const key = this.joinSegments(this.expandParts(keyed.key, DEFAULT_WORD_CONTEXT));
+          roots.push(key);
+          this.checkTilde(keyed.value, true);
+          const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+          roots.push(value);
+          elements.push({ key, value, append: keyed.append, rawText: word.text });
+          continue;
+        }
+        if (isAssociative) {
+          const plain = this.expandAssignmentValue(word);
+          roots.push(plain);
+          elements.push({ plain, rawText: word.text });
+          continue;
+        }
+        for (const field of this.expandWords([word])) {
+          roots.push(field);
+          elements.push({ plain: field, rawText: word.text });
+        }
       }
-      for (const field of this.expandWords([word])) {
-        elements.push({ plain: field, rawText: word.text });
-      }
-    }
-    return elements;
+      return elements;
+    });
   }
 
-  /**
-   * The elements of `name=(...)` up to the first invalid or empty-keyed associative member, which Bash reports after it
-   * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
-   */
   expandCompound(
     words: Word[],
     isAssociative: boolean,
@@ -228,46 +197,56 @@ export class Expander {
     reportedName: string,
     onPair?: (key: string, value: string, append: boolean) => boolean
   ): { elements: CompoundElement[]; error?: string } {
-    const elements: CompoundElement[] = [];
-    for (const word of words) {
-      const keyed = splitKeyedElement(word);
-      if (!keyed) {
-        return {
-          elements,
-          error: compoundItemValidationError({ plain: word.text, rawText: word.text }, false, reportedName),
-        };
+    const roots: string[] = [];
+    return this.shell.withValuesRoot(roots, () => {
+      const elements: CompoundElement[] = [];
+      for (const word of words) {
+        const outcome = this.expandOneKeyedPair(word, reportedName, roots);
+        if ('error' in outcome) return { elements, error: outcome.error };
+        if (!emitKeyedPair(elements, outcome, onPair)) return { elements };
       }
-      const key = this.joinPieces(this.expandParts(keyed.key, false));
-      if (key === '') return { elements, error: `${word.text}: bad array subscript` };
-      this.checkTilde(keyed.value, true);
-      const value = this.joinPieces(this.expandParts(keyed.value, false));
-      if (onPair) {
-        if (!onPair(key, value, keyed.append)) return { elements };
-      } else elements.push({ key, value, append: keyed.append, rawText: word.text });
+      return { elements };
+    });
+  }
+
+  private expandOneKeyedPair(
+    word: Word,
+    reportedName: string,
+    roots: string[]
+  ): { key: string; value: string; append: boolean; rawText: string } | { error: string | undefined } {
+    const keyed = splitKeyedElement(word);
+    if (!keyed) {
+      return { error: compoundItemValidationError({ plain: word.text, rawText: word.text }, false, reportedName) };
     }
-    return { elements };
+    const key = this.joinSegments(this.expandParts(keyed.key, DEFAULT_WORD_CONTEXT));
+    if (key === '') return { error: `${word.text}: bad array subscript` };
+    roots.push(key);
+    this.checkTilde(keyed.value, true);
+    const value = this.joinSegments(this.expandParts(keyed.value, DEFAULT_WORD_CONTEXT));
+    roots.push(value);
+    return { key, value, append: keyed.append, rawText: word.text };
   }
 
   private expandAlternatingAssociative(
     words: Word[],
     onPair?: (key: string, value: string, append: boolean) => boolean
   ): { elements: CompoundElement[] } {
-    const elements: CompoundElement[] = [];
-    for (let i = 0; i < words.length; i += 2) {
-      const key = this.expandAssignmentValue(words[i]);
-      if (key === '') {
-        this.shell.reportError(`${words[i].text}: bad array subscript`);
-        continue;
+    const roots: string[] = [];
+    return this.shell.withValuesRoot(roots, () => {
+      const elements: CompoundElement[] = [];
+      for (let i = 0; i < words.length; i += 2) {
+        const key = this.expandAssignmentValue(words[i]);
+        if (key === '') {
+          this.shell.reportError(`${words[i].text}: bad array subscript`);
+          continue;
+        }
+        roots.push(key);
+        const value = i + 1 < words.length ? this.expandAssignmentValue(words[i + 1]) : '';
+        roots.push(value);
+        if (!emitAlternatingPair(elements, words, i, key, value, onPair)) return { elements };
       }
-      const value = i + 1 < words.length ? this.expandAssignmentValue(words[i + 1]) : '';
-      if (onPair) {
-        if (!onPair(key, value, false)) return { elements };
-      } else {
-        elements.push({ plain: key, rawText: words[i].text });
-        if (i + 1 < words.length) elements.push({ plain: value, rawText: words[i + 1].text });
-      }
-    }
-    return { elements };
+      return { elements };
+    });
   }
 
   validateCompoundItems(
@@ -287,83 +266,74 @@ export class Expander {
     return { elements };
   }
 
-  /** The text of an arithmetic expression after its expansions, which the evaluator reads as Bash's does. */
+  /** Substitutes expansions inside an arithmetic expression before evaluating it. */
   arithmeticText(source: ArithmeticSource): string {
-    return this.withIsolatedTail(() => {
-      let text = '';
+    return this.shell.withBuilderRoot((builder) => {
       const spend = (cost?: number): void => this.spend(cost);
+      const doubleCtx: WordContext = { inDouble: true, spacedStar: false };
       for (const piece of source.pieces) {
-        if (typeof piece === 'string') text = appendBounded(text, piece, spend);
+        if (typeof piece === 'string') builder.text = appendBounded(builder.text, piece, spend);
         else if (piece.kind === 'ansiC') {
-          text = appendBounded(text, `'${piece.text.replaceAll("'", String.raw`'\''`)}'`, spend);
-        } else text = appendBounded(text, this.joinPieces(this.expandPart(piece, true)), spend);
+          builder.text = appendBounded(builder.text, `'${piece.text.replaceAll("'", String.raw`'\''`)}'`, spend);
+        } else builder.text = appendBounded(builder.text, this.joinSegments(this.expandPart(piece, doubleCtx)), spend);
       }
-      return text;
+      return builder.text;
     });
   }
 
   // ---------------------------------------------------------------- parts
 
-  /** Expands parts in order; `inDouble` tells whether they are inside double quotes. */
-  expandParts(parts: WordPart[], inDouble: boolean): Piece[] {
-    const pieces: Piece[] = [];
-    for (const part of parts) {
-      for (const piece of this.expandPart(part, inDouble)) {
-        this.recordPartialPiece(piece, inDouble);
-        pieces.push(piece);
-      }
-    }
-    return pieces;
+  /** Expands `parts` with explicit `ctx`, rooting complete live builder text for turtle GC. */
+  expandParts(parts: WordPart[], ctx: WordContext): WordSegment[] {
+    const segments: WordSegment[] = [];
+    const fieldTexts: string[] = [];
+    return this.shell.withValuesRoot(fieldTexts, () =>
+      this.shell.withBuilderRoot((builder) => {
+        const spend = (cost?: number): void => this.spend(cost);
+        for (const part of parts) {
+          for (const seg of this.expandPart(part, ctx)) {
+            segments.push(seg);
+            recordSegmentBuilderText(seg, builder, fieldTexts, spend);
+          }
+        }
+        return segments;
+      })
+    );
   }
 
-  private recordPartialPiece(piece: Piece, inDouble: boolean): void {
-    if (piece === EMPTY_LIST) return;
-    if (isFieldBreak(piece)) {
-      this.partialTail = '';
-      return;
-    }
-    if (inDouble && piece === QUOTED_EMPTY) return;
-    this.shell.rootValue(piece.text);
-    this.partialTail = (this.partialTail + piece.text).slice(-32);
-    this.shell.rootValue(this.partialTail);
-  }
-
-  // code-gauge-allow functionNcss -- Dispatches each WordPart variant during word expansion.
-  private expandPart(part: WordPart, inDouble: boolean): Piece[] {
+  // code-gauge-allow functionNcss -- Dispatches each WordPart variant using explicit immutable WordContext.
+  private expandPart(part: WordPart, ctx: WordContext): WordSegment[] {
     this.spend();
     switch (part.kind) {
       case 'literal': {
-        return inDouble
-          ? [{ text: unescapeDoubleQuoted(part.text), quoted: true, split: false }]
-          : literalFragments(part.text);
+        return ctx.inDouble ? [textSegment(unescapeDoubleQuoted(part.text), true, false)] : literalSegments(part.text);
       }
       case 'single':
       case 'ansiC': {
-        return [{ text: part.text, quoted: true, split: false }];
+        return [textSegment(part.text, true, false)];
       }
       case 'double': {
-        const inner = this.withRestoredTail(() => this.expandParts(part.parts, true));
-        // `"$@"` and `@`-subscripted array expansions with no elements make no field; any other quoted text makes one.
-        if (inner.length > 0 && inner.every((piece) => piece === EMPTY_LIST)) return [];
-        const kept = inner.filter((piece) => piece !== EMPTY_LIST);
-        if (kept.length === 0) return [QUOTED_EMPTY];
-        if (kept.every((piece) => isFieldBreak(piece))) return kept;
-        return [QUOTED_EMPTY, ...kept];
+        const inner = this.expandParts(part.parts, { inDouble: true, spacedStar: ctx.spacedStar });
+        if (inner.length > 0 && inner.every((seg) => seg.kind === 'emptyList')) return [];
+        const kept = inner.filter((seg) => seg.kind !== 'emptyList');
+        if (kept.length === 0) return [QUOTED_EMPTY_SEGMENT];
+        if (kept.every(isBreakSegment)) return kept;
+        return [QUOTED_EMPTY_SEGMENT, ...kept];
       }
       case 'parameter': {
-        return this.expandParameter(part, inDouble);
+        return this.expandParameter(part, ctx);
       }
       case 'commandSubstitution': {
-        if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-        const { output, status } = this.withSubshellContext(() => this.shell.captureSubshell(part.body, part.row));
+        if (part.syntaxError) return this.failBackquoted(part.syntaxError, ctx.inDouble);
+        const { output, status } = this.shell.captureSubshell(part.body, part.row);
         this.lastSubstitutionStatus = status;
-        this.shell.state.lastStatus = status;
+        this.shell.store.lastStatus = status;
         if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
-        return [{ text: output.replaceAll('\0', '').replace(/\n+$/, ''), quoted: inDouble, split: !inDouble }];
+        return [textSegment(output.replaceAll('\0', '').replace(/\n+$/, ''), ctx.inDouble, !ctx.inDouble)];
       }
       case 'arithmeticExpansion': {
         const value = this.shell.evaluate(part.expression, undefined);
-        return [{ text: String(value), quoted: inDouble, split: !inDouble }];
+        return [textSegment(String(value), ctx.inDouble, !ctx.inDouble)];
       }
     }
   }
@@ -393,10 +363,10 @@ export class Expander {
 
   // ---------------------------------------------------------------- parameters
 
-  expandParameter(expansion: ParameterExpansion, inDouble: boolean): Piece[] {
+  expandParameter(expansion: ParameterExpansion, ctx: WordContext): WordSegment[] {
     const { name } = expansion;
     if (!expansion.braced) {
-      return this.valuePieces(this.parameterValue(name, undefined, expansion), inDouble);
+      return this.valueSegments(this.parameterValue(name, undefined, expansion), ctx);
     }
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
@@ -407,77 +377,56 @@ export class Expander {
       expansion.subscript.text !== '@' &&
       expansion.subscript.text !== '*'
     ) {
-      return this.valuePieces(this.elementLengthValue(expansion), inDouble);
+      return this.valueSegments(this.elementLengthValue(expansion), ctx);
     }
     const subscript = expansion.subscript ? this.subscriptRef(name, expansion.subscript) : undefined;
-    if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, inDouble);
+    if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, ctx);
     const value = this.parameterValue(name, subscript, expansion);
-    if (expansion.prefix === '#') return this.valuePieces(lengthOf(value), inDouble);
+    if (expansion.prefix === '#') return this.valueSegments(lengthOf(value), ctx);
     if (expansion.operator === undefined) {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
-      return this.valuePieces(value, inDouble);
+      return this.valueSegments(value, ctx);
     }
-    return this.withRestoredTail(() => applyOperator(this, this.shell, expansion, value, name, subscript, inDouble));
+    return applyOperator(this, this.shell, expansion, value, name, subscript, ctx);
   }
 
-  /** `${#a[i]}`: returns 0 for unmaterialized targets, or evaluates `i` once and returns the element's length. */
   private elementLengthValue(expansion: ParameterExpansion): ParameterValue {
     const rawSubscript = expansion.subscript as Word;
     if (rawSubscript.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
-    const resolved = this.shell.resolveName(expansion.name);
-    if (!this.hasMaterializedLengthTarget(resolved)) return { kind: 'scalar', value: '0' };
-    if (this.shell.isAssociative(resolved)) {
-      const subscript = this.expandAssociativeKey(rawSubscript);
-      if (subscript === '') this.shell.discard(`[${rawSubscript.text}]: bad array subscript`);
-      return lengthOf({ kind: 'scalar', value: this.shell.elementValue(resolved, subscript) });
+    const resolved = resolveTargetName(this.shell, expansion.name);
+    if (resolved === undefined || !this.shell.store.hasMaterializedTarget(resolved)) {
+      return { kind: 'scalar', value: '0' };
     }
-    const subscript = this.expandSubscriptString(rawSubscript);
-    const index = this.shell.arrayIndex(resolved, subscript === '' ? '0' : subscript);
-    if (index === undefined) this.shell.discard(`[${subscript}]: bad array subscript`);
-    return lengthOf({ kind: 'scalar', value: this.shell.elementAtIndex(resolved, index) });
+    const target = resolveSubscriptTarget(this.shell, {
+      name: expansion.name,
+      subscript: { kind: 'word', word: rawSubscript },
+      operation: 'read',
+    });
+    if (!target) return { kind: 'scalar', value: '0' };
+    if (target.kind === 'invalid') {
+      this.shell.discard(target.failure.message || `[${rawSubscript.text}]: bad array subscript`);
+    }
+    return lengthOf({ kind: 'scalar', value: readResolvedTarget(this.shell, target) });
   }
 
-  private hasMaterializedLengthTarget(resolved: string): boolean {
-    const variable = this.shell.findVariable(resolved);
-    if (variable) return variable.value !== undefined;
-    if (this.shell.isUnreadHostEnv(resolved)) throw new UnsupportedFeatureError(`環境変数（${resolved}）`);
-    if (!this.shell.isDynamic(resolved)) return false;
-    return resolved !== 'FUNCNAME' || this.shell.dynamicElements(resolved) !== undefined;
-  }
-
-  /** Evaluates a subscript, distinguishing literal `@` and `*` from an expanded associative key or index expression. */
   private subscriptRef(name: string, subscript: Word): SubscriptRef {
     const raw = subscript.text;
-    if (raw === '@' || raw === '*') return { text: raw, wholeArray: true };
-    const text = this.shell.isAssociative(this.shell.resolveName(name))
+    if (raw === '@' || raw === '*') return { text: raw, wholeArray: true, rawText: raw };
+    const resolved = resolveTargetName(this.shell, name, false) ?? name;
+    const text = this.shell.store.isAssociativeName(resolved)
       ? this.expandAssociativeKey(subscript)
       : this.expandSubscriptString(subscript);
-    return { text, wholeArray: false };
+    return { text, wholeArray: false, rawText: raw };
   }
 
   parameterValue(name: string, subscript: SubscriptRef | undefined, expansion?: ParameterExpansion): ParameterValue {
-    const { shell } = this;
     if (subscript !== undefined) return this.subscriptedParameterValue(name, subscript, expansion);
     const special = this.specialParameterValue(name);
     if (special) return special;
-    const resolved = shell.resolveNameOrUndefined(name);
-    if (resolved === undefined) return { kind: 'scalar', value: undefined };
-    const split = shell.findOwnVariable(resolved) ? undefined : shell.splitSubscript(resolved);
-    if (
-      (expansion?.braced === false || expansion?.prefix === '#') &&
-      split &&
-      (split.subscript === '@' || split.subscript === '*')
-    ) {
-      const arr = shell.resolveNameOrUndefined(split.name);
-      return { kind: 'list', values: arr === undefined ? [] : shell.arrayValues(arr), star: split.subscript === '*' };
-    }
-    if (expansion?.prefix === '#' && split) {
-      const arr = shell.resolveNameOrUndefined(split.name);
-      if (arr === undefined || !this.hasMaterializedLengthTarget(arr)) {
-        return { kind: 'scalar', value: undefined };
-      }
-    }
-    return { kind: 'scalar', value: shell.scalarValue(name) };
+    return {
+      kind: 'scalar',
+      value: this.shell.store.readScalar(name, (c) => this.shell.reportError(`warning: ${c}: circular name reference`)),
+    };
   }
 
   private subscriptedParameterValue(
@@ -485,22 +434,35 @@ export class Expander {
     subscript: SubscriptRef,
     expansion?: ParameterExpansion
   ): ParameterValue {
-    const resolved = this.shell.resolveName(name);
-    if (!this.shell.findOwnVariable(resolved) && resolved.includes('[')) {
+    const resolved = resolveTargetName(this.shell, name);
+    if (resolved === undefined) {
       return subscript.wholeArray
         ? { kind: 'list', values: [], star: subscript.text === '*' }
         : { kind: 'scalar', value: undefined };
     }
     if (subscript.wholeArray) {
-      return { kind: 'list', values: this.shell.arrayValues(resolved), star: subscript.text === '*' };
+      return { kind: 'list', values: this.shell.store.readArrayValues(resolved), star: subscript.text === '*' };
     }
-    if (subscript.text === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
-    return { kind: 'scalar', value: this.shell.elementValue(resolved, subscript.text) };
+    if (subscript.rawText === '' && expansion) this.shell.discard(`${expansion.text}: bad substitution`);
+    if (subscript.text === '' && this.shell.store.isAssociativeName(resolved)) {
+      this.shell.reportError(`${name}: bad array subscript`);
+      return { kind: 'scalar', value: undefined };
+    }
+    const target = resolveSubscriptTarget(this.shell, {
+      name,
+      subscript: { kind: 'text', text: subscript.text === '' ? '0' : subscript.text, preExpanded: true },
+      operation: 'read',
+    });
+    if (!target) return { kind: 'scalar', value: undefined };
+    if (target.kind === 'invalid') {
+      if (target.failure.message !== '') this.shell.reportError(target.failure.message);
+      return { kind: 'scalar', value: undefined };
+    }
+    return { kind: 'scalar', value: readResolvedTarget(this.shell, target) };
   }
 
   private specialParameterValue(name: string): ParameterValue | undefined {
-    const { shell } = this;
-    const positional = shell.state.positional.at(-1) as string[];
+    const positional = this.shell.store.positionalArgs();
     switch (name) {
       case '@':
       case '*': {
@@ -510,7 +472,7 @@ export class Expander {
         return { kind: 'scalar', value: String(positional.length) };
       }
       case '?': {
-        return { kind: 'scalar', value: String(shell.state.lastStatus) };
+        return { kind: 'scalar', value: String(this.shell.store.lastStatus) };
       }
       case '-': {
         return { kind: 'scalar', value: 'hB' };
@@ -525,53 +487,42 @@ export class Expander {
         return { kind: 'scalar', value: SCRIPT_NAME };
       }
       case '_': {
-        if (shell.state.lastArgument === undefined) throw new UnsupportedFeatureError('Bash のパス（最初の $_）');
-        return { kind: 'scalar', value: shell.state.lastArgument };
+        if (this.shell.store.lastArgument === undefined) throw new UnsupportedFeatureError('Bash のパス（最初の $_）');
+        return { kind: 'scalar', value: this.shell.store.lastArgument };
       }
     }
     if (/^[0-9]+$/.test(name)) return { kind: 'scalar', value: positional[Number(name) - 1] };
     return undefined;
   }
 
-  /** `${a[$k]}` whose subscript expands to nothing: element 0 of an indexed array, and an error for an associative one. */
-  private emptySubscriptValue(expansion: ParameterExpansion, resolved: string): ParameterValue {
-    if (expansion.subscript?.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
-    if (!this.shell.isAssociative(resolved)) return { kind: 'scalar', value: this.shell.elementValue(resolved, '0') };
-    this.shell.reportError(`${expansion.name}: bad array subscript`);
-    return { kind: 'scalar', value: undefined };
-  }
-
-  /** `${!name}`, `${!name[@]}`, and `${!prefix*}`. */
   private expandIndirect(
     expansion: ParameterExpansion,
     subscript: SubscriptRef | undefined,
-    inDouble: boolean
-  ): Piece[] {
-    const { shell } = this;
+    ctx: WordContext
+  ): WordSegment[] {
     const { name } = expansion;
     if (subscript?.wholeArray) {
-      if (expansion.operator !== undefined) shell.discard(`${expansion.text}: bad substitution`);
-      return this.valuePieces(
-        { kind: 'list', values: shell.arrayKeys(shell.resolveName(name)), star: subscript.text === '*' },
-        inDouble
-      );
+      if (expansion.operator !== undefined) this.shell.discard(`${expansion.text}: bad substitution`);
+      const resolved = resolveTargetName(this.shell, name);
+      const keys = resolved === undefined ? [] : this.shell.store.readArrayKeys(resolved);
+      return this.valueSegments({ kind: 'list', values: keys, star: subscript.text === '*' }, ctx);
     }
     if ((expansion.operator === '*' || expansion.operator === '@') && expansion.argument.length === 0) {
-      return this.valuePieces(
-        { kind: 'list', values: this.namesWithPrefix(name), star: expansion.operator === '*' },
-        inDouble
+      return this.valueSegments(
+        { kind: 'list', values: this.shell.store.namesWithPrefix(name), star: expansion.operator === '*' },
+        ctx
       );
     }
-    const variable = subscript === undefined ? shell.findOwnVariable(name) : undefined;
-    if (variable?.attributes.has('n')) {
-      const target = variable.value?.kind === 'scalar' ? variable.value.value : '';
-      return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, undefined, inDouble);
+    const own = subscript === undefined ? this.shell.store.ownView(name) : undefined;
+    if (own?.attributes.has('n')) {
+      const target = own.scalar ?? '';
+      return this.finishIndirect(expansion, { kind: 'scalar', value: target }, target, undefined, ctx);
     }
     const direct = this.parameterValue(name, subscript, expansion);
     const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
     if (reference === undefined || reference === '') {
       if (expansion.operator === undefined) this.checkIndirectReference(name, subscript?.text);
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', undefined, inDouble);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', undefined, ctx);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
@@ -579,7 +530,7 @@ export class Expander {
       this.parameterValue(target.name, target.subscript, expansion),
       target.name,
       target.subscript,
-      inDouble
+      ctx
     );
   }
 
@@ -588,181 +539,131 @@ export class Expander {
     value: ParameterValue,
     targetName: string,
     targetSubscript: SubscriptRef | undefined,
-    inDouble: boolean
-  ): Piece[] {
-    if (expansion.operator === undefined) return this.valuePieces(value, inDouble);
-    return applyOperator(this, this.shell, expansion, value, targetName, targetSubscript, inDouble);
+    ctx: WordContext
+  ): WordSegment[] {
+    if (expansion.operator === undefined) return this.valueSegments(value, ctx);
+    return applyOperator(this, this.shell, expansion, value, targetName, targetSubscript, ctx);
   }
 
-  /** Bash rejects `${!x}` for an unset variable, but not for an unset element of an array that exists. */
   private checkIndirectReference(name: string, subscript: string | undefined): void {
     if (subscript === undefined) this.shell.discard(`${name}: invalid indirect expansion`);
-    if (!this.shell.findVariable(name)) this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
+    const resolved = resolveTargetName(this.shell, name, false);
+    if (resolved === undefined || !this.shell.store.ownView(resolved)) {
+      this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
+    }
   }
 
   private indirectTarget(reference: string): { name: string; subscript: SubscriptRef | undefined } {
     const split = this.shell.splitSubscript(reference);
     if (split && isIdentifier(split.name) && split.subscript !== '') {
-      const resolved = this.shell.resolveName(split.name);
       const raw = split.subscript;
-      if (raw === '@' || raw === '*') return { name: split.name, subscript: { text: raw, wholeArray: true } };
-      const expanded = this.shell.expandDynamicSubscript(raw);
-      if (this.shell.isAssociative(resolved)) {
-        return { name: split.name, subscript: { text: expanded, wholeArray: false } };
+      if (raw === '@' || raw === '*') {
+        return { name: split.name, subscript: { text: raw, wholeArray: true, rawText: raw } };
       }
-      const normalized = expanded === '' ? '0' : expanded;
-      const index = this.shell.arrayIndex(resolved, normalized);
-      return {
-        name: split.name,
-        subscript: { text: index === undefined ? normalized : String(index), wholeArray: false },
-      };
+      const expanded = this.expandSubscriptText(raw);
+      return { name: split.name, subscript: { text: expanded, wholeArray: false, rawText: raw } };
     }
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
     return { name: reference, subscript: undefined };
   }
 
-  /** The names of the variables starting with a prefix, in byte order, as `${!prefix*}` lists them. */
-  // code-gauge-allow functionCognitiveComplexity -- Collects user variables while rejecting the shell's own, whose list depends on the environment.
-  private namesWithPrefix(prefix: string): string[] {
-    const names = new Set<string>();
-    for (const scope of this.shell.state.scopes) {
-      for (const variable of scope.values()) {
-        if (!variable.name.startsWith(prefix)) continue;
-        if (variable.isSystem) throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
-        if (variable.value !== undefined) names.add(variable.name);
-      }
-    }
-    for (const envName of ENVIRONMENT_VARIABLES) {
-      if (envName.startsWith(prefix) && this.shell.isUnreadHostEnv(envName)) {
-        throw new UnsupportedFeatureError(`環境変数（${envName}）`);
-      }
-    }
-    if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
-      throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
-    }
-    return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  }
-
-  /** The pieces of a value: one fragment, or one per element with breaks between them. */
-  // code-gauge-allow functionCognitiveComplexity -- Bash's rules for scalars, "$*", and "$@"-like lists, inside and outside quotes.
-  valuePieces(value: ParameterValue, inDouble: boolean): Piece[] {
+  // code-gauge-allow functionCognitiveComplexity -- Emits typed text, break, and empty-list segments for scalars and `@`/`*` lists inside and outside quotes.
+  valueSegments(value: ParameterValue, ctx: WordContext): WordSegment[] {
+    const { inDouble } = ctx;
     if (value.kind === 'scalar') {
       return value.value === undefined || value.value === ''
         ? inDouble
-          ? [QUOTED_EMPTY]
+          ? [QUOTED_EMPTY_SEGMENT]
           : []
-        : [{ text: value.value, quoted: inDouble, split: !inDouble }];
+        : [textSegment(value.value, inDouble, !inDouble)];
     }
     if (value.star && inDouble) {
       return value.values.length === 0
-        ? [QUOTED_EMPTY]
+        ? [QUOTED_EMPTY_SEGMENT]
         : [
-            {
-              text: joinBounded(value.values, this.ifsJoiner(), (cost) => this.spend(cost)),
-              quoted: true,
-              split: false,
-            },
+            textSegment(
+              joinBounded(value.values, this.ifsJoiner(), (cost) => this.spend(cost)),
+              true,
+              false
+            ),
           ];
     }
-    if (inDouble && value.values.length === 0) return [EMPTY_LIST];
-    const pieces: Piece[] = [];
-    const separator = this.separatorOf(value);
+    if (inDouble && value.values.length === 0) return [EMPTY_LIST_SEGMENT];
+    const segments: WordSegment[] = [];
+    const separator = this.separatorOf(value, ctx.spacedStar);
     for (const [index, element] of value.values.entries()) {
-      if (index > 0) pieces.push(separator);
-      if (inDouble && element === '') pieces.push(QUOTED_EMPTY);
+      if (index > 0) segments.push(separator);
+      if (inDouble && element === '') segments.push(QUOTED_EMPTY_SEGMENT);
       else {
-        pieces.push({
-          text: element,
-          quoted: inDouble,
-          split: !inDouble,
-          ...(!inDouble && !value.star ? { atListElement: true } : {}),
-          ...(!inDouble && value.transformed ? { transformedList: true } : {}),
-        });
+        segments.push(
+          textSegment(element, inDouble, !inDouble, {
+            ...(!inDouble && !value.star ? { atListElement: true } : {}),
+            ...(!inDouble && value.transformed ? { transformedList: true } : {}),
+          })
+        );
       }
     }
-    if (inDouble && value.values.length > 0) pieces.unshift(QUOTED_EMPTY);
-    return pieces;
+    if (inDouble && value.values.length > 0) segments.unshift(QUOTED_EMPTY_SEGMENT);
+    return segments;
   }
 
-  /** What separates a list's elements: one that joins as `"$*"` does where words are not split, or a plain break. */
-  private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>): Piece {
-    if (!value.star) return value.positional ? POSITIONAL_BREAK : FIELD_BREAK;
-    return value.positional && this.spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK : STAR_BREAK;
+  private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>, spacedStar: boolean): WordSegment {
+    if (!value.star) return value.positional ? POSITIONAL_BREAK_SEGMENT : FIELD_BREAK_SEGMENT;
+    return value.positional && spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK_SEGMENT : STAR_BREAK_SEGMENT;
   }
 
-  /**
-   * Runs an expansion in which an unquoted `$*` joins with spaces when `IFS` is empty, as Bash 5.3 joins it in the
-   * word of `${x:-word}`, `${x:+word}`, and `${x:?word}` and in a declaration builtin's assignment, though not `${a[*]}`.
-   */
-  withSpacedStar<T>(run: () => T, enabled = true): T {
-    const saved = this.spacedStar;
-    this.spacedStar = enabled;
-    try {
-      return run();
-    } finally {
-      this.spacedStar = saved;
-    }
-  }
-
-  /** The first character of `IFS`, which joins the elements of `"$*"`: a space when unset, nothing when empty. */
   ifsJoiner(): string {
-    const ifs = this.shell.scalarValue('IFS');
+    const ifs = this.shell.store.readScalar('IFS');
     if (ifs === undefined) return ' ';
     return charactersOf(ifs)[0] ?? '';
   }
 
-  // ---------------------------------------------------------------- splitting and joining
+  currentIfs(): string {
+    return this.shell.store.readScalar('IFS') ?? ' \t\n';
+  }
 
-  /** Joins pieces into one string, as an expansion that is not split gives: elements of `$@` joined by spaces. */
-  joinPieces(pieces: Piece[]): string {
+  // ---------------------------------------------------------------- splitting & joining
+
+  joinSegments(segments: readonly WordSegment[]): string {
     let text = '';
     const spend = (cost?: number): void => this.spend(cost);
-    for (const piece of pieces) {
-      if (piece === EMPTY_LIST) continue;
-      const chunk = isFieldBreak(piece) ? (piece === STAR_BREAK ? this.ifsJoiner() : ' ') : piece.text;
+    for (const segment of segments) {
+      if (segment.kind === 'emptyList') continue;
+      const chunk = segment.kind === 'break' ? (segment.breakKind === 'star' ? this.ifsJoiner() : ' ') : segment.text;
       text = appendBounded(text, chunk, spend);
     }
     return text;
   }
 
-  /** The fragments of pieces joined into one field, as patterns need. */
-  flatten(pieces: Piece[]): Fragment[] {
-    return pieces
-      .filter((piece): piece is Exclude<Piece, typeof EMPTY_LIST> => piece !== EMPTY_LIST)
-      .map((piece) =>
-        isFieldBreak(piece)
-          ? { text: piece === STAR_BREAK ? this.ifsJoiner() : ' ', quoted: true, split: false }
-          : piece
-      );
+  flatten(segments: readonly WordSegment[]): TextSegment[] {
+    const out: TextSegment[] = [];
+    for (const segment of segments) {
+      if (segment.kind === 'emptyList') continue;
+      if (segment.kind === 'break') {
+        out.push(textSegment(segment.breakKind === 'star' ? this.ifsJoiner() : ' ', true, false));
+      } else out.push(segment);
+    }
+    return out;
   }
 
-  /** The pattern pieces make, with the quoted characters escaped. */
-  patternOf(pieces: Piece[]): string {
+  patternOf(segments: readonly WordSegment[]): string {
     let pattern = '';
     const spend = (cost?: number): void => this.spend(cost);
-    for (const fragment of this.flatten(pieces)) {
+    for (const fragment of this.flatten(segments)) {
       const chunk = fragment.quoted ? quotePattern(fragment.text) : fragment.text;
       pattern = appendBounded(pattern, chunk, spend);
     }
-    // `[[ == ]]` matches extended patterns even without `shopt -s extglob`, so they cannot pass as literal text.
-    if (hasExtendedGlob(pattern, () => this.spend()))
+    if (hasExtendedGlob(pattern, () => this.spend())) {
       throw new UnsupportedFeatureError('拡張パターン（@( ... ) など）');
+    }
     return pattern;
   }
 
-  currentIfs(): string {
-    return this.shell.scalarValue('IFS') ?? ' \t\n';
+  splitFields(segments: readonly WordSegment[]): TextSegment[][] {
+    return splitWordSegments(segments, this.currentIfs());
   }
 
-  /** Splits pieces into fields at `IFS` characters in unquoted expansions and at the breaks between elements. */
-  splitFields(pieces: Piece[]): Fragment[][] {
-    const splitter = new FieldSplitter(this.currentIfs());
-    for (const piece of pieces) splitter.add(piece);
-    return splitter.finish();
-  }
-
-  /** Removes the quotes from a field, after checking that it would not expand into file names. */
-  finishField(field: Fragment[]): string {
+  finishField(field: readonly TextSegment[]): string {
     let length = 0;
     for (const fragment of field) {
       length += fragment.text.length;
@@ -775,21 +676,18 @@ export class Expander {
         `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(result)} のように引用符で囲む）`
       );
     }
-    this.shell.rootValue(result);
     return result;
   }
 
-  /** A backquoted body Bash cannot parse: it reports the error as it runs the substitution, which gives nothing. */
-  private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): Piece[] {
+  private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): WordSegment[] {
     const prefix = `${SCRIPT_NAME}: command substitution: line ${error.row + 1}: `;
-    for (const message of error.messages) this.shell.state.fd2.write(`${prefix}${message}\n`);
-    if (error.line !== undefined) this.shell.state.fd2.write(`${prefix}\`${error.line}'\n`);
+    for (const message of error.messages) this.shell.fd2.write(`${prefix}${message}\n`);
+    if (error.line !== undefined) this.shell.fd2.write(`${prefix}\`${error.line}'\n`);
     this.lastSubstitutionStatus = 2;
-    this.shell.state.lastStatus = 2;
-    return [{ text: '', quoted: inDouble, split: !inDouble }];
+    this.shell.store.lastStatus = 2;
+    return [textSegment('', inDouble, !inDouble)];
   }
 
-  /** Exits the shell after an error of `${x:?}`, as a non-interactive Bash does. */
   failParameter(name: string, message: string): never {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
@@ -833,18 +731,61 @@ function isValidParameterName(name: string): boolean {
   return isIdentifier(name) || /^[0-9]+$/.test(name) || SPECIAL_PARAMETERS.has(name);
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Scans literal word parts from a ~ to verify no backslash or expansion quotes the tilde prefix.
+function emitKeyedPair(
+  elements: CompoundElement[],
+  pair: { key: string; value: string; append: boolean; rawText: string },
+  onPair?: (key: string, value: string, append: boolean) => boolean
+): boolean {
+  if (onPair) return onPair(pair.key, pair.value, pair.append);
+  elements.push(pair);
+  return true;
+}
+
+function emitAlternatingPair(
+  elements: CompoundElement[],
+  words: readonly Word[],
+  index: number,
+  key: string,
+  value: string,
+  onPair?: (key: string, value: string, append: boolean) => boolean
+): boolean {
+  if (onPair) return onPair(key, value, false);
+  elements.push({ plain: key, rawText: words[index].text });
+  if (index + 1 < words.length) elements.push({ plain: value, rawText: words[index + 1].text });
+  return true;
+}
+
+function recordSegmentBuilderText(
+  seg: WordSegment,
+  builder: { text: string },
+  fieldTexts: string[],
+  spend: (cost?: number) => void
+): void {
+  if (seg.kind === 'break') {
+    if (builder.text !== '') fieldTexts.push(builder.text);
+    builder.text = '';
+  } else if (seg.kind === 'text' && seg.text !== '') {
+    builder.text = appendBounded(builder.text, seg.text, spend);
+  }
+}
+
 function hasUnquotedTildePrefix(parts: WordPart[], partIndex: number, from: number, afterColon: boolean): boolean {
   for (let p = partIndex; p < parts.length; p++) {
     const part = parts[p];
     if (part.kind !== 'literal') return false;
-    for (let i = p === partIndex ? from : 0; i < part.text.length; i++) {
-      const c = part.text[i];
-      if (c === '\\') return false;
-      if (c === '/' || (afterColon && c === ':')) return true;
-    }
+    const step = scanTildeLiteral(part.text, p === partIndex ? from : 0, afterColon);
+    if (step !== undefined) return step;
   }
   return true;
+}
+
+function scanTildeLiteral(text: string, start: number, afterColon: boolean): boolean | undefined {
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\') return false;
+    if (c === '/' || (afterColon && c === ':')) return true;
+  }
+  return undefined;
 }
 
 function lengthOf(value: ParameterValue): ParameterValue {
@@ -852,41 +793,37 @@ function lengthOf(value: ParameterValue): ParameterValue {
   return { kind: 'scalar', value: String(charactersOf(value.value ?? '').length) };
 }
 
-/** The fragments of unquoted literal text: a backslash quotes the character after it. */
-// code-gauge-allow functionCognitiveComplexity -- Bash's quote removal of backslashes, including the one that ends a word.
-function literalFragments(text: string): Fragment[] {
-  const fragments: Fragment[] = [];
+// code-gauge-allow functionCognitiveComplexity -- Bash's quote removal of backslashes, including a trailing backslash at word end.
+function literalSegments(text: string): TextSegment[] {
+  const fragments: TextSegment[] = [];
   let plain = '';
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    // Quote removal drops a backslash that ends a word, as one that brace expansion makes can, leaving the field.
     if (c === '\\' && i + 1 === text.length) {
-      if (plain) fragments.push({ text: plain, quoted: false, split: false });
-      fragments.push({ text: '', quoted: true, split: false });
+      if (plain) fragments.push(textSegment(plain, false, false));
+      fragments.push(QUOTED_EMPTY_SEGMENT);
       return fragments;
     }
     if (c === '\\') {
-      if (plain) fragments.push({ text: plain, quoted: false, split: false });
+      if (plain) fragments.push(textSegment(plain, false, false));
       plain = '';
       const next = text.codePointAt(i + 1) as number;
       const char = String.fromCodePoint(next);
-      if (char !== '\n') fragments.push({ text: char, quoted: true, split: false });
+      if (char !== '\n') fragments.push(textSegment(char, true, false));
       i += char.length;
       continue;
     }
     plain += c;
   }
-  if (plain) fragments.push({ text: plain, quoted: false, split: false });
+  if (plain) fragments.push(textSegment(plain, false, false));
   return fragments;
 }
 
-/** Removes the backslashes that quote `$`, `` ` ``, `"`, `\`, and newlines inside double quotes. */
 export function unescapeDoubleQuoted(text: string): string {
   return text.replaceAll(/\\([$`"\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
 }
 
-/** Splits an array element written `[key]=value` or `[key]+=value` into its parts. */
-// code-gauge-allow functionCognitiveComplexity -- Splits a word at its [key]= prefix across literal and expanded parts, as Bash scans the unexpanded word.
+// code-gauge-allow functionCognitiveComplexity -- Splits a word at its [key]= prefix across literal and expanded parts.
 function splitKeyedElement(word: Word): { key: WordPart[]; value: WordPart[]; append: boolean } | undefined {
   const [first] = word.parts;
   if (first?.kind !== 'literal' || !first.text.startsWith('[')) return undefined;
@@ -917,7 +854,6 @@ function splitKeyedElement(word: Word): { key: WordPart[]; value: WordPart[]; ap
   return undefined;
 }
 
-/** The index of the `]` in `text` that closes the subscript, counting brackets opened in earlier texts in `depth`. */
 function closingBracket(text: string, depth: { value: number }): number | undefined {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];

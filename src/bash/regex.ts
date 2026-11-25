@@ -5,7 +5,7 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { matchesRegexEquivalenceClass, resolveRegexCollatingElement } from './collation';
+import { UnsupportedFeatureError } from './unsupported';
 
 type RegexNode =
   | { kind: 'char'; c: string }
@@ -208,21 +208,8 @@ class RegexParser {
     const type = this.chars[this.position + 1];
     if (c !== '[' || (type !== ':' && type !== '=' && type !== '.')) return undefined;
     const name = this.readSubbracketName(type);
-    const hasTrailingRange = this.hasRangeContinuation();
-    return type === ':'
-      ? parseCharacterClassSubbracket(name, hasTrailingRange)
-      : this.parseCollatingSubbracket(type, name, hasTrailingRange);
-  }
-
-  private parseCollatingSubbracket(type: '=' | '.', name: string, hasTrailingRange: boolean): (ch: string) => boolean {
-    const element = resolveRegexCollatingElement(name);
-    if (element === undefined) throw new RegexSyntaxError('invalid collating element');
-    if (hasTrailingRange) {
-      if (type !== '.') throw new RegexSyntaxError('invalid character range');
-      this.position++;
-      return makeCodeRangeTest(element, this.readRangeEndChar());
-    }
-    return type === '=' ? (ch) => matchesRegexEquivalenceClass(element, ch) : (ch) => ch === element;
+    if (type !== ':') throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+    return parseCharacterClassSubbracket(name, this.hasRangeContinuation());
   }
 
   private readRangeEndChar(): string {
@@ -234,11 +221,9 @@ class RegexParser {
   private readRawRangeEndChar(): string {
     const type = this.chars[this.position + 1];
     if (this.chars[this.position] === '[' && (type === '.' || type === ':' || type === '=')) {
-      const name = this.readSubbracketName(type);
-      if (type !== '.') throw new RegexSyntaxError('invalid character range');
-      const element = resolveRegexCollatingElement(name);
-      if (element === undefined) throw new RegexSyntaxError('invalid collating element');
-      return element;
+      this.readSubbracketName(type);
+      if (type !== ':') throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+      throw new RegexSyntaxError('invalid character range');
     }
     const end = this.chars[this.position++];
     if (end === undefined) throw new RegexSyntaxError('brackets ([ ]) not balanced');

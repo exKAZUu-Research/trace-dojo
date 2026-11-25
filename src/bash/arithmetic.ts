@@ -6,15 +6,11 @@
  * structured lvalue resolution.
  */
 
+import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import { skipBalanced, SourceText, SyntaxFailure, UnknownSyntax } from './syntaxWords';
+import type { ResolvedTarget } from './targets';
 
-export type ArithmeticTarget =
-  | { kind: 'scalar'; name: string }
-  | { kind: 'associativeElement'; name: string; key: string }
-  | { kind: 'indexedElement'; name: string; index: bigint }
-  | { kind: 'invalidElement'; raw: string; emptyWrite?: boolean };
-
-export type WriteTargetResult = 'ok' | 'ignored' | 'readonly' | 'invalid';
+export type ArithmeticTarget = ResolvedTarget;
 
 export interface ArithmeticHost {
   /** Resolves a variable or `name[subscript]` once into a reusable target. */
@@ -26,8 +22,8 @@ export interface ArithmeticHost {
   ): ArithmeticTarget;
   /** Reads the current string value of `target`, or `undefined` when unset. */
   readTarget(target: ArithmeticTarget): string | undefined;
-  /** Stores `value` into `target`, reporting why a failed store was rejected. */
-  writeTarget(target: ArithmeticTarget, value: string): WriteTargetResult;
+  /** Stores `value` into `target`, returning the structured `StoreOutcome`. */
+  writeTarget(target: ArithmeticTarget, value: string): StoreOutcome;
   /** Reports a diagnostic without formatting it as an arithmetic syntax error. */
   reportError(message: string): void;
 }
@@ -40,10 +36,10 @@ export class ArithmeticError extends Error {
   }
 }
 
-/** Aborts remaining arithmetic evaluation after a host variable store fails and already reported its own error. */
+/** Aborts remaining arithmetic evaluation after a host variable store fails. */
 export class ArithmeticStoreError extends Error {
-  constructor(readonly isReadonly = false) {
-    super('Arithmetic store failed');
+  constructor(readonly failure: StoreFailure) {
+    super(failure.message);
     this.name = 'ArithmeticStoreError';
   }
 }
@@ -572,13 +568,16 @@ class FrameParser {
   }
 
   private store(target: ArithmeticTarget, value: bigint): void {
-    if (target.kind === 'invalidElement' && target.emptyWrite) {
+    if (target.kind === 'invalid' && target.emptyArithmeticWrite) {
       const prefix = this.session.commandName === undefined ? '' : `${this.session.commandName}: `;
-      this.session.host.reportError(`${prefix}\`${target.raw}': not a valid identifier`);
-      throw new ArithmeticStoreError(false);
+      throw new ArithmeticStoreError({
+        ok: false,
+        reason: 'invalidIdentifier',
+        message: `${prefix}\`${target.raw}': not a valid identifier`,
+      });
     }
-    const status = this.session.host.writeTarget(target, value.toString());
-    if (status === 'readonly' || status === 'invalid') throw new ArithmeticStoreError(status === 'readonly');
+    const outcome = this.session.host.writeTarget(target, value.toString());
+    if (!outcome.ok) throw new ArithmeticStoreError(outcome);
   }
 
   private isOp(op: OperatorText): boolean {

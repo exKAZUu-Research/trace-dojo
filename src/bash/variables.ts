@@ -1,405 +1,157 @@
-// code-gauge-allow-file fileNcss -- Keeps Bash variable cells, associative tables, scopes, and dynamic variable state together.
+// code-gauge-allow-file fileNcss -- Encapsulates VariableStore scopes, cells, copy-on-write containers, PRNG, and dynamic read descriptors in one single-writer module.
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import {
+  ASSOCIATIVE_BUCKETS,
+  AssociativeTable,
+  type CompoundElement,
+  CONVERTED_BUCKETS,
+  isIdentifier,
+  isValidFunctionName,
+  maxElementIndex,
+  readAssociativePair,
+  sortedElements,
+  unpackIndexedElement,
+} from './associativeTable';
+import {
+  type Attribute,
+  ATTRIBUTE_ORDER,
+  DYNAMIC_VARIABLES,
+  ENVIRONMENT_VARIABLES,
+  rejectSpecialVariableMutation,
+  rejectUnsupportedNamerefTarget,
+  SCALAR_DYNAMIC_VARIABLES,
+} from './capabilities';
 import { capitalize, lowerCase, upperCase } from './characters';
+import type { StoreFailure, StoreOutcome } from './failurePolicy';
+import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
+import { UnsupportedFeatureError } from './unsupported';
 
-/** Variable attribute flags recognized by `declare` and listed by `declare -p`. */
-export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 't' | 'x' | 'c' | 'l' | 'u';
+export {
+  ASSOCIATIVE_BUCKETS,
+  AssociativeTable,
+  type CompoundElement,
+  CONVERTED_BUCKETS,
+  isIdentifier,
+  isValidFunctionName,
+  maxElementIndex,
+  readAssociativePair,
+  sortedElements,
+  unpackIndexedElement,
+};
+export { type Attribute, ATTRIBUTE_ORDER, DYNAMIC_VARIABLES, ENVIRONMENT_VARIABLES, SCALAR_DYNAMIC_VARIABLES };
 
-/** Canonical display order of variable attribute flags for `declare -p` and `${x@a}`. */
-export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 't', 'x', 'c', 'l', 'u'];
-
-export type VariableValue =
+type CellValue =
   | { kind: 'scalar'; value: string }
   | { kind: 'indexed'; elements: Map<bigint, string> }
   | { kind: 'associative'; table: AssociativeTable };
 
-export interface Variable {
-  name: string;
-  /** Stored value, or `undefined` when declared without an initial value (such as `local x`). */
-  value: VariableValue | undefined;
+interface Cell {
+  readonly id: number;
+  readonly name: string;
+  value: CellValue | undefined;
   attributes: Set<Attribute>;
-  /** Whether the variable is a built-in shell variable omitted from learner traces unless user-assigned. */
-  isSystem?: boolean;
-  /** Whether the program explicitly assigned or converted this variable cell. */
-  userAssigned?: boolean;
-  /** Whether `value` is shared copy-on-write with a suspended parent or child subshell scope. */
-  shared?: boolean;
-  /** Whether an empty scalar value represents a `null` object binding from a `for` loop over turtles/structures. */
-  nullReference?: boolean;
-  /** Whether the cell originated from a command-prefix temporary environment binding. */
-  fromTempEnv?: boolean;
+  isSystem: boolean;
+  userAssigned: boolean;
+  shared: boolean;
+  nullReference: boolean;
 }
 
-/** A lexical/dynamic variable scope (global scope at index 0, followed by function and temporary scopes). */
-export type Scope = Map<string, Variable>;
-
-/** An element of a compound assignment: a plain word, or `[key]=value`. */
-export type CompoundElement =
-  | { key: string; value: string; append: boolean; rawText?: string }
-  | { plain: string; rawText: string }
-  | string;
-
-export function isKeyedCompoundList(elements: readonly CompoundElement[]): boolean {
-  return elements.length > 0 && typeof elements[0] !== 'string' && !('plain' in elements[0]);
-}
-
-/** Reads one `[key]=value` item or alternating `key value` pair from an associative compound assignment. */
-export function readAssociativePair(
-  elements: CompoundElement[],
-  index: number,
-  element: CompoundElement,
-  reportedName: string,
-  keyedMode = isKeyedCompoundList(elements)
-): {
-  key: string;
-  value: string;
-  append: boolean;
-  consumedNext: boolean;
-  error?: string;
-} {
-  if (keyedMode) {
-    if (typeof element === 'string' || 'plain' in element) {
-      const invalidPlain = typeof element === 'string' ? element : element.plain;
-      return {
-        key: '',
-        value: '',
-        append: false,
-        consumedNext: false,
-        error: `${reportedName}: ${invalidPlain}: must use subscript when assigning associative array`,
-      };
-    }
-    const rawKey = element.rawText ?? element.key;
-    return {
-      key: element.key,
-      value: element.value,
-      append: element.append,
-      consumedNext: false,
-      ...(element.key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
-    };
-  }
-  const key = compoundElementPlainText(element);
-  const rawKey = typeof element === 'string' ? element : (element.rawText ?? key);
-  const next = elements[index + 1];
-  const value = next === undefined ? '' : compoundElementPlainText(next);
-  return {
-    key,
-    value,
-    append: false,
-    consumedNext: true,
-    ...(key === '' ? { error: `${rawKey}: bad array subscript` } : {}),
-  };
-}
-
-function compoundElementPlainText(element: CompoundElement): string {
-  if (typeof element === 'string') return element;
-  if ('plain' in element) return element.plain;
-  return `[${element.key}]${element.append ? '+=' : '='}${element.value}`;
-}
-
-/** Normalizes one indexed compound element for `assignCompoundTo`. */
-export function unpackIndexedElement(rawElement: CompoundElement): {
-  key: string | undefined;
-  value: string;
-  append: boolean;
-} {
-  if (typeof rawElement === 'string') return { key: undefined, value: rawElement, append: false };
-  if ('plain' in rawElement) return { key: undefined, value: rawElement.plain, append: false };
-  return { key: rawElement.key, value: rawElement.value, append: rawElement.append };
-}
-
-interface BucketEntry {
-  key: string;
-  value: string;
-  hash: number;
-}
-
-/** Initial hash bucket count for associative arrays (1024) and scalar-to-associative conversions (128). */
-export const ASSOCIATIVE_BUCKETS = 1024;
-export const CONVERTED_BUCKETS = 128;
-
-const UTF8_ENCODER = new TextEncoder();
-
-/**
- * Sparse power-of-two chained hash table matching Bash 5.3 associative-array key order:
- * buckets are visited in ascending index order, new keys prepend to their bucket, and capacity quadruples
- * when entry count reaches twice the bucket capacity. Only non-empty buckets are allocated.
- */
-export class AssociativeTable {
-  private buckets = new Map<number, BucketEntry[]>();
-  private capacity: number;
-  private count = 0;
-
-  constructor(capacity = ASSOCIATIVE_BUCKETS) {
-    this.capacity = capacity;
-  }
-
-  get bucketCount(): number {
-    return this.capacity;
-  }
-
-  get size(): number {
-    return this.count;
-  }
-
-  get(key: string): string | undefined {
-    const hash = fnv1SignedUtf8(key);
-    return this.buckets.get(hash & (this.capacity - 1))?.find((entry) => entry.hash === hash && entry.key === key)
-      ?.value;
-  }
-
-  has(key: string): boolean {
-    return this.get(key) !== undefined;
-  }
-
-  set(key: string, value: string): void {
-    const hash = fnv1SignedUtf8(key);
-    const existing = this.buckets
-      .get(hash & (this.capacity - 1))
-      ?.find((entry) => entry.hash === hash && entry.key === key);
-    if (existing) {
-      existing.value = value;
-      return;
-    }
-    if (this.count >= this.capacity * 2) this.rehash();
-    const bucketIndex = hash & (this.capacity - 1);
-    const bucket = this.buckets.get(bucketIndex);
-    if (bucket) bucket.unshift({ key, value, hash });
-    else this.buckets.set(bucketIndex, [{ key, value, hash }]);
-    this.count++;
-  }
-
-  delete(key: string): void {
-    const hash = fnv1SignedUtf8(key);
-    const bucketIndex = hash & (this.capacity - 1);
-    const bucket = this.buckets.get(bucketIndex);
-    if (!bucket) return;
-    const position = bucket.findIndex((entry) => entry.hash === hash && entry.key === key);
-    if (position === -1) return;
-    bucket.splice(position, 1);
-    if (bucket.length === 0) this.buckets.delete(bucketIndex);
-    this.count--;
-  }
-
-  clear(): void {
-    this.buckets.clear();
-    this.count = 0;
-  }
-
-  entries(): [string, string][] {
-    return [...this.buckets.keys()]
-      .toSorted((a, b) => a - b)
-      .flatMap((bucketIndex) =>
-        (this.buckets.get(bucketIndex) as BucketEntry[]).map(({ key, value }): [string, string] => [key, value])
-      );
-  }
-
-  clone(): AssociativeTable {
-    const copy = new AssociativeTable(this.capacity);
-    for (const [bucketIndex, bucket] of this.buckets) {
-      copy.buckets.set(
-        bucketIndex,
-        bucket.map((entry) => ({ ...entry }))
-      );
-    }
-    copy.count = this.count;
-    return copy;
-  }
-
-  private rehash(): void {
-    const nextCapacity = this.capacity * 4;
-    const nextBuckets = new Map<number, BucketEntry[]>();
-    for (const bucketIndex of [...this.buckets.keys()].toSorted((a, b) => a - b)) {
-      for (const entry of this.buckets.get(bucketIndex) as BucketEntry[]) {
-        const targetIndex = entry.hash & (nextCapacity - 1);
-        const target = nextBuckets.get(targetIndex);
-        if (target) target.unshift(entry);
-        else nextBuckets.set(targetIndex, [entry]);
-      }
-    }
-    this.capacity = nextCapacity;
-    this.buckets = nextBuckets;
-  }
-}
-
-/** Public-domain 32-bit FNV-1 hash (offset basis 2166136261, prime 16777619) over signed UTF-8 byte values. */
-function fnv1SignedUtf8(text: string): number {
-  let hash = 2_166_136_261;
-  for (const byte of UTF8_ENCODER.encode(text)) {
-    hash = Math.imul(hash, 16_777_619) >>> 0;
-    hash = (hash ^ (byte >= 0x80 ? byte - 0x1_00 : byte)) >>> 0;
-  }
-  return hash;
-}
-
-/** Shifts `FUNCNAME` right by one index and inserts `[0]=fnName` on function entry. */
-export function pushFuncname(funcname: Map<bigint, string>, fnName: string): void {
-  const shifted = sortedElements(funcname);
-  funcname.clear();
-  funcname.set(0n, fnName);
-  for (const [index, value] of shifted) funcname.set(index + 1n, value);
-}
-
-/** Shifts `FUNCNAME` left by one element on function return, preserving sparse mutations across calls. */
-export function popFuncname(funcname: Map<bigint, string>): void {
-  const [, ...rest] = sortedElements(funcname);
-  funcname.clear();
-  for (const [index, value] of rest) funcname.set(index - 1n, value);
-}
-
-/** Indexed-array elements ordered by ascending numeric index. */
-export function sortedElements(elements: ReadonlyMap<bigint, string>): [bigint, string][] {
-  return [...elements].toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
-/** Greatest key in an indexed-array map, or `-1n` when empty. */
-export function maxElementIndex(elements: ReadonlyMap<bigint, string>): bigint {
-  let max = -1n;
-  for (const key of elements.keys()) if (key > max) max = key;
-  return max;
-}
-
-export function cloneValue(value: VariableValue | undefined): VariableValue | undefined {
-  if (!value) return undefined;
-  if (value.kind === 'scalar') return { ...value };
-  if (value.kind === 'indexed') return { kind: 'indexed', elements: new Map(value.elements) };
-  return { kind: 'associative', table: value.table.clone() };
-}
-
-/** Materializes a private copy of `variable.value` before mutating an indexed or associative container in place. */
-export function ensureWritable(variable: Variable): void {
-  if (!variable.shared) return;
-  variable.value = cloneValue(variable.value);
-  variable.shared = false;
-}
-
-/** Clones a scope for a subshell, sharing container values copy-on-write until the subshell mutates them. */
-export function cloneScope(scope: Scope): Scope {
-  const copy: Scope = new Map();
-  for (const [name, variable] of scope) {
-    copy.set(name, {
-      ...variable,
-      value: variable.value?.kind === 'scalar' ? { ...variable.value } : variable.value,
-      attributes: new Set(variable.attributes),
-      shared: variable.value !== undefined && variable.value.kind !== 'scalar',
-    });
-  }
-  return copy;
-}
-
-/** Whether `text` is a valid POSIX/Bash shell identifier (`[A-Za-z_][A-Za-z0-9_]*`). */
-export function isIdentifier(text: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(text);
-}
-
-/** Whether a function's name is non-empty, contains no `$`, and is not purely digits. */
-export function isValidFunctionName(name: string): boolean {
-  return name !== '' && !name.includes('$') && !/^[0-9]+$/.test(name);
-}
-
-/** Looks up `name` in `scopes` from innermost to outermost, skipping `excludedScope`. */
-export function findEnclosingVariable(scopes: Scope[], excludedScope: Scope, name: string): Variable | undefined {
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    if (scopes[i] === excludedScope) continue;
-    const found = scopes[i].get(name);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-/** Unsets a dynamic or scoped variable `target`, returning an error message when it cannot be unset. */
-export function unsetNamedVariable(
-  state: {
-    scopes: Scope[];
-    functionScopes: number[];
-    unsetDynamic: Set<string>;
-    dynamicAttributes: Map<string, Set<Attribute>>;
-    unsetEnv: Set<string>;
-  },
-  target: string,
-  isDynamic: boolean
-): string | undefined {
-  if (isDynamic) {
-    if (state.dynamicAttributes.get(target)?.has('r')) return `unset: ${target}: cannot unset: readonly variable`;
-    if (PERMANENT_DYNAMIC_VARIABLES.has(target)) return `unset: ${target}: cannot unset`;
-    state.dynamicAttributes.delete(target);
-    state.unsetDynamic.add(target);
-    return undefined;
-  }
-  const removed = removeScopedVariable(state.scopes, state.functionScopes.at(-1), target);
-  if (removed === 'global' && ENVIRONMENT_VARIABLES.has(target)) state.unsetEnv.add(target);
-  return removed === 'readonly' ? `unset: ${target}: cannot unset: readonly variable` : undefined;
-}
-
-/** Removes `target` from the innermost scope holding it (leaving a running-function local declared without a value). */
-export function removeScopedVariable(
-  scopes: Scope[],
-  currentFunctionScope: number | undefined,
-  target: string
-): 'readonly' | 'local' | 'global' {
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    const variable = scopes[i].get(target);
-    if (!variable) continue;
-    if (variable.attributes.has('r')) return 'readonly';
-    if (i > 0 && currentFunctionScope === i) {
-      variable.value = undefined;
-      variable.shared = false;
-      variable.fromTempEnv = false;
-      variable.userAssigned = false;
-      variable.attributes.clear();
-    } else scopes[i].delete(target);
-    return i > 0 ? 'local' : 'global';
-  }
-  return 'global';
+interface ScopeEntry {
+  readonly kind: 'global' | 'function' | 'temp';
+  readonly map: Map<string, Cell>;
 }
 
 export interface CallFrameEntry {
-  name: string;
-  line: number;
+  readonly name: string;
+  readonly line: number;
 }
 
-/** Sparse indexed-array elements of `FUNCNAME`, `BASH_LINENO`, `BASH_SOURCE`, and `PIPESTATUS`. */
-export function callStackElements(
-  name: string,
-  calls: readonly CallFrameEntry[],
-  scriptName: string,
-  pipeStatus: ReadonlyMap<bigint, string>,
-  funcname: ReadonlyMap<bigint, string>
-): Map<bigint, string> | undefined {
-  if (name === 'PIPESTATUS') return new Map(pipeStatus);
-  if (name === 'FUNCNAME') return calls.length === 0 ? undefined : new Map(funcname);
-  const reversed = calls.toReversed();
-  if (name === 'BASH_LINENO') {
-    return new Map([...reversed.map((c) => String(c.line)), '0'].map((v, i) => [BigInt(i), v]));
+/** Opaque handle to a `VariableStore`-owned variable cell. */
+export interface CellHandle {
+  readonly __cellBrand: 'CellHandle';
+  readonly id: number;
+  readonly name: string;
+}
+
+/** Immutable read-only snapshot of a variable cell or synthesized dynamic descriptor. */
+export interface VariableView {
+  readonly handle?: CellHandle;
+  readonly name: string;
+  readonly attributes: ReadonlySet<Attribute>;
+  readonly kind: 'unset' | 'scalar' | 'indexed' | 'associative';
+  readonly scalar?: string;
+  readonly indexed?: ReadonlyMap<bigint, string>;
+  readonly associativeEntries?: readonly [string, string][];
+  readonly isSystem: boolean;
+  readonly userAssigned: boolean;
+  readonly nullReference: boolean;
+  readonly isCurrentLocal: boolean;
+}
+
+export type DestinationIntent = 'local' | 'global' | 'visible';
+
+export interface DestinationSelection {
+  readonly scope: DestinationIntent;
+  readonly name: string;
+  readonly cell: CellHandle;
+  readonly created: boolean;
+  readonly importedFrom?: 'tempPrefix';
+}
+
+export type NamerefResolution =
+  | { readonly kind: 'resolved'; readonly name: string; readonly cell?: CellHandle; readonly fromNameref: boolean }
+  | { readonly kind: 'cycle'; readonly cyclicName: string };
+
+export type IntEvaluator = (expression: string) => bigint | undefined;
+
+export interface CompoundWriteHooks {
+  readonly append: boolean;
+  readonly reportedName?: string;
+  readonly evalIndex: (cellHandle: CellHandle, rawKey: string) => bigint | undefined;
+  readonly evalInt: IntEvaluator;
+  readonly onItemError: (message: string) => void;
+}
+
+class RandomStream {
+  constructor(
+    private seed = initialRandomSeed(),
+    private lastValue = 0,
+    private subshellDraws = 0
+  ) {}
+
+  next(): number {
+    let current = this.seed;
+    let value: number;
+    do {
+      current = current === 0 ? 123_459_876 : current;
+      const high = Math.trunc(current / 127_773);
+      const low = current % 127_773;
+      current = 16_807 * low - 2836 * high;
+      if (current < 0) current += 0x7f_ff_ff_ff;
+      value = ((current >>> 16) ^ (current & 0xff_ff)) & 0x7f_ff;
+    } while (value === this.lastValue);
+    this.seed = current;
+    this.lastValue = value;
+    return value;
   }
-  if (name === 'BASH_SOURCE') {
-    return new Map([...reversed.map(() => scriptName), scriptName].map((v, i) => [BigInt(i), v]));
+
+  reseed(uint32Seed: number): void {
+    this.seed = uint32Seed;
+    this.lastValue = 0;
+    this.subshellDraws = 0;
   }
-  return undefined;
+
+  fork(childSubshellLevel: number): RandomStream {
+    const childIndex = ++this.subshellDraws;
+    return new RandomStream(deriveSubshellSeed(this.seed, childIndex, childSubshellLevel), 0, 0);
+  }
 }
 
-/** Negative-index reference length (`maxIndex + 1`) for a non-empty dynamic array, or `undefined` when empty. */
-export function dynamicArrayLength(elements: ReadonlyMap<bigint, string> | undefined): number | undefined {
-  return elements && elements.size > 0 ? Number(maxElementIndex(elements) + 1n) : undefined;
-}
-
-/** Unsets one element (or `'all'` for `@`/`*`) of `FUNCNAME` or `PIPESTATUS`. */
-export function unsetDynamicArrayElement(
-  state: { funcname: Map<bigint, string>; pipeStatus: Map<bigint, string> },
-  name: string,
-  index: bigint | 'all'
-): void {
-  const target = name === 'PIPESTATUS' ? state.pipeStatus : name === 'FUNCNAME' ? state.funcname : undefined;
-  if (!target) return;
-  if (index === 'all') target.clear();
-  else target.delete(index);
-}
-
-/** Picks a nonzero initial Park-Miller seed for a fresh shell from the host random source. */
-export function initialRandomSeed(): number {
+function initialRandomSeed(): number {
   return Math.floor(Math.random() * 0x7f_ff_ff_fe) + 1;
 }
 
-/** Derives a distinct nonzero Park-Miller seed for a command-substitution subshell without advancing the parent stream. */
-export function deriveSubshellSeed(parentSeed: number, subshellIndex: number, subshellLevel: number): number {
+function deriveSubshellSeed(parentSeed: number, subshellIndex: number, subshellLevel: number): number {
   let h =
     (Math.imul(parentSeed, 0x9e_37_79_b1) ^
       Math.imul(subshellIndex, 0x85_eb_ca_6b) ^
@@ -410,347 +162,1093 @@ export function deriveSubshellSeed(parentSeed: number, subshellIndex: number, su
   return (h % 0x7f_ff_ff_fe) + 1;
 }
 
-/** Advances Bash's Park-Miller `RANDOM` generator until it produces a 15-bit value distinct from `lastRandom`. */
-export function advanceRandomState(randomSeed: number, lastRandom: number): { seed: number; value: number } {
-  let seed = randomSeed;
-  let value: number;
-  do {
-    seed = seed === 0 ? 123_459_876 : seed;
-    const high = Math.trunc(seed / 127_773);
-    const low = seed % 127_773;
-    seed = 16_807 * low - 2836 * high;
-    if (seed < 0) seed += 0x7f_ff_ff_ff;
-    value = ((seed >>> 16) ^ (seed & 0xff_ff)) & 0x7f_ff;
-  } while (value === lastRandom);
-  return { seed, value };
-}
+let nextCellId = 1;
 
-/** Dynamic variables computed on read unless unset or shadowed. */
-export const DYNAMIC_VARIABLES = new Set([
-  'RANDOM',
-  'LINENO',
-  'FUNCNAME',
-  'BASH_LINENO',
-  'BASH_SOURCE',
-  'BASH_SUBSHELL',
-  'PIPESTATUS',
-]);
+/**
+ * Single owner and single writer of Bash scopes, variable cells, copy-on-write containers, functions,
+ * positional parameters, call stack metadata, host-unset tombstones, regex captures, and PRNG streams.
+ */
+export class VariableStore {
+  private readonly scopes: ScopeEntry[];
+  private readonly cellsById = new Map<number, Cell>();
+  private readonly functions: Map<string, FunctionDefinition>;
+  private readonly positional: string[][];
+  private readonly calls: CallFrameEntry[];
+  private readonly unsetHostEnv: Set<string>;
+  private rematch: string[];
+  private readonly prng: RandomStream;
+  lastStatus = 0;
+  private hasCommandStatus = false;
+  lastArgument: string | undefined;
+  readonly subshellLevel: number;
 
-export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
-
-export function cloneDynamicAttributes(
-  source: ReadonlyMap<string, ReadonlySet<Attribute>>
-): Map<string, Set<Attribute>> {
-  const copy = new Map<string, Set<Attribute>>();
-  for (const [name, attributes] of source) copy.set(name, new Set(attributes));
-  return copy;
-}
-
-export function ensureDynamicAttributes(
-  state: { dynamicAttributes: Map<string, Set<Attribute>> },
-  name: string
-): Set<Attribute> {
-  let attributes = state.dynamicAttributes.get(name);
-  if (!attributes) {
-    attributes = defaultDynamicAttributes(name);
-    state.dynamicAttributes.set(name, attributes);
+  constructor(
+    private readonly runtime: Runtime,
+    private currentLine: () => number,
+    forked?: {
+      scopes: ScopeEntry[];
+      functions: Map<string, FunctionDefinition>;
+      positional: string[][];
+      calls: CallFrameEntry[];
+      unsetHostEnv: Set<string>;
+      rematch: string[];
+      prng: RandomStream;
+      lastStatus: number;
+      hasCommandStatus: boolean;
+      lastArgument: string | undefined;
+      subshellLevel: number;
+    }
+  ) {
+    if (forked) {
+      this.scopes = forked.scopes;
+      for (const scope of this.scopes) {
+        for (const cell of scope.map.values()) this.cellsById.set(cell.id, cell);
+      }
+      this.functions = forked.functions;
+      this.positional = forked.positional;
+      this.calls = forked.calls;
+      this.unsetHostEnv = forked.unsetHostEnv;
+      this.rematch = forked.rematch;
+      this.prng = forked.prng;
+      this.lastStatus = forked.lastStatus;
+      this.hasCommandStatus = forked.hasCommandStatus;
+      this.lastArgument = forked.lastArgument;
+      this.subshellLevel = forked.subshellLevel;
+      return;
+    }
+    this.scopes = [{ kind: 'global', map: new Map() }];
+    this.functions = new Map();
+    this.positional = [[]];
+    this.calls = [];
+    this.unsetHostEnv = new Set();
+    this.rematch = [];
+    this.prng = new RandomStream();
+    this.subshellLevel = 0;
+    this.initSystemVariables();
   }
-  return attributes;
-}
 
-/** Formats a dynamic variable cell for `declare -p` and `${v@a}` / `${v@A}`. */
-export function buildDynamicDeclaration(
-  name: string,
-  scalarValue: string | undefined,
-  elements: ReadonlyMap<bigint, string> | undefined,
-  configuredAttributes?: ReadonlySet<Attribute>
-): Variable | undefined {
-  const attributes = new Set(configuredAttributes ?? defaultDynamicAttributes(name));
-  if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
+  setLineReader(reader: () => number): void {
+    this.currentLine = reader;
+  }
+
+  private initSystemVariables(): void {
+    const defineSystem = (name: string, value: CellValue, attrs: Attribute[] = []): void => {
+      const cell = this.allocateCell(name, value, attrs, true, false);
+      this.scopes[0].map.set(name, cell);
+    };
+    defineSystem('IFS', { kind: 'scalar', value: ' \t\n' });
+    defineSystem('PS4', { kind: 'scalar', value: '+ ' });
+    defineSystem('OPTIND', { kind: 'scalar', value: '1' });
+    defineSystem('OPTERR', { kind: 'scalar', value: '1' });
+    defineSystem('BASH_VERSION', { kind: 'scalar', value: BASH_VERSION });
+    defineSystem(
+      'BASH_VERSINFO',
+      {
+        kind: 'indexed',
+        elements: new Map(['5', '3', '0', '1', 'release', 'aarch64-apple-darwin20.0.0'].map((v, i) => [BigInt(i), v])),
+      },
+      ['a', 'r']
+    );
+  }
+
+  private allocateCell(
+    name: string,
+    value: CellValue | undefined,
+    attrs: Iterable<Attribute> = [],
+    isSystem = false,
+    userAssigned = false
+  ): Cell {
+    const cell: Cell = {
+      id: nextCellId++,
+      name,
+      value,
+      attributes: new Set(attrs),
+      isSystem,
+      userAssigned,
+      shared: false,
+      nullReference: false,
+    };
+    this.cellsById.set(cell.id, cell);
+    return cell;
+  }
+
+  private toHandle(cell: Cell): CellHandle {
+    return { __cellBrand: 'CellHandle', id: cell.id, name: cell.name };
+  }
+
+  private getCell(handle: CellHandle): Cell {
+    const cell = this.cellsById.get(handle.id);
+    if (!cell) throw new Error(`Stale cell handle for ${handle.name}`);
+    return cell;
+  }
+
+  // ---------------------------------------------------------------- fork & scopes
+
+  /** Creates an isolated child `VariableStore` for a command substitution with copy-on-write containers. */
+  fork(childLineReader: () => number): VariableStore {
+    const clonedScopes: ScopeEntry[] = this.scopes.map((entry) => {
+      const map = new Map<string, Cell>();
+      for (const [name, cell] of entry.map) {
+        this.runtime.spend();
+        const isContainer = cell.value !== undefined && cell.value.kind !== 'scalar';
+        if (isContainer) cell.shared = true;
+        map.set(name, {
+          id: nextCellId++,
+          name: cell.name,
+          value: cell.value?.kind === 'scalar' ? { kind: 'scalar', value: cell.value.value } : cell.value,
+          attributes: new Set(cell.attributes),
+          isSystem: cell.isSystem,
+          userAssigned: cell.userAssigned,
+          shared: isContainer,
+          nullReference: cell.nullReference,
+        });
+      }
+      return { kind: entry.kind, map };
+    });
+    const nextLevel = this.subshellLevel + 1;
+    return new VariableStore(this.runtime, childLineReader, {
+      scopes: clonedScopes,
+      functions: new Map(this.functions),
+      positional: this.positional.map((args) => [...args]),
+      calls: this.calls.map((c) => ({ ...c })),
+      unsetHostEnv: new Set(this.unsetHostEnv),
+      rematch: [...this.rematch],
+      prng: this.prng.fork(nextLevel),
+      lastStatus: this.lastStatus,
+      hasCommandStatus: this.hasCommandStatus,
+      lastArgument: this.lastArgument,
+      subshellLevel: nextLevel,
+    });
+  }
+
+  get isInFunction(): boolean {
+    return this.currentFunctionScopeIndex() !== undefined;
+  }
+
+  private currentFunctionScopeIndex(): number | undefined {
+    for (let i = this.scopes.length - 1; i >= 1; i--) {
+      if (this.scopes[i].kind === 'function') return i;
+    }
+    return undefined;
+  }
+
+  pushFunctionScope(fnName: string, callLine: number, args: string[]): number {
+    this.scopes.push({ kind: 'function', map: new Map() });
+    const scopeIndex = this.scopes.length - 1;
+    this.positional.push([...args]);
+    this.calls.push({ name: fnName, line: callLine });
+    return scopeIndex;
+  }
+
+  popFunctionScope(scopeIndex: number): void {
+    this.calls.pop();
+    this.positional.pop();
+    for (let i = this.scopes.length - 1; i >= scopeIndex; i--) {
+      for (const cell of this.scopes[i].map.values()) this.cellsById.delete(cell.id);
+    }
+    this.scopes.length = scopeIndex;
+  }
+
+  pushTemporaryScope(): number {
+    this.scopes.push({ kind: 'temp', map: new Map() });
+    return this.scopes.length - 1;
+  }
+
+  popTemporaryScope(scopeIndex: number): void {
+    const entry = this.scopes[scopeIndex];
+    if (!entry) return;
+    for (const cell of entry.map.values()) this.cellsById.delete(cell.id);
+    this.scopes.splice(scopeIndex, 1);
+  }
+
+  bindTemporaryScalar(scopeIndex: number, name: string, value: string, append: boolean): void {
+    if (append && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    const base = append ? (this.readScalar(name) ?? '') : '';
+    const combined = base + value;
+    this.checkStringLength(combined);
+    const map = this.scopes[scopeIndex].map;
+    const prev = map.get(name);
+    if (prev) this.cellsById.delete(prev.id);
+    const cell = this.allocateCell(name, { kind: 'scalar', value: combined }, ['x'], false, true);
+    map.set(name, cell);
+  }
+
+  // ---------------------------------------------------------------- functions, status, positional
+
+  getFunction(name: string): FunctionDefinition | undefined {
+    return this.functions.get(name);
+  }
+
+  hasFunction(name: string): boolean {
+    return this.functions.has(name);
+  }
+
+  setFunction(fn: FunctionDefinition): void {
+    this.functions.set(fn.name, fn);
+  }
+
+  deleteFunction(name: string): boolean {
+    return this.functions.delete(name);
+  }
+
+  setCommandStatus(status: number): void {
+    this.lastStatus = status;
+    this.hasCommandStatus = true;
+  }
+
+  positionalArgs(): readonly string[] {
+    return this.positional.at(-1) as string[];
+  }
+
+  setPositionalArgs(args: readonly string[]): void {
+    const current = this.positional.at(-1) as string[];
+    current.splice(0, current.length, ...args);
+  }
+
+  shiftPositionalArgs(count: number): boolean {
+    const current = this.positional.at(-1) as string[];
+    if (count > current.length) return false;
+    current.splice(0, count);
+    return true;
+  }
+
+  setRematch(elements: readonly string[]): void {
+    this.rematch = [...elements];
+  }
+
+  seedRandom(seedValue: bigint): void {
+    this.prng.reseed(Number(BigInt.asUintN(32, seedValue)));
+  }
+
+  // ---------------------------------------------------------------- lookup & single access gate
+
+  isUnreadHostEnv(name: string): boolean {
+    return ENVIRONMENT_VARIABLES.has(name) && !this.unsetHostEnv.has(name) && !this.findOwnCell(name);
+  }
+
+  isDynamic(name: string): boolean {
+    return (DYNAMIC_VARIABLES.has(name) || name === 'BASH_REMATCH') && !this.findOwnCell(name);
+  }
+
+  private checkPostDereferenceAccess(name: string): void {
+    if (this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+  }
+
+  private findOwnCell(name: string, maxScopeIndex = this.scopes.length - 1): Cell | undefined {
+    for (let i = Math.min(maxScopeIndex, this.scopes.length - 1); i >= 0; i--) {
+      const cell = this.scopes[i].map.get(name);
+      if (cell) return cell;
+    }
+    return undefined;
+  }
+
+  /** Resolves whole-variable nameref chains in one place with cycle detection and optional scope bound. */
+  resolveChain(name: string, maxScopeIndex = this.scopes.length - 1): NamerefResolution {
+    const seen = new Set<Cell>();
+    let current = name;
+    let fromNameref = false;
+    for (;;) {
+      const cell = this.findOwnCell(current, maxScopeIndex);
+      if (!cell?.attributes.has('n') || cell.value?.kind !== 'scalar' || cell.value.value === '') {
+        return { kind: 'resolved', name: current, ...(cell ? { cell: this.toHandle(cell) } : {}), fromNameref };
+      }
+      if (seen.has(cell)) return { kind: 'cycle', cyclicName: cell.name };
+      seen.add(cell);
+      const target = cell.value.value;
+      rejectUnsupportedNamerefTarget(target, (n) => this.isUnreadHostEnv(n));
+      current = target;
+      fromNameref = true;
+    }
+  }
+
+  ownView(name: string, maxScopeIndex = this.scopes.length - 1): VariableView | undefined {
+    const cell = this.findOwnCell(name, maxScopeIndex);
+    return cell ? this.cellToView(cell) : undefined;
+  }
+
+  viewOfHandle(handle: CellHandle): VariableView {
+    return this.cellToView(this.getCell(handle));
+  }
+
+  private cellToView(cell: Cell): VariableView {
+    const fnScopeIdx = this.currentFunctionScopeIndex();
+    const isCurrentLocal = fnScopeIdx !== undefined && this.scopes[fnScopeIdx].map.get(cell.name) === cell;
+    const base = {
+      handle: this.toHandle(cell),
+      name: cell.name,
+      attributes: cell.attributes,
+      isSystem: cell.isSystem,
+      userAssigned: cell.userAssigned,
+      nullReference: cell.nullReference,
+      isCurrentLocal,
+    };
+    if (!cell.value) return { ...base, kind: 'unset' };
+    if (cell.value.kind === 'scalar') return { ...base, kind: 'scalar', scalar: cell.value.value };
+    if (cell.value.kind === 'indexed') return { ...base, kind: 'indexed', indexed: cell.value.elements };
+    return { ...base, kind: 'associative', associativeEntries: cell.value.table.entries() };
+  }
+
+  // ---------------------------------------------------------------- dynamic descriptors & reads
+
+  private readDynamicScalar(name: string): string | undefined {
+    if (name === 'RANDOM') return String(this.prng.next());
+    if (name === 'LINENO') return String(this.currentLine());
+    if (name === 'BASH_SUBSHELL') return String(this.subshellLevel);
+    return this.readDynamicElements(name)?.get(0n);
+  }
+
+  private readDynamicElements(name: string): Map<bigint, string> | undefined {
+    if (name === 'PIPESTATUS') {
+      return this.hasCommandStatus ? new Map([[0n, String(this.lastStatus)]]) : undefined;
+    }
+    if (name === 'BASH_REMATCH') {
+      return new Map(this.rematch.map((v, i) => [BigInt(i), v]));
+    }
+    if (name === 'FUNCNAME') {
+      if (this.calls.length === 0) return undefined;
+      const items = [...this.calls.toReversed().map((c) => c.name), 'main'];
+      return new Map(items.map((v, i) => [BigInt(i), v]));
+    }
+    if (name === 'BASH_LINENO') {
+      const items = [...this.calls.toReversed().map((c) => String(c.line)), '0'];
+      return new Map(items.map((v, i) => [BigInt(i), v]));
+    }
+    if (name === 'BASH_SOURCE') {
+      const items = [...this.calls.toReversed().map(() => SCRIPT_NAME), SCRIPT_NAME];
+      return new Map(items.map((v, i) => [BigInt(i), v]));
+    }
+    return undefined;
+  }
+
+  dynamicView(name: string): VariableView | undefined {
+    if (!this.isDynamic(name)) return undefined;
+    if (SCALAR_DYNAMIC_VARIABLES.has(name)) {
+      const attributes = new Set<Attribute>(name === 'RANDOM' ? ['i'] : []);
+      return {
+        name,
+        attributes,
+        kind: 'scalar',
+        scalar: this.readDynamicScalar(name) ?? '',
+        isSystem: true,
+        userAssigned: false,
+        nullReference: false,
+        isCurrentLocal: false,
+      };
+    }
+    const elements = this.readDynamicElements(name);
+    if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) return undefined;
     return {
       name,
-      attributes,
-      value: { kind: 'scalar', value: scalarValue as string },
+      attributes: new Set<Attribute>(['a']),
+      kind: 'indexed',
+      indexed: elements,
+      isSystem: true,
+      userAssigned: false,
+      nullReference: false,
+      isCurrentLocal: false,
     };
   }
-  if (!elements || (name === 'PIPESTATUS' && elements.size === 0)) {
-    return configuredAttributes ? { name, attributes, value: undefined } : undefined;
+
+  /** Reads scalar value (or element `0` of an array) through the single post-dereference gate. */
+  readScalar(name: string, onCycle?: (cyclicName: string) => void): string | undefined {
+    const res = this.resolveChain(name);
+    if (res.kind === 'cycle') {
+      onCycle?.(res.cyclicName);
+      return undefined;
+    }
+    if (res.cell) return cellScalarZero(this.getCell(res.cell).value);
+    if (this.isDynamic(res.name)) return this.readDynamicScalar(res.name);
+    this.checkPostDereferenceAccess(res.name);
+    return undefined;
   }
-  return {
-    name,
-    attributes,
-    value: {
-      kind: 'indexed',
-      elements: new Map(elements),
-    },
-  };
-}
 
-function defaultDynamicAttributes(name: string): Set<Attribute> {
-  if (name === 'RANDOM') return new Set(['i']);
-  return SCALAR_DYNAMIC_VARIABLES.has(name) ? new Set() : new Set(['a']);
-}
+  isAssociativeName(resolvedName: string): boolean {
+    const cell = this.findOwnCell(resolvedName);
+    return cell?.value?.kind === 'associative' || cell?.attributes.has('A') === true;
+  }
 
-/** Dynamic variables that `unset` refuses to remove. */
-export const PERMANENT_DYNAMIC_VARIABLES = new Set(['BASH_LINENO', 'BASH_SOURCE']);
+  hasMaterializedTarget(resolvedName: string): boolean {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell) return cell.value !== undefined;
+    this.checkPostDereferenceAccess(resolvedName);
+    if (!this.isDynamic(resolvedName)) return false;
+    return resolvedName !== 'FUNCNAME' || this.calls.length > 0;
+  }
 
-/** Host environment variables absent in the browser grading sandbox. */
-export const ENVIRONMENT_VARIABLES = new Set([
-  'HOME',
-  'PATH',
-  'USER',
-  'LOGNAME',
-  'PWD',
-  'OLDPWD',
-  'SHELL',
-  'TERM',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'LC_COLLATE',
-  'LC_MESSAGES',
-  'TMPDIR',
-  'HOSTNAME',
-  'HOSTTYPE',
-  'OSTYPE',
-  'MACHTYPE',
-  'UID',
-  'EUID',
-  'PPID',
-  'BASHPID',
-  'BASH',
-  'SHLVL',
-  'SECONDS',
-  'BASH_MONOSECONDS',
-  'EPOCHSECONDS',
-  'EPOCHREALTIME',
-  'SRANDOM',
-  'GROUPS',
-  'DIRSTACK',
-  'MAIL',
-  'MAILCHECK',
-  'BASH_ARGV',
-  'BASH_ARGC',
-  'BASH_ARGV0',
-  'BASH_COMMAND',
-  'BASH_EXECUTION_STRING',
-  'BASHOPTS',
-  'SHELLOPTS',
-  'BASH_ALIASES',
-  'BASH_CMDS',
-  'BASH_LOADABLES_PATH',
-  'COMP_WORDBREAKS',
-  'HISTCMD',
-  'COLUMNS',
-  'LINES',
-  'EDITOR',
-  'PS1',
-  'PS2',
-  '_',
-]);
+  translateNegativeIndex(resolvedName: string, index: bigint, allowScalarWrite: boolean): bigint | undefined {
+    const cell = this.findOwnCell(resolvedName);
+    let length = 0n;
+    if (cell?.value?.kind === 'indexed') {
+      length = maxElementIndex(cell.value.elements) + 1n;
+    } else if (!cell && this.isDynamic(resolvedName)) {
+      if (SCALAR_DYNAMIC_VARIABLES.has(resolvedName)) length = 1n;
+      else {
+        const elems = this.readDynamicElements(resolvedName);
+        if (elems && elems.size > 0) length = maxElementIndex(elems) + 1n;
+      }
+    } else if (
+      allowScalarWrite &&
+      cell !== undefined &&
+      !cell.attributes.has('a') &&
+      !cell.attributes.has('A') &&
+      cell.value?.kind !== 'associative'
+    ) {
+      length = 1n;
+    }
+    const resolved = length + index;
+    return resolved < 0n ? undefined : resolved;
+  }
 
-/** Creates the initial global scope pre-populated with Bash 5.3's built-in system variables. */
-export function createInitialGlobalScope(bashVersion: string): Scope {
-  const global: Scope = new Map();
-  const system = (name: string, value: VariableValue, attributes: Attribute[] = []): void => {
-    global.set(name, { name, value, attributes: new Set(attributes), isSystem: true });
-  };
-  system('IFS', { kind: 'scalar', value: ' \t\n' });
-  system('PS4', { kind: 'scalar', value: '+ ' });
-  system('OPTIND', { kind: 'scalar', value: '1' });
-  system('OPTERR', { kind: 'scalar', value: '1' });
-  system('BASH_VERSION', { kind: 'scalar', value: bashVersion });
-  system(
-    'BASH_VERSINFO',
-    {
-      kind: 'indexed',
-      elements: new Map(
-        ['5', '3', '0', '1', 'release', 'aarch64-apple-darwin20.0.0'].map((value, index) => [BigInt(index), value])
-      ),
-    },
-    ['a', 'r']
-  );
-  return global;
-}
+  readAssociativeElement(handle: CellHandle, key: string): string | undefined {
+    const cell = this.getCell(handle);
+    return cell.value?.kind === 'associative' ? cell.value.table.get(key) : undefined;
+  }
 
-/** Yields every string value reachable across running/suspended scopes, positional lists, and active buffers. */
-// code-gauge-allow functionCognitiveComplexity -- Walks every value kind across active and suspended shell scopes and buffers.
-export function* collectReachableStrings(
-  states: readonly { scopes: Scope[]; positional: string[][] }[],
-  activeOutputs: readonly { text: string }[],
-  inFlight: readonly { values: string[] }[]
-): Iterable<string> {
-  for (const state of states) {
-    for (const scope of state.scopes) {
-      for (const variable of scope.values()) {
-        const { value } = variable;
-        if (!value) continue;
-        if (value.kind === 'scalar') yield value.value;
-        else if (value.kind === 'indexed') yield* value.elements.values();
-        else {
-          for (const [key, element] of value.table.entries()) {
-            yield key;
-            yield element;
-          }
+  readIndexedElement(resolvedName: string, index: bigint): string | undefined {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell?.value) return cellElementAt(cell.value, index);
+    if (this.isDynamic(resolvedName)) {
+      return SCALAR_DYNAMIC_VARIABLES.has(resolvedName)
+        ? index === 0n
+          ? this.readDynamicScalar(resolvedName)
+          : undefined
+        : this.readDynamicElements(resolvedName)?.get(index);
+    }
+    this.checkPostDereferenceAccess(resolvedName);
+    return undefined;
+  }
+
+  readArrayValues(resolvedName: string): string[] {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell?.value) return cellElementValues(cell.value);
+    if (this.isDynamic(resolvedName)) {
+      if (SCALAR_DYNAMIC_VARIABLES.has(resolvedName)) return [this.readDynamicScalar(resolvedName) as string];
+      const elems = this.readDynamicElements(resolvedName);
+      return elems ? sortedElements(elems).map(([, v]) => v) : [];
+    }
+    this.checkPostDereferenceAccess(resolvedName);
+    return [];
+  }
+
+  readArrayKeys(resolvedName: string): string[] {
+    const cell = this.findOwnCell(resolvedName);
+    if (cell?.value) return cellElementKeys(cell.value);
+    if (this.isDynamic(resolvedName)) {
+      if (SCALAR_DYNAMIC_VARIABLES.has(resolvedName)) return ['0'];
+      const elems = this.readDynamicElements(resolvedName);
+      return elems ? sortedElements(elems).map(([k]) => String(k)) : [];
+    }
+    this.checkPostDereferenceAccess(resolvedName);
+    return [];
+  }
+
+  namesWithPrefix(prefix: string): string[] {
+    const names = this.collectScopedPrefixNames(prefix);
+    this.rejectUnsupportedPrefixQuery(prefix);
+    return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+
+  private collectScopedPrefixNames(prefix: string): Set<string> {
+    const names = new Set<string>();
+    for (const scope of this.scopes) {
+      for (const cell of scope.map.values()) {
+        if (!cell.name.startsWith(prefix)) continue;
+        if (cell.isSystem && !cell.userAssigned) {
+          throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
+        }
+        if (cell.value !== undefined) names.add(cell.name);
+      }
+    }
+    return names;
+  }
+
+  private rejectUnsupportedPrefixQuery(prefix: string): void {
+    for (const envName of ENVIRONMENT_VARIABLES) {
+      if (envName.startsWith(prefix) && this.isUnreadHostEnv(envName)) {
+        throw new UnsupportedFeatureError(`環境変数（${envName}）`);
+      }
+    }
+    if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
+      throw new UnsupportedFeatureError(`シェルの変数の一覧（\${!${prefix}*}）`);
+    }
+  }
+
+  // ---------------------------------------------------------------- canonical destination selector & mutations
+
+  /** Selects or creates the destination cell for a declaration, assignment, or compound store. */
+  selectDestination(
+    intent: DestinationIntent,
+    name: string,
+    initialContainer?: 'indexed' | 'associative',
+    checkAppendHostEnv = false
+  ): DestinationSelection {
+    if (intent === 'local') return this.selectLocalDestination(name, initialContainer);
+    return this.selectScopedDestination(intent, name, initialContainer, checkAppendHostEnv);
+  }
+
+  private selectLocalDestination(name: string, initialContainer?: 'indexed' | 'associative'): DestinationSelection {
+    const fnIdx = this.currentFunctionScopeIndex();
+    if (fnIdx === undefined) throw new Error('local destination requested outside function');
+    const localMap = this.scopes[fnIdx].map;
+    const existing = localMap.get(name);
+    if (existing) return { scope: 'local', name, cell: this.toHandle(existing), created: false };
+    const tempOrigin = initialContainer === undefined ? this.findTempPrefixAbove(fnIdx, name) : undefined;
+    const initialValue = this.createInitialContainer(initialContainer, tempOrigin?.scalar);
+    const attrs = containerAttributes(initialContainer, Boolean(tempOrigin));
+    const created = this.allocateCell(name, initialValue, attrs, false, Boolean(tempOrigin));
+    localMap.set(name, created);
+    return {
+      scope: 'local',
+      name,
+      cell: this.toHandle(created),
+      created: true,
+      ...(tempOrigin ? { importedFrom: 'tempPrefix' } : {}),
+    };
+  }
+
+  private selectScopedDestination(
+    intent: 'global' | 'visible',
+    name: string,
+    initialContainer: 'indexed' | 'associative' | undefined,
+    checkAppendHostEnv: boolean
+  ): DestinationSelection {
+    const existing = intent === 'global' ? this.scopes[0].map.get(name) : this.findOwnCell(name);
+    if (existing) return { scope: intent, name, cell: this.toHandle(existing), created: false };
+    if (checkAppendHostEnv && this.isUnreadHostEnv(name)) throw new UnsupportedFeatureError(`環境変数（${name}）`);
+    const created = this.allocateCell(
+      name,
+      this.createInitialContainer(initialContainer),
+      containerAttributes(initialContainer, false)
+    );
+    this.scopes[0].map.set(name, created);
+    return { scope: intent, name, cell: this.toHandle(created), created: true };
+  }
+
+  private findTempPrefixAbove(fnIdx: number, name: string): { scalar: string } | undefined {
+    for (let i = fnIdx - 1; i >= 1; i--) {
+      if (this.scopes[i].kind === 'function') break;
+      const cell = this.scopes[i].map.get(name);
+      if (cell?.value?.kind === 'scalar') return { scalar: cell.value.value };
+    }
+    return undefined;
+  }
+
+  private createInitialContainer(
+    kind: 'indexed' | 'associative' | undefined,
+    importedScalar?: string
+  ): CellValue | undefined {
+    if (kind === 'indexed') return { kind: 'indexed', elements: new Map() };
+    if (kind === 'associative') return { kind: 'associative', table: new AssociativeTable() };
+    return importedScalar === undefined ? undefined : { kind: 'scalar', value: importedScalar };
+  }
+
+  /** Applies declaration attributes (`a`, `A`, `i`, `r`, `x`, `l`, `u`) to `handle`, converting scalars when needed. */
+  applyAttributes(
+    handle: CellHandle,
+    toAdd: ReadonlySet<Attribute>,
+    allowReadonlyAlreadySet = true
+  ): StoreFailure | undefined {
+    const cell = this.getCell(handle);
+    if (!allowReadonlyAlreadySet && cell.attributes.has('r')) {
+      return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
+    }
+    const incompatible = checkIncompatibleArrayConversion(cell, toAdd);
+    if (incompatible) return { ok: false, reason: 'incompatibleArray', message: `${cell.name}: ${incompatible}` };
+    this.detachShared(cell);
+    if (toAdd.has('a') && cell.value?.kind === 'scalar') {
+      this.runtime.allocateSlots(1);
+      cell.value = { kind: 'indexed', elements: new Map([[0n, cell.value.value]]) };
+    } else if (toAdd.has('A') && cell.value?.kind === 'scalar') {
+      const table = new AssociativeTable(CONVERTED_BUCKETS);
+      this.runtime.allocateSlots(1);
+      table.set('0', cell.value.value);
+      cell.value = { kind: 'associative', table };
+    }
+    if (toAdd.has('l')) cell.attributes.delete('u');
+    if (toAdd.has('u')) cell.attributes.delete('l');
+    for (const attr of toAdd) cell.attributes.add(attr);
+    return undefined;
+  }
+
+  /** Binds a whole-variable nameref target onto `handle`, returning any store failure or cycle warning. */
+  bindNameref(
+    handle: CellHandle,
+    target: string | undefined,
+    inFunction: boolean
+  ): { ok: true; cycleWarning?: string } | StoreFailure {
+    const cell = this.getCell(handle);
+    if (cell.attributes.has('r')) {
+      return { ok: false, reason: 'readonly', message: `${cell.name}: readonly variable` };
+    }
+    if (target !== undefined) {
+      rejectUnsupportedNamerefTarget(target, (n) => this.isUnreadHostEnv(n));
+      if (target !== '' && !isIdentifier(target)) {
+        return { ok: false, reason: 'invalidIdentifier', message: `\`${target}': not a valid identifier` };
+      }
+      if (!inFunction && target === cell.name) {
+        return {
+          ok: false,
+          reason: 'cannotAssign',
+          message: `${cell.name}: nameref variable self reference not allowed`,
+        };
+      }
+      cell.value = { kind: 'scalar', value: target };
+      cell.shared = false;
+      cell.nullReference = false;
+      cell.userAssigned = true;
+    }
+    cell.attributes.add('n');
+    const cycle = this.hasCycleFrom(cell);
+    return {
+      ok: true,
+      ...(cycle ? { cycleWarning: `warning: ${cell.name}: circular name reference` } : {}),
+    };
+  }
+
+  private hasCycleFrom(start: Cell): boolean {
+    const seen = new Set<Cell>();
+    for (let cur: Cell | undefined = start; cur?.attributes.has('n') && cur.value?.kind === 'scalar';) {
+      if (seen.has(cur)) return true;
+      seen.add(cur);
+      const target: string = cur.value.value;
+      cur = target === '' ? undefined : this.findOwnCell(target);
+    }
+    return false;
+  }
+
+  setNullReference(handle: CellHandle, isNull: boolean): void {
+    const cell = this.getCell(handle);
+    cell.nullReference = isNull;
+  }
+
+  writeScalar(
+    handle: CellHandle,
+    rawText: string,
+    append: boolean,
+    evalInt: IntEvaluator,
+    reportedName?: string
+  ): StoreOutcome {
+    const target = this.writableCellOrFailure(handle, reportedName);
+    if (!target.ok) return target;
+    const { cell, label } = target;
+    if (isArrayCell(cell)) {
+      return cell.value?.kind === 'associative' || cell.attributes.has('A')
+        ? this.writeAssociativeElement(handle, '0', rawText, append, evalInt, label)
+        : this.writeIndexedElement(handle, 0n, rawText, append, evalInt, label);
+    }
+    const base = append && cell.value?.kind === 'scalar' ? cell.value.value : '';
+    const prep = this.prepareConvertedString(cell, rawText, base, append, evalInt);
+    if (!prep.ok) return prep;
+    cell.value = { kind: 'scalar', value: prep.value };
+    cell.shared = false;
+    cell.nullReference = false;
+    cell.userAssigned = true;
+    return { ok: true, stored: prep.value };
+  }
+
+  writeAssociativeElement(
+    handle: CellHandle,
+    key: string,
+    rawText: string,
+    append: boolean,
+    evalInt: IntEvaluator,
+    reportedName?: string
+  ): StoreOutcome {
+    return this.writeMapEntry(handle, key, { rawText, append, evalInt, reportedName }, (cell) =>
+      this.ensureAssociativeTable(cell)
+    );
+  }
+
+  writeIndexedElement(
+    handle: CellHandle,
+    index: bigint,
+    rawText: string,
+    append: boolean,
+    evalInt: IntEvaluator,
+    reportedName?: string
+  ): StoreOutcome {
+    return this.writeMapEntry(handle, index, { rawText, append, evalInt, reportedName }, (cell) => {
+      this.detachShared(cell);
+      return this.ensureIndexedMap(cell);
+    });
+  }
+
+  private writeMapEntry<K>(
+    handle: CellHandle,
+    key: K,
+    opts: { rawText: string; append: boolean; evalInt: IntEvaluator; reportedName?: string },
+    getMap: (cell: Cell) => { has(k: K): boolean; get(k: K): string | undefined; set(k: K, v: string): unknown }
+  ): StoreOutcome {
+    const target = this.writableCellOrFailure(handle, opts.reportedName);
+    if (!target.ok) return target;
+    const map = getMap(target.cell);
+    const base = opts.append ? (map.get(key) ?? '') : '';
+    const prep = this.prepareConvertedString(target.cell, opts.rawText, base, opts.append, opts.evalInt);
+    if (!prep.ok) return prep;
+    if (!map.has(key)) this.runtime.allocateSlots(1);
+    map.set(key, prep.value);
+    target.cell.userAssigned = true;
+    return { ok: true, stored: prep.value };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- Writes keyed and plain elements into associative or indexed containers with Bash's partial-commit rules.
+  writeCompound(handle: CellHandle, elements: CompoundElement[], hooks: CompoundWriteHooks): StoreOutcome {
+    const target = this.writableCellOrFailure(handle, hooks.reportedName);
+    if (!target.ok) return target;
+    const { cell, label } = target;
+    this.detachShared(cell);
+    if (cell.value?.kind === 'associative' || cell.attributes.has('A')) {
+      return this.writeAssociativeCompound(cell, elements, hooks, label);
+    }
+    const map = hooks.append ? this.ensureIndexedMap(cell) : new Map<bigint, string>();
+    if (!hooks.append) {
+      cell.value = { kind: 'indexed', elements: map };
+      cell.attributes.add('a');
+    }
+    cell.userAssigned = true;
+    let next = hooks.append ? maxElementIndex(map) + 1n : 0n;
+    for (const rawElement of elements) {
+      const item = unpackIndexedElement(rawElement);
+      const index = item.key === undefined ? next : hooks.evalIndex(handle, item.key);
+      if (index === undefined) {
+        return { ok: false, reason: 'badSubscript', message: `${label}[${item.key ?? ''}]: bad array subscript` };
+      }
+      const prep = this.prepareConvertedString(
+        cell,
+        item.value,
+        item.append ? (map.get(index) ?? '') : '',
+        item.append,
+        hooks.evalInt
+      );
+      if (!prep.ok) return prep;
+      if (!map.has(index)) this.runtime.allocateSlots(1);
+      map.set(index, prep.value);
+      next = index + 1n;
+    }
+    return { ok: true, stored: '' };
+  }
+
+  private writeAssociativeCompound(
+    cell: Cell,
+    elements: CompoundElement[],
+    hooks: CompoundWriteHooks,
+    label: string
+  ): StoreOutcome {
+    const previous = cell.value?.kind === 'associative' ? cell.value.table : undefined;
+    const table = hooks.append && previous ? previous : new AssociativeTable(previous?.bucketCount);
+    if (hooks.append) cell.value = { kind: 'associative', table };
+    const baseTable = hooks.append ? table : previous;
+    for (let i = 0; i < elements.length; i++) {
+      const entry = readAssociativePair(elements, i, elements[i], label);
+      if (entry.consumedNext) i++;
+      if (entry.error !== undefined) {
+        hooks.onItemError(entry.error);
+        continue;
+      }
+      const failure = this.storeAssociativeCompoundPair(cell, table, baseTable, entry, hooks.evalInt);
+      if (failure) {
+        cell.value = { kind: 'associative', table };
+        cell.attributes.add('A');
+        cell.userAssigned = true;
+        return failure;
+      }
+    }
+    cell.value = { kind: 'associative', table };
+    cell.attributes.add('A');
+    cell.userAssigned = true;
+    return { ok: true, stored: '' };
+  }
+
+  private storeAssociativeCompoundPair(
+    cell: Cell,
+    table: AssociativeTable,
+    baseTable: AssociativeTable | undefined,
+    entry: { key: string; value: string; append: boolean },
+    evalInt: IntEvaluator
+  ): StoreFailure | undefined {
+    const base = entry.append ? (baseTable?.get(entry.key) ?? '') : '';
+    const prep = this.prepareConvertedString(cell, entry.value, base, entry.append, evalInt);
+    if (!prep.ok) return prep;
+    if (!table.has(entry.key)) this.runtime.allocateSlots(1);
+    table.set(entry.key, prep.value);
+    return undefined;
+  }
+
+  prepareAssociativeAppend(handle: CellHandle, reportedName?: string): StoreFailure | undefined {
+    const cell = this.getCell(handle);
+    if (cell.attributes.has('r')) {
+      return { ok: false, reason: 'readonly', message: `${reportedName ?? cell.name}: readonly variable` };
+    }
+    this.detachShared(cell);
+    if (cell.value?.kind !== 'associative') {
+      cell.value = { kind: 'associative', table: new AssociativeTable() };
+    }
+    cell.attributes.add('A');
+    cell.userAssigned = true;
+    return undefined;
+  }
+
+  unsetNamed(target: string): StoreFailure | undefined {
+    rejectSpecialVariableMutation(target, false);
+    const fnIdx = this.currentFunctionScopeIndex();
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      const cell = this.scopes[i].map.get(target);
+      if (!cell) continue;
+      if (cell.attributes.has('r')) {
+        return { ok: false, reason: 'readonly', message: `${target}: cannot unset: readonly variable` };
+      }
+      if (i > 0 && fnIdx === i) {
+        cell.value = undefined;
+        cell.shared = false;
+        cell.userAssigned = false;
+        cell.nullReference = false;
+        cell.attributes.clear();
+      } else {
+        this.scopes[i].map.delete(target);
+        this.cellsById.delete(cell.id);
+      }
+      if (i === 0 && ENVIRONMENT_VARIABLES.has(target)) this.unsetHostEnv.add(target);
+      return undefined;
+    }
+    if (ENVIRONMENT_VARIABLES.has(target)) this.unsetHostEnv.add(target);
+    return undefined;
+  }
+
+  unsetElement(
+    handle: CellHandle,
+    target: { kind: 'associative'; key: string } | { kind: 'indexed'; index: bigint } | { kind: 'wholeArray' },
+    reportedName: string
+  ): StoreFailure | undefined {
+    const cell = this.getCell(handle);
+    if (cell.attributes.has('r')) {
+      return { ok: false, reason: 'readonly', message: `${reportedName}: cannot unset: readonly variable` };
+    }
+    if (target.kind === 'associative') {
+      if (cell.value?.kind === 'associative') {
+        this.detachShared(cell);
+        cell.value.table.delete(target.key);
+      }
+      return undefined;
+    }
+    if (target.kind === 'wholeArray') {
+      if (cell.value?.kind === 'indexed') {
+        this.detachShared(cell);
+        cell.value.elements.clear();
+        return undefined;
+      }
+      if (!cell.attributes.has('a')) {
+        return { ok: false, reason: 'notArray', message: `${reportedName}: not an array variable` };
+      }
+      return undefined;
+    }
+    if (cell.value?.kind === 'indexed') {
+      this.detachShared(cell);
+      cell.value.elements.delete(target.index);
+      return undefined;
+    }
+    if (cell.attributes.has('a')) return undefined;
+    if (target.index === 0n) return this.unsetNamed(cell.name);
+    return { ok: false, reason: 'notArray', message: `${reportedName}: not an array variable` };
+  }
+
+  // ---------------------------------------------------------------- pure trace & GC inspection
+
+  /** Pure frame-bounded variable views for trace projection; never mutates cells, containers, or PRNG. */
+  visibleViews(maxScopeIndex: number): VariableView[] {
+    const upper = Math.min(maxScopeIndex, this.scopes.length - 1);
+    const seen = new Set<string>();
+    const found: { cell: Cell; scopeIdx: number }[] = [];
+    for (let i = upper; i >= 0; i--) {
+      for (const cell of this.scopes[i].map.values()) {
+        if (seen.has(cell.name)) continue;
+        seen.add(cell.name);
+        if ((!cell.isSystem || cell.userAssigned) && isIdentifier(cell.name) && cell.value !== undefined) {
+          found.push({ cell, scopeIdx: i });
         }
       }
     }
-    for (const args of state.positional) yield* args;
+    return found.toSorted((a, b) => b.scopeIdx - a.scopeIdx).map(({ cell }) => this.cellToView(cell));
   }
-  for (const { text } of activeOutputs) yield text;
-  for (const { values } of inFlight) yield* values;
-}
 
-/** Whether following `start`'s nameref chain across `scopes` reaches an already-seen nameref cell. */
-export function hasNamerefCycleInScopes(scopes: readonly Scope[], start: Variable): boolean {
-  const seen = new Set<Variable>();
-  for (let cur: Variable | undefined = start; cur?.attributes.has('n') && cur.value?.kind === 'scalar';) {
-    if (seen.has(cur)) return true;
-    seen.add(cur);
-    const target: string = cur.value.value;
-    cur = target === '' || target.includes('[') ? undefined : findOwnVariableInScopes(scopes, target);
-  }
-  return false;
-}
-
-/** Follows namerefs across `scopes` to the referenced variable cell, returning `undefined` on cycles. */
-export function findVariableInScopes(
-  scopes: readonly Scope[],
-  name: string,
-  followReferences: boolean
-): Variable | undefined {
-  if (!followReferences) return findOwnVariableInScopes(scopes, name);
-  const seen = new Set<Variable>();
-  for (let target = name; ;) {
-    const variable = findOwnVariableInScopes(scopes, target);
-    if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar') return variable;
-    if (seen.has(variable)) return undefined;
-    seen.add(variable);
-    const ref = variable.value.value;
-    if (ref === '') return variable;
-    const direct = ref.includes('[') ? findOwnVariableInScopes(scopes, ref) : undefined;
-    if (direct) return direct;
-    const open = ref.indexOf('[');
-    target = open === -1 ? ref : ref.slice(0, open);
-  }
-}
-
-/** Resolves `name` through namerefs across `scopes`, reporting `{ cyclicName }` when a reference cycle is encountered. */
-export function resolveNameInScopes(
-  scopes: readonly Scope[],
-  name: string
-): { resolved: string } | { cyclicName: string } {
-  const seen = new Set<Variable>();
-  for (let target = name; !target.includes('[');) {
-    const variable = findOwnVariableInScopes(scopes, target);
-    if (!variable?.attributes.has('n') || variable.value?.kind !== 'scalar' || variable.value.value === '') {
-      return { resolved: target };
+  /** Pure whole-variable nameref traversal bounded to `maxScopeIndex` with cycle detection. */
+  resolveViewInFrame(view: VariableView, maxScopeIndex: number): VariableView | undefined {
+    if (!view.handle || !view.attributes.has('n')) return view;
+    const visited = new Set<number>();
+    let cur: Cell | undefined = this.getCell(view.handle);
+    for (let depth = 0; depth < 16 && cur; depth++) {
+      if (!cur.attributes.has('n') || cur.value?.kind !== 'scalar') return this.cellToView(cur);
+      if (visited.has(cur.id)) return undefined;
+      visited.add(cur.id);
+      const ref: string = cur.value.value;
+      if (ref === '') return this.cellToView(cur);
+      if (!isIdentifier(ref)) return undefined;
+      cur = this.findOwnCell(ref, maxScopeIndex);
     }
-    if (seen.has(variable)) return { cyclicName: variable.name };
-    seen.add(variable);
-    target = variable.value.value;
-    if (target.includes('[')) return { resolved: target };
+    return undefined;
   }
-  return { resolved: name };
+
+  /** Yields all stored scalar/array strings, associative keys, and positional parameters for turtle GC. */
+  *storedReachableStrings(): Iterable<string> {
+    for (const scope of this.scopes) {
+      for (const cell of scope.map.values()) {
+        if (cell.value) yield* cellStrings(cell.value);
+      }
+    }
+    for (const args of this.positional) yield* args;
+    yield* this.rematch;
+  }
+
+  // ---------------------------------------------------------------- private cell helpers
+
+  private writableCellOrFailure(
+    handle: CellHandle,
+    reportedName?: string
+  ): { ok: true; cell: Cell; label: string } | StoreFailure {
+    const cell = this.getCell(handle);
+    const label = reportedName ?? cell.name;
+    if (cell.attributes.has('r')) {
+      return { ok: false, reason: 'readonly', message: `${label}: readonly variable` };
+    }
+    return { ok: true, cell, label };
+  }
+
+  private prepareConvertedString(
+    cell: Cell,
+    rawValue: string,
+    base: string,
+    append: boolean,
+    evalInt: IntEvaluator
+  ): { ok: true; value: string } | StoreFailure {
+    const converted = this.convertForCell(cell, rawValue, base, append, evalInt);
+    if (converted === undefined) return { ok: false, reason: 'arithmetic', message: '', alreadyReported: true };
+    this.checkStringLength(converted);
+    return { ok: true, value: converted };
+  }
+
+  private ensureAssociativeTable(cell: Cell): AssociativeTable {
+    this.detachShared(cell);
+    if (cell.value?.kind !== 'associative') {
+      cell.value = { kind: 'associative', table: new AssociativeTable() };
+      cell.attributes.add('A');
+    }
+    return cell.value.table;
+  }
+
+  private detachShared(cell: Cell): void {
+    if (!cell.shared) return;
+    if (cell.value?.kind === 'indexed') {
+      cell.value = { kind: 'indexed', elements: new Map(cell.value.elements) };
+    } else if (cell.value?.kind === 'associative') {
+      cell.value = { kind: 'associative', table: cell.value.table.clone() };
+    } else if (cell.value?.kind === 'scalar') {
+      cell.value = { kind: 'scalar', value: cell.value.value };
+    }
+    cell.shared = false;
+  }
+
+  private ensureIndexedMap(cell: Cell): Map<bigint, string> {
+    if (cell.value?.kind === 'indexed') return cell.value.elements;
+    const elements = new Map<bigint, string>();
+    if (cell.value?.kind === 'scalar') {
+      this.runtime.allocateSlots(1);
+      elements.set(0n, cell.value.value);
+    }
+    cell.value = { kind: 'indexed', elements };
+    cell.attributes.add('a');
+    return elements;
+  }
+
+  private convertForCell(
+    cell: Cell,
+    rawValue: string,
+    base: string,
+    append: boolean,
+    evalInt: IntEvaluator
+  ): string | undefined {
+    if (!cell.attributes.has('i')) return applyCaseTransform(cell.attributes, base + rawValue);
+    if (append) {
+      const lhs = evalInt(base || '0');
+      if (lhs === undefined) return undefined;
+      const rhs = evalInt(rawValue);
+      if (rhs === undefined) return undefined;
+      return applyCaseTransform(cell.attributes, String(BigInt.asIntN(64, lhs + rhs)));
+    }
+    const evaluated = evalInt(rawValue);
+    if (evaluated === undefined) return undefined;
+    return applyCaseTransform(cell.attributes, String(BigInt.asIntN(64, evaluated)));
+  }
+
+  private checkStringLength(value: string): void {
+    this.runtime.spend(Math.ceil(value.length / 256));
+    if (value.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+  }
 }
 
-/** Looks up `name` in `scopes` from innermost to outermost without following namerefs. */
-export function findOwnVariableInScopes(scopes: readonly Scope[], name: string): Variable | undefined {
-  for (let i = scopes.length - 1; i >= 0; i--) {
-    const variable = scopes[i].get(name);
-    if (variable) return variable;
+function containerAttributes(kind: 'indexed' | 'associative' | undefined, hasTempOrigin: boolean): Attribute[] {
+  if (kind === 'associative') return ['A'];
+  if (kind === 'indexed') return ['a'];
+  return hasTempOrigin ? ['x'] : [];
+}
+
+function* cellStrings(value: CellValue): Iterable<string> {
+  if (value.kind === 'scalar') {
+    yield value.value;
+    return;
   }
+  if (value.kind === 'indexed') {
+    yield* value.elements.values();
+    return;
+  }
+  for (const [k, v] of value.table.entries()) {
+    yield k;
+    yield v;
+  }
+}
+
+function isArrayCell(cell: Cell): boolean {
+  return (
+    cell.value?.kind === 'indexed' ||
+    cell.value?.kind === 'associative' ||
+    cell.attributes.has('a') ||
+    cell.attributes.has('A')
+  );
+}
+
+function checkIncompatibleArrayConversion(cell: Cell, toAdd: ReadonlySet<Attribute>): string | undefined {
+  const isAssoc = cell.value?.kind === 'associative' || cell.attributes.has('A');
+  const isIndexed = cell.value?.kind === 'indexed' || cell.attributes.has('a');
+  if (toAdd.has('a') && isAssoc) return 'cannot convert associative to indexed array';
+  if (toAdd.has('A') && isIndexed) return 'cannot convert indexed to associative array';
   return undefined;
 }
 
-/** Reads scalar/element-0 value of a `VariableValue`. */
-export function variableScalarZero(value: VariableValue | undefined): string | undefined {
+function applyCaseTransform(attributes: ReadonlySet<Attribute>, text: string): string {
+  if (attributes.has('u')) return upperCase(text);
+  if (attributes.has('l')) return lowerCase(text);
+  if (attributes.has('c')) return capitalize(text);
+  return text;
+}
+
+function cellScalarZero(value: CellValue | undefined): string | undefined {
   if (!value) return undefined;
   if (value.kind === 'scalar') return value.value;
   return value.kind === 'indexed' ? value.elements.get(0n) : value.table.get('0');
 }
 
-/** Reads `value` at numeric `index`. */
-export function variableElementAt(value: VariableValue, index: bigint): string | undefined {
+function cellElementAt(value: CellValue, index: bigint): string | undefined {
   if (value.kind === 'scalar') return index === 0n ? value.value : undefined;
   if (value.kind === 'associative') return value.table.get(String(index));
   return value.elements.get(index);
 }
 
-/** Translates a negative array index relative to `variable`'s max index + 1 (or `dynamicLength`). */
-export function translateNegativeIndex(
-  variable: Variable | undefined,
-  index: bigint,
-  dynamicLength?: number,
-  allowScalarWrite = false
-): bigint | undefined {
-  let length = 0n;
-  if (variable?.value?.kind === 'indexed') length = maxElementIndex(variable.value.elements) + 1n;
-  else if (dynamicLength !== undefined) length = BigInt(dynamicLength);
-  else if (allowScalarWrite && isDeclaredScalarVariable(variable)) length = 1n;
-  const resolved = length + index;
-  return resolved < 0n ? undefined : resolved;
-}
-
-function isDeclaredScalarVariable(variable: Variable | undefined): boolean {
-  return (
-    variable !== undefined &&
-    !variable.attributes.has('a') &&
-    !variable.attributes.has('A') &&
-    variable.value?.kind !== 'associative'
-  );
-}
-
-/** Lists all element values of a non-empty `VariableValue`. */
-export function variableElementValues(value: VariableValue): string[] {
+function cellElementValues(value: CellValue): string[] {
   if (value.kind === 'scalar') return [value.value];
-  if (value.kind === 'indexed') return sortedElements(value.elements).map(([, element]) => element);
-  return value.table.entries().map(([, element]) => element);
+  if (value.kind === 'indexed') return sortedElements(value.elements).map(([, v]) => v);
+  return value.table.entries().map(([, v]) => v);
 }
 
-/** Lists all element keys of a non-empty `VariableValue`. */
-export function variableElementKeys(value: VariableValue): string[] {
+function cellElementKeys(value: CellValue): string[] {
   if (value.kind === 'scalar') return ['0'];
-  if (value.kind === 'indexed') return sortedElements(value.elements).map(([key]) => String(key));
-  return value.table.entries().map(([key]) => key);
-}
-
-/** Applies `u`, `l`, or `c` case-modification attributes to `text`. */
-export function applyCaseAttributes(variable: Variable, text: string): string {
-  if (variable.attributes.has('u')) return upperCase(text);
-  if (variable.attributes.has('l')) return lowerCase(text);
-  if (variable.attributes.has('c')) return capitalize(text);
-  return text;
-}
-
-/** Materializes `variable` as a writable indexed array, converting a scalar into element `0`. */
-export function ensureIndexedElements(variable: Variable): Map<bigint, string> {
-  ensureWritable(variable);
-  if (variable.value?.kind === 'indexed') return variable.value.elements;
-  const elements = new Map<bigint, string>();
-  if (variable.value?.kind === 'scalar') elements.set(0n, variable.value.value);
-  variable.value = { kind: 'indexed', elements };
-  variable.shared = false;
-  variable.attributes.add('a');
-  return elements;
-}
-
-export function isArrayVariable(variable: Variable): boolean {
-  return (
-    variable.value?.kind === 'indexed' ||
-    variable.value?.kind === 'associative' ||
-    variable.attributes.has('a') ||
-    variable.attributes.has('A')
-  );
-}
-
-export function isAssociativeVariable(variable: Variable | undefined): boolean {
-  return variable?.value?.kind === 'associative' || variable?.attributes.has('A') === true;
-}
-
-export function storeScalarCell(variable: Variable, value: string): void {
-  variable.value = { kind: 'scalar', value };
-  variable.shared = false;
-  variable.nullReference = false;
-  variable.userAssigned = true;
+  if (value.kind === 'indexed') return sortedElements(value.elements).map(([k]) => String(k));
+  return value.table.entries().map(([k]) => k);
 }

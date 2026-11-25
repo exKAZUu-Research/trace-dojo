@@ -1,43 +1,65 @@
-/** The pieces an expansion makes, and Bash's field splitting of them. */
+/** Immutable per-word context and typed segment model for Bash word expansion and pure field splitting. */
 
-/** Text from an expansion: whether quotes protect it from splitting and patterns, and whether it may be split. */
-export interface Fragment {
-  text: string;
-  quoted: boolean;
-  /** Whether the text came from an unquoted expansion, which field splitting splits at `IFS` characters. */
-  split: boolean;
-  /** Whether the fragment came from an element of an unquoted `@`-list (`$@` or `${a[@]}`). */
-  atListElement?: boolean;
-  /** Whether an empty `@`-list fragment was selected by an unquoted `${x:-word}` / `${x:+word}` operator. */
-  operatorNull?: boolean;
-  /** Whether the fragment came from an unquoted transformed list expansion (`${a[@]#p}`, `${a[@]/p/r}`, etc.). */
-  transformedList?: boolean;
+export interface WordContext {
+  readonly inDouble: boolean;
+  readonly spacedStar: boolean;
 }
 
-/** Separates the fields of `"${a[@]}"` and `${a[@]}`. */
-export const FIELD_BREAK = Symbol('fieldBreak');
-/** Separates the fields of `"$@"` and `$@`, whose unquoted boundaries stay distinct when a quoted `@`-list is present. */
-export const POSITIONAL_BREAK = Symbol('positionalBreak');
-/**
- * Separates the elements of an unquoted `$*` or `${a[*]}`, which split as `FIELD_BREAK` does, but which an expansion
- * that is not split joins with the first character of `IFS`, as `"$*"` does.
- */
-export const STAR_BREAK = Symbol('starBreak');
-/** Marks an `@`-subscripted expansion inside double quotes that produced zero elements, so `"${a[@]}"` vanishes. */
-export const EMPTY_LIST = Symbol('emptyList');
-export type Piece = Fragment | typeof FIELD_BREAK | typeof POSITIONAL_BREAK | typeof STAR_BREAK | typeof EMPTY_LIST;
+export const DEFAULT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false };
 
-export function isFieldBreak(piece: Piece): piece is typeof FIELD_BREAK | typeof POSITIONAL_BREAK | typeof STAR_BREAK {
-  return piece === FIELD_BREAK || piece === POSITIONAL_BREAK || piece === STAR_BREAK;
+export interface TextSegment {
+  readonly kind: 'text';
+  readonly text: string;
+  readonly quoted: boolean;
+  readonly split: boolean;
+  readonly atListElement?: boolean;
+  readonly operatorNull?: boolean;
+  readonly transformedList?: boolean;
+}
+
+export interface BreakSegment {
+  readonly kind: 'break';
+  readonly breakKind: 'field' | 'positional' | 'star';
+}
+
+export interface EmptyListSegment {
+  readonly kind: 'emptyList';
+}
+
+export type WordSegment = TextSegment | BreakSegment | EmptyListSegment;
+
+export const EMPTY_LIST_SEGMENT: EmptyListSegment = { kind: 'emptyList' };
+export const FIELD_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'field' };
+export const POSITIONAL_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'positional' };
+export const STAR_BREAK_SEGMENT: BreakSegment = { kind: 'break', breakKind: 'star' };
+export const QUOTED_EMPTY_SEGMENT: TextSegment = { kind: 'text', text: '', quoted: true, split: false };
+
+export function textSegment(
+  text: string,
+  quoted: boolean,
+  split: boolean,
+  extra?: { atListElement?: boolean; operatorNull?: boolean; transformedList?: boolean }
+): TextSegment {
+  return { kind: 'text', text, quoted, split, ...extra };
+}
+
+export function isBreakSegment(segment: WordSegment): segment is BreakSegment {
+  return segment.kind === 'break';
 }
 
 /**
- * Bash's field splitting: a run of `IFS` whitespace separates fields, and each other `IFS` character ends one, so two
- * of them in a row make an empty field, though one next to whitespace counts as one separator with it.
+ * Pure Bash field-splitting function with fresh per-call state: a run of `IFS` whitespace separates fields,
+ * and each non-whitespace `IFS` character terminates a field (adjacent whitespace coalesces with one delimiter).
  */
-export class FieldSplitter {
-  private readonly fields: Fragment[][] = [];
-  private field: Fragment[] = [];
+export function splitWordSegments(segments: readonly WordSegment[], ifs: string): TextSegment[][] {
+  const state = new SplitterState(ifs);
+  for (const segment of segments) state.add(segment);
+  return state.finish();
+}
+
+class SplitterState {
+  private readonly fields: TextSegment[][] = [];
+  private field: TextSegment[] = [];
   private started = false;
   private afterWhite = false;
   private afterListWhite = false;
@@ -48,25 +70,30 @@ export class FieldSplitter {
     this.hasNonWhitePrimaryIfs = ifs !== '' && ifs[0] !== ' ' && ifs[0] !== '\t' && ifs[0] !== '\n';
   }
 
-  add(piece: Piece): void {
-    if (piece === EMPTY_LIST) return;
-    if (isFieldBreak(piece)) {
+  add(segment: WordSegment): void {
+    if (segment.kind === 'emptyList') return;
+    if (segment.kind === 'break') {
       this.onFieldBreak();
-    } else if (!piece.split || this.ifs === '') {
-      if (piece.text === '' && !piece.quoted) return;
-      this.field.push({ ...piece, split: false });
+    } else if (!segment.split || this.ifs === '') {
+      if (segment.text === '' && !segment.quoted) return;
+      this.field.push({ ...segment, split: false });
       this.started = true;
       this.afterWhite = false;
       this.afterListWhite = false;
       this.afterDelimiter = false;
-    } else if (piece.text !== '') {
-      this.split(piece.text, Boolean(piece.transformedList));
-    } else if (piece.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
+    } else if (segment.text !== '') {
+      this.splitText(segment.text, Boolean(segment.transformedList));
+    } else if (segment.operatorNull && this.ifs !== '' && this.ifs[0] !== ' ') {
       this.started = true;
       this.afterWhite = false;
       this.afterListWhite = false;
       this.afterDelimiter = false;
     }
+  }
+
+  finish(): TextSegment[][] {
+    if (this.started) this.end();
+    return this.fields;
   }
 
   private onFieldBreak(): void {
@@ -90,18 +117,13 @@ export class FieldSplitter {
     }
   }
 
-  finish(): Fragment[][] {
-    if (this.started) this.end();
-    return this.fields;
-  }
-
   private end(): void {
     this.fields.push(this.field);
     this.field = [];
     this.started = false;
   }
 
-  private split(text: string, transformedList = false): void {
+  private splitText(text: string, transformedList: boolean): void {
     let run = '';
     for (const c of text) {
       if (!this.ifs.includes(c)) {
@@ -112,11 +134,11 @@ export class FieldSplitter {
         this.afterDelimiter = false;
         continue;
       }
-      if (run) this.field.push({ text: run, quoted: false, split: false });
+      if (run) this.field.push(textSegment(run, false, false));
       run = '';
       this.separate(c, transformedList);
     }
-    if (run) this.field.push({ text: run, quoted: false, split: false });
+    if (run) this.field.push(textSegment(run, false, false));
   }
 
   private separate(c: string, transformedList = false): void {

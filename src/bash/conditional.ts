@@ -4,8 +4,9 @@ import { charactersOf, legalNumber } from './characters';
 import { compareCollated } from './collation';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
+import { isResolvedTargetSet, resolveScalarTarget, resolveSubscriptTarget } from './targets';
 import { UnsupportedFeatureError } from './unsupported';
-import { isIdentifier, variableScalarZero } from './variables';
+import { isIdentifier } from './variables';
 
 /** The file tests, which read the file system this environment does not have. */
 export const FILE_TEST_OPERATORS = new Set([
@@ -88,7 +89,10 @@ function conditionalNumber(shell: Shell, text: string): bigint {
   try {
     return evaluateArithmetic(text, shell, undefined, () => shell.runtime.spend());
   } catch (error) {
-    if (error instanceof ArithmeticStoreError) throw new ConditionalArithmeticError();
+    if (error instanceof ArithmeticStoreError) {
+      shell.failures.handleStoreFailure('conditional', error.failure);
+      throw new ConditionalArithmeticError();
+    }
     if (!(error instanceof ArithmeticError)) throw error;
     shell.reportError(error.message);
     throw new ConditionalArithmeticError();
@@ -119,8 +123,8 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
       return isSet(shell, operand);
     }
     case '-R': {
-      const variable = shell.findOwnVariable(operand);
-      return variable?.attributes.has('n') === true && variable.value !== undefined;
+      const view = shell.store.ownView(operand);
+      return view?.attributes.has('n') === true && view.kind !== 'unset';
     }
     case '-o': {
       throw new UnsupportedFeatureError('シェルのオプションを調べる演算子（-o）');
@@ -137,39 +141,24 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
 /** `-v name`: whether a variable, an array element, or a positional parameter is set. */
 function isSet(shell: Shell, operand: string): boolean {
   const split = shell.splitSubscript(operand);
-  if (split && isIdentifier(split.name)) return isSubscriptedSet(shell, split);
+  if (split && isIdentifier(split.name)) {
+    const target = resolveSubscriptTarget(shell, {
+      name: split.name,
+      subscript: { kind: 'text', text: split.subscript },
+      operation: 'testSet',
+    });
+    return target !== undefined && isResolvedTargetSet(shell, target);
+  }
   const index = legalNumber(operand);
   if (index !== undefined) {
-    return index >= 0n && index <= BigInt((shell.state.positional.at(-1) as string[]).length);
+    return index >= 0n && index <= BigInt(shell.store.positionalArgs().length);
   }
   if (!isIdentifier(operand)) return false;
-  const resolved = shell.resolveNameOrUndefined(operand);
-  if (resolved === undefined) return false;
-  if (!isIdentifier(resolved)) return variableScalarZero(shell.findVariable(resolved, false)?.value) !== undefined;
-  if (shell.findVariable(resolved, false)?.attributes.has('n')) return false;
-  return shell.scalarValue(resolved) !== undefined;
+  const target = resolveScalarTarget(shell, operand, false, { warnCycle: false });
+  return target !== undefined && isResolvedTargetSet(shell, target);
 }
 
-function isSubscriptedSet(shell: Shell, split: { name: string; subscript: string }): boolean {
-  const resolved = shell.resolveName(split.name);
-  if (shell.isAssociative(resolved)) {
-    const key = shell.expandDynamicSubscript(split.subscript);
-    if (key === '') {
-      shell.reportError(`${resolved}: bad array subscript`);
-      return false;
-    }
-    return shell.elementValue(resolved, key) !== undefined;
-  }
-  if (split.subscript === '@' || split.subscript === '*') return shell.arrayValues(resolved).length > 0;
-  if (split.subscript === '') {
-    shell.reportError(`${resolved}: bad array subscript`);
-    return false;
-  }
-  const index = shell.arrayIndex(resolved, shell.expandDynamicSubscript(split.subscript));
-  return index !== undefined && shell.elementValue(resolved, String(index)) !== undefined;
-}
-
-/** `[[ text =~ regex ]]`, which sets `BASH_REMATCH` and gives 2 for a regex macOS rejects. */
+/** `[[ text =~ regex ]]`, updating `BASH_REMATCH` via `VariableStore` and returning status 2 on invalid ERE. */
 function regexTest(shell: Shell, text: string, source: string): boolean {
   let compiled;
   try {
@@ -182,25 +171,8 @@ function regexTest(shell: Shell, text: string, source: string): boolean {
   const match = searchRegex(compiled, text, () => shell.runtime.spend());
   const chars = charactersOf(text);
   const elements = match ? match.map(([start, end]) => (start === -1 ? '' : chars.slice(start, end).join(''))) : [];
-  storeRegexMatch(shell, elements);
+  shell.store.setRematch(elements);
   return match !== undefined;
-}
-
-function storeRegexMatch(shell: Shell, elements: string[]): void {
-  const resolved = shell.resolveNameOrUndefined('BASH_REMATCH');
-  if (resolved === undefined) return;
-  const target = shell.findOwnVariable(resolved);
-  if (target?.value?.kind === 'associative' || target?.attributes.has('A')) {
-    shell.reportError('[[: BASH_REMATCH: not an indexed array');
-    return;
-  }
-  if (shell.assignCompound(resolved, elements, false) && resolved === 'BASH_REMATCH') {
-    const variable = shell.findOwnVariable('BASH_REMATCH');
-    if (variable) {
-      variable.isSystem = true;
-      variable.userAssigned = false;
-    }
-  }
 }
 
 /** Ends `[[ =~ ]]` with status 2 after an invalid regular expression. */

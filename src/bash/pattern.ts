@@ -5,12 +5,13 @@
  */
 
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
-import { compareCollated, matchesGlobEquivalenceClass, resolveCollatingElement } from './collation';
+import { UnsupportedFeatureError } from './unsupported';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
   | { kind: 'range'; low: number; high: number }
-  | { kind: 'class'; test: ((c: string) => boolean) | undefined };
+  | { kind: 'class'; test: ((c: string) => boolean) | undefined }
+  | { kind: 'unsupportedCollating' };
 
 type GlobAtom =
   | { kind: 'star' }
@@ -42,7 +43,7 @@ export function matchesPattern(pattern: string, text: string, spend: () => void,
 
 /** Whether `pattern` contains any unescaped `*`, `?`, or closed `[...]` wildcard. */
 export function hasPatternCharacters(pattern: string, spend?: () => void): boolean {
-  return compileGlob(pattern, spend).atoms.some((atom) => atom.kind !== 'char');
+  return compileGlobInternal(pattern, spend, false, true).atoms.some((atom) => atom.kind !== 'char');
 }
 
 /** Whether `pattern` contains an unescaped extended-glob operator (`?(...)`, `*(...)`, `+(...)`, `@(...)`, `!(...)`) outside `[...]`. */
@@ -58,6 +59,15 @@ export function quotePattern(text: string): string {
 
 /** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
 export function compileGlob(pattern: string, spend?: () => void, extmatch = false): CompiledGlob {
+  return compileGlobInternal(pattern, spend, extmatch, false);
+}
+
+function compileGlobInternal(
+  pattern: string,
+  spend: (() => void) | undefined,
+  extmatch: boolean,
+  allowUnsupportedSpecs: boolean
+): CompiledGlob {
   const chars = charactersOf(pattern);
   const memo = createBracketScanMemo(chars.length);
   const literalFrom = extmatch ? scanExtendedGlob(chars, spend, memo).firstUnclosedOpener : undefined;
@@ -71,6 +81,13 @@ export function compileGlob(pattern: string, spend?: () => void, extmatch = fals
       continue;
     }
     const { atom, next } = readGlobAtom(chars, i, spend, memo);
+    if (
+      !allowUnsupportedSpecs &&
+      atom.kind === 'bracket' &&
+      atom.specs.some((s) => s.kind === 'unsupportedCollating')
+    ) {
+      throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
+    }
     if (atom.kind === 'star') {
       hasStar = true;
       if (atoms.at(-1)?.kind !== 'star') atoms.push(atom);
@@ -134,8 +151,9 @@ function readGlobAtom(
   if (c === '\\') return { atom: { kind: 'char', c: i + 1 < chars.length ? chars[i + 1] : '\\' }, next: i + 2 };
   if (c === '[') {
     const bracket = readBracketExpression(chars, i + 1, spend, memo);
-    if (bracket)
+    if (bracket) {
       return { atom: { kind: 'bracket', negated: bracket.negated, specs: bracket.specs }, next: bracket.next };
+    }
   }
   return { atom: { kind: 'char', c }, next: i + 1 };
 }
@@ -249,7 +267,6 @@ function matchesFixed(atoms: readonly GlobAtom[], chars: readonly string[], star
   return true;
 }
 
-/** Advances an NFA state-set across `chars[start..limit]`, returning the shortest or longest matching end index. */
 function scanStates(
   atoms: readonly GlobAtom[],
   chars: readonly string[],
@@ -363,27 +380,25 @@ function hasActiveStartAtOrBefore(state: Int32Array, count: number, limitStart: 
 }
 
 function matchesAtom(atom: GlobAtom, ch: string): boolean {
-  if (atom.kind === 'any') return true;
+  if (atom.kind === 'any' || atom.kind === 'star') return true;
   if (atom.kind === 'char') return ch === atom.c;
-  if (atom.kind === 'star') return true;
   const code = ch.codePointAt(0) as number;
   const hit = atom.specs.some((spec) => {
     if (spec.kind === 'char') return ch === spec.c;
     if (spec.kind === 'range') return code >= spec.low && code <= spec.high;
+    if (spec.kind === 'unsupportedCollating') return false;
     return spec.test?.(ch) ?? false;
   });
   return hit !== atom.negated;
 }
 
 interface BracketAtom {
-  c: string | undefined;
+  c: string;
   collating: boolean;
   next: number;
 }
 
 /** Parses `[...]` starting just after `[`, or returns `undefined` if unclosed. */
-// code-gauge-allow functionCognitiveComplexity -- Parses optional negation, leading `]`, POSIX sub-brackets, and character ranges with linear failure memoization.
-// code-gauge-allow functionNcss -- Parses optional negation, leading `]`, POSIX sub-brackets, and character ranges.
 function readBracketExpression(
   chars: readonly string[],
   start: number,
@@ -401,29 +416,35 @@ function readBracketExpression(
     if (!first) {
       if (memo.failedAfterFirst[pos]) return markBracketFailure(memo, visited);
       visited.push(pos);
+      if (chars[pos] === ']') return { negated, specs, next: pos + 1 };
     }
-    if (chars[pos] === ']' && !first) return { negated, specs, next: pos + 1 };
     first = false;
-    const subbracket = tryReadSubbracketSpec(chars, pos, spend, memo);
-    if (subbracket) {
-      specs.push(subbracket.spec);
-      pos = subbracket.next;
-      continue;
-    }
-    const startAtom = readBracketAtom(chars, pos, spend, memo);
-    if (!startAtom) return markBracketFailure(memo, visited);
-    pos = startAtom.next;
-    if (chars[pos] === '-' && pos + 1 < chars.length && chars[pos + 1] !== ']') {
-      const endAtom = readBracketAtom(chars, pos + 1, spend, memo);
-      if (!endAtom) return markBracketFailure(memo, visited);
-      pos = endAtom.next;
-      const rangeSpec = buildRangeSpec(startAtom, endAtom);
-      if (rangeSpec) specs.push(rangeSpec);
-      continue;
-    }
-    if (startAtom.c !== undefined) specs.push({ kind: 'char', c: startAtom.c });
+    const step = readBracketSpecStep(chars, pos, spend, memo);
+    if (!step) return markBracketFailure(memo, visited);
+    if (step.spec) specs.push(step.spec);
+    pos = step.next;
   }
   return markBracketFailure(memo, visited);
+}
+
+function readBracketSpecStep(
+  chars: readonly string[],
+  pos: number,
+  spend: (() => void) | undefined,
+  memo: BracketScanMemo
+): { spec?: BracketSpec; next: number } | undefined {
+  const subbracket = tryReadSubbracketSpec(chars, pos, spend, memo);
+  if (subbracket) return subbracket;
+  const startAtom = readBracketAtom(chars, pos, spend, memo);
+  if (!startAtom) return undefined;
+  const afterStart = startAtom.next;
+  if (chars[afterStart] === '-' && afterStart + 1 < chars.length && chars[afterStart + 1] !== ']') {
+    const endAtom = readBracketAtom(chars, afterStart + 1, spend, memo);
+    if (!endAtom) return undefined;
+    return { spec: buildRangeSpec(startAtom, endAtom), next: endAtom.next };
+  }
+  const spec: BracketSpec = startAtom.collating ? { kind: 'unsupportedCollating' } : { kind: 'char', c: startAtom.c };
+  return { spec, next: afterStart };
 }
 
 function markBracketFailure(memo: BracketScanMemo, visited: readonly number[]): undefined {
@@ -432,18 +453,9 @@ function markBracketFailure(memo: BracketScanMemo, visited: readonly number[]): 
 }
 
 function buildRangeSpec(startAtom: BracketAtom, endAtom: BracketAtom): BracketSpec | undefined {
-  const startChar = startAtom.c;
-  const endChar = endAtom.c;
-  if (startChar === undefined || endChar === undefined) return undefined;
-  if (startAtom.collating || endAtom.collating) {
-    if (compareCollated(startChar, endChar) > 0) return undefined;
-    return {
-      kind: 'class',
-      test: (ch) => compareCollated(startChar, ch) <= 0 && compareCollated(ch, endChar) <= 0,
-    };
-  }
-  const low = startChar.codePointAt(0) as number;
-  const high = endChar.codePointAt(0) as number;
+  if (startAtom.collating || endAtom.collating) return { kind: 'unsupportedCollating' };
+  const low = startAtom.c.codePointAt(0) as number;
+  const high = endAtom.c.codePointAt(0) as number;
   return low <= high ? { kind: 'range', low, high } : undefined;
 }
 
@@ -457,16 +469,12 @@ function tryReadSubbracketSpec(
   if (chars[pos] !== '[' || (kind !== ':' && kind !== '=')) return undefined;
   const end = findSubbracketClose(chars, pos + 2, kind, spend, memo);
   if (end === undefined) return undefined;
+  if (kind === '=') return { spec: { kind: 'unsupportedCollating' }, next: end + 2 };
   const name = chars
     .slice(pos + 2, end)
     .join('')
     .replaceAll(/\\(.)/g, '$1');
-  if (kind === ':') {
-    const test = Object.hasOwn(CHARACTER_CLASSES, name) ? CHARACTER_CLASSES[name] : undefined;
-    return { spec: { kind: 'class', test }, next: end + 2 };
-  }
-  const target = resolveCollatingElement(name);
-  const test = target === undefined ? undefined : (ch: string): boolean => matchesGlobEquivalenceClass(target, ch);
+  const test = Object.hasOwn(CHARACTER_CLASSES, name) ? CHARACTER_CLASSES[name] : undefined;
   return { spec: { kind: 'class', test }, next: end + 2 };
 }
 
@@ -479,13 +487,7 @@ function readBracketAtom(
   if (pos >= chars.length) return undefined;
   if (chars[pos] === '[' && chars[pos + 1] === '.') {
     const end = findSubbracketClose(chars, pos + 2, '.', spend, memo);
-    if (end !== undefined) {
-      const name = chars
-        .slice(pos + 2, end)
-        .join('')
-        .replaceAll(/\\(.)/g, '$1');
-      return { c: resolveCollatingElement(name), collating: true, next: end + 2 };
-    }
+    if (end !== undefined) return { c: '', collating: true, next: end + 2 };
   }
   if (chars[pos] === '\\') {
     return pos + 1 < chars.length ? { c: chars[pos + 1], collating: false, next: pos + 2 } : undefined;
