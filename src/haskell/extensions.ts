@@ -8,7 +8,7 @@ import { featureAllowed, type FeatureGates, type FeatureOf, type Phase } from '.
 export const KNOWN_EXTENSIONS = new Set(
   `Unsafe Trustworthy Safe CPP OverlappingInstances UndecidableInstances IncoherentInstances UndecidableSuperClasses
   MonomorphismRestriction MonoLocalBinds DeepSubsumption RelaxedPolyRec ExtendedDefaultRules NamedDefaults
-  ForeignFunctionInterface UnliftedFFITypes InterruptibleFFI CApiFFI GHCForeignImportPrim ParallelArrays Arrows
+  ForeignFunctionInterface UnliftedFFITypes InterruptibleFFI CApiFFI GHCForeignImportPrim JavaScriptFFI ParallelArrays Arrows
   TemplateHaskell TemplateHaskellQuotes QualifiedDo QuasiQuotes ImplicitParams ImplicitPrelude ScopedTypeVariables
   PatternSignatures AllowAmbiguousTypes UnboxedTuples UnboxedSums UnliftedNewtypes UnliftedDatatypes BangPatterns
   TypeFamilies TypeFamilyDependencies TypeInType OverloadedStrings OverloadedLists NumDecimals
@@ -236,6 +236,7 @@ export const UNSUPPORTED_EXTENSIONS: Record<string, string> = {
   UnliftedFFITypes: '外部の関数の宣言（UnliftedFFITypes）',
   InterruptibleFFI: '外部の関数の宣言（InterruptibleFFI）',
   CApiFFI: '外部の関数の宣言（CApiFFI）',
+  JavaScriptFFI: '外部の関数の宣言（JavaScriptFFI）',
   ApplicativeDo: 'Applicative による do の読み替え（ApplicativeDo）',
 };
 
