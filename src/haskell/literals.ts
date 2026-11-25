@@ -55,7 +55,6 @@ const SINGLE_ESCAPES: Record<string, number> = {
 const MAX_CODE_POINT = 0x10_ff_ff;
 const STRING_GAP_WHITESPACE = /^[\t\n\v\f\r ]+$/;
 
-/** The language extensions that change how number literals read. */
 export type NumberLiteralOptions = FeatureGates<'convert'>;
 
 export type NumberLiteral = { kind: 'int'; value: bigint } | { kind: 'frac'; value: number; text: string };
@@ -100,7 +99,6 @@ export function parseNumberLiteral(source: string, span: Span, options: NumberLi
   return { kind: 'frac', value: Number(text), text };
 }
 
-/** Writes a hexadecimal fraction such as `0x1.8p1` as the decimal fraction of the same value, `3.0`. */
 function hexFloatToDecimal(text: string, span: Span): string {
   const match = /^0[xX]([\dA-Fa-f]+)(?:\.([\dA-Fa-f]+))?(?:[pP]([+-]?\d+))?$/.exec(text);
   if (!match) throw syntaxError(span, '書き方に誤りがあります。');

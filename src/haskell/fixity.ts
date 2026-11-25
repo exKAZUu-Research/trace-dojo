@@ -134,7 +134,6 @@ export function resolvePatChain(items: ChainItem<Pat>[], span: Span, conFixity: 
   return result;
 }
 
-/** Resolves `a :+: b :*: c` by the type operators' fixities into applications of the operators. */
 export function resolveTypeChain(
   items: ChainItem<TypeExpr>[],
   span: Span,

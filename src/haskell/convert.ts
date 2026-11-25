@@ -143,7 +143,6 @@ function hasToken(node: Node, token: string): boolean {
   return node.children.some((child) => child !== null && !child.isNamed && child.type === token);
 }
 
-/** What converting a module reads besides its syntax tree. */
 interface ConvertContext extends FeatureGates<'convert'> {
   /** The syntax each Template Haskell splice gave, by its node's start. */
   readonly grafts: ReadonlyMap<number, SpliceSyntax>;
@@ -168,7 +167,6 @@ function grafted<K extends SpliceSyntax['kind']>(
   return graft as Extract<SpliceSyntax, { kind: K }>;
 }
 
-/** Converts a module's parse tree into the surface syntax, rejecting syntax this environment does not support. */
 export function convertModule(
   root: Node,
   extensions: Extensions,
@@ -398,7 +396,6 @@ function infixHeadName(node: Node): QName {
   return inner ? qualifiedName(inner).name : plainName(node);
 }
 
-/** The name a node spells, without parentheses around an operator. */
 function plainName(node: Node): Name {
   if (node.type === 'prefix_id' || node.type === 'parenthesized_name') {
     const inner = namedChildren(node)[0];
@@ -542,7 +539,6 @@ function convertTopDecl(features: ConvertContext, node: Node): Decl[] {
   }
 }
 
-/** Converts a declaration that may appear in a `let`, a `where`, a class, an instance, or at the top level. */
 function convertDecl(features: ConvertContext, node: Node): Decl[] {
   if (node.type === 'pragma') return [];
   rejectUnsupported(node);
@@ -805,7 +801,6 @@ function convertDerivingClauses(features: ConvertContext, node: Node): DerivingC
   return deriving;
 }
 
-/** The strategy a `deriving` clause or standalone declaration names, if any. */
 function derivingStrategy(features: ConvertContext, node: Node): { strategy?: DerivingStrategy; via?: TypeExpr } {
   const via = field(node, 'via');
   if (via) {
@@ -842,7 +837,6 @@ function convertMultiplicity(node: Node | null | undefined): Multiplicity {
   throw syntaxError(spanOf(node), `多重度 ${text} は書けません（%1・%Many・型変数のどれかを書いてください）。`);
 }
 
-/** Converts `type role T nominal _`. */
 function convertRoleAnnotation(features: ConvertContext, node: Node): Decl {
   if (!features.allows('roleAnnotations')) {
     throw syntaxError(spanOf(node), '型の役割の注釈には、RoleAnnotations の拡張が要ります。');
@@ -880,7 +874,6 @@ function convertStandaloneDeriving(features: ConvertContext, node: Node): Decl {
   };
 }
 
-/** Converts `pattern P x = p` and its variants, and `pattern P :: t`. */
 function convertPatternSynonym(features: ConvertContext, node: Node): Decl {
   if (!features.allows('patternSynonyms')) {
     throw syntaxError(spanOf(node), 'パターンシノニムを使うには、PatternSynonyms の拡張が要ります。');
@@ -944,7 +937,6 @@ function convertPatternSynonymHead(node: Node): { name: Name; params: Name[]; fi
   }
 }
 
-/** Converts `type family F a`, with its result kind and injectivity, or a closed family with its equations. */
 function convertTypeFamily(features: ConvertContext, node: Node, span: Span): Decl {
   const equationsNode = field(node, 'closed_family');
   const resultNode = namedChildren(node).find((child) => child.type === 'type_family_result');
@@ -985,7 +977,6 @@ function familyInjectivity(features: ConvertContext, node: Node, params: Name[])
   });
 }
 
-/** Converts the declarations of type families and data families, and their instances. */
 function convertFamilyDecl(features: ConvertContext, node: Node): Decl {
   if (!features.allows('typeFamilies')) {
     throw syntaxError(spanOf(node), '型族やデータ族を使うには、TypeFamilies の拡張が要ります。');
@@ -1020,7 +1011,6 @@ function convertFamilyDecl(features: ConvertContext, node: Node): Decl {
   }
 }
 
-/** An equation of a type family: `F Int = Bool` in a closed family, or `type instance F Int = Bool`. */
 function convertEquation(features: ConvertContext, node: Node): TypeEquation {
   const rhsNode = unnamedFieldChildren(node).at(-1);
   if (!rhsNode) throw syntaxError(spanOf(node), '書き方に誤りがあります。');
@@ -1314,7 +1304,6 @@ function convertBinder(features: ConvertContext, node: Node): TyVarBinder {
   }
 }
 
-/** Converts a kind, which reads as a type: `Type`, `*`, `Constraint`, `k1 -> k2`, or a kind variable. */
 function convertKind(features: ConvertContext, node: Node): TypeExpr {
   if (!features.allows('kindSignatures')) {
     throw syntaxError(spanOf(node), '種類の注釈を書くには、KindSignatures の拡張が要ります。');
@@ -1322,7 +1311,6 @@ function convertKind(features: ConvertContext, node: Node): TypeExpr {
   return convertType(features, node);
 }
 
-/** A constructor with its existential variables and constraints, `forall a. Show a => MkT a`. */
 function convertConstructor(features: ConvertContext, node: Node): ConDecl {
   const forallNode = field(node, 'forall');
   const contextNode = field(node, 'context');
@@ -1340,7 +1328,6 @@ function convertConstructor(features: ConvertContext, node: Node): ConDecl {
   };
 }
 
-/** Converts `C1, C2 :: forall a. ctx => t1 -> t2 -> T a`, a constructor declared by its signature. */
 function convertGadtConstructor(features: ConvertContext, node: Node): ConDecl[] {
   const forallNode = field(node, 'forall');
   const contextNode = field(node, 'context');
@@ -1707,7 +1694,6 @@ function constraintsOf(features: ConvertContext, node: Node): Constraint[] {
   }
 }
 
-/** Converts a type that may be polymorphic itself, `forall a. C a => t`, as a function's argument may be. */
 function convertQuantifiedType(features: ConvertContext, node: Node): TypeExpr {
   if (node.type === 'forall' || node.type === 'context') {
     if (!features.allows('rankNTypes')) {
@@ -1880,7 +1866,6 @@ function wildcardOr(node: Node, convert: (node: Node) => TypeExpr): TypeExpr | u
   return node.type === 'wildcard' ? undefined : convert(node);
 }
 
-/** Whether a type is an application with the `*` token among its parts. */
 export function hasStarArgument(type: TypeExpr): boolean {
   let head = type;
   while (head.kind === 'tapp') {
@@ -2301,7 +2286,6 @@ function requireTemplateHaskell(features: ConvertContext, span: Span, quotes = f
   }
 }
 
-/** Converts a quote, `[| e |]`, `[p| p |]`, `[t| t |]`, `[d| ds |]`, or `[|| e ||]`. */
 function convertQuote(outer: ConvertContext, node: Node, span: Span): Expr {
   requireTemplateHaskell(outer, span, true);
   const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
@@ -2343,7 +2327,6 @@ function fieldLabel(node: Node): string {
   return node.type === 'field_name' ? (namedChildren(node)[0] ?? node).text : node.text;
 }
 
-/** The fields `(.a.b)` selects, in order. */
 function fieldsOfSelector(node: Node): string[] {
   return fields(node, 'field').map(fieldLabel);
 }
@@ -2578,7 +2561,6 @@ function convertAlternative(features: ConvertContext, node: Node): Alt {
   };
 }
 
-/** Converts a statement of a `do` block or a qualifier of a list comprehension. */
 function convertStatement(features: ConvertContext, node: Node): Stmt {
   rejectUnsupported(node);
   const span = spanOf(node);

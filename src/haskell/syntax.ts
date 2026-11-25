@@ -16,7 +16,6 @@ export interface Name {
 /** The module of a global name a splice gives when it is the module being compiled. */
 export const THIS_MODULE = '';
 
-/** A possibly qualified name, such as `M.fromList`. */
 export interface QName extends Name {
   qualifier?: string;
   /**
@@ -34,7 +33,6 @@ export type Literal =
 
 export type SourceLiteral = Literal & { text: string };
 
-/** An operator between operands, written as a symbol (`+`, `:`) or a name in backticks (`` `div` ``). */
 export interface Operator extends QName {
   isConstructor: boolean;
   /** Whether the operator is a promoted constructor in a type, `':`. */
@@ -92,7 +90,6 @@ export type Expr =
    * (`required`), which only a `forall a ->` binder takes.
    */
   | { kind: 'tyapp'; expr: Expr; type?: TypeExpr; required?: boolean; span: Span }
-  /** An implicit parameter, `?x`. */
   | { kind: 'implicit'; name: string; span: Span }
   /** `let ?x = e in body`, which gives the body the implicit parameters. */
   | { kind: 'implicitLet'; binds: { name: string; expr: Expr; span: Span }[]; body: Expr; span: Span }
@@ -174,17 +171,13 @@ export interface TyVarBinder {
 
 export type TypeExpr =
   | { kind: 'tvar'; name: string; span: Span }
-  /** A type with a kind annotation, `(t :: k)`. */
   | { kind: 'tkinded'; type: TypeExpr; kindSig: TypeExpr; span: Span }
   /** A data constructor used as a type, as DataKinds promotes it: `'True`, `'[]`, `':`. */
   | { kind: 'tpromoted'; name: QName; span: Span }
-  /** A type-level list, `'[a, b]`, or tuple, `'(a, b)`. */
   | { kind: 'tpromotedList' | 'tpromotedTuple'; elems: TypeExpr[]; span: Span }
   /** A type applied to a kind, `T @Type` for `type T :: forall k. k -> Type`, which fixes its kind variable. */
   | { kind: 'tkindapp'; type: TypeExpr; kindArg: TypeExpr; span: Span }
-  /** An implicit parameter's constraint, `?x :: t`. */
   | { kind: 'timplicit'; name: string; type: TypeExpr; span: Span }
-  /** A type-level literal, `3` or `"name"`. */
   | { kind: 'tlit'; value: bigint | string; span: Span }
   /** Types joined by type operators, `a :+: b`, before fixity resolution. */
   | { kind: 'tchain'; items: ChainItem<TypeExpr>[]; span: Span }
@@ -221,7 +214,6 @@ export type Guard =
   | { kind: 'let'; decls: Decl[]; span: Span }
   | { kind: 'pat'; pat: Pat; expr: Expr; span: Span };
 
-/** The right-hand side of an equation or alternative: a plain expression or guarded ones, with `where` bindings. */
 export interface Rhs {
   body: { kind: 'plain'; expr: Expr } | { kind: 'guarded'; branches: GuardedExpr[] };
   where: Decl[];
@@ -251,7 +243,6 @@ export interface ConDecl {
   fields: TypeExpr[];
   /** The positions of the strict fields: those marked `!`, and under StrictData those not marked `~`. */
   strictFields?: number[];
-  /** The field names of a record constructor, one per field. */
   fieldNames?: Name[];
   isInfix: boolean;
   span: Span;
@@ -284,9 +275,7 @@ export type Decl =
       params: Name[];
       /** `type data`, whose constructors are types only, as TypeData declares them. */
       typeData?: boolean;
-      /** The kinds the parameters' annotations give, by position. */
       paramKinds?: (TypeExpr | undefined)[];
-      /** The kind `data T :: k where` gives the type. */
       kindSig?: TypeExpr;
       /** Whether the head binds a kind variable invisibly, `data T @k (a :: k)`, which needs a kind signature. */
       invisibleBinders?: boolean;
@@ -319,12 +308,10 @@ export type Decl =
       params: Name[];
       paramKinds?: (TypeExpr | undefined)[];
       resultKind?: TypeExpr;
-      /** The equations of a closed family, in order. */
       equations?: TypeEquation[];
       /** The arguments an injectivity annotation, `= r | r -> a`, says the result determines, by position. */
       injective?: number[];
       span: Span;
-      /** The class an associated family belongs to. */
       associatedWith?: string;
     }
   /** `type instance F Int = Bool`, an equation of an open family. */
@@ -358,9 +345,7 @@ export type Decl =
       isInfix: boolean;
       span: Span;
     }
-  /** `pattern P, Q :: t`, the type of pattern synonyms. */
   | { kind: 'patSynSig'; names: Name[]; sig: SigType; span: Span }
-  /** A standalone kind signature, `type T :: Type -> Type`. */
   | { kind: 'kindSig'; name: Name; kindSig: TypeExpr; span: Span }
   | {
       kind: 'instance';
@@ -391,7 +376,6 @@ export type Role = 'nominal' | 'representational' | 'phantom';
 
 export type DerivingStrategy = 'stock' | 'anyclass' | 'newtype' | 'via';
 
-/** An equation of a type family, `F Int = Bool`. */
 export interface TypeEquation {
   family: QName;
   patterns: TypeExpr[];
@@ -399,7 +383,6 @@ export interface TypeEquation {
   span: Span;
 }
 
-/** A class a `deriving` clause names, with the strategy it gives. */
 export interface DerivingClause {
   cls: QName;
   strategy?: DerivingStrategy;
@@ -437,5 +420,4 @@ export interface Module {
 /** The multiplicity LinearTypes writes on an arrow: `%1` (or `⊸`), `%Many`, or a variable `%m`. */
 export type Multiplicity = { kind: 'one' } | { kind: 'many' } | { kind: 'var'; name: string; span: Span };
 
-/** How an instance may overlap others, as its pragma says. */
 export type OverlapMode = 'OVERLAPPING' | 'OVERLAPPABLE' | 'OVERLAPS' | 'INCOHERENT';

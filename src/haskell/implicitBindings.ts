@@ -1,7 +1,6 @@
 import { compileError, unsupportedError } from './errors';
 import type { Decl, Expr, Guard, GuardedExpr, Pat, Rhs, Span, Stmt } from './syntax';
 
-/** A binding of an implicit parameter, `?x = e`. */
 export interface ImplicitBind {
   name: string;
   expr: Expr;
@@ -26,7 +25,6 @@ export function implicitGuard(binds: ImplicitBind[], span: Span): Guard {
   return guard;
 }
 
-/** A do block's statements, an implicit `let` among them scoping over the statements after it. */
 export function lowerImplicitStmts(stmts: Stmt[], what: 'do' | 'mdo' | 'rec' | 'qualifiedDo'): Stmt[] {
   const index = stmts.findIndex((stmt) => implicitGroups.has(stmt));
   if (index === -1) return stmts;

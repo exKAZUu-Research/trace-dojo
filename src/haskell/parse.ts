@@ -23,19 +23,11 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 export const misplacedHaskellAtomicMessage =
   '-- atomic は、関数を宣言する行（型シグネチャか、定義の最初の行）に付けてください。';
 
-/**
- * Parses a module, throwing a `CompileError` for syntax errors and for syntax this environment does not support. A
- * program's text has already gone through {@link preprocessProgram}: preprocessing is a stage of its own, and parsing
- * never runs it.
- */
+/** A program's text must already have gone through {@link preprocessProgram}: parsing never runs it. */
 export function parseHaskell(source: string, defaultName = 'Main', library = false): Module {
   return parseModule(source, defaultName, library).module;
 }
 
-/**
- * Parses a program, running its Template Haskell splices with `run` and putting the syntax each gives in its place,
- * and gives what the splices printed while they ran.
- */
 export function parseProgram(
   source: string,
   run: SpliceRunner
@@ -83,7 +75,6 @@ export function preprocessProgram(source: string): string {
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */
 const HASKELL_ANNOTATION_PATTERN = /--[ \t]*atomic[ \t]*$/;
 
-/** The `-- atomic` annotations of a program, read from its comment tokens. */
 export function findHaskellTraceAnnotations(source: string): TraceAnnotation[] {
   return traceAnnotationsIn(
     commentTokens(parser, source).filter((comment) => comment.text.startsWith('--')),

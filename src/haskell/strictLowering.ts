@@ -59,7 +59,6 @@ class StrictLowering {
     }
   }
 
-  /** A local binding group, with the variables whose values must be evaluated before what the group scopes over. */
   private group(decls: Decl[]): { decls: Decl[]; forced: string[] } {
     return strictBindings(this.features, this.decls(decls));
   }
@@ -333,7 +332,6 @@ function strictBindings(features: FeatureGates<'convert'>, decls: Decl[]): { dec
   return { decls: result, forced };
 }
 
-/** An expression that evaluates variables before it gives its value, `x `seq` e`. */
 function forcing(names: string[], expr: Expr, span: Span): Expr {
   let result = expr;
   for (const name of names.toReversed()) {

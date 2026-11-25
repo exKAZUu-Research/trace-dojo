@@ -253,7 +253,6 @@ interface Sink {
   condition: boolean;
 }
 
-/** A call of a function-like macro, whose arguments are being expanded. */
 interface Call {
   name: string;
   macro: Macro;
@@ -538,7 +537,6 @@ class Lexer {
     return this.done || /^\s*#/.test(this.peekLine()) ? undefined : this.line();
   }
 
-  /** The line ahead, without its newline. */
   peekLine(): string {
     const end = this.text.indexOf('\n', this.position);
     return this.text.slice(this.position, end === -1 ? undefined : end);
@@ -788,7 +786,6 @@ function characterValue(token: string): bigint {
   return BigInt(escapes[escaped] ?? escaped.codePointAt(0) ?? 0);
 }
 
-/** A value of C's arithmetic, wrapped to 64 bits as its type is signed or not. */
 function cInteger(value: bigint, unsigned: boolean): CInteger {
   return { value: unsigned ? BigInt.asUintN(64, value) : BigInt.asIntN(64, value), unsigned };
 }
