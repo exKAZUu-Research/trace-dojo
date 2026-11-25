@@ -350,6 +350,8 @@ function splitArguments(
 class ConditionParser {
   private readonly tokens: string[];
   private position = 0;
+  /** How many operands being read are ones C skips (after a deciding `&&` or `||`, or `?:`'s other branch). */
+  private skipping = 0;
 
   constructor(
     text: string,
@@ -368,10 +370,19 @@ class ConditionParser {
     const condition = this.binary(0);
     if (this.tokens[this.position] !== '?') return condition;
     this.position++;
-    const ifTrue = this.ternary();
+    const ifTrue = this.skipped(condition === 0, () => this.ternary());
     this.expect(':');
-    const ifFalse = this.ternary();
+    const ifFalse = this.skipped(condition !== 0, () => this.ternary());
     return condition === 0 ? ifFalse : ifTrue;
+  }
+
+  private skipped(skip: boolean, read: () => number): number {
+    if (skip) this.skipping++;
+    try {
+      return read();
+    } finally {
+      if (skip) this.skipping--;
+    }
   }
 
   private static readonly LEVELS: string[][] = [
@@ -392,8 +403,9 @@ class ConditionParser {
     let left = this.binary(level + 1);
     while (ConditionParser.LEVELS[level].includes(this.tokens[this.position])) {
       const operator = this.tokens[this.position++];
-      const right = this.binary(level + 1);
-      left = applyOperator(operator, left, right, this.error);
+      const decided = (operator === '&&' && left === 0) || (operator === '||' && left !== 0);
+      const right = this.skipped(decided, () => this.binary(level + 1));
+      left = applyOperator(operator, left, right, this.skipping > 0 ? () => {} : this.error);
     }
     return left;
   }
@@ -434,7 +446,12 @@ class ConditionParser {
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per C operator.
-function applyOperator(operator: string, left: number, right: number, error: (message: string) => Error): number {
+function applyOperator(
+  operator: string,
+  left: number,
+  right: number,
+  error: (message: string) => Error | undefined
+): number {
   switch (operator) {
     case '||': {
       return left !== 0 || right !== 0 ? 1 : 0;
@@ -485,7 +502,11 @@ function applyOperator(operator: string, left: number, right: number, error: (me
       return left * right;
     }
     default: {
-      if (right === 0) throw error('#if の式で 0 で割っています。');
+      if (right === 0) {
+        const problem = error('#if の式で 0 で割っています。');
+        if (problem) throw problem;
+        return 0;
+      }
       return operator === '/' ? Math.trunc(left / right) : left % right;
     }
   }
