@@ -511,8 +511,9 @@ export function setSpliceRunner(runner: SpliceRunner): void {
 
 export interface CompiledProgram {
   main: GlobalDef;
-  /** What the program's Template Haskell splices printed while it compiled. */
+  /** What the program's Template Haskell splices printed while it compiled, to standard output and to standard error. */
   compileOutput?: string;
+  compileErrorOutput?: string;
 }
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
@@ -525,14 +526,14 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     const splices = findProgramSplices(text);
     let expanded = text;
     let compileOutput = '';
+    let compileErrorOutput = '';
     if (splices && splices.sites.length > 0) {
       assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      ({ source: expanded, printed: compileOutput } = expandSplices(
-        splices.source,
-        splices.header,
-        splices.sites,
-        spliceRunner
-      ));
+      ({
+        source: expanded,
+        printed: compileOutput,
+        printedError: compileErrorOutput,
+      } = expandSplices(splices.source, splices.header, splices.sites, spliceRunner));
     }
     const parsed = parseHaskell(expanded);
     const renamed = renameModule(parsed, {
@@ -565,6 +566,7 @@ export function compileProgram(source: string, atomicRows?: ReadonlySet<number>,
     return {
       main: codegen.compileEntry(checked.main.entity, checked.main.evidence),
       ...(compileOutput ? { compileOutput } : {}),
+      ...(compileErrorOutput ? { compileErrorOutput } : {}),
     };
   });
 }

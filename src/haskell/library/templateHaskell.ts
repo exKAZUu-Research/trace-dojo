@@ -1542,7 +1542,9 @@ instance Splice a => Splice [a] where
 
 runSplice :: Splice a => Q a -> IO ()
 -- The code a splice spells, after a mark that keeps it apart from what the splice prints itself while it runs.
-runSplice (Q io) = io >>= \x -> putStr ("\0" ++ renderSplice x)
+-- A splice that exits fails as GHC reports it.
+runSplice (Q io) = (io >>= \x -> putStr ("\0" ++ renderSplice x)) ${'`'}catch${'`'} \e ->
+  hPutStr stderr ("\1Exception when trying to run compile-time code:\n  " ++ show (e :: ExitCode) ++ "\1")
 
 runDecSplice :: Q [Dec] -> IO ()
 runDecSplice = runSplice

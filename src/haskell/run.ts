@@ -10,8 +10,8 @@ import { Runtime, type TraceFrame } from './runtime';
 import { HaskellException, type Slot, type Value } from './values';
 
 // A splice runs as a program of its own while the program that has it compiles: its output, after a mark, spells
-// its code, and what it prints before the mark is the compiler's output, as runIO's is in GHC. An error it reports
-// with reportError, marked in its standard error, fails it.
+// its code, and what it prints before the mark and to its standard error is the compiler's output, as runIO's is in
+// GHC. An error it reports with reportError, marked in its standard error, fails it, as a run without the mark does.
 setSpliceRunner((program) => {
   const run = runProgram(new Runtime(), compileProgram(program));
   if (run.uncaughtException !== undefined) {
@@ -20,7 +20,8 @@ setSpliceRunner((program) => {
   const reported = /\u0001([^\u0001]*)\u0001/.exec(run.stderr);
   if (reported) throw new CompileError([{ row: 0, message: reported[1] }]);
   const mark = run.stdout.lastIndexOf('\u0000');
-  return { printed: run.stdout.slice(0, Math.max(mark, 0)), code: run.stdout.slice(mark + 1) };
+  if (mark === -1) throw new CompileError([{ row: 0, message: 'Exception when trying to run compile-time code' }]);
+  return { printed: run.stdout.slice(0, mark), printedError: run.stderr, code: run.stdout.slice(mark + 1) };
 });
 
 export function executeHaskellProgram(source: string, input?: ProgramInput): ProgramExecution {
@@ -72,6 +73,7 @@ export function runProgram(
   let uncaughtException: string | undefined;
   // What the program's splices printed while it compiled comes first, as GHC prints it before the program runs.
   if (program.compileOutput) runtime.io.stdout.write(program.compileOutput);
+  if (program.compileErrorOutput) runtime.io.stderr.write(program.compileErrorOutput);
   try {
     runtime.machine.runIO(runtime.global(program.main));
   } catch (error) {

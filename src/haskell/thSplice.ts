@@ -138,12 +138,12 @@ export function spliceHeader(root: Node): string {
   return lines.join('\n');
 }
 
-/** How a splice's program runs: the code it spells, and what it printed while it ran. */
-export type SpliceRunner = (program: string) => { code: string; printed: string };
+/** How a splice's program runs: the code it spells, and what it printed while it ran to its standard streams. */
+export type SpliceRunner = (program: string) => { code: string; printed: string; printedError: string };
 
 /**
  * Runs a program's splices in the order they are written, as GHC does, and puts the code of each in its place,
- * giving the program's text and what the splices printed. The code takes the rows the splice had, and the text
+ * giving the program's text and what the splices printed to each standard stream. The code takes the rows the splice had, and the text
  * after the splice keeps its row and column, so that the layout of the rest of the program stays. A splice runs as
  * a program of the module's pragmas and imports, as GHC's stage restriction allows: it cannot use the module's own
  * definitions.
@@ -153,8 +153,9 @@ export function expandSplices(
   header: string,
   sites: readonly SpliceSite[],
   run: SpliceRunner
-): { source: string; printed: string } {
+): { source: string; printed: string; printedError: string } {
   let printed = '';
+  let printedError = '';
   const codes = sites.map((site) => {
     const lines = site.code.split('\n');
     const padded = [' '.repeat(site.column + 2) + lines[0], ...lines.slice(1).map((line) => `  ${line}`)].join('\n');
@@ -162,6 +163,7 @@ export function expandSplices(
     try {
       const output = run(program);
       printed += output.printed;
+      printedError += output.printedError;
       return output.code;
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
@@ -180,7 +182,7 @@ export function expandSplices(
     result =
       result.slice(0, site.start) + replacement + '\n'.repeat(spliceLines.length - 1) + indent + result.slice(site.end);
   }
-  return { source: result, printed };
+  return { source: result, printed, printedError };
 }
 
 /**
