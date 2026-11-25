@@ -123,25 +123,21 @@ function groupNamesByIndex(source: string): string[] {
   return names;
 }
 
-function replaceWith(frame: Frame, receiver: Value, input: Value, replacement: Value, isGlobal: boolean): string {
-  const regex = regexOf(receiver);
-  const text = String(input);
-  frame.runtime.spend(1 + Math.floor(text.length / 64));
-  const regExp = isGlobal ? regex.search : new RegExp(regex.search.source, regex.search.flags.replace('g', ''));
-  regExp.lastIndex = 0;
-  try {
-    return text.replace(regExp, javaReplacer(replacement as string));
-  } catch (error) {
-    if (!(error instanceof ReplacementError)) throw error;
-    return throwError(frame, `java.lang.${error.exception}`, error.message);
+defineNative(
+  'kotlin.text.Regex.replaceText(String, String, Boolean)',
+  (frame, receiver, [input, replacement, isGlobal]) => {
+    const regex = regexOf(receiver);
+    const text = input as string;
+    frame.runtime.spend(1 + Math.floor(text.length / 64));
+    const regExp = isGlobal ? regex.search : new RegExp(regex.search.source, regex.search.flags.replace('g', ''));
+    regExp.lastIndex = 0;
+    try {
+      return text.replace(regExp, javaReplacer(replacement as string));
+    } catch (error) {
+      if (!(error instanceof ReplacementError)) throw error;
+      return throwError(frame, `java.lang.${error.exception}`, error.message);
+    }
   }
-}
-
-defineNative('kotlin.text.Regex.replace(CharSequence, String)', (frame, receiver, [input, replacement]) =>
-  replaceWith(frame, receiver, input, replacement, true)
-);
-defineNative('kotlin.text.Regex.replaceFirst(CharSequence, String)', (frame, receiver, [input, replacement]) =>
-  replaceWith(frame, receiver, input, replacement, false)
 );
 defineNative('kotlin.text.Regex.Companion.escapeReplacement(String)', (_frame, _receiver, [literal]) =>
   (literal as string).replaceAll(/[\\$]/g, (char) => `\\${char}`)

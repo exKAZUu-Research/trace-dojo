@@ -88,8 +88,11 @@ external class Regex {
     internal external fun groupNameArray(): Array<String>
     internal fun groupNames(): Map<String, Int> =
         groupNameArray().withIndex().filter { it.value != "" }.associate { it.value to it.index }
-    external fun replace(input: CharSequence, replacement: String): String
-    external fun replaceFirst(input: CharSequence, replacement: String): String
+    // A CharSequence reaches the native code as its String, as find's does.
+    fun replace(input: CharSequence, replacement: String): String = replaceText(input.toString(), replacement, true)
+    fun replaceFirst(input: CharSequence, replacement: String): String =
+        replaceText(input.toString(), replacement, false)
+    internal external fun replaceText(input: String, replacement: String, isGlobal: Boolean): String
 
     fun find(input: CharSequence, startIndex: Int = 0): MatchResult? {
         // Kotlin/JVM's find leaves the check to java.util.regex.Matcher.find, whose message this is.
