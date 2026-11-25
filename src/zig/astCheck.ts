@@ -198,10 +198,10 @@ class AstChecker {
         else this.withComptime(member, () => this.checkContainerVariable(member));
       }
       for (const block of body.comptimeBlocks)
-        this.checkBody(block, () => this.withComptime(block, () => this.expression(block, 'value')));
+        this.checkBody(() => this.withComptime(block, () => this.expression(block, 'value')));
       for (const test of body.tests) {
         if (test.decl && !names.has(test.decl.name)) this.reference(test.decl.name, test.decl, 'value');
-        this.checkBody(test.body, () => this.blockStatements(test.body.statements), true);
+        this.checkBody(() => this.blockStatements(test.body.statements), true);
       }
     } finally {
       this.scope = outer;
@@ -268,7 +268,7 @@ class AstChecker {
   }
 
   /** Checks the body of a test or a `comptime` declaration, which AstGen checks as it checks a function's. */
-  private checkBody(span: Span, check: () => void, isFunction = false): void {
+  private checkBody(check: () => void, isFunction = false): void {
     const outer = this.scope;
     if (isFunction) this.scope = { kind: 'function', parent: outer };
     this.functionDepth++;
@@ -280,7 +280,6 @@ class AstChecker {
       this.functionDepth--;
       this.scope = outer;
     }
-    void span;
   }
 
   /** A type, which Zig evaluates at compile time wherever it stands. */
