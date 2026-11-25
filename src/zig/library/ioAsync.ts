@@ -64,6 +64,9 @@ export function asyncMember(name: 'async' | 'concurrent'): () => Member {
   });
 }
 
+/** What a group's task returns: only `error.Canceled`, which the group drops, may fail it. */
+const GROUP_TASK_RESULT = errorUnionOf(errorSetOf(['Canceled']), VOID);
+
 /** `std.Io.Group`, whose tasks `async` runs to their end when they start. */
 export const GROUP: StructType = nativeStruct('Io.Group', {}, [{ name: 'state', type: USIZE, hasDefault: false }]);
 
@@ -83,9 +86,7 @@ function groupStart(name: 'async' | 'concurrent'): () => Member {
     const result = startedCall(sema, functionArg, argsArg, call.span);
     const evaluators = [pointer, io, result].map((arg) => arg.eval);
     const type = name === 'async' ? VOID : errorUnionOf(errorSetOf(['ConcurrencyUnavailable']), VOID);
-    // A group's task may return only `error.Canceled`, which the group drops.
-    if (result.type.kind !== 'void' && !(result.type.kind === 'error_union' && result.type.payload.kind === 'void'))
-      sema.error(call.span, `Group.${name} の関数は、void か error{Canceled}!void を返してください。`);
+    sema.coerce(result, GROUP_TASK_RESULT, call.span);
     return runtime(
       type,
       (frame) => {
