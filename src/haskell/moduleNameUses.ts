@@ -26,10 +26,16 @@ class ModuleNameUses implements SyntaxMapper {
     if (expr.kind === 'var' || expr.kind === 'con') this.note(expr.name);
     if (expr.kind === 'leftSection' || expr.kind === 'rightSection') this.note(expr.op);
     if (expr.kind === 'chain') for (const item of expr.items) if (item.kind === 'operator') this.note(item.op);
+    if (expr.kind === 'recordCon') this.note(expr.con);
+    if (expr.kind === 'recordCon' || expr.kind === 'recordUpdate')
+      for (const field of expr.fields) this.note(field.field);
     return mapExprChildren(expr, this);
   }
 
   pat(pat: Pat): Pat {
+    if (pat.kind === 'pcon' || pat.kind === 'precord') this.note(pat.con);
+    if (pat.kind === 'precord') for (const field of pat.fields) this.note(field.field);
+    if (pat.kind === 'pchain') for (const item of pat.items) if (item.kind === 'operator') this.note(item.op);
     return mapPatChildren(pat, this);
   }
 
