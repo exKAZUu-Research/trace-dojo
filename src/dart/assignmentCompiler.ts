@@ -1,24 +1,24 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
+import { awaitingCompiled } from './awaitCompiler';
+import { containsAwait, type GenEval, runSteps, runWithoutWaiting, type Step } from './awaitSteps';
 import type { ClassInfo, Member } from './classes';
 import {
   type AddElement,
   addToHashed,
-  applyAddition,
-  build,
-  type BuildProgress,
-  type ElementLoop,
-  type LoopProgress,
-  runLoop,
-  runResumableLoop,
-} from './collectionLoops';
+  awaitMoveNext,
+  building,
+  type ElementCode,
+  type ElementGen,
+  runElement,
+} from './collectionElements';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { branchesType } from './contextTypes';
-import { ControlCompiler } from './controlCompiler';
+import { cancelUnfinished, ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
-import { forEachValue, implicitCast, iterableValues } from './library/nativeSupport';
+import { forEachValue, implicitCast } from './library/nativeSupport';
 import { wrap } from './operators';
 import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
@@ -44,7 +44,7 @@ import {
   sameType,
   upperBound,
 } from './types';
-import { type Callable, Cell, DartList, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
+import { type Callable, Cell, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
 
 /** How to read and write the target of an assignment once its receiver and index are evaluated. */
 interface AssignableTarget {
@@ -115,6 +115,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   // code-gauge-allow functionNcss -- Simple, compound, and null-aware assignments.
+  // code-gauge-allow functionCognitiveComplexity -- A null-aware assignment whose value awaits waits inside it.
   private assignTo(target: AssignableTarget, operator: string, valueSyntax: Expression, span: Span): Compiled {
     const { write, variable, writeType } = target;
     if (operator === '=') {
@@ -146,7 +147,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const readCurrent = this.readBeforeValue(target, valueSyntax);
     if (operator === '??=') {
       const before = this.flow;
-      const written = this.compileExpression(valueSyntax, writeType);
+      // The value runs only when the target is null, so its awaits wait inside the assignment.
+      const awaits = this.awaitRoot?.fn === this.fn && containsAwait(valueSyntax);
+      const { result: written, steps } = this.compileWithSteps(valueSyntax, () =>
+        this.compileExpression(valueSyntax, writeType)
+      );
       const value = this.coerce(
         written,
         writeType,
@@ -155,9 +160,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       );
       this.flow = Flow.join(before, this.flow);
       if (variable) this.afterWrite(variable, upperBound(nonNullable(readType), value.type));
+      const type = upperBound(nonNullable(readType), assignedType(written, value));
       const run = value.run;
+      if (awaits) return awaitingCompiled(type, ifNullAssigning(target, readCurrent, steps, run));
       return {
-        type: upperBound(nonNullable(readType), assignedType(written, value)),
+        type,
         run: withPrepared(target, (frame, prepared) => {
           const existing = readCurrent(frame, prepared);
           if (existing !== undefined) return existing;
@@ -196,15 +203,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  /** Reads a compound assignment's target, once when its value awaits and the statement then runs again. */
+  /**
+   * Reads a compound assignment's target, in a step before its value's when the value awaits, as the SDK reads it
+   * before evaluating the value.
+   */
   private readBeforeValue(
     target: AssignableTarget,
     valueSyntax: Expression
   ): (frame: Frame, prepared: unknown) => Value {
     const { read } = target;
-    const remember = this.rememberBeforeAwait(target, valueSyntax);
-    if (!remember) return read;
-    return (frame, prepared) => remember(frame, () => read(frame, prepared));
+    const readStep = containsAwait(valueSyntax) ? this.addStep(withPrepared(target, read)) : undefined;
+    return readStep ? (frame) => readStep(frame) : read;
   }
 
   protected compileIncrement(operand: Expression, operator: '+' | '-', isPrefix: boolean, span: Span): Compiled {
@@ -610,30 +619,60 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined
-  ): {
-    types: ElementTypes[];
-    run: (frame: Frame, add: AddElement) => void;
-    isConst: boolean;
-    creates: boolean;
-  } {
+  ): ElementCode & { types: ElementTypes[]; isConst: boolean; creates: boolean } {
     const types: ElementTypes[] = [];
     let isConst = true;
     // A literal of objects being created counts as creating them, as Java's array initializers do.
     let creates = elements.length > 0;
-    const runs: ((frame: Frame, add: AddElement) => void)[] = [];
+    const codes: ElementCode[] = [];
     for (const element of elements) {
-      const compiled = this.compileCollectionElement(element, kind, elementContext, valueContext, types);
-      runs.push(compiled.run);
+      const compiled = this.compileStagedElement(element, kind, elementContext, valueContext, types);
+      codes.push(compiled);
       isConst &&= compiled.isConst;
       creates &&= compiled.creates;
     }
     return {
       types,
       run: (frame, add) => {
-        for (const run of runs) run(frame, add);
+        for (const code of codes) code.run(frame, add);
       },
+      gen: codes.some((code) => code.gen)
+        ? function* (frame, add) {
+            for (const code of codes) yield* runElement(code, frame, add);
+          }
+        : undefined,
       isConst,
       creates,
+    };
+  }
+
+  /**
+   * An element of a collection literal. In a statement that awaits, an element that awaits gets a generator: a loop
+   * or condition decides itself when its parts run, and the parts of another element run in its own steps.
+   */
+  private compileStagedElement(
+    element: CollectionElement,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): ElementCode & { isConst: boolean; creates: boolean } {
+    const awaits = this.awaitRoot?.fn === this.fn && containsAwait(element);
+    const decidesItself =
+      element.kind === 'ifElement' || element.kind === 'forElement' || element.kind === 'forInElement';
+    if (!awaits || decidesItself)
+      return this.compileCollectionElement(element, kind, elementContext, valueContext, types);
+    const { result, steps } = this.compileWithSteps(element, () =>
+      this.compileCollectionElement(element, kind, elementContext, valueContext, types)
+    );
+    const { run } = result;
+    return {
+      ...result,
+      isConst: false,
+      *gen(frame, add) {
+        yield* runSteps(frame, steps);
+        run(frame, add);
+      },
     };
   }
 
@@ -644,7 +683,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: ElementTypes[]
-  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean; creates: boolean } {
+  ): ElementCode & { isConst: boolean; creates: boolean } {
     switch (element.kind) {
       case 'mapEntry': {
         return { ...this.compileMapEntryElement(element, kind, elementContext, valueContext, types), creates: false };
@@ -664,7 +703,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       case 'forElement':
       case 'forInElement': {
         return {
-          run: this.compileForElement(element, kind, elementContext, valueContext, types),
+          ...this.compileForElement(element, kind, elementContext, valueContext, types),
           isConst: false,
           creates: false,
         };
@@ -805,29 +844,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const run =
       kind === 'map'
         ? this.compileMapSpread(element, compiled, elementContext, valueContext, types)
-        : this.compileIterableSpread(element, this.listedBeforeAwait(element, compiled), elementContext, types);
+        : this.compileIterableSpread(element, compiled, elementContext, types);
     return { run, isConst: compiled.isConst };
-  }
-
-  /**
-   * A spread iterable that a later `await` follows, listed once, so that evaluating the statement again after the
-   * `await` does not iterate a lazy iterable, whose iteration may run code, a second time.
-   */
-  private listedBeforeAwait(element: Span, compiled: Compiled): Compiled {
-    const remember =
-      this.precedesAwait(element) || this.awaitsWithin(element)
-        ? this.rememberBeforeAwait(element, element, [{ kind: 'await' }])
-        : undefined;
-    if (!remember) return compiled;
-    const { run } = compiled;
-    const listed: Eval = (frame) =>
-      remember(frame, () => {
-        const value = run(frame);
-        if (value === undefined || value instanceof DartList) return value;
-        const { runtime } = frame;
-        return runtime.links.newList(runtime, DYNAMIC, iterableValues(runtime, value), true);
-      });
-    return { ...compiled, run: listed };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Validate both map type arguments before configuring the spread.
@@ -861,10 +879,8 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const map = run(frame);
       if (nullAware && map === undefined) return;
       // The VM adds a spread map by the literal's `addAll`, whose hashing may run learner code while the map is unnamed.
-      applyAddition(add, (target) =>
-        frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
-          frame.runtime.links.addAllToMap(frame.runtime, target.target as DartObject, map)
-        )
+      frame.runtime.withCallRoots(map, NO_ARGUMENTS, () =>
+        frame.runtime.links.addAllToMap(frame.runtime, add.target as DartObject, map)
       );
     };
   }
@@ -906,9 +922,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: { key: DartType; value?: DartType }[]
-  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
+  ): ElementCode & { isConst: boolean } {
     if (element.casePattern) {
-      const subject = this.compileExpression(element.condition);
+      const { result: subject, steps: subjectSteps } = this.compileWithSteps(element.condition, () =>
+        this.compileExpression(element.condition)
+      );
       const casePattern = element.casePattern;
       const { result, slots } = this.withScope(() => {
         const { pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard);
@@ -922,23 +940,26 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.flow = Flow.join(result.afterThen, this.flow);
       types.push(...result.body.types, ...(otherwise?.types ?? []));
       const test = subject.run;
+      const matches = (frame: Frame): boolean => {
+        try {
+          return result.pattern.match(frame, test(frame)) && (!result.guard || result.guard(frame) === true);
+        } finally {
+          for (const slot of slots) frame.locals[slot] = undefined;
+        }
+      };
       return {
         isConst: false,
         run: (frame, add) => {
-          const value = test(frame);
-          try {
-            if (result.pattern.match(frame, value) && (!result.guard || result.guard(frame) === true)) {
-              result.body.run(frame, add);
-              return;
-            }
-          } finally {
-            for (const slot of slots) frame.locals[slot] = undefined;
-          }
-          otherwise?.run(frame, add);
+          if (matches(frame)) result.body.run(frame, add);
+          else otherwise?.run(frame, add);
         },
+        gen: conditionalElement(subjectSteps, matches, result.body, otherwise),
       };
     }
-    const { compiled: condition, flow } = this.compileCondition(element.condition);
+    const {
+      result: { compiled: condition, flow },
+      steps,
+    } = this.compileWithSteps(element.condition, () => this.compileCondition(element.condition));
     this.flow = flow.whenTrue;
     const consequent = this.compileCollectionElements([element.consequent], kind, elementContext, valueContext);
     const afterThen = this.flow;
@@ -955,6 +976,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         if (test(frame)) consequent.run(frame, add);
         else otherwise?.run(frame, add);
       },
+      gen: conditionalElement(steps, (frame) => test(frame) === true, consequent, otherwise),
     };
   }
 
@@ -964,157 +986,160 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: ElementTypes[]
-  ): (frame: Frame, add: AddElement) => void {
+  ): ElementCode {
     const { result, slots } = this.withScope(() =>
       element.kind === 'forInElement'
         ? this.compileForInElement(element, kind, elementContext, valueContext, types)
         : this.compileCountedForElement(element, kind, elementContext, valueContext, types)
     );
-    return (frame, add) => {
-      try {
-        result(frame, add);
-      } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
-      }
+    const clear = (frame: Frame): void => {
+      for (const slot of slots) frame.locals[slot] = undefined;
+    };
+    const { run, gen } = result;
+    return {
+      run: (frame, add) => {
+        try {
+          run(frame, add);
+        } finally {
+          clear(frame);
+        }
+      },
+      gen:
+        gen &&
+        function* (frame, add) {
+          try {
+            yield* gen(frame, add);
+          } finally {
+            clear(frame);
+          }
+        },
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- One generator iterates iterables and streams, with the steps of its iterable.
+  // code-gauge-allow functionNcss -- The loop's flow analysis and its generator read best together.
   private compileForInElement(
     element: Extract<CollectionElement, { kind: 'forInElement' }>,
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: ElementTypes[]
-  ): (frame: Frame, add: AddElement) => void {
-    const iterable = this.compileExpression(element.iterable);
-    const elementType = element.isAwait
+  ): ElementCode {
+    const { isAwait } = element;
+    if (isAwait && !this.fn.kind.isAsync) this.error(element, 'await for は async の関数の中にしか書けません。');
+    const { result: iterable, steps } = this.compileWithSteps(element.iterable, () =>
+      this.compileExpression(element.iterable)
+    );
+    const elementType = isAwait
       ? this.elementTypeOfStream(iterable, element.iterable)
       : this.elementTypeOfIterable(iterable, element.iterable);
-    const progress = this.progressMemo<LoopProgress>(element);
-    const start = element.isAwait
-      ? this.streamIteratorOf(iterable, elementType)
-      : this.iteratorOf(this.iterableSource(iterable));
     this.enterLoop(element);
     const afterSource = this.flow;
-    const { bind, body, moveNext } = this.inCollectionLoop(() => {
-      const savedRecords = this.recordsSteps;
-      this.recordsSteps = false;
-      const binding = this.compileForInBinding(element.binding, elementType, element);
-      this.recordsSteps = savedRecords;
-      return {
-        bind: binding,
-        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
-        moveNext: element.isAwait ? this.awaitedMoveNext(element) : syncMoveNext,
-      };
-    });
+    const savedRecords = this.recordsSteps;
+    this.recordsSteps = false;
+    const bind = this.compileForInBinding(element.binding, elementType, element);
+    this.recordsSteps = savedRecords;
+    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
     this.finishLoop(afterSource);
-    const loop: ElementLoop = {
-      start,
-      next: (frame, iterator) =>
-        moveNext(frame, iterator) === true
-          ? { value: frame.runtime.getProperty(iterator, 'current', undefined) }
-          : undefined,
-      bind,
-      body: body.run,
-      afterIteration: (frame) => frame.runtime.spend(),
-      variables: [],
+    const source = this.iterableSource(iterable);
+    const resolveElement = this.runtimeType(elementType);
+    const gen: ElementGen = function* (frame, add) {
+      const { runtime } = frame;
+      if (steps.length > 0) yield* runSteps(frame, steps);
+      const iterator = isAwait
+        ? runtime.links.construct(runtime, '_StreamIterator', '', [iterable.run(frame)], undefined, [
+            resolveElement(frame),
+          ])
+        : runtime.getProperty(source(frame), 'iterator', undefined);
+      frame.temporaries.push(iterator);
+      try {
+        for (;;) {
+          const more = isAwait
+            ? yield* awaitMoveNext(frame, iterator)
+            : runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
+          if (more !== true) return;
+          bind(frame, runtime.getProperty(iterator, 'current', undefined));
+          if (body.gen) yield* body.gen(frame, add);
+          else body.run(frame, add);
+          runtime.spend();
+        }
+      } finally {
+        if (isAwait) yield* cancelUnfinished(frame, iterator);
+        else frame.temporaries.pop();
+      }
     };
-    return progress ? runResumableLoop(loop, progress) : runLoop(loop);
+    return elementLoop(gen, isAwait || steps.length > 0 || body.gen !== undefined);
   }
 
-  private iteratorOf(iterable: Eval): Eval {
-    return (frame) => frame.runtime.getProperty(iterable(frame), 'iterator', undefined);
-  }
-
-  /** The `StreamIterator` an `await for` element reads. */
-  private streamIteratorOf(stream: Compiled, elementType: DartType): Eval {
-    const resolve = this.runtimeType(elementType);
-    return (frame) =>
-      frame.runtime.links.construct(frame.runtime, '_StreamIterator', '', [stream.run(frame)], undefined, [
-        resolve(frame),
-      ]);
-  }
-
-  /** The `moveNext` of an `await for` element, which awaits each element. */
-  private awaitedMoveNext(element: Span): (frame: Frame, iterator: Value) => Value {
-    const root = this.awaitRoot;
-    if (!root || !this.fn.kind.isAsync) return this.error(element, 'await for は async の関数の中にしか書けません。');
-    const awaited = this.awaiting(root, element);
-    return (frame, iterator) =>
-      awaited(frame, () => frame.runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined));
-  }
-
+  // code-gauge-allow functionCognitiveComplexity -- The steps of the initializer, condition, and updates interleave with the loop.
+  // code-gauge-allow functionNcss -- The loop's flow analysis and its generator read best together.
   private compileCountedForElement(
     element: Extract<CollectionElement, { kind: 'forElement' }>,
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: ElementTypes[]
-  ): (frame: Frame, add: AddElement) => void {
-    const progress = this.progressMemo<LoopProgress>(element);
-    const { initExec, loopSlots } = this.compileForInit(element);
+  ): ElementCode {
+    const {
+      result: { initExec, loopSlots },
+      steps: initSteps,
+    } = this.compileWithSteps(element.init, () => this.compileForInit(element));
     this.enterLoop(element);
-    const { condition, afterLoop, body, updates } = this.inCollectionLoop(() => {
-      const compiledCondition = element.condition ? this.compileCondition(element.condition) : undefined;
-      const exit = compiledCondition?.flow.whenFalse ?? this.flow.unreachable;
-      if (compiledCondition) this.flow = compiledCondition.flow.whenTrue;
-      return {
-        condition: compiledCondition,
-        afterLoop: exit,
-        body: this.compileCollectionElements([element.body], kind, elementContext, valueContext),
-        updates: this.withoutRemembering(() => element.updates.map((update) => this.compileExpression(update).run)),
-      };
-    });
+    const { condition: conditionSyntax } = element;
+    const { result: condition, steps: testSteps } = this.compileWithSteps(conditionSyntax, () =>
+      conditionSyntax ? this.compileCondition(conditionSyntax) : undefined
+    );
+    const afterLoop = condition?.flow.whenFalse ?? this.flow.unreachable;
+    if (condition) this.flow = condition.flow.whenTrue;
+    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
     types.push(...body.types);
+    const { result: updates, steps: updateSteps } = this.compileWithSteps(element.updates, () =>
+      element.updates.map((update) => this.compileExpression(update).run)
+    );
     const test = condition?.compiled.run;
     this.finishLoop(afterLoop);
-    const loop: ElementLoop = {
-      start: (frame) => {
-        initExec?.(frame);
-        return;
-      },
-      next: (frame) => (!test || test(frame) ? { value: undefined } : undefined),
-      bind: undefined,
-      body: body.run,
-      afterIteration: (frame) => {
+    const gen: ElementGen = function* (frame, add) {
+      if (initSteps.length > 0) yield* runSteps(frame, initSteps);
+      initExec?.(frame);
+      for (;;) {
+        if (testSteps.length > 0) yield* runSteps(frame, testSteps);
+        if (test && !test(frame)) return;
+        if (body.gen) yield* body.gen(frame, add);
+        else body.run(frame, add);
         // Each iteration has its own loop variables, which closures created in the body keep.
         for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+        if (updateSteps.length > 0) yield* runSteps(frame, updateSteps);
         for (const update of updates) update(frame);
         frame.runtime.spend();
-      },
-      variables: loopSlots,
+      }
     };
-    return progress ? runResumableLoop(loop, progress) : runLoop(loop);
+    const awaits = initSteps.length > 0 || testSteps.length > 0 || updateSteps.length > 0 || body.gen !== undefined;
+    return elementLoop(gen, awaits);
   }
 
-  protected buildSet(
-    span: Span,
-    type: DartType,
-    run: (frame: Frame, add: AddElement) => void,
-    isConst: boolean
-  ): Compiled {
+  protected buildSet(type: DartType, elements: ElementCode, isConst: boolean): Compiled {
     const resolve = this.runtimeType((type as InterfaceType).args[0]);
-    const memo = this.progressMemo<BuildProgress>(span);
-    const create = (frame: Frame): DartObject => frame.runtime.links.newSet(frame.runtime, resolve(frame), isConst);
-    const built: Eval = (frame) => build(frame, memo, () => create(frame), addToHashed, run);
-    return { type, run: isConst ? this.canonicalized(built) : built, isConst };
+    const { run, gen } = building(
+      (frame) => frame.runtime.links.newSet(frame.runtime, resolve(frame), isConst),
+      addToHashed,
+      elements
+    );
+    if (gen) return awaitingCompiled(type, gen);
+    return { type, run: isConst ? this.canonicalized(run) : run, isConst };
   }
 
-  protected buildMap(
-    span: Span,
-    type: DartType,
-    run: (frame: Frame, add: AddElement) => void,
-    isConst: boolean
-  ): Compiled {
+  protected buildMap(type: DartType, elements: ElementCode, isConst: boolean): Compiled {
     const [keyType, valueType] = (type as InterfaceType).args;
     const resolveKey = this.runtimeType(keyType);
     const resolveValue = this.runtimeType(valueType);
-    const memo = this.progressMemo<BuildProgress>(span);
-    const create = (frame: Frame): DartObject =>
-      frame.runtime.links.newMap(frame.runtime, resolveKey(frame), resolveValue(frame), isConst);
-    const built: Eval = (frame) => build(frame, memo, () => create(frame), addToHashed, run);
-    return { type, run: isConst ? this.canonicalized(built) : built, isConst };
+    const { run, gen } = building(
+      (frame) => frame.runtime.links.newMap(frame.runtime, resolveKey(frame), resolveValue(frame), isConst),
+      addToHashed,
+      elements
+    );
+    if (gen) return awaitingCompiled(type, gen);
+    return { type, run: isConst ? this.canonicalized(run) : run, isConst };
   }
 
   // Switch expressions
@@ -1127,7 +1152,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     span: Span,
     context: DartType | undefined
   ): Compiled {
-    const subject = this.compileExpression(subjectSyntax);
+    // Only the matching case's body runs, so the awaits of the bodies wait inside the expression.
+    const awaits = this.awaitRoot?.fn === this.fn && containsAwait([subjectSyntax, cases]);
+    const { result: subject, steps: subjectSteps } = this.compileWithSteps(awaits ? subjectSyntax : undefined, () =>
+      this.compileExpression(subjectSyntax)
+    );
     const before = this.flow;
     const patternSubject = this.switchSubject(subject, cases);
     let whenFalse = before;
@@ -1143,8 +1172,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
           whenFalse: unmatched,
         } = this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard);
         whenFalse = unmatched;
-        const body = this.instantiateInContext(this.compileExpression(switchCase.body, context), context);
-        return { pattern, guard, body };
+        const { result: body, steps: bodySteps } = this.compileWithSteps(awaits ? switchCase.body : undefined, () =>
+          this.instantiateInContext(this.compileExpression(switchCase.body, context), context)
+        );
+        return { pattern, guard, body, bodySteps };
       });
       after = after ? Flow.join(after, this.flow) : this.flow;
       const bodyType = result.body.type;
@@ -1163,39 +1194,80 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     this.flow = after ?? before;
     const type = resultType ? branchesType(resultType, bodyTypes, context) : NEVER;
     const test = subject.run;
-    return {
-      type,
-      run: (frame) =>
-        PatternCache.run(frame, (cache) => {
-          const value = test(frame);
-          frame.temporaries.push(value);
-          try {
-            for (const switchCase of compiledCases) {
-              try {
-                if (
-                  switchCase.pattern.match(frame, value, cache) &&
-                  (!switchCase.guard || switchCase.guard(frame) === true)
-                ) {
-                  return switchCase.body.run(frame);
-                }
-              } finally {
-                for (const slot of switchCase.slots) frame.locals[slot] = undefined;
+    const select: GenEval = function* (frame) {
+      yield* runSteps(frame, subjectSteps);
+      return yield* PatternCache.runAwaiting(frame, function* (cache) {
+        const value = test(frame);
+        frame.temporaries.push(value);
+        try {
+          for (const switchCase of compiledCases) {
+            try {
+              if (
+                switchCase.pattern.match(frame, value, cache) &&
+                (!switchCase.guard || switchCase.guard(frame) === true)
+              ) {
+                yield* runSteps(frame, switchCase.bodySteps);
+                return switchCase.body.run(frame);
               }
+            } finally {
+              for (const slot of switchCase.slots) frame.locals[slot] = undefined;
             }
-          } finally {
-            frame.temporaries.pop();
           }
-          return frame.runtime.throwError('StateError', '', ['No switch case matched']);
-        }),
-      isConst: false,
+        } finally {
+          frame.temporaries.pop();
+        }
+        return frame.runtime.throwError('StateError', '', ['No switch case matched']);
+      });
     };
+    if (awaits) return awaitingCompiled(type, select);
+    return { type, run: (frame) => runWithoutWaiting(select(frame)), isConst: false };
   }
 }
 
 export type { Member };
 
-function syncMoveNext(frame: Frame, iterator: Value): Value {
-  return frame.runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
+/** A collection `for` element, which runs through its generator only when it awaits. */
+function elementLoop(gen: ElementGen, awaits: boolean): ElementCode {
+  return { run: (frame, add) => runWithoutWaiting(gen(frame, add)), gen: awaits ? gen : undefined };
+}
+
+/** An `if` element that awaits, in its condition or its branches. */
+function conditionalElement(
+  steps: readonly Step[],
+  test: (frame: Frame) => boolean,
+  consequent: ElementCode,
+  otherwise: ElementCode | undefined
+): ElementGen | undefined {
+  if (steps.length === 0 && !consequent.gen && !otherwise?.gen) return undefined;
+  return function* (frame, add) {
+    yield* runSteps(frame, steps);
+    if (test(frame)) yield* runElement(consequent, frame, add);
+    else if (otherwise) yield* runElement(otherwise, frame, add);
+  };
+}
+
+/** `target ??= value` whose value awaits, which waits only when the target is null. */
+function ifNullAssigning(
+  target: AssignableTarget,
+  read: (frame: Frame, prepared: unknown) => Value,
+  steps: readonly Step[],
+  value: Eval
+): GenEval {
+  return function* (frame) {
+    const count = frame.temporaries.length;
+    try {
+      const prepared = target.prepare(frame);
+      if (prepared === SHORTED) return SHORTED;
+      const existing = read(frame, prepared);
+      if (existing !== undefined) return existing;
+      yield* runSteps(frame, steps);
+      const result = value(frame);
+      target.write(frame, prepared, result);
+      return result;
+    } finally {
+      frame.temporaries.length = count;
+    }
+  };
 }
 
 function withPrepared(target: AssignableTarget, action: (frame: Frame, prepared: unknown) => Value): Eval {
@@ -1257,10 +1329,6 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
 }
 
 function addIterableElements(frame: Frame, iterable: Value, elementType: DartType | undefined, add: AddElement): void {
-  if (add.addAll) {
-    add.addAll((target) => addIterableElements(frame, iterable, elementType, target));
-    return;
-  }
   const { runtime } = frame;
   if (elementType === undefined && add.target && runtime.links.quickCopySet(runtime, add.target, iterable)) return;
   runtime.withCallRoots(iterable, NO_ARGUMENTS, () =>

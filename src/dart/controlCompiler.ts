@@ -3,13 +3,14 @@ import type { Block, CatchClause, Expression, Pattern, Span, Statement, SwitchCa
 import { localNamesIn } from './astWalk';
 import {
   AwaitRequest,
+  type AwaitRoot,
   containsSuspension,
   evaluateParts,
   LISTENER_CANCELLED,
   newAwaitRoot,
   suspensionStarts,
   YieldEachRequest,
-} from './awaitReplay';
+} from './awaitSteps';
 import type { FunctionSpec } from './callCompiler';
 import { type ClassInfo, scopedMemberName } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
@@ -437,23 +438,26 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   /**
-   * Compiles the parts of a statement that `heads` holds, whose `await`s suspend the statement's generator: the
-   * slots to evaluate them with, or undefined when they do not await.
+   * Compiles the parts of a statement that `heads` holds, whose `await`s suspend the statement's generator: the steps
+   * that evaluate the parts that await, or undefined when none does.
    */
   private resuming<T>(
     heads: readonly (Span | undefined)[],
     compile: () => T
-  ): { result: T; slots: number[] | undefined } {
+  ): { result: T; parts: AwaitRoot | undefined } {
     const ranges = heads.filter((head) => head !== undefined);
     const awaitStarts = ranges.flatMap((head) => suspensionStarts(head, false));
-    if (!this.fn.kind.isAsync || awaitStarts.length === 0) return { result: compile(), slots: undefined };
+    if (!this.fn.kind.isAsync || awaitStarts.length === 0) return { result: compile(), parts: undefined };
     const root = newAwaitRoot(this.fn, ranges, awaitStarts);
-    const saved = this.awaitRoot;
+    const savedRoot = this.awaitRoot;
+    const savedStaging = this.staging;
     this.awaitRoot = root;
+    this.staging = root.staging;
     try {
-      return { result: compile(), slots: root.slots };
+      return { result: compile(), parts: root };
     } finally {
-      this.awaitRoot = saved;
+      this.awaitRoot = savedRoot;
+      this.staging = savedStaging;
     }
   }
 
@@ -462,17 +466,17 @@ export abstract class ControlCompiler extends StatementCompiler {
     const capture: NonNullable<typeof this.stepCapture> = { statement, step: undefined };
     const savedCapture = this.stepCapture;
     this.stepCapture = capture;
-    let compiled: { result: Exec; slots: number[] | undefined };
+    let compiled: { result: Exec; parts: AwaitRoot | undefined };
     try {
       compiled = this.resuming([statement], () => this.compileStatement(statement));
     } finally {
       this.stepCapture = savedCapture;
     }
-    const { result: exec, slots } = compiled;
+    const { result: exec, parts } = compiled;
     const { step } = capture;
     return function* (frame) {
       const mark = frame.runtime.steps.statementMark();
-      const completion = yield* evaluateParts(frame, slots, () => exec(frame));
+      const completion = yield* evaluateParts(frame, parts, () => exec(frame));
       if (step) frame.runtime.steps.completeStatement(step.row, step.onlyCalls, mark);
       return completion;
     };
@@ -544,13 +548,13 @@ export abstract class ControlCompiler extends StatementCompiler {
     const guards = statement.cases.flatMap((switchCase) => ('guard' in switchCase ? [switchCase.guard] : []));
     const {
       result: { groups, select, route },
-      slots: selectSlots,
+      parts: selectParts,
     } = this.resuming([statement.subject, ...(guards as Span[])], () =>
       this.compileSwitchPlan(statement, (body) => this.compileGenStatements(body))
     );
     return function* (frame) {
       frame.runtime.spend();
-      let index = yield* evaluateParts(frame, selectSlots, () => select(frame));
+      let index = yield* evaluateParts(frame, selectParts, () => select(frame));
       while (index >= 0) {
         const group = groups[index];
         let completion: Completion | void;
@@ -645,7 +649,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   private compileGenIf(statement: Extract<Statement, { kind: 'if' }>): GenExec {
-    const { test, flow, slots: testSlots } = this.compileResumingCondition(statement.condition);
+    const { test, flow, parts: testParts } = this.compileResumingCondition(statement.condition);
     this.flow = flow.whenTrue;
     const consequence = this.compileGenScoped(statement.consequence);
     const afterThen = this.flow;
@@ -654,32 +658,32 @@ export abstract class ControlCompiler extends StatementCompiler {
     const otherwise = alternative ? this.compileGenScoped(alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
     return function* (frame) {
-      if (yield* evaluateParts(frame, testSlots, () => test(frame))) return yield* consequence(frame);
+      if (yield* evaluateParts(frame, testParts, () => test(frame))) return yield* consequence(frame);
       if (otherwise) return yield* otherwise(frame);
       return;
     };
   }
 
-  /** A condition of a statement in a generator, with the slots to evaluate it with when it awaits. */
+  /** A condition of a statement in a generator, with the steps that evaluate its parts that await. */
   private compileResumingCondition(condition: Expression): {
     test: Eval;
     flow: ConditionFlow;
-    slots: number[] | undefined;
+    parts: AwaitRoot | undefined;
   } {
-    const { result, slots } = this.resuming([condition], () => this.compileCondition(condition));
-    return { test: result.compiled.run, flow: result.flow, slots };
+    const { result, parts } = this.resuming([condition], () => this.compileCondition(condition));
+    return { test: result.compiled.run, flow: result.flow, parts };
   }
 
   private compileGenIfCase(statement: Extract<Statement, { kind: 'if' }>): GenExec {
     const {
       result: { match, consequence, otherwise, slots },
-      slots: matchSlots,
+      parts: matchParts,
     } = this.resuming([statement.condition, statement.casePattern?.guard], () =>
       this.compileIfCaseParts(statement, (body) => this.compileGenScoped(body))
     );
     return function* (frame) {
       try {
-        if (yield* evaluateParts(frame, matchSlots, () => match(frame))) return yield* consequence(frame);
+        if (yield* evaluateParts(frame, matchParts, () => match(frame))) return yield* consequence(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
@@ -692,12 +696,12 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenWhile(statement: Extract<Statement, { kind: 'while' }>): GenExec {
     const labels = this.takeLoopLabels();
     this.enterLoop(statement);
-    const { test, flow, slots: testSlots } = this.compileResumingCondition(statement.condition);
+    const { test, flow, parts: testParts } = this.compileResumingCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileGenLoopBody(statement.body, labels);
     this.finishLoop(flow.whenFalse, this.fn.jumpTargets.pop());
     return function* (frame) {
-      while (yield* evaluateParts(frame, testSlots, () => test(frame))) {
+      while (yield* evaluateParts(frame, testParts, () => test(frame))) {
         const completion = yield* body(frame);
         if (completion) {
           const outcome = loopCompletion(completion, labels);
@@ -712,7 +716,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenDo(statement: Extract<Statement, { kind: 'do' }>): GenExec {
     const {
       result: { labels, body, test },
-      slots: testSlots,
+      parts: testParts,
     } = this.resuming([statement.condition], () =>
       this.compileDoPlan(statement, (body, labels) => this.compileGenLoopBody(body, labels))
     );
@@ -724,7 +728,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           if (outcome !== 'continue') return outcome;
         }
         frame.runtime.spend();
-      } while (yield* evaluateParts(frame, testSlots, () => test(frame)));
+      } while (yield* evaluateParts(frame, testParts, () => test(frame)));
       return;
     };
   }
@@ -741,11 +745,11 @@ export abstract class ControlCompiler extends StatementCompiler {
       const init = Array.isArray(statement.init) ? statement.init : [statement.init];
       const {
         result: { initExec, initRow, loopSlots },
-        slots: initSlots,
+        parts: initParts,
       } = this.resuming(init, () => this.compileForInit(statement));
       this.enterLoop(statement);
       const { condition: conditionSyntax } = statement;
-      const { result: condition, slots: testSlots } = this.resuming([conditionSyntax], () =>
+      const { result: condition, parts: testParts } = this.resuming([conditionSyntax], () =>
         conditionSyntax ? this.compileCondition(conditionSyntax) : undefined
       );
       const exit = condition?.flow.whenFalse ?? this.flow.unreachable;
@@ -753,7 +757,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const body = this.compileGenLoopBody(statement.body, labels);
       const target = this.fn.jumpTargets.pop();
       if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
-      const { result: updates, slots: updateSlots } = this.resuming(statement.updates, () =>
+      const { result: updates, parts: updateParts } = this.resuming(statement.updates, () =>
         statement.updates.map((update) => this.compileExpression(update).run)
       );
       this.finishLoop(exit, target);
@@ -768,7 +772,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           loopSlots,
           updateRow: updates.length > 0 ? this.stepRowOf(statement) : undefined,
         },
-        { init: initSlots, test: testSlots, update: updateSlots }
+        { init: initParts, test: testParts, update: updateParts }
       );
     });
     return clearingSlots(result, slots);
@@ -778,7 +782,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const labels = this.takeLoopLabels();
     const { isAwait } = statement;
     if (isAwait && !this.fn.kind.isAsync) this.error(statement, 'await for は async の関数の中にしか書けません。');
-    const { result: iterable, slots: sourceSlots } = this.resuming([statement.iterable], () =>
+    const { result: iterable, parts: sourceParts } = this.resuming([statement.iterable], () =>
       this.compileExpression(statement.iterable)
     );
     const elementType = isAwait
@@ -791,12 +795,12 @@ export abstract class ControlCompiler extends StatementCompiler {
       const body = this.compileGenLoopBody(statement.body, labels);
       this.finishLoop(before, this.fn.jumpTargets.pop());
       if (isAwait)
-        return awaitForLoop(iterable.run, sourceSlots, this.runtimeType(elementType), { bind, body, labels });
+        return awaitForLoop(iterable.run, sourceParts, this.runtimeType(elementType), { bind, body, labels });
       const source = this.iterableSource(iterable);
       const loop: IteratorLoop = { bind, body, labels };
       return function* (frame: Frame): ReturnType<GenExec> {
         const { runtime } = frame;
-        const values = yield* evaluateParts(frame, sourceSlots, () => source(frame));
+        const values = yield* evaluateParts(frame, sourceParts, () => source(frame));
         const iterator = runtime.getProperty(values, 'iterator', undefined);
         frame.temporaries.push(iterator);
         try {
@@ -901,7 +905,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const elementType = this.fn.yieldElement;
     const { isEach } = statement;
     const context = isEach ? (elementType ? interfaceType(coreTypes.stream, [elementType]) : undefined) : elementType;
-    const { result: compiled, slots } = this.resuming([statement.value], () => {
+    const { result: compiled, parts } = this.resuming([statement.value], () => {
       const value = this.compileExpression(statement.value, context);
       if (!isEach) {
         this.fn.yieldTypes?.push(value.type);
@@ -924,7 +928,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { run } = compiled;
     const row = this.stepRowOf(statement);
     return function* (frame) {
-      const value = yield* evaluateParts(frame, slots, () => run(frame));
+      const value = yield* evaluateParts(frame, parts, () => run(frame));
       if (row !== undefined) frame.runtime.steps.step(row);
       const resumed: unknown = yield isEach ? new YieldEachRequest(value) : value;
       return resumed === LISTENER_CANCELLED ? CANCELLED_RETURN : undefined;
@@ -947,13 +951,13 @@ const CANCELLED_RETURN: Completion = { kind: 'return', value: undefined };
  */
 function awaitForLoop(
   source: Eval,
-  sourceSlots: number[] | undefined,
+  sourceParts: AwaitRoot | undefined,
   resolveElement: (frame: Frame) => DartType,
   loop: IteratorLoop
 ): GenExec {
   return function* (frame) {
     const { runtime } = frame;
-    const stream = yield* evaluateParts(frame, sourceSlots, () => source(frame));
+    const stream = yield* evaluateParts(frame, sourceParts, () => source(frame));
     const iterator = runtime.links.construct(runtime, '_StreamIterator', '', [stream], undefined, [
       resolveElement(frame),
     ]);
@@ -996,7 +1000,7 @@ function* iterate(
 }
 
 /** Ends an `await for` loop, cancelling its subscription when the stream has not ended. */
-function* cancelUnfinished(frame: Frame, iterator: Value): ReturnType<GenExec> {
+export function* cancelUnfinished(frame: Frame, iterator: Value): Generator<AwaitRequest, undefined, Value> {
   const { runtime } = frame;
   const index = frame.temporaries.lastIndexOf(iterator);
   if (index !== -1) frame.temporaries.splice(index, 1);
@@ -1005,10 +1009,10 @@ function* cancelUnfinished(frame: Frame, iterator: Value): ReturnType<GenExec> {
   }
 }
 
-/** A counted loop in a generator, whose header parts may await with the slots `resume` gives them. */
+/** A counted loop in a generator, whose header parts may await through the steps `resume` gives them. */
 function genForLoop(
   loop: CountedLoop<GenExec>,
-  resume: { init?: number[]; test?: number[]; update?: number[] }
+  resume: { init?: AwaitRoot; test?: AwaitRoot; update?: AwaitRoot }
 ): GenExec {
   const { test, body, labels } = loop;
   return function* (frame: Frame): ReturnType<GenExec> {

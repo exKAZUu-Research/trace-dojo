@@ -14,7 +14,7 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { assignmentTargets, localNamesIn } from './astWalk';
-import type { AwaitRequest, YieldEachRequest } from './awaitReplay';
+import type { AwaitRequest, YieldEachRequest } from './awaitSteps';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
@@ -102,7 +102,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     const savedFlow = this.flow;
     const savedRecords = this.recordsSteps;
     const savedAwaitRoot = this.awaitRoot;
+    const savedStaging = this.staging;
     this.awaitRoot = undefined;
+    this.staging = undefined;
     const isAtomic = this.atomicRows !== undefined && this.isAtomicHeader(spec.span.row, spec.headerEndRow);
     const info = this.newFunctionInfo(spec.name, undefined, spec.showsThis);
     info.isAtomic = isAtomic;
@@ -155,6 +157,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.flow = isClosure ? savedFlow.forget([], this.localsNamed(assignments.free)) : savedFlow;
       this.recordsSteps = savedRecords;
       this.awaitRoot = savedAwaitRoot;
+      this.staging = savedStaging;
     }
   }
 
@@ -532,6 +535,8 @@ export abstract class StatementCompiler extends PatternCompiler {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
     const initialized: Compiled[] = [];
+    // A later initializer may read an earlier variable after its own parts wait, so each variable is set in a step.
+    const setsInSteps = declaration.variables.length > 1 && this.awaitsHere(declaration);
     for (const declarator of declaration.variables) {
       const compiled = this.compileLocalInitializer(declaration, declarator, declaredType);
       if (compiled) initialized.push(compiled);
@@ -556,7 +561,15 @@ export abstract class StatementCompiler extends PatternCompiler {
       variable.condition = this.pendingCondition;
       this.flow = this.flow.rememberCondition(variable);
       this.pendingCondition = undefined;
-      parts.push({ slot: variable.slot, run: compiled?.run, isLate: declaration.isLate });
+      const part = { slot: variable.slot, run: compiled?.run, isLate: declaration.isLate };
+      if (setsInSteps) {
+        this.addStep((frame) => {
+          frame.locals[part.slot] = new Cell(initialLocalValue(frame, part.run, part.isLate));
+          return;
+        });
+      } else {
+        parts.push(part);
+      }
     }
     const exec: Exec = (frame) => {
       for (const { slot, run, isLate } of parts) frame.locals[slot] = new Cell(initialLocalValue(frame, run, isLate));
@@ -1115,6 +1128,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Runs a for-in loop over an iterable through its iterator, as Dart does. */
+  // code-gauge-allow duplicateLines -- A for-in statement and a sync* yield* iterate an Iterable alike; one runs a body, the other yields.
   protected forInLoop(iterable: Eval, bind: (frame: Frame, value: Value) => void, body: Exec, labels: string[]): Exec {
     return (frame) => {
       const { runtime } = frame;
@@ -1245,11 +1259,14 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private compileAssert(statement: Extract<Statement, { kind: 'assert' }>): Exec {
     const before = this.flow;
-    const { flow } = this.compileCondition(statement.condition);
+    // `dart run` runs without --enable-asserts, which skips assertions, so the steps of their awaits never run.
+    const {
+      result: { flow },
+    } = this.compileWithSteps(statement, () => this.compileCondition(statement.condition));
     this.flow = flow.whenFalse;
-    if (statement.message) this.compileExpression(statement.message);
+    if (statement.message)
+      this.compileWithSteps(statement, () => this.compileExpression(statement.message as Expression));
     this.flow = before.inheritTypeTests(flow.whenTrue).inheritTypeTests(flow.whenFalse);
-    // `dart run` runs without --enable-asserts, which skips assertions.
     return () => {};
   }
 

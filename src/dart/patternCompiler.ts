@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
+import type { AwaitRequest } from './awaitSteps';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
@@ -57,6 +58,21 @@ export class PatternCache {
     frame.runtime.roots.add(roots);
     try {
       return match(new PatternCache(values));
+    } finally {
+      frame.runtime.roots.delete(roots);
+    }
+  }
+
+  /** `run` for a match whose code awaits, as a switch expression's bodies may. */
+  static *runAwaiting<T>(
+    frame: Frame,
+    match: (cache: PatternCache) => Generator<AwaitRequest, T, Value>
+  ): Generator<AwaitRequest, T, Value> {
+    const values: Value[] = [];
+    const roots = (): Value[] => values;
+    frame.runtime.roots.add(roots);
+    try {
+      return yield* match(new PatternCache(values));
     } finally {
       frame.runtime.roots.delete(roots);
     }
@@ -144,6 +160,17 @@ export abstract class PatternCompiler extends CallCompiler {
     // A pattern the matched type always satisfies never fails.
     if (this.alwaysMatches(syntax, current)) whenFalse = whenFalse.unreachable;
     if (!guardSyntax) return { pattern, guard: undefined, whenFalse };
+    return this.compileGuard(pattern, guardSyntax, whenFalse);
+  }
+
+  private compileGuard(
+    pattern: CompiledPattern,
+    guardSyntax: Expression,
+    whenFalse: Flow
+  ): { pattern: CompiledPattern; guard: Eval | undefined; whenFalse: Flow } {
+    // A guard runs only after its pattern matches, while the steps of its statement run before the match.
+    if (this.awaitsHere(guardSyntax))
+      return this.error(guardSyntax, 'when の条件の await は、この採点環境では使えません。');
     for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
     try {
       const guard = this.compileCondition(guardSyntax);

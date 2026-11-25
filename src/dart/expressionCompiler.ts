@@ -15,9 +15,10 @@ import type {
   TypeSyntax,
 } from './ast';
 import { chainHead, isDotShorthand } from './astWalk';
-import { AwaitCompiler } from './awaitCompiler';
+import { AwaitCompiler, awaitingCompiled } from './awaitCompiler';
+import { shortCircuiting } from './awaitSteps';
 import type { ClassInfo, FieldMember, Member } from './classes';
-import { type AddElement, addToList, build, type BuildProgress } from './collectionLoops';
+import { addToList, building, type ElementCode } from './collectionElements';
 import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import {
   elementTypeOfContext,
@@ -64,7 +65,6 @@ import {
   type Callable,
   type Cell,
   DartList,
-  type DartObject,
   DartRecord,
   DartTypeValue,
   LateInitializer,
@@ -343,15 +343,28 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     flow: ConditionFlow;
   } {
     const isAnd = expression.operator === '&&';
-    const left = this.compileConditionInner(expression.left);
+    // The right operand runs only on the left's value, so its awaits wait inside the operator.
+    const awaits = this.awaitsHere(expression);
+    const { result: left, steps: leftSteps } = this.compileWithSteps(awaits ? expression.left : undefined, () =>
+      this.compileConditionInner(expression.left)
+    );
     const leftRun = this.requireBool(left.compiled, expression.left).run;
     this.flow = isAnd ? left.flow.whenTrue : left.flow.whenFalse;
-    const right = this.compileConditionInner(expression.right);
+    const { result: right, steps: rightSteps } = this.compileWithSteps(awaits ? expression.right : undefined, () =>
+      this.compileConditionInner(expression.right)
+    );
     const rightRun = this.requireBool(right.compiled, expression.right).run;
     const flow: ConditionFlow = isAnd
       ? { whenTrue: right.flow.whenTrue, whenFalse: Flow.join(left.flow.whenFalse, right.flow.whenFalse) }
       : { whenTrue: Flow.join(left.flow.whenTrue, right.flow.whenTrue), whenFalse: right.flow.whenFalse };
     this.flow = Flow.join(flow.whenTrue, flow.whenFalse);
+    if (awaits) {
+      const gen = shortCircuiting({ steps: leftSteps, run: leftRun }, (value) => value !== isAnd, {
+        steps: rightSteps,
+        run: rightRun,
+      });
+      return { compiled: this.liftAwaiting(awaitingCompiled(interfaceType(coreTypes.bool), gen)), flow };
+    }
     const isConst = left.compiled.isConst && right.compiled.isConst;
     return {
       compiled: {
@@ -466,12 +479,14 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     return valueIs(frame.runtime, value, type);
   }
 
-  /**
-   * Compiles part of an expression, which remembers its value when an `await` after it in the statement may suspend
-   * the statement.
-   */
+  /** Compiles part of an expression, which a statement that awaits may lift into a step. */
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
-    return this.rememberedBeforeAwait(expression, () => this.compileChainPartNow(expression, context));
+    return this.compileStagedPart(expression, () => this.compileChainPartNow(expression, context));
+  }
+
+  protected shortingProbe(): () => boolean {
+    const chain = this.nullChain;
+    return () => chain.exit !== undefined;
   }
 
   private compileChainPartNow(expression: Expression, context: DartType | undefined): Compiled {
@@ -701,14 +716,14 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     const resolve = this.runtimeType(elementType);
     // Inside a constant context, a literal without `const` is constant too.
     const isConst = expression.isConst || (this.inConstContext && elements.isConst);
-    const memo = this.progressMemo<BuildProgress>(expression);
-    const built: Eval = (frame) => {
-      const create = (): DartObject => new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
-      const list = build(frame, memo, create, addToList, elements.run) as DartList;
-      frame.runtime.allocate(list.elements.length);
-      return list;
-    };
-    return { type, run: isConst ? this.canonicalized(built) : built, isConst, creates: elements.creates };
+    const { run, gen } = building(
+      (frame) => new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst),
+      addToList,
+      elements,
+      (frame, list) => frame.runtime.allocate((list as DartList).elements.length)
+    );
+    if (gen) return awaitingCompiled(type, gen, { creates: elements.creates });
+    return { type, run: isConst ? this.canonicalized(run) : run, isConst, creates: elements.creates };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -753,9 +768,8 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
           compiled.types.map((type) => type.key)
         );
       return this.buildSet(
-        expression,
         interfaceType(coreTypes.set, [elementType]),
-        compiled.run,
+        compiled,
         expression.isConst || (this.inConstContext && compiled.isConst)
       );
     }
@@ -780,9 +794,8 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
         compiled.types.map((type) => type.value ?? DYNAMIC)
       );
     return this.buildMap(
-      expression,
       interfaceType(coreTypes.map, [keyType, valueType]),
-      compiled.run,
+      compiled,
       expression.isConst || (this.inConstContext && compiled.isConst)
     );
   }
@@ -894,18 +907,8 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     }
   }
 
-  protected abstract buildSet(
-    span: Span,
-    type: DartType,
-    run: (frame: Frame, add: AddElement) => void,
-    isConst: boolean
-  ): Compiled;
-  protected abstract buildMap(
-    span: Span,
-    type: DartType,
-    run: (frame: Frame, add: AddElement) => void,
-    isConst: boolean
-  ): Compiled;
+  protected abstract buildSet(type: DartType, elements: ElementCode, isConst: boolean): Compiled;
+  protected abstract buildMap(type: DartType, elements: ElementCode, isConst: boolean): Compiled;
 
   // code-gauge-allow functionCognitiveComplexity -- Compile fields in source order and keep named fields sorted in the type and value.
   private compileRecordLiteral(

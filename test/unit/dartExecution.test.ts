@@ -10083,6 +10083,41 @@ void main() async {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 3, 1]\n[2, 3, 4]\n' });
 });
 
+// Dart SDK 3.13.7 (`dart run`) prints the expected output.
+test('Dart evaluates the parts around an await once, in source order', () => {
+  const program = `Future<int> f(int x) async {
+  print('f $x');
+  await null;
+  return x;
+}
+int g(String s) {
+  print('g $s');
+  return s.length;
+}
+var total = 1;
+Future<int> bump() async {
+  total += 10;
+  return 1;
+}
+void main() async {
+  print(g('a') + await f(1) + g('bb'));
+  total += await bump();
+  int? m;
+  m ??= await f(2);
+  m ??= await f(3);
+  final t = true;
+  print([total, m, t || await f(4) > 0, t ? await f(5) : await f(6), switch (await f(7)) { 7 => g('s'), _ => 0 }]);
+  final list = <int>[]..add(await f(8))..add(g('c'))..add(await f(9));
+  var a = await f(10), b = a + await f(11);
+  print([list, a, b]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'g a\nf 1\ng bb\n4\nf 2\nf 5\nf 7\ng s\n[2, 2, true, 5, 1]\nf 8\ng c\nf 9\nf 10\nf 11\n[[8, 1, 9], 10, 21]\n',
+  });
+});
+
 test('Dart collection for elements await each element once in order', () => {
   const program = `Future<int> later(int x) async {
   await null;

@@ -9,6 +9,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import { declaredMemberNames } from './astWalk';
+import type { GenEval } from './awaitSteps';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import { eraseExtensionTypes } from './eraseExtensionTypes';
@@ -72,6 +73,8 @@ export interface Compiled {
   creates?: boolean;
   /** An explicit extension application `E(x)`, whose members are the extension's. */
   extensionOverride?: { ext: ExtensionInfo; typeArgs: DartType[] };
+  /** How an expression that awaits is evaluated, which a step of its statement runs instead of `run`. */
+  gen?: GenEval;
 }
 
 /** A member found through a static type, with its type in terms of the receiver's type arguments. */

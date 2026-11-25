@@ -1,80 +1,116 @@
-import type { Expression, Span } from './ast';
+import type { Expression } from './ast';
 import {
-  AwaitedError,
+  AwaitRequest,
   type AwaitRoot,
-  AwaitSuspension,
   containsAwait,
-  iterationKey,
-  readMemo,
+  type GenEval,
+  newStaging,
   rootCovers,
-  writeMemo,
-} from './awaitReplay';
-import type { ProgressMemo } from './collectionLoops';
-import { type Compiled, CompilerBase } from './compilerBase';
+  runSteps,
+  type Staging,
+  type Step,
+  suspensionStarts,
+} from './awaitSteps';
+import { type Compiled, CompilerBase, type Eval } from './compilerBase';
 import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype, isTop } from './types';
-import { Cell, type Value } from './values';
+import type { Cell } from './values';
+
+/** A compiled expression that awaits, which runs only through its generator. */
+export type AwaitingCompiled = Compiled & { gen: GenEval };
 
 /**
- * Compiles `await` and what a statement that awaits must remember. Such a statement runs again from its start after
- * each `await` suspends it, so a part evaluated before a later `await` keeps its value in a slot, which evaluating the
- * statement again reuses instead of evaluating the part twice.
+ * Compiles `await` and the expressions around it. A statement that awaits runs as a generator: each part of it that
+ * contains an `await`, or comes before one, is lifted into a step that evaluates it into a hidden slot, waiting at its
+ * `await`s, and the code that uses the part reads the slot. Nothing is evaluated twice, and the code around the parts
+ * is the same as without `await`.
  */
 export abstract class AwaitCompiler extends CompilerBase {
-  /** The statement or loop condition being compiled whose `await`s may suspend it, if any. */
+  /** The statement or loop condition being compiled whose `await`s suspend its generator, if any. */
   protected awaitRoot: AwaitRoot | undefined;
+  /** Where the parts of the expression or statement being compiled are lifted, while it awaits. */
+  protected staging: (Staging & { isShorted?: () => boolean }) | undefined;
 
   abstract compileExpression(expression: Expression, context?: DartType): Compiled;
 
-  /** Compiles a part of an expression, remembering its value when an `await` after it may suspend the statement. */
-  protected rememberedBeforeAwait(expression: Expression, compile: () => Compiled): Compiled {
+  /** A test of whether the selector chain being compiled has passed a null-aware selector that may short it. */
+  protected abstract shortingProbe(): () => boolean;
+
+  /**
+   * Compiles a part of an expression, through which every expression is compiled. In a statement that awaits, a part
+   * that contains an `await` gets a generator, and a part that the expression being staged evaluates before one of
+   * its `await`s, or that contains one, is lifted into a step.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each check decides one case of lifting, in the order they apply.
+  protected compileStagedPart(expression: Expression, compile: () => Compiled): Compiled {
     const root = this.awaitRoot;
-    if (
-      root?.fn !== this.fn ||
-      root.memoDepth > 0 ||
-      expression.kind === 'await' ||
-      containsAwait(expression) ||
-      !this.precedesAwait(expression)
-    ) {
-      return compile();
+    const parent = this.staging;
+    // The statements of a loop or switch whose header awaits are compiled inside the header's root, as their own.
+    if (root?.fn !== this.fn || !rootCovers(root, expression)) return this.withoutStaging(compile);
+    const awaits = containsAwait(expression);
+    if (!parent) {
+      return awaits ? this.error(expression, 'この位置の await は、この採点環境では使えません。') : compile();
     }
-    root.memoDepth++;
+    const own = awaits && !handlesAwaitItself(expression) ? newStaging(suspensionStarts(expression, false)) : undefined;
+    if (own) Object.assign(own, { isShorted: this.shortingProbe() });
+    this.staging = own;
     let compiled: Compiled;
     try {
       compiled = compile();
     } finally {
-      root.memoDepth--;
+      this.staging = parent;
     }
-    if (compiled.isConst) return compiled;
-    const remember = this.remembering(root, expression);
-    const { run } = compiled;
-    return { ...compiled, run: (frame) => remember(frame, () => run(frame)) };
+    if (own) compiled = withSteps(compiled, own.steps);
+    if (awaits && !compiled.gen) return this.error(expression, 'この位置の await は、この採点環境では使えません。');
+    const precedes = parent.awaitStarts.some((start) => start >= expression.end);
+    if (!compiled.gen && !(precedes && isLiftable(compiled))) return compiled;
+    // A null-aware selector earlier in the chain shorts what follows it, which a step would evaluate anyway.
+    if (compiled.gen && parent.isShorted?.()) {
+      return this.error(expression, 'null 認識の選択子より後の await は、この採点環境では使えません。');
+    }
+    return this.lift(root, parent, compiled);
   }
 
   /**
-   * A value an expression computes before `later` awaits, such as the current value of a compound assignment's
-   * target, which evaluating the statement again after the `await` must reuse; undefined when `later` does not await.
+   * Compiles a part of an expression that decides itself when its parts run, as a branch of `?:` does, with its own
+   * steps, which the expression runs right before the part's code.
    */
-  protected rememberBeforeAwait(
-    key: object,
-    later: Span,
-    laterParts: unknown = later
-  ): ((frame: Frame, compute: () => Value) => Value) | undefined {
-    const root = this.awaitRoot;
-    if (root?.fn !== this.fn || !rootCovers(root, later) || !containsAwait(laterParts)) return undefined;
-    return this.remembering(root, key);
+  protected compileWithSteps<T>(part: unknown, compile: () => T): { result: T; steps: Step[] } {
+    const staging = newStaging(suspensionStarts(part, false));
+    const saved = this.staging;
+    this.staging = staging;
+    try {
+      return { result: compile(), steps: staging.steps };
+    } finally {
+      this.staging = saved;
+    }
   }
 
-  /** Whether an `await` of the statement being compiled comes after `span`, which then runs before it suspends. */
-  protected precedesAwait(span: Span): boolean {
+  /**
+   * Lifts an expression that awaits into the steps of what is being staged, when it is compiled outside a part, as a
+   * condition's operands are; inside a part, the part lifts it.
+   */
+  protected liftAwaiting(compiled: AwaitingCompiled): Compiled {
     const root = this.awaitRoot;
-    return root?.fn === this.fn && rootCovers(root, span) && root.awaitStarts.some((start) => start >= span.end);
+    const staging = this.staging;
+    if (root?.fn !== this.fn || !staging) return compiled;
+    return this.lift(root, staging, compiled);
   }
 
-  /** Whether `span` is part of the statement being compiled whose `await`s suspend it and contains one of them. */
-  protected awaitsWithin(span: Span): boolean {
+  /** Whether an expression awaits inside the statement being compiled, so that it must be compiled with steps. */
+  protected awaitsHere(node: unknown): boolean {
+    return this.awaitRoot?.fn === this.fn && containsAwait(node);
+  }
+
+  /**
+   * Adds a step that computes a value of the expression being staged, such as the current value of a compound
+   * assignment's target before its value awaits, to the steps lifted so far, giving what reads the step's value.
+   */
+  protected addStep(run: Eval): Eval | undefined {
     const root = this.awaitRoot;
-    return root?.fn === this.fn && rootCovers(root, span) && containsAwait(span);
+    const staging = this.staging;
+    if (root?.fn !== this.fn || !staging) return undefined;
+    return this.lift(root, staging, { type: DYNAMIC, run, isConst: false }).run;
   }
 
   protected compileAwait(expression: Extract<Expression, { kind: 'await' }>, context: DartType | undefined): Compiled {
@@ -87,7 +123,9 @@ export abstract class AwaitCompiler extends CompilerBase {
       context && context.kind !== 'dynamic' && !isTop(context)
         ? interfaceType(coreTypes.futureOr, [context])
         : undefined;
-    const operand = this.compileExpression(expression.value, operandContext);
+    const { result: operand, steps } = this.compileWithSteps(expression.value, () =>
+      this.compileExpression(expression.value, operandContext)
+    );
     if (operand.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
     const type = flatten(operand.type);
     // The VM awaits a future whose static type is not a Future only when it is a Future<flatten(T)>, as its
@@ -95,95 +133,83 @@ export abstract class AwaitCompiler extends CompilerBase {
     const awaitedType = isSubtype(operand.type, interfaceType(coreTypes.future, [DYNAMIC]))
       ? undefined
       : this.runtimeType(interfaceType(coreTypes.future, [type]));
-    const awaited = this.awaiting(root, expression, awaitedType);
     const { run } = operand;
-    return { type, run: (frame) => awaited(frame, () => run(frame)), isConst: false };
-  }
-
-  /**
-   * Waits for a value inside a statement that awaits: suspends the statement with the future `compute` gives, and
-   * once the statement runs again gives what the future completed with, or throws its error.
-   */
-  protected awaiting(
-    root: AwaitRoot,
-    key: object,
-    awaitedType?: (frame: Frame) => DartType
-  ): (frame: Frame, compute: () => Value) => Value {
-    const slot = this.awaitSlot(root, key);
-    const iterated = root.iterated.has(slot);
-    return (frame, compute) => {
-      const cell = readMemo(frame, slot, iterated);
-      if (cell instanceof AwaitedError) throw cell.error;
-      if (cell) return cell.v;
-      const value = compute();
+    return awaitingCompiled(type, function* (frame) {
+      yield* runSteps(frame, steps);
+      const value = run(frame);
       const { runtime } = frame;
       const isNotFuture = awaitedType !== undefined && !runtime.links.isValueOf(runtime, value, awaitedType(frame));
-      throw new AwaitSuspension(slot, value, iterated ? iterationKey(frame) : undefined, isNotFuture);
-    };
+      return yield new AwaitRequest(value, isNotFuture);
+    });
   }
 
-  /**
-   * Compiles code that runs after the code written after it, as a loop's updates run after its body, which therefore
-   * remembers nothing before the body's `await`s.
-   */
-  protected withoutRemembering<T>(compile: () => T): T {
-    const root = this.awaitRoot;
-    if (root) root.memoDepth++;
+  private withoutStaging<T>(compile: () => T): T {
+    const saved = this.staging;
+    this.staging = undefined;
     try {
       return compile();
     } finally {
-      if (root) root.memoDepth--;
+      this.staging = saved;
     }
   }
 
-  /**
-   * Where a collection literal or `for` element keeps its progress when an `await` inside or after it may evaluate the
-   * statement again, kept apart for each iteration of the collection `for` elements enclosing it; undefined when no
-   * `await` can. A collection `for` element that keeps its progress is therefore always in a literal that does.
-   */
-  protected progressMemo<T extends Cell>(span: Span): ProgressMemo<T> | undefined {
-    const root = this.awaitRoot;
-    if (!root || !(this.awaitsWithin(span) || this.precedesAwait(span))) return undefined;
-    const slot = this.awaitSlot(root, {});
-    const iterated = root.iterated.has(slot);
-    return {
-      read: (frame) => readMemo(frame, slot, iterated) as T | undefined,
-      write: (frame, progress) => writeMemo(frame, slot, iterated ? iterationKey(frame) : undefined, progress),
-    };
+  private lift(root: AwaitRoot, staging: Staging, compiled: Compiled): Compiled {
+    const slot = this.fn.allocateSlot();
+    this.fn.info.locals[slot] = { name: '\0', type: DYNAMIC };
+    root.slots.push(slot);
+    staging.steps.push({ slot, run: compiled.gen ? undefined : compiled.run, gen: compiled.gen });
+    return { ...compiled, gen: undefined, run: (frame) => (frame.locals[slot] as Cell).v };
   }
+}
 
-  /** Compiles a collection `for` element's parts, whose remembered values are kept apart for each iteration. */
-  protected inCollectionLoop<T>(compile: () => T): T {
-    const root = this.awaitRoot;
-    if (root) root.loopDepth++;
-    try {
-      return compile();
-    } finally {
-      if (root) root.loopDepth--;
+/** A compiled expression that awaits, with the generator that evaluates it. */
+export function awaitingCompiled(type: DartType, gen: GenEval, extra?: Partial<Compiled>): AwaitingCompiled {
+  return { ...extra, type, isConst: false, gen, run: runsThroughGenerator };
+}
+
+function runsThroughGenerator(): never {
+  throw new Error('An expression that awaits runs only through its generator.');
+}
+
+function withSteps(compiled: Compiled, steps: readonly Step[]): Compiled {
+  if (steps.length === 0) return compiled;
+  const { run } = compiled;
+  return {
+    ...compiled,
+    *gen(frame: Frame) {
+      yield* runSteps(frame, steps);
+      return run(frame);
+    },
+  };
+}
+
+/**
+ * Whether an expression decides itself when its parts that await run, because it evaluates some of them only on a
+ * condition or in a loop, instead of having each part lifted in order.
+ */
+function handlesAwaitItself(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'await':
+    case 'conditional':
+    case 'list':
+    case 'setOrMap':
+    case 'switch':
+    case 'cascade': {
+      return true;
+    }
+    case 'binary': {
+      return expression.operator === '&&' || expression.operator === '||' || expression.operator === '??';
+    }
+    case 'assign': {
+      return expression.operator === '??=';
+    }
+    default: {
+      return false;
     }
   }
+}
 
-  private remembering(root: AwaitRoot, key: object): (frame: Frame, compute: () => Value) => Value {
-    const slot = this.awaitSlot(root, key);
-    const iterated = root.iterated.has(slot);
-    return (frame, compute) => {
-      const cell = readMemo(frame, slot, iterated);
-      if (cell) return cell.v;
-      const value = compute();
-      writeMemo(frame, slot, iterated ? iterationKey(frame) : undefined, new Cell(value));
-      return value;
-    };
-  }
-
-  private awaitSlot(root: AwaitRoot, node: object): number {
-    let slot = root.slotOf.get(node);
-    if (slot === undefined) {
-      slot = this.fn.allocateSlot();
-      this.fn.info.locals[slot] = { name: '\0', type: DYNAMIC };
-      root.slots.push(slot);
-      root.slotOf.set(node, slot);
-      if (root.loopDepth > 0) root.iterated.add(slot);
-    }
-    return slot;
-  }
+/** Whether a part's value can change between its evaluation and an `await` after it, so that it must be lifted. */
+function isLiftable(compiled: Compiled): boolean {
+  return !compiled.isConst && !compiled.isSuper && !compiled.thisReference && !compiled.extensionOverride;
 }

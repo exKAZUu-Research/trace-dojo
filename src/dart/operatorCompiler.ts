@@ -1,4 +1,7 @@
+// code-gauge-allow-file fileNcss -- The operators that decide when their operands run also build their await-aware forms.
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
+import { awaitingCompiled } from './awaitCompiler';
+import { containsAwait, runSteps, shortCircuiting } from './awaitSteps';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { branchesType, isDoubleContext } from './contextTypes';
 import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
@@ -270,16 +273,29 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   private compileIfNull(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
-    const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
+    // The right operand runs only when the left is null, so its awaits wait inside the operator.
+    const awaits = this.awaitsHere(expression);
+    const { result: left, steps: leftSteps } = this.compileWithSteps(awaits ? expression.left : undefined, () =>
+      this.compileExpression(expression.left, context ? makeNullable(context) : undefined)
+    );
     const { whenNull, whenNonNull } = this.nullBranches(left);
     this.flow = whenNull;
     const rightContext = context ?? nonNullable(left.type);
-    const right = this.instantiateInContext(this.compileExpression(expression.right, rightContext), rightContext);
+    const { result: right, steps: rightSteps } = this.compileWithSteps(awaits ? expression.right : undefined, () =>
+      this.instantiateInContext(this.compileExpression(expression.right, rightContext), rightContext)
+    );
     this.flow = Flow.join(whenNonNull, this.flow);
     const leftRun = left.run;
     const rightRun = right.run;
     const nonNullLeft = left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type);
     const type = branchesType(upperBound(nonNullLeft, right.type), [nonNullLeft, right.type], context);
+    if (awaits) {
+      const gen = shortCircuiting({ steps: leftSteps, run: leftRun }, (value) => value !== undefined, {
+        steps: rightSteps,
+        run: rightRun,
+      });
+      return awaitingCompiled(type, gen);
+    }
     return {
       type,
       run: (frame) => {
@@ -295,16 +311,29 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- The condition and both branches each compile with their own steps.
   protected compileConditional(
     expression: Extract<Expression, { kind: 'conditional' }>,
     context: DartType | undefined
   ): Compiled {
-    const { compiled: condition, flow } = this.compileCondition(expression.condition);
+    // Only one branch runs, so the awaits of the operands wait inside the expression.
+    const awaits = this.awaitsHere(expression);
+    const {
+      result: { compiled: condition, flow },
+      steps: conditionSteps,
+    } = this.compileWithSteps(awaits ? expression.condition : undefined, () =>
+      this.compileCondition(expression.condition)
+    );
     this.flow = flow.whenTrue;
-    const then = this.instantiateInContext(this.compileExpression(expression.consequent, context), context);
+    const { result: then, steps: thenSteps } = this.compileWithSteps(awaits ? expression.consequent : undefined, () =>
+      this.instantiateInContext(this.compileExpression(expression.consequent, context), context)
+    );
     const afterThen = this.flow;
     this.flow = flow.whenFalse;
-    const otherwise = this.instantiateInContext(this.compileExpression(expression.alternative, context), context);
+    const { result: otherwise, steps: otherwiseSteps } = this.compileWithSteps(
+      awaits ? expression.alternative : undefined,
+      () => this.instantiateInContext(this.compileExpression(expression.alternative, context), context)
+    );
     this.flow = Flow.join(afterThen, this.flow);
     const bound =
       then.type.kind === 'never' && !then.type.nullable
@@ -322,6 +351,17 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           ? then.constValue
           : otherwise.constValue
         : undefined;
+    if (awaits) {
+      return awaitingCompiled(type, function* (frame) {
+        yield* runSteps(frame, conditionSteps);
+        if (conditionRun(frame) === true) {
+          yield* runSteps(frame, thenSteps);
+          return thenRun(frame);
+        }
+        yield* runSteps(frame, otherwiseSteps);
+        return otherwiseRun(frame);
+      });
+    }
     return {
       type,
       run: (frame) => (conditionRun(frame) ? thenRun(frame) : otherwiseRun(frame)),
@@ -407,11 +447,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  // code-gauge-allow functionNcss -- The target and each section compile with their own steps, which the generator interleaves.
   protected compileCascade(
     expression: Extract<Expression, { kind: 'cascade' }>,
     context: DartType | undefined
   ): Compiled {
-    const target = this.compileExpression(expression.target, context);
+    const { result: target, steps: targetSteps } = this.compileWithSteps(expression.target, () =>
+      this.compileExpression(expression.target, context)
+    );
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: target.type };
     const nullAware = expression.sections[0]?.nullAware ?? false;
@@ -421,13 +464,32 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       run: (frame) => (frame.locals[slot] as Cell).v,
       isConst: false,
     };
-    const sections = expression.sections.map((section, index) => {
-      const run = this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result;
-      // A section that ran before a later one awaited must not run again when the statement continues.
-      const remember = this.rememberBeforeAwait(section, section, expression.sections.slice(index + 1));
-      return remember ? (frame: Frame) => remember(frame, () => run(frame)) : run;
-    });
+    // Each section's awaits wait right before the section runs, after the sections before it.
+    const sections = expression.sections.map((section) =>
+      this.compileWithSteps(
+        section,
+        () => this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result
+      )
+    );
     const targetRun = target.run;
+    if (this.awaitRoot?.fn === this.fn && containsAwait(expression)) {
+      return awaitingCompiled(target.type, function* (frame) {
+        yield* runSteps(frame, targetSteps);
+        const value = targetRun(frame);
+        if (nullAware && value === undefined) return;
+        const previous = frame.locals[slot];
+        frame.locals[slot] = new Cell(value);
+        try {
+          for (const { result, steps } of sections) {
+            yield* runSteps(frame, steps);
+            result(frame);
+          }
+        } finally {
+          frame.locals[slot] = previous;
+        }
+        return value;
+      });
+    }
     return {
       type: target.type,
       run: (frame) => {
@@ -436,7 +498,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         const previous = frame.locals[slot];
         frame.locals[slot] = new Cell(value);
         try {
-          for (const section of sections) section(frame);
+          for (const { result } of sections) result(frame);
         } finally {
           frame.locals[slot] = previous;
         }
