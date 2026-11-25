@@ -585,6 +585,23 @@ export abstract class SuspendCompiler extends LocalCompiler {
     } else if (target.kind === 'index') {
       target = { ...target, receiver: held(target.receiver), indices: target.indices.map(held) };
     }
+    const variable = target.kind === 'name' ? this.findVariable(scope, target.name) : undefined;
+    if (variable && statement.operator !== '=') {
+      // `x += f()` reads `x` before `f()` runs, as kotlinc's `x = x + f()` and `x.plusAssign(f())` do: the value read
+      // takes the operation, and a `var` then gets its result.
+      const read = hiddenName('target');
+      before.push({ ...propertyStatement(row, read, target), isVar: variable.isVar } as Statement);
+      const operand = held(statement.value);
+      const readName: Expression = { kind: 'name', row, name: read };
+      const writeBack: Statement[] = variable.isVar
+        ? [{ kind: 'assignment', row, operator: '=', target, value: readName }]
+        : [];
+      return this.compileSuspendStatements(scope, context, [
+        ...before,
+        { ...statement, target: readName, value: operand },
+        ...writeBack,
+      ]);
+    }
     const value = held(statement.value);
     return this.compileSuspendStatements(scope, context, [...before, { ...statement, target, value }]);
   }
@@ -650,7 +667,7 @@ export abstract class SuspendCompiler extends LocalCompiler {
       const last = parts.findLastIndex((part) => this.mayYield(scope, part));
       return parts.map((part, index) => {
         if (index > last) return part;
-        if (index < last && !this.mayYield(scope, part) && hasEffects(part)) return hold(part);
+        if (index < last && !this.mayYield(scope, part) && readsState(part)) return hold(part);
         return hoist(part);
       });
     };
@@ -924,18 +941,29 @@ interface SuspendValue {
   repr: Compiled['repr'];
 }
 
+/** The parts of an expression whose value no later code can change: constants, and the code a lambda or reference is. */
+const CONSTANT_KINDS = new Set([
+  'integer',
+  'real',
+  'char',
+  'boolean',
+  'null',
+  'this',
+  'super',
+  'lambda',
+  'anonymousFunction',
+  'reference',
+]);
+
 /**
- * Whether running an expression may have effects or read what a later suspend call changes, so that it has to run
- * before that call: a call, an assignment, or an increment, outside the lambdas it passes.
+ * Whether running a part of an expression may have effects or read what a later suspend call changes, so that it has
+ * to run before that call, as kotlinc evaluates parts from left to right: anything but a constant, such as a variable's
+ * value, a property, a call, or a template with values in it. A lambda or reference stays where it is written, as an
+ * inline call needs its lambda there.
  */
-function hasEffects(node: unknown): boolean {
-  if (!node || typeof node !== 'object') return false;
-  if (Array.isArray(node)) return node.some(hasEffects);
-  const { kind } = node as { kind?: string };
-  if (kind === 'call' || kind === 'postfix' || kind === 'index') return true;
-  if (kind === 'prefix' && ['++', '--'].includes((node as { operator?: string }).operator ?? '')) return true;
-  if (kind !== undefined && OPAQUE_KINDS.has(kind)) return false;
-  return Object.values(node).some(hasEffects);
+function readsState(part: Expression): boolean {
+  if (part.kind === 'string') return part.parts.some((piece) => typeof piece !== 'string');
+  return !CONSTANT_KINDS.has(part.kind);
 }
 
 /** The scope class that restricts the suspend calls of the coroutine an inline lambda runs in. */

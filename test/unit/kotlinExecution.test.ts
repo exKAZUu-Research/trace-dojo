@@ -6374,6 +6374,7 @@ fun g(x: Int): Int { log += "g$x "; return x }
 
 test.each([
   ['an operand before a suspend call', 'println(g(1) + f(2))', '3\ng1 f2 \n'],
+  ['a variable read before a suspend call changes it', 'println(log.length + f(1))', '1\nf1 \n'],
   [
     'indexed and compound assignments',
     'val a = intArrayOf(0, 0)\n    a[g(1)] = f(5)\n    a[0] += f(3)\n    println(a.toList())',
