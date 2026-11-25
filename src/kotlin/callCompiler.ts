@@ -205,23 +205,33 @@ export function allowsSuspendCalls(context: FunctionContext): boolean {
   return false;
 }
 
-/** A call of a function, or of a suspend function as the coroutine running the caller performs it. */
+/**
+ * A call of a function, or of a suspend function as the coroutine running the caller performs it. A suspend function
+ * dispatches on `dispatcher`: the receiver, or for a member extension, the value of its class that the call passes.
+ */
 function callOrSuspend(
   symbol: FunctionSymbol,
   frame: Frame,
   receiver: Value,
   values: Value[],
-  callRow: number | undefined
+  callRow: number | undefined,
+  dispatcher = receiver
 ): Value {
   return symbol.isSuspend
-    ? suspendCall(symbol, receiver, values, callRow)
+    ? suspendCall(symbol, receiver, values, callRow, dispatcher)
     : callFunction(symbol, frame, receiver, values, callRow);
 }
 
-/** A call of a suspend function, which the coroutine running the caller performs, dispatching on the receiver. */
-function suspendCall(symbol: FunctionSymbol, receiver: Value, args: Value[], callRow: number | undefined): Value {
+/** A call of a suspend function, which the coroutine running the caller performs, dispatching on `dispatcher`. */
+function suspendCall(
+  symbol: FunctionSymbol,
+  receiver: Value,
+  args: Value[],
+  callRow: number | undefined,
+  dispatcher: Value
+): Value {
   return new SuspendCall((caller) => {
-    const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
+    const target = isVirtual(symbol) ? runtimeClassOf(dispatcher).dispatch(symbol) : symbol;
     const invoke = target.invokeSuspend;
     if (!invoke) throw new Error(`The suspend function ${symbol.name} has no implementation`);
     return invoke(caller, receiver, args, callRow);
@@ -1277,9 +1287,7 @@ export abstract class CallCompiler extends CompilerCore {
             values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
           for (const value of values) temporaries.push(value);
           const target = isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
-          return suspendVersion
-            ? suspendCall(suspendVersion, receiver, values, callRow)
-            : callFunction(target, frame, receiver, values, callRow);
+          return callOrSuspend(suspendVersion ?? target, frame, receiver, values, callRow, dispatch);
         }
         if (symbol.passesTypeArguments)
           values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);

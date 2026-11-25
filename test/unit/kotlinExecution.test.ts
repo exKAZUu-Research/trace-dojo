@@ -6429,6 +6429,16 @@ test.each([
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test('calls suspend member extensions, dispatching on the value of their class', () => {
+  const source = `open class A { open suspend fun Int.tag(): String = "A$this" }
+class C : A() { override suspend fun Int.tag(): String = "C$this" }
+suspend fun main() {
+    with(A()) { println(1.tag()) }
+    with(C() as A) { println(listOf(2, 3).map { it.tag() }) }
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'A1\n[C2, C3]\n' });
+});
+
 test('suspends a sequence builder inside the inline lambdas and branches its block runs', () => {
   const source = `fun main() {
     val filtered = sequence { listOf(1, 2, 3).filter { yield(it); it > 1 }.forEach { yield(it * 10) } }
