@@ -1,0 +1,14 @@
+const counter = {
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next() { return { value: i, done: i++ >= 2 }; } };
+  },
+};
+for (const n of counter) console.log(n.toFixed(1));
+class Steps {
+  [Symbol.iterator]() {
+    let i = 0;
+    return { next: () => ({ value: `v${i}`, done: i++ >= 1 }) };
+  }
+}
+console.log([...new Steps()].map((s) => s.toUpperCase()));

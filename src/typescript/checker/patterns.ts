@@ -620,9 +620,8 @@ export class BindingPatterns {
       type.kind === 'templateLiteral'
     )
       return stringType;
-    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('iterator'));
-    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
-    if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
+    const element = this.iteratorElementType(type, 'iterator');
+    if (element) return element;
     if (type.kind === 'typeParameter') {
       const constraint = this.c.constraintOf(type);
       if (constraint) return this.iteratedType(node, constraint);
@@ -643,9 +642,8 @@ export class BindingPatterns {
         type.types.map((member) => this.asyncIteratedType(node, member)),
         true
       );
-    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('asyncIterator'));
-    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
-    if (iteratorType?.kind === 'object' && iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
+    const asyncElement = this.iteratorElementType(type, 'asyncIterator');
+    if (asyncElement) return asyncElement;
     const element = this.iteratedType(undefined, type);
     if (element !== errorType) return awaitedType(this.c, element);
     if (node)
@@ -654,6 +652,22 @@ export class BindingPatterns {
         `型 '${this.c.print(type)}' には、非同期イテレーターを返す '[Symbol.asyncIterator]()' メソッドが必要です。`
       );
     return errorType;
+  }
+
+  /**
+   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns yields: the type argument of
+   * a library iterator, or else the `value` its `next()` results have, as for an iterator object a program writes.
+   */
+  private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
+    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
+    if (iteratorType?.kind !== 'object') return undefined;
+    if (iteratorType.typeArguments?.[0]) return iteratorType.typeArguments[0];
+    const next = this.c.propertyOf(iteratorType, 'next');
+    const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
+    if (!result) return undefined;
+    const settled = method === 'asyncIterator' ? awaitedType(this.c, result) : result;
+    return this.c.propertyOf(settled, 'value')?.type();
   }
 
   private iterableConstraint(type: Type): Type | undefined {
