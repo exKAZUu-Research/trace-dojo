@@ -1,0 +1,10 @@
+namespace N {
+  export interface Box<T> { v: T }
+  export type Pair<A, B = string> = [A, B];
+  export class Holder<T> { constructor(public item: T) {} }
+}
+let b: N.Box<number> = { v: 2 };
+const p: N.Pair<number> = [1, 'x'];
+const h: N.Holder<string> = new N.Holder('s');
+const bad: N.Box<number> = { v: 'no' };
+console.log(b.v, p, h.item, bad);

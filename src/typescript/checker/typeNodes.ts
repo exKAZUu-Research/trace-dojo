@@ -232,9 +232,14 @@ export class TypeNodes {
   private genericType(node: TreeNode): Type {
     const name = node.childForFieldName('name') as TreeNode;
     const argumentsNode = node.childForFieldName('type_arguments');
-    return name.type === 'nested_type_identifier'
-      ? this.qualifiedType(name)
-      : this.typeReference(node, name, argumentsNode ? named(argumentsNode) : []);
+    const argumentNodes = argumentsNode ? named(argumentsNode) : [];
+    if (name.type !== 'nested_type_identifier') return this.typeReference(node, name, argumentNodes);
+    const type = this.qualifiedType(name);
+    // `N.Box<number>`: the generic a namespace exports, applied to its type arguments.
+    const symbol = type === errorType ? undefined : this.c.namespaces.qualifiedTypeSymbol(name).symbol;
+    const parameters = symbol ? this.c.signatures.typeParametersOfSymbol(symbol) : [];
+    if (!symbol || parameters.length === 0 || argumentNodes.length === 0) return type;
+    return this.referenceWithArguments(node, symbol, parameters, argumentNodes);
   }
 
   /** Eager class or interface arguments may carry a pending alias, as an array element can. */
@@ -498,7 +503,16 @@ export class TypeNodes {
         this.typeFromNode(argumentNodes[0])
       );
     if ('local' in reference) return reference.local;
-    const { symbol, parameters } = reference;
+    return this.referenceWithArguments(node, reference.symbol, reference.parameters, argumentNodes);
+  }
+
+  /** A declared class, interface, or alias applied to the written type arguments, filled with its defaults. */
+  private referenceWithArguments(
+    node: TreeNode,
+    symbol: Sym,
+    parameters: TypeParameter[],
+    argumentNodes: TreeNode[]
+  ): Type {
     const defers = symbol.typeKind === 'interface' || symbol.typeKind === 'class';
     const declared = this.declaredTypeOf(symbol);
     if (parameters.length === 0) return declared;
