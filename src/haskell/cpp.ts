@@ -355,7 +355,7 @@ class ConditionParser {
     text: string,
     private readonly error: (message: string) => Error
   ) {
-    this.tokens = text.match(/\d+|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g) ?? [];
+    this.tokens = text.match(/0[xX][\da-fA-F]+|\d+|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g) ?? [];
   }
 
   parse(): number {
@@ -419,7 +419,9 @@ class ConditionParser {
         return value;
       }
       default: {
-        if (token !== undefined && /^\d+$/.test(token)) return Number.parseInt(token, 10);
+        if (token !== undefined && /^0[xX][\da-fA-F]+$/.test(token)) return Number.parseInt(token.slice(2), 16);
+        if (token !== undefined && /^0[0-7]*$/.test(token)) return Number.parseInt(token, 8);
+        if (token !== undefined && /^[1-9]\d*$/.test(token)) return Number.parseInt(token, 10);
         throw this.error(`#if の式に誤りがあります（${token ?? '式の終わり'}）。`);
       }
     }
