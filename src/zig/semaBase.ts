@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
-import { alignmentOperand } from './admissibility';
+import { alignmentOperand, runtimeVariableType } from './admissibility';
 import { CompilationStorage, resolveTypeSlots, valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
@@ -209,6 +209,7 @@ export interface SemaApi {
   valueComparator(type: Type, ordered: boolean, span: Span): (a: Value, b: Value) => number;
   reserveStorage(type: Type, span: Span): void;
   resolveStorage(type: Type, span: Span): void;
+  requiresComptime(type: Type, span: Span): boolean;
   spendCompilation(cost?: number): void;
   nameSlice(text: string, frame?: Frame): Slice;
   libraryFunction(
@@ -328,7 +329,7 @@ export abstract class SemaBase implements SemaApi {
     this.resolveLayout(type, span, new Set());
   }
 
-  protected requiresComptime(type: Type, span: Span): boolean {
+  requiresComptime(type: Type, span: Span): boolean {
     this.resolveStorage(type, span);
     return isComptimeOnly(type);
   }
@@ -611,12 +612,7 @@ export abstract class SemaBase implements SemaApi {
             return declared ? this.coerce(compiled, declared, value) : compiled;
           }, value)
         );
-        if (decl.kind === 'var' && this.requiresComptime(compiled.type, syntax)) {
-          this.error(
-            syntax,
-            `変数「${syntax.name}」の型 ${typeName(compiled.type)} は、コンパイルのときだけの型です。`
-          );
-        }
+        if (decl.kind === 'var') runtimeVariableType(this, syntax.name, compiled.type, syntax, 'container');
         decl.cell = { slots: [this.copyForCompilation(compiled.value, compiled.type, syntax)] };
         decl.type = compiled.type;
         if (syntax.addressSpace) this.addressSpace(syntax.addressSpace);

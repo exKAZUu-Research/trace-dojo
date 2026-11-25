@@ -1,4 +1,4 @@
-import { alignmentOperand } from './admissibility';
+import { alignmentOperand, runtimeVariableType } from './admissibility';
 import { valueSlots } from './allocation';
 // code-gauge-allow-file duplicateLines -- Library types repeat the same shape of method on purpose, each over its own state.
 import { PANIC, panic } from './arith';
@@ -380,12 +380,10 @@ export abstract class StatementCompiler extends CallCompiler {
     alignment?: number
   ): LocalBinding {
     this.resolveStorage(type, value.span);
-    if (!isConst && !this.runsAtCompileTime(value.span) && this.requiresComptime(type, value.span))
-      this.error(
-        value.span,
-        `変数「${name}」の型 ${typeName(type)} は、コンパイルのときだけの型なので、const で宣言してください。`
-      );
-    if (!isConst && !this.runsAtCompileTime(value.span)) this.refuseComptimeVarReference(value, value.span);
+    if (!isConst && !this.runsAtCompileTime(value.span)) {
+      runtimeVariableType(this, name, type, value.span, 'local');
+      this.refuseComptimeVarReference(value, value.span);
+    }
     const fn = this.currentFn(value.span);
     const slot = this.localSlot();
     const binding: LocalBinding = {
