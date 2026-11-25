@@ -100,6 +100,8 @@ export class FileStream extends Stream {
   /** How many bytes of the file reading has passed. */
   private position = 0;
   private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  private encodedText: string | undefined;
+  private encoded = new Uint8Array();
 
   constructor(
     readonly file: OpenFile,
@@ -122,15 +124,21 @@ export class FileStream extends Stream {
 
   protected override readBytes(limit: number, spend: (cost: number) => void): Uint8Array | undefined {
     if (this.file.directory) return undefined;
-    const content = this.bytes();
-    const bytes = content.subarray(this.position, this.position + limit);
+    const bytes = this.bytes(spend).subarray(this.position, this.position + limit);
     this.position += bytes.length;
-    spend(Math.ceil((content.length + 1) / 64));
+    spend(Math.ceil((bytes.length + 1) / 64));
     return bytes;
   }
 
-  private bytes(): Uint8Array {
-    return new TextEncoder().encode(this.file.read?.() ?? '');
+  /** The file's bytes, which are encoded again only after the file's text changes. */
+  private bytes(spend?: (cost: number) => void): Uint8Array {
+    const text = this.file.read?.() ?? '';
+    if (text !== this.encodedText) {
+      this.encoded = new TextEncoder().encode(text);
+      this.encodedText = text;
+      spend?.(Math.ceil((this.encoded.length + 1) / 64));
+    }
+    return this.encoded;
   }
 
   private writeText(decode: () => string): void {
