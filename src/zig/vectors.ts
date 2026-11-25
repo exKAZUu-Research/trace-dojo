@@ -160,9 +160,8 @@ export abstract class VectorCompiler extends ReflectionCompiler {
         const span = { row: maskArg.row, col: maskArg.col, endRow: maskArg.endRow };
         // An undefined mask element selects an undefined element.
         if (index === undefinedValue(I32)) return { kind: 'undefined', ...span };
-        // An undefined operand has the other operand's length, which a mask element must still fall within.
-        const sized = source ?? left ?? right;
-        checkMaskElement(this, index, sized ? (sized.type as ArrayType).length : 0n, position, maskArg);
+        // Zig takes an undefined operand as a vector of no elements, which no mask element may select.
+        checkMaskElement(this, index, source ? (source.type as ArrayType).length : 0n, position, maskArg);
         if (!source) return { kind: 'undefined', ...span };
         const holder = elements[sources.indexOf(source)];
         return {

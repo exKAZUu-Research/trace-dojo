@@ -28,7 +28,7 @@ export function vectorOperand(sema: SemaApi, value: TExpr, element: Type, span: 
   return sema.coerce(value, vectorOf(type.length, element), span);
 }
 
-/** A `@shuffle` mask element, which must select an element of its operand, an undefined one as long as the other. */
+/** A `@shuffle` mask element, which must select an element of its operand; an undefined operand has none. */
 export function checkMaskElement(sema: SemaApi, element: bigint, length: bigint, position: number, span: Span): void {
   const index = element >= 0n ? element : ~element;
   if (index >= length) sema.error(span, `@shuffle のマスクの ${position} 番目 ${element} は、ベクトルの範囲の外です。`);
