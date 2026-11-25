@@ -26,6 +26,20 @@ interface SortedSet<E> : MutableSet<E> {
     fun subSet(fromElement: E, toElement: E): SortedSet<E>
 }
 
+interface NavigableSet<E> : SortedSet<E> {
+    fun lower(e: E): E?
+    fun floor(e: E): E?
+    fun ceiling(e: E): E?
+    fun higher(e: E): E?
+    fun pollFirst(): E?
+    fun pollLast(): E?
+    fun descendingSet(): NavigableSet<E>
+    fun descendingIterator(): MutableIterator<E>
+    fun headSet(toElement: E, inclusive: Boolean): NavigableSet<E>
+    fun tailSet(fromElement: E, inclusive: Boolean): NavigableSet<E>
+    fun subSet(fromElement: E, fromInclusive: Boolean, toElement: E, toInclusive: Boolean): NavigableSet<E>
+}
+
 @Suppress("UNCHECKED_CAST")
 internal fun <T> compareInOrder(comparator: Comparator<in T>?, a: T, b: T): Int =
     if (comparator != null) comparator.compare(a, b) else (a as Comparable<Any?>).compareTo(b)
@@ -83,7 +97,7 @@ class TreeMap<K, V> private constructor(
 class TreeSet<E> private constructor(
     private val order: Comparator<in E>?,
     private val table: LinkedHashSet<E>
-) : SortedSet<E>, MutableSet<E> by table {
+) : NavigableSet<E>, MutableSet<E> by table {
     constructor() : this(null, LinkedHashSet())
     constructor(comparator: Comparator<in E>?) : this(comparator, LinkedHashSet())
     constructor(elements: Collection<E>) : this(null, LinkedHashSet()) {
@@ -110,12 +124,56 @@ class TreeSet<E> private constructor(
 
     override fun first(): E = if (table.isEmpty()) throw NoSuchElementException() else table.iterator().next()
     override fun last(): E = if (table.isEmpty()) throw NoSuchElementException() else table.toList().last()
-    override fun headSet(toElement: E): SortedSet<E> = filtered { compareInOrder(order, it, toElement) < 0 }
-    override fun tailSet(fromElement: E): SortedSet<E> = filtered { compareInOrder(order, it, fromElement) >= 0 }
-    override fun subSet(fromElement: E, toElement: E): SortedSet<E> =
-        filtered { compareInOrder(order, it, fromElement) >= 0 && compareInOrder(order, it, toElement) < 0 }
+    override fun headSet(toElement: E): SortedSet<E> = headSet(toElement, false)
+    override fun tailSet(fromElement: E): SortedSet<E> = tailSet(fromElement, true)
+    override fun subSet(fromElement: E, toElement: E): SortedSet<E> = subSet(fromElement, true, toElement, false)
+    override fun headSet(toElement: E, inclusive: Boolean): NavigableSet<E> =
+        filtered { below(it, toElement, inclusive) }
+    override fun tailSet(fromElement: E, inclusive: Boolean): NavigableSet<E> =
+        filtered { below(fromElement, it, inclusive) }
+    override fun subSet(fromElement: E, fromInclusive: Boolean, toElement: E, toInclusive: Boolean): NavigableSet<E> {
+        compareInOrder(order, fromElement, toElement).let { if (it > 0) throw IllegalArgumentException("fromKey > toKey") }
+        return filtered { below(fromElement, it, fromInclusive) && below(it, toElement, toInclusive) }
+    }
 
-    private fun filtered(predicate: (E) -> Boolean): SortedSet<E> {
+    override fun lower(e: E): E? = table.lastOrNull { compareInOrder(order, it, e) < 0 }
+    override fun floor(e: E): E? = table.lastOrNull { compareInOrder(order, it, e) <= 0 }
+    override fun ceiling(e: E): E? = table.firstOrNull { compareInOrder(order, it, e) >= 0 }
+    override fun higher(e: E): E? = table.firstOrNull { compareInOrder(order, it, e) > 0 }
+    override fun pollFirst(): E? = table.firstOrNull()?.also { table.remove(it) }
+    override fun pollLast(): E? = table.lastOrNull()?.also { table.remove(it) }
+    override fun descendingSet(): NavigableSet<E> {
+        val result = TreeSet<E>(Comparator<E> { a, b -> compareInOrder(order, b, a) })
+        result.addAll(table)
+        return result
+    }
+    override fun descendingIterator(): MutableIterator<E> {
+        val elements = table.toList().asReversed().iterator()
+        return object : MutableIterator<E> {
+            private var current: E? = null
+            private var hasCurrent = false
+            override fun hasNext(): Boolean = elements.hasNext()
+            override fun next(): E {
+                val element = elements.next()
+                current = element
+                hasCurrent = true
+                return element
+            }
+            @Suppress("UNCHECKED_CAST")
+            override fun remove() {
+                if (!hasCurrent) throw IllegalStateException()
+                table.remove(current as E)
+                hasCurrent = false
+            }
+        }
+    }
+
+    private fun below(a: E, b: E, inclusive: Boolean): Boolean {
+        val comparison = compareInOrder(order, a, b)
+        return if (inclusive) comparison <= 0 else comparison < 0
+    }
+
+    private fun filtered(predicate: (E) -> Boolean): TreeSet<E> {
         val result = TreeSet<E>(order)
         for (element in table) if (predicate(element)) result.add(element)
         return result

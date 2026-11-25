@@ -6503,6 +6503,21 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '3\nabab\n' });
 });
 
+test('finds the neighbors of values in sorted sets, as java.util.TreeSet does', () => {
+  const source = `fun main() {
+    val t = sortedSetOf(5, 2, 9, 7)
+    println(listOf(t.ceiling(3), t.floor(3), t.higher(7), t.lower(2)))
+    println(t.descendingSet())
+    println(t.subSet(2, false, 7, true))
+    println(listOf(t.pollFirst(), t.pollLast()))
+    println(t)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n',
+  });
+});
+
 test('reads regex groups by name, as Kotlin/JVM does', () => {
   const source = `fun main() {
     val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
