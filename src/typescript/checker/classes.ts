@@ -42,6 +42,14 @@ import {
   voidType,
 } from './types';
 
+/** The functions, generators included, whose own `this` is untyped unless annotated. */
+const plainFunctionTypes = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function_declaration',
+  'generator_function',
+]);
+
 /** The kinds of global declarations that become properties of `globalThis`, unlike `let`, `const`, and classes. */
 const globalThisValueKinds = new Set<ValueKind>(['var', 'function', 'declared']);
 
@@ -834,10 +842,7 @@ export class ClassChecker {
       this.checkConstructorReceiver(node, owner, classNode, 'this');
       return isStatic ? info.staticType : this.selfType(info);
     }
-    if (
-      objectMethod ||
-      ['function_declaration', 'function_expression'].includes(owner.type.replace(/^generator_function/, 'function'))
-    ) {
+    if (objectMethod || plainFunctionTypes.has(owner.type)) {
       this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
       return anyType;
     }
