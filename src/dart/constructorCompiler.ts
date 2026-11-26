@@ -355,7 +355,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
     const type = this.resolveType(target.type, { allowRaw: true });
     if (type.kind !== 'interface') return this.error(declaration, 'リダイレクト先には、クラスを書いてください。');
-    this.checkUnavailableStaticMember(type.cls, target.name ?? '', declaration);
+    this.checkUnimplementedMember({ cls: type.cls }, target.name ?? '', 'read', declaration);
     const targetConstructor = type.cls.constructors.get(target.name ?? '');
     if (!targetConstructor)
       return this.error(
@@ -813,7 +813,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const targetType = kind === 'super' ? cls.superclass : cls.thisType;
     if (!targetType) return this.error(span, 'このクラスにはスーパークラスがありません。');
     const target = targetType.cls.constructors.get(name ?? '');
-    this.checkUnavailableStaticMember(target?.forwardedFrom ?? targetType.cls, name ?? '', span);
+    this.checkUnimplementedMember({ cls: target?.forwardedFrom ?? targetType.cls }, name ?? '', 'read', span);
     if (!target) {
       if (isImplicit) {
         return this.error(

@@ -319,7 +319,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
       return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
     }
-    this.checkUnavailableStaticMember(target.cls, callee.name, callee);
+    this.checkUnimplementedMember({ cls: target.cls }, callee.name, 'read', callee);
     return this.error(
       callee,
       `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
@@ -476,7 +476,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
-      this.checkUnimplementedMember(lookupType, name, span);
+      this.checkUnimplementedMember({ receiver: lookupType }, name, 'read', span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
     }
     if (
@@ -637,7 +637,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       const value = this.readStatic(member, span);
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
-    this.checkUnavailableStaticMember(member.owner, member.name, span);
+    this.checkUnimplementedMember({ cls: member.owner }, member.name, 'read', span);
     const bound = this.bindArguments(member.type, args, typeArguments, span, context);
     const row = this.callRow(span);
     const method = member;
@@ -751,7 +751,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     isConstSyntax: boolean
   ): Compiled {
     if (methodTypeArguments) this.error(span, 'コンストラクタには、型引数をこの位置には書けません。');
-    this.checkUnavailableStaticMember(cls, name ?? '', span);
+    this.checkUnimplementedMember({ cls }, name ?? '', 'read', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor) {
       if (cls.kind === 'enum') return this.error(span, '列挙型のオブジェクトは作れません。');
@@ -1154,7 +1154,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   compileConstructorTearoff(type: TypeSyntax, name: string | undefined, span: Span): Compiled {
     if (type.kind !== 'named') return this.error(span, 'クラスの名前を書いてください。');
     const { cls, types: typeArgs } = this.resolveConstructorType(type, span);
-    this.checkUnavailableStaticMember(cls, name ?? '', span);
+    this.checkUnimplementedMember({ cls }, name ?? '', 'read', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);
@@ -1221,7 +1221,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     }
     const member = cls.staticMembers.get(name);
     if (!member) {
-      this.checkUnavailableStaticMember(cls, name, expression);
+      this.checkUnimplementedMember({ cls }, name, 'read', expression);
       return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
     }
     return this.readStatic(member, expression);

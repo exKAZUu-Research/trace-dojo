@@ -1297,7 +1297,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
   }
 
   protected readStatic(member: Member, span: Span): Compiled {
-    this.checkUnavailableStaticMember(member.owner, member.name, span);
+    this.checkUnimplementedMember({ cls: member.owner }, member.name, 'read', span);
     switch (member.kind) {
       case 'field': {
         const global = this.globals[member.slot];
@@ -1403,7 +1403,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
-      this.checkUnimplementedMember(lookupType, name, span);
+      this.checkUnimplementedMember({ receiver: lookupType }, name, 'read', span);
       if (this.lookupMember(lookupType, name, true))
         this.error(span, `${name} には getter がないので、値を読めません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
@@ -1618,7 +1618,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     if (target.cls.constructors.has(name === 'new' ? '' : name))
       return this.loadedOnlyIfPrefixed(prefix, () => this.compileConstructorTearoff(target.syntax, name, span));
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
-    this.checkUnavailableStaticMember(target.cls, name, span);
+    this.checkUnimplementedMember({ cls: target.cls }, name, 'read', span);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
   }
 

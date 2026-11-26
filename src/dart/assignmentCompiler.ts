@@ -304,7 +304,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const owner = staticTarget.kind === 'class' ? staticTarget.cls : staticTarget.ext;
       const member = owner.staticSetters.get(expression.name) ?? owner.staticMembers.get(expression.name);
       if (staticTarget.kind === 'class')
-        this.checkUnavailableStaticMember(staticTarget.cls, expression.name, expression);
+        this.checkUnimplementedMember({ cls: staticTarget.cls }, expression.name, 'write', expression);
       if (!member)
         return this.error(
           expression,
@@ -402,7 +402,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private staticMemberTarget(member: Member, span: Span): AssignableTarget {
-    this.checkUnavailableStaticMember(member.owner, member.name, span);
+    this.checkUnimplementedMember({ cls: member.owner }, member.name, 'write', span);
     if (member.kind === 'field') {
       const global = this.globals[member.slot];
       return this.globalTarget(global, span);
@@ -472,10 +472,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const setter = this.memberFor(receiver, lookupType, name, span, true);
     if (!setter) {
-      // A member the interpreter has as a getter is implemented; only one it lacks altogether may be unavailable.
+      // A setter the SDK has and the interpreter lacks is unavailable, whether or not the getter is implemented.
+      this.checkUnimplementedMember({ receiver: lookupType }, name, 'write', span);
       const getter = this.memberFor(receiver, lookupType, name, span);
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
-      this.checkUnimplementedMember(lookupType, name, span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
     if (!this.canAccessTarget(receiverType, nullAware, setter)) {

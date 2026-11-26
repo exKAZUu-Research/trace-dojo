@@ -102,27 +102,41 @@ function sdkMembersOf(cls: ClassInfo): readonly [string, string, string] | undef
   return SDK_MEMBERS[cls.library === URI_LIBRARY ? 'dart:core' : cls.library]?.[cls.name];
 }
 
+/** How a member is used: a write uses its setter, which the table writes `name=`. */
+export type MemberAccess = 'read' | 'write';
+
 function hasName(names: string, name: string): boolean {
-  // The table does not record unnamed constructors, which an empty name would otherwise match.
-  return name !== '' && ` ${names} `.includes(` ${name} `);
+  return ` ${names} `.includes(` ${name} `);
+}
+
+function tableName(name: string, access: MemberAccess): string {
+  return access === 'write' ? `${name}=` : name;
 }
 
 /**
- * Whether the SDK gives instances of a class a member, through the nearest SDK classes it is or extends; the
- * interpreter's own supertypes of an SDK class are not consulted, since its hierarchy may differ from the SDK's.
+ * Whether the SDK gives instances of a class a member for the access, through the nearest SDK classes it is or
+ * extends; the interpreter's own supertypes of an SDK class are not consulted, since its hierarchy may differ.
  */
-export function isSdkInstanceMember(cls: ClassInfo, name: string, visited = new Set<ClassInfo>()): boolean {
+export function isSdkInstanceMember(
+  cls: ClassInfo,
+  name: string,
+  access: MemberAccess,
+  visited = new Set<ClassInfo>()
+): boolean {
   if (visited.has(cls)) return false;
   visited.add(cls);
   const members = cls.library ? sdkMembersOf(cls) : undefined;
-  if (members) return hasName(members[0], name);
+  if (members) return hasName(members[0], tableName(name, access));
   return [cls.superclass, ...cls.interfaces, ...cls.mixins, ...cls.onTypes].some(
-    (type) => type !== undefined && isSdkInstanceMember(type.cls, name, visited)
+    (type) => type !== undefined && isSdkInstanceMember(type.cls, name, access, visited)
   );
 }
 
-/** Whether the SDK's class has a static member or named constructor of the name. */
-export function isSdkStaticMember(cls: ClassInfo, name: string): boolean {
+/** Whether the SDK's class has a static member for the access, or a constructor (`''` the unnamed one). */
+export function isSdkStaticMember(cls: ClassInfo, name: string, access: MemberAccess): boolean {
   const members = cls.library ? sdkMembersOf(cls) : undefined;
-  return members !== undefined && (hasName(members[1], name) || hasName(members[2], name));
+  if (members === undefined) return false;
+  // The unnamed constructor has no name of its own, which every list would match, so it is looked up as `new`.
+  if (name === '') return access === 'read' && hasName(members[2], 'new');
+  return hasName(members[1], tableName(name, access)) || (access === 'read' && hasName(members[2], name));
 }

@@ -13,7 +13,7 @@ import type { GenEval } from './awaitSteps';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import { eraseExtensionTypes } from './eraseExtensionTypes';
-import { isSdkInstanceMember, isSdkStaticMember } from './library/sdkExports';
+import { isSdkInstanceMember, isSdkStaticMember, type MemberAccess } from './library/sdkExports';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalScope, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
@@ -167,23 +167,36 @@ export abstract class CompilerBase {
     if (!this.fn.kind.isAsync) this.error(span, `${construct} は async の関数の中にしか書けません。`);
   }
 
-  /** Rejects as unavailable an instance member the SDK has but the interpreter does not implement. */
-  protected checkUnimplementedMember(receiver: DartType, name: string, span: Span): void {
-    const type = resolveBound(receiver);
-    if (type.kind === 'interface' && isSdkInstanceMember(type.cls, name))
-      this.unsupported(span, type.cls.name + '.' + name);
-  }
-
-  protected checkUnavailableStaticMember(cls: ClassInfo, name: string, span: Span): void {
+  /**
+   * Rejects as unavailable a member the SDK has for the access (a read or call, or a write through its setter) but
+   * the interpreter does not implement: an instance member of the receiver's type, which the caller found missing,
+   * or a static member or constructor of a class. Every member use decides this here, from the generated SDK table.
+   */
+  protected checkUnimplementedMember(
+    owner: { receiver: DartType } | { cls: ClassInfo },
+    name: string,
+    access: MemberAccess,
+    span: Span
+  ): void {
+    if ('receiver' in owner) {
+      const type = resolveBound(owner.receiver);
+      if (type.kind === 'interface' && isSdkInstanceMember(type.cls, name, access))
+        this.unsupported(span, type.cls.name + '.' + name);
+      return;
+    }
+    const { cls } = owner;
     if (name.startsWith('_') && cls.library !== this.library.name) {
       this.error(span, `${cls.name} の ${name} は、宣言されているライブラリの中だけで使えます。`);
     }
     if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
       this.unsupported(span, `${cls.name}.${name}`);
     }
+    const constructor = name === 'new' ? '' : name;
     const isImplemented =
-      cls.staticMembers.has(name) || cls.staticSetters.has(name) || cls.constructors.has(name === 'new' ? '' : name);
-    if (!isImplemented && isSdkStaticMember(cls, name)) this.unsupported(span, `${cls.name}.${name}`);
+      access === 'write'
+        ? cls.staticSetters.has(name) || cls.staticMembers.get(name)?.kind === 'field'
+        : cls.staticMembers.has(name) || cls.staticSetters.has(name) || cls.constructors.has(constructor);
+    if (!isImplemented && isSdkStaticMember(cls, constructor, access)) this.unsupported(span, `${cls.name}.${name}`);
   }
 
   protected checkMixinConstraints(base: InterfaceType, mixin: InterfaceType, span: Span): void {
