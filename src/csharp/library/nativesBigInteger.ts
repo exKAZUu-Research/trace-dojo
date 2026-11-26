@@ -86,6 +86,16 @@ function toInt32(value: bigint): number {
   return Number(value);
 }
 
+/**
+ * `(uint)value` or `(ulong)value`: a negative int is the checked conversion's overflow, and any other value outside
+ * the words the type holds is the type's.
+ */
+function toUnsigned(value: bigint, words: number, typeName: string): bigint {
+  if (isSmall(value) && value < 0n) fail('System.OverflowException', GENERIC_OVERFLOW);
+  if (value < 0n || wordsOf(value) > words) overflow(typeName);
+  return value;
+}
+
 /** The narrower integral types convert through int, checked. */
 const NARROW_RANGES: Record<string, readonly [number, number]> = {
   sbyte: [-128, 127],
@@ -101,18 +111,14 @@ function toIntegral(value: bigint, type: string): number | bigint {
       return toInt32(value);
     }
     case 'uint': {
-      if (isSmall(value) && value < 0n) fail('System.OverflowException', GENERIC_OVERFLOW);
-      if (value < 0n || wordsOf(value) > 1) overflow('a UInt32');
-      return Number(value);
+      return Number(toUnsigned(value, 1, 'a UInt32'));
     }
     case 'long': {
       if (value < -(2n ** 63n) || value >= 2n ** 63n) overflow('an Int64');
       return value;
     }
     case 'ulong': {
-      if (isSmall(value) && value < 0n) fail('System.OverflowException', GENERIC_OVERFLOW);
-      if (value < 0n || wordsOf(value) > 2) overflow('a UInt64');
-      return value;
+      return toUnsigned(value, 2, 'a UInt64');
     }
     default: {
       const narrow = toInt32(value);
