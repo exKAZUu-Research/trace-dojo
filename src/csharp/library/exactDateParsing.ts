@@ -22,6 +22,24 @@ export type ExactDateFailure =
   | { kind: 'badFormatSpecifier' }
   | { kind: 'invalidString' };
 
+/** The message of .NET's FormatException for a string that a format does not read. */
+export function exactFailureMessage(text: string, failure: ExactDateFailure): string {
+  switch (failure.kind) {
+    case 'badDateTime': {
+      return `String '${text}' was not recognized as a valid DateTime.`;
+    }
+    case 'badQuote': {
+      return `Cannot find a matching quote character for the character '${failure.quote}'.`;
+    }
+    case 'badFormatSpecifier': {
+      return "Format specifier '' was invalid.";
+    }
+    case 'invalidString': {
+      return 'Input string was not in a correct format.';
+    }
+  }
+}
+
 /** The `DateTimeStyles` that a string may have white space by. */
 export interface WhiteSpaceStyles {
   leading: boolean;

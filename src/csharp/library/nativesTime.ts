@@ -4,8 +4,8 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsArray, CsBox, CsStruct, plainString, type Value } from '../values';
 import {
-  type ExactDateFailure,
   type ExactDateFields,
+  exactFailureMessage,
   isUniversalStandardFormat,
   parseExactDate,
   type WhiteSpaceStyles,
@@ -715,23 +715,6 @@ function parseExact(
       return ticks;
   }
   return `String '${text}' was not recognized as a valid DateTime.`;
-}
-
-function exactFailureMessage(text: string, failure: ExactDateFailure): string {
-  switch (failure.kind) {
-    case 'badDateTime': {
-      return `String '${text}' was not recognized as a valid DateTime.`;
-    }
-    case 'badQuote': {
-      return `Cannot find a matching quote character for the character '${failure.quote}'.`;
-    }
-    case 'badFormatSpecifier': {
-      return "Format specifier '' was invalid.";
-    }
-    case 'invalidString': {
-      return 'Input string was not in a correct format.';
-    }
-  }
 }
 
 /**
