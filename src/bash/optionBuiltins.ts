@@ -101,7 +101,7 @@ export const shoptBuiltin: Builtin = (shell, args) => {
   const allNames: readonly OptionName[] = usesSet ? SET_OPTION_NAMES : SHOPT_NAMES;
   const shown =
     requested.length > 0 ? names : allNames.filter((name) => setting === undefined || shell.options[name] === setting);
-  if (!flags.has('q')) printShoptLines(shell, shown, usesSet, flags.has('p'));
+  if (!flags.has('q')) printShoptLines(shell, shown, usesSet, flags.has('p'), requested.length === 0);
   const anyOff = requested.length > 0 && shown.some((name) => !shell.options[name]);
   return anyOff ? 1 : status;
 };
@@ -146,10 +146,18 @@ function knownOptionNames(
 
 /** Prints options as `shopt` lists them, or with `-p` as the commands that set them. */
 // code-gauge-allow functionCognitiveComplexity -- Picks among the table and the two command formats `shopt -p` and `shopt -po` print.
-function printShoptLines(shell: Shell, names: readonly OptionName[], usesSet: boolean, asCommands: boolean): void {
+function printShoptLines(
+  shell: Shell,
+  names: readonly OptionName[],
+  usesSet: boolean,
+  asCommands: boolean,
+  listsAll: boolean
+): void {
+  // Bash lists every `set -o` option as `set -o` does, in 15 columns, and names given in the `shopt` width of 20.
+  const width = usesSet && listsAll ? 15 : 20;
   for (const name of names) {
     const on = shell.options[name];
-    if (!asCommands) shell.fd1.write(`${name.padEnd(20)}\t${on ? 'on' : 'off'}\n`);
+    if (!asCommands) shell.fd1.write(`${name.padEnd(width)}\t${on ? 'on' : 'off'}\n`);
     else shell.fd1.write(usesSet ? `set ${on ? '-' : '+'}o ${name}\n` : `shopt ${on ? '-s' : '-u'} ${name}\n`);
   }
 }
