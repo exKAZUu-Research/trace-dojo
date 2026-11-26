@@ -101,6 +101,8 @@ export interface Job {
   finish?: (shellEnds?: boolean) => void;
   descriptors?: DescriptorTable;
   waiting?: boolean;
+  /** Whether a waiting coprocess would still run commands once its input ends, which this environment cannot resume. */
+  losesRemainder?: boolean;
   awaitEnd?: () => void;
 }
 

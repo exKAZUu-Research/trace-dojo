@@ -169,7 +169,10 @@ export class DeadlockError extends Error {
 }
 
 /** Stops a coprocess that has read all the shell wrote to it while the shell can still write more, as Bash's waits. */
-export class CoprocessWaitSignal {}
+export class CoprocessWaitSignal {
+  /** The `while read` loop whose condition waited, which ends with nothing more to run once the input ends. */
+  waitingLoop: Statement | undefined;
+}
 
 /** Whether `error` is how the shell leaves commands as Bash does, rather than a stop of the whole program. */
 export function isShellSignal(

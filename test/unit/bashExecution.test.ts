@@ -327,3 +327,24 @@ echo late >&"\${C[1]}"
     uncaughtException: '動き終わった coproc（C）への書き込みは、この採点環境では使えません。',
   });
 });
+
+test('a coprocess left waiting for input ends quietly only where nothing would run after its input ends', () => {
+  // Bash closes the coprocess's input as the shell ends, and runs what follows the `read` that was waiting.
+  const loopOnly = `up() { while read -r l; do echo "\${l^^}"; done; }
+coproc C { up; }
+echo ping >&"\${C[1]}"
+read -r reply <&"\${C[0]}"
+echo "reply=$reply"
+`;
+  expect(executeProgram('bash', loopOnly)).toMatchObject({ kind: 'executed', stdout: 'reply=PING\n', stderr: '' });
+  const withRest = `coproc { read x; echo "got $x"; read y; echo "y=[$y]" > out.txt; }
+echo a >&"\${COPROC[1]}"
+read -r z <&"\${COPROC[0]}"
+echo "$z"
+`;
+  expect(executeProgram('bash', withRest)).toMatchObject({
+    kind: 'executed',
+    stdout: 'got a\n',
+    uncaughtException: '入力を待ったまま残りの処理がある coproc は、この採点環境では使えません。',
+  });
+});

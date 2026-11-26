@@ -111,6 +111,27 @@ function redirectsStandardInput(redirect: Redirect): boolean {
  * Whether a forked process runs a compound command, in which `break` and `continue` are outside every loop, as in
  * Bash; a simple command, with `!` or alone in a pipeline, keeps the loops it was written in.
  */
+/** Whether a `while` condition is a lone `read`, which fails only once its input ends. */
+function isLoneRead(condition: readonly Statement[]): boolean {
+  const [only] = condition;
+  return condition.length === 1 && only.kind === 'command' && only.words[0]?.text === 'read';
+}
+
+/**
+ * Whether `statement` is the last command `body` runs, at the end of any `{ }` around it or of the function a last
+ * command without arguments calls in `shell`.
+ */
+function endsWith(shell: Shell, body: Statement, statement: Statement): boolean {
+  if (body === statement) return true;
+  if (body.kind === 'group') {
+    return body.body.length > 0 && endsWith(shell, body.body.at(-1) as Statement, statement);
+  }
+  if (body.kind !== 'command' || body.words.length !== 1 || body.redirects.length > 0) return false;
+  const name = body.words[0].text;
+  const fn = shell.store.hasFunction(name) ? shell.store.getFunction(name) : undefined;
+  return fn !== undefined && fn.redirects.length === 0 && endsWith(shell, fn.body, statement);
+}
+
 function runsCompoundCommand(command: Statement): boolean {
   if (command.kind === 'not') return runsCompoundCommand(command.body);
   if (command.kind === 'pipeline' && command.commands.length === 1) return runsCompoundCommand(command.commands[0]);
@@ -769,6 +790,11 @@ export class Shell implements ArithmeticHost {
       } catch (error) {
         if (!(error instanceof CoprocessWaitSignal)) throw error;
         job.waiting = true;
+        // The body cannot go on from where it waited; it can be left only where the rest would do nothing.
+        job.losesRemainder =
+          error.waitingLoop === undefined ||
+          !endsWith(child.shell, body, error.waitingLoop) ||
+          child.shell.traps.has('EXIT');
       }
       output = capture.read();
     };
@@ -810,9 +836,15 @@ export class Shell implements ArithmeticHost {
     return fd;
   }
 
-  /** Runs the coprocesses nothing has read from, as they run to their end when the shell or subshell ends. */
+  /**
+   * Runs the coprocesses nothing has read from, as they run to their end when the shell or subshell ends, and stops
+   * where a coprocess waiting for input would run more commands once its input ends, which it cannot resume here.
+   */
   finishCoprocesses(): void {
-    for (const job of this.store.jobs.values()) job.finish?.(true);
+    for (const job of this.store.jobs.values()) {
+      job.finish?.(true);
+      if (job.waiting && job.losesRemainder) rejectUnsupportedFeature('入力を待ったまま残りの処理がある coproc');
+    }
   }
 
   private runWithStandardInput(input: OpenFile, command: Statement): number {
@@ -848,12 +880,27 @@ export class Shell implements ArithmeticHost {
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        const cond = this.runWhileCondition(statement.condition, last);
+        const cond = this.markWaitingLoop(statement, () => this.runWhileCondition(statement.condition, last));
         if (cond.action === 'break' || (cond.status === 0) === statement.until) return;
         if (cond.action === 'continue') continue;
         if (this.iterate(statement.body, last) === 'stop') return;
       }
     });
+  }
+
+  /**
+   * Notes a `while` loop whose condition is a lone `read` that waits for a coprocess's input, which ends the loop
+   * with nothing more to run once the input ends.
+   */
+  private markWaitingLoop<T>(statement: Extract<Statement, { kind: 'while' }>, run: () => T): T {
+    try {
+      return run();
+    } catch (error) {
+      if (error instanceof CoprocessWaitSignal && !statement.until && isLoneRead(statement.condition)) {
+        error.waitingLoop ??= statement;
+      }
+      throw error;
+    }
   }
 
   private runWhileCondition(
