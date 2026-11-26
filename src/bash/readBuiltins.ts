@@ -116,7 +116,8 @@ function readText(
     if (count !== undefined && chars.length >= count) return { chars, escaped, complete: true };
     const c = readCharacter(reader);
     if (c === undefined) return { chars, escaped, complete: false };
-    if (c === '\0') continue;
+    // Bash drops NULs from the input unless a NUL is the delimiter, as with `-d ''`.
+    if (c === '\0' && delimiter !== '\0') continue;
     if (!raw && c === '\\') {
       const next = readCharacter(reader);
       if (next === undefined) return { chars, escaped, complete: false };
