@@ -50,17 +50,29 @@ function changeDirectory(shell: Shell, builtin: string, path: string, shown: str
   const full = path.startsWith('/') ? path : `${shell.store.workingDirectory}/${path}`;
   const target = resolvePath(full);
   // `..` leaves a directory by its name, but every directory the path names on the way must exist, as Bash checks.
-  const kinds = [...prefixesBeforeParents(full), target].map((prefix) =>
-    shell.runtime.io.files.kindOf(resolvePath(prefix))
-  );
-  if (kinds.some((kind) => kind !== 'directory')) {
-    const notDirectory = kinds.find((kind) => kind !== 'directory') === 'file';
-    shell.reportError(`${builtin}: ${shown}: ${notDirectory ? 'Not a directory' : 'No such file or directory'}`);
+  // The first name on the way that is not a directory decides the error, as `chdir` reports it: a file there is
+  // `Not a directory`, even when the names after it do not exist.
+  const blocked = [...prefixesBeforeParents(full), target]
+    .map((prefix) => firstNonDirectory(shell, resolvePath(prefix)))
+    .find((kind) => kind !== undefined);
+  if (blocked !== undefined) {
+    const message = blocked === 'file' ? 'Not a directory' : 'No such file or directory';
+    shell.reportError(`${builtin}: ${shown}: ${message}`);
     return false;
   }
   shell.store.previousDirectory = shell.store.workingDirectory;
   shell.store.workingDirectory = target;
   return true;
+}
+
+/** What the first name along an absolute path is that is not a directory: a file, missing, or none. */
+function firstNonDirectory(shell: Shell, path: string): 'file' | 'missing' | undefined {
+  const parts = path.split('/').filter((part) => part !== '');
+  for (let index = 1; index <= parts.length; index++) {
+    const kind = shell.runtime.io.files.kindOf(`/${parts.slice(0, index).join('/')}`);
+    if (kind !== 'directory') return kind === 'file' ? 'file' : 'missing';
+  }
+  return undefined;
 }
 
 /** The parts of a path up to each `..` in it, whose directories the `..` leaves. */
