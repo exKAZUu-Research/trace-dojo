@@ -24,7 +24,6 @@ import {
   copyLoopVariables,
   type CountedLoop,
   type Exec,
-  functionLabel,
   type GenExec,
   loopCompletion,
   runLoopUpdates,
@@ -43,7 +42,6 @@ import {
   iterableElementOf,
   NEVER,
   nonNullable,
-  NULL,
   resolveBound,
   sameType,
 } from './types';
@@ -423,16 +421,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       functionBody.kind === 'expression'
         ? this.compileGenStatement(this.arrowBodyReturn(functionBody.expression))
         : this.compileGenBlock(functionBody.block, false);
-    if (functionBody.kind === 'block' && this.flow.reachable) {
-      this.fn.returnTypes?.push(NULL);
-      const checked = this.checkedReturnType(spec);
-      if (checked && this.mustReturnValue(checked, true)) {
-        this.error(
-          { row: functionBody.block.row },
-          `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
-        );
-      }
-    }
+    this.checkBodyEnd(spec);
     const value = declared ? futureValueType(declared) : this.inferredFutureValue(this.fn, spec);
     const resolveValue = this.runtimeType(value);
     return (frame) => frame.runtime.links.startAsync(frame, resolveValue(frame), body);

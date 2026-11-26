@@ -20,7 +20,7 @@ import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
-import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar } from './scope';
+import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar, type ReturnRule } from './scope';
 import { closeInferenceHoles, containsInferenceHole } from './typeInference';
 import {
   coreTypes,
@@ -93,7 +93,6 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // Functions
 
-  // code-gauge-allow functionCognitiveComplexity -- Parameters, the body, and return-type inference share the closure's flow.
   // code-gauge-allow functionNcss -- Parameters, the body, and return-type inference share the function context.
   compileFunction(spec: FunctionSpec & { isClosure?: boolean }): CompiledFunction {
     const isClosure = spec.isClosure ?? spec.name === '<anonymous closure>';
@@ -114,6 +113,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (spec.returnType === undefined) fn.returnTypes = [];
     if (spec.kind.isGenerator) fn.yieldTypes = [];
     fn.contextReturn = spec.contextReturnType;
+    fn.returnRule = this.returnRuleOf(spec);
     this.fn = fn;
     // A closure sees what is known of the enclosing function's variables where it is created, except promotions of
     // variables assigned anywhere after their declarations, which may change before the closure runs.
@@ -129,31 +129,18 @@ export abstract class StatementCompiler extends PatternCompiler {
       } else if (spec.kind.isAsync) {
         run = this.compileAsyncBody(spec);
       } else if (spec.body.kind === 'expression') {
-        const body = spec.body.expression;
-        const compiled = this.compileReturnValue(body, expectedReturn, true);
+        const compiled = this.compileReturnedValue(spec.body.expression, true);
         const valueRun = compiled.run;
         run = (frame) => valueRun(frame);
       } else {
         const block = this.compileBlock(spec.body.block, false);
-        if (this.flow.reachable) {
-          fn.returnTypes?.push(NULL);
-          const checked = this.checkedReturnType(spec);
-          if (checked && this.mustReturnValue(checked, false)) {
-            this.error(
-              { row: spec.body.block.row },
-              `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
-            );
-          }
-        }
+        this.checkBodyEnd(spec);
         run = (frame) => {
           const completion = block(frame);
           return completion?.kind === 'return' ? completion.value : undefined;
         };
       }
-      if (fn.returnsValue) {
-        for (const bare of fn.contextBareReturns)
-          this.error(bare, 'この関数は値を return するので、return にも値が必要です。');
-      }
+      this.checkContextBareReturns();
       const returnType = spec.returnType ?? this.inferredReturnType(fn, spec);
       return { fn, returnType, run, bind: binders, usesTypeEnv: true };
     } finally {
@@ -180,11 +167,44 @@ export abstract class StatementCompiler extends PatternCompiler {
   /** The annotation rows that mark a function, so that any other one is reported as misplaced. */
   protected readonly usedAtomicRows = new Set<number>();
 
+  /** The function's effective return type, decided once, which every return rule of its body reads. */
+  private returnRuleOf(spec: FunctionSpec): ReturnRule {
+    const isAsync = spec.kind.isAsync;
+    const checked = this.checkedReturnType(spec);
+    if (isAsync) {
+      const declared = spec.returnType ?? spec.contextReturnType;
+      const valueType = declared ? futureValueType(declared) : undefined;
+      // The returned expression is inferred under FutureOr of its value type, Object? and dynamic included, as the
+      // SDK does: `Future<Object?> f() async => wrap(x)` infers wrap's T as Object?; a void value type gives none.
+      const context =
+        valueType && valueType.kind !== 'void' ? interfaceType(coreTypes.futureOr, [valueType]) : undefined;
+      return { checked, valueType, context, isAsync };
+    }
+    const context = spec.returnType ?? spec.contextReturnType;
+    return { checked, valueType: checked, context: context?.kind === 'void' ? undefined : context, isAsync };
+  }
+
+  /**
+   * Rejects a body whose end is reachable when its return type does not allow completing with null, the rule for
+   * the end of every body that may return a value.
+   */
+  protected checkBodyEnd(spec: FunctionSpec): void {
+    if (spec.body.kind !== 'block' || !this.flow.reachable) return;
+    this.fn.returnTypes?.push(NULL);
+    const { checked, isAsync } = this.fn.returnRule;
+    if (checked && this.mustReturnValue(checked, isAsync)) {
+      this.error(
+        { row: spec.body.block.row },
+        `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
+      );
+    }
+  }
+
   /**
    * The return type a function's body is checked against: the declared one, or for a function literal the one its
    * context gives, once that is known; a literal without a context infers its return type instead.
    */
-  protected checkedReturnType(spec: FunctionSpec): DartType | undefined {
+  private checkedReturnType(spec: FunctionSpec): DartType | undefined {
     if (spec.returnType) return spec.returnType;
     const context = spec.contextReturnType;
     if (!context || containsInferenceHole(context)) return undefined;
@@ -198,7 +218,7 @@ export abstract class StatementCompiler extends PatternCompiler {
    * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
    * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
    */
-  protected mustReturnValue(declared: DartType, isAsync: boolean): boolean {
+  private mustReturnValue(declared: DartType, isAsync: boolean): boolean {
     if (isAsync && isNullable(declared)) return false;
     const type = isAsync && !isObject(declared) ? futureValueType(declared) : declared;
     if (isTop(type) || type.kind === 'null' || isNullable(type)) return false;
@@ -229,57 +249,26 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /**
-   * The type a `return` gives the function's result: the declared return type, or for an `async` function the type
-   * its future completes with; undefined for a closure whose return type is inferred.
+   * A returned value, checked by the function's return rule: a void function's `return` takes no value but a void,
+   * dynamic or null one (an arrow body may give any); an async function's value fits when it is a FutureOr of the
+   * value type, as Dart's rule says, which flatten would not tell for a value type that is itself a future; a
+   * synchronous one's is coerced to the return type, which a void value fits only for a top context.
    */
-  protected returnValueType(): DartType | undefined {
-    const { returnType, isAsync } = this.fn.kind;
-    if (!isAsync) {
-      // A function literal is checked against its context's return type once that type is known, as r65's check is.
-      const context = this.fn.contextReturn;
-      const known = context && !containsInferenceHole(context) ? context : undefined;
-      return returnType ?? known ?? (this.fn.returnTypes ? undefined : VOID);
-    }
-    const declared = returnType ?? this.fn.contextReturn;
-    return declared ? futureValueType(declared) : undefined;
-  }
-
-  /** The value an `async` function returns, which may be a future of the value its own future completes with. */
-  protected compileAsyncReturnValue(
-    expression: Expression,
-    expected: DartType | undefined,
-    isArrow: boolean
-  ): Compiled {
-    // The returned expression is inferred under FutureOr of its value type, Object? and dynamic included, as the SDK
-    // does: `Future<Object?> f() async => wrap(x)` infers wrap's T as Object?. A void value type gives no context, as a
-    // synchronous return's does, and only a value type beyond the top types checks the value.
-    const valueType = expected && !isTop(expected) ? expected : undefined;
-    const context = expected && expected.kind !== 'void' ? interfaceType(coreTypes.futureOr, [expected]) : undefined;
+  private compileReturnedValue(expression: Expression, isArrow: boolean): Compiled {
+    const { valueType, context, isAsync } = this.fn.returnRule;
     const compiled = this.compileExpression(expression, context);
     const kind = compiled.type.kind;
-    if (expected?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
+    const voidType = isAsync ? valueType : (valueType ?? this.fn.contextReturn);
+    if (voidType?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
     }
-    const value = flatten(compiled.type);
-    // The returned value fits when it is a FutureOr of the value type, as Dart's rule says, which flatten would not
-    // tell for a value type that is itself a future: Future<Future<int>> takes a Future<int>.
-    if (
-      valueType &&
-      compiled.type.kind !== 'dynamic' &&
-      !isSubtype(compiled.type, interfaceType(coreTypes.futureOr, [valueType]))
-    ) {
-      this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
-    }
-    this.fn.returnTypes?.push(value);
-    return compiled;
-  }
-
-  private compileReturnValue(expression: Expression, expected: DartType | undefined, isArrow: boolean): Compiled {
-    const context = expected?.kind === 'void' ? undefined : expected;
-    const compiled = this.compileExpression(expression, context);
-    const kind = compiled.type.kind;
-    if (expected?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
-      this.error(expression, '戻り値の型が void の関数は、値を返せません。');
+    if (isAsync) {
+      const fits = !valueType || isTop(valueType) || kind === 'dynamic';
+      if (!fits && !isSubtype(compiled.type, interfaceType(coreTypes.futureOr, [valueType]))) {
+        this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
+      }
+      this.fn.returnTypes?.push(flatten(compiled.type));
+      return compiled;
     }
     const allowsVoid =
       kind === 'void' && context && (context.kind === 'dynamic' || (this.fn.returnTypes && isTop(context)));
@@ -1247,19 +1236,16 @@ export abstract class StatementCompiler extends PatternCompiler {
       const done: Completion = { kind: 'return', value: undefined };
       return () => done;
     }
-    const expected = this.returnValueType();
     if (!statement.value) {
       this.fn.returnTypes?.push(NULL);
-      if (expected) this.checkBareReturn(statement, expected);
+      this.checkBareReturn(statement);
       this.flow = this.flow.unreachable;
       const completion: Completion = { kind: 'return', value: undefined };
       return () => completion;
     }
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
     this.fn.returnsValue = true;
-    const compiled = this.fn.kind.isAsync
-      ? this.compileAsyncReturnValue(statement.value, expected, statement === this.arrowReturn)
-      : this.compileReturnValue(statement.value, expected ?? this.fn.contextReturn, false);
+    const compiled = this.compileReturnedValue(statement.value, statement === this.arrowReturn);
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });
@@ -1275,12 +1261,23 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Rejects `return;` where the function's value type requires a value. */
-  private checkBareReturn(statement: Span, expected: DartType): void {
-    if (expected.kind === 'void' || expected.kind === 'dynamic' || expected.kind === 'null') return;
+  private checkBareReturn(statement: Span): void {
+    const expected = this.fn.returnRule.valueType;
+    if (!expected || expected.kind === 'void' || expected.kind === 'dynamic' || expected.kind === 'null') return;
     if (this.fn.kind.isConstructor) return;
     // A function literal's return type comes from its context, which `return;` fits when it allows null.
     if (this.fn.kind.returnType === undefined && isNullable(expected)) this.fn.contextBareReturns.push(statement);
     else this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
+  }
+
+  /**
+   * Rejects the `return;`s a function literal's nullable context allowed, once a `return` with a value shows that the
+   * function returns values, as the SDK requires.
+   */
+  private checkContextBareReturns(): void {
+    if (!this.fn.returnsValue) return;
+    for (const bare of this.fn.contextBareReturns)
+      this.error(bare, 'この関数は値を return するので、return にも値が必要です。');
   }
 
   /** The slots holding the exceptions of the catch clauses being compiled, innermost last. */

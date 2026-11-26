@@ -111,6 +111,8 @@ export class FunctionContext {
   catchDepth = 0;
   /** The return type a closure's context expects, which its `return` statements are checked against. */
   contextReturn: DartType | undefined;
+  /** What the body's end and its `return`s are checked against, decided once from the function's return type. */
+  returnRule: ReturnRule = { checked: undefined, valueType: undefined, context: undefined, isAsync: false };
   /** The element type a `sync*` function's return type gives its `yield` statements. */
   yieldElement: DartType | undefined;
 
@@ -489,4 +491,17 @@ export function bodyKind(modifier: BodyModifier | undefined): { isGenerator: boo
     isGenerator: modifier === 'sync*' || modifier === 'async*',
     isAsync: modifier === 'async' || modifier === 'async*',
   };
+}
+
+/**
+ * The effective return type of a function, by which Dart's rules for the end of its body and for each `return` are
+ * applied on every path (sync, async, arrow, closure): `checked` is the declared type, or a function literal's
+ * context once it is known; `valueType` is what a returned value must fit, an async function's folded by
+ * futureValueType; `context` is what a returned expression is inferred under.
+ */
+export interface ReturnRule {
+  checked: DartType | undefined;
+  valueType: DartType | undefined;
+  context: DartType | undefined;
+  isAsync: boolean;
 }
