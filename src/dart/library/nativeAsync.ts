@@ -164,9 +164,14 @@ function perform(
   }
 }
 
+/**
+ * The resumptions that the resumption running on each runtime asked to run once it ends, one list for each resumption
+ * running, innermost last: a body that resumes another this way does not nest its frames in the host's stack.
+ */
+const laterResumptions = new WeakMap<Runtime, { state: SuspendedBody & { object: DartObject }; value: Value }[][]>();
+
 define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) => {
   const state = (self as DartObject).native as unknown as SuspendedBody & { object: DartObject };
-  const { frame } = state;
   let next: Resumption | undefined;
   if (exception !== undefined) {
     next = { kind: 'throw', error: runtime.newThrow(exception, stackTrace) };
@@ -175,6 +180,33 @@ define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) 
   } else {
     next = { kind: 'next', value: state.atStart || state.atYield ? undefined : value };
   }
+  const stack = laterResumptions.get(runtime) ?? [];
+  laterResumptions.set(runtime, stack);
+  const later: { state: SuspendedBody & { object: DartObject }; value: Value }[] = [];
+  stack.push(later);
+  try {
+    resume(runtime, state, next);
+    // A body this resumption asked to resume runs now, where it would have finished inside it.
+    for (let job = later.shift(); job; job = later.shift())
+      resume(runtime, job.state, { kind: 'next', value: job.value });
+  } finally {
+    stack.pop();
+  }
+  return;
+});
+
+define('_SuspendState._resumeLater', (runtime, self, [value]) => {
+  const state = (self as DartObject).native as unknown as SuspendedBody & { object: DartObject };
+  const later = laterResumptions.get(runtime)?.at(-1);
+  if (later) later.push({ state, value });
+  else resume(runtime, state, { kind: 'next', value: state.atStart || state.atYield ? undefined : value });
+  return;
+});
+
+/** Runs a body from where it waits until it suspends again or ends. */
+function resume(runtime: Runtime, state: SuspendedBody & { object: DartObject }, first: Resumption): void {
+  const { frame } = state;
+  let next: Resumption | undefined = first;
   state.atStart = false;
   while (next && state.generator) {
     state.atYield = false;
@@ -190,8 +222,7 @@ define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) 
     // The body has left its frame, so that code its future or stream runs now does not run inside it.
     next = perform(runtime, state, outcome);
   }
-  return;
-});
+}
 
 define('_scheduleImmediate', (runtime, _self, [callback]) => {
   runtime.events.scheduleImmediate(callback);

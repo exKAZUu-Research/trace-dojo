@@ -9383,6 +9383,37 @@ Future<void> main() async {
   });
 });
 
+test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
+  const source = `import 'dart:async';
+var ticks = 0;
+Future<void> countdown(int n) async {
+  if (n == 0) return;
+  ticks++;
+  await Future.delayed(Duration(milliseconds: 1));
+  await countdown(n - 1);
+}
+Future<int> chain(int n) async {
+  if (n == 0) { print('bottom'); return 0; }
+  final r = await chain(n - 1);
+  print('up $n');
+  return r + 1;
+}
+Future<void> main() async {
+  try {
+    await countdown(300);
+    print('done $ticks');
+  } finally {
+    print('finally');
+  }
+  scheduleMicrotask(() => print('micro'));
+  print(await chain(2));
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'done 300\nfinally\nbottom\nmicro\nup 1\nup 2\n2\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

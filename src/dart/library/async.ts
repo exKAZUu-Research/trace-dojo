@@ -434,6 +434,8 @@ class _Future<T> implements Future<T> {
   static const int _completionStateMask = 30;
   int _state = _stateIncomplete;
   var _resultOrListeners;
+  /** The async body that awaits this future, if one does: an addition to the SDK's class, for _returnAsync. */
+  _SuspendState? _awaitedBy;
   _Future();
   _Future.immediate(FutureOr<T> result) {
     _asyncComplete(result);
@@ -1116,6 +1118,7 @@ class _SuspendState {
       if (object._isComplete) {
         _awaitCompletedFuture(object);
       } else {
+        object._awaitedBy = this;
         object._thenAwait<dynamic>(_thenCallback!, _errorCallback!);
       }
     } else if (object is! Future) {
@@ -1126,6 +1129,21 @@ class _SuspendState {
   }
   void _returnAsync(Object? returnValue) {
     final future = _functionData as _Future;
+    // Modification: when the only listener of the future is the await of another body, that body resumes right after
+    // this one's resumption ends, by its driver's loop, instead of inside the completion, as the VM resumes it, which
+    // nothing else runs between; so that a chain of awaited recursive calls runs in a fixed depth of host frames.
+    final awaiter = future._awaitedBy;
+    final listeners = future._resultOrListeners;
+    if (returnValue is! Future &&
+        awaiter != null &&
+        future._state == _Future._stateIncomplete &&
+        listeners is _FutureListener &&
+        listeners._nextListener == null &&
+        identical(listeners.callback, awaiter._thenCallback)) {
+      future._setValue(returnValue);
+      awaiter._resumeLater(returnValue);
+      return;
+    }
     if (returnValue is Future) {
       future._asyncCompleteUnchecked(returnValue);
     } else {
@@ -1159,6 +1177,7 @@ class _SuspendState {
     (_functionData as _AsyncStarStreamController).close();
   }
   external void _resume(Object? value, Object? exception, StackTrace? stackTrace);
+  external void _resumeLater(Object? value);
 }
 ` +
   STREAM_SOURCE;
