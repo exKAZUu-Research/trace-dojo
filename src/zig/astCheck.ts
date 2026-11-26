@@ -868,7 +868,7 @@ class AstChecker {
       const otherwise = expression.otherwise;
       this.withBlock(() => {
         this.capture(expression.elseCapture);
-        this.expression(otherwise, 'value');
+        this.branchBody(otherwise);
       });
     }
   }
@@ -911,7 +911,7 @@ class AstChecker {
     }
     if (expression.otherwise) {
       const otherwise = expression.otherwise;
-      this.withBlock(() => this.expression(otherwise, 'value'));
+      this.withBlock(() => this.branchBody(otherwise));
     }
   }
 
