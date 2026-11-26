@@ -34,7 +34,7 @@ import { FunctionInstance } from './functions';
 import { alignOf, bitSizeOf, hasResolvedLayout, resolveTypeLayout, sizeOf } from './layout';
 import { spendMemory } from './memoryAccounting';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
-import { type BranchCount, type Frame, ZigPanic } from './runtime';
+import { type BranchCount, type Frame, UnavailableOperation, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
 import {
   arrayOf,
@@ -1426,6 +1426,7 @@ export abstract class SemaBase implements SemaApi {
         if (error instanceof MemoryFault) return this.error(span, 'undefined のポインタは参照できません。');
         if (error instanceof ZigPanic)
           return this.error(span, `値が決まっている計算が、実行時のエラー（${error.text}）になります。`);
+        if (error instanceof UnavailableOperation) return this.error(span, error.message);
         throw error;
       }
     }
