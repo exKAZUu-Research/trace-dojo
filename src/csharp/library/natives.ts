@@ -7,6 +7,7 @@ import './nativesDateOnly';
 import './nativesGlobalization';
 import './nativesFormattable';
 import './nativesIndex';
+import './nativesVersion';
 import './nativesIterators';
 import './nativesPath';
 import './nativesIo';

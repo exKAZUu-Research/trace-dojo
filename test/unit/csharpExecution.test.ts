@@ -789,3 +789,27 @@ try { "a\uD800".Normalize(); } catch (ArgumentException e) { Console.WriteLine(e
   const invariant = `#:property InvariantGlobalization=true\nConsole.WriteLine("e\\u0301".Normalize().Length);\n`;
   expect(executeProgram('csharp', invariant)).toMatchObject({ kind: 'executed', stdout: '2\n' });
 });
+
+// .NET 10.0.403 prints these: Version compares component by component with null first, prints only the components
+// it has, and `Environment.Version` is the runtime's 10.0.14.
+test('System.Version parses, compares, and prints as in .NET', () => {
+  const program = String.raw`var a = new Version(1, 2);
+var c = Version.Parse("1.2.3.4");
+Version? n = null;
+Console.WriteLine($"{a} {c} {c.Build} {a.Build} {c.GetHashCode()} {a < c} {n < a} {a >= n} {c.ToString(2)}");
+Console.WriteLine($"{Environment.Version} {Version.TryParse("1.x", out var r)} {r is null}");
+try { new Version("1.-2"); } catch (ArgumentOutOfRangeException e) { Console.WriteLine(e.Message); }
+try { a.ToString(3); } catch (ArgumentException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '1.2 1.2.3.4 3 -1 270544900 True True True 1.2',
+      '10.0.14 False True',
+      "input ('-2') must be a non-negative value. (Parameter 'input')",
+      'Actual value was -2.',
+      "Argument must be between 0 and 2. (Parameter 'fieldCount')",
+      '',
+    ].join('\n'),
+  });
+});
