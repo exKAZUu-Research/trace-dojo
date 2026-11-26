@@ -174,15 +174,6 @@ export class LoanBuilder {
     this.endLocals(parameterLocals, end);
     const inputs = [...defs, ...paramVars];
     const regions = inputs.map((v) => this.graph.varRegions[v]);
-    const staticError = staticInputError(
-      this.graph.outlives,
-      regions,
-      this.staticRegion,
-      body.span,
-      this.shared.budget
-    );
-    if (staticError) this.shared.errors.push(staticError);
-    this.graph.check(this.shared.errors);
     const relationError =
       signature &&
       signatureLifetimeError(signature, {
@@ -194,6 +185,12 @@ export class LoanBuilder {
         staticRegion: this.staticRegion,
         body,
       });
+    // The signature's own lifetime error explains the same flow better than the trait object's message.
+    const staticError =
+      !relationError &&
+      staticInputError(this.graph.outlives, regions, this.staticRegion, body.span, this.shared.budget);
+    if (staticError) this.shared.errors.push(staticError);
+    this.graph.check(this.shared.errors);
     if (relationError) this.shared.errors.push(relationError);
     return paramVars;
   }

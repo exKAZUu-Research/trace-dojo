@@ -202,8 +202,8 @@ function relationError(longer: NamedRegion, shorter: NamedRegion, span: Span): L
 }
 
 /**
- * The error when a reference from a parameter must outlive `'static`, as storing it in a trait object without a lifetime
- * (`Box<dyn Trait>`) needs.
+ * The error when a reference from a parameter must outlive `'static`, as a `T: 'static` bound or storing it in a trait
+ * object without a lifetime (`Box<dyn Trait>`) needs.
  */
 export function staticInputError(
   outlives: readonly (readonly [RVar, RVar])[],
@@ -221,7 +221,11 @@ export function staticInputError(
     regions.some((region) => region !== staticRegion && reachable.has(region))
   );
   return reached
-    ? { span, message: "引数から借りた参照を、この 'static が必要なトレイトオブジェクトには保存できません。" }
+    ? {
+        span,
+        message:
+          "ライフタイムが足りません。引数から借りた参照を、'static が必要なところ（T: 'static の制約や、Box<dyn Trait> のようにライフタイムを書いていないトレイトオブジェクト）で使っています。",
+      }
     : undefined;
 }
 
