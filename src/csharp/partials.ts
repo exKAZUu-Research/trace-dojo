@@ -1,4 +1,7 @@
 import type {
+  ConstructorDeclaration,
+  EventAccessorDeclaration,
+  EventFieldDeclaration,
   MemberDeclaration,
   MethodDeclaration,
   Modifier,
@@ -56,15 +59,20 @@ export function joinPartialType(first: TypeDeclaration, part: TypeDeclaration, r
 }
 
 /**
- * Joins the defining and the implementing declarations of a type's partial methods, properties, and indexers into the
- * implementing one (C# spec §15.6.9). A partial method that only has its definition and returns void without an access
- * modifier stays, without a body, as one whose calls are removed.
+ * Joins the defining and the implementing declarations of a type's partial methods, properties, indexers, events, and
+ * constructors into the implementing one (C# spec §15.6.9, C# 14). A partial method that only has its definition and
+ * returns void without an access modifier stays, without a body, as one whose calls are removed.
  */
 export function joinPartialMembers(owner: TypeDeclaration, report: Report): void {
   const isPartialType = owner.modifiers.set.has('partial');
   const groups = new Map<string, PartialMember[]>();
+  const laterGroups = new Map<string, LaterPartialMember[]>();
   const joined: MemberDeclaration[] = [];
   for (const member of owner.members) {
+    if (isLaterPartialMember(member)) {
+      for (const part of splitEvents(member)) addLaterPartial(owner, part, isPartialType, laterGroups, joined, report);
+      continue;
+    }
     if ((member.kind !== 'method' && member.kind !== 'property') || !member.modifiers.set.has('partial')) {
       joined.push(member);
       continue;
@@ -83,7 +91,111 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
     }
   }
   for (const group of groups.values()) joined[joined.indexOf(group[0])] = joinGroup(owner, group, report);
+  const duplicates: LaterPartialMember[] = [];
+  for (const group of laterGroups.values())
+    joined[joined.indexOf(group[0])] = joinLaterGroup(owner, group, duplicates, report);
+  // Roslyn reports a repeated part as a repeated member once it has checked every partial member's parts.
+  for (const duplicate of duplicates) {
+    if (duplicate.kind === 'constructor')
+      report(
+        duplicate,
+        'CS0111',
+        `型 '${owner.name}' は、'${owner.name}' と呼ばれるメンバーを同じパラメーターの型で既に定義しています`
+      );
+    else report(duplicate, 'CS0102', `型 '${owner.name}' は既に '${laterName(duplicate)}' の定義を含んでいます`);
+  }
   owner.members = joined;
+}
+
+/** A partial event (a field-like definition and an implementation with accessors) or constructor, which C# 14 adds. */
+type LaterPartialMember = ConstructorDeclaration | EventFieldDeclaration | EventAccessorDeclaration;
+
+function isLaterPartialMember(member: MemberDeclaration): member is LaterPartialMember {
+  return (
+    (member.kind === 'constructor' || member.kind === 'event' || member.kind === 'eventAccessors') &&
+    member.modifiers.set.has('partial')
+  );
+}
+
+/** A partial field-like event declares one partial event per name, `partial event Action A, B;` two. */
+function splitEvents(member: LaterPartialMember): LaterPartialMember[] {
+  if (member.kind !== 'event' || member.declarators.length === 1) return [member];
+  return member.declarators.map((declarator) => ({ ...member, declarators: [declarator] }));
+}
+
+function addLaterPartial(
+  owner: TypeDeclaration,
+  member: LaterPartialMember,
+  isPartialType: boolean,
+  groups: Map<string, LaterPartialMember[]>,
+  joined: MemberDeclaration[],
+  report: Report
+): void {
+  const display = laterDisplay(owner, member);
+  if (member.kind === 'event' && member.declarators[0].initializer)
+    report(member, 'CS9279', `'${display}': 部分的イベントには初期化子を持たせることができません`);
+  if (!isPartialType) {
+    // Roslyn reports a constructor's missing part before, and an event's after, its partial type's absence.
+    const isDefinition = !hasLaterBody(member);
+    if (member.kind === 'constructor' && isDefinition) reportMissingImplementation(member, display, report);
+    report(member, 'CS0751', '部分メンバーは、部分型内で宣言される必要があります');
+    if (member.kind !== 'constructor' && isDefinition) reportMissingImplementation(member, display, report);
+    joined.push(member);
+    return;
+  }
+  const key =
+    member.kind === 'constructor' ? `constructor(${parameterText(member.parameters)})` : `event ${laterName(member)}`;
+  const group = groups.get(key);
+  if (group) group.push(member);
+  else {
+    groups.set(key, [member]);
+    joined.push(member);
+  }
+}
+
+/** The one member that a partial event's or constructor's declarations join into, reporting what is missing or repeated. */
+function joinLaterGroup(
+  owner: TypeDeclaration,
+  group: LaterPartialMember[],
+  duplicates: LaterPartialMember[],
+  report: Report
+): MemberDeclaration {
+  const display = laterDisplay(owner, group[0]);
+  const definitions = group.filter((member) => !hasLaterBody(member));
+  const implementations = group.filter((member) => hasLaterBody(member));
+  for (const duplicate of definitions.slice(1))
+    report(duplicate, 'CS9277', `部分的メンバー '${display}' には、複数の定義宣言を指定することはできません。`);
+  for (const duplicate of implementations.slice(1))
+    report(duplicate, 'CS9278', `部分的メンバー '${display}' には、複数の実装宣言を含めないでください。`);
+  duplicates.push(...definitions.slice(1), ...implementations.slice(1));
+  const [definition] = definitions;
+  const [implementation] = implementations;
+  if (definition?.kind === 'constructor' && definition.initializer)
+    report(definition, 'CS9280', `'${display}': 部分コンストラクターの実装宣言のみが初期化子を持つことができます`);
+  if (!implementation) {
+    reportMissingImplementation(definition as LaterPartialMember, display, report);
+    return definition as LaterPartialMember;
+  }
+  if (!definition) report(implementation, 'CS9276', `部分的メンバー '${display}' には定義パーツが必要です。`);
+  return implementation;
+}
+
+function reportMissingImplementation(member: LaterPartialMember, display: string, report: Report): void {
+  report(member, 'CS9275', `部分的メンバー '${display}' には実装部分が必要です。`);
+}
+
+function hasLaterBody(member: LaterPartialMember): boolean {
+  if (member.kind === 'constructor') return member.body !== undefined;
+  return member.kind === 'eventAccessors';
+}
+
+function laterName(member: LaterPartialMember): string {
+  return member.kind === 'event' ? member.declarators[0].name : member.name;
+}
+
+function laterDisplay(owner: TypeDeclaration, member: LaterPartialMember): string {
+  if (member.kind === 'constructor') return `${owner.name}.${owner.name}(${parameterText(member.parameters)})`;
+  return `${owner.name}.${laterName(member)}`;
 }
 
 type PartialMember = MethodDeclaration | PropertyDeclaration;
