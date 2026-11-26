@@ -139,7 +139,7 @@ export class Converter {
    */
   private noteUnterminatedHeredoc(
     row: number,
-    startLine: number,
+    startLine: number | undefined,
     delimiter: string,
     closedRow: number | undefined
   ): void {
@@ -147,7 +147,7 @@ export class Converter {
     const lastLine = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
     this.unterminatedHeredocs.push({
       row,
-      startLine,
+      startLine: startLine ?? lastLine,
       line: closedRow === undefined ? lastLine : closedRow + 1,
       delimiter: delimiter.replaceAll(/['"\\]/g, ''),
     });
@@ -611,7 +611,8 @@ export class Converter {
       if (this.hooks.readsApart || insideCurrentShellSubstitution(redirect)) {
         return this.unsupported(redirect, 'outerHeredocBody');
       }
-      this.noteUnterminatedHeredoc(row, row + 1, delimiter, undefined);
+      // Bash begins reading the body at the end of the input, where it stops at once.
+      this.noteUnterminatedHeredoc(row, undefined, delimiter, undefined);
       return { parts: [], row, text: '' };
     }
     const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
