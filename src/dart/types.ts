@@ -213,7 +213,8 @@ export function factorType(type: DartType, removed: DartType): DartType {
   const normal = norm(type);
   if (!sameType(normal, type)) return factorType(normal, removed);
   const nonNull = nonNullable(type);
-  if (type.kind !== 'typeParam' && isNullable(type) && !sameType(nonNull, type)) {
+  // A type parameter splits like any `R?` when it is written with `?`; a bare one, nullable through its bound, does not.
+  if ((type.kind !== 'typeParam' || type.nullable) && isNullable(type) && !sameType(nonNull, type)) {
     const rest = factorType(nonNull, removed);
     return isSubtype(NULL, removed) ? rest : makeNullable(rest);
   }
