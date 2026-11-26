@@ -1988,11 +1988,6 @@ export function polytypeScheme(type: TForall): Scheme {
 }
 
 /**
- * A constructor's scheme: the data type's parameters, then the constructor's existential variables, all specified; a
- * GADT constructor quantifies its signature's variables instead, in their written order, before the parameters its
- * result type fixes.
- */
-/**
  * A field's selector type over its constructor's own variables: the record type the constructor builds (a data
  * instance's types, or a GADT constructor's result) and the field's type.
  */
@@ -2008,6 +2003,11 @@ export function fieldSelectorType(con: ConInfo, position: number): { kinds: Kind
   return { kinds: [...params, ...(con.exKinds ?? [])], record: tap(tcon(con.type), ...resultArgs), field };
 }
 
+/**
+ * A constructor's scheme: the data type's parameters, then the constructor's existential variables, all specified; a
+ * GADT constructor quantifies its signature's variables instead, in their written order, before the parameters its
+ * result type fixes.
+ */
 export function conScheme(con: ConInfo): Scheme {
   if (con.instanceArgs) {
     const kinds = con.instanceKinds ?? [];
