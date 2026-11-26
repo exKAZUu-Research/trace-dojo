@@ -43,8 +43,13 @@ export class AsyncTask {
 
   /** The steps the tasks spawned from `start` on recorded where this task did not count them, theirs included. */
   spawnedSteps(start: number): number {
+    // A loop over the tasks, as a deep recursion of async calls makes a deep tree of them.
     let total = 0;
-    for (const task of this.spawned.slice(start)) total += task.detachedSteps + task.spawnedSteps(0);
+    const pending = this.spawned.slice(start);
+    for (let task = pending.pop(); task; task = pending.pop()) {
+      total += task.detachedSteps;
+      pending.push(...task.spawned);
+    }
     return total;
   }
 }

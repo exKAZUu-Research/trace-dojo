@@ -487,8 +487,11 @@ export abstract class ControlCompiler extends StatementCompiler {
       const completion = yield* evaluateParts(frame, parts, () => exec(frame));
       // Only the steps the statement recorded itself, and those of the calls it started, can show what its calls
       // did, not those of other work it waited on.
-      const own = task.recordedSteps - begun + task.spawnedSteps(spawnedBefore);
-      if (step) steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - own);
+      if (step) {
+        // Counted only for a statement a trace records, as it walks the tasks the statement started.
+        const own = task.recordedSteps - begun + task.spawnedSteps(spawnedBefore);
+        steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - own);
+      }
       return completion;
     };
   }
