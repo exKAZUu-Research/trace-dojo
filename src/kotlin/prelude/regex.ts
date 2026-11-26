@@ -48,6 +48,8 @@ interface MatchResult {
 
 internal class MatchGroups(private val list: List<MatchGroup?>, private val names: Map<String, Int>) :
     MatchNamedGroupCollection, Collection<MatchGroup?> by list {
+    // Shown as a list, as Kotlin/JVM's groups are an AbstractCollection.
+    override fun toString(): String = list.toString()
     // As java.util.regex.Matcher.group, which throws for a group the pattern lacks.
     override fun get(index: Int): MatchGroup? =
         if (index < 0 || index >= list.size) throw IndexOutOfBoundsException("No group \$index") else list[index]
