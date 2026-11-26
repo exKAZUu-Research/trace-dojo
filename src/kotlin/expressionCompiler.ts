@@ -1374,8 +1374,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const inferred = name === 'enumValueOf' ? fromExpected : element?.variance === 'star' ? undefined : element?.type;
     const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : inferred && resolved(inferred);
     // A reified type parameter names the enum only when the program runs, as `enumValues<T>()` of an inline function.
-    if (argument?.kind === 'param' && argument.param.isReified)
+    if (argument?.kind === 'param' && argument.param.isReified) {
+      // Its bound must make it an enum, as `T : Enum<T>` does, which the call's type argument then is.
+      const isEnum = argument.param.bounds.some((bound) => {
+        const type = resolved(bound);
+        return type.kind === 'class' && type.cls.isSubclassOf(this.core.enum);
+      });
+      if (!isEnum) this.error(row, `型引数 ${argument.param.name} は Enum の型ではないので、${name} に渡せません。`);
       return this.compileReifiedEnumFunction(scope, context, argument.param, name, args, row);
+    }
     if (argument?.kind !== 'class' || argument.cls.kind !== 'enum') return undefined;
     // The type argument names the enum, so the call passes none to the function it means.
     return this.compileEnumFunction(scope, context, argument.cls, name, { args, typeArgs: [] }, row);
