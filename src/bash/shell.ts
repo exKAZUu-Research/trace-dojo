@@ -1220,6 +1220,7 @@ export class Shell implements ArithmeticHost {
       // A command substitution does not keep `set -e` unless `inherit_errexit` is on.
       options: { ...this.options, errexit: this.options.errexit && this.options.inherit_errexit },
       traceLevel: this.traceLevel + 1,
+      readsFile: isFileReadSubstitution(body),
     });
     return { output: capture.read(), status };
   }
@@ -1254,7 +1255,7 @@ export class Shell implements ArithmeticHost {
   runSubshell(
     body: Statement[],
     fds: DescriptorTable,
-    overrides?: { lineShift: number; options: ShellOptionValues; traceLevel: number }
+    overrides?: { lineShift: number; options: ShellOptionValues; traceLevel: number; readsFile: boolean }
   ): number {
     this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1);
@@ -1276,10 +1277,23 @@ export class Shell implements ArithmeticHost {
     };
     this.runtime.frames.push(subshellFrame);
     try {
-      return runSubshellBody(childShell, body);
+      const status = overrides?.readsFile
+        ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
+        : runSubshellCommands(childShell, body);
+      return childShell.runExitTrap(status);
     } finally {
       this.runtime.frames.pop();
     }
+  }
+
+  /** Runs `$(< file)`, which Bash replaces with the file's contents without running a command. */
+  private readFileSubstitution(command: Extract<Statement, { kind: 'command' }>): number {
+    this.currentRow = command.lineRow - this.lineShift;
+    return this.withRedirects(command.redirects, () => {
+      const input = this.fds.get(0)?.input;
+      if (input) this.fd1.write(input.readRest());
+      return 0;
+    });
   }
 
   /** What a subshell copies from this shell besides its variables: descriptors and options. */
@@ -1468,19 +1482,7 @@ function isFileReadSubstitution(body: readonly Statement[]): boolean {
   );
 }
 
-function runSubshellBody(childShell: Shell, body: Statement[]): number {
-  return childShell.runExitTrap(runSubshellCommands(childShell, body));
-}
-
 function runSubshellCommands(childShell: Shell, body: Statement[]): number {
-  if (isFileReadSubstitution(body)) {
-    const [command] = body as Extract<Statement, { kind: 'command' }>[];
-    return childShell.withRedirects(command.redirects, () => {
-      const input = childShell.fds.get(0)?.input;
-      if (input) childShell.fd1.write(input.readRest());
-      return 0;
-    });
-  }
   try {
     return childShell.runStatements(body);
   } catch (error) {
