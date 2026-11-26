@@ -10,7 +10,7 @@ import type {
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { isDoubleContext } from './contextTypes';
+import { intArithmeticContext, isDoubleContext } from './contextTypes';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
@@ -545,8 +545,9 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /**
-   * The signature `clamp` and `remainder` take in a double context: Dart then gives their arguments a double context (for
-   * `clamp` on a double and `remainder` on any other number), so `x.clamp(0, 1)` passes 0.0 and 1.0.
+   * The signature `clamp` and `remainder` take in a double or an int context: Dart then gives their arguments a double
+   * context (for `clamp` on a double and `remainder` on any other number), so `x.clamp(0, 1)` passes 0.0 and 1.0, and
+   * an int receiver's arguments an int context.
    */
   private specialNumericSignature(
     signature: FunctionType,
@@ -555,10 +556,18 @@ export abstract class CallCompiler extends OperatorCompiler {
     context: DartType | undefined
   ): FunctionType {
     const receiver = numericClassOf(receiverType);
-    if (!receiver || !context || !isDoubleContext(nonNullable(context))) return signature;
-    const doubleArguments = name === 'clamp' ? receiver === 'double' : name === 'remainder' && receiver !== 'double';
-    if (!doubleArguments) return signature;
-    return { ...signature, positional: signature.positional.map(() => interfaceType(coreTypes.double)) };
+    if (!receiver || !context || (name !== 'clamp' && name !== 'remainder')) return signature;
+    const argumentsOf = (cls: ClassInfo): FunctionType => ({
+      ...signature,
+      positional: signature.positional.map(() => interfaceType(cls)),
+    });
+    const special = intArithmeticContext(context);
+    if (receiver === 'int' && special?.kind === 'interface' && special.cls === coreTypes.int) {
+      return argumentsOf(coreTypes.int);
+    }
+    if (!isDoubleContext(nonNullable(context))) return signature;
+    const doubleArguments = name === 'clamp' ? receiver === 'double' : receiver !== 'double';
+    return doubleArguments ? argumentsOf(coreTypes.double) : signature;
   }
 
   /** The static type of an argument already compiled by the call, read from the types it recorded. */

@@ -2,6 +2,22 @@ import type { ClassInfo } from './classes';
 import { closeInferenceHoles, containsInferenceHole, INFERENCE_HOLE, isInferenceHole } from './typeInference';
 import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, resolveBound, upperBound } from './types';
 
+/**
+ * The type Dart's rule for int arithmetic passes from the context K of an int's `+`, `-`, `*`, `%`, `remainder` or
+ * `clamp` to its operands: int when int is a subtype of K and num is not, as for int and int?; double likewise;
+ * otherwise none, so that the operands take the operation's own parameter type.
+ */
+export function intArithmeticContext(context: DartType | undefined): DartType | undefined {
+  if (!context) return undefined;
+  const num = interfaceType(coreTypes.num);
+  if (isSubtype(num, context)) return undefined;
+  for (const cls of [coreTypes.int, coreTypes.double]) {
+    const type = interfaceType(cls);
+    if (isSubtype(type, context)) return type;
+  }
+  return undefined;
+}
+
 export function isDoubleContext(context: DartType): boolean {
   const base = context.kind === 'interface' ? context : undefined;
   return base?.cls === coreTypes.double;
