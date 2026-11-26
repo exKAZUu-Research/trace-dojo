@@ -205,9 +205,10 @@ export class VariableStore {
   directoryStack: string[] = [];
   /** The background commands this shell started, by process number, with their statuses and whether `wait` told them. */
   /**
-   * The background jobs and coprocesses by process ID; a coprocess that has not run yet keeps `finish`, which runs
-   * it (to the end of its input when the shell ends), and the descriptors it was started with, through which it will
-   * write; one that stopped waiting for more input is `waiting`.
+   * The background jobs, coprocesses, and process substitutions by process ID; a coprocess that has not run yet
+   * keeps `finish`, which runs it (to the end of its input when the shell ends), and the descriptors it was started
+   * with, through which it will write; one that stopped waiting for more input is `waiting`. A `>(...)` keeps
+   * `awaitEnd`, which `wait` calls to let it read its input to the end.
    */
   readonly jobs = new Map<
     number,
@@ -217,6 +218,7 @@ export class VariableStore {
       finish?: (shellEnds?: boolean) => void;
       descriptors?: DescriptorTable;
       waiting?: boolean;
+      awaitEnd?: () => void;
     }
   >();
   /** The process number of the last background command, which `$!` expands to. */

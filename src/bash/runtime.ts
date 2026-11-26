@@ -150,11 +150,13 @@ export class Runtime implements TracedRuntime<Frame> {
 
 /**
  * Stops a program at a wait that never ends, where Bash would wait forever: reading from a coprocess that waits for
- * input the shell can still write, or waiting for one.
+ * input the shell can still write, or waiting for such a coprocess or `>(...)`.
  */
 export class DeadlockError extends Error {
   constructor() {
-    super('デッドロックが起きました。シェルとコプロセスが互いの入出力を待ったままで、どれも先に進めません。');
+    super(
+      'デッドロックが起きました。シェルとコプロセスやプロセス置換が互いの入出力を待ったままで、どれも先に進めません。'
+    );
     this.name = 'DeadlockError';
   }
 }

@@ -26,6 +26,9 @@ export const waitBuiltin: Builtin = (shell, args) => {
   }
   const pids = processIds(shell, operands);
   if (pids === undefined) return 1;
+  // A `>(...)` is waited for when named, or with no operand when `$!` is still its process ID, as Bash 5.3 does.
+  const awaited = pids.length > 0 ? pids : [shell.store.lastBackgroundPid].filter((pid) => pid !== undefined);
+  for (const pid of awaited) jobs.get(pid)?.awaitEnd?.();
   const report = (pid: number, status: number): number => {
     const name = options.get('p');
     (jobs.get(pid) as { reported: boolean }).reported = true;

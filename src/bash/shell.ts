@@ -355,8 +355,13 @@ export class Shell implements ArithmeticHost {
   openProcessSubstitution(direction: '<' | '>', body: Statement[]): string {
     const fd = this.highestFreeDescriptor(PROCESS_SUBSTITUTION_FIRST_FD);
     const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
+    // Bash gives a process substitution a process ID, which `$!` holds and `wait` waits for.
+    const pid = this.runtime.allocateProcessId();
+    const job: { status: number; reported: boolean; awaitEnd?: () => void } = { status: 0, reported: false };
+    this.store.jobs.set(pid, job);
+    this.store.lastBackgroundPid = pid;
     if (direction === '<') {
-      this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
+      job.status = this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
       const file = { input: this.runtime.io.textReader(capture.read()) };
       this.fds.set(fd, file);
       this.processSubstitutions.push({ fd, file });
@@ -381,13 +386,27 @@ export class Shell implements ArithmeticHost {
           holder: child.fds,
           finish: () => {
             ran = true;
+            job.awaitEnd = undefined;
             child.fds.set(0, { input: this.runtime.io.textReader(capture.read()) });
-            child.run(body);
+            job.status = child.run(body);
           },
         },
       });
+      job.awaitEnd = () => this.awaitSubstitution(file);
     }
     return `/dev/fd/${fd}`;
+  }
+
+  /**
+   * Waits for a `>(...)` whose command has ended: it reads its input to the end and runs now, unless something can
+   * still write to it, where Bash would wait forever.
+   */
+  private awaitSubstitution(file: OpenFile): void {
+    const entry = this.lingeringSubstitutions.find((lingering) => lingering.file === file);
+    if (!entry) return;
+    if (this.isOpenHere(file) || this.isWrittenElsewhere(entry)) throw new DeadlockError();
+    this.lingeringSubstitutions.splice(this.lingeringSubstitutions.indexOf(entry), 1);
+    entry.finish();
   }
 
   private closeProcessSubstitutions(mark: number, completed: boolean): void {
