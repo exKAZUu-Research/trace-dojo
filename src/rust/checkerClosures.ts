@@ -3,6 +3,7 @@ import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkParamPatterns } from './checkerPatterns';
+import { neverCompletes } from './divergence';
 import { compileError } from './items';
 import { type CaptureMode, captureProjections, projectedBindings } from './loanCaptures';
 import { receiverReborrow } from './receiverReborrow';
@@ -12,6 +13,7 @@ import {
   callableSignature,
   type ClosureType,
   freshVar,
+  NEVER,
   newClosureType,
   resolve,
   settleClosure,
@@ -64,6 +66,9 @@ export function checkClosure(c: Checker, expr: Extract<Expr, { kind: 'closure' }
       paramTypes
     );
     c.coerceExpr(expr.body, retType);
+    // A body that never finishes leaves its return type open; edition 2024 falls back to `!`, as for a `let`.
+    const ret = shallow(retType);
+    if (ret.kind === 'var' && !ret.v.literal && neverCompletes(expr.body)) ret.v.fallback ??= NEVER;
   } finally {
     c.body = parentBody;
   }
