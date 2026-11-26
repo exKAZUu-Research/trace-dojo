@@ -298,9 +298,13 @@ const UNAVAILABLE_FS_MEMBERS = new Set([
  * The feature a member of a Node.js object names when this interpreter does not run it, by the name of the interface or
  * module declaring it: of `process`, it provides only the standard output and error streams, which only write.
  */
-export function unavailableNodeMember(owner: string | undefined, name: string): string | undefined {
+export function unavailableNodeMember(
+  owner: string | undefined,
+  name: string,
+  stream: 'stdout' | 'stderr' = 'stdout'
+): string | undefined {
   if (owner === 'Process' && name !== 'stdout' && name !== 'stderr') return `process.${name}`;
-  if (owner === 'WriteStream') return `process.stdout.${name}`;
+  if (owner === 'WriteStream') return `process.${stream}.${name}`;
   if ((owner === '"fs"' || owner === '"node:fs"') && UNAVAILABLE_FS_MEMBERS.has(name)) return `fs.${name}`;
   return undefined;
 }

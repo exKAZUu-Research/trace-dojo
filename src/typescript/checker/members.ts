@@ -351,7 +351,11 @@ export class MemberChecker {
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
     if (owner === 'ArrayConstructor' && name === 'fromAsync') return 'Array.fromAsync';
-    const nodeMember = unavailableNodeMember(owner, name);
+    // Both standard streams are a `WriteStream`, which only the receiver tells apart.
+    const receiver = propertyNode.parent?.childForFieldName('object');
+    const isStderr =
+      receiver?.type === 'member_expression' && receiver.childForFieldName('property')?.text === 'stderr';
+    const nodeMember = unavailableNodeMember(owner, name, isStderr ? 'stderr' : 'stdout');
     if (nodeMember) return nodeMember;
     if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
