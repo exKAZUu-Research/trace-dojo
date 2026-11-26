@@ -40,7 +40,12 @@ export const waitBuiltin: Builtin = (shell, args) => {
     return pid === undefined ? 127 : report(pid, (jobs.get(pid) as { status: number }).status);
   }
   if (pids.length === 0) {
-    for (const job of jobs.values()) job.reported = true;
+    // Bash reaps every child it waited for, so a later `wait` for one of them reports it is not a child; a job that
+    // still holds descriptors or has yet to run stays, as its ends are still in use.
+    for (const [pid, job] of jobs) {
+      job.reported = true;
+      if (job.finish === undefined && job.descriptors === undefined) jobs.delete(pid);
+    }
     return 0;
   }
   let status = 0;
