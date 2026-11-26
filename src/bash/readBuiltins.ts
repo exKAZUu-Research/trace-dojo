@@ -122,10 +122,11 @@ function readText(
     // Bash drops NULs from the input unless a NUL is the delimiter, as with `-d ''`.
     if (c === '\0' && delimiter !== '\0') continue;
     if (!raw && c === '\\') {
-      const next = readCharacter(reader);
+      let next = readCharacter(reader);
+      while (next === '\0' && delimiter !== '\0') next = readCharacter(reader);
       if (next === undefined) return { chars, escaped, complete: false };
-      // A backslash before the delimiter continues the line when the delimiter is a newline.
-      if (next === delimiter && delimiter === '\n') continue;
+      // A backslash before a newline continues the line, whatever the delimiter, and one before a NUL drops it.
+      if (next === '\n' || next === '\0') continue;
       chars.push(next);
       escaped.push(true);
       continue;
