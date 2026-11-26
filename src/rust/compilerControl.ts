@@ -31,7 +31,11 @@ export function compileIf(c: Compiler, expr: ExprOf<'if'>, asStatement: boolean)
 }
 
 export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: boolean): Eval {
-  const scrutinee = compilePatternInput(c, expr.scrutinee);
+  const scrutinee = compilePatternInput(
+    c,
+    expr.scrutinee,
+    expr.arms.map((arm) => arm.pattern)
+  );
   const arms = expr.arms.map((arm) => {
     const matcher = compileGuardedMatcher(c, arm.pattern);
     const guard = arm.guard && c.value(arm.guard);
@@ -162,7 +166,7 @@ function compileCondition(c: Compiler, cond: Condition): ConditionalEval {
       return true;
     };
   }
-  const input = compilePatternInput(c, cond.value);
+  const input = compilePatternInput(c, cond.value, [cond.pattern]);
   const matcher = c.compileMatcher(cond.pattern);
   const takeAll = takesWhole(c, cond.value, cond.pattern);
   return (frame, onMatch) => {

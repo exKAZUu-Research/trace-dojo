@@ -400,7 +400,7 @@ export class Compiler {
   }
 
   private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
-    const input = compilePatternInput(this, stmt.init!);
+    const input = compilePatternInput(this, stmt.init!, [stmt.pattern]);
     const matcher = this.compileMatcher(stmt.pattern);
     const takeAll = takesWhole(this, stmt.init!, stmt.pattern);
     const elseBlock = stmt.else && this.compileBlock(stmt.else, true);

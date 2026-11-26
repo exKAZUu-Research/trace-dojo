@@ -1,9 +1,11 @@
 import type { LocalVar, PathRes } from './annotations';
 import type { Expr, Pattern } from './ast';
+import { patternBindingParts } from './astWalk';
 import type { Compiler } from './compiler';
 import { derefAll, isPlaceExpr, isRefType, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
 import { projectedBindings } from './loanCaptures';
+import { derefOnce } from './methods';
 import { compareValues, copyValue, needsCopy, valuesEqual } from './ops';
 import { type Frame, MOVED } from './runtime';
 import { runtimeType } from './runtimeTypes';
@@ -30,8 +32,17 @@ type PatternProbe = (frame: Frame, value: Value, place: (() => Place) | undefine
 
 type PatternOf<K extends Pattern['kind']> = Extract<Pattern, { kind: K }>;
 
-export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => { value: Value; place: Place } {
-  if (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map') {
+/**
+ * The value a pattern matches and the place it lives in. A `*` or an index through the program's `Deref` or `Index`
+ * reaches it through `deref` or `index`, as rustc does, unless a pattern binds part of it by `ref mut`.
+ */
+export function compilePatternInput(
+  c: Compiler,
+  expr: Expr,
+  patterns: Pattern[]
+): (frame: Frame) => { value: Value; place: Place } {
+  const overloaded = isOverloadedPlace(c, expr) && !patterns.some((pattern) => bindsByRefMut(c, pattern));
+  if (overloaded || (expr.kind === 'index' && c.annotations.indexes.get(expr)?.container === 'map')) {
     const read = c.read(expr);
     return (frame) => {
       const value = read(frame);
@@ -47,6 +58,19 @@ export function compilePatternInput(c: Compiler, expr: Expr): (frame: Frame) => 
     const evaluated = place(frame);
     return { value: evaluated.get(), place: evaluated };
   };
+}
+
+function isOverloadedPlace(c: Compiler, expr: Expr): boolean {
+  if (expr.kind === 'index') return c.annotations.indexes.get(expr)?.container === 'user';
+  return (
+    expr.kind === 'unary' &&
+    expr.op === '*' &&
+    derefOnce(c.program, normalize(shallow(expr.operand.ty!)))?.kind === 'user'
+  );
+}
+
+function bindsByRefMut(c: Compiler, pattern: Pattern): boolean {
+  return patternBindingParts(pattern, c.annotations).some(({ local }) => local.mode === 'refMut');
 }
 
 /**

@@ -58,7 +58,7 @@ export function compileMacro(c: Compiler, expr: Expr, macro: MacroCall): Eval {
 }
 
 function matchesMacro(c: Compiler, macro: Macro<'matches'>): Eval {
-  const input = compilePatternInput(c, macro.value);
+  const input = compilePatternInput(c, macro.value, [macro.pattern]);
   const matcher = c.compileMatcher(macro.pattern);
   const slots = c.patternSlots(macro.pattern);
   const takeAll = takesWhole(c, macro.value, macro.pattern);
