@@ -398,7 +398,7 @@ export function unsetResolvedElement(shell: Shell, target: ResolvedTarget): Stor
 
 export function isResolvedTargetSet(shell: Shell, target: ResolvedTarget): boolean {
   if (target.kind === 'invalid') {
-    if (target.failure.message !== '') shell.reportError(target.failure.message);
+    if (target.failure.message !== '') shell.reportShellError(target.failure.message);
     return false;
   }
   if (target.kind === 'wholeArray') {
