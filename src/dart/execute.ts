@@ -59,11 +59,10 @@ export function runProgram(
     runMain(runtime, program);
     // The isolate keeps running the microtasks and timers that `main` left until none remain.
     runtime.events.run();
-    requireFinishedCharacter(runtime, false);
-    requireFinishedCharacter(runtime, true);
   } catch (error) {
     uncaughtException = describeUncaught(runtime, error);
   }
+  uncaughtException = unfinishedCharacter(runtime) ?? uncaughtException;
   if (runtime.onMainExit) {
     runtime.onMainExit = undefined;
     finalTurtles = runtime.world.turtleTraces();
@@ -73,6 +72,20 @@ export function runProgram(
     finalTurtles = runtime.world.turtleTraces();
   }
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
+}
+
+/**
+ * However the run ends (its end, exit, or an uncaught error), a character its standard streams' bytes left unfinished
+ * is reported, since the VM writes the bytes as they are, which the run's text output cannot hold.
+ */
+function unfinishedCharacter(runtime: Runtime): string | undefined {
+  try {
+    requireFinishedCharacter(runtime, false);
+    requireFinishedCharacter(runtime, true);
+    return undefined;
+  } catch (error) {
+    return describeUncaught(runtime, error);
+  }
 }
 
 function runMain(runtime: Runtime, program: CompiledProgram): void {

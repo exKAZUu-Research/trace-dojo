@@ -9366,6 +9366,13 @@ void main() { stdout.add([0x41, 0xE3]); }`;
     uncaughtException:
       'Unhandled exception:\nUnsupported operation: 文字の途中で終わるバイト列を標準出力に残したままの出力や終了は、この採点環境では使えません。',
   });
+  // The end of the run by exit or by an uncaught error reports it too.
+  for (const end of ['exit(0);', "throw StateError('boom');"]) {
+    expect(executeProgram('dart', `import 'dart:io';\nvoid main() { stdout.add([0xE3]); ${end} }`)).toMatchObject({
+      uncaughtException:
+        'Unhandled exception:\nUnsupported operation: 文字の途中で終わるバイト列を標準出力に残したままの出力や終了は、この採点環境では使えません。',
+    });
+  }
 });
 
 test('a write of bytes that are not UTF-8 stops the run with its diagnostic instead of dropping later writes', () => {
