@@ -252,6 +252,16 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs the `EXIT` trap as the shell ends with `status`, returning the status it ends with, which `exit` may set. */
+  /**
+   * Ends the shell as `exit` does: the `EXIT` trap runs here, where `exit` ran, with the function's variables,
+   * positional parameters, and redirections still in place, as Bash runs it, and does not run again as the shell ends.
+   */
+  exitShell(status: number): never {
+    const finalStatus = this.runExitTrap(status);
+    this.traps.delete('EXIT');
+    throw new ExitSignal(finalStatus);
+  }
+
   runExitTrap(status: number): number {
     try {
       this.runTrap('EXIT', status);

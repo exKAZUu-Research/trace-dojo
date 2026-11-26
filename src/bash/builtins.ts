@@ -286,14 +286,14 @@ function returnBuiltin(shell: Shell, args: string[]): number {
 
 function exitBuiltin(shell: Shell, args: string[]): number {
   const [statusText, ...extra] = operands(args);
-  if (statusText === undefined) throw new ExitSignal(shell.store.lastStatus);
+  if (statusText === undefined) shell.exitShell(shell.store.lastStatus);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
     return 2;
   }
   rejectExtraOperands(shell, 'exit', extra);
-  throw new ExitSignal(Number(BigInt.asUintN(8, status)));
+  return shell.exitShell(Number(BigInt.asUintN(8, status)));
 }
 
 function loopControl(kind: 'break' | 'continue'): Builtin {
