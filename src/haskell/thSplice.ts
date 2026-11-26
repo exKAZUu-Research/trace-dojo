@@ -205,6 +205,12 @@ function withDependents(
   let remaining = complete;
   for (const name of pending.flatMap(declaredNames)) declared.add(name);
   for (;;) {
+    // An instance whose methods alone name a pending declaration stays declared, without its methods.
+    remaining = remaining.map((decl) => {
+      if (decl.kind !== 'instance' || !mentions(decl, declared)) return decl;
+      const head = { ...decl, decls: decl.decls.filter((inner) => inner.kind === 'sig') };
+      return mentions(head, declared) ? decl : head;
+    });
     const naming = remaining.filter((decl) => mentions(decl, declared));
     if (naming.length === 0) return { complete: remaining, pending };
     remaining = remaining.filter((decl) => !naming.includes(decl));
