@@ -60,6 +60,16 @@ function collator(isInvariant: boolean | undefined, sensitivity: Sensitivity): I
   return found;
 }
 
+/** An ordinal comparison: the difference of the first differing UTF-16 code units, or of the lengths. */
+export function ordinalDifference(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    const difference = a.charCodeAt(index) - b.charCodeAt(index);
+    if (difference !== 0) return difference;
+  }
+  return a.length - b.length;
+}
+
 /** `string.Compare` with a culture, which gives -1, 0, or 1. */
 export function compareCulture(a: string, b: string, options: CultureComparison = {}): number {
   charge(options, a.length + b.length);

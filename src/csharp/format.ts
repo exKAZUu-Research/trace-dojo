@@ -1,22 +1,12 @@
 // code-gauge-allow-file fileNcss -- The format module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { LIMITS } from '../interpreter/limits';
+import type { Culture } from './cultures';
 import { CsDecimal } from './decimal';
 import { PendingException } from './numeric';
 
-/** The number formatting of the ja-JP culture, which the reference runtime uses (with ICU's data). */
-export const CULTURE = {
-  decimalSeparator: '.',
-  groupSeparator: ',',
-  negativeSign: '-',
-  numberDecimalDigits: 3,
-  percentDecimalDigits: 3,
-  currencyDecimalDigits: 0,
-  currencySymbol: '¥',
-  nan: 'NaN',
-  positiveInfinity: '∞',
-  negativeInfinity: '-∞',
-};
+/** The number symbols that both cultures this grader has (ja-JP and the invariant culture) share. */
+export const NUMBER_SYMBOLS = { decimalSeparator: '.', groupSeparator: ',', negativeSign: '-', nan: 'NaN' };
 
 /** The digits of a number: `0.d1d2… × 10^exponent`, with no leading zeros, or empty for zero. */
 interface Digits {
@@ -149,11 +139,11 @@ function fixedParts(number: Digits, decimals: number): { integer: string; fracti
 }
 
 function group(integer: string): string {
-  return integer.replaceAll(/\B(?=(\d{3})+(?!\d))/g, CULTURE.groupSeparator);
+  return integer.replaceAll(/\B(?=(\d{3})+(?!\d))/g, NUMBER_SYMBOLS.groupSeparator);
 }
 
 function withSign(text: string, number: Digits): string {
-  return number.isNegative && number.digits !== '' ? `${CULTURE.negativeSign}${text}` : text;
+  return number.isNegative && number.digits !== '' ? `${NUMBER_SYMBOLS.negativeSign}${text}` : text;
 }
 
 function scientific(
@@ -169,29 +159,32 @@ function scientific(
   let rest = digits.slice(1);
   if (mantissaDigits !== undefined && !trimZeros) rest = rest.padEnd(mantissaDigits, '0').slice(0, mantissaDigits);
   if (trimZeros) rest = rest.replace(/0+$/, '');
-  if (rest !== '') mantissa += `${CULTURE.decimalSeparator}${rest}`;
+  if (rest !== '') mantissa += `${NUMBER_SYMBOLS.decimalSeparator}${rest}`;
   const sign = exponent < 0 ? '-' : '+';
   return `${mantissa}${letter}${sign}${String(Math.abs(exponent)).padStart(minimumExponentDigits, '0')}`;
 }
 
 /** The text that `ToString()` gives a double or float: the shortest round-trip digits, in scientific notation when large or small. */
-export function formatFloat(value: number, isFloat: boolean): string {
-  if (Number.isNaN(value)) return CULTURE.nan;
-  if (value === Number.POSITIVE_INFINITY) return CULTURE.positiveInfinity;
-  if (value === Number.NEGATIVE_INFINITY) return CULTURE.negativeInfinity;
+export function formatFloat(value: number, isFloat: boolean, culture: Culture): string {
+  if (!Number.isFinite(value)) return nonFiniteText(value, culture);
   const number = shortestDigits(value, isFloat);
   return generalText(number, isFloat ? 9 : 17, 'E');
 }
 
+function nonFiniteText(value: number, culture: Culture): string {
+  if (Number.isNaN(value)) return NUMBER_SYMBOLS.nan;
+  return value > 0 ? culture.positiveInfinity : culture.negativeInfinity;
+}
+
 /** The general format: fixed notation unless the exponent reaches the precision or falls to -5. */
 function generalText(number: Digits, precision: number, letter: 'E' | 'e'): string {
-  if (number.digits === '') return number.isNegative ? `${CULTURE.negativeSign}0` : '0';
+  if (number.digits === '') return number.isNegative ? `${NUMBER_SYMBOLS.negativeSign}0` : '0';
   const exponent = number.exponent - 1;
   if (exponent >= precision || exponent < -4) {
     return withSign(scientific(number, undefined, letter, 2, true), number);
   }
   const { integer, fraction } = fixedParts(number, Math.max(0, number.digits.length - number.exponent));
-  const text = fraction === '' ? integer : `${integer}${CULTURE.decimalSeparator}${fraction}`;
+  const text = fraction === '' ? integer : `${integer}${NUMBER_SYMBOLS.decimalSeparator}${fraction}`;
   return withSign(text, number);
 }
 
@@ -202,22 +195,24 @@ export function formatNumber(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
   format: string | undefined,
+  culture: Culture,
   /** The width of an integral type, which `X` shows a negative number in. */
   bits = 32
 ): string {
-  if ((kind === 'double' || kind === 'float') && typeof value === 'number' && !Number.isFinite(value)) {
-    return Number.isNaN(value) ? CULTURE.nan : value > 0 ? CULTURE.positiveInfinity : CULTURE.negativeInfinity;
-  }
-  if (format === undefined || format === '') return defaultText(value, kind);
+  if ((kind === 'double' || kind === 'float') && typeof value === 'number' && !Number.isFinite(value))
+    return nonFiniteText(value, culture);
+  if (format === undefined || format === '') return defaultText(value, kind, culture);
   const standard = /^([A-Za-z])(\d{0,9})$/.exec(format);
-  if (standard)
-    return formatStandard(value, kind, standard[1], standard[2] === '' ? undefined : Number(standard[2]), bits);
+  if (standard) {
+    const precision = standard[2] === '' ? undefined : Number(standard[2]);
+    return formatStandard(value, kind, standard[1], precision, bits, culture);
+  }
   return formatCustom(value, kind, format);
 }
 
-function defaultText(value: number | bigint | CsDecimal, kind: NumericKind): string {
+function defaultText(value: number | bigint | CsDecimal, kind: NumericKind, culture: Culture): string {
   if (value instanceof CsDecimal) return value.toString();
-  if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');
+  if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float', culture);
   return String(value);
 }
 
@@ -236,7 +231,8 @@ function formatStandard(
   kind: NumericKind,
   specifier: string,
   precision: number | undefined,
-  bits: number
+  bits: number,
+  culture: Culture
 ): string {
   const upper = specifier.toUpperCase();
   const mode = kind === 'decimal' || kind === 'integer' ? 'away' : 'even';
@@ -265,20 +261,13 @@ function formatStandard(
     }
     case 'F':
     case 'N': {
-      return fixedText(value, kind, upper === 'N', precision ?? CULTURE.numberDecimalDigits, mode);
+      return fixedText(value, kind, upper === 'N', precision ?? culture.numberDecimalDigits, mode);
     }
     case 'P': {
-      return percentText(value, kind, precision ?? CULTURE.percentDecimalDigits, mode);
+      return percentText(value, kind, precision ?? culture.percentDecimalDigits, mode, culture);
     }
     case 'C': {
-      const decimals = precision ?? CULTURE.currencyDecimalDigits;
-      const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
-      const { integer, fraction } = fixedParts(number, decimals);
-      return withSignKeepingZero(
-        `${CULTURE.currencySymbol}${group(integer)}${fractionSuffix(decimals, fraction)}`,
-        number,
-        kind
-      );
+      return currencyText(value, kind, precision ?? culture.currencyDecimalDigits, mode, culture);
     }
     case 'E': {
       const decimals = precision ?? 6;
@@ -286,12 +275,12 @@ function formatStandard(
       return withSignKeepingZero(scientific(number, decimals, specifier === 'e' ? 'e' : 'E', 3, false), number, kind);
     }
     case 'G': {
-      return generalStandardText(value, kind, precision, specifier === 'g' ? 'e' : 'E', mode);
+      return generalStandardText(value, kind, precision, specifier === 'g' ? 'e' : 'E', mode, culture);
     }
     case 'R': {
       // A decimal is always exact, so its round-trip text is its general one.
-      if (kind === 'decimal') return defaultText(value, kind);
-      return roundTripText(value, kind);
+      if (kind === 'decimal') return defaultText(value, kind, culture);
+      return roundTripText(value, kind, culture);
     }
     default: {
       throw invalidFormat();
@@ -316,13 +305,29 @@ function percentText(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
   decimals: number,
-  mode: 'even' | 'away'
+  mode: 'even' | 'away',
+  culture: Culture
 ): string {
   const base = digitsOf(value, kind);
   const scaled = base.digits === '' ? base : { ...base, exponent: base.exponent + 2 };
   const number = roundToDecimals(scaled, decimals, mode);
   const { integer, fraction } = fixedParts(number, decimals);
-  return withSignKeepingZero(`${group(integer)}${fractionSuffix(decimals, fraction)}%`, number, kind);
+  const text = `${group(integer)}${fractionSuffix(decimals, fraction)}${culture.percentSuffix}`;
+  return withSignKeepingZero(text, number, kind);
+}
+
+function currencyText(
+  value: number | bigint | CsDecimal,
+  kind: NumericKind,
+  decimals: number,
+  mode: 'even' | 'away',
+  culture: Culture
+): string {
+  const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
+  const { integer, fraction } = fixedParts(number, decimals);
+  const text = `${culture.currencySymbol}${group(integer)}${fractionSuffix(decimals, fraction)}`;
+  if (culture.parenthesizesNegativeCurrency && isShownNegative(number, kind)) return `(${text})`;
+  return withSignKeepingZero(text, number, kind);
 }
 
 function generalStandardText(
@@ -330,31 +335,34 @@ function generalStandardText(
   kind: NumericKind,
   precision: number | undefined,
   letter: 'E' | 'e',
-  mode: 'even' | 'away'
+  mode: 'even' | 'away',
+  culture: Culture
 ): string {
   // `G0` of a decimal drops its trailing zeros, which `G` keeps, by taking all 29 of its digits as the precision.
   if (precision === 0 && kind === 'decimal') precision = 29;
   if (precision === undefined || precision === 0) {
-    const text = roundTripText(value, kind);
+    const text = roundTripText(value, kind, culture);
     return letter === 'e' ? text.replace('E', 'e') : text;
   }
   return generalText(roundDigits(digitsOf(value, kind), precision, mode), precision, letter);
 }
 
 function fractionSuffix(decimals: number, fraction: string): string {
-  return decimals > 0 ? `${CULTURE.decimalSeparator}${fraction}` : '';
+  return decimals > 0 ? `${NUMBER_SYMBOLS.decimalSeparator}${fraction}` : '';
 }
 
-function roundTripText(value: number | bigint | CsDecimal, kind: NumericKind): string {
-  if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');
-  return defaultText(value, kind);
+function roundTripText(value: number | bigint | CsDecimal, kind: NumericKind, culture: Culture): string {
+  if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float', culture);
+  return defaultText(value, kind, culture);
 }
 
 /** Fixed-point formats keep the sign of a negative value that rounds to zero, as .NET Core 3.0 and later do. */
 function withSignKeepingZero(text: string, number: Digits, kind: NumericKind): string {
-  if (number.isNegative && (number.digits !== '' || kind === 'double' || kind === 'float'))
-    return `${CULTURE.negativeSign}${text}`;
-  return text;
+  return isShownNegative(number, kind) ? `${NUMBER_SYMBOLS.negativeSign}${text}` : text;
+}
+
+function isShownNegative(number: Digits, kind: NumericKind): boolean {
+  return number.isNegative && (number.digits !== '' || kind === 'double' || kind === 'float');
 }
 
 function hexText(value: number | bigint, lower: boolean, minimum: number, bits: number): string {
@@ -393,7 +401,7 @@ function formatCustom(value: number | bigint | CsDecimal, kind: NumericKind, for
   const result = renderCustom(pattern, scan, integerDigitsText, fractionPart, exponent);
   // A pattern that prints no digit, such as `#` for a value that rounds to zero, prints no sign either.
   if (needsSign && (!isZero || ((kind === 'double' || kind === 'float') && /\d/.test(result))))
-    return `${CULTURE.negativeSign}${result}`;
+    return `${NUMBER_SYMBOLS.negativeSign}${result}`;
   return result;
 }
 
@@ -670,7 +678,7 @@ function renderDigit(state: RenderState): void {
   }
   if (state.fractionIndex >= state.fraction.length) return;
   if (!state.pointWritten) {
-    state.result += CULTURE.decimalSeparator;
+    state.result += NUMBER_SYMBOLS.decimalSeparator;
     state.pointWritten = true;
   }
   state.result += state.fraction[state.fractionIndex++];
@@ -681,7 +689,7 @@ function writeIntegerDigits(state: RenderState, end: number): void {
   for (; state.integerIndex < end; state.integerIndex++) {
     state.result += integer[state.integerIndex];
     const position = integer.length - 1 - state.integerIndex;
-    if (state.hasGrouping && position > 0 && position % 3 === 0) state.result += CULTURE.groupSeparator;
+    if (state.hasGrouping && position > 0 && position % 3 === 0) state.result += NUMBER_SYMBOLS.groupSeparator;
   }
 }
 

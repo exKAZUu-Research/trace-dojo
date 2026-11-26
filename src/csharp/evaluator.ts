@@ -1611,15 +1611,19 @@ export class Evaluator extends AsyncExecutor {
     return freshString(text.toString());
   }
 
-  /** Formats one hole of an interpolated string or a composite format, with its format string and alignment. */
+  /**
+   * Formats one hole of an interpolated string or a composite format, with its format string and alignment, and the
+   * format provider of `string.Format(provider, ...)`.
+   */
   formatHole(
     value: Value,
     type: Type,
     format: string | undefined,
     alignment: number | undefined,
-    frame: Frame
+    frame: Frame,
+    provider?: Value
   ): string {
-    const text = formatValue(this, value, type, format, frame);
+    const text = formatValue(this, value, type, format, frame, provider);
     if (alignment === undefined) return text;
     // A wide alignment is checked against the string limit before the host pads to it.
     this.runtime.allocateString(Math.max(text.length, Math.abs(alignment)), 0);

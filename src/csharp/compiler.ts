@@ -16,6 +16,7 @@ import { type BindContext, lateOperandName } from './convertBinder';
 import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
+import { GLOBALIZATION_SOURCE } from './library/globalizationSource';
 import { IO_SOURCE } from './library/ioSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
 import { TASKS_SOURCE } from './library/tasksSource';
@@ -62,6 +63,8 @@ export interface CompiledProgram {
   isTopLevel: boolean;
   /** Whether integral overflow throws outside `checked` and `unchecked`, as `CheckForOverflowUnderflow` makes it. */
   checkOverflow: boolean;
+  /** Whether `InvariantGlobalization` makes the invariant culture the current one and the only one. */
+  invariantGlobalization: boolean;
   /** Binds an operation on `dynamic` values to its operands' types when it runs, as the runtime binder does. */
   /** `target` is the type a conversion converts to, with the type arguments of the code that runs it. */
   bindLate?: (node: LateNode, types: Type[], target: Type | undefined) => LateBinding;
@@ -106,7 +109,7 @@ function buildLibrary(): Library {
   const compiler = new Compiler(library, {});
   // One unit, since the library's namespaces refer to each other's types.
   const unit = parseCSharp(
-    [SYSTEM_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, IO_SOURCE, TURTLE_SOURCE].join('\n'),
+    [SYSTEM_SOURCE, GLOBALIZATION_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, IO_SOURCE, TURTLE_SOURCE].join('\n'),
     true
   );
   const declared = compiler.declareUnit(unit, root, true);
@@ -183,6 +186,7 @@ export class Compiler extends AttributeBinder {
       entry,
       isTopLevel,
       checkOverflow: unit.options?.checkOverflow ?? false,
+      invariantGlobalization: unit.options?.invariantGlobalization ?? false,
       bindLate: (node, operandTypes, target) => this.bindLate(node, operandTypes, target),
     };
   }

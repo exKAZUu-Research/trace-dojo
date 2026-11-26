@@ -1,8 +1,9 @@
+import { type Culture, INVARIANT, providerCulture } from '../cultures';
 import { MeteredText, type TextBudget } from '../meteredText';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsBox, CsStruct, type Value } from '../values';
-import { fail, failNull, failOutOfRange, libraryType, refOf } from './support';
+import { fail, failNull, failOutOfRange, libraryType, refOf, unsupportedCall } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
 const TICKS_PER_MILLISECOND = 10_000n;
@@ -15,11 +16,6 @@ const MAX_DATE_TICKS = 3_155_378_975_999_999_999n;
 const LOCAL_OFFSET_TICKS = 9n * TICKS_PER_HOUR;
 /** The ticks of 1970-01-01, where JavaScript's clock starts. */
 const UNIX_EPOCH_TICKS = 621_355_968_000_000_000n;
-
-const DAY_NAMES = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'];
-const SHORT_DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
-const ENGLISH_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const ENGLISH_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function ticksOf(value: Value): bigint {
   return (unboxedTime(value) as CsStruct).fields[0] as bigint;
@@ -207,48 +203,47 @@ function pad(value: number, width: number): string {
   return String(value).padStart(width, '0');
 }
 
-const STANDARD_DATE_FORMATS: Record<string, string> = {
-  d: 'yyyy/MM/dd',
-  D: 'yyyy年M月d日 dddd',
-  t: 'H:mm',
-  T: 'H:mm:ss',
-  f: 'yyyy年M月d日 dddd H:mm',
-  F: 'yyyy年M月d日 dddd H:mm:ss',
-  g: 'yyyy/MM/dd H:mm',
-  G: 'yyyy/MM/dd H:mm:ss',
-  M: 'M月d日',
-  m: 'M月d日',
-  Y: 'yyyy年M月',
-  y: 'yyyy年M月',
+/** The standard formats that every culture writes alike. */
+const INVARIANT_DATE_FORMATS: Record<string, string> = {
   s: "yyyy'-'MM'-'dd'T'HH':'mm':'ss",
   u: "yyyy'-'MM'-'dd HH':'mm':'ss'Z'",
   o: "yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffff",
   O: "yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fffffff",
 };
 
-/** Formats a DateTime with a standard or custom format string, with the ja-JP culture's names. */
-export function formatDateTime(budget: TextBudget, value: CsStruct, format: string | undefined): string {
+/** Formats a DateTime with a standard or custom format string, with a culture's patterns and names. */
+export function formatDateTime(
+  budget: TextBudget,
+  value: CsStruct,
+  format: string | undefined,
+  culture: Culture
+): string {
+  const patterns: Record<string, string | undefined> = { ...INVARIANT_DATE_FORMATS, ...culture.datePatterns };
   // "U" writes the value converted from local time to UTC, which stops at DateTime.MinValue, with the full date and
   // time pattern.
   if (format === 'U') {
     const universal = ticksOf(value) - LOCAL_OFFSET_TICKS;
-    return customDate(partsOf(universal < 0n ? 0n : universal), STANDARD_DATE_FORMATS.F, new MeteredText(budget));
+    return customDate(
+      partsOf(universal < 0n ? 0n : universal),
+      culture.datePatterns.F,
+      culture,
+      new MeteredText(budget)
+    );
   }
   const parts = partsOf(ticksOf(value));
   const pattern =
-    format === undefined || format === ''
-      ? STANDARD_DATE_FORMATS.G
-      : format.length === 1
-        ? STANDARD_DATE_FORMATS[format]
-        : format;
-  if (format === 'r' || format === 'R')
-    return `${ENGLISH_DAYS[parts.dayOfWeek].slice(0, 3)}, ${pad(parts.day, 2)} ${ENGLISH_MONTHS[parts.month - 1]} ${pad(parts.year, 4)} ${pad(parts.hour, 2)}:${pad(parts.minute, 2)}:${pad(parts.second, 2)} GMT`;
+    format === undefined || format === '' ? culture.datePatterns.G : format.length === 1 ? patterns[format] : format;
+  if (format === 'r' || format === 'R') {
+    const day = INVARIANT.abbreviatedDayNames[parts.dayOfWeek];
+    const month = INVARIANT.abbreviatedMonthNames[parts.month - 1];
+    return `${day}, ${pad(parts.day, 2)} ${month} ${pad(parts.year, 4)} ${pad(parts.hour, 2)}:${pad(parts.minute, 2)}:${pad(parts.second, 2)} GMT`;
+  }
   if (pattern === undefined)
     throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
-  return customDate(parts, pattern, new MeteredText(budget));
+  return customDate(parts, pattern, culture, new MeteredText(budget));
 }
 
-function customDate(parts: DateParts, pattern: string, result: MeteredText): string {
+function customDate(parts: DateParts, pattern: string, culture: Culture, result: MeteredText): string {
   let index = 0;
   // Where the run of equal characters at the index ends, kept while a literal consumes the run in parts.
   let runEnd = 0;
@@ -260,7 +255,7 @@ function customDate(parts: DateParts, pattern: string, result: MeteredText): str
       result.read(runEnd - index);
     }
     const count = runEnd - index;
-    const field = dateField(parts, char, count);
+    const field = dateField(parts, char, count, culture);
     if (field === undefined) {
       const literal = dateLiteral(pattern, index, count);
       result.read(literal.length);
@@ -280,23 +275,24 @@ function customDate(parts: DateParts, pattern: string, result: MeteredText): str
 function isEmptyOptionalFraction(parts: DateParts, pattern: string, index: number): boolean {
   let end = index;
   while (pattern[end] === 'F') end++;
-  return end > index && dateField(parts, 'F', end - index) === '';
+  return end > index && dateField(parts, 'F', end - index, INVARIANT) === '';
 }
 
 /** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
 // code-gauge-allow functionCognitiveComplexity -- One case per custom date format specifier.
 // code-gauge-allow functionNcss -- One case per custom date format specifier.
-function dateField(parts: DateParts, char: string, count: number): string | undefined {
+function dateField(parts: DateParts, char: string, count: number, culture: Culture): string | undefined {
   switch (char) {
     case 'y': {
       return count <= 2 ? pad(parts.year % 100, count) : pad(parts.year, count);
     }
     case 'M': {
-      return count <= 2 ? pad(parts.month, count) : `${parts.month}月`;
+      if (count <= 2) return pad(parts.month, count);
+      return (count === 3 ? culture.abbreviatedMonthNames : culture.monthNames)[parts.month - 1];
     }
     case 'd': {
       if (count <= 2) return pad(parts.day, count);
-      return count === 3 ? SHORT_DAY_NAMES[parts.dayOfWeek] : DAY_NAMES[parts.dayOfWeek];
+      return (count === 3 ? culture.abbreviatedDayNames : culture.dayNames)[parts.dayOfWeek];
     }
     case 'H': {
       return pad(parts.hour, Math.min(count, 2));
@@ -316,14 +312,14 @@ function dateField(parts: DateParts, char: string, count: number): string | unde
       return char === 'F' ? digits.replace(/0+$/, '') : digits;
     }
     case 't': {
-      const designator = parts.hour < 12 ? '午前' : '午後';
+      const designator = parts.hour < 12 ? culture.amDesignator : culture.pmDesignator;
       return count === 1 ? designator.charAt(0) : designator;
     }
     case 'K': {
       return '';
     }
     case 'g': {
-      return '西暦';
+      return culture.era;
     }
     case 'z': {
       if (count === 1) return '+9';
@@ -592,29 +588,33 @@ defineNatives({
   'System.DateTime.Equals': (_call, receiver, [other]) => timeEquals(receiver, other as Value),
   'System.DateTime.GetHashCode': (_call, receiver) =>
     Number(BigInt.asIntN(32, ticksOf(receiver) ^ (ticksOf(receiver) >> 32n))),
-  'System.DateTime.ToString': (call, receiver, [format]) =>
-    formatDateTime(call.frame.runtime, receiver as CsStruct, (format as string | undefined) ?? undefined),
-  'System.DateTime.ToShortDateString': (call, receiver) =>
-    formatDateTime(call.frame.runtime, receiver as CsStruct, 'd'),
-  'System.DateTime.ToLongDateString': (call, receiver) => formatDateTime(call.frame.runtime, receiver as CsStruct, 'D'),
-  'System.DateTime.ToShortTimeString': (call, receiver) =>
-    formatDateTime(call.frame.runtime, receiver as CsStruct, 't'),
-  'System.DateTime.ToLongTimeString': (call, receiver) => formatDateTime(call.frame.runtime, receiver as CsStruct, 'T'),
+  'System.DateTime.ToString()': (call, receiver) => dateText(call, receiver, undefined),
+  'System.DateTime.ToString(string?)': (call, receiver, [format]) => dateText(call, receiver, format as Value),
+  'System.DateTime.ToString(IFormatProvider?)': (call, receiver, [provider]) =>
+    dateText(call, receiver, undefined, provider as Value),
+  'System.DateTime.ToString(string?, IFormatProvider?)': (call, receiver, [format, provider]) =>
+    dateText(call, receiver, format as Value, provider as Value),
+  'System.DateTime.ToShortDateString': (call, receiver) => dateText(call, receiver, 'd'),
+  'System.DateTime.ToLongDateString': (call, receiver) => dateText(call, receiver, 'D'),
+  'System.DateTime.ToShortTimeString': (call, receiver) => dateText(call, receiver, 't'),
+  'System.DateTime.ToLongTimeString': (call, receiver) => dateText(call, receiver, 'T'),
   'System.DateTime.DaysInMonth': (_call, _receiver, [year, month]) => {
     if ((month as number) < 1 || (month as number) > 12)
       fail('System.ArgumentOutOfRangeException', 'Month must be between one and twelve.', 'month');
     return daysInMonth(year as number, month as number);
   },
   'System.DateTime.IsLeapYear': (_call, _receiver, [year]) => isLeapYear(year as number),
-  'System.DateTime.Parse': (call, _receiver, [text]) => {
+  'System.DateTime.Parse': (call, _receiver, args) => {
+    const { text, culture } = dateParseArguments(call, args as Value[]);
     if (text === undefined) failNull('s');
-    const ticks = parseDate(text as string);
-    if (ticks === undefined) fail('System.FormatException', dateTimeParseError(text as string));
+    const ticks = parseDate(text, culture);
+    if (ticks === undefined) fail('System.FormatException', dateTimeParseError(text));
     return dateTime(call, ticks);
   },
-  'System.DateTime.TryParse': (call, _receiver, [text, result]) => {
-    const ticks = text === undefined ? undefined : parseDate(text as string);
-    refOf(result).set(dateTime(call, ticks ?? 0n));
+  'System.DateTime.TryParse': (call, _receiver, args) => {
+    const { text, culture } = dateParseArguments(call, args as Value[]);
+    const ticks = text === undefined ? undefined : parseDate(text, culture);
+    refOf(args.at(-1) as Value).set(dateTime(call, ticks ?? 0n));
     return ticks !== undefined;
   },
   'System.DateTime.op_Addition': (call, _receiver, [d, t]) => dateTime(call, ticksOf(d as Value) + ticksOf(t as Value)),
@@ -624,6 +624,27 @@ defineNatives({
     timeSpan(call, ticksOf(a as Value) - ticksOf(b as Value)),
   ...comparisons('System.DateTime'),
 });
+
+/** A DateTime's text in a format, with the culture of a format provider, the current culture's for null. */
+function dateText(call: NativeCall, receiver: Value, format: Value, provider?: Value): string {
+  const culture = providerCulture(call.frame.runtime, provider);
+  return formatDateTime(call.frame.runtime, receiver as CsStruct, (format as string | undefined) ?? undefined, culture);
+}
+
+/** The white space that `DateTimeStyles` may allow, which `Parse` skips anyway. */
+const WHITE_SPACE_STYLES = 7;
+
+/** The string and the culture of a `DateTime.Parse` or `TryParse` call, by the parameters' names. */
+function dateParseArguments(call: NativeCall, args: Value[]): { text: string | undefined; culture: Culture } {
+  const argument = (name: string): Value =>
+    args[call.method.parameters.findIndex((parameter) => parameter.name === name)];
+  const styles = (argument('styles') as number | undefined) ?? 0;
+  if ((styles & ~WHITE_SPACE_STYLES) !== 0) unsupportedCall(call, 'DateTimeStyles の AllowWhiteSpaces 以外の指定');
+  return {
+    text: argument('s') as string | undefined,
+    culture: providerCulture(call.frame.runtime, argument('provider')),
+  };
+}
 
 function addMonths(call: NativeCall, receiver: Value, months: number): Value {
   const ticks = ticksOf(receiver);
@@ -642,12 +663,14 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
 }
 
 /**
- * The one grammar of `DateTime.Parse` and `TryParse`: a date `2024/3/5`, `2024-03-05`, or ja-JP's `2024年3月5日`; then
- * optionally a time `H:m[:s[.fffffff]]` (or `10時20分[30秒]`) after a space or `T`; then optionally `Z` or a UTC offset
- * (`+09`, `+0900`, `+09:00`), converted to local time. A string outside it throws the FormatException .NET throws for a
- * string it cannot read, though .NET reads some such strings, such as `5/6/2024`, a time alone, and English month names.
+ * The one grammar of `DateTime.Parse` and `TryParse`: a date `2024/3/5`, `2024-03-05`, ja-JP's `2024年3月5日`, or the
+ * invariant culture's `3/5/2024`; then optionally a time `H:m[:s[.fffffff]]` (or `10時20分[30秒]`) after a space or
+ * `T`; then optionally `Z` or a UTC offset (`+09`, `+0900`, `+09:00`), converted to local time. A string outside it
+ * throws the FormatException .NET throws for a string it cannot read, though .NET reads some such strings, such as
+ * ja-JP's `5/6/2024`, a time alone, and English month names.
  */
-function parseDate(text: string): bigint | undefined {
+function parseDate(text: string, culture: Culture): bigint | undefined {
+  if (culture.isInvariant) return parseDateParts(text.replace(/^(\s*)(\d{1,2})\/(\d{1,2})\/(\d{4})/, '$1$4/$2/$3'));
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`, with the weekday that the D and F formats write, which
   // must be the date's.
   let weekday: number | undefined;
@@ -664,6 +687,11 @@ function parseDate(text: string): bigint | undefined {
       (_match, hour: string, minute: string, second: string | undefined, rest: string) =>
         `${hour}:${minute.padStart(2, '0')}${second === undefined ? '' : `:${second.padStart(2, '0')}`}${rest}`
     );
+  return parseDateParts(normalized, weekday);
+}
+
+/** Reads `yyyy/M/d` or `yyyy-M-d` with an optional time and zone, with a weekday that must be the date's. */
+function parseDateParts(normalized: string, weekday?: number): bigint | undefined {
   const match =
     /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ Tt](\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,7}))?)?([Zz]|[+-]\d{2}(?::?\d{2})?)?)?\s*$/.exec(
       normalized

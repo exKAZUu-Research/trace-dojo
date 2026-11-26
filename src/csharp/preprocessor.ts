@@ -21,6 +21,8 @@ export interface BuildOptions {
   /** `CheckForOverflowUnderflow`, which makes integer arithmetic checked by default. */
   checkOverflow: boolean;
   implicitUsings: boolean;
+  /** `InvariantGlobalization`, which makes the invariant culture the only one and the current one. */
+  invariantGlobalization: boolean;
   /** The symbols defined at the end of the file, which `[Conditional]` methods test. */
   symbols: string[];
 }
@@ -117,6 +119,7 @@ class Preprocessor {
     allowUnsafe: false,
     checkOverflow: false,
     implicitUsings: true,
+    invariantGlobalization: false,
     symbols: [],
   };
   private readonly diagnostics: SourceDiagnostic[] = [];
@@ -336,6 +339,10 @@ function applyFileDirective(text: string, row: number, options: BuildOptions): v
     }
     case 'CheckForOverflowUnderflow': {
       options.checkOverflow = flag;
+      return;
+    }
+    case 'InvariantGlobalization': {
+      options.invariantGlobalization = flag;
       return;
     }
     case 'ImplicitUsings': {

@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import { compareCulture } from './culture';
+import { compareCulture, ordinalDifference } from './culture';
+import { type Culture, cultureSettingsOf, currentCulture } from './cultures';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { formatFloat } from './format';
@@ -116,7 +117,7 @@ function sameNumber(a: unknown, b: unknown): boolean {
 export function stringOf(evaluator: Evaluator, value: Value, type: Type, frame: Frame): string {
   if (value === undefined) return '';
   const underlying = nullableUnderlying(type) ?? type;
-  const primitive = primitiveText(value, underlying);
+  const primitive = primitiveText(value, underlying, currentCulture(evaluator.runtime));
   if (primitive !== undefined) return primitive;
   return stringText(invokeToString(evaluator, value, frame) ?? '');
 }
@@ -130,7 +131,7 @@ export function toStringValue(evaluator: Evaluator, value: Value, type: Type, fr
   if (isString(value)) return value;
   const underlying = value instanceof CsBox ? value.type : (nullableUnderlying(type) ?? type);
   const inner = unboxed(value);
-  const primitive = primitiveText(inner, underlying);
+  const primitive = primitiveText(inner, underlying, currentCulture(evaluator.runtime));
   if (primitive === undefined) return invokeToString(evaluator, value, frame) ?? '';
   if (typeof inner === 'boolean') return primitive;
   const runtime = evaluator.runtime;
@@ -146,8 +147,8 @@ function isIntegral(type: Type): boolean {
 }
 
 /** The text of a value whose static type says how its representation reads, for primitives. */
-export function primitiveText(value: Value, type: Type): string | undefined {
-  if (value instanceof CsBox) return primitiveText(value.value, value.type);
+export function primitiveText(value: Value, type: Type, culture: Culture): string | undefined {
+  if (value instanceof CsBox) return primitiveText(value.value, value.type, culture);
   if (type.kind !== 'named') return undefined;
   if (type.symbol.kind === 'enum') return enumText(type, value);
   switch (type.symbol.special) {
@@ -169,7 +170,7 @@ export function primitiveText(value: Value, type: Type): string | undefined {
     }
     case 'float':
     case 'double': {
-      return formatFloat(value as number, type.symbol.special === 'float');
+      return formatFloat(value as number, type.symbol.special === 'float', culture);
     }
     case 'decimal': {
       return (value as CsDecimal).toString();
@@ -237,7 +238,8 @@ export function defaultToString(evaluator: Evaluator, value: Value): string {
   if (value instanceof CsObject && value.native && isExceptionState(value.native))
     return exceptionText(evaluator, value);
   const type = evaluator.runtime.runtimeTypeOf(value);
-  if (value instanceof CsBox) return primitiveText(value.value, value.type) ?? runtimeTypeName(value.type);
+  if (value instanceof CsBox)
+    return primitiveText(value.value, value.type, currentCulture(evaluator.runtime)) ?? runtimeTypeName(value.type);
   return type ? runtimeTypeName(type) : 'System.Object';
 }
 
@@ -403,18 +405,27 @@ export function structHash(evaluator: Evaluator, value: CsStruct, frame: Frame):
 export function defaultCompare(evaluator: Evaluator, a: Value, b: Value, frame: Frame): number {
   if (a === undefined) return b === undefined ? 0 : -1;
   if (b === undefined) return 1;
-  const spend = (cost: number): void => evaluator.runtime.spend(cost);
-  return comparePrimitives(unboxed(a), unboxed(b), spend) ?? evaluator.compareThroughInterface(a, b, frame);
+  return comparePrimitives(evaluator.runtime, unboxed(a), unboxed(b)) ?? evaluator.compareThroughInterface(a, b, frame);
 }
 
 /** The order of two primitive values of the same kind, or undefined for other values. */
-function comparePrimitives(x: Value, y: Value, spend: (cost: number) => void): number | undefined {
-  if (typeof x === 'string' && typeof y === 'string') return compareCulture(x, y, { spend });
+function comparePrimitives(runtime: Runtime, x: Value, y: Value): number | undefined {
+  if (typeof x === 'string' && typeof y === 'string') return compareStrings(runtime, x, y);
   if (typeof x === 'number' && typeof y === 'number') return compareNumbers(x, y);
   if (typeof x === 'bigint' && typeof y === 'bigint') return orderOf(x, y);
   if (x instanceof CsDecimal && y instanceof CsDecimal) return x.compare(y);
   if (typeof x === 'boolean' && typeof y === 'boolean') return orderOf(Number(x), Number(y));
   return undefined;
+}
+
+/**
+ * The order of two strings by the current culture, or ordinal in globalization-invariant mode, where no culture has
+ * collation data.
+ */
+function compareStrings(runtime: Runtime, x: string, y: string): number {
+  const settings = cultureSettingsOf(runtime);
+  if (settings.isGlobalizationInvariant) return ordinalDifference(x, y);
+  return compareCulture(x, y, { spend: (cost) => runtime.spend(cost), isInvariant: settings.current.isInvariant });
 }
 
 /** The order of two numbers, where NaN comes before every other number, as `double.CompareTo` does. */

@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
+import { type Culture, isCultureInfo, providerCulture } from '../cultures';
 import { CsDecimal } from '../decimal';
 import { combineDelegates } from '../delegates';
 import { MeteredText } from '../meteredText';
@@ -63,8 +64,19 @@ import {
   type Value,
   type VariableReference,
 } from '../values';
-import { formatValue, normalizeNumberText, parseNumber, trimNumberText } from './formatting';
+import { formatValue } from './formatting';
 import { linqDisplayName } from './nativesLinq';
+import {
+  checkFloatStyles,
+  checkIntegerStyles,
+  DECIMAL_NAME,
+  NumberStyles,
+  parseDecimalText,
+  type ParseFailure,
+  parseFloatText,
+  parseIntegerText,
+  parseNatives,
+} from './numberParsing';
 import {
   arrayValues,
   evaluatorOf,
@@ -372,9 +384,16 @@ const parsers: Record<string, NativeMethod> = {};
  * An integer's `ToString` with a format: .NET returns its cached text of a small number for the formats that print
  * the plain digits, which are `G` without a precision and `D` with at most one digit, and a new string for others.
  */
-function integerString(call: NativeCall, receiver: Value, format: Value, prefix: string): string | CsString {
+function integerString(
+  call: NativeCall,
+  receiver: Value,
+  format: Value,
+  prefix: string,
+  provider?: Value
+): string | CsString {
   const formatText = (format as string | undefined) ?? undefined;
-  const text = formatValue(evaluatorOf(call), unboxed(receiver), libraryType(call, prefix), formatText, call.frame);
+  const type = libraryType(call, prefix);
+  const text = formatValue(evaluatorOf(call), unboxed(receiver), type, formatText, call.frame, provider);
   return /^(?:[Gg]0*|[Dd]0*1?)?$/.test(formatText ?? '') ? call.frame.runtime.numberString(text) : text;
 }
 
@@ -409,8 +428,11 @@ for (const [name, special] of INTEGRAL) {
       integerString(call, receiver, format, prefix),
     [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value) =>
       call.frame.runtime.numberString(String(unboxed(receiver))),
-    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
-      integerString(call, receiver, format, prefix),
+    [`${prefix}.ToString(string?, IFormatProvider?)`]: (
+      call: NativeCall,
+      receiver: Value,
+      [format, provider]: Value[]
+    ) => integerString(call, receiver, format, prefix, provider),
     [`${prefix}.Equals`]: (_call: NativeCall, receiver: Value, [other]: Value[]) => {
       if (other instanceof CsBox) return specialOf(other.type) === special && unboxed(receiver) === other.value;
       return unboxed(receiver) === other;
@@ -430,15 +452,16 @@ for (const [name, special] of INTEGRAL) {
       if (NARROW_INTEGRALS.has(special)) return Number(a - b);
       return a < b ? -1 : a > b ? 1 : 0;
     },
-    [`${prefix}.Parse`]: (_call: NativeCall, _receiver: Value, [text]: Value[]) => {
-      if (text === undefined) failNull('s');
-      return fromBig(parseInteger(text as string, min, max, special, true) as bigint);
-    },
-    [`${prefix}.TryParse`]: (_call: NativeCall, _receiver: Value, [text, result]: (Value | VariableReference)[]) => {
-      const parsed = text === undefined ? undefined : parseInteger(text as string, min, max, special, false);
-      refOf(result).set(fromBig(parsed ?? 0n));
-      return parsed !== undefined;
-    },
+    ...parseNatives(prefix, {
+      parse: (text, styles, culture) => {
+        const parsed = parseIntegerText(text, styles, culture, [min, max]);
+        return typeof parsed === 'bigint' ? fromBig(parsed) : parsed;
+      },
+      defaultStyles: NumberStyles.Integer,
+      checkStyles: checkIntegerStyles,
+      overflowName: OVERFLOW_NAMES[special] as string,
+      zero: fromBig(0n),
+    }),
     [`${prefix}.Abs`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
       const integer = toBig(value);
       if (integer === min && min < 0n)
@@ -493,28 +516,6 @@ function clampInteger(value: Value, low: Value, high: Value, toBig: (value: Valu
   return value;
 }
 
-/** Parses an integer as `int.Parse` does: optional whitespace and sign, decimal digits, and a thousands-free number. */
-function parseInteger(
-  text: string,
-  min: bigint,
-  max: bigint,
-  special: SpecialType,
-  throws: boolean
-): bigint | undefined {
-  const match = /^([+-]?)(\d+)$/.exec(trimNumberText(text));
-  if (!match) {
-    if (throws) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-    return undefined;
-  }
-  const value = BigInt(`${match[1]}${match[2]}`);
-  if (value < min || value > max) {
-    if (throws)
-      fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[special]}.`);
-    return undefined;
-  }
-  return value;
-}
-
 for (const [name, special] of [
   ['Double', 'double'],
   ['Single', 'float'],
@@ -533,15 +534,23 @@ for (const [name, special] of [
         (format as string | undefined) ?? undefined,
         call.frame
       ),
-    [`${prefix}.ToString(IFormatProvider?)`]: (call, receiver) =>
-      formatValue(evaluatorOf(call), unboxed(receiver), libraryType(call, prefix), undefined, call.frame),
-    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call, receiver, [format]) =>
+    [`${prefix}.ToString(IFormatProvider?)`]: (call, receiver, [provider]) =>
+      formatValue(
+        evaluatorOf(call),
+        unboxed(receiver),
+        libraryType(call, prefix),
+        undefined,
+        call.frame,
+        provider as Value
+      ),
+    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call, receiver, [format, provider]) =>
       formatValue(
         evaluatorOf(call),
         unboxed(receiver),
         libraryType(call, prefix),
         (format as string | undefined) ?? undefined,
-        call.frame
+        call.frame,
+        provider as Value
       ),
     [`${prefix}.Equals`]: (_call, receiver, [other]) => {
       const a = unboxed(receiver) as number;
@@ -558,18 +567,16 @@ for (const [name, special] of [
       if (Number.isNaN(b)) return 1;
       return a < b ? -1 : a > b ? 1 : 0;
     },
-    [`${prefix}.Parse`]: (_call, _receiver, [text]) => {
-      if (text === undefined) failNull('s');
-      const value = parseNumber(text as string);
-      if (value === undefined)
-        fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-      return round(value);
-    },
-    [`${prefix}.TryParse`]: (_call, _receiver, [text, result]) => {
-      const value = text === undefined ? undefined : parseNumber(text as string);
-      refOf(result).set(value === undefined ? 0 : round(value));
-      return value !== undefined;
-    },
+    ...parseNatives(prefix, {
+      parse: (text, styles, culture) => {
+        const parsed = parseFloatText(text, styles, culture);
+        return parsed === undefined ? 'format' : round(parsed);
+      },
+      defaultStyles: NumberStyles.FloatWithThousands,
+      checkStyles: checkFloatStyles,
+      overflowName: name,
+      zero: 0,
+    }),
     [`${prefix}.IsNaN`]: (_call, _receiver, [value]) => Number.isNaN(value),
     [`${prefix}.IsInfinity`]: (_call, _receiver, [value]) =>
       value === Number.POSITIVE_INFINITY || value === Number.NEGATIVE_INFINITY,
@@ -640,13 +647,14 @@ defineNatives({
       call.frame
     ),
   'System.Decimal.ToString(IFormatProvider?)': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
-  'System.Decimal.ToString(string?, IFormatProvider?)': (call, receiver, [format]) =>
+  'System.Decimal.ToString(string?, IFormatProvider?)': (call, receiver, [format, provider]) =>
     formatValue(
       evaluatorOf(call),
       unboxed(receiver),
       libraryType(call, 'System.Decimal'),
       (format as string | undefined) ?? undefined,
-      call.frame
+      call.frame,
+      provider as Value
     ),
   'System.Decimal.Equals': (_call, receiver, [other]) => {
     const b = unboxed(other as Value);
@@ -659,17 +667,13 @@ defineNatives({
     if (!(value instanceof CsDecimal)) fail('System.ArgumentException', 'Object must be of type Decimal.');
     return (unboxed(receiver) as CsDecimal).compare(value);
   },
-  'System.Decimal.Parse': (_call, _receiver, [text]) => {
-    if (text === undefined) failNull('s');
-    const parsed = parseDecimal(text as string);
-    if (!parsed) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-    return parsed;
-  },
-  'System.Decimal.TryParse': (_call, _receiver, [text, result]) => {
-    const parsed = text === undefined ? undefined : parseDecimal(text as string);
-    refOf(result).set(parsed ?? CsDecimal.ZERO);
-    return parsed !== undefined;
-  },
+  ...parseNatives('System.Decimal', {
+    parse: parseDecimalText,
+    defaultStyles: NumberStyles.Number,
+    checkStyles: checkFloatStyles,
+    overflowName: DECIMAL_NAME,
+    zero: CsDecimal.ZERO,
+  }),
   'System.Decimal.Abs': (_call, _receiver, [value]) => {
     const decimal = value as CsDecimal;
     return decimal.isNegative ? decimal.negate() : decimal;
@@ -748,12 +752,6 @@ defineNativesKeepingStrings({
       call.frame
     ),
 });
-
-/** Parses a decimal as `decimal.Parse` does, whose number style allows group separators but no exponent. */
-function parseDecimal(text: string): CsDecimal | undefined {
-  const normalized = normalizeNumberText(text, false);
-  return normalized === undefined ? undefined : CsDecimal.parse(normalized);
-}
 
 // ---- Math ----
 
@@ -1016,9 +1014,12 @@ defineNativesKeepingStrings({
     radixText(call, BigInt(value as number), base as number, 16),
   'System.Convert.ToString(byte, int)': (call, _receiver, [value, base]) =>
     radixText(call, BigInt(value as number), base as number, 8),
-  // `ToString()` of the value, as the object it returns.
-  'System.Convert.ToString': (call, _receiver, [value]) =>
-    toStringValue(evaluatorOf(call), value as Value, parameterType(call, 0), call.frame),
+  // `ToString()` of the value, as the object it returns, or `ToString(provider)` with a culture of its own.
+  'System.Convert.ToString': (call, _receiver, [value, provider]) => {
+    const type = parameterType(call, 0);
+    if (!isCultureInfo(provider as Value)) return toStringValue(evaluatorOf(call), value as Value, type, call.frame);
+    return freshString(formatValue(evaluatorOf(call), value as Value, type, undefined, call.frame, provider as Value));
+  },
 });
 
 /** The digits of an integer in a base, of which base 10 is `ToString()` and its cached text of a small number. */
@@ -1029,13 +1030,18 @@ function radixText(call: NativeCall, value: bigint, base: number, bits: number):
 }
 
 function convertTo(call: NativeCall, args: (Value | VariableReference)[], target: SpecialType): Value {
-  const [value, fromBase] = args as Value[];
+  const [value, second] = args as Value[];
+  const takesProvider = call.method.parameters[1]?.name === 'provider';
+  const fromBase = takesProvider ? undefined : second;
   const declared = specialOf(parameterType(call, 0));
   const isUntyped = declared === 'object' || declared === undefined;
   if (isUntyped && value === undefined) return zeroOf(target);
   const { source, inner } = isUntyped ? convertibleOf(call, value) : { source: declared, inner: value };
   checkConvertible(source, target);
-  if (source === 'string') return convertString(inner as string | undefined, fromBase, target);
+  if (source === 'string') {
+    const culture = providerCulture(call.frame.runtime, takesProvider ? second : undefined);
+    return convertString(inner as string | undefined, fromBase, target, culture);
+  }
   if (source === 'bool') return boolNumber(inner as boolean, target);
   if (isIntegral(target)) {
     if (source === 'double' || source === 'float') return floatToInteger(inner as number, target);
@@ -1084,26 +1090,33 @@ function convertibleOf(call: NativeCall, value: Value): { source: SpecialType; i
   );
 }
 
-function convertString(text: string | undefined, fromBase: Value, target: SpecialType): Value {
+function convertString(text: string | undefined, fromBase: Value, target: SpecialType, culture: Culture): Value {
   if (text === undefined) {
     if (target === 'char') fail('System.ArgumentNullException', 'Value cannot be null.', 'value');
     return zeroOf(target);
   }
   if (fromBase !== undefined) return parseRadix(text, fromBase as number, target);
-  if (!isIntegral(target)) return parseNonIntegral(text, target);
   if (target === 'char') {
     if (text.length !== 1) fail('System.FormatException', 'String must be exactly one character long.');
     return text.charCodeAt(0);
   }
-  const [min, max] = integerRange(target);
-  const parsed = parseInteger(text, min, max, target, true) as bigint;
-  return isBigIntKind(target) ? parsed : Number(parsed);
+  const parsed = parseText(text, target, culture);
+  if (parsed === 'format') fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
+  if (parsed === 'overflow') {
+    if (target === 'decimal')
+      fail('System.OverflowException', `Value was either too large or too small for ${DECIMAL_NAME}.`);
+    overflowFor(target);
+  }
+  if (target === 'float') return Math.fround(parsed as number);
+  return typeof parsed === 'bigint' && !isBigIntKind(target) ? Number(parsed) : parsed;
 }
 
-function parseNonIntegral(text: string, target: SpecialType): Value {
-  const parsed = target === 'decimal' ? parseDecimal(text) : parseNumber(text);
-  if (parsed === undefined) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-  return target === 'float' ? Math.fround(parsed as number) : parsed;
+/** A string's number as `Parse` of the target type reads it in its default style. */
+function parseText(text: string, target: SpecialType, culture: Culture): NumericValue | ParseFailure {
+  if (target === 'decimal') return parseDecimalText(text, NumberStyles.Number, culture);
+  if (target === 'double' || target === 'float')
+    return parseFloatText(text, NumberStyles.FloatWithThousands, culture) ?? 'format';
+  return parseIntegerText(text, NumberStyles.Integer, culture, integerRange(target));
 }
 
 function boolNumber(value: boolean, target: SpecialType): Value {
@@ -1230,7 +1243,8 @@ function textOfChars(chars: readonly Value[]): string {
 export function compositeFormat(
   call: NativeCall,
   format: string | undefined,
-  args: { value: Value; type: Type }[]
+  args: { value: Value; type: Type }[],
+  provider?: Value
 ): string {
   if (format === undefined) failNull('format');
   const evaluator = evaluatorOf(call);
@@ -1243,7 +1257,7 @@ export function compositeFormat(
     }
     const arg = args[part.index];
     if (!arg) throw FORMAT_INDEX();
-    text.append(evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame));
+    text.append(evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame, provider));
   }
   return text.toString();
 }

@@ -7,6 +7,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
+import { INVARIANT } from './cultures';
 import { CsDecimal } from './decimal';
 import { Evaluator } from './evaluator';
 import { runProgram } from './execute';
@@ -279,7 +280,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     case 'float': {
       // A float shows its own shortest digits, as .NET prints `1.1f` as 1.1, not the double it widens to.
       const number = value as number;
-      return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true)) : number;
+      return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true, INVARIANT)) : number;
     }
     case 'object': {
       return isString(value) ? shownText(stringText(value)) : NOT_SCALAR;

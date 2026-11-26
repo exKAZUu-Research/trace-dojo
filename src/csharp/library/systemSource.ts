@@ -71,7 +71,7 @@ namespace System {
   public interface IComparable<in T> { int CompareTo(T? other); }
   public interface IEquatable<T> { bool Equals(T? other); }
   public interface IFormattable { string ToString(string? format, IFormatProvider? formatProvider); }
-  public interface IFormatProvider { }
+  public interface IFormatProvider { object? GetFormat(Type? formatType); }
   public interface IDisposable { void Dispose(); }
   public interface ICloneable { object Clone(); }
 
@@ -185,6 +185,9 @@ namespace System {
     public static string Format(string format, object? arg0, object? arg1);
     public static string Format(string format, object? arg0, object? arg1, object? arg2);
     public static string Format(string format, params object?[] args);
+    public static string Format(IFormatProvider? provider, string format, object? arg0);
+    public static string Format(IFormatProvider? provider, string format, object? arg0, object? arg1);
+    public static string Format(IFormatProvider? provider, string format, object? arg0, object? arg1, object? arg2);
     public static string Format(IFormatProvider? provider, string format, params object?[] args);
     public static bool IsNullOrEmpty(string? value);
     public static bool IsNullOrWhiteSpace(string? value);
@@ -307,7 +310,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static ${keyword} Parse(string s);
     public static ${keyword} Parse(string s, IFormatProvider? provider);
+    public static ${keyword} Parse(string s, System.Globalization.NumberStyles style);
+    public static ${keyword} Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out ${keyword} result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out ${keyword} result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out ${keyword} result);
     public static ${keyword} Abs(${keyword} value);
     public static ${keyword} Clamp(${keyword} value, ${keyword} min, ${keyword} max);
     public static ${keyword} Max(${keyword} x, ${keyword} y);
@@ -351,7 +358,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static float Parse(string s);
     public static float Parse(string s, IFormatProvider? provider);
+    public static float Parse(string s, System.Globalization.NumberStyles style);
+    public static float Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out float result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out float result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out float result);
     public static bool IsNaN(float f);
     public static bool IsInfinity(float f);
     public static bool IsPositiveInfinity(float f);
@@ -391,7 +402,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static double Parse(string s);
     public static double Parse(string s, IFormatProvider? provider);
+    public static double Parse(string s, System.Globalization.NumberStyles style);
+    public static double Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out double result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out double result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out double result);
     public static bool IsNaN(double d);
     public static bool IsInfinity(double d);
     public static bool IsPositiveInfinity(double d);
@@ -433,7 +448,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static decimal Parse(string s);
     public static decimal Parse(string s, IFormatProvider? provider);
+    public static decimal Parse(string s, System.Globalization.NumberStyles style);
+    public static decimal Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out decimal result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out decimal result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out decimal result);
     public static decimal Abs(decimal value);
     public static decimal Max(decimal x, decimal y);
     public static decimal Min(decimal x, decimal y);
@@ -772,6 +791,7 @@ namespace System {
     public static byte ToByte(object? value);
     public static byte ToByte(string? value);
     public static byte ToByte(string? value, int fromBase);
+    public static byte ToByte(string? value, IFormatProvider? provider);
     public static byte ToByte(int value);
     public static byte ToByte(double value);
     public static byte ToByte(char value);
@@ -788,6 +808,7 @@ namespace System {
     public static sbyte ToSByte(object? value);
     public static sbyte ToSByte(string? value);
     public static sbyte ToSByte(string? value, int fromBase);
+    public static sbyte ToSByte(string? value, IFormatProvider? provider);
     public static sbyte ToSByte(int value);
     public static sbyte ToSByte(double value);
     public static sbyte ToSByte(bool value);
@@ -804,6 +825,7 @@ namespace System {
     public static short ToInt16(object? value);
     public static short ToInt16(string? value);
     public static short ToInt16(string? value, int fromBase);
+    public static short ToInt16(string? value, IFormatProvider? provider);
     public static short ToInt16(int value);
     public static short ToInt16(double value);
     public static short ToInt16(bool value);
@@ -831,6 +853,7 @@ namespace System {
     public static int ToInt32(decimal value);
     public static int ToInt32(string? value);
     public static int ToInt32(string? value, int fromBase);
+    public static int ToInt32(string? value, IFormatProvider? provider);
     public static int ToInt32(sbyte value);
     public static int ToInt32(ushort value);
     public static long ToInt64(object? value);
@@ -847,6 +870,7 @@ namespace System {
     public static long ToInt64(decimal value);
     public static long ToInt64(string? value);
     public static long ToInt64(string? value, int fromBase);
+    public static long ToInt64(string? value, IFormatProvider? provider);
     public static long ToInt64(sbyte value);
     public static long ToInt64(ushort value);
     public static double ToDouble(object? value);
@@ -862,12 +886,14 @@ namespace System {
     public static double ToDouble(double value);
     public static double ToDouble(decimal value);
     public static double ToDouble(string? value);
+    public static double ToDouble(string? value, IFormatProvider? provider);
     public static double ToDouble(sbyte value);
     public static double ToDouble(ushort value);
     public static float ToSingle(object? value);
     public static float ToSingle(double value);
     public static float ToSingle(char value);
     public static float ToSingle(string? value);
+    public static float ToSingle(string? value, IFormatProvider? provider);
     public static float ToSingle(sbyte value);
     public static float ToSingle(byte value);
     public static float ToSingle(short value);
@@ -890,6 +916,7 @@ namespace System {
     public static decimal ToDecimal(double value);
     public static decimal ToDecimal(float value);
     public static decimal ToDecimal(string? value);
+    public static decimal ToDecimal(string? value, IFormatProvider? provider);
     public static decimal ToDecimal(sbyte value);
     public static decimal ToDecimal(ushort value);
     public static decimal ToDecimal(decimal value);
@@ -907,6 +934,12 @@ namespace System {
     public static string ToString(float value);
     public static string ToString(double value);
     public static string ToString(decimal value);
+    public static string ToString(object? value, IFormatProvider? provider);
+    public static string ToString(int value, IFormatProvider? provider);
+    public static string ToString(long value, IFormatProvider? provider);
+    public static string ToString(float value, IFormatProvider? provider);
+    public static string ToString(double value, IFormatProvider? provider);
+    public static string ToString(decimal value, IFormatProvider? provider);
     public static string ToString(byte value, int toBase);
     public static string ToString(short value, int toBase);
     public static string ToString(int value, int toBase);
@@ -1230,6 +1263,7 @@ namespace System {
     public override int GetHashCode();
     public override string ToString();
     public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
     public string ToString(string? format, IFormatProvider? provider);
     public string ToShortDateString();
     public string ToLongDateString();
@@ -1238,7 +1272,11 @@ namespace System {
     public static int DaysInMonth(int year, int month);
     public static bool IsLeapYear(int year);
     public static DateTime Parse(string s);
+    public static DateTime Parse(string s, IFormatProvider? provider);
+    public static DateTime Parse(string s, IFormatProvider? provider, System.Globalization.DateTimeStyles styles);
     public static bool TryParse(string? s, out DateTime result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out DateTime result);
+    public static bool TryParse(string? s, IFormatProvider? provider, System.Globalization.DateTimeStyles styles, out DateTime result);
     public static int Compare(DateTime t1, DateTime t2);
     public static DateTime operator +(DateTime d, TimeSpan t);
     public static DateTime operator -(DateTime d, TimeSpan t);
