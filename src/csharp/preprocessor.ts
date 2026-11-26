@@ -367,12 +367,8 @@ function applyFileDirective(text: string, row: number, options: BuildOptions, sy
       return;
     }
     case 'DefineConstants': {
-      // A value that refers to MSBuild properties, as `$(DefineConstants);X`, needs MSBuild to expand it.
-      if (setting.includes('$(')) break;
-      // The SDK adds `DEBUG` and the target framework's symbols to the constants a project defines, but not `TRACE`.
-      symbols.delete('TRACE');
-      for (const symbol of setting.split(/[;,\s]+/)) if (symbol !== '') symbols.add(symbol);
-      return;
+      if (defineConstants(setting, symbols)) return;
+      break;
     }
     case 'LangVersion': {
       if (LANGUAGE_VERSIONS.has(setting.toLowerCase())) return;
@@ -383,6 +379,15 @@ function applyFileDirective(text: string, row: number, options: BuildOptions, sy
     }
   }
   unsupported({ row, column: 0 }, `\`#:property ${name}=${setting}\``);
+}
+
+/** Defines the symbols of a `DefineConstants` value, or returns false for one that only MSBuild can expand. */
+function defineConstants(setting: string, symbols: Set<string>): boolean {
+  if (setting.includes('$(')) return false;
+  // The SDK adds `DEBUG` and the target framework's symbols to the constants a project defines, but not `TRACE`.
+  symbols.delete('TRACE');
+  for (const symbol of setting.split(/[;,\s]+/)) if (symbol !== '') symbols.add(symbol);
+  return true;
 }
 
 function checkLineEnd(rest: string, row: number, diagnostics: SourceDiagnostic[]): void {

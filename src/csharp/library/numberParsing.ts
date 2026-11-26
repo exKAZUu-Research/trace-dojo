@@ -203,78 +203,112 @@ export function parseDecimalText(text: string, styles: number, culture: Culture)
  * currency symbol; digits with a decimal point and group separators; an exponent; then the trailing ones. Anything left
  * over but NUL characters fails.
  */
-// code-gauge-allow functionCognitiveComplexity -- One branch per element of .NET's number grammar.
-// code-gauge-allow functionNcss -- One branch per element of .NET's number grammar.
 function scanNumber(text: string, styles: number, culture: Culture): ScannedNumber | undefined {
-  const allows = (flag: number): boolean => (styles & flag) !== 0;
-  let index = 0;
-  let currency: string | undefined = allows(NumberStyles.AllowCurrencySymbol) ? culture.currencySymbol : undefined;
-  let hasSign = false;
-  let hasCurrency = false;
-  let inParentheses = false;
-  let isNegative = false;
-  for (; index < text.length; index++) {
-    const char = text[index];
-    // White space may not follow a sign, unless a currency symbol does: `-¤ 5` is a number but `- 5` is not.
-    if (isWhite(char) && allows(NumberStyles.AllowLeadingWhite) && (!hasSign || hasCurrency)) continue;
-    if (allows(NumberStyles.AllowLeadingSign) && !hasSign && (char === '+' || char === '-')) {
-      hasSign = true;
-      isNegative = char === '-';
-    } else if (char === '(' && allows(NumberStyles.AllowParentheses) && !hasSign) {
-      hasSign = true;
-      inParentheses = true;
-      isNegative = true;
-    } else if (currency !== undefined && text.startsWith(currency, index)) {
-      hasCurrency = true;
-      index += currency.length - 1;
-      currency = undefined;
-    } else break;
+  return new NumberScanner(text, styles, culture).scan();
+}
+
+/** The state of one `scanNumber`, which reads the parts of the number in order. */
+class NumberScanner {
+  private index = 0;
+  /** The currency symbol, until it has been read once. */
+  private currency: string | undefined;
+  private hasSign = false;
+  private hasCurrency = false;
+  private inParentheses = false;
+  private isNegative = false;
+
+  constructor(
+    private readonly text: string,
+    private readonly styles: number,
+    culture: Culture
+  ) {
+    this.currency = this.allows(NumberStyles.AllowCurrencySymbol) ? culture.currencySymbol : undefined;
   }
-  let integer = '';
-  let fraction = '';
-  let hasPoint = false;
-  for (; index < text.length; index++) {
-    const char = text[index];
-    if (char >= '0' && char <= '9') {
-      if (hasPoint) fraction += char;
-      else integer += char;
-    } else if (char === NUMBER_SYMBOLS.decimalSeparator && allows(NumberStyles.AllowDecimalPoint) && !hasPoint) {
-      hasPoint = true;
-    } else if (
-      char !== NUMBER_SYMBOLS.groupSeparator ||
-      !allows(NumberStyles.AllowThousands) ||
-      integer === '' ||
-      hasPoint
-    ) {
-      break;
+
+  scan(): ScannedNumber | undefined {
+    this.scanLeading();
+    const digits = this.scanDigits();
+    if (!digits) return undefined;
+    const exponent = this.scanExponent();
+    this.scanTrailing();
+    if (this.inParentheses || !/^\0*$/.test(this.text.slice(this.index))) return undefined;
+    return { isNegative: this.isNegative, ...digits, exponent };
+  }
+
+  private allows(flag: number): boolean {
+    return (this.styles & flag) !== 0;
+  }
+
+  private scanLeading(): void {
+    for (; this.index < this.text.length; this.index++) {
+      const char = this.text[this.index];
+      // White space may not follow a sign, unless a currency symbol does: `-¤ 5` is a number but `- 5` is not.
+      const mayBeWhite = !this.hasSign || this.hasCurrency;
+      if (isWhite(char) && this.allows(NumberStyles.AllowLeadingWhite) && mayBeWhite) continue;
+      if (this.readSign(char, NumberStyles.AllowLeadingSign)) continue;
+      if (char === '(' && this.allows(NumberStyles.AllowParentheses) && !this.hasSign) {
+        this.hasSign = true;
+        this.inParentheses = true;
+        this.isNegative = true;
+      } else if (this.readCurrency()) {
+        this.hasCurrency = true;
+      } else break;
     }
   }
-  if (integer === '' && fraction === '') return undefined;
-  let exponent = 0;
-  if ((text[index] === 'e' || text[index] === 'E') && allows(NumberStyles.AllowExponent)) {
-    const match = /^[eE]([+-]?)(\d+)/.exec(text.slice(index));
-    if (match) {
-      // .NET stops counting an exponent past 1000, which already puts any number past every type's range.
-      const magnitude = match[2].replace(/^0+/, '').length > 4 ? 9999 : Math.min(Number(match[2]), 9999);
-      exponent = match[1] === '-' ? -magnitude : magnitude;
-      index += match[0].length;
+
+  private scanDigits(): { integer: string; fraction: string } | undefined {
+    let integer = '';
+    let fraction = '';
+    let hasPoint = false;
+    const allowsPoint = this.allows(NumberStyles.AllowDecimalPoint);
+    const allowsGroups = this.allows(NumberStyles.AllowThousands);
+    for (; this.index < this.text.length; this.index++) {
+      const char = this.text[this.index];
+      const isDigit = char >= '0' && char <= '9';
+      if (isDigit && hasPoint) fraction += char;
+      else if (isDigit) integer += char;
+      else if (char === NUMBER_SYMBOLS.decimalSeparator && allowsPoint && !hasPoint) hasPoint = true;
+      // A group separator may follow any digit before the decimal point, in groups of any size.
+      else if (char !== NUMBER_SYMBOLS.groupSeparator || !allowsGroups || integer === '' || hasPoint) break;
+    }
+    return integer === '' && fraction === '' ? undefined : { integer, fraction };
+  }
+
+  private scanExponent(): number {
+    if (!this.allows(NumberStyles.AllowExponent)) return 0;
+    const match = /^[eE]([+-]?)(\d+)/.exec(this.text.slice(this.index));
+    if (!match) return 0;
+    this.index += match[0].length;
+    // .NET stops counting an exponent past 1000, which already puts any number past every type's range.
+    const magnitude = match[2].replace(/^0+/, '').length > 4 ? 9999 : Math.min(Number(match[2]), 9999);
+    return match[1] === '-' ? -magnitude : magnitude;
+  }
+
+  private scanTrailing(): void {
+    for (; this.index < this.text.length; this.index++) {
+      const char = this.text[this.index];
+      if (isWhite(char) && this.allows(NumberStyles.AllowTrailingWhite)) continue;
+      if (this.readSign(char, NumberStyles.AllowTrailingSign)) continue;
+      if (char === ')' && this.inParentheses) this.inParentheses = false;
+      else if (!this.readCurrency()) break;
     }
   }
-  for (; index < text.length; index++) {
-    const char = text[index];
-    if (isWhite(char) && allows(NumberStyles.AllowTrailingWhite)) continue;
-    if (allows(NumberStyles.AllowTrailingSign) && !hasSign && (char === '+' || char === '-')) {
-      hasSign = true;
-      isNegative = char === '-';
-    } else if (char === ')' && inParentheses) {
-      inParentheses = false;
-    } else if (currency !== undefined && text.startsWith(currency, index)) {
-      index += currency.length - 1;
-      currency = undefined;
-    } else break;
+
+  /** Reads a sign at the index, which the style must allow there and which may come only once. */
+  private readSign(char: string, flag: number): boolean {
+    if (!this.allows(flag) || this.hasSign || (char !== '+' && char !== '-')) return false;
+    this.hasSign = true;
+    this.isNegative = char === '-';
+    return true;
   }
-  if (inParentheses || !/^\0*$/.test(text.slice(index))) return undefined;
-  return { isNegative, integer, fraction, exponent };
+
+  /** Reads the currency symbol at the index, leaving the index at its last character. */
+  private readCurrency(): boolean {
+    if (this.currency === undefined || !this.text.startsWith(this.currency, this.index)) return false;
+    this.index += this.currency.length - 1;
+    this.currency = undefined;
+    return true;
+  }
 }
 
 function isWhite(char: string): boolean {

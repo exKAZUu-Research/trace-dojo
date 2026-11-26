@@ -79,20 +79,9 @@ export const JA_JP: Culture = {
 };
 
 const ENGLISH_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const ENGLISH_MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
+const ENGLISH_MONTHS = 'January February March April May June July August September October November December'.split(
+  ' '
+);
 
 const INVARIANT_NAME = 'Invariant Language (Invariant Country)';
 
