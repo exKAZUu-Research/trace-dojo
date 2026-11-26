@@ -2106,7 +2106,9 @@ export abstract class StatementCompiler extends CallCompiler {
     asStatement: boolean
   ): { stmt: Stmt; value: TExpr } {
     const fn = this.currentFn(expression);
-    if (expression.isInline) return this.inlineFor(expression, resultType, asStatement);
+    // Code that the compiler runs evaluates a loop as it goes, so each iteration's captures are known as an inline loop's.
+    if (expression.isInline || this.runsAtCompileTime(expression))
+      return this.inlineFor(expression, resultType, asStatement);
     const target: JumpTarget = {
       id: {},
       label: expression.label?.name,
