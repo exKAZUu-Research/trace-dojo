@@ -1281,15 +1281,14 @@ export class Checker {
     const input = this.instantiateCon(cons[0]);
     const output = this.instantiateCon(cons[0]);
     this.unify(target, input.type, expr.expr.span, 'レコードの更新');
-    const inputArgs = splitApp(input.type).args;
-    const outputArgs = splitApp(output.type).args;
-    for (const con of cons) {
+    // A data family's other instances may share the fields' names; the update keeps to the first constructor's instance.
+    for (const con of cons.filter((candidate) => candidate.instanceArgs === cons[0].instanceArgs)) {
       const updated = new Set(expr.fields.map((field) => field.field.positions.get(con)));
       for (const [position, fieldType] of con.fieldTypes.entries()) {
         if (updated.has(position)) continue;
         this.unify(
-          instantiateType(fieldType, inputArgs),
-          instantiateType(fieldType, outputArgs),
+          instantiateType(fieldType, input.vars),
+          instantiateType(fieldType, output.vars),
           expr.span,
           'レコードの更新'
         );
@@ -1384,18 +1383,21 @@ export class Checker {
     }
   }
 
-  instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[] } {
+  /** A constructor's type at fresh variables, which `vars` holds: a data instance's own, or the data type's parameters. */
+  instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[]; vars: Type[] } {
     if (con.instanceArgs) {
       const vars = freshKinds(con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
       return {
         type: tap(tcon(con.type), ...con.instanceArgs.map((arg) => instantiateType(arg, vars))),
         fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
+        vars,
       };
     }
-    const args = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
+    const vars = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
     return {
-      type: tap(tcon(con.type), ...args),
-      fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, args)),
+      type: tap(tcon(con.type), ...vars),
+      fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
+      vars,
     };
   }
 
