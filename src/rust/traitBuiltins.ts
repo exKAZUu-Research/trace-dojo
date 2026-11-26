@@ -482,6 +482,8 @@ function debug(goal: Goal): Answer {
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);
   if (d) return d;
+  // `SendError` hides the message it holds: `SendError { .. }`, whatever its type.
+  if (t.def.builtin === 'SendError') return 'yes';
   if (t.def.builtin === 'Iter') {
     return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
@@ -495,7 +497,9 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
   if (
-    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode', 'IoError'].includes(t.def.builtin as string) ||
+    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode', 'IoError', 'SendError'].includes(
+      t.def.builtin as string
+    ) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
@@ -653,7 +657,11 @@ function defaultValue(goal: Goal): Answer {
 
 function stdError({ t, all }: Goal): Answer {
   // `io::Error` is an error, though unlike the others it is neither `Clone` nor `PartialEq`.
-  if (t.kind === 'adt') return ERROR_TYPES.has(t.def.builtin as string) || t.def.builtin === 'IoError' ? 'yes' : 'no';
+  if (t.kind === 'adt') {
+    return ERROR_TYPES.has(t.def.builtin as string) || ['IoError', 'SendError'].includes(t.def.builtin ?? '')
+      ? 'yes'
+      : 'no';
+  }
   if (t.kind === 'ref') return all([t.target]);
   return 'no';
 }

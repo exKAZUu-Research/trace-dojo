@@ -7,6 +7,7 @@ import {
   type BorrowGuard,
   type CellBox,
   CellPlace,
+  type ChannelEnd,
   DynValue,
   EnumValue,
   FnValue,
@@ -159,6 +160,10 @@ export class Dropper {
         (target as BorrowGuard).release();
         return;
       }
+      case 'Receiver': {
+        (target as ChannelEnd).receiverDropped = true;
+        return;
+      }
       case 'RefCell':
       case 'Cell':
       case 'Mutex':
@@ -229,7 +234,17 @@ export class Dropper {
 }
 
 /** The types whose drop counts (an `Rc`'s strong count) or ends a borrow (a `RefCell`'s guard). */
-const COUNTED = new Set(['Rc', 'Weak', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard']);
+const COUNTED = new Set([
+  'Rc',
+  'Weak',
+  'Ref',
+  'RefMut',
+  'Arc',
+  'MutexGuard',
+  'RwLockReadGuard',
+  'RwLockWriteGuard',
+  'Receiver',
+]);
 
 function argsOf(t: Type & { kind: 'adt' }): Map<TypeParam, Type> {
   return new Map(t.def.params.map((param, index) => [param, t.args[index]]));

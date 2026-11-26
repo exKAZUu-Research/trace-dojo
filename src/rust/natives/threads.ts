@@ -258,12 +258,15 @@ define({
     return ok(ctx, { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) });
   },
   'PoisonError<_>::into_inner': ([error]) => (deref(error) as StructValue).fields[0],
-  'std::sync::mpsc::channel': () => {
+  'std::sync::mpsc::channel': (_args, ctx) => {
+    ctx.interp.dropper.activate();
     const channel = new ChannelEnd([]);
     return [channel, channel];
   },
   'Sender<_>::send': ([sender, message], ctx) => {
-    (deref(sender) as ChannelEnd).queue.push(message);
+    const channel = deref(sender) as ChannelEnd;
+    if (channel.receiverDropped) return err(ctx, new StructValue(mpscDef(ctx, 'SendError'), [message]));
+    channel.queue.push(message);
     return ok(ctx, UNIT_VALUE);
   },
   'Receiver<_>::recv': ([receiver], ctx) => {

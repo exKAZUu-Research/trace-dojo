@@ -134,6 +134,7 @@ export const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   RwLockReadGuard: 'RwLockReadGuard',
   RwLockWriteGuard: 'RwLockWriteGuard',
   Sender: 'Sender',
+  SendError: 'SendError',
   Receiver: 'Receiver',
   JoinHandle: 'JoinHandle',
   ScopedJoinHandle: 'ScopedJoinHandle',

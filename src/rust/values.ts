@@ -398,6 +398,8 @@ export class IoStream {
 
 /** The queue of an `mpsc` channel, which its `Sender`s and its `Receiver` share. */
 export class ChannelEnd {
+  /** Whether the `Receiver` has gone, after which a send gives back its message as an error. */
+  receiverDropped = false;
   constructor(readonly queue: Value[]) {}
 }
 

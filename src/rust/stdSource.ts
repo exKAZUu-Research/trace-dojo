@@ -1749,7 +1749,7 @@ pub mod sync {
             pub fn try_iter(&self) -> IterImpl<T, super::super::iter::shape::ReceiverShape>;
         }
         pub fn channel<T>() -> (Sender<T>, Receiver<T>);
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(Clone, Copy, PartialEq, Eq)]
         pub struct SendError<T>(pub T);
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct RecvError;

@@ -192,6 +192,9 @@ export class Formatter {
           case 'IoError': {
             return padString(ioErrorDisplay(v), spec, write);
           }
+          case 'SendError': {
+            return padString('sending on a closed channel', spec, write);
+          }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
               return padString(errorDisplay(t.def.builtin as string, v), spec, write);
@@ -433,6 +436,7 @@ export class Formatter {
         );
       }
       case 'Sender':
+      case 'SendError':
       case 'Receiver':
       case 'JoinHandle': {
         return emit(`${def.builtin} { .. }`, write);
