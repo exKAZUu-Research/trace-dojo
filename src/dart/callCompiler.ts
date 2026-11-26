@@ -332,6 +332,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       if (callee.name === 'loadLibrary' && this.library.deferredPrefixes.has(prefix)) {
         return this.compileLoadLibrary(prefix, expression);
       }
+      this.checkLoadedFirst(prefix, expression);
       const call = this.compilePrefixedCall(prefix, callee, expression, context);
       if (call) return this.loadedOnly(prefix, call);
     }

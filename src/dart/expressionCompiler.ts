@@ -1579,6 +1579,18 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     return resolution !== undefined && resolution.kind !== 'prefix';
   }
 
+  /**
+   * Checks a deferred prefix before the steps of an expression that reads it and awaits, which run before the
+   * expression's own code: the SDK reads the prefix before it evaluates the arguments.
+   */
+  protected checkLoadedFirst(prefix: string, node: unknown): void {
+    if (!this.library.deferredPrefixes.has(prefix) || !this.awaitsHere(node)) return;
+    this.addStep((frame) => {
+      if (!frame.runtime.loadedPrefixes.has(prefix)) frame.runtime.throwError('_DeferredNotLoadedError', '', [prefix]);
+      return;
+    });
+  }
+
   /** What a prefix of a `deferred as` import reaches, which fails until its library is loaded. */
   protected loadedOnly(prefix: string, compiled: Compiled): Compiled {
     if (!this.library.deferredPrefixes.has(prefix)) return compiled;
