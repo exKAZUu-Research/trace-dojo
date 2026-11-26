@@ -26,10 +26,12 @@ import {
   callFunction,
   getPropertyValue,
   isVirtual,
+  needsDefaults,
   parameterReprs,
   receiverRepr,
   returnRepr,
   runtimeClassOf,
+  withDefaults,
 } from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
@@ -238,7 +240,13 @@ function suspendCall(
     const target = dispatcher !== undefined && isVirtual(symbol) ? runtimeClassOf(dispatcher).dispatch(symbol) : symbol;
     const invoke = target.invokeSuspend;
     if (!invoke) throw new Error(`The suspend function ${symbol.name} has no implementation`);
-    return invoke(caller, receiver, args, callRow);
+    // An override does not fill the defaults it inherits, as callFunction fills them for other calls.
+    if (!needsDefaults(symbol, target, args)) return invoke(caller, receiver, args, callRow);
+    const mark = caller.temporaries.length;
+    const values = withDefaults(symbol, caller, receiver, args);
+    // The coroutine's frame holds the filled arguments from here on.
+    caller.temporaries.length = mark;
+    return invoke(caller, receiver, values, callRow);
   }) as unknown as Value;
 }
 

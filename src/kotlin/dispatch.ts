@@ -142,23 +142,34 @@ export function callFunction(
   if (receiver instanceof KObject && receiver.function && symbol.name === 'invoke' && isFunctionInterface(symbol.owner))
     return receiver.function.call(frame, args);
   const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
-  const needsDefaults =
-    (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);
-  if (!needsDefaults) return invokeTarget(symbol, target, frame, receiver, args, callRow);
+  if (!needsDefaults(symbol, target, args)) return invokeTarget(symbol, target, frame, receiver, args, callRow);
   const { temporaries } = frame;
   const mark = temporaries.length;
   try {
-    const filled = [...args];
-    for (const [index, value] of args.entries()) {
-      if (value !== MISSING) continue;
-      const resolved = evaluateDefault(symbol, frame, receiver, filled, index);
-      temporaries.push(resolved);
-      filled[index] = resolved;
-    }
-    return invokeTarget(symbol, target, frame, receiver, filled, callRow);
+    return invokeTarget(symbol, target, frame, receiver, withDefaults(symbol, frame, receiver, args), callRow);
   } finally {
     temporaries.length = mark;
   }
+}
+
+/**
+ * Whether a call's omitted arguments need the defaults the resolved function declares, which an override that the call
+ * dispatches to, or a function inheriting its defaults, does not fill itself.
+ */
+export function needsDefaults(symbol: FunctionSymbol, target: FunctionSymbol, args: Value[]): boolean {
+  return (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);
+}
+
+/** A call's arguments with each omitted one filled from the default the resolved function declares or inherits. */
+export function withDefaults(symbol: FunctionSymbol, frame: Frame, receiver: Value, args: Value[]): Value[] {
+  const filled = [...args];
+  for (const [index, value] of args.entries()) {
+    if (value !== MISSING) continue;
+    const resolved = evaluateDefault(symbol, frame, receiver, filled, index);
+    frame.temporaries.push(resolved);
+    filled[index] = resolved;
+  }
+  return filled;
 }
 
 function invokeTarget(
