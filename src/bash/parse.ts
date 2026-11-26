@@ -93,12 +93,24 @@ export function parseTrapActionPrefix(text: string, row: number): Statement[] {
     errorRow = error.diagnostics[0]?.row ?? 0;
   }
   for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
-    // A line ending in a backslash joins the next one, so the command does not end there.
-    if (/(^|[^\\])(\\\\)*\\$/.test(lines[count - 1] ?? '')) continue;
-    const prefix = parseTrapAction(lines.slice(0, count).join('\n'), row);
-    if (prefix !== undefined) return prefix;
+    const text = lines.slice(0, count).join('\n');
+    const prefix = parseTrapAction(text, row);
+    if (prefix !== undefined && endsAtLineEnd(text, prefix.length)) return prefix;
   }
   return [];
+}
+
+/**
+ * Whether the commands of `text`, `count` of them, end at its last line's end, which a backslash continuing that line
+ * into the next prevents: a command on a line after it is then one more command, read as the grammar reads comments
+ * and quotes.
+ */
+function endsAtLineEnd(text: string, count: number): boolean {
+  try {
+    return parseText(`${text}\n:\n`, new Set()).units.flat().length === count + 1;
+  } catch {
+    return false;
+  }
 }
 
 /**
