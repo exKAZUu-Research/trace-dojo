@@ -1440,8 +1440,8 @@ export class Shell implements ArithmeticHost {
       shift: this.lineShift,
       definitionRow: this.functionDefinitionRow,
       setOptions: this.setOptionsToRestore,
-      // Without `set -E`, the caller's `ERR` trap is set aside for the function, and comes back when it returns,
-      // over a trap the function set; a trap set where none was stays, as in Bash.
+      // Without `set -E`, the caller's `ERR` trap is set aside for the function, and comes back when it returns
+      // unless the function set one, which stays, as Bash's `maybe_set_error_trap` does.
       errTrap: this.options.errtrace ? undefined : this.traps.get('ERR'),
     };
     this.setOptionsToRestore = undefined;
@@ -1463,7 +1463,7 @@ export class Shell implements ArithmeticHost {
       const restored = this.setOptionsToRestore;
       if (restored) for (const name of SET_OPTION_NAMES) this.options[name] = restored[name];
       this.setOptionsToRestore = saved.setOptions;
-      if (saved.errTrap) this.traps.set('ERR', saved.errTrap);
+      if (saved.errTrap && !this.traps.has('ERR')) this.traps.set('ERR', saved.errTrap);
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
