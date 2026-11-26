@@ -53,3 +53,8 @@
   Property 'y' is missing in type '{ x: 1; }' but required in type 'FullPoint'.
 (55,47): error TS2344: Type 'string | number' does not satisfy the constraint 'string | undefined'.
   Type 'number' is not assignable to type 'string'.
+(57,62): error TS2322: Type '"square" | "triangle"' is not assignable to type 'never'.
+  Type '"square"' is not assignable to type 'never'.
+(59,63): error TS2322: Type 'Color.Green | Color.Blue' is not assignable to type 'never'.
+  Type 'Color.Green' is not assignable to type 'never'.
+(60,7): error TS2322: Type '"q"' is not assignable to type 'never'.

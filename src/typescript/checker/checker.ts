@@ -1245,7 +1245,9 @@ export class Checker {
 
   widenLiteralForMessage(source: Type, target: Type): Type {
     const regular = regularOf(source);
-    if (!isLiteralType(regular) || this.couldHaveTopLevelSingletonTypes(target)) return regular;
+    // tsc shows the literals a value assigned to `never` has, as an exhaustiveness check reports the cases left.
+    if (!isLiteralType(regular) || isIntrinsic(target, 'never') || this.couldHaveTopLevelSingletonTypes(target))
+      return regular;
     return regular.kind === 'union' ? unionOf(regular.types.map(baseTypeOfLiteral)) : baseTypeOfLiteral(regular);
   }
 
