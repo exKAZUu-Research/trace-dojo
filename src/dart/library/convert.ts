@@ -431,27 +431,31 @@ final class JsonEncoder extends Converter<Object?, String> {
   const JsonEncoder.withIndent(this.indent, [Object? Function(dynamic object)? toEncodable]) : _toEncodable = toEncodable;
   String convert(Object? object) => _jsonEncode(object, _toEncodable, indent);
   Stream<String> bind(Stream<Object?> stream) =>
-      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _JsonEncoderSink(sink, this));
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _JsonEncoderSink(sink, _toEncodable, indent));
 }
 
-/**
- * The SDK's _JsonEncoderSink (lib/convert/json.dart): a stream of values encodes its first value and then ends, and
- * a later value is an error. Modification: the encoded text is added as one string, where the SDK's stringifier adds
- * the pieces it writes one by one.
- */
+// From the SDK's lib/convert/json.dart (3.13.7): _JsonEncoderSink, _JsonStringifier, _JsonPrettyPrintMixin,
+// _JsonStringStringifier and _JsonStringStringifierPretty, with their comments removed; and from
+// lib/convert/string_conversion.dart, _StringConversionSinkAsStringSinkAdapter. They encode a stream's value, adding
+// each piece the stringifier writes, as the SDK's do. Modifications: the sinks implement EventSink and add to an
+// EventSink<String> in place of a StringConversionSink; a single conversion stays native (nativeConvert.ts), with
+// the same text and errors, since the Dart stringifier would charge operations for each character.
 class _JsonEncoderSink implements EventSink<Object?> {
+  final String? _indent;
+  final Object? Function(dynamic)? _toEncodable;
   final EventSink<String> _sink;
-  final JsonEncoder _encoder;
   bool _isDone = false;
-  _JsonEncoderSink(this._sink, this._encoder);
+
+  _JsonEncoderSink(this._sink, this._toEncodable, this._indent);
 
   void add(Object? o) {
     if (_isDone) {
       throw StateError("Only one call to add allowed");
     }
     _isDone = true;
-    _sink.add(_encoder.convert(o));
-    _sink.close();
+    var stringSink = _StringConversionSinkAsStringSinkAdapter(_sink);
+    _JsonStringStringifier.printOn(o, stringSink, _toEncodable, _indent);
+    stringSink.close();
   }
 
   void addError(Object error, [StackTrace? stackTrace]) {
@@ -459,7 +463,404 @@ class _JsonEncoderSink implements EventSink<Object?> {
   }
 
   void close() {
-    if (!_isDone) _sink.close();
+    /* do nothing */
+  }
+}
+
+class _StringConversionSinkAsStringSinkAdapter implements StringSink {
+  static const _MIN_STRING_SIZE = 16;
+
+  final StringBuffer _buffer;
+  final EventSink<String> _chunkedSink;
+
+  _StringConversionSinkAsStringSinkAdapter(this._chunkedSink)
+    : _buffer = StringBuffer();
+
+  void close() {
+    if (_buffer.isNotEmpty) _flush();
+    _chunkedSink.close();
+  }
+
+  void writeCharCode(int charCode) {
+    _buffer.writeCharCode(charCode);
+    if (_buffer.length > _MIN_STRING_SIZE) _flush();
+  }
+
+  void write(Object? o) {
+    if (_buffer.isNotEmpty) _flush();
+    _chunkedSink.add(o.toString());
+  }
+
+  void writeln([Object? o = ""]) {
+    _buffer.writeln(o);
+    if (_buffer.length > _MIN_STRING_SIZE) _flush();
+  }
+
+  void writeAll(Iterable objects, [String separator = ""]) {
+    if (_buffer.isNotEmpty) _flush();
+    var iterator = objects.iterator;
+    if (!iterator.moveNext()) return;
+    if (separator.isEmpty) {
+      do {
+        _chunkedSink.add(iterator.current.toString());
+      } while (iterator.moveNext());
+    } else {
+      _chunkedSink.add(iterator.current.toString());
+      while (iterator.moveNext()) {
+        write(separator);
+        _chunkedSink.add(iterator.current.toString());
+      }
+    }
+  }
+
+  void _flush() {
+    var accumulated = _buffer.toString();
+    _buffer.clear();
+    _chunkedSink.add(accumulated);
+  }
+}
+
+dynamic _defaultToEncodable(dynamic object) => object.toJson();
+
+abstract class _JsonStringifier {
+  static const int backspace = 0x08;
+  static const int tab = 0x09;
+  static const int newline = 0x0a;
+  static const int carriageReturn = 0x0d;
+  static const int formFeed = 0x0c;
+  static const int quote = 0x22;
+  static const int char_0 = 0x30;
+  static const int backslash = 0x5c;
+  static const int char_b = 0x62;
+  static const int char_d = 0x64;
+  static const int char_f = 0x66;
+  static const int char_n = 0x6e;
+  static const int char_r = 0x72;
+  static const int char_t = 0x74;
+  static const int char_u = 0x75;
+  static const int surrogateMin = 0xd800;
+  static const int surrogateMask = 0xfc00;
+  static const int surrogateLead = 0xd800;
+  static const int surrogateTrail = 0xdc00;
+
+  final List _seen = [];
+
+  final dynamic Function(dynamic) _toEncodable;
+
+  _JsonStringifier(dynamic Function(dynamic o)? toEncodable)
+    : _toEncodable = toEncodable ?? _defaultToEncodable;
+
+  String? get _partialResult;
+
+  void writeString(String characters);
+
+  void writeStringSlice(String characters, int start, int end);
+
+  void writeCharCode(int charCode);
+
+  void writeNumber(num number);
+
+  static int hexDigit(int x) => x < 10 ? 48 + x : 87 + x;
+
+  void writeStringContent(String s) {
+    var offset = 0;
+    final length = s.length;
+    for (var i = 0; i < length; i++) {
+      var charCode = s.codeUnitAt(i);
+      if (charCode > backslash) {
+        if (charCode >= surrogateMin) {
+          if (((charCode & surrogateMask) == surrogateLead &&
+                  !(i + 1 < length &&
+                      (s.codeUnitAt(i + 1) & surrogateMask) ==
+                          surrogateTrail)) ||
+              ((charCode & surrogateMask) == surrogateTrail &&
+                  !(i - 1 >= 0 &&
+                      (s.codeUnitAt(i - 1) & surrogateMask) ==
+                          surrogateLead))) {
+            if (i > offset) writeStringSlice(s, offset, i);
+            offset = i + 1;
+            writeCharCode(backslash);
+            writeCharCode(char_u);
+            writeCharCode(char_d);
+            writeCharCode(hexDigit((charCode >> 8) & 0xf));
+            writeCharCode(hexDigit((charCode >> 4) & 0xf));
+            writeCharCode(hexDigit(charCode & 0xf));
+          }
+        }
+        continue;
+      }
+      if (charCode < 32) {
+        if (i > offset) writeStringSlice(s, offset, i);
+        offset = i + 1;
+        writeCharCode(backslash);
+        switch (charCode) {
+          case backspace:
+            writeCharCode(char_b);
+            break;
+          case tab:
+            writeCharCode(char_t);
+            break;
+          case newline:
+            writeCharCode(char_n);
+            break;
+          case formFeed:
+            writeCharCode(char_f);
+            break;
+          case carriageReturn:
+            writeCharCode(char_r);
+            break;
+          default:
+            writeCharCode(char_u);
+            writeCharCode(char_0);
+            writeCharCode(char_0);
+            writeCharCode(hexDigit((charCode >> 4) & 0xf));
+            writeCharCode(hexDigit(charCode & 0xf));
+            break;
+        }
+      } else if (charCode == quote || charCode == backslash) {
+        if (i > offset) writeStringSlice(s, offset, i);
+        offset = i + 1;
+        writeCharCode(backslash);
+        writeCharCode(charCode);
+      }
+    }
+    if (offset == 0) {
+      writeString(s);
+    } else if (offset < length) {
+      writeStringSlice(s, offset, length);
+    }
+  }
+
+  void _checkCycle(Object? object) {
+    for (var i = 0; i < _seen.length; i++) {
+      if (identical(object, _seen[i])) {
+        throw JsonCyclicError(object);
+      }
+    }
+    _seen.add(object);
+  }
+
+  void _removeSeen(Object? object) {
+    assert(_seen.isNotEmpty);
+    assert(identical(_seen.last, object));
+    _seen.removeLast();
+  }
+
+  void writeObject(Object? object) {
+    if (writeJsonValue(object)) return;
+    _checkCycle(object);
+    try {
+      var customJson = _toEncodable(object);
+      if (!writeJsonValue(customJson)) {
+        throw JsonUnsupportedObjectError(object, partialResult: _partialResult);
+      }
+      _removeSeen(object);
+    } catch (e) {
+      throw JsonUnsupportedObjectError(
+        object,
+        cause: e,
+        partialResult: _partialResult,
+      );
+    }
+  }
+
+  bool writeJsonValue(Object? object) {
+    if (object is num) {
+      if (!object.isFinite) return false;
+      writeNumber(object);
+      return true;
+    } else if (identical(object, true)) {
+      writeString('true');
+      return true;
+    } else if (identical(object, false)) {
+      writeString('false');
+      return true;
+    } else if (object == null) {
+      writeString('null');
+      return true;
+    } else if (object is String) {
+      writeString('"');
+      writeStringContent(object);
+      writeString('"');
+      return true;
+    } else if (object is List) {
+      _checkCycle(object);
+      writeList(object);
+      _removeSeen(object);
+      return true;
+    } else if (object is Map) {
+      _checkCycle(object);
+      var success = writeMap(object);
+      _removeSeen(object);
+      return success;
+    } else {
+      return false;
+    }
+  }
+
+  void writeList(List<Object?> list) {
+    writeString('[');
+    if (list.isNotEmpty) {
+      writeObject(list[0]);
+      for (var i = 1; i < list.length; i++) {
+        writeString(',');
+        writeObject(list[i]);
+      }
+    }
+    writeString(']');
+  }
+
+  bool writeMap(Map<Object?, Object?> map) {
+    if (map.isEmpty) {
+      writeString("{}");
+      return true;
+    }
+    var keyValueList = List<Object?>.filled(map.length * 2, null);
+    var i = 0;
+    var allStringKeys = true;
+    map.forEach((key, value) {
+      if (key is! String) {
+        allStringKeys = false;
+      }
+      keyValueList[i++] = key;
+      keyValueList[i++] = value;
+    });
+    if (!allStringKeys) return false;
+    writeString('{');
+    var separator = '"';
+    for (var i = 0; i < keyValueList.length; i += 2) {
+      writeString(separator);
+      separator = ',"';
+      writeStringContent(keyValueList[i] as String);
+      writeString('":');
+      writeObject(keyValueList[i + 1]);
+    }
+    writeString('}');
+    return true;
+  }
+}
+
+mixin _JsonPrettyPrintMixin implements _JsonStringifier {
+  int _indentLevel = 0;
+
+  void writeIndentation(int indentLevel);
+
+  void writeList(List<Object?> list) {
+    if (list.isEmpty) {
+      writeString('[]');
+    } else {
+      writeString('[\n');
+      _indentLevel++;
+      writeIndentation(_indentLevel);
+      writeObject(list[0]);
+      for (var i = 1; i < list.length; i++) {
+        writeString(',\n');
+        writeIndentation(_indentLevel);
+        writeObject(list[i]);
+      }
+      writeString('\n');
+      _indentLevel--;
+      writeIndentation(_indentLevel);
+      writeString(']');
+    }
+  }
+
+  bool writeMap(Map<Object?, Object?> map) {
+    if (map.isEmpty) {
+      writeString("{}");
+      return true;
+    }
+    var keyValueList = List<Object?>.filled(map.length * 2, null);
+    var i = 0;
+    var allStringKeys = true;
+    map.forEach((key, value) {
+      if (key is! String) {
+        allStringKeys = false;
+      }
+      keyValueList[i++] = key;
+      keyValueList[i++] = value;
+    });
+    if (!allStringKeys) return false;
+    writeString('{\n');
+    _indentLevel++;
+    var separator = "";
+    for (var i = 0; i < keyValueList.length; i += 2) {
+      writeString(separator);
+      separator = ",\n";
+      writeIndentation(_indentLevel);
+      writeString('"');
+      writeStringContent(keyValueList[i] as String);
+      writeString('": ');
+      writeObject(keyValueList[i + 1]);
+    }
+    writeString('\n');
+    _indentLevel--;
+    writeIndentation(_indentLevel);
+    writeString('}');
+    return true;
+  }
+}
+
+class _JsonStringStringifier extends _JsonStringifier {
+  final StringSink _sink;
+
+  _JsonStringStringifier(
+    this._sink,
+    dynamic Function(dynamic object)? _toEncodable,
+  ) : super(_toEncodable);
+
+  static String stringify(
+    Object? object,
+    dynamic Function(dynamic object)? toEncodable,
+    String? indent,
+  ) {
+    var output = StringBuffer();
+    printOn(object, output, toEncodable, indent);
+    return output.toString();
+  }
+
+  static void printOn(
+    Object? object,
+    StringSink output,
+    dynamic Function(dynamic o)? toEncodable,
+    String? indent,
+  ) {
+    _JsonStringifier stringifier;
+    if (indent == null) {
+      stringifier = _JsonStringStringifier(output, toEncodable);
+    } else {
+      stringifier = _JsonStringStringifierPretty(output, toEncodable, indent);
+    }
+    stringifier.writeObject(object);
+  }
+
+  String? get _partialResult => _sink is StringBuffer ? _sink.toString() : null;
+
+  void writeNumber(num number) {
+    _sink.write(number.toString());
+  }
+
+  void writeString(String string) {
+    _sink.write(string);
+  }
+
+  void writeStringSlice(String string, int start, int end) {
+    _sink.write(string.substring(start, end));
+  }
+
+  void writeCharCode(int charCode) {
+    _sink.writeCharCode(charCode);
+  }
+}
+
+class _JsonStringStringifierPretty extends _JsonStringStringifier
+    with _JsonPrettyPrintMixin {
+  final String _indent;
+
+  _JsonStringStringifierPretty(super.sink, super.toEncodable, this._indent);
+
+  void writeIndentation(int count) {
+    for (var i = 0; i < count; i++) writeString(_indent);
   }
 }
 
@@ -473,17 +874,38 @@ final class JsonDecoder extends Converter<String, Object?> {
 
 /**
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
- * as it comes: the chunks are joined and parsed when the stream ends, and an error is reported in the chunk it is in,
- * at its offset there, as the chunked parser reports it; the error comes at the stream's end, not at its chunk.
+ * as it comes: the chunks so far are parsed again as each arrives, so that an error is reported when its chunk
+ * arrives, in that chunk at its offset there, as the chunked parser reports it, and the value when the stream ends.
  */
 class _JsonStringDecoderSink implements EventSink<String> {
   final EventSink<Object?> _sink;
   final Object? Function(Object? key, Object? value)? _reviver;
   final List<String> _chunks = <String>[];
+  /** The text before the error that stopped the chunked parser, once one has. */
+  String? _beforeError;
+  bool _isRejected = false;
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
+    // The chunked parser goes on from a state an error leaves it in, which this sink does not reproduce.
+    if (_beforeError != null && chunk.isNotEmpty) {
+      _isRejected = true;
+      throw UnsupportedError("エラーの後に続く json.decoder のストリームのチャンクは、この採点環境では使えません。");
+    }
     _chunks.add(chunk);
+    if (chunk.isEmpty || _beforeError != null) return;
+    // An error before the end of the text so far is one no later chunk can mend, which the SDK's chunked parser
+    // reports as soon as its chunk arrives; one at the end waits for more input.
+    final source = _chunks.join();
+    try {
+      _jsonDecode(source, null);
+    } on FormatException catch (error) {
+      final offset = error.offset;
+      if (offset != null && offset < source.length) {
+        _beforeError = source.substring(0, offset);
+        throw _inChunk(error, offset);
+      }
+    }
   }
 
   void addError(Object error, [StackTrace? stackTrace]) {
@@ -491,7 +913,17 @@ class _JsonStringDecoderSink implements EventSink<String> {
   }
 
   void close() {
-    final source = _chunks.join();
+    if (_isRejected) {
+      _sink.close();
+      return;
+    }
+    final beforeError = _beforeError;
+    // A parser an error stopped gives the value it completed before it, or fails as its input ends unfinished.
+    final source = beforeError ?? _chunks.join();
+    if (beforeError != null && !_completes(beforeError)) {
+      final last = _chunks.last;
+      throw FormatException("Unexpected end of input", last, last.length);
+    }
     Object? value;
     try {
       value = _jsonDecode(source, _reviver);
@@ -500,6 +932,15 @@ class _JsonStringDecoderSink implements EventSink<String> {
     }
     _sink.add(value);
     _sink.close();
+  }
+
+  bool _completes(String text) {
+    try {
+      _jsonDecode(text, null);
+      return true;
+    } on FormatException {
+      return false;
+    }
   }
 
   FormatException _inChunk(FormatException error, int offset) {
