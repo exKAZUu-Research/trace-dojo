@@ -5,7 +5,10 @@ import { call, define, deref, type NativeContext, panic, placeOf } from './suppo
 const identity = ([value]: Value[]): Value => value;
 
 define({
-  'AsyncFuture<_>::poll': ([pinned, context], ctx) => poll(ctx, (deref(pinned) as FutureValue).poll(context)),
+  'AsyncFuture<_>::poll': pollFuture,
+  'Ready<_>::poll': pollFuture,
+  'Pending<_>::poll': pollFuture,
+  'PollFn<_, _>::poll': pollFuture,
   // A `Box<F>` (or a `Pin<Box<F>>`) is the future it holds, which a pinned reference to it refers to.
   'Box<_>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
   'Pin<Box<_>>::poll': ([pinned, context], ctx) => pollInner(ctx, pinned, context),
@@ -56,6 +59,11 @@ define({
   'Box<_>::into_pin': identity,
   'std::pin::pin_value': ([value]) => new CellPlace(value),
 });
+
+/** Polls a future the library makes: an `async` block's, or `ready`'s, `pending`'s, or `poll_fn`'s. */
+function pollFuture([pinned, context]: Value[], ctx: NativeContext): Value {
+  return poll(ctx, (deref(pinned) as FutureValue).poll(context));
+}
 
 /** Polls the future of type `F` (the impl's parameter) that `pinned` refers to. */
 function pollInner(ctx: NativeContext, pinned: Value, context: Value): Value {

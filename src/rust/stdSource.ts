@@ -1561,7 +1561,7 @@ pub mod future {
         type Output;
         fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>;
     }
-    /** The future of an \`async\` block or function, or of \`ready\` or \`poll_fn\`. */
+    /** The future of an \`async\` block or function. */
     pub struct AsyncFuture<T>;
     impl<T> Future for AsyncFuture<T> {
         type Output = T;
@@ -1593,9 +1593,25 @@ pub mod future {
         type IntoFuture = F;
         fn into_future(self) -> F;
     }
-    pub fn ready<T>(t: T) -> AsyncFuture<T>;
-    pub fn pending<T>() -> AsyncFuture<T>;
-    pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> AsyncFuture<T>;
+    pub struct Ready<T>;
+    impl<T> Future for Ready<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    pub struct Pending<T>;
+    impl<T> Future for Pending<T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    /** Also names the output \`T\`, which an impl cannot take from the closure's bound alone. */
+    pub struct PollFn<F, T>;
+    impl<T, F: FnMut(&mut Context) -> Poll<T>> Future for PollFn<F, T> {
+        type Output = T;
+        fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<T>;
+    }
+    pub fn ready<T>(t: T) -> Ready<T>;
+    pub fn pending<T>() -> Pending<T>;
+    pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> PollFn<F, T>;
 }
 pub mod task {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
