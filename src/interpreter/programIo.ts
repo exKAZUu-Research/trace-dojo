@@ -60,9 +60,14 @@ export class ProgramIO {
     return new TextReader(() => text, this.budget);
   }
 
+  /** A reader of what a command wrote into a pipe, which `read -t 0` finds ready only while text remains. */
+  pipeReader(text: string): TextReader {
+    return new TextReader(() => text, this.budget, undefined, true);
+  }
+
   /** A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far. */
   partReader(source: () => string, refill: () => boolean): TextReader {
-    return new TextReader(source, this.budget, refill);
+    return new TextReader(source, this.budget, refill, true);
   }
 
   output(): ProgramOutput {
@@ -124,7 +129,9 @@ export class TextReader {
   constructor(
     private readonly source: () => string,
     private readonly budget: ExecutionBudget,
-    private readonly refill?: () => boolean
+    private readonly refill?: () => boolean,
+    /** Whether the text comes through a pipe, which a poll finds ready only while text remains. */
+    readonly throughPipe = false
   ) {}
 
   get text(): string {

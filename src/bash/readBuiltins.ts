@@ -45,7 +45,7 @@ export const readBuiltin: Builtin = (shell, args) => {
   const reader = inputReader(shell, 'read', options.get('u'));
   if (!reader) return 1;
   if (!options.has('t')) rejectControlVariable(shell.store.readScalar('TMOUT'), 'TMOUT', 'read の待ち時間');
-  const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'));
+  const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'), reader);
   if (timeoutStatus !== undefined) return timeoutStatus;
   // Reading no characters still assigns the empty text read, as Bash does.
   if (count === 0) {
@@ -75,16 +75,16 @@ export const readBuiltin: Builtin = (shell, args) => {
  * The status of `read -t`, which ends `read` only for a zero timeout, testing for input: all input is present before
  * the program starts, so no other timeout can pass. Reports a timeout that is not a number.
  */
-function zeroTimeoutStatus(shell: Shell, timeout: string | undefined): number | undefined {
+function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: TextReader): number | undefined {
   if (timeout === undefined) return undefined;
   if (!/^\d*\.?\d*$/.test(timeout) || timeout === '' || timeout === '.') {
     shell.reportError(`read: ${timeout}: invalid timeout specification`);
     return 1;
   }
   if (Number(timeout) !== 0) return undefined;
-  // Bash polls the descriptor, which is ready to read while input remains and at its end alike, as every input here
-  // is complete before the program reads it.
-  return 0;
+  // Bash polls the descriptor: a file, `/dev/null`, or a here-document is ready at its end too, while a pipe whose
+  // text is all read waits for its writer, which has mostly not ended yet when Bash polls it.
+  return reader.throughPipe && reader.isAtEnd ? 1 : 0;
 }
 
 /**
