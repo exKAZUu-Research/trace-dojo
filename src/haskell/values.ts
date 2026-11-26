@@ -2,13 +2,10 @@ import type { TurtleState } from '../interpreter/turtleWorld';
 import type { Core, FunctionInfo, IODoCore, LamCore } from './core';
 import type { DisplayTypeScope, TypeHint, TypeHintRef } from './displayTypeHints';
 import type { ConInfo, InstanceInfo } from './entities';
-import type { RunNext, TailCall } from './machine';
+import type { RunCatching, RunNext, TailCall } from './machine';
 import type { Primitive } from './primitives';
 
-/**
- * A value in weak head normal form: an integer (`Int` and `Integer` as bigints), a floating-point number, a
- * character (one code point), a constructor application, a function, an `IO` action, a class dictionary, or a turtle.
- */
+/** A value in weak head normal form. `Int` and `Integer` are bigints, and a character is one code point. */
 export type Value = bigint | number | string | ConValue | FunValue | IOAction | Dict | TurtleValue;
 
 export type Slot = Value | Thunk | TypedSlot;
@@ -52,7 +49,9 @@ export class Env {
 export class ConValue {
   constructor(
     readonly con: ConInfo,
-    readonly fields: Slot[]
+    readonly fields: Slot[],
+    /** The dictionaries of a constructor's constraints, which matching the value gives. */
+    readonly dicts?: Slot[]
   ) {}
 }
 
@@ -72,7 +71,9 @@ export class PrimFn {
   constructor(
     readonly prim: Primitive,
     readonly info?: FunctionInfo,
-    readonly atomicScope?: FunctionInfo
+    readonly atomicScope?: FunctionInfo,
+    /** The values the primitive's closure holds, which the collector cannot see inside it. */
+    readonly roots?: readonly Slot[]
   ) {}
 
   get arity(): number {
@@ -80,7 +81,6 @@ export class PrimFn {
   }
 }
 
-/** A function applied to fewer arguments than it takes. */
 export class Partial {
   constructor(
     readonly fn: Closure | PrimFn,
@@ -102,12 +102,19 @@ export class Thunk {
   value: Value | undefined;
   /** Another thunk whose value this one takes, set when the evaluator drops this thunk's update frame. */
   target: Thunk | undefined;
+  /**
+   * The IO action whose result is the value, for an effectful thunk (a lazy read, `unsafeInterleaveIO`), which the
+   * evaluator runs on its own stack and a trace's display never enters.
+   */
+  effect: Slot | undefined;
 
   constructor(
     public code: Core | undefined,
     public env: Env | undefined,
     /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
-    public native?: () => Slot | TailCall
+    public native?: () => Slot | TailCall,
+    /** The values `native` holds, which the collector cannot see inside the closure. */
+    public nativeRoots?: readonly Slot[]
   ) {
     this.displayType = code?.displayType ? { tag: 'hint', value: code.displayType } : undefined;
   }
@@ -119,16 +126,25 @@ export class Thunk {
     this.code = undefined;
     this.env = undefined;
     this.native = undefined;
+    this.nativeRoots = undefined;
     this.target = undefined;
+    this.effect = undefined;
   }
 
-  /** Makes this thunk take another thunk's value instead of computing its own. */
   redirect(target: Thunk): void {
     this.state = 'pending';
     this.code = undefined;
     this.env = undefined;
     this.native = undefined;
+    this.nativeRoots = undefined;
     this.target = target;
+    this.effect = undefined;
+  }
+
+  static effectful(action: Slot): Thunk {
+    const thunk = new Thunk(undefined, undefined);
+    thunk.effect = action;
+    return thunk;
   }
 
   static of(value: Value): Thunk {
@@ -139,7 +155,6 @@ export class Thunk {
   }
 }
 
-/** An `IO` action, which only running it performs. */
 export type IOAction = IOReturn | IOBind | IOThen | IOPrim | IODo | IOCall;
 
 export class IOReturn {
@@ -164,7 +179,7 @@ export class IOThen {
 export class IOPrim {
   constructor(
     readonly name: string,
-    readonly run: () => Slot | RunNext,
+    readonly run: () => Slot | RunNext | RunCatching,
     /** The slots the action uses, which keep the turtles they reach alive. */
     readonly refs: Slot[] = []
   ) {}
@@ -222,12 +237,35 @@ export function isFunction(value: Value): value is FunValue {
   return value instanceof Closure || value instanceof PrimFn || value instanceof Partial;
 }
 
+/**
+ * What raised an exception: a value the program threw, or a built-in failure of a kind, which a `catch` turns into
+ * the exception value of its Haskell type. A failure without a cause is an `ErrorCall`.
+ */
+export type ExceptionCause =
+  | { kind: 'value'; value: Slot }
+  | { kind: 'arith'; error: ArithError }
+  | { kind: 'pattern' }
+  | { kind: 'io'; type: string; location: string; file?: string; description: string; handle?: Slot };
+
+export type ArithError =
+  | 'Overflow'
+  | 'Underflow'
+  | 'LossOfPrecision'
+  | 'DivideByZero'
+  | 'Denormal'
+  | 'RatioZeroDenominator';
+
 export class HaskellException extends Error {
   constructor(
     /** The message `displayException` gives, which an uncaught exception reports. */
-    readonly display: string
+    readonly display: string,
+    readonly cause?: ExceptionCause
   ) {
     super(display);
     this.name = 'HaskellException';
   }
+}
+
+export class RefValue {
+  constructor(public value: Slot) {}
 }

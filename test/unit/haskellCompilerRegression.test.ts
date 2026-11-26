@@ -414,7 +414,6 @@ test.each([
   ['Text.Printf (PrintfArg(parseFormat))', 'parseFormat'],
   ['Text.Read (Read(readPrec))', 'readPrec'],
   ['Text.Read (Read(readListPrec))', 'readListPrec'],
-  ['Text.Read (Read(..))', 'readListPrec'],
 ])('known class methods retain unsupported diagnostics: %s', (item, method) => {
   const result = executeProgram('haskell', `import ${item}\nmain=print(1::Int)`);
   expect(result).toMatchObject({
@@ -427,16 +426,19 @@ test.each([
     expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
 });
 
-test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read hiding (Read(readPrec))'])(
-  'supported and hidden class selections remain usable: %s',
-  (item) => {
-    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
-      kind: 'executed',
-      stdout: '1\n',
-      uncaughtException: undefined,
-    });
-  }
-);
+test.each([
+  'Text.Read (Read(readsPrec))',
+  'Text.Printf (PrintfArg)',
+  'Text.Read hiding (Read(readPrec))',
+  'Text.Read (Read(..))',
+  'Control.Exception (ErrorCall(..))',
+])('supported and hidden class selections remain usable: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
 
 test.each([false, true])('long binding chains compile without host recursion (cyclic=%s)', (cyclic) => {
   const count = 30_000;
@@ -616,7 +618,7 @@ test.each([
   });
 });
 
-test.each(['System.IO (IOMode(ReadMode))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
+test.each(['System.IO (SeekMode(AbsoluteSeek))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
   'selecting unsupported type children still rejects use: %s',
   (item) => {
     expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
@@ -1329,4 +1331,28 @@ test.each([
   const result = executeProgram('haskell', source);
   expect(result.kind).toBe('compileError');
   if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('曖昧');
+});
+
+test.each([
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f (type Int) 3)', '3\n'],
+  ['k :: forall a b -> a -> b -> a\nk _ _ x _ = x\nmain = print (k (type Int) (type Bool) 3 True)', '3\n'],
+  ['main = print (id (type Int) 3)', undefined],
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f @Int 3)', undefined],
+  ['k :: forall a b -> a -> b -> a\nk _ _ x _ = x\nmain = print (k (type Int) @Bool 3 True)', undefined],
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f @_ 3)', undefined],
+  ['f :: forall a -> a -> a\nf _ x = x\nmain = print (f (type _) 3)', '3\n'],
+  ['main = print (id @_ 3 :: Int)', '3\n'],
+])('a required type argument takes only (type t), and (type t) goes only to one: %s', (body, stdout) => {
+  const result = executeProgram('haskell', `{-# LANGUAGE RequiredTypeArguments, TypeOperators #-}\n${body}\n`);
+  if (stdout === undefined) expect(result.kind).toBe('compileError');
+  else expect(result).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  ['main = let ?x = (5 :: Int) in print (?x + 1 :: Int)', '6\n'],
+  ['main = let ?x = (5 :: Int) in let f :: Int; f = ?x in print f', '5\n'],
+  ['main = let ?x = (5 :: Int) in let ?x = ?x + 1 in print (?x :: Int)', '6\n'],
+])('an implicit parameter bound outside a signature is given inside it: %s', (body, stdout) => {
+  const result = executeProgram('haskell', `{-# LANGUAGE ImplicitParams #-}\n${body}\n`);
+  expect(result).toMatchObject({ kind: 'executed', stdout });
 });

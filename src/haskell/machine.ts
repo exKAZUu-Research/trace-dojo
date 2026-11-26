@@ -22,6 +22,7 @@ import {
   statementDone,
   unwindBlock,
 } from './ioBlocks';
+import { DisplayAbort } from './previewBudget';
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
 import type { Runtime, TraceFrame } from './runtime';
@@ -54,6 +55,7 @@ export type Frame =
       env: Env | undefined;
       native?: () => Slot | TailCall;
       target: Thunk | undefined;
+      effect: Slot | undefined;
     }
   | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
   | {
@@ -71,6 +73,9 @@ export type Frame =
   | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
+  /** Enters the result of the IO action run above it, as `runST` and an effectful thunk give it. */
+  | { k: 'pureIO' }
+  | { k: 'catch'; handle: (error: HaskellException) => Slot; refs: Slot[] }
   | { k: 'ioBind'; next: Slot }
   | { k: 'ioThen'; next: Slot }
   | DoFrame
@@ -125,11 +130,26 @@ export class RunNext {
   constructor(readonly action: Slot) {}
 }
 
-export type PrimResult = Slot | TailCall;
+export class RunCatching {
+  constructor(
+    readonly action: Slot,
+    readonly handle: (error: HaskellException) => Slot,
+    /** The slots the handler uses, which stay reachable while the action runs. */
+    readonly refs: Slot[]
+  ) {}
+}
+
+/** What `runST` gives: an action whose result is the primitive's value, run on the machine's own stack. */
+export class RunPure {
+  constructor(readonly action: Slot) {}
+}
+
+export type PrimResult = Slot | TailCall | RunPure;
 
 /**
  * Evaluates Core with an explicit stack, so that deep recursion in a program does not exhaust the host's stack.
- * Evaluation may nest (a primitive forcing a value), each level running until the stack returns to its base.
+ * IO actions, including those that `catch`, `runST` and effectful thunks run, go on the same stack; only a primitive
+ * forcing a value nests evaluation, each level running until the stack returns to its base.
  */
 export class Machine {
   private readonly nativeCalls = new RecursionBudget(() => this.runtime.evaluationLimitError());
@@ -180,10 +200,11 @@ export class Machine {
       case 'con': {
         if (code.args.length === 0) return nullary(code.con);
         this.runtime.allocate(code.args.length);
-        return new ConValue(
-          code.con,
-          code.args.map((arg) => this.makeLetSlot(arg, env))
-        );
+        const slots = code.args.map((arg) => this.makeLetSlot(arg, env));
+        if (code.con.context?.length) {
+          return new ConValue(code.con, slots.slice(0, code.con.arity), slots.slice(code.con.arity));
+        }
+        return new ConValue(code.con, slots);
       }
       case 'iodo': {
         return new IODo(code, env as Env);
@@ -212,49 +233,55 @@ export class Machine {
     return this.nativeCalls.run(() => this.runCore(start));
   }
 
-  // code-gauge-allow functionNcss -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
   private runCore(start: RunStart): Slot {
     const { stack } = this;
     const base = stack.length;
     stack.push({ k: 'base' });
     const state = new RunState(start);
     if (start.mode === 'runSlotIO') stack.push({ k: 'runIO' });
-    try {
-      for (;;) {
-        switch (state.mode) {
-          case 'eval': {
-            this.stepEval(state);
-            break;
-          }
-          case 'enter': {
-            this.stepEnter(state);
-            break;
-          }
-          case 'apply': {
-            this.stepApply(state);
-            break;
-          }
-          case 'primNext': {
-            this.stepPrim(state);
-            break;
-          }
-          case 'return': {
-            if (this.stepReturn(state)) return state.value;
-            break;
-          }
-          case 'io': {
-            this.stepIO(state);
-            break;
-          }
-          case 'ioDone': {
-            if (this.stepIODone(state)) return state.value;
-            break;
-          }
+    for (;;) {
+      try {
+        return this.loop(state);
+      } catch (error) {
+        if (error instanceof HaskellException && this.handleException(base, state, error)) continue;
+        this.unwind(base, error instanceof HaskellException ? error : undefined);
+        throw error;
+      }
+    }
+  }
+
+  private loop(state: RunState): Slot {
+    for (;;) {
+      switch (state.mode) {
+        case 'eval': {
+          this.stepEval(state);
+          break;
+        }
+        case 'enter': {
+          this.stepEnter(state);
+          break;
+        }
+        case 'apply': {
+          this.stepApply(state);
+          break;
+        }
+        case 'primNext': {
+          this.stepPrim(state);
+          break;
+        }
+        case 'return': {
+          if (this.stepReturn(state)) return state.value;
+          break;
+        }
+        case 'io': {
+          this.stepIO(state);
+          break;
+        }
+        case 'ioDone': {
+          if (this.stepIODone(state)) return state.value;
+          break;
         }
       }
-    } catch (error) {
-      this.unwind(base);
-      throw error;
     }
   }
 
@@ -329,7 +356,10 @@ export class Machine {
         return;
       }
       case 'error': {
-        throw new HaskellException(code.message);
+        throw new HaskellException(
+          code.message,
+          /Non-exhaustive (patterns|guards)/.test(code.message) ? { kind: 'pattern' } : undefined
+        );
       }
     }
   }
@@ -383,6 +413,7 @@ export class Machine {
       env: slot.env,
       native: slot.native,
       target: slot.target,
+      effect: slot.effect,
     });
     this.runtime.beginPreview(slot);
     if (slot.target) {
@@ -390,6 +421,12 @@ export class Machine {
       return;
     }
     this.runtime.spend();
+    if (slot.effect !== undefined) {
+      this.refuseEffectInDisplay();
+      this.stack.push({ k: 'pureIO' }, { k: 'runIO' });
+      state.enter(slot.effect);
+      return;
+    }
     if (!slot.native) {
       state.evaluate(slot.code as Core, slot.env);
       return;
@@ -474,9 +511,16 @@ export class Machine {
     }
     this.stack.pop();
     this.runtime.spend();
+    if (frame.prim.effectful) this.refuseEffectInDisplay();
     const result = frame.prim.fn(frame.args, this.runtime);
-    if (result instanceof TailCall) state.applyTo(result.fn, result.args);
-    else state.enter(result);
+    if (result instanceof TailCall) {
+      state.applyTo(result.fn, result.args);
+    } else if (result instanceof RunPure) {
+      this.stack.push({ k: 'pureIO' }, { k: 'runIO' });
+      state.enter(result.action);
+    } else {
+      state.enter(result);
+    }
   }
 
   // code-gauge-allow functionNcss -- One short case per kind of frame a value returns to.
@@ -551,6 +595,14 @@ export class Machine {
         throw new Error(`A value returned to an IO frame (${frame.k})`);
       }
     }
+  }
+
+  /**
+   * Stops a trace's display before an effect (a lazy read, `Debug.Trace` output), so the display shows the value
+   * unevaluated and the program's own run performs the effect when it needs the value.
+   */
+  private refuseEffectInDisplay(): void {
+    if (this.runtime.displaying) throw new DisplayAbort();
   }
 
   private pushFunctionResult(
@@ -641,9 +693,15 @@ export class Machine {
   private selectAlternative(state: RunState, core: CaseCore, env: Env, type: TypeHint | undefined): void {
     const scrutinee = state.value as ConValue;
     if (core.bindIndex !== undefined) env.slots[core.bindIndex] = typedSlot(scrutinee, type);
+    // A case without alternatives only evaluates its scrutinee, which may be of any type, as `!x` does.
+    if (core.alts.size === 0 && core.default) {
+      state.evaluate(core.default, env);
+      return;
+    }
     const alt = core.alts.get(scrutinee.con.tag);
     if (alt) {
-      const { slots } = alt;
+      const { slots, dictSlots } = alt;
+      if (dictSlots) for (const [index, slot] of dictSlots.entries()) env.slots[slot] = scrutinee.dicts![index];
       for (let index = 0; index < slots.length; index++) {
         if (slots[index] >= 0)
           env.slots[slots[index]] = typedSlot(
@@ -684,6 +742,9 @@ export class Machine {
       if (result instanceof RunNext) {
         this.stack.push({ k: 'runIO' });
         state.enter(result.action);
+      } else if (result instanceof RunCatching) {
+        this.stack.push({ k: 'catch', handle: result.handle, refs: result.refs }, { k: 'runIO' });
+        state.enter(result.action);
       } else {
         state.ioResult(result);
       }
@@ -702,6 +763,13 @@ export class Machine {
       }
       case 'ioScope': {
         this.runtime.popFrame(frame.frame);
+        return false;
+      }
+      case 'catch': {
+        return false;
+      }
+      case 'pureIO': {
+        state.enter(state.value);
         return false;
       }
       case 'ioBind': {
@@ -728,16 +796,46 @@ export class Machine {
     return this.runtime.frames.some((frame) => frame.isAtomic);
   }
 
-  private unwind(base: number): void {
+  /**
+   * Runs the handler of the innermost `catch` of this run that an exception escapes to, restoring what the frames
+   * above it were evaluating; false when no `catch` of this run is there.
+   */
+  private handleException(base: number, state: RunState, error: HaskellException): boolean {
+    const index = this.stack.findLastIndex((frame, position) => position > base && frame.k === 'catch');
+    if (index === -1) return false;
+    this.unwind(index + 1, error);
+    const frame = this.stack.pop() as Extract<Frame, { k: 'catch' }>;
+    this.stack.push({ k: 'runIO' });
+    state.enter(frame.handle(error));
+    return true;
+  }
+
+  /**
+   * Pops the frames above `base`. A thunk an exception escapes keeps raising it, as GHC updates it with the exception;
+   * without one (the evaluation was interrupted), the thunk is restored to compute again.
+   */
+  private unwind(base: number, exception?: HaskellException): void {
     const { stack } = this;
     while (stack.length > base) {
       const frame = stack.pop() as Frame;
       if (frame.k === 'update') {
         frame.thunk.state = 'pending';
-        frame.thunk.code = frame.code;
-        frame.thunk.env = frame.env;
-        frame.thunk.native = frame.native;
-        frame.thunk.target = frame.target;
+        frame.thunk.target = undefined;
+        frame.thunk.effect = undefined;
+        if (exception) {
+          frame.thunk.code = undefined;
+          frame.thunk.env = undefined;
+          frame.thunk.native = () => {
+            throw exception;
+          };
+          frame.thunk.nativeRoots = exceptionRoots(exception);
+        } else {
+          frame.thunk.code = frame.code;
+          frame.thunk.env = frame.env;
+          frame.thunk.native = frame.native;
+          frame.thunk.target = frame.target;
+          frame.thunk.effect = frame.effect;
+        }
         this.runtime.endPreview(frame.thunk, true);
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);
@@ -817,4 +915,12 @@ function describeValue(value: unknown): string {
   if (value === undefined) return 'undefined';
   if (typeof value === 'object' && value !== null) return value.constructor.name;
   return typeof value;
+}
+
+/** The program values an exception carries: its value, or the handle an I/O error names. */
+function exceptionRoots(exception: HaskellException): Slot[] {
+  const { cause } = exception;
+  if (cause?.kind === 'value') return [cause.value];
+  if (cause?.kind === 'io' && cause.handle !== undefined) return [cause.handle];
+  return [];
 }

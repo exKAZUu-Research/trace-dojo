@@ -1,6 +1,7 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { compileError } from './errors';
+import type { Extensions } from './extensions';
 import { sourceColumns } from './sourceCoordinates';
 import type { Span } from './syntax';
 
@@ -23,15 +24,22 @@ interface Layout {
   itemStart: number;
 }
 
-export function validateDialect(root: Node): void {
-  new DialectValidator(root).run();
+export function validateDialect(root: Node, extensions: Extensions): void {
+  const reserved = new Set(reservedNames);
+  const features = extensions.gates('parse');
+  if (features.allows('recursiveDoKeywords')) for (const name of ['rec', 'mdo']) reserved.add(name);
+  new DialectValidator(root, features.allows('blockArguments'), reserved).run();
 }
 
 class DialectValidator {
   private previousRow = -1;
   private readonly columns: Uint32Array;
 
-  constructor(private readonly root: Node) {
+  constructor(
+    private readonly root: Node,
+    private readonly blockArguments: boolean,
+    private readonly reserved: ReadonlySet<string>
+  ) {
     this.columns = sourceColumns(root.text);
   }
 
@@ -39,9 +47,11 @@ class DialectValidator {
     this.visit(this.root);
   }
 
-  private visit(node: Node, context?: Layout): void {
+  private visit(node: Node, outer?: Layout): void {
     if (isComment(node)) return;
-    validateSyntaxNode(node);
+    // A quote's brackets delimit it, so the layout around it does not reach inside, as its own declarations' does.
+    const context = node.type === 'quote' ? undefined : outer;
+    validateSyntaxNode(node, this.blockArguments, this.reserved);
     const children = node.children.filter((child): child is Node => child !== null);
     if (children.length === 0) {
       this.checkToken(node, context);
@@ -80,15 +90,15 @@ class DialectValidator {
   }
 }
 
-function validateSyntaxNode(node: Node): void {
-  if (node.type === 'variable' && reservedNames.has(node.text)) fail(node);
+function validateSyntaxNode(node: Node, allowBlockArguments: boolean, reserved: ReadonlySet<string>): void {
+  if (node.type === 'variable' && reserved.has(node.text)) fail(node);
   if (node.type === 'arithmetic_sequence') {
     const value = node.childForFieldName('step') ?? node.childForFieldName('from');
     const name = value?.type === 'qualified' ? value.childForFieldName('id') : value;
     const dots = node.children.find((child) => child?.type === '..');
     if (value && name?.type === 'constructor' && value.endIndex === dots?.startIndex) fail(value);
   }
-  if (node.type !== 'apply') return;
+  if (node.type !== 'apply' || allowBlockArguments) return;
   const argument = node.childForFieldName('argument');
   if (argument && blockArguments.has(argument.type)) fail(argument);
 }

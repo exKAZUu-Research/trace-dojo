@@ -288,3 +288,12 @@ test.each(['x=y\ny=x\nmain=print(x::Int)', 'main=print(let x=y;y=x in x::Int)', 
     expect(executeProgram('haskell', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
   }
 );
+
+test.each([
+  ['"""  \n  hello\n  """', String.raw`"  \nhello"`],
+  [String.raw`"""x\\ ` + '\n  ' + String.raw`\""\"` + '\n"""', String.raw`"x\\ \n\"\"\""`],
+  [String.raw`"""\1\  \2"""`, String.raw`"\SOH2"`],
+])('multiline string %j keeps its first line and reads gaps after escapes', (literal, shown) => {
+  const source = `{-# LANGUAGE MultilineStrings #-}\nmain = print ${literal}`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: `${shown}\n` });
+});
