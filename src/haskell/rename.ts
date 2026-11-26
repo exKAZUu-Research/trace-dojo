@@ -3739,7 +3739,7 @@ function patternSynonymSelectors(decl: Extract<Decl, { kind: 'patSyn' }>, matche
     );
     const matched: Pat = {
       kind: 'pcon',
-      con: { name: 'Just', span },
+      con: libraryName('Just', 'GHC.Internal.Maybe', 'con', span),
       args: [parts.length === 1 ? parts[0] : { kind: 'ptuple', elems: parts, span }],
       span,
     };
@@ -3873,6 +3873,11 @@ function patternAsExpression(pat: Pat): Expr {
   }
 }
 
+/** A library name the renamer generates, resolved by its identity, whatever the program's scope has under it. */
+function libraryName(name: string, module: string, namespace: 'con' | 'type', span: Span): QName {
+  return { name, span, global: { module, namespace } };
+}
+
 /**
  * The signatures of a pattern synonym's functions, from `pattern P :: t1 -> t2 -> T`: the builder's is the same, and
  * the matcher's is `T -> Maybe (t1, t2)`.
@@ -3887,10 +3892,10 @@ function patternSynonymSignatures(decls: Decl[], name: Name, sig: SigType): Decl
   }
   const matched: TypeExpr =
     params.length === 0
-      ? { kind: 'tcon', name: { name: 'Bool', span }, span }
+      ? { kind: 'tcon', name: libraryName('Bool', 'GHC.Internal.Types', 'type', span), span }
       : {
           kind: 'tapp',
-          fn: { kind: 'tcon', name: { name: 'Maybe', span }, span },
+          fn: { kind: 'tcon', name: libraryName('Maybe', 'GHC.Internal.Maybe', 'type', span), span },
           arg: params.length === 1 ? params[0] : { kind: 'ttuple', elems: params, span },
           span,
         };
