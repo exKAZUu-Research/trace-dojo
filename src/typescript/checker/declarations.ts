@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { blockHasRuntimeCode, isAmbient } from '../namespaceInstantiation';
 import type { Checker } from './checker';
 import { checkDuplicateIndexSignatures } from './indexConformance';
 import { nativeGlobalRedeclaration } from './nativeGlobalIdentity';
@@ -56,15 +57,7 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
     return;
   }
   if (entries.every((entry) => entry.kind === 'function')) {
-    const implementations = symbol.valueDeclarations.filter(
-      (declaration) =>
-        declaration.type === 'function_declaration' || declaration.type === 'generator_function_declaration'
-    );
-    if (implementations.length > 1) {
-      for (const implementation of implementations) {
-        c.error(implementation.childForFieldName('name') ?? implementation, `関数 ${name} の実装が重複しています。`);
-      }
-    }
+    checkDuplicateImplementations(c, symbol);
     return;
   }
   if (
@@ -82,11 +75,57 @@ function checkValueDuplicates(c: Checker, symbol: Sym): void {
 function checkNamespaceAndEnumMerges(c: Checker, symbol: Sym): boolean {
   const kinds = symbol.valueEntries.map((entry) => entry.kind);
   const mergeable = kinds.includes('enum') ? ['enum', 'namespace'] : ['namespace', 'function', 'class', 'enum'];
-  if (kinds.every((kind) => mergeable.includes(kind))) return false;
+  if (kinds.every((kind) => mergeable.includes(kind))) {
+    if (!kinds.includes('enum')) checkNamespaceMergedDeclarations(c, symbol);
+    return false;
+  }
   if (!kinds.includes('enum')) return true;
   for (const entry of symbol.valueEntries)
     c.error(entry.name, 'enum の宣言は、namespace かほかの enum の宣言としかマージできません。');
   return false;
+}
+
+/**
+ * A namespace with code to run must follow the function or class it merges with, whose implementations and classes
+ * are still duplicates of each other.
+ */
+function checkNamespaceMergedDeclarations(c: Checker, symbol: Sym): void {
+  const merged = symbol.valueDeclarations.filter((declaration) => !isAmbient(declaration));
+  const firstMerged = merged.find((declaration) => !isNamespaceDeclaration(declaration));
+  if (firstMerged) {
+    for (const declaration of merged) {
+      const body = declaration.childForFieldName('body');
+      if (
+        isNamespaceDeclaration(declaration) &&
+        declaration.startIndex < firstMerged.startIndex &&
+        body &&
+        blockHasRuntimeCode(body)
+      )
+        c.error(
+          declaration.childForFieldName('name') ?? declaration,
+          'namespace の宣言は、マージ先のクラスや関数より前には置けません。'
+        );
+    }
+  }
+  checkDuplicateImplementations(c, symbol);
+  const classes = symbol.valueDeclarations.filter((declaration) => declaration.type === 'class_declaration');
+  if (classes.length > 1)
+    for (const declaration of classes)
+      c.error(declaration.childForFieldName('name') ?? declaration, `${symbol.name} はすでに宣言されています。`);
+}
+
+function isNamespaceDeclaration(declaration: TreeNode): boolean {
+  return declaration.type === 'internal_module' || declaration.type === 'module';
+}
+
+function checkDuplicateImplementations(c: Checker, symbol: Sym): void {
+  const implementations = symbol.valueDeclarations.filter(
+    (declaration) =>
+      declaration.type === 'function_declaration' || declaration.type === 'generator_function_declaration'
+  );
+  if (implementations.length < 2) return;
+  for (const implementation of implementations)
+    c.error(implementation.childForFieldName('name') ?? implementation, `関数 ${symbol.name} の実装が重複しています。`);
 }
 
 export function checkParameterRedeclarations(c: Checker, scopes: Scope[]): void {

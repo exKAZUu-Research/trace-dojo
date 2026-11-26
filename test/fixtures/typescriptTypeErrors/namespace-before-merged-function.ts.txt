@@ -1,0 +1,14 @@
+namespace M {
+  export const a = 1;
+}
+function M() {}
+function M() {}
+namespace T {
+  export type U = number;
+}
+function T() {}
+function g() {}
+namespace g {
+  export const y = 2;
+}
+console.log(M.a, g.y);
