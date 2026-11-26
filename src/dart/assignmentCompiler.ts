@@ -762,15 +762,23 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const { nullAwareKey, nullAwareValue } = element;
     const keyContext = nullAwareKey ? nullableContext(elementContext) : elementContext;
     const mapValueContext = nullAwareValue ? nullableContext(valueContext) : valueContext;
-    const key = this.coerceElement(
+    const coercedKey = this.coerceElement(
       this.compileExpression(element.key, keyContext),
       keyContext ?? DYNAMIC,
       element.key,
       kind
     );
+    // A null-aware key decides whether the value runs, so the value's awaits are guarded by it, evaluated once.
+    const key = nullAwareKey ? this.decidingValue(coercedKey, element.value) : coercedKey;
     const keyBranches = nullAwareKey ? this.nullBranches(key) : undefined;
     if (keyBranches) this.flow = keyBranches.whenNonNull;
-    const compiledValue = this.compileExpression(element.value, mapValueContext);
+    const compiledValue = nullAwareKey
+      ? this.compileGuarded(
+          (frame) => key.run(frame) !== undefined,
+          element.value,
+          () => this.compileExpression(element.value, mapValueContext)
+        )
+      : this.compileExpression(element.value, mapValueContext);
     if (keyBranches) this.flow = Flow.join(keyBranches.whenNull, this.flow);
     const valueType = nullAwareValue && mapValueContext?.kind === 'void' ? DYNAMIC : (mapValueContext ?? DYNAMIC);
     const value = this.coerceElement(compiledValue, valueType, element.value, kind);
@@ -1175,6 +1183,9 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       span,
       false
     );
+    // A body that awaits runs in the statement's parts, so the cases' variables end with the statement's hidden slots
+    // when it throws, as they end with the switch when it does not.
+    if (awaits) this.awaitRoot?.slots.push(...compiledCases.flatMap((switchCase) => switchCase.slots));
     this.flow = after ?? before;
     const type = resultType ? branchesType(resultType, bodyTypes, context) : NEVER;
     return {

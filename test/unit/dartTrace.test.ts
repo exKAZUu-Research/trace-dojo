@@ -534,6 +534,24 @@ Future<void> main() async {
   expect(traceLines(suspending)).toEqual([0, 6, 2, 3, 8]);
 });
 
+test('a switch expression arm that awaits and throws ends its pattern variables', () => {
+  const program = `Future<String> g(int v) async {
+  await null;
+  throw 'x';
+}
+Future<void> main() async {
+  try {
+    var r = switch (3) { var n => await g(n) };
+    print(r);
+  } catch (e) {
+    print('c');
+  }
+  print('after');
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.traceItems.filter(({ line }) => line >= 9).every(({ vars }) => !('n' in vars))).toBe(true);
+});
+
 test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
   const program = `Future<int> walk(Turtle t, int n) async {
   for (var i = 0; i < n; i++) {

@@ -9437,6 +9437,16 @@ Future<void> main() async {
   });
 });
 
+test('a null-aware map key that is null skips its value, awaits included', () => {
+  const source = `int? sn(String tag) { print('sn $tag'); return null; }
+Future<int> f(String tag, int v) async { print('f $tag'); return v; }
+Future<void> main() async {
+  print({?sn('k1'): await f('v1', 1)});
+  print({for (var i = 0; i < 2; i++) ?(i == 0 ? null : i): await f('v$i', i)});
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'sn k1\n{}\nf v1\n{1: 1}\n' });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
