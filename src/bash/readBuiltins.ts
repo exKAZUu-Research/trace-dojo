@@ -50,7 +50,7 @@ export const readBuiltin: Builtin = (shell, args) => {
   // Reading no characters still assigns the empty text read, as Bash does.
   if (count === 0) {
     if (arrayName !== undefined) return shell.assignIndexedArray(arrayName, [], 'read') ? 0 : 1;
-    return assignAll(shell, names.length === 0 ? ['REPLY'] : names, []) ? 0 : 1;
+    return assignAll(shell, names.length === 0 ? ['REPLY'] : names, []);
   }
   const delimiter = options.has('d') ? (options.get('d') as string).slice(0, 1) || '\0' : '\n';
   let text: ReadText;
@@ -63,12 +63,12 @@ export const readBuiltin: Builtin = (shell, args) => {
     return 142;
   }
   const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
-  let ok: boolean;
-  if (arrayName !== undefined) ok = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read');
-  else if (names.length === 0) ok = shell.assignVariable('REPLY', text.chars.join(''));
-  else if (options.has('N')) ok = assignAll(shell, names, [text.chars.join('')]);
-  else ok = assignAll(shell, names, splitAmong(text, ifs, names.length));
-  return ok && text.complete ? 0 : 1;
+  let status: number;
+  if (arrayName !== undefined) status = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read') ? 0 : 1;
+  else if (names.length === 0) status = shell.assignVariable('REPLY', text.chars.join('')) ? 0 : 1;
+  else if (options.has('N')) status = assignAll(shell, names, [text.chars.join('')]);
+  else status = assignAll(shell, names, splitAmong(text, ifs, names.length));
+  return status !== 0 ? status : text.complete ? 0 : 1;
 };
 
 /**
@@ -87,12 +87,15 @@ function zeroTimeoutStatus(shell: Shell, timeout: string | undefined): number | 
   return 0;
 }
 
-function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): boolean {
-  let ok = true;
+/**
+ * Assigns the values to the names in order, returning the status: Bash stops at the first name it cannot assign, with
+ * status 1 when it is the last name and 2 otherwise, leaving the names after it as they were.
+ */
+function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): number {
   for (const [index, name] of names.entries()) {
-    if (!shell.assignVariable(name, values[index] ?? '')) ok = false;
+    if (!shell.assignVariable(name, values[index] ?? '')) return index === names.length - 1 ? 1 : 2;
   }
-  return ok;
+  return 0;
 }
 
 function readCount(shell: Shell, text: string | undefined): number | undefined | 'invalid' {
