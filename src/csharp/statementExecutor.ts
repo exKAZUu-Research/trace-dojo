@@ -197,9 +197,9 @@ export abstract class StatementExecutor extends PatternMatcher {
 
   /** Disposes a `using` resource unless it is null, returning what `Dispose` or `DisposeAsync` returned. */
   protected disposeResource(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Value {
-    if (statement.patternDispose) return this.evaluate(statement.patternDispose, frame);
     const resource = this.readLocal(frame, statement.local);
     if (resource === undefined) return undefined;
+    if (statement.patternDispose) return this.evaluate(statement.patternDispose, frame);
     const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
     return this.invokeWithoutArguments(frame, dispose, resource, statement.row, this.runtime.runtimeTypeOf(resource));
   }

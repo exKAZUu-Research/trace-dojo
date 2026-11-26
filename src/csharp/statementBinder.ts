@@ -713,7 +713,8 @@ export abstract class StatementBinder extends PatternBinder {
 
   /**
    * How `using` disposes a resource: undefined for `IDisposable.Dispose` (or `IAsyncDisposable`'s), or the call of a
-   * ref struct's `Dispose()` without the interface (C# 8), reporting a resource that has neither.
+   * ref struct's `Dispose()` or of a `DisposeAsync()` returning a task without the interface, reporting a resource
+   * that has neither.
    */
   private disposeResourceBy(
     local: LocalSymbol,
@@ -728,13 +729,18 @@ export abstract class StatementBinder extends PatternBinder {
     // A ref struct implements an interface without converting to it, which `using` disposes it by all the same.
     if (isRefLikeType(type) && (type as NamedType).symbol.interfaces.some((face) => face.symbol === disposable.symbol))
       return undefined;
-    if (!isAwait && isRefLikeType(type)) {
+    // `await using` also takes a `DisposeAsync()` that returns a task without the interface, as `using` a ref struct's
+    // `Dispose()`.
+    if (isAwait || isRefLikeType(type)) {
       const call = this.quietly(() => {
         const receiver: BoundExpression = { kind: 'local', local, type, row: position.row };
-        const group = this.bindInstanceMember(receiver, 'Dispose', undefined, position, context, true);
+        const name = isAwait ? 'DisposeAsync' : 'Dispose';
+        const group = this.bindInstanceMember(receiver, name, undefined, position, context, true);
         return group.kind === 'methodGroup' ? this.invokeMethodGroup(group, [], position, context) : undefined;
       });
-      if (call?.kind === 'call' && !call.method.isStatic) return call;
+      const shape = isAwait && call ? this.asyncShapeOf(call.type)?.kind : undefined;
+      if (call?.kind === 'call' && !call.method.isStatic && (!isAwait || shape === 'task' || shape === 'valueTask'))
+        return call;
     }
     if (isAwait) {
       this.error(
