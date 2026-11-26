@@ -285,6 +285,7 @@ export abstract class LambdaBinder extends MemberBinder {
     }
     const bodyReturnType = shape ? shape.resultType : returnType;
     const context = this.lambdaContext(node, outer, parameterTypes, bodyReturnType);
+    context.fn.method.returnsByRef = delegateType?.symbol.invoke?.returnsByRef;
     if (node.isAsync) {
       context.fn.method.isAsync = true;
       context.fn.method.async = shape ?? { kind: 'task', resultType: VOID_TYPE };
@@ -394,8 +395,21 @@ export abstract class LambdaBinder extends MemberBinder {
     returnType: Type | undefined,
     report: boolean
   ): { body: BoundBlock; inferred: Type | undefined } {
-    if (node.body.kind === 'block') {
-      const body = this.bindFunctionBlock(node.body, context);
+    const { body: written } = node;
+    const returnsByRef = context.fn.method.returnsByRef !== undefined && written.kind !== 'throw';
+    if (written.kind === 'block' || written.kind === 'refExpression' || returnsByRef) {
+      // `() => ref x` returns the variable, as the block `{ return ref x; }` does.
+      const position = { row: written.row, column: written.column };
+      const block: Block =
+        written.kind === 'block'
+          ? written
+          : {
+              kind: 'block',
+              statements: [{ kind: 'return', value: written, ...position }],
+              endRow: written.row,
+              ...position,
+            };
+      const body = this.bindFunctionBlock(block, context);
       const { fn } = context;
       const inferred =
         returnType ??
@@ -408,9 +422,9 @@ export abstract class LambdaBinder extends MemberBinder {
     }
     const savedThrow = this.allowsThrowExpression;
     this.allowsThrowExpression = true;
-    const value = this.bindValue(node.body, context);
+    const value = this.bindValue(written, context);
     this.allowsThrowExpression = savedThrow;
-    return this.expressionLambdaBody(node, node.body, value, returnType, report);
+    return this.expressionLambdaBody(node, written, value, returnType, report);
   }
 
   /** The body of a lambda with an expression body, converted to the delegate's return type. */
@@ -497,6 +511,7 @@ export abstract class LambdaBinder extends MemberBinder {
       }
       case 'assign':
       case 'refAssign':
+      case 'refFieldAssign':
       case 'compoundAssign':
       case 'increment':
       case 'call':

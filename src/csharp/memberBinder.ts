@@ -1172,6 +1172,16 @@ export abstract class MemberBinder extends CallBinder {
   /** Declares a local in the current scope, reporting names that clash with others in scope. */
   abstract declareLocal(name: string, type: Type, position: Position, context: BindContext): LocalSymbol;
 
+  /** The variable of `ref x`, which a reference then refers to. */
+  abstract bindRefTarget(
+    operand: Expression,
+    isReadonly: boolean,
+    context: BindContext,
+    use: 'local' | 'return'
+  ): BoundLValue;
+
+  abstract checkRefType(actual: Type, expected: Type, position: Position): void;
+
   /** Binds an expression as storage that an assignment or a `ref` argument writes. */
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
 
@@ -1358,7 +1368,15 @@ export abstract class MemberBinder extends CallBinder {
       { name: displayType(target.type), kind: 'delegate' }
     );
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    return { kind: 'invokeDelegate', target, args: resolved.args, type: invoke.returnType, row: node.row };
+    const { returnsByRef } = delegateSymbol.invoke as MethodSymbol;
+    return {
+      kind: 'invokeDelegate',
+      target,
+      args: resolved.args,
+      ...(returnsByRef ? { returnsByRef } : {}),
+      type: invoke.returnType,
+      row: node.row,
+    };
   }
 
   /**
@@ -2094,6 +2112,7 @@ export abstract class MemberBinder extends CallBinder {
   private bindMemberInitializer(member: MemberInitializer, type: Type, context: BindContext): BoundMemberInit {
     // `Xs = { 1, 2 }` reads the member and fills it, so it needs no setter.
     const { value } = member;
+    if (value.kind === 'refExpression') return this.bindRefMemberInitializer(member, value, type, context);
     const isNested = value.kind === 'collectionInitializer' || value.kind === 'objectInitializer';
     const target = this.bindInitializerTarget(member, type, isNested, context);
     if (isNested) {
@@ -2105,6 +2124,31 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     return { kind: 'memberInit', target, value: this.bindAs(value, target.type, context), nested: undefined };
+  }
+
+  /** `F = ref x` in an object initializer, which makes a ref field refer to the variable. */
+  private bindRefMemberInitializer(
+    member: MemberInitializer,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    type: Type,
+    context: BindContext
+  ): BoundMemberInit {
+    // The field is not written but pointed elsewhere, so only its readability is checked, as for a nested initializer.
+    const target = this.bindInitializerTarget(member, type, true, context);
+    const field = target.kind === 'field' ? target.field : undefined;
+    if (!field?.byRef) {
+      this.bindValue(value.operand, context);
+      if (target.type.kind !== 'error') this.error(member, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
+      return {
+        kind: 'memberInit',
+        target: { kind: 'discard', type: ERROR_TYPE, row: member.row },
+        value: undefined,
+        nested: undefined,
+      };
+    }
+    const refTarget = this.bindRefTarget(value.operand, field.byRef === 'readonly', context, 'local');
+    if (refTarget.kind !== 'discard') this.checkRefType(refTarget.type, target.type, value);
+    return { kind: 'memberInit', target, value: undefined, refTarget, nested: undefined };
   }
 
   private bindInitializerTarget(

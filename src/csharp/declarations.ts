@@ -760,7 +760,7 @@ export class DeclarationBinder extends BinderBase {
     invoke.access = 'public';
     invoke.parameters = this.resolveParameters(declaration.delegateParameters, context, invoke);
     invoke.returnType = declaration.delegateReturnType
-      ? this.checkReturnType(this.resolveType(declaration.delegateReturnType, context), declaration.delegateReturnType)
+      ? this.resolveReturnType(declaration.delegateReturnType, context, invoke)
       : VOID_TYPE;
     symbol.invoke = invoke;
     symbol.methods.push(invoke);
@@ -769,7 +769,9 @@ export class DeclarationBinder extends BinderBase {
   private declareField(type: DeclaredType, member: FieldDeclaration, declarator: VariableDeclarator): void {
     const { symbol, context } = type;
     const field = new FieldSymbol(declarator.name, ERROR_TYPE, symbol);
-    field.type = this.resolveType(member.type, context);
+    const declared = refTypeOf(member.type);
+    field.type = this.resolveType(declared.type, context);
+    field.byRef = declared.returnsByRef;
     field.isStatic = member.modifiers.set.has('static') || member.modifiers.set.has('const');
     field.isConst = member.modifiers.set.has('const');
     field.isReadonly = member.modifiers.set.has('readonly');
@@ -813,7 +815,8 @@ export class DeclarationBinder extends BinderBase {
         `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
       );
     if (member.modifiers.set.has('volatile')) this.checkVolatile(declarator, field);
-    this.checkStoredType(field, member.type);
+    if (field.byRef) this.checkRefField(field, member.type);
+    else this.checkStoredType(field, member.type);
     if (
       symbol.kind === 'struct' &&
       !field.isStatic &&
@@ -827,6 +830,22 @@ export class DeclarationBinder extends BinderBase {
         "'struct' でフィールド初期化子を使用するには、明示的に宣言されたコンストラクターが必要です。"
       );
     }
+  }
+
+  /** Reports a ref field outside a ref struct, or one that refers to a ref struct. */
+  private checkRefField(field: FieldSymbol, position: Position): void {
+    // A ref field lives in an instance, so `static` and `const`, which `static` comes with, are no modifiers of one.
+    if (field.isStatic) {
+      this.error(position, 'CS0106', "修飾子 'static' がこの項目に対して有効ではありません");
+      if (field.isConst) this.error(position, 'CS0106', "修飾子 'const' がこの項目に対して有効ではありません");
+      // As for an instance ref field's initializer, a value is no variable for the field to refer to.
+      if (field.isConst && field.initializer && field.initializer.kind !== 'refExpression') {
+        this.error(position, 'CS8172', '値を使用して参照渡し変数を初期化することはできません');
+        this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+      }
+    } else if (!field.owner.isRefLike)
+      this.error(position, 'CS9059', 'ref フィールドは ref 構造体でのみ宣言できます。');
+    else if (isRefLikeType(field.type)) this.error(position, 'CS9050', 'ref フィールドは ref 構造体を参照できません。');
   }
 
   /** Reports a field of a ref struct type, which only an instance of a ref struct, itself on the stack, may hold. */

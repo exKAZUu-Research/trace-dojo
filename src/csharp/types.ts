@@ -237,6 +237,11 @@ export class FieldSymbol {
   isStatic = false;
   isReadonly = false;
   isConst = false;
+  /**
+   * How a ref field of a ref struct refers to a variable (`ref T F`, `ref readonly T F`); its slot holds a reference,
+   * or nothing for a null reference. `readonly` then forbids `F = ref x` outside constructors, not writes through it.
+   */
+  byRef: 'ref' | 'readonly' | undefined;
   constantValue: unknown;
   access: Accessibility = 'private';
   /** The index of the field among its object's or its type's fields. */
@@ -301,6 +306,24 @@ export class PropertySymbol {
   ) {}
 }
 
+/**
+ * How far a variable, or the variables a ref struct value refers to, live, from the widest: beyond the method's caller
+ * (`caller`, as the heap's do), as far as a `return` (`return`, as a ref parameter's do), or only while the method runs.
+ */
+export type SafeContext = 'caller' | 'return' | 'local';
+
+const SAFE_CONTEXT_RANKS: Record<SafeContext, number> = { local: 0, return: 1, caller: 2 };
+
+/** Whether a variable living as far as `context` lives at least as far as `required`. */
+export function outlives(context: SafeContext, required: SafeContext): boolean {
+  return SAFE_CONTEXT_RANKS[context] >= SAFE_CONTEXT_RANKS[required];
+}
+
+/** The narrower of two contexts. */
+export function narrowerContext(a: SafeContext, b: SafeContext): SafeContext {
+  return outlives(a, b) ? b : a;
+}
+
 export class LocalSymbol {
   /** The index of the variable among its function's locals. */
   slot = 0;
@@ -313,8 +336,12 @@ export class LocalSymbol {
   refKind: 'ref' | 'out' | 'in' | undefined;
   /** Whether the variable is a ref local (`ref int r = ref x;`), whose slot holds a reference to another variable. */
   isRefLocal = false;
-  /** Whether a ref local refers to a variable that outlives the method, so that the method may return it by `ref`. */
-  refEscapes = false;
+  /** How far the variable that a ref local refers to lives, which bounds where the method may give the local by `ref`. */
+  refContext: SafeContext = 'local';
+  /** How far the variables that a ref struct local's ref fields may refer to live, which bounds where it may go. */
+  valueContext: SafeContext = 'caller';
+  /** Whether `r = ref x` may not make the ref local refer elsewhere, as for `foreach (ref T r in e)`. */
+  isRefFixed = false;
   /** Whether the program can assign the variable, which `foreach` variables and `using` variables forbid. */
   isReadonly = false;
   /** What makes a readonly variable so, as Roslyn's messages name it (`foreach 繰り返し変数`, `using 変数`). */

@@ -25,6 +25,9 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'call': {
       return expression.method.returnsByRef === 'ref';
     }
+    case 'invokeDelegate': {
+      return expression.returnsByRef === 'ref';
+    }
     case 'property': {
       return expression.property.returnsByRef === 'ref';
     }

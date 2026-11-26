@@ -14,7 +14,7 @@ import type { Space } from './patternSpace';
 // code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import { sizeOf } from './pointers';
 import { desugarQuery } from './queries';
-import { LocalScope } from './scopes';
+import { type FunctionScope, LocalScope } from './scopes';
 import {
   arrayType,
   displayType,
@@ -33,9 +33,11 @@ import {
   namedType,
   NULL_TYPE,
   nullableUnderlying,
+  outlives,
   type ParameterSymbol,
   pointeeOf,
   PropertySymbol,
+  type SafeContext,
   sameType,
   specialOf,
   substitute,
@@ -53,14 +55,16 @@ type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
 export abstract class ExpressionBinder extends LambdaBinder {
   /** Binds a pattern against an input type, declaring its variables in the context's scope. */
   abstract bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern;
-  abstract bindRefTarget(
-    operand: Expression,
-    isReadonly: boolean,
+  abstract refScopeOf(target: BoundLValue, fn: FunctionScope): 'return' | 'local';
+  abstract refContextOf(target: BoundLValue, fn: FunctionScope): SafeContext;
+  abstract valueContextOf(value: BoundExpression, fn: FunctionScope): SafeContext;
+  abstract checkValueEscape(value: BoundExpression, required: SafeContext, context: BindContext): void;
+  abstract checkReadonlyField(
+    field: FieldSymbol,
     context: BindContext,
-    use: 'local' | 'return'
-  ): BoundLValue;
-  abstract checkRefType(actual: Type, expected: Type, position: Position): void;
-  abstract refScopeOf(target: BoundLValue): 'return' | 'local';
+    position: Position,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): void;
 
   /** Reports a switch arm whose pattern the earlier arms handle, then adds an unguarded arm's values to them. */
   protected abstract checkArmReachable(
@@ -311,6 +315,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return this.bindAssignment(node, context);
       }
       case 'conditional': {
+        if (node.whenTrue.kind === 'refExpression' || node.whenFalse.kind === 'refExpression')
+          return this.bindRefConditional(node, context);
         return (
           this.bindConditional(node, context, undefined) ?? { kind: 'unbound', node, context, type: ERROR_TYPE, row }
         );
@@ -876,6 +882,41 @@ export abstract class ExpressionBinder extends LambdaBinder {
     Expression,
     { scope: LocalScope; condition: BoundExpression; whenTrue: BoundExpression; whenFalse: BoundExpression }
   >();
+
+  /**
+   * `c ? ref a : ref b`, a variable of the type both sides have. Each side is bound as a variable the program may only
+   * read; using the whole as a writable one checks both sides then.
+   */
+  private bindRefConditional(
+    node: Extract<Expression, { kind: 'conditional' }>,
+    context: BindContext
+  ): BoundExpression {
+    const condition = this.bindAs(node.condition, this.specialType('bool'), context);
+    const { whenTrue, whenFalse } = node;
+    if (whenTrue.kind !== 'refExpression' || whenFalse.kind !== 'refExpression') {
+      this.bindValue(whenTrue.kind === 'refExpression' ? whenTrue.operand : whenTrue, context);
+      this.bindValue(whenFalse.kind === 'refExpression' ? whenFalse.operand : whenFalse, context);
+      this.error(
+        node,
+        'CS8326',
+        '条件演算子の両辺の値は、両方とも ref 値にするか、両方とも ref 以外の値にする必要があります'
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    const first = this.bindRefTarget(whenTrue.operand, true, context, 'local');
+    const second = this.bindRefTarget(whenFalse.operand, true, context, 'local');
+    if (first.kind === 'discard' || second.kind === 'discard')
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    if (!sameType(first.type, second.type)) {
+      this.error(
+        whenFalse,
+        'CS8327',
+        `式は、代替 ref 値と一致するために、型 '${displayType(first.type)}' である必要があります`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    return { kind: 'refConditional', condition, whenTrue: first, whenFalse: second, type: first.type, row: node.row };
+  }
 
   private bindConditional(
     node: Extract<Expression, { kind: 'conditional' }>,
@@ -1570,6 +1611,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     context: BindContext
   ): BoundExpression {
     const left = this.toValue(this.bindExpression(node.target, context), node.target);
+    if (left.kind === 'field' && left.field.byRef) return this.bindRefFieldAssignment(node, left, value, context);
     const local =
       left.kind === 'local' && (left.local.isRefLocal || left.local.refKind !== undefined) ? left.local : undefined;
     const target = this.bindRefTarget(value.operand, local?.refKind === 'in', context, 'local');
@@ -1577,11 +1619,19 @@ export abstract class ExpressionBinder extends LambdaBinder {
       if (left.type.kind !== 'error') this.error(node, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
+    if (local.isRefFixed) {
+      this.error(
+        node.target,
+        'CS1656',
+        `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
     if (target.kind === 'discard') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     this.checkRefType(target.type, local.type, value);
     // A reference may not come to refer to a variable that dies sooner than the one it referred to.
-    const localScope = local.isRefLocal ? (local.refEscapes ? 'return' : 'local') : 'return';
-    if (localScope === 'return' && this.refScopeOf(target) !== 'return') {
+    const localScope = local.isRefLocal && local.refContext === 'local' ? 'local' : 'return';
+    if (localScope === 'return' && this.refScopeOf(target, context.fn) !== 'return') {
       const name = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
       this.refSafetyError(
         node,
@@ -1592,7 +1642,49 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { kind: 'refAssign', local, target, type: local.type, row: node.row };
   }
 
-  private describeRefTarget(target: BoundLValue): string {
+  /** `r.F = ref x`: a ref field refers to another variable, which must outlive the ref struct holding the field. */
+  private bindRefFieldAssignment(
+    node: Extract<Expression, { kind: 'assign' }>,
+    left: Extract<BoundExpression, { kind: 'field' }>,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    context: BindContext
+  ): BoundExpression {
+    const { field } = left;
+    // `readonly ref` forbids pointing the field elsewhere outside constructors, as `readonly` forbids assigning.
+    this.checkReadonlyField(field, context, node.target, 'assign');
+    const target = this.bindRefTarget(value.operand, field.byRef === 'readonly', context, 'local');
+    if (target.kind === 'discard') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    this.checkRefType(target.type, left.type, value);
+    this.checkRefFieldTarget(target, field, this.valueContextOf(left.receiver, context.fn), node, context);
+    return { kind: 'refFieldAssign', field: left, target, type: left.type, row: node.row };
+  }
+
+  /** Reports a variable that a ref field may not refer to, as it dies before the ref struct holding the field. */
+  checkRefFieldTarget(
+    target: BoundLValue,
+    field: FieldSymbol,
+    holder: SafeContext,
+    position: Position,
+    context: BindContext
+  ): void {
+    const targetContext = this.refContextOf(target, context.fn);
+    if (outlives(targetContext, holder)) return;
+    const name = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
+    if (targetContext === 'return')
+      this.refSafetyError(
+        position,
+        'CS9079',
+        `'${name}' は return ステートメントを介してのみ現在のメソッドをエスケープできるため、'${name}' を '${field.name}' に ref 割り当てすることはできません。`
+      );
+    else
+      this.refSafetyError(
+        position,
+        'CS8374',
+        `'${name}' を '${field.name}' に ref 割り当てすることはできません。'${name}' のエスケープ スコープが '${field.name}' より狭いためです。`
+      );
+  }
+
+  describeRefTarget(target: BoundLValue): string {
     return target.kind === 'field' ? target.field.name : displayType(target.type);
   }
 
@@ -1616,13 +1708,10 @@ export abstract class ExpressionBinder extends LambdaBinder {
       if (value.kind === 'unbound') return this.convert(value, this.naturalTypeOf(value) ?? ERROR_TYPE, node);
       return { kind: 'assign', target: { ...target, type: value.type }, value, type: value.type, row: node.row };
     }
-    return {
-      kind: 'assign',
-      target,
-      value: this.convert(value, target.type, node.value),
-      type: target.type,
-      row: node.row,
-    };
+    const converted = this.convert(value, target.type, node.value);
+    // A ref struct variable may take no value that refers to variables dying sooner than the ones it may refer to.
+    if (isRefLikeType(target.type)) this.checkValueEscape(converted, this.valueContextOf(target, context.fn), context);
+    return { kind: 'assign', target, value: converted, type: target.type, row: node.row };
   }
 
   /** `e += h` or `e -= h` of an event with `add` and `remove` accessors, which calls the accessor. */
@@ -2204,7 +2293,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindIncrement(node: Extract<Expression, { kind: 'increment' }>, context: BindContext): BoundExpression {
     const readonlyRef = node.operand.kind === 'name' ? context.scope.lookup(node.operand.name)?.local : undefined;
-    if (readonlyRef?.isRefLocal && readonlyRef.refKind === 'in') {
+    if (readonlyRef?.isRefLocal && readonlyRef.refKind === 'in' && !readonlyRef.isReadonly) {
       this.error(
         node,
         'CS1059',

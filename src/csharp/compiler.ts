@@ -573,6 +573,10 @@ export class Compiler extends AttributeBinder {
     for (const field of fields) {
       this.callerMember = field.property?.name ?? field.name;
       const initializer = field.initializer as NonNullable<FieldSymbol['initializer']>;
+      if (field.byRef && !isStatic) {
+        statements.push(this.bindRefFieldInitializer(field, symbol, initializer, bindContext));
+        continue;
+      }
       const value =
         initializer.kind === 'arrayInitializer'
           ? this.bindArrayInitializer(initializer, field.type, bindContext)
@@ -609,6 +613,35 @@ export class Compiler extends AttributeBinder {
     if (isStatic) symbol.staticInitializerLocals = method.locals;
     else symbol.initializerLocals = method.locals;
     return block;
+  }
+
+  /** `ref int F = ref x;`, which makes a ref field refer to the variable before a constructor's body runs. */
+  private bindRefFieldInitializer(
+    field: FieldSymbol,
+    symbol: TypeSymbol,
+    initializer: NonNullable<FieldSymbol['initializer']>,
+    context: BindContext
+  ): BoundStatement {
+    const row = field.row;
+    const left = {
+      kind: 'field' as const,
+      receiver: { kind: 'this' as const, type: symbol.declaredType, row },
+      field,
+      type: field.type,
+      row,
+    };
+    if (initializer.kind !== 'refExpression') {
+      if (initializer.kind === 'arrayInitializer')
+        this.error(row, 'CS8172', '値を使用して参照渡し変数を初期化することはできません');
+      else this.reportValueForReference(initializer, { row, column: 0 }, context);
+      return { kind: 'empty', row, step: 'none' };
+    }
+    const target = this.bindRefTarget(initializer.operand, field.byRef === 'readonly', context, 'local');
+    if (target.kind === 'discard') return { kind: 'empty', row, step: 'none' };
+    this.checkRefType(target.type, field.type, initializer);
+    this.checkRefFieldTarget(target, field, this.valueContextOf(left.receiver, context.fn), initializer, context);
+    const expression: BoundExpression = { kind: 'refFieldAssign', field: left, target, type: field.type, row };
+    return { kind: 'expression', expression, row, step: 'step' };
   }
 
   private bindConstructor(constructor: MethodSymbol, type: DeclaredType): void {

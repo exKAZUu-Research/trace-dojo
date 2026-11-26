@@ -9,7 +9,7 @@ import type {
   ForeachKind,
   LabelSymbol,
 } from './bound';
-import { NULL_REFERENCE, type Reference } from './evaluatorBase';
+import { NULL_REFERENCE, Reference } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
 import { CsThrow, type ExceptionState, type Frame, ProgramExit, type Slot } from './runtime';
@@ -293,6 +293,12 @@ export abstract class StatementExecutor extends PatternMatcher {
 
   /** Stores an element in a foreach loop's variable, or deconstructs it into the loop's variables. */
   protected bindIteration(statement: ForeachStatement, frame: Frame, element: Value): void {
+    if (statement.isRef) {
+      // `Current` returns by reference the variable itself, which the loop's variable then refers to.
+      this.bindReference(frame, statement.variable, element as unknown as Reference);
+      if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
+      return;
+    }
     const converted = statement.elementConversion
       ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
       : element;
@@ -352,7 +358,10 @@ export abstract class StatementExecutor extends PatternMatcher {
         if (!(this.invokeWithoutArguments(frame, moveNext, enumerator, statement.row, enumeratorType) as boolean))
           return;
         const value = this.invokeWithoutArguments(frame, current, enumerator, statement.row, enumeratorType);
-        return { value: this.boxedAsCalled(getter, current, enumeratorType, value) };
+        if (statement.isRef) return { value };
+        // A `Current` that returns by reference gives the variable, whose value a loop by value takes.
+        const element = value instanceof Reference ? value.get() : value;
+        return { value: this.boxedAsCalled(getter, current, enumeratorType, element) };
       },
       close: () => {
         frame.temporaries.pop();

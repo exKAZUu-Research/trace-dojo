@@ -541,6 +541,10 @@ export class FlowAnalyzer {
       case 'makeRef': {
         return this.reference(expression.target, state, expression.row);
       }
+      case 'refFieldAssign': {
+        const before = this.targetPrefix(expression.field, state);
+        return this.assignTarget(expression.field, this.reference(expression.target, before, expression.row));
+      }
       case 'refType':
       case 'refValue': {
         return this.expression(expression.operand, state);
@@ -808,7 +812,8 @@ export class FlowAnalyzer {
         const current = target.receiver ? this.expression(target.receiver, state) : state;
         return this.arguments(target.args, current);
       }
-      case 'call': {
+      case 'call':
+      case 'invokeDelegate': {
         return this.expression(target, state);
       }
       case 'deref': {
@@ -816,6 +821,13 @@ export class FlowAnalyzer {
       }
       case 'refValue': {
         return this.expression(target.operand, state);
+      }
+      case 'refConditional': {
+        const condition = this.condition(target.condition, state);
+        return intersect(
+          this.reference(target.whenTrue, condition.whenTrue, target.row),
+          this.reference(target.whenFalse, condition.whenFalse, target.row)
+        );
       }
       default: {
         return state;
@@ -878,6 +890,7 @@ export class FlowAnalyzer {
     for (const entry of entries) {
       if (entry.kind === 'collectionAdd') current = this.expression(entry.call, current);
       else if (entry.value) current = this.expression(entry.value, current);
+      else if (entry.refTarget) current = this.reference(entry.refTarget, current, entry.target.row);
       else if (entry.nested) current = this.initializer(entry.nested, current);
     }
     return current;

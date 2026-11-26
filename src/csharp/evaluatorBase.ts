@@ -385,7 +385,9 @@ export abstract class EvaluatorBase {
     const fields: Value[] = Array.from<Value>({ length: type.symbol.instanceFieldCount });
     const substitution = substitutionOf(type);
     for (const field of type.symbol.fields) {
-      if (!field.isStatic && !field.isConst) fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
+      // A ref field starts as a null reference, which holds no variable.
+      if (!field.isStatic && !field.isConst && !field.byRef)
+        fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
     }
     return new CsStruct(type, fields);
   }
@@ -404,7 +406,8 @@ export abstract class EvaluatorBase {
     const substitution = substitutionOf(type);
     let count = type.symbol.instanceFieldCount;
     for (const field of type.symbol.fields) {
-      if (!field.isStatic && !field.isConst) count += this.defaultSlotCount(substitute(field.type, substitution));
+      if (!field.isStatic && !field.isConst && !field.byRef)
+        count += this.defaultSlotCount(substitute(field.type, substitution));
       // A layout past the slot limit fails to allocate whatever its size, so counting stops there, which also bounds
       // the work of constructions that share no counts.
       if (count > LIMITS.maxSlots) break;

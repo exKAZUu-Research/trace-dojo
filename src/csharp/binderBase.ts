@@ -525,8 +525,9 @@ export class BinderBase {
         return this.resolvePredefinedType(node);
       }
       case 'refType': {
-        // Ref locals and methods returning by reference take the type apart; elsewhere it is not run.
-        return this.unsupported(node, 'この場所の `ref` 型');
+        // Declarations that may be references take the type apart; elsewhere Roslyn's parser rejects the `ref`.
+        this.error(node, 'CS1073', "予期しないトークン 'ref'");
+        return this.resolveType(node.type, context);
       }
       case 'pointerType': {
         if (!node.isUnsafe) this.reportOutsideUnsafe(node);

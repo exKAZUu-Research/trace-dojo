@@ -42,6 +42,8 @@ export interface BoundMemberInit {
   kind: 'memberInit';
   target: BoundLValue;
   value: BoundExpression | undefined;
+  /** `F = ref x` of a ref field, which then refers to the variable. */
+  refTarget?: BoundLValue;
   /** A nested initializer of the member's own object or collection. */
   nested: BoundInitializerEntry[] | undefined;
 }
@@ -107,7 +109,13 @@ export type BoundExpression =
       /** For an extension property of a generic extension block, the block's type arguments. */
       typeArgs?: Type[];
     } & Base)
-  | ({ kind: 'invokeDelegate'; target: BoundExpression; args: BoundArgument[] } & Base)
+  | ({
+      kind: 'invokeDelegate';
+      target: BoundExpression;
+      args: BoundArgument[];
+      /** How the delegate returns by reference (`delegate ref int D()`), if it does. */
+      returnsByRef?: 'ref' | 'readonly';
+    } & Base)
   | ({
       kind: 'new';
       constructor: MethodSymbol | undefined;
@@ -164,6 +172,8 @@ export type BoundExpression =
       leftConversion?: BoundExpression;
     } & Base)
   | ({ kind: 'conditional'; condition: BoundExpression; whenTrue: BoundExpression; whenFalse: BoundExpression } & Base)
+  /** `c ? ref a : ref b`, the variable that the condition chooses. */
+  | ({ kind: 'refConditional'; condition: BoundExpression; whenTrue: BoundLValue; whenFalse: BoundLValue } & Base)
   | ({
       kind: 'convert';
       operand: BoundExpression;
@@ -238,6 +248,8 @@ export type BoundExpression =
   | ({ kind: 'refValue'; operand: BoundExpression } & Base)
   /** `r = ref x`, which makes a ref local refer to another variable, and is that variable's value. */
   | ({ kind: 'refAssign'; local: LocalSymbol; target: BoundLValue } & Base)
+  /** `r.F = ref x`: a ref field refers to another variable from then on. */
+  | ({ kind: 'refFieldAssign'; field: Extract<BoundExpression, { kind: 'field' }>; target: BoundLValue } & Base)
   /** `&x`: a pointer to a variable, decomposed into the storage it lies in and its offset there. */
   | ({ kind: 'addressOf'; target: BoundLValue } & Base)
   /** `*p`, the variable a pointer points to, of the pointer's element type. */
@@ -309,7 +321,9 @@ export type BoundLValue =
           | 'implicitIndex'
           | 'call'
           | 'deref'
-          | 'refValue';
+          | 'refValue'
+          | 'refConditional'
+          | 'invokeDelegate';
       }
     >
   | ({ kind: 'discard' } & Base);
@@ -462,6 +476,8 @@ export type BoundStatement =
       iteration: ForeachKind;
       /** The iteration variable, or the deconstruction of each element into several. */
       variable: LocalSymbol;
+      /** `foreach (ref T x in e)`: the variable refers to what `Current` returns by reference. */
+      isRef?: true;
       deconstruction: BoundExpression | undefined;
       locals: LocalSymbol[];
       body: BoundStatement;

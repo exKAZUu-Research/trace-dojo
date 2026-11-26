@@ -1207,11 +1207,14 @@ export class Converter extends ExpressionConverter {
         };
       } else {
         // C# has no foreach over existing variables: a name lacks its type, and a tuple of names declares nothing.
+        // `ref` before a deconstruction is no ref type, which Roslyn reports before the missing type.
+        const isRef = expression.kind === 'refExpression';
         const message =
           expression.kind === 'tuple'
             ? 'CS8186: foreach ループでは繰り返し変数を宣言する必要があります。'
             : 'CS0230: foreach ステートメントには、型と識別子の両方が必要です';
-        throw new CompileError([{ row: left.startPosition.row, message }]);
+        const row = left.startPosition.row;
+        throw new CompileError([...(isRef ? [{ row, message: "CS1525: 'ref' は無効です" }] : []), { row, message }]);
       }
     }
     return {

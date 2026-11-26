@@ -101,6 +101,8 @@ type AccessExpression = Extract<
       | 'constant'
       | 'local'
       | 'refAssign'
+      | 'refFieldAssign'
+      | 'refConditional'
       | 'this'
       | 'field'
       | 'staticField'
@@ -503,6 +505,8 @@ export class Evaluator extends AsyncExecutor {
       case 'implicitIndex':
       case 'typeOf':
       case 'refAssign':
+      case 'refFieldAssign':
+      case 'refConditional':
       case 'compoundOperand':
       case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
@@ -562,7 +566,8 @@ export class Evaluator extends AsyncExecutor {
       }
       case 'field': {
         const receiver = this.evaluate(expression.receiver, frame);
-        return this.fieldsOf(receiver)[expression.field.slot];
+        const value = this.fieldsOf(receiver)[expression.field.slot];
+        return expression.field.byRef ? referenceIn(value).get() : value;
       }
       case 'staticField': {
         return this.runtime.staticsOf(frame.resolve(expression.owner) as NamedType)[expression.field.slot];
@@ -580,6 +585,15 @@ export class Evaluator extends AsyncExecutor {
       case 'refAssign': {
         const reference = this.referenceTo(expression.target, frame);
         this.bindReference(frame, expression.local, reference);
+        return reference.get();
+      }
+      case 'refConditional': {
+        return this.place(expression, frame).get();
+      }
+      case 'refFieldAssign': {
+        const fields = this.fieldsOf(this.evaluate(expression.field.receiver, frame));
+        const reference = this.referenceTo(expression.target, frame);
+        fields[expression.field.field.slot] = reference as unknown as Value;
         return reference.get();
       }
       case 'typeOf': {
@@ -629,7 +643,8 @@ export class Evaluator extends AsyncExecutor {
       }
 
       case 'invokeDelegate': {
-        return this.evaluateInvokeDelegate(expression, frame);
+        const result = this.evaluateInvokeDelegate(expression, frame);
+        return result instanceof Reference ? result.get() : result;
       }
       case 'new': {
         return this.evaluateNew(expression, frame);
@@ -1061,6 +1076,11 @@ export class Evaluator extends AsyncExecutor {
 
   referenceTo(target: BoundLValue, frame: Frame): Reference {
     if (target.kind === 'call') return this.evaluateCall(target, frame) as unknown as Reference;
+    if (target.kind === 'invokeDelegate') return this.evaluateInvokeDelegate(target, frame) as unknown as Reference;
+    if (target.kind === 'refConditional') return this.referenceTo(this.chosenVariable(target, frame), frame);
+    // A ref field gives the variable it refers to now, which a later `F = ref y` does not change.
+    if (target.kind === 'field' && target.field.byRef)
+      return referenceIn(this.fieldsOf(this.evaluate(target.receiver, frame))[target.field.slot]);
     if (target.kind === 'local') {
       const { local } = target;
       const slot = local.owner === frame.method ? frame.slots[local.slot] : frame.captured.get(local);
@@ -1093,6 +1113,7 @@ export class Evaluator extends AsyncExecutor {
         const receiver = this.evaluate(target.receiver, frame);
         const fields = this.fieldsOf(receiver);
         const { slot } = target.field;
+        if (target.field.byRef) return referenceIn(fields[slot]);
         return {
           get: () => fields[slot],
           set: (value) => {
@@ -1135,6 +1156,9 @@ export class Evaluator extends AsyncExecutor {
       case 'call': {
         return this.evaluateCall(target, frame) as unknown as Reference;
       }
+      case 'invokeDelegate': {
+        return this.evaluateInvokeDelegate(target, frame) as unknown as Reference;
+      }
       case 'deref': {
         const pointer = this.pointerValue(target.pointer, frame);
         const type = frame.resolve(target.type);
@@ -1143,7 +1167,14 @@ export class Evaluator extends AsyncExecutor {
       case 'refValue': {
         return refValuePlace(this.evaluate(target.operand, frame), frame.resolve(target.type));
       }
+      case 'refConditional': {
+        return this.place(this.chosenVariable(target, frame), frame);
+      }
     }
+  }
+
+  private chosenVariable(target: Extract<BoundLValue, { kind: 'refConditional' }>, frame: Frame): BoundLValue {
+    return (this.evaluate(target.condition, frame) as boolean) ? target.whenTrue : target.whenFalse;
   }
 
   private pointerValue(expression: BoundExpression, frame: Frame): CsPointer {
@@ -1445,6 +1476,12 @@ export class Evaluator extends AsyncExecutor {
         continue;
       }
       if (entry.target.kind === 'discard') continue;
+      if (entry.refTarget) {
+        const target = entry.target as Extract<BoundLValue, { kind: 'field' }>;
+        const fields = this.fieldsOf(this.evaluate(target.receiver, frame));
+        fields[target.field.slot] = this.referenceTo(entry.refTarget, frame) as unknown as Value;
+        continue;
+      }
       if (entry.nested) {
         const place = this.place(entry.target, frame);
         const nested = place.get();
@@ -1828,4 +1865,17 @@ function liftedBool(operator: '&' | '|', a: boolean | undefined, b: boolean | un
   }
   if (a === true || b === true) return true;
   return a === undefined || b === undefined ? undefined : false;
+}
+
+/** The variable a ref field refers to, whose use throws for a null reference, as .NET's does. */
+function referenceIn(slot: Value): Reference {
+  if (slot instanceof Reference) return slot;
+  return new Reference(
+    () => {
+      throw NULL_REFERENCE();
+    },
+    () => {
+      throw NULL_REFERENCE();
+    }
+  );
 }

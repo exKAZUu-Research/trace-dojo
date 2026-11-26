@@ -192,11 +192,18 @@ function addVariable(variables: TraceVariables, name: string, value: Value, type
 
 function addThis(variables: TraceVariables, self: CsObject | CsStruct): void {
   for (const [field, type] of instanceFields(self)) {
-    const scalar = scalarOf(self.fields[field.slot], type);
+    const scalar = scalarOf(fieldValueOf(self, field), type);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${field.property?.name ?? field.name}`] = scalar;
   }
   const node = displayNodeOf(self, self.type, new Set());
   if (node) variables.referenceVars.this = node;
+}
+
+/** A field's value, which for a ref field is the value of the variable it refers to, or none for a null one. */
+function fieldValueOf(self: CsObject | CsStruct, field: FieldSymbol): Value {
+  const value = self.fields[field.slot];
+  if (!field.byRef) return value;
+  return isReference(value) ? value.get() : undefined;
 }
 
 /**
@@ -373,7 +380,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     if (value instanceof CsObject && isExceptionState(value.native))
       entries.Message = { kind: 'value', value: shownText(exceptionMessage(value)) };
     for (const [field, fieldType] of instanceFields(value)) {
-      const node = displayNodeOf(value.fields[field.slot], fieldType, seen);
+      const node = displayNodeOf(fieldValueOf(value, field), fieldType, seen);
       if (node) entries[field.property?.name ?? field.name] = node;
     }
     return { kind: 'object', entries };
