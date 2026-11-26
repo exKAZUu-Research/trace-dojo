@@ -491,7 +491,16 @@ export class Checker {
     if (!info || head.entity.sort !== 'data') {
       typeError(span, `型 ${head.entity.name} には、フィールド ${String(label.entity.literal)} がありません。`);
     }
-    this.unify(field, instantiateType(info.fieldType, args), span, `フィールド ${info.name} の型`);
+    // A data instance's field is typed over the instance's own variables, which its types give the family's arguments.
+    const con = info.positions.keys().next().value as ConInfo;
+    let fieldArgs = args;
+    if (con.instanceArgs) {
+      fieldArgs = (con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
+      for (const [index, instanceArg] of con.instanceArgs.entries()) {
+        this.unify(args[index], instantiateType(instanceArg, fieldArgs), span, `フィールド ${info.name} の型`);
+      }
+    }
+    this.unify(field, instantiateType(info.fieldType, fieldArgs), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
   }
 

@@ -139,7 +139,10 @@ function applyDefaultDecls(checker: Checker, module: RModule): void {
 }
 
 function defineConstructors(decl: RDataDecl): void {
+  // A data family's instances share its field table; each instance defines only the fields of its own constructors.
+  const own = new Set(decl.cons.map(({ con }) => con));
   for (const field of decl.entity.fields.values()) {
+    if (![...field.positions.keys()].some((con) => own.has(con))) continue;
     const types = [...field.positions.entries()].map(([con, position]) => con.fieldTypes[position]);
     const first = types[0];
     for (const other of types.slice(1)) {
