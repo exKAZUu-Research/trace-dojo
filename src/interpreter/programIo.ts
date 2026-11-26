@@ -135,10 +135,18 @@ export class TextReader {
     private readonly refill?: () => boolean,
     /** Whether the text comes through a pipe, which a poll finds ready only while text remains. */
     readonly throughPipe = false,
-    /** Whether a poll finds the pipe empty until the text is first read, as its writer has not written yet. */
-    readonly writtenLate = false,
+    /**
+     * Whether the first poll finds the pipe empty, as its writer has not written yet then; that poll, waiting for the
+     * writer, or reading ends it.
+     */
+    private writtenLate = false,
     private readonly onEmptyPoll?: () => void
   ) {}
+
+  /** Treats the writer as having written its text, as once the shell has waited for it. */
+  markWritten(): void {
+    this.writtenLate = false;
+  }
 
   /**
    * Whether a poll of the descriptor finds text ready to read: it answers from the text in hand and never refills,
@@ -146,7 +154,10 @@ export class TextReader {
    */
   get readyToPoll(): boolean {
     if (!this.throughPipe) return true;
-    const ready = !(this.writtenLate && this.position === 0) && this.position < this.text.length;
+    const notYetWritten = this.writtenLate && this.position === 0;
+    // Time passes between polls, in which the writer writes.
+    this.writtenLate = false;
+    const ready = !notYetWritten && this.position < this.text.length;
     if (!ready) this.onEmptyPoll?.();
     return ready;
   }

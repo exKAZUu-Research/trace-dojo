@@ -516,6 +516,7 @@ export class Shell implements ArithmeticHost {
       const file = { input: this.runtime.io.pipeReader(capture.read(), true) };
       this.fds.set(fd, file);
       this.processSubstitutions.push({ fd, file });
+      job.awaitEnd = () => file.input.markWritten();
     } else {
       // The commands copy the shell's state now, as Bash forks them here, though they run later.
       const child = this.forkSubshell(this.fds.clone(), undefined, 1, false, true);
