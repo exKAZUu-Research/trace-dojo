@@ -180,4 +180,10 @@ export interface Program {
   units: Statement[][];
   /** The row where each unit ends, the line Bash's parser is on when it runs the unit. */
   unitEndRows: number[];
+  /**
+   * For each unit holding an extended pattern that Bash reads as one only if a `shopt -s extglob` that may not have
+   * run did, the row and text of the line of the first such pattern, where Bash reports a syntax error when
+   * `extglob` is off.
+   */
+  extglobRows: Map<number, { row: number; line: string }>;
 }

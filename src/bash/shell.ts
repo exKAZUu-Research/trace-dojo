@@ -35,6 +35,7 @@ import {
   type FunctionDefinition,
   ReturnSignal,
   type Runtime,
+  SCRIPT_NAME,
 } from './runtime';
 import { formatSelectMenu } from './selectMenu';
 import {
@@ -251,6 +252,8 @@ export class Shell implements ArithmeticHost {
     try {
       for (const [index, unit] of program.units.entries()) {
         this.lineShift = this.readShift;
+        const extglobRow = program.extglobRows.get(index);
+        if (extglobRow !== undefined && !this.options.extglob) return this.failExtglobLine(extglobRow);
         try {
           this.runStatements(unit);
         } catch (error) {
@@ -264,6 +267,16 @@ export class Shell implements ArithmeticHost {
       throw error;
     }
     return this.store.lastStatus;
+  }
+
+  /**
+   * Ends the script at a line whose extended pattern Bash reads as a syntax error, as `extglob` is off when it reads
+   * the line: the `shopt` that would have turned it on did not run.
+   */
+  private failExtglobLine({ row, line }: { row: number; line: string }): number {
+    this.fd2.write(`${SCRIPT_NAME}: line ${row + 1}: syntax error near unexpected token \`('\n`);
+    this.fd2.write(`${SCRIPT_NAME}: line ${row + 1}: \`${line}'\n`);
+    return 2;
   }
 
   runStatements(statements: Statement[]): number {

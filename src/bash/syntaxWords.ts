@@ -48,6 +48,11 @@ export class SourceText {
   readonly literalSingleQuotes: number[] = [];
   /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */
   readonly declarationFunctionStarts: number[] = [];
+  /**
+   * The rows of extended patterns read while `extglob` is on only if a `shopt` inside a compound command or after
+   * `&&` or `||` ran, which only the run can tell.
+   */
+  readonly uncertainExtglobRows: number[] = [];
   /** The `{name}` words before the redirections of compound commands, by offset, which the grammar cannot read. */
   readonly descriptorVariables: { start: number; end: number; name: string }[] = [];
   /** Balanced arithmetic and compound-subscript spans collected during the single lexical/validation pass. */

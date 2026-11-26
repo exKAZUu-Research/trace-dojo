@@ -43,6 +43,8 @@ export interface AnalyzedBashSource {
    * in `grammarSource`, which holds a descriptor number of the same length in its place.
    */
   readonly descriptorVariables: ReadonlyMap<number, string>;
+  /** The rows of extended patterns that Bash reads as such only if a `shopt -s extglob` that may not run did. */
+  readonly uncertainExtglobRows: ReadonlySet<number>;
 }
 
 /** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
@@ -75,6 +77,7 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     literalQuotes,
     declarationFunctionStarts,
     descriptorVariables: new Map(checked.descriptorVariables.map(({ start, name }) => [start, name])),
+    uncertainExtglobRows: new Set(checked.uncertainExtglobRows),
   };
 }
 
@@ -95,6 +98,7 @@ export function checkBashSyntax(source: string): {
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
   descriptorVariables: { start: number; end: number; name: string }[];
+  uncertainExtglobRows: number[];
 } {
   const text = createValidatorSourceText(source);
   return {
@@ -104,6 +108,7 @@ export function checkBashSyntax(source: string): {
     declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
     descriptorVariables: text.descriptorVariables,
+    uncertainExtglobRows: text.uncertainExtglobRows,
   };
 }
 
@@ -484,6 +489,8 @@ class ShellTokenStream {
    * part of a word, as Bash reads each line of a script after running the ones before it.
    */
   extglob = false;
+  /** Whether `extglob` is on only if a `shopt` that may not have run did, which the run checks. */
+  extglobUncertain = false;
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
   private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
 
@@ -555,6 +562,7 @@ class ShellTokenStream {
       const ch = source[this.position];
       if (this.tryScanSpecialWordSegment(start, context, ch, unclosedBrackets)) continue;
       if (this.extglob && '?*+@!'.includes(ch) && source[this.position + 1] === '(') {
+        if (this.extglobUncertain) this.text.uncertainExtglobRows.push(this.text.rowAt(this.position));
         this.position = skipBalanced(this.text, this.position + 1, '(', ')');
         continue;
       }
@@ -705,11 +713,14 @@ class ShellGrammarValidator {
   private cachedContext: WordContext = 'argument';
   /** How many function bodies, subshells, and coprocesses enclose the command being read. */
   private separateShellDepth = 0;
+  /** How many compound commands and `&&` or `||` lists enclose the command being read, which may not run it. */
+  private conditionalDepth = 0;
   /**
-   * What the commands of the line being read that run in this shell set `extglob` to, in order: those in a pipeline
-   * of several commands or a background list run in subshells, so they are dropped when the pipeline or list ends.
+   * What the commands of the line being read that run in this shell set `extglob` to, in order, and whether they may
+   * not run: those in a pipeline of several commands or a background list run in subshells, so they are dropped when
+   * the pipeline or list ends.
    */
-  private readonly lineExtglob: boolean[] = [];
+  private readonly lineExtglob: { on: boolean; uncertain: boolean }[] = [];
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
   constructor(
@@ -730,8 +741,12 @@ class ShellGrammarValidator {
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
-      const last = this.lineExtglob.at(-1);
-      if (last !== undefined) this.stream.extglob = last;
+      for (const { on, uncertain } of this.lineExtglob) {
+        // A `shopt` that may not run leaves `extglob` on if either it or the state before it has it on.
+        if (uncertain) this.stream.extglobUncertain ||= this.stream.extglob !== on;
+        else this.stream.extglobUncertain = false;
+        this.stream.extglob = uncertain ? this.stream.extglob || on : on;
+      }
     }
   }
 
@@ -763,7 +778,7 @@ class ShellGrammarValidator {
       if (this.hasOperator(next, '&&') || this.hasOperator(next, '||')) {
         this.advance();
         this.consumeNewlines();
-        this.parsePipeline();
+        this.conditionally(() => this.parsePipeline());
         continue;
       }
       const isSeparator =
@@ -854,8 +869,20 @@ class ShellGrammarValidator {
     }
   }
 
+  private conditionally(parse: () => void): void {
+    this.conditionalDepth++;
+    try {
+      parse();
+    } finally {
+      this.conditionalDepth--;
+    }
+  }
+
   private parseCompoundWithRedirections(): void {
-    const requiresSeparator = this.parseCompoundConstruct();
+    let requiresSeparator = false;
+    this.conditionally(() => {
+      requiresSeparator = this.parseCompoundConstruct();
+    });
     this.parseTrailingRedirections();
     const next = this.peek();
     const closesEnclosing =
@@ -1156,7 +1183,7 @@ class ShellGrammarValidator {
       if (token.kind !== 'word') {
         // Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines.
         const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
-        if (setting !== undefined) this.lineExtglob.push(setting);
+        if (setting !== undefined) this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0 });
         return;
       }
       this.advance();

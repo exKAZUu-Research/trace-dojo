@@ -96,7 +96,13 @@ export class Converter {
       units.push(unit);
       unitEndRows.push(previousEndRow);
     }
-    return { units, unitEndRows };
+    const extglobRows = new Map<number, { row: number; line: string }>();
+    const lines = this.analyzed.originalSource.split('\n');
+    for (const row of [...this.analyzed.uncertainExtglobRows].toSorted((a, b) => a - b)) {
+      const index = unitEndRows.findIndex((endRow) => endRow >= row);
+      if (index !== -1 && !extglobRows.has(index)) extglobRows.set(index, { row, line: lines[row] ?? '' });
+    }
+    return { units, unitEndRows, extglobRows };
   }
 
   /** Pairs here-document redirections with their bodies, which follow in the same order in the source. */
