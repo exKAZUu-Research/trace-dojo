@@ -24,7 +24,9 @@ export function checkVarianceAnnotations(c: Checker, node: TreeNode): void {
   const annotated = named(parametersNode).filter(
     (parameter) => hasToken(parameter, 'in') || hasToken(parameter, 'out')
   );
-  if (annotated.length === 0 || !checkAnnotationPlaces(c, node, annotated)) return;
+  if (annotated.length === 0) return;
+  for (const parameter of annotated) checkModifierOrder(c, parameter);
+  if (!checkAnnotationPlaces(c, node, annotated)) return;
   const parameters = c.signatures.typeParametersOf(node);
   const all = named(parametersNode);
   // `in out` declares the parameter invariant, which tsc takes as written.
@@ -33,6 +35,14 @@ export function checkVarianceAnnotations(c: Checker, node: TreeNode): void {
     const parameter = parameters[all.findIndex((each) => each.id === parameterNode.id)];
     if (parameter) checkVariance(c, node, parameterNode, parameters, parameter);
   }
+}
+
+/** Reports `out in`, where tsc requires `in` to come first. */
+function checkModifierOrder(c: Checker, parameter: TreeNode): void {
+  const tokens = parameter.children.filter((child) => child !== null && !child.isNamed);
+  const outIndex = tokens.findIndex((token) => token?.type === 'out');
+  const inToken = tokens.find((token, index) => token?.type === 'in' && outIndex !== -1 && index > outIndex);
+  if (inToken) c.error(inToken, "'in' 修飾子は、'out' 修飾子の前に書かなければいけません。");
 }
 
 /** Reports annotations where tsc allows none, and tells whether the declaration may have them. */
