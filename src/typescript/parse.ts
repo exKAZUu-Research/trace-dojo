@@ -210,7 +210,9 @@ function postfixMarkedType(mark: Node): Node | undefined {
   if (!before || mark.parent?.childForFieldName('return_type')?.id === before.id) return undefined;
   // A parameter's annotation ends the parameter, which the `?` then follows.
   const annotation = before.type === 'type_annotation' ? before : before.childForFieldName('type');
-  return annotation?.type === 'type_annotation' ? (annotation.namedChildren[0] ?? undefined) : undefined;
+  // A `?` after an initializer follows the value, not the type.
+  if (annotation?.type !== 'type_annotation' || annotation.endIndex !== before.endIndex) return undefined;
+  return annotation.namedChildren[0] ?? undefined;
 }
 
 /**
