@@ -161,7 +161,8 @@ export class Scope {
   /** The interface another body of this namespace exports, which an interface of the name in this body merges into. */
   private exportedInterface(name: string, kind: TypeKind, declaration: TreeNode): Sym | undefined {
     // A local interface of the name stays apart from the exported one, as in tsc.
-    const isExported = this.isAmbient || declaration.parent?.type === 'export_statement';
+    const statement = declaration.parent?.type === 'ambient_declaration' ? declaration.parent : declaration;
+    const isExported = this.isAmbient || statement.parent?.type === 'export_statement';
     const exported = kind === 'interface' && isExported ? this.namespace?.namespaceExports?.types.get(name) : undefined;
     if (exported?.typeKind !== 'interface') return undefined;
     this.types.set(name, exported);
