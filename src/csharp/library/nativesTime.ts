@@ -2,7 +2,14 @@ import { type Culture, INVARIANT, providerCulture } from '../cultures';
 import { MeteredText, type TextBudget } from '../meteredText';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
-import { CsBox, CsStruct, type Value } from '../values';
+import { CsArray, CsBox, CsStruct, plainString, type Value } from '../values';
+import {
+  type ExactDateFailure,
+  type ExactDateFields,
+  isUniversalStandardFormat,
+  parseExactDate,
+  type WhiteSpaceStyles,
+} from './exactDateParsing';
 import { fail, failNull, failOutOfRange, libraryType, refOf, unsupportedCall } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
@@ -615,6 +622,22 @@ defineNatives({
     refOf(args.at(-1) as Value).set(dateTime(call, ticks ?? 0n));
     return ticks !== undefined;
   },
+  'System.DateTime.ParseExact': (call, _receiver, args) => {
+    const { text, formats, culture, styles } = exactParseArguments(call, args as Value[]);
+    if (text === undefined) failNull('s');
+    if (formats === undefined) failNull(call.method.parameters[1].name);
+    const result = parseExact(call, text, formats, culture, styles);
+    if (typeof result !== 'bigint') fail('System.FormatException', result);
+    return dateTime(call, result);
+  },
+  'System.DateTime.TryParseExact': (call, _receiver, args) => {
+    const { text, formats, culture, styles } = exactParseArguments(call, args as Value[]);
+    const result =
+      text === undefined || formats === undefined ? undefined : parseExact(call, text, formats, culture, styles);
+    const ticks = typeof result === 'bigint' ? result : undefined;
+    refOf(args.at(-1) as Value).set(dateTime(call, ticks ?? 0n));
+    return ticks !== undefined;
+  },
   'System.DateTime.op_Addition': (call, _receiver, [d, t]) => dateTime(call, ticksOf(d as Value) + ticksOf(t as Value)),
   'System.DateTime.op_Subtraction(DateTime, TimeSpan)': (call, _receiver, [d, t]) =>
     dateTime(call, ticksOf(d as Value) - ticksOf(t as Value)),
@@ -642,6 +665,105 @@ function dateParseArguments(call: NativeCall, args: Value[]): { text: string | u
     text: argument('s') as string | undefined,
     culture: providerCulture(call.frame.runtime, argument('provider')),
   };
+}
+
+/** The string, the formats, the culture, and the white space styles of a `ParseExact` or `TryParseExact` call. */
+function exactParseArguments(
+  call: NativeCall,
+  args: Value[]
+): {
+  text: string | undefined;
+  formats: (string | undefined)[] | undefined;
+  culture: Culture;
+  styles: WhiteSpaceStyles;
+} {
+  const [text, formats, provider, style] = args as [string | undefined, Value, Value, number | undefined];
+  const styles = style ?? 0;
+  if ((styles & ~WHITE_SPACE_STYLES) !== 0) unsupportedCall(call, 'DateTimeStyles の AllowWhiteSpaces 以外の指定');
+  return {
+    text,
+    formats:
+      formats instanceof CsArray
+        ? formats.values.map((format) => plainString(format) as string | undefined)
+        : formats === undefined
+          ? undefined
+          : [formats as string],
+    culture: providerCulture(call.frame.runtime, provider),
+    styles: { leading: (styles & 1) !== 0, trailing: (styles & 2) !== 0, inner: (styles & 4) !== 0 },
+  };
+}
+
+/**
+ * The ticks of a string that one of the formats reads, or the message of .NET's FormatException for it: that of the
+ * one format's failure, or a general one when several formats were given.
+ */
+function parseExact(
+  call: NativeCall,
+  text: string,
+  formats: (string | undefined)[],
+  culture: Culture,
+  styles: WhiteSpaceStyles
+): bigint | string {
+  if (formats.length === 0) return 'No format specifiers were provided.';
+  for (const format of formats) {
+    if (format !== undefined && isUniversalStandardFormat(format))
+      unsupportedCall(call, `DateTime.ParseExact の標準書式 "${format}"`);
+    const result =
+      format === undefined ? ({ kind: 'badFormatSpecifier' } as const) : parseExactDate(text, format, culture, styles);
+    const ticks = 'kind' in result ? exactFailureMessage(text, result) : exactTicks(call, text, result);
+    if (typeof ticks === 'bigint' || formats.length === 1 || ('kind' in result && result.kind === 'badFormatSpecifier'))
+      return ticks;
+  }
+  return `String '${text}' was not recognized as a valid DateTime.`;
+}
+
+function exactFailureMessage(text: string, failure: ExactDateFailure): string {
+  switch (failure.kind) {
+    case 'badDateTime': {
+      return `String '${text}' was not recognized as a valid DateTime.`;
+    }
+    case 'badQuote': {
+      return `Cannot find a matching quote character for the character '${failure.quote}'.`;
+    }
+    case 'badFormatSpecifier': {
+      return "Format specifier '' was invalid.";
+    }
+    case 'invalidString': {
+      return 'Input string was not in a correct format.';
+    }
+  }
+}
+
+/**
+ * The ticks of the fields that a format read, defaulting a date without a year, month, or day to today and the others
+ * to the current year and January 1, as .NET's `CheckDefaultDateTime` does, and converting a UTC offset to local time;
+ * or the message of the FormatException for a date that does not exist or a weekday that is not the date's.
+ */
+function exactTicks(call: NativeCall, text: string, fields: ExactDateFields): bigint | string {
+  const today = partsOf(nowTicks(call));
+  let { year, month, day } = fields;
+  if (year === undefined && month === undefined && day === undefined) ({ year, month, day } = today);
+  else year ??= today.year;
+  month ??= 1;
+  day ??= 1;
+  const { hour = 0, minute = 0, second = 0 } = fields;
+  if (
+    year < 1 ||
+    year > 9999 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  )
+    return `The DateTime represented by the string '${text}' is not supported in calendar 'System.Globalization.GregorianCalendar'.`;
+  const ticks = ticksFromParts(year, month, day, hour, minute, second) + BigInt(fields.fraction);
+  if (fields.dayOfWeek !== undefined && partsOf(ticks).dayOfWeek !== fields.dayOfWeek)
+    return `String '${text}' was not recognized as a valid DateTime because the day of week was incorrect.`;
+  if (fields.offsetMinutes === undefined) return ticks;
+  return ticks - BigInt(fields.offsetMinutes) * TICKS_PER_MINUTE + LOCAL_OFFSET_TICKS;
 }
 
 function addMonths(call: NativeCall, receiver: Value, months: number): Value {

@@ -1279,6 +1279,11 @@ namespace System {
     public static bool TryParse(string? s, out DateTime result);
     public static bool TryParse(string? s, IFormatProvider? provider, out DateTime result);
     public static bool TryParse(string? s, IFormatProvider? provider, System.Globalization.DateTimeStyles styles, out DateTime result);
+    public static DateTime ParseExact(string s, string format, IFormatProvider? provider);
+    public static DateTime ParseExact(string s, string format, IFormatProvider? provider, System.Globalization.DateTimeStyles style);
+    public static DateTime ParseExact(string s, string[] formats, IFormatProvider? provider, System.Globalization.DateTimeStyles style);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateTime result);
+    public static bool TryParseExact(string? s, string?[]? formats, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateTime result);
     public static int Compare(DateTime t1, DateTime t2);
     public static DateTime operator +(DateTime d, TimeSpan t);
     public static DateTime operator -(DateTime d, TimeSpan t);
