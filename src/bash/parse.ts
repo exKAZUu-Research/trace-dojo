@@ -27,8 +27,13 @@ export function parseBash(source: string, trace?: TraceOptions): Program {
   return parseText(source, new Set(trace?.atomicAnnotations.keys()));
 }
 
-function parseText(source: string, atomicRows: ReadonlySet<number>, readsApart = false): Program {
-  const analyzed = analyzeBashSource(parser, source);
+function parseText(
+  source: string,
+  atomicRows: ReadonlySet<number>,
+  readsApart = false,
+  initialExtglob = false
+): Program {
+  const analyzed = analyzeBashSource(parser, source, initialExtglob);
   return parseSource(
     parser,
     analyzed.grammarSource,
@@ -67,9 +72,9 @@ const UNSUPPORTED_SUFFIX = 'は、この採点環境では使えません。';
  * The commands of a `trap` action, read when the trap is set, numbered as the `trap` command's line so that their
  * steps show there, or `undefined` for an action with a syntax error, which Bash finds only as it runs the action.
  */
-export function parseTrapAction(text: string, row: number): Statement[][] | undefined {
+export function parseTrapAction(text: string, row: number, extglob = false): Statement[][] | undefined {
   try {
-    return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units;
+    return parseText(`${'\n'.repeat(row)}${text}`, new Set(), false, extglob).units;
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
     const message = error.diagnostics[0]?.message ?? '';
@@ -83,19 +88,19 @@ export function parseTrapAction(text: string, row: number): Statement[][] | unde
  * The commands of a `trap` action with a syntax error that Bash runs before it reaches the error: those of the lines
  * before the line of the error that read as complete commands, numbered as `parseTrapAction` numbers them.
  */
-export function parseTrapActionPrefix(text: string, row: number): Statement[][] {
+export function parseTrapActionPrefix(text: string, row: number, extglob = false): Statement[][] {
   const lines = text.split('\n');
   let errorRow = lines.length;
   try {
-    parseText(`${text}\n`, new Set());
+    parseText(`${text}\n`, new Set(), false, extglob);
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
     errorRow = error.diagnostics[0]?.row ?? 0;
   }
   for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
     const text = lines.slice(0, count).join('\n');
-    const prefix = parseTrapAction(text, row);
-    if (prefix !== undefined && endsAtLineEnd(text, prefix.flat().length)) return prefix;
+    const prefix = parseTrapAction(text, row, extglob);
+    if (prefix !== undefined && endsAtLineEnd(text, prefix.flat().length, extglob)) return prefix;
   }
   return [];
 }
@@ -105,9 +110,9 @@ export function parseTrapActionPrefix(text: string, row: number): Statement[][] 
  * into the next prevents: a command on a line after it is then one more command, read as the grammar reads comments
  * and quotes.
  */
-function endsAtLineEnd(text: string, count: number): boolean {
+function endsAtLineEnd(text: string, count: number, extglob: boolean): boolean {
   try {
-    return parseText(`${text}\n:\n`, new Set()).units.flat().length === count + 1;
+    return parseText(`${text}\n:\n`, new Set(), false, extglob).units.flat().length === count + 1;
   } catch {
     return false;
   }
@@ -117,10 +122,10 @@ function endsAtLineEnd(text: string, count: number): boolean {
  * The syntax error of a `trap` action that `parseTrapAction` could not read, as Bash reports it when the action runs:
  * its message, numbered from `firstLine` for the action's first line, and the action's line it names, if any.
  */
-export function trapActionSyntaxError(text: string, firstLine: number, showsLine: boolean): string[] {
+export function trapActionSyntaxError(text: string, firstLine: number, showsLine: boolean, extglob = false): string[] {
   try {
     // Bash ends the action's last line itself; an action that already ends with a newline gets no empty line more.
-    parseText(text.endsWith('\n') ? text : `${text}\n`, new Set());
+    parseText(text.endsWith('\n') ? text : `${text}\n`, new Set(), false, extglob);
     return [];
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
@@ -138,8 +143,8 @@ export function trapActionSyntaxError(text: string, firstLine: number, showsLine
 }
 
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
-function reparseBackquoted(text: string, row: number): Statement[] {
-  return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
+function reparseBackquoted(text: string, row: number, extglob = false): Statement[] {
+  return parseText(`${'\n'.repeat(row)}${text}`, new Set(), false, extglob).units.flat();
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

@@ -20,6 +20,8 @@ export interface Trap {
    * for its first line; Bash reads the action only then.
    */
   readonly syntaxError?: (firstLine: number, showsLine: boolean) => string[];
+  /** The `extglob` setting the action was read with, which Bash reads it with when it runs it. */
+  readonly extglob?: boolean;
   /** The row of the `trap` command, where the action's commands are numbered from. */
   readonly row: number;
 }
@@ -95,22 +97,29 @@ export const trapBuiltin: Builtin = (shell, args) => {
     }
     if (condition === undefined) rejectUnsupportedCondition(spec);
     if (resets) shell.traps.delete(condition);
-    else {
-      const read = parseTrapAction(first, shell.currentRow);
-      const units = read ?? parseTrapActionPrefix(first, shell.currentRow);
-      shell.traps.set(condition, {
-        text: first,
-        statements: units.flat(),
-        units,
-        ...(read === undefined
-          ? { syntaxError: (line: number, showsLine: boolean) => trapActionSyntaxError(first, line, showsLine) }
-          : {}),
-        row: shell.currentRow,
-      });
-    }
+    else shell.traps.set(condition, readTrapAction(first, shell.currentRow, shell.options.extglob));
   }
   return status;
 };
+
+/**
+ * Reads a trap's action as Bash would with `extglob` as given: its commands by line, and, for an action with a syntax
+ * error, those before the error and the lines Bash reports for it.
+ */
+export function readTrapAction(text: string, row: number, extglob: boolean): Trap {
+  const read = parseTrapAction(text, row, extglob);
+  const units = read ?? parseTrapActionPrefix(text, row, extglob);
+  return {
+    text,
+    statements: units.flat(),
+    units,
+    extglob,
+    ...(read === undefined
+      ? { syntaxError: (line: number, showsLine: boolean) => trapActionSyntaxError(text, line, showsLine, extglob) }
+      : {}),
+    row,
+  };
+}
 
 function printTraps(shell: Shell, specs: readonly string[]): number {
   const conditions = conditionsOf(shell, specs);

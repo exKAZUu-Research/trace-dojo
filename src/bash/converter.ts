@@ -39,7 +39,7 @@ const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
   /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
-  readonly reparse: (text: string, row: number) => Statement[];
+  readonly reparse: (text: string, row: number, extglob?: boolean) => Statement[];
   readonly parseSubscriptParts?: (raw: string) => WordPart[];
   readonly parseBracedExpansion?: (slice: string, inDouble: boolean, row: number) => ParameterExpansion;
   /** Whether the text is a `${ ...; }` body read apart from the lines after it, which may hold its here-documents. */
@@ -1031,7 +1031,11 @@ export class Converter {
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';
     const body = /\\[$`\\]/.test(inner)
-      ? this.hooks.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), row)
+      ? this.hooks.reparse(
+          inner.replaceAll(/\\([$`\\])/g, '$1'),
+          row,
+          this.analyzed.backquoteExtglob.get(node.startIndex)
+        )
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
     return { kind: 'commandSubstitution', body, text, row };
   }

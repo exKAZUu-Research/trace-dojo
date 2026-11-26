@@ -49,7 +49,7 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
-import type { Trap, TrapCondition } from './trapBuiltins';
+import { readTrapAction, type Trap, type TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, type Job, VariableStore } from './variables';
 import { loopHeaderText, traceAssignment, traceLine, traceWords } from './xtrace';
@@ -354,8 +354,15 @@ export class Shell implements ArithmeticHost {
    * and restores `$?` afterwards. A trap does not set itself off while it runs.
    */
   private runTrap(condition: TrapCondition, status: number): void {
-    const trap = this.traps.get(condition);
-    if (!trap || this.runningTraps.has(condition)) return;
+    const set = this.traps.get(condition);
+    if (!set || this.runningTraps.has(condition)) return;
+    // Bash reads the action when it runs it, with the `extglob` then in effect.
+    const trap =
+      set.statements.length === 0 && !set.syntaxError
+        ? set
+        : set.extglob === undefined || set.extglob === this.options.extglob
+          ? set
+          : readTrapAction(set.text, set.row, this.options.extglob);
     // Bash reads the action line by line as it runs it: the commands before a syntax error run, and the error ends
     // the action, numbered from the failed command's line for `ERR` and from 1 for `EXIT`.
     const firstLine = condition === 'ERR' ? this.currentRow + 1 : 1;

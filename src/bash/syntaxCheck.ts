@@ -40,6 +40,8 @@ export interface AnalyzedBashSource {
   readonly deferredArithmetic: ReadonlyMap<number, string>;
   readonly deferredExpansions: ReadonlyMap<number, DeferredExpansion>;
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
+  /** Whether each backquoted body, by its start offset, reads extended patterns, as `extglob` may be on there. */
+  readonly backquoteExtglob: ReadonlyMap<number, boolean>;
   readonly literalQuotes: ReadonlySet<number>;
   readonly declarationFunctionStarts: ReadonlySet<number>;
   /**
@@ -52,8 +54,8 @@ export interface AnalyzedBashSource {
 }
 
 /** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
-export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashSource {
-  const checked = checkBashSyntax(source);
+export function analyzeBashSource(parser: Parser, source: string, initialExtglob = false): AnalyzedBashSource {
+  const checked = checkBashSyntax(source, initialExtglob);
   if (checked.error && checked.error !== 'unknown') {
     throw new CompileError([{ row: checked.error.row, message: syntaxErrorMessage(checked.error.text) }]);
   }
@@ -79,6 +81,7 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     deferredArithmetic,
     deferredExpansions,
     backquoteErrors: backquotes.errors,
+    backquoteExtglob: new Map(checked.backquotes.map(({ start, extglob }) => [start, extglob])),
     literalQuotes,
     declarationFunctionStarts,
     descriptorVariables: new Map(descriptorVariables.map(({ start, name }) => [start, name])),
@@ -96,16 +99,19 @@ function maskDescriptorVariables(source: string, spans: readonly { start: number
   return out;
 }
 
-export function checkBashSyntax(source: string): {
+export function checkBashSyntax(
+  source: string,
+  initialExtglob = false
+): {
   error: BashSyntaxError | 'unknown' | undefined;
-  backquotes: { start: number; end: number }[];
+  backquotes: { start: number; end: number; extglob: boolean }[];
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
   descriptorVariables: DescriptorVariableSpan[];
   uncertainExtglobRows: number[];
 } {
-  const text = createValidatorSourceText(source);
+  const text = createValidatorSourceText(source, initialExtglob);
   return {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
@@ -118,9 +124,13 @@ export function checkBashSyntax(source: string): {
 }
 
 /** Inspects an unescaped backquoted body at `row` for runtime syntax errors. */
-export function inspectUnescapedBackquoteBody(body: string, row: number): BackquoteSyntaxError | undefined {
+export function inspectUnescapedBackquoteBody(
+  body: string,
+  row: number,
+  extglob = false
+): BackquoteSyntaxError | undefined {
   const text = `${'\n'.repeat(row)}${body}\n`;
-  const { error } = checkBashSyntax(text);
+  const { error } = checkBashSyntax(text, extglob);
   if (!error || error === 'unknown') return undefined;
   const messages = error.near === undefined ? [error.text] : [error.text, `syntax error near \`${error.near}'`];
   const shows = (messages.at(-1) as string).startsWith('syntax error near');
@@ -129,7 +139,7 @@ export function inspectUnescapedBackquoteBody(body: string, row: number): Backqu
 
 function analyzeBackquotes(
   source: string,
-  backquotes: readonly { start: number; end: number }[]
+  backquotes: readonly { start: number; end: number; extglob: boolean }[]
 ): {
   source: string;
   errors: Map<number, BackquoteSyntaxError>;
@@ -144,8 +154,8 @@ function analyzeBackquotes(
   const arithmeticRegions: DeferredRegion[] = [];
   const descriptorVariables: DescriptorVariableSpan[] = [];
   let normalized = source;
-  for (const { start, end } of backquotes) {
-    const inspected = inspectBackquoteSpan(source, start, end);
+  for (const { start, end, extglob } of backquotes) {
+    const inspected = inspectBackquoteSpan(source, start, end, extglob);
     if (inspected.error) {
       errors.set(start, inspected.error);
       const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
@@ -170,7 +180,8 @@ function analyzeBackquotes(
 function inspectBackquoteSpan(
   source: string,
   start: number,
-  end: number
+  end: number,
+  extglob: boolean
 ): {
   error?: BackquoteSyntaxError;
   quoteOffsets: number[];
@@ -189,10 +200,10 @@ function inspectBackquoteSpan(
   const row = source.slice(0, start).split('\n').length - 1;
   const pad = '\n'.repeat(row);
   const padded = `${pad}${body}\n`;
-  const checked = checkBashSyntax(padded);
+  const checked = checkBashSyntax(padded, extglob);
   if (checked.error && checked.error !== 'unknown') {
     return {
-      error: inspectUnescapedBackquoteBody(body, row),
+      error: inspectUnescapedBackquoteBody(body, row, extglob),
       quoteOffsets: [],
       fnStarts: [],
       arithmeticRegions: [],
@@ -397,8 +408,8 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
     try {
       i = skipDoubleQuotedPiece(text, i);
       // A backquoted body is read apart from the program's, so its spans are mapped back from that reading.
-      for (const { start: open, end: close } of text.backquotes.slice(marks[0])) {
-        text.descriptorVariables.push(...inspectBackquoteSpan(text.source, open, close).descriptorVariables);
+      for (const { start: open, end: close, extglob } of text.backquotes.slice(marks[0])) {
+        text.descriptorVariables.push(...inspectBackquoteSpan(text.source, open, close, extglob).descriptorVariables);
       }
     } catch (error) {
       if (!(error instanceof SyntaxFailure || error instanceof UnknownSyntax)) throw error;
@@ -413,8 +424,11 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
   }
 }
 
-export function createValidatorSourceText(source: string): SourceText {
+export function createValidatorSourceText(source: string, initialExtglob = false): SourceText {
   const text = new SourceText(source);
+  // A text read apart from the program, as a trap action or a backquoted body is, starts with the `extglob` in effect
+  // where Bash reads it.
+  text.readingExtglob = { on: initialExtglob, uncertain: false };
   // A `$( )`'s own `shopt` lines change what it reads but not the line around it; a `${ ...; }` runs in this shell,
   // so what it may set is left for the lines after the line holding it.
   const keepingExtglob = (read: () => number): number => {
@@ -839,7 +853,7 @@ class ShellGrammarValidator {
   ) {
     this.closer = closesBrace ? '}' : ')';
     this.stream = new ShellTokenStream(text, start, closesBrace, insideSubstitution && !closesBrace);
-    if (insideSubstitution) {
+    {
       const { on, uncertain } = text.readingExtglob;
       this.possibleExtglob.clear();
       if (on || uncertain) this.possibleExtglob.add(true);
