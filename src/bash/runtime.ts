@@ -19,6 +19,8 @@ export interface FunctionDefinition {
   redirects: Redirect[];
   /** How far the lines Bash numbered the function with are behind its rows. */
   lineShift: number;
+  /** The line where the definition starts, 0-based, which errors of the function's own redirections name. */
+  definitionRow: number;
 }
 
 /** A frame of the trace: the program's top level, a command substitution, or a call of a function the program defines. */

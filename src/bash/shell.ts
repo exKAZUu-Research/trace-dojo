@@ -478,6 +478,7 @@ export class Shell implements ArithmeticHost {
       isAtomic: statement.isAtomic,
       redirects: statement.redirects,
       lineShift: this.lineShift,
+      definitionRow: statement.row - this.lineShift,
     });
     return 0;
   }
@@ -1312,6 +1313,8 @@ export class Shell implements ArithmeticHost {
     this.loopDepth = 0;
     this.lineShift = fn.lineShift;
     try {
+      // Bash names the line where the definition starts when the function's own redirections fail.
+      if (fn.redirects.length > 0) this.currentRow = fn.definitionRow;
       return this.restoringLine(() => this.withRedirects(fn.redirects, () => this.execute(fn.body)));
     } catch (error) {
       if (error instanceof ReturnSignal) return error.status;
