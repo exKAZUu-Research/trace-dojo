@@ -1,6 +1,7 @@
 import { assert } from 'es-toolkit';
 
 import { CompileError } from '../interpreter/diagnostics';
+import { ExecutionBudget } from '../interpreter/limits';
 import { TURTLE_METHOD_NAMES } from '../interpreter/turtleWorld';
 import {
   COERCIBLE_CLASS,
@@ -43,7 +44,7 @@ import type { SpliceNames, SpliceSyntax } from './thDecode';
 import { SPLICE_ENTRY } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
-import { withCompilationBudget } from './typeWorkBudget';
+import { withCompilationBudget, withTypeWorkBudget } from './typeWorkBudget';
 
 /** Compiled once per process. */
 interface Library {
@@ -464,7 +465,13 @@ export function compileProgram(source: string, options: CompileOptions = {}): Co
       printedError: compileErrorOutput,
     } = parseProgram(preprocessProgram(source), (spliceModule, pending, span, names) => {
       assert(spliceExecutor, 'No executor of Template Haskell splices is set');
-      const main = compileModule(lib, spliceModule, { splice: { entry: SPLICE_ENTRY, pending } });
+      // Each splice recompiles the declarations before it, so that type work has a budget of its own: on the
+      // program's, a module with many splices would run out though each declaration compiles once in GHC.
+      const typeWork = new ExecutionBudget(Number.POSITIVE_INFINITY);
+      const main = withTypeWorkBudget(
+        (units) => typeWork.spend(units),
+        () => compileModule(lib, spliceModule, { splice: { entry: SPLICE_ENTRY, pending } })
+      );
       return spliceExecutor({ main }, span, names);
     });
     return {
