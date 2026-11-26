@@ -115,10 +115,11 @@ export const FILE_TEST_OPERATORS = new Set([
   '-ef',
 ]);
 
-export type UnsupportedSyntaxKind = 'time';
+export type UnsupportedSyntaxKind = 'time' | 'outerHeredocBody';
 
 const UNSUPPORTED_SYNTAX_LABELS: Record<UnsupportedSyntaxKind, string> = {
   time: '実行時間の計測（time）',
+  outerHeredocBody: '置換の外の行にある here-document の本体',
 };
 
 /** Formats static unsupported-syntax diagnostics from one declarative catalog for `Converter`. */

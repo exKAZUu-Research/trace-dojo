@@ -102,7 +102,6 @@ export class Converter {
     return { units, unitEndRows, extglobRows };
   }
 
-  /** Pairs here-document redirections with their bodies, which follow in the same order in the source. */
   /**
    * Pairs each here-document redirection with its body: the first body not yet paired that starts after it within
    * the same command substitution (or the program), as Bash reads a substitution's here-documents apart.
@@ -541,7 +540,9 @@ export class Converter {
     const body = this.heredocBodies.get(redirect.startIndex);
     const row = redirect.startPosition.row;
     const stripsTabs = redirect.childForFieldName('operator')?.type === '<<-';
-    if (!body) return { parts: [], row, text: '' };
+    // Only a `${ ...; }` is read apart from the lines after it, which may hold its here-document's body, as Bash 5.3
+    // reads with a warning; every other here-document has a body, which ends at the end of the input at the latest.
+    if (!body) return this.unsupported(redirect, 'outerHeredocBody');
     const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
     const contentEnd = end?.startIndex ?? body.endIndex;
     const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
