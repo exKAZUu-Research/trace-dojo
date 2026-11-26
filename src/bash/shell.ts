@@ -348,7 +348,9 @@ export class Shell implements ArithmeticHost {
     this.runningTraps.add(condition);
     this.trapStartStatus = status;
     this.store.lastStatus = status;
-    this.lineShift = trap.row - this.currentRow;
+    // Bash numbers an `ERR` action's lines from the failed command's line, and the `EXIT` action's from 1, as it
+    // reads the action as a new script then (`SEVAL_RESETLINE`).
+    this.lineShift = condition === 'EXIT' ? trap.row : trap.row - this.currentRow;
     try {
       this.runStatements(trap.statements);
     } finally {
