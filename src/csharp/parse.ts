@@ -73,9 +73,11 @@ function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagn
   for (const diagnostic of errors) {
     const missing = /^「(.+)」が足りません。$/.exec(diagnostic.message);
     if (missing) {
-      const token = missing[1] === ';' && endsDeclarationBeforeMore(root, diagnostic.row) ? ',' : missing[1];
+      const endsDeclaration = missing[1] === ';' && endsDeclarationBeforeMore(root, diagnostic.row);
+      const token = endsDeclaration ? ',' : missing[1];
       const message = MISSING_TOKENS[token] ?? `CS1003: 構文エラーです。'${token}' が必要です`;
       diagnostics.push({ row: diagnostic.row, message });
+      if (endsDeclaration) diagnostics.push(...skippedDeclarationErrors(root, diagnostic.row));
     }
   }
   for (const error of outermostErrors(root)) diagnostics.push(...roslynErrorsOf(root, error));
@@ -224,6 +226,62 @@ function endsDeclarationBeforeMore(root: Node, row: number): boolean {
     return false;
   const next = nextLeafOf(root, missing);
   return next !== undefined && next.type !== '}';
+}
+
+/**
+ * The errors after a top-level declaration without its `;`, which Roslyn reads on as declarators to skip: up to the
+ * next `;`, or else to a `}`, before which it expects the `;` (CS1002); a `}` whose `{` it skipped then closes nothing
+ * (CS1022). A skip that stops inside parentheses, at a label's `:`, or before a clause such as `else` leaves Roslyn
+ * more errors to report, which only the first stands for here.
+ */
+function skippedDeclarationErrors(root: Node, row: number): SourceDiagnostic[] {
+  const leaves = leavesOf(root).filter((leaf) => !leaf.isMissing && leaf.type !== 'comment');
+  const missing = leavesOf(root).find((leaf) => leaf.isMissing && leaf.type === ';' && leaf.startPosition.row === row);
+  if (!missing) return [];
+  const skip = skippedTokens(
+    leaves,
+    leaves.findIndex((leaf) => leaf.startIndex >= missing.endIndex)
+  );
+  if (!skip) return [];
+  const diagnostics: SourceDiagnostic[] = [];
+  if (leaves[skip.end].type === '}')
+    diagnostics.push({ row: leaves[skip.end - 1].startPosition.row, message: MISSING_TOKENS[';'] });
+  return unmatchedBraces(root, skip.opened, diagnostics);
+}
+
+const NESTING: Record<string, number> = { '(': 1, '[': 1, ')': -1, ']': -1 };
+
+/**
+ * Where the skip from a token ends: at the `;` or `}` outside parentheses, with the `{` it passes; or undefined when it
+ * meets a `:` or `,` first, or none.
+ */
+function skippedTokens(leaves: Node[], start: number): { end: number; opened: Node[] } | undefined {
+  if (start < 0) return undefined;
+  const opened: Node[] = [];
+  let depth = 0;
+  for (let index = start; index < leaves.length; index++) {
+    const { type } = leaves[index];
+    if (type === ':' || type === ',' || depth < 0) return undefined;
+    if (type === ';' || type === '}') return depth === 0 ? { end: index, opened } : undefined;
+    if (type === '{') opened.push(leaves[index]);
+    depth += NESTING[type] ?? 0;
+  }
+  return undefined;
+}
+
+/** The skipped `{` of blocks, whose `}` each then stands alone (CS1022), unless a clause follows it. */
+function unmatchedBraces(root: Node, opened: Node[], diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+  for (const brace of opened) {
+    const close = brace.parent?.type === 'block' ? lastLeafOf(brace.parent) : undefined;
+    if (close?.type !== '}') return [];
+    const next = nextLeafOf(root, close);
+    if (next && ['else', 'catch', 'finally'].includes(next.type)) return [];
+    diagnostics.push({
+      row: close.startPosition.row,
+      message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です',
+    });
+  }
+  return diagnostics;
 }
 
 function outermostErrors(root: Node): Node[] {
