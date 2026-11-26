@@ -32,12 +32,12 @@ define(
   ([evidence, value], runtime) => new TailCall(runtime.machine.force(evidence), [0n, value])
 );
 
-function lazily(compute: () => Slot | TailCall): Thunk {
-  return new Thunk(undefined, undefined, compute);
+function lazily(roots: readonly Slot[], compute: () => Slot | TailCall): Thunk {
+  return new Thunk(undefined, undefined, compute, roots);
 }
 
-function oneArgument(name: string, fn: (arg: Slot) => Slot | TailCall): PrimFn {
-  return new PrimFn({ name, arity: 1, strict: [], fn: ([arg]) => fn(arg) });
+function oneArgument(roots: readonly Slot[], fn: (arg: Slot) => Slot | TailCall): PrimFn {
+  return new PrimFn({ name: 'coerce', arity: 1, strict: [], fn: ([arg]) => fn(arg) }, undefined, undefined, roots);
 }
 
 function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot[], runtime: Runtime): Slot {
@@ -48,23 +48,27 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
     }
     case 'leaf': {
       const direction = forward === spec.flipped ? 1n : 0n;
-      return lazily(() => new TailCall(force(leaves[spec.index]), [direction, value]));
+      return lazily([value, ...leaves], () => new TailCall(force(leaves[spec.index]), [direction, value]));
     }
     case 'unwrap':
     case 'wrap': {
       // Unwrapping forward and wrapping back take the newtype's field out; the others put the field in.
       if ((spec.k === 'unwrap') === forward) {
-        return lazily(() => convert(spec.inner, (force(value) as ConValue).fields[0], forward, leaves, runtime));
+        return lazily([value, ...leaves], () =>
+          convert(spec.inner, (force(value) as ConValue).fields[0], forward, leaves, runtime)
+        );
       }
-      return lazily(() => newtypeBox(spec.con, convert(spec.inner, value, forward, leaves, runtime), force));
+      return lazily([value, ...leaves], () =>
+        newtypeBox(spec.con, convert(spec.inner, value, forward, leaves, runtime), force)
+      );
     }
     case 'fun': {
-      return lazily(() => {
+      return lazily([value, ...leaves], () => {
         const fn = force(value);
-        return oneArgument('coerce', (arg) =>
+        return oneArgument([fn, ...leaves], (arg) =>
           convert(
             spec.res,
-            lazily(() => new TailCall(fn, [convert(spec.arg, arg, !forward, leaves, runtime)])),
+            lazily([fn, arg, ...leaves], () => new TailCall(fn, [convert(spec.arg, arg, !forward, leaves, runtime)])),
             forward,
             leaves,
             runtime
@@ -73,14 +77,14 @@ function convert(spec: CoercionSpec, value: Slot, forward: boolean, leaves: Slot
       });
     }
     case 'io': {
-      const next = oneArgument('coerce', (result) => new IOReturn(convert(spec.res, result, forward, leaves, runtime)));
-      return lazily(() => {
+      const next = oneArgument(leaves, (result) => new IOReturn(convert(spec.res, result, forward, leaves, runtime)));
+      return lazily([value, ...leaves], () => {
         force(value);
         return new IOBind(value, next);
       });
     }
     case 'data': {
-      return lazily(() => {
+      return lazily([value, ...leaves], () => {
         const original = force(value) as ConValue;
         const fields = original.fields.map((field, index) => {
           const fieldSpec = specOfField(original.con.fieldTypes[index], spec.params);

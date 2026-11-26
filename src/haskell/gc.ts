@@ -16,6 +16,7 @@ import {
   IOThen,
   Partial,
   type PreparedBlock,
+  PrimFn,
   RefValue,
   type Slot,
   Thunk,
@@ -194,12 +195,15 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
     push(value.value);
   } else if (value instanceof Thunk) {
     for (const root of runtime.previewRoots(value) ?? []) push(root);
+    for (const root of value.nativeRoots ?? []) push(root);
     if (value.state === 'done') push(value.value);
     else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
     else if (value.effect !== undefined) push(value.effect);
     else push(value.target);
   } else if (value instanceof Closure) {
     pushRefs(freeVarsOf(value.lam), value.env, push);
+  } else if (value instanceof PrimFn) {
+    for (const root of value.roots ?? []) push(root);
   } else if (value instanceof Partial) {
     push(value.fn);
     for (const arg of value.args) push(arg);
@@ -226,6 +230,7 @@ function pushPreparedActions(block: PreparedBlock | undefined, push: Push, start
 }
 
 export function thunkReferences(thunk: Thunk): readonly Slot[] | undefined {
+  if (thunk.nativeRoots) return thunk.nativeRoots;
   if (!thunk.code || !thunk.env) return thunk.target === undefined ? undefined : [thunk.target];
   const roots: Slot[] = [];
   pushRefs(freeVarsOf(thunk.code), thunk.env, (slot) => {

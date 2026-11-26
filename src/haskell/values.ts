@@ -71,7 +71,9 @@ export class PrimFn {
   constructor(
     readonly prim: Primitive,
     readonly info?: FunctionInfo,
-    readonly atomicScope?: FunctionInfo
+    readonly atomicScope?: FunctionInfo,
+    /** The values the primitive's closure holds, which the collector cannot see inside it. */
+    readonly roots?: readonly Slot[]
   ) {}
 
   get arity(): number {
@@ -110,7 +112,9 @@ export class Thunk {
     public code: Core | undefined,
     public env: Env | undefined,
     /** Computes the value natively, for thunks the evaluator builds itself (such as a string's rest). */
-    public native?: () => Slot | TailCall
+    public native?: () => Slot | TailCall,
+    /** The values `native` holds, which the collector cannot see inside the closure. */
+    public nativeRoots?: readonly Slot[]
   ) {
     this.displayType = code?.displayType ? { tag: 'hint', value: code.displayType } : undefined;
   }
@@ -122,6 +126,7 @@ export class Thunk {
     this.code = undefined;
     this.env = undefined;
     this.native = undefined;
+    this.nativeRoots = undefined;
     this.target = undefined;
     this.effect = undefined;
   }
@@ -131,6 +136,7 @@ export class Thunk {
     this.code = undefined;
     this.env = undefined;
     this.native = undefined;
+    this.nativeRoots = undefined;
     this.target = target;
     this.effect = undefined;
   }

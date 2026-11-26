@@ -828,6 +828,7 @@ export class Machine {
           frame.thunk.native = () => {
             throw exception;
           };
+          frame.thunk.nativeRoots = exceptionRoots(exception);
         } else {
           frame.thunk.code = frame.code;
           frame.thunk.env = frame.env;
@@ -914,4 +915,12 @@ function describeValue(value: unknown): string {
   if (value === undefined) return 'undefined';
   if (typeof value === 'object' && value !== null) return value.constructor.name;
   return typeof value;
+}
+
+/** The program values an exception carries: its value, or the handle an I/O error names. */
+function exceptionRoots(exception: HaskellException): Slot[] {
+  const { cause } = exception;
+  if (cause?.kind === 'value') return [cause.value];
+  if (cause?.kind === 'io' && cause.handle !== undefined) return [cause.handle];
+  return [];
 }
