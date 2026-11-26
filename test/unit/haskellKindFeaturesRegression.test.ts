@@ -2,35 +2,28 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-const unsupported = [
-  ['phantomKind', 'data Q f=Q\ninstance Show(Q f) where show _="Q"\na::Q Maybe\na=Q\nmain=print a'],
-  ['appliedKind', 'data App f a=App(f a)\ndata Pr a=Pr\ny::App Pr Maybe\ny=App Pr\nmain=putStrLn "ok"'],
-  ['mixedKinds', 'data Q f=Q\ndata R=R(Q Maybe)(Q Int)\nmain=putStrLn "ok"'],
-  ['laterKind', 'data Q f=Q\ndata R=R(Q Maybe)\nx::Q Int\nx=Q\nmain=putStrLn "ok"'],
-  ['reversedKinds', 'data R=R(Q Maybe)\ndata Q f=Q\nx::Q Int\nx=Q\nmain=putStrLn "ok"'],
-  ['synonymKind', 'type K a=Int\nf::K Maybe\nf=1\nmain=print f'],
-  [
-    'classKind',
-    'data P a=P\nclass C a where c::P a->String\ninstance C Maybe where c _="ok"\nmain=putStrLn(c(P::P Maybe))',
-  ],
+const accepted = [
   [
     'constraintSynonym',
     'type C a=(Show a,Eq a)\nf::C a=>a->String\nf x=if x==x then show x else ""\nmain=putStrLn(f 1)',
+    '1\n',
   ],
   [
     'qualifiedConstraint',
     'import qualified Prelude as P\nimport Prelude\ntype C a=P.Show a\nf::C a=>a->String\nf=show\nmain=putStrLn(f True)',
+    'True\n',
   ],
-] as const;
-
-test.each(unsupported)('unsupported kind features have an environment diagnostic: %s', (_name, source) => {
-  const result = executeProgram('haskell', source);
-  expect(result.kind).toBe('compileError');
-  if (result.kind === 'compileError')
-    expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
-});
-
-const accepted = [
+  ['phantomKind', 'data Q f=Q\ninstance Show(Q f) where show _="Q"\na::Q Maybe\na=Q\nmain=print a', 'Q\n'],
+  ['appliedKind', 'data App f a=App(f a)\ndata Pr a=Pr\ny::App Pr Maybe\ny=App Pr\nmain=putStrLn "ok"', 'ok\n'],
+  ['mixedKinds', 'data Q f=Q\ndata R=R(Q Maybe)(Q Int)\nmain=putStrLn "ok"', 'ok\n'],
+  ['laterKind', 'data Q f=Q\ndata R=R(Q Maybe)\nx::Q Int\nx=Q\nmain=putStrLn "ok"', 'ok\n'],
+  ['reversedKinds', 'data R=R(Q Maybe)\ndata Q f=Q\nx::Q Int\nx=Q\nmain=putStrLn "ok"', 'ok\n'],
+  ['synonymKind', 'type K a=Int\nf::K Maybe\nf=1\nmain=print f', '1\n'],
+  [
+    'classKind',
+    'data P a=P\nclass C a where c::P a->String\ninstance C Maybe where c _="ok"\nmain=putStrLn(c(P::P Maybe))',
+    'ok\n',
+  ],
   [
     'ordinaryPhantom',
     'data Q f=Q\ninstance Show(Q f) where show _="Q"\na::Q Int\na=Q\nb::Q Bool\nb=Q\nmain=print(a,b)',
@@ -68,6 +61,31 @@ test.each(accepted)('monomorphic kind inference remains supported: %s', (_name, 
   expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
 });
 
+const polymorphicFamilies = [
+  [
+    'closedFamilyKind',
+    "{-# LANGUAGE DataKinds, TypeFamilies, UndecidableInstances #-}\nimport GHC.TypeLits\nimport Data.Proxy\ntype family Length xs where\n  Length '[] = 0\n  Length (x ': xs) = 1 + Length xs\nmain=print(natVal(Proxy::Proxy(Length '[1,2,3])))",
+    '3\n',
+  ],
+  [
+    'closedFamilyKinds',
+    '{-# LANGUAGE TypeFamilies #-}\nimport Data.Proxy\ntype family Id a where Id a=a\nx::Proxy(Id Maybe)\nx=Proxy\ny::Id Int\ny=1\nmain=print y',
+    '1\n',
+  ],
+  [
+    'openFamilyKinds',
+    '{-# LANGUAGE TypeFamilies #-}\nimport Data.Proxy\ntype family F(a::k)::k\ntype instance F a=a\nx::Proxy(F Maybe)\nx=Proxy\ny::F Int\ny=1\nmain=print y',
+    '1\n',
+  ],
+] as const;
+
+test.each(polymorphicFamilies)(
+  'type families take kinds polymorphic per use as in GHC: %s',
+  (_name, source, stdout) => {
+    expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
+  }
+);
+
 const rejected = [
   ['invalidConcreteKind', 'data S a=S a\nx::S Maybe\nx=undefined\nmain=putStrLn "ok"'],
   ['invalidApplication', 'data App f a=App(f a)\nx::App Maybe Maybe\nx=undefined\nmain=putStrLn "ok"'],
@@ -84,39 +102,45 @@ test.each(rejected)('invalid kinds retain ordinary type diagnostics: %s', (_name
 });
 
 const constraintKinds = [
-  ['phantomClass', 'data P a=P\nx::P Show\nx=P\nmain=putStrLn "ok"'],
-  ['fieldClass', 'data P a=P\ndata R=R(P Eq)\nmain=putStrLn "ok"'],
+  ['phantomClass', 'data P a=P\nx::P Show\nx=P\nmain=putStrLn "ok"', 'ok\n'],
+  [
+    'emptyConstraintArgument',
+    'import Data.Kind\ndata P(c::Constraint)=P\ntype S(c::Constraint)=Int\nx::P()\nx=P\ny::S()\ny=1\nmain=print y',
+    '1\n',
+  ],
+  ['fieldClass', 'data P a=P\ndata R=R(P Eq)\nmain=putStrLn "ok"', 'ok\n'],
   [
     'instanceClass',
     'data P a=P\nclass C a where c::a->String\ninstance C(P Show) where c _="ok"\nmain=putStrLn(c(P::P Show))',
+    'ok\n',
   ],
-  ['variableConstraint', 'data P a=P\ng::c a=>P c->a->Int\ng _ _=1\nmain=print 1'],
-  ['aliasSuperclass', 'type C a=Show a\nclass C a=>D a\nmain=print 1'],
+  ['variableConstraint', 'data P a=P\ng::c a=>P c->a->Int\ng _ _=1\nmain=print 1', '1\n'],
+  ['aliasSuperclass', 'type C a=Show a\nclass C a=>D a\nmain=print 1', '1\n'],
   [
     'qualifiedClassType',
     'import qualified Prelude as P\nimport Prelude\ndata Q a=Q\nx::Q P.Show\nx=Q\nmain=putStrLn "ok"',
+    'ok\n',
   ],
-  ['userClassType', 'class C a where c::a->String\ndata P a=P\nx::P C\nx=P\nmain=putStrLn "ok"'],
-  ['nestedConstraintTuple', 'type C a=((Show a,Eq a),Ord a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
-  ['constraintSynonymApply', 'type Id a=a\ntype C a=Id(Show a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
-  ['bareShowDeriving', 'type C=Show\ndata T=T deriving C\nmain=print T'],
-  ['bareEqDeriving', 'type E=Eq\ndata T=T deriving(E,Show)\nmain=print(T==T)'],
-  ['bareOrdDeriving', 'type O=Ord\ndata T=T deriving(Eq,O,Show)\nmain=print(compare T T)'],
-  ['forwardDeriving', 'data T=T deriving C\ntype C=Show\nmain=print T'],
-  ['parenthesizedDeriving', 'type C=(Show)\ndata T=T deriving C\nmain=print T'],
-  ['aliasChainDeriving', 'type A=Show\ntype B=A\ndata T=T deriving B\nmain=print T'],
-  ['zeroConstraintAlias', 'type C=Show Int\nf::C=>Int\nf=1\nmain=print f'],
-  ['manyConstraintAlias', 'type C a b=(Show a,Eq b)\nf::C a b=>a->b->String\nf a _=show a\nmain=putStrLn(f 1 True)'],
-  ['bareVariableConstraint', 'data P a=P\ng::c=>P c->Int\ng _=1\nmain=print 1'],
+  ['userClassType', 'class C a where c::a->String\ndata P a=P\nx::P C\nx=P\nmain=putStrLn "ok"', 'ok\n'],
+  ['nestedConstraintTuple', 'type C a=((Show a,Eq a),Ord a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)', '1\n'],
+  ['constraintSynonymApply', 'type Id a=a\ntype C a=Id(Show a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)', '1\n'],
+  ['bareShowDeriving', 'type C=Show\ndata T=T deriving C\nmain=print T', 'T\n'],
+  ['bareEqDeriving', 'type E=Eq\ndata T=T deriving(E,Show)\nmain=print(T==T)', 'True\n'],
+  ['bareOrdDeriving', 'type O=Ord\ndata T=T deriving(Eq,O,Show)\nmain=print(compare T T)', 'EQ\n'],
+  ['forwardDeriving', 'data T=T deriving C\ntype C=Show\nmain=print T', 'T\n'],
+  ['parenthesizedDeriving', 'type C=(Show)\ndata T=T deriving C\nmain=print T', 'T\n'],
+  ['aliasChainDeriving', 'type A=Show\ntype B=A\ndata T=T deriving B\nmain=print T', 'T\n'],
+  ['zeroConstraintAlias', 'type C=Show Int\nf::C=>Int\nf=1\nmain=print f', '1\n'],
+  [
+    'manyConstraintAlias',
+    'type C a b=(Show a,Eq b)\nf::C a b=>a->b->String\nf a _=show a\nmain=putStrLn(f 1 True)',
+    '1\n',
+  ],
+  ['bareVariableConstraint', 'data P a=P\ng::c=>P c->Int\ng _=1\nmain=print 1', '1\n'],
 ] as const;
 
-test.each(constraintKinds)('well-kinded constraint uses have an environment diagnostic: %s', (_name, source) => {
-  const result = executeProgram('haskell', source);
-  expect(result.kind).toBe('compileError');
-  if (result.kind === 'compileError') {
-    expect(result.diagnostics[0]?.message).toMatch(/PolyKinds|ConstraintKinds/);
-    expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
-  }
+test.each(constraintKinds)('constraints used as types run as in GHC: %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
 });
 
 const kindMisuses = [
@@ -129,7 +153,6 @@ const kindMisuses = [
   ['invalidShowMaybe', 'type C=Show Maybe\nmain=print 1'],
   ['invalidOverClass', 'type C a=Show a a\nmain=print 1'],
   ['invalidClassValue', 'data D=D Show\nmain=print 1'],
-  ['constraintTupleEmpty', 'type C a=(Show a,())\nmain=print 1'],
   ['aliasValueContext', 'type Name=String\nclass Name a=>C a\nmain=print 1'],
   ['aliasValueInstance', 'type Point=(Int,Int)\ninstance Point Int\nmain=print 1'],
   ['aliasValueDeriving', 'type Name=String\ndata D=D deriving Name\nmain=print 1'],
@@ -164,30 +187,29 @@ test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %
   }
 });
 
-const unsupportedSuperclasses = [
+const flexibleSuperclasses = [
   [
     'listSuperclass',
     'class Show [a]=>D a where d::a->String\ninstance D Int where d x=show [x]\nmain=putStrLn(d(1::Int))',
+    '[1]\n',
   ],
-  ['concreteSuperclass', 'class Show Int=>D a where d::a->String\ninstance D Bool where d=show\nmain=putStrLn(d True)'],
+  [
+    'concreteSuperclass',
+    'class Show Int=>D a where d::a->String\ninstance D Bool where d=show\nmain=putStrLn(d True)',
+    'True\n',
+  ],
   [
     'maybeSuperclass',
     'class Eq(Maybe a)=>D a where d::a->Bool\ninstance D Int where d x=Just x==Just x\nmain=print(d(1::Int))',
+    'True\n',
   ],
   [
     'higherSuperclass',
     'class Show(f Int)=>D f where d::f Int->String\ninstance D Maybe where d=show\nmain=putStrLn(d(Just(1::Int)))',
+    'Just 1\n',
   ],
 ] as const;
 
-test.each(unsupportedSuperclasses)(
-  'well-kinded superclass contexts have an environment diagnostic: %s',
-  (_name, source) => {
-    const result = executeProgram('haskell', source);
-    expect(result.kind).toBe('compileError');
-    if (result.kind === 'compileError') {
-      expect(result.diagnostics[0]?.message).toContain('スーパークラス');
-      expect(result.diagnostics[0]?.message).toContain('は、この採点環境では使えません。');
-    }
-  }
-);
+test.each(flexibleSuperclasses)('superclass contexts on other types run as in GHC: %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});

@@ -93,10 +93,9 @@ test.each([
 });
 
 test.each([
-  ['standard input', 'main = getLine >>= putStrLn'],
-  ['a file', 'main = readFile "a.txt" >>= putStrLn'],
-  ['a syntax of an extension', 'f = \\case\n  _ -> 1\nmain = print (f ())'],
-  ['a module outside base and containers', 'import Data.IORef\nmain = print 1'],
+  ['a foreign function', 'foreign import ccall "sin" c_sin :: Double -> Double\nmain = print 1'],
+  ['a module outside base and containers', 'import Data.Text\nmain = print 1'],
+  ['a concurrent thread', 'import Control.Concurrent\nmain = print 1'],
 ])('%s is rejected as unsupported', (_name, program) => {
   const execution = executeProgram('haskell', program);
   expect(execution.kind).toBe('compileError');

@@ -31,7 +31,7 @@ import {
 import { visibleVariables } from './visibleScope';
 
 export function traceHaskellProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
-  const compiled = compileProgram(program, new Set(trace.atomicAnnotations.keys()), true);
+  const compiled = compileProgram(program, { atomicRows: new Set(trace.atomicAnnotations.keys()), traceTypes: true });
   const runtime = new Runtime(input);
   runtime.displaysAnswer = (name, slot, type, context) => slotDisplaysAnswer(runtime, name, slot, type, context);
   const output = new RecordingOutput(runtime);

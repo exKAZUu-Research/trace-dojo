@@ -135,8 +135,7 @@ export function openPath(
       input,
       output: {
         write: (text) => {
-          handle.seek(input.position);
-          handle.write(text);
+          handle.writeAt(input.position, text);
           input.position += text.length;
         },
       },

@@ -14,6 +14,7 @@ import {
   UNIT_CON,
   WORD_TYPE,
 } from './builtinTypes';
+import { coercionPrimitive } from './coercion';
 import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt, LamCore } from './core';
 import {
   type ClassEntity,
@@ -27,10 +28,12 @@ import {
   type ValueEntity,
 } from './entities';
 import { TailCall } from './machine';
+import { matchesWithoutEvaluating } from './newtypes';
 import { patternProjection, patternResult } from './patternBindings';
 import { surfacePatternText } from './patternText';
 import { primitiveNamed, rationalToFloat } from './primitives';
 import type { LocalVar, RAlt, RBindGroup, RBinding, RClause, RExpr, RGuard, RPat, RRhs, RStmt } from './rast';
+import { rpatLocals } from './rastChildren';
 import { RecursionBudget } from './recursionBudget';
 import { type DictBuilders, dictBuilders, type Runtime } from './runtime';
 import type { Span } from './syntax';
@@ -39,6 +42,10 @@ import { prune, type Scheme, splitApp, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 import { type Dict, Env, HaskellException, type Slot, Thunk } from './values';
 import type { VisibleBinding, VisibleScope } from './visibleScope';
+
+function local(index: number): Core {
+  return { k: 'local', depth: 0, index };
+}
 
 /** The file name GHC's messages show for the program, which runs as `Main.hs`. */
 export const PROGRAM_FILE = 'Main.hs';
@@ -55,7 +62,6 @@ export function globalOf(key: object, name: string, entity?: ValueEntity): Globa
   return def;
 }
 
-/** The library's entities that generated code refers to. */
 export interface CodegenSupport {
   value(name: string): ValueEntity;
   boolType(): TypeEntity;
@@ -101,7 +107,6 @@ export function sourceSpanText(span: Span): string {
   return `${PROGRAM_FILE}:(${span.row + 1},${span.col + 1})-(${span.endRow + 1},${span.endCol})`;
 }
 
-/** Generates code for a module's bindings and instances, registering its globals and instance dictionaries. */
 export class Codegen {
   /** The scope of top-level code, which has no frame at run time. */
   private readonly rootFrame = new FrameScope(undefined);
@@ -138,6 +143,11 @@ export class Codegen {
     }
     const whole = globalOf(binding, '<pattern>');
     const patternOwner = { name: '<pattern>', row: binding.span.row, isAtomic: false };
+    const params = binding.dictParams ?? [];
+    if (params.length > 0) {
+      this.compilePolymorphicTopPattern(binding, whole, params, patternOwner);
+      return;
+    }
     const frame = new FrameScope(undefined);
     whole.code = this.withFrame(frame, () => {
       const slot = frame.alloc();
@@ -164,7 +174,42 @@ export class Codegen {
     }
   }
 
-  /** Registers how a module's instance's dictionary is built. */
+  /**
+   * A pattern binding generalized with constraints, as it is without the monomorphism restriction: its match and each
+   * of its variables take the constraints' dictionaries, each variable matching the binding at the ones it is given.
+   */
+  private compilePolymorphicTopPattern(
+    binding: Extract<RBinding, { k: 'pat' }>,
+    whole: GlobalDef,
+    params: DictParam[],
+    patternOwner: FunctionInfo
+  ): void {
+    const globals = binding.globals as ValueEntity[];
+    for (const global of globals) this.ownDictParams.set(global, params);
+    whole.code = this.compileDictionaryLambda(params, 0, () => this.matchedPattern(binding), { info: patternOwner });
+    for (const [index, global] of globals.entries()) {
+      globalOf(global, global.name, global).code = this.compileDictionaryLambda(
+        params,
+        0,
+        () => this.projectAt(binding, { k: 'global', global: whole }, params, index),
+        { info: { name: global.name, row: binding.span.row, isAtomic: false, patternOwner } }
+      );
+    }
+  }
+
+  /** A pattern binding's match of its right-hand side, in the current frame. */
+  private matchedPattern(binding: Extract<RBinding, { k: 'pat' }>): Core {
+    const slot = this.frame.alloc();
+    const rhs = this.compileRhs(binding.rhs, this.patternFail(binding.span));
+    return { k: 'let', binds: [{ index: slot, expr: rhs }], body: this.matchBoundPattern(binding, slot) };
+  }
+
+  /** A variable of a polymorphic pattern binding: the binding's match at the current dictionaries, projected. */
+  private projectAt(binding: Extract<RBinding, { k: 'pat' }>, whole: Core, params: DictParam[], index: number): Core {
+    const matched: Core = { k: 'app', fn: whole, args: params.map((param) => this.paramRef(param)) };
+    return patternProjection(matched, index, binding.binders.length);
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Each branch fills one part of a dictionary: methods, defaults, and superclasses.
   compileInstance(info: InstanceInfo, bindings: RBinding[], sourceDefined = false): void {
     for (const binding of bindings) {
@@ -236,32 +281,39 @@ export class Codegen {
   }
 
   /**
-   * Generates a constructor's function, for uses that do not apply it to all its fields, and for every use of a
-   * constructor with strict fields, which evaluates them from left to right before building the value as GHC does.
+   * Generates a constructor's function, which takes the dictionaries of its constraints first, then its fields: for
+   * uses that do not apply it to all its fields, and for every use of a constructor with strict fields, which
+   * evaluates them from left to right before building the value as GHC does.
    */
   static constructorGlobal(con: ConInfo): GlobalDef {
     const def = globalOf(con, con.name);
     if (def.code) return def;
-    if (con.arity === 0) {
+    const dicts = con.context?.length ?? 0;
+    if (con.arity + dicts === 0) {
       def.code = { k: 'con', con, args: [] };
       return def;
     }
     let body: Core = {
       k: 'con',
       con,
-      args: Array.from({ length: con.arity }, (_, index) => ({ k: 'local', depth: 0, index }) as Core),
+      args: [
+        ...Array.from({ length: con.arity }, (_, index) => local(dicts + index)),
+        ...Array.from({ length: dicts }, (_, index) => local(index)),
+      ],
     };
     const seq: Core = { k: 'prim', prim: primitiveNamed('seq') };
     for (const position of [...(con.strictFields ?? [])].toReversed())
-      body = { k: 'app', fn: seq, args: [{ k: 'local', depth: 0, index: position }, body] };
-    def.code = { k: 'lam', arity: con.arity, size: con.arity, body };
+      body = { k: 'app', fn: seq, args: [local(dicts + position), body] };
+    def.code = { k: 'lam', arity: con.arity + dicts, size: con.arity + dicts, body };
     return def;
   }
 
-  /** A constructor applied to all its fields. */
-  private construct(con: ConInfo, args: Core[]): Core {
-    if (con.strictFields) return { k: 'app', fn: { k: 'global', global: Codegen.constructorGlobal(con) }, args };
-    return { k: 'con', con, args };
+  /** A constructor applied to all its fields, after the dictionaries of its constraints. */
+  private construct(con: ConInfo, args: Core[], dicts: Core[] = []): Core {
+    if (con.strictFields) {
+      return { k: 'app', fn: { k: 'global', global: Codegen.constructorGlobal(con) }, args: [...dicts, ...args] };
+    }
+    return { k: 'con', con, args: [...args, ...dicts] };
   }
 
   /** Generates a record field's selector, which fails for constructors without the field. */
@@ -350,6 +402,9 @@ export class Codegen {
         return { k: 'frame', size: frame.size, body, info, atomicScope, functionResult } as Core;
       });
     }
+    const primitive = arity === 0 ? primitiveBody(binding, this.options.support) : undefined;
+    // A library primitive with constraints takes the dictionaries as its first arguments.
+    if (primitive) return { k: 'prim', prim: primitiveNamed(primitive) };
     const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
     return this.compileDictionaryLambda(
       dictParams,
@@ -408,6 +463,9 @@ export class Codegen {
         if (binding.dictParams && binding.dictParams.length > 0) this.ownDictParams.set(local, binding.dictParams);
       } else {
         const own: number[] = [];
+        if (binding.dictParams && binding.dictParams.length > 0) {
+          for (const local of binding.binders) this.ownDictParams.set(local, binding.dictParams);
+        }
         for (const local of binding.binders) {
           const slot = this.frame.alloc();
           this.frame.slots.set(local, slot);
@@ -422,6 +480,20 @@ export class Codegen {
       if (binding.k === 'fun') {
         const local = (binding.binder as { kind: 'local'; local: LocalVar }).local;
         binds.push({ index: own[0], expr: this.compileFunction(binding, local.name, false) });
+        continue;
+      }
+      const params = binding.dictParams ?? [];
+      if (params.length > 0) {
+        const whole = this.frame.alloc();
+        binds.push({ index: whole, expr: this.compileDictionaryLambda(params, 0, () => this.matchedPattern(binding)) });
+        for (const index of binding.binders.keys()) {
+          binds.push({
+            index: own[index],
+            expr: this.compileDictionaryLambda(params, 0, () =>
+              this.projectAt(binding, { k: 'local', depth: 1, index: whole }, params, index)
+            ),
+          });
+        }
         continue;
       }
       const whole = this.frame.alloc();
@@ -498,6 +570,8 @@ export class Codegen {
   private planPattern(pat: RPat, slot: number, visible: boolean): Plan {
     const result: Plan[] = [];
     const pending = [{ pat, slot, target: result, index: 0 }];
+    // The plans of the patterns inside `!p` and view patterns, which planning fills in after it plans them.
+    const innerPlans: { plan: { inner: Plan }; inner: Plan[] }[] = [];
     while (pending.length > 0) {
       const job = pending.pop()!;
       const { pat, slot, target, index } = job;
@@ -505,8 +579,30 @@ export class Codegen {
         this.frame.slots.set(pat.local, slot);
         if (visible) this.addVisible(pat.local, slot);
       }
-      if (pat.k === 'as') {
+      if (pat.k === 'as' || pat.k === 'sig') {
         pending.push({ ...job, pat: pat.pat });
+        continue;
+      }
+      if (pat.k === 'bang' || pat.k === 'view') {
+        const inner: Plan[] = [];
+        if (pat.k === 'bang') {
+          target[index] = { k: 'bang', slot, inner: undefined as unknown as Plan };
+          pending.push({ pat: pat.pat, slot, target: inner, index: 0 });
+        } else {
+          const viewSlot = this.frame.alloc();
+          const fn = this.compileExpr(pat.expr);
+          target[index] = { k: 'view', slot, fn, viewSlot, inner: undefined as unknown as Plan };
+          pending.push({ pat: pat.pat, slot: viewSlot, target: inner, index: 0 });
+        }
+        innerPlans.push({ plan: target[index] as { inner: Plan }, inner });
+        continue;
+      }
+      if (pat.k === 'lazy') {
+        target[index] = this.planLazyPattern(pat, slot, visible);
+        continue;
+      }
+      if (pat.k === 'or') {
+        target[index] = { k: 'or', alts: pat.alts.map((alt) => this.planPattern(alt, slot, false)) };
         continue;
       }
       if (pat.k !== 'con') {
@@ -514,14 +610,19 @@ export class Codegen {
         continue;
       }
       const fields: Plan[] = [];
-      if (pat.con.isNewtype) {
+      if (matchesWithoutEvaluating(pat.con)) {
         const fieldSlot = this.frame.alloc();
         target[index] = { k: 'newtype', slot, fieldSlot, fields };
         pending.push({ pat: pat.args[0], slot: fieldSlot, target: fields, index: 0 });
         continue;
       }
       const fieldSlots = Array.from({ length: pat.args.length }, () => -1);
-      target[index] = { k: 'con', con: pat.con, slot, fieldSlots, fields };
+      const dictSlots = pat.dictParams?.map((param) => {
+        const dictSlot = this.frame.alloc();
+        this.frame.slots.set(param, dictSlot);
+        return dictSlot;
+      });
+      target[index] = { k: 'con', con: pat.con, slot, fieldSlots, fields, dictSlots };
       const children = [];
       for (const position of pat.order ?? pat.args.keys()) {
         const arg = pat.args[position];
@@ -532,7 +633,37 @@ export class Codegen {
       }
       pending.push(...children.toReversed());
     }
+    for (const { plan, inner } of innerPlans) plan.inner = inner[0];
     return result[0];
+  }
+
+  /**
+   * Plans `~p`: its variables are projections of one shared match of `p`, which runs only when one of them is used
+   * and fails then if `p` does not match.
+   */
+  private planLazyPattern(pat: Extract<RPat, { k: 'lazy' }>, slot: number, visible: boolean): Plan {
+    const binders = rpatLocals(pat.pat);
+    if (binders.length === 0) return { k: 'any' };
+    const plan = this.planPattern(pat.pat, slot, false);
+    const text = pat.pat.surface ? surfacePatternText(pat.pat.surface) : patternText(pat.pat);
+    const fail: Core = { k: 'error', message: `${sourceSpanText(pat.pat.span)}: Non-exhaustive patterns in ${text}` };
+    const matched = this.frame.alloc();
+    const binds = [
+      {
+        index: matched,
+        expr: this.matchPlan(plan, patternResult(binders.map((binder) => this.localRef(binder))), fail),
+      },
+    ];
+    for (const [index, binder] of binders.entries()) {
+      const own = this.frame.alloc();
+      this.frame.slots.set(binder, own);
+      if (visible) this.addVisible(binder, own);
+      binds.push({
+        index: own,
+        expr: patternProjection({ k: 'local', depth: 0, index: matched }, index, binders.length),
+      });
+    }
+    return { k: 'lazy', binds };
   }
 
   private matchPlan(plan: Plan, success: Core, fail: Core): Core {
@@ -543,6 +674,40 @@ export class Codegen {
       if (plan.k === 'any') continue;
       if (plan.k === 'lit') {
         code = this.matchLiteral(plan.pat, plan.slot, code, fail);
+        continue;
+      }
+      if (plan.k === 'lazy') {
+        code = { k: 'let', binds: plan.binds, body: code };
+        continue;
+      }
+      if (plan.k === 'or') {
+        code = this.matchAlternatives(plan.alts, code, fail);
+        continue;
+      }
+      if (plan.k === 'bang' || plan.k === 'view') {
+        if (!wrap) {
+          pending.push({ plan, wrap: true }, { plan: plan.inner, wrap: false });
+          continue;
+        }
+        code =
+          plan.k === 'bang'
+            ? {
+                k: 'case',
+                scrut: { k: 'local', depth: 0, index: plan.slot },
+                bindIndex: plan.slot,
+                alts: new Map(),
+                default: code,
+              }
+            : {
+                k: 'let',
+                binds: [
+                  {
+                    index: plan.viewSlot,
+                    expr: { k: 'app', fn: plan.fn, args: [{ k: 'local', depth: 0, index: plan.slot }] },
+                  },
+                ],
+                body: code,
+              };
         continue;
       }
       if (!wrap) {
@@ -570,11 +735,20 @@ export class Codegen {
               k: 'case',
               scrut: { k: 'local', depth: 0, index: plan.slot },
               bindIndex: plan.slot,
-              alts: new Map([[plan.con.tag, { slots: plan.fieldSlots, body: code }]]),
+              alts: new Map([[plan.con.tag, { slots: plan.fieldSlots, body: code, dictSlots: plan.dictSlots }]]),
               default: plan.con.type.cons.length > 1 ? fail : undefined,
             };
     }
     return code;
+  }
+
+  /** Matches the alternatives of an or pattern in turn, sharing the code that runs after any of them matches. */
+  private matchAlternatives(alts: readonly Plan[], success: Core, fail: Core): Core {
+    const shared = this.frame.alloc();
+    const ref: Core = { k: 'local', depth: 0, index: shared };
+    let code = fail;
+    for (const alt of alts.toReversed()) code = this.matchPlan(alt, ref, code);
+    return { k: 'let', binds: [{ index: shared, expr: success }], body: code };
   }
 
   private matchLiteral(pat: Extract<RPat, { k: 'lit' }>, slot: number, success: Core, fail: Core): Core {
@@ -621,18 +795,32 @@ export class Codegen {
 
   private compileGuarded(guards: readonly RGuard[], expr: RExpr, fail: Core, ioResult: boolean): Core {
     const savedVisible = this.visible;
-    const wrappers: ({ binds: { index: number; expr: Core }[] } | { condition: Core })[] = [];
+    const wrappers: (
+      | { binds: { index: number; expr: Core }[] }
+      | { condition: Core }
+      | { slot: number; value: Core; plan: Plan }
+    )[] = [];
     try {
       for (const guard of guards) {
         chargeTypeWork();
         if (guard.k === 'let') wrappers.push({ binds: this.compileLocalGroup(guard.binds) });
-        else if (!isOtherwise(guard.expr, this.options.support))
+        else if (guard.k === 'pat') {
+          const value = this.compileExpr(guard.expr);
+          const slot = this.frame.alloc();
+          wrappers.push({ slot, value, plan: this.planPattern(guard.pat, slot, true) });
+        } else if (!isOtherwise(guard.expr, this.options.support))
           wrappers.push({ condition: this.compileExpr(guard.expr) });
       }
       let body = this.bodyExpr(expr, ioResult);
       for (const wrapper of wrappers.toReversed()) {
-        body =
-          'binds' in wrapper ? { k: 'let', binds: wrapper.binds, body } : this.ifCore(wrapper.condition, body, fail);
+        if ('binds' in wrapper) body = { k: 'let', binds: wrapper.binds, body };
+        else if ('plan' in wrapper) {
+          body = {
+            k: 'let',
+            binds: [{ index: wrapper.slot, expr: wrapper.value }],
+            body: this.matchPlan(wrapper.plan, body, fail),
+          };
+        } else body = this.ifCore(wrapper.condition, body, fail);
       }
       return body;
     } finally {
@@ -664,11 +852,37 @@ export class Codegen {
   // code-gauge-allow functionNcss -- One short case per expression kind, each delegating to a helper.
   private compileExprInner(expr: RExpr): Core {
     switch (expr.k) {
+      case 'hole': {
+        throw new Error('A typed hole reached code generation');
+      }
+      case 'tyapp': {
+        return this.compileExpr(expr.expr);
+      }
+      case 'implicit': {
+        return this.compileEvidence(expr.evidence as Evidence);
+      }
+      case 'implicitLet': {
+        const binds = (expr.dictParams ?? []).map((param, index) => {
+          const slot = this.frame.alloc();
+          const code = this.compileExpr(expr.binds[index].expr);
+          this.frame.slots.set(param, slot);
+          return { index: slot, expr: code };
+        });
+        return { k: 'let', binds, body: this.compileExpr(expr.body) };
+      }
+      case 'projection': {
+        return { k: 'app', fn: this.compileEvidence(expr.evidence as Evidence), args: [this.compileExpr(expr.expr)] };
+      }
+      case 'poly': {
+        return this.compileDictionaryLambda(expr.dictParams, 0, () => this.compileExpr(expr.expr));
+      }
       case 'var': {
         return this.compileVar(expr);
       }
       case 'con': {
-        return { k: 'global', global: Codegen.constructorGlobal(expr.con) };
+        const global: Core = { k: 'global', global: Codegen.constructorGlobal(expr.con) };
+        if (!expr.evidence?.length) return global;
+        return { k: 'app', fn: global, args: expr.evidence.map((item) => this.compileEvidence(item)) };
       }
       case 'lit': {
         return this.literalCore(expr.lit, expr.evidence);
@@ -752,7 +966,11 @@ export class Codegen {
         });
         for (const field of expr.fields)
           args[field.field.positions.get(expr.con) as number] = this.compileExpr(field.value);
-        return this.construct(expr.con, args);
+        return this.construct(
+          expr.con,
+          args,
+          (expr.evidence ?? []).map((item) => this.compileEvidence(item))
+        );
       }
       case 'recordUpdate': {
         return this.compileRecordUpdate(expr);
@@ -796,9 +1014,16 @@ export class Codegen {
   }
 
   private compileApp(expr: Extract<RExpr, { k: 'app' }>): Core {
+    if (expr.evidence?.length) {
+      return {
+        k: 'app',
+        fn: this.compileApp({ ...expr, evidence: undefined }),
+        args: expr.evidence.map((item) => this.compileEvidence(item)),
+      };
+    }
     const args: RExpr[] = [];
     let head: RExpr = expr;
-    while (head.k === 'app') {
+    while (head.k === 'app' && (head === expr || !head.evidence?.length)) {
       args.unshift(head.arg);
       head = head.fn;
     }
@@ -818,7 +1043,8 @@ export class Codegen {
     if (head.k === 'con' && args.length >= head.con.arity && head.con.arity > 0) {
       const con = this.construct(
         head.con,
-        args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg))
+        args.slice(0, head.con.arity).map((arg) => this.compileExpr(arg)),
+        (head.evidence ?? []).map((item) => this.compileEvidence(item))
       );
       const rest = args.slice(head.con.arity);
       return rest.length === 0 ? con : { k: 'app', fn: con, args: rest.map((arg) => this.compileExpr(arg)) };
@@ -839,7 +1065,7 @@ export class Codegen {
       const plans = expr.pats.map((pat, index) => this.planPattern(pat, slots[index], true));
       let body: Core;
       const inner = stripParens(expr.body);
-      const binding = { row: expr.span.row, names: expr.pats.flatMap(patternLocals).map((local) => local.name) };
+      const binding = { row: expr.span.row, names: expr.pats.flatMap(rpatLocals).map((local) => local.name) };
       if (ioResult) {
         body = this.ioBlock(expr.body, binding);
       } else if (this.options.isProgram && inner.k === 'do') {
@@ -862,10 +1088,12 @@ export class Codegen {
   private compileCase(expr: Extract<RExpr, { k: 'case' }>, ioResult: boolean): Core {
     const fail: Core = {
       k: 'error',
-      message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in case`,
+      message: `${sourceSpanText(expr.span)}: Non-exhaustive patterns in ${expr.what ?? 'case'}`,
     };
     const scrutinee = this.compileExpr(expr.scrutinee);
-    if (expr.alts.length === 0) return { k: 'case', scrut: scrutinee, alts: new Map(), default: fail };
+    if (expr.alts.length === 0) {
+      return { k: 'app', fn: { k: 'global', global: this.supportGlobal('seq') }, args: [scrutinee, fail] };
+    }
     const slot = this.frame.alloc();
     const clauses: RClause[] = expr.alts.map((alt: RAlt) => ({ pats: [alt.pat], rhs: alt.rhs, span: alt.span }));
     const body = this.compileMatch([slot], clauses, fail, ioResult);
@@ -896,7 +1124,14 @@ export class Codegen {
       const args: Core[] = fieldSlots.map((fieldSlot): Core => ({ k: 'local', depth: 0, index: fieldSlot }));
       for (const value of values)
         args[value.field.positions.get(con) as number] = { k: 'local', depth: 0, index: value.slot };
-      alts.set(con.tag, { slots: fieldSlots, body: this.construct(con, args) });
+      // The dictionaries a constrained constructor holds go into the updated value too.
+      const dictSlots = (con.context ?? []).map(() => this.frame.alloc());
+      const dicts = dictSlots.map((dictSlot): Core => ({ k: 'local', depth: 0, index: dictSlot }));
+      alts.set(con.tag, {
+        slots: fieldSlots,
+        body: this.construct(con, args, dicts),
+        ...(dictSlots.length > 0 ? { dictSlots } : {}),
+      });
     }
     const owner = expr.fields[0].field.type;
     const body: Core = {
@@ -1126,9 +1361,7 @@ export class Codegen {
             matcher = this.matchPlan(plan, { k: 'con', con: UNIT_CON, args: [] }, fail);
           }
           const onlyCalls =
-            patternLocals(stmt.pat).length === 0
-              ? isCall(stmt.expr)
-              : isTurtleCreation(stmt.expr, this.options.support);
+            rpatLocals(stmt.pat).length === 0 ? isCall(stmt.expr) : isTurtleCreation(stmt.expr, this.options.support);
           stmts.push({
             kind: 'bind',
             row,
@@ -1262,7 +1495,7 @@ export class Codegen {
 
   private addVisible(local: LocalVar, slot: number): void {
     const type = local.scheme?.type ?? local.type;
-    if (!type) return;
+    if (!type || local.name.startsWith(' ')) return;
     chargeTypeWork();
     this.visible = this.visible.set(local.name, { level: this.frame.level, index: slot, type, previewOwner: local });
   }
@@ -1302,9 +1535,20 @@ export class Codegen {
     return mapGraph<Evidence, Core>(
       evidence,
       resolveEvidence,
-      (node) => (node.kind === 'super' ? [node.of] : node.kind === 'instance' ? node.args : []),
+      (node) =>
+        node.kind === 'super'
+          ? [node.of]
+          : node.kind === 'instance'
+            ? node.args
+            : node.kind === 'coercion'
+              ? node.leaves
+              : [],
       (node, mapped) => {
         switch (node.kind) {
+          case 'coercion': {
+            const prim: Core = { k: 'prim', prim: coercionPrimitive(node.spec, node.leaves.length) };
+            return mapped.length === 0 ? prim : { k: 'app', fn: prim, args: mapped };
+          }
           case 'param': {
             return this.paramRef(node.param);
           }
@@ -1313,6 +1557,17 @@ export class Codegen {
           }
           case 'super': {
             return { k: 'super', dict: mapped[0], index: node.index };
+          }
+          case 'equality': {
+            return { k: 'con', con: UNIT_CON, args: [] };
+          }
+          case 'field': {
+            return { k: 'global', global: Codegen.fieldGlobal(node.field) };
+          }
+          case 'literal': {
+            return typeof node.value === 'string'
+              ? { k: 'str', value: [...node.value] }
+              : { k: 'lit', value: node.value };
           }
           case 'hole': {
             throw new Error(`Unsolved constraint ${node.hole.pred.cls.name}`);
@@ -1391,9 +1646,13 @@ export class Codegen {
 
 type Plan =
   | { k: 'any' }
+  | { k: 'bang'; slot: number; inner: Plan }
+  | { k: 'view'; slot: number; fn: Core; viewSlot: number; inner: Plan }
+  | { k: 'lazy'; binds: { index: number; expr: Core }[] }
+  | { k: 'or'; alts: Plan[] }
   | { k: 'lit'; pat: Extract<RPat, { k: 'lit' }>; slot: number }
   | { k: 'newtype'; slot: number; fieldSlot: number; fields: Plan[] }
-  | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[] };
+  | { k: 'con'; con: ConInfo; slot: number; fieldSlots: number[]; fields: Plan[]; dictSlots?: number[] };
 
 function binderKey(binding: Extract<RBinding, { k: 'fun' }>): LocalVar | ValueEntity {
   return binding.binder.kind === 'local' ? binding.binder.local : binding.binder.entity;
@@ -1440,7 +1699,7 @@ function stripDollar(expr: RExpr, support: CodegenSupport): RExpr {
   if (inner.k === 'app' && inner.fn.k === 'app') {
     const op = inner.fn.fn;
     if (op.k === 'var' && op.ref.kind === 'global' && op.ref.entity === support.value('$')) {
-      return { k: 'app', fn: inner.fn.arg, arg: inner.arg, span: inner.span };
+      return { k: 'app', fn: inner.fn.arg, arg: inner.arg, span: inner.span, evidence: inner.evidence };
     }
   }
   return inner;
@@ -1512,7 +1771,6 @@ function isFunctionOrAction(local: LocalVar): boolean {
   return head.tag === 'tcon' && (head.entity.special === 'function' || head.entity === IO_TYPE);
 }
 
-/** Whether an expression is `return x` or `pure x`. */
 function isReturn(expr: RExpr, support: CodegenSupport): boolean {
   if (expr.k !== 'app') return false;
   const fn = stripDollar(expr.fn, support);
@@ -1528,21 +1786,20 @@ function isReturnUnit(expr: RExpr, support: CodegenSupport): boolean {
   return expr.arg.k === 'con' && expr.arg.con === UNIT_CON;
 }
 
+/** The name of the primitive a binding is defined as, `f = primitive "name"`, if it is one. */
+function primitiveBody(binding: Extract<RBinding, { k: 'fun' }>, support: CodegenSupport): string | undefined {
+  const { body } = binding.clauses[0].rhs;
+  if (binding.clauses.length !== 1 || body.k !== 'plain' || binding.clauses[0].rhs.where.bindings.length > 0) return;
+  const { expr } = body;
+  if (expr.k !== 'app' || expr.fn.k !== 'var' || expr.fn.ref.kind !== 'global') return;
+  if (expr.fn.ref.entity !== support.value('primitive') || expr.arg.k !== 'lit' || expr.arg.lit.kind !== 'string')
+    return;
+  return expr.arg.lit.value.join('');
+}
+
 function isOtherwise(expr: RExpr, support: CodegenSupport): boolean {
   if (expr.k === 'var' && expr.ref.kind === 'global' && expr.ref.entity === support.value('otherwise')) return true;
   return expr.k === 'con' && expr.con.name === 'True' && expr.con.type === support.boolType();
-}
-
-function patternLocals(pat: RPat): LocalVar[] {
-  const result: LocalVar[] = [];
-  const pending = [pat];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (current.k === 'var' || current.k === 'as') result.push(current.local);
-    if (current.k === 'as') pending.push(current.pat);
-    else if (current.k === 'con') pending.push(...current.args.toReversed());
-  }
-  return result;
 }
 
 function patternText(pat: RPat): string {
@@ -1554,10 +1811,20 @@ function patternText(pat: RPat): string {
       return '_';
     }
     case 'as': {
+      if (pat.local.name.startsWith(' ')) return patternText(pat.pat);
       return `${pat.local.name}@${patternText(pat.pat)}`;
     }
     case 'lit': {
       return pat.lit.kind === 'string' ? JSON.stringify(pat.lit.value.join('')) : String(pat.lit.value);
+    }
+    case 'bang':
+    case 'lazy':
+    case 'view':
+    case 'or': {
+      return pat.surface ? surfacePatternText(pat.surface) : '_';
+    }
+    case 'sig': {
+      return patternText(pat.pat);
     }
     case 'con': {
       if (pat.con.type.special === 'tuple') return `(${pat.args.map(patternText).join(', ')})`;
