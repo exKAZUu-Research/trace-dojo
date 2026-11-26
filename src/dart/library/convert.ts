@@ -123,10 +123,49 @@ class _UnicodeSubsetEncoder extends Converter<String, List<int>> {
     }
     return result;
   }
+  Stream<List<int>> bind(Stream<String> stream) =>
+      Stream<List<int>>.eventTransformed(stream, (EventSink<List<int>> sink) => _UnicodeSubsetEncoderSink(_subsetMask, sink));
 }
 
 final class AsciiEncoder extends _UnicodeSubsetEncoder {
   const AsciiEncoder() : super(_asciiMask);
+}
+
+// From the SDK's lib/convert/ascii.dart (3.13.7), class _UnicodeSubsetEncoderSink. Modifications: it is the event
+// sink of an encoder's stream transformation, so it implements EventSink<String> and adds to an EventSink<List<int>>.
+class _UnicodeSubsetEncoderSink implements EventSink<String> {
+  final EventSink<List<int>> _sink;
+  final int _subsetMask;
+
+  _UnicodeSubsetEncoderSink(this._subsetMask, this._sink);
+
+  void close() {
+    _sink.close();
+  }
+
+  void add(String source) {
+    addSlice(source, 0, source.length, false);
+  }
+
+  void addSlice(String source, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, source.length);
+    for (var i = start; i < end; i++) {
+      var codeUnit = source.codeUnitAt(i);
+      if ((codeUnit & ~_subsetMask) != 0) {
+        throw ArgumentError(
+          "Source contains invalid character with code point: $codeUnit.",
+        );
+      }
+    }
+    _sink.add(source.codeUnits.sublist(start, end));
+    if (isLast) {
+      close();
+    }
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
 }
 
 abstract class _UnicodeSubsetDecoder extends Converter<List<int>, String> {
@@ -391,12 +430,89 @@ final class JsonEncoder extends Converter<Object?, String> {
   const JsonEncoder([Object? Function(dynamic object)? toEncodable]) : indent = null, _toEncodable = toEncodable;
   const JsonEncoder.withIndent(this.indent, [Object? Function(dynamic object)? toEncodable]) : _toEncodable = toEncodable;
   String convert(Object? object) => _jsonEncode(object, _toEncodable, indent);
+  Stream<String> bind(Stream<Object?> stream) =>
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _JsonEncoderSink(sink, this));
+}
+
+/**
+ * The SDK's _JsonEncoderSink (lib/convert/json.dart): a stream of values encodes its first value and then ends, and
+ * a later value is an error. Modification: the encoded text is added as one string, where the SDK's stringifier adds
+ * the pieces it writes one by one.
+ */
+class _JsonEncoderSink implements EventSink<Object?> {
+  final EventSink<String> _sink;
+  final JsonEncoder _encoder;
+  bool _isDone = false;
+  _JsonEncoderSink(this._sink, this._encoder);
+
+  void add(Object? o) {
+    if (_isDone) {
+      throw StateError("Only one call to add allowed");
+    }
+    _isDone = true;
+    _sink.add(_encoder.convert(o));
+    _sink.close();
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+
+  void close() {
+    if (!_isDone) _sink.close();
+  }
 }
 
 final class JsonDecoder extends Converter<String, Object?> {
   final Object? Function(Object? key, Object? value)? _reviver;
   const JsonDecoder([Object? Function(Object? key, Object? value)? reviver]) : _reviver = reviver;
   dynamic convert(String input) => _jsonDecode(input, _reviver);
+  Stream<Object?> bind(Stream<String> stream) =>
+      Stream<Object?>.eventTransformed(stream, (EventSink<Object?> sink) => _JsonStringDecoderSink(sink, _reviver));
+}
+
+/**
+ * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
+ * as it comes: the chunks are joined and parsed when the stream ends, and an error is reported in the chunk it is in,
+ * at its offset there, as the chunked parser reports it; the error comes at the stream's end, not at its chunk.
+ */
+class _JsonStringDecoderSink implements EventSink<String> {
+  final EventSink<Object?> _sink;
+  final Object? Function(Object? key, Object? value)? _reviver;
+  final List<String> _chunks = <String>[];
+  _JsonStringDecoderSink(this._sink, this._reviver);
+
+  void add(String chunk) {
+    _chunks.add(chunk);
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+
+  void close() {
+    final source = _chunks.join();
+    Object? value;
+    try {
+      value = _jsonDecode(source, _reviver);
+    } on FormatException catch (error) {
+      throw _inChunk(error, error.offset ?? source.length);
+    }
+    _sink.add(value);
+    _sink.close();
+  }
+
+  FormatException _inChunk(FormatException error, int offset) {
+    var start = 0;
+    for (var i = 0; i < _chunks.length; i++) {
+      final chunk = _chunks[i];
+      if (offset < start + chunk.length || i == _chunks.length - 1) {
+        return FormatException(error.message, chunk, offset - start);
+      }
+      start += chunk.length;
+    }
+    return FormatException(error.message, "", 0);
+  }
 }
 
 const Utf8Codec utf8 = Utf8Codec();
@@ -426,6 +542,43 @@ final class Utf8Codec extends Encoding {
 final class Utf8Encoder extends Converter<String, List<int>> {
   const Utf8Encoder();
   _Uint8List convert(String string, [int start = 0, int? end]) => _utf8Encode(string, start, end);
+  Stream<List<int>> bind(Stream<String> stream) =>
+      Stream<List<int>>.eventTransformed(stream, (EventSink<List<int>> sink) => _Utf8EncoderSink(sink));
+}
+
+/**
+ * Encodes a stream of strings as the SDK's _Utf8EncoderSink (lib/convert/utf.dart) does: a chunk that ends inside a
+ * surrogate pair keeps its lead surrogate for the next chunk, an empty chunk adds nothing, and a lead surrogate left
+ * at the end is written as U+FFFD. The encoding itself is the native one the converter uses.
+ */
+class _Utf8EncoderSink implements EventSink<String> {
+  final EventSink<List<int>> _sink;
+  int _carry = 0;
+  _Utf8EncoderSink(this._sink);
+
+  void add(String str) {
+    if (str.isEmpty) return;
+    var text = _carry == 0 ? str : String.fromCharCode(_carry) + str;
+    _carry = 0;
+    final last = text.codeUnitAt(text.length - 1);
+    if (last & 0xFC00 == 0xD800) {
+      _carry = last;
+      text = text.substring(0, text.length - 1);
+    }
+    _sink.add(_utf8Encode(text));
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+
+  void close() {
+    if (_carry != 0) {
+      _carry = 0;
+      _sink.add(const <int>[0xEF, 0xBF, 0xBD]);
+    }
+    _sink.close();
+  }
 }
 
 final class Utf8Decoder extends Converter<List<int>, String> {
@@ -600,25 +753,501 @@ String base64Encode(List<int> bytes) => base64.encode(bytes);
 String base64UrlEncode(List<int> bytes) => base64Url.encode(bytes);
 _Uint8List base64Decode(String source) => base64.decode(source);
 
+// From the SDK's lib/convert/base64.dart (3.13.7): Base64Codec, Base64Encoder, _Base64Encoder, _Base64EncoderSink,
+// _AsciiBase64EncoderSink, Base64Decoder, _Base64Decoder and _Base64DecoderSink, with their comments removed.
+// Modifications: the single conversions and normalize are native (nativeConvert.ts), with the same results, since
+// the Dart code would charge an operation for each character and stop long inputs the SDK converts; the encoder and
+// decoder transform streams through these chunk sinks, which implement EventSink, so the StringConversionSink forms
+// (_Utf8Base64EncoderSink) and the buffer cache of _BufferCachingBase64Encoder, which needs Uint8List.view, are left
+// out; _Uint8List stands for Uint8List and a constant list for _inverseAlphabet's Int8List; an error message is
+// built without interpolating an expression.
+const int _paddingChar = 0x3d; // '='.
+
 final class Base64Codec extends Codec<List<int>, String> {
-  final Base64Encoder encoder;
-  const Base64Codec() : encoder = const Base64Encoder();
-  const Base64Codec.urlSafe() : encoder = const Base64Encoder.urlSafe();
+  final Base64Encoder _encoder;
+  const Base64Codec() : _encoder = const Base64Encoder();
+  const Base64Codec.urlSafe() : _encoder = const Base64Encoder.urlSafe();
+
+  Base64Encoder get encoder => _encoder;
+
   Base64Decoder get decoder => const Base64Decoder();
+
   _Uint8List decode(String encoded) => decoder.convert(encoded);
+
   String normalize(String source, [int start = 0, int? end]) => _base64Normalize(source, start, end);
 }
 
+
 final class Base64Encoder extends Converter<List<int>, String> {
   final bool _urlSafe;
+
   const Base64Encoder() : _urlSafe = false;
   const Base64Encoder.urlSafe() : _urlSafe = true;
+
   String convert(List<int> input) => _base64Encode(input, _urlSafe);
+
+  Stream<String> bind(Stream<List<int>> stream) =>
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _AsciiBase64EncoderSink(sink, _urlSafe));
+}
+
+class _Base64Encoder {
+  static const String _base64Alphabet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+  static const String _base64UrlAlphabet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+  static const int _valueShift = 2;
+
+  static const int _countMask = 3;
+
+  static const int _sixBitMask = 0x3F;
+
+  int _state = 0;
+
+  final String _alphabet;
+
+  _Base64Encoder(bool urlSafe)
+    : _alphabet = urlSafe ? _base64UrlAlphabet : _base64Alphabet;
+
+  static int _encodeState(int count, int bits) {
+    assert(count <= _countMask);
+    return bits << _valueShift | count;
+  }
+
+  static int _stateBits(int state) => state >> _valueShift;
+
+  static int _stateCount(int state) => state & _countMask;
+
+  _Uint8List createBuffer(int bufferLength) => _Uint8List(bufferLength);
+
+  _Uint8List? encode(List<int> bytes, int start, int end, bool isLast) {
+    assert(0 <= start);
+    assert(start <= end);
+    assert(end <= bytes.length);
+    var length = end - start;
+
+    var count = _stateCount(_state);
+    var byteCount = (count + length);
+    var fullChunks = byteCount ~/ 3;
+    var partialChunkLength = byteCount - fullChunks * 3;
+    var bufferLength = fullChunks * 4;
+    if (isLast && partialChunkLength > 0) {
+      bufferLength += 4; // Room for padding.
+    }
+    var output = createBuffer(bufferLength);
+    _state = encodeChunk(
+      _alphabet,
+      bytes,
+      start,
+      end,
+      isLast,
+      output,
+      0,
+      _state,
+    );
+    if (bufferLength > 0) return output;
+    return null;
+  }
+
+  static int encodeChunk(
+    String alphabet,
+    List<int> bytes,
+    int start,
+    int end,
+    bool isLast,
+    _Uint8List output,
+    int outputIndex,
+    int state,
+  ) {
+    var bits = _stateBits(state);
+    var expectedChars = 3 - _stateCount(state);
+
+    var byteOr = 0;
+    for (var i = start; i < end; i++) {
+      var byte = bytes[i];
+      byteOr |= byte;
+      bits = ((bits << 8) | byte) & 0xFFFFFF; // Never store more than 24 bits.
+      expectedChars--;
+      if (expectedChars == 0) {
+        output[outputIndex++] = alphabet.codeUnitAt((bits >> 18) & _sixBitMask);
+        output[outputIndex++] = alphabet.codeUnitAt((bits >> 12) & _sixBitMask);
+        output[outputIndex++] = alphabet.codeUnitAt((bits >> 6) & _sixBitMask);
+        output[outputIndex++] = alphabet.codeUnitAt(bits & _sixBitMask);
+        expectedChars = 3;
+        bits = 0;
+      }
+    }
+    if (byteOr >= 0 && byteOr <= 255) {
+      if (isLast && expectedChars < 3) {
+        writeFinalChunk(alphabet, output, outputIndex, 3 - expectedChars, bits);
+        return 0;
+      }
+      return _encodeState(3 - expectedChars, bits);
+    }
+
+    var i = start;
+    while (i < end) {
+      var byte = bytes[i];
+      if (byte < 0 || byte > 255) break;
+      i++;
+    }
+    throw ArgumentError.value(
+      bytes,
+      "Not a byte value at index " + i.toString() + ": 0x" + bytes[i].toRadixString(16),
+    );
+  }
+
+  static void writeFinalChunk(
+    String alphabet,
+    _Uint8List output,
+    int outputIndex,
+    int count,
+    int bits,
+  ) {
+    assert(count > 0);
+    if (count == 1) {
+      output[outputIndex++] = alphabet.codeUnitAt((bits >> 2) & _sixBitMask);
+      output[outputIndex++] = alphabet.codeUnitAt((bits << 4) & _sixBitMask);
+      output[outputIndex++] = _paddingChar;
+      output[outputIndex++] = _paddingChar;
+    } else {
+      assert(count == 2);
+      output[outputIndex++] = alphabet.codeUnitAt((bits >> 10) & _sixBitMask);
+      output[outputIndex++] = alphabet.codeUnitAt((bits >> 4) & _sixBitMask);
+      output[outputIndex++] = alphabet.codeUnitAt((bits << 2) & _sixBitMask);
+      output[outputIndex++] = _paddingChar;
+    }
+  }
+}
+
+abstract class _Base64EncoderSink implements EventSink<List<int>> {
+  void add(List<int> source) {
+    _add(source, 0, source.length, false);
+  }
+
+  void close() {
+    _add(const [], 0, 0, true);
+  }
+
+  void addSlice(List<int> source, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, source.length);
+    _add(source, start, end, isLast);
+  }
+
+  void _add(List<int> source, int start, int end, bool isLast);
+}
+
+class _AsciiBase64EncoderSink extends _Base64EncoderSink {
+  final EventSink<String> _sink;
+  final _Base64Encoder _encoder;
+
+  _AsciiBase64EncoderSink(this._sink, bool urlSafe)
+    : _encoder = _Base64Encoder(urlSafe);
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+
+  void _add(List<int> source, int start, int end, bool isLast) {
+    var buffer = _encoder.encode(source, start, end, isLast);
+    if (buffer != null) {
+      var string = String.fromCharCodes(buffer);
+      _sink.add(string);
+    }
+    if (isLast) {
+      _sink.close();
+    }
+  }
 }
 
 final class Base64Decoder extends Converter<String, List<int>> {
   const Base64Decoder();
+
   _Uint8List convert(String input, [int start = 0, int? end]) => _base64Decode(input, start, end);
+
+  Stream<List<int>> bind(Stream<String> stream) =>
+      Stream<List<int>>.eventTransformed(stream, (EventSink<List<int>> sink) => _Base64DecoderSink(sink));
+}
+
+class _Base64Decoder {
+  static const int _valueShift = 2;
+
+  static const int _countMask = 3;
+
+  static const int _invalid = -2;
+
+  static const int _padding = -1;
+
+  static const int __ = _invalid;
+  static const int _p = _padding;
+
+  static const List<int> _inverseAlphabet = [
+    __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, //
+    __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, __, //
+    __, __, __, __, __, _p, __, __, __, __, __, 62, __, 62, __, 63, //
+    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, __, __, __, _p, __, __, //
+    __, 00, 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, //
+    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, __, __, __, __, 63, //
+    __, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, //
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, __, __, __, __, __, //
+  ];
+
+  static const int _char_percent = 0x25; // '%'.
+  static const int _char_3 = 0x33; // '3'.
+  static const int _char_d = 0x64; // 'd'.
+
+  int _state = 0;
+
+  static int _encodeCharacterState(int count, int bits) {
+    assert(count == (count & _countMask));
+    return (bits << _valueShift | count);
+  }
+
+  static int _stateCount(int state) {
+    assert(state >= 0);
+    return state & _countMask;
+  }
+
+  static int _stateBits(int state) {
+    assert(state >= 0);
+    return state >> _valueShift;
+  }
+
+  static int _encodePaddingState(int expectedPadding) {
+    assert(expectedPadding >= 0);
+    assert(expectedPadding <= 5);
+    return -expectedPadding - 1; // ~expectedPadding adapted to dart2js.
+  }
+
+  static int _statePadding(int state) {
+    assert(state < 0);
+    return -state - 1; // ~state adapted to dart2js.
+  }
+
+  static bool _hasSeenPadding(int state) => state < 0;
+
+  _Uint8List? decode(String input, int start, int end) {
+    assert(0 <= start);
+    assert(start <= end);
+    assert(end <= input.length);
+    if (_hasSeenPadding(_state)) {
+      _state = _checkPadding(input, start, end, _state);
+      return null;
+    }
+    if (start == end) return _Uint8List(0);
+    var buffer = _allocateBuffer(input, start, end, _state);
+    _state = decodeChunk(input, start, end, buffer, 0, _state);
+    return buffer;
+  }
+
+  void close(String? input, int? end) {
+    if (_state < _encodePaddingState(0)) {
+      throw FormatException("Missing padding character", input, end);
+    }
+    if (_state > 0) {
+      throw FormatException(
+        "Invalid length, must be multiple of four",
+        input,
+        end,
+      );
+    }
+    _state = _encodePaddingState(0);
+  }
+
+  static int decodeChunk(
+    String input,
+    int start,
+    int end,
+    _Uint8List output,
+    int outIndex,
+    int state,
+  ) {
+    assert(!_hasSeenPadding(state));
+    const asciiMask = 127;
+    const asciiMax = 127;
+    const eightBitMask = 0xFF;
+    const bitsPerCharacter = 6;
+
+    var bits = _stateBits(state);
+    var count = _stateCount(state);
+    var charOr = 0;
+    final inverseAlphabet = _Base64Decoder._inverseAlphabet;
+    for (var i = start; i < end; i++) {
+      var char = input.codeUnitAt(i);
+      charOr |= char;
+      var code = inverseAlphabet[char & asciiMask];
+      if (code >= 0) {
+        bits = ((bits << bitsPerCharacter) | code) & 0xFFFFFF;
+        count = (count + 1) & 3;
+        if (count == 0) {
+          assert(outIndex + 3 <= output.length);
+          output[outIndex++] = (bits >> 16) & eightBitMask;
+          output[outIndex++] = (bits >> 8) & eightBitMask;
+          output[outIndex++] = bits & eightBitMask;
+          bits = 0;
+        }
+        continue;
+      } else if (code == _padding && count > 1) {
+        if (charOr < 0 || charOr > asciiMax) break;
+        if (count == 3) {
+          if ((bits & 0x03) != 0) {
+            throw FormatException("Invalid encoding before padding", input, i);
+          }
+          output[outIndex++] = bits >> 10;
+          output[outIndex++] = bits >> 2;
+        } else {
+          if ((bits & 0x0F) != 0) {
+            throw FormatException("Invalid encoding before padding", input, i);
+          }
+          output[outIndex++] = bits >> 4;
+        }
+        //
+        var expectedPadding = (3 - count) * 3;
+        if (char == _char_percent) expectedPadding += 2;
+        state = _encodePaddingState(expectedPadding);
+        return _checkPadding(input, i + 1, end, state);
+      }
+      throw FormatException("Invalid character", input, i);
+    }
+    if (charOr >= 0 && charOr <= asciiMax) {
+      return _encodeCharacterState(count, bits);
+    }
+    int i;
+    for (i = start; i < end; i++) {
+      var char = input.codeUnitAt(i);
+      if (char < 0 || char > asciiMax) break;
+    }
+    throw FormatException("Invalid character", input, i);
+  }
+
+  static final _Uint8List _emptyBuffer = _Uint8List(0);
+
+  static _Uint8List _allocateBuffer(
+    String input,
+    int start,
+    int end,
+    int state,
+  ) {
+    assert(state >= 0);
+    var paddingStart = _trimPaddingChars(input, start, end);
+    var length = _stateCount(state) + (paddingStart - start);
+    var bufferLength = (length >> 2) * 3;
+    var remainderLength = length & 3;
+    if (remainderLength != 0 && paddingStart < end) {
+      bufferLength += remainderLength - 1;
+    }
+    if (bufferLength > 0) return _Uint8List(bufferLength);
+    return _emptyBuffer;
+  }
+
+  static int _trimPaddingChars(String input, int start, int end) {
+    var padding = 0;
+    var index = end;
+    var newEnd = end;
+    while (index > start && padding < 2) {
+      index--;
+      var char = input.codeUnitAt(index);
+      if (char == _paddingChar) {
+        padding++;
+        newEnd = index;
+        continue;
+      }
+      if ((char | 0x20) == _char_d) {
+        if (index == start) break;
+        index--;
+        char = input.codeUnitAt(index);
+      }
+      if (char == _char_3) {
+        if (index == start) break;
+        index--;
+        char = input.codeUnitAt(index);
+      }
+      if (char == _char_percent) {
+        padding++;
+        newEnd = index;
+        continue;
+      }
+      break;
+    }
+    return newEnd;
+  }
+
+  static int _checkPadding(String input, int start, int end, int state) {
+    assert(_hasSeenPadding(state));
+    if (start == end) return state;
+    var expectedPadding = _statePadding(state);
+    assert(expectedPadding >= 0);
+    assert(expectedPadding < 6);
+    while (expectedPadding > 0) {
+      var char = input.codeUnitAt(start);
+      if (expectedPadding == 3) {
+        if (char == _paddingChar) {
+          expectedPadding -= 3;
+          start++;
+          break;
+        }
+        if (char == _char_percent) {
+          expectedPadding--;
+          start++;
+          if (start == end) break;
+          char = input.codeUnitAt(start);
+        } else {
+          break;
+        }
+      }
+      var expectedPartialPadding = expectedPadding;
+      if (expectedPartialPadding > 3) expectedPartialPadding -= 3;
+      if (expectedPartialPadding == 2) {
+        if (char != _char_3) break;
+        start++;
+        expectedPadding--;
+        if (start == end) break;
+        char = input.codeUnitAt(start);
+      }
+      if ((char | 0x20) != _char_d) break;
+      start++;
+      expectedPadding--;
+      if (start == end) break;
+    }
+    if (start != end) {
+      throw FormatException("Invalid padding character", input, start);
+    }
+    return _encodePaddingState(expectedPadding);
+  }
+}
+
+class _Base64DecoderSink implements EventSink<String> {
+  final EventSink<List<int>> _sink;
+  final _Base64Decoder _decoder = _Base64Decoder();
+
+  _Base64DecoderSink(this._sink);
+
+  void add(String string) {
+    if (string.isEmpty) return;
+    var buffer = _decoder.decode(string, 0, string.length);
+    if (buffer != null) _sink.add(buffer);
+  }
+
+  void close() {
+    _decoder.close(null, null);
+    _sink.close();
+  }
+
+  void addSlice(String string, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, string.length);
+    if (start == end) return;
+    var buffer = _decoder.decode(string, start, end);
+    if (buffer != null) _sink.add(buffer);
+    if (isLast) {
+      _decoder.close(string, end);
+      _sink.close();
+    }
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
 }
 
 external String _base64Encode(List<int> bytes, bool urlSafe);
@@ -698,4 +1327,5 @@ class _LineSplitIterator implements Iterator<String> {
       ? _source.substring(_lineStart, _lineEnd)
       : (throw StateError("No element")));
 }
+
 `;
