@@ -6,49 +6,33 @@
 export const IO_SOURCE = String.raw`
 abstract interface class IOException implements Exception {}
 
-/** The text of bytes written to a file or a standard stream, which hold text, so that bytes that are not UTF-8 cannot be kept. */
-String _textOfBytes(List<int> bytes) {
-  try {
-    return utf8.decode(bytes);
-  } on FormatException {
-    _rejectBytes();
-  }
-}
+/**
+ * Rejects what the run's files and standard streams cannot take, as they hold text: an encoding other than UTF-8, and
+ * bytes that are not UTF-8. Every such check of dart:io throws its diagnostic from here.
+ */
+Never _unavailableIo(String what) => throw UnsupportedError(what + "は、この採点環境では使えません。");
 
-/** Rejects an encoding other than UTF-8 for the run's files and standard streams, which hold text. */
 void _requireUtf8(Encoding encoding) {
-  if (encoding.name != "utf-8") {
-    throw UnsupportedError("UTF-8 以外の encoding によるファイルと標準入出力の読み書きは、この採点環境では使えません。");
+  if (encoding.name != "utf-8") _unavailableIo("UTF-8 以外の encoding によるファイルと標準入出力の読み書き");
+}
+
+/**
+ * The text of bytes written to a file or a standard stream. Bytes given in parts go through one decoder, which keeps
+ * a character the parts split until the next part; finishing it fails a character left unfinished.
+ */
+String _textOfBytes(List<int> bytes, [_Utf8Decoder? parts]) {
+  try {
+    return parts == null ? utf8.decode(bytes) : parts.convertChunked(bytes, 0, null);
+  } on FormatException {
+    _unavailableIo("UTF-8 でないバイト列の書き込み");
   }
 }
 
-Never _rejectBytes() => throw UnsupportedError("UTF-8 でないバイト列の書き込みは、この採点環境では使えません。");
-
-/** The bytes a sink is given in parts, whose last character may continue in its next part. */
-class _Utf8Bytes {
-  List<int> _pending = const <int>[];
-  String text(List<int> data) {
-    final bytes = _pending.isEmpty ? data : <int>[..._pending, ...data];
-    var end = bytes.length;
-    for (var back = 1; back <= 3 && back <= bytes.length; back++) {
-      final byte = bytes[bytes.length - back];
-      if (byte & 0xC0 != 0x80) {
-        // Only a byte that can begin a character, C2 to F4, waits for the rest of it.
-        final length = byte < 0xC2 || byte > 0xF4 ? 1 : byte >= 0xF0 ? 4 : byte >= 0xE0 ? 3 : 2;
-        if (length > back) end = bytes.length - back;
-        break;
-      }
-    }
-    if (end == bytes.length) {
-      _pending = const <int>[];
-      return _textOfBytes(bytes);
-    }
-    _pending = bytes.sublist(end);
-    return _textOfBytes(bytes.sublist(0, end));
-  }
-  /** Ends the parts before text or the sink's end, which leave a character the bytes began unfinished. */
-  void finish() {
-    if (_pending.isNotEmpty) _rejectBytes();
+void _finishText(_Utf8Decoder parts) {
+  try {
+    parts.flush(StringBuffer());
+  } on FormatException {
+    _unavailableIo("UTF-8 でないバイト列の書き込み");
   }
 }
 
@@ -139,21 +123,36 @@ abstract interface class IOSink implements StreamSink<List<int>>, StringSink {
   Future get done;
 }
 
+// From the SDK's lib/io/stdio.dart (3.13.7), class Stdout. Modifications: a run's standard streams are pipes, not
+// a terminal, so the terminal queries answer as the VM does for a pipe, and nonBlocking is left out.
+class Stdout extends _StdSink implements IOSink {
+  final bool _isError;
+
+  Stdout._(IOSink sink, this._isError) : super(sink);
+
+  bool get hasTerminal => false;
+
+  int get terminalColumns => throw const StdoutException("Could not get terminal size", _notTerminal);
+
+  int get terminalLines => throw const StdoutException("Could not get terminal size", _notTerminal);
+
+  bool get supportsAnsiEscapes => false;
+}
+
 /**
- * Standard output or error, checked as the SDK's IOSink checks a write, a flush, a close and an added stream, and
- * written at once, as the VM's synchronous sink controller writes it, so that its text and print's stay in order.
+ * The IOSink a run's standard output or error writes through, in place of the SDK's _IOSinkImpl over a _StdConsumer
+ * of the descriptor: it checks a write, a flush, a close and an added stream by the rules of the SDK's
+ * _StreamSinkImpl and _IOSinkImpl, and writes at once, as the VM's synchronous controller does, so that its text and
+ * print's stay in order. The SDK's classes would charge about five times the operations for each write, so that a run
+ * could write a fifth of what Java's can.
  */
-class Stdout implements IOSink {
+class _StdIOSink implements IOSink {
   final bool _isError;
   final Completer<void> _closed = Completer<void>();
   bool _isBound = false;
-  Stdout._(this._isError);
+  _StdIOSink(this._isError);
   Encoding get encoding => utf8;
   set encoding(Encoding value) => _requireUtf8(value);
-  bool get hasTerminal => false;
-  bool get supportsAnsiEscapes => false;
-  int get terminalColumns => throw const StdoutException("Could not get terminal size", _notTerminal);
-  int get terminalLines => throw const StdoutException("Could not get terminal size", _notTerminal);
   void write(Object? object) {
     String string = '$object';
     if (string.isEmpty) return;
@@ -183,11 +182,11 @@ class Stdout implements IOSink {
   void add(List<int> data) {
     _requireWritable();
     // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
-    _write(_textOfBytes(data));
+    _writeStream(_isError, _textOfBytes(data));
   }
   void _add(String text) {
     _requireWritable();
-    _write(text);
+    _writeStream(_isError, text);
   }
   /** Fails a write as the SDK's sink does: once it is closed, and while a stream is added to it. */
   void _requireWritable() {
@@ -201,9 +200,9 @@ class Stdout implements IOSink {
     if (_isBound) throw StateError("StreamSink is already bound to a stream");
     _isBound = true;
     return stream.forEach((data) {
-      // The VM's sink hands a stream to the file itself, which fails each chunk, even an empty one, once closed.
+      // The VM's sink hands a stream to the descriptor's file, which fails each chunk, even an empty one, once closed.
       if (_closed.isCompleted) throw const FileSystemException("File closed", "");
-      _write(_textOfBytes(data));
+      _writeStream(_isError, _textOfBytes(data));
     }).whenComplete(() {
       _isBound = false;
     });
@@ -215,17 +214,126 @@ class Stdout implements IOSink {
   // Closing completes, and so does done, once closed; afterwards a write fails, and print drops what it prints.
   Future close() {
     if (_isBound) throw StateError("StreamSink is bound to a stream");
-    _close();
+    _closeStream(_isError);
     if (!_closed.isCompleted) _closed.complete();
     return _closed.future;
   }
   Future get done => _closed.future;
-  external void _write(String text);
-  external void _close();
 }
 
-final Stdout stdout = Stdout._(false);
-final Stdout stderr = Stdout._(true);
+external void _writeStream(bool isError, String text);
+external void _closeStream(bool isError);
+
+final _newLineDetector = RegExp(r'(?<!\r)\n');
+final _newLineDetectorAfterCR = RegExp(r'(?<=[^\r])\n');
+
+// From the SDK's lib/io/stdio.dart (3.13.7), class _StdSink, without modifications.
+class _StdSink implements IOSink {
+  final IOSink _sink;
+  bool _windowsLineTerminator = false;
+  bool _lastWrittenCharIsCR = false;
+
+  _StdSink(this._sink);
+
+  String get lineTerminator => _windowsLineTerminator ? "\r\n" : "\n";
+  set lineTerminator(String lineTerminator) {
+    if (lineTerminator == "\r\n") {
+      assert(!_lastWrittenCharIsCR || _windowsLineTerminator);
+      _windowsLineTerminator = true;
+    } else if (lineTerminator == "\n") {
+      _windowsLineTerminator = false;
+      _lastWrittenCharIsCR = false;
+    } else {
+      throw ArgumentError.value(
+        lineTerminator,
+        "lineTerminator",
+        r'invalid line terminator, must be one of "\n" or "\r\n"',
+      );
+    }
+  }
+
+  Encoding get encoding => _sink.encoding;
+  void set encoding(Encoding encoding) {
+    _sink.encoding = encoding;
+  }
+
+  String _convertToWindowsLineTerminators(String string) {
+    assert(!string.isEmpty);
+    var pattern = _lastWrittenCharIsCR
+        ? _newLineDetectorAfterCR
+        : _newLineDetector;
+    var result = string.replaceAll(pattern, "\r\n");
+    _lastWrittenCharIsCR = result.endsWith('\r');
+    return result;
+  }
+
+  void _write(Object? object) {
+    if (!_windowsLineTerminator) {
+      _sink.write(object);
+      return;
+    }
+
+    var string = object.toString();
+    if (string.isEmpty) return;
+    _sink.write(_convertToWindowsLineTerminators(string));
+  }
+
+  void write(Object? object) => _write(object);
+
+  void writeln([Object? object = ""]) {
+    if (!_windowsLineTerminator) {
+      _sink.write('$object\n');
+    } else {
+      _sink.write(_convertToWindowsLineTerminators('$object\r\n'));
+    }
+  }
+
+  void writeAll(Iterable objects, [String sep = ""]) {
+    Iterator iterator = objects.iterator;
+    if (!iterator.moveNext()) return;
+    if (sep.isEmpty) {
+      do {
+        _write(iterator.current);
+      } while (iterator.moveNext());
+    } else {
+      _write(iterator.current);
+      while (iterator.moveNext()) {
+        _write(sep);
+        _write(iterator.current);
+      }
+    }
+  }
+
+  void add(List<int> data) {
+    _lastWrittenCharIsCR = false;
+    _sink.add(data);
+  }
+
+  void addError(error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+
+  void writeCharCode(int charCode) {
+    if (!_windowsLineTerminator) {
+      _sink.writeCharCode(charCode);
+      return;
+    }
+
+    _write(String.fromCharCode(charCode));
+  }
+
+  Future addStream(Stream<List<int>> stream) {
+    _lastWrittenCharIsCR = false;
+    return _sink.addStream(stream);
+  }
+
+  Future flush() => _sink.flush();
+  Future close() => _sink.close();
+  Future get done => _sink.done;
+}
+
+final Stdout stdout = Stdout._(_StdIOSink(false), false);
+final Stdout stderr = Stdout._(_StdIOSink(true), true);
 
 class Stdin extends Stream<List<int>> {
   Stdin._();
@@ -704,7 +812,7 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
  */
 class _OpenedFile {
   /** The file holds text, so the bytes of a character written in parts wait for the rest of it. */
-  final _Utf8Bytes _bytes = _Utf8Bytes();
+  final _Utf8Decoder _parts = _Utf8Decoder(false);
   _OpenedFile._();
   static Future<_OpenedFile> _openFile(String path, bool appends) {
     final file = _OpenedFile._();
@@ -717,11 +825,11 @@ class _OpenedFile {
     return Future.value(file);
   }
   void writeFrom(List<int> bytes) {
-    _writeOpened(_bytes.text(bytes));
+    _writeOpened(_textOfBytes(bytes, _parts));
   }
   Future<void> close() {
     try {
-      _bytes.finish();
+      _finishText(_parts);
     } catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }

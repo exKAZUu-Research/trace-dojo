@@ -162,19 +162,15 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 
 // dart:io
 
-function isStderr(receiver: Value): boolean {
-  return (receiver as DartObject).fields[0] === true;
-}
-
-define('Stdout._write', (runtime, receiver, [text]) => {
-  const channel = isStderr(receiver) ? runtime.io.stderr : runtime.io.stdout;
+define('_writeStream', (runtime, _receiver, [isError, text]) => {
+  const channel = isError === true ? runtime.io.stderr : runtime.io.stdout;
   channel.write(text as string, encodableText);
   return;
 });
-// print reads whether standard output is closed, after which it drops what it prints.
-define('Stdout._close', (runtime, receiver) => {
+// print reads whether standard output is closed, after which it drops what it prints, as the VM's closed descriptor does.
+define('_closeStream', (runtime, _receiver, [isError]) => {
   const closed = closedSinks.get(runtime) ?? new Set<boolean>();
-  closed.add(isStderr(receiver));
+  closed.add(isError === true);
   closedSinks.set(runtime, closed);
   return;
 });
