@@ -212,6 +212,7 @@ export class TraitSolver {
         'Send',
         'Sync',
         'Sized',
+        'Unpin',
       ].includes(name)
     ) {
       return 'yes';
