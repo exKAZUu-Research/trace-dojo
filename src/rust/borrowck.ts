@@ -353,6 +353,10 @@ export class BorrowChecker {
   }
 
   private assignment(expr: Extract<Expr, { kind: 'assign' | 'compoundAssign' }>, state: State): State {
+    // `_ = place` binds nothing, so it reads the place as `let _ = place` does, moving nothing out of it.
+    if (expr.kind === 'assign' && this.annotations.paths.get(expr.target)?.kind === 'discard') {
+      return this.patternSource(expr.value, state);
+    }
     const value = this.expr(expr.value, state, 'move');
     if (expr.kind === 'assign')
       return this.assign(

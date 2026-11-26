@@ -657,8 +657,16 @@ export class Compiler {
   // code-gauge-allow functionCognitiveComplexity -- Drops, places and destructuring assignment follow Rust order.
   // code-gauge-allow functionNcss -- Drops, places and destructuring assignment follow Rust order.
   assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
-    const value = this.value(expr.value);
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
+    // `_ = place` neither moves nor drops what the place holds, though evaluating the place still checks its indexes.
+    if (res?.kind === 'discard' && isPlaceExpr(expr.value, this.annotations)) {
+      const place = this.place(expr.value);
+      return (frame) => {
+        place(frame);
+        return UNIT_VALUE;
+      };
+    }
+    const value = this.value(expr.value);
     const dropped = this.droppedType(expr.target.ty);
     if (res?.kind === 'discard') {
       const discarded = this.droppedType(expr.value.ty);
