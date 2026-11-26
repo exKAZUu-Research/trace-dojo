@@ -322,9 +322,26 @@ operator fun <T> Sequence<T>.plus(elements: Sequence<T>): Sequence<T> = sequence
 
 operator fun <T> Sequence<T>.plus(elements: Iterable<T>): Sequence<T> = sequenceOf(this, elements.asSequence()).flatten()
 
+operator fun <T> Sequence<T>.plus(elements: Array<out T>): Sequence<T> = sequenceOf(this, elements.asSequence()).flatten()
+
 operator fun <T> Sequence<T>.minus(element: T): Sequence<T> = Sequence {
     var removed = false
     iterator().asSequence().filter { if (!removed && it == element) { removed = true; false } else true }.iterator()
+}
+
+// Removing elements reads them when each iteration starts, as the stdlib's minus does.
+operator fun <T> Sequence<T>.minus(elements: Iterable<T>): Sequence<T> = Sequence {
+    val other = elements.toList()
+    this@minus.filterNot { it in other }.iterator()
+}
+
+operator fun <T> Sequence<T>.minus(elements: Array<out T>): Sequence<T> = Sequence {
+    this@minus.filterNot { it in elements }.iterator()
+}
+
+operator fun <T> Sequence<T>.minus(elements: Sequence<T>): Sequence<T> = Sequence {
+    val other = elements.toList()
+    this@minus.filterNot { it in other }.iterator()
 }
 
 fun <T : Comparable<T>> Sequence<T>.sorted(): Sequence<T> = Sequence { toMutableList().apply { sort() }.iterator() }
@@ -438,6 +455,21 @@ fun <T> Sequence<T>.single(): T {
     val single = source.next()
     if (source.hasNext()) throw IllegalArgumentException("Sequence has more than one element.")
     return single
+}
+
+inline fun <T> Sequence<T>.single(predicate: (T) -> Boolean): T {
+    var single: T? = null
+    var found = false
+    for (element in this) {
+        if (predicate(element)) {
+            if (found) throw IllegalArgumentException("Sequence contains more than one matching element.")
+            single = element
+            found = true
+        }
+    }
+    if (!found) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    @Suppress("UNCHECKED_CAST")
+    return single as T
 }
 
 fun <T> Sequence<T>.elementAt(index: Int): T =
