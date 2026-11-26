@@ -1,7 +1,7 @@
 import type { Statement } from './ast';
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
-import { parseTrapAction } from './parse';
+import { parseTrapAction, trapActionSyntaxError } from './parse';
 import { singleQuote } from './quoting';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
@@ -13,8 +13,11 @@ export type TrapCondition = 'EXIT' | 'ERR';
 export interface Trap {
   readonly text: string;
   readonly statements: Statement[];
-  /** Whether the action holds a syntax error, which stops the program only when the action runs, as Bash reads it then. */
-  readonly unreadable?: boolean;
+  /**
+   * For an action with a syntax error, the lines Bash reports when it runs the action, numbered from the line given
+   * for its first line; Bash reads the action only then.
+   */
+  readonly syntaxError?: (firstLine: number) => string[];
   /** The row of the `trap` command, where the action's commands are numbered from. */
   readonly row: number;
 }
@@ -95,7 +98,7 @@ export const trapBuiltin: Builtin = (shell, args) => {
       shell.traps.set(condition, {
         text: first,
         statements: statements ?? [],
-        unreadable: statements === undefined,
+        ...(statements === undefined ? { syntaxError: (line: number) => trapActionSyntaxError(first, line) } : {}),
         row: shell.currentRow,
       });
     }

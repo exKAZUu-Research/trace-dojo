@@ -79,6 +79,28 @@ export function parseTrapAction(text: string, row: number): Statement[] | undefi
   }
 }
 
+/**
+ * The syntax error of a `trap` action that `parseTrapAction` could not read, as Bash reports it when the action runs:
+ * its message, numbered from `firstLine` for the action's first line, and the action's line it names, if any.
+ */
+export function trapActionSyntaxError(text: string, firstLine: number): string[] {
+  try {
+    parseText(`${text}\n`, new Set());
+    return [];
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    const { row, message } = error.diagnostics[0] ?? { row: 0, message: '' };
+    const bashMessage = message.replace(/^構文エラーです（/, '').replace(/）。$/, '');
+    const line = firstLine + row;
+    const renumbered = bashMessage.replace(/on line (\d+)/, (_, n: string) => `on line ${firstLine + Number(n) - 1}`);
+    const lines = [`line ${line}: ${renumbered}`];
+    if (bashMessage.startsWith('syntax error near unexpected token')) {
+      lines.push(`line ${line}: \`${text.split('\n')[row] ?? ''}'`);
+    }
+    return lines;
+  }
+}
+
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
 function reparseBackquoted(text: string, row: number): Statement[] {
   return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();

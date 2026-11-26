@@ -354,8 +354,16 @@ export class Shell implements ArithmeticHost {
   private runTrap(condition: TrapCondition, status: number): void {
     const trap = this.traps.get(condition);
     if (!trap || this.runningTraps.has(condition)) return;
-    // Bash reads the action only as it runs it, where a syntax error in it stops the action.
-    if (trap.unreadable) rejectUnsupportedFeature('構文エラーのある trap の文字列');
+    // Bash reads the action only as it runs it, where a syntax error in it ends the action, numbered from the failed
+    // command's line for `ERR` and from 1 for `EXIT`.
+    if (trap.syntaxError) {
+      const label = condition === 'ERR' ? 'error' : 'exit';
+      const firstLine = condition === 'ERR' ? this.currentRow + 1 : 1;
+      for (const line of trap.syntaxError(firstLine)) {
+        this.fd2.write(`${SCRIPT_NAME}: ${label} trap: ${line}\n`);
+      }
+      return;
+    }
     if (trap.statements.length === 0) return;
     const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
@@ -490,7 +498,7 @@ export class Shell implements ArithmeticHost {
         false,
         true
       ).run(body);
-      const file = { input: this.runtime.io.textReader(capture.read()) };
+      const file = { input: this.runtime.io.pipeReader(capture.read()) };
       this.fds.set(fd, file);
       this.processSubstitutions.push({ fd, file });
     } else {
@@ -515,7 +523,7 @@ export class Shell implements ArithmeticHost {
           finish: () => {
             ran = true;
             job.awaitEnd = undefined;
-            child.fds.set(0, { input: this.runtime.io.textReader(capture.read()) });
+            child.fds.set(0, { input: this.runtime.io.pipeReader(capture.read()) });
             job.status = child.run(body);
           },
         },
@@ -758,7 +766,7 @@ export class Shell implements ArithmeticHost {
           ? this.runWithStandardInput(input, command)
           : this.runElementSubshell(command, fds)
       );
-      if (capture) input = { input: this.runtime.io.textReader(capture.read()) };
+      if (capture) input = { input: this.runtime.io.pipeReader(capture.read()) };
     }
     this.store.pipeStatus = statuses;
     const last = statuses.at(-1) as number;
@@ -1844,7 +1852,7 @@ export class Shell implements ArithmeticHost {
     // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
     const traps = [...this.traps].filter(
       ([condition, trap]) =>
-        (trap.statements.length === 0 && !trap.unreadable) || (condition === 'ERR' && this.options.errtrace)
+        (trap.statements.length === 0 && !trap.syntaxError) || (condition === 'ERR' && this.options.errtrace)
     );
     return {
       fds: this.fds.clone(),
