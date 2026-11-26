@@ -910,6 +910,10 @@ export class ExpressionConverter {
       if (child.text === 'scoped') isScoped = true;
       else if (['ref', 'out', 'in'].includes(child.text)) modifier = child.text as LambdaParameter['modifier'];
       else if (child.text === 'readonly' && modifier === 'ref') isRefReadonly = true;
+      else if (child.text === 'this')
+        throw new CompileError([
+          { row: child.startPosition.row, message: "CS1041: 識別子が必要です。'this' はキーワードです" },
+        ]);
       else unsupported(parameter, `ラムダ式の引数の \`${child.text}\``);
     }
     return {

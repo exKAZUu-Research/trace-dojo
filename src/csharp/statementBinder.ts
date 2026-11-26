@@ -1889,8 +1889,10 @@ export abstract class StatementBinder extends PatternBinder {
         initializer
       );
     if (initializer?.kind === 'refExpression') {
+      // Roslyn still takes the variable as initialized, so no CS0165 follows.
       this.error(declarator, 'CS8171', '参照を使用して値渡し変数を初期化することはできません');
-      return { kind: 'localDeclaration', local, value: undefined, row: declarator.row, step: 'none' };
+      value ??= this.bindAs(initializer.operand, type, context);
+      return { kind: 'localDeclaration', local, value, row: declarator.row, step: 'none' };
     }
     if (initializer && !value) {
       value =
@@ -1917,6 +1919,11 @@ export abstract class StatementBinder extends PatternBinder {
     if (initializer.kind === 'arrayInitializer') {
       this.error(declarator, 'CS0820', '配列初期化子で暗黙的に型指定された変数を初期化することはできません');
       return { type: ERROR_TYPE };
+    }
+    // `var x = ref y;` takes its type from `y`, and the declarator then reports CS8171 for the `ref`.
+    if (initializer.kind === 'refExpression') {
+      const operand = this.bindValue(initializer.operand, context);
+      return { type: operand.type, value: operand };
     }
     const bound = this.bindValue(initializer, context);
     if (bound.type.kind === 'null' && bound.kind !== 'unbound') {
