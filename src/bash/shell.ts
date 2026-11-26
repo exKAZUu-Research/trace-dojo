@@ -1349,6 +1349,9 @@ export class Shell implements ArithmeticHost {
     const changed = mode === 'current' ? [1] : [];
     if (mode === 'current') this.fds.set(1, { output: capture.target });
     const scopeIndex = this.store.pushSubstitutionScope(mode === 'reply');
+    // As in `$(...)`, `set -e` is off inside unless `inherit_errexit` is on, and the caller's setting comes back.
+    const errexit = this.options.errexit;
+    this.options.errexit = errexit && this.options.inherit_errexit;
     let status: number;
     let reply = '';
     try {
@@ -1360,6 +1363,7 @@ export class Shell implements ArithmeticHost {
       }
       if (mode === 'reply') reply = this.store.readScalar('REPLY') ?? '';
     } finally {
+      this.options.errexit = errexit;
       this.store.popSubstitutionScope(scopeIndex);
       this.restoreDescriptors(saved, changed);
     }
