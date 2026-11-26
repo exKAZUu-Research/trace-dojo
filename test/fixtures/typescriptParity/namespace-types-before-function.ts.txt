@@ -1,0 +1,17 @@
+namespace f {
+  export type T = number;
+}
+function f() {
+  return 1;
+}
+const t: f.T = 2;
+namespace g {
+  export interface I {
+    a: number;
+  }
+}
+class g {
+  v = 3;
+}
+const i: g.I = { a: 4 };
+console.log(f(), t, new g().v, i.a);

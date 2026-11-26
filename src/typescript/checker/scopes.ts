@@ -21,6 +21,8 @@ export type TypeKind = 'interface' | 'alias' | 'class' | 'typeParameter' | 'enum
 
 let nextSymbolId = 1;
 
+const mergesIntoNamespace = new Set<ValueKind>(['enum', 'function', 'class']);
+
 /** A name a program or the library declares, as a value, a type, or both. */
 export class Sym {
   readonly id = nextSymbolId++;
@@ -128,8 +130,8 @@ export class Scope {
       symbol = new Sym(name, this);
       this.values.set(name, symbol);
     }
-    // An enum merges into a namespace declared before it, whose object then holds the enum's members too.
-    if (symbol.valueKind === undefined || (symbol.valueKind === 'namespace' && kind === 'enum'))
+    // An enum, a function, or a class merges into a namespace declared before it, whose exports it then holds too.
+    if (symbol.valueKind === undefined || (symbol.valueKind === 'namespace' && mergesIntoNamespace.has(kind)))
       symbol.valueKind = kind;
     symbol.valueDeclarations.push(declaration);
     symbol.valueEntries.push({ kind, name: nameNode });
