@@ -196,6 +196,7 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
     for (const root of runtime.previewRoots(value) ?? []) push(root);
     if (value.state === 'done') push(value.value);
     else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
+    else if (value.effect !== undefined) push(value.effect);
     else push(value.target);
   } else if (value instanceof Closure) {
     pushRefs(freeVarsOf(value.lam), value.env, push);

@@ -26,6 +26,8 @@ export interface Primitive {
   /** The arguments forced to weak head normal form before the primitive runs. */
   strict: number[] | 'all';
   fn: (args: Slot[], runtime: Runtime) => PrimResult;
+  /** Whether a pure call performs an effect (`Debug.Trace` output), which a trace's display must not. */
+  effectful?: true;
 }
 
 const registry = new Map<string, Primitive>();
@@ -36,8 +38,14 @@ export function primitiveNamed(name: string): Primitive {
   return prim;
 }
 
-export function define(name: string, arity: number, strict: Primitive['strict'], fn: Primitive['fn']): void {
-  registry.set(name, { name, arity, strict, fn });
+export function define(
+  name: string,
+  arity: number,
+  strict: Primitive['strict'],
+  fn: Primitive['fn'],
+  effectful?: true
+): void {
+  registry.set(name, { name, arity, strict, fn, effectful });
 }
 
 /** Defines a primitive whose arguments are all forced, taking their values. */

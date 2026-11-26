@@ -22,6 +22,7 @@ import {
   statementDone,
   unwindBlock,
 } from './ioBlocks';
+import { DisplayAbort } from './previewBudget';
 import type { Primitive } from './primitives';
 import { RecursionBudget } from './recursionBudget';
 import type { Runtime, TraceFrame } from './runtime';
@@ -54,6 +55,7 @@ export type Frame =
       env: Env | undefined;
       native?: () => Slot | TailCall;
       target: Thunk | undefined;
+      effect: Slot | undefined;
     }
   | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
   | {
@@ -71,6 +73,7 @@ export type Frame =
   | { k: 'deferredDo'; action: IODo; ordinary: Slot }
   | { k: 'prim'; prim: Primitive; args: Slot[]; position: number }
   | { k: 'runIO' }
+  /** Enters the result of the IO action run above it, as `runST` and an effectful thunk give it. */
   | { k: 'pureIO' }
   | { k: 'catch'; handle: (error: HaskellException) => Slot; refs: Slot[] }
   | { k: 'ioBind'; next: Slot }
@@ -145,7 +148,8 @@ export type PrimResult = Slot | TailCall | RunPure;
 
 /**
  * Evaluates Core with an explicit stack, so that deep recursion in a program does not exhaust the host's stack.
- * Evaluation may nest (a primitive forcing a value), each level running until the stack returns to its base.
+ * IO actions, including those that `catch`, `runST` and effectful thunks run, go on the same stack; only a primitive
+ * forcing a value nests evaluation, each level running until the stack returns to its base.
  */
 export class Machine {
   private readonly nativeCalls = new RecursionBudget(() => this.runtime.evaluationLimitError());
@@ -167,11 +171,6 @@ export class Machine {
 
   runIO(action: Slot): void {
     this.run({ mode: 'runSlotIO', slot: action });
-  }
-
-  /** Runs an IO action to its end inside a primitive, as `catch` and `runST` do, giving its result. */
-  runIOValue(action: Slot): Slot {
-    return this.run({ mode: 'runSlotIO', slot: action });
   }
 
   makeSlot(code: Core, env: Env | undefined): Slot {
@@ -234,7 +233,6 @@ export class Machine {
     return this.nativeCalls.run(() => this.runCore(start));
   }
 
-  // code-gauge-allow functionNcss -- The main loop dispatches on the machine mode and handles limits and exceptions in one place.
   private runCore(start: RunStart): Slot {
     const { stack } = this;
     const base = stack.length;
@@ -252,7 +250,6 @@ export class Machine {
     }
   }
 
-  // code-gauge-allow functionNcss -- The main loop dispatches on the machine mode.
   private loop(state: RunState): Slot {
     for (;;) {
       switch (state.mode) {
@@ -416,6 +413,7 @@ export class Machine {
       env: slot.env,
       native: slot.native,
       target: slot.target,
+      effect: slot.effect,
     });
     this.runtime.beginPreview(slot);
     if (slot.target) {
@@ -423,6 +421,12 @@ export class Machine {
       return;
     }
     this.runtime.spend();
+    if (slot.effect !== undefined) {
+      this.refuseEffectInDisplay();
+      this.stack.push({ k: 'pureIO' }, { k: 'runIO' });
+      state.enter(slot.effect);
+      return;
+    }
     if (!slot.native) {
       state.evaluate(slot.code as Core, slot.env);
       return;
@@ -507,6 +511,7 @@ export class Machine {
     }
     this.stack.pop();
     this.runtime.spend();
+    if (frame.prim.effectful) this.refuseEffectInDisplay();
     const result = frame.prim.fn(frame.args, this.runtime);
     if (result instanceof TailCall) {
       state.applyTo(result.fn, result.args);
@@ -590,6 +595,14 @@ export class Machine {
         throw new Error(`A value returned to an IO frame (${frame.k})`);
       }
     }
+  }
+
+  /**
+   * Stops a trace's display before an effect (a lazy read, `Debug.Trace` output), so the display shows the value
+   * unevaluated and the program's own run performs the effect when it needs the value.
+   */
+  private refuseEffectInDisplay(): void {
+    if (this.runtime.displaying) throw new DisplayAbort();
   }
 
   private pushFunctionResult(
@@ -807,6 +820,7 @@ export class Machine {
         frame.thunk.env = frame.env;
         frame.thunk.native = frame.native;
         frame.thunk.target = frame.target;
+        frame.thunk.effect = frame.effect;
         this.runtime.endPreview(frame.thunk, true);
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);

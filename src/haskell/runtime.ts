@@ -112,12 +112,9 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     }
   }
 
-  /**
-   * Stops a trace's display before a value's evaluation performs an effect (a lazy read, `Debug.Trace` output), so the
-   * display shows the value unevaluated and the program's own run performs the effect when it needs the value.
-   */
-  beginEffect(): void {
-    if (this.displayRemaining !== undefined) throw new DisplayAbort();
+  /** Whether evaluation runs for a trace's display, which must never perform an effect. */
+  get displaying(): boolean {
+    return this.displayRemaining !== undefined;
   }
 
   endPreviewStatement(owner: DoFrame, frame: TraceFrame): void {

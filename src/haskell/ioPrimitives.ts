@@ -129,25 +129,27 @@ class Handle {
    * Reads the rest lazily, as GHC's `hGetContents` does: the handle is semi-closed until the string's end is reached,
    * which closes it; closing it earlier makes reading further fail.
    */
-  readContents(runtime: Runtime): Thunk {
+  readContents(): Thunk {
     const reader = this.reader('hGetContents');
     this.state = 'semiClosed';
     // Nothing is read until the string is forced, the first character included.
-    return new Thunk(undefined, undefined, () => this.lazyContents(reader, runtime));
+    return this.lazyContents(reader);
   }
 
-  private lazyContents(reader: TextReader, runtime: Runtime): Value {
-    runtime.beginEffect();
-    if (this.state === 'closed') {
-      throw ioError('IllegalOperation', 'hGetContents', this.name, 'delayed read on closed handle', this.value);
-    }
-    runtime.spend();
-    const character = readCharacter(reader);
-    if (character === undefined) {
-      this.state = 'closed';
-      return NIL();
-    }
-    return cons(character, new Thunk(undefined, undefined, () => this.lazyContents(reader, runtime)));
+  private lazyContents(reader: TextReader): Thunk {
+    return Thunk.effectful(
+      new IOPrim('hGetContents', () => {
+        if (this.state === 'closed') {
+          throw ioError('IllegalOperation', 'hGetContents', this.name, 'delayed read on closed handle', this.value);
+        }
+        const character = readCharacter(reader);
+        if (character === undefined) {
+          this.state = 'closed';
+          return NIL();
+        }
+        return cons(character, this.lazyContents(reader));
+      })
+    );
   }
 
   private sink(location: string): (chunk: string) => void {
@@ -427,7 +429,7 @@ define('hIsEOF', 1, [], ([handle], runtime) =>
 );
 
 define('hGetContents', 1, [], ([handle], runtime) =>
-  ioAction('hGetContents', [handle], () => handleOf(handle, runtime).readContents(runtime))
+  ioAction('hGetContents', [handle], () => handleOf(handle, runtime).readContents())
 );
 
 /** The arguments `getArgs` gives while `withArgs` runs an action, by run; a run starts with none. */
@@ -521,27 +523,22 @@ define('writeIORef', 2, [], ([ref, value], runtime) =>
 define('sameRef', 2, 'all', ([a, b]) => bool(a === b));
 
 /** Defers an action until its result is used, as `unsafeInterleaveIO` does for `fixIO`. */
-define('interleaveIO', 1, [], ([action], runtime) =>
-  ioAction(
-    'unsafeInterleaveIO',
-    [action],
-    () =>
-      new Thunk(undefined, undefined, () => {
-        runtime.beginEffect();
-        return runtime.machine.runIOValue(action);
-      })
-  )
-);
+define('interleaveIO', 1, [], ([action]) => ioAction('unsafeInterleaveIO', [action], () => Thunk.effectful(action)));
 
 /** Runs an action whose effects only its own references see, as `runST` does. */
 define('runIOPure', 1, [], ([action]) => new RunPure(action));
 
-define('trace', 2, [], ([message, value], runtime) => {
-  runtime.beginEffect();
-  writeString(message, runtime, (chunk) => runtime.io.stderr.write(chunk));
-  runtime.io.stderr.write('\n');
-  return value;
-});
+define(
+  'trace',
+  2,
+  [],
+  ([message, value], runtime) => {
+    writeString(message, runtime, (chunk) => runtime.io.stderr.write(chunk));
+    runtime.io.stderr.write('\n');
+    return value;
+  },
+  true
+);
 
 function ioAction(name: string, refs: Slot[], run: () => Slot | RunNext | RunCatching): IOPrim {
   return new IOPrim(name, run, refs);

@@ -100,6 +100,11 @@ export class Thunk {
   value: Value | undefined;
   /** Another thunk whose value this one takes, set when the evaluator drops this thunk's update frame. */
   target: Thunk | undefined;
+  /**
+   * The IO action whose result is the value, for an effectful thunk (a lazy read, `unsafeInterleaveIO`), which the
+   * evaluator runs on its own stack and a trace's display never enters.
+   */
+  effect: Slot | undefined;
 
   constructor(
     public code: Core | undefined,
@@ -118,6 +123,7 @@ export class Thunk {
     this.env = undefined;
     this.native = undefined;
     this.target = undefined;
+    this.effect = undefined;
   }
 
   redirect(target: Thunk): void {
@@ -126,6 +132,13 @@ export class Thunk {
     this.env = undefined;
     this.native = undefined;
     this.target = target;
+    this.effect = undefined;
+  }
+
+  static effectful(action: Slot): Thunk {
+    const thunk = new Thunk(undefined, undefined);
+    thunk.effect = action;
+    return thunk;
   }
 
   static of(value: Value): Thunk {
