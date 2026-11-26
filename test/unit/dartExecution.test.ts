@@ -3030,6 +3030,20 @@ void main() {
   });
 });
 
+test('a constructor, a factory and a setter cannot have an async or generator body, as the SDK rejects', () => {
+  for (const [program, message] of [
+    ['class A { A() async {} }', 'コンストラクタの本体には async・async*・sync* を書けません。'],
+    ['class A { A._(); factory A.x() async => A._(); }', 'ファクトリの本体には async・async*・sync* を書けません。'],
+    ['class A { set v(int x) async {} }', 'セッターの本体には async・async*・sync* を書けません。'],
+    ['set v(int x) sync* {}', 'セッターの本体には async・async*・sync* を書けません。'],
+  ]) {
+    expect(executeProgram('dart', `${program}\nvoid main() {}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message }],
+    });
+  }
+});
+
 test('nullable values can use Object members and still dispatch to overrides', () => {
   const program = `class Marker {
   String toString() => 'marker';

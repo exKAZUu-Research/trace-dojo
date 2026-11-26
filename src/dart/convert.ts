@@ -562,9 +562,12 @@ export class Converter extends ExpressionConverter {
     if (inner.type === 'method_declaration') {
       const signatureNode = requireNode(fieldOf(inner, 'signature'), inner);
       const body = this.convertFunctionBody(requireNode(fieldOf(inner, 'body'), inner));
-      return [
-        this.convertSignature(inner, childrenOf(signatureNode), body, [...annotations, ...this.annotationsOf(inner)]),
-      ];
+      const member = this.convertSignature(inner, childrenOf(signatureNode), body, [
+        ...annotations,
+        ...this.annotationsOf(inner),
+      ]);
+      requireSyncBody(member, body);
+      return [member];
     }
     const children = childrenOf(inner);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
@@ -827,6 +830,7 @@ export class Converter extends ExpressionConverter {
     const signature = requireNode(fieldOf(node, 'signature'), node);
     const body = this.convertFunctionBody(requireNode(fieldOf(node, 'body'), node));
     const kind = node.type === 'getter_declaration' ? 'getter' : 'setter';
+    if (kind === 'setter') requireSyncBody({ kind: 'topLevelSetter' }, body);
     return this.functionFromSignature(signature, body, kind, this.annotationsOf(node), spanOf(node), false);
   }
 
@@ -1439,4 +1443,17 @@ function asUntypedMethod(member: MemberDeclaration, owner: string | undefined): 
 function requirePlainParameters(positional: FormalParameter[], named: FormalParameter[]): void {
   const invalid = [...positional, ...named].find((parameter) => parameter.binding !== 'plain');
   if (invalid) syntaxError(invalid, `引数 ${invalid.binding}.${invalid.name} は、この引数リストでは使えません。`);
+}
+
+/**
+ * A constructor, a factory and a setter run to their end before their caller goes on, so the SDK rejects a body
+ * marked `async`, `async*` or `sync*` on them, which would otherwise run as a plain body.
+ */
+function requireSyncBody(member: MemberDeclaration | { kind: 'topLevelSetter' }, body: FunctionBody | undefined): void {
+  if (!body || body.modifier === 'sync') return;
+  let what: string | undefined;
+  if (member.kind === 'constructor') what = member.constructorKind === 'generative' ? 'コンストラクタ' : 'ファクトリ';
+  else if (member.kind === 'topLevelSetter' || (member.kind === 'method' && member.methodKind === 'setter'))
+    what = 'セッター';
+  if (what) syntaxError(body, `${what}の本体には async・async*・sync* を書けません。`);
 }
