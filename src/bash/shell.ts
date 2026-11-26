@@ -861,9 +861,13 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Applies a command's redirections once for every part of it that runs with them, as a declaration builtin runs
-   * its operands one at a time, throwing a `RedirectionError` when one fails.
+   * its operands one at a time, throwing a `RedirectionError` when one fails. `report` tells of a failure while the
+   * descriptors are still redirected, as Bash writes the message to the standard error the command has then.
    */
-  redirectionSession(redirects: readonly Redirect[]): { run: <T>(body: () => T) => T } {
+  private redirectionSession(
+    redirects: readonly Redirect[],
+    report: (error: unknown) => void
+  ): { run: <T>(body: () => T) => T } {
     let applied: DescriptorTable | undefined;
     const changed: number[] = [];
     return {
@@ -877,6 +881,9 @@ export class Shell implements ArithmeticHost {
             applied = this.fds.clone();
           }
           return body();
+        } catch (error) {
+          report(error);
+          throw error;
         } finally {
           this.restoreDescriptors(saved, changed);
         }
@@ -1119,7 +1126,11 @@ export class Shell implements ArithmeticHost {
       return { status: this.callShadowingFunction(statement), stepMode: 'statement', ranFunction: true };
     }
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
-    const session = this.redirectionSession(statement.redirects);
+    const session = this.redirectionSession(statement.redirects, (error) => {
+      if (error instanceof RedirectionError) this.reportError(error.message);
+      else if (error instanceof BadDescriptorError)
+        this.reportError(`${statement.name}: write error: ${error.message}`);
+    });
     try {
       const optionWords = statement.words
         .slice(0, statement.words.length - statement.args.length)
@@ -1134,12 +1145,7 @@ export class Shell implements ArithmeticHost {
       );
       return { status, stepMode: assignsAnswer ? 'statement' : 'binding', ranFunction: false };
     } catch (error) {
-      if (error instanceof RedirectionError) {
-        this.reportError(error.message);
-        return { status: 1, stepMode: 'statement', ranFunction: false };
-      }
-      if (!(error instanceof BadDescriptorError)) throw error;
-      this.reportError(`${statement.name}: write error: ${error.message}`);
+      if (!(error instanceof RedirectionError) && !(error instanceof BadDescriptorError)) throw error;
       return { status: 1, stepMode: 'statement', ranFunction: false };
     }
   }
