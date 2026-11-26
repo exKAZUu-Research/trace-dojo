@@ -1181,15 +1181,11 @@ class ShellGrammarValidator {
         continue;
       }
       if (token.kind !== 'word') {
-        // Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines.
-        const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
-        if (setting !== undefined) this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0 });
+        this.recordExtglobSetting(words);
         return;
       }
       this.advance();
-      if (commandName === undefined && !isAssignmentWord(token.value)) {
-        commandName = token.value;
-      }
+      commandName ??= isAssignmentWord(token.value) ? undefined : token.value;
       if (commandName !== undefined) words.push(token.value);
       if (position === 0 && commandName !== undefined && this.hasOperator(this.peek(), '(')) {
         if (DECLARATION_NAMES.has(token.value) || !isIdentifier(token.value)) {
@@ -1202,6 +1198,12 @@ class ShellGrammarValidator {
         return;
       }
     }
+  }
+
+  /** Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines. */
+  private recordExtglobSetting(words: readonly string[]): void {
+    const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
+    if (setting !== undefined) this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0 });
   }
 
   private maskWordToken(token: ShellToken): void {
