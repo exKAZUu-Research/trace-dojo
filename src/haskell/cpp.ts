@@ -4,61 +4,55 @@ import { RecursionBudget } from './recursionBudget';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /**
- * The C preprocessor GHC runs on a program with the CPP extension, in its traditional mode: directives (`#define`,
- * `#if`, `#ifdef`, and so on) and the expansion of macros in the code outside strings and comments. Each directive
- * and each line an `#if` leaves out becomes an empty line, so that lines keep their numbers.
+ * The C preprocessor GHC runs on a program with the CPP extension, in the subset that version and feature guards use:
+ *
+ * - `#define NAME tokens` and `#undef NAME`, with object-like macros expanded in code (outside strings and comments)
+ *   and in conditions, and a macro never expanded inside its own expansion;
+ * - `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, and `#endif`, whose conditions are made of decimal integers,
+ *   macros, `defined NAME` or `defined(NAME)`, `MIN_VERSION_pkg(a,b,c)` and `MIN_VERSION_GLASGOW_HASKELL(a,b,c,d)`,
+ *   parentheses, `!`, `&&`, `||`, and the comparisons `==`, `!=`, `<`, `>`, `<=`, `>=`;
+ * - the predefined macros `__GLASGOW_HASKELL__` and the others GHC defines, `VERSION_pkg`, and `__LINE__`;
+ * - `#error`, and `#warning`, `#line`, `#pragma`, and `#ident`, which change nothing.
+ *
+ * Function-like macros, `#` and `##` in a macro's body, the other operators of C in a condition, and `#include` are
+ * reported as unavailable. Each directive and each line an `#if` leaves out becomes an empty line, so that lines keep
+ * their numbers.
  */
 export function preprocess(source: string): string {
   return new Preprocessor().run(source);
-}
-
-interface Macro {
-  params?: string[];
-  body: Token[];
 }
 
 interface Token {
   kind: 'name' | 'space' | 'newline' | 'comment' | 'other';
   text: string;
   row: number;
-  /** Whether the name was met inside the expansion of its own macro, after which C never expands it ("blue paint"). */
-  painted?: boolean;
 }
 
+const GHC_VERSION = '9.14.1.0';
+
 /**
- * The macros GHC defines for each package, as Cabal generates them: `VERSION_pkg`, the version as a string, and
- * `MIN_VERSION_pkg(major1,major2,minor)`, whether the version is at least the given one; and
- * `MIN_VERSION_GLASGOW_HASKELL` for the compiler's version.
+ * The versions `MIN_VERSION_pkg(major1,major2,minor)`, as Cabal generates it for each package, and
+ * `MIN_VERSION_GLASGOW_HASKELL(ma,mi,pl1,pl2)` compare their arguments with, by macro name.
  */
-function versionMacros(): [string, Macro][] {
+function versionChecks(): [string, number[]][] {
   return [
-    ...Object.entries(PACKAGE_VERSIONS).flatMap(([pkg, version]): [string, Macro][] => {
-      const name = pkg.replaceAll('-', '_');
-      return [
-        [`VERSION_${name}`, { body: tokenize(`"${version}"`, 0) }],
-        versionAtLeast(`MIN_VERSION_${name}`, version, ['major1', 'major2', 'minor']),
-      ];
-    }),
-    versionAtLeast('MIN_VERSION_GLASGOW_HASKELL', '9.14.1.0', ['ma', 'mi', 'pl1', 'pl2']),
+    ...Object.entries(PACKAGE_VERSIONS).map(([pkg, version]): [string, number[]] => [
+      `MIN_VERSION_${pkg.replaceAll('-', '_')}`,
+      versionParts(version, 3),
+    ]),
+    ['MIN_VERSION_GLASGOW_HASKELL', versionParts(GHC_VERSION, 4)],
   ];
 }
 
-/** `MIN_VERSION_...(a, b, ...)`, whether a version is at least the one its arguments give, as a C comparison. */
-function versionAtLeast(name: string, version: string, params: string[]): [string, Macro] {
+function versionParts(version: string, count: number): number[] {
   const parts = version.split('.').map(Number);
-  const terms = params.map((param, index) => {
-    const equal = params.slice(0, index).map((earlier, at) => `(${earlier}) == ${parts[at] ?? 0} && `);
-    return `${equal.join('')}(${param}) ${index === params.length - 1 ? '<=' : '<'} ${parts[index] ?? 0}`;
-  });
-  return [name, { params, body: tokenize(`(${terms.join(' || ')})`, 0) }];
+  return Array.from({ length: count }, (_, index) => parts[index] ?? 0);
 }
 
 /** Macros that tell the operating system or the CPU, which this environment does not let a program depend on. */
 const PLATFORM_MACRO = /^\w+_(HOST|BUILD|TARGET)_(OS|ARCH)$/;
 
 const DIRECTIVE = /^\s*#\s*([A-Za-z]+)?(.*)$/;
-
-const UNCLOSED_CALL = 'マクロの呼び出しの ) がありません。';
 
 interface Conditional {
   /** Whether the lines of the current branch are kept. */
@@ -72,13 +66,18 @@ interface Conditional {
 }
 
 class Preprocessor {
-  readonly macros = new Map<string, Macro>([
-    ['__GLASGOW_HASKELL__', { body: tokenize('914', 0) }],
-    ['__GLASGOW_HASKELL_FULL_VERSION__', { body: tokenize('"9.14.1"', 0) }],
-    ['__GLASGOW_HASKELL_PATCHLEVEL1__', { body: tokenize('1', 0) }],
-    ['__FILE__', { body: tokenize('"Main.hs"', 0) }],
-    ...versionMacros(),
+  readonly macros = new Map<string, Token[]>([
+    ['__GLASGOW_HASKELL__', tokenize('914', 0)],
+    ['__GLASGOW_HASKELL_FULL_VERSION__', tokenize('"9.14.1"', 0)],
+    ['__GLASGOW_HASKELL_PATCHLEVEL1__', tokenize('1', 0)],
+    ['__FILE__', tokenize('"Main.hs"', 0)],
+    ...Object.entries(PACKAGE_VERSIONS).map(([pkg, version]): [string, Token[]] => [
+      `VERSION_${pkg.replaceAll('-', '_')}`,
+      tokenize(`"${version}"`, 0),
+    ]),
   ]);
+
+  readonly versionChecks = new Map(versionChecks());
 
   /** The row that `__LINE__` and errors refer to. */
   row = 0;
@@ -100,8 +99,10 @@ class Preprocessor {
         );
         output += '\n'.repeat(newlines);
       } else if (stack.every((item) => item.active)) {
-        // A macro call's arguments continue onto the code lines after it until its `)`.
-        output += new Expansion(this, lexer.line(), false, () => lexer.codeLine()).run();
+        output += new Expansion(this, lexer.line(), 'code')
+          .run()
+          .map((token) => token.text)
+          .join('');
       } else if (lexer.skipLine()) {
         output += '\n';
       }
@@ -151,16 +152,13 @@ class Preprocessor {
   private activeDirective(name: string, rest: string): void {
     switch (name) {
       case 'define': {
-        const match = /^([A-Za-z_]\w*)(\(([^)]*)\))?\s*(.*)$/.exec(rest);
-        if (!match) throw this.error(this.row, '#define の書き方に誤りがあります。');
-        this.checkPlatform(match[1]);
-        const params = match[2] === undefined ? undefined : match[3].split(',').map((param) => param.trim());
-        const body = tokenize(match[4], this.row);
-        this.macros.set(match[1], { ...(params ? { params: params.filter(Boolean) } : {}), body });
+        this.define(rest);
         return;
       }
       case 'undef': {
-        this.macros.delete(this.macroName(rest));
+        const macro = this.macroName(rest);
+        this.macros.delete(macro);
+        this.versionChecks.delete(macro);
         return;
       }
       case 'error': {
@@ -182,6 +180,22 @@ class Preprocessor {
     }
   }
 
+  private define(rest: string): void {
+    const match = /^([A-Za-z_]\w*)(.*)$/.exec(rest);
+    if (!match) throw this.error(this.row, '#define の書き方に誤りがあります。');
+    const [, name, definition] = match;
+    this.checkPlatform(name);
+    if (definition.startsWith('(')) {
+      throw unsupportedError(this.row, `関数のようなマクロの定義（#define ${name}(...)）`);
+    }
+    const body = tokenize(definition.trim(), this.row);
+    if (body.some((token) => token.text === '#')) {
+      throw unsupportedError(this.row, 'マクロの本体での # や ##（文字列化やトークンの連結）');
+    }
+    this.versionChecks.delete(name);
+    this.macros.set(name, body);
+  }
+
   private top(stack: Conditional[], what: string): Conditional {
     const top = stack.at(-1);
     if (!top) throw this.error(this.row, `${what} に対応する #if がありません。`);
@@ -195,8 +209,8 @@ class Preprocessor {
     return name;
   }
 
-  private isDefined(name: string): boolean {
-    return this.macros.has(name) || name === '__LINE__';
+  isDefined(name: string): boolean {
+    return this.macros.has(name) || this.versionChecks.has(name) || name === '__LINE__';
   }
 
   checkPlatform(name: string): void {
@@ -205,19 +219,10 @@ class Preprocessor {
     }
   }
 
-  /** Whether an `#if` condition holds: `defined`, integers, macros, and C's operators. */
   private evaluate(expression: string): boolean {
-    const withDefined = expression.replaceAll(
-      /\bdefined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))/g,
-      (_, inParens: string | undefined, bare: string | undefined) => {
-        const name = (inParens ?? bare) as string;
-        this.checkPlatform(name);
-        return this.isDefined(name) ? '1' : '0';
-      }
-    );
-    const expanded = new Expansion(this, tokenize(withDefined, this.row), true).run();
-    const error = (message: string): Error => this.error(this.row, message);
-    return evaluateCondition(new ConditionParser(expanded, error).parse(), error).value !== 0n;
+    const expanded = new Expansion(this, tokenize(expression, this.row), 'condition').run();
+    const text = expanded.map((token) => token.text).join('');
+    return new ConditionParser(text, this.row).parse() !== 0n;
   }
 
   error(row: number, message: string): Error {
@@ -225,258 +230,153 @@ class Preprocessor {
   }
 }
 
-/** A run of tokens being read: the input, a macro's replacement, an argument being expanded, or tokens put back. */
+/** A run of tokens being read: the input, a macro's body, or tokens put back. */
 interface Frame {
   tokens: Token[];
   position: number;
-  /** The macro whose replacement the frame holds, which is not expanded while the frame is open. */
+  /** The macro whose body the frame holds, which is not expanded while the frame is open. */
   macro?: string;
-  /** Whether the frame holds an argument expanded on its own, whose end ends the expansion of the argument. */
-  argument?: boolean;
-}
-
-/** Where expanded tokens go; in a condition, a name that is no macro becomes `0`. */
-interface Sink {
-  tokens: Token[];
-  condition: boolean;
-}
-
-interface Call {
-  name: string;
-  macro: Macro;
-  args: Token[][];
-  expanded: Token[][];
 }
 
 /**
- * The expansion of macros in a run of tokens, by C's rules: a function-like macro's arguments are expanded each on
- * its own first, and the replacement is then read again, with the tokens after it, while the macro is disabled. The
- * frames being read form an explicit stack rather than nested calls, so a replacement ending in a function-like
- * macro's name takes the arguments that follow it, and the input may supply further lines to an unclosed call.
+ * Where the expansion of a line goes: code, where a version check becomes `True` or `False`; a condition, where
+ * `defined` is applied and a name that is no macro becomes `0`; or an argument of a version check.
  */
+type Destination = 'code' | 'condition' | 'argument';
+
+/** The expansion of the object-like macros and version checks in a line, until no macro is left. */
 class Expansion {
   private readonly frames: Frame[];
-  private readonly sinks: Sink[];
-  private readonly calls: Call[] = [];
+  private readonly output: Token[] = [];
   /** The macros of the open frames. */
   private readonly disabled = new Set<string>();
-  /** The newlines inside calls, which follow the line the calls end in so that later rows keep their numbers. */
-  private skippedRows = 0;
 
   constructor(
     private readonly preprocessor: Preprocessor,
     tokens: Token[],
-    condition: boolean,
-    private readonly continuation?: () => Token[] | undefined
+    private readonly destination: Destination
   ) {
     this.frames = [{ tokens, position: 0 }];
-    this.sinks = [{ tokens: [], condition }];
   }
 
-  run(): string {
-    for (;;) {
-      const frame = this.frames.at(-1) as Frame;
-      if (frame.position < frame.tokens.length) {
-        this.examine(frame.tokens[frame.position++], this.frames.length === 1);
-      } else if (this.frames.length === 1) {
-        return this.sinks[0].tokens.map((token) => token.text).join('') + '\n'.repeat(this.skippedRows);
-      } else {
-        this.close();
-        if (frame.argument) this.finishArgument();
-      }
-    }
+  run(): Token[] {
+    for (let token = this.read(); token; token = this.read()) this.examine(token);
+    return this.output;
   }
 
-  private get condition(): boolean {
-    return (this.sinks.at(-1) as Sink).condition;
-  }
-
-  private examine(token: Token, fromInput: boolean): void {
+  private examine(token: Token): void {
     if (token.kind !== 'name') {
-      this.emit(token);
+      this.output.push(token);
       return;
     }
-    const { preprocessor } = this;
-    if (fromInput) preprocessor.row = token.row;
+    const { preprocessor, destination } = this;
+    // An argument's tokens may come from a macro's body, whose row is that of its `#define`.
+    if (this.frames.length === 1 && destination !== 'argument') preprocessor.row = token.row;
     const name = token.text;
-    if (this.condition) preprocessor.checkPlatform(name);
+    if (destination !== 'code') preprocessor.checkPlatform(name);
+    const body = preprocessor.macros.get(name);
     if (name === '__LINE__') {
-      this.emit({ kind: 'other', text: String(preprocessor.row + 1), row: token.row });
-      return;
-    }
-    const macro = token.painted ? undefined : preprocessor.macros.get(name);
-    if (macro && this.disabled.has(name)) {
-      token.painted = true;
-      this.emitName(token, false);
-      return;
-    }
-    if (!macro) {
-      this.emitName(token, false);
-    } else if (macro && !macro.params) {
-      chargeTypeWork(1 + macro.body.length);
-      this.open(
-        name,
-        macro.body.map((bodyToken) => ({ ...bodyToken }))
-      );
-    } else if (this.takeOpenParen()) {
-      this.call({
-        name,
-        macro,
-        args: this.collectArguments(),
-        expanded: [],
-      });
+      this.emit(String(preprocessor.row + 1), token);
+    } else if (destination === 'condition' && name === 'defined') {
+      this.emit(preprocessor.isDefined(this.definedName()) ? '1' : '0', token);
+    } else if (body && !this.disabled.has(name)) {
+      chargeTypeWork(1 + body.length);
+      this.frames.push({ tokens: body, position: 0, macro: name });
+      this.disabled.add(name);
+    } else if (!body && destination !== 'argument' && /^MIN_VERSION_\w+$/.test(name) && this.takeOpenParen()) {
+      const atLeast = this.versionCheck(name);
+      this.emit(destination === 'code' ? (atLeast ? 'True' : 'False') : atLeast ? '1' : '0', token);
     } else {
-      this.emitName(token, true);
+      this.output.push(destination === 'condition' ? { ...token, kind: 'other', text: '0' } : token);
     }
   }
 
-  /**
-   * Emits a name that is not expanded, which a condition reads as `0`; a function-like macro's name in an argument
-   * stays, which the call's replacement may still apply.
-   */
-  private emitName(token: Token, functionLike: boolean): void {
-    const zero = this.condition && (!functionLike || this.sinks.length === 1);
-    this.emit(zero ? { kind: 'other', text: '0', row: token.row } : token);
+  private emit(text: string, token: Token): void {
+    this.output.push({ kind: 'other', text, row: token.row });
   }
 
-  private emit(token: Token): void {
-    (this.sinks.at(-1) as Sink).tokens.push(token);
-  }
-
-  private open(macro: string, tokens: Token[]): void {
-    this.frames.push({ tokens, position: 0, macro });
-    this.disabled.add(macro);
-  }
-
-  private close(): void {
-    const { macro } = this.frames.pop() as Frame;
-    if (macro !== undefined) this.disabled.delete(macro);
-  }
-
-  /**
-   * The next token, past the frames that have ended; none at the end of an argument, or at the end of the input when
-   * no more lines are wanted or there are none.
-   */
-  private read(moreLines: boolean): Token | undefined {
+  /** The next token, past the frames that have ended; none at the end of the line. */
+  private read(): Token | undefined {
     for (;;) {
-      const frame = this.frames.at(-1) as Frame;
+      const frame = this.frames.at(-1);
+      if (!frame) return undefined;
       if (frame.position < frame.tokens.length) return frame.tokens[frame.position++];
-      if (frame.argument) return undefined;
-      if (this.frames.length > 1) {
-        this.close();
-      } else {
-        const line = moreLines ? this.continuation?.() : undefined;
-        if (!line) return undefined;
-        frame.tokens = line;
-        frame.position = 0;
-      }
+      this.frames.pop();
+      if (frame.macro !== undefined) this.disabled.delete(frame.macro);
     }
   }
 
-  /** Reads the `(` of a call after a function-like macro's name, or puts back what follows the name. */
+  private readNonSpace(): Token | undefined {
+    let token = this.read();
+    while (token?.kind === 'space') token = this.read();
+    return token;
+  }
+
+  /** Reads the `(` after a name, or puts back what follows the name. */
   private takeOpenParen(): boolean {
     const skipped: Token[] = [];
-    for (;;) {
-      const token = this.read(false);
-      if (token?.kind === 'space') {
-        skipped.push(token);
-        continue;
-      }
-      if (token?.kind === 'other' && token.text === '(') return true;
-      if (token) skipped.push(token);
-      if (skipped.length > 0) this.frames.push({ tokens: skipped, position: 0 });
-      return false;
-    }
+    let token = this.read();
+    for (; token?.kind === 'space'; token = this.read()) skipped.push(token);
+    if (token?.kind === 'other' && token.text === '(') return true;
+    if (token) skipped.push(token);
+    if (skipped.length > 0) this.frames.push({ tokens: skipped, position: 0 });
+    return false;
   }
 
-  /** The arguments of a call after its `(`, split at the commas outside parentheses and trimmed. */
-  private collectArguments(): Token[][] {
-    const args: Token[][] = [];
-    let current: Token[] = [];
+  /** The name after `defined`, in parentheses or not. */
+  private definedName(): string {
+    const error = (): Error =>
+      this.preprocessor.error(this.preprocessor.row, 'defined の後にマクロの名前を書いてください。');
+    let token = this.readNonSpace();
+    const parenthesized = token?.text === '(';
+    if (parenthesized) token = this.readNonSpace();
+    if (token?.kind !== 'name') throw error();
+    if (parenthesized && this.readNonSpace()?.text !== ')') throw error();
+    this.preprocessor.checkPlatform(token.text);
+    return token.text;
+  }
+
+  /** Whether the version a `MIN_VERSION_...(` checks is at least the one its arguments, read up to the `)`, give. */
+  private versionCheck(name: string): boolean {
+    const { preprocessor } = this;
+    const version = preprocessor.versionChecks.get(name);
+    if (!version) throw unsupportedError(preprocessor.row, `ほかのパッケージのバージョンの確認（${name}）`);
+    const args = this.collectArguments(name).map((arg) => {
+      const text = new Expansion(preprocessor, arg, 'argument')
+        .run()
+        .map((token) => token.text)
+        .join('')
+        .trim();
+      if (!/^\d+$/.test(text)) {
+        throw unsupportedError(preprocessor.row, `${name} の整数でない引数（${text}）`);
+      }
+      return Number(text);
+    });
+    if (args.length !== version.length) {
+      throw preprocessor.error(preprocessor.row, `${name} には、引数を ${version.length} 個書いてください。`);
+    }
+    const differing = args.findIndex((arg, index) => arg !== version[index]);
+    return differing === -1 || args[differing] < version[differing];
+  }
+
+  /** The arguments of a call after its `(`, split at the commas outside parentheses. */
+  private collectArguments(name: string): Token[][] {
+    const args: Token[][] = [[]];
     let depth = 0;
     for (;;) {
-      const token = this.readArgumentToken();
+      const token = this.read();
+      if (!token) throw unsupportedError(this.preprocessor.row, `複数の行にわたる ${name} の呼び出し`);
+      chargeTypeWork(1);
       const punctuation = token.kind === 'other' ? token.text : '';
-      if (punctuation === ')' && depth-- === 0) {
-        args.push(trimSpaces(current));
-        return args;
-      }
+      if (punctuation === ')' && depth-- === 0) return args;
       if (punctuation === ',' && depth === 0) {
-        args.push(trimSpaces(current));
-        current = [];
+        args.push([]);
         continue;
       }
       if (punctuation === '(') depth++;
-      current.push(token);
+      (args.at(-1) as Token[]).push(token);
     }
   }
-
-  /** The next token of a call's arguments, where a newline or a comment is a space. */
-  private readArgumentToken(): Token {
-    const token = this.read(true);
-    if (!token) throw this.preprocessor.error(this.preprocessor.row, UNCLOSED_CALL);
-    if (token.kind !== 'newline' && token.kind !== 'comment') return token;
-    this.skippedRows += token.text.split('\n').length - 1;
-    return { kind: 'space', text: ' ', row: token.row };
-  }
-
-  private call(call: Call): void {
-    const { name, macro } = call;
-    // `()` gives one empty argument to a macro of one parameter and none to a macro of none.
-    const empty = call.args.length === 1 && call.args[0].length === 0;
-    const params = macro.params ?? [];
-    const args = empty && params.length !== 1 ? [] : call.args;
-    call.args = args;
-    if (params.length !== args.length) {
-      throw this.preprocessor.error(
-        this.preprocessor.row,
-        `マクロ ${name} には、引数を ${params.length} 個書いてください。`
-      );
-    }
-    chargeTypeWork(1 + args.reduce((total, arg) => total + arg.length, 0));
-    if (args.length === 0) {
-      this.finishCall(call);
-    } else {
-      this.calls.push(call);
-      this.expandArgument(call);
-    }
-  }
-
-  /** Starts expanding the next argument of a call on its own, under the macros disabled around the call. */
-  private expandArgument(call: Call): void {
-    this.sinks.push({ tokens: [], condition: this.condition });
-    this.frames.push({ tokens: call.args[call.expanded.length], position: 0, argument: true });
-  }
-
-  private finishArgument(): void {
-    const call = this.calls.at(-1) as Call;
-    call.expanded.push((this.sinks.pop() as Sink).tokens);
-    if (call.expanded.length < call.args.length) {
-      this.expandArgument(call);
-    } else {
-      this.calls.pop();
-      this.finishCall(call);
-    }
-  }
-
-  private finishCall({ name, macro, expanded }: Call): void {
-    const { params = [], body } = macro;
-    const argOf = (token: Token): Token[] | undefined =>
-      token.kind === 'name' ? expanded[params.indexOf(token.text)] : undefined;
-    chargeTypeWork(1 + body.reduce((total, token) => total + (argOf(token)?.length ?? 1), 0));
-    this.open(
-      name,
-      body.flatMap((token) => (argOf(token) ?? [token]).map((replacement) => ({ ...replacement })))
-    );
-  }
-}
-
-function trimSpaces(tokens: Token[]): Token[] {
-  let start = 0;
-  let end = tokens.length;
-  while (start < end && tokens[start].kind === 'space') start++;
-  while (end > start && tokens[end - 1].kind === 'space') end--;
-  return tokens.slice(start, end);
 }
 
 /** The tokens of a macro's body or a condition, where `--` and `{-` are no comments. */
@@ -518,11 +418,6 @@ class Lexer {
       newlines += Number(more);
     }
     return { rest, newlines };
-  }
-
-  /** The tokens of the line ahead unless it is a directive or there is none. */
-  codeLine(): Token[] | undefined {
-    return this.done || /^\s*#/.test(this.peekLine()) ? undefined : this.line();
   }
 
   peekLine(): string {
@@ -613,295 +508,113 @@ function stringEnd(text: string, start: number): number {
   return text[index] === '"' ? index + 1 : Math.min(index, text.length);
 }
 
-/**
- * An integer of the preprocessor's arithmetic, which C does in its widest types: a 64-bit `value`, signed (two's
- * complement) unless `unsigned`.
- */
-interface CInteger {
-  value: bigint;
-  unsigned: boolean;
-}
+/** The tokens of an `#if` condition after its macros are expanded. */
+const CONDITION_TOKEN = /\d[\w.]*|'(?:\\.[^']*|[^\\'])'|&&|\|\||==|!=|<=|>=|<<|>>|\S/g;
 
-/** The expression of an `#if`, parsed in full before any of it is evaluated. */
-type Condition =
-  | { k: 'integer'; integer: CInteger }
-  | { k: 'unary'; op: string; operand: Condition }
-  | { k: 'binary'; op: string; left: Condition; right: Condition }
-  | { k: 'conditional'; test: Condition; ifTrue: Condition; ifFalse: Condition };
-
-/**
- * The integer constants of C, which both read tokens and give their values: a prefix with the digits it takes, and
- * the suffixes C allows (`u` and `l` or `ll`, in either order, in one case each).
- */
-const INTEGER_CONSTANT = {
-  prefixes: [
-    { pattern: /^0[xX]([\da-fA-F]+)$/, radix: 16 },
-    { pattern: /^0[bB]([01]+)$/, radix: 2 },
-    { pattern: /^(0[0-7]*)$/, radix: 8 },
-    { pattern: /^([1-9]\d*)$/, radix: 10 },
-  ],
-  suffixes: ['', 'u', 'l', 'll', 'ul', 'lu', 'ull', 'llu'].flatMap((suffix) => [
-    ...new Set([suffix, suffix.toUpperCase(), suffix.replace('u', 'U'), suffix.replace(/l+/, (l) => l.toUpperCase())]),
-  ]),
-};
-
-const INT64_MAX = (1n << 63n) - 1n;
-const UINT64_MAX = (1n << 64n) - 1n;
-
-/** The tokens of an `#if` expression: C's numbers (which a word character continues), characters, and operators. */
-const CONDITION_TOKEN = /\d[\w.]*|'(?:\\.[^']*|[^\\'])'|&&|\|\||==|!=|<=|>=|<<|>>|[-+*/%()<>!~&|^?:]|\S/g;
-
-const BINARY_LEVELS: readonly (readonly string[])[] = [
-  ['||'],
-  ['&&'],
-  ['|'],
-  ['^'],
-  ['&'],
+const COMPARISONS: readonly (readonly string[])[] = [
   ['==', '!='],
   ['<', '>', '<=', '>='],
-  ['<<', '>>'],
-  ['+', '-'],
-  ['*', '/', '%'],
 ];
 
-/**
- * Parses the integer expression of an `#if`, after its macros are expanded, into a tree: the whole expression, so
- * that a syntax error is reported even in an operand that evaluation skips.
- */
+/** C's operators outside the subset, which a version or feature guard does not need. */
+const UNAVAILABLE_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '~', '<<', '>>', '?', ':']);
+
+/** Evaluates an `#if` condition after its macros are expanded: the grammar the subset of {@link preprocess} allows. */
 class ConditionParser {
   private readonly tokens: string[];
   private position = 0;
+  private readonly depth = new RecursionBudget();
 
   constructor(
     text: string,
-    private readonly error: (message: string) => Error
+    private readonly row: number
   ) {
     this.tokens = text.match(CONDITION_TOKEN) ?? [];
+    chargeTypeWork(1 + this.tokens.length);
   }
 
-  /** How deep the condition nests, which a deep condition from a macro may not exceed. */
-  private readonly depth = new RecursionBudget();
-
-  parse(): Condition {
-    const condition = this.ternary();
-    if (this.position < this.tokens.length) throw this.error(`#if の式 ${this.tokens.join(' ')} に誤りがあります。`);
-    return condition;
+  parse(): bigint {
+    const value = this.or();
+    if (this.position < this.tokens.length) this.unexpected(this.tokens[this.position]);
+    return value;
   }
 
-  private ternary(): Condition {
-    return this.depth.run(() => this.ternaryAtDepth());
+  private or(): bigint {
+    let value = this.and();
+    while (this.accept('||')) value = truth(this.and() !== 0n || value !== 0n);
+    return value;
   }
 
-  private ternaryAtDepth(): Condition {
-    const test = this.binary(0);
-    if (this.tokens[this.position] !== '?') return test;
-    this.position++;
-    const ifTrue = this.ternary();
-    this.expect(':');
-    const ifFalse = this.ternary();
-    return { k: 'conditional', test, ifTrue, ifFalse };
+  private and(): bigint {
+    let value = this.comparison(0);
+    while (this.accept('&&')) value = truth(this.comparison(0) !== 0n && value !== 0n);
+    return value;
   }
 
-  private binary(level: number): Condition {
-    if (level >= BINARY_LEVELS.length) return this.unary();
-    let left = this.binary(level + 1);
-    while (BINARY_LEVELS[level].includes(this.tokens[this.position])) {
+  private comparison(level: number): bigint {
+    if (level >= COMPARISONS.length) return this.unary();
+    let left = this.comparison(level + 1);
+    while (COMPARISONS[level].includes(this.tokens[this.position])) {
       const op = this.tokens[this.position++];
-      left = { k: 'binary', op, left, right: this.binary(level + 1) };
+      left = compare(op, left, this.comparison(level + 1));
     }
     return left;
   }
 
-  private unary(): Condition {
-    return this.depth.run(() => this.unaryAtDepth());
-  }
-
-  private unaryAtDepth(): Condition {
-    const token = this.tokens[this.position++];
-    switch (token) {
-      case '!':
-      case '-':
-      case '+':
-      case '~': {
-        return { k: 'unary', op: token, operand: this.unary() };
-      }
-      case '(': {
-        const inner = this.ternary();
-        this.expect(')');
+  private unary(): bigint {
+    return this.depth.run(() => {
+      const token = this.tokens[this.position++];
+      if (token === '!') return truth(this.unary() === 0n);
+      if (token === '(') {
+        const inner = this.or();
+        if (!this.accept(')')) throw compileError(this.row, '#if の式に ) がありません。');
         return inner;
       }
-      default: {
-        if (token === undefined) throw this.error('#if の式に誤りがあります（式の終わり）。');
-        if (token.startsWith("'")) return { k: 'integer', integer: { value: characterValue(token), unsigned: false } };
-        if (/^\d/.test(token)) return { k: 'integer', integer: this.integerConstant(token) };
-        throw this.error(`#if の式に誤りがあります（${token}）。`);
-      }
-    }
+      if (token !== undefined && /^\d/.test(token)) return this.integer(token);
+      return this.unexpected(token);
+    });
   }
 
-  /** The value of an integer constant, which is unsigned when its suffix says so or only an unsigned type holds it. */
-  private integerConstant(token: string): CInteger {
-    if (token.includes('.') || /^\d+[eE]/.test(token)) throw this.error('#if の式に小数は書けません。');
-    for (const { pattern, radix } of INTEGER_CONSTANT.prefixes) {
-      for (const suffix of INTEGER_CONSTANT.suffixes) {
-        if (suffix !== '' && !token.endsWith(suffix)) continue;
-        const digits = pattern.exec(token.slice(0, token.length - suffix.length))?.[1];
-        if (digits === undefined) continue;
-        const value = digits
-          .split('')
-          .reduce((total, digit) => total * BigInt(radix) + BigInt(Number.parseInt(digit, 16)), 0n);
-        if (value > UINT64_MAX) throw this.error(`#if の整数 ${token} は大きすぎます。`);
-        return { value, unsigned: /u/i.test(suffix) || value > INT64_MAX };
-      }
-    }
-    throw this.error(`#if の整数 ${token} の書き方に誤りがあります。`);
+  private integer(token: string): bigint {
+    if (!/^(?:0|[1-9]\d*)$/.test(token)) throw unsupportedError(this.row, `#if の中の 10 進数でない数（${token}）`);
+    return BigInt(token);
   }
 
-  private expect(token: string): void {
-    if (this.tokens[this.position] !== token) throw this.error(`#if の式に ${token} がありません。`);
+  private unexpected(token: string | undefined): never {
+    if (token === undefined) throw compileError(this.row, '#if の式に誤りがあります（式の終わり）。');
+    if (token.startsWith("'")) throw unsupportedError(this.row, `#if の中の文字定数（${token}）`);
+    if (UNAVAILABLE_OPERATORS.has(token)) throw unsupportedError(this.row, `#if の中の算術や条件演算子（${token}）`);
+    throw compileError(this.row, `#if の式に誤りがあります（${token}）。`);
+  }
+
+  private accept(token: string): boolean {
+    if (this.tokens[this.position] !== token) return false;
     this.position++;
+    return true;
   }
 }
 
-/** The value of a character constant such as `'a'` or `'\n'`, which is an `int`. */
-function characterValue(token: string): bigint {
-  const body = token.slice(1, -1);
-  if (!body.startsWith('\\')) return BigInt(body.codePointAt(0) ?? 0);
-  const escapes: Record<string, number> = { n: 10, t: 9, r: 13, '0': 0, a: 7, b: 8, f: 12, v: 11 };
-  const escaped = body.slice(1);
-  if (/^x[\da-fA-F]+$/.test(escaped)) return BigInt(Number.parseInt(escaped.slice(1), 16));
-  if (/^[0-7]{1,3}$/.test(escaped)) return BigInt(Number.parseInt(escaped, 8));
-  return BigInt(escapes[escaped] ?? escaped.codePointAt(0) ?? 0);
-}
-
-function cInteger(value: bigint, unsigned: boolean): CInteger {
-  return { value: unsigned ? BigInt.asUintN(64, value) : BigInt.asIntN(64, value), unsigned };
-}
-
-const truth = (value: boolean): CInteger => ({ value: value ? 1n : 0n, unsigned: false });
-
-/**
- * Evaluates a parsed `#if` expression with C's rules: `&&`, `||`, and `?:` evaluate only the operands they select;
- * an operand with an unsigned type makes the other unsigned too.
- */
-function evaluateCondition(
-  condition: Condition,
-  error: (message: string) => Error,
-  depth = new RecursionBudget()
-): CInteger {
-  const evaluate = (node: Condition): CInteger => depth.run(() => evaluateCondition(node, error, depth));
-  switch (condition.k) {
-    case 'integer': {
-      return condition.integer;
-    }
-    case 'unary': {
-      const { value, unsigned } = evaluate(condition.operand);
-      if (condition.op === '!') return truth(value === 0n);
-      if (condition.op === '-') return cInteger(-value, unsigned);
-      if (condition.op === '~') return cInteger(~value, unsigned);
-      return { value, unsigned };
-    }
-    case 'conditional': {
-      const test = evaluate(condition.test).value !== 0n;
-      // The result has the type both branches convert to, though only the chosen branch is evaluated.
-      const unsigned = isUnsigned(condition.ifTrue) || isUnsigned(condition.ifFalse);
-      const chosen = evaluate(test ? condition.ifTrue : condition.ifFalse);
-      return cInteger(chosen.value, unsigned);
-    }
-    case 'binary': {
-      const { op } = condition;
-      if (op === '&&') return truth(evaluate(condition.left).value !== 0n && evaluate(condition.right).value !== 0n);
-      if (op === '||') return truth(evaluate(condition.left).value !== 0n || evaluate(condition.right).value !== 0n);
-      return applyOperator(op, evaluate(condition.left), evaluate(condition.right), error);
-    }
-  }
-}
-
-/** Whether an expression has an unsigned type, which C decides without evaluating it. */
-function isUnsigned(condition: Condition): boolean {
-  // A stack, not recursion: a macro can build a condition far deeper than JavaScript's call stack.
-  const pending = [condition];
-  for (let part = pending.pop(); part; part = pending.pop()) {
-    switch (part.k) {
-      case 'integer': {
-        if (part.integer.unsigned) return true;
-        break;
-      }
-      case 'unary': {
-        if (part.op !== '!') pending.push(part.operand);
-        break;
-      }
-      case 'conditional': {
-        pending.push(part.ifTrue, part.ifFalse);
-        break;
-      }
-      case 'binary': {
-        if (['||', '&&', '==', '!=', '<', '>', '<=', '>='].includes(part.op)) break;
-        pending.push(part.left);
-        if (part.op !== '<<' && part.op !== '>>') pending.push(part.right);
-        break;
-      }
-      default: {
-        part satisfies never;
-      }
-    }
-  }
-  return false;
-}
-
-// code-gauge-allow functionCognitiveComplexity -- One case per C operator.
-function applyOperator(op: string, left: CInteger, right: CInteger, error: (message: string) => Error): CInteger {
-  if (op === '<<' || op === '>>') {
-    const shift = right.unsigned ? right.value : BigInt.asIntN(64, right.value);
-    const value = left.unsigned ? left.value : BigInt.asIntN(64, left.value);
-    if (shift < 0n || shift >= 64n) return cInteger(0n, left.unsigned);
-    return cInteger(op === '<<' ? value << shift : value >> shift, left.unsigned);
-  }
-  // The usual arithmetic conversions: when either operand is unsigned, both are.
-  const unsigned = left.unsigned || right.unsigned;
-  const a = cInteger(left.value, unsigned).value;
-  const b = cInteger(right.value, unsigned).value;
+function compare(op: string, left: bigint, right: bigint): bigint {
   switch (op) {
-    case '|': {
-      return cInteger(a | b, unsigned);
-    }
-    case '^': {
-      return cInteger(a ^ b, unsigned);
-    }
-    case '&': {
-      return cInteger(a & b, unsigned);
-    }
     case '==': {
-      return truth(a === b);
+      return truth(left === right);
     }
     case '!=': {
-      return truth(a !== b);
+      return truth(left !== right);
     }
     case '<': {
-      return truth(a < b);
+      return truth(left < right);
     }
     case '>': {
-      return truth(a > b);
+      return truth(left > right);
     }
     case '<=': {
-      return truth(a <= b);
-    }
-    case '>=': {
-      return truth(a >= b);
-    }
-    case '+': {
-      return cInteger(a + b, unsigned);
-    }
-    case '-': {
-      return cInteger(a - b, unsigned);
-    }
-    case '*': {
-      return cInteger(a * b, unsigned);
+      return truth(left <= right);
     }
     default: {
-      if (b === 0n) throw error('#if の式で 0 で割っています。');
-      // BigInt's division truncates toward zero and its remainder takes the dividend's sign, as C's do.
-      return cInteger(op === '/' ? a / b : a % b, unsigned);
+      return truth(left >= right);
     }
   }
 }
+
+const truth = (value: boolean): bigint => (value ? 1n : 0n);

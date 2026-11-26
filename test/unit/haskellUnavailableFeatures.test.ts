@@ -73,10 +73,12 @@ test('every extension GHC knows has a feature, is accepted without one, or is li
   }
 });
 
-test('CPU and OS dependent code and MagicHash values are reported as unavailable', async () => {
+test('CPU and OS dependent code, CPP outside its subset, and MagicHash values are reported as unavailable', async () => {
   const { executeProgram } = await import('../../src/interpreter/program');
   for (const source of [
     '{-# LANGUAGE CPP #-}\n#ifdef linux_HOST_OS\nx = 1\n#endif\nmain :: IO ()\nmain = print 0\n',
+    '{-# LANGUAGE CPP #-}\n#define F(x) x\nmain :: IO ()\nmain = print 0\n',
+    '{-# LANGUAGE CPP #-}\n#if __GLASGOW_HASKELL__ + 1 > 900\nx = 1\n#endif\nmain :: IO ()\nmain = print 0\n',
     '{-# LANGUAGE MagicHash #-}\nimport GHC.Exts\nmain :: IO ()\nmain = print (I# 3#)\n',
   ]) {
     const result = executeProgram('haskell', source);
