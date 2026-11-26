@@ -1,0 +1,6 @@
+const fs = require('fs');
+fs.writeFileSync(1, 'to fd1\n');
+fs.writeFileSync(2, 'to fd2\n');
+fs.appendFileSync(1, 'more fd1\n');
+fs.writeFileSync('/dev/stdout', 'path stdout\n');
+console.log('done');

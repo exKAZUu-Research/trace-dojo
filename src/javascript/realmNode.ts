@@ -183,9 +183,10 @@ function writeFile(runtime: Runtime, method: string, [file, content, options]: V
   const encoding = encodingOption(runtime, options);
   if (runtime.unavailableMember && encoding !== undefined && encoding !== null && !isUtf8(encoding))
     rejectUnavailableMember(`${method} の encoding: ${encodingLabel(runtime, encoding)}`, runtime.currentRow);
-  const path = requirePath(runtime, file);
+  // The descriptors 1 and 2 and the paths `/dev/stdout` and `/dev/stderr` are the run's standard streams, as 0 and
+  // `/dev/stdin` are its standard input.
+  const path = file === 1 || file === 2 ? `/dev/fd/${file}` : requirePath(runtime, file);
   const data = requireText(runtime, content, 'data');
-  // `/dev/stdout` and `/dev/stderr` are the run's standard streams, as `/dev/stdin` is its standard input.
   const stream = STANDARD_STREAMS[resolvePath(path) as keyof typeof STANDARD_STREAMS];
   if (stream) {
     runtime.io[stream].write(data);
