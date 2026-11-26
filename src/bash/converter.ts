@@ -50,6 +50,8 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
   /** The body of each here-document, by the start of its redirection, which the grammar puts after the command. */
   private readonly heredocBodies = new Map<number, Node>();
+  /** The here-documents the end of the input ends, by the row of their redirection, with the delimiter they wanted. */
+  private readonly unterminatedHeredocs: { row: number; delimiter: string }[] = [];
 
   private get source(): string {
     return this.analyzed.grammarSource;
@@ -99,7 +101,23 @@ export class Converter {
       const index = unitEndRows.findIndex((endRow) => endRow >= row);
       if (index !== -1 && !extglobRows.has(index)) extglobRows.set(index, { row, line: lines[row] ?? '' });
     }
-    return { units, unitEndRows, extglobRows };
+    return { units, unitEndRows, extglobRows, readWarnings: this.readWarnings(unitEndRows) };
+  }
+
+  /**
+   * The warnings Bash prints for here-documents the end of the input ends, at the line it is on then, as it reads the
+   * unit holding them.
+   */
+  private readWarnings(unitEndRows: readonly number[]): Map<number, string[]> {
+    const warnings = new Map<number, string[]>();
+    const endLine = this.analyzed.originalSource.split('\n').length;
+    for (const { row, delimiter } of this.unterminatedHeredocs) {
+      const index = unitEndRows.findIndex((endRow) => endRow >= row);
+      const unit = index === -1 ? unitEndRows.length - 1 : index;
+      const message = `line ${endLine}: warning: here-document at line ${row + 1} delimited by end-of-file (wanted \`${delimiter}')`;
+      warnings.set(unit, [...(warnings.get(unit) ?? []), message]);
+    }
+    return warnings;
   }
 
   /**
@@ -559,6 +577,9 @@ export class Converter {
     const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
     const contentEnd = end?.startIndex ?? body.endIndex;
     const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
+    // The grammar ends a body the end of the input ends with an empty `heredoc_end`.
+    if (!end || end.startIndex === end.endIndex)
+      this.unterminatedHeredocs.push({ row, delimiter: delimiter.replaceAll(/['"\\]/g, '') });
     const strip = (text: string, atLineStart: boolean): string =>
       stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
     if (/['"\\]/.test(delimiter)) {

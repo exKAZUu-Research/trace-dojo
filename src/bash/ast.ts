@@ -188,4 +188,9 @@ export interface Program {
    * `extglob` is off.
    */
   extglobRows: Map<number, { row: number; line: string }>;
+  /**
+   * For each unit holding here-documents that the end of the input ends, the warnings Bash prints as it reads the
+   * unit, before running it.
+   */
+  readWarnings?: Map<number, string[]>;
 }

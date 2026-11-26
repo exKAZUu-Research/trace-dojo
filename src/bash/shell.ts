@@ -107,10 +107,6 @@ function redirectsStandardInput(redirect: Redirect): boolean {
   return redirect.kind !== 'duplicate' || redirect.operator === '<&';
 }
 
-/**
- * Whether a forked process runs a compound command, in which `break` and `continue` are outside every loop, as in
- * Bash; a simple command, with `!` or alone in a pipeline, keeps the loops it was written in.
- */
 /** Whether a `while` condition is a lone `read`, which fails only once its input ends. */
 function isLoneRead(condition: readonly Statement[]): boolean {
   const [only] = condition;
@@ -134,6 +130,10 @@ function endsWith(shell: Shell, body: Statement, statement: Statement): boolean 
   return fn !== undefined && endsWith(shell, fn.body, statement);
 }
 
+/**
+ * Whether a forked process runs a compound command, in which `break` and `continue` are outside every loop, as in
+ * Bash; a simple command, with `!` or alone in a pipeline, keeps the loops it was written in.
+ */
 function runsCompoundCommand(command: Statement): boolean {
   if (command.kind === 'not') return runsCompoundCommand(command.body);
   if (command.kind === 'pipeline' && command.commands.length === 1) return runsCompoundCommand(command.commands[0]);
@@ -370,6 +370,7 @@ export class Shell implements ArithmeticHost {
     try {
       for (const [index, unit] of program.units.entries()) {
         this.lineShift = this.readShift;
+        for (const warning of program.readWarnings?.get(index) ?? []) this.fd2.write(`${SCRIPT_NAME}: ${warning}\n`);
         const extglobRow = program.extglobRows.get(index);
         if (extglobRow !== undefined && !this.options.extglob) return this.failExtglobLine(extglobRow);
         try {
