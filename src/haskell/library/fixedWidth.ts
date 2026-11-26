@@ -75,12 +75,7 @@ instance Enum ${name} where
   enumFromThenTo (${con} a) (${con} b) (${con} c) = map ${con} (enumFromThenTo a b c)
 
 instance Integral ${name} where
-  quot (${con} a) (${con} b) = if b == (-1) && a == (${lo}) then overflowError else ${wrap} (quot a b)
-  rem (${con} a) (${con} b) = ${wrap} (rem a b)
-  div (${con} a) (${con} b) = if b == (-1) && a == (${lo}) then overflowError else ${wrap} (div a b)
-  mod (${con} a) (${con} b) = ${wrap} (mod a b)
-  quotRem x y = (quot x y, rem x y)
-  divMod x y = (div x y, mod x y)
+${signed ? signedDivision(con, lo) : unsignedDivision(con)}
   toInteger (${con} x) = x
 
 instance Bits ${name} where
@@ -106,6 +101,48 @@ instance Bits ${name} where
 instance FiniteBits ${name} where
   finiteBitSize _ = ${bits}
 `;
+}
+
+function signedDivision(con: string, lo: bigint): string {
+  return String.raw`  quot (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) && a == (${lo}) = overflowError
+    | otherwise = ${con} (quot a b)
+  rem (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) = 0
+    | otherwise = ${con} (rem a b)
+  div (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) && a == (${lo}) = overflowError
+    | otherwise = ${con} (div a b)
+  mod (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) = 0
+    | otherwise = ${con} (mod a b)
+  quotRem (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) && a == (${lo}) = (overflowError, 0)
+    | otherwise = (${con} (quot a b), ${con} (rem a b))
+  divMod (${con} a) (${con} b)
+    | b == 0 = divZeroError
+    | b == (-1) && a == (${lo}) = (overflowError, 0)
+    | otherwise = (${con} (div a b), ${con} (mod a b))`;
+}
+
+function unsignedDivision(con: string): string {
+  return String.raw`  quot (${con} a) (${con} b)
+    | b /= 0 = ${con} (quot a b)
+    | otherwise = divZeroError
+  rem (${con} a) (${con} b)
+    | b /= 0 = ${con} (rem a b)
+    | otherwise = divZeroError
+  quotRem (${con} a) (${con} b)
+    | b /= 0 = (${con} (quot a b), ${con} (rem a b))
+    | otherwise = divZeroError
+  div x y = quot x y
+  mod x y = rem x y
+  divMod x y = quotRem x y`;
 }
 
 export const FIXED_WIDTH_SOURCE = FIXED_WIDTH_TYPES.map(({ name, bits, signed }) =>
