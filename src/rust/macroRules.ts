@@ -360,6 +360,11 @@ function matchFragment(fragment: string, tokens: Token[], start: number, followi
     case 'block': {
       return token?.kind === 'group' && token.open === '{' ? start + 1 : -1;
     }
+    case 'item':
+    case 'meta': {
+      const begins = fragment === 'item' ? beginsItem(tokens, start) : isPathStart(leafText(token));
+      return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
+    }
     default: {
       return matchUntilStop(fragment, tokens, start, following);
     }
@@ -375,6 +380,36 @@ function matchLiteral(tokens: Token[], start: number): number {
     return next?.kind === 'leaf' && next.type.endsWith('_literal') ? start + 2 : -1;
   }
   return token.type.endsWith('_literal') || token.text === 'true' || token.text === 'false' ? start + 1 : -1;
+}
+
+const ITEM_KEYWORDS = new Set([
+  'fn',
+  'struct',
+  'enum',
+  'union',
+  'impl',
+  'trait',
+  'mod',
+  'use',
+  'const',
+  'static',
+  'type',
+  'unsafe',
+  'extern',
+  'async',
+  'pub',
+  'macro_rules',
+]);
+
+/** Whether an item can begin at `start`, as rustc tells before it picks a rule: an attribute, a keyword, or a macro. */
+function beginsItem(tokens: Token[], start: number): boolean {
+  const first = leafText(tokens[start]);
+  if (first === '#' || (first !== undefined && ITEM_KEYWORDS.has(first))) return true;
+  return isPathStart(first) && leafText(tokens[start + 1]) === '!';
+}
+
+function isPathStart(text: string | undefined): boolean {
+  return text !== undefined && (text === '::' || /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(text));
 }
 
 /**
