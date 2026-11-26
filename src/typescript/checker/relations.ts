@@ -374,11 +374,28 @@ export class Relations {
     if (t.kind === s.kind && this.sameGeneric(s, t)) return true;
     if (s.kind === 'indexedAccess' && t.kind === 'indexedAccess') return this.relatedToIndexedAccess(s, t, relation);
     if (s.kind === 'conditional' && t.kind === 'conditional' && this.conditionalsRelated(s, t, relation)) return true;
+    if (this.isAwaitedOf(s, t)) return true;
     // TypeScript tries a conditional type's branches before their constraints, so `Exclude<keyof T, K>` fits `keyof T`.
     if (s.kind === 'conditional' && this.isRelated(s.trueType, t, relation) && this.isRelated(s.falseType, t, relation))
       return true;
     const constraint = this.c.baseConstraint(s);
     return constraint !== s && this.isRelated(constraint, t, relation, 0, EXPANDING_SOURCE);
+  }
+
+  /** The library's `Awaited<T>` of a type parameter, which TypeScript relates to `T` as what awaiting a `T` gives. */
+  private isAwaitedOf(source: Type, target: Type): boolean {
+    return (
+      source.kind === 'conditional' &&
+      target.kind === 'typeParameter' &&
+      source.aliasName === 'Awaited' &&
+      source.aliasArguments?.length === 1 &&
+      source.aliasArguments[0] === target &&
+      this.isLibraryDeclared(source.root ?? source)
+    );
+  }
+
+  private isLibraryDeclared(type: ConditionalType): boolean {
+    return type.declaration !== undefined && this.c.isLibrary(type.declaration);
   }
 
   private conditionalComparableToParameter(source: ConditionalType, target: TypeParameter): boolean {

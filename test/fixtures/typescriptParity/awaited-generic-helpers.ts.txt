@@ -1,0 +1,8 @@
+function h<T>(x: Awaited<T>): T { return x; }
+async function allOf<T>(ps: Promise<T>[]): Promise<T[]> { const arr = await Promise.all(ps); return arr; }
+async function allDirect<T>(ps: Promise<T>[]): Promise<T[]> { return Promise.all(ps); }
+async function pairUp<A, B>(a: Promise<A>, b: Promise<B>): Promise<[A, B]> { const pair = await Promise.all([a, b]); return pair; }
+async function getOne<T>(p: Promise<T>): Promise<T> { const v = await p; return v; }
+async function main() { console.log(await allOf([Promise.resolve(1)]), await allDirect([Promise.resolve(2)]), await pairUp(Promise.resolve(3), Promise.resolve("b")), await getOne(Promise.resolve("a"))); }
+main();
+console.log(typeof h);
