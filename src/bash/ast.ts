@@ -23,6 +23,11 @@ export type WordPart =
       text: string;
       row: number;
       syntaxError?: BackquoteSyntaxError;
+      /**
+       * The syntax error a backquoted body read with extended patterns has when `extglob` turns out off as it runs,
+       * where the program cannot tell which before it runs.
+       */
+      syntaxErrorWithoutExtglob?: BackquoteSyntaxError;
       /** `${ ...; }` runs in the current shell, and `${| ...; }` there too, expanding to `REPLY` instead. */
       mode?: 'current' | 'reply';
     }

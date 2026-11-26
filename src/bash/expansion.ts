@@ -372,6 +372,9 @@ export class Expander {
     inDouble: boolean
   ): WordSegment[] {
     if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
+    if (part.syntaxErrorWithoutExtglob && !this.shell.options.extglob) {
+      return this.failBackquoted(part.syntaxErrorWithoutExtglob, inDouble);
+    }
     const { output, status } = part.mode
       ? this.shell.captureCurrentShell(part.body, part.mode)
       : this.shell.captureSubshell(part.body, part.row);

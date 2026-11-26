@@ -17,7 +17,7 @@ import type {
 } from './ast';
 import { DECLARATION_OPTIONS, type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
-import { type AnalyzedBashSource, findForHeaderSemicolons } from './syntaxCheck';
+import { type AnalyzedBashSource, findForHeaderSemicolons, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
 import { isIdentifier } from './variables';
 
@@ -1037,6 +1037,11 @@ export class Converter {
     if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';
+    // A body read where `extglob` may be off is read again without it as it runs, as Bash reads it only then.
+    const withoutExtglob =
+      opening?.type === '`' && this.analyzed.backquoteUncertainExtglob.has(node.startIndex)
+        ? inspectUnescapedBackquoteBody(inner.replaceAll(/\\([$`\\])/g, '$1'), row, false)
+        : undefined;
     const body = /\\[$`\\]/.test(inner)
       ? this.hooks.reparse(
           inner.replaceAll(/\\([$`\\])/g, '$1'),
@@ -1044,7 +1049,13 @@ export class Converter {
           this.analyzed.backquoteExtglob.get(node.startIndex)
         )
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
-    return { kind: 'commandSubstitution', body, text, row };
+    return {
+      kind: 'commandSubstitution',
+      body,
+      text,
+      row,
+      ...(withoutExtglob ? { syntaxErrorWithoutExtglob: withoutExtglob } : {}),
+    };
   }
 
   private expansion(node: Node): ParameterExpansion {

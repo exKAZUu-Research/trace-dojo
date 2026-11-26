@@ -42,6 +42,8 @@ export interface AnalyzedBashSource {
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
   /** Whether each backquoted body, by its start offset, reads extended patterns, as `extglob` may be on there. */
   readonly backquoteExtglob: ReadonlyMap<number, boolean>;
+  /** The backquoted bodies, by start offset, read where `extglob` may be on or off, which the run decides. */
+  readonly backquoteUncertainExtglob: ReadonlySet<number>;
   readonly literalQuotes: ReadonlySet<number>;
   readonly declarationFunctionStarts: ReadonlySet<number>;
   /**
@@ -82,6 +84,7 @@ export function analyzeBashSource(parser: Parser, source: string, initialExtglob
     deferredExpansions,
     backquoteErrors: backquotes.errors,
     backquoteExtglob: new Map(checked.backquotes.map(({ start, extglob }) => [start, extglob])),
+    backquoteUncertainExtglob: new Set(checked.backquotes.filter((b) => b.extglobUncertain).map(({ start }) => start)),
     literalQuotes,
     declarationFunctionStarts,
     descriptorVariables: new Map(descriptorVariables.map(({ start, name }) => [start, name])),
@@ -104,7 +107,7 @@ export function checkBashSyntax(
   initialExtglob = false
 ): {
   error: BashSyntaxError | 'unknown' | undefined;
-  backquotes: { start: number; end: number; extglob: boolean }[];
+  backquotes: { start: number; end: number; extglob: boolean; extglobUncertain: boolean }[];
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
