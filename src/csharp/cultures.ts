@@ -1,4 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
+import { JAPANESE, ROOT } from './culture';
 import { intlCulture } from './intlCultures';
 import type { Runtime } from './runtime';
 import { CsObject, type Value } from './values';
@@ -241,6 +242,12 @@ export function cultureSettingsOf(runtime: Runtime): CultureSettings {
 /** The culture that formatting without a provider uses: `CultureInfo.CurrentCulture`. */
 export function currentCulture(runtime: Runtime): Culture {
   return cultureSettingsOf(runtime).current;
+}
+
+/** The `Intl` locale whose collation a culture's string comparisons use. */
+export function collationLocale(culture: Culture): string {
+  if (culture.isInvariant) return ROOT;
+  return culture.twoLetterIsoLanguageName === 'ja' ? JAPANESE : culture.name;
 }
 
 /** The state of a `CultureInfo` object. */

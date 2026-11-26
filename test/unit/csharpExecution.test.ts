@@ -864,3 +864,27 @@ try { new CultureInfo("en-"); } catch (CultureNotFoundException e) { Console.Wri
     ].join('\n'),
   });
 });
+
+// .NET 10.0.403 prints these: each culture sorts by its own tailoring, and Turkish pairs i with İ and ı with I.
+test('cultures compare and change case by their own rules', () => {
+  const program = String.raw`using System.Globalization;
+var words = new List<string> { "zebra", "äpple", "ña", "nz", "ch", "cz", "ıslak", "İstanbul", "iyi" };
+foreach (var name in new[] { "en-US", "sv-SE", "es-ES", "cs-CZ", "tr-TR" })
+{
+    CultureInfo.CurrentCulture = new CultureInfo(name);
+    words.Sort();
+    Console.WriteLine($"{name}: {string.Join(" ", words)} {"istanbul".ToUpper()} {"ILIK".ToLower()} {char.ToUpper('i')}");
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'en-US: äpple ch cz İstanbul iyi ıslak ña nz zebra ISTANBUL ilik I',
+      'sv-SE: ch cz İstanbul iyi ıslak ña nz zebra äpple ISTANBUL ilik I',
+      'es-ES: äpple ch cz İstanbul iyi ıslak nz ña zebra ISTANBUL ilik I',
+      'cs-CZ: äpple cz ch İstanbul iyi ıslak ña nz zebra ISTANBUL ilik I',
+      'tr-TR: äpple ch cz ıslak İstanbul iyi ña nz zebra İSTANBUL ılık İ',
+      '',
+    ].join('\n'),
+  });
+});

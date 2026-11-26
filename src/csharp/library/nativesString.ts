@@ -11,8 +11,9 @@ import {
   cultureStartsWith,
   equalsCulture,
   ordinalDifference,
+  ROOT,
 } from '../culture';
-import { cultureSettingsOf, currentCulture } from '../cultures';
+import { collationLocale, type Culture, cultureSettingsOf, currentCulture } from '../cultures';
 import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import { primitiveHash, toStringValue, unboxed } from '../objects';
@@ -81,7 +82,7 @@ function comparisonIn(call: NativeCall, comparison: number): number {
 /** A culture comparison of a `StringComparison`, whose work counts against the run's budget. */
 function cultureOf(call: NativeCall, comparison: number): CultureComparison {
   return {
-    isInvariant: comparison >= 2 || currentCulture(call.frame.runtime).isInvariant,
+    locale: comparison >= 2 ? ROOT : collationLocale(currentCulture(call.frame.runtime)),
     ignoreCase: comparison % 2 === 1,
     spend: (cost) => call.frame.runtime.spend(cost),
   };
@@ -550,16 +551,16 @@ const stringNatives: Record<string, NativeMethod> = {
     );
   },
   [`${STRING}.ToLower`]: (call, receiver) =>
-    caseMappedText(receiverText(receiver), false, currentCulture(call.frame.runtime).isInvariant),
-  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false, true),
+    caseMappedText(receiverText(receiver), false, casingOf(currentCulture(call.frame.runtime))),
+  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false, 'invariant'),
   [`${STRING}.Normalize`]: (call, receiver, [form]) => normalizedText(call, receiverText(receiver), form, 'strInput'),
   [`${STRING}.IsNormalized`]: (call, receiver, [form]) => {
     const text = receiverText(receiver);
     return normalizedText(call, text, form, 'source') === text;
   },
   [`${STRING}.ToUpper`]: (call, receiver) =>
-    caseMappedText(receiverText(receiver), true, currentCulture(call.frame.runtime).isInvariant),
-  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, true),
+    caseMappedText(receiverText(receiver), true, casingOf(currentCulture(call.frame.runtime))),
+  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, 'invariant'),
   [`${STRING}.ToString`]: (_call, receiver) => receiverText(receiver),
   [`${STRING}.Trim()`]: (_call, receiver) => trimWith(receiverText(receiver), undefined, true, true),
   [`${STRING}.Trim(char)`]: (_call, receiver, [char]) =>
@@ -946,11 +947,11 @@ defineNatives({
   [`${CHAR}.IsBetween`]: (_call, _receiver, [value, low, high]) =>
     (value as number) >= (low as number) && (value as number) <= (high as number),
   [`${CHAR}.ToUpper`]: (call, _receiver, [value]) =>
-    caseMapped(value as number, true, currentCulture(call.frame.runtime).isInvariant),
-  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true, true),
+    caseMapped(value as number, true, casingOf(currentCulture(call.frame.runtime))),
+  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true, 'invariant'),
   [`${CHAR}.ToLower`]: (call, _receiver, [value]) =>
-    caseMapped(value as number, false, currentCulture(call.frame.runtime).isInvariant),
-  [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false, true),
+    caseMapped(value as number, false, casingOf(currentCulture(call.frame.runtime))),
+  [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false, 'invariant'),
   [`${CHAR}.GetNumericValue`]: (_call, _receiver, args) => {
     const [value, index] = args as Value[];
     const char = typeof value === 'string' ? value.charAt(index as number) : String.fromCharCode(value as number);
@@ -1008,9 +1009,11 @@ defineNatives({
  * .NET's simple case mapping of a character, which keeps one character: `ß` stays as JavaScript's `SS` would expand
  * it, and `İ` lowers to `i` without JavaScript's combining dot.
  */
-function caseMapped(code: number, upper: boolean, isInvariant = false): number {
+function caseMapped(code: number, upper: boolean, casing: Casing = 'cultural'): number {
   // The invariant culture keeps the dotless i and the dotted capital I, whose case pairs belong to Turkish.
-  if (isInvariant && code === (upper ? DOTLESS_I : DOTTED_CAPITAL_I)) return code;
+  if (casing === 'invariant' && code === (upper ? DOTLESS_I : DOTTED_CAPITAL_I)) return code;
+  // Turkish and Azerbaijani pair i with İ and ı with I.
+  if (casing === 'turkish' && code === (upper ? SMALL_I : CAPITAL_I)) return upper ? DOTTED_CAPITAL_I : DOTLESS_I;
   const char = String.fromCharCode(code);
   const mapped = upper ? char.toUpperCase() : char.toLowerCase();
   if (mapped.length === 1) return mapped.charCodeAt(0);
@@ -1018,13 +1021,24 @@ function caseMapped(code: number, upper: boolean, isInvariant = false): number {
 }
 
 /** Maps each character of a text as `ToUpper` and `ToLower` do, without JavaScript's context-sensitive rules. */
-function caseMappedText(text: string, upper: boolean, isInvariant = false): string {
+function caseMappedText(text: string, upper: boolean, casing: Casing = 'cultural'): string {
   let result = '';
   for (let index = 0; index < text.length; index++)
-    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper, isInvariant));
+    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper, casing));
   return result;
 }
 
+/** The case rules of a culture: the invariant culture's, Turkish ones, or the ones every other culture shares. */
+type Casing = 'invariant' | 'turkish' | 'cultural';
+
+function casingOf(culture: Culture): Casing {
+  if (culture.isInvariant) return 'invariant';
+  return TURKISH_CASING.has(culture.twoLetterIsoLanguageName) ? 'turkish' : 'cultural';
+}
+
+const TURKISH_CASING = new Set(['tr', 'az']);
+const SMALL_I = 0x69;
+const CAPITAL_I = 0x49;
 const DOTLESS_I = 0x1_31;
 const DOTTED_CAPITAL_I = 0x1_30;
 const LONG_S = 0x1_7f;

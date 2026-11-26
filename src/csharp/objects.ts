@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { compareCulture, ordinalDifference } from './culture';
-import { type Culture, cultureSettingsOf, currentCulture } from './cultures';
+import { collationLocale, type Culture, cultureSettingsOf, currentCulture } from './cultures';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { decimalText, formatFloat, integerText } from './format';
@@ -432,7 +432,7 @@ function comparePrimitives(runtime: Runtime, x: Value, y: Value): number | undef
 function compareStrings(runtime: Runtime, x: string, y: string): number {
   const settings = cultureSettingsOf(runtime);
   if (settings.isGlobalizationInvariant) return ordinalDifference(x, y);
-  return compareCulture(x, y, { spend: (cost) => runtime.spend(cost), isInvariant: settings.current.isInvariant });
+  return compareCulture(x, y, { spend: (cost) => runtime.spend(cost), locale: collationLocale(settings.current) });
 }
 
 /** The order of two numbers, where NaN comes before every other number, as `double.CompareTo` does. */
