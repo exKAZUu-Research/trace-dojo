@@ -1273,10 +1273,16 @@ export class Checker {
   private inferRecordUpdate(expr: Extract<RExpr, { k: 'recordUpdate' }>): Type {
     const target = this.inferExpr(expr.expr);
     const owner = expr.fields[0].field.type;
-    const cons = owner.cons.filter((con) => expr.fields.every((fieldBind) => fieldBind.field.positions.has(con)));
-    if (cons.length === 0 || !expr.fields.every((fieldBind) => fieldBind.field.type === owner)) {
+    const sharing = owner.cons.filter((con) => expr.fields.every((fieldBind) => fieldBind.field.positions.has(con)));
+    if (sharing.length === 0 || !expr.fields.every((fieldBind) => fieldBind.field.type === owner)) {
       typeError(expr.span, 'これらのフィールドをすべて持つ構成子がありません。');
     }
+    // Data instances may share the fields' names: the record's type, as far as it is known, picks the instance.
+    const record = zonk(target);
+    const matching = sharing.filter(
+      (con) => !con.instanceArgs || couldMatch(tap(tcon(owner), ...con.instanceArgs), record)
+    );
+    const cons = matching.length > 0 ? matching : sharing;
     expr.cons = cons;
     const input = this.instantiateCon(cons[0]);
     const output = this.instantiateCon(cons[0]);
