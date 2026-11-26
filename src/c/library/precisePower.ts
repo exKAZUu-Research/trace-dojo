@@ -1,6 +1,7 @@
 import { Decimal } from 'decimal.js';
 
-import { exactParts, roundBinary } from './binaryFloat';
+import { exactParts } from '../../interpreter/floatFormat';
+import { roundBinary } from './binaryFloat';
 
 const HighPrecision = Decimal.clone({ precision: 100, rounding: Decimal.ROUND_HALF_EVEN });
 

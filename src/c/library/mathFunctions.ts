@@ -1,10 +1,11 @@
+import { exactParts } from '../../interpreter/floatFormat';
 import type { Scalar } from '../arith';
 import { CRuntimeError } from '../errors';
 import { constantOperand, type SpecialCall } from '../expressionCompiler';
 import type { NativeFunction, Runtime } from '../runtime';
 import { INT } from '../types';
 import { appleFloatPower } from './appleFloatPower';
-import { exactParts, fma, roundBinary, roundSquareRoot } from './binaryFloat';
+import { fma, roundBinary, roundSquareRoot } from './binaryFloat';
 import { precisePower } from './precisePower';
 import { asAddress, asNumber, writeBytes } from './support';
 

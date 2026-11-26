@@ -1,4 +1,5 @@
 import { type Interpreter, type ProgramExecution, type ProgramTrace, traceWith } from './interpreter';
+import { interpreter as bash } from './languages/bash';
 import { interpreter as c } from './languages/c';
 import { interpreter as cpp } from './languages/cpp';
 import { interpreter as csharp } from './languages/csharp';
@@ -36,10 +37,11 @@ const interpreters = {
   dart,
   haskell,
   csharp,
+  bash,
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python and Ruby, `-- atomic` in Haskell).
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python, Ruby, and Bash, `-- atomic` in Haskell).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
