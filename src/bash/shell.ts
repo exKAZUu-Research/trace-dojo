@@ -88,6 +88,7 @@ interface ShellContextOptions {
   readonly options?: ShellOptionValues;
   readonly ignoresErrexit?: boolean;
   readonly traps?: Map<TrapCondition, Trap>;
+  readonly shownTraps?: ReadonlyMap<TrapCondition, Trap>;
   readonly traceLevel?: number;
   readonly lineShift?: number;
   readonly readShift?: number;
@@ -114,6 +115,11 @@ export class Shell implements ArithmeticHost {
   readonly traceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
+  /**
+   * The parent's traps, which `trap -p` in a subshell shows until the subshell sets or resets a trap, as Bash does,
+   * though the subshell does not run them.
+   */
+  shownTraps: ReadonlyMap<TrapCondition, Trap> | undefined;
   /** The traps running now, which do not run again until they end, as Bash runs none of them inside itself. */
   private readonly runningTraps = new Set<TrapCondition>();
   /**
@@ -144,6 +150,7 @@ export class Shell implements ArithmeticHost {
     this.options = options?.options ?? defaultOptions();
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
     this.traps = options?.traps ?? new Map();
+    this.shownTraps = options?.shownTraps;
     this.traceLevel = options?.traceLevel ?? 1;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
@@ -1429,7 +1436,10 @@ export class Shell implements ArithmeticHost {
   }
 
   /** What a subshell copies from this shell besides its variables: descriptors and options. */
-  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit' | 'traps' | 'traceLevel'> {
+  childContext(): Pick<
+    ShellContextOptions,
+    'fds' | 'options' | 'ignoresErrexit' | 'traps' | 'shownTraps' | 'traceLevel'
+  > {
     // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
     const traps = [...this.traps].filter(
       ([condition, trap]) => trap.statements.length === 0 || (condition === 'ERR' && this.options.errtrace)
@@ -1439,6 +1449,7 @@ export class Shell implements ArithmeticHost {
       options: { ...this.options },
       ignoresErrexit: this.errexitIgnored > 0,
       traps: new Map(traps),
+      shownTraps: this.shownTraps ?? new Map(this.traps),
       traceLevel: this.traceLevel,
     };
   }

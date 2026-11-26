@@ -1,4 +1,5 @@
 import type { Statement } from './ast';
+import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
 import { parseTrapAction } from './parse';
 import { singleQuote } from './quoting';
@@ -58,14 +59,14 @@ const SIGNAL_NAMES = new Set([
  */
 // code-gauge-allow functionCognitiveComplexity -- Handles printing, resetting, ignoring, and setting traps, which Bash's `trap` tells apart by its operands.
 export const trapBuiltin: Builtin = (shell, args) => {
-  let operands = args;
-  let prints = false;
-  if (operands[0] === '-p') {
-    prints = true;
-    operands = operands.slice(1);
-  } else if (operands[0] === '-l') rejectUnsupportedFeature('シグナルの一覧（trap -l）');
-  if (operands[0] === '--') operands = operands.slice(1);
-  if (prints || operands.length === 0) return printTraps(shell, operands);
+  const parsed = parseBuiltinOptions(shell, 'trap', args, 'lpP', 'trap [-Plp] [[action] signal_spec ...]');
+  if (typeof parsed === 'number') return parsed;
+  const { options, operands } = parsed;
+  if (options.has('l')) rejectUnsupportedFeature('シグナルの一覧（trap -l）');
+  if (options.has('P')) return printTrapActions(shell, operands);
+  if (options.has('p') || operands.length === 0) return printTraps(shell, operands);
+  // A subshell that changes a trap shows its own traps from then on.
+  shell.shownTraps = undefined;
   const [first, ...rest] = operands;
   const resets = first === '-' || (rest.length === 0 && conditionOf(first) !== undefined);
   const specs = resets && first !== '-' ? operands : rest;
@@ -90,21 +91,46 @@ export const trapBuiltin: Builtin = (shell, args) => {
 };
 
 function printTraps(shell: Shell, specs: readonly string[]): number {
+  const conditions = conditionsOf(shell, specs);
+  if (conditions === undefined) return 1;
+  const traps = shell.shownTraps ?? shell.traps;
+  for (const condition of conditions.length > 0 ? conditions : (['EXIT', 'ERR'] as const)) {
+    const trap = traps.get(condition);
+    if (trap) shell.fd1.write(`trap -- ${singleQuote(trap.text)} ${condition}\n`);
+  }
+  return 0;
+}
+
+/** `trap -P`, which prints the actions alone of the conditions it names. */
+function printTrapActions(shell: Shell, specs: readonly string[]): number {
+  if (specs.length === 0) {
+    shell.reportError('trap: -P requires at least one signal name');
+    shell.fd2.write('trap: usage: trap [-Plp] [[action] signal_spec ...]\n');
+    return 2;
+  }
+  const conditions = conditionsOf(shell, specs);
+  if (conditions === undefined) return 1;
+  const traps = shell.shownTraps ?? shell.traps;
+  for (const condition of conditions) {
+    const trap = traps.get(condition);
+    if (trap) shell.fd1.write(`${trap.text}\n`);
+  }
+  return 0;
+}
+
+/** The conditions that operands name, or `undefined` after reporting one Bash does not know. */
+function conditionsOf(shell: Shell, specs: readonly string[]): TrapCondition[] | undefined {
   const conditions: TrapCondition[] = [];
   for (const spec of specs) {
     const condition = conditionOf(spec);
     if (condition === 'invalid') {
       shell.reportError(`trap: ${spec}: invalid signal specification`);
-      return 1;
+      return undefined;
     }
     if (condition === undefined) rejectUnsupportedCondition(spec);
     conditions.push(condition);
   }
-  for (const condition of conditions.length > 0 ? conditions : (['EXIT', 'ERR'] as const)) {
-    const trap = shell.traps.get(condition);
-    if (trap) shell.fd1.write(`trap -- ${singleQuote(trap.text)} ${condition}\n`);
-  }
-  return 0;
+  return conditions;
 }
 
 /** Rejects a signal, or the `DEBUG` or `RETURN` condition, which this environment does not provide. */
