@@ -1254,6 +1254,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       ...receiverLevels,
       ...(this.withConstructors(scope, name, cls, receiverLevels.length + packageLevels.length === 0, row) ??
         packageLevels),
+      ...(cls?.companion ? this.companionInvokeLevels(scope, cls.companion, row) : []),
     ];
     if (levels.length === 0) {
       if (local) throw local;
@@ -1297,6 +1298,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (nested?.isInner) return nested;
     }
     return undefined;
+  }
+
+  /** The `invoke` operators of a class's companion object, which `Foo(1)` calls when no constructor takes it. */
+  private companionInvokeLevels(scope: Scope, companion: ClassSymbol, row: number): CallLevel[] {
+    const receiver: Compiled = {
+      type: companion.type,
+      repr: 'ref',
+      eval: this.objectInstance(companion),
+      stableKey: keyOf(companion),
+    };
+    return this.memberCallLevels(scope, receiver, 'invoke', row).filter(
+      (level) => 'candidates' in level && level.candidates.some((candidate) => candidate.symbol.isOperator)
+    );
   }
 
   /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
