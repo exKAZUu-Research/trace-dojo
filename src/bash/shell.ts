@@ -414,8 +414,8 @@ export class Shell implements ArithmeticHost {
         return status;
       }
       case 'pipeline': {
-        const status = this.executePipeline(statement.commands);
-        this.checkErrexit(status);
+        const { status, checked } = this.executePipeline(statement.commands);
+        if (!checked) this.checkErrexit(status);
         return status;
       }
       case 'background': {
@@ -484,28 +484,32 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Runs a pipeline's commands one after another, each in a subshell that reads what the one before it wrote, since
-   * builtins and functions run in one process here; with `lastpipe`, the last runs in this shell.
+   * builtins and functions run in one process here; with `lastpipe`, the last runs in this shell. `checked` tells
+   * that the failure the pipeline returns is that of a last command which already ran the `ERR` trap and `set -e`
+   * in this shell, so that one failing pipeline runs them once.
    */
-  private executePipeline(commands: readonly Statement[]): number {
+  private executePipeline(commands: readonly Statement[]): { status: number; checked: boolean } {
     const statuses: number[] = [];
     let input: OpenFile | undefined;
+    let lastRanHere = false;
     for (const [index, command] of commands.entries()) {
       const isLast = index === commands.length - 1;
       const capture = isLast ? undefined : createCaptureBuffer((cost) => this.runtime.spend(cost));
       const fds = this.fds.clone();
       if (input) fds.set(0, input);
       if (capture) fds.set(1, { output: capture.target });
+      lastRanHere = isLast && this.options.lastpipe && input !== undefined;
       statuses.push(
-        isLast && this.options.lastpipe && input
-          ? this.runWithStandardInput(input, command)
-          : this.runSubshell([command], fds)
+        lastRanHere && input ? this.runWithStandardInput(input, command) : this.runSubshell([command], fds)
       );
       if (capture) input = { input: this.runtime.io.textReader(capture.read()) };
     }
     this.store.pipeStatus = statuses;
     const last = statuses.at(-1) as number;
-    if (!this.options.pipefail) return last;
-    return statuses.findLast((status) => status !== 0) ?? 0;
+    // A failed last command decides the status with or without `pipefail`.
+    const checked = lastRanHere && last !== 0;
+    if (!this.options.pipefail) return { status: last, checked };
+    return { status: statuses.findLast((status) => status !== 0) ?? 0, checked };
   }
 
   /**
