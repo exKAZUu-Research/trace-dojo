@@ -278,3 +278,52 @@ echo never
     uncaughtException: 'main.sh: line 3: 前に進む: Out of bounds: (0, 7)',
   });
 });
+
+test('input, files, pipes, process substitutions, and here-documents read and write as Java programs do', () => {
+  const program = `total=0
+while read -r name score; do
+  echo "$name:$score" >> scores.txt
+  total=$(( total + score ))
+done
+mapfile -t lines < scores.txt
+upper() { while IFS= read -r l; do echo "\${l^^}"; done; }
+printf '%s\\n' "\${lines[@]}" | upper
+cat_lines() { while IFS= read -r l; do echo "> $l"; done < "$1"; }
+cat_lines notes.txt
+cat_lines <(echo "total $total")
+upper <<EOF
+here $total
+EOF
+echo missing > /nodir/x.txt
+`;
+  expect(
+    executeProgram('bash', program, { stdin: 'alice 3\nbob 4\n', files: { 'notes.txt': 'first note\n' } })
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'ALICE:3\nBOB:4\n> first note\n> total 7\nHERE 7\n',
+    stderr: 'main.sh: line 15: /nodir/x.txt: No such file or directory\n',
+    finalFiles: { 'notes.txt': 'first note\n', 'scores.txt': 'alice:3\nbob:4\n' },
+  });
+});
+
+test('background commands, output process substitutions, and coprocesses run in a fixed order', () => {
+  // Bash runs these alongside the shell, so its order varies from run to run; this is one order it produces.
+  const program = `job() { echo "job $1"; return "$1"; }
+job 1 & job 2 &
+echo main
+wait -n; echo "first=$?"
+up() { while read -r l; do echo "\${l^^}"; done; }
+echo hello > >(up)
+echo after
+coproc C { up; }
+echo ping >&"\${C[1]}"
+read -r reply <&"\${C[0]}"
+echo "reply=$reply"
+echo late >&"\${C[1]}"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'job 1\njob 2\nmain\nfirst=1\nHELLO\nafter\nreply=PING\n',
+    uncaughtException: '動き終わった coproc（C）への書き込みは、この採点環境では使えません。',
+  });
+});
