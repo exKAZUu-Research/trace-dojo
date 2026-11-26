@@ -1284,7 +1284,14 @@ export class Shell implements ArithmeticHost {
     }
     this.store.lastArgument = '';
     const status = this.expander.lastSubstitutionStatus;
-    return this.withRedirects(statement.redirects, () => status);
+    if (!statement.redirects.some((redirect) => redirect.fdVariable !== undefined)) {
+      return this.withRedirects(statement.redirects, () => status);
+    }
+    // Without a command word, Bash keeps neither the descriptor nor the variable of a `{name}` redirection, as if
+    // it were performed in a subshell; files it opens are still created and its errors still reported.
+    const child = this.forkSubshell(this.fds.clone(), undefined, 0).shell;
+    child.currentRow = this.currentRow;
+    return child.withRedirects(statement.redirects, () => status);
   }
 
   private withTemporaryScope(assignments: Assignment[], run: () => number): number {
