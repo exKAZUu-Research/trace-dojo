@@ -513,12 +513,14 @@ export class Shell implements ArithmeticHost {
     const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
     let output: string | undefined;
     const job: { status: number; reported: boolean; finish?: () => void } = { status: 0, reported: false };
+    // The coprocess copies the shell's state when it starts, though it runs later.
+    const child = this.forkSubshell(this.fds.clone());
     const run = (): void => {
       job.finish = undefined;
       const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
-      const fds = this.descriptorsWith(0, { input: this.runtime.io.textReader(input.read()) });
-      fds.set(1, { output: capture.target });
-      job.status = this.runSubshell([body], fds);
+      child.fds.set(0, { input: this.runtime.io.textReader(input.read()) });
+      child.fds.set(1, { output: capture.target });
+      job.status = child.run([body]);
       output = capture.read();
     };
     job.finish = run;
@@ -1260,11 +1262,18 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */
-  runSubshell(
-    body: Statement[],
+  runSubshell(body: Statement[], fds: DescriptorTable, overrides?: SubshellOverrides): number {
+    return this.forkSubshell(fds, overrides).run(body);
+  }
+
+  /**
+   * Copies this shell into a child shell now, as Bash forks, returning the child's descriptors and what runs
+   * statements in it, which may happen later, as a coprocess does.
+   */
+  private forkSubshell(
     fds: DescriptorTable,
-    overrides?: { lineShift: number; options: ShellOptionValues; traceLevel: number; readsFile: boolean }
-  ): number {
+    overrides?: SubshellOverrides
+  ): { fds: DescriptorTable; run: (body: Statement[]) => number } {
     this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1);
     const lineShift = overrides?.lineShift ?? this.lineShift;
@@ -1277,21 +1286,24 @@ export class Shell implements ArithmeticHost {
       readShift: lineShift,
       loopDepth: this.loopDepth,
     });
-    const subshellFrame: Frame = {
-      callRow: undefined,
-      isAtomic: false,
-      store: childStore,
-      scopeIndex: childStore.topScopeIndex,
+    const run = (body: Statement[]): number => {
+      const subshellFrame: Frame = {
+        callRow: undefined,
+        isAtomic: false,
+        store: childStore,
+        scopeIndex: childStore.topScopeIndex,
+      };
+      this.runtime.frames.push(subshellFrame);
+      try {
+        const status = overrides?.readsFile
+          ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
+          : runSubshellCommands(childShell, body);
+        return childShell.runExitTrap(status);
+      } finally {
+        this.runtime.frames.pop();
+      }
     };
-    this.runtime.frames.push(subshellFrame);
-    try {
-      const status = overrides?.readsFile
-        ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
-        : runSubshellCommands(childShell, body);
-      return childShell.runExitTrap(status);
-    } finally {
-      this.runtime.frames.pop();
-    }
+    return { fds, run };
   }
 
   /** Runs `$(< file)`, which Bash replaces with the file's contents without running a command. */
@@ -1469,6 +1481,14 @@ export class Shell implements ArithmeticHost {
   splitSubscript(text: string): { name: string; subscript: string } | undefined {
     return splitSubscriptText(text);
   }
+}
+
+/** What a command substitution changes in the subshell it runs in. */
+interface SubshellOverrides {
+  lineShift: number;
+  options: ShellOptionValues;
+  traceLevel: number;
+  readsFile: boolean;
 }
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
