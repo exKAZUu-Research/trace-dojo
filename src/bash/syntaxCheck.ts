@@ -397,6 +397,16 @@ const REDIRECTION_OPERATORS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', 
 const WORD_BREAK_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
 const DECLARATION_NAMES = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
 
+/** Whether `token` is `{name}` written right before a redirection operator, as in `{fd}>file`. */
+function isDescriptorVariableWord(token: ShellToken, source: string): boolean {
+  return (
+    token.kind === 'word' &&
+    !token.quoted &&
+    /^\{[A-Za-z_]\w*(?:\[[^\]]*\])?\}$/.test(token.value) &&
+    (source[token.end] === '<' || source[token.end] === '>')
+  );
+}
+
 function isAssignmentWord(word: string): boolean {
   const open = word.indexOf('[');
   const eq = word.indexOf('=');
@@ -1136,7 +1146,11 @@ class ShellGrammarValidator {
   }
 
   private parseTrailingRedirections(): void {
-    while (this.peek().kind === 'ioNumber' || this.isRedirectionOperator(this.peek())) {
+    for (;;) {
+      const token = this.peek();
+      // `{name}` right before an operator names the descriptor the redirection allocates, as after a simple command.
+      if (isDescriptorVariableWord(token, this.text.source)) this.advance();
+      else if (token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) return;
       this.parseOneRedirection();
     }
   }

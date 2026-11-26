@@ -6,7 +6,7 @@ import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitte
 import { skipSubscript } from './arithmetic';
 import type { ParameterExpansion, Program, Statement, WordPart } from './ast';
 import { rejectUnsupportedFeature } from './capabilities';
-import { Converter, decodeAnsiC } from './converter';
+import { Converter, decodeAnsiC, descriptorVariableBefore } from './converter';
 import { analyzeBashSource, createValidatorSourceText, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { syntaxErrorsOf } from './syntaxErrors';
 import type { SourceText } from './syntaxWords';
@@ -49,9 +49,25 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
       return program;
     },
     {
-      locateErrors: (root: Node) => syntaxErrorsOf(root, analyzed.grammarSource, isEmptySubscript),
-      isBenignError: isEmptySubscript,
+      locateErrors: (root: Node) => syntaxErrorsOf(root, analyzed.grammarSource, isBenignError),
+      isBenignError,
     }
+  );
+}
+
+/** The error nodes of the grammar that are no syntax errors in Bash. */
+function isBenignError(node: Node): boolean {
+  return isEmptySubscript(node) || isDescriptorVariableError(node);
+}
+
+/** `{name}` before a compound command's redirection, which the grammar reads as an error and the converter as a name. */
+function isDescriptorVariableError(node: Node): boolean {
+  const next = node.nextSibling;
+  return (
+    node.type === 'ERROR' &&
+    node.parent?.type === 'redirected_statement' &&
+    next !== null &&
+    descriptorVariableBefore(next) !== undefined
   );
 }
 
