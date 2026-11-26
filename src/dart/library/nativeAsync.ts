@@ -131,6 +131,9 @@ function advance(state: SuspendedBody, resumption: Resumption): Outcome {
   return { kind: 'yield', value: request as Value };
 }
 
+/** Calls a member of a body's `_SuspendState`. */
+type StateCall = (name: string, ...positional: Value[]) => Value;
+
 /**
  * Does what a suspended or finished body asked for, as the VM's `_SuspendState` does, giving how the body continues
  * at once when its stream's listener has gone.
@@ -140,9 +143,8 @@ function perform(
   state: SuspendedBody & { object: DartObject },
   outcome: Outcome
 ): Resumption | undefined {
-  const call = (name: string, ...positional: Value[]): Value =>
+  const call: StateCall = (name, ...positional) =>
     runtime.invoke(state.object, asyncMember(name), { positional, named: undefined }, [], undefined);
-  const wasSuspended = state.hasSuspended;
   switch (outcome.kind) {
     case 'return': {
       if (state.isStar) call('_returnAsyncStar');
@@ -150,48 +152,66 @@ function perform(
       return undefined;
     }
     case 'throw': {
+      const { value, stackTrace } = outcome.error;
       if (state.escapesUncaught) {
         state.escapesUncaught = false;
-        call('_escapeAwait', outcome.error.value, outcome.error.stackTrace);
-        return undefined;
+        call('_escapeAwait', value, stackTrace);
+      } else {
+        call('_handleException', state.hasSuspended, value, stackTrace);
       }
-      call('_handleException', wasSuspended, outcome.error.value, outcome.error.stackTrace);
       return undefined;
     }
     case 'await': {
-      state.hasSuspended = true;
-      try {
-        call(outcome.isNotFuture ? '_awaitNotFutureOfType' : '_await', outcome.value);
-        state.escapesUncaught = false;
-      } catch (error) {
-        // A future of the program's own whose then throws throws at the await, inside the body, which has not
-        // suspended there.
-        if (!(error instanceof DartThrow)) throw error;
-        state.hasSuspended = wasSuspended;
-        if (!wasSuspended) state.escapesUncaught = true;
-        return { kind: 'throw', error };
-      }
-      return undefined;
+      return performAwait(state, outcome, call);
     }
     default: {
-      state.hasSuspended = true;
-      let cancelled: Value;
-      try {
-        cancelled =
-          outcome.kind === 'yieldEach'
-            ? call('_yieldEachAsyncStar', outcome.stream)
-            : call('_yieldAsyncStar', outcome.value);
-      } catch (error) {
-        // A stream yield* cannot listen to, as one already listened to, throws at the yield*, inside the body.
-        if (error instanceof DartThrow) return { kind: 'throw', error };
-        throw error;
-      }
-      // An `async*` body's `yield` ends it when the stream's listener has gone, and otherwise waits for the listener.
-      if (cancelled === true) return { kind: 'next', value: LISTENER_CANCELLED };
-      state.atYield = true;
-      return undefined;
+      return performYield(state, outcome, call);
     }
   }
+}
+
+function performAwait(
+  state: SuspendedBody,
+  outcome: Extract<Outcome, { kind: 'await' }>,
+  call: StateCall
+): Resumption | undefined {
+  const wasSuspended = state.hasSuspended;
+  state.hasSuspended = true;
+  try {
+    call(outcome.isNotFuture ? '_awaitNotFutureOfType' : '_await', outcome.value);
+  } catch (error) {
+    // A future of the program's own whose then throws throws at the await, inside the body, which has not
+    // suspended there.
+    if (!(error instanceof DartThrow)) throw error;
+    state.hasSuspended = wasSuspended;
+    if (!wasSuspended) state.escapesUncaught = true;
+    return { kind: 'throw', error };
+  }
+  state.escapesUncaught = false;
+  return undefined;
+}
+
+function performYield(
+  state: SuspendedBody,
+  outcome: Extract<Outcome, { kind: 'yield' | 'yieldEach' }>,
+  call: StateCall
+): Resumption | undefined {
+  state.hasSuspended = true;
+  let cancelled: Value;
+  try {
+    cancelled =
+      outcome.kind === 'yieldEach'
+        ? call('_yieldEachAsyncStar', outcome.stream)
+        : call('_yieldAsyncStar', outcome.value);
+  } catch (error) {
+    // A stream yield* cannot listen to, as one already listened to, throws at the yield*, inside the body.
+    if (error instanceof DartThrow) return { kind: 'throw', error };
+    throw error;
+  }
+  // An `async*` body's `yield` ends it when the stream's listener has gone, and otherwise waits for the listener.
+  if (cancelled === true) return { kind: 'next', value: LISTENER_CANCELLED };
+  state.atYield = true;
+  return undefined;
 }
 
 /**
