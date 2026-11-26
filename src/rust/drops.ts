@@ -41,6 +41,8 @@ export class Dropper {
   }
 
   private counted = false;
+  /** The types `needsDrop` met again inside themselves during the current outermost query. */
+  private readonly cutAt = new Set<string>();
 
   /** Whether any value of the program can need dropping. */
   get active(): boolean {
@@ -57,10 +59,14 @@ export class Dropper {
   needsDrop(type: Type, seen: Type[] = []): boolean {
     if (!this.active) return false;
     const t = normalize(shallow(type));
-    if (seen.some((other) => sameType(other, t))) return false;
     const key = typeKey(t);
     const known = this.needs.get(key);
     if (known !== undefined) return known;
+    // A type met again inside itself adds nothing to what its other parts need.
+    if (seen.some((other) => sameType(other, t))) {
+      this.cutAt.add(key);
+      return false;
+    }
     const inner = [...seen, t];
     let result: boolean;
     switch (t.kind) {
@@ -92,7 +98,11 @@ export class Dropper {
         result = false;
       }
     }
-    this.needs.set(key, result);
+    // A `false` found while a type it is inside was cut short may change once that type is known, so only the
+    // outermost type's answer is final.
+    this.cutAt.delete(key);
+    if (result || this.cutAt.size === 0 || seen.length === 0) this.needs.set(key, result);
+    if (seen.length === 0) this.cutAt.clear();
     return result;
   }
 
