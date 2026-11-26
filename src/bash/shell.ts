@@ -1463,9 +1463,11 @@ export class Shell implements ArithmeticHost {
   private executeExec(statement: Extract<Statement, { kind: 'command' }>, args: string[], lastArg: string): number {
     const [command] = operands(args);
     if (command !== undefined) rejectUnsupportedFeature(`外部コマンド（exec ${command}）`);
-    const status = this.withTemporaryScope(statement.assignments, () =>
-      this.applyPermanentRedirects(statement.redirects)
-    );
+    const status = this.withTemporaryScope(statement.assignments, () => {
+      // Traced as any simple command is, before its redirections change the shell's own error output.
+      if (this.options.xtrace) traceWords(this, ['exec', ...args]);
+      return this.applyPermanentRedirects(statement.redirects);
+    });
     this.store.lastArgument = lastArg;
     return status;
   }
