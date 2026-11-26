@@ -170,8 +170,6 @@ export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
   eval: '文字列の評価（eval）',
   source: '別ファイルの読み込み（source）',
   '.': '別ファイルの読み込み（.）',
-  trap: 'trap',
-  wait: 'wait',
   jobs: 'ジョブ制御（jobs）',
   fg: 'ジョブ制御（fg）',
   bg: 'ジョブ制御（bg）',
@@ -449,12 +447,6 @@ export function rejectUnsupportedPrefixAssignment(
   }
 }
 
-export function rejectUnsupportedTestOperator(operator: string): never {
-  if (operator === '-o') throw new UnsupportedFeatureError('シェルのオプションを調べる演算子（-o）');
-  if (operator === '-t') throw new UnsupportedFeatureError('端末を調べる演算子（-t）');
-  throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
-}
-
 export function rejectUnsupportedPrintfConversion(conversion: 'n' | '('): never {
   if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
   throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
@@ -471,7 +463,6 @@ export function rejectUnsupportedBracketClass(): never {
 export type UnsupportedExpansionKind =
   | 'tilde'
   | 'pid'
-  | 'bgPid'
   | 'initialLastArg'
   | 'extglob'
   | 'promptTransform'
@@ -480,7 +471,6 @@ export type UnsupportedExpansionKind =
 const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
   tilde: '~ の展開',
   pid: 'プロセス番号（$$）',
-  bgPid: 'バックグラウンドのプロセス番号（$!）',
   initialLastArg: 'Bash のパス（最初の $_）',
   extglob: '拡張パターン（@( ... ) など）',
   promptTransform: 'プロンプトの展開（${x@P}）',

@@ -60,6 +60,19 @@ function isEmptySubscript(node: Node): boolean {
   return node.type === 'raw_string' && node.startIndex === node.endIndex && node.parent?.type === 'subscript';
 }
 
+/**
+ * The commands of a `trap` action, read when the trap is set, numbered as the `trap` command's line so that their
+ * steps show there. A syntax error in the action stops the program, as an action Bash could not run.
+ */
+export function parseTrapAction(text: string, row: number): Statement[] {
+  try {
+    return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
+  } catch (error) {
+    if (error instanceof CompileError) rejectUnsupportedFeature('構文エラーのある trap の文字列');
+    throw error;
+  }
+}
+
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
 function reparseBackquoted(text: string, row: number): Statement[] {
   return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();

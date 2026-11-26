@@ -1,5 +1,6 @@
 import { legalNumber } from './characters';
 import { cdBuiltin, dirsBuiltin, popdBuiltin, pushdBuiltin, pwdBuiltin } from './directoryBuiltins';
+import { waitBuiltin } from './jobBuiltins';
 import { setBuiltin, shoptBuiltin } from './optionBuiltins';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
@@ -8,6 +9,7 @@ import { BreakSignal, ContinueSignal, ExitSignal, ReturnSignal } from './runtime
 import type { Shell } from './shell';
 import { resolveScalarTarget, resolveSubscriptTarget, unsetResolvedElement, writeResolvedTarget } from './targets';
 import { testBuiltin } from './testBuiltin';
+import { trapBuiltin } from './trapBuiltins';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { isIdentifier } from './variables';
 
@@ -335,5 +337,7 @@ export const REGULAR_BUILTINS: Record<string, Builtin> = {
   pushd: pushdBuiltin,
   popd: popdBuiltin,
   dirs: dirsBuiltin,
+  wait: waitBuiltin,
+  trap: trapBuiltin,
   ...TURTLE_BUILTINS,
 };

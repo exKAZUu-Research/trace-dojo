@@ -1,6 +1,7 @@
 import { FileSystemError, type FileSystemErrorCode, type OpenMode, resolvePath } from '../interpreter/programIo';
 import type { Redirect, Word } from './ast';
 import { DescriptorTable, nullFile, type OpenFile } from './descriptors';
+import { descriptorOfPath } from './fileTests';
 import type { Shell } from './shell';
 
 /** A redirection that failed, whose message Bash prints before skipping the command with status 1. */
@@ -24,9 +25,6 @@ const FILE_SYSTEM_MESSAGES: Record<FileSystemErrorCode, string> = {
 export function fileSystemMessage(error: FileSystemError): string {
   return FILE_SYSTEM_MESSAGES[error.code];
 }
-
-/** The descriptors a path under `/dev/fd` or a `/dev/std*` name copies, as macOS and Linux open them. */
-const DESCRIPTOR_PATHS: Record<string, number> = { '/dev/stdin': 0, '/dev/stdout': 1, '/dev/stderr': 2 };
 
 /**
  * Applies redirections to the shell's descriptors in order, as Bash does after expanding a command's words, throwing
@@ -115,7 +113,7 @@ export function openPath(
   const absolute = shell.absolutePath(path);
   const device = resolvePath(absolute);
   if (device === '/dev/null') return nullFile(io.textReader(''));
-  const descriptor = DESCRIPTOR_PATHS[device] ?? descriptorPathNumber(device);
+  const descriptor = descriptorOfPath(device);
   if (descriptor !== undefined) {
     const file = shell.fds.get(descriptor);
     if (!file) throw new RedirectionError(`${path}: No such file or directory`);
@@ -148,13 +146,8 @@ export function openPath(
   }
 }
 
-function descriptorPathNumber(absolute: string): number | undefined {
-  const match = /^\/dev\/fd\/(\d+)$/.exec(absolute);
-  return match ? Number(match[1]) : undefined;
-}
-
 function descriptorOfVariable(shell: Shell, name: string): number {
-  const value = shell.store.readScalar(name);
+  const value = shell.readNamed(name);
   if (value === undefined || !/^\d+$/.test(value)) throw new RedirectionError(`${value ?? ''}: ambiguous redirect`);
   return Number(value);
 }

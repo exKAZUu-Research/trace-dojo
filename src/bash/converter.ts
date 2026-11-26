@@ -37,7 +37,7 @@ type FileRedirectOperator = Extract<Redirect, { kind: 'file' }>['operator'];
 const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>', '&>>']);
 
 /** A `{name}` word written right before a redirection, which names the variable that receives its descriptor. */
-const FD_VARIABLE_PATTERN = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+const FD_VARIABLE_PATTERN = /^\{([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)\}$/;
 
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
@@ -73,7 +73,7 @@ export class Converter {
     let previousEndRow = 0;
     for (const child of root.children) {
       if (!child.isNamed) {
-        this.checkTerminator(child);
+        if (child.type === '&') runInBackground(unit);
         continue;
       }
       if (child.type === 'comment') continue;
@@ -123,15 +123,11 @@ export class Converter {
     this.fail(node, unsupportedSyntaxMessage(kind, detail));
   }
 
-  private checkTerminator(node: Node): void {
-    if (node.type === '&') this.unsupported(node, 'background');
-  }
-
   private statements(nodes: Node[]): Statement[] {
     const result: Statement[] = [];
     for (const node of nodes) {
       if (!node.isNamed) {
-        this.checkTerminator(node);
+        if (node.type === '&') runInBackground(result);
         continue;
       }
       if (node.type === 'comment' || node.type === 'heredoc_body') continue;
@@ -219,7 +215,9 @@ export class Converter {
         return { ...base, kind: 'subshell', body: this.nonEmpty(node, this.statements(node.children)) };
       }
       case 'coproc_command': {
-        return this.unsupported(node, 'coproc');
+        const body = node.namedChildren.findLast((child) => child?.type !== 'comment') as Node;
+        const name = node.childForFieldName('name')?.text ?? 'COPROC';
+        return { ...base, kind: 'coproc', name, body: this.statement(body) };
       }
       case 'timed_command': {
         return this.unsupported(node, 'time');
@@ -589,7 +587,6 @@ export class Converter {
 
   private forStatement(node: Node): Statement {
     const row = node.startPosition.row;
-    if (node.childForFieldName('keyword')?.type === 'select') this.unsupported(node, 'select');
     const hasIn = node.children.some((child) => child.type === 'in');
     const varNode = node.childForFieldName('variable');
     const variable = varNode
@@ -602,6 +599,7 @@ export class Converter {
       variable,
       values: hasIn ? this.fieldNodes(node, 'value').map((value) => this.word(value)) : undefined,
       body: this.body(node.childForFieldName('body') as Node),
+      ...(node.childForFieldName('keyword')?.type === 'select' ? { select: true } : {}),
     };
   }
 
@@ -818,7 +816,14 @@ export class Converter {
         ];
       }
       case 'process_substitution': {
-        return this.unsupported(node, 'processSubstitution');
+        return [
+          {
+            kind: 'processSubstitution',
+            direction: node.child(0)?.type === '>(' ? '>' : '<',
+            body: this.statements(node.children.filter((child) => child.isNamed || child.type === '&')),
+            text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
+          },
+        ];
       }
       case 'extglob_pattern': {
         return [{ kind: 'literal', text: this.restoreQuotes(node.text, node.startIndex) }];
@@ -899,6 +904,12 @@ export class Converter {
     } else expansion.name = parameter.text;
     return expansion;
   }
+}
+
+/** Makes the last statement run in the background, as the `&` after it does. */
+function runInBackground(statements: Statement[]): void {
+  const last = statements.pop();
+  if (last) statements.push({ row: last.row, lineRow: last.lineRow, kind: 'background', body: last });
 }
 
 /** A command whose standard error also goes to its output, after its own redirections, as `|&` makes it. */

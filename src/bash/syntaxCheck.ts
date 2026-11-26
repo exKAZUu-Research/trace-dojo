@@ -419,6 +419,13 @@ function isCompoundAssignmentPrefix(prefix: string): boolean {
 
 type WordContext = 'command' | 'declaration' | 'argument';
 
+/** Whether a compound command starts at `index`, past blanks, which makes the word before it a coprocess's name. */
+function startsCompoundCommand(source: string, index: number): boolean {
+  return /^[ \t]*(?:[{(]|\[\[|(?:if|while|until|for|case|select)(?![^\s;&|<>()]))/.test(
+    source.slice(index, index + 16)
+  );
+}
+
 /** Whether `extglob` is on after a line of the script, which `shopt -s extglob` or `shopt -u extglob` changes. */
 function extglobAfterLine(line: string, enabled: boolean): boolean {
   let result = enabled;
@@ -763,6 +770,10 @@ class ShellGrammarValidator {
         }
         if (lead.value === 'coproc') {
           this.advance();
+          const name = this.peek();
+          if (name.kind === 'word' && !this.isKeywordToken(name) && startsCompoundCommand(this.text.source, name.end)) {
+            this.advance();
+          }
           this.parseCommand();
           return;
         }

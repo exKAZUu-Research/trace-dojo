@@ -1,8 +1,9 @@
 import { ArithmeticError, ArithmeticStoreError, evaluateArithmetic } from './arithmetic';
 import type { TestExpression } from './ast';
-import { FILE_TEST_OPERATORS, rejectUnsupportedTestOperator } from './capabilities';
+import { FILE_TEST_OPERATORS } from './capabilities';
 import { charactersOf, legalNumber } from './characters';
 import { compareCollated } from './collation';
+import { fileComparison, fileTest } from './fileTests';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
 import { isResolvedTargetSet, resolveScalarTarget, resolveSubscriptTarget } from './targets';
@@ -62,7 +63,7 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
   const right = expander.expandString(expression.right);
   if (operator === '<') return compareCollated(left, right) < 0;
   if (operator === '>') return compareCollated(left, right) > 0;
-  if (FILE_TEST_OPERATORS.has(operator)) rejectUnsupportedTestOperator(operator);
+  if (FILE_TEST_OPERATORS.has(operator)) return fileComparison(shell, operator, left, right);
   const compare = ARITHMETIC_OPERATORS[operator];
   const leftNum = conditionalNumber(shell, left);
   if (leftNum === undefined) return false;
@@ -102,7 +103,7 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
       return view?.attributes.has('n') === true && view.kind !== 'unset';
     }
     default: {
-      return rejectUnsupportedTestOperator(operator);
+      return fileTest(shell, operator, operand);
     }
   }
 }

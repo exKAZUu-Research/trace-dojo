@@ -26,7 +26,9 @@ export type WordPart =
       /** `${ ...; }` runs in the current shell, and `${| ...; }` there too, expanding to `REPLY` instead. */
       mode?: 'current' | 'reply';
     }
-  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource; rawText: string };
+  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource; rawText: string }
+  /** `<(...)` or `>(...)`, which expands to a path that reads the commands' output or feeds their input. */
+  | { kind: 'processSubstitution'; direction: '<' | '>'; body: Statement[]; text: string };
 
 /** A syntax error in a backquoted body, which Bash reports when it runs the substitution, with the line it shows. */
 export interface BackquoteSyntaxError {
@@ -145,7 +147,8 @@ export type Statement = StatementBase &
     | { kind: 'test'; expression: TestExpression; text: string }
     | { kind: 'if'; clauses: { condition: Statement[]; body: Statement[] }[]; elseBody: Statement[] | undefined }
     | { kind: 'while'; until: boolean; condition: Statement[]; body: Statement[] }
-    | { kind: 'for'; variable: string; values: Word[] | undefined; body: Statement[] }
+    /** `for name in words` or, with `select`, the menu loop that reads a choice of the words for each iteration. */
+    | { kind: 'for'; variable: string; values: Word[] | undefined; body: Statement[]; select?: boolean }
     | {
         kind: 'arithmeticFor';
         init: ArithmeticSource | undefined;
@@ -162,6 +165,10 @@ export type Statement = StatementBase &
     | { kind: 'redirected'; body: Statement; redirects: Redirect[] }
     /** `( ... )`, which runs its body in a copy of the shell. */
     | { kind: 'subshell'; body: Statement[] }
+    /** `coproc [name] command`, which runs the command with pipes to and from the shell in `name` (`COPROC`). */
+    | { kind: 'coproc'; name: string; body: Statement }
+    /** A command followed by `&`, which runs in a subshell without waiting for it. */
+    | { kind: 'background'; body: Statement }
     /** Commands joined by `|`, where `|&` has added `2>&1` after the redirections of the command before it. */
     | { kind: 'pipeline'; commands: Statement[] }
   );

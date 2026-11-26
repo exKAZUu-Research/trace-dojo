@@ -177,7 +177,8 @@ class ConditionalValidator {
       this.current = { kind: 'newline', value: '\n', row };
       return;
     }
-    if (context !== 'regex') {
+    const startsProcessSubstitution = (ch === '<' || ch === '>') && source[this.cursor + 1] === '(';
+    if (context !== 'regex' && !startsProcessSubstitution) {
       const punct =
         MULTI_CHAR_PUNCTS.find((candidate) => source.startsWith(candidate, this.cursor)) ??
         (SINGLE_CHAR_PUNCTS.has(ch) ? ch : undefined);
@@ -196,7 +197,9 @@ class ConditionalValidator {
     const begin = this.cursor;
     while (this.cursor < source.length) {
       const ch = source[this.cursor];
-      if (context === 'regex' && ch === '(') {
+      if ((ch === '<' || ch === '>') && source[this.cursor + 1] === '(' && this.cursor === begin) {
+        this.cursor = this.text.parseSubstitution(this.cursor + 2);
+      } else if (context === 'regex' && ch === '(') {
         this.cursor = skipBalanced(this.text, this.cursor, '(', ')');
       } else if (context === 'regex' && ch === '|') {
         this.cursor++;

@@ -18,9 +18,10 @@ import {
   rejectUnsupportedNamerefMutation,
   rejectUnsupportedPrefixAssignment,
 } from './capabilities';
+import { legalNumber } from './characters';
 import { conditionalStatus } from './conditional';
 import { executeCompoundAssignment, executeDeclarationCommand } from './declare';
-import { BadDescriptorError, type DescriptorTable, type OpenFile, type OutputTarget } from './descriptors';
+import { BadDescriptorError, type DescriptorTable, nullFile, type OpenFile, type OutputTarget } from './descriptors';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
 import { defaultOptions, type ShellOptionValues } from './options';
@@ -35,6 +36,7 @@ import {
   ReturnSignal,
   type Runtime,
 } from './runtime';
+import { formatSelectMenu } from './selectMenu';
 import {
   readResolvedTarget,
   resolveScalarTarget,
@@ -42,6 +44,7 @@ import {
   resolveTargetName,
   writeResolvedTarget,
 } from './targets';
+import type { Trap, TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
 
@@ -51,6 +54,9 @@ export type { CompoundElement } from './variables';
 type StepMode = 'statement' | 'binding' | 'skip';
 
 const CONDITION_BUILTINS = new Set<string>(['test', '[', 'true', 'false', ...TURTLE_PREDICATE_NAMES]);
+
+/** The descriptor of the first process substitution, below which Bash numbers the next ones. */
+const PROCESS_SUBSTITUTION_FIRST_FD = 63;
 
 /** What a writer to a closed descriptor gets, which fails the write as Bash's `write` does. */
 const CLOSED_OUTPUT: OutputTarget = {
@@ -67,6 +73,7 @@ interface ShellContextOptions {
   readonly fds?: DescriptorTable;
   readonly options?: ShellOptionValues;
   readonly ignoresErrexit?: boolean;
+  readonly traps?: Map<TrapCondition, Trap>;
   readonly lineShift?: number;
   readonly readShift?: number;
   readonly loopDepth?: number;
@@ -90,6 +97,11 @@ export class Shell implements ArithmeticHost {
    * after `!`, whose functions and subshells ignore it as well.
    */
   private errexitIgnored: number;
+  /** The commands `trap` set for the shell's exit and for failed commands. */
+  readonly traps: Map<TrapCondition, Trap>;
+  private runningTrap = false;
+  /** The descriptors of process substitutions that the commands running now use, with what each runs when done. */
+  private readonly processSubstitutions: { fd: number; finish?: () => void }[] = [];
   private readShift: number;
   private lineShift: number;
   private loopDepth: number;
@@ -101,6 +113,7 @@ export class Shell implements ArithmeticHost {
     this.fds = options?.fds ?? initialDescriptors({ runtime });
     this.options = options?.options ?? defaultOptions();
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
+    this.traps = options?.traps ?? new Map();
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
     this.loopDepth = options?.loopDepth ?? 0;
@@ -127,6 +140,44 @@ export class Shell implements ArithmeticHost {
 
   runProgram(program: Program): number {
     this.runtime.frames.push({ callRow: undefined, isAtomic: false, store: this.store, scopeIndex: 0 });
+    const status = this.runExitTrap(this.runUnits(program));
+    this.finishCoprocesses();
+    return status;
+  }
+
+  /** Runs the `EXIT` trap as the shell ends with `status`, returning the status it ends with, which `exit` may set. */
+  runExitTrap(status: number): number {
+    try {
+      this.runTrap('EXIT', status);
+    } catch (error) {
+      if (error instanceof ExitSignal) return error.status;
+      throw error;
+    }
+    return status;
+  }
+
+  /**
+   * Runs a trap's commands with `$?` holding the status that set it off, numbering their lines as that command's,
+   * and restores `$?` afterwards. A trap does not set itself off while it runs.
+   */
+  private runTrap(condition: TrapCondition, status: number): void {
+    const trap = this.traps.get(condition);
+    if (!trap || trap.statements.length === 0 || this.runningTrap) return;
+    const saved = { lineShift: this.lineShift, row: this.currentRow };
+    this.runningTrap = true;
+    this.store.lastStatus = status;
+    this.lineShift = trap.row - this.currentRow;
+    try {
+      this.runStatements(trap.statements);
+    } finally {
+      this.runningTrap = false;
+      this.lineShift = saved.lineShift;
+      this.currentRow = saved.row;
+      this.store.lastStatus = status;
+    }
+  }
+
+  private runUnits(program: Program): number {
     try {
       for (const [index, unit] of program.units.entries()) {
         this.lineShift = this.readShift;
@@ -170,14 +221,62 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  /** Exits after a failed command when `set -e` is on and the command's context does not ignore the failure. */
+  /**
+   * Handles a failed command whose context does not ignore the failure: runs the `ERR` trap, which functions run
+   * only under `set -E`, and exits when `set -e` is on.
+   */
   private checkErrexit(status: number): void {
     if (status === 0 || this.errexitIgnored > 0) return;
+    if (this.options.errtrace || !this.isInFunction) this.runTrap('ERR', status);
     if (this.options.errexit) throw new ExitSignal(status);
   }
 
   // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
   execute(statement: Statement, guarded = false): number {
+    const mark = this.processSubstitutions.length;
+    let completed = false;
+    try {
+      const status = this.executeStatement(statement, guarded);
+      completed = true;
+      return status;
+    } finally {
+      this.closeProcessSubstitutions(mark, completed);
+    }
+  }
+
+  /**
+   * Runs `<(...)` at once with its output kept for the path it expands to, or for `>(...)` keeps what is written to
+   * the path for the commands, which run once the command using the path ends. Bash runs them alongside the command,
+   * so these orders are ones it could take.
+   */
+  openProcessSubstitution(direction: '<' | '>', body: Statement[]): string {
+    const fd = this.highestFreeDescriptor(PROCESS_SUBSTITUTION_FIRST_FD);
+    if (direction === '<') {
+      const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
+      this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
+      this.fds.set(fd, { input: this.runtime.io.textReader(capture.read()) });
+      this.processSubstitutions.push({ fd });
+    } else {
+      const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
+      this.fds.set(fd, { output: capture.target });
+      this.processSubstitutions.push({
+        fd,
+        finish: () => {
+          this.runSubshell(body, this.descriptorsWith(0, { input: this.runtime.io.textReader(capture.read()) }));
+        },
+      });
+    }
+    return `/dev/fd/${fd}`;
+  }
+
+  private closeProcessSubstitutions(mark: number, completed: boolean): void {
+    for (const { fd, finish } of this.processSubstitutions.splice(mark)) {
+      this.fds.close(fd);
+      if (completed) finish?.();
+    }
+  }
+
+  private executeStatement(statement: Statement, guarded: boolean): number {
     this.runtime.spend();
     this.currentRow = statement.lineRow - this.lineShift;
     let status: number;
@@ -254,6 +353,14 @@ export class Shell implements ArithmeticHost {
       case 'pipeline': {
         status = this.executePipeline(statement.commands);
         this.checkErrexit(status);
+        break;
+      }
+      case 'background': {
+        status = this.runInBackground(statement.body);
+        break;
+      }
+      case 'coproc': {
+        status = this.startCoprocess(statement.name, statement.body);
         break;
       }
     }
@@ -340,6 +447,85 @@ export class Shell implements ArithmeticHost {
     return statuses.findLast((status) => status !== 0) ?? 0;
   }
 
+  /**
+   * Runs a command started with `&` at once and to its end, before the commands after it, as if each background
+   * command ran until it finished before the shell went on. Its standard input is `/dev/null`, as Bash's is without
+   * job control, so it never waits for input.
+   */
+  private runInBackground(command: Statement): number {
+    const fds = this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
+    const status = this.runSubshell([command], fds);
+    const pid = this.runtime.allocateProcessId();
+    this.store.jobs.set(pid, { status, reported: false });
+    this.store.lastBackgroundPid = pid;
+    return 0;
+  }
+
+  /**
+   * Starts a coprocess, which runs once the shell first reads its output or waits for it, or when the script ends,
+   * reading what the shell wrote to it until then. A coprocess that answers each line as it comes would need to run
+   * alongside the shell, so writing to it after it has run is rejected.
+   */
+  private startCoprocess(name: string, body: Statement): number {
+    const pid = this.runtime.allocateProcessId();
+    const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
+    let output: string | undefined;
+    const job: { status: number; reported: boolean; finish?: () => void } = { status: 0, reported: false };
+    const run = (): void => {
+      job.finish = undefined;
+      const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
+      const fds = this.descriptorsWith(0, { input: this.runtime.io.textReader(input.read()) });
+      fds.set(1, { output: capture.target });
+      job.status = this.runSubshell([body], fds);
+      output = capture.read();
+    };
+    job.finish = run;
+    // Bash moves both ends of both pipes to high descriptors and keeps the first and the last of the four.
+    const pipeEnds: number[] = [];
+    for (let fd = PROCESS_SUBSTITUTION_FIRST_FD; pipeEnds.length < 4; fd--) {
+      if (!this.fds.get(fd)) pipeEnds.push(fd);
+    }
+    const readFd = pipeEnds[0];
+    const writeFd = pipeEnds[3];
+    this.fds.set(readFd, {
+      input: this.runtime.io.partReader(
+        () => output ?? '',
+        () => {
+          if (output !== undefined) {
+            this.store.unsetNamed(name, false);
+            this.store.unsetNamed(`${name}_PID`, false);
+            return false;
+          }
+          run();
+          return output !== '';
+        }
+      ),
+    });
+    this.fds.set(writeFd, {
+      output: {
+        write: (text) => {
+          if (output !== undefined) rejectUnsupportedFeature(`動き終わった coproc（${name}）への書き込み`);
+          input.target.write(text);
+        },
+      },
+    });
+    this.store.jobs.set(pid, job);
+    this.assignIndexedArray(name, [String(readFd), String(writeFd)], 'coproc');
+    this.assignVariable(`${name}_PID`, String(pid));
+    return 0;
+  }
+
+  private highestFreeDescriptor(limit: number): number {
+    let fd = limit;
+    while (this.fds.get(fd)) fd--;
+    return fd;
+  }
+
+  /** Runs the coprocesses nothing has read from, as they run to their end when the script ends. */
+  finishCoprocesses(): void {
+    for (const job of this.store.jobs.values()) job.finish?.();
+  }
+
   private runWithDescriptors(fds: DescriptorTable, command: Statement): number {
     const saved = this.fds.clone();
     this.fds.restore(fds);
@@ -392,9 +578,46 @@ export class Shell implements ArithmeticHost {
         : [...this.store.positionalArgs()];
       const bindsObjects = values.some((value) => this.runtime.isTurtleHandle(value) || this.namesStructure(value));
       this.restoringLine(() => {
-        this.runForIterations(statement, values, bindsObjects, last);
+        if (statement.select) this.runSelectIterations(statement, values, last);
+        else this.runForIterations(statement, values, bindsObjects, last);
       });
     });
+  }
+
+  /**
+   * Runs `select`: shows the numbered words and `PS3` on standard error, reads a line into `REPLY`, and runs the body
+   * with the variable set to the chosen word, or empty for a number out of range, until `break` or the end of input.
+   * An empty line shows the menu again.
+   */
+  private runSelectIterations(
+    statement: Extract<Statement, { kind: 'for' }>,
+    values: readonly string[],
+    last: { status: number }
+  ): void {
+    if (values.length === 0) return;
+    for (let showsMenu = true; ;) {
+      this.runtime.spend();
+      this.currentRow = statement.row - this.lineShift;
+      if (showsMenu) this.fd2.write(formatSelectMenu(values));
+      this.fd2.write(this.store.readScalar('PS3') ?? '#? ');
+      if (this.runBuiltin('read', []) !== 0) {
+        this.fds.get(1)?.output?.write('\n');
+        last.status = 1;
+        return;
+      }
+      const reply = this.store.readScalar('REPLY') ?? '';
+      showsMenu = reply === '';
+      if (showsMenu) continue;
+      const choice = legalNumber(reply);
+      const value =
+        choice !== undefined && choice >= 1n && choice <= BigInt(values.length) ? values[Number(choice) - 1] : '';
+      if (!this.bindLoopVariable(statement.variable, value, false)) {
+        last.status = 1;
+        return;
+      }
+      this.runtime.steps.stepBinding(statement.row, true);
+      if (this.iterate(statement.body, last) === 'stop') return;
+    }
   }
 
   private runForIterations(
@@ -618,9 +841,23 @@ export class Shell implements ArithmeticHost {
 
   /** Assigns a scalar variable as a builtin does, reporting a failure such as a readonly variable. */
   assignVariable(name: string, value: string, builtin?: string): boolean {
-    const target = resolveScalarTarget(this, name, true);
-    const outcome = writeResolvedTarget(this, target, value, false, builtin);
+    const outcome = writeResolvedTarget(this, this.namedTarget(name, 'write'), value, false, builtin);
     return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
+  }
+
+  /** The value of a variable or an array element named as `name` or `name[subscript]`, as a builtin reads one. */
+  readNamed(name: string): string | undefined {
+    return readResolvedTarget(this, this.namedTarget(name, 'read'));
+  }
+
+  private namedTarget(name: string, operation: 'read' | 'write'): ArithmeticTarget {
+    const split = this.splitSubscript(name);
+    if (!split) return resolveScalarTarget(this, name, operation === 'write');
+    return resolveSubscriptTarget(this, {
+      name: split.name,
+      subscript: { kind: 'text', text: split.subscript },
+      operation,
+    });
   }
 
   /**
@@ -966,11 +1203,16 @@ export class Shell implements ArithmeticHost {
   }
 
   /** What a subshell copies from this shell besides its variables: descriptors and options. */
-  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit'> {
+  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit' | 'traps'> {
+    // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
+    const traps = [...this.traps].filter(
+      ([condition, trap]) => trap.statements.length === 0 || (condition === 'ERR' && this.options.errtrace)
+    );
     return {
       fds: this.fds.clone(),
       options: { ...this.options },
       ignoresErrexit: this.errexitIgnored > 0,
+      traps: new Map(traps),
     };
   }
 
@@ -1137,6 +1379,10 @@ function isFileReadSubstitution(body: readonly Statement[]): boolean {
 }
 
 function runSubshellBody(childShell: Shell, body: Statement[]): number {
+  return childShell.runExitTrap(runSubshellCommands(childShell, body));
+}
+
+function runSubshellCommands(childShell: Shell, body: Statement[]): number {
   if (isFileReadSubstitution(body)) {
     const [command] = body as Extract<Statement, { kind: 'command' }>[];
     return childShell.withRedirects(command.redirects, () => {

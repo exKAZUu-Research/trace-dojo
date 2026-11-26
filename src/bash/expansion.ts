@@ -338,6 +338,9 @@ export class Expander {
       case 'commandSubstitution': {
         return this.expandCommandSubstitution(part, ctx.inDouble);
       }
+      case 'processSubstitution': {
+        return [textSegment(this.shell.openProcessSubstitution(part.direction, part.body), true, false)];
+      }
       case 'arithmeticExpansion': {
         const value = this.shell.evaluate(part.expression, undefined);
         return [textSegment(String(value), ctx.inDouble, !ctx.inDouble)];
@@ -403,7 +406,8 @@ export class Expander {
 
   // ---------------------------------------------------------------- parameters
 
-  expandParameter(expansion: ParameterExpansion, ctx: WordContext): WordSegment[] {
+  expandParameter(parsed: ParameterExpansion, ctx: WordContext): WordSegment[] {
+    const expansion = backgroundPidOperand(parsed);
     if (expansion.unclosedSubscript) this.failUnclosedSubscript(expansion, ctx.badSubTarget);
     if ((ctx.inOperatorWord || ctx.inSubscript) && isListExpansionSyntax(expansion)) {
       rejectListInScalarContext(expansion.text);
@@ -537,7 +541,8 @@ export class Expander {
         return rejectUnsupportedExpansion('pid');
       }
       case '!': {
-        return rejectUnsupportedExpansion('bgPid');
+        const pid = this.shell.store.lastBackgroundPid;
+        return { kind: 'scalar', value: pid === undefined ? undefined : String(pid) };
       }
       case '0': {
         return { kind: 'scalar', value: SCRIPT_NAME };
@@ -789,6 +794,16 @@ export class Expander {
   }
 }
 
+/** `${!-word}` and the like, which apply `-`, `=`, `?`, or `+` to `$!` rather than name `$-` indirectly. */
+function backgroundPidOperand(expansion: ParameterExpansion): ParameterExpansion {
+  const isOperator = ['-', '=', '?', '+'].includes(expansion.name);
+  if (expansion.prefix !== '!' || expansion.operator !== undefined || !isOperator || expansion.argument.length === 0) {
+    return expansion;
+  }
+  const { prefix: _prefix, ...rest } = expansion;
+  return { ...rest, name: '!', operator: expansion.name };
+}
+
 function isElementLengthExpansion(expansion: ParameterExpansion): boolean {
   return (
     expansion.prefix === '#' &&
@@ -811,7 +826,8 @@ function partSourceText(part: WordPart): string {
   switch (part.kind) {
     case 'literal':
     case 'parameter':
-    case 'commandSubstitution': {
+    case 'commandSubstitution':
+    case 'processSubstitution': {
       return part.text;
     }
     case 'single': {

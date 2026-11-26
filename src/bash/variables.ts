@@ -203,6 +203,10 @@ export class VariableStore {
   previousDirectory: string | undefined;
   /** The directories `pushd` remembers, most recent first, below the working directory. */
   directoryStack: string[] = [];
+  /** The background commands this shell started, by process number, with their statuses and whether `wait` told them. */
+  readonly jobs = new Map<number, { status: number; reported: boolean; finish?: () => void }>();
+  /** The process number of the last background command, which `$!` expands to. */
+  lastBackgroundPid: number | undefined;
   private readonly subshellLevel: number;
 
   constructor(
@@ -222,6 +226,7 @@ export class VariableStore {
       workingDirectory: string;
       previousDirectory: string | undefined;
       directoryStack: string[];
+      lastBackgroundPid: number | undefined;
     }
   ) {
     if (forked) {
@@ -238,6 +243,7 @@ export class VariableStore {
       this.workingDirectory = forked.workingDirectory;
       this.previousDirectory = forked.previousDirectory;
       this.directoryStack = forked.directoryStack;
+      this.lastBackgroundPid = forked.lastBackgroundPid;
       return;
     }
     this.scopes = [{ kind: 'global', map: new Map() }];
@@ -308,6 +314,7 @@ export class VariableStore {
       workingDirectory: this.workingDirectory,
       previousDirectory: this.previousDirectory,
       directoryStack: [...this.directoryStack],
+      lastBackgroundPid: this.lastBackgroundPid,
     });
   }
 

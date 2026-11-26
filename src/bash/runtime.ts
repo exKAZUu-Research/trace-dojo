@@ -70,6 +70,12 @@ export class DiscardSignal {
 
 const TURTLE_HANDLE_PREFIX = 'Turtle@';
 
+/**
+ * The process number of the first background command. Bash shows the operating system's, which differ from run to
+ * run, so any fixed numbering is one Bash could show.
+ */
+const FIRST_PROCESS_ID = 1000;
+
 /** Shared per-run services: the turtle board, step tracker, execution budget, output streams, and trace frame stack. */
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
@@ -84,6 +90,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private nextTurtle = 1;
   private turtleRevision = 0;
   private slots = 0;
+  private nextProcessId = FIRST_PROCESS_ID;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -100,6 +107,11 @@ export class Runtime implements TracedRuntime<Frame> {
 
   checkCallDepth(): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+  }
+
+  /** A new process number for a background command or a coprocess. */
+  allocateProcessId(): number {
+    return this.nextProcessId++;
   }
 
   reserveTurtleHandle(): string {
