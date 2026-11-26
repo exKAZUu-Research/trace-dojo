@@ -45,7 +45,7 @@ export const readBuiltin: Builtin = (shell, args) => {
   const reader = inputReader(shell, 'read', options.get('u'));
   if (!reader) return 1;
   if (!options.has('t')) rejectControlVariable(shell.store.readScalar('TMOUT'), 'TMOUT', 'read の待ち時間');
-  const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'), reader);
+  const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'));
   if (timeoutStatus !== undefined) return timeoutStatus;
   // Reading no characters still assigns the empty text read, as Bash does.
   if (count === 0) {
@@ -75,16 +75,16 @@ export const readBuiltin: Builtin = (shell, args) => {
  * The status of `read -t`, which ends `read` only for a zero timeout, testing for input: all input is present before
  * the program starts, so no other timeout can pass. Reports a timeout that is not a number.
  */
-function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: TextReader): number | undefined {
+function zeroTimeoutStatus(shell: Shell, timeout: string | undefined): number | undefined {
   if (timeout === undefined) return undefined;
   if (!/^\d*\.?\d*$/.test(timeout) || timeout === '' || timeout === '.') {
     shell.reportError(`read: ${timeout}: invalid timeout specification`);
     return 1;
   }
   if (Number(timeout) !== 0) return undefined;
-  // Bash polls the descriptor: a regular file is ready to read even at its end, while other input is ready only
-  // while some remains.
-  return reader.fromRegularFile || !reader.isAtEnd ? 0 : 1;
+  // Bash polls the descriptor, which is ready to read while input remains and at its end alike, as every input here
+  // is complete before the program reads it.
+  return 0;
 }
 
 function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): boolean {
