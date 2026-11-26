@@ -95,6 +95,18 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   protected compileAssignment(expression: Extract<Expression, { kind: 'assign' }>): Compiled {
+    if (expression.operator === '??=' && this.awaitsHere(expression.target)) {
+      // `??=` runs only its value on a condition, so it stages its target's awaits itself, which always run first.
+      const { result: target, steps } = this.compileWithSteps(expression.target, () =>
+        this.assignableTarget(expression.target, false)
+      );
+      const assigned = this.assignTo(target, expression.operator, expression.value, expression);
+      const { gen, run } = assigned;
+      return awaitingCompiled(assigned.type, function* (frame) {
+        yield* runSteps(frame, steps);
+        return gen ? yield* gen(frame) : run(frame);
+      });
+    }
     const target = this.assignableTarget(expression.target, expression.operator === '=');
     return this.assignTo(target, expression.operator, expression.value, expression);
   }
