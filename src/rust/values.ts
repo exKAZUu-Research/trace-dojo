@@ -439,6 +439,8 @@ export class BufferedWriter {
 export class ChannelEnd {
   /** Whether the `Receiver` has gone, after which a send gives back its message as an error. */
   receiverDropped = false;
+  /** The `Sender`s that have not gone, while one of which a receive with nothing to receive waits. */
+  senders = 1;
   constructor(readonly queue: Value[]) {}
 }
 

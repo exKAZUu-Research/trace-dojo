@@ -155,13 +155,10 @@ export class Dropper {
         (target as BorrowGuard).release();
         return;
       }
-      case 'Receiver': {
-        (target as ChannelEnd).receiverDropped = true;
-        return;
-      }
+      case 'Receiver':
+      case 'Sender':
       case 'BufWriter': {
-        // Dropping a `BufWriter` passes on what it holds, and ignores a failure as std does.
-        (target as BufferedWriter).flush();
+        dropHandle(target, t.def.builtin);
         return;
       }
       case 'RefCell':
@@ -241,6 +238,13 @@ export class Dropper {
   }
 }
 
+/** The end of a channel, or a `BufWriter`, going: which passes on what the buffer holds, ignoring a failure as std. */
+function dropHandle(target: Value, builtin: 'Receiver' | 'Sender' | 'BufWriter'): void {
+  if (builtin === 'Receiver') (target as ChannelEnd).receiverDropped = true;
+  else if (builtin === 'Sender') (target as ChannelEnd).senders--;
+  else (target as BufferedWriter).flush();
+}
+
 /** The types whose drop counts (an `Rc`'s strong count) or ends a borrow (a `RefCell`'s guard). */
 const COUNTED = new Set([
   'Rc',
@@ -252,6 +256,7 @@ const COUNTED = new Set([
   'RwLockReadGuard',
   'RwLockWriteGuard',
   'Receiver',
+  'Sender',
   'BufWriter',
 ]);
 

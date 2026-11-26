@@ -142,13 +142,19 @@ function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) 
   }
 }
 
-/** `Receiver::recv`: a message, which the threads waiting run to send, or none once none can. */
+/**
+ * `Receiver::recv`: a message, which the threads waiting run to send, or none once every `Sender` has gone; with a
+ * `Sender` left and no thread to run, the wait would never end.
+ */
 function receive(ctx: NativeContext, receiver: Value): Value | undefined {
-  const { queue } = deref(receiver) as ChannelEnd;
-  while (queue.length === 0) {
-    if (!scheduler(ctx).runNext(ctx)) return undefined;
+  const channel = deref(receiver) as ChannelEnd;
+  while (channel.queue.length === 0) {
+    if (scheduler(ctx).runNext(ctx)) continue;
+    if (channel.senders > 0)
+      panic(ctx, 'デッドロックしました（送信側が残ったまま、送るスレッドがないチャンネルを待っています）。');
+    return undefined;
   }
-  return queue.shift();
+  return channel.queue.shift();
 }
 
 export function receiverIter(ctx: NativeContext, receiver: Value, waits: boolean): IterValue {

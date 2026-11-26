@@ -8,6 +8,7 @@ import { type AdtDef, intMax, intMin, type IntName, shallow, type Type } from '.
 import {
   BorrowGuard,
   CellBox,
+  type ChannelEnd,
   DONE,
   type DurationValue,
   EnumValue,
@@ -747,6 +748,11 @@ function cloneAdt(t: Type & { kind: 'adt' }, value: Value): Value {
     case 'RefCell':
     case 'Cell': {
       return cloneShared(t, derefAll(value));
+    }
+    case 'Sender': {
+      const channel = derefAll(value) as ChannelEnd;
+      channel.senders++;
+      return channel;
     }
     case 'HashMap':
     case 'BTreeMap':
