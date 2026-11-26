@@ -498,6 +498,7 @@ function commitCompoundOperand(shell: Shell, req: CompoundOperandRequest): { ok:
         hasEnclosingTempBinding: shell.store.hasTemporaryBinding(req.name),
       });
     }
+    settleCompoundTrace(shell);
     shell.failures.handleStoreFailure(req.context, {
       ok: false,
       reason: 'cannotAssign',
@@ -537,6 +538,7 @@ function resolveCompoundTargetName(shell: Shell, req: CompoundOperandRequest): s
   const targetName = req.intent === 'visible' ? resolveTargetName(shell, req.name) : req.name;
   rejectUnsupportedVariableMutation(targetName, false);
   if (!isIdentifier(targetName)) {
+    settleCompoundTrace(shell);
     shell.failures.handleStoreFailure(req.context, {
       ok: false,
       reason: 'invalidIdentifier',
@@ -546,6 +548,7 @@ function resolveCompoundTargetName(shell: Shell, req: CompoundOperandRequest): s
   }
   const outerRo = req.intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
   if (outerRo) {
+    settleCompoundTrace(shell);
     shell.failures.handleStoreFailure('declarationOperand', outerRo, req.builtin);
     return undefined;
   }
@@ -619,6 +622,14 @@ function traceCompound(shell: Shell, req: CompoundOperandRequest, elements: read
     return `[${singleQuote(element.key)}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
   });
   traceLine(shell, `${req.name}${req.append ? '+=' : '='}(${texts.join(' ')})`);
+  settleCompoundTrace(shell);
+}
+
+/**
+ * Counts one compound operand of the declaration being traced as expanded, or skipped because it fails before it is
+ * expanded, and prints the declaration's trace once none is left, before a failure is reported, as Bash does.
+ */
+function settleCompoundTrace(shell: Shell): void {
   const pending = pendingTraces.get(shell);
   if (pending && --pending.compounds === 0) {
     pendingTraces.delete(shell);
