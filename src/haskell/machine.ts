@@ -244,7 +244,7 @@ export class Machine {
         return this.loop(state);
       } catch (error) {
         if (error instanceof HaskellException && this.handleException(base, state, error)) continue;
-        this.unwind(base);
+        this.unwind(base, error instanceof HaskellException ? error : undefined);
         throw error;
       }
     }
@@ -803,24 +803,38 @@ export class Machine {
   private handleException(base: number, state: RunState, error: HaskellException): boolean {
     const index = this.stack.findLastIndex((frame, position) => position > base && frame.k === 'catch');
     if (index === -1) return false;
-    this.unwind(index + 1);
+    this.unwind(index + 1, error);
     const frame = this.stack.pop() as Extract<Frame, { k: 'catch' }>;
     this.stack.push({ k: 'runIO' });
     state.enter(frame.handle(error));
     return true;
   }
 
-  private unwind(base: number): void {
+  /**
+   * Pops the frames above `base`. A thunk an exception escapes keeps raising it, as GHC updates it with the exception;
+   * without one (the evaluation was interrupted), the thunk is restored to compute again.
+   */
+  private unwind(base: number, exception?: HaskellException): void {
     const { stack } = this;
     while (stack.length > base) {
       const frame = stack.pop() as Frame;
       if (frame.k === 'update') {
         frame.thunk.state = 'pending';
-        frame.thunk.code = frame.code;
-        frame.thunk.env = frame.env;
-        frame.thunk.native = frame.native;
-        frame.thunk.target = frame.target;
-        frame.thunk.effect = frame.effect;
+        frame.thunk.target = undefined;
+        frame.thunk.effect = undefined;
+        if (exception) {
+          frame.thunk.code = undefined;
+          frame.thunk.env = undefined;
+          frame.thunk.native = () => {
+            throw exception;
+          };
+        } else {
+          frame.thunk.code = frame.code;
+          frame.thunk.env = frame.env;
+          frame.thunk.native = frame.native;
+          frame.thunk.target = frame.target;
+          frame.thunk.effect = frame.effect;
+        }
         this.runtime.endPreview(frame.thunk, true);
       } else if (frame.k === 'do') {
         unwindBlock(this, frame);
