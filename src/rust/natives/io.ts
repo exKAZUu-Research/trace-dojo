@@ -134,19 +134,34 @@ function readLine(ctx: NativeContext, reader: TextReader): string | undefined {
   return line;
 }
 
-/** `BufRead::lines`: each line without its `\n` (or `\r\n`), as `Ok`. */
-function linesOf(ctx: NativeContext, reader: TextReader): IterValue {
+/**
+ * `BufRead::lines`: each line without its `\n` (or `\r\n`), as `Ok`; from a file opened only for writing, an `Err` at
+ * every call, as each read fails.
+ */
+function linesOf(ctx: NativeContext, source: Value): IterValue {
+  const { reader } = stream(source);
   return new IterValue(() => {
+    if (!reader) return err(ctx, badDescriptor(ctx.interp.program));
     const line = readLine(ctx, reader);
     if (line === undefined) return DONE;
     return ok(ctx, line.endsWith('\r\n') ? line.slice(0, -2) : line.endsWith('\n') ? line.slice(0, -1) : line);
   });
 }
 
-function readerOf(value: Value): TextReader {
-  const { reader } = stream(value);
-  if (!reader) throw new Error('A stream without a reader');
-  return reader;
+/** Reads from a stream, giving `Ok` of what `read` gives, or the `Err` of a file opened only for writing. */
+function reading(ctx: NativeContext, source: Value, read: (reader: TextReader) => Value): Value {
+  const { reader } = stream(source);
+  return reader ? ok(ctx, read(reader)) : err(ctx, badDescriptor(ctx.interp.program));
+}
+
+function readLineInto(ctx: NativeContext, reader: TextReader, buf: Value): Value {
+  const line = readLine(ctx, reader);
+  return BigInt(line === undefined ? 0 : appendText(ctx, buf, line));
+}
+
+/** The `io::Error` of a read from a file opened only for writing, or of a write to one opened only for reading. */
+function badDescriptor(program: Program): Value {
+  return new StructValue(program.adtDef('IoError'), [{ code: 'EBADF', kind: 'Uncategorized' } as unknown as Value]);
 }
 
 function openFile(ctx: NativeContext, path: string, options: OpenOptionsValue): Value {
@@ -178,28 +193,21 @@ function options(value: Value): OpenOptionsValue {
 define({
   'std::io::stdin': (_args, ctx) => new IoStream(ctx.runtime.io.stdin.reader, undefined),
   'Stdin::lock': ([self]) => stream(self),
-  'Stdin::read_line': ([self, buf], ctx) => {
-    const line = readLine(ctx, readerOf(self));
-    return ok(ctx, BigInt(line === undefined ? 0 : appendText(ctx, buf, line)));
-  },
-  'Stdin::lines': ([self], ctx) => linesOf(ctx, readerOf(self)),
-  'std::io::Read::read_to_string': ([self, buf], ctx) => {
-    const rest = readerOf(self).readRest();
-    return ok(ctx, BigInt(appendText(ctx, buf, rest)));
-  },
-  'std::io::Read::read_to_end': ([self, buf], ctx) => {
-    const bytes = new TextEncoder().encode(readerOf(self).readRest());
-    const items = placeOf(buf).get() as Value[];
-    ctx.runtime.allocate(bytes.length);
-    for (const byte of bytes) items.push(BigInt(byte));
-    return ok(ctx, BigInt(bytes.length));
-  },
-  'std::io::BufRead::read_line': ([self, buf], ctx) => {
-    const line = readLine(ctx, readerOf(self));
-    return ok(ctx, BigInt(line === undefined ? 0 : appendText(ctx, buf, line)));
-  },
-  'std::io::BufRead::lines': ([self], ctx) => linesOf(ctx, readerOf(self)),
-  'std::io::read_to_string': ([reader], ctx) => ok(ctx, readerOf(reader).readRest()),
+  'Stdin::read_line': ([self, buf], ctx) => reading(ctx, self, (reader) => readLineInto(ctx, reader, buf)),
+  'Stdin::lines': ([self], ctx) => linesOf(ctx, self),
+  'std::io::Read::read_to_string': ([self, buf], ctx) =>
+    reading(ctx, self, (reader) => BigInt(appendText(ctx, buf, reader.readRest()))),
+  'std::io::Read::read_to_end': ([self, buf], ctx) =>
+    reading(ctx, self, (reader) => {
+      const bytes = new TextEncoder().encode(reader.readRest());
+      const items = placeOf(buf).get() as Value[];
+      ctx.runtime.allocate(bytes.length);
+      for (const byte of bytes) items.push(BigInt(byte));
+      return BigInt(bytes.length);
+    }),
+  'std::io::BufRead::read_line': ([self, buf], ctx) => reading(ctx, self, (reader) => readLineInto(ctx, reader, buf)),
+  'std::io::BufRead::lines': ([self], ctx) => linesOf(ctx, self),
+  'std::io::read_to_string': ([reader], ctx) => reading(ctx, reader, (source) => source.readRest()),
   'BufReader<_>::new': ([inner]) => inner,
   'BufWriter<_>::new': ([inner]) => inner,
   'Error::new': ([kind, error], ctx) =>
@@ -328,8 +336,9 @@ function option(ctx: NativeContext, value: Value | undefined): Value {
  */
 export function writeToStream(program: Program, target: Value, text: string): Value | undefined {
   const { writer } = stream(target);
-  if (!writer)
-    return new StructValue(program.adtDef('IoError'), [{ code: 'EBADF', kind: 'Uncategorized' } as unknown as Value]);
+  // Writing nothing makes no call to the system, so it cannot fail.
+  if (text === '') return undefined;
+  if (!writer) return badDescriptor(program);
   writer.write(text);
   return undefined;
 }
