@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
-import { displayMethodIn } from './declarations';
+import { displayExtensionBlock, displayExtensionMember, displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
 import type { LineMap } from './preprocessor';
@@ -236,6 +236,7 @@ export abstract class CallBinder extends OperatorBinder {
         typeArgs = [];
       }
       const substitution = this.callSubstitution(candidate, typeArgs);
+      if (!this.staticReceiverFits(candidate, substitution)) continue;
       const argumentTypes = args.map((_arg, index) =>
         this.parameterType(method, mapping.parameterOf[index], form, substitution)
       );
@@ -255,6 +256,18 @@ export abstract class CallBinder extends OperatorBinder {
       }
     }
     return undefined;
+  }
+
+  /**
+   * Whether the type that a static member of an extension block is accessed through converts to the block's receiver
+   * type by identity, reference, or boxing, as an extension method's receiver does.
+   */
+  private staticReceiverFits(candidate: MethodCandidate, substitution: Map<TypeParameterSymbol, Type>): boolean {
+    const { staticReceiver } = candidate;
+    const extended = candidate.method.staticExtensionOf;
+    if (!staticReceiver || !extended) return true;
+    const kind = this.conversions.implicit(staticReceiver, substitute(extended, substitution));
+    return kind === 'identity' || kind === 'reference' || kind === 'boxing' || kind === 'typeParameterBox';
   }
 
   protected callSubstitution(candidate: MethodCandidate, typeArgs: Type[]): Map<TypeParameterSymbol, Type> {
@@ -385,6 +398,13 @@ export abstract class CallBinder extends OperatorBinder {
       }),
       pending: new Set(),
     };
+    // The type that a static member of an extension block is accessed through infers the block's type arguments.
+    if (candidate.staticReceiver && method.staticExtensionOf)
+      this.lowerBoundInference(
+        candidate.staticReceiver,
+        substitute(method.staticExtensionOf, ownerSubstitution),
+        inference.bounds
+      );
     this.inferFromArguments(inference, method, parameterOf);
     for (let round = 0; round <= parameters.length + args.length; round++) {
       this.inferLambdaReturnTypes(inference);
@@ -594,7 +614,11 @@ export abstract class CallBinder extends OperatorBinder {
   private fix(bounds: Bounds): Type | undefined {
     if (bounds.exact.length > 0) {
       const [first] = bounds.exact;
-      return bounds.exact.every((type) => sameType(type, first)) ? first : undefined;
+      const fits =
+        bounds.exact.every((type) => sameType(type, first)) &&
+        bounds.lower.every((lower) => this.conversions.implicit(lower, first) !== undefined) &&
+        bounds.upper.every((upper) => this.conversions.implicit(first, upper) !== undefined);
+      return fits ? first : undefined;
     }
     const candidates = [...bounds.lower, ...bounds.upper].filter(
       (type, index, list) => list.findIndex((other) => sameType(other, type)) === index
@@ -745,7 +769,7 @@ export abstract class CallBinder extends OperatorBinder {
           parameter,
           this.callSubstitution(applicable.candidate, applicable.typeArgs),
           row,
-          displayMethod(method)
+          constraintOwner(method, index)
         )
       )
         return false;
@@ -1068,6 +1092,10 @@ export abstract class CallBinder extends OperatorBinder {
         ? []
         : this.reportedTypeArguments(candidate, args, explicitTypeArgs, mapping.parameterOf, expanded);
     const substitution = this.callSubstitution(candidate, typeArgs);
+    if (!this.staticReceiverFits(candidate, substitution)) {
+      this.reportStaticReceiverMismatch(candidate, typeArgs, substitution, row);
+      return;
+    }
     // Roslyn reports each argument that does not fit, but only the receiver of an extension method that does not.
     let hasBadArgument = false;
     for (const [index, arg] of args.entries()) {
@@ -1077,14 +1105,22 @@ export abstract class CallBinder extends OperatorBinder {
       if (this.reportRefKindMismatch(arg, parameter, position)) {
         hasBadArgument = true;
       } else if (!this.argumentFits(arg, type, parameter.refKind)) {
-        this.reportInconvertible(candidate, arg, position, type, row, description);
+        this.reportInconvertible(candidate, arg, position, type, row, description, typeArgs);
         if (description.isExtension && position === 0) return;
         hasBadArgument = true;
       }
     }
     if (hasBadArgument) return;
     for (const [index, typeArg] of typeArgs.entries()) {
-      if (!this.satisfiesConstraints(typeArg, method.typeParameters[index], substitution, row, displayMethod(method)))
+      if (
+        !this.satisfiesConstraints(
+          typeArg,
+          method.typeParameters[index],
+          substitution,
+          row,
+          constraintOwner(method, index)
+        )
+      )
         return;
     }
   }
@@ -1202,6 +1238,22 @@ export abstract class CallBinder extends OperatorBinder {
     }
   }
 
+  private reportStaticReceiverMismatch(
+    candidate: MethodCandidate,
+    typeArgs: Type[],
+    substitution: Map<TypeParameterSymbol, Type>,
+    row: number
+  ): void {
+    const { method } = candidate;
+    const receiver = displayType(candidate.staticReceiver as Type);
+    const extended = displayType(substitute(method.staticExtensionOf as Type, substitution), true);
+    this.error(
+      row,
+      'CS1929',
+      `'${receiver}' に '${method.extensionProperty ?? method.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayExtensionMember(method, typeArgs)}' には '${extended}' 型のレシーバーが必要です`
+    );
+  }
+
   /** Reports a generic candidate whose type arguments cannot be inferred, telling whether it did. */
   private reportUninferable(
     candidate: MethodCandidate,
@@ -1217,10 +1269,23 @@ export abstract class CallBinder extends OperatorBinder {
       this.inferTypeArguments(candidate, args, mapping.parameterOf, !this.mapArguments(method, args, false))
     )
       return false;
+    if (candidate.staticReceiver && method.extensionProperty) {
+      // An extension property takes no type arguments, so Roslyn finds none that the type can access.
+      const receiver = displayType(candidate.staticReceiver);
+      this.error(
+        row,
+        'CS1061',
+        `'${receiver}' に '${method.extensionProperty}' の定義が含まれておらず、型 '${receiver}' の最初の引数を受け付けるアクセス可能な拡張メソッド '${method.extensionProperty}' が見つかりませんでした。using ディレクティブまたはアセンブリ参照が不足していないことを確認してください`
+      );
+      return true;
+    }
+    const shown = method.isExtensionBlockMember
+      ? displayExtensionMember(method)
+      : displayMethodIn(method, candidate.owner);
     this.error(
       row,
       'CS0411',
-      `メソッド '${displayMethodIn(method, candidate.owner)}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
+      `メソッド '${shown}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
     );
     return true;
   }
@@ -1258,7 +1323,8 @@ export abstract class CallBinder extends OperatorBinder {
     position: number,
     type: Type,
     row: number,
-    description: CallDescription
+    description: CallDescription,
+    typeArgs: Type[]
   ): void {
     if (arg.expression.kind === 'unbound' && arg.expression.methodGroup) {
       this.error(
@@ -1272,10 +1338,14 @@ export abstract class CallBinder extends OperatorBinder {
     } else if (description.isExtension && position === 0) {
       // An extension method of .NET's that the library lacks, such as a span's, is unavailable rather than a mismatch.
       this.rejectUnknownLibraryMember(arg.expression.type, description.name, row);
+      const { method } = candidate;
+      const shown = method.isExtensionBlockMember
+        ? displayExtensionMember(method, typeArgs)
+        : displayMethodIn(method, candidate.owner);
       this.error(
         row,
         'CS1929',
-        `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(candidate.method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
+        `'${displayType(arg.expression.type)}' に '${method.extensionProperty ?? description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${shown}' には '${displayType(type, method.isExtensionBlockMember)}' 型のレシーバーが必要です`
       );
     } else {
       this.lastInconvertibleCall =
@@ -1316,4 +1386,11 @@ export function isUnmanagedType(type: Type, seen = new Set<TypeSymbol>()): boole
   return type.symbol.fields
     .filter((field) => !field.isStatic && !field.isConst)
     .every((field) => isUnmanagedType(substitute(field.type, substitution), seen));
+}
+
+/** The name of the generic method or extension block whose type parameter a type argument breaks a constraint of. */
+function constraintOwner(method: MethodSymbol, typeParameterIndex: number): string {
+  return method.isExtensionBlockMember && typeParameterIndex < method.extensionBlockArity
+    ? displayExtensionBlock(method)
+    : displayMethod(method);
 }

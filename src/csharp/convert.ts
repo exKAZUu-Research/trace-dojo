@@ -810,7 +810,11 @@ export class Converter extends ExpressionConverter {
         typeParameters: [...typeParameters, ...method.typeParameters],
         constraints: [...constraints, ...method.constraints],
         parameters: isStatic ? method.parameters : [receiver, ...method.parameters],
-        extension: { ...method.extension, ...(isStatic ? { staticReceiver: receiverType } : {}) },
+        extension: {
+          ...method.extension,
+          blockArity: typeParameters.length,
+          ...(isStatic ? { staticReceiver: receiverType } : {}),
+        },
       };
     });
   }

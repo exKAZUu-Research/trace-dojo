@@ -1539,7 +1539,10 @@ export abstract class MemberBinder extends CallBinder {
     context: BindContext,
     isCallee: boolean
   ): BindResult | undefined {
-    const methods = this.lookupStaticExtensions(type, name, false, context.fn.typeContext);
+    // Explicit type arguments give the block's type parameters as well as the method's, and leave out other arities.
+    const methods = this.lookupStaticExtensions(type, name, false, context.fn.typeContext).filter(
+      ({ method }) => !typeArgs || method.typeParameters.length === typeArgs.length
+    );
     if (methods.length > 0) return { ...this.extensionGroup(name, undefined, methods, position), typeArgs };
     if (isCallee) return undefined;
     const getters = this.lookupStaticExtensions(type, name, true, context.fn.typeContext);

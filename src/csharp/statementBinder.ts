@@ -23,6 +23,7 @@ import type {
 import { LabelSymbol } from './bound';
 import type { BindContext } from './convertBinder';
 import { constantText } from './convertBinder';
+import { displayExtensionMember } from './declarations';
 import { discardResult } from './lambdaBinder';
 import type { MemberLookup } from './lookup';
 import { propertyDisplay } from './memberBinder';
@@ -159,7 +160,14 @@ export abstract class StatementBinder extends PatternBinder {
       case 'call': {
         // A call of a method that returns by `ref` is the variable it returns.
         if (target.method.returnsByRef === 'ref') return target;
-        if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
+        // An extension property without a setter stays the call of its getter.
+        if (target.method.extensionProperty && (use === 'assign' || use === 'compound'))
+          this.error(
+            position,
+            'CS0200',
+            `プロパティまたはインデクサー '${displayExtensionMember(target.method, target.typeArgs)}' は読み取り専用であるため、割り当てることはできません`
+          );
+        else if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
       case 'local': {

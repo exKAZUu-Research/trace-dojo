@@ -206,6 +206,10 @@ export class MethodSymbol {
   extensionAssignmentOf: Type | undefined;
   /** For a static member of an extension block, the receiver type, whose static members it joins (`string.M()`). */
   staticExtensionOf: Type | undefined;
+  /** Whether the method stands for a member of an extension block, which Roslyn names after the block. */
+  isExtensionBlockMember = false;
+  /** For a member of an extension block, how many of its type parameters are the block's, which come first. */
+  extensionBlockArity = 0;
   /** How a method returns by reference (`ref T M()`, `ref readonly T M()`), if it does. */
   returnsByRef: 'ref' | 'readonly' | undefined;
   async: AsyncShape | undefined;

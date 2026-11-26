@@ -64,11 +64,39 @@ namespace System.IO {
   public class StreamWriter : TextWriter {
     public StreamWriter(string path);
     public StreamWriter(string path, bool append);
+    public StreamWriter(string path, bool append, System.Text.Encoding? encoding);
+    public StreamWriter(Stream stream);
+    public StreamWriter(Stream stream, System.Text.Encoding? encoding);
     public virtual bool AutoFlush { get; set; }
   }
-  public class StringWriter : TextWriter {
-    public StringWriter();
-    public override string ToString();
+  public class StringWriter : TextWriter { public StringWriter(); public override string ToString(); }
+
+  public enum FileMode { CreateNew = 1, Create = 2, Open = 3, OpenOrCreate = 4, Truncate = 5, Append = 6 }
+  [Flags]
+  public enum FileAccess { Read = 1, Write = 2, ReadWrite = 3 }
+  [Flags]
+  public enum FileShare { None = 0, Read = 1, Write = 2, ReadWrite = 3, Delete = 4, Inheritable = 16 }
+  public enum SeekOrigin { Begin = 0, Current = 1, End = 2 }
+  public abstract class Stream : IDisposable {
+    public virtual bool CanRead { get; }
+    public virtual bool CanWrite { get; }
+    public virtual bool CanSeek { get; }
+    public virtual long Length { get; }
+    public virtual long Position { get; set; }
+    public virtual int ReadByte();
+    public virtual void WriteByte(byte value);
+    public virtual int Read(byte[] buffer, int offset, int count);
+    public virtual void Write(byte[] buffer, int offset, int count);
+    public virtual long Seek(long offset, SeekOrigin origin);
+    public virtual void Flush();
+    public virtual void Close();
+    public void Dispose();
+  }
+  public class FileStream : Stream {
+    public FileStream(string path, FileMode mode);
+    public FileStream(string path, FileMode mode, FileAccess access);
+    public FileStream(string path, FileMode mode, FileAccess access, FileShare share);
+    public virtual string Name { get; }
   }
 
   public abstract class TextReader : IDisposable {
@@ -81,6 +109,9 @@ namespace System.IO {
   }
   public class StreamReader : TextReader {
     public StreamReader(string path);
+    public StreamReader(string path, System.Text.Encoding? encoding);
+    public StreamReader(Stream stream);
+    public StreamReader(Stream stream, System.Text.Encoding? encoding);
     public bool EndOfStream { get; }
   }
   public class StringReader : TextReader {
@@ -90,13 +121,30 @@ namespace System.IO {
   public static class File {
     public static bool Exists(string? path);
     public static string ReadAllText(string path);
+    public static string ReadAllText(string path, System.Text.Encoding encoding);
     public static string[] ReadAllLines(string path);
+    public static string[] ReadAllLines(string path, System.Text.Encoding encoding);
     public static IEnumerable<string> ReadLines(string path);
+    public static IEnumerable<string> ReadLines(string path, System.Text.Encoding encoding);
     public static void WriteAllText(string path, string? contents);
+    public static void WriteAllText(string path, string? contents, System.Text.Encoding encoding);
     public static void WriteAllLines(string path, string[] contents);
     public static void WriteAllLines(string path, IEnumerable<string> contents);
+    public static void WriteAllLines(string path, string[] contents, System.Text.Encoding encoding);
+    public static void WriteAllLines(string path, IEnumerable<string> contents, System.Text.Encoding encoding);
     public static void AppendAllText(string path, string? contents);
+    public static void AppendAllText(string path, string? contents, System.Text.Encoding encoding);
     public static void AppendAllLines(string path, IEnumerable<string> contents);
+    public static void AppendAllLines(string path, IEnumerable<string> contents, System.Text.Encoding encoding);
+    public static byte[] ReadAllBytes(string path);
+    public static void WriteAllBytes(string path, byte[] bytes);
+    public static void AppendAllBytes(string path, byte[] bytes);
+    public static FileStream Open(string path, FileMode mode);
+    public static FileStream Open(string path, FileMode mode, FileAccess access);
+    public static FileStream Open(string path, FileMode mode, FileAccess access, FileShare share);
+    public static FileStream OpenRead(string path);
+    public static FileStream OpenWrite(string path);
+    public static FileStream Create(string path);
     public static void Delete(string path);
     public static void Copy(string sourceFileName, string destFileName);
     public static void Copy(string sourceFileName, string destFileName, bool overwrite);
@@ -130,6 +178,12 @@ namespace System.IO {
     public StreamReader OpenText();
     public StreamWriter CreateText();
     public StreamWriter AppendText();
+    public FileStream Create();
+    public FileStream Open(FileMode mode);
+    public FileStream Open(FileMode mode, FileAccess access);
+    public FileStream Open(FileMode mode, FileAccess access, FileShare share);
+    public FileStream OpenRead();
+    public FileStream OpenWrite();
   }
   public sealed class DirectoryInfo : FileSystemInfo {
     public DirectoryInfo(string path);

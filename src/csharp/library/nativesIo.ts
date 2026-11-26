@@ -1,32 +1,37 @@
-import {
-  type FileHandle,
-  FileSystemError,
-  type OutputChannel,
-  resolvePath,
-  type TextReader,
-} from '../../interpreter/programIo';
+import { FileSystemError, type OutputChannel, resolvePath, type TextReader } from '../../interpreter/programIo';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { exceptionText } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
-import { CsObject, type CsString, isString, stringText, type Value } from '../values';
+import { CsObject, isString, type Value } from '../values';
+import { checkLock, holdLock } from './fileLocks';
 import { iterate } from './iteration';
 import { writeText } from './nativesCore';
+import { fullPathOf, pathArgument, valueText } from './nativesPath';
 import { evaluatorOf, fail, libraryType, newArray } from './support';
 
-/** Where a TextWriter's text goes: the console, a file, or a string. */
+/** Where a TextWriter's text goes: the console, a file, a stream, or a string. */
 interface WriterState {
   /** The writer's type name, which an ObjectDisposedException names. */
   readonly name: string;
   isClosed: boolean;
-  write(text: string): void;
-  flush(): void;
+  write(text: string, call: NativeCall): void;
+  flush(call: NativeCall): void;
+  /** Releases what the writer holds open, once it is closed. */
+  onClose?: (call: NativeCall) => void;
 }
 
-/** What a TextReader reads: standard input, a file, or a string. */
-interface ReaderState {
+/** What a TextReader reads: standard input, a file, a stream, or a string. */
+export interface ReaderState {
   readonly name: string;
   readonly reader: TextReader;
   isClosed: boolean;
+  onClose?: (call: NativeCall) => void;
+}
+
+/** Where a StreamWriter's encoded text goes: a file's text, or the bytes of a stream. */
+export interface TextSink {
+  write(text: string, call: NativeCall): void;
+  flush?(call: NativeCall): void;
 }
 
 class ConsoleWriter implements WriterState {
@@ -63,34 +68,49 @@ const BYTE_BUFFER_SIZE = 4096;
  * once it would hold more than 4096 bytes, so what the file shows before `Flush` or `Dispose` follows those sizes,
  * and what a program never flushes is lost when it ends.
  */
-class FileWriter implements WriterState {
+export class FileWriter implements WriterState {
   readonly name = 'StreamWriter';
   isClosed = false;
   autoFlush = false;
+  onClose?: (call: NativeCall) => void;
   private chars = '';
   private pending = '';
   private pendingBytes = 0;
 
-  constructor(private readonly handle: FileHandle) {}
+  /**
+   * @param ownsBuffer Whether the writer holds the bytes its FileStream would, for a file it opened by its path; a
+   * stream given to it holds its bytes itself.
+   * @param preamble Whether the text starts with a byte order mark, as Encoding.UTF8 writes one at the stream's start.
+   */
+  constructor(
+    private readonly sink: TextSink,
+    private readonly ownsBuffer: boolean,
+    preamble: boolean
+  ) {
+    // The mark goes out with the first flush, even of no text, as .NET writes it.
+    if (preamble) this.pending = BYTE_ORDER_MARK;
+    this.pendingBytes = this.pending === '' ? 0 : 3;
+  }
 
-  write(text: string): void {
+  write(text: string, call: NativeCall): void {
     let rest = text;
     while (rest.length > 0) {
       // The buffer is encoded when it is full and more characters come, as StreamWriter.Write does it.
-      if (this.chars.length === CHAR_BUFFER_SIZE) this.encodeChars();
+      if (this.chars.length === CHAR_BUFFER_SIZE) this.encodeChars(call);
       const taken = rest.slice(0, CHAR_BUFFER_SIZE - this.chars.length);
       this.chars += taken;
       rest = rest.slice(taken.length);
     }
-    if (this.autoFlush) this.flush();
+    if (this.autoFlush) this.flush(call);
   }
 
-  flush(): void {
-    this.encodeChars();
-    this.writePending();
+  flush(call: NativeCall): void {
+    this.encodeChars(call);
+    this.writePending(call);
+    this.sink.flush?.(call);
   }
 
-  private encodeChars(): void {
+  private encodeChars(call: NativeCall): void {
     if (this.chars === '') return;
     let chunk = this.chars;
     // The encoder keeps a high surrogate at the end for the low one that follows.
@@ -98,21 +118,24 @@ class FileWriter implements WriterState {
     if (keepsSurrogate) chunk = chunk.slice(0, -1);
     this.chars = keepsSurrogate ? this.chars.slice(-1) : '';
     const bytes = utf8Length(chunk);
-    if (this.pendingBytes + bytes > BYTE_BUFFER_SIZE) this.writePending();
-    if (bytes >= BYTE_BUFFER_SIZE) this.handle.write(chunk);
+    if (!this.ownsBuffer || this.pendingBytes + bytes > BYTE_BUFFER_SIZE) this.writePending(call);
+    if (!this.ownsBuffer || bytes >= BYTE_BUFFER_SIZE) this.sink.write(chunk, call);
     else {
       this.pending += chunk;
       this.pendingBytes += bytes;
     }
   }
 
-  private writePending(): void {
+  private writePending(call: NativeCall): void {
     if (this.pending === '') return;
-    this.handle.write(this.pending);
+    this.sink.write(this.pending, call);
     this.pending = '';
     this.pendingBytes = 0;
   }
 }
+
+/** U+FEFF, whose UTF-8 bytes at a file's start mark it as UTF-8 and which .NET's readers skip there. */
+export const BYTE_ORDER_MARK = '\uFEFF';
 
 export function utf8Length(text: string): number {
   let length = 0;
@@ -123,19 +146,7 @@ export function utf8Length(text: string): number {
   return length;
 }
 
-// ---- Paths and errors ----
-
-export function valueText(value: Value): string {
-  return stringText(value as string | CsString);
-}
-
-/** The path argument of a file operation, which may be neither null nor empty. */
-export function pathArgument(value: Value, paramName = 'path'): string {
-  if (value === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', paramName);
-  const path = valueText(value);
-  if (path === '') fail('System.ArgumentException', 'The value cannot be an empty string.', paramName);
-  return path;
-}
+// ---- Errors ----
 
 export function throwException(call: NativeCall, fullName: string, message: string, fileName?: string): never {
   const exception = call.frame.runtime.createException(fullName, message);
@@ -212,19 +223,21 @@ function readerOf(call: NativeCall, receiver: Value): ReaderState {
   return state;
 }
 
-const close: NativeMethod = (_call, receiver) => {
+const close: NativeMethod = (call, receiver) => {
   const state = (receiver as CsObject).native as WriterState | ReaderState;
   if (state.isClosed) return;
-  if ('flush' in state) state.flush();
+  if ('flush' in state) state.flush(call);
   // The console's writers and reader stay open, as .NET's do.
-  if (!(state instanceof ConsoleWriter) && state.name !== 'TextReader') state.isClosed = true;
+  if (state instanceof ConsoleWriter || state.name === 'TextReader') return;
+  state.isClosed = true;
+  state.onClose?.(call);
 };
 
 const writing =
   (newline: boolean): NativeMethod =>
   (call, receiver, args) => {
     const writer = writerOf(call, receiver);
-    writer.write(writeText(call, args as Value[]) + (newline ? '\n' : ''));
+    writer.write(writeText(call, args as Value[]) + (newline ? '\n' : ''), call);
   };
 
 export function newWriter(call: NativeCall, typeName: string, state: WriterState): CsObject {
@@ -233,14 +246,27 @@ export function newWriter(call: NativeCall, typeName: string, state: WriterState
   return writer;
 }
 
-export function openFileWriter(call: NativeCall, path: string, append: boolean): FileWriter {
+/**
+ * A StreamWriter on a file it opens by its path, sharing the file with readers and writers that share it too, and
+ * starting with a byte order mark when `encoding` is given (the library's one Encoding, UTF-8) and the file is empty.
+ */
+export function openFileWriter(call: NativeCall, path: string, append: boolean, encoding?: Value): FileWriter {
   const files = call.frame.runtime.io.files;
-  return new FileWriter(withFiles(call, () => files.open(path, { create: 'always', truncate: !append, append })));
+  checkLock(call, path, 'shared');
+  const handle = withFiles(call, () => files.open(path, { create: 'always', truncate: !append, append }));
+  const writer = new FileWriter(handle, true, encoding !== undefined && handle.text === '');
+  writer.onClose = holdLock(handle.file, 'shared');
+  return writer;
 }
 
+/** A StreamReader on a file it opens by its path, which skips a byte order mark at the file's start. */
 export function openFileReader(call: NativeCall, path: string): ReaderState {
   const io = call.frame.runtime.io;
-  return { name: 'StreamReader', reader: withFiles(call, () => io.openReader(path)), isClosed: false };
+  checkLock(call, path, 'shared');
+  const reader = withFiles(call, () => io.openReader(path));
+  if (reader.position === 0 && reader.text.startsWith(BYTE_ORDER_MARK)) reader.position = 1;
+  const file = io.files.fileOf(path);
+  return { name: 'StreamReader', reader, isClosed: false, onClose: file && holdLock(file, 'shared') };
 }
 
 export function newReader(call: NativeCall, typeName: string, state: ReaderState): CsObject {
@@ -307,7 +333,7 @@ defineNatives({
   'System.IO.TextWriter.Write': writing(false),
   'System.IO.TextWriter.WriteLine': writing(true),
   'System.IO.TextWriter.Flush': (call, receiver) => {
-    writerOf(call, receiver).flush();
+    writerOf(call, receiver).flush(call);
   },
   'System.IO.TextWriter.Close': close,
   'System.IO.TextWriter.Dispose': close,
@@ -317,11 +343,17 @@ defineNatives({
   'System.IO.StreamWriter..ctor(string, bool)': (call, receiver, [path, append]) => {
     (receiver as CsObject).native = openFileWriter(call, pathArgument(path as Value), append as boolean);
   },
+  'System.IO.StreamWriter..ctor(string, bool, Encoding?)': (call, receiver, args) => {
+    const [path, append] = args as Value[];
+    const target = pathArgument(path as Value);
+    // A null encoding is UTF-8 without a byte order mark, as for the overloads without one.
+    (receiver as CsObject).native = openFileWriter(call, target, append as boolean, args[2] as Value);
+  },
   'System.IO.StreamWriter.get_AutoFlush': (_call, receiver) => ((receiver as CsObject).native as FileWriter).autoFlush,
   'System.IO.StreamWriter.set_AutoFlush': (call, receiver, [value]) => {
     const writer = writerOf(call, receiver) as FileWriter;
     writer.autoFlush = value as boolean;
-    if (writer.autoFlush) writer.flush();
+    if (writer.autoFlush) writer.flush(call);
   },
   'System.IO.StringWriter..ctor': (_call, receiver) => {
     (receiver as CsObject).native = new StringWriterState();
@@ -334,8 +366,11 @@ defineNatives({
   'System.IO.TextReader.ReadToEnd': (call, receiver) => readerOf(call, receiver).reader.readRest(),
   'System.IO.TextReader.Close': close,
   'System.IO.TextReader.Dispose': close,
-  'System.IO.StreamReader..ctor': (call, receiver, [path]) => {
+  'System.IO.StreamReader..ctor(string)': (call, receiver, [path]) => {
     (receiver as CsObject).native = openFileReader(call, pathArgument(path as Value));
+  },
+  'System.IO.StreamReader..ctor(string, Encoding?)': (call, receiver, args) => {
+    (receiver as CsObject).native = openFileReader(call, pathArgument(args[0] as Value));
   },
   'System.IO.StreamReader.get_EndOfStream': (call, receiver) => readerOf(call, receiver).reader.isAtEnd,
   'System.IO.StringReader..ctor': (call, receiver, [text]) => {
@@ -347,9 +382,27 @@ defineNatives({
 
 // ---- File ----
 
-function writeFile(call: NativeCall, path: string, text: string, append: boolean): void {
+/** Writes a text to a file, after a byte order mark when `encoding` is given and the file is empty. */
+function writeFile(call: NativeCall, path: string, text: string, append: boolean, encoding?: Value): void {
   const files = call.frame.runtime.io.files;
-  withFiles(call, () => files.open(path, { create: 'always', truncate: !append, append }).write(text));
+  checkLock(call, path, 'shared');
+  const handle = withFiles(call, () => files.open(path, { create: 'always', truncate: !append, append }));
+  handle.write(encoding !== undefined && handle.text === '' ? `${BYTE_ORDER_MARK}${text}` : text);
+}
+
+/**
+ * The encoding argument of an overload that takes one, which can only be Encoding.UTF8, the library's one encoding,
+ * or `undefined` for an overload without one.
+ */
+export function encodingArgument(call: NativeCall, args: readonly unknown[], index: number): Value {
+  if (call.method.parameters.length <= index) return undefined;
+  const encoding = args[index] as Value;
+  if (encoding === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', 'encoding');
+  return encoding;
+}
+
+function textArgument(value: Value): string {
+  return value === undefined ? '' : valueText(value);
 }
 
 function linesText(call: NativeCall, lines: Value): string {
@@ -357,9 +410,14 @@ function linesText(call: NativeCall, lines: Value): string {
   return [...iterate(call, lines, 'contents')].map((line) => `${line === undefined ? '' : valueText(line)}\n`).join('');
 }
 
-function readFile(call: NativeCall, path: Value): string {
+/** The text of a file, without the byte order mark that .NET's readers skip at its start. */
+function readFile(call: NativeCall, path: Value, args: readonly unknown[] = []): string {
   const files = call.frame.runtime.io.files;
-  return withFiles(call, () => files.readFile(pathArgument(path)));
+  const target = pathArgument(path);
+  encodingArgument(call, args, 1);
+  checkLock(call, target, 'shared');
+  const text = withFiles(call, () => files.readFile(target));
+  return text.startsWith(BYTE_ORDER_MARK) ? text.slice(1) : text;
 }
 
 /** Deletes a file, where a file that is not there is no error, but a missing directory on its path is. */
@@ -377,7 +435,9 @@ export function copyFile(call: NativeCall, from: Value, to: Value, overwrite: bo
   const files = call.frame.runtime.io.files;
   const source = pathArgument(from, 'sourceFileName');
   const target = pathArgument(to, 'destFileName');
+  checkLock(call, source, 'shared');
   const text = withFiles(call, () => files.readFile(source));
+  checkLock(call, target, 'exclusive');
   const existing = files.kindOf(target);
   if (existing === 'directory')
     throwException(
@@ -406,22 +466,32 @@ defineNatives({
     isString(path as Value) &&
     valueText(path as Value) !== '' &&
     call.frame.runtime.io.files.kindOf(valueText(path as Value)) === 'file',
-  'System.IO.File.ReadAllText': (call, _receiver, [path]) => readFile(call, path as Value),
-  'System.IO.File.ReadAllLines': (call, _receiver, [path]) =>
-    stringArray(call, linesOf(call, readFile(call, path as Value))),
-  'System.IO.File.ReadLines': (call, _receiver, [path]) =>
-    stringArray(call, linesOf(call, readFile(call, path as Value))),
-  'System.IO.File.WriteAllText': (call, _receiver, [path, text]) => {
-    writeFile(call, pathArgument(path as Value), text === undefined ? '' : valueText(text as Value), false);
+  'System.IO.File.ReadAllText': (call, _receiver, args) => readFile(call, args[0] as Value, args),
+  'System.IO.File.ReadAllLines': (call, _receiver, args) =>
+    stringArray(call, linesOf(call, readFile(call, args[0] as Value, args))),
+  'System.IO.File.ReadLines': (call, _receiver, args) =>
+    stringArray(call, linesOf(call, readFile(call, args[0] as Value, args))),
+  'System.IO.File.WriteAllText': (call, _receiver, args) => {
+    const [path, text] = args as Value[];
+    const target = pathArgument(path);
+    writeFile(call, target, textArgument(text), false, encodingArgument(call, args, 2));
   },
-  'System.IO.File.WriteAllLines': (call, _receiver, [path, lines]) => {
-    writeFile(call, pathArgument(path as Value), linesText(call, lines as Value), false);
+  'System.IO.File.WriteAllLines': (call, _receiver, args) => {
+    const [path, lines] = args as Value[];
+    const target = pathArgument(path);
+    const text = linesText(call, lines);
+    writeFile(call, target, text, false, encodingArgument(call, args, 2));
   },
-  'System.IO.File.AppendAllText': (call, _receiver, [path, text]) => {
-    writeFile(call, pathArgument(path as Value), text === undefined ? '' : valueText(text as Value), true);
+  'System.IO.File.AppendAllText': (call, _receiver, args) => {
+    const [path, text] = args as Value[];
+    const target = pathArgument(path);
+    writeFile(call, target, textArgument(text), true, encodingArgument(call, args, 2));
   },
-  'System.IO.File.AppendAllLines': (call, _receiver, [path, lines]) => {
-    writeFile(call, pathArgument(path as Value), linesText(call, lines as Value), true);
+  'System.IO.File.AppendAllLines': (call, _receiver, args) => {
+    const [path, lines] = args as Value[];
+    const target = pathArgument(path);
+    const text = linesText(call, lines);
+    writeFile(call, target, text, true, encodingArgument(call, args, 2));
   },
   'System.IO.File.Delete': (call, _receiver, [path]) => {
     deleteFile(call, pathArgument(path as Value));
@@ -554,113 +624,6 @@ defineNatives({
   'System.IO.Directory.EnumerateDirectories(string, string)': (call, _receiver, [path, pattern]) =>
     entriesOf(call, path as Value, pattern as Value, 'directory'),
   'System.IO.Directory.GetCurrentDirectory': () => '/',
-});
-
-// ---- Path ----
-
-export function trimEnd(path: string): string {
-  return path.length > 1 ? path.replace(/\/+$/u, '') || '/' : path;
-}
-
-export function fileNameOf(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1);
-}
-
-function extensionStart(path: string): number {
-  const dot = path.lastIndexOf('.');
-  return dot > path.lastIndexOf('/') ? dot : -1;
-}
-
-/** `Path.GetFullPath`, which keeps a final separator. */
-export function fullPathOf(path: string): string {
-  const resolved = resolvePath(path);
-  return path.endsWith('/') && resolved !== '/' ? `${resolved}/` : resolved;
-}
-
-function optionalText(value: Value): string | undefined {
-  return value === undefined ? undefined : valueText(value);
-}
-
-function pathParts(call: NativeCall, args: Value[]): (string | undefined)[] {
-  const params = call.method.parameters.at(-1)?.isParams;
-  if (!params) return args.map(optionalText);
-  const array = args[0];
-  if (array === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', 'paths');
-  return [...iterate(call, array, 'paths')].map(optionalText);
-}
-
-/** `Path.Combine`: a rooted part starts the path again; parts join with a separator unless one ends with it. */
-const combine: NativeMethod = (call, _receiver, args) => {
-  const parts = pathParts(call, args as Value[]);
-  const names = call.method.parameters.map((parameter) => parameter.name);
-  let path = '';
-  for (const [index, part] of parts.entries()) {
-    if (part === undefined)
-      fail('System.ArgumentNullException', 'Value cannot be null.', names.length === 1 ? 'paths' : names[index]);
-    if (part === '') continue;
-    if (part.startsWith('/')) path = part;
-    else path = path === '' || path.endsWith('/') ? `${path}${part}` : `${path}/${part}`;
-  }
-  return path;
-};
-
-/** `Path.Join`: parts join with one separator between them unless one already has it; null and empty parts drop. */
-const join: NativeMethod = (call, _receiver, args) => {
-  let path = '';
-  for (const part of pathParts(call, args as Value[])) {
-    if (part === undefined || part === '') continue;
-    path = path === '' || path.endsWith('/') || part.startsWith('/') ? `${path}${part}` : `${path}/${part}`;
-  }
-  return path;
-};
-
-defineNatives({
-  'System.IO.Path.Combine': combine,
-  'System.IO.Path.Join': join,
-  'System.IO.Path.GetFileName': (_call, _receiver, [path]) => {
-    const text = optionalText(path as Value);
-    return text === undefined ? undefined : fileNameOf(text);
-  },
-  'System.IO.Path.GetFileNameWithoutExtension': (_call, _receiver, [path]) => {
-    const text = optionalText(path as Value);
-    if (text === undefined) return;
-    const name = fileNameOf(text);
-    const dot = name.lastIndexOf('.');
-    return dot === -1 ? name : name.slice(0, dot);
-  },
-  'System.IO.Path.GetExtension': (_call, _receiver, [path]) => {
-    const text = optionalText(path as Value);
-    if (text === undefined) return;
-    const dot = extensionStart(text);
-    return dot === -1 || dot === text.length - 1 ? '' : text.slice(dot);
-  },
-  'System.IO.Path.HasExtension': (_call, _receiver, [path]) => {
-    const text = optionalText(path as Value);
-    if (text === undefined) return false;
-    const dot = extensionStart(text);
-    return dot !== -1 && dot !== text.length - 1;
-  },
-  'System.IO.Path.GetDirectoryName': (_call, _receiver, [path]) => {
-    const text = optionalText(path as Value);
-    if (text === undefined || text === '' || /^\/+$/u.test(text)) return;
-    const slash = text.lastIndexOf('/');
-    if (slash === -1) return '';
-    const directory = text.slice(0, slash).replace(/\/+$/u, '');
-    // Repeated separators inside the directory collapse to one, as .NET normalizes them.
-    return directory === '' ? '/' : directory.replaceAll(/\/{2,}/gu, '/');
-  },
-  'System.IO.Path.ChangeExtension': (_call, _receiver, [path, extension]) => {
-    const text = optionalText(path as Value);
-    if (text === undefined) return;
-    const dot = extensionStart(text);
-    const stem = dot === -1 ? text : text.slice(0, dot);
-    const added = optionalText(extension as Value);
-    if (added === undefined) return stem;
-    if (added === '') return `${stem}.`;
-    return added.startsWith('.') ? `${stem}${added}` : `${stem}.${added}`;
-  },
-  'System.IO.Path.IsPathRooted': (_call, _receiver, [path]) => optionalText(path as Value)?.startsWith('/') ?? false,
-  'System.IO.Path.GetFullPath': (_call, _receiver, [path]) => fullPathOf(pathArgument(path as Value)),
 });
 
 // ---- Exceptions ----

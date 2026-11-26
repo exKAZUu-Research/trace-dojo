@@ -1017,6 +1017,8 @@ export class DeclarationBinder extends BinderBase {
     method.parameters = this.resolveParameters(member.parameters, methodContext, method);
     method.isExtension = member.parameters[0]?.isThis === true;
     method.extensionProperty = member.extension?.property;
+    method.isExtensionBlockMember = member.extension?.blockArity !== undefined;
+    method.extensionBlockArity = member.extension?.blockArity ?? 0;
     if (member.extension?.staticReceiver)
       method.staticExtensionOf = this.resolveType(member.extension.staticReceiver, methodContext);
     if (member.extension?.accessor) this.declareExtensionAccessor(method, member, methodContext);
@@ -2427,6 +2429,42 @@ export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull =
   // Roslyn names a constructor after its type, as `A.A(int)`.
   const name = method.kind === 'constructor' ? owner.symbol.name : method.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}${method.typeParameters.length > 0 ? `<${method.typeParameters.map((parameter) => parameter.name).join(', ')}>` : ''}(${parameters})`;
+}
+
+/**
+ * How Roslyn names a member of an extension block, after the block (`E.extension<T>(List<T>).Create()`), with the
+ * block's and the member's type parameters, or the type arguments that a call gives them.
+ */
+export function displayExtensionMember(method: MethodSymbol, typeArgs?: Type[]): string {
+  const block = displayExtensionBlock(method, typeArgs);
+  if (method.extensionProperty) return `${block}.${method.extensionProperty}`;
+  const substitution = typeArgumentSubstitution(method, typeArgs);
+  const parameters = method.parameters
+    .slice(method.staticExtensionOf ? 0 : 1)
+    .map((parameter) => displayType(substitute(parameter.type, substitution)));
+  const own = typeArgumentList(method, typeArgs).slice(method.extensionBlockArity);
+  return `${block}.${method.name}${own.length > 0 ? `<${own.join(', ')}>` : ''}(${parameters.join(', ')})`;
+}
+
+/** How Roslyn names the extension block that declares a member, as in a broken constraint of the block's. */
+export function displayExtensionBlock(method: MethodSymbol, typeArgs?: Type[]): string {
+  const blockArgs = typeArgumentList(method, typeArgs).slice(0, method.extensionBlockArity);
+  // An instance member takes the block's receiver as its first parameter.
+  const extended = method.staticExtensionOf ?? method.parameters[0].type;
+  const receiver = substitute(extended, typeArgumentSubstitution(method, typeArgs));
+  return `${displayTypeSymbol(method.owner)}.extension${blockArgs.length > 0 ? `<${blockArgs.join(', ')}>` : ''}(${displayType(receiver)})`;
+}
+
+function typeArgumentList(method: MethodSymbol, typeArgs: Type[] | undefined): string[] {
+  return method.typeParameters.map((parameter, index) =>
+    typeArgs?.[index] ? displayType(typeArgs[index]) : parameter.name
+  );
+}
+
+function typeArgumentSubstitution(method: MethodSymbol, typeArgs: Type[] | undefined): Map<TypeParameterSymbol, Type> {
+  return new Map(
+    typeArgs ? method.typeParameters.map((parameter, index) => [parameter, typeArgs[index] ?? ERROR_TYPE]) : []
+  );
 }
 
 export function isDelegateType(type: Type): type is NamedType {

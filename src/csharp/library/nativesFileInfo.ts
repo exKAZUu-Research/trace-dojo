@@ -7,22 +7,18 @@ import {
   deleteDirectory,
   deleteFile,
   entryPaths,
-  fileNameOf,
   fileSystemInfo,
   type FileSystemInfoState,
-  fullPathOf,
   moveFile,
   newReader,
   newWriter,
   openFileReader,
   openFileWriter,
-  pathArgument,
   throwException,
-  trimEnd,
   utf8Length,
-  valueText,
   withFiles,
 } from './nativesIo';
+import { fileNameOf, fullPathOf, pathArgument, trimEnd, valueText } from './nativesPath';
 import { fail, libraryType, newArray } from './support';
 
 // FileInfo and DirectoryInfo, whose `Exists` and `Length` show what was there when they last looked, as in .NET.

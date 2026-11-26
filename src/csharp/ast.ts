@@ -428,6 +428,8 @@ export interface ExtensionMember {
   isAuto?: boolean;
   /** For a static member, the receiver type, whose static members it joins (`string.M()`). */
   staticReceiver?: TypeNode;
+  /** For a member of an extension block, how many of its type parameters the block declares, which come first. */
+  blockArity?: number;
   /** The block's receiver type, which names the block in errors (`Ext.extension(string)`). */
   receiver?: TypeNode;
   /** For an instance operator (`void operator +=(int k)`), the block's receiver, which it takes first. */

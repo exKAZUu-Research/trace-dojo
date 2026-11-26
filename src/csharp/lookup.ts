@@ -19,6 +19,11 @@ export interface MethodCandidate {
   method: MethodSymbol;
   /** The constructed type that declares the method, whose type arguments its signature takes. */
   owner: NamedType;
+  /**
+   * For a static member of an extension block, the type that the member is accessed through (`List<int>.Create()`),
+   * which must convert to the block's receiver type and which infers the block's type arguments.
+   */
+  staticReceiver?: Type;
 }
 
 export type MemberLookup =
@@ -212,17 +217,19 @@ export class LookupBinder extends DeclarationBinder {
     );
   }
 
-  /** The static members of extension blocks for a type, by name: methods, or with `property`, property getters. */
+  /**
+   * The static members of extension blocks by name that a type may be accessed through: methods, or with `property`,
+   * property getters. Overload resolution checks the type against each block's receiver type, as Roslyn does.
+   */
   lookupStaticExtensions(type: Type, name: string, isProperty: boolean, context: TypeContext): MethodCandidate[] {
     return this.lookupExtensionMembers(
       context,
       (method) =>
         method.staticExtensionOf !== undefined &&
-        sameType(method.staticExtensionOf, type) &&
         (isProperty
           ? method.extensionProperty === name && method.name === `get_${name}`
           : method.name === name && !method.extensionProperty)
-    );
+    ).map((candidate) => ({ ...candidate, staticReceiver: type }));
   }
 
   /** The methods of the static classes in scope that satisfy a test, as extension methods are found. */

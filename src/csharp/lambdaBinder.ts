@@ -17,7 +17,6 @@ import {
   namedType,
   sameType,
   substitute,
-  substitutionOf,
   type Type,
   typeKey,
   VOID_TYPE,
@@ -51,9 +50,19 @@ export abstract class LambdaBinder extends MemberBinder {
     const node = expression.node;
     if (expression.methodGroup) {
       const group = expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>;
-      if (group.candidates.length !== 1 || group.candidates[0].method.typeParameters.length > 0) return undefined;
-      const method = group.candidates[0].method;
-      const substitution = substitutionOf(group.candidates[0].owner);
+      if (group.candidates.length !== 1) return undefined;
+      const [candidate] = group.candidates;
+      const { method } = candidate;
+      // A static member of a generic extension block takes the block's type arguments from the type it is accessed
+      // through (`List<int>.Create`).
+      const typeArgs =
+        method.typeParameters.length === 0
+          ? []
+          : candidate.staticReceiver && !group.typeArgs
+            ? this.inferTypeArguments(candidate, [], [], false)
+            : undefined;
+      if (!typeArgs) return undefined;
+      const substitution = this.callSubstitution(candidate, typeArgs);
       return this.functionTypeOf(
         method.parameters.map((parameter) => substitute(parameter.type, substitution)),
         substitute(method.returnType, substitution)
