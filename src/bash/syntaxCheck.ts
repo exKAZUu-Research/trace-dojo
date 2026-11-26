@@ -38,6 +38,11 @@ export interface AnalyzedBashSource {
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
   readonly literalQuotes: ReadonlySet<number>;
   readonly declarationFunctionStarts: ReadonlySet<number>;
+  /**
+   * The variable of each `{name}` before a compound command's redirection, by the offset where the redirection starts
+   * in `grammarSource`, which holds a descriptor number of the same length in its place.
+   */
+  readonly descriptorVariables: ReadonlyMap<number, string>;
 }
 
 /** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
@@ -52,7 +57,8 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     ...checked.declarationFunctionStarts,
     ...backquotes.declarationFunctionStarts,
   ]);
-  const normalized = applySourceNormalizations(backquotes.source, literalQuotes, declarationFunctionStarts);
+  const withDescriptors = maskDescriptorVariables(backquotes.source, checked.descriptorVariables);
+  const normalized = applySourceNormalizations(withDescriptors, literalQuotes, declarationFunctionStarts);
   const regions = sortDeferredRegions([...checked.arithmeticRegions, ...backquotes.arithmeticRegions]);
   const { grammarSource, deferredArithmetic, deferredExpansions } = resolveDeferredArithmeticRegions(
     parser,
@@ -68,7 +74,18 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     backquoteErrors: backquotes.errors,
     literalQuotes,
     declarationFunctionStarts,
+    descriptorVariables: new Map(checked.descriptorVariables.map(({ start, name }) => [start, name])),
   };
+}
+
+/**
+ * Writes a descriptor number in place of each `{name}` before a compound command's redirection, which the grammar
+ * reads only after a simple command, so that it parses the redirection, which the converter gives the name back.
+ */
+function maskDescriptorVariables(source: string, spans: readonly { start: number; end: number }[]): string {
+  let out = source;
+  for (const { start, end } of spans) out = `${out.slice(0, start)}${'9'.repeat(end - start)}${out.slice(end)}`;
+  return out;
 }
 
 export function checkBashSyntax(source: string): {
@@ -77,6 +94,7 @@ export function checkBashSyntax(source: string): {
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: { start: number; end: number; name: string }[];
 } {
   const text = createValidatorSourceText(source);
   return {
@@ -85,6 +103,7 @@ export function checkBashSyntax(source: string): {
     literalSingleQuotes: text.literalSingleQuotes,
     declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
+    descriptorVariables: text.descriptorVariables,
   };
 }
 
@@ -1170,8 +1189,10 @@ class ShellGrammarValidator {
     for (;;) {
       const token = this.peek();
       // `{name}` right before an operator names the descriptor the redirection allocates, as after a simple command.
-      if (isDescriptorVariableWord(token, this.text.source)) this.advance();
-      else if (token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) return;
+      if (isDescriptorVariableWord(token, this.text.source)) {
+        this.text.descriptorVariables.push({ start: token.start, end: token.end, name: token.value.slice(1, -1) });
+        this.advance();
+      } else if (token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) return;
       this.parseOneRedirection();
     }
   }

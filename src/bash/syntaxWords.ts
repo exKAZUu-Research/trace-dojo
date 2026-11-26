@@ -48,6 +48,8 @@ export class SourceText {
   readonly literalSingleQuotes: number[] = [];
   /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */
   readonly declarationFunctionStarts: number[] = [];
+  /** The `{name}` words before the redirections of compound commands, by offset, which the grammar cannot read. */
+  readonly descriptorVariables: { start: number; end: number; name: string }[] = [];
   /** Balanced arithmetic and compound-subscript spans collected during the single lexical/validation pass. */
   readonly arithmeticRegions: DeferredRegion[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */

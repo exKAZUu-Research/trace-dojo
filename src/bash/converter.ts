@@ -230,9 +230,8 @@ export class Converter {
 
   private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const bodyNode = node.childForFieldName('body');
-    // The grammar reads `{name}` before a compound command's redirection as an error node of its own.
     const redirects = this.fieldNodes(node, 'redirect').map((redirect) =>
-      this.redirect(redirect, descriptorVariableBefore(redirect))
+      this.redirect(redirect, this.analyzed.descriptorVariables.get(redirect.startIndex))
     );
     if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
     const converted = this.statement(bodyNode);
@@ -1056,16 +1055,6 @@ function lineRowOf(node: Node): number {
       return node.startPosition.row;
     }
   }
-}
-
-/**
- * The `name` of `{name}` written right before a compound command's redirection, which the grammar parses as an
- * error node before it.
- */
-export function descriptorVariableBefore(redirect: Node): string | undefined {
-  const previous = redirect.previousSibling;
-  if (previous?.type !== 'ERROR' || previous.endIndex !== redirect.startIndex) return undefined;
-  return FD_VARIABLE_PATTERN.exec(previous.text)?.[1];
 }
 
 /** The word after `after` that starts the next clause of an `if` or ends it: `elif`, `else`, or `fi`. */
