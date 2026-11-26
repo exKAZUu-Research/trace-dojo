@@ -114,7 +114,8 @@ export class Shell implements ArithmeticHost {
   readonly traceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
-  private runningTrap = false;
+  /** The traps running now, which do not run again until they end, as Bash runs none of them inside itself. */
+  private readonly runningTraps = new Set<TrapCondition>();
   /**
    * The descriptors of process substitutions that the commands running now use, with what each `>(...)` runs when
    * done and the descriptors its commands were started with.
@@ -233,15 +234,15 @@ export class Shell implements ArithmeticHost {
    */
   private runTrap(condition: TrapCondition, status: number): void {
     const trap = this.traps.get(condition);
-    if (!trap || trap.statements.length === 0 || this.runningTrap) return;
+    if (!trap || trap.statements.length === 0 || this.runningTraps.has(condition)) return;
     const saved = { lineShift: this.lineShift, row: this.currentRow };
-    this.runningTrap = true;
+    this.runningTraps.add(condition);
     this.store.lastStatus = status;
     this.lineShift = trap.row - this.currentRow;
     try {
       this.runStatements(trap.statements);
     } finally {
-      this.runningTrap = false;
+      this.runningTraps.delete(condition);
       this.lineShift = saved.lineShift;
       this.currentRow = saved.row;
       this.store.lastStatus = status;
