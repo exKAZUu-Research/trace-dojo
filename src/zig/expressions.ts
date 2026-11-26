@@ -38,13 +38,14 @@ import { MemoryFault } from './memoryFault';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
 import { sliceLengthPointer } from './pointerViews';
-import { type Frame, Jump, withHeldValues } from './runtime';
+import { type Frame, Jump, UnavailableOperation, withHeldValues } from './runtime';
 import {
   addDecls,
   copyForFrame,
   copyForStorage,
   evaluateHeld,
   FnRef,
+  inMemoryCoercible,
   isAnonymous,
   isType,
   known,
@@ -1447,7 +1448,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { operator } = expression;
     if (operator !== '+' && operator !== '-')
       return this.error(expression, `多要素のポインタには、${operator} は使えません（+ と - だけです）。`);
-    const offset = this.coerce(this.compile(expression.right, USIZE), USIZE, expression.right);
+    const right = this.compile(expression.right, operator === '-' ? undefined : USIZE);
+    const leftType = pointer.type as Extract<Type, { kind: 'pointer' }>;
+    if (operator === '-' && right.type.kind === 'pointer' && right.type.size === leftType.size)
+      return this.pointerDifference(pointer, right, expression);
+    const offset = this.coerce(right, USIZE, expression.right);
     const sign = operator === '+' ? 1 : -1;
     return this.combine(
       [pointer, offset],
@@ -1455,6 +1460,27 @@ export abstract class ExpressionCompiler extends SemaBase {
       ([value, count]) => {
         if (!(value instanceof Pointer)) throw new MemoryFault();
         return new Pointer(value.target, value.index + sign * Number(count as bigint));
+      },
+      expression
+    );
+  }
+
+  /** `q - p` on many-item pointers into the same memory: how many elements `p` lies before `q`. */
+  private pointerDifference(left: TExpr, right: TExpr, expression: ExpressionOf<'binary'>): TExpr {
+    const child = (left.type as Extract<Type, { kind: 'pointer' }>).child;
+    if (!inMemoryCoercible(child, (right.type as Extract<Type, { kind: 'pointer' }>).child))
+      this.error(expression, mismatch(left.type, right.type));
+    const size = BigInt(sizeOf(child));
+    return this.combine(
+      [left, right],
+      USIZE,
+      ([a, b]) => {
+        const [later, earlier] = [manyPointer(a), manyPointer(b)];
+        // Pointers into different memory differ by their addresses, which the grader does not model.
+        if (later.target !== earlier.target) throw new UnavailableOperation('pointer:differentMemory');
+        // Zig subtracts the addresses with wrapping, then divides by the element's size.
+        const bytes = BigInt.asUintN(64, BigInt(later.index - earlier.index) * size);
+        return size === 0n ? 0n : bytes / size;
       },
       expression
     );
