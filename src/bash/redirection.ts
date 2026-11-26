@@ -51,16 +51,20 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
     shell.assignVariable(redirect.fdVariable, String(fd));
     return;
   }
-  changed.push(redirect.fd);
-  if (file === 'close') {
-    shell.fds.close(redirect.fd);
-    return;
+  // `&>file`, `&>>file`, and `>&file` send standard error to the file as well.
+  const sendsStandardError =
+    (redirect.kind === 'file' && (redirect.operator === '&>' || redirect.operator === '&>>')) ||
+    (file !== 'close' && isStandardOutputAndErrorToFile(redirect));
+  for (const fd of sendsStandardError ? [redirect.fd, 2] : [redirect.fd]) {
+    changed.push(fd);
+    if (file === 'close') shell.fds.close(fd);
+    else shell.fds.set(fd, file);
   }
-  shell.fds.set(redirect.fd, file);
-  if (redirect.kind === 'file' && (redirect.operator === '&>' || redirect.operator === '&>>')) {
-    changed.push(2);
-    shell.fds.set(2, file);
-  }
+}
+
+/** Whether a redirection is `>&word` with a word that names no descriptor, which Bash reads as `&>word`. */
+function isStandardOutputAndErrorToFile(redirect: Exclude<Redirect, { kind: 'close' }>): boolean {
+  return redirect.kind === 'duplicate' && redirect.operator === '>&' && !redirect.hasDescriptor && !redirect.fdVariable;
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per redirection operator, as Bash's `do_redirection_internal` has.
@@ -85,11 +89,7 @@ function openRedirectTarget(shell: Shell, redirect: Exclude<Redirect, { kind: 'c
         if (copy[2] === '-' && source !== redirect.fd) shell.fds.close(source);
         return file;
       }
-      if (redirect.operator === '>&' && !redirect.hasDescriptor && !redirect.fdVariable) {
-        const file = openPath(shell, target, '>');
-        shell.fds.set(2, file);
-        return file;
-      }
+      if (isStandardOutputAndErrorToFile(redirect)) return openPath(shell, target, '>');
       throw new RedirectionError(`${redirect.target.text}: ambiguous redirect`);
     }
   }
