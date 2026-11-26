@@ -8894,6 +8894,25 @@ fn main() {
   });
 });
 
+// A pattern reads `*x` and `v[i]` through `Deref` and `Index`, and writes through `DerefMut` and `IndexMut` only for
+// `ref mut`; the wrong one panics on a `Ref` or loses the write.
+test('a scrutinee behind Deref or Index is read shared unless a pattern binds it by ref mut', () => {
+  const program = `use std::cell::RefCell;
+use std::ops::{Index, IndexMut};
+struct G(Vec<Option<i32>>);
+impl Index<usize> for G { type Output = Option<i32>; fn index(&self, i: usize) -> &Option<i32> { &self.0[i] } }
+impl IndexMut<usize> for G { fn index_mut(&mut self, i: usize) -> &mut Option<i32> { &mut self.0[i] } }
+fn main() {
+    let c = RefCell::new(Some(1));
+    if let Some(v) = *c.borrow() { println!("v {v}"); }
+    match *c.borrow_mut() { ref mut x => *x = Some(9) }
+    let mut g = G(vec![Some(1)]);
+    if let Some(ref mut x) = g[0] { *x += 4; }
+    println!("{:?} {:?}", c.borrow(), g.0);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'v 1\nSome(9) [Some(5)]\n' });
+});
+
 // The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
 test('unsafe code reaches raw pointers, mutable statics, unsafe functions, and unions', () => {
   const program = `static mut COUNTER: u32 = 0;
