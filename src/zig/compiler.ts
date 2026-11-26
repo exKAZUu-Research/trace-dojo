@@ -17,7 +17,7 @@ import { BranchQuotaExceeded, CompileTimeCallDepthExceeded, Frame, Runtime, ZigP
 import { addDecls, FnRef, type TExpr } from './semaBase';
 import { StatementCompiler } from './statements';
 import { type Decl, type Namespace, type StructType, TYPE, type Type, typeName } from './types';
-import type { Slots, Value } from './values';
+import { type Slots, UNASSIGNED, type Value } from './values';
 
 /** A container-level variable, which the trace shows as Java shows a static field. */
 export interface GlobalVariable {
@@ -210,6 +210,8 @@ class Compiler extends StatementCompiler {
       },
       set: (target, key, value, receiver) => {
         if (outsideOwn(key)) panic('unable to resolve comptime value');
+        // A block's locals outlive it here, as a pointer to one may leave the code with its value (no slot is reused).
+        if (value === UNASSIGNED) return true;
         return Reflect.set(target, key, value, receiver);
       },
     });
