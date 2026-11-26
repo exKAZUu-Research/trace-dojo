@@ -417,7 +417,7 @@ export class Expander {
     if (!expansion.braced) {
       const value = this.parameterValue(name, undefined, expansion);
       // Bash names an unbraced positional or special parameter with its `$`, as in `$1: unbound variable`.
-      this.requireSet(value, /^[A-Za-z_]/.test(name) ? name : `$${name}`, undefined);
+      this.requireSet(value, /^[A-Za-z_]/.test(name) ? name : `$${name}`);
       return this.valueSegments(value, ctx, expansion.text);
     }
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
@@ -431,7 +431,7 @@ export class Expander {
     if (expansion.prefix === '#') return this.expandLength(name, subscript, expansion, ctx);
     const value = this.parameterValue(name, subscript, expansion);
     if (expansion.operator === undefined || !UNSET_TESTING_OPERATORS.has(expansion.operator)) {
-      this.requireSet(value, name, subscript);
+      this.requireSet(value, subscriptedLabel(name, subscript));
     }
     if (expansion.operator === undefined) {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
@@ -441,9 +441,9 @@ export class Expander {
   }
 
   /** Stops the shell at an unset parameter under `set -u`, which `$@`, `$*`, and `${a[@]}` never are. */
-  private requireSet(value: ParameterValue, name: string, subscript: SubscriptRef | undefined): void {
+  private requireSet(value: ParameterValue, label: string): void {
     if (!this.shell.options.nounset || value.kind !== 'scalar' || value.value !== undefined) return;
-    this.failParameter(subscript ? `${name}[${subscript.text}]` : name, 'unbound variable');
+    this.failParameter(label, 'unbound variable');
   }
 
   private expandLength(
@@ -454,11 +454,16 @@ export class Expander {
   ): WordSegment[] {
     if (subscript?.wholeArray) {
       const resolved = resolveTargetName(this.shell, name);
-      const count = this.shell.store.readArrayLength(resolved);
+      // Under `set -u`, Bash counts the elements only of an array that is set, even an empty one.
+      const { store } = this.shell;
+      if (this.shell.options.nounset && !(store.isArrayName(resolved) && store.hasMaterializedTarget(resolved))) {
+        this.failParameter(name, 'unbound variable');
+      }
+      const count = store.readArrayLength(resolved);
       return this.valueSegments({ kind: 'scalar', value: String(count) }, ctx, expansion.text);
     }
     const value = this.parameterValue(name, subscript, expansion);
-    this.requireSet(value, name, subscript);
+    this.requireSet(value, subscriptedLabel(name, subscript));
     return this.valueSegments(lengthOf(value), ctx, expansion.text);
   }
 
@@ -602,17 +607,18 @@ export class Expander {
     const direct = this.parameterValue(name, subscript, expansion);
     const reference =
       direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
+    // Bash names the expansion as written, with its `!`, when the value it finally reads is unset under `set -u`.
+    const written = subscript === undefined ? `!${name}` : `!${name}[${subscript.rawText}]`;
     if (reference === undefined) {
       this.checkIndirectReference(name, subscript?.rawText);
-      const missingName = subscript === undefined ? `!${name}` : `!${name}[${subscript.rawText}]`;
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, missingName, undefined, ctx);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, { name: written }, written, ctx);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
       expansion,
       this.parameterValue(target.name, target.subscript, expansion),
-      target.name,
-      target.subscript,
+      target,
+      written,
       ctx
     );
   }
@@ -620,12 +626,15 @@ export class Expander {
   private finishIndirect(
     expansion: ParameterExpansion,
     value: ParameterValue,
-    targetName: string,
-    targetSubscript: SubscriptRef | undefined,
+    target: { name: string; subscript?: SubscriptRef },
+    written: string,
     ctx: WordContext
   ): WordSegment[] {
+    if (expansion.operator === undefined || !UNSET_TESTING_OPERATORS.has(expansion.operator)) {
+      this.requireSet(value, written);
+    }
     if (expansion.operator === undefined) return this.valueSegments(value, ctx, expansion.text);
-    return applyOperator(this, this.shell, expansion, value, targetName, targetSubscript, ctx);
+    return applyOperator(this, this.shell, expansion, value, target.name, target.subscript, ctx);
   }
 
   private checkIndirectReference(name: string, subscript: string | undefined): void {
@@ -796,6 +805,11 @@ export class Expander {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
   }
+}
+
+/** How `set -u` names a parameter: `name`, or `name[subscript]` with the subscript as expanded. */
+function subscriptedLabel(name: string, subscript: SubscriptRef | undefined): string {
+  return subscript ? `${name}[${subscript.text}]` : name;
 }
 
 /** `${!-word}` and the like, which apply `-`, `=`, `?`, or `+` to `$!` rather than name `$-` indirectly. */
