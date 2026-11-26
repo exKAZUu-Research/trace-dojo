@@ -865,7 +865,6 @@ const EXCLUSIVE_MODIFIERS = [
   ['data', 'open'],
   ['enum', 'inner'],
   ['sealed', 'final'],
-  ['in', 'out'],
 ] as const;
 
 /**
