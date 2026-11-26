@@ -876,24 +876,21 @@ final class JsonDecoder extends Converter<String, Object?> {
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
  * as it comes: the chunks so far are parsed again as each arrives, so that an error is reported when its chunk
  * arrives, in that chunk at its offset there, as the chunked parser reports it, and the value when the stream ends.
+ * What that parser does after an error (a second error, or a value it had completed) depends on its internal state,
+ * so a later chunk or the stream's end after an error is reported as unavailable.
  */
 class _JsonStringDecoderSink implements EventSink<String> {
   final EventSink<Object?> _sink;
   final Object? Function(Object? key, Object? value)? _reviver;
   final List<String> _chunks = <String>[];
-  /** The text before the error that stopped the chunked parser, once one has. */
-  String? _beforeError;
+  bool _hasFailed = false;
   bool _isRejected = false;
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
-    // The chunked parser goes on from a state an error leaves it in, which this sink does not reproduce.
-    if (_beforeError != null && chunk.isNotEmpty) {
-      _isRejected = true;
-      throw UnsupportedError("エラーの後に続く json.decoder のストリームのチャンクは、この採点環境では使えません。");
-    }
+    if (_hasFailed && chunk.isNotEmpty) _afterError();
     _chunks.add(chunk);
-    if (chunk.isEmpty || _beforeError != null) return;
+    if (chunk.isEmpty || _hasFailed) return;
     // An error before the end of the text so far is one no later chunk can mend, which the SDK's chunked parser
     // reports as soon as its chunk arrives; one at the end waits for more input.
     final source = _chunks.join();
@@ -902,28 +899,32 @@ class _JsonStringDecoderSink implements EventSink<String> {
     } on FormatException catch (error) {
       final offset = error.offset;
       if (offset != null && offset < source.length) {
-        _beforeError = source.substring(0, offset);
+        _hasFailed = true;
         throw _inChunk(error, offset);
       }
     }
   }
+
+  Never _afterError() {
+    _isRejected = true;
+    throw _unavailableAfterError;
+  }
+
+  static final UnsupportedError _unavailableAfterError =
+      UnsupportedError("エラーの後の json.decoder のストリームは、この採点環境では使えません。");
 
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);
   }
 
   void close() {
-    if (_isRejected) {
+    // The stream still ends after the rejection, as the SDK's ends after its second error.
+    if (_hasFailed && !_isRejected) _sink.addError(_unavailableAfterError);
+    if (_hasFailed) {
       _sink.close();
       return;
     }
-    final beforeError = _beforeError;
-    // A parser an error stopped gives the value it completed before it, or fails as its input ends unfinished.
-    final source = beforeError ?? _chunks.join();
-    if (beforeError != null && !_completes(beforeError)) {
-      final last = _chunks.last;
-      throw FormatException("Unexpected end of input", last, last.length);
-    }
+    final source = _chunks.join();
     Object? value;
     try {
       value = _jsonDecode(source, _reviver);
@@ -932,15 +933,6 @@ class _JsonStringDecoderSink implements EventSink<String> {
     }
     _sink.add(value);
     _sink.close();
-  }
-
-  bool _completes(String text) {
-    try {
-      _jsonDecode(text, null);
-      return true;
-    } on FormatException {
-      return false;
-    }
   }
 
   FormatException _inChunk(FormatException error, int offset) {
