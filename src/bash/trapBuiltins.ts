@@ -13,6 +13,8 @@ export type TrapCondition = 'EXIT' | 'ERR';
 export interface Trap {
   readonly text: string;
   readonly statements: Statement[];
+  /** Whether the action holds a syntax error, which stops the program only when the action runs, as Bash reads it then. */
+  readonly unreadable?: boolean;
   /** The row of the `trap` command, where the action's commands are numbered from. */
   readonly row: number;
 }
@@ -88,12 +90,15 @@ export const trapBuiltin: Builtin = (shell, args) => {
     }
     if (condition === undefined) rejectUnsupportedCondition(spec);
     if (resets) shell.traps.delete(condition);
-    else
+    else {
+      const statements = parseTrapAction(first, shell.currentRow);
       shell.traps.set(condition, {
         text: first,
-        statements: parseTrapAction(first, shell.currentRow),
+        statements: statements ?? [],
+        unreadable: statements === undefined,
         row: shell.currentRow,
       });
+    }
   }
   return status;
 };

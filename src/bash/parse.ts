@@ -61,16 +61,21 @@ function isEmptySubscript(node: Node): boolean {
   return node.type === 'raw_string' && node.startIndex === node.endIndex && node.parent?.type === 'subscript';
 }
 
+const UNSUPPORTED_SUFFIX = 'は、この採点環境では使えません。';
+
 /**
  * The commands of a `trap` action, read when the trap is set, numbered as the `trap` command's line so that their
- * steps show there. A syntax error in the action stops the program, as an action Bash could not run.
+ * steps show there, or `undefined` for an action with a syntax error, which Bash finds only as it runs the action.
  */
-export function parseTrapAction(text: string, row: number): Statement[] {
+export function parseTrapAction(text: string, row: number): Statement[] | undefined {
   try {
     return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
   } catch (error) {
-    if (error instanceof CompileError) rejectUnsupportedFeature('構文エラーのある trap の文字列');
-    throw error;
+    if (!(error instanceof CompileError)) throw error;
+    const message = error.diagnostics[0]?.message ?? '';
+    // What the action uses that this environment does not provide stops the program when the trap is set.
+    if (message.endsWith(UNSUPPORTED_SUFFIX)) rejectUnsupportedFeature(message.slice(0, -UNSUPPORTED_SUFFIX.length));
+    return undefined;
   }
 }
 
