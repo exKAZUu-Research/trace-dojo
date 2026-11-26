@@ -45,6 +45,11 @@ export class SourceText {
    * Bash reads the substitution with the options of the line it is on.
    */
   readingExtglob = { on: false, uncertain: false };
+  /**
+   * The values `extglob` may have after a `${ ...; }` read in the line being read, which runs in this shell, so the
+   * lines after it read with them.
+   */
+  readonly currentShellExtglob: boolean[] = [];
   private readonly lineStarts: number[] = [0];
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */

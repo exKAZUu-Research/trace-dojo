@@ -415,7 +415,8 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
 
 export function createValidatorSourceText(source: string): SourceText {
   const text = new SourceText(source);
-  // A substitution's own `shopt` lines change what it reads but not the line around it.
+  // A `$( )`'s own `shopt` lines change what it reads but not the line around it; a `${ ...; }` runs in this shell,
+  // so what it may set is left for the lines after the line holding it.
   const keepingExtglob = (read: () => number): number => {
     const saved = text.readingExtglob;
     try {
@@ -427,7 +428,12 @@ export function createValidatorSourceText(source: string): SourceText {
   text.parseSubstitution = (start) =>
     keepingExtglob(() => new ShellGrammarValidator(text, start, true).validateSubstitution());
   text.parseBraceSubstitution = (start) =>
-    keepingExtglob(() => new ShellGrammarValidator(text, start, true, true).validateBraceSubstitution());
+    keepingExtglob(() => {
+      const validator = new ShellGrammarValidator(text, start, true, true);
+      const end = validator.validateBraceSubstitution();
+      text.currentShellExtglob.push(...validator.extglobValuesAfter());
+      return end;
+    });
   return text;
 }
 
@@ -857,6 +863,10 @@ class ShellGrammarValidator {
    * read while it may also be off.
    */
   private applyLineExtglob(): void {
+    // What a `${ ...; }` of the line may set, which may not run, as the commands around it may not.
+    for (const on of this.text.currentShellExtglob.splice(0)) {
+      this.lineExtglob.push({ on, uncertain: true, inFunction: this.functionDepth > 0 });
+    }
     for (const { on, uncertain, inFunction } of this.lineExtglob) {
       if (inFunction) this.functionExtglob.add(on);
       if (!uncertain) this.possibleExtglob.clear();
@@ -881,6 +891,12 @@ class ShellGrammarValidator {
     const end = this.peek();
     if (!this.hasKeyword(end, '}')) this.failUnexpected(end);
     return this.advance().end;
+  }
+
+  /** The values `extglob` may have once the commands read have run, those of the line being read included. */
+  extglobValuesAfter(): boolean[] {
+    this.applyLineExtglob();
+    return [...this.possibleExtglob];
   }
 
   private parseCompoundList(): void {
