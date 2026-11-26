@@ -52,7 +52,7 @@ export function compileMatch(c: Compiler, expr: ExprOf<'match'>, asStatement: bo
         const moveOut = matcher(frame, value, () => place);
         if (!moveOut) continue;
         if (guard && guard(frame) !== true) {
-          frame.endScope(slots);
+          frame.endScope(slots, false);
           continue;
         }
         moveOut();

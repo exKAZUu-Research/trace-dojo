@@ -66,9 +66,12 @@ export class Frame implements TracedFrame {
    */
   readonly referents = new Map<number, { place: Place; root: number; view?: (value: Value) => Value }>();
 
-  /** Ends the scope of variables, which leave the trace with the references to them, dropping their values. */
-  endScope(slots: readonly number[]): void {
-    this.runtime.dropper?.dropSlots(this, slots);
+  /**
+   * Ends the scope of variables, which leave the trace with the references to them, dropping their values; with
+   * `drops` false, as when a match guard fails, the values stay with the value matched, which the bindings never took.
+   */
+  endScope(slots: readonly number[], drops = true): void {
+    if (drops) this.runtime.dropper?.dropSlots(this, slots);
     for (const slot of slots) {
       this.locals[slot] = UNASSIGNED;
       this.referents.delete(slot);
