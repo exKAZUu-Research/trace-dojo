@@ -3,6 +3,7 @@ import type { Expr, Span } from './ast';
 import { madeString, stringCapacity } from './capacity';
 import type { Compiler, Eval, PlaceEval } from './compiler';
 import { derefAll, evaluateValues, LocalPlace } from './compilerCommon';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import { floatBits, floatFromBits } from './floatBits';
 import { normalize } from './infer';
 import { derefOnce } from './methods';
@@ -81,7 +82,8 @@ function pathPlace(c: Compiler, expr: ExprOf<'path'>): PlaceEval | undefined {
 function fieldPlace(c: Compiler, expr: ExprOf<'field'>): PlaceEval | undefined {
   const field = c.annotations.fields.get(expr);
   if (!field) return undefined;
-  const base = placeThrough(c, expr.operand, field.derefs);
+  const through = placeThrough(c, expr.operand, field.derefs);
+  const base = field.derefs.length === 0 ? (dropsBorrowedTemporary(c, expr.operand, through) as PlaceEval) : through;
   const { index } = field;
   if (field.range) return rangeFieldPlace(base, rangeEndpoint(expr.name));
   const union = unionFields(expr);
@@ -271,7 +273,9 @@ export function valueThrough(c: Compiler, operand: Expr, derefs: Derefs): Eval {
 export function compileField(c: Compiler, expr: ExprOf<'field'>): Eval {
   const field = c.annotations.fields.get(expr);
   if (!field) throw new Error('Unresolved field');
-  const base = valueThrough(c, expr.operand, field.derefs);
+  const through = valueThrough(c, expr.operand, field.derefs);
+  // A field of a value no variable holds (`make().0`) leaves that value a temporary, which goes later.
+  const base = field.derefs.length === 0 ? dropsBorrowedTemporary(c, expr.operand, through) : through;
   const { index } = field;
   if (field.range) {
     const endpoint = rangeEndpoint(expr.name);

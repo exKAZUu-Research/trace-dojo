@@ -499,8 +499,7 @@ export class Compiler {
         };
       }
     }
-    // A closure moves out only what it captured by value, which its own storage holds.
-    if ((expr.kind === 'path' || expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr)) {
+    if (this.movesOutOfPlace(expr)) {
       const place = this.place(expr);
       return (frame) => {
         const target = place(frame);
@@ -510,6 +509,15 @@ export class Compiler {
       };
     }
     return read;
+  }
+
+  /**
+   * Whether moving the value leaves its place without it: a closure moves out only what it captured by value, which
+   * its own storage holds, and a field moves out of a temporary (`make_pair().0`), which then drops only the rest.
+   */
+  private movesOutOfPlace(expr: Expr): boolean {
+    if (expr.kind === 'field' && !isPlaceExpr(fieldRoot(expr), this.annotations)) return true;
+    return (expr.kind === 'path' || expr.kind === 'field' || expr.kind === 'unary') && this.ownedPlace(expr);
   }
 
   ownedPlace(expr: Expr): boolean {
@@ -941,6 +949,13 @@ function dynCoercion(read: Eval, type: (frame: Frame) => Type, mutable: boolean)
       target
     );
   };
+}
+
+/** The value a chain of field accesses starts from: `make()` of `make().a.b`. */
+function fieldRoot(expr: Expr): Expr {
+  let root = expr;
+  while (root.kind === 'field') root = root.operand;
+  return root;
 }
 
 function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
