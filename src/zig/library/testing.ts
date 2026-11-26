@@ -16,6 +16,7 @@ import {
   typeName,
   VOID,
 } from '../types';
+import { unavailableMessage } from '../unavailable';
 import { ErrorValue, NULL, Pointer, type Slice, type Value, type ZStruct, type ZUnion } from '../values';
 import { approximatelyEqual } from './math';
 import { expectArgs, fnMember, type Member, nativeStruct } from './native';
@@ -286,11 +287,11 @@ function slicePointer(slice: Slice): Value {
   return new Pointer(slice.target, slice.start);
 }
 
-/** A tagged union compares its tags and then the active payloads; Zig compares other unions by their bits. */
+/** A tagged union compares its tags and then the active payloads; Zig compares a packed or extern union by its bits. */
 function unionCheck(sema: SemaApi, type: Extract<Type, { kind: 'union' }>, span: Span): Check {
   const tagType = type.tagType;
-  if (type.layout !== 'auto' || !tagType)
-    return sema.error(span, `${typeName(type)} 型の値は、std.testing.expectEqual で比べられません。`);
+  if (type.layout !== 'auto') return sema.error(span, unavailableMessage('testing:bitUnion'));
+  if (!tagType) return sema.error(span, `${typeName(type)} 型の値は、std.testing.expectEqual で比べられません。`);
   const fields = sema.unionFields(type);
   const tags = sema.enumFields(tagType);
   const tagCheck = equalityCheck(sema, tagType, span);
