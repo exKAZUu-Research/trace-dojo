@@ -156,7 +156,9 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const fixed = pattern.elems.length - (rest === undefined ? 0 : 1);
   const restBinding = rest === undefined ? undefined : pattern.elems[rest];
   const restLocal = restBinding && c.annotations.bindings.get(restBinding);
-  const restByRef = restLocal !== undefined && isRefType(restLocal.type);
+  const restType = restLocal && normalize(shallow(restLocal.type));
+  const restByRef = restType?.kind === 'ref';
+  const restByMut = restType?.kind === 'ref' && restType.mutable;
   // An element after the `..` counts from the end.
   const offsetOf = (index: number, after: number): number =>
     rest !== undefined && index > rest ? index - 1 + after : index;
@@ -173,7 +175,11 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
     }
     if (restLocal) {
       const from = start + (rest as number);
-      bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restByRef)));
+      bindings.push(() => {
+        const elems = sliceRest(target, base, from, from + after, restByRef);
+        // A `&mut [T]` is the place of its slice, as `&mut v[a..b]` makes one.
+        frame.locals[restLocal.slot] = restByMut ? new CellPlace(elems) : elems;
+      });
     }
     return true;
   };
