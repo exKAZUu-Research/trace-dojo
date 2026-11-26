@@ -170,11 +170,15 @@ export class Formatter {
           case 'Pin': {
             return this.display(v, t.args[0], spec, write);
           }
-          case 'Rc': {
+          case 'Rc':
+          case 'Arc': {
             return this.display((v as SharedBox).value, t.args[0], spec, write);
           }
           case 'Ref':
-          case 'RefMut': {
+          case 'RefMut':
+          case 'MutexGuard':
+          case 'RwLockReadGuard':
+          case 'RwLockWriteGuard': {
             return this.display((v as BorrowGuard).cell.value, t.args[0], spec, write);
           }
           case 'CaseIter':
