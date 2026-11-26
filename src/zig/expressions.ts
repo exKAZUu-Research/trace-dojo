@@ -2241,9 +2241,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (type?.kind === 'struct' && type.isTuple) {
       const fields = this.structFields(type, expression);
       if (fields.length !== expression.elements.length) this.error(expression, 'タプルの要素の数が合いません。');
-      const elements = expression.elements.map((element, index) =>
-        this.coerce(this.compile(element, fields[index].type), fields[index].type, element)
-      );
+      const elements = expression.elements.map((element, index) => {
+        const field = fields[index];
+        const compiled = this.coerce(this.compile(element, field.type), field.type, element);
+        if (field.comptimeValue) this.checkComptimeField(compiled, field, element);
+        return compiled;
+      });
       return this.aggregate(type, elements, expression, (values) => new ZStruct(values));
     }
     if (type && type.kind !== 'struct') {
