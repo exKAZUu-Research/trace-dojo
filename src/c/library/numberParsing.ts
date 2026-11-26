@@ -1,4 +1,5 @@
-import { exactParts, roundBinary, roundDecimalToFloat } from './binaryFloat';
+import { exactParts } from '../../interpreter/floatFormat';
+import { roundBinary, roundDecimalToFloat } from './binaryFloat';
 
 export function isSpaceByte(byte: number): boolean {
   return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
