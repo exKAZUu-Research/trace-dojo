@@ -164,9 +164,15 @@ function builtinAssocType(trait: TraitDef, name: string, self: Type, args: Type[
 function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undefined {
   const left = primitiveOperand(self);
   // std's impls for numbers take numbers (`i32 + &i32`); one with another type on the right is the program's.
-  if (left && (args.length === 0 || primitiveOperand(args[0]))) return left;
+  if (left && (args.length === 0 || primitiveOperand(args[0]) || untypedNumber(args[0], left))) return left;
   if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
   return undefined;
+}
+
+/** Whether an operand is a number literal whose type is not known yet, of the kind of the number on the left. */
+function untypedNumber(type: Type, left: Type): boolean {
+  const t = normalize(shallow(type));
+  return t.kind === 'var' && t.v.literal !== undefined && t.v.literal === left.kind;
 }
 
 function primitiveOperand(type: Type | undefined): Type | undefined {
