@@ -157,10 +157,11 @@ function rejectUnsupportedCondition(spec: string): never {
  * not provide, or `invalid` for a name Bash does not know.
  */
 function conditionOf(spec: string): TrapCondition | 'invalid' | undefined {
-  const name = spec.toUpperCase().replace(/^SIG/, '');
-  if (name === 'EXIT' || spec === '0') return 'EXIT';
-  if (name === 'ERR') return 'ERR';
-  if (name === 'DEBUG' || name === 'RETURN' || SIGNAL_NAMES.has(name)) return undefined;
+  // Only a real signal's name may start with `SIG`: Bash finds no `SIGEXIT` or `SIGERR`.
+  const upper = spec.toUpperCase();
+  if (upper === 'EXIT' || spec === '0') return 'EXIT';
+  if (upper === 'ERR') return 'ERR';
+  if (upper === 'DEBUG' || upper === 'RETURN' || SIGNAL_NAMES.has(upper.replace(/^SIG/, ''))) return undefined;
   if (/^\d+$/.test(spec) && Number(spec) < 65) return undefined;
   return 'invalid';
 }
