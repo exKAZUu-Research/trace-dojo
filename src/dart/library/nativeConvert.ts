@@ -1007,22 +1007,28 @@ const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) =
 function validatedBase64Length(input: string, fail: (message: string, offset: number) => never): number {
   let last = 0;
   let count = 0;
+  // As the SDK's decodeChunk, a code unit is looked up by its low seven bits, and one beyond ASCII is reported
+  // only when no character before the end, or before padding, is invalid by that lookup.
+  let firstNonAscii = -1;
   for (let position = 0; position < input.length; position++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- Base64 reads UTF-16 code units.
     const code = input.charCodeAt(position);
-    const value = code > 127 ? -2 : (BASE64_VALUES[code] as number);
+    if (code > 127 && firstNonAscii < 0) firstNonAscii = position;
+    const value = BASE64_VALUES[code & 0x7f] as number;
     if (value >= 0) {
       last = value;
       count = (count + 1) & 3;
       continue;
     }
     if (value !== -1 || count <= 1) fail('Invalid character', position);
+    if (firstNonAscii >= 0) break;
     if ((last & (count === 3 ? 0x03 : 0x0f)) !== 0) fail('Invalid encoding before padding', position);
     const expected = (3 - count) * 3 + (input[position] === '%' ? 2 : 0);
     const remaining = checkBase64Padding(input, position + 1, expected, fail);
     if (remaining > 0) fail('Missing padding character', input.length);
     return position;
   }
+  if (firstNonAscii >= 0) fail('Invalid character', firstNonAscii);
   if (count > 0) fail('Invalid length, must be multiple of four', input.length);
   return input.length;
 }

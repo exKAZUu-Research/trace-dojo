@@ -9473,6 +9473,16 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'sn k1\n{}\nf v1\n{1: 1}\n' });
 });
 
+test('base64 decoding reports an invalid character after a non-ASCII one where the SDK does', () => {
+  const source = `import 'dart:convert';
+void main() {
+  for (final s in ['\\u00e9d\\u007f', '\\u00e9\\u007f', 'a\\u00e9=', 'ab\\u00bd=']) {
+    try { base64.decode(s); } catch (e) { print((e as FormatException).offset); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\n1\n1\n2\n' });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
