@@ -887,9 +887,14 @@ export class Shell implements ArithmeticHost {
       reaped = true;
       this.store.unsetNamed(name, false);
       this.store.unsetNamed(`${name}_PID`, false);
+      // Bash closes the shell's two ends as it reaps the coprocess; copies the program made of them stay open.
+      if (this.fds.get(readFd) === readEnd) this.fds.close(readFd);
+      if (this.fds.get(writeFd) === writeEnd) this.fds.close(writeFd);
     };
     const isWaiting = (): boolean => job.waiting === true;
     let polledEmpty = false;
+    // The shell's read end of the coprocess's output, set up below, which reaping closes.
+    let readEnd: OpenFile | undefined;
     let endStatus = 0;
     job.settleWait = () => {
       if (!isWaiting()) return;
@@ -906,7 +911,7 @@ export class Shell implements ArithmeticHost {
     }
     const readFd = pipeEnds[0];
     const writeFd = pipeEnds[3];
-    this.fds.set(readFd, {
+    readEnd = {
       input: this.runtime.io.partReader(
         () => output ?? '',
         () => {
@@ -929,7 +934,8 @@ export class Shell implements ArithmeticHost {
           polledEmpty = true;
         }
       ),
-    });
+    };
+    this.fds.set(readFd, readEnd);
     this.fds.set(writeFd, writeEnd);
     const pid = this.startJob(job);
     this.assignIndexedArray(name, [String(readFd), String(writeFd)], 'coproc');

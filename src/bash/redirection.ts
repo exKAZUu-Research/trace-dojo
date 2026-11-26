@@ -96,7 +96,9 @@ function openRedirectTarget(
       if (copy) {
         const source = Number(copy[1]);
         const file = shell.fds.get(source);
-        if (!file) throw new RedirectionError(`${copy[1]}: Bad file descriptor`);
+        // Bash names the descriptor word as written, as `$r`, not its value, without the `-` that moves it.
+        const written = copy[2] === '-' ? redirect.target.text.replace(/-$/, '') : redirect.target.text;
+        if (!file) throw new RedirectionError(`${written}: Bad file descriptor`);
         // `N>&M-` moves the descriptor: the source closes as well, which the command's end restores.
         const movedFrom = copy[2] === '-' && source !== redirect.fd ? source : undefined;
         return { file, withStandardError: false, movedFrom };
