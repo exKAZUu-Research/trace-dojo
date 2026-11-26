@@ -781,12 +781,18 @@ class ShellGrammarValidator {
    * not run it.
    */
   private conditionalDepth = 0;
+  /** How many function bodies enclose the command being read. */
+  private functionDepth = 0;
   /**
-   * What the commands of the line being read that run in this shell set `extglob` to, in order, and whether they may
-   * not run: those in a pipeline of several commands or a background list run in subshells, so they are dropped when
-   * the pipeline or list ends.
+   * What the commands of the line being read that run in this shell set `extglob` to, in order, whether they may not
+   * run, and whether a function body holds them: those in a pipeline of several commands or a background list run in
+   * subshells, so they are dropped when the pipeline or list ends.
    */
-  private readonly lineExtglob: { on: boolean; uncertain: boolean }[] = [];
+  private readonly lineExtglob: { on: boolean; uncertain: boolean; inFunction: boolean }[] = [];
+  /** The values `extglob` may have when the next line is read, which the run decides when there are two. */
+  private readonly possibleExtglob = new Set([false]);
+  /** The values a function body sets `extglob` to, which a call may set at any later line. */
+  private readonly functionExtglob = new Set<boolean>();
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
   constructor(
@@ -807,13 +813,25 @@ class ShellGrammarValidator {
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
-      for (const { on, uncertain } of this.lineExtglob) {
-        // A `shopt` that may not run leaves `extglob` on if either it or the state before it has it on.
-        if (uncertain) this.stream.extglobUncertain ||= this.stream.extglob !== on;
-        else this.stream.extglobUncertain = false;
-        this.stream.extglob = uncertain ? this.stream.extglob || on : on;
-      }
+      this.applyLineExtglob();
     }
+  }
+
+  /**
+   * Updates the values `extglob` may have after the line just read: a `shopt` that surely runs leaves its value and
+   * those a function call may set later, one that may not run adds its value, and a function body's value may be set
+   * at any line after it. The next lines read extended patterns when `extglob` may be on, and the run checks those
+   * read while it may also be off.
+   */
+  private applyLineExtglob(): void {
+    for (const { on, uncertain, inFunction } of this.lineExtglob) {
+      if (inFunction) this.functionExtglob.add(on);
+      if (!uncertain) this.possibleExtglob.clear();
+      this.possibleExtglob.add(on);
+      for (const value of this.functionExtglob) this.possibleExtglob.add(value);
+    }
+    this.stream.extglob = this.possibleExtglob.has(true);
+    this.stream.extglobUncertain = this.possibleExtglob.size > 1;
   }
 
   validateSubstitution(): number {
@@ -1231,7 +1249,12 @@ class ShellGrammarValidator {
       this.failUnexpected(bodyLead);
     }
     // A function body runs in this shell only when the function is called, which only the run can tell.
-    this.conditionally(() => this.parseCompoundWithRedirections());
+    this.functionDepth++;
+    try {
+      this.conditionally(() => this.parseCompoundWithRedirections());
+    } finally {
+      this.functionDepth--;
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
@@ -1269,7 +1292,9 @@ class ShellGrammarValidator {
   /** Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines. */
   private recordExtglobSetting(words: readonly string[]): void {
     const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
-    if (setting !== undefined) this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0 });
+    if (setting !== undefined) {
+      this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0, inFunction: this.functionDepth > 0 });
+    }
   }
 
   private maskWordToken(token: ShellToken): void {
