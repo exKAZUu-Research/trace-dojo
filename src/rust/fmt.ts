@@ -188,26 +188,9 @@ export class Formatter {
             if (write) for (const char of text) write(char);
             return text;
           }
-          case 'IoError': {
-            return padString(ioErrorDisplay(v), spec, write);
-          }
-          case 'SendError': {
-            return padString('sending on a closed channel', spec, write);
-          }
-          case 'PoisonError': {
-            return padString('poisoned lock: another task failed inside', spec, write);
-          }
-          case 'TryLockError': {
-            const poisoned = (v as EnumValue).variant === 0;
-            const text = poisoned
-              ? 'poisoned lock: another task failed inside'
-              : 'try_lock failed because the operation would block';
-            return padString(text, spec, write);
-          }
           default: {
-            if (ERROR_TYPES.has(t.def.builtin as string))
-              return padString(errorDisplay(t.def.builtin as string, v), spec, write);
-            return '';
+            const text = stdErrorDisplay(t.def.builtin as string, v);
+            return text === undefined ? '' : padString(text, spec, write);
           }
         }
       }
@@ -725,6 +708,29 @@ function escapeChar(char: string, isChar: boolean): string {
     default: {
       const code = char.codePointAt(0)!;
       return debugEscapesUnicode(code) ? `\\u{${code.toString(16)}}` : char;
+    }
+  }
+}
+
+/** The `Display` of the standard library's error types, or undefined for another type. */
+function stdErrorDisplay(builtin: string, value: Value): string | undefined {
+  switch (builtin) {
+    case 'IoError': {
+      return ioErrorDisplay(value);
+    }
+    case 'SendError': {
+      return 'sending on a closed channel';
+    }
+    case 'PoisonError': {
+      return 'poisoned lock: another task failed inside';
+    }
+    case 'TryLockError': {
+      return (value as EnumValue).variant === 0
+        ? 'poisoned lock: another task failed inside'
+        : 'try_lock failed because the operation would block';
+    }
+    default: {
+      return ERROR_TYPES.has(builtin) ? errorDisplay(builtin, value) : undefined;
     }
   }
 }
