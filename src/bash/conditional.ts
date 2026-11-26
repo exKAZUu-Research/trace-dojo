@@ -21,18 +21,21 @@ export const ARITHMETIC_OPERATORS: Record<string, (a: bigint, b: bigint) => bool
   '-ge': (a, b) => a >= b,
 };
 
-/** Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad regex. */
+/**
+ * Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad
+ * regex. `inverted` tells that a `!` applies to the term itself, which `set -x` shows with it, as Bash does.
+ */
 // code-gauge-allow functionCognitiveComplexity -- One case per conditional expression kind, each tracing its expanded operands under `set -x`.
-export function conditionalStatus(shell: Shell, expression: TestExpression): number {
+export function conditionalStatus(shell: Shell, expression: TestExpression, inverted = false): number {
   const { expander } = shell;
   switch (expression.kind) {
     case 'word': {
       const word = expander.expandString(expression.word);
-      if (shell.options.xtrace) traceLine(shell, `[[ ${word} ]]`);
+      traceTerm(shell, inverted, '-n', word);
       return word === '' ? 1 : 0;
     }
     case 'not': {
-      return conditionalStatus(shell, expression.expression) === 0 ? 1 : 0;
+      return conditionalStatus(shell, expression.expression, !inverted) === 0 ? 1 : 0;
     }
     case 'and': {
       const left = conditionalStatus(shell, expression.left);
@@ -44,33 +47,52 @@ export function conditionalStatus(shell: Shell, expression: TestExpression): num
     }
     case 'unary': {
       const operand = expander.expandString(expression.operand);
-      if (shell.options.xtrace) traceLine(shell, `[[ ${expression.operator} ${operand} ]]`);
+      traceTerm(shell, inverted, expression.operator, operand);
       return unaryTest(shell, expression.operator, operand) ? 0 : 1;
     }
     case 'binary': {
-      return evaluateBinaryConditional(shell, expression) ? 0 : 1;
+      return evaluateBinaryConditional(shell, expression, inverted) ? 0 : 1;
     }
     case 'regex': {
       const left = expander.expandString(expression.left);
       const regex = expander.expandRegex(expression.right);
-      if (shell.options.xtrace) traceLine(shell, `[[ ${left} =~ ${regex} ]]`);
+      traceTerm(shell, inverted, left, '=~', regex);
       return regexStatus(shell, left, regex);
     }
   }
 }
 
-function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpression, { kind: 'binary' }>): boolean {
+/**
+ * Shows a term of `[[ ]]` under `set -x` as Bash does: its operator and operands as expanded, an empty operand as
+ * `''`, a lone word as `-n word`, and a `!` that applies to the term before it.
+ */
+function traceTerm(shell: Shell, inverted: boolean, ...parts: [string, string] | [string, string, string]): void {
+  if (!shell.options.xtrace) return;
+  const shown =
+    parts.length === 2 ? [parts[0], operandText(parts[1])] : [operandText(parts[0]), parts[1], operandText(parts[2])];
+  traceLine(shell, `[[ ${inverted ? '! ' : ''}${shown.join(' ')} ]]`);
+}
+
+function operandText(operand: string): string {
+  return operand === '' ? "''" : operand;
+}
+
+function evaluateBinaryConditional(
+  shell: Shell,
+  expression: Extract<TestExpression, { kind: 'binary' }>,
+  inverted: boolean
+): boolean {
   const { expander } = shell;
   const { operator } = expression;
   const left = expander.expandString(expression.left);
   if (operator === '==' || operator === '=' || operator === '!=') {
     const pattern = expander.expandPattern(expression.right);
-    if (shell.options.xtrace) traceLine(shell, `[[ ${left} ${operator} ${pattern} ]]`);
+    traceTerm(shell, inverted, left, operator, pattern);
     const matched = expander.matches(left, pattern, { extmatch: true, fold: shell.options.nocasematch });
     return operator === '!=' ? !matched : matched;
   }
   const right = expander.expandString(expression.right);
-  if (shell.options.xtrace) traceLine(shell, `[[ ${left} ${operator} ${right} ]]`);
+  traceTerm(shell, inverted, left, operator, right);
   if (operator === '<') return compareCollated(left, right) < 0;
   if (operator === '>') return compareCollated(left, right) > 0;
   if (FILE_TEST_OPERATORS.has(operator)) return fileComparison(shell, operator, left, right);
