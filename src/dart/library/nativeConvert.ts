@@ -862,10 +862,6 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
 const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /**
- * The text of bytes a run writes to a standard stream, which holds text: bytes that are not UTF-8 are rejected, as
- * dart:io's _textOfBytes rejects them. A byte order mark stays, as the VM writes the bytes as they are.
- */
-/**
  * The text of bytes a run writes to a standard stream in parts: the bytes of a character the parts split wait in
  * `pending` for the rest of it, as one decoder holds them for a file sink; the rest is decoded as textOfWrittenBytes
  * decodes it.
@@ -895,6 +891,10 @@ function unfinishedTail(bytes: Uint8Array): number {
   return 0;
 }
 
+/**
+ * The text of bytes a run writes to a standard stream, which holds text: bytes that are not UTF-8 are rejected, as
+ * dart:io's _textOfBytes rejects them. A byte order mark stays, as the VM writes the bytes as they are.
+ */
 export function textOfWrittenBytes(runtime: Runtime, bytes: Value): string {
   const read = readByteList(runtime, bytes, 'buffer', (value) =>
     value >= 0n && value <= 0xffn ? Number(value) : 0xff
