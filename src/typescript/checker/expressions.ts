@@ -477,6 +477,8 @@ export class ExpressionChecker {
     this.checkUsedBeforeDeclaration(node, symbol);
     if (symbol.valueKind === 'enum') this.c.enums.checkConstEnumUse(node, symbol);
     if (symbol.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, symbol)) return errorType;
+    const aliased = symbol.valueKind === 'importAlias' ? this.c.namespaces.imported(symbol, 'value') : undefined;
+    if (aliased?.valueKind === 'namespace' && !this.c.namespaces.checkValueUse(node, aliased, name)) return errorType;
     return this.variableReferenceType(node, symbol, contextual);
   }
 

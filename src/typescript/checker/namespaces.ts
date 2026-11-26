@@ -65,9 +65,9 @@ export class Namespaces {
   }
 
   /** Whether a namespace has an object to use as a value, reporting one that only declares types. */
-  checkValueUse(node: TreeNode, symbol: Sym): boolean {
+  checkValueUse(node: TreeNode, symbol: Sym, name = symbol.name): boolean {
     if (symbol.valueEntries.some((entry) => entry.kind !== 'namespace') || this.isInstantiated(symbol)) return true;
-    this.c.error(node, `名前空間 '${symbol.name}' は値として使えません。`);
+    this.c.error(node, `名前空間 '${name}' は値として使えません。`);
     return false;
   }
 
