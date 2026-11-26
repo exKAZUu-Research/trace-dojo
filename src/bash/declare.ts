@@ -561,7 +561,7 @@ function expandAndCommitCompound(
   const isDeclaration = req.builtin !== undefined;
   const beforeExpandDepth = shell.store.enterCompoundGuard(targetName, false);
   const expanded = shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
-  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements, isAssoc);
+  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements);
   shell.store.leaveCompoundGuards(beforeExpandDepth);
   const { outcome, materializedArray } = shell.store.writeCompoundNamed({
     resolvedName: targetName,
@@ -588,20 +588,14 @@ function expandAndCommitCompound(
 }
 
 /**
- * Prints a declaration's compound operand as `name=('a' 'b')`, each element quoted, and an associative array's keys
- * as well, as Bash's trace shows it.
+ * Prints a declaration's compound operand as `name=('a' ['k']='b')`, each element and subscript quoted, as Bash's
+ * trace shows it.
  */
-function traceCompound(
-  shell: Shell,
-  req: CompoundOperandRequest,
-  elements: readonly CompoundElement[],
-  isAssoc: boolean
-): void {
+function traceCompound(shell: Shell, req: CompoundOperandRequest, elements: readonly CompoundElement[]): void {
   const texts = elements.map((element) => {
     if (typeof element === 'string') return singleQuote(element);
     if ('plain' in element) return singleQuote(element.plain);
-    const key = isAssoc ? singleQuote(element.key) : element.key;
-    return `[${key}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
+    return `[${singleQuote(element.key)}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
   });
   traceLine(shell, `${req.name}${req.append ? '+=' : '='}(${texts.join(' ')})`);
   const pending = pendingTraces.get(shell);
