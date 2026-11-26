@@ -53,7 +53,14 @@ export class ReturnSignal {
 
 /** Exits the shell, or the subshell running a command substitution, with a status. */
 export class ExitSignal {
-  constructor(readonly status: number) {}
+  /**
+   * `byExpansionError` marks an expansion error that ends a non-interactive shell, such as `${x?}` or an unset
+   * variable under `set -u`, which keeps the status the shell was ending with when it happens in the `EXIT` trap.
+   */
+  constructor(
+    readonly status: number,
+    readonly byExpansionError = false
+  ) {}
 }
 
 /**

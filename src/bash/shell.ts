@@ -133,8 +133,8 @@ export class Shell implements ArithmeticHost {
    * after `!`, whose functions and subshells ignore it as well.
    */
   private errexitIgnored: number;
-  /** Whether the context that started this shell ignores `set -e`, which its `EXIT` trap keeps. */
-  private readonly inheritedErrexitIgnored: number;
+  /** The status a running trap started with, which `exit` without an operand ends with there, as in Bash. */
+  private trapStartStatus: number | undefined;
   /** How many times `set -x` repeats the first character of `PS4`: once, and once more in each command substitution. */
   readonly traceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
@@ -195,7 +195,6 @@ export class Shell implements ArithmeticHost {
     this.fds = options?.fds ?? initialDescriptors({ runtime });
     this.options = options?.options ?? defaultOptions();
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
-    this.inheritedErrexitIgnored = this.errexitIgnored;
     this.traps = options?.traps ?? new Map();
     this.shownTraps = options?.shownTraps;
     this.standardInputRedirected = options?.standardInputRedirected ?? false;
@@ -276,6 +275,11 @@ export class Shell implements ArithmeticHost {
    * Ends the shell as `exit` does: the `EXIT` trap runs here, where `exit` ran, with the function's variables,
    * positional parameters, and redirections still in place, as Bash runs it, and does not run again as the shell ends.
    */
+  /** The status `exit` without an operand ends with: the last command's, or in a trap the status the trap started with. */
+  get statusForExit(): number {
+    return this.trapStartStatus ?? this.store.lastStatus;
+  }
+
   exitShell(status: number): never {
     const finalStatus = this.runExitTrap(status);
     this.traps.delete('EXIT');
@@ -284,16 +288,18 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Runs the `EXIT` trap as the shell ends with `status`, returning the status it ends with. As in Bash's
-   * `run_exit_trap`, the trap runs where the shell ended but outside the conditions that ignore `set -e` there, and
-   * whatever it does, the shell still ends: `exit` or `set -e` in it sets the status, `return` sets the value it
-   * returns, and `break`, `continue`, or an error that discards the rest keeps `status`.
+   * `run_exit_trap`, the trap runs where the shell ended but outside the conditions that ignore `set -e`, even those a
+   * subshell started in, and whatever it does, the shell still ends: `exit` or `set -e` in it sets the status, `return`
+   * sets the value it returns, and `break`, `continue`, or an error that discards the rest or ends the shell in an
+   * expansion keeps `status`.
    */
   runExitTrap(status: number): number {
     const ignored = this.errexitIgnored;
-    this.errexitIgnored = this.inheritedErrexitIgnored;
+    this.errexitIgnored = 0;
     try {
       this.runTrap('EXIT', status);
     } catch (error) {
+      if (error instanceof ExitSignal && error.byExpansionError) return status;
       if (error instanceof ExitSignal || error instanceof ReturnSignal) return error.status;
       if (isShellSignal(error)) return status;
       throw error;
@@ -310,14 +316,16 @@ export class Shell implements ArithmeticHost {
   private runTrap(condition: TrapCondition, status: number): void {
     const trap = this.traps.get(condition);
     if (!trap || trap.statements.length === 0 || this.runningTraps.has(condition)) return;
-    const saved = { lineShift: this.lineShift, row: this.currentRow };
+    const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
+    this.trapStartStatus = status;
     this.store.lastStatus = status;
     this.lineShift = trap.row - this.currentRow;
     try {
       this.runStatements(trap.statements);
     } finally {
       this.runningTraps.delete(condition);
+      this.trapStartStatus = saved.trapStatus;
       this.lineShift = saved.lineShift;
       this.currentRow = saved.row;
       this.store.lastStatus = status;

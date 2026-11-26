@@ -665,7 +665,7 @@ function transform(
     expansion.argument.length === 1 && expansion.argument[0].kind === 'literal' ? expansion.argument[0].text : '';
   if (!/^[QEPAKakuUL]$/.test(letter)) {
     shell.reportError(`${expansion.text}: bad substitution`);
-    throw new ExitSignal(1);
+    throw new ExitSignal(1, true);
   }
   switch (letter) {
     case 'Q': {

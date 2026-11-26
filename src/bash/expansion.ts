@@ -803,7 +803,7 @@ export class Expander {
 
   failParameter(name: string, message: string): never {
     this.shell.reportError(`${name}: ${message}`);
-    throw new ExitSignal(1);
+    throw new ExitSignal(1, true);
   }
 }
 

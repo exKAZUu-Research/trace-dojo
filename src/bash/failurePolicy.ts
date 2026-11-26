@@ -85,7 +85,7 @@ export class FailurePolicy {
     if (isReportedAsShellError(context, failure, builtinPrefix) && this.exitsOnError()) throw new ExitSignal(1);
     switch (context) {
       case 'parameterRequire': {
-        throw new ExitSignal(1);
+        throw new ExitSignal(1, true);
       }
       case 'fatalReadonlyArithmetic':
       case 'scriptAssignment':

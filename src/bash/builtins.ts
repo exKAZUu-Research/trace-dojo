@@ -286,7 +286,7 @@ function returnBuiltin(shell: Shell, args: string[]): number {
 
 function exitBuiltin(shell: Shell, args: string[]): number {
   const [statusText, ...extra] = operands(args);
-  if (statusText === undefined) shell.exitShell(shell.store.lastStatus);
+  if (statusText === undefined) shell.exitShell(shell.statusForExit);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
