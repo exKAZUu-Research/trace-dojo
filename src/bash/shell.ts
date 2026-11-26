@@ -101,6 +101,16 @@ interface ShellContextOptions {
 }
 
 /**
+ * Whether a forked process runs a compound command, in which `break` and `continue` are outside every loop, as in
+ * Bash; a simple command, with `!` or alone in a pipeline, keeps the loops it was written in.
+ */
+function runsCompoundCommand(command: Statement): boolean {
+  if (command.kind === 'not') return runsCompoundCommand(command.body);
+  if (command.kind === 'pipeline' && command.commands.length === 1) return runsCompoundCommand(command.commands[0]);
+  return command.kind !== 'command' && command.kind !== 'declaration';
+}
+
+/**
  * One Bash execution context (top-level script or isolated child command substitution), owning its `VariableStore`,
  * `Expander`, `FailurePolicy`, file descriptors, and control-flow counters.
  */
@@ -712,7 +722,7 @@ export class Shell implements ArithmeticHost {
     const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
     let output: string | undefined;
     // The coprocess copies the shell's state when it starts, though it runs later.
-    const child = this.forkSubshell(this.fds.clone());
+    const child = this.forkSubshell(this.fds.clone(), undefined, 1, runsCompoundCommand(body));
     const job: Job = { status: 0, reported: false, descriptors: child.fds };
     const writeEnd: OpenFile = {
       output: {
@@ -1573,7 +1583,7 @@ export class Shell implements ArithmeticHost {
     const asyncElement = this.runsAsyncPipeline && !background;
     const sameLevel =
       command.kind === 'subshell' || command.kind === 'pipeline' || (simple && !background && !asyncElement);
-    const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1, background);
+    const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1, runsCompoundCommand(command));
     if (simple) child.shell.elementCommand = command;
     // Whether the command calls a function is known only once its name is expanded.
     child.shell.elementCallDeepens = simple && !background && !asyncElement;
