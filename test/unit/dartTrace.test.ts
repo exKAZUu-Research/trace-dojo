@@ -520,6 +520,18 @@ void main() {
   print('end');
 }`;
   expect(traceLines(asyncProgram)).toEqual(traceLines(syncProgram));
+  // A callee that suspends before its steps shows them after it resumes, which count for the awaited call too: the
+  // await statement records no step of its own after them.
+  const suspending = `Future<void> walk(Turtle t) async {
+  await Future.value(0);
+  t.forward();
+}
+Future<void> main() async {
+  var t = Turtle(1, 1);
+  await walk(t);
+  print('end');
+}`;
+  expect(traceLines(suspending)).toEqual([0, 6, 2, 3, 8]);
 });
 
 test('Dart async functions record their steps where they resume, without the call that awaited them', () => {

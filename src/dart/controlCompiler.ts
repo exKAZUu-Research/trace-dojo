@@ -468,9 +468,12 @@ export abstract class ControlCompiler extends StatementCompiler {
       const { steps } = frame.runtime;
       const task = frame.asyncTask as AsyncTask;
       const begun = task.recordedSteps;
+      const spawnedBefore = task.spawned.length;
       const completion = yield* evaluateParts(frame, parts, () => exec(frame));
-      // Only the steps the statement recorded itself can show what its calls did, not those of other work it waited on.
-      if (step) steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - (task.recordedSteps - begun));
+      // Only the steps the statement recorded itself, and those of the calls it started, can show what its calls
+      // did, not those of other work it waited on.
+      const own = task.recordedSteps - begun + task.spawnedSteps(spawnedBefore);
+      if (step) steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - own);
       return completion;
     };
   }
