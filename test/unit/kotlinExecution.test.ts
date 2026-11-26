@@ -6914,6 +6914,12 @@ fun main() { println(listOf(listOf(1, 2).map(Util::sq), A().all(listOf("1")), li
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[[1, 4], [2], [6]]\n' });
 });
 
+test('lets the last expression of a suspending lambda see its earlier declarations', () => {
+  const source = `suspend fun d(x: Int) = x * 2
+suspend fun main() { println(listOf(1).map { val y = it + 1; d(y) } + mapOf(1 to 2).map { (k, v) -> d(k) + v }) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 4]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

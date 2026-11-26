@@ -179,7 +179,8 @@ export abstract class SuspendCompiler extends LocalCompiler {
       const statements = lambda.statements;
       const last = statements.at(-1);
       if (!returnsUnit && last?.kind === 'expressionStatement') {
-        const before = this.compileSuspendStatements(lambdaScope, lambdaContext, statements.slice(0, -1));
+        // The last expression sees what the statements before it declare.
+        const before = this.compileSuspendStatements(lambdaScope, lambdaContext, statements.slice(0, -1), true);
         const value = this.compileSuspendValue(
           lambdaScope,
           lambdaContext,
