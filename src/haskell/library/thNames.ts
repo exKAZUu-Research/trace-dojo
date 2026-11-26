@@ -4,6 +4,29 @@
  * Generated from GHC's output for `'name` and `''Type` of each name the public modules export.
  */
 export const TH_NAME_MODULES: Record<string, readonly string[]> = {
+  'GHC.Internal.Control.Arrow': [
+    't Control.Arrow.Internal Arrow',
+    't Control.Arrow.Internal ArrowApply',
+    't Control.Arrow.Internal ArrowChoice',
+    't Control.Arrow.Internal ArrowLoop',
+    't Control.Arrow.Internal ArrowMonad',
+    't Control.Arrow.Internal ArrowPlus',
+    't Control.Arrow.Internal ArrowZero',
+    't Control.Arrow.Internal Kleisli',
+    'v Control.Arrow.Internal <<^',
+    'v Control.Arrow.Internal >>^',
+    'v Control.Arrow.Internal ^<<',
+    'v Control.Arrow.Internal ^>>',
+    'v Control.Arrow.Internal leftApp',
+    'v Control.Arrow.Internal returnA',
+    'v Control.Arrow.Internal runKleisli',
+  ],
+  'GHC.Internal.Control.Category': [
+    't Control.Arrow.Internal Category',
+    'v Control.Arrow.Internal <<<',
+    'v Control.Arrow.Internal >>>',
+  ],
+  'Data.Bifunctor': ['t Data.Bifunctor.Internal Bifunctor'],
   'Control.Applicative': ['v Base optional'],
   'Data.Char': ['v Base digitToInt', 'v Base isLetter', 'v Base isMark', 'v Base isNumber', 'v Base isSeparator'],
   'Data.Functor.Compose': ['t Base Compose', 'v Base getCompose'],
@@ -814,7 +837,7 @@ export const TH_NAME_MODULES: Record<string, readonly string[]> = {
   'GHC.Internal.Text.ParserCombinators.ReadP': ['t Base ReadS'],
   'GHC.Internal.Text.Read': ['v Base read', 'v Base readEither', 'v Base readMaybe', 'v Base reads'],
   'GHC.Internal.TypeLits': ['t Base KnownSymbol', 'v Base natVal', 'v Base symbolVal'],
-  'GHC.Internal.TypeNats': ['t Base KnownNat'],
+  'GHC.Internal.TypeNats': ['t Base KnownNat', 'v GHC.TypeNats.Internal natVal'],
   'GHC.Internal.Types': [
     't Base Bool',
     't Base Char',

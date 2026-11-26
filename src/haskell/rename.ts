@@ -3331,7 +3331,8 @@ class Renamer {
     const found = thNameModules().get(`${kind === 'con' ? 't' : kind} ${entity.module} ${entity.name}`);
     if (found) return found;
     if (entity.module === 'GHC.Types') {
-      return entity.name === 'Integer' ? 'GHC.Internal.Bignum.Integer' : 'GHC.Internal.Types';
+      if (entity.name === 'Integer' || entity.name === 'Natural') return `GHC.Internal.Bignum.${entity.name}`;
+      return 'GHC.Internal.Types';
     }
     return 'GHC.Internal.Base';
   }
