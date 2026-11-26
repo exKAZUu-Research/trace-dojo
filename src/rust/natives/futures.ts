@@ -41,6 +41,7 @@ define({
   'Waker::wake_by_ref': () => UNIT_VALUE,
   'Waker::will_wake': () => true,
   'Waker::clone': (_args, ctx) => unitStruct(ctx, 'Waker'),
+  'Future::into_future': identity,
   'Pin<&mut _>::new': identity,
   'Pin<_>::new_unchecked': identity,
   'Pin<_>::into_inner': identity,

@@ -1583,6 +1583,16 @@ pub mod future {
         type Output = F::Output;
         fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<F::Output>;
     }
+    pub trait IntoFuture {
+        type Output;
+        type IntoFuture: Future<Output = Self::Output>;
+        fn into_future(self) -> Self::IntoFuture;
+    }
+    impl<F: Future> IntoFuture for F {
+        type Output = F::Output;
+        type IntoFuture = F;
+        fn into_future(self) -> F;
+    }
     pub fn ready<T>(t: T) -> AsyncFuture<T>;
     pub fn pending<T>() -> AsyncFuture<T>;
     pub fn poll_fn<T, F: FnMut(&mut Context) -> Poll<T>>(f: F) -> AsyncFuture<T>;
@@ -1948,6 +1958,8 @@ pub mod prelude {
     pub use super::iter::Iterator;
     pub use super::iter::IntoIterator;
     pub use super::iter::DoubleEndedIterator;
+    pub use super::future::Future;
+    pub use super::future::IntoFuture;
     pub use super::iter::ExactSizeIterator;
     pub use super::iter::FromIterator;
     pub use super::iter::Extend;
