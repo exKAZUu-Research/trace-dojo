@@ -556,7 +556,10 @@ function namespacePath(name: TreeNode): TreeNode[] {
   return [...(object ? namespacePath(object) : []), ...(property ? [property] : [])];
 }
 
-/** The name nodes a declaration declares, as the names of a variable declaration's patterns or a class's name. */
+/**
+ * The name nodes a declaration declares: the names of a variable declaration's patterns, the name of any other
+ * declaration, and the first name of `namespace A.B`.
+ */
 export function declaredNames(declaration: TreeNode): TreeNode[] {
   if (declaration.type === 'lexical_declaration' || declaration.type === 'variable_declaration')
     return named(declaration).flatMap((declarator) => {
