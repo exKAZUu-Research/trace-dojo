@@ -9,6 +9,37 @@ export type AddElement = ((key: Value, value?: Value) => void) & { target?: Dart
 /** Runs an element of a collection literal that awaits, adding its values as it goes. */
 export type ElementGen = (frame: Frame, add: AddElement) => Generator<AwaitRequest, void, Value>;
 
+/**
+ * The element with the variables in `slots` ending once it has run, the same way whether it runs at once or as a
+ * generator: a pattern's variables end after the branch that reads them, and a loop's after the loop.
+ */
+export function endingVariables<T extends ElementCode>(slots: readonly number[], code: T): T {
+  if (slots.length === 0) return code;
+  const clear = (frame: Frame): void => {
+    for (const slot of slots) frame.locals[slot] = undefined;
+  };
+  const { run, gen } = code;
+  return {
+    ...code,
+    run: (frame: Frame, add: AddElement) => {
+      try {
+        run(frame, add);
+      } finally {
+        clear(frame);
+      }
+    },
+    gen:
+      gen &&
+      function* (frame: Frame, add: AddElement) {
+        try {
+          yield* gen(frame, add);
+        } finally {
+          clear(frame);
+        }
+      },
+  };
+}
+
 /** A compiled element of a collection literal, with a generator when it awaits. */
 export interface ElementCode {
   run: (frame: Frame, add: AddElement) => void;

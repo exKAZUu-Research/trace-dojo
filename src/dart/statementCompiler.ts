@@ -1394,9 +1394,16 @@ export function advanceCountedLoop(loop: CountedLoop<unknown>, frame: Frame): vo
   runLoopUpdates(loop, frame);
 }
 
-/** Gives the next iteration its own loop variables, before the updates run, so that closures keep this one's. */
 export function copyLoopVariables(loop: CountedLoop<unknown>, frame: Frame): void {
-  for (const slot of loop.loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+  copyLoopCells(loop.loopSlots, frame);
+}
+
+/**
+ * Gives the next iteration of a statement's or a collection element's counted for its own loop variables, before the
+ * updates run, so that closures keep this one's.
+ */
+export function copyLoopCells(slots: readonly number[], frame: Frame): void {
+  for (const slot of slots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
 }
 
 export function runLoopUpdates(loop: CountedLoop<unknown>, frame: Frame): void {

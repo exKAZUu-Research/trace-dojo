@@ -10,6 +10,7 @@ import {
   building,
   type ElementCode,
   type ElementGen,
+  endingVariables,
   runElement,
 } from './collectionElements';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -23,7 +24,7 @@ import { wrap } from './operators';
 import { PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
-import { isAnsweredType } from './statementCompiler';
+import { copyLoopCells, isAnsweredType } from './statementCompiler';
 import { containsInferenceHole, INFERENCE_HOLE } from './typeInference';
 import {
   asInstanceOf,
@@ -44,7 +45,7 @@ import {
   sameType,
   upperBound,
 } from './types';
-import { type Callable, Cell, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
+import { type Callable, type DartObject, NO_ARGUMENTS, UNINITIALIZED, type Value } from './values';
 
 /** How to read and write the target of an assignment once its receiver and index are evaluated. */
 interface AssignableTarget {
@@ -914,7 +915,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compileIfElement(
     element: Extract<CollectionElement, { kind: 'ifElement' }>,
@@ -942,28 +942,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       const test = subject.run;
       const matches = (frame: Frame): boolean =>
         result.pattern.match(frame, test(frame)) && (!result.guard || result.guard(frame) === true);
-      // The pattern's variables live until the branch that reads them has run.
-      const gen = conditionalElement(subjectSteps, matches, result.body, otherwise);
-      return {
+      return endingVariables(slots, {
         isConst: false,
         run: (frame, add) => {
-          try {
-            if (matches(frame)) result.body.run(frame, add);
-            else otherwise?.run(frame, add);
-          } finally {
-            for (const slot of slots) frame.locals[slot] = undefined;
-          }
+          if (matches(frame)) result.body.run(frame, add);
+          else otherwise?.run(frame, add);
         },
-        gen:
-          gen &&
-          function* (frame, add) {
-            try {
-              yield* gen(frame, add);
-            } finally {
-              for (const slot of slots) frame.locals[slot] = undefined;
-            }
-          },
-      };
+        gen: conditionalElement(subjectSteps, matches, result.body, otherwise),
+      });
     }
     const {
       result: { compiled: condition, flow },
@@ -1001,28 +987,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         ? this.compileForInElement(element, kind, elementContext, valueContext, types)
         : this.compileCountedForElement(element, kind, elementContext, valueContext, types)
     );
-    const clear = (frame: Frame): void => {
-      for (const slot of slots) frame.locals[slot] = undefined;
-    };
-    const { run, gen } = result;
-    return {
-      run: (frame, add) => {
-        try {
-          run(frame, add);
-        } finally {
-          clear(frame);
-        }
-      },
-      gen:
-        gen &&
-        function* (frame, add) {
-          try {
-            yield* gen(frame, add);
-          } finally {
-            clear(frame);
-          }
-        },
-    };
+    return endingVariables(slots, result);
   }
 
   // code-gauge-allow functionCognitiveComplexity -- One generator iterates iterables and streams, with the steps of its iterable.
@@ -1116,8 +1081,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         if (test && !test(frame)) return;
         if (body.gen) yield* body.gen(frame, add);
         else body.run(frame, add);
-        // Each iteration has its own loop variables, which closures created in the body keep.
-        for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+        copyLoopCells(loopSlots, frame);
         if (updateSteps.length > 0) yield* runSteps(frame, updateSteps);
         for (const update of updates) update(frame);
         frame.runtime.spend();
