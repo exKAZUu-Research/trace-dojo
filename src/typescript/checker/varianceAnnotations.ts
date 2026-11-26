@@ -25,7 +25,8 @@ export function checkVarianceAnnotations(c: Checker, node: TreeNode): void {
     (parameter) => hasToken(parameter, 'in') || hasToken(parameter, 'out')
   );
   if (annotated.length === 0) return;
-  for (const parameter of annotated) checkModifierOrder(c, parameter);
+  // tsc checks the order only where annotations may appear, and reports their misplacement alone elsewhere.
+  if (varianceOwners.has(node.type)) for (const parameter of annotated) checkModifierOrder(c, parameter);
   if (!checkAnnotationPlaces(c, node, annotated)) return;
   const parameters = c.signatures.typeParametersOf(node);
   const all = named(parametersNode);
