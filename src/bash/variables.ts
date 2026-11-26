@@ -677,6 +677,10 @@ export class VariableStore {
   namesWithPrefix(prefix: string): string[] {
     const names = this.collectScopedPrefixNames(prefix);
     this.rejectUnsupportedPrefixQuery(prefix);
+    // Dynamic variables have no cell, but Bash lists the ones that are set, such as `PWD`.
+    for (const name of DYNAMIC_VARIABLES) {
+      if (name.startsWith(prefix) && this.hasMaterializedTarget(name)) names.add(name);
+    }
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
