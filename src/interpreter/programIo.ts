@@ -503,11 +503,7 @@ export class VirtualFileSystem {
    * The names of a path from the root, keeping `.` and `..` for the walk to resolve, and whether the path must name a
    * directory, while charging the run for reading the path and walking its names.
    */
-  private componentsOf(path: string): {
-    components: string[];
-    namesDirectory: boolean;
-    dots: '.' | '..' | undefined;
-  } {
+  private componentsOf(path: string): { components: string[]; namesDirectory: boolean; dots: '.' | '..' | undefined } {
     this.budget.spend(Math.ceil((path.length + 1) / 16));
     const absolute = path.startsWith('/') ? path : `${WORKING_DIRECTORY}/${path}`;
     const raw = absolute.split('/');

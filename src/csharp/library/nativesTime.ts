@@ -73,11 +73,7 @@ function daysFromCivil(year: number, month: number, day: number): number {
   return era * 146_097 + dayOfEra - 719_468 + 719_162;
 }
 
-function civilFromDays(days: number): {
-  year: number;
-  month: number;
-  day: number;
-} {
+function civilFromDays(days: number): { year: number; month: number; day: number } {
   const z = days + 719_468 - 719_162;
   const era = Math.floor(z / 146_097);
   const dayOfEra = z - era * 146_097;
