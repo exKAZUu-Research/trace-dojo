@@ -196,6 +196,13 @@ export class Shell implements ArithmeticHost {
    * command or function with redirections decides it by whether they redirect the standard input.
    */
   private standardInputRedirected: boolean;
+  /**
+   * The pipeline element this subshell runs that reads the pipe, whose own redirections keep the mark set: only inner
+   * compound commands and functions set it again by their redirections, as Bash 5.3 does.
+   */
+  private pipeInputStatement: Statement | undefined;
+  /** The `( )` body whose own redirections are being applied, and whether they redirect standard input. */
+  private redirectedSubshell: { body: Statement; givesInput: boolean } | undefined;
   /** The `set` options to restore when the running function returns, which `local -` keeps. */
   private setOptionsToRestore: ShellOptionValues | undefined;
   /**
@@ -592,7 +599,10 @@ export class Shell implements ArithmeticHost {
     const trapped = this.errTrapSet;
     const status = this.withRedirects(statement.redirects, () => {
       redirected = true;
-      return this.withStandardInputMark(statement.redirects, () => this.execute(statement.body, guarded));
+      if (statement === this.pipeInputStatement) return this.runRedirectedBody(statement, guarded, true);
+      return this.withStandardInputMark(statement.redirects, () =>
+        this.runRedirectedBody(statement, guarded, this.standardInputRedirected)
+      );
     });
     // A failed redirection fails the compound command itself, while its body applies the rules on its own.
     if (!redirected) this.checkErrexit(status, trapped);
@@ -623,7 +633,12 @@ export class Shell implements ArithmeticHost {
     const trapped = this.errTrapSet;
     switch (statement.kind) {
       case 'subshell': {
-        const status = this.runSubshell(statement.body, this.fds.clone(), undefined, 1, true);
+        // A `( )` takes the standard-input mark only from being a pipeline element reading the pipe or from its own
+        // redirections, not from the commands around it.
+        const own = this.redirectedSubshell?.body === statement ? this.redirectedSubshell.givesInput : false;
+        const child = this.forkSubshell(this.fds.clone(), undefined, 1, true);
+        child.shell.standardInputRedirected = own || statement === this.pipeInputStatement;
+        const status = child.run(statement.body);
         this.store.pipeStatus = [status];
         this.checkErrexit(status, trapped);
         return status;
@@ -759,6 +774,9 @@ export class Shell implements ArithmeticHost {
     let output: string | undefined;
     // The coprocess copies the shell's state when it starts, though it runs later.
     const child = this.forkSubshell(this.fds.clone(), undefined, 1, runsCompoundCommand(body));
+    // The coprocess reads the pipe from the shell, which a command it starts with `&` reads as well, unless the
+    // body's own redirections say otherwise; its body runs later, so the mark is set as it forks.
+    child.shell.standardInputRedirected = true;
     const job: Job = { status: 0, reported: false, descriptors: child.fds };
     const writeEnd: OpenFile = {
       output: {
@@ -854,6 +872,25 @@ export class Shell implements ArithmeticHost {
       return this.execute(command);
     } finally {
       this.restoreDescriptors(saved, [0]);
+    }
+  }
+
+  /**
+   * Runs the body of a redirected compound command, noting for a `( )` whether its own redirections give it standard
+   * input (`givesInput`), which its fork takes as its mark.
+   */
+  private runRedirectedBody(
+    statement: Extract<Statement, { kind: 'redirected' }>,
+    guarded: boolean,
+    givesInput: boolean
+  ): number {
+    if (statement.body.kind !== 'subshell') return this.execute(statement.body, guarded);
+    const saved = this.redirectedSubshell;
+    this.redirectedSubshell = { body: statement.body, givesInput };
+    try {
+      return this.execute(statement.body, guarded);
+    } finally {
+      this.redirectedSubshell = saved;
     }
   }
 
@@ -1654,7 +1691,10 @@ export class Shell implements ArithmeticHost {
     child.shell.elementCallDeepens = simple && !background && !asyncElement;
     child.shell.runsAsyncPipeline = background && command.kind === 'pipeline';
     // A pipeline element after the first reads the pipe, which a command it starts with `&` reads as well.
-    if (!background && fds.get(0) !== this.fds.get(0)) child.shell.standardInputRedirected = true;
+    if (!background && fds.get(0) !== this.fds.get(0)) {
+      child.shell.standardInputRedirected = true;
+      child.shell.pipeInputStatement = command;
+    }
     child.shell.functionDefinitionRow = this.functionDefinitionRow;
     return child.run([command]);
   }

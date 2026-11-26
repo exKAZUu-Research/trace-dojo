@@ -348,3 +348,24 @@ echo "$z"
     uncaughtException: '入力を待ったまま残りの処理がある coproc は、この採点環境では使えません。',
   });
 });
+
+test('a command started with & reads the pipe or redirection its compound command or function gives, as in Bash', () => {
+  const program = `f() { read v; echo "[$v]"; }
+echo p | { f & wait; } 2>/dev/null
+echo q | ( f & wait ) 2>&1
+echo r | { ( f & wait ); }
+{ { f & wait; } 2>/dev/null; } <<< n
+g() { f & wait; } <<< def; g
+( f & wait ) <<< sub
+f & wait
+coproc { { f & wait; }; }
+echo z >&"\${COPROC[1]}"
+read -r reply <&"\${COPROC[0]}"
+echo "$reply"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[p]\n[q]\n[]\n[]\n[def]\n[sub]\n[]\n[z]\n',
+    stderr: '',
+  });
+});
