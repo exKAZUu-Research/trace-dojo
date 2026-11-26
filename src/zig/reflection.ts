@@ -5,7 +5,7 @@ import { constantText } from './constantText';
 import { bitSizeOf } from './layout';
 import { langNamespace } from './library/lang';
 import { isPublicStdField, leftOutStdField } from './library/native';
-import { known, runtime, type TExpr } from './semaBase';
+import { known, NATIVE_FN_TYPE, runtime, type TExpr } from './semaBase';
 import {
   BOOL,
   ENUM_LITERAL,
@@ -114,7 +114,10 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
   private builtinTypeName(expression: ExpressionOf<'builtinCall'>): TExpr {
     const { args } = expression;
     this.builtinArity(expression, 1);
-    return this.text(typeName(this.compileType(args[0])), expression);
+    const type = this.compileType(args[0]);
+    // A library function the grader implements natively has no Zig signature to name.
+    if (type === NATIVE_FN_TYPE) return this.error(expression, unavailableMessage('reflection:libraryFn'));
+    return this.text(typeName(type), expression);
   }
 
   private builtinCompileError(expression: ExpressionOf<'builtinCall'>): TExpr {
@@ -549,6 +552,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
       }
       case 'fn': {
         if (type.genericParams) return this.error(span, unavailableMessage('@typeInfo:genericFn'));
+        if (type === NATIVE_FN_TYPE) return this.error(span, unavailableMessage('reflection:libraryFn'));
         return variant('fn', this.fnInfo(type, nested('Fn') as StructType, span));
       }
       default: {
