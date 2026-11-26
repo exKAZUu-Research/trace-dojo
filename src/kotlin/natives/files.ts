@@ -228,7 +228,7 @@ function openWriterOf(frame: Frame, value: Value): BufferedFileWriter {
   return writer.isClosed ? throwError(frame, 'java.io.IOException', 'Stream closed') : writer;
 }
 
-/** Runs a `PrintWriter`'s operation, which does nothing once it is closed: it records errors instead of throwing. */
+/** Runs a `PrintWriter`'s operation, which does nothing once it is closed instead of throwing, as Java's does. */
 function printing(frame: Frame, value: Value, run: (writer: BufferedFileWriter) => void): void {
   const writer = writerOf(value);
   if (!writer.isClosed) run(writer);
