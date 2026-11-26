@@ -603,7 +603,7 @@ export class Shell implements ArithmeticHost {
    */
   private runInBackground(command: Statement): number {
     const fds = this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
-    const status = this.runElementSubshell(command, fds);
+    const status = this.runElementSubshell(command, fds, true);
     const pid = this.runtime.allocateProcessId();
     this.store.jobs.set(pid, { status, reported: false });
     this.store.lastBackgroundPid = pid;
@@ -1429,12 +1429,13 @@ export class Shell implements ArithmeticHost {
   }
 
   /**
-   * Runs a pipeline element or a command started with `&` in a subshell, which Bash counts in `BASH_SUBSHELL` only for
-   * a compound command: a simple command runs in the forked process itself, and `( )` merges with it.
+   * Runs a pipeline element or a command started with `&` in a subshell. Bash counts it in `BASH_SUBSHELL` except a
+   * pipeline's simple command, which runs in the forked process itself, and `( )`, which merges with the fork.
    */
-  private runElementSubshell(command: Statement, fds: DescriptorTable): number {
+  private runElementSubshell(command: Statement, fds: DescriptorTable, background = false): number {
     const simple = command.kind === 'command' || command.kind === 'declaration';
-    const child = this.forkSubshell(fds, undefined, simple || command.kind === 'subshell' ? 0 : 1);
+    const sameLevel = command.kind === 'subshell' || (simple && !background);
+    const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1);
     if (simple) child.shell.elementCommand = command;
     return child.run([command]);
   }
