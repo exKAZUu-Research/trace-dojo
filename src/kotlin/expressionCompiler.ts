@@ -1782,7 +1782,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
       };
       levels.push(...this.memberCallLevels(scope, receiver, name, row));
     }
-    if (nested)
+    // An inner class needs an instance of its outer class, which `Outer.Inner()` does not give.
+    if (nested?.isInner && levels.length === 0)
+      this.error(row, `内部クラス ${nested.name} は、${cls.name} のインスタンスから作ってください。`);
+    if (nested && !nested.isInner)
       levels.push({
         candidates: this.constructorCandidates(nested, row),
         receiver: undefined,
