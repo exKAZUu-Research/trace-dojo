@@ -54,6 +54,11 @@ export class SourceText {
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
   readonly backquotes: { start: number; end: number; extglob: boolean; extglobUncertain: boolean }[] = [];
+  /**
+   * The `extglob` state where each backquoted body stands, kept for the converter's reading of it even where the
+   * syntax check drops the body from `backquotes`, as for one in a here-document.
+   */
+  readonly backquoteStates: { start: number; extglob: boolean; extglobUncertain: boolean }[] = [];
   /** Offsets of characters that are contextual literals in Bash (`'` in `"${...}"`, `$` before non-ASCII, etc.). */
   readonly literalSingleQuotes: number[] = [];
   /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */
@@ -197,12 +202,12 @@ function skipBackquoted(text: SourceText, open: number): number {
   const end = closeAt(text, open, i < source.length ? i : -1, '`');
   // Bash reads a backquoted body only when it runs it, so its syntax is checked apart from the program's.
   // Its extended patterns read as they would where it stands, which the run may still decide.
-  text.backquotes.push({
-    start: open,
-    end,
+  const state = {
     extglob: text.readingExtglob.on || text.readingExtglob.uncertain,
     extglobUncertain: text.readingExtglob.uncertain,
-  });
+  };
+  text.backquotes.push({ start: open, end, ...state });
+  text.backquoteStates.push({ start: open, ...state });
   return end;
 }
 

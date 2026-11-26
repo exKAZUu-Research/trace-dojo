@@ -83,8 +83,10 @@ export function analyzeBashSource(parser: Parser, source: string, initialExtglob
     deferredArithmetic,
     deferredExpansions,
     backquoteErrors: backquotes.errors,
-    backquoteExtglob: new Map(checked.backquotes.map(({ start, extglob }) => [start, extglob])),
-    backquoteUncertainExtglob: new Set(checked.backquotes.filter((b) => b.extglobUncertain).map(({ start }) => start)),
+    backquoteExtglob: new Map(checked.backquoteStates.map(({ start, extglob }) => [start, extglob])),
+    backquoteUncertainExtglob: new Set(
+      checked.backquoteStates.filter((b) => b.extglobUncertain).map(({ start }) => start)
+    ),
     literalQuotes,
     declarationFunctionStarts,
     descriptorVariables: new Map(descriptorVariables.map(({ start, name }) => [start, name])),
@@ -108,6 +110,7 @@ export function checkBashSyntax(
 ): {
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number; extglob: boolean; extglobUncertain: boolean }[];
+  backquoteStates: { start: number; extglob: boolean; extglobUncertain: boolean }[];
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
@@ -118,6 +121,7 @@ export function checkBashSyntax(
   return {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
+    backquoteStates: text.backquoteStates,
     literalSingleQuotes: text.literalSingleQuotes,
     declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
