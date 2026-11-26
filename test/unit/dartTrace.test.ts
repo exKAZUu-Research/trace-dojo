@@ -552,6 +552,17 @@ Future<void> main() async {
   expect(trace.traceItems.filter(({ line }) => line >= 9).every(({ vars }) => !('n' in vars))).toBe(true);
 });
 
+test('the turtles main leaves stay in the trace end when work runs after main', () => {
+  const program = `import 'dart:async';
+void main() {
+  var t = Turtle(1, 1);
+  t.forward();
+  scheduleMicrotask(() => t.forward());
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.finalTurtles).toEqual([{ x: 1, y: 3, color: '#', dir: 'N' }]);
+});
+
 test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
   const program = `Future<int> walk(Turtle t, int n) async {
   for (var i = 0; i < n; i++) {
