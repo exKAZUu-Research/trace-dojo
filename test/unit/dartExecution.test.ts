@@ -10918,6 +10918,10 @@ Future<void> main() async {
     stdout: 'after call\n',
     uncaughtException: 'Unhandled exception:\nboom',
   });
+  // An async* body's stream reports it, and an error after it, to its listener as any error.
+  const stream = `${future}Stream<int> g() async* { try { await BadFuture(); } catch (e) { print('caught $e'); } throw 'later'; }
+void main() { g().listen(print, onError: (e) => print('err $e'), onDone: () => print('done')); }`;
+  expect(executeProgram('dart', stream)).toMatchObject({ kind: 'executed', stdout: 'caught boom\nerr later\ndone\n' });
 });
 
 test("a function literal's bare return goes with returns of null, not with returns of a value, as SDK 3.13.7 rules", () => {

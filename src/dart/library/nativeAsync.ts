@@ -184,7 +184,8 @@ function performAwait(
     // suspended there.
     if (!(error instanceof DartThrow)) throw error;
     state.hasSuspended = wasSuspended;
-    if (!wasSuspended) state.escapesUncaught = true;
+    // Only an async function's body raises it so; an async* body's stream reports it, as any error, to its listener.
+    if (!wasSuspended && !state.isStar) state.escapesUncaught = true;
     return { kind: 'throw', error };
   }
   state.escapesUncaught = false;
