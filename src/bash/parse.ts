@@ -119,7 +119,8 @@ function endsAtLineEnd(text: string, count: number): boolean {
  */
 export function trapActionSyntaxError(text: string, firstLine: number, showsLine: boolean): string[] {
   try {
-    parseText(`${text}\n`, new Set());
+    // Bash ends the action's last line itself; an action that already ends with a newline gets no empty line more.
+    parseText(text.endsWith('\n') ? text : `${text}\n`, new Set());
     return [];
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;

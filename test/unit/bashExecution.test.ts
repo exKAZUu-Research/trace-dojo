@@ -394,3 +394,10 @@ read -t 0 -u "\${c[0]}"; read -t 0 -u "\${c[0]}"
       'まだ動いていない coproc（c）の出力の繰り返しの確認（read -t 0）は、この採点環境では使えません。',
   });
 });
+
+test('a trap action that ends with a newline numbers its syntax error from its own last line, as Bash does', () => {
+  expect(executeProgram('bash', "trap 'if true; then\n:\n' EXIT\necho m\n")).toMatchObject({
+    stdout: 'm\n',
+    stderr: "main.sh: exit trap: line 3: syntax error: unexpected end of file from `if' command on line 1\n",
+  });
+});
