@@ -104,8 +104,6 @@ export class Shell implements ArithmeticHost {
   readonly fds: DescriptorTable;
   readonly options: ShellOptionValues;
   currentRow = 0;
-  /** The descriptors that `{name}>file` allocated, which stay open after the command, as Bash keeps them. */
-  private readonly allocatedDescriptors = new Set<number>();
   /**
    * How many enclosing contexts ignore a failure for `set -e`: a condition, a command before `&&` or `||`, or one
    * after `!`, whose functions and subshells ignore it as well.
@@ -478,7 +476,9 @@ export class Shell implements ArithmeticHost {
       if (input) fds.set(0, input);
       if (capture) fds.set(1, { output: capture.target });
       statuses.push(
-        isLast && this.options.lastpipe ? this.runWithDescriptors(fds, command) : this.runSubshell([command], fds)
+        isLast && this.options.lastpipe && input
+          ? this.runWithStandardInput(input, command)
+          : this.runSubshell([command], fds)
       );
       if (capture) input = { input: this.runtime.io.textReader(capture.read()) };
     }
@@ -570,13 +570,13 @@ export class Shell implements ArithmeticHost {
     for (const job of this.store.jobs.values()) job.finish?.();
   }
 
-  private runWithDescriptors(fds: DescriptorTable, command: Statement): number {
+  private runWithStandardInput(input: OpenFile, command: Statement): number {
     const saved = this.fds.clone();
-    this.fds.restore(fds);
+    this.fds.set(0, input);
     try {
       return this.execute(command);
     } finally {
-      this.restoreDescriptors(saved);
+      this.restoreDescriptors(saved, [0]);
     }
   }
 
@@ -825,9 +825,10 @@ export class Shell implements ArithmeticHost {
   withRedirects(redirects: readonly Redirect[], run: () => number): number {
     if (redirects.length === 0) return run();
     const saved = this.fds.clone();
+    const changed: number[] = [];
     try {
       try {
-        applyRedirects(this, redirects);
+        applyRedirects(this, redirects, changed);
       } catch (error) {
         if (!(error instanceof RedirectionError)) throw error;
         this.reportError(error.message);
@@ -835,7 +836,7 @@ export class Shell implements ArithmeticHost {
       }
       return run();
     } finally {
-      this.restoreDescriptors(saved);
+      this.restoreDescriptors(saved, changed);
     }
   }
 
@@ -845,19 +846,20 @@ export class Shell implements ArithmeticHost {
    */
   redirectionSession(redirects: readonly Redirect[]): { run: <T>(body: () => T) => T } {
     let applied: DescriptorTable | undefined;
+    const changed: number[] = [];
     return {
       run: <T>(body: () => T): T => {
         if (redirects.length === 0) return body();
         const saved = this.fds.clone();
         try {
-          if (applied) this.fds.restore(applied);
+          if (applied) for (const fd of changed) this.copyDescriptor(applied, fd);
           else {
-            applyRedirects(this, redirects);
+            applyRedirects(this, redirects, changed);
             applied = this.fds.clone();
           }
           return body();
         } finally {
-          this.restoreDescriptors(saved);
+          this.restoreDescriptors(saved, changed);
         }
       },
     };
@@ -875,19 +877,19 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  private restoreDescriptors(saved: DescriptorTable): void {
-    const kept = [...this.allocatedDescriptors].map((fd): [number, OpenFile | undefined] => [fd, this.fds.get(fd)]);
-    this.fds.restore(saved);
-    for (const [fd, file] of kept) {
-      if (file) this.fds.set(fd, file);
-      else this.fds.close(fd);
-    }
+  /**
+   * Puts back the descriptors a command's redirections changed, as Bash undoes only those: descriptors that the
+   * command opened otherwise, as `exec` and `{name}>file` do, stay open after it.
+   */
+  private restoreDescriptors(saved: DescriptorTable, changed: readonly number[]): void {
+    for (const fd of changed) this.copyDescriptor(saved, fd);
   }
 
-  /** Stores the descriptor that `{name}>file` allocated in `name`. */
-  assignDescriptorVariable(name: string, fd: number): void {
-    this.allocatedDescriptors.add(fd);
-    this.assignVariable(name, String(fd));
+  /** Makes `fd` what it is in `table`, closing it when it is closed there. */
+  private copyDescriptor(table: DescriptorTable, fd: number): void {
+    const file = table.get(fd);
+    if (file) this.fds.set(fd, file);
+    else this.fds.close(fd);
   }
 
   /** Assigns a scalar variable as a builtin does, reporting a failure such as a readonly variable. */
@@ -1244,6 +1246,7 @@ export class Shell implements ArithmeticHost {
     const savedReply = mode === 'reply' ? this.store.readScalar('REPLY') : undefined;
     if (mode === 'reply') this.store.unsetNamed('REPLY', true);
     const saved = this.fds.clone();
+    const changed = mode === 'current' ? [1] : [];
     if (mode === 'current') this.fds.set(1, { output: capture.target });
     let status: number;
     try {
@@ -1252,7 +1255,7 @@ export class Shell implements ArithmeticHost {
       if (!(error instanceof ReturnSignal)) throw error;
       status = error.status;
     } finally {
-      this.restoreDescriptors(saved);
+      this.restoreDescriptors(saved, changed);
     }
     if (mode === 'current') return { output: capture.read(), status };
     const reply = this.store.readScalar('REPLY') ?? '';

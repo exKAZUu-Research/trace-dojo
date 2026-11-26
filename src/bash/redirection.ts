@@ -28,30 +28,39 @@ export function fileSystemMessage(error: FileSystemError): string {
 
 /**
  * Applies redirections to the shell's descriptors in order, as Bash does after expanding a command's words, throwing
- * a `RedirectionError` at the first that fails.
+ * a `RedirectionError` at the first that fails. Adds to `changed` each descriptor that the command's end restores:
+ * all but those a `{name}` redirection opens or closes, which Bash leaves as they are.
  */
-export function applyRedirects(shell: Shell, redirects: readonly Redirect[]): void {
-  for (const redirect of redirects) applyRedirect(shell, redirect);
+export function applyRedirects(shell: Shell, redirects: readonly Redirect[], changed: number[] = []): void {
+  for (const redirect of redirects) applyRedirect(shell, redirect, changed);
 }
 
-function applyRedirect(shell: Shell, redirect: Redirect): void {
+function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): void {
   if (redirect.kind === 'close') {
-    shell.fds.close(redirect.fdVariable ? descriptorOfVariable(shell, redirect.fdVariable) : redirect.fd);
+    if (redirect.fdVariable) shell.fds.close(descriptorOfVariable(shell, redirect.fdVariable));
+    else {
+      changed.push(redirect.fd);
+      shell.fds.close(redirect.fd);
+    }
     return;
   }
   const file = openRedirectTarget(shell, redirect);
+  if (redirect.fdVariable && file !== 'close') {
+    const fd = shell.fds.allocate();
+    shell.fds.set(fd, file);
+    shell.assignVariable(redirect.fdVariable, String(fd));
+    return;
+  }
+  changed.push(redirect.fd);
   if (file === 'close') {
     shell.fds.close(redirect.fd);
     return;
   }
-  if (redirect.fdVariable) {
-    const fd = shell.fds.allocate();
-    shell.fds.set(fd, file);
-    shell.assignDescriptorVariable(redirect.fdVariable, fd);
-    return;
-  }
   shell.fds.set(redirect.fd, file);
-  if (redirect.kind === 'file' && (redirect.operator === '&>' || redirect.operator === '&>>')) shell.fds.set(2, file);
+  if (redirect.kind === 'file' && (redirect.operator === '&>' || redirect.operator === '&>>')) {
+    changed.push(2);
+    shell.fds.set(2, file);
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One case per redirection operator, as Bash's `do_redirection_internal` has.

@@ -55,12 +55,6 @@ export class DescriptorTable {
   clone(): DescriptorTable {
     return new DescriptorTable(this.open);
   }
-
-  /** Makes this table hold what another holds, restoring descriptors that a command's redirections changed. */
-  restore(saved: DescriptorTable): void {
-    this.open.clear();
-    for (const [fd, file] of saved.open) this.open.set(fd, file);
-  }
 }
 
 /** What `/dev/null` reads and writes: nothing. */
