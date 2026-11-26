@@ -1304,9 +1304,10 @@ export class Shell implements ArithmeticHost {
     return fds;
   }
 
-  /** Rejects a device this environment does not have, such as a terminal. */
+  /** Rejects a device this environment does not have, such as a terminal, or Bash's network paths. */
   rejectDevice(path: string): never {
-    rejectUnsupportedFeature(`デバイス（${path}）`);
+    const isNetwork = path.startsWith('/dev/tcp/') || path.startsWith('/dev/udp/');
+    rejectUnsupportedFeature(`${isNetwork ? 'ネットワーク' : 'デバイス'}（${path}）`);
   }
 
   // ---------------------------------------------------------------- errors & arithmetic
