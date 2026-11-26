@@ -29,6 +29,26 @@ export { iteratorCapability } from './traitIterators';
 
 export type Answer = 'yes' | 'no' | 'unknown';
 
+/** The operator traits std implements for numbers only with the same type on both sides (not shifts). */
+const SAME_TYPE_OPERATORS = new Set([
+  'Add',
+  'Sub',
+  'Mul',
+  'Div',
+  'Rem',
+  'BitAnd',
+  'BitOr',
+  'BitXor',
+  'AddAssign',
+  'SubAssign',
+  'MulAssign',
+  'DivAssign',
+  'RemAssign',
+  'BitAndAssign',
+  'BitOrAssign',
+  'BitXorAssign',
+]);
+
 /** Decides which types implement which traits: from impls, derives, bounds, and the standard library's rules. */
 export class TraitSolver {
   private readonly implGoals: { trait: TraitDef; type: Type; args: Type[] }[] = [];
@@ -145,15 +165,26 @@ export class TraitSolver {
     if (!t.v.literal) return 'unknown';
     if (ref.trait.builtin === 'ExtendInto' || ref.trait.builtin === 'MapExtendInto')
       return builtinImplements(this, t, ref);
-    const rhs = ref.args[0];
-    if (rhs && (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd')) {
-      return this.literalCompares(t, t.v.literal, ref, normalize(shallow(rhs)));
-    }
+    const byRhs = this.literalWithRhs(t, t.v.literal, ref);
+    if (byRhs) return byRhs;
     // rustc takes a number's type from the one impl that fits it, among the impls for numbers of its kind.
     const only = this.onlyNumericImpl(t.v.literal, ref);
     if (only) return this.unifier.tryUnify(t, only) ? 'yes' : 'no';
     if (ref.trait.builtin) return this.literalImplements(t.v.literal, ref);
     return 'unknown';
+  }
+
+  /** What the type on the right of a comparison or an arithmetic trait settles of an untyped number on the left. */
+  private literalWithRhs(t: Type & { kind: 'var' }, literal: 'int' | 'float', ref: TraitRef): Answer | undefined {
+    const rhs = ref.args[0] && normalize(shallow(ref.args[0]));
+    if (!rhs) return undefined;
+    if (ref.trait.builtin === 'PartialEq' || ref.trait.builtin === 'PartialOrd') {
+      return this.literalCompares(t, literal, ref, rhs);
+    }
+    // With a number of its kind on the right of an arithmetic trait (`Add::add(2, x)`), it is of that number's type,
+    // as std implements these traits only for two numbers of one type.
+    if (rhs.kind !== literal || !SAME_TYPE_OPERATORS.has(ref.trait.builtin ?? '')) return undefined;
+    return this.unifier.tryUnify(t, rhs) ? 'yes' : 'no';
   }
 
   /** Whether an untyped number compares with a value of another type, which settles the number's type. */

@@ -165,6 +165,9 @@ function operatorOutput(builtin: string, self: Type, args: Type[]): Type | undef
   const left = primitiveOperand(self);
   // std's impls for numbers take numbers (`i32 + &i32`); one with another type on the right is the program's.
   if (left && (args.length === 0 || primitiveOperand(args[0]) || untypedNumber(args[0], left))) return left;
+  // An untyped number on the left takes the type of the number on the right (`Add::add(2, x)`), but a shift does not.
+  const right = args[0] && primitiveOperand(args[0]);
+  if (right && untypedNumber(self, right) && builtin !== 'Shl' && builtin !== 'Shr') return right;
   if (builtin === 'Add' && self.kind === 'adt' && self.def.builtin === 'String') return self;
   return undefined;
 }
