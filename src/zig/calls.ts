@@ -80,7 +80,9 @@ export abstract class CallCompiler extends ReflectionCompiler {
     if (tuple.type.kind !== 'struct' || !tuple.type.isTuple)
       return this.error(args[2], '@call の引数は、.{ 1, 2 } のようなタプルにしてください。');
     const fields = this.structFields(tuple.type, args[2]);
-    const elements = fields.map((field, index) => this.tupleElement(tuple, index, field, args[2]));
+    // A tuple literal's elements are the arguments themselves, so each runs once, as in a direct call.
+    const literal = args[2].kind === 'arrayInit' && !args[2].type ? args[2].elements : undefined;
+    const elements = literal ?? fields.map((field, index) => this.tupleElement(tuple, index, field, args[2]));
     const call: ExpressionOf<'call'> = {
       kind: 'call',
       row: expression.row,
