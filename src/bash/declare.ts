@@ -95,6 +95,12 @@ export function executeDeclarationCommand(
     const prepared = staticOptions
       ? prepareNormalizedDeclaration(builtin, staticOptions, args)
       : prepareRuntimeOptionDeclaration(shell, builtin, args);
+    // `local -` makes the function restore the `set` options when it returns, as Bash does.
+    if (builtin === 'local' && shell.isInFunction && prepared.operandArgs.some(isLoneDash)) {
+      shell.restoreSetOptionsOnReturn();
+      prepared.operandArgs = prepared.operandArgs.filter((arg) => !isLoneDash(arg));
+      if (prepared.operandArgs.length === 0) return { status: 0, assignsAnswer: false };
+    }
     const state: DeclarationRunState = {
       status: 0,
       assignsAnswer: false,
@@ -264,6 +270,13 @@ function traceDeclaration(
 }
 
 /** The text of a declaration operand as a name, which `declare -F` looks up. */
+/** Whether an operand is written as a lone `-`, as `local -` is. */
+function isLoneDash(arg: Word | Assignment | ReadyOperand): boolean {
+  if ('append' in arg) return false;
+  if ('kind' in arg) return arg.kind === 'word' && arg.text === '-';
+  return arg.text === '-';
+}
+
 function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): string {
   if ('append' in arg) return arg.text;
   if (!('kind' in arg)) return shell.expander.expandString(arg);

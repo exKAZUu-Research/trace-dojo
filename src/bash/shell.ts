@@ -25,7 +25,7 @@ import { executeCompoundAssignment, executeDeclarationCommand } from './declare'
 import { BadDescriptorError, type DescriptorTable, nullFile, type OpenFile, type OutputTarget } from './descriptors';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
-import { defaultOptions, type ShellOptionValues } from './options';
+import { defaultOptions, SET_OPTION_NAMES, type ShellOptionValues } from './options';
 import { applyRedirects, initialDescriptors, RedirectionError } from './redirection';
 import {
   BreakSignal,
@@ -147,6 +147,8 @@ export class Shell implements ArithmeticHost {
   private elementCommand: Statement | undefined;
   /** Whether the next function call is this pipeline element's own, which Bash counts as a `BASH_SUBSHELL` level. */
   private deepensAtFunctionCall = false;
+  /** The `set` options to restore when the running function returns, which `local -` keeps. */
+  private setOptionsToRestore: ShellOptionValues | undefined;
   /**
    * The line where the body of the innermost function running starts, which Bash reports when a redirection of a
    * compound command in the body fails; a pipeline element or `&` command inherits it, other subshells do not.
@@ -1385,7 +1387,9 @@ export class Shell implements ArithmeticHost {
       loop: this.loopDepth,
       shift: this.lineShift,
       definitionRow: this.functionDefinitionRow,
+      setOptions: this.setOptionsToRestore,
     };
+    this.setOptionsToRestore = undefined;
     this.loopDepth = 0;
     this.lineShift = fn.lineShift;
     this.functionDefinitionRow = fn.definitionRow;
@@ -1400,6 +1404,9 @@ export class Shell implements ArithmeticHost {
       this.loopDepth = saved.loop;
       this.lineShift = saved.shift;
       this.functionDefinitionRow = saved.definitionRow;
+      const restored = this.setOptionsToRestore;
+      if (restored) for (const name of SET_OPTION_NAMES) this.options[name] = restored[name];
+      this.setOptionsToRestore = saved.setOptions;
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
@@ -1415,6 +1422,11 @@ export class Shell implements ArithmeticHost {
 
   get isInFunction(): boolean {
     return this.store.isInFunction;
+  }
+
+  /** Keeps the `set` options as they are now, which the running function restores when it returns. */
+  restoreSetOptionsOnReturn(): void {
+    this.setOptionsToRestore ??= { ...this.options };
   }
 
   get isInLoop(): boolean {
