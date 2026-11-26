@@ -105,6 +105,8 @@ export class FunctionContext {
   returnsValue = false;
   /** The type of the value each `return` gives, collected to infer a closure's return type. */
   returnTypes: DartType[] | undefined;
+  /** The values an `async` closure's `return`s give, checked against the future value it infers from them. */
+  readonly inferredAsyncReturns: { type: DartType; span: Span }[] = [];
   /** For `sync*` functions, the type of the elements `yield` gives. */
   yieldTypes: DartType[] | undefined;
   /** The catch clause's exception variables in scope, which `rethrow` needs. */

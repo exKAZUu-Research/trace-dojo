@@ -41,8 +41,10 @@ import {
   makeNullable,
   NEVER,
   nonNullable,
+  norm,
   NULL,
   resolveBound,
+  sameType,
   type TypeParam,
   upperBound,
   vmTypeString,
@@ -227,7 +229,16 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (spec.kind.isGenerator) {
       return interfaceType(spec.kind.isAsync ? coreTypes.stream : coreTypes.iterable, [fn.yieldElement ?? DYNAMIC]);
     }
-    if (spec.kind.isAsync) return interfaceType(coreTypes.future, [this.inferredFutureValue(fn, spec)]);
+    if (spec.kind.isAsync) {
+      const value = this.inferredFutureValue(fn, spec);
+      // The SDK checks each returned value against the future value it inferred, which a nested future is not.
+      for (const { type, span } of fn.inferredAsyncReturns) {
+        if (!asyncValueFits(type, value, false)) {
+          this.error(span, `${typeName(type)} 型の値は、戻り値の型 ${typeName(value)} に合いません。`);
+        }
+      }
+      return interfaceType(coreTypes.future, [value]);
+    }
     if (spec.contextReturnType?.kind === 'void') return VOID;
     return returnedType(fn, spec.contextReturnType && closeInferenceHoles(spec.contextReturnType));
   }
@@ -271,7 +282,10 @@ export abstract class StatementCompiler extends PatternCompiler {
       if (valueType && !asyncValueFits(compiled.type, valueType, this.fn.kind.returnType !== undefined)) {
         this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
       }
-      this.fn.returnTypes?.push(flatten(compiled.type));
+      if (this.fn.returnTypes) {
+        this.fn.returnTypes.push(innermostFutureValue(compiled.type));
+        this.fn.inferredAsyncReturns.push({ type: compiled.type, span: expression });
+      }
       return compiled;
     }
     const allowsVoid =
@@ -1464,6 +1478,17 @@ function returnedType(fn: FunctionContext, context: DartType | undefined): DartT
   for (const type of fn.returnTypes ?? []) result = result ? upperBound(result, type) : type;
   const returned = result ?? NEVER;
   return context && !isSubtype(returned, context) ? context : returned;
+}
+
+/**
+ * The value an `async` function literal infers its future to complete with from a returned value: every Future and
+ * FutureOr taken off its normal form, as the SDK infers `Future<int>` from a `Future<Future<int>>`, though `await`
+ * and the declared return checks take one off the type as written.
+ */
+function innermostFutureValue(type: DartType): DartType {
+  let value = norm(type);
+  for (let inner = flatten(value); !sameType(inner, value); inner = flatten(value)) value = norm(inner);
+  return value;
 }
 
 /** A local declared with `var` keeps the type of its initializer, except that `Null` widens to `dynamic`. */

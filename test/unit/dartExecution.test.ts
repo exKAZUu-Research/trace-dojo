@@ -6977,6 +6977,26 @@ Future<void> main() async {
 Future<void> h(FutureOr<FutureOr<void>> a, int b) async { var c = true ? a : b; print(await c); print(await a); }
 void main() { h(Future.value(1), 2); }`;
   expect(executeProgram('dart', nested)).toMatchObject({ kind: 'executed', stdout: '1\n1\n' });
+  // An async function literal infers its future's value with every future taken off the returned type's normal form,
+  // and rejects a returned value that does not fit it, as the SDK does.
+  const inferred = `import 'dart:async';
+void main() {
+  var f = (FutureOr<int>? a) async => a;
+  var g = (FutureOr<FutureOr<void>> a) async => a;
+  print([f.runtimeType, g.runtimeType]);
+}`;
+  expect(executeProgram('dart', inferred)).toMatchObject({
+    kind: 'executed',
+    stdout: '[(FutureOr<int>?) => Future<int?>, (void) => Future<void>]\n',
+  });
+  for (const nested of ['Future<Future<int>>', 'FutureOr<FutureOr<int>>']) {
+    expect(
+      executeProgram('dart', `import 'dart:async';\nvoid main() { var f = (${nested} a) async => a; print(f); }`)
+    ).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: `'${nested}' 型の値は、戻り値の型 'int' に合いません。` }],
+    });
+  }
   // void is more top than dynamic, so their bound cannot be used, as the SDK reports.
   expect(executeProgram('dart', 'void f(dynamic a, void b) { bool s = true ? a : b; }\nvoid main() {}')).toMatchObject({
     kind: 'compileError',
