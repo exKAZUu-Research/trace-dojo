@@ -1422,8 +1422,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
+    // A collection with only a non-generic IEnumerable passes each element to its `Add` as it is, as Roslyn does.
+    const addsAsIs =
+      target.kind === 'named' &&
+      this.collectionElementType(target) === this.objectType &&
+      !this.isGenericEnumerable(target);
     const elements = node.elements.map((element) => {
-      if (!element.spread) return { spread: false, value: this.bindAs(element.value, elementType, context) };
+      if (!element.spread)
+        return {
+          spread: false,
+          value: addsAsIs ? this.bindValue(element.value, context) : this.bindAs(element.value, elementType, context),
+        };
       const value = this.bindValue(element.value, context);
       return { spread: true, value };
     });
@@ -1674,6 +1683,12 @@ export abstract class ExpressionBinder extends LambdaBinder {
    * The element type of a class or struct that a collection expression creates by its parameterless constructor and
    * fills by `Add`: the `T` of the `IEnumerable<T>` it implements, or `object` of a non-generic `IEnumerable`.
    */
+  private isGenericEnumerable(target: NamedType): boolean {
+    return allInterfacesOf(target, () => []).some(
+      (face) => face.symbol.fullName === 'System.Collections.Generic.IEnumerable`1'
+    );
+  }
+
   private constructibleElementType(target: NamedType): Type | undefined {
     const { symbol } = target;
     if ((symbol.kind !== 'class' && symbol.kind !== 'struct') || symbol.isAbstract) return undefined;
