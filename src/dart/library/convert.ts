@@ -159,6 +159,72 @@ abstract class _UnicodeSubsetDecoder extends Converter<List<int>, String> {
 
 final class AsciiDecoder extends _UnicodeSubsetDecoder {
   const AsciiDecoder({bool allowInvalid = false}) : super(allowInvalid, _asciiMask);
+  Stream<String> bind(Stream<List<int>> stream) => Stream<String>.eventTransformed(
+        stream,
+        (EventSink<String> sink) => _allowInvalid
+            ? _ErrorHandlingAsciiDecoderSink(_Utf8ConversionSink(sink, false))
+            : _SimpleAsciiDecoderSink(sink),
+      );
+}
+
+// From the SDK's lib/convert/ascii.dart (3.13.7), classes _ErrorHandlingAsciiDecoderSink and
+// _SimpleAsciiDecoderSink. Modifications: they are the event sinks of a decoder's stream transformation, so they
+// implement EventSink<List<int>> instead of extending ByteConversionSink, and add to an EventSink<String> (or the
+// UTF-8 sink) instead of a StringConversionSink.
+class _ErrorHandlingAsciiDecoderSink implements EventSink<List<int>> {
+  final _Utf8ConversionSink _utf8Sink;
+  _ErrorHandlingAsciiDecoderSink(this._utf8Sink);
+
+  void close() {
+    _utf8Sink.close();
+  }
+
+  void add(List<int> source) {
+    addSlice(source, 0, source.length, false);
+  }
+
+  void addSlice(List<int> source, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, source.length);
+    for (var i = start; i < end; i++) {
+      if ((source[i] & ~_asciiMask) != 0) {
+        if (i > start) _utf8Sink.addSlice(source, start, i, false);
+        // Add UTF-8 encoding of U+FFFD.
+        _utf8Sink.add(const <int>[0xEF, 0xBF, 0xBD]);
+        start = i + 1;
+      }
+    }
+    if (start < end) {
+      _utf8Sink.addSlice(source, start, end, isLast);
+    } else if (isLast) {
+      close();
+    }
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _utf8Sink.addError(error, stackTrace);
+  }
+}
+
+class _SimpleAsciiDecoderSink implements EventSink<List<int>> {
+  final EventSink<String> _sink;
+  _SimpleAsciiDecoderSink(this._sink);
+
+  void close() {
+    _sink.close();
+  }
+
+  void add(List<int> source) {
+    for (var i = 0; i < source.length; i++) {
+      if ((source[i] & ~_asciiMask) != 0) {
+        throw FormatException("Source contains non-ASCII bytes.");
+      }
+    }
+    _sink.add(String.fromCharCodes(source));
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
 }
 
 const Latin1Codec latin1 = Latin1Codec();
@@ -187,6 +253,92 @@ final class Latin1Encoder extends _UnicodeSubsetEncoder {
 
 final class Latin1Decoder extends _UnicodeSubsetDecoder {
   const Latin1Decoder({bool allowInvalid = false}) : super(allowInvalid, _latin1Mask);
+  Stream<String> bind(Stream<List<int>> stream) => Stream<String>.eventTransformed(
+        stream,
+        (EventSink<String> sink) => _allowInvalid ? _Latin1AllowInvalidDecoderSink(sink) : _Latin1DecoderSink(sink),
+      );
+}
+
+// From the SDK's lib/convert/latin1.dart (3.13.7), classes _Latin1DecoderSink and _Latin1AllowInvalidDecoderSink.
+// Modifications: they are the event sinks of a decoder's stream transformation, so they implement
+// EventSink<List<int>> and add to an EventSink<String>; every list is checked, as the VM's do for a list that is not
+// a Uint8List.
+class _Latin1DecoderSink implements EventSink<List<int>> {
+  EventSink<String>? _sink;
+  _Latin1DecoderSink(this._sink);
+
+  void close() {
+    _sink!.close();
+    _sink = null;
+  }
+
+  void add(List<int> source) {
+    addSlice(source, 0, source.length, false);
+  }
+
+  void _addSliceToSink(List<int> source, int start, int end, bool isLast) {
+    _sink!.add(String.fromCharCodes(source, start, end));
+    if (isLast) close();
+  }
+
+  void addSlice(List<int> source, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, source.length);
+    if (start == end) return;
+    _checkValidLatin1(source, start, end);
+    _addSliceToSink(source, start, end, isLast);
+  }
+
+  static void _checkValidLatin1(List<int> source, int start, int end) {
+    var mask = 0;
+    for (var i = start; i < end; i++) {
+      mask |= source[i];
+    }
+    if (mask >= 0 && mask <= _latin1Mask) {
+      return;
+    }
+    _reportInvalidLatin1(source, start, end); // Always throws.
+  }
+
+  static void _reportInvalidLatin1(List<int> source, int start, int end) {
+    // Find the index of the first non-Latin-1 character code.
+    for (var i = start; i < end; i++) {
+      var char = source[i];
+      if (char < 0 || char > _latin1Mask) {
+        throw FormatException(
+          "Source contains non-Latin-1 characters.",
+          source,
+          i,
+        );
+      }
+    }
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink!.addError(error, stackTrace);
+  }
+}
+
+class _Latin1AllowInvalidDecoderSink extends _Latin1DecoderSink {
+  _Latin1AllowInvalidDecoderSink(EventSink<String> super.sink);
+
+  void addSlice(List<int> source, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, source.length);
+    for (var i = start; i < end; i++) {
+      var char = source[i];
+      if (char > _latin1Mask || char < 0) {
+        if (i > start) _addSliceToSink(source, start, i, false);
+        // Add UTF-8 encoding of U+FFFD.
+        _addSliceToSink(const [0xFFFD], 0, 1, false);
+        start = i + 1;
+      }
+    }
+    if (start < end) {
+      _addSliceToSink(source, start, end, isLast);
+    }
+    if (isLast) {
+      close();
+    }
+  }
 }
 
 class JsonUnsupportedObjectError extends Error {
