@@ -606,9 +606,9 @@ export class Converter {
     const stripsTabs = redirect.childForFieldName('operator')?.type === '<<-';
     const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
     if (!body) {
-      // A `${ ...; }` is read apart from the lines after it, which may hold its here-document's body, as Bash 5.3
-      // reads with a warning; elsewhere, the input ends before the body's first line.
-      if (this.hooks.readsApart || insideCurrentShellSubstitution(redirect)) {
+      // The body is missing because the input ends before its first line, or because it lies on the lines after a
+      // substitution that closed first, which Bash 5.3 reads with a warning and this environment does not.
+      if (this.hooks.readsApart || insideCurrentShellSubstitution(redirect) || !this.inputEndsBefore(redirect)) {
         return this.unsupported(redirect, 'outerHeredocBody');
       }
       // Bash begins reading the body at the end of the input, where it stops at once.
@@ -620,18 +620,23 @@ export class Converter {
     // The grammar ends a body the end of the input ends with an empty `heredoc_end`, and one in a substitution at the
     // delimiter followed by the `)` closing it, both of which Bash warns of.
     const source = this.analyzed.originalSource;
+    // The end of a backquoted substitution ends its delimiter line.
     const endsAtDelimiterLine =
-      end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|$)/.test(source.slice(end.endIndex));
+      end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|`|$)/.test(source.slice(end.endIndex));
+    const closedRow = end !== undefined && end.startIndex < end.endIndex ? end.startPosition.row : undefined;
     if (!endsAtDelimiterLine) {
       const startLine = source[body.startIndex] === '\n' ? body.startPosition.row + 1 : body.startPosition.row;
-      const closedRow = end !== undefined && end.startIndex < end.endIndex ? end.startPosition.row : undefined;
       this.noteUnterminatedHeredoc(row, startLine, delimiter, closedRow);
     }
+    // Bash reads a body line by line, so a last line the end of the input cuts off still ends with a newline.
+    const content = source.slice(body.startIndex, contentEnd);
+    const endsCut = !endsAtDelimiterLine && closedRow === undefined && content.trim() !== '' && !content.endsWith('\n');
+    const lastNewline: WordPart[] = endsCut ? [{ kind: 'single', text: '\n' }] : [];
     const strip = (text: string, atLineStart: boolean): string =>
       stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
     if (/['"\\]/.test(delimiter)) {
       const raw = this.analyzed.originalSource.slice(body.startIndex, contentEnd).replace(/^\n/, '');
-      return { parts: [{ kind: 'single', text: strip(raw, true) }], row, text: raw };
+      return { parts: [{ kind: 'single', text: strip(raw, true) }, ...lastNewline], row, text: raw };
     }
     const parts: WordPart[] = [];
     let atStart = true;
@@ -644,7 +649,25 @@ export class Converter {
       } else parts.push({ kind: 'double', parts: this.wordParts(child), rawText: child.text });
       atStart = false;
     }
-    return { parts, row, text: this.analyzed.originalSource.slice(body.startIndex, contentEnd) };
+    return {
+      parts: [...parts, ...lastNewline],
+      row,
+      text: this.analyzed.originalSource.slice(body.startIndex, contentEnd),
+    };
+  }
+
+  /**
+   * Whether the input ends before the first line a here-document's body could start on: nothing follows the line of
+   * its redirection, or the bodies of here-documents before it read to the end of the input.
+   */
+  private inputEndsBefore(redirect: Node): boolean {
+    const source = this.analyzed.originalSource;
+    const lineEnd = source.indexOf('\n', redirect.endIndex);
+    let readTo = lineEnd === -1 ? source.length : lineEnd + 1;
+    for (const body of this.heredocBodies.values()) {
+      if (body.startIndex > redirect.startIndex) readTo = Math.max(readTo, body.endIndex);
+    }
+    return source.slice(readTo).trim() === '';
   }
 
   private ifStatement(node: Node): Statement {
