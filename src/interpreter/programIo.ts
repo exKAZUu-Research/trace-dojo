@@ -53,7 +53,7 @@ export class ProgramIO {
    */
   openReader(path: string): TextReader {
     if (resolvePath(path) === STDIN_PATH) return this.stdin.reader;
-    return new TextReader(this.files.openForReading(path), this.budget);
+    return new TextReader(this.files.openForReading(path), this.budget, undefined, true);
   }
 
   textReader(text: string): TextReader {
@@ -124,7 +124,9 @@ export class TextReader {
   constructor(
     private readonly source: () => string,
     private readonly budget: ExecutionBudget,
-    private readonly refill?: () => boolean
+    private readonly refill?: () => boolean,
+    /** Whether the text is a regular file's, which a poll finds ready to read even at its end. */
+    readonly fromRegularFile = false
   ) {}
 
   get text(): string {

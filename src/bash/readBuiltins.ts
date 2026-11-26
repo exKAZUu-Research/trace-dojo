@@ -47,7 +47,11 @@ export const readBuiltin: Builtin = (shell, args) => {
   if (!options.has('t')) rejectControlVariable(shell.store.readScalar('TMOUT'), 'TMOUT', 'read の待ち時間');
   const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'), reader);
   if (timeoutStatus !== undefined) return timeoutStatus;
-  if (count === 0) return 0;
+  // Reading no characters still assigns the empty text read, as Bash does.
+  if (count === 0) {
+    if (arrayName !== undefined) return shell.assignIndexedArray(arrayName, [], 'read') ? 0 : 1;
+    return assignAll(shell, names.length === 0 ? ['REPLY'] : names, []) ? 0 : 1;
+  }
   const delimiter = options.has('d') ? (options.get('d') as string).slice(0, 1) || '\0' : '\n';
   let text: ReadText;
   try {
@@ -78,7 +82,9 @@ function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: Te
     return 1;
   }
   if (Number(timeout) !== 0) return undefined;
-  return reader.isAtEnd ? 1 : 0;
+  // Bash polls the descriptor: a regular file is ready to read even at its end, while other input is ready only
+  // while some remains.
+  return reader.fromRegularFile || !reader.isAtEnd ? 0 : 1;
 }
 
 function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): boolean {
