@@ -1429,11 +1429,6 @@ export abstract class StatementCompiler extends OperatorCompiler {
     };
   }
 
-  /**
-   * The head of a branch with a guard, as `is Int if x > 0 ->` or `else if c ->`, which matches when its condition and
-   * then its guard hold. The guard may fail after the condition matched, so the branch covers no case and leaves the
-   * later branches no smart cast.
-   */
   /** Checks where a when's branch may have an `if` guard, as kotlinc does. */
   protected checkGuardedEntry(
     hasSubject: boolean,
@@ -1444,6 +1439,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
       this.error(entry.conditions[1].row, 'if のガードがある分岐には、条件を1つだけ書けます。');
   }
 
+  /**
+   * The head of a branch with a guard, as `is Int if x > 0 ->` or `else if c ->`, which matches when its condition and
+   * then its guard hold. The guard may fail after the condition matched, so the branch covers no case and leaves the
+   * later branches no smart cast.
+   */
   private compileGuardedEntryHead(
     scope: Scope,
     context: FunctionContext,
