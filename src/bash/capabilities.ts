@@ -24,15 +24,8 @@ export const DYNAMIC_VARIABLES = new Set([
 
 export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL', 'PWD', 'OLDPWD']);
 
-/** Deferred Bash internal variables whose reads, writes, declarations, tests, and unsets are rejected. */
-export const UNSUPPORTED_SPECIAL_VARIABLES = new Set<string>();
-
 /** Special variables whose user writes, unsets, and declarations are rejected except scalar `RANDOM` seeding. */
-export const SPECIAL_MUTATION_BLOCKED = new Set([
-  ...DYNAMIC_VARIABLES,
-  'BASH_REMATCH',
-  ...UNSUPPORTED_SPECIAL_VARIABLES,
-]);
+export const SPECIAL_MUTATION_BLOCKED = new Set([...DYNAMIC_VARIABLES, 'BASH_REMATCH']);
 
 /** Host environment variables absent in the browser grading sandbox. */
 export const ENVIRONMENT_VARIABLES = new Set([
@@ -194,16 +187,8 @@ export function rejectUnsupportedHostEnv(name: string): never {
   throw new UnsupportedFeatureError(`環境変数（${name}）`);
 }
 
-/** Rejects deferred special variables (`PIPESTATUS`, `BASH_LINENO`, `BASH_SOURCE`, `BASH_SUBSHELL`) on any access. */
-export function rejectUnsupportedSpecialVariable(name: string): void {
-  if (UNSUPPORTED_SPECIAL_VARIABLES.has(name)) {
-    throw new UnsupportedFeatureError(`特殊変数（${name}）`);
-  }
-}
-
-/** Single read gate for deferred special variables and host environment variables. */
+/** Single read gate for host environment variables, which the browser has none of. */
 export function rejectUnsupportedVariableRead(name: string): void {
-  rejectUnsupportedSpecialVariable(name);
   if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
 }
 

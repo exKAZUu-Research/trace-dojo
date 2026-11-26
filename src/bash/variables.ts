@@ -28,11 +28,9 @@ import {
   rejectUnsupportedNamerefShadowing,
   rejectUnsupportedNamerefTarget,
   rejectUnsupportedPrefixListing,
-  rejectUnsupportedSpecialVariable,
   rejectUnsupportedVariableMutation,
   rejectUnsupportedVariableRead,
   SCALAR_DYNAMIC_VARIABLES,
-  UNSUPPORTED_SPECIAL_VARIABLES,
 } from './capabilities';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import type { GetoptsState } from './getopts';
@@ -1005,9 +1003,6 @@ export class VariableStore {
   }
 
   private rejectUnsupportedPrefixQuery(prefix: string): void {
-    for (const unsupported of UNSUPPORTED_SPECIAL_VARIABLES) {
-      if (unsupported.startsWith(prefix)) rejectUnsupportedSpecialVariable(unsupported);
-    }
     for (const envName of ENVIRONMENT_VARIABLES) {
       if (envName.startsWith(prefix)) rejectUnsupportedVariableRead(envName);
     }
