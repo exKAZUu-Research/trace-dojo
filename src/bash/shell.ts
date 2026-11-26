@@ -93,6 +93,7 @@ interface ShellContextOptions {
   readonly ignoresErrexit?: boolean;
   readonly traps?: Map<TrapCondition, Trap>;
   readonly shownTraps?: ReadonlyMap<TrapCondition, Trap>;
+  readonly standardInputRedirected?: boolean;
   readonly traceLevel?: number;
   readonly lineShift?: number;
   readonly readShift?: number;
@@ -147,6 +148,11 @@ export class Shell implements ArithmeticHost {
   private elementCommand: Statement | undefined;
   /** Whether the next function call is this pipeline element's own, which Bash counts as a `BASH_SUBSHELL` level. */
   private deepensAtFunctionCall = false;
+  /**
+   * Whether a compound command's redirection or a pipeline gave the commands running now their standard input, which
+   * a command started with `&` then reads instead of `/dev/null`, as Bash does without job control.
+   */
+  private standardInputRedirected: boolean;
   /** The `set` options to restore when the running function returns, which `local -` keeps. */
   private setOptionsToRestore: ShellOptionValues | undefined;
   /**
@@ -169,6 +175,7 @@ export class Shell implements ArithmeticHost {
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
     this.traps = options?.traps ?? new Map();
     this.shownTraps = options?.shownTraps;
+    this.standardInputRedirected = options?.standardInputRedirected ?? false;
     this.traceLevel = options?.traceLevel ?? 1;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
@@ -503,9 +510,10 @@ export class Shell implements ArithmeticHost {
       this.currentRow = this.functionDefinitionRow;
     }
     let redirected = false;
+    const input = this.fds.get(0);
     const status = this.withRedirects(statement.redirects, () => {
       redirected = true;
-      return this.execute(statement.body, guarded);
+      return this.withStandardInputMark(this.fds.get(0) !== input, () => this.execute(statement.body, guarded));
     });
     // A failed redirection fails the compound command itself, while its body applies the rules on its own.
     if (!redirected) this.checkErrexit(status);
@@ -641,7 +649,9 @@ export class Shell implements ArithmeticHost {
    * job control, so it never waits for input.
    */
   private runInBackground(command: Statement): number {
-    const fds = this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
+    const fds = this.standardInputRedirected
+      ? this.fds.clone()
+      : this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
     const status = this.runElementSubshell(command, fds, true);
     this.startJob({ status, reported: false });
     return 0;
@@ -750,9 +760,20 @@ export class Shell implements ArithmeticHost {
     const saved = this.saveDescriptors();
     this.fds.set(0, input);
     try {
-      return this.execute(command);
+      return this.withStandardInputMark(true, () => this.execute(command));
     } finally {
       this.restoreDescriptors(saved, [0]);
+    }
+  }
+
+  /** Runs commands marked as having their standard input given by a redirection or a pipe, when `given` is true. */
+  private withStandardInputMark(given: boolean, run: () => number): number {
+    if (!given || this.standardInputRedirected) return run();
+    this.standardInputRedirected = true;
+    try {
+      return run();
+    } finally {
+      this.standardInputRedirected = false;
     }
   }
 
@@ -1505,6 +1526,8 @@ export class Shell implements ArithmeticHost {
     if (simple) child.shell.elementCommand = command;
     // Whether the command calls a function is known only once its name is expanded.
     if (simple && !background) child.shell.deepensAtFunctionCall = true;
+    // A pipeline element after the first reads the pipe, which a command it starts with `&` reads as well.
+    if (!background && fds.get(0) !== this.fds.get(0)) child.shell.standardInputRedirected = true;
     child.shell.functionDefinitionRow = this.functionDefinitionRow;
     return child.run([command]);
   }
@@ -1586,7 +1609,7 @@ export class Shell implements ArithmeticHost {
   /** What a subshell copies from this shell besides its variables: descriptors and options. */
   childContext(): Pick<
     ShellContextOptions,
-    'fds' | 'options' | 'ignoresErrexit' | 'traps' | 'shownTraps' | 'traceLevel'
+    'fds' | 'options' | 'ignoresErrexit' | 'traps' | 'shownTraps' | 'standardInputRedirected' | 'traceLevel'
   > {
     // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
     const traps = [...this.traps].filter(
@@ -1598,6 +1621,7 @@ export class Shell implements ArithmeticHost {
       ignoresErrexit: this.errexitIgnored > 0,
       traps: new Map(traps),
       shownTraps: this.shownTraps ?? new Map(this.traps),
+      standardInputRedirected: this.standardInputRedirected,
       traceLevel: this.traceLevel,
     };
   }
