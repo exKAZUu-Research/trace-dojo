@@ -195,12 +195,16 @@ const STDIN_PATHS = new Set([STDIN_PATH, '/dev/fd/0']);
 
 /**
  * A file's text, where `/dev/stdin` gives standard input, as ProgramIO's readers of every language do: what remains
- * of it for a read, which consumes it, and all of it for a length or an open, which the VM's fstat answers without
- * moving the descriptor.
+ * of it for a read, which consumes it, and for a length or an open, which do not, as the VM answers for standard input
+ * that a pipe gives.
  */
 function readFileAt(runtime: Runtime, path: Value, failure: Value, consumes: boolean): string {
   const filePath = stringArg(runtime, path, 'path');
-  if (STDIN_PATHS.has(resolvePath(filePath))) return consumes ? restOfStdin(runtime) : runtime.io.stdin.reader.text;
+  if (STDIN_PATHS.has(resolvePath(filePath))) {
+    if (consumes) return restOfStdin(runtime);
+    const { reader } = runtime.io.stdin;
+    return reader.text.slice(reader.position);
+  }
   return withFileErrors(runtime, failure as string, () => filesOf(runtime).readFile(filePath));
 }
 
