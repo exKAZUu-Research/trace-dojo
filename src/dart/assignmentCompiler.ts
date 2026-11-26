@@ -1305,7 +1305,6 @@ interface ElementTypes {
   key: DartType;
   value?: DartType;
 }
-/** Adds an element to a collection literal being built; a set or map literal names itself as the target. */
 function collectionName(kind: 'list' | 'set' | 'map'): string {
   return kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
 }
