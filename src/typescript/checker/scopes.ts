@@ -143,7 +143,7 @@ export class Scope {
       this.augmentedNames.add(name);
       return this.augments.declareType(name, kind, declaration, nameNode);
     }
-    let symbol = this.types.get(name) ?? this.exportedInterface(name, kind);
+    let symbol = this.types.get(name) ?? this.exportedInterface(name, kind, declaration);
     if (!symbol) {
       // A class or an enum is a value and a type of the same name.
       symbol =
@@ -159,8 +159,10 @@ export class Scope {
   }
 
   /** The interface another body of this namespace exports, which an interface of the name in this body merges into. */
-  private exportedInterface(name: string, kind: TypeKind): Sym | undefined {
-    const exported = kind === 'interface' ? this.namespace?.namespaceExports?.types.get(name) : undefined;
+  private exportedInterface(name: string, kind: TypeKind, declaration: TreeNode): Sym | undefined {
+    // A local interface of the name stays apart from the exported one, as in tsc.
+    const isExported = this.isAmbient || declaration.parent?.type === 'export_statement';
+    const exported = kind === 'interface' && isExported ? this.namespace?.namespaceExports?.types.get(name) : undefined;
     if (exported?.typeKind !== 'interface') return undefined;
     this.types.set(name, exported);
     return exported;
