@@ -1,14 +1,11 @@
 import { type ExecutionBudget, ExecutionLimitError, LIMITS } from './limits';
 
-/** What a run starts from besides its program. */
 export interface ProgramInput {
-  /** The text the program reads from standard input. */
   stdin?: string;
   /** The contents of the files that exist when the program starts, by path; their directories exist as well. */
   files?: Readonly<Record<string, string>>;
 }
 
-/** What a run leaves besides its turtles. */
 export interface ProgramOutput {
   stdout: string;
   /** Original stdout when it cannot be recovered from the UTF-8 display text. */
@@ -155,7 +152,6 @@ export class TextReader {
     return false;
   }
 
-  /** The next code unit, or `undefined` at the end. */
   read(): string | undefined {
     this.budget.spend();
     if (this.isAtEnd) return undefined;
@@ -229,11 +225,9 @@ export class FileSystemError extends Error {
   }
 }
 
-/** How opening a file for writing treats a file that exists or not. */
 export interface OpenMode {
   /** Whether to create a missing file always, never, or only when none exists, failing if one does. */
   create: 'always' | 'never' | 'exclusive';
-  /** Whether to empty an existing file. */
   truncate: boolean;
   /** Whether writes go to the end of the file, rather than over its text from its start. */
   append: boolean;
@@ -261,7 +255,7 @@ export class FileHandle {
   /** The file's text read from its start, when the handle is open for reading. */
   readonly reader: TextReader | undefined;
   /** Where the next write goes, or `undefined` for the end of the file. */
-  private position: number | undefined;
+  position: number | undefined;
   /** The bytes of a character that a write of bytes left partly written. */
   private decoder: TextDecoder | undefined;
 
@@ -282,8 +276,13 @@ export class FileHandle {
   }
 
   write(text: string): void {
-    this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
+    this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */
+  writeAt(position: number, text: string): void {
+    this.files.writeAt(this.node, position, text);
   }
 
   /**
@@ -324,7 +323,6 @@ interface Location {
   dots: '.' | '..' | undefined;
 }
 
-/** A directory that a walk down a path has entered, with its name in its parent. */
 interface Step {
   directory: DirectoryNode;
   name: string;
