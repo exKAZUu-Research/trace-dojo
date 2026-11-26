@@ -39,6 +39,29 @@ inline fun File.forEachLine(action: (line: String) -> Unit) {
 
 inline fun <T> File.useLines(block: (Sequence<String>) -> T): T = block(readLines().asSequence())
 
+// A reader's lines and text, as Kotlin's extensions of java.io.Reader and BufferedReader read them.
+fun BufferedReader.lineSequence(): Sequence<String> = generateSequence { readLine() }.constrainOnce()
+
+fun BufferedReader.readLines(): List<String> {
+    val lines = ArrayList<String>()
+    forEachLine { lines.add(it) }
+    return lines
+}
+
+inline fun <T> BufferedReader.useLines(block: (Sequence<String>) -> T): T = use { block(it.lineSequence()) }
+
+fun BufferedReader.forEachLine(action: (line: String) -> Unit): Unit = useLines { it.forEach(action) }
+
+fun BufferedReader.readText(): String {
+    val text = StringBuilder()
+    while (true) {
+        val char = read()
+        if (char < 0) break
+        text.append(char.toChar())
+    }
+    return text.toString()
+}
+
 val File.extension: String
     get() = name.substringAfterLast('.', "")
 
