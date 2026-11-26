@@ -1030,7 +1030,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if ((keywords.has('noinline') || keywords.has('crossinline')) && !symbol.isInline)
         this.error(param.row, 'noinline・crossinline は、インライン関数の引数にだけ付けられます。');
     }
-    if (symbol.isTailrec && (symbol.isOpen || owner?.isInterface))
+    // An open member of a final class or object has no overrides, as kotlinc counts it.
+    if (symbol.isTailrec && (owner?.isInterface || (symbol.isOpen && owner?.isInheritable)))
       this.error(decl.row, 'tailrec は、オーバーライドできない関数にだけ付けられます。');
     const misplaced = [...decl.modifiers.keywords].find((keyword) => PROPERTY_ONLY_MODIFIERS.has(keyword));
     if (misplaced) this.error(decl.row, `関数には ${misplaced} 修飾子を付けられません。`);
