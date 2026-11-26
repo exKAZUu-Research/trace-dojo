@@ -80,9 +80,10 @@ export abstract class CallCompiler extends ReflectionCompiler {
     if (tuple.type.kind !== 'struct' || !tuple.type.isTuple)
       return this.error(args[2], '@call の引数は、.{ 1, 2 } のようなタプルにしてください。');
     const fields = this.structFields(tuple.type, args[2]);
-    // A tuple literal's elements are the arguments themselves, so each runs once, as in a direct call.
-    const literal = args[2].kind === 'arrayInit' && !args[2].type ? args[2].elements : undefined;
-    const elements = literal ?? fields.map((field, index) => this.tupleElement(tuple, index, field, args[2]));
+    // A runtime tuple is evaluated once into a slot that each argument reads, as Zig evaluates the tuple as one value.
+    const slot = tuple.known ? undefined : this.localSlot();
+    const source = slot === undefined ? tuple : runtime(tuple.type, (frame) => frame.slots[slot], args[2]);
+    const elements = fields.map((field, index) => this.tupleElement(source, index, field, args[2]));
     const call: ExpressionOf<'call'> = {
       kind: 'call',
       row: expression.row,
@@ -97,7 +98,18 @@ export abstract class CallCompiler extends ReflectionCompiler {
     // `.compile_time` runs the call while the compiler analyzes it; the other modifiers only hint at optimizations.
     if (modifier === COMPILE_TIME_MODIFIER)
       return this.comptimeValue(() => this.compileCall(call, resultType), expression);
-    return this.compileCall(call, resultType);
+    const result = this.compileCall(call, resultType);
+    if (slot === undefined) return result;
+    const evaluateTuple = tuple.eval;
+    const evaluateCall = result.eval;
+    return runtime(
+      result.type,
+      (frame) => {
+        frame.slots[slot] = evaluateTuple(frame);
+        return evaluateCall(frame);
+      },
+      expression
+    );
   }
 
   protected compileCall(expression: ExpressionOf<'call'>, resultType: Type | undefined): TExpr {
