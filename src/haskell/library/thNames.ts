@@ -1,9 +1,16 @@
+import { SEQUENCE_VALUES } from './sequence';
+
 /**
  * The modules GHC 9.14.1 defines the library's names in, which Template Haskell's names show: by the kind of name
  * (`v` for a value, `t` for a type or class), the library module that defines it here, and its name.
  * Generated from GHC's output for `'name` and `''Type` of each name the public modules export.
  */
 export const TH_NAME_MODULES: Record<string, readonly string[]> = {
+  // containers defines what Data.Sequence exports in Data.Sequence.Internal, as this library does.
+  'Data.Sequence.Internal': [
+    ...['Seq', 'ViewL', 'ViewR'].map((name) => `t Data.Sequence.Internal ${name}`),
+    ...SEQUENCE_VALUES.map((name) => `v Data.Sequence.Internal ${name}`),
+  ],
   'GHC.Internal.Control.Arrow': [
     't Control.Arrow.Internal Arrow',
     't Control.Arrow.Internal ArrowApply',
