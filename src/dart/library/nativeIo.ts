@@ -183,12 +183,20 @@ define('FileSystemEntity._isSameFile', (runtime, _self, [path1, path2]) =>
   filesOf(runtime).isSameFile(stringArg(runtime, path1, 'path1'), stringArg(runtime, path2, 'path2'))
 );
 
-define('_File._read', (runtime, _self, [path, failure]) => {
+define('_File._read', (runtime, _self, [path, failure]) => readFileAt(runtime, path, failure, true));
+
+define('_File._peek', (runtime, _self, [path, failure]) => readFileAt(runtime, path, failure, false));
+
+/**
+ * A file's text, where `/dev/stdin` gives standard input, as ProgramIO's readers of every language do: what remains
+ * of it for a read, which consumes it, and all of it for a length or an open, which the VM's fstat answers without
+ * moving the descriptor.
+ */
+function readFileAt(runtime: Runtime, path: Value, failure: Value, consumes: boolean): string {
   const filePath = stringArg(runtime, path, 'path');
-  // `/dev/stdin` reads what remains of standard input, as ProgramIO's readers of every language do.
-  if (resolvePath(filePath) === STDIN_PATH) return restOfStdin(runtime);
+  if (resolvePath(filePath) === STDIN_PATH) return consumes ? restOfStdin(runtime) : runtime.io.stdin.reader.text;
   return withFileErrors(runtime, failure as string, () => filesOf(runtime).readFile(filePath));
-});
+}
 
 function restOfStdin(runtime: Runtime): string {
   const { reader } = runtime.io.stdin;

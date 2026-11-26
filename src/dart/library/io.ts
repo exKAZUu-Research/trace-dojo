@@ -616,7 +616,7 @@ class _File extends FileSystemEntity implements File {
     if (kind == 1) throw FileSystemException(failure, path, const OSError("Is a directory", 21));
     throw PathNotFoundException(path, const OSError("No such file or directory", 2), failure);
   }
-  int lengthSync() => utf8.encode(_read(path, "Cannot retrieve length of file")).length;
+  int lengthSync() => utf8.encode(_peek(path, "Cannot retrieve length of file")).length;
   /** The file's contents as stored, which its bytes encode. */
   String _readStored() => _read(path, "Cannot open file");
   Future<int> length() => Future(lengthSync);
@@ -634,7 +634,7 @@ class _File extends FileSystemEntity implements File {
     _requireUtf8(encoding);
     if (mode == FileMode.read) {
       // The VM opens the file to read, which only an empty write leaves unchanged without an error.
-      _read(path, "Cannot open file");
+      _peek(path, "Cannot open file");
       if (contents.isNotEmpty) throw FileSystemException("writeFrom failed", path, const OSError("Bad file descriptor", 9));
       return;
     }
@@ -686,6 +686,8 @@ class _File extends FileSystemEntity implements File {
         return from < to ? bytes.sublist(from, to) : <int>[];
       })).where((bytes) => bytes.isNotEmpty);
   external static String _read(String path, String failure);
+  /** What _read gives, without reading standard input at /dev/stdin, as a length or an open does not. */
+  external static String _peek(String path, String failure);
   external static void _write(String path, String contents, bool append, String failure, [String? shownPath]);
   external static void _create(String path, bool recursive, bool exclusive);
 }
