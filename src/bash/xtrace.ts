@@ -31,7 +31,7 @@ export function traceAssignment(shell: Shell, target: string, operator: string, 
  * A word as the trace shows it: `$'...'` for one with characters that do not print, single quotes for one with
  * characters the shell treats specially, and as it is otherwise.
  */
-export function quoteTraceWord(word: string): string {
+function quoteTraceWord(word: string): string {
   if (word === '') return "''";
   if (ansicShouldQuote(word)) return ansicQuote(word);
   return containsShellMetas(word) ? singleQuote(word) : word;

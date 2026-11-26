@@ -47,7 +47,7 @@ import {
 import type { Trap, TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
-import { quoteTraceWord, traceAssignment, traceLine, traceWords } from './xtrace';
+import { traceAssignment, traceLine, traceWords } from './xtrace';
 
 export { BASH_VERSION, type FunctionDefinition } from './runtime';
 export type { CompoundElement } from './variables';
@@ -664,9 +664,7 @@ export class Shell implements ArithmeticHost {
     for (let showsMenu = true; ;) {
       this.runtime.spend();
       this.currentRow = statement.row - this.lineShift;
-      if (this.options.xtrace) {
-        traceLine(this, `select ${statement.variable} in ${values.map(quoteTraceWord).join(' ')}`);
-      }
+      if (this.options.xtrace) traceLine(this, `select ${loopHeaderText(statement)}`);
       if (showsMenu) this.fd2.write(formatSelectMenu(values));
       this.fd2.write(this.store.readScalar('PS3') ?? '#? ');
       if (this.runBuiltin('read', []) !== 0) {
@@ -698,7 +696,7 @@ export class Shell implements ArithmeticHost {
     for (const value of values) {
       this.runtime.spend();
       this.currentRow = statement.row - this.lineShift;
-      if (this.options.xtrace) traceLine(this, `for ${statement.variable} in ${values.map(quoteTraceWord).join(' ')}`);
+      if (this.options.xtrace) traceLine(this, `for ${loopHeaderText(statement)}`);
       if (!this.bindLoopVariable(statement.variable, value, bindsObjects)) {
         last.status = 1;
         return;
@@ -1501,6 +1499,15 @@ export class Shell implements ArithmeticHost {
   splitSubscript(text: string): { name: string; subscript: string } | undefined {
     return splitSubscriptText(text);
   }
+}
+
+/**
+ * What `set -x` shows of a `for` or `select` header after its keyword: the words as written, as Bash prints the
+ * command, with `"$@"` for a header without `in`, which stands for it.
+ */
+function loopHeaderText(statement: Extract<Statement, { kind: 'for' }>): string {
+  const words = statement.values ? statement.values.map((word) => word.text) : ['"$@"'];
+  return `${statement.variable} in ${words.join(' ')}`;
 }
 
 /** What a command substitution changes in the subshell it runs in. */
