@@ -4,7 +4,7 @@ import { compileError } from './errors';
 import { TypePrinter } from './prettyType';
 import { rolesOf } from './roles';
 import type { Span } from './syntax';
-import { instantiateType, type Pred, prune, splitApp, type Type, typesEqual, typeVarsOf, zonk } from './types';
+import { instantiateType, type Pred, prune, splitApp, tap, type Type, typesEqual, typeVarsOf, zonk } from './types';
 
 export interface CoercionChecker {
   reduceFamilies(type: Type): Type;
@@ -83,7 +83,13 @@ class CoercionSolver {
     if (fromNewtype) return this.nested('unwrap', fromNewtype, this.solve(field(fromNewtype, l), right, depth + 1));
     const toNewtype = flexible(l.head) ? unwrappable(r) : undefined;
     if (toNewtype) return this.nested('wrap', toNewtype, this.solve(left, field(toNewtype, r), depth + 1));
-    return 'stuck';
+    // GHC's defaulting tries the equality nominally (GHC.Tc.Solver.Default.defaultEquality), which fixes an unknown
+    // head, as `f` in `coerce (pure x) :: Maybe Int`, to the known one; the arguments then convert as usual.
+    const [unknown, known] = flexible(l.head) ? [l, r] : [r, l];
+    if (!flexible(unknown.head) || flexible(known.head) || unknown.args.length > known.args.length) return 'stuck';
+    const fixed = known.args.length - unknown.args.length;
+    this.checker.unify(unknown.head, tap(known.head, ...known.args.slice(0, fixed)), this.span, '型の表現（coerce）');
+    return this.solve(left, right, depth + 1);
   }
 
   /** The conversion a given `Coercible` constraint gives, either way round. */
