@@ -1608,9 +1608,10 @@ export abstract class MemberBinder extends CallBinder {
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     args: ArgumentInfo[],
     node: Position,
-    context?: BindContext
+    context?: BindContext,
+    isCollectionInitializerAdd = false
   ): BoundExpression {
-    const description: CallDescription = { name: group.name, kind: 'method' };
+    const description: CallDescription = { name: group.name, kind: 'method', isCollectionInitializerAdd };
     if (group.candidates.length > 0) {
       const saved = this.diagnostics.length;
       const canFallBack = group.extensions.length > 0 && group.receiver !== undefined;
@@ -2271,7 +2272,7 @@ export abstract class MemberBinder extends CallBinder {
           kind: 'collectionAdd' as const,
           call: { kind: 'default' as const, type: ERROR_TYPE, row: element.row },
         };
-      return { kind: 'collectionAdd' as const, call: this.invokeMethodGroup(group, args, element) };
+      return { kind: 'collectionAdd' as const, call: this.invokeMethodGroup(group, args, element, undefined, true) };
     });
   }
 

@@ -77,6 +77,8 @@ export interface CallDescription {
   typeName?: string;
   /** Whether the candidates are extension methods, whose first argument is the receiver. */
   isExtension?: boolean;
+  /** Whether the call is a collection initializer's `Add`, whose bad arguments Roslyn introduces with CS1950. */
+  isCollectionInitializerAdd?: boolean;
 }
 
 interface Bounds {
@@ -1246,6 +1248,7 @@ export abstract class CallBinder extends OperatorBinder {
     }
     // Roslyn reports each argument that does not fit, but only the receiver of an extension method that does not.
     let hasBadArgument = false;
+    let isIntroduced = !description.isCollectionInitializerAdd;
     for (const [index, arg] of args.entries()) {
       const parameter = method.parameters[mapping.parameterOf[index]];
       const type = this.parameterType(method, mapping.parameterOf[index], expanded, substitution);
@@ -1256,6 +1259,15 @@ export abstract class CallBinder extends OperatorBinder {
         if (description.isExtension && position === 0) {
           this.reportReceiverMismatch(candidate, arg, type, row, description, typeArgs);
           return;
+        }
+        // A lambda's own errors explain why it does not fit, which Roslyn does not introduce.
+        if (!isIntroduced && (arg.expression.kind !== 'unbound' || arg.expression.methodGroup)) {
+          this.error(
+            row,
+            'CS1950',
+            `コレクション初期化子に最も適しているオーバーロード Add メソッド '${displayMethodIn(method, candidate.owner)}' には無効な引数がいくつか含まれています`
+          );
+          isIntroduced = true;
         }
         this.reportInconvertible(candidate, arg, position, type, row, description);
         hasBadArgument = true;
@@ -1511,6 +1523,17 @@ export abstract class CallBinder extends OperatorBinder {
     description: CallDescription
   ): void {
     if (arg.expression.kind === 'unbound' && arg.expression.methodGroup) {
+      // A method of the delegate's parameters but another return type is CS0407, as when assigning the group.
+      const expression = arg.expression;
+      const saved = this.diagnostics.length;
+      const reported = this.quietly(() => {
+        this.convert(expression, type, arg.row);
+        return this.diagnostics.slice(saved);
+      });
+      if (reported?.length === 1 && reported[0].message.startsWith('CS0407:')) {
+        this.diagnostics.push(reported[0]);
+        return;
+      }
       this.error(
         arg.row,
         'CS1503',
