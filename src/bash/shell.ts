@@ -354,17 +354,17 @@ export class Shell implements ArithmeticHost {
   private runTrap(condition: TrapCondition, status: number): void {
     const trap = this.traps.get(condition);
     if (!trap || this.runningTraps.has(condition)) return;
-    // Bash reads the action only as it runs it, where a syntax error in it ends the action, numbered from the failed
-    // command's line for `ERR` and from 1 for `EXIT`.
-    if (trap.syntaxError) {
+    // Bash reads the action line by line as it runs it: the commands before a syntax error run, and the error ends
+    // the action, numbered from the failed command's line for `ERR` and from 1 for `EXIT`.
+    const errorLines = trap.syntaxError?.(condition === 'ERR' ? this.currentRow + 1 : 1);
+    const reportError = (): void => {
       const label = condition === 'ERR' ? 'error' : 'exit';
-      const firstLine = condition === 'ERR' ? this.currentRow + 1 : 1;
-      for (const line of trap.syntaxError(firstLine)) {
-        this.fd2.write(`${SCRIPT_NAME}: ${label} trap: ${line}\n`);
-      }
+      for (const line of errorLines ?? []) this.fd2.write(`${SCRIPT_NAME}: ${label} trap: ${line}\n`);
+    };
+    if (trap.statements.length === 0) {
+      reportError();
       return;
     }
-    if (trap.statements.length === 0) return;
     const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
     this.trapStartStatus = status;
@@ -378,6 +378,7 @@ export class Shell implements ArithmeticHost {
     this.lineShift = condition === 'EXIT' ? trap.row : trap.row - this.currentRow;
     try {
       this.runStatements(trap.statements);
+      reportError();
     } finally {
       this.runningTraps.delete(condition);
       this.trapStartStatus = saved.trapStatus;
@@ -498,7 +499,8 @@ export class Shell implements ArithmeticHost {
         false,
         true
       ).run(body);
-      const file = { input: this.runtime.io.pipeReader(capture.read()) };
+      // Bash starts the command alongside the shell, which has mostly written nothing yet when it is first polled.
+      const file = { input: this.runtime.io.pipeReader(capture.read(), true) };
       this.fds.set(fd, file);
       this.processSubstitutions.push({ fd, file });
     } else {

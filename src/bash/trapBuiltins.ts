@@ -1,7 +1,7 @@
 import type { Statement } from './ast';
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
-import { parseTrapAction, trapActionSyntaxError } from './parse';
+import { parseTrapAction, parseTrapActionPrefix, trapActionSyntaxError } from './parse';
 import { singleQuote } from './quoting';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
@@ -97,7 +97,7 @@ export const trapBuiltin: Builtin = (shell, args) => {
       const statements = parseTrapAction(first, shell.currentRow);
       shell.traps.set(condition, {
         text: first,
-        statements: statements ?? [],
+        statements: statements ?? parseTrapActionPrefix(first, shell.currentRow),
         ...(statements === undefined ? { syntaxError: (line: number) => trapActionSyntaxError(first, line) } : {}),
         row: shell.currentRow,
       });

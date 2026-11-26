@@ -61,8 +61,8 @@ export class ProgramIO {
   }
 
   /** A reader of what a command wrote into a pipe, which `read -t 0` finds ready only while text remains. */
-  pipeReader(text: string): TextReader {
-    return new TextReader(() => text, this.budget, undefined, true);
+  pipeReader(text: string, writtenLate = false): TextReader {
+    return new TextReader(() => text, this.budget, undefined, true, writtenLate);
   }
 
   /** A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far. */
@@ -131,8 +131,17 @@ export class TextReader {
     private readonly budget: ExecutionBudget,
     private readonly refill?: () => boolean,
     /** Whether the text comes through a pipe, which a poll finds ready only while text remains. */
-    readonly throughPipe = false
+    readonly throughPipe = false,
+    /** Whether a poll finds the pipe empty until the text is first read, as its writer has not written yet. */
+    readonly writtenLate = false
   ) {}
+
+  /** Whether a poll of the descriptor finds text ready to read. */
+  get readyToPoll(): boolean {
+    if (!this.throughPipe) return true;
+    if (this.writtenLate && this.position === 0) return false;
+    return !this.isAtEnd;
+  }
 
   get text(): string {
     return this.source();

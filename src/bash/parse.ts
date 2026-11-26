@@ -80,6 +80,26 @@ export function parseTrapAction(text: string, row: number): Statement[] | undefi
 }
 
 /**
+ * The commands of a `trap` action with a syntax error that Bash runs before it reaches the error: those of the lines
+ * before the line of the error that read as complete commands, numbered as `parseTrapAction` numbers them.
+ */
+export function parseTrapActionPrefix(text: string, row: number): Statement[] {
+  const lines = text.split('\n');
+  let errorRow = lines.length;
+  try {
+    parseText(`${text}\n`, new Set());
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    errorRow = error.diagnostics[0]?.row ?? 0;
+  }
+  for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
+    const prefix = parseTrapAction(lines.slice(0, count).join('\n'), row);
+    if (prefix !== undefined) return prefix;
+  }
+  return [];
+}
+
+/**
  * The syntax error of a `trap` action that `parseTrapAction` could not read, as Bash reports it when the action runs:
  * its message, numbered from `firstLine` for the action's first line, and the action's line it names, if any.
  */

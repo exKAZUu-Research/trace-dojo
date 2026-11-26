@@ -84,7 +84,7 @@ function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: Te
   if (Number(timeout) !== 0) return undefined;
   // Bash polls the descriptor: a file, `/dev/null`, or a here-document is ready at its end too, while a pipe whose
   // text is all read waits for its writer, which has mostly not ended yet when Bash polls it.
-  return reader.throughPipe && reader.isAtEnd ? 1 : 0;
+  return reader.readyToPoll ? 0 : 1;
 }
 
 /**
