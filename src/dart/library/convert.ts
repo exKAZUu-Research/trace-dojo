@@ -1020,9 +1020,9 @@ final class Utf8Encoder extends Converter<String, List<int>> {
 }
 
 /**
- * Encodes a stream of strings as the SDK's _Utf8EncoderSink (lib/convert/utf.dart) does: a chunk that ends inside a
- * surrogate pair keeps its lead surrogate for the next chunk, an empty chunk adds nothing, and a lead surrogate left
- * at the end is written as U+FFFD. The encoding itself is the native one the converter uses.
+ * Encodes a stream of strings as the SDK's _Utf8EncoderSink (lib/convert/utf.dart) does: each chunk in buffers of
+ * 1024 bytes, a chunk that ends inside a surrogate pair keeping its lead surrogate for the next chunk, an empty chunk
+ * adding nothing, and a lead surrogate left at the end written as U+FFFD. The encoding is native.
  */
 class _Utf8EncoderSink implements EventSink<String> {
   final EventSink<List<int>> _sink;
@@ -1031,15 +1031,11 @@ class _Utf8EncoderSink implements EventSink<String> {
 
   void add(String str) {
     if (str.isEmpty) return;
-    var text = _carry == 0 ? str : String.fromCharCode(_carry) + str;
-    _carry = 0;
-    final last = text.codeUnitAt(text.length - 1);
-    if (last & 0xFC00 == 0xD800) {
-      _carry = last;
-      text = text.substring(0, text.length - 1);
-    }
-    _sink.add(_utf8Encode(text));
+    final chunks = _utf8EncodeChunks(str, _carry);
+    _carry = chunks[0] as int;
+    for (var i = 1; i < chunks.length; i++) _sink.add(chunks[i] as List<int>);
   }
+  external static List<Object> _utf8EncodeChunks(String str, int carry);
 
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);

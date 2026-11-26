@@ -490,6 +490,90 @@ define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
   runtime.allocate(size + 1);
   return new DartPackedList(runtime.links.classNamed('_Uint8List'), new TextEncoder().encode(text));
 });
+/* oxlint-disable unicorn/prefer-code-point -- The SDK's encoder reads UTF-16 code units. */
+const isLeadSurrogate = (unit: number): boolean => (unit & 0xfc_00) === 0xd8_00;
+const isTailSurrogate = (unit: number): boolean => (unit & 0xfc_00) === 0xdc_00;
+
+/** The SDK's _Utf8Encoder buffer of a stream's chunk, filled as _fillBuffer fills it. */
+class Utf8ChunkBuffer {
+  bytes: number[] = [];
+
+  constructor(private readonly size: number) {}
+
+  /** _writeSurrogate: a pair writes its four bytes; a lead alone writes U+FFFD. */
+  surrogate(lead: number, next: number): boolean {
+    if (!isTailSurrogate(next)) {
+      this.bytes.push(0xef, 0xbf, 0xbd);
+      return false;
+    }
+    const rune = 0x1_00_00 + ((lead & 0x3_ff) << 10) + (next & 0x3_ff);
+    this.bytes.push(
+      0xf0 | (rune >> 18),
+      0x80 | ((rune >> 12) & 0x3f),
+      0x80 | ((rune >> 6) & 0x3f),
+      0x80 | (rune & 0x3f)
+    );
+    return true;
+  }
+
+  /** _fillBuffer: writes characters while the buffer has room for each, giving where it stopped. */
+  fill(text: string, start: number, stringEnd: number): number {
+    const end = start !== stringEnd && isLeadSurrogate(text.charCodeAt(stringEnd - 1)) ? stringEnd - 1 : stringEnd;
+    let index = start;
+    while (index < end) {
+      const next = this.write(text, index);
+      if (next === undefined) break;
+      index = next;
+    }
+    return index;
+  }
+
+  /**
+   * Writes the character at `index` when it fits, as the SDK checks each kind's room (a lead surrogate needs four
+   * bytes whether or not a pair follows), giving the next index.
+   */
+  private write(text: string, index: number): number | undefined {
+    const unit = text.charCodeAt(index);
+    const need = unit <= 0x7f ? 1 : isLeadSurrogate(unit) ? 4 : isTailSurrogate(unit) || unit > 0x7_ff ? 3 : 2;
+    if (this.bytes.length + need > this.size) return undefined;
+    if (need === 4) return this.surrogate(unit, text.charCodeAt(index + 1)) ? index + 2 : index + 1;
+    if (isTailSurrogate(unit)) this.bytes.push(0xef, 0xbf, 0xbd);
+    else if (need === 1) this.bytes.push(unit);
+    else if (need === 2) this.bytes.push(0xc0 | (unit >> 6), 0x80 | (unit & 0x3f));
+    else this.bytes.push(0xe0 | (unit >> 12), 0x80 | ((unit >> 6) & 0x3f), 0x80 | (unit & 0x3f));
+    return index + 1;
+  }
+}
+
+/**
+ * A stream chunk's UTF-8 bytes as the SDK's _Utf8EncoderSink.addSlice gives them: in buffers of 1024 bytes, each
+ * filled as _Utf8Encoder._fillBuffer fills it (a character that does not fit the rest of a buffer starts the next),
+ * with a lead surrogate a chunk ends in carried to the next chunk. Returns the new carry followed by the chunks.
+ */
+define('_Utf8EncoderSink._utf8EncodeChunks', (runtime, _receiver, [input, carryValue]) => {
+  const text = stringArg(runtime, input, 'input');
+  runtime.spend(Math.ceil(text.length / 64));
+  const chunks: Value[] = [];
+  let carry = Number(carryValue as bigint);
+  let start = 0;
+  if (text.length === 0) return newList(runtime, DYNAMIC, [BigInt(carry)]);
+  let buffer = new Utf8ChunkBuffer(1024);
+  if (carry !== 0 && buffer.surrogate(carry, text.charCodeAt(0))) start++;
+  carry = 0;
+  do {
+    start = buffer.fill(text, start, text.length);
+    if (start === text.length - 1 && isLeadSurrogate(text.charCodeAt(start))) {
+      carry = text.charCodeAt(start);
+      start++;
+    }
+    runtime.allocate(buffer.bytes.length + 1);
+    chunks.push(new DartPackedList(runtime.links.classNamed('_Uint8List'), Uint8Array.from(buffer.bytes)));
+    buffer = new Utf8ChunkBuffer(1024);
+  } while (start < text.length);
+  return newList(runtime, DYNAMIC, [BigInt(carry), ...chunks]);
+});
+/* oxlint-enable unicorn/prefer-code-point */
+
 /* oxlint-disable unicorn/prefer-code-point -- The SDK's tables are strings of byte-sized code units. */
 const UTF8_TYPES =
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'.repeat(4) +

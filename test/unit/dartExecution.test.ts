@@ -9691,6 +9691,21 @@ Future<void> main() async {
   });
 });
 
+test("a utf8.encoder stream gives each chunk's bytes in buffers of 1024, as the SDK fills them", () => {
+  const source = `import 'dart:convert';
+Future<void> t(List<String> chunks) async =>
+    print((await Stream.fromIterable(chunks).transform(utf8.encoder).toList()).map((c) => c.length).toList());
+Future<void> main() async {
+  await t(['a' * 3000]);
+  await t(['a' * 1022 + 'あ']);
+  await t(['ab\\uD83D', '\\uDE00cd']);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1024, 1024, 952]\n[1022, 3]\n[2, 6]\n',
+  });
+});
+
 test('json.fuse(utf8).encoder is a JsonUtf8Encoder, which streams its bytes in buffers', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
