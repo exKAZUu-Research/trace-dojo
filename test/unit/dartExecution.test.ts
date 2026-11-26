@@ -9450,6 +9450,19 @@ Future<void> main() async {
   });
 });
 
+test('a null-aware selector in a cascade section skips the section, awaits included', () => {
+  const source = `class Node { int? v; Node? child; void add(int a) { print('add $a'); } }
+Future<int> g(String s, [int r = 1]) async { print('g $s'); return r; }
+Future<void> main() async {
+  var n = Node();
+  n..child?.add(await g('a'))..child?.v = await g('b');
+  n.child = Node();
+  n..child?.add(await g('c', 5))..child?.v = await g('d', 6);
+  print(n.child?.v);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'g c\nadd 5\ng d\n6\n' });
+});
+
 test('a null-aware map key that is null skips its value, awaits included', () => {
   const source = `int? sn(String tag) { print('sn $tag'); return null; }
 Future<int> f(String tag, int v) async { print('f $tag'); return v; }

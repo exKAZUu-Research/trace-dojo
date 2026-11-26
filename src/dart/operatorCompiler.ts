@@ -462,7 +462,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         (frame) => !isShorted(frame),
         section,
         () => {
-          const compiled = this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result;
+          const compiled = this.compileNullChain(() => {
+            // The section's null-aware selectors guard what follows them in it, as a chain's do.
+            if (this.staging) Object.assign(this.staging, { shortingTests: this.shortingProbe() });
+            return this.compileCascadeSection(receiver, section);
+          }).result;
           return awaits ? this.stagePart(compiled) : compiled;
         }
       )

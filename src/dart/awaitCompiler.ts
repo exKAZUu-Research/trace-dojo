@@ -82,7 +82,7 @@ export abstract class AwaitCompiler extends CompilerBase {
    * steps, which the expression runs right before the part's code.
    */
   protected compileWithSteps<T>(part: unknown, compile: () => T): { result: T; steps: Part[] } {
-    const staging = newStaging(suspensionStarts(part, false));
+    const staging = Object.assign(newStaging(suspensionStarts(part, false)), { shortingTests: this.shortingProbe() });
     const saved = this.staging;
     this.staging = staging;
     try {
@@ -102,7 +102,9 @@ export abstract class AwaitCompiler extends CompilerBase {
     const staging = this.staging;
     if (!staging) return compile();
     // A part without awaits is staged on its own too, so that an await after it lifts none of it out of the guard.
-    const inner = newStaging(this.awaitsHere(part) ? suspensionStarts(part, false) : []);
+    const inner = Object.assign(newStaging(this.awaitsHere(part) ? suspensionStarts(part, false) : []), {
+      shortingTests: this.shortingProbe(),
+    });
     this.staging = inner;
     try {
       return compile();
