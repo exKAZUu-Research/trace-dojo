@@ -458,13 +458,14 @@ defineTurtle('remove', (runtime, state) => {
 
 export { asciiNames, formatDouble, identityOf };
 
-/** Each Expando's entries; the weak table drops an entry once its key object is no longer reachable, as the VM's does. */
 /**
  * Each Expando's values, by key. A key is found as identical() finds it: objects by identity, and Type values, which
  * each evaluation of a type literal or runtimeType makes anew, by the type they stand for.
  */
 interface ExpandoEntries {
+  /** Held weakly: an entry drops once its key object is no longer reachable, as the VM's does. */
   objects: WeakMap<object, Value>;
+  /** Held strongly, as the types a program names stay reachable for the whole run. */
   types: { type: DartTypeValue; value: Value }[];
 }
 
