@@ -912,7 +912,16 @@ class Renamer {
       deriving,
       span: decl.span,
     });
-    if (decl.kindSig) this.dataKindSigs.push({ entity, kind: this.renameKind(decl.kindSig), span: decl.span });
+    if (decl.kindSig) {
+      // `data T a :: k` gives the kind after T's written parameters: T's own kind runs through theirs first.
+      let kind = this.renameKind(decl.kindSig);
+      for (const [index, param] of decl.params.entries().toArray().toReversed()) {
+        const written = decl.paramKinds?.[index];
+        const from: RType = written ? this.renameKind(written) : { k: 'var', name: ` k${param.name}`, span: decl.span };
+        kind = { k: 'fun', from, to: kind, span: decl.span };
+      }
+      this.dataKindSigs.push({ entity, kind, span: decl.span });
+    }
   }
 
   /**
@@ -3301,13 +3310,13 @@ class Renamer {
     return this.lookupValue(op, true).fixity ?? DEFAULT_FIXITY;
   }
 
-  /** The module GHC defines a name in, which Template Haskell shows it with. */
   /** A global name of a quote, with the package of its module: the program's own, `main`, or the library's. */
   private globalRef(space: 'v' | 'd' | 'tc', module: string, name: string): QRef {
     const own = module === this.module.name || module === this.options.spliceModule?.module;
     return { k: 'global', space, package: own ? 'main' : libraryPackage(module), module, name };
   }
 
+  /** The module GHC defines a name in, which Template Haskell shows it with. */
   private thModule(kind: 'v' | 't' | 'con', of: ValueEntity | ConInfo | TypeEntity | ClassEntity): string {
     if ('tag' in of && 'arity' in of && 'fieldTypes' in of) {
       const con = of as ConInfo;
