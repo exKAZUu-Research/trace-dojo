@@ -82,9 +82,12 @@ export interface Parameter extends Position, Attributed {
   name: string;
   type: TypeNode | undefined;
   modifier: 'ref' | 'out' | 'in' | 'params' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: true;
   /** Whether the parameter is an extension method's receiver (`this int x`). */
   isThis: boolean;
   defaultValue: Expression | undefined;
+  isScoped?: true;
 }
 
 export interface Argument extends Position {
@@ -128,6 +131,11 @@ export interface LambdaParameter extends Position {
   name: string;
   type: TypeNode | undefined;
   modifier: 'ref' | 'out' | 'in' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: true;
+  isParams?: true;
+  isScoped?: true;
+  defaultValue?: Expression;
 }
 
 export interface SwitchArm extends Position {
@@ -157,7 +165,15 @@ export type QueryClause =
 export type Expression =
   | ({ kind: 'literal'; value: LiteralValue } & Position)
   | ({ kind: 'interpolated'; parts: InterpolationPart[] } & Position)
-  | ({ kind: 'name'; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  | ({
+      kind: 'name';
+      name: string;
+      typeArgs: TypeNode[] | undefined;
+      /** Whether the name is the `field` keyword of a property's accessor (C# 14), which names its backing field. */
+      isFieldKeyword?: true;
+      /** For an unbound generic name in `nameof(List<>)` (C# 14), how many type arguments it leaves out. */
+      unboundArity?: number;
+    } & Position)
   | ({ kind: 'predefinedTypeName'; name: string } & Position)
   | ({ kind: 'aliasQualified'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'this' } & Position)
@@ -168,6 +184,10 @@ export type Expression =
       name: string;
       typeArgs: TypeNode[] | undefined;
       nameRow: number;
+      /** Whether the access is in an unsafe context, where it may name a fixed-size buffer. */
+      isUnsafe?: true;
+      /** For an unbound generic name in `nameof(A.List<>)` (C# 14), how many type arguments it leaves out. */
+      unboundArity?: number;
     } & Position)
   | ({ kind: 'conditionalAccess'; target: Expression; access: Expression } & Position)
   /** The receiver of `?.`, which a conditional access's `access` starts from. */
@@ -238,6 +258,8 @@ export type Expression =
       count: Expression | undefined;
       initializer: Expression[] | undefined;
       isUnsafe: boolean;
+      /** `(stackalloc T[n])`, which a pointer local does not take as its own stackalloc initializer. */
+      isParenthesized?: true;
     } & Position)
   | ({ kind: 'await'; operand: Expression } & Position)
   /** `^n`, an index from the end. */
@@ -293,6 +315,8 @@ export interface Block extends Position {
 export interface VariableDeclarator extends Position {
   name: string;
   initializer: Expression | ArrayInitializer | undefined;
+  /** The length of a fixed-size buffer, `fixed int Buf[4]`. */
+  fixedSize?: Expression;
 }
 
 export interface SwitchSection extends Position {
@@ -324,6 +348,10 @@ export type Statement =
       using?: 'using' | 'await using';
       /** The variable of an `await foreach (ref T x in e)` loop, which `Current` initializes by reference. */
       isRefIteration?: true;
+      /** A `scoped` local (C# 11), whose reference or ref struct value may not leave the method. */
+      isScoped?: true;
+      /** Modifiers other than `const` (`static`, `readonly`, ...), which a local may not have (CS0106). */
+      invalidModifiers?: string[];
     } & Position)
   | ({ kind: 'deconstruction'; designation: Designation; value: Expression } & Position)
   | ({ kind: 'unsafe'; body: Block } & Position)
@@ -336,6 +364,7 @@ export type Statement =
       kind: 'for';
       initializer:
         | { kind: 'declaration'; type: TypeNode; declarators: VariableDeclarator[] }
+        | { kind: 'deconstruction'; statement: Extract<Statement, { kind: 'deconstruction' }> }
         | { kind: 'expressions'; expressions: Expression[] }
         | undefined;
       condition: Expression | undefined;
@@ -387,6 +416,8 @@ export type Constraint =
   | ({ kind: 'unmanaged' } & Position)
   | ({ kind: 'default' } & Position)
   | ({ kind: 'new' } & Position)
+  /** `allows ref struct` (C# 13), an anti-constraint that lets a ref struct be the type argument. */
+  | ({ kind: 'allowsRefStruct' } & Position)
   | ({ kind: 'type'; type: TypeNode } & Position);
 
 export interface ConstraintClause extends Position {
@@ -460,12 +491,16 @@ export interface FieldDeclaration extends Position, Attributed {
   modifiers: Modifiers;
   type: TypeNode;
   declarators: VariableDeclarator[];
+  /** For fixed-size buffers, whether they are declared in an unsafe context. */
+  fixedBuffer?: { isUnsafe: boolean };
 }
 
 export interface Accessor extends Position, Attributed {
   kind: 'get' | 'set' | 'init';
   modifiers: Modifiers;
   body: Block | Expression | undefined;
+  /** Whether a property's accessor uses the `field` keyword, which gives the property a backing field (C# 14). */
+  usesField?: true;
 }
 
 export interface PropertyDeclaration extends Position, Attributed {

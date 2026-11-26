@@ -92,6 +92,18 @@ namespace System {
   public interface IComparable<in T> { int CompareTo(T? other); }
   public interface IEquatable<T> { bool Equals(T? other); }
   public interface IFormattable { string ToString(string? format, IFormatProvider? formatProvider); }
+  public abstract class FormattableString : IFormattable {
+    protected FormattableString();
+    public abstract string Format { get; }
+    public abstract int ArgumentCount { get; }
+    public abstract object?[] GetArguments();
+    public abstract object? GetArgument(int index);
+    public abstract string ToString(IFormatProvider? formatProvider);
+    string IFormattable.ToString(string? ignored, IFormatProvider? formatProvider);
+    public override string ToString();
+    public static string Invariant(FormattableString formattable);
+    public static string CurrentCulture(FormattableString formattable);
+  }
   public interface IFormatProvider { object? GetFormat(Type? formatType); }
   public interface IDisposable { void Dispose(); }
   public interface ICloneable { object Clone(); }
@@ -1606,6 +1618,24 @@ namespace System.Runtime.CompilerServices {
   public sealed class OverloadResolutionPriorityAttribute : Attribute {
     public OverloadResolutionPriorityAttribute(int priority);
     public int Priority { get; }
+  }
+  public static class FormattableStringFactory {
+    public static FormattableString Create(string format, params object?[] arguments);
+    private sealed class ConcreteFormattableString : FormattableString {
+      public override string Format { get; }
+      public override int ArgumentCount { get; }
+      public override object?[] GetArguments();
+      public override object? GetArgument(int index);
+      public override string ToString(IFormatProvider? formatProvider);
+    }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+  public sealed class InterpolatedStringHandlerAttribute : Attribute { public InterpolatedStringHandlerAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+  public sealed class InterpolatedStringHandlerArgumentAttribute : Attribute {
+    public InterpolatedStringHandlerArgumentAttribute(string argument);
+    public InterpolatedStringHandlerArgumentAttribute(params string[] arguments);
+    public string[] Arguments { get; }
   }
   /** The type of a pointer \`T*\`, which no program names; \`void*\` points to \`__Void\`. */
   public sealed class __Pointer<T> { }

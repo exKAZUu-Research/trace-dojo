@@ -35,6 +35,7 @@ import {
   field,
   fieldChildren,
   hasToken,
+  inUnsafeContext,
   namedChildren,
   positionOf,
   requiredField,
@@ -151,12 +152,15 @@ const RESERVED_KEYWORDS = new Set([
 
 /**
  * Rejects a reserved keyword where the grammar reads it as an identifier, as in `int class = 1;` or `class => 1`,
- * where Roslyn expects an identifier and C# needs `@class`.
+ * where Roslyn expects an identifier and C# needs `@class`, and the undocumented `__arglist` the grammar reads so.
  */
 function rejectKeywordIdentifiers(root: Node): void {
   for (const node of root.descendantsOfType('identifier')) {
-    // The grammar reads the `default` constraint as a type named `default`.
+    // `__arglist` passes C-style variable arguments, which only native interop takes.
+    if (node?.text === '__arglist') unsupported(node, '`__arglist`');
+    // The grammar reads the `default` constraint as a type named `default`, and the type of `scoped int x` as a name.
     if (node?.text === 'default' && node.parent?.type === 'type_parameter_constraint') continue;
+    if (node?.parent?.type === 'scoped_type') continue;
     if (node && RESERVED_KEYWORDS.has(node.text))
       throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
   }
@@ -416,6 +420,7 @@ export class Converter extends ExpressionConverter {
       }
       if (namedChildren(constraint).some((child) => child.type === 'constructor_constraint'))
         return { kind: 'new', ...position };
+      if (hasToken(constraint, 'allows')) return { kind: 'allowsRefStruct', ...position };
       if (hasToken(constraint, 'notnull')) return { kind: 'notnull', ...position };
       if (hasToken(constraint, 'unmanaged')) return { kind: 'unmanaged', ...position };
       if (hasToken(constraint, 'class')) return { kind: 'class', nullable: hasToken(constraint, '?'), ...position };
@@ -498,10 +503,20 @@ export class Converter extends ExpressionConverter {
       }
       case 'field_declaration': {
         const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
-        const { type, declarators } = this.convertVariableDeclaration(declarationNode);
-        const modifiers = this.convertModifiers(node);
+        const isFixed = namedChildren(node).some((child) => child.type === 'modifier' && child.text === 'fixed');
+        const { type, declarators } = this.convertVariableDeclaration(declarationNode, isFixed);
+        const modifiers = this.convertModifiers(node, isFixed);
         if (modifiers.set.has('const')) rejectConstantsWithoutValues(declarators);
-        return [{ kind: 'field', modifiers, type, declarators, ...positionOf(node) }];
+        return [
+          {
+            kind: 'field',
+            modifiers,
+            type,
+            declarators,
+            ...(isFixed ? { fixedBuffer: { isUnsafe: inUnsafeContext(node) } } : {}),
+            ...positionOf(node),
+          },
+        ];
       }
       case 'event_field_declaration': {
         const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
@@ -622,12 +637,12 @@ export class Converter extends ExpressionConverter {
     const accessorsNode = field(node, 'accessors');
     const isExpressionBodied = valueNode?.type === 'arrow_expression_clause';
     const accessors: Accessor[] = accessorsNode
-      ? this.convertAccessors(accessorsNode)
+      ? this.convertAccessors(accessorsNode, true)
       : [
           {
             kind: 'get',
             modifiers: emptyModifiers(),
-            body: this.convertBody(valueNode),
+            ...this.convertPropertyBody(valueNode),
             ...positionOf(valueNode ?? node),
           },
         ];
@@ -649,7 +664,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  private convertAccessors(node: Node): Accessor[] {
+  private convertAccessors(node: Node, isProperty = false): Accessor[] {
     return namedChildren(node).map((accessor) => {
       const kind = requiredField(accessor, 'name').text;
       if (!['get', 'set', 'init'].includes(kind)) {
@@ -660,11 +675,25 @@ export class Converter extends ExpressionConverter {
       return {
         kind: kind as Accessor['kind'],
         modifiers: this.convertModifiers(accessor),
-        body: this.convertBody(field(accessor, 'body')),
+        ...(isProperty
+          ? this.convertPropertyBody(field(accessor, 'body'))
+          : { body: this.convertBody(field(accessor, 'body')) }),
         ...this.attributed(accessor),
         ...positionOf(accessor),
       };
     });
+  }
+
+  /** Converts a property accessor's body, in which `field` is a keyword (C# 14), noting whether the body uses it. */
+  private convertPropertyBody(node: Node | undefined): Pick<Accessor, 'body' | 'usesField'> {
+    const saved = this.fieldKeywordUses;
+    this.fieldKeywordUses = 0;
+    try {
+      const body = this.convertBody(node);
+      return this.fieldKeywordUses > 0 ? { body, usesField: true } : { body };
+    } finally {
+      this.fieldKeywordUses = saved;
+    }
   }
 
   private convertBody(node: Node | undefined): Block | Expression | undefined {
@@ -710,11 +739,11 @@ export class Converter extends ExpressionConverter {
       .map((child) => child.text);
     let modifier: Parameter['modifier'];
     for (const text of modifiers) {
-      // `scoped` limits how far a reference may escape, which this grader does not check.
       if (['ref', 'out', 'in', 'params'].includes(text)) modifier = text as Parameter['modifier'];
     }
     // A `ref readonly` parameter is passed by reference and read only, as an `in` parameter is.
-    if (modifiers.includes('ref') && modifiers.includes('readonly')) modifier = 'in';
+    const isRefReadonly = modifiers.includes('ref') && modifiers.includes('readonly');
+    if (isRefReadonly) modifier = 'in';
     const typeNode = field(node, 'type');
     // The grammar lets a parameter omit its type for lambdas, whose parameters convertLambda takes instead; Roslyn
     // reads the name of `int Add(int a, b)` as a type still waiting for its name.
@@ -730,8 +759,10 @@ export class Converter extends ExpressionConverter {
       name: requiredField(node, 'name').text,
       type: this.convertType(typeNode),
       modifier,
+      ...(isRefReadonly ? { isRefReadonly: true as const } : {}),
       isThis: modifiers.includes('this'),
       defaultValue: defaultNode ? this.convertExpression(defaultNode) : undefined,
+      ...(modifiers.includes('scoped') || typeNode.type === 'scoped_type' ? { isScoped: true as const } : {}),
       ...this.attributed(node),
       ...positionOf(node),
     };
@@ -889,12 +920,14 @@ export class Converter extends ExpressionConverter {
     });
   }
 
-  private convertModifiers(node: Node): Modifiers {
+  /** The modifiers of a declaration, apart from the `fixed` of a fixed-size buffer, which its field keeps instead. */
+  private convertModifiers(node: Node, isFixedBuffer = false): Modifiers {
     const set = new Set<Modifier>();
     const positions = new Map<Modifier, ReturnType<typeof positionOf>>();
     for (const child of namedChildren(node)) {
       if (child.type !== 'modifier') continue;
       const text = child.text;
+      if (isFixedBuffer && text === 'fixed') continue;
       const what = UNSUPPORTED_MODIFIERS[text];
       if (what && !(this.isLibrary && text === 'extern')) unsupported(child, what);
       if (!MODIFIERS.has(text) && text !== 'extern') unsupported(child, `\`${text}\``);
@@ -1035,7 +1068,8 @@ export class Converter extends ExpressionConverter {
         return { kind: 'goto', target: { kind: 'label', name: parts[0].text }, ...position };
       }
       case 'labeled_statement': {
-        return { kind: 'labeled', label: parts[0].text, statement: this.convertEmbedded(parts[1]), ...position };
+        // A label may stand before a declaration in a block, whose scope the declaration's variables belong to.
+        return { kind: 'labeled', label: parts[0].text, statement: this.convertStatement(parts[1]), ...position };
       }
       case 'using_statement': {
         return this.convertUsingStatement(node);
@@ -1073,7 +1107,7 @@ export class Converter extends ExpressionConverter {
 
   /** Converts the statement that an `if`, a loop, or `else` contains, which cannot be a declaration. */
   private convertEmbedded(node: Node): Statement {
-    if (node.type === 'local_declaration_statement') {
+    if (node.type === 'local_declaration_statement' || node.type === 'labeled_statement') {
       throw new CompileError([
         {
           row: node.startPosition.row,
@@ -1089,24 +1123,10 @@ export class Converter extends ExpressionConverter {
       .filter((child) => child.type === 'modifier')
       .map((child) => child.text);
     const using = hasToken(node, 'using') ? (hasToken(node, 'await') ? 'await using' : 'using') : undefined;
-    for (const text of modifiers) if (text !== 'const') unsupported(node, `\`${text}\` のローカル変数`);
+    const invalidModifiers = modifiers.filter((text) => text !== 'const');
     const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
-    const deconstruction = namedChildren(declarationNode).find(
-      (child) =>
-        child.type === 'variable_declarator' && namedChildren(child).some((part) => part.type === 'tuple_pattern')
-    );
-    if (deconstruction) {
-      const parts = namedChildren(deconstruction);
-      const pattern = parts.find((part) => part.type === 'tuple_pattern') as Node;
-      const value = parts.find((part) => !sameNode(part, pattern)) as Node;
-      const designation = this.convertDesignation(pattern);
-      return {
-        kind: 'deconstruction',
-        designation,
-        value: this.convertExpression(value),
-        ...positionOf(node),
-      };
-    }
+    const deconstruction = this.convertDeconstruction(declarationNode, node);
+    if (deconstruction) return deconstruction;
     const { type, declarators } = this.convertVariableDeclaration(declarationNode);
     if (modifiers.includes('const')) rejectConstantsWithoutValues(declarators);
     return {
@@ -1114,12 +1134,38 @@ export class Converter extends ExpressionConverter {
       isConst: modifiers.includes('const'),
       type,
       declarators,
+      ...(requiredField(declarationNode, 'type').type === 'scoped_type' ? { isScoped: true as const } : {}),
       ...(using ? { using } : {}),
+      ...(invalidModifiers.length > 0 ? { invalidModifiers } : {}),
       ...positionOf(node),
     };
   }
 
-  protected convertVariableDeclaration(node: Node): { type: TypeNode; declarators: VariableDeclarator[] } {
+  /** `var (a, b) = value`, which the grammar parses as a declaration whose declarator is a tuple pattern. */
+  private convertDeconstruction(
+    declarationNode: Node,
+    statementNode: Node
+  ): Extract<Statement, { kind: 'deconstruction' }> | undefined {
+    const deconstruction = namedChildren(declarationNode).find(
+      (child) =>
+        child.type === 'variable_declarator' && namedChildren(child).some((part) => part.type === 'tuple_pattern')
+    );
+    if (!deconstruction) return undefined;
+    const parts = namedChildren(deconstruction);
+    const pattern = parts.find((part) => part.type === 'tuple_pattern') as Node;
+    const value = parts.find((part) => !sameNode(part, pattern)) as Node;
+    return {
+      kind: 'deconstruction',
+      designation: this.convertDesignation(pattern),
+      value: this.convertExpression(value),
+      ...positionOf(statementNode),
+    };
+  }
+
+  protected convertVariableDeclaration(
+    node: Node,
+    isFixedBuffer = false
+  ): { type: TypeNode; declarators: VariableDeclarator[] } {
     const type = this.convertType(requiredField(node, 'type'));
     const declarators = namedChildren(node)
       .filter((child) => child.type === 'variable_declarator')
@@ -1129,6 +1175,7 @@ export class Converter extends ExpressionConverter {
           throw new CompileError([{ row: declarator.startPosition.row, message: 'CS1001: 識別子がありません' }]);
         const parts = namedChildren(declarator).filter((part) => !sameNode(part, nameNode));
         const bracketed = parts.find((part) => part.type === 'bracketed_argument_list');
+        if (isFixedBuffer) return this.convertFixedBuffer(nameNode, bracketed);
         if (bracketed) {
           throw new CompileError([
             {
@@ -1150,11 +1197,36 @@ export class Converter extends ExpressionConverter {
     return { type, declarators };
   }
 
+  /** A fixed-size buffer's declarator, `Buf[4]`, which must give one length. */
+  private convertFixedBuffer(nameNode: Node, bracketed: Node | undefined): VariableDeclarator {
+    const row = nameNode.startPosition.row;
+    if (!bracketed)
+      throw new CompileError([
+        { row, message: "CS1003: 構文エラーです。'[' が必要です" },
+        { row, message: "CS1003: 構文エラーです。']' が必要です" },
+        { row, message: 'CS0443: 構文エラーです。値が必要です' },
+      ]);
+    const sizes = namedChildren(bracketed);
+    if (sizes.length !== 1)
+      throw new CompileError([
+        { row: bracketed.startPosition.row, message: 'CS7092: 固定バッファーには 1 次元のみを指定できます。' },
+      ]);
+    return {
+      name: nameNode.text,
+      initializer: undefined,
+      fixedSize: this.convertExpression(namedChildren(sizes[0])[0]),
+      ...positionOf(nameNode),
+    };
+  }
+
   private convertFor(node: Node): Statement {
     const initializerNodes = fieldChildren(node, 'initializer').filter((child) => child.isNamed);
     let initializer: Extract<Statement, { kind: 'for' }>['initializer'];
     if (initializerNodes.length === 1 && initializerNodes[0].type === 'variable_declaration') {
-      initializer = { kind: 'declaration', ...this.convertVariableDeclaration(initializerNodes[0]) };
+      const deconstruction = this.convertDeconstruction(initializerNodes[0], initializerNodes[0]);
+      initializer = deconstruction
+        ? { kind: 'deconstruction', statement: deconstruction }
+        : { kind: 'declaration', ...this.convertVariableDeclaration(initializerNodes[0]) };
     } else if (initializerNodes.length > 0) {
       initializer = {
         kind: 'expressions',

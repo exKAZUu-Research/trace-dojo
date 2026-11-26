@@ -1,3 +1,4 @@
+import type { Position } from './ast';
 import type { NestedTypeFound, TypeContext } from './binderBase';
 import { DeclarationBinder } from './declarations';
 import {
@@ -34,6 +35,30 @@ export type MemberLookup =
 
 /** Finds members by name in types and their bases, honoring hiding, overriding, and accessibility. */
 export class LookupBinder extends DeclarationBinder {
+  /**
+   * Reports a static abstract or virtual member of an interface named through the interface (CS8926), which only a
+   * type parameter's type argument implements; returns whether it did.
+   */
+  protected reportConstrainedAccess(
+    found:
+      | { kind: 'methods'; candidates: { method: MethodSymbol }[] }
+      | { kind: 'field'; field: FieldSymbol }
+      | { kind: 'property'; property: PropertySymbol },
+    position: Position
+  ): boolean {
+    const constrainedOnly =
+      found.kind === 'methods'
+        ? found.candidates.every((candidate) => isConstrained(candidate.method))
+        : isConstrained(found.kind === 'field' ? found.field : found.property);
+    if (constrainedOnly)
+      this.error(
+        position,
+        'CS8926',
+        '静的な仮想または抽象インターフェイス メンバーには、型パラメーターでのみアクセスできます。'
+      );
+    return constrainedOnly;
+  }
+
   /** The constructed types to search for a type's members: the type and its bases, or an interface's bases. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected searchChain(type: Type): NamedType[] {
@@ -344,4 +369,10 @@ function extendsType(method: MethodSymbol, extended: Type | undefined, type: Typ
   if (!extended) return false;
   if (method.typeParameters.length === 0) return sameType(extended, type);
   return extended.kind === 'named' && type.kind === 'named' && extended.symbol === type.symbol;
+}
+
+/** Whether a member is an interface's static abstract or virtual member, which a type parameter's argument implements. */
+export function isConstrained(member: MethodSymbol | PropertySymbol | FieldSymbol): boolean {
+  if (member instanceof FieldSymbol) return false;
+  return member.isStatic && member.owner.kind === 'interface' && (member.isAbstract || member.isVirtual);
 }

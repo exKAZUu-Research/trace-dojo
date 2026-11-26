@@ -299,12 +299,31 @@ export type BoundExpression =
    * An expression whose type comes from where it is used: a lambda, a method group, `new()`, a collection expression,
    * `default`, or a switch or conditional expression without a natural type. Converting it to a type binds it.
    */
-  | ({ kind: 'unbound'; node: Expression; context: unknown; methodGroup?: unknown } & Base);
+  | ({
+      kind: 'unbound';
+      node: Expression;
+      context: unknown;
+      methodGroup?: unknown;
+      /** The element type of a `stackalloc` that no pointer local takes, whose type is then a `Span` of it. */
+      spanElement?: Type;
+    } & Base);
 
 /** The targets of a deconstruction, which a tuple or a `Deconstruct` method fills one by one. */
 export type BoundDeconstructTarget =
   | { kind: 'single'; target: BoundLValue | undefined; conversion: BoundExpression | undefined }
-  | { kind: 'nested'; elements: BoundDeconstructTarget[]; deconstruct: MethodSymbol | undefined; elementTypes: Type[] };
+  | {
+      kind: 'nested';
+      elements: BoundDeconstructTarget[];
+      deconstruct: BoundDeconstruct | undefined;
+      elementTypes: Type[];
+    };
+
+/** The `Deconstruct` method that a deconstruction calls: an instance method, or an extension method that takes the value. */
+export interface BoundDeconstruct {
+  method: MethodSymbol;
+  /** The type arguments of a generic extension method, inferred from the value. */
+  typeArgs: Type[];
+}
 
 /** An expression that names storage: a variable, a field, an array element, or a property or indexer. */
 export type BoundLValue =
@@ -365,7 +384,7 @@ export type BoundPattern =
       inputType: Type;
       /** The narrowed type that the subpatterns read members of. */
       narrowedType: Type;
-      deconstruct: MethodSymbol | undefined;
+      deconstruct: BoundDeconstruct | undefined;
       /** Whether the positional subpatterns read a tuple's elements. */
       isTuple: boolean;
       /** Whether the positional subpatterns read the elements of an `object` through `ITuple`, if it is a tuple. */
@@ -434,6 +453,8 @@ export type ForeachKind =
   | {
       kind: 'enumerator';
       getEnumerator: MethodSymbol;
+      /** For an extension GetEnumerator (C# 9), which takes the collection, its type arguments. */
+      extensionTypeArgs?: Type[];
       moveNext: MethodSymbol;
       current: PropertySymbol;
       enumeratorType: Type;
@@ -519,6 +540,8 @@ export type BoundStatement =
       body: BoundStatement;
       dispose: MethodSymbol;
       disposable: NamedType;
+      /** The call of a ref struct's `Dispose()`, which disposes it in place of `dispose` without `IDisposable`. */
+      patternDispose?: BoundExpression;
       /** `await using`, which awaits the `ValueTask` of `IAsyncDisposable.DisposeAsync`. */
       isAwait?: true;
     } & StatementBase)

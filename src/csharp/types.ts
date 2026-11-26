@@ -94,6 +94,8 @@ export class TypeParameterSymbol {
   hasValueConstraint = false;
   hasConstructorConstraint = false;
   hasNotNullConstraint = false;
+  /** Whether `allows ref struct` lets a ref struct be the type argument. */
+  allowsRefStruct = false;
   /** The `unmanaged` constraint, which also makes the parameter a value type. */
   hasUnmanagedConstraint = false;
 
@@ -114,6 +116,8 @@ export interface ParameterSymbol {
   name: string;
   type: Type;
   refKind: 'ref' | 'out' | 'in' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: boolean;
   isParams: boolean;
   /** The value an omitted optional argument takes, already converted to the parameter's type. */
   defaultValue?: { value: unknown };
@@ -123,6 +127,12 @@ export interface ParameterSymbol {
   defaultContext?: TypeContext;
   /** What a `[Caller...]` attribute makes an omitted argument receive. */
   callerInfo?: CallerInfo;
+  isScoped?: boolean;
+  /**
+   * The parameters whose arguments an interpolated string handler's constructor also takes, by an
+   * `[InterpolatedStringHandlerArgument]` attribute: their names, or `""` for the receiver.
+   */
+  handlerArguments?: string[];
   /** Whether `[EnumeratorCancellation]` makes an async iterator's parameter receive `GetAsyncEnumerator`'s token. */
   isEnumeratorCancellation?: boolean;
   position?: Position;
@@ -265,6 +275,11 @@ export class FieldSymbol {
   obsoleteError: string | undefined;
   /** For an event with `add` and `remove` accessors, which it uses in place of a delegate field. */
   eventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
+  /**
+   * For a fixed-size buffer (`fixed int Buf[4]`), its elements and the length that members binding sets; the field
+   * holds a struct of the elements, and naming it gives a pointer to the first one.
+   */
+  fixedBuffer: { elementType: Type; length: number; size: Expression } | undefined;
 
   constructor(
     readonly name: string,
@@ -286,6 +301,11 @@ export class PropertySymbol {
   access: Accessibility = 'private';
   /** The backing field of an auto-property. */
   backingField: FieldSymbol | undefined;
+  /**
+   * The backing field of a property whose accessors use the `field` keyword or mix bodies with `get;` or `set;` (C#
+   * 14), which its accessors read and write but which, unlike an auto-property's, no access reaches past them.
+   */
+  keywordField: FieldSymbol | undefined;
   /** For an indexer, its parameters. */
   parameters: ParameterSymbol[] = [];
   declaration: PropertyDeclaration | undefined;
@@ -340,6 +360,8 @@ export class LocalSymbol {
   /** Whether the variable is a parameter, and how it is passed. */
   isParameter = false;
   refKind: 'ref' | 'out' | 'in' | undefined;
+  /** Whether a parameter is `scoped`, so that its reference, or the variables its ref struct refers to, stay in the method. */
+  isScoped = false;
   /** Whether the variable is a ref local (`ref int r = ref x;`), whose slot holds a reference to another variable. */
   isRefLocal = false;
   /** How far the variable that a ref local refers to lives, which bounds where the method may give the local by `ref`. */
@@ -415,6 +437,8 @@ export class TypeSymbol {
   anonymousDisplay: string | undefined;
   /** Whether an enum has `[Flags]`, which prints a combination of members by their names. */
   isFlags = false;
+  /** Whether the type has `[InterpolatedStringHandler]`, which an interpolated string converts to. */
+  isInterpolatedStringHandler = false;
   /** The builder type and method of a `[CollectionBuilder]`, which create the type from a collection expression. */
   collectionBuilder: { builderType: Type; methodName: string } | undefined;
   obsoleteError: string | undefined;
@@ -762,13 +786,18 @@ export function displayTypeSymbol(
   return `${prefix}${symbol.name}${suffix}`;
 }
 
+/** The keyword that a parameter passed by reference is declared with: `ref`, `out`, `in`, or `ref readonly`. */
+export function refKeyword(parameter: Pick<ParameterSymbol, 'refKind' | 'isRefReadonly'>): string | undefined {
+  return parameter.isRefReadonly ? 'ref readonly' : parameter.refKind;
+}
+
 /** The name of a method as Roslyn's diagnostics show it, such as `A.M(int, string)`. */
 export function displayMethod(method: MethodSymbol): string {
   const owner = displayTypeSymbol(method.owner);
   const parameters = method.parameters
     .map(
       (parameter) =>
-        `${parameter.refKind ? `${parameter.refKind} ` : ''}${parameter.isParams ? 'params ' : ''}${displayType(parameter.type)}`
+        `${parameter.refKind ? `${refKeyword(parameter)} ` : ''}${parameter.isParams ? 'params ' : ''}${displayType(parameter.type)}`
     )
     .join(', ');
   const typeParameters =

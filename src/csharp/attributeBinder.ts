@@ -304,6 +304,15 @@ export abstract class AttributeBinder extends StatementBinder {
         if (owner instanceof MethodSymbol) owner.setsRequiredMembers = true;
         return;
       }
+      case 'System.Runtime.CompilerServices.InterpolatedStringHandlerAttribute': {
+        if (owner instanceof TypeSymbol) owner.isInterpolatedStringHandler = true;
+        return;
+      }
+      case 'System.Runtime.CompilerServices.InterpolatedStringHandlerArgumentAttribute': {
+        if (owner && 'refKind' in owner && pending.target === 'parameter')
+          owner.handlerArguments = (Array.isArray(args[0]) ? args[0] : [args[0]]).map(String);
+        return;
+      }
       case 'System.Runtime.CompilerServices.EnumeratorCancellationAttribute':
       case 'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute':
       case 'System.Runtime.CompilerServices.CollectionBuilderAttribute': {

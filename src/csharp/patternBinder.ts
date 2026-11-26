@@ -1,5 +1,5 @@
 import type { Designation, Expression, Pattern, Position, Subpattern } from './ast';
-import type { BoundExpression, BoundPattern, OperandKind } from './bound';
+import type { BoundDeconstruct, BoundExpression, BoundPattern, OperandKind } from './bound';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext } from './convertBinder';
 import { ExpressionBinder } from './expressionBinder';
@@ -10,7 +10,6 @@ import {
   ERROR_TYPE,
   type FieldSymbol,
   LocalSymbol,
-  type MethodSymbol,
   type NamedType,
   nullableUnderlying,
   type PropertySymbol,
@@ -358,7 +357,8 @@ export abstract class PatternBinder extends ExpressionBinder {
       inputType,
       designation.elements.length,
       undefined,
-      designation
+      designation,
+      context
     );
     const positional = designation.elements.map((element, index): BoundPattern => {
       const type = elementTypes[index] ?? ERROR_TYPE;
@@ -387,14 +387,14 @@ export abstract class PatternBinder extends ExpressionBinder {
     if (testType) this.checkPatternType(testType, inputType, pattern);
     const narrowed = testType ?? nullableUnderlying(inputType) ?? inputType;
     let positional: BoundPattern[] = [];
-    let deconstruct: MethodSymbol | undefined;
+    let deconstruct: BoundDeconstruct | undefined;
     let isTuple = false;
     // An `object` has no Deconstruct, so C# matches its positional pattern through ITuple, which tuples implement.
     const isITuple = pattern.positional !== undefined && specialOf(narrowed) === 'object';
     if (isITuple) {
       positional = (pattern.positional ?? []).map((sub) => this.bindPattern(sub.pattern, narrowed, context));
     } else if (pattern.positional) {
-      const result = this.deconstructionOf(narrowed, pattern.positional.length, undefined, pattern);
+      const result = this.deconstructionOf(narrowed, pattern.positional.length, undefined, pattern, context);
       deconstruct = result.deconstruct;
       isTuple = deconstruct === undefined;
       positional = pattern.positional.map((sub, index) =>

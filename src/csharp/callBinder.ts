@@ -1,8 +1,10 @@
 // code-gauge-allow-file fileNcss -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayExtensionBlock, displayExtensionMember, displayMethodIn } from './declarations';
+import { convertHandlerArguments, interpolationTargetOf, type PendingHandlerArgument } from './interpolatedConversions';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
+import { isBetterParamsCollection, type ParamsCollection, paramsCollectionOf } from './paramsCollections';
 import type { LineMap } from './preprocessor';
 import {
   allInterfacesOf,
@@ -13,6 +15,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   isReferenceType,
+  isRefLikeType,
   type MethodSymbol,
   type NamedType,
   nullableUnderlying,
@@ -107,6 +110,17 @@ export abstract class CallBinder extends OperatorBinder {
   protected abstract lambdaParameterTypes(
     expression: Extract<BoundExpression, { kind: 'unbound' }>
   ): Type[] | undefined;
+
+  /**
+   * The params collection of a class or struct, or the `List<T>` of an interface, that the parameterless constructor
+   * creates and an `Add` call for each element fills, whose accessibility the method's declaring type decides.
+   */
+  protected abstract createParamsCollection(
+    collection: Extract<ParamsCollection, { kind: 'constructible' | 'list' }>,
+    elements: BoundExpression[],
+    declaringType: TypeSymbol,
+    row: number
+  ): BoundExpression;
 
   /** Resolves a call among candidates, reporting Roslyn's error when none applies or several tie. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
@@ -218,7 +232,7 @@ export abstract class CallBinder extends OperatorBinder {
   ): Applicable | undefined {
     const { method } = candidate;
     for (const form of [false, true]) {
-      if (form && !method.parameters.at(-1)?.isParams) break;
+      if (form && !this.hasExpandedForm(method)) break;
       const mapping = this.mapArguments(method, args, form);
       if (!mapping) continue;
       let typeArgs: Type[];
@@ -287,8 +301,22 @@ export abstract class CallBinder extends OperatorBinder {
   ): Type {
     const parameter = method.parameters[index];
     const type = substitute(parameter.type, substitution);
-    if (expanded && parameter.isParams && type.kind === 'array') return type.element;
-    return type;
+    return expanded && parameter.isParams ? this.paramsElementType(type) : type;
+  }
+
+  /** The element type that a `params` parameter of the type takes in expanded form, or the type when it takes none. */
+  private paramsElementType(type: Type): Type {
+    return paramsCollectionOf(type, this.objectType)?.element ?? type;
+  }
+
+  /**
+   * Whether a method has an expanded form: its last parameter is `params` of a collection type, or of a type parameter
+   * of an anonymous delegate, which its type argument makes one.
+   */
+  private hasExpandedForm(method: MethodSymbol): boolean {
+    const last = method.parameters.at(-1);
+    if (!last?.isParams) return false;
+    return last.type.kind === 'typeParameter' || paramsCollectionOf(last.type, this.objectType) !== undefined;
   }
 
   private mapArguments(
@@ -296,6 +324,7 @@ export abstract class CallBinder extends OperatorBinder {
     args: ArgumentInfo[],
     expanded: boolean
   ): { parameterOf: number[]; defaultsUsed: number } | undefined {
+    if (expanded && !this.hasExpandedForm(method)) return undefined;
     const parameters = method.parameters;
     const parameterOf: number[] = [];
     const filled = new Set<number>();
@@ -311,7 +340,6 @@ export abstract class CallBinder extends OperatorBinder {
     }
     const defaultsUsed = this.countDefaultsUsed(parameters, filled, expanded);
     if (defaultsUsed === undefined) return undefined;
-    if (expanded && !filled.has(paramsIndex) && args.length < parameters.length - 1) return undefined;
     return { parameterOf, defaultsUsed };
   }
 
@@ -367,6 +395,9 @@ export abstract class CallBinder extends OperatorBinder {
     // A receiver that is no variable still fits a `ref` receiver, which then reports it (CS1510).
     if (arg.isReceiver && refKind === 'ref')
       return sameType(arg.expression.type, type) || arg.expression.type.kind === 'error';
+    // A `ref` argument may stand for an `in` or `ref readonly` parameter (C# 12), which Roslyn only warns of for `in`.
+    if (refKind === 'in' && arg.refKind === 'ref')
+      return sameType(arg.expression.type, type) || arg.expression.type.kind === 'error';
     if (refKind === 'ref' || refKind === 'out') {
       if (arg.refKind !== refKind) return false;
       if (arg.isOutVar) return true;
@@ -395,7 +426,7 @@ export abstract class CallBinder extends OperatorBinder {
       formals: args.map((_arg, index) => {
         const parameter = method.parameters[parameterOf[index]];
         const type = substitute(parameter.type, ownerSubstitution);
-        return expanded && parameter.isParams && type.kind === 'array' ? type.element : type;
+        return expanded && parameter.isParams ? this.paramsElementType(type) : type;
       }),
       pending: new Set(),
     };
@@ -663,12 +694,33 @@ export abstract class CallBinder extends OperatorBinder {
     const bGeneric = b.candidate.method.typeParameters.length > 0;
     if (!aGeneric && bGeneric) return true;
     if (aGeneric && !bGeneric) return false;
-    if (!a.isExpanded && b.isExpanded) return true;
-    if (a.isExpanded && !b.isExpanded) return false;
+    if (a.isExpanded !== b.isExpanded) return b.isExpanded;
+    const collectionOrder = a.isExpanded ? this.compareParamsCollections(a, b) : 0;
+    if (collectionOrder !== 0) return collectionOrder > 0;
     if (a.defaultsUsed < b.defaultsUsed) return true;
     if (a.defaultsUsed > b.defaultsUsed) return false;
     const aSpecific = this.moreSpecific(a, b);
     return aSpecific === 1;
+  }
+
+  /** Compares the params collections of two candidates in expanded form (C# 13): 1 when the first is better. */
+  private compareParamsCollections(a: Applicable, b: Applicable): number {
+    const aCollection = this.expandedCollection(a);
+    const bCollection = this.expandedCollection(b);
+    if (!aCollection || !bCollection || sameType(aCollection.type, bCollection.type)) return 0;
+    const converts = (from: Type, to: Type): boolean => this.conversions.implicit(from, to) !== undefined;
+    if (isBetterParamsCollection(aCollection, bCollection, converts)) return 1;
+    return isBetterParamsCollection(bCollection, aCollection, converts) ? -1 : 0;
+  }
+
+  /** The collection that a candidate in expanded form passes its `params` arguments in. */
+  private expandedCollection(applicable: Applicable): ParamsCollection | undefined {
+    const { method } = applicable.candidate;
+    const type = method.parameters.at(-1)?.type ?? ERROR_TYPE;
+    return paramsCollectionOf(
+      substitute(type, this.callSubstitution(applicable.candidate, applicable.typeArgs)),
+      this.objectType
+    );
   }
 
   /** Compares declared parameter types, where a type parameter is less specific than any other type. */
@@ -710,6 +762,11 @@ export abstract class CallBinder extends OperatorBinder {
     const expression = arg.expression;
     if (expression.kind === 'unbound')
       return this.compareLambdaConversions(expression, a, b) ?? this.betterTarget(a, b);
+    // A handler conversion is better than any other for an interpolated string that is not constant (C# 10).
+    if (expression.kind === 'interpolated') {
+      const aIsHandler = interpolationTargetOf(a) === 'handler';
+      if (aIsHandler !== (interpolationTargetOf(b) === 'handler')) return aIsHandler ? 1 : -1;
+    }
     if (!arg.isOutVar) {
       const aExact = sameType(expression.type, a);
       const bExact = sameType(expression.type, b);
@@ -793,7 +850,7 @@ export abstract class CallBinder extends OperatorBinder {
     owner: string
   ): boolean {
     if (arg.kind === 'error') return true;
-    if (!this.checkTypeArgumentKind(arg, parameter.name, owner, row)) return false;
+    if (!this.checkTypeArgumentKind(arg, parameter.name, owner, row, parameter.allowsRefStruct)) return false;
     if (
       parameter.hasReferenceConstraint &&
       !this.isReference(arg) &&
@@ -846,6 +903,7 @@ export abstract class CallBinder extends OperatorBinder {
       const target = substitute(constraint, substitution);
       if (
         !this.conversions.implicit(arg, target) &&
+        !this.refStructImplements(arg, target) &&
         !(
           arg.kind === 'named' &&
           target.kind === 'named' &&
@@ -869,6 +927,19 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
+  /**
+   * Whether a ref struct implements an interface, which satisfies an interface constraint of a parameter with `allows
+   * ref struct` (C# 13) although it has no boxing conversion to it.
+   */
+  private refStructImplements(arg: Type, target: Type): boolean {
+    return (
+      arg.kind === 'named' &&
+      isRefLikeType(arg) &&
+      target.kind === 'named' &&
+      this.allInterfaces(arg).some((face) => sameType(face, target))
+    );
+  }
+
   /** The variable of a `ref` or `out` argument, reporting a receiver that is none for a `ref` receiver (CS1510). */
   private refArgumentTarget(arg: ArgumentInfo, type: Type, row: number): BoundLValue {
     if (arg.declareOut) return arg.declareOut(type);
@@ -883,6 +954,7 @@ export abstract class CallBinder extends OperatorBinder {
     const substitution = this.callSubstitution(applicable.candidate, applicable.typeArgs);
     const result: (BoundArgument | undefined)[] = Array.from({ length: method.parameters.length });
     const paramsElements: BoundExpression[] = [];
+    const handlers: PendingHandlerArgument[] = [];
     for (const [index, arg] of args.entries()) {
       const parameterIndex = applicable.parameterOf[index];
       const parameter = method.parameters[parameterIndex];
@@ -892,27 +964,76 @@ export abstract class CallBinder extends OperatorBinder {
         result[parameterIndex] = { kind: 'refArgument', target, refKind: parameter.refKind, type, row: arg.row };
         continue;
       }
+      const handler = this.pendingHandlerArgument(arg, parameter, parameterIndex, type);
+      if (handler) {
+        handlers.push(handler);
+        result[parameterIndex] = { kind: 'default', type, row: arg.row };
+        continue;
+      }
       const converted = this.convert(arg.expression, type, arg.row);
       if (applicable.isExpanded && parameterIndex === method.parameters.length - 1) paramsElements.push(converted);
       else result[parameterIndex] = converted;
     }
-    if (applicable.isExpanded) {
-      const arrayType = substitute(method.parameters.at(-1)?.type ?? ERROR_TYPE, substitution);
-      if (arrayType.kind === 'array') {
-        result[method.parameters.length - 1] = {
-          kind: 'newArray',
-          arrayType,
-          sizes: [this.constant(paramsElements.length, this.intType, row)],
-          elements: paramsElements,
-          type: arrayType,
-          row,
-        };
-      }
-    }
+    const collection = applicable.isExpanded ? this.expandedCollection(applicable) : undefined;
+    if (collection) result[method.parameters.length - 1] = this.packParams(collection, paramsElements, method, row);
     for (const [index, parameter] of method.parameters.entries()) {
       result[index] ??= this.omittedArgument(method, parameter, substitution, args, applicable.parameterOf, row);
     }
-    return withSourceOrder(result as BoundArgument[], applicable.parameterOf);
+    return this.withHandlerArguments(handlers, applicable, result, row);
+  }
+
+  /** The `params` collection of the arguments of the expanded form, created as a collection expression of them is. */
+  private packParams(
+    collection: ParamsCollection,
+    elements: BoundExpression[],
+    method: MethodSymbol,
+    row: number
+  ): BoundExpression {
+    if (collection.kind === 'constructible' || collection.kind === 'list')
+      return this.createParamsCollection(collection, elements, method.owner, row);
+    const array = arrayType(collection.element);
+    const created: BoundExpression = {
+      kind: 'newArray',
+      arrayType: array,
+      sizes: [this.constant(elements.length, this.intType, row)],
+      elements,
+      type: array,
+      row,
+    };
+    return collection.kind === 'span' ? this.convert(created, collection.type, row) : created;
+  }
+
+  /**
+   * Converts the deferred handler arguments once the others are, ordering the arguments as the source evaluates them,
+   * with the local that a handler takes the receiver from, if any, which the call then keeps the receiver in.
+   */
+  private withHandlerArguments(
+    handlers: PendingHandlerArgument[],
+    applicable: Applicable,
+    result: (BoundArgument | undefined)[],
+    row: number
+  ): BoundArguments {
+    const handlerReceiver = convertHandlerArguments(
+      handlers,
+      applicable.candidate.method,
+      applicable.candidate.owner,
+      result,
+      (source, target, values) => this.bindInterpolationConversion(source, target, values, row)
+    );
+    const finished = withSourceOrder(result as BoundArgument[], applicable.parameterOf);
+    return handlerReceiver ? Object.assign(finished, { handlerReceiver }) : finished;
+  }
+
+  /** An interpolated string argument of a handler parameter whose constructor takes other arguments of the call. */
+  private pendingHandlerArgument(
+    arg: ArgumentInfo,
+    parameter: ParameterSymbol,
+    parameterIndex: number,
+    type: Type
+  ): PendingHandlerArgument | undefined {
+    if (!parameter.handlerArguments || interpolationTargetOf(type) !== 'handler') return undefined;
+    const source = this.interpolationConvertingTo(arg.expression, type);
+    return source && { parameter, parameterIndex, source, type: type as NamedType };
   }
 
   /** The value of an omitted optional argument, or the source text of another argument that it names. */
@@ -1080,7 +1201,7 @@ export abstract class CallBinder extends OperatorBinder {
     const byArity = candidates.filter(
       (candidate) =>
         this.mapArguments(candidate.method, args, false) !== undefined ||
-        (candidate.method.parameters.at(-1)?.isParams && this.mapArguments(candidate.method, args, true))
+        this.mapArguments(candidate.method, args, true) !== undefined
     );
     this.rejectUnavailableOverload(candidates, args, byArity.length, row);
     if (byArity.length === 0) {
@@ -1146,7 +1267,7 @@ export abstract class CallBinder extends OperatorBinder {
     const { method } = candidate;
     const normal = this.mapArguments(method, args, false);
     if (!normal) return true;
-    const expanded = method.parameters.at(-1)?.isParams ? this.mapArguments(method, args, true) : undefined;
+    const expanded = this.mapArguments(method, args, true);
     if (!expanded) return false;
     const badCount = (form: boolean, parameterOf: number[]): number => {
       const typeArgs =
@@ -1308,6 +1429,7 @@ export abstract class CallBinder extends OperatorBinder {
     if (
       arg.isReceiver ||
       parameter.refKind === arg.refKind ||
+      (parameter.refKind === 'in' && arg.refKind === 'ref') ||
       (parameter.refKind !== 'ref' && parameter.refKind !== 'out' && arg.refKind !== 'ref' && arg.refKind !== 'out')
     )
       return false;

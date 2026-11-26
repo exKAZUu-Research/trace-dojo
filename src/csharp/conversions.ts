@@ -41,7 +41,9 @@ export type ConversionKind =
   /** A value to a type parameter, which unboxes or checks at run time. */
   | 'typeParameterUnbox'
   /** Between pointer types, or between a pointer and an integer, which keeps the address. */
-  | 'pointer';
+  | 'pointer'
+  /** An interpolated string to FormattableString, IFormattable, or a handler type, which binds it again. */
+  | 'interpolatedString';
 
 /** The types that conversions and operators know by role. */
 export interface WellKnownTypes {

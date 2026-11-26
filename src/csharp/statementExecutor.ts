@@ -197,6 +197,7 @@ export abstract class StatementExecutor extends PatternMatcher {
 
   /** Disposes a `using` resource unless it is null, returning what `Dispose` or `DisposeAsync` returned. */
   protected disposeResource(statement: Extract<BoundStatement, { kind: 'using' }>, frame: Frame): Value {
+    if (statement.patternDispose) return this.evaluate(statement.patternDispose, frame);
     const resource = this.readLocal(frame, statement.local);
     if (resource === undefined) return undefined;
     const dispose = this.runtime.dispatch(statement.dispose, resource, statement.disposable);
@@ -341,12 +342,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     collection: Value,
     frame: Frame
   ): ElementCursor {
-    const receiverType = this.runtime.runtimeTypeOf(collection);
-    const getEnumerator =
-      iteration.getEnumerator.owner.kind === 'interface' || iteration.getEnumerator.isVirtual
-        ? this.runtime.dispatch(iteration.getEnumerator, collection)
-        : iteration.getEnumerator;
-    const enumerator = this.invokeWithoutArguments(frame, getEnumerator, collection, statement.row, receiverType);
+    const enumerator = this.collectionEnumerator(statement, iteration, collection, frame);
     if (enumerator === undefined) throw NULL_REFERENCE();
     frame.temporaries.push(enumerator);
     const enumeratorType = this.runtime.runtimeTypeOf(enumerator);
@@ -378,6 +374,31 @@ export abstract class StatementExecutor extends PatternMatcher {
         }
       },
     };
+  }
+
+  /** The enumerator that the collection's GetEnumerator, or an extension GetEnumerator taking it, returns. */
+  private collectionEnumerator(
+    statement: ForeachStatement,
+    iteration: Extract<ForeachKind, { kind: 'enumerator' }>,
+    collection: Value,
+    frame: Frame
+  ): Value {
+    const { getEnumerator: declared, extensionTypeArgs } = iteration;
+    if (extensionTypeArgs) {
+      const environment = this.staticEnvironment(declared, extensionTypeArgs, frame);
+      return this.invoke(frame, declared, undefined, [collection], statement.row, environment);
+    }
+    const getEnumerator =
+      declared.owner.kind === 'interface' || declared.isVirtual
+        ? this.runtime.dispatch(declared, collection)
+        : declared;
+    return this.invokeWithoutArguments(
+      frame,
+      getEnumerator,
+      collection,
+      statement.row,
+      this.runtime.runtimeTypeOf(collection)
+    );
   }
 
   protected invokeWithoutArguments(

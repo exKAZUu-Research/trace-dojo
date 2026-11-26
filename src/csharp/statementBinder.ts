@@ -68,7 +68,14 @@ import {
   type TypeSymbol,
   VOID_TYPE,
 } from './types';
-import { isVariable } from './variables';
+import { isFixedBufferAccess, isFixedVariable, isVariable } from './variables';
+
+/** A resource of `using`, with the call of a ref struct's `Dispose()` that disposes it without `IDisposable`. */
+interface UsingResource {
+  declaration: BoundStatement;
+  local: LocalSymbol;
+  patternDispose?: BoundExpression;
+}
 
 /** What the earlier labels of a switch have covered. */
 interface SwitchLabelsSeen {
@@ -109,9 +116,9 @@ export abstract class StatementBinder extends PatternBinder {
     return { kind: 'constant', value, type, row: position.row };
   }
 
-  protected rejectUnavailableName(name: string, position: Position): void {
+  protected rejectUnavailableName(name: string, position: Position, context?: TypeContext): void {
     const simple = name.slice(name.lastIndexOf('.') + 1);
-    const unavailable = this.unavailableType(name, simple) ?? unavailableDotnetNamespace(name.split('.'));
+    const unavailable = this.unavailableType(name, simple, context) ?? unavailableDotnetNamespace(name.split('.'));
     if (unavailable) this.unsupported(position, unavailable);
   }
 
@@ -336,28 +343,24 @@ export abstract class StatementBinder extends PatternBinder {
     const setter = declared?.access === 'private' && property.owner.isLibrary ? undefined : declared;
     const display = propertyDisplay(target);
     if (!setter) {
-      if (property.backingField && !property.isStatic && this.isInConstructorOf(property, context)) {
+      // A constructor assigns a getter-only property's backing field, whether the property is auto or uses `field`.
+      const backingField = property.backingField ?? property.keywordField;
+      if (backingField && !property.isStatic && this.isInConstructorOf(property, context)) {
         return {
           kind: 'field',
           receiver: target.receiver as BoundExpression,
-          field: property.backingField,
+          field: backingField,
           type: target.type,
           row: target.row,
         };
       }
       if (
-        property.backingField &&
+        backingField &&
         property.isStatic &&
         context.fn.method.kind === 'staticConstructor' &&
         context.fn.method.owner === property.owner
       ) {
-        return {
-          kind: 'staticField',
-          field: property.backingField,
-          owner: target.owner,
-          type: target.type,
-          row: target.row,
-        };
+        return { kind: 'staticField', field: backingField, owner: target.owner, type: target.type, row: target.row };
       }
       this.reportReadonlyProperty(property, display, position);
       return { kind: 'discard', type: ERROR_TYPE, row: position.row };
@@ -678,38 +681,61 @@ export abstract class StatementBinder extends PatternBinder {
     position: Position,
     context: BindContext,
     isAwait: boolean
-  ): { declaration: BoundStatement; local: LocalSymbol }[] {
+  ): UsingResource[] {
     if (resource.kind === 'expression') {
       const value = this.bindTypedValue(resource.value, context);
       const local = new LocalSymbol('\0using', value.type, position.row, position.column);
       local.isHidden = true;
       context.fn.addLocal(local);
-      this.checkDisposable(value.type, resource.value, isAwait);
-      return [{ declaration: { kind: 'localDeclaration', local, value, row: position.row, step: 'callsOnly' }, local }];
+      const patternDispose = this.disposeResourceBy(local, resource.value, isAwait, context);
+      return [
+        {
+          declaration: { kind: 'localDeclaration', local, value, row: position.row, step: 'callsOnly' },
+          local,
+          patternDispose,
+        },
+      ];
     }
     return resource.declarators.map((declarator) => {
-      if (!declarator.initializer)
-        this.error(declarator, 'CS0210', 'fixed または using ステートメントの宣言の中に、初期化子を指定してください');
       const declaration = this.bindLocalDeclaration(
         { kind: 'localDeclaration', isConst: false, type: resource.type, declarators: [declarator], ...position },
         context
       );
+      if (!declarator.initializer)
+        this.error(declarator, 'CS0210', 'fixed または using ステートメントの宣言の中に、初期化子を指定してください');
       const local = context.scope.variables.get(declarator.name) as LocalSymbol;
       local.isReadonly = true;
       local.readonlyReason = 'using 変数';
-      this.checkDisposable(local.type, declarator, isAwait);
-      return { declaration: { ...declaration, row: declarator.row }, local };
+      const patternDispose = this.disposeResourceBy(local, declarator, isAwait, context);
+      return { declaration: { ...declaration, row: declarator.row }, local, patternDispose };
     });
   }
 
-  /** Reports a resource type that converts to no `IDisposable` (or `IAsyncDisposable`), which `using` disposes it by. */
-  private checkDisposable(type: Type, position: Position, isAwait: boolean): void {
-    if (type.kind === 'error' || type.kind === 'null') return;
+  /**
+   * How `using` disposes a resource: undefined for `IDisposable.Dispose` (or `IAsyncDisposable`'s), or the call of a
+   * ref struct's `Dispose()` without the interface (C# 8), reporting a resource that has neither.
+   */
+  private disposeResourceBy(
+    local: LocalSymbol,
+    position: Position,
+    isAwait: boolean,
+    context: BindContext
+  ): BoundExpression | undefined {
+    const type = local.type;
+    if (type.kind === 'error' || type.kind === 'null') return undefined;
     const disposable = this.library.typeNamed(isAwait ? 'System.IAsyncDisposable' : 'System.IDisposable').declaredType;
-    if (this.conversions.implicit(type, disposable) !== undefined) return;
+    if (this.conversions.implicit(type, disposable) !== undefined) return undefined;
     // A ref struct implements an interface without converting to it, which `using` disposes it by all the same.
     if (isRefLikeType(type) && (type as NamedType).symbol.interfaces.some((face) => face.symbol === disposable.symbol))
-      return;
+      return undefined;
+    if (!isAwait && isRefLikeType(type)) {
+      const call = this.quietly(() => {
+        const receiver: BoundExpression = { kind: 'local', local, type, row: position.row };
+        const group = this.bindInstanceMember(receiver, 'Dispose', undefined, position, context, true);
+        return group.kind === 'methodGroup' ? this.invokeMethodGroup(group, [], position, context) : undefined;
+      });
+      if (call?.kind === 'call' && !call.method.isStatic) return call;
+    }
     if (isAwait) {
       this.error(
         position,
@@ -723,16 +749,13 @@ export abstract class StatementBinder extends PatternBinder {
       'CS1674',
       `'${displayType(type)}': using ステートメントで使用される型は 'System.IDisposable' を実装する必要があります。`
     );
+    return undefined;
   }
 
   /** The declarations of the resources, each followed by the `using` that disposes it after the rest. */
-  private nestUsings(
-    resources: { declaration: BoundStatement; local: LocalSymbol }[],
-    body: BoundStatement,
-    isAwait: boolean
-  ): BoundStatement[] {
+  private nestUsings(resources: UsingResource[], body: BoundStatement, isAwait: boolean): BoundStatement[] {
     let inner: BoundStatement[] = [body];
-    for (const { declaration, local } of resources.toReversed()) {
+    for (const { declaration, local, patternDispose } of resources.toReversed()) {
       const disposable = this.library.typeNamed(isAwait ? 'System.IAsyncDisposable' : 'System.IDisposable');
       inner = [
         declaration,
@@ -746,6 +769,7 @@ export abstract class StatementBinder extends PatternBinder {
           dispose: disposable.methods.find(
             (method) => method.name === (isAwait ? 'DisposeAsync' : 'Dispose')
           ) as MethodSymbol,
+          ...(patternDispose ? { patternDispose } : {}),
           ...(isAwait ? { isAwait: true as const } : {}),
           disposable: disposable.declaredType,
           row: declaration.row,
@@ -902,7 +926,7 @@ export abstract class StatementBinder extends PatternBinder {
       else if (initializer.kind === 'addressOf')
         value = this.toValue(this.bindAddressOf(initializer, inner, true), initializer);
       else {
-        const bound = this.bindValue(initializer, inner);
+        const bound = this.bindFixedValue(initializer, inner);
         if (bound.type.kind === 'array' || specialOf(bound.type) === 'string') {
           const element = bound.type.kind === 'array' ? bound.type.element : this.specialType('char');
           value = {
@@ -931,6 +955,21 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
+  /** A `fixed` statement's initializer other than `&x`, which may name a movable fixed-size buffer only (CS0213). */
+  private bindFixedValue(initializer: Expression, context: BindContext): BoundExpression {
+    const allowed = this.allowsMovableFixedBuffer;
+    this.allowsMovableFixedBuffer = true;
+    const bound = this.bindValue(initializer, context);
+    this.allowsMovableFixedBuffer = allowed;
+    if (bound.kind === 'addressOf' && isFixedBufferAccess(bound) && isFixedVariable(bound.target as BoundExpression))
+      this.error(
+        initializer,
+        'CS0213',
+        '既に fixed が使用されている式のアドレスを取得するために、fixed ステートメントを使用することはできません'
+      );
+    return bound;
+  }
+
   /**
    * Binds `await foreach` as C# spec §13.9.5 expands it: `var e = c.GetAsyncEnumerator(); try { while (await
    * e.MoveNextAsync()) { var x = e.Current; body } } finally { await e.DisposeAsync(); }`, with `e` hidden.
@@ -943,7 +982,8 @@ export abstract class StatementBinder extends PatternBinder {
     if (
       collectionType &&
       collectionType.kind !== 'error' &&
-      !this.hasMethod(collectionType, 'GetAsyncEnumerator', context)
+      !this.hasMethod(collectionType, 'GetAsyncEnumerator', context) &&
+      !this.hasPatternExtension(collectionType, 'GetAsyncEnumerator', statement.collection, context)
     ) {
       const display = displayType(collectionType);
       const hint = this.hasMethod(collectionType, 'GetEnumerator', context)
@@ -1018,13 +1058,16 @@ export abstract class StatementBinder extends PatternBinder {
           },
         ]),
         catches: [],
-        finally: block([
-          {
-            kind: 'expression',
-            expression: { kind: 'await', operand: call(enumerator, 'DisposeAsync'), ...position },
-            ...position,
-          },
-        ]),
+        // An enumerator without DisposeAsync, as a struct may be, is not disposed.
+        finally: this.isAsyncDisposable(call(statement.collection, 'GetAsyncEnumerator'), context)
+          ? block([
+              {
+                kind: 'expression',
+                expression: { kind: 'await', operand: call(enumerator, 'DisposeAsync'), ...position },
+                ...position,
+              },
+            ])
+          : undefined,
         ...position,
       },
     ]);
@@ -1320,6 +1363,8 @@ export abstract class StatementBinder extends PatternBinder {
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     context: BindContext
   ): BoundStatement {
+    for (const modifier of statement.invalidModifiers ?? [])
+      this.error(statement, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
     if (statement.type.kind === 'refType') return this.bindRefLocals(statement, statement.type, context);
     // `var s = stackalloc ...` makes a Span, which this grader does not run.
     if (
@@ -1337,6 +1382,7 @@ export abstract class StatementBinder extends PatternBinder {
     const statements: BoundStatement[] = statement.declarators.map((declarator) =>
       this.bindDeclarator(declarator, declaredType, statement.isConst, context)
     );
+    if (statement.isScoped) this.scopeLocals(statements, statement);
     const hasInitializer = statement.declarators.some((declarator) => declarator.initializer !== undefined);
     if (!hasInitializer)
       return {
@@ -1368,6 +1414,21 @@ export abstract class StatementBinder extends PatternBinder {
     } as BoundBlock;
   }
 
+  /**
+   * Limits `scoped` locals (C# 11) to the method: what a ref local refers to, or what a ref struct value may refer to;
+   * any other local refers to nothing (CS9048).
+   */
+  private scopeLocals(statements: BoundStatement[], position: Position): void {
+    for (const bound of statements) {
+      if (bound.kind !== 'localDeclaration') continue;
+      const { local } = bound;
+      local.isScoped = true;
+      if (local.isRefLocal) local.refContext = 'local';
+      else if (isRefLikeType(local.type)) local.valueContext = 'local';
+      else this.checkScoped(position, local.type, undefined);
+    }
+  }
+
   /** `ref int r = ref x;` and `ref readonly var r = ref x;`: locals that refer to other variables. */
   private bindRefLocals(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
@@ -1394,6 +1455,7 @@ export abstract class StatementBinder extends PatternBinder {
         step: 'none',
       };
     });
+    if (statement.isScoped) this.scopeLocals(statements, statement);
     if (statements.length === 1)
       return { ...(statements[0] as BoundStatement), row: statement.row, step: 'step' } as BoundStatement;
     return {
@@ -1529,7 +1591,9 @@ export abstract class StatementBinder extends PatternBinder {
       case 'local': {
         const { local } = target;
         if (local.isRefLocal) return local.refContext;
-        return local.isParameter && (local.refKind === 'ref' || local.refKind === 'in') ? 'return' : 'local';
+        return local.isParameter && !local.isScoped && (local.refKind === 'ref' || local.refKind === 'in')
+          ? 'return'
+          : 'local';
       }
       case 'field': {
         // A ref field refers to what the ref struct holding it may refer to.
@@ -1569,7 +1633,8 @@ export abstract class StatementBinder extends PatternBinder {
     if (!isRefLikeType(value.type)) return 'caller';
     switch (value.kind) {
       case 'local': {
-        return value.local.isParameter ? 'caller' : value.local.valueContext;
+        if (value.local.isParameter) return value.local.isScoped && !value.local.refKind ? 'local' : 'caller';
+        return value.local.valueContext;
       }
       case 'this': {
         // A constructor's `this` is like an `out` parameter, which its ref parameters may outlive no further.
@@ -1650,7 +1715,8 @@ export abstract class StatementBinder extends PatternBinder {
       );
       return;
     }
-    const name = value.kind === 'local' ? value.local.name : this.describeEscapingValue(value, required, fn);
+    const name =
+      value.kind === 'local' ? escapingLocalName(value.local) : this.describeEscapingValue(value, required, fn);
     this.refSafetyError(
       position,
       'CS8352',
@@ -1674,6 +1740,28 @@ export abstract class StatementBinder extends PatternBinder {
     const target = entry.refTarget;
     const targetName = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
     return `${entry.target.field.name} = ref ${targetName}`;
+  }
+
+  /** Reports a `return ref` of a parameter, or of its member, that does not outlive the method. */
+  private reportParameterEscape(local: LocalSymbol, isMember: boolean, position: Position | number): void {
+    if (local.isScoped && local.refKind !== undefined)
+      this.refSafetyError(
+        position,
+        'CS9075',
+        `現在のメソッドに範囲指定されているため、参照渡し '${local.name}' でパラメーターを返すことはできません`
+      );
+    else if (isMember)
+      this.refSafetyError(
+        position,
+        'CS8167',
+        `ref パラメーターでも out パラメーターでもないため、パラメーター '${local.name}' のメンバーを参照渡しで返すことはできません`
+      );
+    else
+      this.refSafetyError(
+        position,
+        'CS8166',
+        `参照 '${local.name}' は ref パラメーターではないため、パラメーターを返すことができません`
+      );
   }
 
   /** Reports a `return ref` of a variable that does not outlive the method, as Roslyn names the variable. */
@@ -1713,18 +1801,7 @@ export abstract class StatementBinder extends PatternBinder {
         return;
       }
       if (local.isParameter) {
-        if (isMember)
-          this.refSafetyError(
-            position,
-            'CS8167',
-            `ref パラメーターでも out パラメーターでもないため、パラメーター '${local.name}' のメンバーを参照渡しで返すことはできません`
-          );
-        else
-          this.refSafetyError(
-            position,
-            'CS8166',
-            `参照 '${local.name}' は ref パラメーターではないため、パラメーターを返すことができません`
-          );
+        this.reportParameterEscape(local, isMember, position);
         return;
       }
       if (isMember)
@@ -1755,6 +1832,7 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     const { initializer } = declarator;
+    const saved = this.diagnostics.length;
     const inferred = declaredType ? { type: declaredType } : this.inferLocalType(declarator, context);
     const { type } = inferred;
     let { value } = inferred;
@@ -1763,7 +1841,12 @@ export abstract class StatementBinder extends PatternBinder {
     }
     // The variable is in scope in its own initializer, where using it is an error of definite assignment.
     const local = this.declareLocal(declarator.name, type, declarator, context);
-    if (initializer?.kind === 'stackalloc' && declaredType && isPointerType(declaredType))
+    if (
+      initializer?.kind === 'stackalloc' &&
+      !initializer.isParenthesized &&
+      declaredType &&
+      isPointerType(declaredType)
+    )
       value = this.convert(
         this.bindStackalloc(initializer, pointeeOf(declaredType), context),
         declaredType,
@@ -1779,7 +1862,7 @@ export abstract class StatementBinder extends PatternBinder {
           ? this.bindArrayInitializer(initializer, type, context)
           : this.bindAs(initializer, type, context);
     }
-    if (isConst) this.checkLocalConstant(declarator, local, value, type);
+    if (isConst) this.checkLocalConstant(declarator, local, value, type, this.diagnostics.length > saved);
     // A ref struct local may refer to what its initializer refers to, and later takes nothing that dies sooner.
     if (value && isRefLikeType(type)) local.valueContext = this.valueContextOf(value, context.fn);
     return { kind: 'localDeclaration', local, value, row: declarator.row, step: 'none' };
@@ -1833,12 +1916,14 @@ export abstract class StatementBinder extends PatternBinder {
     declarator: VariableDeclarator,
     local: LocalSymbol,
     value: BoundExpression | undefined,
-    type: Type
+    type: Type,
+    hasErrors: boolean
   ): void {
     local.isConst = true;
-    // The parser rejects a constant without a value, so `value` is the initializer's.
+    // The parser rejects a constant without a value, so `value` is the initializer's. An initializer with errors, as
+    // an overflow (CS0220), is no constant that Roslyn reports again.
     if (value?.kind === 'constant') local.constantValue = value.value;
-    else if (value && value.type.kind !== 'error')
+    else if (value && value.type.kind !== 'error' && !hasErrors)
       this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
     if (type.kind !== 'error' && !this.isConstantType(type))
       this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const 宣言することはできません`);
@@ -1870,6 +1955,8 @@ export abstract class StatementBinder extends PatternBinder {
         inner
       );
       initializers.push(bound);
+    } else if (statement.initializer?.kind === 'deconstruction') {
+      initializers.push(this.bindDeconstruction(statement.initializer.statement, inner));
     } else if (statement.initializer) {
       for (const expression of statement.initializer.expressions) {
         const bound = this.bindValue(expression, inner);
@@ -2117,6 +2204,24 @@ export abstract class StatementBinder extends PatternBinder {
    * a public instance `GetEnumerator()`, else an implemented `IEnumerable`'s; on what it returns, a public instance
    * `bool MoveNext()` and a public instance `Current` with a getter; and disposal through `IDisposable` only.
    */
+  /** Whether an extension method of the name in scope applies to a value of a type without other arguments. */
+  private hasPatternExtension(type: Type, name: string, position: Position, context: BindContext): boolean {
+    const extensions = this.lookupExtensionMethods(name, context.fn.typeContext);
+    return (
+      extensions.length > 0 &&
+      this.quietly(() => this.resolvePatternExtension(type, extensions, 0, position)) !== undefined
+    );
+  }
+
+  /** Whether the enumerator that an expression gives has a `DisposeAsync()` or implements `IAsyncDisposable`. */
+  private isAsyncDisposable(getEnumerator: Expression, context: BindContext): boolean {
+    const type = this.quietly(() => this.bindTypedValue(getEnumerator, context).type);
+    if (!type || type.kind === 'error') return true;
+    if (this.hasMethod(type, 'DisposeAsync', context)) return true;
+    const disposable = this.library.typeNamed('System.IAsyncDisposable').declaredType;
+    return this.conversions.implicit(type, disposable) !== undefined;
+  }
+
   /** Whether a type has an accessible method of the name, which some foreach errors suggest by. */
   private hasMethod(type: Type, name: string, context: BindContext): boolean {
     return this.lookupMember(type, name, context.fn.typeContext).found?.kind === 'methods';
@@ -2144,17 +2249,29 @@ export abstract class StatementBinder extends PatternBinder {
         owner = candidate.owner;
       }
     }
-    if (!method) {
-      const enumerable = this.findImplementedEnumerable(type);
-      if (!enumerable) return undefined;
+    let enumeratorType: Type | undefined;
+    let extensionTypeArgs: Type[] | undefined;
+    const enumerable = method ? undefined : this.findImplementedEnumerable(type);
+    if (enumerable) {
       getEnumerator = lookup(enumerable, 'GetEnumerator');
       if (getEnumerator?.kind !== 'methods') return undefined;
       const candidate = getEnumerator.candidates.find((option) => option.method.parameters.length === 0);
       if (!candidate) return undefined;
       method = candidate.method;
       owner = candidate.owner;
+    } else if (!method) {
+      // Without an instance GetEnumerator or IEnumerable, an extension GetEnumerator takes the collection (C# 9).
+      const extensions = this.lookupExtensionMethods('GetEnumerator', context.fn.typeContext);
+      const resolved =
+        extensions.length > 0
+          ? this.quietly(() => this.resolvePatternExtension(type, extensions, 0, position))
+          : undefined;
+      if (!resolved) return undefined;
+      method = resolved.candidate.method;
+      extensionTypeArgs = resolved.typeArgs;
+      enumeratorType = substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
     }
-    const enumeratorType = substitute(method.returnType, substitutionOf(owner as NamedType));
+    enumeratorType ??= substitute(method.returnType, substitutionOf(owner as NamedType));
     const moveNext = lookup(enumeratorType, 'MoveNext');
     const current = lookup(enumeratorType, 'Current');
     // The pattern reads Current through a public instance getter, so a property without one is no Current for it.
@@ -2185,6 +2302,7 @@ export abstract class StatementBinder extends PatternBinder {
       iteration: {
         kind: 'enumerator',
         getEnumerator: method,
+        ...(extensionTypeArgs ? { extensionTypeArgs } : {}),
         moveNext: moveNextMethod,
         current: current.property,
         enumeratorType,
@@ -2482,16 +2600,17 @@ export abstract class StatementBinder extends PatternBinder {
     this.methodContexts.set(method, typeContext);
     method.returnType = this.resolveReturnType(declaration.returnType, typeContext, method);
     method.parameters = this.resolveParameters(declaration.parameters, typeContext, undefined);
+    this.checkParamsCollections(method.parameters, context);
     if (declaration.parameters.some((parameter) => parameter.isThis))
       this.error(declaration, 'CS1106', '拡張メソッドは、非ジェネリック静的クラスで定義される必要があります');
+    // A name declared again keeps meaning the first declaration, as Roslyn binds the calls to it.
     if (context.scope.localFunctions.has(declaration.name) || context.scope.variables.has(declaration.name)) {
       this.error(
         declaration,
         'CS0128',
         `'${declaration.name}' という名前のローカル変数または関数はこのスコープで既に定義されています`
       );
-    }
-    context.scope.localFunctions.set(declaration.name, method);
+    } else context.scope.localFunctions.set(declaration.name, method);
     this.localFunctionScopes.set(method, context.scope);
     // A local function's attributes bind with its declaration, before the calls that their meaning changes.
     this.collectAttributes(declaration.attributes, 'method', method, typeContext, { method, return: undefined });
@@ -2546,6 +2665,7 @@ export abstract class StatementBinder extends PatternBinder {
     );
     local.isParameter = true;
     local.refKind = parameter.refKind;
+    local.isScoped = parameter.isScoped === true;
     if (context.scope.isDeclaredOutside(parameter.name)) {
       this.error(
         parameter.position ?? 0,
@@ -2554,6 +2674,8 @@ export abstract class StatementBinder extends PatternBinder {
       );
     }
     local.isTransparent = parameter.name.startsWith(TRANSPARENT_PREFIX);
+    // A local function's declaration checks its own, in the order of the statements.
+    if (context.fn.kind !== 'localFunction') this.checkParamsCollections([parameter], context);
     context.fn.addLocal(local);
     context.scope.variables.set(parameter.name, local);
     return local;
@@ -2637,6 +2759,7 @@ export abstract class StatementBinder extends PatternBinder {
         );
       // A `throw` expression converts to any return type.
       const value = body.kind === 'throw' ? this.bindValue(body, context) : this.bindAs(body, returnType, context);
+      this.checkValueEscape(value, 'return', context);
       return blockOf({ kind: 'return', value, row: body.row, step: 'none' }, body.row);
     } finally {
       this.allowsThrowExpression = saved;
@@ -2702,6 +2825,9 @@ function namesDeclaredInBlock(statement: Statement): string[] {
       collectDesignatedNames(statement, names);
       break;
     }
+    case 'labeled': {
+      return namesDeclaredInBlock(statement.statement);
+    }
     case 'expression': {
       collectDesignatedNames(statement.expression, names);
       break;
@@ -2761,4 +2887,9 @@ function isReferable(bound: BoundExpression): boolean {
     (bound.kind === 'invokeDelegate' && bound.returnsByRef !== undefined) ||
     (bound.kind === 'property' && bound.property.returnsByRef !== undefined)
   );
+}
+
+/** How Roslyn names a local whose ref struct value goes too far: a `scoped` parameter with its declaration. */
+function escapingLocalName(local: LocalSymbol): string {
+  return local.isScoped && local.isParameter ? `scoped ${displayType(local.type)} ${local.name}` : local.name;
 }

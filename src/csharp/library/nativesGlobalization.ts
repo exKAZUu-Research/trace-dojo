@@ -12,7 +12,7 @@ function newCultureInfo(call: NativeCall, culture: Culture, isReadOnly: boolean)
   return object;
 }
 
-function invariantObject(call: NativeCall): CsObject {
+export function invariantObject(call: NativeCall): CsObject {
   const { objects } = cultureSettingsOf(call.frame.runtime);
   objects.invariant ??= newCultureInfo(call, INVARIANT, true);
   return objects.invariant;

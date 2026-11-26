@@ -1,4 +1,4 @@
-import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundPattern } from './bound';
+import type { BoundDeconstruct, BoundDeconstructTarget, BoundExpression, BoundLValue, BoundPattern } from './bound';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { EvaluatorBase, NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
@@ -190,7 +190,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
     }
     const elements = pattern.isTuple
       ? (target as CsStruct).fields
-      : this.deconstructedElements(pattern.deconstruct as MethodSymbol, target, pattern.positional.length, frame);
+      : this.deconstructedElements(pattern.deconstruct as BoundDeconstruct, target, pattern.positional.length, frame);
     return pattern.positional.every((sub, index) => this.matches(sub, elements[index], frame));
   }
 
@@ -250,7 +250,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
   }
 
   /** The values that a `Deconstruct` method gives through its `out` parameters. */
-  private deconstructedElements(deconstruct: MethodSymbol, target: Value, count: number, frame: Frame): Value[] {
+  private deconstructedElements(deconstruct: BoundDeconstruct, target: Value, count: number, frame: Frame): Value[] {
     const cells = Array.from({ length: count }, () => new Cell(undefined));
     const references = cells.map(
       (cell) =>
@@ -259,15 +259,22 @@ export abstract class PatternMatcher extends EvaluatorBase {
           (stored) => (cell.value = stored)
         )
     );
-    const method = this.runtime.dispatch(deconstruct, target);
-    this.invoke(
-      frame,
-      method,
-      target,
-      references,
-      undefined,
-      this.environmentFor(method, this.runtime.runtimeTypeOf(target))
-    );
+    const { method: declared, typeArgs } = deconstruct;
+    if (declared.isStatic) {
+      // An extension method takes the value as its first argument.
+      const environment = this.staticEnvironment(declared, typeArgs, frame);
+      this.invoke(frame, declared, undefined, [target, ...references], undefined, environment);
+    } else {
+      const method = this.runtime.dispatch(declared, target);
+      this.invoke(
+        frame,
+        method,
+        target,
+        references,
+        undefined,
+        this.environmentFor(method, this.runtime.runtimeTypeOf(target))
+      );
+    }
     return cells.map((cell) => cell.value as Value);
   }
 }

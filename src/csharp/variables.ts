@@ -1,4 +1,5 @@
 import type { BoundExpression } from './bound';
+import type { BindResult } from './memberBinder';
 import { isValueType } from './types';
 
 /**
@@ -64,4 +65,9 @@ export function isFixedVariable(expression: BoundExpression): boolean {
       return false;
     }
   }
+}
+
+/** Whether an expression names a fixed-size buffer, which gives a pointer to its first element. */
+export function isFixedBufferAccess(expression: BindResult): boolean {
+  return expression.kind === 'addressOf' && expression.target.kind === 'field' && !!expression.target.field.fixedBuffer;
 }

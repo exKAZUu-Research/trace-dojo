@@ -3,6 +3,7 @@ import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression } from './bound';
 import { type ConversionKind, INTEGRAL_RANGES, isEnum, isNumeric } from './conversions';
 import { CsDecimal } from './decimal';
+import { type InterpolationSource, interpolationTargetOf } from './interpolatedConversions';
 import { LookupBinder } from './lookup';
 import { convertNumeric, type NumericValue, PendingException } from './numeric';
 import type { FunctionScope, LocalScope } from './scopes';
@@ -68,6 +69,26 @@ export abstract class ConversionBinder extends LookupBinder {
   /** The type that a target-typed expression has on its own, if any, such as a lambda's natural delegate type. */
   protected abstract naturalTypeOf(expression: Extract<BoundExpression, { kind: 'unbound' }>): Type | undefined;
 
+  /** The interpolated strings bound as strings, which convert to FormattableString, IFormattable, and handler types. */
+  protected readonly interpolations = new WeakMap<BoundExpression, InterpolationSource>();
+
+  /**
+   * Binds the interpolated string conversion of an interpolated string to a type that `interpolationTargetOf` names,
+   * whose handler constructor also takes the values of the call's other arguments that its parameter names.
+   */
+  protected abstract bindInterpolationConversion(
+    source: InterpolationSource,
+    target: NamedType,
+    handlerArguments: BoundExpression[],
+    row: number
+  ): BoundExpression;
+
+  /** The interpolated string that an expression is, if it converts to the type by an interpolated string conversion. */
+  protected interpolationConvertingTo(expression: BoundExpression, target: Type): InterpolationSource | undefined {
+    const source = this.interpolations.get(expression);
+    return source && interpolationTargetOf(target) ? source : undefined;
+  }
+
   isConstant(expression: BoundExpression): expression is Extract<BoundExpression, { kind: 'constant' }> {
     return expression.kind === 'constant';
   }
@@ -81,6 +102,7 @@ export abstract class ConversionBinder extends LookupBinder {
     const standard = this.standardImplicitOf(expression, target);
     if (standard) return standard;
     if (expression.kind === 'unbound') return undefined;
+    if (this.interpolationConvertingTo(expression, target)) return 'interpolatedString';
     const user = this.userConversion(expression, target, false);
     return user && !('ambiguous' in user) ? 'userDefined' : undefined;
   }
@@ -307,6 +329,8 @@ export abstract class ConversionBinder extends LookupBinder {
         { target: { type: target, isExplicit: mode === 'explicit' } }
       );
     }
+    const interpolation = this.interpolationConvertingTo(expression, target);
+    if (interpolation) return this.bindInterpolationConversion(interpolation, target as NamedType, [], row);
     const implicit = this.standardImplicitOf(expression, target);
     const standard = implicit ?? (mode === 'explicit' ? this.conversions.explicit(expression.type, target) : undefined);
     if (!standard) {

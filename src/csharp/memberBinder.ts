@@ -1,12 +1,15 @@
 // code-gauge-allow-file fileNcss -- The memberBinder module keeps one stage of the C# interpreter together.
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
+import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
 import { type ArgumentInfo, CallBinder, type CallDescription, type ResolvedCall } from './callBinder';
 import type { BindContext } from './convertBinder';
 import { displayMethodIn } from './declarations';
 import { dynamicObjectCall, dynamicObjectMember } from './dynamicObjects';
-import type { MethodCandidate } from './lookup';
+import { isConstrained, type MethodCandidate } from './lookup';
+import { withBoundTypeArguments } from './nameofArguments';
 import type { NamespaceSymbol } from './namespaces';
+import { createParamsCollection, type ParamsCollection } from './paramsCollections';
 import { captureUpToOwner, type FunctionScope, typeParameterNamed } from './scopes';
 import {
   baseTypeOf,
@@ -31,6 +34,7 @@ import {
   substitute,
   substitutionOf,
   type Type,
+  type TypeParameterSymbol,
   TypeSymbol,
 } from './types';
 import { isKnownLibraryMember } from './unavailable';
@@ -350,7 +354,7 @@ export abstract class MemberBinder extends CallBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
-    this.reportUndefinedName(name, position);
+    this.reportUndefinedName(name, position, typeContext);
     return { kind: 'default', type: ERROR_TYPE, row: position.row };
   }
 
@@ -522,13 +526,16 @@ export abstract class MemberBinder extends CallBinder {
     return undefined;
   }
 
-  protected reportUndefinedName(name: string, position: Position): void {
-    this.rejectUnavailableName(name, position);
+  protected reportUndefinedName(name: string, position: Position, context: TypeContext): void {
+    this.rejectUnavailableName(name, position, context);
     this.error(position, 'CS0103', `現在のコンテキストに '${name}' という名前は存在しません`);
   }
 
-  /** Rejects a name of the .NET library that this grader does not provide. */
-  protected abstract rejectUnavailableName(name: string, position: Position): void;
+  /**
+   * Rejects a name of the .NET library that this grader does not provide: a dotted one, or a simple one that a
+   * namespace in scope of the context gives it.
+   */
+  protected abstract rejectUnavailableName(name: string, position: Position, context?: TypeContext): void;
 
   /** The type to look members up in from inside a type, which is the type with its own type parameters. */
   private instanceTypeOf(type: TypeSymbol, context: BindContext): NamedType {
@@ -721,7 +728,14 @@ export abstract class MemberBinder extends CallBinder {
         );
       }
       if (field.isStatic) return { kind: 'staticField', field, owner: found.owner, type, row: position.row };
-      return { kind: 'field', receiver: receiver as BoundExpression, field, type, row: position.row };
+      const access: BoundExpression = {
+        kind: 'field',
+        receiver: receiver as BoundExpression,
+        field,
+        type,
+        row: position.row,
+      };
+      return field.fixedBuffer ? this.fixedBufferAccess(access, field.fixedBuffer.elementType, position) : access;
     }
     const { property } = found;
     const type = substitute(property.type, substitution);
@@ -730,6 +744,9 @@ export abstract class MemberBinder extends CallBinder {
 
   /** The value of a constant field, binding its initializer when it has not been bound yet. */
   protected abstract constantField(field: FieldSymbol, type: Type, position: Position): BoundExpression;
+
+  /** A fixed-size buffer's field named, which gives a pointer to the buffer's first element. */
+  protected abstract fixedBufferAccess(access: BoundExpression, elementType: Type, position: Position): BoundExpression;
 
   /**
    * Reports a member that the code may not access: as CS1540 when a derived class reads a protected member through
@@ -904,6 +921,7 @@ export abstract class MemberBinder extends CallBinder {
         row: position.row,
       };
     }
+    if (this.reportConstrainedAccess(found, position)) return { kind: 'default', type: ERROR_TYPE, row: position.row };
     if (found.kind === 'methods') {
       return {
         kind: 'methodGroup',
@@ -918,6 +936,9 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     const member = found.kind === 'field' ? found.field : found.property;
+    // `nameof(List<int>.Count)` names an instance member through its type, whose members it may name in turn.
+    if (!member.isStatic && this.isBindingName)
+      return { kind: 'default', type: substitute(member.type, substitutionOf(found.owner)), row: position.row };
     if (!member.isStatic) {
       this.error(
         position,
@@ -982,6 +1003,9 @@ export abstract class MemberBinder extends CallBinder {
 
   /** Rejects a member that .NET's library type has but this grader's does not. */
   protected rejectUnknownLibraryMember(type: Type, name: string, position: Position | number): void {
+    // An extension method's receiver converts from an array to a span, so an array takes MemoryExtensions' methods.
+    if (type.kind === 'array' && isKnownLibraryMember('System.MemoryExtensions', name))
+      this.unsupported(position, `MemoryExtensions.${name}`);
     const symbol =
       type.kind === 'named' ? type.symbol : type.kind === 'array' ? this.wellKnown.array.symbol : undefined;
     if (!symbol?.isLibrary) return;
@@ -1072,9 +1096,12 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found.kind === 'methods') {
       // Static methods do not apply to an instance, which then calls an extension method of the name, as
-      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse; with none, the call or the conversion
-      // reports the static method it chose.
+      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse; with none, an array's call of a
+      // MemoryExtensions method, as `array.Sort()`, is unavailable, and any other call or conversion reports the static
+      // method it chose.
       const instance = found.candidates.filter((candidate) => !candidate.method.isStatic);
+      if (instance.length === 0 && extensions.length === 0 && type.kind === 'array')
+        this.rejectUnknownLibraryMember(type, name, position);
       return {
         kind: 'methodGroup',
         name,
@@ -1211,9 +1238,8 @@ export abstract class MemberBinder extends CallBinder {
       return undefined;
     }
     const method = resolved.candidate.method;
-    const returnType =
-      this.covariantReturn(group, method) ??
-      substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
+    const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
+    const returnType = this.covariantReturn(group, method, substitution) ?? substitute(method.returnType, substitution);
     const returnsMatch =
       (returnType.kind === 'void' && invoke.returnType.kind === 'void') ||
       (returnType.kind !== 'void' &&
@@ -1531,7 +1557,7 @@ export abstract class MemberBinder extends CallBinder {
     }
     this.isBindingName = true;
     try {
-      this.bindExpression(value, context);
+      this.bindExpression(withBoundTypeArguments(value), context);
     } finally {
       this.isBindingName = false;
     }
@@ -1675,7 +1701,7 @@ export abstract class MemberBinder extends CallBinder {
       group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
     this.checkObsolete(method, node);
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
-    const returnType = this.covariantReturn(group, method) ?? substitute(method.returnType, substitution);
+    const returnType = this.covariantReturn(group, method, substitution) ?? substitute(method.returnType, substitution);
     const constrained = group.constrainedType ? { constrainedType: group.constrainedType } : {};
     let receiver = method.isStatic ? undefined : group.receiver;
     if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
@@ -1717,6 +1743,33 @@ export abstract class MemberBinder extends CallBinder {
       !this.wellKnown.nullable.methods.some((override) => override.isOverride && override.name === method.name)
     ) {
       receiver = this.convert(receiver, this.objectType, node);
+    }
+    // A handler's constructor that takes the receiver reads it from the local that the receiver is first kept in, which
+    // outlives the sequence that stores it.
+    const { handlerReceiver } = resolved.args as { handlerReceiver?: LocalSymbol };
+    if (receiver && handlerReceiver) {
+      const local: BoundExpression = {
+        kind: 'local',
+        local: handlerReceiver,
+        type: handlerReceiver.type,
+        row: node.row,
+      };
+      receiver = {
+        kind: 'sequence',
+        locals: [],
+        sideEffects: [
+          {
+            kind: 'assign',
+            target: local as BoundLValue,
+            value: this.convert(receiver, handlerReceiver.type, node),
+            type: handlerReceiver.type,
+            row: node.row,
+          },
+        ],
+        value: local,
+        type: handlerReceiver.type,
+        row: node.row,
+      };
     }
     if (receiver && isRefLikeType(receiver.type) && method.owner.kind === 'class')
       this.reportInheritedOnRefStruct(receiver.type, method, node);
@@ -1787,13 +1840,22 @@ export abstract class MemberBinder extends CallBinder {
    * The return type of the most derived override that the receiver's static type has, which a call gets when an
    * override returns a more derived reference type (C# 9 covariant returns); undefined to use the method's own.
    */
-  private covariantReturn(group: Extract<NonValue, { kind: 'methodGroup' }>, method: MethodSymbol): Type | undefined {
+  private covariantReturn(
+    group: Extract<NonValue, { kind: 'methodGroup' }>,
+    method: MethodSymbol,
+    substitution: Map<TypeParameterSymbol, Type>
+  ): Type | undefined {
     if (!group.receiver || method.isStatic || !(method.isVirtual || method.isAbstract || method.isOverride))
       return undefined;
     const override = this.implementationIn(group.receiver.type, method);
     // A generic class's override would need its own type arguments, which introductory programs do not combine with this.
     if (override === method || override.owner.typeParameters.length > 0) return undefined;
-    return sameType(override.returnType, method.returnType) ? undefined : override.returnType;
+    // The override names its own type parameters, which stand for the method's by position.
+    const ownTypeParameters = new Map<TypeParameterSymbol, Type>(
+      override.typeParameters.map((parameter, index) => [parameter, method.typeParameters[index].type])
+    );
+    const returnType = substitute(override.returnType, ownTypeParameters);
+    return sameType(returnType, method.returnType) ? undefined : substitute(returnType, substitution);
   }
 
   /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
@@ -2147,13 +2209,22 @@ export abstract class MemberBinder extends CallBinder {
       }
       access = this.memberAccessOn(placeholder, found, member, context);
     } else {
-      access = this.bindElementAccess(placeholder, member.args, member, context);
+      access = this.bindIndexInitializerTarget(placeholder, member, context);
     }
     // An assigned member or indexer is written, so it goes through the assignment's accessor checks, while a nested
     // initializer reads the member and fills what it holds, so the member must be readable.
     if (!isNested) return this.checkAssignable(access, member, context, 'initializer');
     this.checkReadable(access, member, context);
     return access as BoundLValue;
+  }
+
+  protected createParamsCollection(
+    collection: Extract<ParamsCollection, { kind: 'constructible' | 'list' }>,
+    elements: BoundExpression[],
+    declaringType: TypeSymbol,
+    row: number
+  ): BoundExpression {
+    return createParamsCollection(this, collection, elements, declaringType, row);
   }
 
   /** Binds collection initializer elements as `Add` calls, which `{ a, b }` makes for each element. */
@@ -2202,6 +2273,13 @@ export abstract class MemberBinder extends CallBinder {
     });
   }
 
+  /** The element that `[i] = v` in an object initializer assigns, of the object that the placeholder stands for. */
+  protected abstract bindIndexInitializerTarget(
+    placeholder: BoundExpression,
+    member: Extract<MemberInitializer, { kind: 'indexAssign' }>,
+    context: BindContext
+  ): BoundExpression;
+
   /** Checks that storage can be assigned, reporting read-only fields, properties without setters, and values that are not variables. */
   abstract checkAssignable(
     target: BoundExpression,
@@ -2218,11 +2296,6 @@ export abstract class MemberBinder extends CallBinder {
   protected isSameMethodType(a: Type, b: Type): boolean {
     return sameType(a, b);
   }
-}
-
-/** Whether a member is an interface's static abstract or virtual member, which a type parameter's argument implements. */
-function isConstrained(member: MethodSymbol | PropertySymbol): boolean {
-  return member.isStatic && member.owner.kind === 'interface' && (member.isAbstract || member.isVirtual);
 }
 
 export { LocalSymbol, PropertySymbol, FieldSymbol };

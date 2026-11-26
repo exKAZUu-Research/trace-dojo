@@ -39,6 +39,28 @@ import {
 
 const UNSUPPORTED_TYPES: Record<string, string> = {};
 
+/** The keywords that name types, which the grammar reads as names after `scoped`. */
+const PREDEFINED_TYPE_NAMES = new Set([
+  'bool',
+  'byte',
+  'char',
+  'decimal',
+  'double',
+  'dynamic',
+  'float',
+  'int',
+  'long',
+  'nint',
+  'nuint',
+  'object',
+  'sbyte',
+  'short',
+  'string',
+  'uint',
+  'ulong',
+  'ushort',
+]);
+
 export class ExpressionConverter {
   /** @param isLibrary Whether the source is this grader's own library declarations, which use more syntax. */
   /** @param allowsUnsafe Whether the program is built with `AllowUnsafeBlocks`, without which `unsafe` is an error. */
@@ -46,6 +68,9 @@ export class ExpressionConverter {
     protected readonly isLibrary: boolean,
     protected readonly allowsUnsafe = false
   ) {}
+
+  /** While a property's accessor is being converted, how many `field` keywords it uses; otherwise undefined. */
+  protected fieldKeywordUses: number | undefined;
 
   /** Converts the body of a block, provided by the statement converter. */
   protected convertBlockNode(_node: Node): Block {
@@ -68,12 +93,10 @@ export class ExpressionConverter {
       }
       case 'generic_name': {
         const [name, args] = this.genericParts(node);
-        const [, argsNode] = namedChildren(node);
         // `List<>` and `Dictionary<,>` leave their type arguments out, which only `typeof` allows.
-        if (args.length === 0) {
-          const unboundArity = childrenOf(argsNode).filter((child) => child.type === ',').length + 1;
-          return { kind: 'namedType', name, typeArgs: undefined, unboundArity, ...position };
-        }
+        const unbound = unboundArityOf(node);
+        if (unbound.unboundArity !== undefined)
+          return { kind: 'namedType', name, typeArgs: undefined, ...unbound, ...position };
         return { kind: 'namedType', name, typeArgs: args, ...position };
       }
       case 'qualified_name': {
@@ -149,8 +172,12 @@ export class ExpressionConverter {
         };
       }
       case 'scoped_type': {
-        // `scoped` limits how far a reference may escape; this grader checks no lifetimes beyond those of locals.
-        return this.convertType(requiredField(node, 'type'));
+        // A declaration reads its `scoped`. The grammar reads a keyword type after it, as `scoped int`, as a name.
+        const inner = requiredField(node, 'type');
+        if (inner.type === 'identifier' && inner.text === 'var') return { kind: 'varType', ...positionOf(inner) };
+        if (inner.type === 'identifier' && PREDEFINED_TYPE_NAMES.has(inner.text))
+          return { kind: 'predefinedType', name: inner.text, ...positionOf(inner) };
+        return this.convertType(inner);
       }
       default: {
         const what = UNSUPPORTED_TYPES[node.type];
@@ -217,8 +244,8 @@ export class ExpressionConverter {
     const position = positionOf(node);
     switch (node.type) {
       case 'parenthesized_expression': {
-        const [inner] = namedChildren(node);
-        return this.convertExpression(inner);
+        const inner = this.convertExpression(namedChildren(node)[0]);
+        return inner.kind === 'stackalloc' ? { ...inner, isParenthesized: true } : inner;
       }
       case 'integer_literal':
       case 'real_literal':
@@ -234,11 +261,15 @@ export class ExpressionConverter {
         return { kind: 'interpolated', parts: this.convertInterpolated(node), ...position };
       }
       case 'identifier': {
+        if (node.text === 'field' && this.fieldKeywordUses !== undefined) {
+          this.fieldKeywordUses++;
+          return { kind: 'name', name: node.text, typeArgs: undefined, isFieldKeyword: true, ...position };
+        }
         return { kind: 'name', name: node.text, typeArgs: undefined, ...position };
       }
       case 'generic_name': {
         const [name, typeArgs] = this.genericParts(node);
-        return { kind: 'name', name, typeArgs, ...position };
+        return { kind: 'name', name, typeArgs, ...unboundArityOf(node), ...position };
       }
       case 'predefined_type': {
         return { kind: 'predefinedTypeName', name: node.text, ...position };
@@ -590,7 +621,16 @@ export class ExpressionConverter {
   private memberAccess(target: Expression, nameNode: Node, position: ReturnType<typeof positionOf>): Expression {
     const [name, typeArgs] =
       nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
-    return { kind: 'memberAccess', target, name, typeArgs, nameRow: nameNode.startPosition.row, ...position };
+    return {
+      kind: 'memberAccess',
+      target,
+      name,
+      typeArgs,
+      ...(nameNode.type === 'generic_name' ? unboundArityOf(nameNode) : {}),
+      nameRow: nameNode.startPosition.row,
+      ...(inUnsafeContext(nameNode) ? { isUnsafe: true as const } : {}),
+      ...position,
+    };
   }
 
   private convertPrefixUnary(node: Node): Expression {
@@ -807,18 +847,70 @@ export class ExpressionConverter {
   }
 
   private convertLambdaParameters(node: Node): LambdaParameter[] {
-    return namedChildren(node).map((parameter) => {
-      const typeNode = field(parameter, 'type');
-      const modifier = namedChildren(parameter).find((child) => child.type === 'modifier')?.text;
-      if (modifier !== undefined && !['ref', 'out', 'in'].includes(modifier))
-        unsupported(parameter, `ラムダ式の引数の \`${modifier}\``);
-      return {
-        name: requiredField(parameter, 'name').text,
-        type: typeNode ? this.convertType(typeNode) : undefined,
-        modifier: modifier as LambdaParameter['modifier'],
-        ...positionOf(parameter),
-      };
-    });
+    const parameters: LambdaParameter[] = [];
+    const children = childrenOf(node);
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      if (child.type === 'parameter') parameters.push(this.convertLambdaParameter(child));
+      else if (child.type === 'params') {
+        // The grammar keeps a `params` parameter's parts directly in the list.
+        const typeNode = children[index + 1];
+        const nameNode = children[index + 2];
+        parameters.push({
+          name: nameNode.text,
+          type: this.convertType(typeNode),
+          modifier: undefined,
+          isParams: true,
+          ...positionOf(nameNode),
+        });
+        index += 2;
+      }
+    }
+    return parameters;
+  }
+
+  private convertLambdaParameter(parameter: Node): LambdaParameter {
+    const typeNode = field(parameter, 'type');
+    const nameNode = requiredField(parameter, 'name');
+    const modifiers = namedChildren(parameter).filter((child) => child.type === 'modifier');
+    const defaultNode = namedChildren(parameter).find(
+      (child) =>
+        !sameNode(child, typeNode) &&
+        !sameNode(child, nameNode) &&
+        child.type !== 'modifier' &&
+        child.type !== 'attribute_list'
+    );
+    const written = this.lambdaParameterModifiers(parameter, modifiers);
+    return {
+      ...written,
+      name: nameNode.text,
+      type: typeNode ? this.convertType(typeNode) : undefined,
+      ...(typeNode?.type === 'scoped_type' ? { isScoped: true as const } : {}),
+      ...(defaultNode ? { defaultValue: this.convertExpression(defaultNode) } : {}),
+    };
+  }
+
+  /** A lambda parameter's position and what its modifiers say. */
+  private lambdaParameterModifiers(
+    parameter: Node,
+    modifiers: Node[]
+  ): Pick<LambdaParameter, 'modifier' | 'isRefReadonly' | 'isScoped' | 'row' | 'column'> {
+    let modifier: LambdaParameter['modifier'];
+    let isScoped = false;
+    let isRefReadonly = false;
+    for (const child of modifiers) {
+      if (child.text === 'scoped') isScoped = true;
+      else if (['ref', 'out', 'in'].includes(child.text)) modifier = child.text as LambdaParameter['modifier'];
+      else if (child.text === 'readonly' && modifier === 'ref') isRefReadonly = true;
+      else unsupported(parameter, `ラムダ式の引数の \`${child.text}\``);
+    }
+    return {
+      // A `ref readonly` parameter is passed by reference and read only, as an `in` parameter is.
+      modifier: isRefReadonly ? 'in' : modifier,
+      ...(isRefReadonly ? { isRefReadonly: true as const } : {}),
+      ...(isScoped ? { isScoped: true as const } : {}),
+      ...positionOf(parameter),
+    };
   }
 
   private convertLambda(node: Node): Expression {
@@ -828,14 +920,17 @@ export class ExpressionConverter {
         .map((child) => child.text)
     );
     const parameters: LambdaParameter[] = [];
+    // The grammar keeps the modifiers of implicitly typed parameters (C# 14), as `(ref a, out b)`, beside them.
+    let written: Node[] = [];
     for (const parameterNode of fieldChildren(node, 'parameters')) {
-      if (parameterNode.type === 'implicit_parameter') {
+      if (parameterNode.type === 'modifier') written.push(parameterNode);
+      else if (parameterNode.type === 'implicit_parameter') {
         parameters.push({
+          ...this.lambdaParameterModifiers(parameterNode, written),
           name: parameterNode.text,
           type: undefined,
-          modifier: undefined,
-          ...positionOf(parameterNode),
         });
+        written = [];
       } else if (parameterNode.type === 'parameter_list') {
         parameters.push(...this.convertLambdaParameters(parameterNode));
       }
@@ -1277,4 +1372,11 @@ function dedentRawParts(node: Node, parts: InterpolationPart[]): InterpolationPa
     if (index < holes.length) result.push(holes[holeIndex++]);
   }
   return result;
+}
+
+/** The arity of a generic name without type arguments, as `Dictionary<,>`, as a property to spread into its syntax. */
+function unboundArityOf(node: Node): { unboundArity?: number } {
+  const [, argsNode] = namedChildren(node);
+  if (namedChildren(argsNode).length > 0) return {};
+  return { unboundArity: childrenOf(argsNode).filter((child) => child.type === ',').length + 1 };
 }

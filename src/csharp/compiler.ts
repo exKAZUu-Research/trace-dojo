@@ -35,7 +35,7 @@ import {
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
-  type FieldSymbol,
+  FieldSymbol,
   type LocalSymbol,
   MethodSymbol,
   type NamedType,
@@ -310,7 +310,16 @@ export class Compiler extends AttributeBinder {
       type: undefined,
       methodTypeParameters: [],
     };
-    const method = new MethodSymbol('<dynamic>', typeContext.type ?? this.objectType.symbol, 'method');
+    return this.staticScope('<dynamic>', typeContext.type ?? this.objectType.symbol, typeContext);
+  }
+
+  /** A static method of an owner to bind code outside any member's body in, such as a default parameter value. */
+  private staticScope(
+    name: string,
+    owner: TypeSymbol,
+    typeContext: TypeContext
+  ): { method: MethodSymbol; context: BindContext } {
+    const method = new MethodSymbol(name, owner, 'method');
     method.isStatic = true;
     const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
     return { method, context: { scope: new LocalScope(undefined, fn), fn } };
@@ -510,6 +519,7 @@ export class Compiler extends AttributeBinder {
       return;
     }
     for (const field of symbol.fields) if (field.isConst) this.constantValueOf(field);
+    for (const field of symbol.fields) if (field.fixedBuffer) this.sizeFixedBuffer(field, field.fixedBuffer);
     const parameters = [...symbol.methods, ...symbol.constructors, ...symbol.properties].flatMap(
       (owner) => owner.parameters
     );
@@ -1000,6 +1010,29 @@ export class Compiler extends AttributeBinder {
     }
   }
 
+  /** Gives a fixed-size buffer's struct its elements, as many as its length, a constant above zero, says. */
+  private sizeFixedBuffer(field: FieldSymbol, buffer: NonNullable<FieldSymbol['fixedBuffer']>): void {
+    // The length binds as a constant of the field's name would, which Roslyn's errors name it by.
+    const size = new FieldSymbol(field.name, this.intType, field.owner);
+    size.isConst = true;
+    size.isStatic = true;
+    size.initializer = buffer.size;
+    size.row = field.row;
+    const errors = this.diagnostics.length;
+    const length = Number(this.constantValueOf(size));
+    if (length <= 0 && this.diagnostics.length === errors)
+      this.error(field.row, 'CS1665', '固定サイズ バッファーには、0 よりも大きい値を指定しなければなりません');
+    buffer.length = Math.max(length, 1);
+    const elements = (field.type as NamedType).symbol;
+    elements.fields = Array.from({ length: buffer.length }, (_, index) => {
+      const element = new FieldSymbol(`<${index}>`, buffer.elementType, elements);
+      element.access = 'public';
+      element.slot = index;
+      return element;
+    });
+    elements.instanceFieldCount = buffer.length;
+  }
+
   private evaluateConstant(field: FieldSymbol): unknown {
     const owner = field.owner;
     const declared = this.declaredTypes.find((type) => type.symbol === owner);
@@ -1016,9 +1049,11 @@ export class Compiler extends AttributeBinder {
     if (owner.kind === 'enum') return this.enumMemberValue(field, bindContext);
     // The parser rejects a constant without a value.
     if (!field.initializer) return 0;
+    const saved = this.diagnostics.length;
     const value = this.bindAs(field.initializer as Expression, field.type, bindContext);
     if (value.kind !== 'constant') {
-      if (value.type.kind !== 'error')
+      // An initializer with errors, as an overflow (CS0220), is no constant that Roslyn reports again.
+      if (value.type.kind !== 'error' && this.diagnostics.length === saved)
         this.error(
           field.row,
           'CS0133',
@@ -1058,27 +1093,11 @@ export class Compiler extends AttributeBinder {
     return typeof previous === 'bigint' ? previous + 1n : (previous as number) + 1;
   }
 
-  protected bindParameterDefault(parameter: ParameterSymbol, type: Type): BoundExpression {
+  protected bindParameterDefault(parameter: ParameterSymbol, type: Type, scope?: BindContext): BoundExpression {
     if (parameter.defaultValue)
       return { kind: 'constant', value: parameter.defaultValue.value, type, row: parameter.position?.row ?? 0 };
     const syntax = parameter.defaultSyntax as Expression;
-    const method = new MethodSymbol('<default>', this.objectType.symbol, 'method');
-    method.isStatic = true;
-    const fn = new FunctionScope(
-      method,
-      undefined,
-      parameter.defaultContext ?? {
-        namespace: [this.userRoot, this.library.root],
-        usings: this.globalImports([]).usings,
-        type: undefined,
-        methodTypeParameters: [],
-      },
-      VOID_TYPE,
-      true,
-      undefined,
-      'initializer'
-    );
-    const context: BindContext = { scope: new LocalScope(undefined, fn), fn };
+    const context = scope ?? this.defaultValueContext(parameter);
     const bound = this.bindAs(syntax, type, context);
     if (bound.kind === 'constant') {
       parameter.defaultValue = { value: bound.value };
@@ -1099,6 +1118,17 @@ export class Compiler extends AttributeBinder {
       );
     parameter.defaultValue = { value: undefined };
     return { kind: 'default', type: ERROR_TYPE, row: syntax.row };
+  }
+
+  /** The scope of a member's default parameter value, which sees the names where the member is declared. */
+  private defaultValueContext(parameter: ParameterSymbol): BindContext {
+    const typeContext = parameter.defaultContext ?? {
+      namespace: [this.userRoot, this.library.root],
+      usings: this.globalImports([]).usings,
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    return this.staticScope('<default>', this.objectType.symbol, typeContext).context;
   }
 }
 

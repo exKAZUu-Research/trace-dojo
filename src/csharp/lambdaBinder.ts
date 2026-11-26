@@ -1,10 +1,12 @@
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { AnonymousDelegates, hasDefault } from './anonymousDelegates';
 import type { Block, Expression, LambdaParameter } from './ast';
 import type { BoundBlock, BoundExpression, LambdaInfo } from './bound';
 import type { ArgumentInfo } from './callBinder';
 import type { BindContext } from './convertBinder';
 import { FlowAnalyzer } from './flow';
 import { MemberBinder, type NonValue } from './memberBinder';
+import { paramsCollectionOf } from './paramsCollections';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope } from './scopes';
 import { markSuspends } from './suspension';
@@ -16,6 +18,8 @@ import {
   MethodSymbol,
   type NamedType,
   namedType,
+  type ParameterSymbol,
+  refKeyword,
   sameType,
   substitute,
   type Type,
@@ -47,6 +51,11 @@ export abstract class LambdaBinder extends MemberBinder {
     Map<string, { result: BoundExpression | undefined; diagnostics: SourceDiagnostic[]; returnType: Type | undefined }>
   >();
 
+  /** Binds a parameter's default value, which must be a constant, `default`, or `new S()` of a value type. */
+  protected abstract bindParameterDefault(parameter: ParameterSymbol, type: Type, scope?: BindContext): BoundExpression;
+
+  private readonly anonymousDelegates = new AnonymousDelegates(() => this.wellKnown.multicastDelegate);
+
   protected naturalTypeOf(expression: Unbound): Type | undefined {
     const node = expression.node;
     if (expression.methodGroup)
@@ -54,16 +63,57 @@ export abstract class LambdaBinder extends MemberBinder {
     if (node.kind === 'lambda') {
       if (node.omitsParameters || node.parameters.some((parameter) => !parameter.type)) return undefined;
       const context = expression.context as BindContext;
-      const parameterTypes = node.parameters.map((parameter) =>
-        this.resolveType(parameter.type as NonNullable<LambdaParameter['type']>, context.fn.typeContext)
-      );
-      const declaredReturn = node.returnType ? this.resolveType(node.returnType, context.fn.typeContext) : undefined;
+      const parameters = node.parameters.map((parameter) => this.lambdaParameterSymbol(parameter, context));
+      const parameterTypes = parameters.map((parameter) => parameter.type);
+      // `ref int () => ref x` returns by reference, which only a delegate type of the compiler's does.
+      const byRef = { returnsByRef: undefined as 'ref' | 'readonly' | undefined };
+      const declaredReturn = node.returnType
+        ? this.resolveReturnType(node.returnType, context.fn.typeContext, byRef)
+        : undefined;
       const returnType =
         declaredReturn ?? this.bindLambda(node, context, undefined, parameterTypes, undefined, false).returnType;
       if (!returnType) return undefined;
-      return this.functionTypeOf(parameterTypes, returnType);
+      const isScoped = node.parameters.some((parameter) => parameter.isScoped);
+      return this.delegateTypeOf(parameters, returnType, isScoped, byRef.returnsByRef);
     }
     return undefined;
+  }
+
+  /** A lambda's explicitly typed parameter as a delegate's, with its default value bound without reporting errors. */
+  private lambdaParameterSymbol(parameter: LambdaParameter, context: BindContext): ParameterSymbol {
+    const symbol: ParameterSymbol = {
+      name: parameter.name,
+      type: this.resolveType(parameter.type as NonNullable<LambdaParameter['type']>, context.fn.typeContext),
+      refKind: parameter.modifier,
+      ...(parameter.isRefReadonly ? { isRefReadonly: true } : {}),
+      isParams: parameter.isParams === true,
+      position: parameter,
+    };
+    if (parameter.defaultValue) {
+      symbol.defaultSyntax = parameter.defaultValue;
+      symbol.defaultContext = context.fn.typeContext;
+      this.quietly(() => this.bindParameterDefault(symbol, symbol.type, context));
+    }
+    return symbol;
+  }
+
+  /**
+   * The natural delegate type of parameters and a return type: `Func` or `Action`, or else a delegate type the compiler
+   * makes, for parameters passed by reference, `params` parameters, default values, and `scoped` parameters.
+   */
+  private delegateTypeOf(
+    parameters: ParameterSymbol[],
+    returnType: Type,
+    isScoped: boolean,
+    returnsByRef?: 'ref' | 'readonly'
+  ): NamedType | undefined {
+    const plain = parameters.every((parameter) => !parameter.refKind && !parameter.isParams && !hasDefault(parameter));
+    if (plain && !isScoped && !returnsByRef)
+      return this.functionTypeOf(
+        parameters.map((parameter) => parameter.type),
+        returnType
+      );
+    return this.anonymousDelegates.typeOf(parameters, returnType, isScoped, returnsByRef);
   }
 
   /** The natural type of a method group of one method, whose type arguments, if any, it must not need inferred. */
@@ -81,10 +131,11 @@ export abstract class LambdaBinder extends MemberBinder {
           : undefined;
     if (!typeArgs) return undefined;
     const substitution = this.callSubstitution(candidate, typeArgs);
-    return this.functionTypeOf(
-      method.parameters.map((parameter) => substitute(parameter.type, substitution)),
-      substitute(method.returnType, substitution)
-    );
+    const parameters = method.parameters.map((parameter) => ({
+      ...parameter,
+      type: substitute(parameter.type, substitution),
+    }));
+    return this.delegateTypeOf(parameters, substitute(method.returnType, substitution), false, method.returnsByRef);
   }
 
   /** The `Func` or `Action` type of parameter and return types, the natural type of lambdas and method groups. */
@@ -136,6 +187,7 @@ export abstract class LambdaBinder extends MemberBinder {
     );
   }
 
+  // code-gauge-allow functionNcss -- Each check is one way that Roslyn rejects a lambda for a delegate type.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected bindLambdaTo(
     written: LambdaExpression,
@@ -177,6 +229,8 @@ export abstract class LambdaBinder extends MemberBinder {
         );
       return undefined;
     }
+    if (this.reportRefKindMismatches(node, (target as NamedType).symbol.invoke?.parameters ?? [], report))
+      return undefined;
     const mismatches = node.parameters.flatMap((parameter, index) => {
       if (!parameter.type) return [];
       const declared = this.resolveType(parameter.type, context.fn.typeContext);
@@ -198,6 +252,38 @@ export abstract class LambdaBinder extends MemberBinder {
       return undefined;
     }
     return this.bindLambda(node, context, target as NamedType, invoke.parameterTypes, invoke.returnType, report).result;
+  }
+
+  /**
+   * Reports each parameter declared otherwise than its delegate's by `ref`, `out`, or `in` (CS1676, CS1677), where `in`
+   * and `ref readonly` agree and either may stand for `ref`; tells whether any is.
+   */
+  private reportRefKindMismatches(
+    node: LambdaExpression,
+    delegateParameters: readonly ParameterSymbol[],
+    report: boolean
+  ): boolean {
+    let isMismatched = false;
+    for (const [index, parameter] of node.parameters.entries()) {
+      const expected = delegateParameters[index];
+      const written = parameter.modifier;
+      if (!expected || written === expected.refKind || (written === 'in' && expected.refKind === 'ref')) continue;
+      isMismatched = true;
+      if (!report) continue;
+      if (expected.refKind)
+        this.error(
+          parameter,
+          'CS1676',
+          `パラメーター ${index + 1} はキーワード '${refKeyword(expected)}' で宣言する必要があります`
+        );
+      else
+        this.error(
+          parameter,
+          'CS1677',
+          `パラメーター ${index + 1} はキーワード '${refKeyword({ refKind: written, isRefReadonly: parameter.isRefReadonly })}' で宣言しないでください`
+        );
+    }
+    return isMismatched;
   }
 
   /** The anonymous methods without parameter lists, with the parameters given them for each count, kept for the cache. */
@@ -284,6 +370,7 @@ export abstract class LambdaBinder extends MemberBinder {
       return { result: undefined, returnType: undefined };
     }
     const bodyReturnType = shape ? shape.resultType : returnType;
+    if (report) this.checkLambdaParameters(node, parameterTypes, outer);
     const context = this.lambdaContext(node, outer, parameterTypes, bodyReturnType);
     context.fn.method.returnsByRef = delegateType?.symbol.invoke?.returnsByRef;
     if (node.isAsync) {
@@ -334,6 +421,40 @@ export abstract class LambdaBinder extends MemberBinder {
     return { result: converted, returnType: inferred };
   }
 
+  /** Reports misplaced `params` parameters and optional parameters, and default values that are no constants. */
+  private checkLambdaParameters(node: LambdaExpression, parameterTypes: Type[], outer: BindContext): void {
+    let hasOptional = false;
+    for (const [index, parameter] of node.parameters.entries()) {
+      const type = parameterTypes[index] ?? ERROR_TYPE;
+      if (parameter.isScoped) this.checkScoped(parameter, type, parameter.modifier);
+      if (parameter.isParams) {
+        if (index !== node.parameters.length - 1)
+          this.error(
+            parameter,
+            'CS0231',
+            'params パラメーターは、パラメーター リストの最後のパラメーターでなければなりません'
+          );
+        if (type.kind !== 'error' && !paramsCollectionOf(type, this.objectType))
+          this.error(parameter, 'CS0225', 'params パラメーターには有効なコレクションの種類が必要です');
+      } else if (parameter.defaultValue) {
+        hasOptional = true;
+        this.bindParameterDefault(
+          {
+            name: parameter.name,
+            type,
+            refKind: parameter.modifier,
+            isParams: false,
+            defaultSyntax: parameter.defaultValue,
+            defaultContext: outer.fn.typeContext,
+          },
+          type,
+          outer
+        );
+      } else if (hasOptional)
+        this.error(parameter, 'CS1737', '省略可能なパラメーターはすべての必須パラメーターの後で指定する必要があります');
+    }
+  }
+
   /** The scope of a lambda's body, with a method for the lambda and its parameters declared. */
   private lambdaContext(
     node: LambdaExpression,
@@ -350,7 +471,8 @@ export abstract class LambdaBinder extends MemberBinder {
       name: parameter.name,
       type: parameterTypes[index] ?? ERROR_TYPE,
       refKind: parameter.modifier,
-      isParams: false,
+      ...(parameter.isRefReadonly ? { isRefReadonly: true } : {}),
+      isParams: parameter.isParams === true,
     }));
     const fn = new FunctionScope(
       method,
@@ -489,6 +611,7 @@ export abstract class LambdaBinder extends MemberBinder {
     const local = new LocalSymbol(parameter.name, type, parameter.row, parameter.column);
     local.isParameter = true;
     local.refKind = parameter.modifier;
+    local.isScoped = parameter.isScoped === true;
     local.isTransparent = parameter.name.startsWith(TRANSPARENT_PREFIX);
     local.isHidden = local.isTransparent;
     context.fn.addLocal(local);

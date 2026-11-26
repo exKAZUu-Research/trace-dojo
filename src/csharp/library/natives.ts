@@ -5,6 +5,7 @@ import './nativesNumberStatics';
 import './nativesTime';
 import './nativesDateOnly';
 import './nativesGlobalization';
+import './nativesFormattable';
 import './nativesIndex';
 import './nativesIterators';
 import './nativesPath';

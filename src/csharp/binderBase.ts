@@ -695,14 +695,16 @@ export class BinderBase {
       const found = namespace.findType(name, args.length);
       if (found) return this.construct(position, found, args);
     }
+    // `global::Name` names a type of the global namespace, where .NET has none.
     const unavailable =
-      this.unavailableType([...path, name].join('.'), name) ?? unavailableDotnetNamespace([...path, name]);
+      (path.length > 0 ? this.unavailableType([...path, name].join('.'), name) : undefined) ??
+      unavailableDotnetNamespace([...path, name]);
     if (unavailable) this.unsupported(position, unavailable);
     if (path.length === 0) {
       this.error(
         position,
         'CS0400',
-        `型または名前空間の名前 '${name}' はグローバル名前空間に見つかりませんでした (アセンブリ参照が存在することを確認してください)`
+        `型名または名前空間名 '${name}' がグローバル名前空間に見つかりませんでした (アセンブリ参照が存在することを確認してください)`
       );
       return ERROR_TYPE;
     }
@@ -747,7 +749,7 @@ export class BinderBase {
       this.reportTypeArityMismatch(position, otherArity);
       return ERROR_TYPE;
     }
-    const unavailable = this.unavailableType(name, name);
+    const unavailable = this.unavailableType(name, name, context);
     if (unavailable) this.unsupported(position, unavailable);
     this.error(
       position,
@@ -769,12 +771,33 @@ export class BinderBase {
       );
   }
 
-  /** Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too. */
-  protected unavailableType(name: string, simpleName: string): string | undefined {
-    return unavailableTypeOf(name, simpleName, (fullName) => {
-      const parts = fullName.split('.');
-      return this.library.root.resolve(parts.slice(0, -1), false)?.types.has(parts.at(-1) as string) ?? false;
-    });
+  /**
+   * Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too; a simple name
+   * names one only through a namespace in scope of the context, as the name would bind to it in .NET.
+   */
+  protected unavailableType(name: string, simpleName: string, context?: TypeContext): string | undefined {
+    const inScope = context ? this.namespacePathsInScope(context) : new Set<string>();
+    return unavailableTypeOf(
+      name,
+      simpleName,
+      (fullName) => {
+        const parts = fullName.split('.');
+        return this.library.root.resolve(parts.slice(0, -1), false)?.types.has(parts.at(-1) as string) ?? false;
+      },
+      (namespace) => inScope.has(namespace)
+    );
+  }
+
+  /**
+   * The dotted paths of the namespaces whose types a simple name finds in a context: those around it and those its
+   * usings import, with the implicit usings that .NET has although the library lacks some of their namespaces.
+   */
+  private namespacePathsInScope(context: TypeContext): Set<string> {
+    const paths = new Set<string>();
+    for (const group of [...this.enclosingNamespaces(context), ...context.usings])
+      for (const namespace of group) paths.add(namespacePathOf(namespace).join('.'));
+    if (this.implicitUsings) for (const path of IMPLICIT_USINGS) paths.add(path.join('.'));
+    return paths;
   }
 
   /** Finds a type in the namespaces around a declaration and its usings; an arity of -1 matches any arity. */
@@ -866,20 +889,28 @@ export class BinderBase {
     const parameters = symbol.allTypeParameters;
     const display = displayTypeSymbol(symbol);
     const areKindsAllowed = args
-      .map((arg, index) => this.checkTypeArgumentKind(arg, parameters[index].name, display, position.row))
+      .map((arg, index) =>
+        this.checkTypeArgumentKind(
+          arg,
+          parameters[index].name,
+          display,
+          position.row,
+          parameters[index].allowsRefStruct
+        )
+      )
       .every(Boolean);
     if (areKindsAllowed && args.length > 0 && symbol.special !== 'nullable')
       this.constraintChecks.push({ symbol, args, row: position.row });
     return namedType(symbol, args);
   }
 
-  /** Reports a ref struct as a type argument, which no type parameter of this grader's or a program's allows. */
-  checkTypeArgumentKind(arg: Type, parameter: string, owner: string, row: number): boolean {
+  /** Reports a ref struct as a type argument, which only a type parameter with `allows ref struct` takes. */
+  checkTypeArgumentKind(arg: Type, parameter: string, owner: string, row: number, allowsRefStruct = false): boolean {
     if (isRestrictedType(arg)) {
       this.error(row, 'CS0306', `型 '${displayType(arg)}' は型引数として使用できません`);
       return false;
     }
-    if (isRefLikeType(arg)) {
+    if (isRefLikeType(arg) && !allowsRefStruct) {
       this.error(
         row,
         'CS9244',

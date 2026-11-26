@@ -137,6 +137,11 @@ export abstract class EvaluatorBase {
     throw NULL_REFERENCE();
   }
 
+  /** The type environment of a generic static method, as an extension method, called with type arguments. */
+  protected staticEnvironment(method: MethodSymbol, typeArgs: Type[], frame: Frame): Map<TypeParameterSymbol, Type> {
+    return new Map(method.typeParameters.map((parameter, index) => [parameter, frame.resolve(typeArgs[index])]));
+  }
+
   /** The type environment of an instance method called on a receiver of a runtime type. */
   protected environmentFor(method: MethodSymbol, receiverType: Type | undefined): Map<TypeParameterSymbol, Type> {
     if (!receiverType || receiverType.kind !== 'named') return new Map();

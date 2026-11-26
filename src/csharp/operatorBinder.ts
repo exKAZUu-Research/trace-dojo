@@ -319,7 +319,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     this.error(
       row,
       'CS0019',
-      `演算子 '${operator}' を '${displayType(left.type)}' と '${displayType(right.type)}' 型のオペランドに適用することはできません`
+      `演算子 '${operator}' を '${operandDisplay(left)}' と '${operandDisplay(right)}' 型のオペランドに適用することはできません`
     );
   }
 
@@ -723,4 +723,11 @@ function isNonNegativeIntConstant(operand: BoundExpression): boolean {
 /** Whether an operand may be compared as a pointer: a pointer, or null. */
 function isPointerOperand(operand: BoundExpression): boolean {
   return isPointerType(operand.type) || operand.type.kind === 'null';
+}
+
+/** An operand's type as Roslyn names it: a `stackalloc` that no pointer local takes is a Span, which has no operators. */
+function operandDisplay(operand: BoundExpression): string {
+  return operand.kind === 'unbound' && operand.spanElement
+    ? `Span<${displayType(operand.spanElement)}>`
+    : displayType(operand.type);
 }

@@ -153,6 +153,8 @@ export class Evaluator extends PointerEvaluator {
     typeEnvironment: Map<TypeParameterSymbol, Type>,
     captured?: Map<LocalSymbol, Cell>
   ): Value {
+    // A delegate's Invoke has no body: a delegate made from `d.Invoke` calls d's invocation list.
+    if (method.kind === 'delegateInvoke') return this.invokeDelegate(caller, receiver, args, callRow);
     // A struct's method called through its box, as a virtual call on an object does, runs on the boxed value.
     const self = receiver instanceof CsBox && method.owner.isValueType ? receiver.value : receiver;
     if (method.native) {
@@ -174,9 +176,9 @@ export class Evaluator extends PointerEvaluator {
       }
     }
     const body = method.body;
-    const backingField = method.property?.backingField;
+    const backingField = method.property?.backingField ?? method.property?.keywordField;
     if (!body && backingField) {
-      // An auto-property's accessors read and write its backing field.
+      // An auto-property's accessors, and `get;` or `set;` beside an accessor using `field`, use its backing field.
       const fields = backingField.isStatic
         ? this.runtime.staticsOf(this.ownerFromEnvironment(method, typeEnvironment) as NamedType)
         : this.fieldsOf(self);

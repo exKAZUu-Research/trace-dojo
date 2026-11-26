@@ -1,16 +1,31 @@
-import type { Designation, Expression, Pattern, Position, TypeNode } from './ast';
+import type { Designation, Expression, MemberInitializer, Pattern, Position, TypeNode } from './ast';
 import { bindAwaitPattern } from './awaitPattern';
-import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
-import type { ArgumentInfo } from './callBinder';
+import type {
+  BoundDeconstruct,
+  BoundDeconstructTarget,
+  BoundExpression,
+  BoundLValue,
+  BoundMemberInit,
+  BoundPattern,
+} from './bound';
+import type { ArgumentInfo, ResolvedCall } from './callBinder';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext, ConversionMode } from './convertBinder';
 import { CsDecimal } from './decimal';
 import { isDelegateType } from './declarations';
 import { missingDeconstruct } from './deconstructionErrors';
+import {
+  bindFormattable,
+  bindHandler,
+  type InterpolationParts,
+  type InterpolationSource,
+  interpolationTargetOf,
+} from './interpolatedConversions';
 import { LambdaBinder, typeIdentityKey } from './lambdaBinder';
 import type { MethodCandidate } from './lookup';
 import { type BindResult, isNonValue, type NonValue } from './memberBinder';
 import { ASSIGNMENT_OPERATOR_NAMES, checkedOperatorName } from './natives';
+import { paramsCollectionOf } from './paramsCollections';
 import type { Space } from './patternSpace';
 // code-gauge-allow-file fileNcss -- The expressionBinder module keeps one stage of the C# interpreter together.
 import { sizeOf } from './pointers';
@@ -49,7 +64,7 @@ import {
   VOID_TYPE,
 } from './types';
 import type { CsObject } from './values';
-import { isFixedVariable } from './variables';
+import { isFixedBufferAccess, isFixedVariable } from './variables';
 
 type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
 
@@ -96,6 +111,18 @@ export abstract class ExpressionBinder extends LambdaBinder {
     );
   }
 
+  /** `field` in a property's accessor, or in a lambda or local function there (C# 14): the property's backing field. */
+  private bindFieldKeyword(node: Expression, context: BindContext): BoundExpression {
+    let fn: FunctionScope | undefined = context.fn;
+    while (fn && !fn.method.property) fn = fn.outer;
+    const field = fn?.method.property?.keywordField;
+    // An interface's instance property has no field to name, which its declaration already reports (CS0525).
+    if (!field) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    if (field.isStatic)
+      return { kind: 'staticField', field, owner: field.owner.declaredType, type: field.type, row: node.row };
+    return { kind: 'field', receiver: this.thisValue(context, node), field, type: field.type, row: node.row };
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of primary expression.
   private bindPrimaryExpression(node: Expression, context: BindContext): BindResult | undefined {
     const row = node.row;
@@ -107,6 +134,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return this.bindInterpolated(node, context);
       }
       case 'name': {
+        if (node.isFieldKeyword) return this.bindFieldKeyword(node, context);
         return this.namingMemberOf(node, () => this.bindSimpleName(node.name, node.typeArgs, node, context));
       }
       case 'aliasQualified': {
@@ -133,7 +161,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
         return { kind: 'default', type: ERROR_TYPE, row };
       }
       case 'memberAccess': {
-        return this.bindMemberAccess(node, context);
+        const access = this.bindMemberAccess(node, context);
+        if (!node.isUnsafe && isFixedBufferAccess(access)) this.reportOutsideUnsafe(node);
+        return access;
       }
       case 'conditionalAccess': {
         return this.bindConditionalAccess(node, context);
@@ -167,7 +197,10 @@ export abstract class ExpressionBinder extends LambdaBinder {
     node: Extract<Expression, { kind: 'elementAccess' }>,
     context: BindContext
   ): BindResult {
+    const allowed = this.allowsMovableFixedBuffer;
+    this.allowsMovableFixedBuffer = node.target.kind === 'memberAccess' || node.target.kind === 'name';
     const target = this.bindTypedValue(node.target, context);
+    this.allowsMovableFixedBuffer = allowed;
     // `p[i]` is `*(p + i)`.
     if (isPointerType(target.type) && node.args.length === 1) {
       const index = this.bindValue(node.args[0].value, context);
@@ -207,7 +240,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'stackalloc': {
         if (!node.isUnsafe) return this.unsupported(node, 'Span への `stackalloc`');
-        return this.bindStackalloc(node, undefined, context);
+        return this.bindNestedStackalloc(node, context);
       }
       case 'makeRef':
       case 'refType':
@@ -545,7 +578,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindInterpolated(node: Extract<Expression, { kind: 'interpolated' }>, context: BindContext): BoundExpression {
-    const parts: Extract<BoundExpression, { kind: 'interpolated' }>['parts'] = [];
+    const parts: InterpolationParts = [];
+    const holes: Position[] = [];
     for (const part of node.parts) {
       if (part.text !== undefined) {
         parts.push(part.text);
@@ -580,10 +614,25 @@ export abstract class ExpressionBinder extends LambdaBinder {
         else alignment = bound.value as number;
       }
       parts.push({ value, alignment, format: hole.format });
+      holes.push(hole.expression);
     }
-    if (parts.every((part) => typeof part === 'string'))
-      return this.constant(parts.join(''), this.stringType, node.row);
-    return { kind: 'interpolated', parts, type: this.stringType, row: node.row };
+    const bound =
+      holes.length === 0
+        ? this.constant(parts.join(''), this.stringType, node.row)
+        : { kind: 'interpolated' as const, parts, type: this.stringType, row: node.row };
+    this.interpolations.set(bound, { parts, position: node, holes, context });
+    return bound;
+  }
+
+  protected bindInterpolationConversion(
+    source: InterpolationSource,
+    target: NamedType,
+    handlerArguments: BoundExpression[],
+    row: number
+  ): BoundExpression {
+    return interpolationTargetOf(target) === 'handler'
+      ? bindHandler(this, source, target, handlerArguments, row)
+      : bindFormattable(this, source, target, row);
   }
 
   private isCharSpan(type: Type): boolean {
@@ -644,6 +693,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
       other.kind !== 'unbound' &&
       other.type.kind === 'named' &&
       other.type.symbol.kind === 'delegate';
+    if ((operator === '==' || operator === '!=') && this.isTupleOperand(left) && this.isTupleOperand(right)) {
+      return this.bindTupleEquality(operator, left, right, node.row, context);
+    }
     for (const [operand, syntax] of [
       [left, node.left],
       [right, node.right],
@@ -658,9 +710,6 @@ export abstract class ExpressionBinder extends LambdaBinder {
       const converted = (operand: BoundExpression): BoundExpression =>
         operand.kind === 'unbound' ? this.convert(operand, typed.type, row) : operand;
       return this.bindBinary(operator, converted(left), converted(right), row);
-    }
-    if ((operator === '==' || operator === '!=') && this.isTuple(left.type) && this.isTuple(right.type)) {
-      return this.bindTupleEquality(operator, left, right, node.row, context);
     }
     const result = this.bindBinary(operator, left, right, row);
     return { ...result, row: node.row } as BoundExpression;
@@ -759,33 +808,25 @@ export abstract class ExpressionBinder extends LambdaBinder {
     row: number,
     context: BindContext
   ): BoundExpression {
-    const leftType = left.type as NamedType;
-    const rightType = right.type as NamedType;
-    if (leftType.args.length !== rightType.args.length) {
-      this.reportBinary(operator, left, right, row);
+    const leftOperand = this.tupleEqualityOperand(left, row, context);
+    const rightOperand = this.tupleEqualityOperand(right, row, context);
+    if (leftOperand.elements.length !== rightOperand.elements.length) {
+      this.error(
+        row,
+        'CS8384',
+        `演算子 == または != のオペランドとして使用するタプルの型は、カーディナリティが一致している必要があります。しかし、この演算子は、左辺のタプルの型のカーディナリティが ${leftOperand.elements.length} で、右辺が ${rightOperand.elements.length} です。`
+      );
       return { kind: 'default', type: ERROR_TYPE, row };
     }
-    const temporaryOf = (type: Type): BoundExpression => {
-      const local = new LocalSymbol('\0tuple', type, row, 0);
-      local.isHidden = true;
-      context.fn.addLocal(local);
-      return { kind: 'local', local, type, row };
-    };
-    const leftTemporary = temporaryOf(leftType);
-    const rightTemporary = temporaryOf(rightType);
-    const element = (tuple: BoundExpression, type: NamedType, index: number): BoundExpression => ({
-      kind: 'field',
-      receiver: tuple,
-      field: type.symbol.fields.find((field) => field.name === `Item${index + 1}`) as FieldSymbol,
-      type: type.args[index],
-      row,
-    });
-    const comparisons = leftType.args.map((_, index) => {
-      const a = element(leftTemporary, leftType, index);
-      const b = element(rightTemporary, rightType, index);
-      return this.isTuple(a.type) && this.isTuple(b.type)
-        ? this.bindTupleEquality(operator, a, b, row, context)
-        : this.bindBinary(operator, a, b, row);
+    const comparisons = leftOperand.elements.map((a, index) => {
+      const b = rightOperand.elements[index];
+      if (this.isTupleOperand(a) && this.isTupleOperand(b)) return this.bindTupleEquality(operator, a, b, row, context);
+      // An element without a type, as `null` in `t == (1, null)`, takes the other element's type, as an operand does.
+      if (a.kind === 'unbound' && b.kind !== 'unbound')
+        return this.bindBinary(operator, this.convert(a, b.type, row), b, row);
+      if (b.kind === 'unbound' && a.kind !== 'unbound')
+        return this.bindBinary(operator, a, this.convert(b, a.type, row), row);
+      return this.bindBinary(operator, a, b, row);
     });
     let value = comparisons[0];
     for (const comparison of comparisons.slice(1)) {
@@ -798,22 +839,59 @@ export abstract class ExpressionBinder extends LambdaBinder {
         row,
       };
     }
-    const assign = (target: BoundExpression, source: BoundExpression): BoundExpression => ({
-      kind: 'assign',
-      target: target as BoundLValue,
-      value: source,
-      type: target.type,
-      row,
-    });
     return {
       kind: 'sequence',
       // The operands' hidden locals leave scope with the comparison, so they hold nothing the program has let go.
-      locals: [leftTemporary, rightTemporary].map((temporary) => (temporary as { local: LocalSymbol }).local),
-      sideEffects: [assign(leftTemporary, left), assign(rightTemporary, right)],
+      locals: [...leftOperand.locals, ...rightOperand.locals],
+      sideEffects: [...leftOperand.sideEffects, ...rightOperand.sideEffects],
       value,
       type: this.boolType,
       row,
     };
+  }
+
+  /** A tuple, or a tuple literal without a natural type, as `(1, null)`. */
+  private isTupleOperand(operand: BoundExpression): boolean {
+    return this.isTuple(operand.type) || (operand.kind === 'unbound' && operand.node.kind === 'tuple');
+  }
+
+  /**
+   * The elements that a tuple equality compares of one operand, which it evaluates first into hidden locals: a tuple's
+   * fields, or each element of a tuple literal without a natural type, whose typeless elements stay unbound.
+   */
+  private tupleEqualityOperand(
+    operand: BoundExpression,
+    row: number,
+    context: BindContext
+  ): { elements: BoundExpression[]; locals: LocalSymbol[]; sideEffects: BoundExpression[] } {
+    const locals: LocalSymbol[] = [];
+    const sideEffects: BoundExpression[] = [];
+    const temporaryOf = (value: BoundExpression): BoundExpression => {
+      const local = new LocalSymbol('\0tuple', value.type, row, 0);
+      local.isHidden = true;
+      context.fn.addLocal(local);
+      locals.push(local);
+      const temporary: BoundExpression = { kind: 'local', local, type: value.type, row };
+      sideEffects.push({ kind: 'assign', target: temporary as BoundLValue, value, type: value.type, row });
+      return temporary;
+    };
+    if (operand.kind === 'unbound' && operand.node.kind === 'tuple') {
+      const elements = operand.node.elements.map((element) => {
+        const value = this.bindValue(element.value, context);
+        return value.kind === 'unbound' || value.kind === 'constant' ? value : temporaryOf(value);
+      });
+      return { elements, locals, sideEffects };
+    }
+    const type = operand.type as NamedType;
+    const tuple = temporaryOf(operand);
+    const elements = type.args.map((elementType, index): BoundExpression => ({
+      kind: 'field',
+      receiver: tuple,
+      field: type.symbol.fields.find((field) => field.name === `Item${index + 1}`) as FieldSymbol,
+      type: elementType,
+      row,
+    }));
+    return { elements, locals, sideEffects };
   }
 
   private bindCoalesce(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
@@ -1244,6 +1322,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
       case 'tuple': {
         return this.bindTupleTo(node, context, target, mode, report);
       }
+      case 'stackalloc': {
+        return this.convertNestedStackalloc(expression, target, report);
+      }
       default: {
         return undefined;
       }
@@ -1351,9 +1432,31 @@ export abstract class ExpressionBinder extends LambdaBinder {
     context.fn.addLocal(temporary);
     const receiver: BoundExpression = { kind: 'local', local: temporary, type: createType, row };
     const sideEffects: BoundExpression[] = [];
+    // Roslyn reports a lone constructor that needs arguments as the collection's, rather than the call's CS7036.
+    const constructors =
+      createType.kind === 'named' && createType.symbol.kind === 'class'
+        ? createType.symbol.constructors.filter((constructor) => constructor.access === 'public')
+        : [];
+    if (constructors.length === 1 && !constructors[0].parameters.every(isOptionalParameter)) {
+      this.error(
+        node,
+        'CS9214',
+        'コレクション式の型には、引数なしで呼び出すことができる適用可能なコンストラクターが必要です。'
+      );
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
     const created = this.bindCreation(createType, [], undefined, node, context);
     sideEffects.push({ kind: 'assign', target: receiver as BoundLValue, value: created, type: createType, row });
     const isList = sameType(createType, listType);
+    // A type with no `Add` at all reports its missing member as the first element's call does.
+    if (elements.length > 0 && this.addArity(createType, context) === 'other') {
+      this.error(
+        node,
+        'CS9215',
+        `コレクション式の型 '${displayType(target)}' には、1 つの引数で呼び出すことができるインスタンスメソッドまたは拡張メソッド 'Add' が必要です。`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
     for (const element of elements) {
       if (element.spread && !isList) {
         sideEffects.push(this.addAll(receiver, element.value, elementType, node));
@@ -1377,6 +1480,60 @@ export abstract class ExpressionBinder extends LambdaBinder {
       value = this.convert(receiver, target, node);
     }
     return { kind: 'sequence', locals: [temporary], sideEffects, value, type: target, row };
+  }
+
+  /**
+   * Reports a `params` class or struct (C# 13) that `new T()` cannot create, as the collection expression of its
+   * arguments would, or whose `Add` no element may call.
+   */
+  protected checkParamsCollections(parameters: readonly ParameterSymbol[], context: BindContext): void {
+    for (const parameter of parameters) if (parameter.isParams) this.checkParamsCollection(parameter, context);
+  }
+
+  private checkParamsCollection(parameter: ParameterSymbol, context: BindContext): void {
+    const collection = paramsCollectionOf(parameter.type, this.objectType);
+    if (collection?.kind !== 'constructible') return;
+    const { type } = collection;
+    const position = parameter.position ?? { row: 0, column: 0 };
+    const constructors =
+      type.symbol.kind === 'class'
+        ? type.symbol.constructors.filter((constructor) => constructor.access === 'public')
+        : [];
+    if (constructors.length === 1 && !constructors[0].parameters.every(isOptionalParameter)) {
+      this.error(
+        position,
+        'CS9228',
+        '配列 params コレクション以外の種類には、引数なしで呼び出すことができる適用可能なコンストラクターが必要です。'
+      );
+      return;
+    }
+    const saved = this.diagnostics.length;
+    this.bindCreation(type, [], undefined, position, context);
+    if (this.diagnostics.length > saved) return;
+    const arity = this.addArity(type, context);
+    if (arity === 'none') this.error(position, 'CS0117', `'${displayType(type)}' に 'Add' の定義がありません`);
+    else if (arity === 'other')
+      this.error(
+        position,
+        'CS9215',
+        `コレクション式の型 '${displayType(type)}' には、1 つの引数で呼び出すことができるインスタンスメソッドまたは拡張メソッド 'Add' が必要です。`
+      );
+  }
+
+  /**
+   * Whether a type's `Add` methods, which a collection expression adds each element by, include one that one argument
+   * may call, only others, or none at all.
+   */
+  private addArity(type: Type, context: BindContext): 'one' | 'other' | 'none' {
+    const { found } = this.lookupMember(type, 'Add', context.fn.typeContext, 0, true);
+    const instance = found?.kind === 'methods' ? found.candidates.filter(({ method }) => !method.isStatic) : [];
+    const extensions = this.lookupExtensionMethods('Add', context.fn.typeContext);
+    if (
+      instance.some(({ method }) => takesOneArgument(method.parameters)) ||
+      extensions.some(({ method }) => takesOneArgument(method.parameters.slice(1)))
+    )
+      return 'one';
+    return instance.length > 0 || extensions.length > 0 ? 'other' : 'none';
   }
 
   /**
@@ -1495,7 +1652,22 @@ export abstract class ExpressionBinder extends LambdaBinder {
       'System.Collections.Generic.Stack`1',
     ];
     if (supported.includes(name)) return target.args[0];
-    return undefined;
+    return this.constructibleElementType(target);
+  }
+
+  /**
+   * The element type of a class or struct that a collection expression creates by its parameterless constructor and
+   * fills by `Add`: the `T` of the `IEnumerable<T>` it implements, or `object` of a non-generic `IEnumerable`.
+   */
+  private constructibleElementType(target: NamedType): Type | undefined {
+    const { symbol } = target;
+    if ((symbol.kind !== 'class' && symbol.kind !== 'struct') || symbol.isAbstract) return undefined;
+    const faces = allInterfacesOf(target, () => []);
+    const generic = faces.filter((face) => face.symbol.fullName === 'System.Collections.Generic.IEnumerable`1');
+    if (generic.length === 1) return generic[0].args[0];
+    return faces.some((face) => face.symbol.fullName === 'System.Collections.IEnumerable')
+      ? this.objectType
+      : undefined;
   }
 
   private bindAnonymousObject(
@@ -1999,6 +2171,20 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Pointer', 1), [type]);
   }
 
+  /** Whether the fixed-size buffer being bound may be movable: one indexed, or one a `fixed` statement fixes. */
+  protected allowsMovableFixedBuffer = false;
+
+  /** A fixed-size buffer, which a movable variable gives only to be indexed or fixed (CS1666). */
+  protected fixedBufferAccess(access: BoundExpression, elementType: Type, position: Position): BoundExpression {
+    if (!this.allowsMovableFixedBuffer && !isFixedVariable(access))
+      this.error(
+        position,
+        'CS1666',
+        'fixed でない式に含まれる固定サイズ バッファーは使用できません。fixed ステートメントを使用してください。'
+      );
+    return { kind: 'addressOf', target: access as BoundLValue, type: this.pointerTo(elementType), row: position.row };
+  }
+
   /** `*p`, the variable a pointer points to. */
   dereference(pointer: BoundExpression, position: Position): BoundExpression {
     if (pointer.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: position.row };
@@ -2045,6 +2231,24 @@ export abstract class ExpressionBinder extends LambdaBinder {
         '既に fixed が使用されている式のアドレスを取得するために、fixed ステートメントを使用することはできません'
       );
     return { kind: 'addressOf', target: value as BoundLValue, type: this.pointerTo(value.type), row: node.row };
+  }
+
+  /** A `stackalloc` that no pointer local takes as its initializer, which is then a Span of its elements. */
+  private bindNestedStackalloc(node: Extract<Expression, { kind: 'stackalloc' }>, context: BindContext): Unbound {
+    const bound = this.bindStackalloc(node, undefined, context) as Extract<BoundExpression, { kind: 'stackalloc' }>;
+    return { kind: 'unbound', node, context, spanElement: bound.elementType, type: ERROR_TYPE, row: node.row };
+  }
+
+  /** Converts a Span's `stackalloc`, which only a pointer local's initializer makes a pointer (CS8346). */
+  private convertNestedStackalloc(expression: Unbound, target: Type, report: boolean): undefined {
+    if (!isPointerType(target)) return this.unsupported(expression.node, 'Span への `stackalloc`');
+    if (report)
+      this.error(
+        expression.node,
+        'CS8346',
+        `型 '${displayType(expression.spanElement ?? ERROR_TYPE)}' の stackalloc 式を型 '${displayType(target)}' に変換することはできません。`
+      );
+    return undefined;
   }
 
   /** `stackalloc T[n]` or `stackalloc[] { ... }`, as a pointer to a new buffer of its elements. */
@@ -2138,6 +2342,25 @@ export abstract class ExpressionBinder extends LambdaBinder {
     const value = this.bindValue(syntax, context);
     if (!isIndexOrRange(value.type)) return undefined;
     return { value, isRange: sameType(value.type, rangeType) };
+  }
+
+  protected override bindIndexInitializerTarget(
+    placeholder: BoundExpression,
+    member: Extract<MemberInitializer, { kind: 'indexAssign' }>,
+    context: BindContext
+  ): BoundExpression {
+    // `[^1] = v` (C# 13) indexes from the end of the object's member, as `x[^1]` does.
+    const node: Extract<Expression, { kind: 'elementAccess' }> = {
+      kind: 'elementAccess',
+      target: { kind: 'this', row: member.row, column: member.column },
+      args: member.args,
+      row: member.row,
+      column: member.column,
+    };
+    return (
+      this.bindImplicitIndexOrRange(placeholder, node, context) ??
+      this.bindElementAccess(placeholder, member.args, member, context)
+    );
   }
 
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
@@ -2475,7 +2698,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     position: Position
   ): BoundDeconstructTarget {
     const count = node.elements.length;
-    const { elementTypes, deconstruct } = this.deconstructionOf(type, count, value, position);
+    const { elementTypes, deconstruct } = this.deconstructionOf(type, count, value, position, context);
     const elements = node.elements.map((element, index): BoundDeconstructTarget => {
       const elementType = elementTypes[index] ?? ERROR_TYPE;
       const syntax = element.value;
@@ -2522,7 +2745,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
         elementType,
         designation.elements.length,
         undefined,
-        designation
+        designation,
+        context
       );
       return {
         kind: 'nested',
@@ -2549,13 +2773,17 @@ export abstract class ExpressionBinder extends LambdaBinder {
     };
   }
 
-  /** The element types of a deconstruction: a tuple's elements, or the `out` parameters of a `Deconstruct` method. */
+  /**
+   * The element types of a deconstruction: a tuple's elements, or the `out` parameters of a `Deconstruct` method, an
+   * instance one or else an extension one in scope.
+   */
   protected deconstructionOf(
     type: Type,
     count: number,
     value: BoundExpression | undefined,
-    position: Position
-  ): { elementTypes: Type[]; deconstruct: MethodSymbol | undefined } {
+    position: Position,
+    context: BindContext
+  ): { elementTypes: Type[]; deconstruct: BoundDeconstruct | undefined } {
     if (type.kind === 'error') return { elementTypes: [], deconstruct: undefined };
     if (type.kind === 'named' && specialOf(type) === 'valueTuple') {
       if (type.args.length !== count) {
@@ -2572,12 +2800,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (value?.kind === 'unbound' && value.node.kind === 'tuple') {
       this.unsupported(position, '型のないタプルの分解');
     }
-    const { found } = this.lookupMember(type, 'Deconstruct', {
-      namespace: [],
-      usings: [],
-      type: undefined,
-      methodTypeParameters: [],
-    });
+    const { found } = this.lookupMember(type, 'Deconstruct', context.fn.typeContext);
     const candidate =
       found?.kind === 'methods'
         ? found.candidates.find(
@@ -2586,21 +2809,82 @@ export abstract class ExpressionBinder extends LambdaBinder {
               option.method.parameters.every((parameter) => parameter.refKind === 'out')
           )
         : undefined;
-    if (!candidate) {
+    if (candidate) {
+      const substitution = substitutionOf(candidate.owner);
+      return {
+        elementTypes: candidate.method.parameters.map((parameter) => substitute(parameter.type, substitution)),
+        deconstruct: { method: candidate.method, typeArgs: [] },
+      };
+    }
+    const extensions = this.lookupExtensionMethods('Deconstruct', context.fn.typeContext);
+    const extension = extensions.length > 0 ? this.extensionDeconstruct(type, count, extensions, position) : undefined;
+    if (extension) return extension;
+    if (extensions.length === 0) {
       const missing = missingDeconstruct(displayType(type), count, found?.kind === 'methods');
       this.error(position, missing.code, missing.message);
-      this.error(
-        position,
-        'CS8129',
-        `${count} out パラメーターと void 戻り値の型を持つ、型 '${displayType(type)}' の適切な分解インスタンスまたは拡張メソッドが見つかりませんでした。`
-      );
-      return { elementTypes: [], deconstruct: undefined };
     }
-    const substitution = substitutionOf(candidate.owner);
+    this.error(
+      position,
+      'CS8129',
+      `${count} out パラメーターと void 戻り値の型を持つ、型 '${displayType(type)}' の適切な分解インスタンスまたは拡張メソッドが見つかりませんでした。`
+    );
+    return { elementTypes: [], deconstruct: undefined };
+  }
+
+  /**
+   * The extension `Deconstruct` that `value.Deconstruct(out var _, ...)` calls, which overload resolution chooses,
+   * inferring type arguments from the value alone, and reports when none applies.
+   */
+  private extensionDeconstruct(
+    type: Type,
+    count: number,
+    extensions: MethodCandidate[],
+    position: Position
+  ): { elementTypes: Type[]; deconstruct: BoundDeconstruct } | undefined {
+    const resolved = this.resolvePatternExtension(type, extensions, count, position);
+    if (!resolved) return undefined;
+    const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
+    const { method } = resolved.candidate;
     return {
-      elementTypes: candidate.method.parameters.map((parameter) => substitute(parameter.type, substitution)),
-      deconstruct: candidate.method,
+      elementTypes: method.parameters.slice(1).map((parameter) => substitute(parameter.type, substitution)),
+      deconstruct: { method, typeArgs: resolved.typeArgs },
     };
+  }
+
+  /**
+   * The extension method among candidates that a pattern, as deconstruction's or foreach's (C# 9), calls on a value of
+   * a type with `out var` arguments of a count, which overload resolution chooses and reports when none applies.
+   */
+  protected resolvePatternExtension(
+    type: Type,
+    extensions: MethodCandidate[],
+    outCount: number,
+    position: Position
+  ): ResolvedCall | undefined {
+    const { row } = position;
+    const receiver: ArgumentInfo = {
+      expression: { kind: 'compoundOperand', type, row },
+      name: undefined,
+      refKind: undefined,
+      row,
+      target: undefined,
+      isReceiver: true,
+    };
+    const outs = Array.from({ length: outCount }, (): ArgumentInfo => ({
+      expression: { kind: 'default', type: ERROR_TYPE, row },
+      name: undefined,
+      refKind: 'out',
+      row,
+      target: undefined,
+      isOutVar: true,
+      declareOut: (elementType) => ({ kind: 'discard', type: elementType, row }),
+    }));
+    const name = extensions[0]?.method.name ?? '';
+    return this.resolveCall(extensions, [receiver, ...outs], undefined, row, {
+      name,
+      kind: 'method',
+      isExtension: true,
+    });
   }
 
   private readonly switchParts = new WeakMap<
@@ -2734,4 +3018,14 @@ function sizeOfType(type: Type): number | undefined {
   if (type.kind !== 'named') return undefined;
   const special = type.symbol.kind === 'enum' ? type.symbol.enumUnderlying?.symbol.special : type.symbol.special;
   return special ? PREDEFINED_SIZES[special] : undefined;
+}
+
+/** Whether one argument may call a method of the parameters. */
+function takesOneArgument(parameters: readonly ParameterSymbol[]): boolean {
+  return parameters.length > 0 && parameters.slice(1).every(isOptionalParameter);
+}
+
+/** Whether a call may leave out a parameter's argument: an optional parameter's or a `params` one's. */
+function isOptionalParameter(parameter: ParameterSymbol): boolean {
+  return parameter.defaultValue !== undefined || parameter.defaultSyntax !== undefined || parameter.isParams;
 }
