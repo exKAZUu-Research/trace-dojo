@@ -15,7 +15,6 @@ export class TypeScriptProgramConverter extends ProgramConverter {
    */
   protected override readonly isStrictByDefault = false;
   protected override readonly hasAutoAccessors = true;
-  /** What esbuild knows of the members of the enums converted so far, by enum and member. */
   /** The folded members of each enum, by the scope declaring its name and the name, as esbuild resolves a reference. */
   private readonly foldedEnums = new WeakMap<object, Map<string, Map<string, FoldedValue>>>();
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */

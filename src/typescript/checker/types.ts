@@ -199,9 +199,9 @@ export interface ObjectType {
   /** For an object literal typed by one alternative of a union it spreads, which TypeScript leaves unnormalized. */
   isUnionSpread?: boolean;
   hasSpread?: boolean;
-  /** The alias the type was written with, for printing. */
   /** For the type of a value other than a class, such as an enum object, the name `typeof` prints it with. */
   valueName?: string;
+  /** The alias the type was written with, for printing. */
   aliasName?: string;
   aliasArguments?: Type[];
   aliasId?: number;
