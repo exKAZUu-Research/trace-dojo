@@ -1,8 +1,20 @@
 import type { ClassEntity, Evidence, InstanceInfo, TypeEntity } from './entities';
-import { couldMatch, matchType, type Pred, splitApp, type Type, typesEqual, typeVarsOf } from './types';
+import {
+  couldMatch,
+  freshTypeVar,
+  instantiateType,
+  matchType,
+  type Pred,
+  prune,
+  splitApp,
+  STAR,
+  tap,
+  type Type,
+  typesEqual,
+  typeVarsOf,
+} from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
-/** The instances visible to a module: the library's, and the module's own. */
 export class ClassEnv {
   private readonly own = new Map<ClassEntity, InstanceInfo[]>();
 
@@ -31,19 +43,35 @@ export class ClassEnv {
    */
   findInstance(pred: Pred): { instance: InstanceInfo; args: Type[] } | 'none' | 'pending' | 'overlap' {
     let pending = false;
-    let matched: { instance: InstanceInfo; args: Type[] } | undefined;
+    const matches: { instance: InstanceInfo; args: Type[] }[] = [];
     const head = splitApp(pred.type).head;
     const instances = head.tag === 'tcon' ? this.instancesForHead(pred.cls, head.entity) : this.instancesOf(pred.cls);
     for (const instance of instances) {
       const bindings: (Type | undefined)[] = [];
       if (matchType(instance.head, pred.type, bindings)) {
-        if (matched) return typeVarsOf(pred.type).size > 0 ? 'pending' : 'overlap';
-        matched = { instance, args: instance.kinds.map((_, index) => bindings[index] as Type) };
+        matches.push({ instance, args: instance.kinds.map((_, index) => bindings[index] as Type) });
         continue;
       }
-      if (couldMatch(instance.head, pred.type)) pending = true;
+      // An instance that could match once the type is known decides nothing yet, unless it is incoherent.
+      if (instance.overlap !== 'INCOHERENT' && couldMatch(instance.head, withFamiliesUnknown(pred.type)))
+        pending = true;
     }
-    return pending ? 'pending' : (matched ?? 'none');
+    // As GHC does, an instance gives way to a more specific one when either pragma allows it.
+    const remaining = matches.filter(
+      (candidate) =>
+        !matches.some(
+          (other) =>
+            other !== candidate &&
+            moreSpecific(other.instance, candidate.instance) &&
+            (overlappable(candidate.instance) || overlapping(other.instance))
+        )
+    );
+    const coherent = remaining.filter((candidate) => candidate.instance.overlap !== 'INCOHERENT');
+    const chosen = coherent.length > 0 ? coherent : remaining.slice(0, 1);
+    if (chosen.length > 1) return typeVarsOf(pred.type).size > 0 ? 'pending' : 'overlap';
+    // Only incoherent instances match: GHC takes one without waiting for the instances that might match later.
+    if (coherent.length === 0 && chosen.length === 1) return chosen[0];
+    return pending ? 'pending' : (chosen[0] ?? 'none');
   }
 
   private instancesForHead(cls: ClassEntity, head: TypeEntity): InstanceInfo[] {
@@ -64,13 +92,53 @@ export class ClassEnv {
   }
 }
 
-/** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */
-export function hasConstructorHead(type: Type): boolean {
-  return splitApp(type).head.tag === 'tcon';
+/** Whether an instance's head is an instance of another's, but not the other way round. */
+function moreSpecific(a: InstanceInfo, b: InstanceInfo): boolean {
+  return matchType(b.head, a.head, []) && !matchType(a.head, b.head, []);
 }
 
-export function isSubclassOf(cls: ClassEntity, ancestor: ClassEntity): boolean {
-  return superclassPath(cls, ancestor) !== undefined;
+function overlappable(instance: InstanceInfo): boolean {
+  return instance.overlap === 'OVERLAPPABLE' || instance.overlap === 'OVERLAPS' || instance.overlap === 'INCOHERENT';
+}
+
+function overlapping(instance: InstanceInfo): boolean {
+  return instance.overlap === 'OVERLAPPING' || instance.overlap === 'OVERLAPS' || instance.overlap === 'INCOHERENT';
+}
+
+/** Whether a constraint's type has a type constructor at its head, so that only an instance can solve it. */
+export function hasConstructorHead(type: Type): boolean {
+  const { head } = splitApp(type);
+  // A type family's application that has not reduced is no constructor yet: what it reduces to may still be learned.
+  return head.tag === 'tcon' && head.entity.sort !== 'family';
+}
+
+/**
+ * A type with its unreduced family applications replaced by unknowns: an instance that could match it may match
+ * once they reduce, while one whose head has a variable there matches them already.
+ */
+function withFamiliesUnknown(type: Type, unknowns: [Type, Type][] = []): Type {
+  const { head, args } = splitApp(prune(type));
+  if (head.tag === 'tcon' && head.entity.sort === 'family') {
+    // Equal applications reduce alike, so they share one unknown, as GHC's apartness check has them.
+    const known = unknowns.find(([application]) => typesEqual(application, type));
+    if (known) return known[1];
+    const unknown = freshTypeVar(STAR, 0);
+    unknowns.push([type, unknown]);
+    return unknown;
+  }
+  return args.length === 0 ? head : tap(head, ...args.map((arg) => withFamiliesUnknown(arg, unknowns)));
+}
+
+export function superPred(pred: Pred, index: number): Pred {
+  const cls = pred.cls.supers[index];
+  const template = pred.cls.superTypes?.[index];
+  if (!template) return { cls, type: pred.type };
+  const args = pred.cls.packed ? splitApp(pred.type).args : [pred.type];
+  return { cls, type: instantiateType(template, args) };
+}
+
+export function impliedBySuperclasses(given: Pred, pred: Pred): boolean {
+  return superclassPath(given, pred) !== undefined;
 }
 
 export function entailByGivens(
@@ -78,14 +146,10 @@ export function entailByGivens(
   pred: Pred
 ): Evidence | undefined {
   for (const given of givens) {
-    if (!typesEqual(given.pred.type, pred.type)) continue;
-    const path = superclassPath(given.pred.cls, pred.cls);
+    const path = superclassPath(given.pred, pred);
     if (!path) continue;
     let evidence = given.evidence;
-    for (const index of path) {
-      chargeTypeWork();
-      evidence = { kind: 'super', of: evidence, index };
-    }
+    for (const index of path) evidence = { kind: 'super', of: evidence, index };
     return evidence;
   }
   return undefined;
@@ -96,25 +160,25 @@ interface SuperclassStep {
   parent: SuperclassStep | undefined;
 }
 
-function superclassPath(cls: ClassEntity, ancestor: ClassEntity): number[] | undefined {
-  const seen = new Set<ClassEntity>();
-  const work: { cls: ClassEntity; path: SuperclassStep | undefined }[] = [{ cls, path: undefined }];
+function superclassPath(given: Pred, pred: Pred): number[] | undefined {
+  const seen = new Map<ClassEntity, Pred[]>();
+  const work: { pred: Pred; step: SuperclassStep | undefined }[] = [{ pred: given, step: undefined }];
   while (work.length > 0) {
     chargeTypeWork();
     const current = work.pop()!;
-    if (seen.has(current.cls)) continue;
-    seen.add(current.cls);
-    if (current.cls === ancestor) {
+    if (predsEqual(current.pred, pred)) {
       const path: number[] = [];
-      for (let step = current.path; step; step = step.parent) {
-        chargeTypeWork();
-        path.push(step.index);
-      }
+      for (let step = current.step; step; step = step.parent) path.push(step.index);
       return path.toReversed();
     }
-    for (let index = current.cls.supers.length - 1; index >= 0; index--) {
-      chargeTypeWork();
-      work.push({ cls: current.cls.supers[index], path: { index, parent: current.path } });
+    // A constraint reached again (the same class at the same type) only repeats what it implies; one reached at
+    // another type may imply other constraints. Superclasses that grow the type (UndecidableSuperClasses) stop at the
+    // compilation budget, which every step charges.
+    const sameClass = seen.get(current.pred.cls) ?? [];
+    if (sameClass.some((other) => predsEqual(other, current.pred))) continue;
+    seen.set(current.pred.cls, [...sameClass, current.pred]);
+    for (let index = current.pred.cls.supers.length - 1; index >= 0; index--) {
+      work.push({ pred: superPred(current.pred, index), step: { index, parent: current.step } });
     }
   }
   return undefined;

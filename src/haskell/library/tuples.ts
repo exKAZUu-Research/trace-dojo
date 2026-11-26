@@ -49,6 +49,7 @@ function tupleAlgebra(vars: string[], others: string[]): string[] {
   return [
     `instance ${tupleContext('Semigroup', vars)} => Semigroup ${tuple(vars)} where`,
     `  ${tuple(vars)} <> ${tuple(others)} = ${tuple(vars.map((value, index) => `${value} <> ${others[index]}`))}`,
+    `  stimes n ${tuple(vars)} = ${tuple(vars.map((value) => `stimes n ${value}`))}`,
     `instance ${tupleContext('Monoid', vars)} => Monoid ${tuple(vars)} where`,
     `  mempty = ${tuple(vars.map(() => 'mempty'))}`,
   ];

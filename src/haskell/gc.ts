@@ -16,6 +16,8 @@ import {
   IOThen,
   Partial,
   type PreparedBlock,
+  PrimFn,
+  RefValue,
   type Slot,
   Thunk,
   TurtleValue,
@@ -168,6 +170,7 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
   if (frame.k === 'update' && frame.code) pushRefs(freeVarsOf(frame.code), frame.env, push);
   else if (frame.k === 'apply' || frame.k === 'prim') for (const arg of frame.args) push(arg);
   else if (frame.k === 'ioBind' || frame.k === 'ioThen') push(frame.next);
+  else if (frame.k === 'catch') for (const ref of frame.refs) push(ref);
   else if (frame.k === 'do' && !frame.tailCalled) {
     if (!frame.discardResult) push(frame.result);
     pushPreparedActions(frame.prefix, push, frame.index);
@@ -187,13 +190,15 @@ function pushStackFrame(frame: Frame, scannedEnvs: Set<Env>, push: Push): void {
 function pushReferences(runtime: Runtime, value: object, push: Push): void {
   if (value instanceof ConValue) {
     for (const field of value.fields) push(field);
+    for (const dict of value.dicts ?? []) push(dict);
+  } else if (value instanceof RefValue) {
+    push(value.value);
   } else if (value instanceof Thunk) {
-    for (const root of runtime.previewRoots(value) ?? []) push(root);
-    if (value.state === 'done') push(value.value);
-    else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
-    else push(value.target);
+    pushThunkReferences(runtime, value, push);
   } else if (value instanceof Closure) {
     pushRefs(freeVarsOf(value.lam), value.env, push);
+  } else if (value instanceof PrimFn) {
+    for (const root of value.roots ?? []) push(root);
   } else if (value instanceof Partial) {
     push(value.fn);
     for (const arg of value.args) push(arg);
@@ -214,12 +219,22 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
   }
 }
 
+function pushThunkReferences(runtime: Runtime, thunk: Thunk, push: Push): void {
+  for (const root of runtime.previewRoots(thunk) ?? []) push(root);
+  for (const root of thunk.nativeRoots ?? []) push(root);
+  if (thunk.state === 'done') push(thunk.value);
+  else if (thunk.code) pushRefs(freeVarsOf(thunk.code), thunk.env, push);
+  else if (thunk.effect !== undefined) push(thunk.effect);
+  else push(thunk.target);
+}
+
 function pushPreparedActions(block: PreparedBlock | undefined, push: Push, start = 0): void {
   if (!block) return;
   for (const [index, action] of block.actions) if (index >= start) push(action);
 }
 
 export function thunkReferences(thunk: Thunk): readonly Slot[] | undefined {
+  if (thunk.nativeRoots) return thunk.nativeRoots;
   if (!thunk.code || !thunk.env) return thunk.target === undefined ? undefined : [thunk.target];
   const roots: Slot[] = [];
   pushRefs(freeVarsOf(thunk.code), thunk.env, (slot) => {
