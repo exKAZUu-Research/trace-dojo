@@ -472,12 +472,6 @@ for (const [name, special] of INTEGRAL) {
       overflowName: OVERFLOW_NAMES[special] as string,
       zero: fromBig(0n),
     }),
-    [`${prefix}.Abs`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
-      const integer = toBig(value);
-      if (integer === min && min < 0n)
-        fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
-      return fromBig(integer < 0n ? -integer : integer);
-    },
     [`${prefix}.Max`]: (_call: NativeCall, _receiver: Value, [a, b]: Value[]) => (toBig(a) >= toBig(b) ? a : b),
     [`${prefix}.Min`]: (_call: NativeCall, _receiver: Value, [a, b]: Value[]) => (toBig(a) <= toBig(b) ? a : b),
     [`${prefix}.Clamp`]: (_call: NativeCall, _receiver: Value, [value, low, high]: Value[]) =>
@@ -495,16 +489,26 @@ for (const [name, special] of INTEGRAL) {
       if (a / b > max) fail('System.OverflowException', 'Arithmetic operation resulted in an overflow.');
       return new CsStruct(call.method.returnType as NamedType, [fromBig(a / b), fromBig(a % b)]);
     },
-    [`${prefix}.CopySign`]: (_call: NativeCall, _receiver: Value, [value, sign]: Value[]) => {
-      const magnitude = toBig(value) < 0n ? -toBig(value) : toBig(value);
-      const result = toBig(sign) < 0n ? -magnitude : magnitude;
-      if (result > max)
-        fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
-      return fromBig(result);
-    },
-    [`${prefix}.IsNegative`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) < 0n,
-    [`${prefix}.IsPositive`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) >= 0n,
   });
+  // The unsigned types implement these members of INumberBase only explicitly, which a program cannot call.
+  if (isSigned)
+    Object.assign(parsers, {
+      [`${prefix}.Abs`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
+        const integer = toBig(value);
+        if (integer === min)
+          fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
+        return fromBig(integer < 0n ? -integer : integer);
+      },
+      [`${prefix}.CopySign`]: (_call: NativeCall, _receiver: Value, [value, sign]: Value[]) => {
+        const magnitude = toBig(value) < 0n ? -toBig(value) : toBig(value);
+        const result = toBig(sign) < 0n ? -magnitude : magnitude;
+        if (result > max)
+          fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
+        return fromBig(result);
+      },
+      [`${prefix}.IsNegative`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) < 0n,
+      [`${prefix}.IsPositive`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) >= 0n,
+    });
 }
 defineNatives(parsers);
 

@@ -9,6 +9,17 @@ const CREATE_FROM_NUMBER = (keyword: string): string =>
     .map((name) => `public static ${keyword} ${name}<TOther>(TOther value) where TOther : struct;`)
     .join(' ');
 
+/** The members of the signed integer types that the unsigned ones implement only explicitly, from INumberBase. */
+const SIGNED_INTEGER_MEMBERS = (keyword: string): string =>
+  [
+    `public static ${keyword} Abs(${keyword} value);`,
+    `public static bool IsNegative(${keyword} value);`,
+    `public static bool IsPositive(${keyword} value);`,
+    `public static ${keyword} CopySign(${keyword} value, ${keyword} sign);`,
+    `public static ${keyword} MaxMagnitude(${keyword} x, ${keyword} y);`,
+    `public static ${keyword} MinMagnitude(${keyword} x, ${keyword} y);`,
+  ].join(' ');
+
 /**
  * The declarations of the `System` library types that programs use, in C#. Members without bodies are implemented
  * natively (see `natives*.ts`); their signatures follow .NET 10, so that overload resolution picks the same members.
@@ -348,7 +359,6 @@ namespace System {
     public static bool TryParse(string? s, out ${keyword} result);
     public static bool TryParse(string? s, IFormatProvider? provider, out ${keyword} result);
     public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out ${keyword} result);
-    public static ${keyword} Abs(${keyword} value);
     public static ${keyword} Clamp(${keyword} value, ${keyword} min, ${keyword} max);
     public static ${keyword} Max(${keyword} x, ${keyword} y);
     public static ${keyword} Min(${keyword} x, ${keyword} y);
@@ -362,12 +372,8 @@ namespace System {
     public static ${keyword} Log2(${keyword} value);
     public static ${keyword} RotateLeft(${keyword} value, int rotateAmount);
     public static ${keyword} RotateRight(${keyword} value, int rotateAmount);
-    public static bool IsNegative(${keyword} value);
-    public static bool IsPositive(${keyword} value);
     public static (${keyword} Quotient, ${keyword} Remainder) DivRem(${keyword} left, ${keyword} right);
-    public static ${keyword} CopySign(${keyword} value, ${keyword} sign);
-    public static ${keyword} MaxMagnitude(${keyword} x, ${keyword} y);
-    public static ${keyword} MinMagnitude(${keyword} x, ${keyword} y);
+    ${min.startsWith('-') ? SIGNED_INTEGER_MEMBERS(keyword) : ''}
     ${CREATE_FROM_NUMBER(keyword)}${keyword === 'int' ? 'public static long BigMul(int left, int right);' : keyword === 'uint' ? 'public static ulong BigMul(uint left, uint right);' : ''}
   }`;
     })

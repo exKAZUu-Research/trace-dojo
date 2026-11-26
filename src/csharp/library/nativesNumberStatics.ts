@@ -99,8 +99,10 @@ const isNegativeInteger = (value: Value): boolean => integerOf(value) < 0n;
 
 for (const [name, kind] of INTEGERS) {
   const prefix = `System.${name}`;
+  defineNatives(factories(prefix, kind));
+  // The unsigned types implement the magnitudes of INumberBase only explicitly, which a program cannot call.
+  if (name.startsWith('U') || name === 'Byte') continue;
   defineNatives({
-    ...factories(prefix, kind),
     [`${prefix}.MaxMagnitude`]: (_call, _receiver, [x, y]) =>
       magnitude(x as Value, y as Value, integerAbs, isNegativeInteger, true),
     [`${prefix}.MinMagnitude`]: (_call, _receiver, [x, y]) =>
