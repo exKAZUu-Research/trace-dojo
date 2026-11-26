@@ -59,6 +59,11 @@ export class SourceText {
    * syntax check drops the body from `backquotes`, as for one in a here-document.
    */
   readonly backquoteStates: { start: number; extglob: boolean }[] = [];
+  /**
+   * The backquoted bodies of here-documents, which the syntax check leaves out of the program's own reading, but
+   * whose syntax errors Bash reports as their lines expand.
+   */
+  readonly heredocBackquotes: { start: number; end: number; extglob: boolean }[] = [];
   /** Offsets of characters that are contextual literals in Bash (`'` in `"${...}"`, `$` before non-ASCII, etc.). */
   readonly literalSingleQuotes: number[] = [];
   /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */

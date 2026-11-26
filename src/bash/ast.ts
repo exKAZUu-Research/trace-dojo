@@ -48,6 +48,11 @@ export interface BackquoteSyntaxError {
   messages: string[];
   /** The text of the line Bash prints after an unexpected token. */
   line?: string;
+  /**
+   * For a body in a here-document, the row it starts on: Bash numbers its error from the line of the command the
+   * here-document belongs to, as it expands the body there.
+   */
+  heredocBodyRow?: number;
 }
 
 export interface ParameterExpansion {

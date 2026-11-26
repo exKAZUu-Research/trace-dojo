@@ -789,7 +789,9 @@ export class Expander {
   }
 
   private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): WordSegment[] {
-    const prefix = `${SCRIPT_NAME}: command substitution: line ${error.row + 1}: `;
+    const row =
+      error.heredocBodyRow === undefined ? error.row : this.shell.currentRow + (error.row - error.heredocBodyRow);
+    const prefix = `${SCRIPT_NAME}: command substitution: line ${row + 1}: `;
     for (const message of error.messages) this.shell.fd2.write(`${prefix}${message}\n`);
     if (error.line !== undefined) this.shell.fd2.write(`${prefix}\`${error.line}'\n`);
     this.lastSubstitutionStatus = 2;

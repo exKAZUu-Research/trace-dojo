@@ -59,7 +59,7 @@ export function analyzeBashSource(parser: Parser, source: string, initialExtglob
   if (checked.error && checked.error !== 'unknown') {
     throw new CompileError([{ row: checked.error.row, message: syntaxErrorMessage(checked.error.text) }]);
   }
-  const backquotes = analyzeBackquotes(source, checked.backquotes);
+  const backquotes = analyzeBackquotes(source, checked.backquotes, checked.heredocBackquotes);
   const descriptorVariables = [...checked.descriptorVariables, ...backquotes.descriptorVariables];
   const literalQuotes = new Set([...checked.literalSingleQuotes, ...backquotes.literalSingleQuotes]);
   const declarationFunctionStarts = new Set([
@@ -106,6 +106,7 @@ export function checkBashSyntax(
   error: BashSyntaxError | 'unknown' | undefined;
   backquotes: { start: number; end: number; extglob: boolean }[];
   backquoteStates: { start: number; extglob: boolean }[];
+  heredocBackquotes: { start: number; end: number; extglob: boolean }[];
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
@@ -117,6 +118,7 @@ export function checkBashSyntax(
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
     backquoteStates: text.backquoteStates,
+    heredocBackquotes: text.heredocBackquotes,
     literalSingleQuotes: text.literalSingleQuotes,
     declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
@@ -141,7 +143,8 @@ export function inspectUnescapedBackquoteBody(
 
 function analyzeBackquotes(
   source: string,
-  backquotes: readonly { start: number; end: number; extglob: boolean }[]
+  backquotes: readonly { start: number; end: number; extglob: boolean }[],
+  heredocBackquotes: readonly { start: number; end: number; extglob: boolean }[] = []
 ): {
   source: string;
   errors: Map<number, BackquoteSyntaxError>;
@@ -156,6 +159,15 @@ function analyzeBackquotes(
   const arithmeticRegions: DeferredRegion[] = [];
   const descriptorVariables: DescriptorVariableSpan[] = [];
   let normalized = source;
+  // A here-document's backquote takes part only through its syntax error, kept on the substitution with its body
+  // blanked as for any backquote; its other spans were taken when its here-document was read.
+  for (const { start, end, extglob } of heredocBackquotes) {
+    const { error } = inspectBackquoteSpan(source, start, end, extglob);
+    if (!error) continue;
+    errors.set(start, { ...error, heredocBodyRow: source.slice(0, start).split('\n').length - 1 });
+    const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
+    normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
+  }
   for (const { start, end, extglob } of backquotes) {
     const inspected = inspectBackquoteSpan(source, start, end, extglob);
     if (inspected.error) {
@@ -418,6 +430,7 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
       text.descriptorVariables.length = found;
       i = pieceStart + 1;
     }
+    text.heredocBackquotes.push(...text.backquotes.slice(marks[0]));
     text.backquotes.length = marks[0];
     text.literalSingleQuotes.length = marks[1];
     text.declarationFunctionStarts.length = marks[2];
