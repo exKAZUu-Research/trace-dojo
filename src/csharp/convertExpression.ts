@@ -288,16 +288,13 @@ export class ExpressionConverter {
         return { kind: 'default', type: typeNode ? this.convertType(typeNode) : undefined, ...position };
       }
       case 'declaration_expression': {
-        return {
-          kind: 'declaration',
-          type: this.convertType(requiredField(node, 'type')),
-          designation: {
-            kind: 'single',
-            name: requiredField(node, 'name').text,
-            ...positionOf(requiredField(node, 'name')),
-          },
-          ...position,
-        };
+        const name = requiredField(node, 'name');
+        // `out var _` and `(var _, var y) = ...` discard; only a local declaration `var _ = 1;` names a variable `_`.
+        const designation: Designation =
+          name.text === '_'
+            ? { kind: 'discard', ...positionOf(name) }
+            : { kind: 'single', name: name.text, ...positionOf(name) };
+        return { kind: 'declaration', type: this.convertType(requiredField(node, 'type')), designation, ...position };
       }
       case 'tuple_expression': {
         return { kind: 'tuple', elements: namedChildren(node).map((arg) => this.convertArgument(arg)), ...position };

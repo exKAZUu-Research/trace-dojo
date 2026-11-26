@@ -63,6 +63,12 @@ export type NonValue =
 
 export type BindResult = BoundExpression | NonValue;
 
+/**
+ * The types of a deconstruction's targets: a type, the targets of a nested tuple, or undefined for one that takes the
+ * value's (`var x`, `_`).
+ */
+export type DeconstructTargets = (Type | DeconstructTargets | undefined)[];
+
 export function isNonValue(result: BindResult): result is NonValue {
   return (
     result.kind === 'namespaceRef' ||
@@ -150,25 +156,64 @@ export abstract class MemberBinder extends CallBinder {
 
   /**
    * Binds the value a deconstruction takes apart. A tuple literal's elements convert to the types of their targets
-   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own.
+   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own; undefined for a
+   * value without a type, as `var (a, b) = default` (CS8131), or a tuple literal that some element leaves without
+   * one, as `var (a, b) = (null, 1)`, whose targets the caller reports.
    */
   protected deconstructedValue(
     node: Expression,
     context: BindContext,
-    targetTypes: (Type | undefined)[] = []
-  ): BoundExpression {
+    targets: DeconstructTargets = []
+  ): BoundExpression | undefined {
     const value = this.bindValue(node, context);
-    if (value.kind !== 'unbound') return value;
-    if (value.node.kind !== 'tuple') return this.typedValue(value, node);
-    const types = value.node.elements.map((element, index): Type => {
-      const target = targetTypes[index];
-      if (target && target.kind !== 'error') return target;
+    if (value.kind === 'unbound' && value.node.kind === 'tuple') {
+      const type = this.mergedTupleType(value.node, targets, context);
+      if (!type) return undefined;
+      if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      return this.convert(value, type, node);
+    }
+    if (!this.isTypelessInDeconstruction(value)) return this.typedValue(value, node);
+    if (value.kind === 'unbound' && value.node.kind !== 'lambda' && !value.methodGroup)
+      this.reportWithoutNaturalType(value, node);
+    this.error(node, 'CS8131', '分解の代入には、右側の型を持つ式が必要です。');
+    return undefined;
+  }
+
+  /**
+   * The type a tuple literal takes from the targets it is deconstructed into, each element its target's type or else
+   * its own, or undefined when an element has neither: Roslyn's merged tuple type, which counts a lambda, `null`, or
+   * `default` as typeless even where it has a natural type.
+   */
+  private mergedTupleType(
+    node: Extract<Expression, { kind: 'tuple' }>,
+    targets: DeconstructTargets,
+    context: BindContext
+  ): Type | undefined {
+    let isTypeless = false;
+    const types = node.elements.map((element, index): Type => {
+      const target = targets[index];
+      if (target && !Array.isArray(target) && target.kind !== 'error') return target;
+      if (element.value.kind === 'tuple' && element.value.elements.length >= 2) {
+        const inner = this.mergedTupleType(element.value, Array.isArray(target) ? target : [], context);
+        isTypeless ||= !inner;
+        return inner ?? ERROR_TYPE;
+      }
+      const bound = this.quietly(() => this.bindValue(element.value, context));
+      if (bound && this.isTypelessInDeconstruction(bound)) {
+        isTypeless = true;
+        return ERROR_TYPE;
+      }
       const typed = this.quietly(() => this.bindTypedValue(element.value, context));
       if (typed && typed.type.kind !== 'error') return typed.type;
       return this.bindTypedValue(element.value, context).type;
     });
-    if (types.some((type) => type.kind === 'error')) return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    return this.convert(value, this.tupleType(types), node);
+    if (isTypeless) return undefined;
+    return types.some((type) => type.kind === 'error') ? ERROR_TYPE : this.tupleType(types);
+  }
+
+  private isTypelessInDeconstruction(value: BoundExpression): boolean {
+    if (value.kind !== 'unbound') return value.type.kind === 'null';
+    return value.node.kind === 'lambda' || value.methodGroup !== undefined || !this.naturalTypeOf(value);
   }
 
   /** The target of the `+=` or `-=` being bound, the one expression that may name an event outside its type. */

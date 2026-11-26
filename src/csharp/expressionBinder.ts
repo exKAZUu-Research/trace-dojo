@@ -23,7 +23,7 @@ import {
 } from './interpolatedConversions';
 import { LambdaBinder, typeIdentityKey } from './lambdaBinder';
 import type { MethodCandidate } from './lookup';
-import { type BindResult, isNonValue, type NonValue } from './memberBinder';
+import { type BindResult, type DeconstructTargets, isNonValue, type NonValue } from './memberBinder';
 import { ASSIGNMENT_OPERATOR_NAMES, checkedOperatorName } from './natives';
 import { paramsCollectionOf } from './paramsCollections';
 import type { Space } from './patternSpace';
@@ -2658,36 +2658,57 @@ export abstract class ExpressionBinder extends LambdaBinder {
     node: Extract<Expression, { kind: 'assign' }>,
     context: BindContext
   ): BoundExpression {
-    const targetTypes = (node.target as Extract<Expression, { kind: 'tuple' }>).elements.map((element) =>
-      this.quietly(() => this.deconstructTargetType(element.value, context))
-    );
+    const target = node.target as Extract<Expression, { kind: 'tuple' }>;
+    const targetTypes = this.quietly(() => this.deconstructTargetTypes(target, context)) ?? [];
     const value = this.deconstructedValue(node.value, context, targetTypes);
-    const targets = this.bindDeconstructTargets(
-      node.target as Extract<Expression, { kind: 'tuple' }>,
-      value.type,
-      value,
-      context,
-      node
-    );
+    if (!value) this.reportTypelessTargets(target, context);
+    const valueType = value?.type ?? ERROR_TYPE;
+    const targets = this.bindDeconstructTargets(target, valueType, value, context, node);
     return {
       kind: 'deconstructAssign',
       targets,
-      value: value.kind === 'unbound' ? { kind: 'default', type: ERROR_TYPE, row: node.row } : value,
-      type: value.type,
+      value: !value || value.kind === 'unbound' ? { kind: 'default', type: ERROR_TYPE, row: node.row } : value,
+      type: valueType,
       row: node.row,
     };
   }
 
-  /** The type a deconstruction target takes, or undefined for one that takes the value's (`var x`, `_`). */
-  private deconstructTargetType(syntax: Expression, context: BindContext): Type | undefined {
-    if (syntax.kind === 'tuple') {
-      const types = syntax.elements.map((element) => this.deconstructTargetType(element.value, context));
-      return types.every((type) => type !== undefined) ? this.tupleType(types) : undefined;
+  /** The types of the targets of `(a, (b, c)) = value`, each undefined where a target takes the value's. */
+  private deconstructTargetTypes(
+    syntax: Extract<Expression, { kind: 'tuple' }>,
+    context: BindContext
+  ): DeconstructTargets {
+    return syntax.elements.map(({ value }) => {
+      if (value.kind === 'tuple') return this.deconstructTargetTypes(value, context);
+      if (value.kind === 'declaration')
+        return value.type.kind === 'varType' ? undefined : this.resolveType(value.type, context.fn.typeContext);
+      if (value.kind === 'name' && value.name === '_' && !context.scope.lookup('_')) return;
+      return this.bindLValue(value, context, 'assign').type;
+    });
+  }
+
+  /** Reports each target of `(a, var b) = (null, 1)` that takes its type from a value that leaves it without one. */
+  private reportTypelessTargets(syntax: Extract<Expression, { kind: 'tuple' }>, context: BindContext): void {
+    for (const { value } of syntax.elements) {
+      if (value.kind === 'tuple') this.reportTypelessTargets(value, context);
+      else if (value.kind === 'declaration' && value.type.kind === 'varType')
+        this.reportTypelessDesignation(value.designation);
+      else if (value.kind === 'name' && value.name === '_' && !context.scope.lookup('_'))
+        this.reportTypelessDesignation({ ...value, kind: 'discard' });
     }
-    if (syntax.kind === 'declaration')
-      return syntax.type.kind === 'varType' ? undefined : this.resolveType(syntax.type, context.fn.typeContext);
-    if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_')) return undefined;
-    return this.bindLValue(syntax, context, 'assign').type;
+  }
+
+  /** Reports each variable of `var (a, b) = (null, 1)`, which a value that leaves it without a type cannot type. */
+  protected reportTypelessDesignation(designation: Designation): void {
+    if (designation.kind === 'parenthesized') {
+      for (const element of designation.elements) this.reportTypelessDesignation(element);
+      return;
+    }
+    if (designation.kind === 'single' && designation.type) return;
+    const name = designation.kind === 'single' ? designation.name : '_';
+    this.error(designation, 'CS8130', `暗黙的に型指定された分解変数 '${name}' の型を推論できません。`);
+    if (designation.kind === 'discard')
+      this.error(designation, 'CS8183', '暗黙的に型指定された破棄の型を推論できません。');
   }
 
   private bindDeconstructTargets(
@@ -2710,10 +2731,8 @@ export abstract class ExpressionBinder extends LambdaBinder {
           elementType,
           context
         );
-      if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_')) {
-        if (elementType.kind === 'null') this.error(syntax, 'CS8183', '暗黙的に型指定された破棄の型を推論できません。');
+      if (syntax.kind === 'name' && syntax.name === '_' && !context.scope.lookup('_'))
         return { kind: 'single', target: undefined, conversion: undefined };
-      }
       const target = this.bindLValue(syntax, context, 'assign');
       const conversion = this.convert(
         { kind: 'compoundOperand', type: elementType, row: syntax.row },
@@ -2732,13 +2751,6 @@ export abstract class ExpressionBinder extends LambdaBinder {
     elementType: Type,
     context: BindContext
   ): BoundDeconstructTarget {
-    // A variable or discard that takes its type from the value cannot take `null`'s, as in `var (p, q) = (null, 1)`.
-    if (elementType.kind === 'null' && !declaredType && !(designation.kind === 'single' && designation.type)) {
-      if (designation.kind === 'single')
-        this.error(designation, 'CS8130', `暗黙的に型指定された分解変数 '${designation.name}' の型を推論できません。`);
-      if (designation.kind === 'discard')
-        this.error(designation, 'CS8183', '暗黙的に型指定された破棄の型を推論できません。');
-    }
     if (designation.kind === 'discard') return { kind: 'single', target: undefined, conversion: undefined };
     if (designation.kind === 'parenthesized') {
       const { elementTypes, deconstruct } = this.deconstructionOf(

@@ -1294,7 +1294,9 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     const { row } = statement;
-    const value = this.deconstructedValue(statement.value, context);
+    const typed = this.deconstructedValue(statement.value, context);
+    if (!typed) this.reportTypelessDesignation(statement.designation);
+    const value = typed ?? { kind: 'default', type: ERROR_TYPE, row };
     const target = this.declareDeconstructed(statement.designation, undefined, value.type, context);
     const expression: BoundExpression = { kind: 'deconstructAssign', targets: target, value, type: VOID_TYPE, row };
     return { kind: 'expression', expression, row, step: 'step' };
@@ -1902,7 +1904,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   protected reportWithoutNaturalType(bound: Extract<BoundExpression, { kind: 'unbound' }>, declarator: Position): void {
     const what = bound.node.kind === 'lambda' || bound.methodGroup ? undefined : bound.node.kind;
-    if (what === 'default') this.error(declarator, 'CS8716', "'default' リテラルにターゲット型がありません。");
+    if (what === 'default') this.error(declarator, 'CS8716', '既定のリテラルのターゲット型がありません。');
     else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
     else if (what === 'collection') this.error(declarator, 'CS9176', 'コレクション式のターゲット型がありません。');
     else if (what === 'switch') this.error(bound.node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
