@@ -139,7 +139,7 @@ function emptyArithmeticSubscriptTarget(
 ): ResolvedTarget | undefined {
   if (operation === 'arithmeticRead') {
     shell.reportError(`${name}[]: bad array subscript`);
-    shell.reportError(`${name}[]: bad array subscript`);
+    shell.reportShellError(`${name}[]: bad array subscript`);
     return invalidTarget(`${name}[]`, 'badSubscript', '');
   }
   if (operation === 'arithmeticWrite') {
@@ -168,7 +168,7 @@ function resolveWholeArraySubscript(
     );
   }
   if (operation === 'arithmeticRead' || operation === 'arithmeticWrite') {
-    if (operation === 'arithmeticRead') shell.reportError(`${resolved}[${rawSubText}]: bad array subscript`);
+    if (operation === 'arithmeticRead') shell.reportShellError(`${resolved}[${rawSubText}]: bad array subscript`);
     return invalidTarget(
       `${reportedName}[${rawSubText}]`,
       'badSubscript',
@@ -194,13 +194,10 @@ function resolveAssociativeSubscript(
 ): ResolvedTarget {
   const key = expandAssociativeSubscript(shell, opts.subscript);
   if (key === '') {
-    const label =
-      opts.operation === 'unset'
-        ? `[${rawSubText}]`
-        : opts.operation === 'testSet'
-          ? resolved
-          : `${opts.name}[${rawSubText}]`;
-    if (opts.operation === 'arithmeticRead') shell.reportError(`${opts.name}[${rawSubText}]: bad array subscript`);
+    // `-v` tests an empty subscript as an unset element, with no error.
+    if (opts.operation === 'testSet') return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', '');
+    const label = opts.operation === 'unset' ? `[${rawSubText}]` : `${opts.name}[${rawSubText}]`;
+    if (opts.operation === 'arithmeticRead') shell.reportShellError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
   const own = shell.store.ownView(resolved);
@@ -223,13 +220,13 @@ function resolveIndexedSubscript(
   rawSubText: string,
   forWrite: boolean
 ): ResolvedTarget {
-  if (rawSubText === '') return emptyIndexedSubscriptTarget(opts.name, resolved, opts.operation);
+  if (rawSubText === '') return emptyIndexedSubscriptTarget(opts.name, opts.operation);
   const expanded = expandIndexedSubscript(shell, opts.subscript);
   const normalized = expanded === '' ? '0' : expanded;
   const rawIndex = shell.evaluateFatalReadonly(normalized, true);
   const index = rawIndex >= 0n ? rawIndex : shell.store.translateNegativeIndex(resolved, rawIndex, forWrite);
   if (index === undefined) {
-    if (opts.operation === 'arithmeticRead') shell.reportError(`${resolved}: bad array subscript`);
+    if (opts.operation === 'arithmeticRead') shell.reportShellError(`${resolved}: bad array subscript`);
     const label = formatBadIndexedLabel(opts.name, resolved, rawSubText, normalized, opts.operation);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
@@ -244,12 +241,10 @@ function resolveIndexedSubscript(
   };
 }
 
-function emptyIndexedSubscriptTarget(
-  writtenName: string,
-  resolved: string,
-  operation: TargetOperation
-): ResolvedTarget {
-  const label = operation === 'unset' ? '[]' : operation === 'testSet' ? resolved : `${writtenName}[]`;
+function emptyIndexedSubscriptTarget(writtenName: string, operation: TargetOperation): ResolvedTarget {
+  // `-v` tests an empty subscript as an unset element, with no error.
+  if (operation === 'testSet') return invalidTarget(`${writtenName}[]`, 'badSubscript', '');
+  const label = operation === 'unset' ? '[]' : `${writtenName}[]`;
   return invalidTarget(`${writtenName}[]`, 'badSubscript', `${label}: bad array subscript`);
 }
 
@@ -398,7 +393,7 @@ export function unsetResolvedElement(shell: Shell, target: ResolvedTarget): Stor
 
 export function isResolvedTargetSet(shell: Shell, target: ResolvedTarget): boolean {
   if (target.kind === 'invalid') {
-    if (target.failure.message !== '') shell.reportError(target.failure.message);
+    if (target.failure.message !== '') shell.reportShellError(target.failure.message);
     return false;
   }
   if (target.kind === 'wholeArray') {

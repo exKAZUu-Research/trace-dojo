@@ -177,7 +177,8 @@ class ConditionalValidator {
       this.current = { kind: 'newline', value: '\n', row };
       return;
     }
-    if (context !== 'regex') {
+    const startsProcessSubstitution = (ch === '<' || ch === '>') && source[this.cursor + 1] === '(';
+    if (context !== 'regex' && !startsProcessSubstitution) {
       const punct =
         MULTI_CHAR_PUNCTS.find((candidate) => source.startsWith(candidate, this.cursor)) ??
         (SINGLE_CHAR_PUNCTS.has(ch) ? ch : undefined);
@@ -191,12 +192,15 @@ class ConditionalValidator {
     this.current = { kind: word === ']]' ? 'close' : 'word', value: word, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Reads one conditional word across process substitutions, regex groups, extended patterns, and word breaks.
   private scanWord(context: LexContext): string {
     const { source } = this.text;
     const begin = this.cursor;
     while (this.cursor < source.length) {
       const ch = source[this.cursor];
-      if (context === 'regex' && ch === '(') {
+      if ((ch === '<' || ch === '>') && source[this.cursor + 1] === '(' && this.cursor === begin) {
+        this.cursor = this.text.parseSubstitution(this.cursor + 2);
+      } else if (context === 'regex' && ch === '(') {
         this.cursor = skipBalanced(this.text, this.cursor, '(', ')');
       } else if (context === 'regex' && ch === '|') {
         this.cursor++;

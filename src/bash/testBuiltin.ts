@@ -3,9 +3,9 @@
  * and GNU Bash Reference Manual §4.1 (`==`, `<`, `>`, `-v`, `-R`, and parenthesized/compound expressions).
  */
 
-import { rejectUnsupportedTestOperator } from './capabilities';
 import { legalNumber } from './characters';
 import { ARITHMETIC_OPERATORS, FILE_TEST_OPERATORS, unaryTest } from './conditional';
+import { fileComparison } from './fileTests';
 import type { Shell } from './shell';
 
 const UNARY_FLAGS = new Set([
@@ -218,7 +218,7 @@ class TestReader {
     if (op === '!=') return left !== right;
     if (op === '<') return compareUtf8Bytes(left, right) < 0;
     if (op === '>') return compareUtf8Bytes(left, right) > 0;
-    if (FILE_TEST_OPERATORS.has(op)) rejectUnsupportedTestOperator(op);
+    if (FILE_TEST_OPERATORS.has(op)) return fileComparison(this.shell, op, left, right);
     return ARITHMETIC_OPERATORS[op](this.parseInteger(left), this.parseInteger(right));
   }
 

@@ -6,6 +6,7 @@
  * structured lvalue resolution.
  */
 
+import { isIdentifier } from './associativeTable';
 import type { StepMeter } from './budget';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import { skipBalanced, SourceText, SyntaxFailure, UnknownSyntax } from './syntaxWords';
@@ -181,6 +182,12 @@ export function splitSubscriptText(text: string): { name: string; subscript: str
   if (open === -1) return undefined;
   const close = skipSubscript(text, open);
   return close === text.length - 1 ? { name: text.slice(0, open), subscript: text.slice(open + 1, close) } : undefined;
+}
+
+/** Whether a builtin can assign to `text`, a name or an array element `name[subscript]`, as `read` and `printf -v` can. */
+export function isVariableReference(text: string): boolean {
+  const split = splitSubscriptText(text);
+  return split ? isIdentifier(split.name) && split.subscript !== '' : isIdentifier(text);
 }
 
 /** Finds the index of the `]` matching the `[` at `start`. */

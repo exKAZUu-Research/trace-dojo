@@ -5,7 +5,7 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { skipSubscript } from './arithmetic';
 import type { ParameterExpansion, Program, Statement, WordPart } from './ast';
-import { rejectUnsupportedFeature, unsupportedSyntaxMessage } from './capabilities';
+import { rejectUnsupportedFeature } from './capabilities';
 import { Converter, decodeAnsiC } from './converter';
 import { analyzeBashSource, createValidatorSourceText, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { syntaxErrorsOf } from './syntaxErrors';
@@ -27,8 +27,13 @@ export function parseBash(source: string, trace?: TraceOptions): Program {
   return parseText(source, new Set(trace?.atomicAnnotations.keys()));
 }
 
-function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
-  const analyzed = analyzeBashSource(parser, source);
+function parseText(
+  source: string,
+  atomicRows: ReadonlySet<number>,
+  readsApart = false,
+  initialExtglob = false
+): Program {
+  const analyzed = analyzeBashSource(parser, source, initialExtglob);
   return parseSource(
     parser,
     analyzed.grammarSource,
@@ -39,6 +44,7 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
         reparse: reparseBackquoted,
         parseSubscriptParts: parseSubscriptWordParts,
         parseBracedExpansion: parseBracedParameterExpansion,
+        readsApart,
       });
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
@@ -60,9 +66,85 @@ function isEmptySubscript(node: Node): boolean {
   return node.type === 'raw_string' && node.startIndex === node.endIndex && node.parent?.type === 'subscript';
 }
 
+const UNSUPPORTED_SUFFIX = 'は、この採点環境では使えません。';
+
+/**
+ * The commands of a `trap` action, read when the trap is set, numbered as the `trap` command's line so that their
+ * steps show there, or `undefined` for an action with a syntax error, which Bash finds only as it runs the action.
+ */
+export function parseTrapAction(text: string, row: number, extglob = false): Statement[][] | undefined {
+  try {
+    return parseText(`${'\n'.repeat(row)}${text}`, new Set(), false, extglob).units;
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    const message = error.diagnostics[0]?.message ?? '';
+    // What the action uses that this environment does not provide stops the program when the trap is set.
+    if (message.endsWith(UNSUPPORTED_SUFFIX)) rejectUnsupportedFeature(message.slice(0, -UNSUPPORTED_SUFFIX.length));
+    return undefined;
+  }
+}
+
+/**
+ * The commands of a `trap` action with a syntax error that Bash runs before it reaches the error: those of the lines
+ * before the line of the error that read as complete commands, numbered as `parseTrapAction` numbers them.
+ */
+export function parseTrapActionPrefix(text: string, row: number, extglob = false): Statement[][] {
+  const lines = text.split('\n');
+  let errorRow = lines.length;
+  try {
+    parseText(`${text}\n`, new Set(), false, extglob);
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    errorRow = error.diagnostics[0]?.row ?? 0;
+  }
+  for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
+    const text = lines.slice(0, count).join('\n');
+    const prefix = parseTrapAction(text, row, extglob);
+    if (prefix !== undefined && endsAtLineEnd(text, prefix.flat().length, extglob)) return prefix;
+  }
+  return [];
+}
+
+/**
+ * Whether the commands of `text`, `count` of them, end at its last line's end, which a backslash continuing that line
+ * into the next prevents: a command on a line after it is then one more command, read as the grammar reads comments
+ * and quotes.
+ */
+function endsAtLineEnd(text: string, count: number, extglob: boolean): boolean {
+  try {
+    return parseText(`${text}\n:\n`, new Set(), false, extglob).units.flat().length === count + 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The syntax error of a `trap` action that `parseTrapAction` could not read, as Bash reports it when the action runs:
+ * its message, numbered from `firstLine` for the action's first line, and the action's line it names, if any.
+ */
+export function trapActionSyntaxError(text: string, firstLine: number, showsLine: boolean, extglob = false): string[] {
+  try {
+    // Bash ends the action's last line itself; an action that already ends with a newline gets no empty line more.
+    parseText(text.endsWith('\n') ? text : `${text}\n`, new Set(), false, extglob);
+    return [];
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    const { row, message } = error.diagnostics[0] ?? { row: 0, message: '' };
+    const bashMessage = message.replace(/^構文エラーです（/, '').replace(/）。$/, '');
+    const line = firstLine + row;
+    const renumbered = bashMessage.replace(/on line (\d+)/, (_, n: string) => `on line ${firstLine + Number(n) - 1}`);
+    const lines = [`line ${line}: ${renumbered}`];
+    // Bash shows the line of an unexpected token, but not while `set -e` is on.
+    if (showsLine && bashMessage.startsWith('syntax error near unexpected token')) {
+      lines.push(`line ${line}: \`${text.split('\n')[row] ?? ''}'`);
+    }
+    return lines;
+  }
+}
+
 /** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
-function reparseBackquoted(text: string, row: number): Statement[] {
-  return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
+function reparseBackquoted(text: string, row: number, extglob = false): Statement[] {
+  return parseText(`${'\n'.repeat(row)}${text}`, new Set(), false, extglob).units.flat();
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */
@@ -354,7 +436,7 @@ function readDollarGroupPiece(raw: string, i: number, text: SourceText): { parts
 
 function parseSafeSubstitutionBody(inner: string): Statement[] | undefined {
   try {
-    return parseText(inner, new Set()).units.flat();
+    return parseText(inner, new Set(), true).units.flat();
   } catch (error) {
     if (error instanceof CompileError) {
       const msg = error.diagnostics[0]?.message ?? '';
@@ -381,8 +463,12 @@ function readBracedExpansionPiece(
   }
   const slice = raw.slice(i, end);
   if (/^\$\{[ \t\n|]/.test(slice)) {
-    const msg = unsupportedSyntaxMessage('currentShellSubstitution');
-    rejectUnsupportedFeature(msg.slice(0, -'は、この採点環境では使えません。'.length));
+    const reply = slice[2] === '|';
+    const body = parseSafeSubstitutionBody(slice.slice(reply ? 3 : 2, -1));
+    const part: WordPart = body
+      ? { kind: 'commandSubstitution', body, text: slice, row: 0, mode: reply ? 'reply' : 'current' }
+      : { kind: 'single', text: slice };
+    return { parts: [part], next: end };
   }
   return { parts: [parseBracedParameterExpansion(slice, inDouble)], next: end };
 }

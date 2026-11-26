@@ -28,14 +28,14 @@ import {
   rejectUnsupportedNamerefShadowing,
   rejectUnsupportedNamerefTarget,
   rejectUnsupportedPrefixListing,
-  rejectUnsupportedSpecialVariable,
   rejectUnsupportedVariableMutation,
   rejectUnsupportedVariableRead,
   SCALAR_DYNAMIC_VARIABLES,
-  UNSUPPORTED_SPECIAL_VARIABLES,
 } from './capabilities';
+import type { DescriptorTable } from './descriptors';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
-import { BASH_VERSION, type FunctionDefinition, type Runtime } from './runtime';
+import type { GetoptsState } from './getopts';
+import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
 
 export {
   ASSOCIATIVE_BUCKETS,
@@ -93,6 +93,25 @@ export interface VariableView {
 }
 
 export type DestinationIntent = 'local' | 'global' | 'visible';
+
+/** A command Bash runs asynchronously: a background command, a process substitution, or a coprocess. */
+export interface Job {
+  status: number;
+  reported: boolean;
+  finish?: (shellEnds?: boolean) => void;
+  descriptors?: DescriptorTable;
+  waiting?: boolean;
+  /** Whether a waiting coprocess would still run commands once its input ends, which this environment cannot resume. */
+  losesRemainder?: boolean;
+  /**
+   * Settles a waiting coprocess that is waited for: one whose input the shell can still write waits forever, and one
+   * whose input nothing can write any more reads its end, so it ends, unless it would run more then.
+   */
+  settleWait?: () => void;
+  /** Unsets a coprocess's `NAME` and `NAME_PID`, as Bash does once it has reaped the coprocess. */
+  dispose?: () => void;
+  awaitEnd?: () => void;
+}
 
 export type IntEvaluator = (expression: string) => bigint | undefined;
 
@@ -195,7 +214,28 @@ export class VariableStore {
   private readonly prng: RandomStream;
   lastStatus = 0;
   lastArgument: string | undefined;
-  private readonly subshellLevel: number;
+  /** The statuses of the commands of the last pipeline, which `PIPESTATUS` holds. */
+  pipeStatus: readonly number[] = [0];
+  /** The directory that relative paths start from, which `cd` changes and `PWD` holds. */
+  workingDirectory = '/';
+  /** The directory before the last `cd`, which `OLDPWD` holds. */
+  previousDirectory: string | undefined;
+  /** The directories `pushd` remembers, most recent first, below the working directory. */
+  directoryStack: string[] = [];
+  /**
+   * The background jobs, coprocesses, and process substitutions by process ID; a coprocess that has not run yet
+   * keeps `finish`, which runs it (to the end of its input when the shell ends), and the descriptors it was started
+   * with, through which it will write; one that stopped waiting for more input is `waiting`. A `>(...)` keeps
+   * `awaitEnd`, which `wait` calls to let it read its input to the end.
+   */
+  readonly jobs = new Map<number, Job>();
+  /** The process number of the last background command, which `$!` expands to. */
+  lastBackgroundPid: number | undefined;
+  /** The aliases `alias` defined, by name. */
+  aliases = new Map<string, string>();
+  /** Where `getopts` is in the options it reads. */
+  getopts: GetoptsState = { optind: 1, charIndex: 0 };
+  private subshellLevel: number;
 
   constructor(
     private readonly runtime: Runtime,
@@ -210,6 +250,13 @@ export class VariableStore {
       lastStatus: number;
       lastArgument: string | undefined;
       subshellLevel: number;
+      pipeStatus: readonly number[];
+      workingDirectory: string;
+      previousDirectory: string | undefined;
+      directoryStack: string[];
+      lastBackgroundPid: number | undefined;
+      aliases: Map<string, string>;
+      getopts: GetoptsState;
     }
   ) {
     if (forked) {
@@ -222,6 +269,13 @@ export class VariableStore {
       this.lastStatus = forked.lastStatus;
       this.lastArgument = forked.lastArgument;
       this.subshellLevel = forked.subshellLevel;
+      this.pipeStatus = forked.pipeStatus;
+      this.workingDirectory = forked.workingDirectory;
+      this.previousDirectory = forked.previousDirectory;
+      this.directoryStack = forked.directoryStack;
+      this.lastBackgroundPid = forked.lastBackgroundPid;
+      this.aliases = forked.aliases;
+      this.getopts = forked.getopts;
       return;
     }
     this.scopes = [{ kind: 'global', map: new Map() }];
@@ -261,8 +315,11 @@ export class VariableStore {
 
   // ---------------------------------------------------------------- eager metered fork & scopes
 
-  /** Creates an isolated child `VariableStore` for `$(...)` via an eager metered full copy of all scopes and containers. */
-  fork(childLineReader: () => number): VariableStore {
+  /**
+   * Creates an isolated child `VariableStore` for `$(...)` via an eager metered full copy of all scopes and containers.
+   * @param levels How much deeper `BASH_SUBSHELL` is in the copy: 1, or 0 for a pipeline's simple command.
+   */
+  fork(childLineReader: () => number, levels = 1): VariableStore {
     const spend = (cost?: number): void => this.runtime.spend(cost);
     const alloc = (count: number): void => this.runtime.allocateSlots(count);
     const clonedScopes: ScopeEntry[] = this.scopes.map((entry) => {
@@ -287,8 +344,20 @@ export class VariableStore {
       prng: this.prng.fork(nextLevel),
       lastStatus: this.lastStatus,
       lastArgument: this.lastArgument,
-      subshellLevel: nextLevel,
+      subshellLevel: this.subshellLevel + levels,
+      pipeStatus: this.pipeStatus,
+      workingDirectory: this.workingDirectory,
+      previousDirectory: this.previousDirectory,
+      directoryStack: [...this.directoryStack],
+      lastBackgroundPid: this.lastBackgroundPid,
+      aliases: new Map(this.aliases),
+      getopts: { ...this.getopts },
     });
+  }
+
+  /** Counts one more `BASH_SUBSHELL` level, as Bash does for a function a pipeline's forked element calls. */
+  deepenSubshellLevel(): void {
+    this.subshellLevel++;
   }
 
   get isInFunction(): boolean {
@@ -349,6 +418,24 @@ export class VariableStore {
     this.scopes.length = scopeIndex;
   }
 
+  /**
+   * Starts the variable scope of `${ ...; }` or `${| ...; }`, which Bash runs as a function call that keeps the
+   * caller's positional parameters, the latter with a local `REPLY` that starts unset.
+   */
+  pushSubstitutionScope(reply: boolean): number {
+    const map = new Map<string, Cell>();
+    if (reply) {
+      map.set('REPLY', createCell('REPLY', undefined));
+      this.runtime.allocateSlots(1);
+    }
+    this.scopes.push({ kind: 'function', map });
+    return this.scopes.length - 1;
+  }
+
+  popSubstitutionScope(scopeIndex: number): void {
+    this.scopes.length = scopeIndex;
+  }
+
   pushTemporaryScope(): number {
     this.scopes.push({ kind: 'temp', map: new Map() });
     return this.scopes.length - 1;
@@ -383,6 +470,10 @@ export class VariableStore {
 
   hasFunction(name: string): boolean {
     return this.functions.has(name);
+  }
+
+  functionNames(): string[] {
+    return [...this.functions.keys()];
   }
 
   setFunction(fn: FunctionDefinition): void {
@@ -426,7 +517,9 @@ export class VariableStore {
 
   isDynamic(name: string): boolean {
     if (this.findOwnCell(name)) return false;
-    return name === 'BASH_REMATCH' ? this.rematch !== undefined : DYNAMIC_VARIABLES.has(name);
+    if (name === 'BASH_REMATCH') return this.rematch !== undefined;
+    if (name === 'OLDPWD') return this.previousDirectory !== undefined;
+    return DYNAMIC_VARIABLES.has(name);
   }
 
   /** Resolves a variable name across at most one function-local nameref hop, enforcing capability invariants. */
@@ -617,6 +710,10 @@ export class VariableStore {
   namesWithPrefix(prefix: string): string[] {
     const names = this.collectScopedPrefixNames(prefix);
     this.rejectUnsupportedPrefixQuery(prefix);
+    // Dynamic variables have no cell, but Bash lists the ones that are set, such as `PWD`.
+    for (const name of DYNAMIC_VARIABLES) {
+      if (name.startsWith(prefix) && this.hasMaterializedTarget(name)) names.add(name);
+    }
     return [...names].toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   }
 
@@ -909,6 +1006,9 @@ export class VariableStore {
   private readDynamicScalar(name: string): string | undefined {
     if (name === 'RANDOM') return String(this.prng.next());
     if (name === 'LINENO') return String(this.currentLine());
+    if (name === 'BASH_SUBSHELL') return String(this.subshellLevel);
+    if (name === 'PWD') return this.workingDirectory;
+    if (name === 'OLDPWD') return this.previousDirectory;
     return this.readDynamicElements(name)?.get(0n);
   }
 
@@ -918,9 +1018,11 @@ export class VariableStore {
     }
     if (name === 'FUNCNAME') {
       if (this.calls.length === 0) return undefined;
-      const items = [...this.calls.toReversed().map((c) => c.name), 'main'];
-      return new IndexedTable(items.map((v, i) => [BigInt(i), v]));
+      return tableOf([...this.calls.toReversed().map((c) => c.name), 'main']);
     }
+    if (name === 'BASH_LINENO') return tableOf([...this.calls.toReversed().map((c) => String(c.line)), '0']);
+    if (name === 'BASH_SOURCE') return tableOf(Array.from({ length: this.calls.length + 1 }, () => SCRIPT_NAME));
+    if (name === 'PIPESTATUS') return tableOf(this.pipeStatus.map(String));
     return undefined;
   }
 
@@ -938,11 +1040,9 @@ export class VariableStore {
   }
 
   private rejectUnsupportedPrefixQuery(prefix: string): void {
-    for (const unsupported of UNSUPPORTED_SPECIAL_VARIABLES) {
-      if (unsupported.startsWith(prefix)) rejectUnsupportedSpecialVariable(unsupported);
-    }
-    for (const envName of ENVIRONMENT_VARIABLES) {
-      if (envName.startsWith(prefix)) rejectUnsupportedVariableRead(envName);
+    // `_` is listed by name as well, which reads it.
+    for (const name of [...ENVIRONMENT_VARIABLES, '_']) {
+      if (name.startsWith(prefix)) rejectUnsupportedVariableRead(name);
     }
     if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
       rejectUnsupportedPrefixListing(prefix);
@@ -1322,4 +1422,8 @@ function cellElementKeys(value: CellValue): string[] {
   if (value.kind === 'scalar') return ['0'];
   if (value.kind === 'indexed') return sortedElements(value.elements).map(([k]) => String(k));
   return value.table.entries().map(([k]) => k);
+}
+
+function tableOf(values: readonly string[]): IndexedTable {
+  return new IndexedTable(values.map((value, index) => [BigInt(index), value]));
 }

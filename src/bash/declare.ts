@@ -12,9 +12,11 @@ import {
 } from './capabilities';
 import { printDeclarations } from './declarePrint';
 import type { FailureContext } from './failurePolicy';
+import { singleQuote } from './quoting';
 import type { Shell } from './shell';
 import { resolveTargetName } from './targets';
-import { type DestinationIntent, isIdentifier } from './variables';
+import { type CompoundElement, type DestinationIntent, isIdentifier } from './variables';
+import { traceAssignment, traceLine, traceWords } from './xtrace';
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -78,23 +80,49 @@ export function consumeDeclarationOptionToken(builtin: string, token: string, op
 }
 
 /** Runs a static `declaration` statement directly through per-operand `VariableStore` transactions. */
+// code-gauge-allow functionCognitiveComplexity -- Orders option checks, `-F`, tracing, header validation, listing, and operand execution as Bash does.
+// code-gauge-allow functionNcss -- Orders option checks, `-F`, tracing, header validation, listing, and operand execution as Bash does.
 export function executeDeclarationCommand(
   shell: Shell,
   builtin: string,
   staticOptions: StaticDeclarationOptions | undefined,
   args: readonly (Word | Assignment)[],
-  withRedirects: <T>(run: () => T) => T
+  withRedirects: <T>(run: () => T) => T,
+  optionWords: readonly string[] = []
 ): { status: number; assignsAnswer: boolean } {
   const savedGuards = shell.store.compoundGuardDepth();
   try {
     const prepared = staticOptions
       ? prepareNormalizedDeclaration(builtin, staticOptions, args)
       : prepareRuntimeOptionDeclaration(shell, builtin, args);
+    // `local -` makes the function restore the `set` options when it returns, as Bash does; the trace keeps the `-`.
+    const dashWords: string[] = [];
+    if (builtin === 'local' && shell.isInFunction && prepared.operandArgs.some(isLoneDash)) {
+      shell.restoreSetOptionsOnReturn();
+      dashWords.push('-');
+      prepared.operandArgs = prepared.operandArgs.filter((arg) => !isLoneDash(arg));
+      if (prepared.operandArgs.length === 0) {
+        if (shell.options.xtrace) traceWords(shell, [builtin, ...optionWords, ...dashWords]);
+        withRedirects(() => {
+          shell.store.lastArgument = '-';
+        });
+        return { status: 0, assignsAnswer: false };
+      }
+    }
     const state: DeclarationRunState = {
       status: 0,
       assignsAnswer: false,
       lastArgText: prepared.initialLastArg,
     };
+    if (listsFunctionNames(builtin, prepared.options)) {
+      const names = prepared.operandArgs.map((arg) => operandText(shell, arg));
+      if (shell.options.xtrace) traceWords(shell, [builtin, ...optionWords, ...names]);
+      const printsDeclarations = prepared.options.set.has('p');
+      return {
+        status: withRedirects(() => printFunctionNames(shell, names, printsDeclarations)),
+        assignsAnswer: false,
+      };
+    }
     if (hasValidBuiltinContext(shell, builtin, prepared.options)) {
       rejectUnsupportedDeclarationOptions(
         builtin,
@@ -104,6 +132,7 @@ export function executeDeclarationCommand(
       );
     }
     const operands = collectReadyOperands(shell, prepared.operandArgs, state);
+    if (shell.options.xtrace) traceDeclaration(shell, builtin, [...optionWords, ...dashWords], operands);
     shell.store.leaveCompoundGuards(savedGuards);
     const headerCode = withRedirects(() => validateDeclarationHeader(shell, builtin, prepared.options));
     if (headerCode !== undefined) {
@@ -206,6 +235,75 @@ function applyBuiltinImpliedFlags(builtin: string, options: ParsedOptions): void
     if (options.set.delete('n')) options.unset.add('x');
     else options.set.add('x');
   }
+}
+
+/** Whether a declaration is `declare -F` or `typeset -F`, which prints the names of functions. */
+function listsFunctionNames(builtin: string, options: ParsedOptions): boolean {
+  return (
+    (builtin === 'declare' || builtin === 'typeset') &&
+    options.invalidOption === undefined &&
+    options.set.has('F') &&
+    !options.set.has('f') &&
+    options.unset.size === 0
+  );
+}
+
+/** The trace of a declaration waiting for its compound operands to print first. */
+const pendingTraces = new WeakMap<Shell, { words: string[]; compounds: number }>();
+
+/**
+ * Prints a declaration under `set -x` as Bash does: its words, a compound operand by its name alone, and for
+ * `readonly` and `export` each assignment again as the assignment it makes.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Prints the words, defers them behind compound operands, and repeats `readonly` and `export` assignments, as Bash's trace does.
+function traceDeclaration(
+  shell: Shell,
+  builtin: string,
+  optionWords: readonly string[],
+  operands: readonly ReadyOperand[]
+): void {
+  const texts = operands.map((op) =>
+    op.kind === 'word' ? op.text : op.kind === 'scalar' ? op.parsed.rawText : op.arg.name
+  );
+  const compounds = operands.filter((op) => op.kind === 'compound').length;
+  // Bash expands a compound operand, which prints it, before it prints the command.
+  if (compounds > 0) pendingTraces.set(shell, { words: [builtin, ...optionWords, ...texts], compounds });
+  else traceWords(shell, [builtin, ...optionWords, ...texts]);
+  if (builtin !== 'readonly' && builtin !== 'export') return;
+  for (const op of operands) {
+    if (op.kind === 'scalar' && op.parsed.value !== undefined) {
+      traceAssignment(shell, op.parsed.name, op.parsed.append ? '+=' : '=', op.parsed.value);
+    }
+  }
+}
+
+/** Whether an operand is written as a lone `-`, as `local -` is. */
+function isLoneDash(arg: Word | Assignment | ReadyOperand): boolean {
+  if ('append' in arg) return false;
+  if ('kind' in arg) return arg.kind === 'word' && arg.text === '-';
+  return arg.text === '-';
+}
+
+/** The text of a declaration operand as a name, which `declare -F` looks up. */
+function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): string {
+  if ('append' in arg) return arg.text;
+  if (!('kind' in arg)) return shell.expander.expandString(arg);
+  if (arg.kind === 'word') return arg.text;
+  return arg.kind === 'scalar' ? arg.parsed.rawText : arg.arg.text;
+}
+
+/** `declare -F`, which lists every function as `declare -f name`, or prints the names given, as such with `-p`. */
+function printFunctionNames(shell: Shell, names: readonly string[], printsDeclarations: boolean): number {
+  if (names.length === 0) {
+    for (const name of shell.store.functionNames().toSorted()) shell.fd1.write(`declare -f ${name}\n`);
+    return 0;
+  }
+  let status = 0;
+  for (const name of names) {
+    if (shell.store.hasFunction(name)) shell.fd1.write(printsDeclarations ? `declare -f ${name}\n` : `${name}\n`);
+    else status = 1;
+  }
+  return status;
 }
 
 function hasValidBuiltinContext(shell: Shell, builtin: string, options: ParsedOptions): boolean {
@@ -324,10 +422,16 @@ function executeCompoundDeclarationOperand(
 ): boolean {
   state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
+  // A compound value without `-a` or `-A` is assigned as a plain array assignment is: its failure abandons the line,
+  // and its readonly error ends the shell under `set -e`. With them, a failure abandons the line outside a function
+  // and fails the builtin inside one. A local that would shadow a readonly variable fails the builtin either way.
+  const inFunction = shell.isInFunction && builtin !== 'readonly' && builtin !== 'export';
   const failCtx: FailureContext =
-    shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
-      ? 'declarationLocalCompound'
-      : 'declarationGlobalCompound';
+    !set.has('a') && !set.has('A')
+      ? 'arrayAssignment'
+      : inFunction
+        ? 'declarationLocalCompound'
+        : 'declarationGlobalCompound';
   const committed = withRedirects(() =>
     commitCompoundOperand(shell, {
       builtin,
@@ -393,6 +497,7 @@ function commitCompoundOperand(shell: Shell, req: CompoundOperandRequest): { ok:
         hasEnclosingTempBinding: shell.store.hasTemporaryBinding(req.name),
       });
     }
+    settleCompoundTrace(shell);
     shell.failures.handleStoreFailure(req.context, {
       ok: false,
       reason: 'cannotAssign',
@@ -432,6 +537,7 @@ function resolveCompoundTargetName(shell: Shell, req: CompoundOperandRequest): s
   const targetName = req.intent === 'visible' ? resolveTargetName(shell, req.name) : req.name;
   rejectUnsupportedVariableMutation(targetName, false);
   if (!isIdentifier(targetName)) {
+    settleCompoundTrace(shell);
     shell.failures.handleStoreFailure(req.context, {
       ok: false,
       reason: 'invalidIdentifier',
@@ -441,7 +547,8 @@ function resolveCompoundTargetName(shell: Shell, req: CompoundOperandRequest): s
   }
   const outerRo = req.intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
   if (outerRo) {
-    shell.failures.handleStoreFailure(req.context, outerRo, req.builtin);
+    settleCompoundTrace(shell);
+    shell.failures.handleStoreFailure('declarationOperand', outerRo, req.builtin);
     return undefined;
   }
   return targetName;
@@ -477,6 +584,7 @@ function expandAndCommitCompound(
   const isDeclaration = req.builtin !== undefined;
   const beforeExpandDepth = shell.store.enterCompoundGuard(targetName, false);
   const expanded = shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
+  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements);
   shell.store.leaveCompoundGuards(beforeExpandDepth);
   const { outcome, materializedArray } = shell.store.writeCompoundNamed({
     resolvedName: targetName,
@@ -500,6 +608,32 @@ function expandAndCommitCompound(
     return { ok: false, materialized: false };
   }
   return { ok: true, materialized: materializedArray };
+}
+
+/**
+ * Prints a declaration's compound operand as `name=('a' ['k']='b')`, each element and subscript quoted, as Bash's
+ * trace shows it.
+ */
+function traceCompound(shell: Shell, req: CompoundOperandRequest, elements: readonly CompoundElement[]): void {
+  const texts = elements.map((element) => {
+    if (typeof element === 'string') return singleQuote(element);
+    if ('plain' in element) return singleQuote(element.plain);
+    return `[${singleQuote(element.key)}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
+  });
+  traceLine(shell, `${req.name}${req.append ? '+=' : '='}(${texts.join(' ')})`);
+  settleCompoundTrace(shell);
+}
+
+/**
+ * Counts one compound operand of the declaration being traced as expanded, or skipped because it fails before it is
+ * expanded, and prints the declaration's trace once none is left, before a failure is reported, as Bash does.
+ */
+function settleCompoundTrace(shell: Shell): void {
+  const pending = pendingTraces.get(shell);
+  if (pending && --pending.compounds === 0) {
+    pendingTraces.delete(shell);
+    traceWords(shell, pending.words);
+  }
 }
 
 function executeScalarDeclarationOperand(
@@ -566,7 +700,13 @@ function executeUnsubscriptedDeclaration(
     append: op.append,
     evalInt: (expr) => shell.evaluateFatalReadonly(expr, false, builtin),
   });
-  if (failure) return shell.failures.handleStoreFailure('declarationOperand', failure, builtin);
+  if (failure) {
+    // `readonly` and `export` assign as a plain assignment does, whose readonly error names no builtin.
+    const assigns = failure.reason === 'readonly' && (builtin === 'readonly' || builtin === 'export');
+    return assigns
+      ? shell.failures.handleStoreFailure('builtinAssignment', failure)
+      : shell.failures.handleStoreFailure('declarationOperand', failure, builtin);
+  }
   if (materializedArray) onMaterialize();
   return true;
 }

@@ -1,12 +1,14 @@
 import { ArithmeticError, ArithmeticStoreError, evaluateArithmetic } from './arithmetic';
 import type { TestExpression } from './ast';
-import { FILE_TEST_OPERATORS, rejectUnsupportedTestOperator } from './capabilities';
+import { FILE_TEST_OPERATORS } from './capabilities';
 import { charactersOf, legalNumber } from './characters';
 import { compareCollated } from './collation';
+import { fileComparison, fileTest } from './fileTests';
 import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
 import { isResolvedTargetSet, resolveScalarTarget, resolveSubscriptTarget } from './targets';
 import { isIdentifier } from './variables';
+import { traceLine } from './xtrace';
 
 export { FILE_TEST_OPERATORS };
 
@@ -19,15 +21,23 @@ export const ARITHMETIC_OPERATORS: Record<string, (a: bigint, b: bigint) => bool
   '-ge': (a, b) => a >= b,
 };
 
-/** Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad regex. */
-export function conditionalStatus(shell: Shell, expression: TestExpression): number {
+/**
+ * Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad
+ * regex. `inverted` tells that a `!` applies to the term itself, which `set -x` shows with it, as Bash does.
+ */
+export function conditionalStatus(shell: Shell, expression: TestExpression, inverted = false): number {
   const { expander } = shell;
   switch (expression.kind) {
     case 'word': {
-      return expander.expandString(expression.word) === '' ? 1 : 0;
+      const word = expander.expandString(expression.word);
+      traceTerm(shell, inverted, '-n', word);
+      return word === '' ? 1 : 0;
     }
     case 'not': {
-      return conditionalStatus(shell, expression.expression) === 0 ? 1 : 0;
+      return conditionalStatus(shell, expression.expression, !inverted) === 0 ? 1 : 0;
+    }
+    case 'group': {
+      return conditionalStatus(shell, expression.expression);
     }
     case 'and': {
       const left = conditionalStatus(shell, expression.left);
@@ -38,30 +48,56 @@ export function conditionalStatus(shell: Shell, expression: TestExpression): num
       return left === 0 ? 0 : conditionalStatus(shell, expression.right);
     }
     case 'unary': {
-      return unaryTest(shell, expression.operator, expander.expandString(expression.operand)) ? 0 : 1;
+      const operand = expander.expandString(expression.operand);
+      traceTerm(shell, inverted, expression.operator, operand);
+      return unaryTest(shell, expression.operator, operand) ? 0 : 1;
     }
     case 'binary': {
-      return evaluateBinaryConditional(shell, expression) ? 0 : 1;
+      return evaluateBinaryConditional(shell, expression, inverted) ? 0 : 1;
     }
     case 'regex': {
       const left = expander.expandString(expression.left);
-      return regexStatus(shell, left, expander.expandRegex(expression.right));
+      const regex = expander.expandRegex(expression.right);
+      traceTerm(shell, inverted, left, '=~', regex);
+      return regexStatus(shell, left, regex);
     }
   }
 }
 
-function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpression, { kind: 'binary' }>): boolean {
+/**
+ * Shows a term of `[[ ]]` under `set -x` as Bash does: its operator and operands as expanded, an empty operand as
+ * `''`, a lone word as `-n word`, and a `!` that applies to the term before it.
+ */
+function traceTerm(shell: Shell, inverted: boolean, ...parts: [string, string] | [string, string, string]): void {
+  if (!shell.options.xtrace) return;
+  const shown =
+    parts.length === 2 ? [parts[0], operandText(parts[1])] : [operandText(parts[0]), parts[1], operandText(parts[2])];
+  traceLine(shell, `[[ ${inverted ? '! ' : ''}${shown.join(' ')} ]]`);
+}
+
+function operandText(operand: string): string {
+  return operand === '' ? "''" : operand;
+}
+
+function evaluateBinaryConditional(
+  shell: Shell,
+  expression: Extract<TestExpression, { kind: 'binary' }>,
+  inverted: boolean
+): boolean {
   const { expander } = shell;
   const { operator } = expression;
   const left = expander.expandString(expression.left);
   if (operator === '==' || operator === '=' || operator === '!=') {
-    const matched = expander.matches(left, expander.expandPattern(expression.right), true);
+    const pattern = expander.expandPattern(expression.right);
+    traceTerm(shell, inverted, left, operator, pattern);
+    const matched = expander.matches(left, pattern, { extmatch: true, fold: shell.options.nocasematch });
     return operator === '!=' ? !matched : matched;
   }
   const right = expander.expandString(expression.right);
+  traceTerm(shell, inverted, left, operator, right);
   if (operator === '<') return compareCollated(left, right) < 0;
   if (operator === '>') return compareCollated(left, right) > 0;
-  if (FILE_TEST_OPERATORS.has(operator)) rejectUnsupportedTestOperator(operator);
+  if (FILE_TEST_OPERATORS.has(operator)) return fileComparison(shell, operator, left, right);
   const compare = ARITHMETIC_OPERATORS[operator];
   const leftNum = conditionalNumber(shell, left);
   if (leftNum === undefined) return false;
@@ -101,7 +137,7 @@ export function unaryTest(shell: Shell, operator: string, operand: string): bool
       return view?.attributes.has('n') === true && view.kind !== 'unset';
     }
     default: {
-      return rejectUnsupportedTestOperator(operator);
+      return fileTest(shell, operator, operand);
     }
   }
 }
@@ -129,7 +165,7 @@ function isSet(shell: Shell, operand: string): boolean {
 function regexStatus(shell: Shell, text: string, source: string): number {
   let compiled;
   try {
-    compiled = compileRegex(source, shell.runtime.step);
+    compiled = compileRegex(source, shell.runtime.step, shell.options.nocasematch);
   } catch (error) {
     if (!(error instanceof RegexSyntaxError)) throw error;
     shell.reportError(`[[: invalid regular expression \`${source}': ${error.message}`);

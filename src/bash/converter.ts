@@ -5,6 +5,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type {
   ArithmeticSource,
   Assignment,
+  BackquoteRereading,
   CaseItem,
   ParameterExpansion,
   Program,
@@ -15,9 +16,14 @@ import type {
   Word,
   WordPart,
 } from './ast';
-import { DECLARATION_OPTIONS, type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
+import {
+  DECLARATION_OPTIONS,
+  rejectUnsupportedFeature,
+  type UnsupportedSyntaxKind,
+  unsupportedSyntaxMessage,
+} from './capabilities';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
-import { type AnalyzedBashSource, findForHeaderSemicolons } from './syntaxCheck';
+import { type AnalyzedBashSource, findForHeaderSemicolons, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
 import { isIdentifier } from './variables';
 
@@ -32,18 +38,71 @@ const EXPANSION_TYPES = new Set([
   'translated_string',
 ]);
 
+type FileRedirectOperator = Extract<Redirect, { kind: 'file' }>['operator'];
+
+const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>', '&>>']);
+
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
   /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
-  readonly reparse: (text: string, row: number) => Statement[];
+  readonly reparse: (text: string, row: number, extglob?: boolean) => Statement[];
   readonly parseSubscriptParts?: (raw: string) => WordPart[];
   readonly parseBracedExpansion?: (slice: string, inDouble: boolean, row: number) => ParameterExpansion;
+  /** Whether the text is a `${ ...; }` body read apart from the lines after it, which may hold its here-documents. */
+  readonly readsApart?: boolean;
+}
+
+/**
+ * Reads a body again while the program runs, where a construct this environment does not provide stops the program
+ * with the unsupported-feature message, as it would have before the run; no compile error leaves a running program.
+ */
+function rereadAtRun(read: () => Statement[]): Statement[] {
+  try {
+    return read();
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    const message = error.diagnostics[0]?.message ?? '';
+    const suffix = 'は、この採点環境では使えません。';
+    rejectUnsupportedFeature(
+      message.endsWith(suffix) ? message.slice(0, -suffix.length) : `実行中に読み直したコマンド（${message}）`
+    );
+  }
+}
+
+/** The `$( )` a node lies in, if any, written with `$(`. */
+function enclosingSubstitution(node: Node): Node | undefined {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'command_substitution') return current.text.startsWith('$(') ? current : undefined;
+  }
+  return undefined;
+}
+
+/** Whether a node lies in a `${ ...; }` or `${| ...; }`, whose body Bash reads apart from the lines after it. */
+function insideCurrentShellSubstitution(node: Node): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'command_substitution' && current.text.startsWith('${')) return true;
+  }
+  return false;
 }
 
 /** Converts the tree of a program into statements, consulting `capabilities.ts` for unsupported syntax. */
 export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
+  /** The body of each here-document, by the start of its redirection, which the grammar puts after the command. */
+  private readonly heredocBodies = new Map<number, Node>();
+  /**
+   * The here-documents that end without their delimiter line, with the row of the redirection, the line Bash's warning
+   * names as where the body starts, the line it reports from, and the delimiter they wanted.
+   */
+  private readonly unterminatedHeredocs: {
+    row: number;
+    startLine: number;
+    line: number;
+    delimiter: string;
+    /** The `$( )` whose here-documents the end of the input left without a body, which Bash counts as it warns. */
+    substitution?: number;
+  }[] = [];
 
   private get source(): string {
     return this.analyzed.grammarSource;
@@ -56,6 +115,7 @@ export class Converter {
   ) {}
 
   convertProgram(root: Node): Program {
+    this.collectHeredocBodies(root);
     const units: Statement[][] = [];
     const unitEndRows: number[] = [];
     let unit: Statement[] = [];
@@ -63,10 +123,15 @@ export class Converter {
     let previousEndRow = 0;
     for (const child of root.children) {
       if (!child.isNamed) {
-        this.checkTerminator(child);
+        if (child.type === '&') runInBackground(unit);
         continue;
       }
       if (child.type === 'comment') continue;
+      if (child.type === 'heredoc_body') {
+        previousEnd = child.endIndex;
+        previousEndRow = child.endPosition.row;
+        continue;
+      }
       // Bash removes backslash-newline continuations before reading a logical line, and discards that line on error.
       if (previousEnd !== undefined && hasLogicalNewline(this.source.slice(previousEnd, child.startIndex))) {
         units.push(unit);
@@ -81,29 +146,106 @@ export class Converter {
       units.push(unit);
       unitEndRows.push(previousEndRow);
     }
-    return { units, unitEndRows };
+    const extglobRows = new Map<number, { row: number; line: string }>();
+    const lines = this.analyzed.originalSource.split('\n');
+    for (const row of [...this.analyzed.uncertainExtglobRows].toSorted((a, b) => a - b)) {
+      const index = unitEndRows.findIndex((endRow) => endRow >= row);
+      if (index !== -1 && !extglobRows.has(index)) extglobRows.set(index, { row, line: lines[row] ?? '' });
+    }
+    return { units, unitEndRows, extglobRows, readWarnings: this.readWarnings(unitEndRows) };
+  }
+
+  /**
+   * The warnings Bash prints for here-documents the end of the input ends, at the line it is on then, as it reads the
+   * unit holding them.
+   */
+  private readWarnings(unitEndRows: readonly number[]): Map<number, string[]> {
+    const warnings = new Map<number, string[]>();
+    const counted = new Set<number>();
+    for (const { row, startLine, line, delimiter, substitution } of this.unterminatedHeredocs) {
+      const index = unitEndRows.findIndex((endRow) => endRow >= row);
+      const unit = index === -1 ? unitEndRows.length - 1 : index;
+      const messages = warnings.get(unit) ?? [];
+      // Bash first counts the here-documents a command substitution leaves unterminated, then warns of each.
+      if (substitution !== undefined && !counted.has(substitution)) {
+        counted.add(substitution);
+        const count = this.unterminatedHeredocs.filter((entry) => entry.substitution === substitution).length;
+        const noun = count === 1 ? 'here-document' : 'here-documents';
+        messages.push(`line ${line}: warning: command substitution: ${count} unterminated ${noun}`);
+      }
+      messages.push(
+        `line ${line}: warning: here-document at line ${startLine} delimited by end-of-file (wanted \`${delimiter}')`
+      );
+      warnings.set(unit, messages);
+    }
+    return warnings;
+  }
+
+  /**
+   * Notes a here-document that ends without its delimiter line: Bash names the line it was on as it began reading the
+   * body (`startLine`), and reports from the line where the substitution closed it (`closedRow`) or else the last
+   * line of the input, which a final newline does not add to.
+   */
+  private noteUnterminatedHeredoc(
+    row: number,
+    startLine: number | undefined,
+    delimiter: string,
+    closedRow: number | undefined,
+    substitution?: number
+  ): void {
+    const source = this.analyzed.originalSource;
+    const lastLine = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
+    this.unterminatedHeredocs.push({
+      row,
+      startLine: startLine ?? lastLine,
+      line: closedRow === undefined ? lastLine : closedRow + 1,
+      delimiter: delimiter.replaceAll(/['"\\]/g, ''),
+      substitution,
+    });
+  }
+
+  /**
+   * Pairs each here-document redirection with its body: the first body not yet paired that starts after it within
+   * the same command substitution (or the program), as Bash reads a substitution's here-documents apart.
+   */
+  private collectHeredocBodies(root: Node): void {
+    const redirects: Node[] = [];
+    const bodies: Node[] = [];
+    const pending: Node[] = [root];
+    for (let node = pending.pop(); node; node = pending.pop()) {
+      if (node.type === 'heredoc_redirect') redirects.push(node);
+      else if (node.type === 'heredoc_body') bodies.push(node);
+      for (let i = node.childCount - 1; i >= 0; i--) pending.push(node.child(i) as Node);
+    }
+    const paired = new Set<Node>();
+    for (const redirect of redirects.toSorted((a, b) => a.startIndex - b.startIndex)) {
+      const scope = substitutionScopeOf(redirect);
+      const body = bodies
+        .filter((candidate) => !paired.has(candidate) && candidate.startIndex >= redirect.endIndex)
+        .filter((candidate) => substitutionScopeOf(candidate) === scope)
+        .toSorted((a, b) => a.startIndex - b.startIndex)[0];
+      if (!body) continue;
+      paired.add(body);
+      this.heredocBodies.set(redirect.startIndex, body);
+    }
   }
 
   private fail(node: Node, message: string): never {
     throw new CompileError([{ row: node.startPosition.row, message }]);
   }
 
-  private unsupported(node: Node, kind: UnsupportedSyntaxKind, detail?: string): never {
-    this.fail(node, unsupportedSyntaxMessage(kind, detail));
-  }
-
-  private checkTerminator(node: Node): void {
-    if (node.type === '&') this.unsupported(node, 'background');
+  private unsupported(node: Node, kind: UnsupportedSyntaxKind): never {
+    this.fail(node, unsupportedSyntaxMessage(kind));
   }
 
   private statements(nodes: Node[]): Statement[] {
     const result: Statement[] = [];
     for (const node of nodes) {
       if (!node.isNamed) {
-        this.checkTerminator(node);
+        if (node.type === '&') runInBackground(result);
         continue;
       }
-      if (node.type === 'comment') continue;
+      if (node.type === 'comment' || node.type === 'heredoc_body') continue;
       result.push(this.statement(node));
     }
     return result;
@@ -182,13 +324,28 @@ export class Converter {
         return this.redirectedStatement(node, base);
       }
       case 'pipeline': {
-        return this.unsupported(node, 'pipeline');
+        return this.pipeline(node, base);
       }
       case 'subshell': {
-        return this.unsupported(node, 'subshell');
+        return { ...base, kind: 'subshell', body: this.nonEmpty(node, this.statements(node.children)) };
       }
       case 'coproc_command': {
-        return this.unsupported(node, 'coproc');
+        const nameNode = node.childForFieldName('name');
+        const redirectNodes = this.fieldNodes(node, 'redirect');
+        // The grammar puts a compound body's redirections beside the body, which apply to it as to any compound
+        // command.
+        const bodyNode = node.namedChildren.findLast(
+          (child) =>
+            child !== null &&
+            child.type !== 'comment' &&
+            child.id !== nameNode?.id &&
+            !redirectNodes.some((redirect) => redirect.id === child.id)
+        ) as Node;
+        const converted = this.statement(bodyNode);
+        const redirects = redirectNodes.map((redirect) => this.redirect(redirect));
+        const body: Statement =
+          redirects.length === 0 ? converted : { ...base, kind: 'redirected', body: converted, redirects };
+        return { ...base, kind: 'coproc', name: nameNode?.text ?? 'COPROC', body };
       }
       case 'timed_command': {
         return this.unsupported(node, 'time');
@@ -201,14 +358,27 @@ export class Converter {
 
   private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const bodyNode = node.childForFieldName('body');
-    if (bodyNode?.type === 'function_definition') this.unsupported(node, 'functionRedirect');
     const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
     if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
     const converted = this.statement(bodyNode);
-    if (converted.kind === 'command' || converted.kind === 'declaration') {
+    if (converted.kind === 'command' || converted.kind === 'declaration' || converted.kind === 'function') {
       return { ...converted, redirects: [...converted.redirects, ...redirects] };
     }
     return { ...base, kind: 'redirected', body: converted, redirects };
+  }
+
+  private pipeline(node: Node, base: { row: number; lineRow: number }): Statement {
+    const commands: Statement[] = [];
+    for (const child of node.children) {
+      if (child.type === '|&') {
+        const previous = commands.pop() as Statement;
+        commands.push(withStandardErrorToOutput(previous, child.startPosition.row));
+      } else if (child.isNamed && child.type !== 'comment' && child.type !== 'heredoc_body') {
+        // A here-document's body the grammar puts inside the pipeline belongs to its redirection, not a command.
+        commands.push(this.statement(child));
+      }
+    }
+    return { ...base, kind: 'pipeline', commands };
   }
 
   private body(node: Node): Statement[] {
@@ -234,15 +404,15 @@ export class Converter {
     const nameNode = node.childForFieldName('name');
     const words = [...leadingWords];
     if (nameNode) words.push(this.word(nameNode.namedChildren.at(-1) as Node));
-    for (const argument of this.fieldNodes(node, 'argument')) words.push(this.word(argument));
-    return {
-      row,
-      lineRow: lineRowOf(node),
-      kind: 'command',
-      assignments,
-      words,
-      redirects: this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect)),
-    };
+    const redirects: Redirect[] = [];
+    const { children } = node;
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      const field = node.fieldNameForChild(index);
+      if (field === 'redirect') redirects.push(this.redirect(child));
+      else if (field === 'argument') words.push(this.word(child));
+    }
+    return { row, lineRow: lineRowOf(node), kind: 'command', assignments, words, redirects };
   }
 
   private declaration(node: Node): Statement {
@@ -270,6 +440,7 @@ export class Converter {
       kind: 'declaration',
       name,
       assignments,
+      words: args,
       ...(normalized
         ? {
             staticOptions: normalized.staticOptions,
@@ -444,18 +615,119 @@ export class Converter {
     };
   }
 
-  private redirect(node: Node): Redirect {
-    if (node.type === 'heredoc_redirect') this.unsupported(node, 'heredoc');
-    if (node.type === 'herestring_redirect') this.unsupported(node, 'herestring');
+  /** Converts a redirection, whose `{name}`, if the syntax check found one before it, names its descriptor. */
+  private redirect(node: Node, fdVariable = this.analyzed.descriptorVariables.get(node.startIndex)): Redirect {
+    const descriptorText = node.childForFieldName('descriptor')?.text;
+    const variable = fdVariable === undefined ? {} : { fdVariable };
+    if (node.type === 'heredoc_redirect') {
+      return {
+        fd: Number(descriptorText ?? 0),
+        ...variable,
+        kind: 'text',
+        body: this.heredocBody(node),
+        appendsNewline: false,
+      };
+    }
+    if (node.type === 'herestring_redirect') {
+      const value = node.childForFieldName('value') ?? node.namedChildren.at(-1);
+      return {
+        fd: Number(descriptorText ?? 0),
+        ...variable,
+        kind: 'text',
+        body: this.word(value as Node),
+        appendsNewline: true,
+      };
+    }
     const operator = node.childForFieldName('operator')?.type ?? '';
-    const descriptor = node.childForFieldName('descriptor')?.text;
-    const destination = node.childForFieldName('destination');
-    const fd = descriptor === undefined ? 1 : Number(descriptor);
-    const target = destination?.type === 'word' ? destination.text : undefined;
-    const isCopy =
-      (operator === '>&' || operator === '<&') && (fd === 1 || fd === 2) && (target === '1' || target === '2');
-    if (isCopy && (operator === '>&' || fd === Number(target))) return { fd, target: Number(target) as 1 | 2 };
-    return this.unsupported(node, 'redirect', node.text);
+    const destinations = this.fieldNodes(node, 'destination');
+    const readsByDefault = operator.startsWith('<') && operator !== '<<<';
+    const fd = descriptorText === undefined ? (readsByDefault ? 0 : 1) : Number(descriptorText);
+    if (operator === '>&-' || operator === '<&-') return { fd, ...variable, kind: 'close' };
+    if (destinations.length !== 1) this.fail(node, unexpectedTokenMessage('newline'));
+    const target = this.word(destinations[0]);
+    if (operator === '>&' || operator === '<&') {
+      return { fd, ...variable, kind: 'duplicate', operator, target, hasDescriptor: descriptorText !== undefined };
+    }
+    if (!FILE_REDIRECT_OPERATORS.has(operator)) this.fail(node, unexpectedTokenMessage(operator));
+    return { fd, ...variable, kind: 'file', operator: operator as FileRedirectOperator, target };
+  }
+
+  /** The text of a here-document, which expands like a double-quoted string unless its delimiter is quoted. */
+  // code-gauge-allow functionCognitiveComplexity -- Handles quoted and unquoted delimiters, `<<-` tab stripping, and the body's first newline together.
+  private heredocBody(redirect: Node): Word {
+    const body = this.heredocBodies.get(redirect.startIndex);
+    const row = redirect.startPosition.row;
+    const stripsTabs = redirect.childForFieldName('operator')?.type === '<<-';
+    const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
+    if (!body) {
+      // The body is missing because the input ends before its first line, or because it lies on the lines after a
+      // substitution that closed first, which Bash 5.3 reads with a warning and this environment does not.
+      if (this.hooks.readsApart || insideCurrentShellSubstitution(redirect) || !this.inputEndsBefore(redirect)) {
+        return this.unsupported(redirect, 'outerHeredocBody');
+      }
+      // Bash begins reading the body at the end of the input, where it stops at once.
+      this.noteUnterminatedHeredoc(row, undefined, delimiter, undefined, enclosingSubstitution(redirect)?.id);
+      return { parts: [], row, text: '' };
+    }
+    const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
+    const contentEnd = end?.startIndex ?? body.endIndex;
+    // The grammar ends a body the end of the input ends with an empty `heredoc_end`, and one in a substitution at the
+    // delimiter followed by the `)` closing it, both of which Bash warns of.
+    const source = this.analyzed.originalSource;
+    // The end of a backquoted substitution ends its delimiter line.
+    // An empty delimiter ends the body at its first empty line, which leaves the grammar's end node empty.
+    const endsAtEmptyLine =
+      delimiter.replaceAll(/['"\\]/g, '') === '' && end !== undefined && source[end.startIndex] === '\n';
+    const endsAtDelimiterLine =
+      endsAtEmptyLine ||
+      (end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|`|$)/.test(source.slice(end.endIndex)));
+    const closedRow = end !== undefined && end.startIndex < end.endIndex ? end.startPosition.row : undefined;
+    if (!endsAtDelimiterLine) {
+      const startLine = source[body.startIndex] === '\n' ? body.startPosition.row + 1 : body.startPosition.row;
+      this.noteUnterminatedHeredoc(row, startLine, delimiter, closedRow);
+    }
+    // Bash reads a body line by line, so a last line the end of the input cuts off still ends with a newline.
+    const content = source.slice(body.startIndex, contentEnd);
+    // A last line of blanks only is a line too; only the newline after the redirection line is no line of the body.
+    const bodyText = content.replace(/^\n/, '');
+    const endsCut = !endsAtDelimiterLine && closedRow === undefined && bodyText !== '' && !bodyText.endsWith('\n');
+    const lastNewline: WordPart[] = endsCut ? [{ kind: 'single', text: '\n' }] : [];
+    const strip = (text: string, atLineStart: boolean): string =>
+      stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
+    if (/['"\\]/.test(delimiter)) {
+      const raw = this.analyzed.originalSource.slice(body.startIndex, contentEnd).replace(/^\n/, '');
+      return { parts: [{ kind: 'single', text: strip(raw, true) }, ...lastNewline], row, text: raw };
+    }
+    const parts: WordPart[] = [];
+    let atStart = true;
+    for (const child of body.namedChildren) {
+      if (!child || child.type === 'heredoc_end') continue;
+      if (child.type === 'heredoc_content') {
+        const raw = this.restoreQuotes(child.text, child.startIndex);
+        const text = atStart ? raw.replace(/^\n/, '') : raw;
+        parts.push({ kind: 'single', text: unescapeHeredoc(strip(text, atStart)) });
+      } else parts.push({ kind: 'double', parts: this.wordParts(child), rawText: child.text });
+      atStart = false;
+    }
+    return {
+      parts: [...parts, ...lastNewline],
+      row,
+      text: this.analyzed.originalSource.slice(body.startIndex, contentEnd),
+    };
+  }
+
+  /**
+   * Whether the input ends before the first line a here-document's body could start on: nothing follows the line of
+   * its redirection, or the bodies of here-documents before it read to the end of the input.
+   */
+  private inputEndsBefore(redirect: Node): boolean {
+    const source = this.analyzed.originalSource;
+    const lineEnd = source.indexOf('\n', redirect.endIndex);
+    let readTo = lineEnd === -1 ? source.length : lineEnd + 1;
+    for (const body of this.heredocBodies.values()) {
+      if (body.startIndex > redirect.startIndex) readTo = Math.max(readTo, body.endIndex);
+    }
+    return source.slice(readTo).trim() === '';
   }
 
   private ifStatement(node: Node): Statement {
@@ -491,7 +763,6 @@ export class Converter {
 
   private forStatement(node: Node): Statement {
     const row = node.startPosition.row;
-    if (node.childForFieldName('keyword')?.type === 'select') this.unsupported(node, 'select');
     const hasIn = node.children.some((child) => child.type === 'in');
     const varNode = node.childForFieldName('variable');
     const variable = varNode
@@ -504,6 +775,7 @@ export class Converter {
       variable,
       values: hasIn ? this.fieldNodes(node, 'value').map((value) => this.word(value)) : undefined,
       body: this.body(node.childForFieldName('body') as Node),
+      ...(node.childForFieldName('keyword')?.type === 'select' ? { select: true } : {}),
     };
   }
 
@@ -526,7 +798,6 @@ export class Converter {
   private functionDefinition(node: Node): Statement {
     const row = node.startPosition.row;
     const body = node.childForFieldName('body') as Node;
-    if (body.type === 'subshell') this.unsupported(body, 'subshellFunctionBody');
     const opening = body.type === 'compound_statement' ? body.child(0) : undefined;
     const headerEnd = opening?.startPosition.row ?? body.startPosition.row;
     let isAtomic = false;
@@ -540,9 +811,6 @@ export class Converter {
     const name = nameNode
       ? this.analyzed.originalSource.slice(nameNode.startIndex, nameNode.endIndex).replaceAll('\\\n', '')
       : '';
-    if (Object.hasOwn(DECLARATION_OPTIONS, name)) {
-      this.unsupported(node, 'shadowedDeclarationFunction', name);
-    }
     return {
       row,
       lineRow: row,
@@ -550,6 +818,7 @@ export class Converter {
       name,
       body: this.statement(body),
       isAtomic,
+      redirects: [],
     };
   }
 
@@ -585,7 +854,7 @@ export class Converter {
         return { kind: 'not', expression: this.testOf(this.innerTest(node)) };
       }
       case 'parenthesized_test': {
-        return this.testOf(this.innerTest(node));
+        return { kind: 'group', expression: this.testOf(this.innerTest(node)) };
       }
       case 'logical_test': {
         const [left, right] = node.namedChildren.filter((child) => child?.type !== 'comment') as Node[];
@@ -720,15 +989,43 @@ export class Converter {
         ];
       }
       case 'process_substitution': {
-        return this.unsupported(node, 'processSubstitution');
+        return [
+          {
+            kind: 'processSubstitution',
+            direction: node.child(0)?.type === '>(' ? '>' : '<',
+            body: this.statements(node.children.filter((child) => child.isNamed || child.type === '&')),
+            text: this.analyzed.originalSource.slice(node.startIndex, node.endIndex),
+          },
+        ];
       }
       case 'extglob_pattern': {
-        return this.unsupported(node, 'extglob');
+        return this.extglobParts(node);
       }
       default: {
         return this.fail(node, unexpectedTokenMessage(node.text));
       }
     }
+  }
+
+  /**
+   * The parts of an extended pattern group whose alternatives hold quotes or expansions (`@($x|b)`): its operator,
+   * `|`, `)`, and the blanks between words stay literal, while each alternative's words expand.
+   */
+  private extglobParts(node: Node): WordPart[] {
+    const parts: WordPart[] = [];
+    let position = node.startIndex;
+    for (const [index, child] of node.children.entries()) {
+      if (child.startIndex > position) {
+        parts.push({
+          kind: 'literal',
+          text: this.restoreQuotes(this.source.slice(position, child.startIndex), position),
+        });
+      }
+      if (node.fieldNameForChild(index) === 'alternative') parts.push(...this.wordParts(child));
+      else parts.push({ kind: 'literal', text: this.restoreQuotes(child.text, child.startIndex) });
+      position = child.endIndex;
+    }
+    return parts;
   }
 
   /** The parts of a double-quoted string, whose text keeps the backslashes that quote `$`, `` ` ``, `"`, and `\`. */
@@ -745,22 +1042,51 @@ export class Converter {
 
   private commandSubstitution(node: Node): WordPart {
     const opening = node.child(0);
-    if (opening && opening.type !== '$(' && opening.type !== '`') {
-      this.unsupported(node, 'currentShellSubstitution');
-    }
     const row = node.startPosition.row;
+    if (opening?.type === '${') {
+      return {
+        kind: 'commandSubstitution',
+        body: this.statements(node.children.filter((child) => child.isNamed || child.type === '&')),
+        text: this.restoreQuotes(node.text, node.startIndex),
+        row,
+        mode: this.source[node.startIndex + 2] === '|' ? 'reply' : 'current',
+      };
+    }
     const text =
       opening?.type === '`'
         ? this.analyzed.originalSource.slice(node.startIndex, node.endIndex)
         : this.restoreQuotes(node.text, node.startIndex);
-    const syntaxError = opening?.type === '`' ? this.analyzed.backquoteErrors.get(node.startIndex) : undefined;
-    if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';
+    const unescaped = inner.replaceAll(/\\([$`\\])/g, '$1');
+    const readExtglob = this.analyzed.backquoteExtglob.get(node.startIndex) ?? false;
+    // Bash reads a backquoted body only as it runs it, with the `extglob` then in effect, so a body runs as read here
+    // only while that setting is the one it was read with, and is read again with the other.
+    const reread = opening?.type === '`' ? this.backquoteRereader(unescaped, row, readExtglob) : undefined;
+    const syntaxError = opening?.type === '`' ? this.analyzed.backquoteErrors.get(node.startIndex) : undefined;
+    if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError, ...reread };
     const body = /\\[$`\\]/.test(inner)
-      ? this.hooks.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), row)
+      ? this.hooks.reparse(unescaped, row, readExtglob)
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
-    return { kind: 'commandSubstitution', body, text, row };
+    return { kind: 'commandSubstitution', body, text, row, ...reread };
+  }
+
+  /** How a backquoted body read with `readExtglob` reads with the other setting, read once when first asked. */
+  private backquoteRereader(
+    unescaped: string,
+    row: number,
+    readExtglob: boolean
+  ): { readExtglob: boolean; rereadWithOtherExtglob: () => BackquoteRereading } {
+    let other: BackquoteRereading | undefined;
+    const rereadWithOtherExtglob = (): BackquoteRereading => {
+      if (other) return other;
+      const syntaxError = inspectUnescapedBackquoteBody(unescaped, row, !readExtglob);
+      other = syntaxError
+        ? { body: [], syntaxError }
+        : { body: rereadAtRun(() => this.hooks.reparse(unescaped, row, !readExtglob)) };
+      return other;
+    };
+    return { readExtglob, rereadWithOtherExtglob };
   }
 
   private expansion(node: Node): ParameterExpansion {
@@ -795,6 +1121,27 @@ export class Converter {
     } else expansion.name = parameter.text;
     return expansion;
   }
+}
+
+/** Makes the last statement run in the background, as the `&` after it does. */
+function runInBackground(statements: Statement[]): void {
+  const last = statements.pop();
+  if (last) statements.push({ row: last.row, lineRow: last.lineRow, kind: 'background', body: last });
+}
+
+/** A command whose standard error also goes to its output, after its own redirections, as `|&` makes it. */
+function withStandardErrorToOutput(statement: Statement, row: number): Statement {
+  const copy: Redirect = {
+    fd: 2,
+    kind: 'duplicate',
+    operator: '>&',
+    target: { parts: [{ kind: 'literal', text: '1' }], row, text: '1' },
+    hasDescriptor: true,
+  };
+  if (statement.kind === 'command' || statement.kind === 'declaration' || statement.kind === 'redirected') {
+    return { ...statement, redirects: [...statement.redirects, copy] };
+  }
+  return { row: statement.row, lineRow: statement.lineRow, kind: 'redirected', body: statement, redirects: [copy] };
 }
 
 function restoreNormalizedChar(
@@ -873,13 +1220,17 @@ function thenWord(owner: Node): Node {
 /**
  * The row Bash reports for a statement's errors and `LINENO`: the line its parser was on when it made the command.
  * That is where the first word of a simple command ends, where `))` ends, and where the last operand of `[[` ends, or
- * its `]]` when `&&` or `||` joins the operands; a compound command keeps the row of its first word.
+ * its `]]` when `&&` or `||` joins the operands, and where the redirections of a compound command end; another
+ * compound command keeps the row of its first word.
  */
 function lineRowOf(node: Node): number {
   switch (node.type) {
     case 'command':
     case 'declaration_command': {
-      return (node.namedChildren.find((child) => child?.type !== 'comment') ?? node).endPosition.row;
+      const first = node.namedChildren.find((child) => child?.type !== 'comment') ?? node;
+      // A redirection node reaches the next line, where its destination word does not.
+      const word = first.type === 'file_redirect' ? (first.namedChildren.at(-1) ?? first) : first;
+      return word.endPosition.row;
     }
     case 'variable_assignment':
     case 'arithmetic_command': {
@@ -889,10 +1240,24 @@ function lineRowOf(node: Node): number {
       const inner = node.namedChildren.find((child) => child && child.type !== 'comment');
       return inner && inner.type !== 'logical_test' ? inner.endPosition.row : node.endPosition.row;
     }
+    case 'redirected_statement': {
+      // The parser has read the redirections when a top-level compound command runs them, so their errors name
+      // the line of the last one's destination.
+      const last = node.childrenForFieldName('redirect').at(-1);
+      return (last?.namedChildren.at(-1) ?? last ?? node).endPosition.row;
+    }
     default: {
       return node.startPosition.row;
     }
   }
+}
+
+/** The start of the command substitution that holds a node, or -1 for the program itself. */
+function substitutionScopeOf(node: Node): number {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.type === 'command_substitution' || parent.type === 'process_substitution') return parent.startIndex;
+  }
+  return -1;
 }
 
 /** The word after `after` that starts the next clause of an `if` or ends it: `elif`, `else`, or `fi`. */
@@ -1057,4 +1422,9 @@ function ansiCEscape(text: string, index: number): { bytes: number[]; last: numb
     };
   }
   return { bytes: [92, ...new TextEncoder().encode(next)], last: index };
+}
+
+/** Removes the backslashes that quote `$`, `` ` ``, and a backslash in a here-document, and joins its continued lines. */
+function unescapeHeredoc(text: string): string {
+  return text.replaceAll(/\\([$`\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
 }

@@ -1,16 +1,31 @@
-import { rejectUnsupportedSetArgs } from './capabilities';
+import { isVariableReference } from './arithmetic';
 import { legalNumber } from './characters';
+import { cdBuiltin, dirsBuiltin, popdBuiltin, pushdBuiltin, pwdBuiltin } from './directoryBuiltins';
+import { getoptsBuiltin } from './getopts';
+import {
+  aliasBuiltin,
+  builtinBuiltin,
+  callerBuiltin,
+  commandBuiltin,
+  logoutBuiltin,
+  typeBuiltin,
+  unaliasBuiltin,
+} from './introspectionBuiltins';
+import { waitBuiltin } from './jobBuiltins';
+import { setBuiltin, shoptBuiltin } from './optionBuiltins';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
+import { mapfileBuiltin, readBuiltin } from './readBuiltins';
 import { BreakSignal, ContinueSignal, ExitSignal, ReturnSignal } from './runtime';
 import type { Shell } from './shell';
 import { resolveScalarTarget, resolveSubscriptTarget, unsetResolvedElement, writeResolvedTarget } from './targets';
 import { testBuiltin } from './testBuiltin';
+import { trapBuiltin } from './trapBuiltins';
 import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { isIdentifier } from './variables';
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
-function operands(args: string[]): string[] {
+export function operands(args: string[]): string[] {
   return args[0] === '--' ? args.slice(1) : args;
 }
 
@@ -141,8 +156,7 @@ function parsePrintfOptions(shell: Shell, args: string[]): { target: string | un
       shell.fd2.write('printf: usage: printf [-v var] format [arguments]\n');
       return 2;
     }
-    const split = shell.splitSubscript(candidate);
-    if (split ? !isIdentifier(split.name) || split.subscript === '' : !isIdentifier(candidate)) {
+    if (!isVariableReference(candidate)) {
       shell.reportError(`printf: \`${candidate}': not a valid identifier`);
       return 2;
     }
@@ -232,7 +246,7 @@ function unsetNonIdentifierOperand(shell: Shell, name: string, mode: UnsetMode):
 }
 
 function rejectExtraOperands(shell: Shell, name: string, extra: string[]): void {
-  if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2);
+  if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2, true);
 }
 
 function shift(shell: Shell, args: string[]): number {
@@ -272,14 +286,14 @@ function returnBuiltin(shell: Shell, args: string[]): number {
 
 function exitBuiltin(shell: Shell, args: string[]): number {
   const [statusText, ...extra] = operands(args);
-  if (statusText === undefined) throw new ExitSignal(shell.store.lastStatus);
+  if (statusText === undefined) shell.exitShell(shell.statusForExit);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
     return 2;
   }
   rejectExtraOperands(shell, 'exit', extra);
-  throw new ExitSignal(Number(BigInt.asUintN(8, status)));
+  return shell.exitShell(Number(BigInt.asUintN(8, status)));
 }
 
 function loopControl(kind: 'break' | 'continue'): Builtin {
@@ -308,16 +322,6 @@ function loopControl(kind: 'break' | 'continue'): Builtin {
   };
 }
 
-function set(shell: Shell, args: string[]): number {
-  if (args.length === 0) rejectUnsupportedSetArgs();
-  if (args[0] === '--' || args[0] === '-' || !/^[-+]/.test(args[0])) {
-    const rest = args[0] === '--' || args[0] === '-' ? args.slice(1) : args;
-    shell.store.setPositionalArgs(rest);
-    return 0;
-  }
-  rejectUnsupportedSetArgs(args[0]);
-}
-
 export const REGULAR_BUILTINS: Record<string, Builtin> = {
   echo,
   printf,
@@ -333,6 +337,25 @@ export const REGULAR_BUILTINS: Record<string, Builtin> = {
   exit: exitBuiltin,
   break: loopControl('break'),
   continue: loopControl('continue'),
-  set,
+  set: setBuiltin,
+  shopt: shoptBuiltin,
+  read: readBuiltin,
+  mapfile: mapfileBuiltin,
+  readarray: mapfileBuiltin,
+  cd: cdBuiltin,
+  pwd: pwdBuiltin,
+  pushd: pushdBuiltin,
+  popd: popdBuiltin,
+  dirs: dirsBuiltin,
+  wait: waitBuiltin,
+  trap: trapBuiltin,
+  getopts: getoptsBuiltin,
+  command: commandBuiltin,
+  builtin: builtinBuiltin,
+  type: typeBuiltin,
+  caller: callerBuiltin,
+  alias: aliasBuiltin,
+  unalias: unaliasBuiltin,
+  logout: logoutBuiltin,
   ...TURTLE_BUILTINS,
 };

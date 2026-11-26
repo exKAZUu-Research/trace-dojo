@@ -1,7 +1,6 @@
 import { isIdentifier } from './associativeTable';
 import type { Assignment } from './ast';
 import { EXTERNAL_COMMANDS } from './externalCommands';
-import { quoteReusable } from './quoting';
 import { UnsupportedFeatureError, unsupportedMessage } from './unsupported';
 
 /** Variable attribute flags recognized by the supported declaration surface and listed by `declare -p`. */
@@ -11,19 +10,22 @@ export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 'x';
 export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 'x'];
 
 /** Supported dynamic variables computed on read through store-owned descriptors. */
-export const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME']);
+export const DYNAMIC_VARIABLES = new Set([
+  'RANDOM',
+  'LINENO',
+  'FUNCNAME',
+  'BASH_SUBSHELL',
+  'PIPESTATUS',
+  'BASH_LINENO',
+  'BASH_SOURCE',
+  'PWD',
+  'OLDPWD',
+]);
 
-export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO']);
-
-/** Deferred Bash internal variables whose reads, writes, declarations, tests, and unsets are rejected. */
-export const UNSUPPORTED_SPECIAL_VARIABLES = new Set(['PIPESTATUS', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
+export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL', 'PWD', 'OLDPWD']);
 
 /** Special variables whose user writes, unsets, and declarations are rejected except scalar `RANDOM` seeding. */
-export const SPECIAL_MUTATION_BLOCKED = new Set([
-  ...DYNAMIC_VARIABLES,
-  'BASH_REMATCH',
-  ...UNSUPPORTED_SPECIAL_VARIABLES,
-]);
+export const SPECIAL_MUTATION_BLOCKED = new Set([...DYNAMIC_VARIABLES, 'BASH_REMATCH']);
 
 /** Host environment variables absent in the browser grading sandbox. */
 export const ENVIRONMENT_VARIABLES = new Set([
@@ -31,8 +33,6 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'PATH',
   'USER',
   'LOGNAME',
-  'PWD',
-  'OLDPWD',
   'SHELL',
   'TERM',
   'LANG',
@@ -77,7 +77,6 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'EDITOR',
   'PS1',
   'PS2',
-  '_',
 ]);
 
 export const DECLARATION_BUILTIN_NAMES = new Set(['declare', 'typeset', 'local', 'readonly', 'export']);
@@ -116,91 +115,40 @@ export const FILE_TEST_OPERATORS = new Set([
   '-ef',
 ]);
 
-export type UnsupportedSyntaxKind =
-  | 'background'
-  | 'pipeline'
-  | 'subshell'
-  | 'coproc'
-  | 'time'
-  | 'functionRedirect'
-  | 'heredoc'
-  | 'herestring'
-  | 'redirect'
-  | 'select'
-  | 'subshellFunctionBody'
-  | 'shadowedDeclarationFunction'
-  | 'processSubstitution'
-  | 'extglob'
-  | 'currentShellSubstitution';
+export type UnsupportedSyntaxKind = 'time' | 'outerHeredocBody';
 
-const UNSUPPORTED_SYNTAX_LABELS: Record<
-  Exclude<UnsupportedSyntaxKind, 'redirect' | 'shadowedDeclarationFunction'>,
-  string
-> = {
-  background: 'バックグラウンド実行（&）',
-  pipeline: 'パイプ（|）',
-  subshell: 'サブシェル（( ... )）',
-  coproc: 'coproc',
-  time: 'time',
-  functionRedirect: '関数の定義に付けたリダイレクト',
-  heredoc: 'ヒアドキュメント（<<）',
-  herestring: 'ヒアストリング（<<<）',
-  select: 'select（標準入力を読む）',
-  subshellFunctionBody: 'サブシェルを本体にした関数（f() ( ... )）',
-  processSubstitution: 'プロセス置換（<( ... )）',
-  extglob: '拡張パターン（@( ... ) など）',
-  currentShellSubstitution: '現在のシェルで実行するコマンド置換（${ ...; }）',
+const UNSUPPORTED_SYNTAX_LABELS: Record<UnsupportedSyntaxKind, string> = {
+  time: '実行時間の計測（time）',
+  outerHeredocBody: '置換の外の行にある here-document の本体',
 };
 
 /** Formats static unsupported-syntax diagnostics from one declarative catalog for `Converter`. */
-export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind, detail = ''): string {
-  if (kind === 'redirect') return unsupportedMessage(`リダイレクト（${detail}）`);
-  if (kind === 'shadowedDeclarationFunction') return unsupportedMessage(`宣言ビルトインと同名の関数定義（${detail}）`);
+export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind): string {
   return unsupportedMessage(UNSUPPORTED_SYNTAX_LABELS[kind]);
 }
 
 export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
-  read: '標準入力（read）',
-  mapfile: '標準入力（mapfile）',
-  readarray: '標準入力（readarray）',
   eval: '文字列の評価（eval）',
   source: '別ファイルの読み込み（source）',
   '.': '別ファイルの読み込み（.）',
-  exec: 'exec',
-  trap: 'trap',
-  wait: 'wait',
   jobs: 'ジョブ制御（jobs）',
   fg: 'ジョブ制御（fg）',
   bg: 'ジョブ制御（bg）',
-  kill: 'kill',
-  disown: 'disown',
-  suspend: 'suspend',
-  cd: 'ディレクトリの移動（cd）',
-  pwd: 'pwd',
-  pushd: 'pushd',
-  popd: 'popd',
-  dirs: 'dirs',
-  umask: 'umask',
-  ulimit: 'ulimit',
-  times: 'times',
-  type: 'type',
-  command: 'command',
-  builtin: 'builtin',
-  caller: 'caller',
-  getopts: 'getopts',
-  hash: 'hash',
-  enable: 'enable',
-  help: 'help',
-  history: 'history',
-  fc: 'fc',
-  bind: 'bind',
-  alias: 'エイリアス（alias）',
-  unalias: 'エイリアス（unalias）',
-  complete: 'complete',
-  compgen: 'compgen',
-  compopt: 'compopt',
-  logout: 'logout',
-  shopt: 'シェルのオプション（shopt）',
+  kill: 'シグナルの送信（kill）',
+  disown: 'ジョブ制御（disown）',
+  suspend: 'ジョブ制御（suspend）',
+  umask: 'ファイルのモードの設定（umask）',
+  ulimit: 'プロセスの資源の制限（ulimit）',
+  times: '実行時間の計測（times）',
+  hash: 'コマンドの場所の記憶（hash）',
+  enable: '組み込みコマンドの一覧と切り替え（enable）',
+  help: '組み込みコマンドの説明（help）',
+  history: 'コマンドの履歴（history）',
+  fc: 'コマンドの履歴（fc）',
+  bind: '対話入力のキーの設定（bind）',
+  complete: '対話入力の補完（complete）',
+  compgen: '対話入力の補完（compgen）',
+  compopt: '対話入力の補完（compopt）',
 };
 
 export type CommandClassification =
@@ -208,6 +156,7 @@ export type CommandClassification =
   | { kind: 'declarationBuiltin'; name: string }
   | { kind: 'unsupportedBuiltin'; feature: string }
   | { kind: 'builtin'; name: string }
+  | { kind: 'exec' }
   | { kind: 'external'; feature: string }
   | { kind: 'notFound' };
 
@@ -219,6 +168,7 @@ export function classifyCommandName(
 ): CommandClassification {
   if (hasFunction) return { kind: 'function' };
   if (DECLARATION_BUILTIN_NAMES.has(name)) return { kind: 'declarationBuiltin', name };
+  if (name === 'exec') return { kind: 'exec' };
   if (Object.hasOwn(UNSUPPORTED_BUILTIN_FEATURES, name)) {
     return { kind: 'unsupportedBuiltin', feature: UNSUPPORTED_BUILTIN_FEATURES[name] };
   }
@@ -233,26 +183,29 @@ export function rejectUnsupportedFeature(feature: string): never {
   throw new UnsupportedFeatureError(feature);
 }
 
+/**
+ * Stops the program where a variable that changes a feature this environment provides, such as `GLOBIGNORE` for
+ * pathname expansion, holds a value that would change it, which this environment does not apply.
+ */
+export function rejectControlVariable(value: string | undefined, name: string, feature: string): void {
+  if (value !== undefined && value !== '') rejectUnsupportedFeature(`${name} による${feature}の変更`);
+}
+
 export function rejectUnsupportedHostEnv(name: string): never {
   throw new UnsupportedFeatureError(`環境変数（${name}）`);
 }
 
-/** Rejects deferred special variables (`PIPESTATUS`, `BASH_LINENO`, `BASH_SOURCE`, `BASH_SUBSHELL`) on any access. */
-export function rejectUnsupportedSpecialVariable(name: string): void {
-  if (UNSUPPORTED_SPECIAL_VARIABLES.has(name)) {
-    throw new UnsupportedFeatureError(`特殊変数（${name}）`);
-  }
-}
-
-/** Single read gate for deferred special variables and host environment variables. */
+/** Single read gate for host environment variables, which the browser has none of. */
 export function rejectUnsupportedVariableRead(name: string): void {
-  rejectUnsupportedSpecialVariable(name);
   if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
+  // `$_` expands to the last argument, which no variable here holds, so reading `_` by name, as `(( _ ))` or
+  // `[[ -v _ ]]` do, would differ; a builtin may still assign it, which Bash's next command overwrites.
+  if (name === '_') throw new UnsupportedFeatureError('名前による変数 _ の参照');
 }
 
 /** Single mutation/unset/declare gate for special and host environment variables (allowing plain scalar `RANDOM` seeding). */
 export function rejectUnsupportedVariableMutation(name: string, allowScalarRandomSeed = false): void {
-  rejectUnsupportedVariableRead(name);
+  if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
   if (!SPECIAL_MUTATION_BLOCKED.has(name)) return;
   if (allowScalarRandomSeed && name === 'RANDOM') return;
   throw new UnsupportedFeatureError(`特殊変数（${name}）の変更`);
@@ -362,7 +315,7 @@ export function rejectUnsupportedDeclarationOptions(
   hasPlusOption: boolean
 ): void {
   if (set.has('f') || set.has('F') || unset.has('f') || unset.has('F')) {
-    throw new UnsupportedFeatureError(`${builtin} -f（関数の一覧）`);
+    throw new UnsupportedFeatureError(`${builtin} -f（関数の本文の表示）`);
   }
   if (builtin === 'export' && unset.has('x') && !hasPlusOption) {
     throw new UnsupportedFeatureError('export -n（エクスポート属性の解除）');
@@ -450,53 +403,31 @@ export function rejectUnsupportedPrefixAssignment(
   }
 }
 
-export function rejectUnsupportedTestOperator(operator: string): never {
-  if (operator === '-o') throw new UnsupportedFeatureError('シェルのオプションを調べる演算子（-o）');
-  if (operator === '-t') throw new UnsupportedFeatureError('端末を調べる演算子（-t）');
-  throw new UnsupportedFeatureError(`ファイルを調べる演算子（${operator}）`);
-}
-
 export function rejectUnsupportedPrintfConversion(conversion: 'n' | '('): never {
   if (conversion === 'n') throw new UnsupportedFeatureError('printf の %n');
   throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
 }
 
-export function rejectUnsupportedSetArgs(firstArg?: string): never {
-  if (firstArg === undefined) throw new UnsupportedFeatureError('set の変数の一覧');
-  throw new UnsupportedFeatureError(`シェルのオプション（set ${firstArg}）`);
+export function rejectUnsupportedSetArgs(): never {
+  throw new UnsupportedFeatureError('set の変数の一覧');
 }
 
 export function rejectUnsupportedBracketClass(): never {
   throw new UnsupportedFeatureError('照合要素・等価クラス（[. .] / [= =]）');
 }
 
-export type UnsupportedExpansionKind =
-  | 'tilde'
-  | 'pid'
-  | 'bgPid'
-  | 'initialLastArg'
-  | 'extglob'
-  | 'promptTransform'
-  | 'nonAsciiIfs';
+export type UnsupportedExpansionKind = 'tilde' | 'pid' | 'initialLastArg' | 'promptTransform' | 'nonAsciiIfs';
 
 const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
   tilde: '~ の展開',
   pid: 'プロセス番号（$$）',
-  bgPid: 'バックグラウンドのプロセス番号（$!）',
   initialLastArg: 'Bash のパス（最初の $_）',
-  extglob: '拡張パターン（@( ... ) など）',
   promptTransform: 'プロンプトの展開（${x@P}）',
   nonAsciiIfs: 'ASCII 以外の文字を含む IFS',
 };
 
 export function rejectUnsupportedExpansion(kind: UnsupportedExpansionKind): never {
   throw new UnsupportedFeatureError(UNSUPPORTED_EXPANSION_LABELS[kind]);
-}
-
-export function rejectUnsupportedPathnameExpansion(word: string): never {
-  throw new UnsupportedFeatureError(
-    `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(word)} のように引用符で囲む）`
-  );
 }
 
 export function rejectUnsupportedPrefixListing(prefix: string): never {

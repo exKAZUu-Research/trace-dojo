@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps the plain and the extended matchers over one atom and bracket reader.
 /**
  * Clean-room shell wildcard and POSIX bracket pattern matcher for `case`, `[[ == ]]`, and parameter-expansion
  * pattern operators (`#`, `##`, `%`, `%%`, `/`, `//`, `/#`, `/%`, `^`, `,`, `~`).
@@ -7,6 +8,7 @@
 import type { StepMeter } from './budget';
 import { rejectUnsupportedBracketClass } from './capabilities';
 import { charactersOf, POSIX_CHARACTER_CLASSES } from './characters';
+import { type ExtendedNode, ExtendedPattern } from './extendedPattern';
 
 type BracketSpec =
   | { kind: 'char'; c: string }
@@ -18,11 +20,20 @@ type GlobAtom =
   | { kind: 'star' }
   | { kind: 'any' }
   | { kind: 'char'; c: string }
-  | { kind: 'bracket'; negated: boolean; specs: BracketSpec[] };
+  /** A bracket expression, which with `fold` also matches a character whose other case it matches. */
+  | { kind: 'bracket'; negated: boolean; specs: BracketSpec[]; fold?: boolean };
 
 export interface CompiledGlob {
   readonly atoms: readonly GlobAtom[];
   readonly hasStar: boolean;
+  /** The pattern as `extglob` groups, which the matchers below use instead of `atoms` when it has any. */
+  readonly extended?: ExtendedPattern;
+}
+
+/** How a pattern is read: with `extglob` groups, and ignoring case as `nocasematch` and `nocaseglob` do. */
+export interface PatternMode {
+  readonly extmatch?: boolean;
+  readonly fold?: boolean;
 }
 
 const CHARACTER_CLASSES: Record<string, (c: string) => boolean> = {
@@ -37,9 +48,9 @@ interface BracketScanMemo {
 }
 
 /** Whether the entire `text` matches `pattern`. */
-export function matchesPattern(pattern: string, text: string, spend: StepMeter, extmatch = false): boolean {
+export function matchesPattern(pattern: string, text: string, spend: StepMeter, mode: PatternMode = {}): boolean {
   const chars = charactersOf(text);
-  return matchesSlice(compileGlob(pattern, spend, extmatch), chars, 0, chars.length, spend);
+  return matchesSlice(compileGlob(pattern, spend, mode), chars, 0, chars.length, spend);
 }
 
 /** Whether `pattern` contains any unescaped `*`, `?`, or closed `[...]` wildcard. */
@@ -53,14 +64,107 @@ export function hasExtendedGlob(pattern: string, spend: StepMeter): boolean {
   return scanExtendedGlob(chars, spend, createBracketScanMemo(chars.length)).closed;
 }
 
-/** Escapes shell glob and bracket-expression operators so `text` matches literally. */
+/** Escapes shell glob, bracket-expression, and extended-pattern operators (`|` among them) so `text` matches literally. */
 export function quotePattern(text: string): string {
-  return text.replaceAll(/[*?[\]\\!^\-+@():=.]/g, (c) => `\\${c}`);
+  return text.replaceAll(/[*?[\]\\!^\-+@():=.|]/g, (c) => `\\${c}`);
 }
 
-/** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms. */
-export function compileGlob(pattern: string, spend: StepMeter, extmatch = false): CompiledGlob {
-  return compileGlobInternal(pattern, spend, extmatch, false);
+/** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms, or into `extglob` groups. */
+export function compileGlob(pattern: string, spend: StepMeter, mode: PatternMode = {}): CompiledGlob {
+  const glob = compileGlobInternal(pattern, spend, mode.extmatch ?? false, false);
+  const folded = mode.fold ? { ...glob, atoms: glob.atoms.map(foldAtom) } : glob;
+  if (!mode.extmatch || !hasExtendedGlob(pattern, spend)) return folded;
+  const chars = charactersOf(pattern);
+  const nodes = parseExtendedNodes(
+    chars,
+    0,
+    chars.length,
+    spend,
+    createBracketScanMemo(chars.length),
+    mode.fold ?? false
+  );
+  return { ...folded, extended: new ExtendedPattern(nodes) };
+}
+
+/** An atom that also matches the other case of each character it matches. */
+function foldAtom(atom: GlobAtom): GlobAtom {
+  if (atom.kind === 'char') {
+    const specs: BracketSpec[] = [...new Set([atom.c, atom.c.toLowerCase(), atom.c.toUpperCase()])].map((c) => ({
+      kind: 'char',
+      c,
+    }));
+    return { kind: 'bracket', negated: false, specs };
+  }
+  return atom.kind === 'bracket' ? { ...atom, fold: true } : atom;
+}
+
+/** Reads `chars[start..end]` as a sequence of characters, `*`, and `extglob` groups split at their `|`. */
+// code-gauge-allow functionCognitiveComplexity -- Reads characters, `*`, and nested groups split at `|` in one pass over the pattern.
+function parseExtendedNodes(
+  chars: readonly string[],
+  start: number,
+  end: number,
+  spend: StepMeter,
+  memo: BracketScanMemo,
+  fold: boolean
+): ExtendedNode[] {
+  const nodes: ExtendedNode[] = [];
+  for (let i = start; i < end;) {
+    spend();
+    const c = chars[i];
+    const group =
+      '?*+@!'.includes(c) && chars[i + 1] === '(' ? findGroupEnd(chars, i + 2, end, spend, memo) : undefined;
+    if (group) {
+      const bounds = [i + 1, ...group.separators, group.close];
+      const alternatives = bounds
+        .slice(1)
+        .map((bound, index) => parseExtendedNodes(chars, bounds[index] + 1, bound, spend, memo, fold));
+      nodes.push({ kind: 'group', operator: c as '?' | '*' | '+' | '@' | '!', alternatives });
+      i = group.close + 1;
+      continue;
+    }
+    if (c === '*') {
+      if (nodes.at(-1)?.kind !== 'star') nodes.push({ kind: 'star' });
+      i++;
+      continue;
+    }
+    const { atom, next } = readGlobAtom(chars, i, spend, memo);
+    if (atom.kind === 'bracket' && atom.specs.some((spec) => spec.kind === 'unsupportedCollating')) {
+      rejectUnsupportedBracketClass();
+    }
+    const matcherAtom = fold ? foldAtom(atom) : atom;
+    nodes.push({ kind: 'character', matcher: { matches: (ch) => matchesAtom(matcherAtom, ch) } });
+    i = next;
+  }
+  return nodes;
+}
+
+/** The `)` that closes a group whose text starts at `start`, and the `|` that separate its alternatives. */
+function findGroupEnd(
+  chars: readonly string[],
+  start: number,
+  end: number,
+  spend: StepMeter,
+  memo: BracketScanMemo
+): { close: number; separators: number[] } | undefined {
+  const separators: number[] = [];
+  let depth = 0;
+  for (let i = start; i < end;) {
+    spend();
+    const skipped = skipQuotedPiece(chars, i, spend, memo);
+    if (skipped !== undefined) {
+      i = skipped;
+      continue;
+    }
+    const c = chars[i];
+    if (c === '(') depth++;
+    else if (c === ')') {
+      if (depth === 0) return { close: i, separators };
+      depth--;
+    } else if (c === '|' && depth === 0) separators.push(i);
+    i++;
+  }
+  return undefined;
 }
 
 function compileGlobInternal(
@@ -115,18 +219,13 @@ function scanExtendedGlob(
   const stack: (number | undefined)[] = [];
   for (let i = 0; i < chars.length;) {
     spend();
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
+    const skipped = skipQuotedPiece(chars, i, spend, memo);
+    if (skipped !== undefined) {
+      i = skipped;
       continue;
     }
-    if (c === '[') {
-      const bracket = readBracketExpression(chars, i + 1, spend, memo);
-      if (bracket) {
-        i = bracket.next;
-        continue;
-      }
-    } else if ('?*+@!'.includes(c) && chars[i + 1] === '(') {
+    const c = chars[i];
+    if ('?*+@!'.includes(c) && chars[i + 1] === '(') {
       stack.push(i);
       i += 2;
       continue;
@@ -138,6 +237,18 @@ function scanExtendedGlob(
     i++;
   }
   return { closed: false, firstUnclosedOpener: stack.find((opener) => opener !== undefined) };
+}
+
+/** The index after an escaped character or a bracket expression at `i`, which hide `(`, `|`, and `)`. */
+function skipQuotedPiece(
+  chars: readonly string[],
+  i: number,
+  spend: StepMeter,
+  memo: BracketScanMemo
+): number | undefined {
+  if (chars[i] === '\\') return i + 2;
+  if (chars[i] !== '[') return undefined;
+  return readBracketExpression(chars, i + 1, spend, memo)?.next;
 }
 
 function readGlobAtom(
@@ -166,11 +277,31 @@ export function shortestPrefixMatch(
   start: number,
   spend: () => void
 ): number | undefined {
+  if (glob.extended) return extremeOf(glob.extended.endsFrom(chars, start, chars.length, spend), Math.min);
   if (!glob.hasStar) {
     const end = start + glob.atoms.length;
     return end <= chars.length && matchesFixed(glob.atoms, chars, start, spend) ? end : undefined;
   }
   return scanStates(glob.atoms, chars, start, chars.length, true, spend);
+}
+
+function extremeOf(positions: ReadonlySet<number>, pick: (...values: number[]) => number): number | undefined {
+  return positions.size === 0 ? undefined : pick(...positions);
+}
+
+/** The start of a suffix of `chars` that an extended pattern matches, the last or the first such start. */
+function extendedSuffixStart(
+  glob: CompiledGlob,
+  chars: readonly string[],
+  shortest: boolean,
+  spend: () => void
+): number | undefined {
+  const extended = glob.extended as ExtendedPattern;
+  for (let offset = 0; offset <= chars.length; offset++) {
+    const start = shortest ? chars.length - offset : offset;
+    if (extended.endsFrom(chars, start, chars.length, spend).has(chars.length)) return start;
+  }
+  return undefined;
 }
 
 /** End index of the longest prefix of `chars[start..]` matching `glob`, or `undefined` if none matches. */
@@ -180,6 +311,7 @@ export function longestPrefixMatch(
   start: number,
   spend: () => void
 ): number | undefined {
+  if (glob.extended) return extremeOf(glob.extended.endsFrom(chars, start, chars.length, spend), Math.max);
   if (!glob.hasStar) {
     const end = start + glob.atoms.length;
     return end <= chars.length && matchesFixed(glob.atoms, chars, start, spend) ? end : undefined;
@@ -193,6 +325,7 @@ export function shortestSuffixMatch(
   chars: readonly string[],
   spend: () => void
 ): number | undefined {
+  if (glob.extended) return extendedSuffixStart(glob, chars, true, spend);
   const reversedEnd = shortestPrefixMatch(reverseGlob(glob), chars.toReversed(), 0, spend);
   return reversedEnd === undefined ? undefined : chars.length - reversedEnd;
 }
@@ -203,6 +336,7 @@ export function longestSuffixMatch(
   chars: readonly string[],
   spend: () => void
 ): number | undefined {
+  if (glob.extended) return extendedSuffixStart(glob, chars, false, spend);
   const reversedEnd = longestPrefixMatch(reverseGlob(glob), chars.toReversed(), 0, spend);
   return reversedEnd === undefined ? undefined : chars.length - reversedEnd;
 }
@@ -211,12 +345,20 @@ export function longestSuffixMatch(
  * Finds the leftmost-longest substring `chars[start..end]` with `start >= from` matching `glob` in one pass,
  * or `undefined` when no match exists in `chars[from..]`.
  */
+// code-gauge-allow functionCognitiveComplexity -- Runs the extended matcher or the single-pass atom automaton for the leftmost-longest match.
 export function nextLeftmostLongestMatch(
   glob: CompiledGlob,
   chars: readonly string[],
   from: number,
   spend: () => void
 ): { start: number; end: number } | undefined {
+  if (glob.extended) {
+    for (let start = from; start <= chars.length; start++) {
+      const end = extremeOf(glob.extended.endsFrom(chars, start, chars.length, spend), Math.max);
+      if (end !== undefined && (end > start || start < chars.length || chars.length === 0)) return { start, end };
+    }
+    return undefined;
+  }
   const count = glob.atoms.length;
   if (from >= chars.length) {
     return chars.length === 0 && from === 0 && glob.atoms.every((atom) => atom.kind === 'star')
@@ -254,6 +396,7 @@ export function matchesSlice(
   end: number,
   spend: () => void
 ): boolean {
+  if (glob.extended) return glob.extended.endsFrom(chars, start, end, spend).has(end);
   if (!glob.hasStar) {
     return end - start === glob.atoms.length && matchesFixed(glob.atoms, chars, start, spend);
   }
@@ -383,14 +526,25 @@ function hasActiveStartAtOrBefore(state: Int32Array, count: number, limitStart: 
 function matchesAtom(atom: GlobAtom, ch: string): boolean {
   if (atom.kind === 'any' || atom.kind === 'star') return true;
   if (atom.kind === 'char') return ch === atom.c;
-  const code = ch.codePointAt(0) as number;
-  const hit = atom.specs.some((spec) => {
-    if (spec.kind === 'char') return ch === spec.c;
-    if (spec.kind === 'range') return code >= spec.low && code <= spec.high;
-    if (spec.kind === 'unsupportedCollating') return false;
-    return spec.test?.(ch) ?? false;
-  });
+  const candidates = atom.fold ? [ch, ch.toLowerCase(), ch.toUpperCase()] : [ch];
+  // Bash folds case for the characters and ranges of a bracket expression, but a class such as `[:upper:]` tests the
+  // character itself.
+  const hit = atom.specs.some((spec) =>
+    spec.kind === 'char' || spec.kind === 'range'
+      ? candidates.some((candidate) => matchesSpec(spec, candidate))
+      : matchesSpec(spec, ch)
+  );
   return hit !== atom.negated;
+}
+
+function matchesSpec(spec: BracketSpec, ch: string): boolean {
+  if (spec.kind === 'char') return ch === spec.c;
+  if (spec.kind === 'range') {
+    const code = ch.codePointAt(0) as number;
+    return code >= spec.low && code <= spec.high;
+  }
+  if (spec.kind === 'unsupportedCollating') return false;
+  return spec.test?.(ch) ?? false;
 }
 
 interface BracketAtom {

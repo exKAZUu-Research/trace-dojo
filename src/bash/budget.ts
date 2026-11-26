@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import type { OutputTarget } from './runtime';
+import type { OutputTarget } from './descriptors';
 
 export type StepMeter = () => void;
 export type CostMeter = (cost?: number) => void;

@@ -40,20 +40,49 @@ export interface DeferredRegion {
 
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
 export class SourceText {
+  /**
+   * The values `extglob` may have at the line being read, which a command substitution read inside it starts from, as
+   * Bash reads the substitution with the options of the line it is on.
+   */
+  readingExtglob = { on: false, uncertain: false };
+  /**
+   * The values `extglob` may have after a `${ ...; }` read in the line being read, which runs in this shell, so the
+   * lines after it read with them.
+   */
+  readonly currentShellExtglob: boolean[] = [];
   private readonly lineStarts: number[] = [0];
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
-  readonly backquotes: { start: number; end: number }[] = [];
+  readonly backquotes: { start: number; end: number; extglob: boolean }[] = [];
+  /**
+   * The `extglob` state where each backquoted body stands, kept for the converter's reading of it even where the
+   * syntax check drops the body from `backquotes`, as for one in a here-document.
+   */
+  readonly backquoteStates: { start: number; extglob: boolean }[] = [];
+  /**
+   * The backquoted bodies of here-documents, which the syntax check leaves out of the program's own reading, but
+   * whose syntax errors Bash reports as their lines expand.
+   */
+  readonly heredocBackquotes: { start: number; end: number; extglob: boolean }[] = [];
   /** Offsets of characters that are contextual literals in Bash (`'` in `"${...}"`, `$` before non-ASCII, etc.). */
   readonly literalSingleQuotes: number[] = [];
   /** Start offsets of declaration-builtin names (`declare`, `local`, ...) used as `name ()` function headers. */
   readonly declarationFunctionStarts: number[] = [];
+  /**
+   * The rows of extended patterns read while `extglob` is on only if a `shopt` inside a compound command or after
+   * `&&` or `||` ran, which only the run can tell.
+   */
+  readonly uncertainExtglobRows: number[] = [];
+  /** The `{name}` words before the redirections of compound commands, by offset, which the grammar cannot read. */
+  readonly descriptorVariables: { start: number; end: number; name: string }[] = [];
   /** Balanced arithmetic and compound-subscript spans collected during the single lexical/validation pass. */
   readonly arithmeticRegions: DeferredRegion[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
   };
+  /** Parses the commands of `${ ...; }` or `${| ...; }` from just after `${ ` or `${|`, returning the index after its `}`. */
+  parseBraceSubstitution: (start: number) => number = (start) => skipBalanced(this, start - 1, '{', '}');
 
   constructor(readonly source: string) {
     for (let i = 0; i < source.length; i++) if (source[i] === '\n') this.lineStarts.push(i + 1);
@@ -139,15 +168,21 @@ function skipDoubleQuoted(text: SourceText, open: number): number {
   return text.nested(() => {
     const { source } = text;
     let i = open + 1;
-    while (i < source.length && source[i] !== '"') {
-      const c = source[i];
-      if (c === '\\') i += 2;
-      else if (c === '`') i = skipBackquoted(text, i);
-      else if (c === '$') i = skipDoubleQuotedDollar(text, i);
-      else i++;
-    }
+    while (i < source.length && source[i] !== '"') i = skipDoubleQuotedPiece(text, i);
     return closeAt(text, open, i < source.length ? i : -1, '"');
   });
+}
+
+/**
+ * Skips one piece of text read as inside double quotes, as a here-document body is: a backslash and what it quotes,
+ * a backquoted command, a `$` expansion, or another character.
+ */
+export function skipDoubleQuotedPiece(text: SourceText, index: number): number {
+  const c = text.source[index];
+  if (c === '\\') return index + 2;
+  if (c === '`') return skipBackquoted(text, index);
+  if (c === '$') return skipDoubleQuotedDollar(text, index);
+  return index + 1;
 }
 
 function skipDoubleQuotedDollar(text: SourceText, dollar: number): number {
@@ -171,15 +206,22 @@ function skipBackquoted(text: SourceText, open: number): number {
   while (i < source.length && source[i] !== '`') i += source[i] === '\\' ? 2 : 1;
   const end = closeAt(text, open, i < source.length ? i : -1, '`');
   // Bash reads a backquoted body only when it runs it, so its syntax is checked apart from the program's.
-  text.backquotes.push({ start: open, end });
+  // Its extended patterns read as they would where it stands, which the run may still decide.
+  const state = { extglob: text.readingExtglob.on || text.readingExtglob.uncertain };
+  text.backquotes.push({ start: open, end, ...state });
+  text.backquoteStates.push({ start: open, ...state });
   return end;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Tells current-shell substitutions from parameter expansions, quoted or not, before skipping either.
 function skipBraces(text: SourceText, open: number, inDouble = false): number {
   return text.nested(() => {
     const { source } = text;
     let i = open + 1;
     let closeEnd: number;
+    if (source[i] !== undefined && ' \t\n|'.includes(source[i])) {
+      return text.parseBraceSubstitution(source[i] === '|' ? i + 1 : i);
+    }
     if (inDouble) {
       i = skipParameterHeader(text, i);
       closeEnd = usesDoubleQuotedBraceBody(source, i)

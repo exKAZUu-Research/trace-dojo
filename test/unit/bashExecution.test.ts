@@ -169,7 +169,7 @@ echo "$shadow|\${box[k]}|$global_sum|\${TMP-unset}"
     'f() { local TMP; }; TMP=scoped f\n',
     'x=1; declare -a x\n',
     'a=(1 2); local_fn() { local -n r="a[0]"; }; local_fn\n',
-    'echo "${PIPESTATUS[0]}"\n',
+    'PIPESTATUS=(1)\n',
     'unset RANDOM\n',
     'f() { local PATH=x; declare -g PATH; }; f; echo "${PATH-unset}"\n',
   ]) {
@@ -248,20 +248,20 @@ test('a deep nesting and a huge printf field stop at a limit instead of exhausti
 });
 
 test('features this environment does not provide stop the program with a message', () => {
-  expect(executeProgram('bash', 'echo a | cat\n')).toEqual({
-    kind: 'compileError',
-    diagnostics: [{ row: 0, message: 'パイプ（|）は、この採点環境では使えません。' }],
+  expect(executeProgram('bash', 'echo a | cat\n')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: '外部コマンド（cat）は、この採点環境では使えません。',
   });
   expect(executeProgram('bash', 'echo before\nls\necho after\n')).toMatchObject({
     kind: 'executed',
     stdout: 'before\n',
     uncaughtException: '外部コマンド（ls）は、この採点環境では使えません。',
   });
-  expect(executeProgram('bash', 'echo *\n')).toMatchObject({
-    uncaughtException: expect.stringContaining('ファイル名の展開'),
+  expect(executeProgram('bash', 'echo $$\n')).toMatchObject({
+    uncaughtException: 'プロセス番号（$$）は、この採点環境では使えません。',
   });
-  expect(executeProgram('bash', 'read x\n')).toMatchObject({
-    uncaughtException: '標準入力（read）は、この採点環境では使えません。',
+  expect(executeProgram('bash', 'eval x=1\n')).toMatchObject({
+    uncaughtException: '文字列の評価（eval）は、この採点環境では使えません。',
   });
 });
 
@@ -276,5 +276,128 @@ echo never
     stdout: '',
     stderr: 'moving\nmain.sh: line 3: 前に進む: Out of bounds: (0, 7)\n',
     uncaughtException: 'main.sh: line 3: 前に進む: Out of bounds: (0, 7)',
+  });
+});
+
+test('input, files, pipes, process substitutions, and here-documents read and write as Java programs do', () => {
+  const program = `total=0
+while read -r name score; do
+  echo "$name:$score" >> scores.txt
+  total=$(( total + score ))
+done
+mapfile -t lines < scores.txt
+upper() { while IFS= read -r l; do echo "\${l^^}"; done; }
+printf '%s\\n' "\${lines[@]}" | upper
+cat_lines() { while IFS= read -r l; do echo "> $l"; done < "$1"; }
+cat_lines notes.txt
+cat_lines <(echo "total $total")
+upper <<EOF
+here $total
+EOF
+echo missing > /nodir/x.txt
+`;
+  expect(
+    executeProgram('bash', program, { stdin: 'alice 3\nbob 4\n', files: { 'notes.txt': 'first note\n' } })
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'ALICE:3\nBOB:4\n> first note\n> total 7\nHERE 7\n',
+    stderr: 'main.sh: line 15: /nodir/x.txt: No such file or directory\n',
+    finalFiles: { 'notes.txt': 'first note\n', 'scores.txt': 'alice:3\nbob:4\n' },
+  });
+});
+
+test('background commands, output process substitutions, and coprocesses run in a fixed order', () => {
+  // Bash runs these alongside the shell, so its order varies from run to run; this is one order it produces.
+  const program = `job() { echo "job $1"; return "$1"; }
+job 1 & job 2 &
+echo main
+wait -n; echo "first=$?"
+up() { while read -r l; do echo "\${l^^}"; done; }
+echo hello > >(up)
+echo after
+coproc C { up; }
+echo ping >&"\${C[1]}"
+read -r reply <&"\${C[0]}"
+echo "reply=$reply"
+echo late >&"\${C[1]}"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'job 1\njob 2\nmain\nfirst=1\nHELLO\nafter\nreply=PING\n',
+    uncaughtException: '動き終わった coproc（C）への書き込みは、この採点環境では使えません。',
+  });
+});
+
+test('a coprocess left waiting for input ends quietly only where nothing would run after its input ends', () => {
+  // Bash closes the coprocess's input as the shell ends, and runs what follows the `read` that was waiting.
+  const loopOnly = `up() { while read -r l; do echo "\${l^^}"; done; }
+coproc C { up; }
+echo ping >&"\${C[1]}"
+read -r reply <&"\${C[0]}"
+echo "reply=$reply"
+`;
+  expect(executeProgram('bash', loopOnly)).toMatchObject({ kind: 'executed', stdout: 'reply=PING\n', stderr: '' });
+  const withRest = `coproc { read x; echo "got $x"; read y; echo "y=[$y]" > out.txt; }
+echo a >&"\${COPROC[1]}"
+read -r z <&"\${COPROC[0]}"
+echo "$z"
+`;
+  expect(executeProgram('bash', withRest)).toMatchObject({
+    kind: 'executed',
+    stdout: 'got a\n',
+    uncaughtException: '入力を待ったまま残りの処理がある coproc は、この採点環境では使えません。',
+  });
+});
+
+test('a command started with & reads the pipe or redirection its compound command or function gives, as in Bash', () => {
+  const program = `f() { read v; echo "[$v]"; }
+echo p | { f & wait; } 2>/dev/null
+echo q | ( f & wait ) 2>&1
+echo r | { ( f & wait ); }
+{ { f & wait; } 2>/dev/null; } <<< n
+g() { f & wait; } <<< def; g
+( f & wait ) <<< sub
+f & wait
+coproc { { f & wait; }; }
+echo z >&"\${COPROC[1]}"
+read -r reply <&"\${COPROC[0]}"
+echo "$reply"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[p]\n[q]\n[]\n[]\n[def]\n[sub]\n[]\n[z]\n',
+    stderr: '',
+  });
+});
+
+test('a here-document the end of the input cuts off still reads its last line, blanks only included', () => {
+  const show = 'c() { while IFS= read -r l; do echo "[$l]"; done; }\n';
+  const warning = "main.sh: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `EOF')\n";
+  expect(executeProgram('bash', `${show}c <<EOF\nhello`)).toMatchObject({ stdout: '[hello]\n', stderr: warning });
+  expect(executeProgram('bash', `${show}c <<-EOF\n\thello`)).toMatchObject({ stdout: '[hello]\n', stderr: warning });
+  expect(executeProgram('bash', `${show}c <<EOF\n  `)).toMatchObject({ stdout: '[  ]\n', stderr: warning });
+});
+
+test('read -t 0 polls a coprocess output without starting it, as Bash finds nothing written yet', () => {
+  const program = `coproc c { read -r l; echo "got $l"; }
+read -t 0 -u "\${c[0]}" q; echo "st=$?"
+echo hi >&"\${c[1]}"
+read -r y <&"\${c[0]}"; echo "$y"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({ stdout: 'st=1\ngot hi\n', stderr: '' });
+  // Polling it again before it runs would wait for it forever here, so it stops as unsupported.
+  const polledTwice = `coproc c { read -r l; echo "got $l"; }
+read -t 0 -u "\${c[0]}"; read -t 0 -u "\${c[0]}"
+`;
+  expect(executeProgram('bash', polledTwice)).toMatchObject({
+    uncaughtException:
+      'まだ動いていない coproc（c）の出力の繰り返しの確認（read -t 0）は、この採点環境では使えません。',
+  });
+});
+
+test('a trap action that ends with a newline numbers its syntax error from its own last line, as Bash does', () => {
+  expect(executeProgram('bash', "trap 'if true; then\n:\n' EXIT\necho m\n")).toMatchObject({
+    stdout: 'm\n',
+    stderr: "main.sh: exit trap: line 3: syntax error: unexpected end of file from `if' command on line 1\n",
   });
 });

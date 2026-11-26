@@ -7,6 +7,12 @@ export interface Word {
   text: string;
 }
 
+/** A backquoted body read again with another `extglob` setting: its commands, or the syntax error it then has. */
+export interface BackquoteRereading {
+  body: Statement[];
+  syntaxError?: BackquoteSyntaxError;
+}
+
 export type WordPart =
   /** Unquoted text, keeping its backslashes, which quote the character after each. */
   | { kind: 'literal'; text: string }
@@ -17,8 +23,22 @@ export type WordPart =
   /** Double-quoted parts; `$"..."` is the same in the C and UTF-8 locales without message catalogs. */
   | { kind: 'double'; parts: WordPart[]; rawText: string }
   | ParameterExpansion
-  | { kind: 'commandSubstitution'; body: Statement[]; text: string; row: number; syntaxError?: BackquoteSyntaxError }
-  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource; rawText: string };
+  | {
+      kind: 'commandSubstitution';
+      body: Statement[];
+      text: string;
+      row: number;
+      syntaxError?: BackquoteSyntaxError;
+      /** The `extglob` setting a backquoted body was read with, which runs it as read while still in effect. */
+      readExtglob?: boolean;
+      /** The body read with the other `extglob` setting, which Bash reads it with when that is in effect as it runs. */
+      rereadWithOtherExtglob?: () => BackquoteRereading;
+      /** `${ ...; }` runs in the current shell, and `${| ...; }` there too, expanding to `REPLY` instead. */
+      mode?: 'current' | 'reply';
+    }
+  | { kind: 'arithmeticExpansion'; expression: ArithmeticSource; rawText: string }
+  /** `<(...)` or `>(...)`, which expands to a path that reads the commands' output or feeds their input. */
+  | { kind: 'processSubstitution'; direction: '<' | '>'; body: Statement[]; text: string };
 
 /** A syntax error in a backquoted body, which Bash reports when it runs the substitution, with the line it shows. */
 export interface BackquoteSyntaxError {
@@ -28,6 +48,11 @@ export interface BackquoteSyntaxError {
   messages: string[];
   /** The text of the line Bash prints after an unexpected token. */
   line?: string;
+  /**
+   * For a body in a here-document, the row it starts on: Bash numbers its error from the line of the command the
+   * here-document belongs to, as it expands the body there.
+   */
+  heredocBodyRow?: number;
 }
 
 export interface ParameterExpansion {
@@ -80,13 +105,24 @@ export interface StaticDeclarationOptions {
   readonly invalidOption?: string;
 }
 
-/** A redirection between standard output and standard error, the only ones a program can use here. */
-export interface Redirect {
+/** A redirection, which changes a file descriptor for the command it follows. */
+export type Redirect = {
   /** The descriptor that the redirection changes. */
-  fd: 1 | 2;
-  /** The descriptor that it becomes a copy of. */
-  target: 1 | 2;
-}
+  fd: number;
+  /** The variable of `{name}>file`, which receives a newly allocated descriptor instead of `fd`. */
+  fdVariable?: string;
+} & (
+  | {
+      kind: 'file';
+      operator: '<' | '>' | '>>' | '>|' | '<>' | '&>' | '&>>';
+      target: Word;
+    }
+  /** `n>&word` or `n<&word`, which copies, moves (`m-`), or closes (`-`) a descriptor, or with `>&file` opens a file. */
+  | { kind: 'duplicate'; operator: '>&' | '<&'; target: Word; hasDescriptor: boolean }
+  | { kind: 'close' }
+  /** A here-document or a here-string, whose expanded text the descriptor reads. */
+  | { kind: 'text'; body: Word; appendsNewline: boolean }
+);
 
 export type TestExpression =
   | { kind: 'word'; word: Word }
@@ -94,7 +130,9 @@ export type TestExpression =
   | { kind: 'binary'; operator: string; left: Word; right: Word }
   | { kind: 'regex'; left: Word; right: Word }
   | { kind: 'and' | 'or'; left: TestExpression; right: TestExpression }
-  | { kind: 'not'; expression: TestExpression };
+  | { kind: 'not'; expression: TestExpression }
+  /** `( expression )`, which a `!` before it negates as a whole, so `set -x` shows no `!` on the terms inside. */
+  | { kind: 'group'; expression: TestExpression };
 
 export interface CaseItem {
   patterns: Word[];
@@ -116,6 +154,8 @@ export type Statement = StatementBase &
         kind: 'declaration';
         name: string;
         assignments: Assignment[];
+        /** The operands as written, which a function named like the builtin receives instead. */
+        words: (Word | Assignment)[];
         /** Pre-parsed leading literal option flags when all leading option words are plain literals. */
         staticOptions?: StaticDeclarationOptions;
         /** Remaining operand arguments when `staticOptions` is set; otherwise all arguments. */
@@ -126,7 +166,8 @@ export type Statement = StatementBase &
     | { kind: 'test'; expression: TestExpression; text: string }
     | { kind: 'if'; clauses: { condition: Statement[]; body: Statement[] }[]; elseBody: Statement[] | undefined }
     | { kind: 'while'; until: boolean; condition: Statement[]; body: Statement[] }
-    | { kind: 'for'; variable: string; values: Word[] | undefined; body: Statement[] }
+    /** `for name in words` or, with `select`, the menu loop that reads a choice of the words for each iteration. */
+    | { kind: 'for'; variable: string; values: Word[] | undefined; body: Statement[]; select?: boolean }
     | {
         kind: 'arithmeticFor';
         init: ArithmeticSource | undefined;
@@ -136,10 +177,19 @@ export type Statement = StatementBase &
       }
     | { kind: 'case'; value: Word; items: CaseItem[] }
     | { kind: 'group'; body: Statement[] }
-    | { kind: 'function'; name: string; body: Statement; isAtomic: boolean }
+    /** A function definition, whose redirections apply each time the function runs. */
+    | { kind: 'function'; name: string; body: Statement; isAtomic: boolean; redirects: Redirect[] }
     | { kind: 'list'; operator: '&&' | '||'; left: Statement; right: Statement }
     | { kind: 'not'; body: Statement }
     | { kind: 'redirected'; body: Statement; redirects: Redirect[] }
+    /** `( ... )`, which runs its body in a copy of the shell. */
+    | { kind: 'subshell'; body: Statement[] }
+    /** `coproc [name] command`, which runs the command with pipes to and from the shell in `name` (`COPROC`). */
+    | { kind: 'coproc'; name: string; body: Statement }
+    /** A command followed by `&`, which runs in a subshell without waiting for it. */
+    | { kind: 'background'; body: Statement }
+    /** Commands joined by `|`, where `|&` has added `2>&1` after the redirections of the command before it. */
+    | { kind: 'pipeline'; commands: Statement[] }
   );
 
 export interface Program {
@@ -147,4 +197,15 @@ export interface Program {
   units: Statement[][];
   /** The row where each unit ends, the line Bash's parser is on when it runs the unit. */
   unitEndRows: number[];
+  /**
+   * For each unit holding an extended pattern that Bash reads as one only if a `shopt -s extglob` that may not have
+   * run did, the row and text of the line of the first such pattern, where Bash reports a syntax error when
+   * `extglob` is off.
+   */
+  extglobRows: Map<number, { row: number; line: string }>;
+  /**
+   * For each unit holding here-documents that the end of the input ends, the warnings Bash prints as it reads the
+   * unit, before running it.
+   */
+  readWarnings?: Map<number, string[]>;
 }

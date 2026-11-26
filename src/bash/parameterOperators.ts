@@ -283,7 +283,7 @@ function mapValues(
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
   if (operator === '#') {
     const end = shortestPrefixMatch(glob, chars, 0, step);
     return end === undefined ? text : chars.slice(end).join('');
@@ -366,7 +366,8 @@ function substitute(
   const chars = charactersOf(text);
   const spend = (cost?: number): void => shell.runtime.spend(cost);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  // `nocasematch` applies to pattern substitution, but not to removing a prefix or suffix.
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob, fold: shell.options.nocasematch });
   const replace = (start: number, end: number): string =>
     replacementFor(replacement, chars.slice(start, end).join(''), spend);
   if (operator === '/#') {
@@ -416,7 +417,7 @@ function substring(
   };
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
-    shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);
+    shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`, 1, true);
   if (value.kind === 'scalar' || scalarTarget !== undefined) {
     const sliced = sliceString(
       scalarTarget as string,
@@ -639,7 +640,7 @@ function updateSubstringNesting(c: string, state: SubstringScanState): boolean {
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
   const all = operator.length === 2;
   for (let i = 0; i < chars.length; i++) {
     if (!all && i > 0) break;
@@ -664,7 +665,7 @@ function transform(
     expansion.argument.length === 1 && expansion.argument[0].kind === 'literal' ? expansion.argument[0].text : '';
   if (!/^[QEPAKakuUL]$/.test(letter)) {
     shell.reportError(`${expansion.text}: bad substitution`);
-    throw new ExitSignal(1);
+    throw new ExitSignal(1, true);
   }
   switch (letter) {
     case 'Q': {

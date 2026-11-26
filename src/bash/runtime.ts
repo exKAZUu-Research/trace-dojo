@@ -3,7 +3,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
-import type { Statement } from './ast';
+import type { Redirect, Statement } from './ast';
 import { chargeStoreSlots, type StepMeter } from './budget';
 import type { VariableStore } from './variables';
 
@@ -12,17 +12,15 @@ export const SCRIPT_NAME = 'main.sh';
 
 export const BASH_VERSION = '5.3.0(1)-release';
 
-/** Where a file descriptor writes: the run's standard output or error, or the text a command substitution captures. */
-export interface OutputTarget {
-  write(text: string): void;
-}
-
 export interface FunctionDefinition {
   name: string;
   body: Statement;
   isAtomic: boolean;
+  redirects: Redirect[];
   /** How far the lines Bash numbered the function with are behind its rows. */
   lineShift: number;
+  /** The line where the definition starts, 0-based, which errors of the function's own redirections name. */
+  definitionRow: number;
 }
 
 /** A frame of the trace: the program's top level, a command substitution, or a call of a function the program defines. */
@@ -55,7 +53,14 @@ export class ReturnSignal {
 
 /** Exits the shell, or the subshell running a command substitution, with a status. */
 export class ExitSignal {
-  constructor(readonly status: number) {}
+  /**
+   * `byExpansionError` marks an expansion error that ends a non-interactive shell, such as `${x?}` or an unset
+   * variable under `set -u`, which keeps the status the shell was ending with when it happens in the `EXIT` trap.
+   */
+  constructor(
+    readonly status: number,
+    readonly byExpansionError = false
+  ) {}
 }
 
 /**
@@ -74,6 +79,12 @@ export class DiscardSignal {
 
 const TURTLE_HANDLE_PREFIX = 'Turtle@';
 
+/**
+ * The process number of the first background command. Bash shows the operating system's, which differ from run to
+ * run, so any fixed numbering is one Bash could show.
+ */
+const FIRST_PROCESS_ID = 1000;
+
 /** Shared per-run services: the turtle board, step tracker, execution budget, output streams, and trace frame stack. */
 export class Runtime implements TracedRuntime<Frame> {
   readonly world = new TurtleWorld();
@@ -88,6 +99,7 @@ export class Runtime implements TracedRuntime<Frame> {
   private nextTurtle = 1;
   private turtleRevision = 0;
   private slots = 0;
+  private nextProcessId = FIRST_PROCESS_ID;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -104,6 +116,11 @@ export class Runtime implements TracedRuntime<Frame> {
 
   checkCallDepth(): void {
     if (this.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+  }
+
+  /** A new process number for a background command or a coprocess. */
+  allocateProcessId(): number {
+    return this.nextProcessId++;
   }
 
   reserveTurtleHandle(): string {
@@ -136,4 +153,38 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** No-op for `TracedRuntime`: Bash string-handle turtles persist until explicit removal or run end. */
   collectGarbage(): void {}
+}
+
+/**
+ * Stops a program at a wait that never ends, where Bash would wait forever: reading from a coprocess that waits for
+ * input the shell can still write, or waiting for such a coprocess or `>(...)`.
+ */
+export class DeadlockError extends Error {
+  constructor() {
+    super(
+      'デッドロックが起きました。シェルとコプロセスやプロセス置換が互いの入出力を待ったままで、どれも先に進めません。'
+    );
+    this.name = 'DeadlockError';
+  }
+}
+
+/** Stops a coprocess that has read all the shell wrote to it while the shell can still write more, as Bash's waits. */
+export class CoprocessWaitSignal {
+  /** The `while read` loop whose condition waited, which ends with nothing more to run once the input ends. */
+  waitingLoop: Statement | undefined;
+  /** The status that loop ends with once its input ends: its body's last, or 0 when the body never ran. */
+  loopStatus = 0;
+}
+
+/** Whether `error` is how the shell leaves commands as Bash does, rather than a stop of the whole program. */
+export function isShellSignal(
+  error: unknown
+): error is ExitSignal | DiscardSignal | ReturnSignal | BreakSignal | ContinueSignal {
+  return (
+    error instanceof ExitSignal ||
+    error instanceof DiscardSignal ||
+    error instanceof ReturnSignal ||
+    error instanceof BreakSignal ||
+    error instanceof ContinueSignal
+  );
 }

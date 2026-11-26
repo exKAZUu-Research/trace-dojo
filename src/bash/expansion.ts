@@ -7,7 +7,6 @@ import {
   rejectQuotedSubscriptExpansion,
   rejectUnsupportedExpansion,
   rejectUnsupportedNamerefMutation,
-  rejectUnsupportedPathnameExpansion,
 } from './capabilities';
 import { charactersOf } from './characters';
 import {
@@ -25,8 +24,10 @@ import {
   type WordContext,
   type WordSegment,
 } from './fields';
+import { flagsOf } from './options';
 import { applyOperator } from './parameterOperators';
-import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
+import { expandPathname } from './pathnameExpansion';
+import { hasExtendedGlob, hasPatternCharacters, matchesPattern, type PatternMode, quotePattern } from './pattern';
 import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { Shell } from './shell';
@@ -52,6 +53,9 @@ export interface SubscriptRef {
   readonly word?: Word;
   readonly indirect?: string;
 }
+
+/** The operators that test whether a parameter is set, which `set -u` lets expand an unset one. */
+const UNSET_TESTING_OPERATORS = new Set(['-', ':-', '=', ':=', '?', ':?', '+', ':+']);
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 const SUBSCRIPT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false, inSubscript: true };
@@ -79,7 +83,7 @@ export class Expander {
       for (const parts of expandBraces(word.parts, this.shell.runtime.step)) {
         this.checkTilde(parts, false);
         for (const field of this.splitFields(this.expandParts(parts, FIELD_SPLITTING_WORD_CONTEXT))) {
-          pushMeteredItem(fields, this.finishField(field), this.shell.runtime.step);
+          for (const result of this.finishField(field)) pushMeteredItem(fields, result, this.shell.runtime.step);
         }
       }
     }
@@ -139,8 +143,8 @@ export class Expander {
     return this.arithmeticText({ pieces, row: word.row }, unquoteAnsiC, true);
   }
 
-  matches(text: string, pattern: string, extmatch = false): boolean {
-    return matchesPattern(pattern, text, this.shell.runtime.step, extmatch);
+  matches(text: string, pattern: string, mode: PatternMode): boolean {
+    return matchesPattern(pattern, text, this.shell.runtime.step, mode);
   }
 
   /** Expands raw compound items of `name=(...)` through metered word and string helpers. */
@@ -245,7 +249,7 @@ export class Expander {
     for (let i = 0; i < words.length; i += 2) {
       const key = this.expandAssignmentValue(words[i]);
       if (key === '') {
-        this.shell.reportError(`${words[i].text}: bad array subscript`);
+        this.shell.reportShellError(`${words[i].text}: bad array subscript`);
         continue;
       }
       const value = i + 1 < words.length ? this.expandAssignmentValue(words[i + 1]) : '';
@@ -334,6 +338,9 @@ export class Expander {
       case 'commandSubstitution': {
         return this.expandCommandSubstitution(part, ctx.inDouble);
       }
+      case 'processSubstitution': {
+        return [textSegment(this.shell.openProcessSubstitution(part.direction, part.body), true, false)];
+      }
       case 'arithmeticExpansion': {
         const value = this.shell.evaluate(part.expression, undefined);
         return [textSegment(String(value), ctx.inDouble, !ctx.inDouble)];
@@ -364,8 +371,14 @@ export class Expander {
     part: Extract<WordPart, { kind: 'commandSubstitution' }>,
     inDouble: boolean
   ): WordSegment[] {
-    if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-    const { output, status } = this.shell.captureSubshell(part.body, part.row);
+    const read =
+      part.rereadWithOtherExtglob && part.readExtglob !== this.shell.options.extglob
+        ? part.rereadWithOtherExtglob()
+        : part;
+    if (read.syntaxError) return this.failBackquoted(read.syntaxError, inDouble);
+    const { output, status } = part.mode
+      ? this.shell.captureCurrentShell(read.body, part.mode)
+      : this.shell.captureSubshell(read.body, part.row);
     this.lastSubstitutionStatus = status;
     this.shell.store.lastStatus = status;
     if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
@@ -397,14 +410,19 @@ export class Expander {
 
   // ---------------------------------------------------------------- parameters
 
-  expandParameter(expansion: ParameterExpansion, ctx: WordContext): WordSegment[] {
+  // code-gauge-allow functionCognitiveComplexity -- Dispatches the braced forms of parameter expansion and the `set -u` check in Bash's order.
+  expandParameter(parsed: ParameterExpansion, ctx: WordContext): WordSegment[] {
+    const expansion = backgroundPidOperand(parsed);
     if (expansion.unclosedSubscript) this.failUnclosedSubscript(expansion, ctx.badSubTarget);
     if ((ctx.inOperatorWord || ctx.inSubscript) && isListExpansionSyntax(expansion)) {
       rejectListInScalarContext(expansion.text);
     }
     const { name } = expansion;
     if (!expansion.braced) {
-      return this.valueSegments(this.parameterValue(name, undefined, expansion), ctx, expansion.text);
+      const value = this.parameterValue(name, undefined, expansion);
+      // Bash names an unbraced positional or special parameter with its `$`, as in `$1: unbound variable`.
+      this.requireSet(value, /^[A-Za-z_]/.test(name) ? name : `$${name}`);
+      return this.valueSegments(value, ctx, expansion.text);
     }
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
@@ -416,11 +434,20 @@ export class Expander {
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, ctx);
     if (expansion.prefix === '#') return this.expandLength(name, subscript, expansion, ctx);
     const value = this.parameterValue(name, subscript, expansion);
+    if (expansion.operator === undefined || !UNSET_TESTING_OPERATORS.has(expansion.operator)) {
+      this.requireSet(value, subscriptedLabel(name, subscript));
+    }
     if (expansion.operator === undefined) {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
       return this.valueSegments(value, ctx, expansion.text);
     }
     return applyOperator(this, this.shell, expansion, value, name, subscript, ctx);
+  }
+
+  /** Stops the shell at an unset parameter under `set -u`, which `$@`, `$*`, and `${a[@]}` never are. */
+  private requireSet(value: ParameterValue, label: string): void {
+    if (!this.shell.options.nounset || value.kind !== 'scalar' || value.value !== undefined) return;
+    this.failParameter(label, 'unbound variable');
   }
 
   private expandLength(
@@ -431,10 +458,18 @@ export class Expander {
   ): WordSegment[] {
     if (subscript?.wholeArray) {
       const resolved = resolveTargetName(this.shell, name);
-      const count = this.shell.store.readArrayLength(resolved);
+      // Under `set -u`, Bash counts the elements only of an array that is set, even an empty one; counting another
+      // abandons the line, and ends the shell only under `set -e`, unlike reading an unset variable.
+      const { store } = this.shell;
+      if (this.shell.options.nounset && !(store.isArrayName(resolved) && store.hasMaterializedTarget(resolved))) {
+        this.shell.discard(`${name}: unbound variable`);
+      }
+      const count = store.readArrayLength(resolved);
       return this.valueSegments({ kind: 'scalar', value: String(count) }, ctx, expansion.text);
     }
-    return this.valueSegments(lengthOf(this.parameterValue(name, subscript, expansion)), ctx, expansion.text);
+    const value = this.parameterValue(name, subscript, expansion);
+    this.requireSet(value, subscriptedLabel(name, subscript));
+    return this.valueSegments(lengthOf(value), ctx, expansion.text);
   }
 
   private elementLengthValue(expansion: ParameterExpansion): ParameterValue {
@@ -483,7 +518,7 @@ export class Expander {
     }
     if (subscript.rawText === '' && expansion) this.shell.discard(`${expansion.text}: bad substitution`);
     if (subscript.text === '' && this.shell.store.isAssociativeName(resolved)) {
-      this.shell.reportError(`${name}: bad array subscript`);
+      this.shell.reportShellError(`${name}: bad array subscript`);
       return { kind: 'scalar', value: undefined };
     }
     const subText = subscript.text === '' ? '0' : subscript.text;
@@ -494,7 +529,7 @@ export class Expander {
       operation: 'read',
     });
     if (target.kind === 'invalid') {
-      if (target.failure.message !== '') this.shell.reportError(target.failure.message);
+      if (target.failure.message !== '') this.shell.reportShellError(target.failure.message);
       return { kind: 'scalar', value: undefined };
     }
     return { kind: 'scalar', value: readResolvedTarget(this.shell, target) };
@@ -514,13 +549,14 @@ export class Expander {
         return { kind: 'scalar', value: String(this.shell.store.lastStatus) };
       }
       case '-': {
-        return { kind: 'scalar', value: 'hB' };
+        return { kind: 'scalar', value: flagsOf(this.shell.options) };
       }
       case '$': {
         return rejectUnsupportedExpansion('pid');
       }
       case '!': {
-        return rejectUnsupportedExpansion('bgPid');
+        const pid = this.shell.store.lastBackgroundPid;
+        return { kind: 'scalar', value: pid === undefined ? undefined : String(pid) };
       }
       case '0': {
         return { kind: 'scalar', value: SCRIPT_NAME };
@@ -576,17 +612,18 @@ export class Expander {
     const direct = this.parameterValue(name, subscript, expansion);
     const reference =
       direct.kind === 'scalar' ? direct.value : direct.values.length === 0 ? undefined : direct.values.join(' ');
+    // Bash names the expansion as written, with its `!`, when the value it finally reads is unset under `set -u`.
+    const written = subscript === undefined ? `!${name}` : `!${name}[${subscript.rawText}]`;
     if (reference === undefined) {
       this.checkIndirectReference(name, subscript?.rawText);
-      const missingName = subscript === undefined ? `!${name}` : `!${name}[${subscript.rawText}]`;
-      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, missingName, undefined, ctx);
+      return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, { name: written }, written, ctx);
     }
     const target = this.indirectTarget(reference);
     return this.finishIndirect(
       expansion,
       this.parameterValue(target.name, target.subscript, expansion),
-      target.name,
-      target.subscript,
+      target,
+      written,
       ctx
     );
   }
@@ -594,12 +631,15 @@ export class Expander {
   private finishIndirect(
     expansion: ParameterExpansion,
     value: ParameterValue,
-    targetName: string,
-    targetSubscript: SubscriptRef | undefined,
+    target: { name: string; subscript?: SubscriptRef },
+    written: string,
     ctx: WordContext
   ): WordSegment[] {
+    if (expansion.operator === undefined || !UNSET_TESTING_OPERATORS.has(expansion.operator)) {
+      this.requireSet(value, written);
+    }
     if (expansion.operator === undefined) return this.valueSegments(value, ctx, expansion.text);
-    return applyOperator(this, this.shell, expansion, value, targetName, targetSubscript, ctx);
+    return applyOperator(this, this.shell, expansion, value, target.name, target.subscript, ctx);
   }
 
   private checkIndirectReference(name: string, subscript: string | undefined): void {
@@ -719,7 +759,6 @@ export class Expander {
       const chunk = fragment.quoted ? quotePattern(fragment.text) : fragment.text;
       pattern = appendMetered(pattern, chunk, spend);
     }
-    if (hasExtendedGlob(pattern, this.shell.runtime.step)) rejectUnsupportedExpansion('extglob');
     return pattern;
   }
 
@@ -730,7 +769,8 @@ export class Expander {
     return splitWordSegments(segments, needsIfs ? this.currentIfs() : ' \t\n');
   }
 
-  finishField(field: readonly TextSegment[]): string {
+  /** Removes a field's quotes and expands it as a pattern into the paths it matches, as Bash does last. */
+  finishField(field: readonly TextSegment[]): string[] {
     const spend = (cost?: number): void => this.spend(cost);
     let result = '';
     let unquoted = '';
@@ -738,12 +778,20 @@ export class Expander {
       result = appendMetered(result, fragment.text, spend);
       unquoted = appendMetered(unquoted, fragment.quoted ? quotePattern(fragment.text) : fragment.text, spend);
     }
-    if (hasPatternCharacters(unquoted, this.shell.runtime.step)) rejectUnsupportedPathnameExpansion(result);
-    return result;
+    const { options } = this.shell;
+    const step = this.shell.runtime.step;
+    const isPattern = hasPatternCharacters(unquoted, step) || (options.extglob && hasExtendedGlob(unquoted, step));
+    if (options.noglob || !isPattern) return [result];
+    const paths = expandPathname(this.shell, unquoted);
+    if (paths.length > 0) return paths;
+    if (options.failglob) this.shell.discard(`no match: ${result}`);
+    return options.nullglob ? [] : [result];
   }
 
   private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): WordSegment[] {
-    const prefix = `${SCRIPT_NAME}: command substitution: line ${error.row + 1}: `;
+    const row =
+      error.heredocBodyRow === undefined ? error.row : this.shell.currentRow + (error.row - error.heredocBodyRow);
+    const prefix = `${SCRIPT_NAME}: command substitution: line ${row + 1}: `;
     for (const message of error.messages) this.shell.fd2.write(`${prefix}${message}\n`);
     if (error.line !== undefined) this.shell.fd2.write(`${prefix}\`${error.line}'\n`);
     this.lastSubstitutionStatus = 2;
@@ -762,8 +810,23 @@ export class Expander {
 
   failParameter(name: string, message: string): never {
     this.shell.reportError(`${name}: ${message}`);
-    throw new ExitSignal(1);
+    throw new ExitSignal(1, true);
   }
+}
+
+/** How `set -u` names a parameter: `name`, or `name[subscript]` with the subscript as expanded. */
+function subscriptedLabel(name: string, subscript: SubscriptRef | undefined): string {
+  return subscript ? `${name}[${subscript.text}]` : name;
+}
+
+/** `${!-word}` and the like, which apply `-`, `=`, `?`, or `+` to `$!` rather than name `$-` indirectly. */
+function backgroundPidOperand(expansion: ParameterExpansion): ParameterExpansion {
+  const isOperator = ['-', '=', '?', '+'].includes(expansion.name);
+  if (expansion.prefix !== '!' || expansion.operator !== undefined || !isOperator || expansion.argument.length === 0) {
+    return expansion;
+  }
+  const { prefix: _prefix, ...rest } = expansion;
+  return { ...rest, name: '!', operator: expansion.name };
 }
 
 function isElementLengthExpansion(expansion: ParameterExpansion): boolean {
@@ -788,7 +851,8 @@ function partSourceText(part: WordPart): string {
   switch (part.kind) {
     case 'literal':
     case 'parameter':
-    case 'commandSubstitution': {
+    case 'commandSubstitution':
+    case 'processSubstitution': {
       return part.text;
     }
     case 'single': {

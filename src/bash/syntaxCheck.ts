@@ -18,6 +18,7 @@ import {
   type DeferredRegion,
   skipBalanced,
   skipBlanks,
+  skipDoubleQuotedPiece,
   skipWordPiece,
   SourceText,
   SyntaxFailure,
@@ -30,29 +31,43 @@ export interface DeferredExpansion {
   readonly inDouble: boolean;
 }
 
+/** Where a `{name}` before a compound command's redirection is written, and its name. */
+type DescriptorVariableSpan = SourceText['descriptorVariables'][number];
+
 export interface AnalyzedBashSource {
   readonly originalSource: string;
   readonly grammarSource: string;
   readonly deferredArithmetic: ReadonlyMap<number, string>;
   readonly deferredExpansions: ReadonlyMap<number, DeferredExpansion>;
   readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>;
+  /** Whether each backquoted body, by its start offset, reads extended patterns, as `extglob` may be on there. */
+  readonly backquoteExtglob: ReadonlyMap<number, boolean>;
   readonly literalQuotes: ReadonlySet<number>;
   readonly declarationFunctionStarts: ReadonlySet<number>;
+  /**
+   * The variable of each `{name}` before a compound command's redirection, by the offset where the redirection starts
+   * in `grammarSource`, which holds a descriptor number of the same length in its place.
+   */
+  readonly descriptorVariables: ReadonlyMap<number, string>;
+  /** The rows of extended patterns that Bash reads as such only if a `shopt -s extglob` that may not run did. */
+  readonly uncertainExtglobRows: ReadonlySet<number>;
 }
 
 /** Validates `source` and builds the single source-aware span and deferred-error map for `Converter`. */
-export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashSource {
-  const checked = checkBashSyntax(source);
+export function analyzeBashSource(parser: Parser, source: string, initialExtglob = false): AnalyzedBashSource {
+  const checked = checkBashSyntax(source, initialExtglob);
   if (checked.error && checked.error !== 'unknown') {
     throw new CompileError([{ row: checked.error.row, message: syntaxErrorMessage(checked.error.text) }]);
   }
-  const backquotes = analyzeBackquotes(source, checked.backquotes);
+  const backquotes = analyzeBackquotes(source, checked.backquotes, checked.heredocBackquotes);
+  const descriptorVariables = [...checked.descriptorVariables, ...backquotes.descriptorVariables];
   const literalQuotes = new Set([...checked.literalSingleQuotes, ...backquotes.literalSingleQuotes]);
   const declarationFunctionStarts = new Set([
     ...checked.declarationFunctionStarts,
     ...backquotes.declarationFunctionStarts,
   ]);
-  const normalized = applySourceNormalizations(backquotes.source, literalQuotes, declarationFunctionStarts);
+  const withDescriptors = maskDescriptorVariables(backquotes.source, descriptorVariables);
+  const normalized = applySourceNormalizations(withDescriptors, literalQuotes, declarationFunctionStarts);
   const regions = sortDeferredRegions([...checked.arithmeticRegions, ...backquotes.arithmeticRegions]);
   const { grammarSource, deferredArithmetic, deferredExpansions } = resolveDeferredArithmeticRegions(
     parser,
@@ -66,32 +81,60 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     deferredArithmetic,
     deferredExpansions,
     backquoteErrors: backquotes.errors,
+    backquoteExtglob: new Map(checked.backquoteStates.map(({ start, extglob }) => [start, extglob])),
     literalQuotes,
     declarationFunctionStarts,
+    descriptorVariables: new Map(descriptorVariables.map(({ start, name }) => [start, name])),
+    uncertainExtglobRows: new Set(checked.uncertainExtglobRows),
   };
 }
 
-export function checkBashSyntax(source: string): {
+/**
+ * Writes a descriptor number in place of each `{name}` before a compound command's redirection, which the grammar
+ * reads only after a simple command, so that it parses the redirection, which the converter gives the name back.
+ */
+function maskDescriptorVariables(source: string, spans: readonly { start: number; end: number }[]): string {
+  let out = source;
+  for (const { start, end } of spans) out = `${out.slice(0, start)}${'9'.repeat(end - start)}${out.slice(end)}`;
+  return out;
+}
+
+export function checkBashSyntax(
+  source: string,
+  initialExtglob = false
+): {
   error: BashSyntaxError | 'unknown' | undefined;
-  backquotes: { start: number; end: number }[];
+  backquotes: { start: number; end: number; extglob: boolean }[];
+  backquoteStates: { start: number; extglob: boolean }[];
+  heredocBackquotes: { start: number; end: number; extglob: boolean }[];
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: DescriptorVariableSpan[];
+  uncertainExtglobRows: number[];
 } {
-  const text = createValidatorSourceText(source);
+  const text = createValidatorSourceText(source, initialExtglob);
   return {
     error: detectSyntaxError(text),
     backquotes: text.backquotes,
+    backquoteStates: text.backquoteStates,
+    heredocBackquotes: text.heredocBackquotes,
     literalSingleQuotes: text.literalSingleQuotes,
     declarationFunctionStarts: text.declarationFunctionStarts,
     arithmeticRegions: text.arithmeticRegions,
+    descriptorVariables: text.descriptorVariables,
+    uncertainExtglobRows: text.uncertainExtglobRows,
   };
 }
 
 /** Inspects an unescaped backquoted body at `row` for runtime syntax errors. */
-export function inspectUnescapedBackquoteBody(body: string, row: number): BackquoteSyntaxError | undefined {
+export function inspectUnescapedBackquoteBody(
+  body: string,
+  row: number,
+  extglob = false
+): BackquoteSyntaxError | undefined {
   const text = `${'\n'.repeat(row)}${body}\n`;
-  const { error } = checkBashSyntax(text);
+  const { error } = checkBashSyntax(text, extglob);
   if (!error || error === 'unknown') return undefined;
   const messages = error.near === undefined ? [error.text] : [error.text, `syntax error near \`${error.near}'`];
   const shows = (messages.at(-1) as string).startsWith('syntax error near');
@@ -100,43 +143,68 @@ export function inspectUnescapedBackquoteBody(body: string, row: number): Backqu
 
 function analyzeBackquotes(
   source: string,
-  backquotes: readonly { start: number; end: number }[]
+  backquotes: readonly { start: number; end: number; extglob: boolean }[],
+  heredocBackquotes: readonly { start: number; end: number; extglob: boolean }[] = []
 ): {
   source: string;
   errors: Map<number, BackquoteSyntaxError>;
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: DescriptorVariableSpan[];
 } {
   const errors = new Map<number, BackquoteSyntaxError>();
   const literalSingleQuotes: number[] = [];
   const declarationFunctionStarts: number[] = [];
   const arithmeticRegions: DeferredRegion[] = [];
+  const descriptorVariables: DescriptorVariableSpan[] = [];
   let normalized = source;
-  for (const { start, end } of backquotes) {
-    const inspected = inspectBackquoteSpan(source, start, end);
+  // A here-document's backquote takes part only through its syntax error, kept on the substitution with its body
+  // blanked as for any backquote; its other spans were taken when its here-document was read.
+  for (const { start, end, extglob } of heredocBackquotes) {
+    const { error } = inspectBackquoteSpan(source, start, end, extglob);
+    if (!error) continue;
+    errors.set(start, { ...error, heredocBodyRow: source.slice(0, start).split('\n').length - 1 });
+    normalized = blankBackquoteBody(normalized, start, end);
+  }
+  for (const { start, end, extglob } of backquotes) {
+    const inspected = inspectBackquoteSpan(source, start, end, extglob);
     if (inspected.error) {
       errors.set(start, inspected.error);
-      const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
-      normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
+      normalized = blankBackquoteBody(normalized, start, end);
     } else {
       literalSingleQuotes.push(...inspected.quoteOffsets);
       declarationFunctionStarts.push(...inspected.fnStarts);
       arithmeticRegions.push(...inspected.arithmeticRegions);
+      descriptorVariables.push(...inspected.descriptorVariables);
     }
   }
-  return { source: normalized, errors, literalSingleQuotes, declarationFunctionStarts, arithmeticRegions };
+  return {
+    source: normalized,
+    errors,
+    literalSingleQuotes,
+    declarationFunctionStarts,
+    arithmeticRegions,
+    descriptorVariables,
+  };
+}
+
+/** Blanks a backquoted body with a syntax error, keeping its lines, so the grammar reads the program around it. */
+function blankBackquoteBody(source: string, start: number, end: number): string {
+  return `${source.slice(0, start + 1)}${source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ')}${source.slice(end - 1)}`;
 }
 
 function inspectBackquoteSpan(
   source: string,
   start: number,
-  end: number
+  end: number,
+  extglob: boolean
 ): {
   error?: BackquoteSyntaxError;
   quoteOffsets: number[];
   fnStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: DescriptorVariableSpan[];
 } {
   let body = '';
   const bodyOffsets: number[] = [];
@@ -149,9 +217,15 @@ function inspectBackquoteSpan(
   const row = source.slice(0, start).split('\n').length - 1;
   const pad = '\n'.repeat(row);
   const padded = `${pad}${body}\n`;
-  const checked = checkBashSyntax(padded);
+  const checked = checkBashSyntax(padded, extglob);
   if (checked.error && checked.error !== 'unknown') {
-    return { error: inspectUnescapedBackquoteBody(body, row), quoteOffsets: [], fnStarts: [], arithmeticRegions: [] };
+    return {
+      error: inspectUnescapedBackquoteBody(body, row, extglob),
+      quoteOffsets: [],
+      fnStarts: [],
+      arithmeticRegions: [],
+      descriptorVariables: [],
+    };
   }
   const nested = analyzeBackquotes(padded, checked.backquotes);
   const mapOffset = (idx: number): number | undefined => {
@@ -165,7 +239,12 @@ function inspectBackquoteSpan(
   const arithmeticRegions = [...checked.arithmeticRegions, ...nested.arithmeticRegions]
     .map((r) => mapDeferredRegion(r, mapOffset))
     .filter((r): r is DeferredRegion => r !== undefined);
-  return { quoteOffsets, fnStarts, arithmeticRegions };
+  const descriptorVariables = [...checked.descriptorVariables, ...nested.descriptorVariables].flatMap((span) => {
+    const start = mapOffset(span.start);
+    const last = mapOffset(span.end - 1);
+    return start === undefined || last === undefined ? [] : [{ start, end: last + 1, name: span.name }];
+  });
+  return { quoteOffsets, fnStarts, arithmeticRegions, descriptorVariables };
 }
 
 function mapDeferredRegion(
@@ -328,9 +407,65 @@ function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {
   return out;
 }
 
-export function createValidatorSourceText(source: string): SourceText {
+/**
+ * Records the `{name}` spans of the command substitutions in a here-document body, which the grammar reads as
+ * commands, without checking them otherwise: Bash reports their syntax errors only when it expands the body.
+ */
+function collectHeredocDescriptorVariables(text: SourceText, start: number, end: number): void {
+  for (let i = start; i < end;) {
+    const found = text.descriptorVariables.length;
+    const marks = [
+      text.backquotes.length,
+      text.literalSingleQuotes.length,
+      text.declarationFunctionStarts.length,
+      text.arithmeticRegions.length,
+      text.uncertainExtglobRows.length,
+    ];
+    const pieceStart = i;
+    try {
+      i = skipDoubleQuotedPiece(text, i);
+      // A backquoted body is read apart from the program's, so its spans are mapped back from that reading.
+      for (const { start: open, end: close, extglob } of text.backquotes.slice(marks[0])) {
+        text.descriptorVariables.push(...inspectBackquoteSpan(text.source, open, close, extglob).descriptorVariables);
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxFailure || error instanceof UnknownSyntax)) throw error;
+      text.descriptorVariables.length = found;
+      i = pieceStart + 1;
+    }
+    text.heredocBackquotes.push(...text.backquotes.slice(marks[0]));
+    text.backquotes.length = marks[0];
+    text.literalSingleQuotes.length = marks[1];
+    text.declarationFunctionStarts.length = marks[2];
+    text.arithmeticRegions.length = marks[3];
+    text.uncertainExtglobRows.length = marks[4];
+  }
+}
+
+export function createValidatorSourceText(source: string, initialExtglob = false): SourceText {
   const text = new SourceText(source);
-  text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  // A text read apart from the program, as a trap action or a backquoted body is, starts with the `extglob` in effect
+  // where Bash reads it.
+  text.readingExtglob = { on: initialExtglob, uncertain: false };
+  // A `$( )`'s own `shopt` lines change what it reads but not the line around it; a `${ ...; }` runs in this shell,
+  // so what it may set is left for the lines after the line holding it.
+  const keepingExtglob = (read: () => number): number => {
+    const saved = text.readingExtglob;
+    try {
+      return read();
+    } finally {
+      text.readingExtglob = saved;
+    }
+  };
+  text.parseSubstitution = (start) =>
+    keepingExtglob(() => new ShellGrammarValidator(text, start, true).validateSubstitution());
+  text.parseBraceSubstitution = (start) =>
+    keepingExtglob(() => {
+      const validator = new ShellGrammarValidator(text, start, true, true);
+      const end = validator.validateBraceSubstitution();
+      text.currentShellExtglob.push(...validator.extglobValuesAfter());
+      return end;
+    });
   return text;
 }
 
@@ -395,6 +530,16 @@ const REDIRECTION_OPERATORS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', 
 const WORD_BREAK_CHARS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
 const DECLARATION_NAMES = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
 
+/** Whether `token` is `{name}` written right before a redirection operator, as in `{fd}>file`. */
+function isDescriptorVariableWord(token: ShellToken, source: string): boolean {
+  return (
+    token.kind === 'word' &&
+    !token.quoted &&
+    /^\{[A-Za-z_]\w*(?:\[[^\]]*\])?\}$/.test(token.value) &&
+    (source[token.end] === '<' || source[token.end] === '>')
+  );
+}
+
 function isAssignmentWord(word: string): boolean {
   const open = word.indexOf('[');
   const eq = word.indexOf('=');
@@ -417,13 +562,57 @@ function isCompoundAssignmentPrefix(prefix: string): boolean {
 
 type WordContext = 'command' | 'declaration' | 'argument';
 
+/** Whether a compound command starts at `index`, past blanks, which makes the word before it a coprocess's name. */
+function startsCompoundCommand(source: string, index: number): boolean {
+  return /^[ \t]*(?:[{(]|\[\[|(?:if|while|until|for|case|select)(?![^\s;&|<>()]))/.test(
+    source.slice(index, index + 16)
+  );
+}
+
+/**
+ * What a simple command's words set `extglob` to, as `shopt -s extglob` or `shopt -u extglob` does, written with
+ * quotes, grouped flags such as `-sq`, or after `builtin` or `command`.
+ */
+function extglobSetBy(written: readonly string[]): boolean | undefined {
+  const words = written.map((word) => word.replaceAll(/['"\\]/g, ''));
+  while (words[0] === 'builtin' || words[0] === 'command') words.shift();
+  if (words[0] !== 'shopt') return undefined;
+  let flags = '';
+  let index = 1;
+  for (; index < words.length && /^-[a-z]+$/.test(words[index]); index++) flags += words[index].slice(1);
+  if (words[index] === '--') index++;
+  // With `-o`, `shopt` names `set -o` options, of which `extglob` is none, so it changes nothing.
+  if (flags.includes('o') || !words.slice(index).includes('extglob') || flags.includes('s') === flags.includes('u')) {
+    return undefined;
+  }
+  return flags.includes('s');
+}
+
+/** Whether the text before `index`, past blanks, ends a command, so that a word at `index` starts one. */
+function endsCommand(source: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+  return i >= 0 && ';&|\n'.includes(source[i]);
+}
+
 class ShellTokenStream {
+  /**
+   * Whether `shopt -s extglob` ran before the line being read, which makes `@(...)` and the other extended patterns
+   * part of a word, as Bash reads each line of a script after running the ones before it.
+   */
+  extglob = false;
+  /** Whether `extglob` is on only if a `shopt` that may not have run did, which the run checks. */
+  extglobUncertain = false;
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
-  private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
+  private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean; expands: boolean }[] = [];
 
   constructor(
     private readonly text: SourceText,
-    public position: number
+    public position: number,
+    /** Whether a `}` that starts a command ends the list, even with a word right after it, as in `"${ f; }"`. */
+    private readonly closesBrace = false,
+    /** Whether a `)` closes the list being read, as in `$( )`, which also ends a here-document on its delimiter line. */
+    private readonly closesParen = false
   ) {}
 
   readNext(context: WordContext): ShellToken {
@@ -433,6 +622,10 @@ class ShellTokenStream {
     const row = this.text.rowAt(start);
     if (start >= source.length) return this.makeToken('eof', '', row, start, false);
     const ch = source[start];
+    if (this.closesBrace && ch === '}' && endsCommand(source, start)) {
+      this.position++;
+      return this.makeToken('word', '}', row, start, false);
+    }
     if (ch === '\n') {
       this.position++;
       this.consumeQueuedHeredocs();
@@ -450,6 +643,7 @@ class ShellTokenStream {
       this.queuedHeredocs.push({
         endMarker: word.value.replaceAll(/\\(.)|["']/g, '$1'),
         stripLeadingTabs: this.pendingHeredocSpec.stripLeadingTabs,
+        expands: !/["'\\]/.test(word.value),
       });
       this.pendingHeredocSpec = undefined;
     }
@@ -457,10 +651,24 @@ class ShellTokenStream {
   }
 
   private consumeQueuedHeredocs(): void {
-    for (const { endMarker, stripLeadingTabs } of this.queuedHeredocs.splice(0)) {
+    for (const { endMarker, stripLeadingTabs, expands } of this.queuedHeredocs.splice(0)) {
+      const bodyStart = this.position;
+      let bodyEnd = bodyStart;
       let line: string | undefined;
-      do line = this.consumeRawLine();
-      while (line !== undefined && (stripLeadingTabs ? line.replace(/^\t+/, '') : line) !== endMarker);
+      for (;;) {
+        const lineStart = this.position;
+        line = this.consumeRawLine();
+        if (line === undefined) break;
+        const stripped = stripLeadingTabs ? line.replace(/^\t+/, '') : line;
+        if (stripped === endMarker) break;
+        // In a substitution, Bash ends the body at the delimiter followed by the `)` closing it, with a warning.
+        if (this.closesParen && stripped.startsWith(endMarker) && /^[ \t]*\)/.test(stripped.slice(endMarker.length))) {
+          this.position = lineStart + (line.length - stripped.length) + endMarker.length;
+          break;
+        }
+        bodyEnd = lineStart + line.length;
+      }
+      if (expands) collectHeredocDescriptorVariables(this.text, bodyStart, bodyEnd);
     }
   }
 
@@ -482,6 +690,11 @@ class ShellTokenStream {
     while (this.position < source.length) {
       const ch = source[this.position];
       if (this.tryScanSpecialWordSegment(start, context, ch, unclosedBrackets)) continue;
+      if (this.extglob && '?*+@!'.includes(ch) && source[this.position + 1] === '(') {
+        if (this.extglobUncertain) this.text.uncertainExtglobRows.push(this.text.rowAt(this.position));
+        this.position = skipBalanced(this.text, this.position + 1, '(', ')');
+        continue;
+      }
       if (WORD_BREAK_CHARS.has(ch)) break;
       if (`'"\\\`$`.includes(ch)) quoted ||= ch !== '$';
       this.position = skipWordPiece(this.text, this.position);
@@ -627,24 +840,80 @@ class ShellGrammarValidator {
   private readonly stream: ShellTokenStream;
   private cached: ShellToken | undefined;
   private cachedContext: WordContext = 'argument';
+  /** How many subshells and coprocesses enclose the command being read. */
+  private separateShellDepth = 0;
+  /**
+   * How many compound commands, function bodies, and `&&` or `||` lists enclose the command being read, which may
+   * not run it.
+   */
+  private conditionalDepth = 0;
+  /** How many function bodies enclose the command being read. */
+  private functionDepth = 0;
+  /**
+   * What the commands of the line being read that run in this shell set `extglob` to, in order, whether they may not
+   * run, and whether a function body holds them: those in a pipeline of several commands or a background list run in
+   * subshells, so they are dropped when the pipeline or list ends.
+   */
+  private readonly lineExtglob: { on: boolean; uncertain: boolean; inFunction: boolean }[] = [];
+  /** The values `extglob` may have when the next line is read, which the run decides when there are two. */
+  private readonly possibleExtglob = new Set([false]);
+  /** The values a function body sets `extglob` to, which a call may set at any later line. */
+  private readonly functionExtglob = new Set<boolean>();
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
+  /** The symbol that closes the substitution being read: `)` for `$( )`, `}` for `${ ...; }`. */
+  private readonly closer: ')' | '}';
 
   constructor(
     private readonly text: SourceText,
     start: number,
-    private readonly insideSubstitution: boolean
+    private readonly insideSubstitution: boolean,
+    closesBrace = false
   ) {
-    this.stream = new ShellTokenStream(text, start);
+    this.closer = closesBrace ? '}' : ')';
+    this.stream = new ShellTokenStream(text, start, closesBrace, insideSubstitution && !closesBrace);
+    {
+      const { on, uncertain } = text.readingExtglob;
+      this.possibleExtglob.clear();
+      if (on || uncertain) this.possibleExtglob.add(true);
+      if (!on || uncertain) this.possibleExtglob.add(false);
+      this.stream.extglob = on;
+      this.stream.extglobUncertain = uncertain;
+    }
   }
 
   validateScript(): void {
     for (;;) {
       this.consumeNewlines();
-      if (this.peek().kind === 'eof') return;
+      const start = this.peek();
+      if (start.kind === 'eof') return;
+      this.lineExtglob.length = 0;
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
+      this.applyLineExtglob();
     }
+  }
+
+  /**
+   * Updates the values `extglob` may have after the line just read: a `shopt` that surely runs leaves its value and
+   * those a function call may set later, one that may not run adds its value, and a function body's value may be set
+   * at any line after it. The next lines read extended patterns when `extglob` may be on, and the run checks those
+   * read while it may also be off.
+   */
+  private applyLineExtglob(): void {
+    // What a `${ ...; }` of the line may set, which may not run, as the commands around it may not.
+    for (const on of this.text.currentShellExtglob.splice(0)) {
+      this.lineExtglob.push({ on, uncertain: true, inFunction: this.functionDepth > 0 });
+    }
+    for (const { on, uncertain, inFunction } of this.lineExtglob) {
+      if (inFunction) this.functionExtglob.add(on);
+      if (!uncertain) this.possibleExtglob.clear();
+      this.possibleExtglob.add(on);
+      for (const value of this.functionExtglob) this.possibleExtglob.add(value);
+    }
+    this.stream.extglob = this.possibleExtglob.has(true);
+    this.stream.extglobUncertain = this.possibleExtglob.size > 1;
+    this.text.readingExtglob = { on: this.stream.extglob, uncertain: this.stream.extglobUncertain };
   }
 
   validateSubstitution(): number {
@@ -652,7 +921,33 @@ class ShellGrammarValidator {
       this.consumeNewlines();
       if (this.hasOperator(this.peek(), ')')) return this.advance().end;
       this.parseList(false);
+      // As in a script, a list ends at a newline or at the `)` that closes the substitution; anything else, such as a
+      // `(` right after a command's words, is the token Bash reports.
+      const next = this.peek();
+      if (next.kind !== 'newline' && !this.hasOperator(next, ')')) this.failUnexpected(next);
     }
+  }
+
+  validateBraceSubstitution(): number {
+    // Bash accepts a body without commands, which expands to nothing, even where a `}` right after it starts no command,
+    // as in `"${ }"`.
+    const empty = /^[ \t\n]*\}/.exec(this.text.source.slice(this.stream.position));
+    if (empty) {
+      this.stream.position += empty[0].length;
+      return this.stream.position;
+    }
+    this.consumeNewlines();
+    if (this.hasKeyword(this.peek(), '}')) return this.advance().end;
+    this.parseCompoundList();
+    const end = this.peek();
+    if (!this.hasKeyword(end, '}')) this.failUnexpected(end);
+    return this.advance().end;
+  }
+
+  /** The values `extglob` may have once the commands read have run, those of the line being read included. */
+  extglobValuesAfter(): boolean[] {
+    this.applyLineExtglob();
+    return [...this.possibleExtglob];
   }
 
   private parseCompoundList(): void {
@@ -661,21 +956,25 @@ class ShellGrammarValidator {
 
   private parseList(multiline: boolean): void {
     if (multiline) this.consumeNewlines();
+    let listStart = this.lineExtglob.length;
     this.parsePipeline();
     for (;;) {
       const next = this.peek();
       if (this.hasOperator(next, '&&') || this.hasOperator(next, '||')) {
         this.advance();
         this.consumeNewlines();
-        this.parsePipeline();
+        this.conditionally(() => this.parsePipeline());
         continue;
       }
       const isSeparator =
         this.hasOperator(next, ';') || this.hasOperator(next, '&') || (multiline && next.kind === 'newline');
       if (!isSeparator) return;
+      // A list run in the background runs in a subshell.
+      if (this.hasOperator(next, '&')) this.lineExtglob.length = listStart;
       this.advance();
       if (multiline) this.consumeNewlines();
       if (!this.canBeginCommand(this.peek())) return;
+      listStart = this.lineExtglob.length;
       this.parsePipeline();
     }
   }
@@ -699,12 +998,17 @@ class ShellGrammarValidator {
       if (!emptyTimed) this.parsePipeline();
       return;
     }
+    const pipelineStart = this.lineExtglob.length;
     this.parseCommand();
+    let commandCount = 1;
     while (this.hasOperator(this.peek(), '|') || this.hasOperator(this.peek(), '|&')) {
       this.advance();
       this.consumeNewlines();
       this.parseCommand();
+      commandCount++;
     }
+    // The commands of a pipeline run in subshells, as a script has `lastpipe` off when it is read.
+    if (commandCount > 1) this.lineExtglob.length = pipelineStart;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Dispatches function definitions, coprocesses, compound constructs, and simple commands.
@@ -719,7 +1023,11 @@ class ShellGrammarValidator {
         }
         if (lead.value === 'coproc') {
           this.advance();
-          this.parseCommand();
+          const name = this.peek();
+          if (name.kind === 'word' && !this.isKeywordToken(name) && startsCompoundCommand(this.text.source, name.end)) {
+            this.advance();
+          }
+          this.inSeparateShell(() => this.parseCommand());
           return;
         }
         this.parseCompoundWithRedirections();
@@ -737,8 +1045,29 @@ class ShellGrammarValidator {
     });
   }
 
+  private inSeparateShell(parse: () => void): void {
+    this.separateShellDepth++;
+    try {
+      parse();
+    } finally {
+      this.separateShellDepth--;
+    }
+  }
+
+  private conditionally(parse: () => void): void {
+    this.conditionalDepth++;
+    try {
+      parse();
+    } finally {
+      this.conditionalDepth--;
+    }
+  }
+
   private parseCompoundWithRedirections(): void {
-    const requiresSeparator = this.parseCompoundConstruct();
+    let requiresSeparator = false;
+    this.conditionally(() => {
+      requiresSeparator = this.parseCompoundConstruct();
+    });
     this.parseTrailingRedirections();
     const next = this.peek();
     const closesEnclosing =
@@ -755,7 +1084,7 @@ class ShellGrammarValidator {
     if (this.hasOperator(this.peek(), '((') && this.tryParseArithmeticConstruct()) return true;
     const lead = this.peek();
     if (this.hasOperator(lead, '(')) {
-      this.parseDelimitedCompound(lead, ')');
+      this.inSeparateShell(() => this.parseDelimitedCompound(lead, ')'));
       return false;
     }
     if (lead.kind !== 'word' || !this.isKeywordToken(lead)) this.failUnexpected(lead);
@@ -1020,25 +1349,34 @@ class ShellGrammarValidator {
     if (!validCompound || bodyLead.value === 'function' || bodyLead.value === 'time' || bodyLead.value === 'coproc') {
       this.failUnexpected(bodyLead);
     }
-    this.parseCompoundWithRedirections();
+    // A function body runs in this shell only when the function is called, which only the run can tell.
+    this.functionDepth++;
+    try {
+      this.conditionally(() => this.parseCompoundWithRedirections());
+    } finally {
+      this.functionDepth--;
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
   private parseSimpleOrFunctionDef(): void {
     let commandName: string | undefined;
+    const words: string[] = [];
     for (let position = 0; ; position++) {
       const context: WordContext =
         commandName === undefined ? 'command' : DECLARATION_NAMES.has(commandName) ? 'declaration' : 'argument';
       const token = this.peek(context);
-      if (token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
+      if (this.consumeDescriptorVariable(token) || token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
         this.parseOneRedirection();
         continue;
       }
-      if (token.kind !== 'word') return;
-      this.advance();
-      if (commandName === undefined && !isAssignmentWord(token.value)) {
-        commandName = token.value;
+      if (token.kind !== 'word') {
+        this.recordExtglobSetting(words);
+        return;
       }
+      this.advance();
+      commandName ??= isAssignmentWord(token.value) ? undefined : token.value;
+      if (commandName !== undefined) words.push(token.value);
       if (position === 0 && commandName !== undefined && this.hasOperator(this.peek(), '(')) {
         if (DECLARATION_NAMES.has(token.value) || !isIdentifier(token.value)) {
           this.maskWordToken(token);
@@ -1052,6 +1390,14 @@ class ShellGrammarValidator {
     }
   }
 
+  /** Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines. */
+  private recordExtglobSetting(words: readonly string[]): void {
+    const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
+    if (setting !== undefined) {
+      this.lineExtglob.push({ on: setting, uncertain: this.conditionalDepth > 0, inFunction: this.functionDepth > 0 });
+    }
+  }
+
   private maskWordToken(token: ShellToken): void {
     const { source } = this.text;
     for (let i = token.start; i < token.end; i++) {
@@ -1061,9 +1407,24 @@ class ShellGrammarValidator {
   }
 
   private parseTrailingRedirections(): void {
-    while (this.peek().kind === 'ioNumber' || this.isRedirectionOperator(this.peek())) {
+    for (;;) {
+      const token = this.peek();
+      if (!this.consumeDescriptorVariable(token) && token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) {
+        return;
+      }
       this.parseOneRedirection();
     }
+  }
+
+  /**
+   * Reads `{name}` written right before a redirection operator, which names the descriptor the redirection allocates
+   * wherever a redirection may stand, recording it for the grammar, which reads it only as a word.
+   */
+  private consumeDescriptorVariable(token: ShellToken): boolean {
+    if (!isDescriptorVariableWord(token, this.text.source)) return false;
+    this.text.descriptorVariables.push({ start: token.start, end: token.end, name: token.value.slice(1, -1) });
+    this.advance();
+    return true;
   }
 
   private parseOneRedirection(): void {
@@ -1161,13 +1522,18 @@ class ShellGrammarValidator {
   private failUnexpected(token: ShellToken): never {
     if (token.kind === 'eof') this.failAtEof();
     const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : formatSyntaxToken(token.value);
-    const suffix = this.insideSubstitution && !this.hasOperator(token, ')') ? " while looking for matching `)'" : '';
+    // The symbol closing the substitution, when it comes too early, takes no suffix: `)` and an unquoted word `}`.
+    const closes =
+      this.closer === ')'
+        ? this.hasOperator(token, ')')
+        : token.kind === 'word' && token.value === '}' && !token.quoted;
+    const suffix = this.insideSubstitution && !closes ? ` while looking for matching \`${this.closer}'` : '';
     this.text.fail(token.row, `syntax error near unexpected token \`${shown}'${suffix}`);
   }
 
   private failAtEof(): never {
     const row = this.text.eofRow;
-    if (this.insideSubstitution) this.text.fail(row, "unexpected EOF while looking for matching `)'");
+    if (this.insideSubstitution) this.text.fail(row, `unexpected EOF while looking for matching \`${this.closer}'`);
     const innermost = this.activeBlocks.at(-1);
     if (innermost) {
       this.text.fail(

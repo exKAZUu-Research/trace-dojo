@@ -60,9 +60,17 @@ export class ProgramIO {
     return new TextReader(() => text, this.budget);
   }
 
-  /** A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far. */
-  partReader(source: () => string, refill: () => boolean): TextReader {
-    return new TextReader(source, this.budget, refill);
+  /** A reader of what a command wrote into a pipe, which `read -t 0` finds ready only while text remains. */
+  pipeReader(text: string, writtenLate = false): TextReader {
+    return new TextReader(() => text, this.budget, undefined, true, writtenLate);
+  }
+
+  /**
+   * A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far;
+   * `onEmptyPoll` runs when `read -t 0` finds nothing in hand to read.
+   */
+  partReader(source: () => string, refill: () => boolean, onEmptyPoll?: () => void): TextReader {
+    return new TextReader(source, this.budget, refill, true, false, onEmptyPoll);
   }
 
   output(): ProgramOutput {
@@ -124,8 +132,44 @@ export class TextReader {
   constructor(
     private readonly source: () => string,
     private readonly budget: ExecutionBudget,
-    private readonly refill?: () => boolean
+    private readonly refill?: () => boolean,
+    /** Whether the text comes through a pipe, which a poll finds ready only while text remains. */
+    readonly throughPipe = false,
+    /**
+     * Whether the first poll finds the pipe empty, as its writer has not written yet then; that poll, waiting for the
+     * writer, or reading ends it.
+     */
+    private writtenLate = false,
+    private readonly onEmptyPoll?: () => void
   ) {}
+
+  /** Whether a read found the end of the text, which shows its writer has closed the pipe. */
+  private endSeen = false;
+
+  /** Treats the writer as having written its text, as once the shell has waited for it. */
+  markWritten(): void {
+    this.writtenLate = false;
+    this.endSeen = true;
+  }
+
+  /**
+   * Whether a poll of the descriptor finds text ready to read: it answers from the text in hand and never refills,
+   * so it neither starts nor waits for the command writing the pipe.
+   */
+  get readyToPoll(): boolean {
+    // A pipe whose end a read has found is closed by its writer, which a poll finds ready, as at a file's end.
+    if (!this.throughPipe || this.endSeen) return true;
+    const notYetWritten = this.writtenLate && this.position === 0;
+    // Time passes between polls, in which the writer writes, and a writer that has already run to its end closes the
+    // pipe: a pipe with nothing left polls as not ready once, then ready.
+    this.writtenLate = false;
+    const ready = !notYetWritten && this.position < this.text.length;
+    if (!ready) {
+      this.onEmptyPoll?.();
+      if (this.refill === undefined && !notYetWritten) this.endSeen = true;
+    }
+    return ready;
+  }
 
   get text(): string {
     return this.source();
@@ -134,7 +178,10 @@ export class TextReader {
   /** Whether no text remains, after refilling the source when it can. */
   get isAtEnd(): boolean {
     while (this.position >= this.text.length) {
-      if (!this.refill?.()) return true;
+      if (!this.refill?.()) {
+        this.endSeen = true;
+        return true;
+      }
     }
     return false;
   }
@@ -169,6 +216,7 @@ export class TextReader {
     while (this.refill?.()) {
       // Each refill adds a part until none remains.
     }
+    this.endSeen = true;
     const { text } = this;
     const rest = text.slice(this.position);
     this.position = text.length;
