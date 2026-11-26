@@ -64,9 +64,9 @@ export function hasExtendedGlob(pattern: string, spend: StepMeter): boolean {
   return scanExtendedGlob(chars, spend, createBracketScanMemo(chars.length)).closed;
 }
 
-/** Escapes shell glob and bracket-expression operators so `text` matches literally. */
+/** Escapes shell glob, bracket-expression, and extended-pattern operators (`|` among them) so `text` matches literally. */
 export function quotePattern(text: string): string {
-  return text.replaceAll(/[*?[\]\\!^\-+@():=.]/g, (c) => `\\${c}`);
+  return text.replaceAll(/[*?[\]\\!^\-+@():=.|]/g, (c) => `\\${c}`);
 }
 
 /** Compiles a shell pattern into a sequence of wildcard, literal, and bracket atoms, or into `extglob` groups. */
