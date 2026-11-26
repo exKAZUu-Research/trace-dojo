@@ -55,6 +55,9 @@ export interface FunctionCompilation {
   isMethod: boolean;
 }
 
+/** How deeply analyses of calls that the compiler runs for their argument values may nest. */
+const MAX_COMPILE_TIME_ANALYSIS_DEPTH = 64;
+
 export abstract class CallCompiler extends ReflectionCompiler {
   private readonly instances = new Map<string, FunctionInstance>();
   private readonly parameterScopes = new Map<string, Scope>();
@@ -248,7 +251,11 @@ export abstract class CallCompiler extends ReflectionCompiler {
       );
     }
     // Zig analyzes a call that the compiler runs for its argument values, so a branch they do not take is not analyzed.
-    const atCompileTime = this.context.comptimeDepth > 0 || this.analyzedFunction()?.atCompileTime === true;
+    // Deeper calls share one analysis, which keeps nested analyses within the host's stack; their evaluation still
+    // counts against the branch quota.
+    const atCompileTime =
+      (this.context.comptimeDepth > 0 || this.analyzedFunction()?.atCompileTime === true) &&
+      this.compileTimeAnalyses < MAX_COMPILE_TIME_ANALYSIS_DEPTH;
     // A parameter's type may refer to earlier parameters, as `b: @TypeOf(a)` does.
     const declaredTypes: (Type | undefined)[] = [];
     const args: TExpr[] = [];
@@ -536,8 +543,18 @@ export abstract class CallCompiler extends ReflectionCompiler {
         isMethod,
       });
     // A function that a struct's field defaults refer to compiles after the struct, as Zig analyzes it separately.
-    if (this.resolvingFields > 0) this.pendingBodies.push(compile);
-    else compile();
+    const analyze = atCompileTime
+      ? (): void => {
+          this.compileTimeAnalyses++;
+          try {
+            compile();
+          } finally {
+            this.compileTimeAnalyses--;
+          }
+        }
+      : compile;
+    if (this.resolvingFields > 0) this.pendingBodies.push(analyze);
+    else analyze();
     return instance;
   }
 
@@ -548,6 +565,8 @@ export abstract class CallCompiler extends ReflectionCompiler {
   }
 
   private readonly pendingBodies: (() => void)[] = [];
+  /** How many analyses of calls that the compiler runs for their argument values are nested now. */
+  private compileTimeAnalyses = 0;
 
   /** Compiles the bodies that waited for structs' fields. */
   protected compilePendingBodies(): void {
