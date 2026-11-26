@@ -409,7 +409,9 @@ class _FutureListener<S, T> {
     if (errorCallback is dynamic Function(Object, StackTrace)) {
       result = errorCallback(asyncError.error, asyncError.stackTrace);
     } else {
-      result = (errorCallback as dynamic)(asyncError.error);
+      // The SDK's runUnary takes it as a dynamic Function(Object), which fails for a handler of a narrower type.
+      dynamic Function(Object) unary = errorCallback as dynamic;
+      result = unary(asyncError.error);
     }
     try {
       return result;
@@ -484,10 +486,7 @@ class _Future<T> implements Future<T> {
   }
   Future<T> catchError(Function onError, {bool test(Object error)?}) {
     _Future<T> result = _Future<T>();
-    if (onError is! Function(Object, StackTrace) && onError is! Function(Object)) {
-      throw ArgumentError.value(onError, "onError",
-          "Error handler must accept one Object or one Object and a StackTrace as arguments, and return a value of the returned future's type");
-    }
+    // As the SDK's, catchError checks no handler in the root zone, whose call casts it when an error reaches it.
     _addListener(_FutureListener<T, T>.catchError(result, onError, test));
     return result;
   }

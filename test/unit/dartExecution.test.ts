@@ -10784,6 +10784,21 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
   });
 });
 
+test('catchError takes a handler of any type and fails when an error reaches one that does not take Object', () => {
+  // Expected output from Dart SDK 3.13.7, whose root zone checks the handler of then but not of catchError.
+  const program = `import 'dart:async';
+Future<void> main() async {
+  try { await Future<int>.error('oops').catchError((String e) => 0); } catch (e) { print(e); }
+  print(await Future<int>.error(1).catchError((Object e, StackTrace s) => 2));
+  try { Future<int>.value(1).then((v) => v, onError: (String e) => 0); } catch (e) { print(e.runtimeType); }
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "type '(String) => int' is not a subtype of type '(Object) => dynamic'\n2\nArgumentError\nend\n",
+  });
+});
+
 test('a deferred import of a library with SDK extensions must hide them, as the SDK requires', () => {
   expect(executeProgram('dart', "import 'dart:collection' deferred as c;\nvoid main() {}")).toMatchObject({
     kind: 'compileError',
