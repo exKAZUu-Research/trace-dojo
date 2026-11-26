@@ -302,8 +302,31 @@ export abstract class CallCompiler extends OperatorCompiler {
     };
   }
 
+  /** A call of a class's static member or named constructor, `C.b(...)`. */
+  private compileClassCall(
+    target: Extract<NonNullable<ReturnType<CallCompiler['staticTarget']>>, { kind: 'class' }>,
+    expression: Extract<Expression, { kind: 'call' }>,
+    callee: Extract<Expression, { kind: 'member' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const { arguments: args, typeArguments } = expression;
+    const member = target.cls.staticMembers.get(callee.name);
+    if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
+    const name = callee.name === 'new' ? undefined : callee.name;
+    if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
+      const types =
+        target.typeArgs ??
+        (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
+      return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
+    }
+    this.checkUnavailableStaticMember(target.cls, callee.name, callee);
+    return this.error(
+      callee,
+      `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
+    );
+  }
+
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
-  // code-gauge-allow functionCognitiveComplexity -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -315,23 +338,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       // A class reached through a deferred prefix fails until its library is loaded, before the arguments run.
       const { prefix } = target.syntax;
       if (prefix) this.checkLoadedFirst(prefix, expression);
-      const compileClassCall = (): Compiled => {
-        const member = target.cls.staticMembers.get(callee.name);
-        if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
-        const name = callee.name === 'new' ? undefined : callee.name;
-        if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
-          const types =
-            target.typeArgs ??
-            (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
-          return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
-        }
-        this.checkUnavailableStaticMember(target.cls, callee.name, callee);
-        return this.error(
-          callee,
-          `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
-        );
-      };
-      return prefix ? this.loadedOnly(prefix, compileClassCall()) : compileClassCall();
+      return this.loadedOnlyIfPrefixed(prefix, () => this.compileClassCall(target, expression, callee, context));
     }
     if (target?.kind === 'prefix') {
       const { prefix } = target;
