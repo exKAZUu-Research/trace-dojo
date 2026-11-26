@@ -195,6 +195,7 @@ export class StatementChecker {
         node,
         "ECMAScript モジュールを対象にするときは、エクスポートの代入は使えません。'export default' か別のモジュール形式を使ってください。"
       );
+    this.checkDuplicateExports(node);
     const clause = named(node).find((child) => child.type === 'export_clause');
     if (!clause || node.childForFieldName('source')) return;
     for (const specifier of named(clause)) {
@@ -202,6 +203,22 @@ export class StatementChecker {
       const scope = name && this.c.scopeOf(name);
       if (name && !scope?.lookupValue(name.text) && !scope?.lookupType(name.text))
         this.c.error(name, `名前 ${name.text} が見つかりません。`);
+    }
+  }
+
+  /** Reports a default or an `export { ... }` name that another export of the module exports too, as tsc does. */
+  private checkDuplicateExports(node: TreeNode): void {
+    if (node.parent?.type !== 'program') return;
+    const others = named(node.parent).filter((child) => child.type === 'export_statement' && child.id !== node.id);
+    const exportedElsewhere = new Set(others.flatMap((other) => exportedNames(other).map(([name]) => name)));
+    for (const [name, site] of exportedNames(node)) {
+      if (!exportedElsewhere.has(name)) continue;
+      this.c.error(
+        site,
+        name === 'default'
+          ? 'モジュールに複数の既定のエクスポートを含めることはできません。'
+          : `識別子 '${name}' が重複しています。`
+      );
     }
   }
 
@@ -1103,4 +1120,16 @@ function literalTypeofName(node: TreeNode): string | undefined {
   const parts = named(node);
   if (parts.some((part) => part.type === 'template_substitution')) return undefined;
   return parts.map((part) => templateFragmentText(part)).join('');
+}
+
+/** The default and the `export { ... }` names an export statement exports, with the node naming each. */
+function exportedNames(node: TreeNode): [string, TreeNode][] {
+  if (node.childForFieldName('source')) return [];
+  const isDefault = node.children.some((child) => child?.type === 'default');
+  if (isDefault) return [['default', node.childForFieldName('value') ?? node.childForFieldName('declaration') ?? node]];
+  const clause = named(node).find((child) => child.type === 'export_clause');
+  return (clause ? named(clause) : []).flatMap((specifier): [string, TreeNode][] => {
+    const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
+    return exported ? [[exported.text, exported]] : [];
+  });
 }

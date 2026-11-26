@@ -1,0 +1,4 @@
+(2,10): error TS2300: Duplicate identifier 'total'.
+(3,10): error TS2300: Duplicate identifier 'total'.
+(4,16): error TS2528: A module cannot have multiple default exports.
+(5,1): error TS2528: A module cannot have multiple default exports.
