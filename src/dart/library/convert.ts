@@ -249,12 +249,24 @@ final class JsonDecoder extends Converter<String, Object?> {
 
 const Utf8Codec utf8 = Utf8Codec();
 
+/** The Unicode Replacement character U+FFFD, which a decoder writes for malformed input it allows. */
+const int unicodeReplacementCharacterRune = 0xFFFD;
+
+/** The Unicode Byte Order Marker character U+FEFF. */
+const int unicodeBomCharacterRune = 0xFEFF;
+
 final class Utf8Codec extends Encoding {
   final bool _allowMalformed;
   const Utf8Codec({bool allowMalformed = false}) : _allowMalformed = allowMalformed;
   String get name => "utf-8";
   _Uint8List encode(String input) => _utf8Encode(input);
-  String decode(List<int> codeUnits, {bool? allowMalformed}) => _utf8Decode(codeUnits, allowMalformed ?? _allowMalformed);
+  String decode(List<int> codeUnits, {bool? allowMalformed}) {
+    // Switch between const objects to avoid allocation.
+    Utf8Decoder decoder = allowMalformed ?? _allowMalformed
+        ? const Utf8Decoder(allowMalformed: true)
+        : const Utf8Decoder(allowMalformed: false);
+    return decoder.convert(codeUnits);
+  }
   Utf8Encoder get encoder => const Utf8Encoder();
   Utf8Decoder get decoder => _allowMalformed ? const Utf8Decoder(allowMalformed: true) : const Utf8Decoder();
 }
@@ -267,67 +279,167 @@ final class Utf8Encoder extends Converter<String, List<int>> {
 final class Utf8Decoder extends Converter<List<int>, String> {
   final bool _allowMalformed;
   const Utf8Decoder({bool allowMalformed = false}) : _allowMalformed = allowMalformed;
-  String convert(List<int> codeUnits, [int start = 0, int? end]) => _utf8Decode(codeUnits, _allowMalformed, start, end);
+  String convert(List<int> codeUnits, [int start = 0, int? end]) =>
+      _Utf8Decoder(_allowMalformed).convertSingle(codeUnits, start, end);
   Stream<String> bind(Stream<List<int>> stream) =>
-      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _Utf8ChunkSink(sink, _allowMalformed));
+      Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _Utf8ConversionSink(sink, _allowMalformed));
 }
 
-/** Decodes the chunks of a byte stream, holding a character's bytes that a chunk splits until the next chunk. */
-class _Utf8ChunkSink implements EventSink<List<int>> {
-  final EventSink<String> _sink;
-  final bool _allowMalformed;
-  List<int> _pending = <int>[];
-  _Utf8ChunkSink(this._sink, this._allowMalformed);
-  /**
-   * Whether the bytes from start to the end can begin a character, so that they wait for its rest. A second byte the
-   * lead rules out, as only A0 to BF follow E0, is an error the SDK's decoder reports as soon as it reads it, so such
-   * bytes are decoded at once.
-   */
-  static bool _beginsCharacter(List<int> bytes, int start) {
-    if (start + 1 >= bytes.length) return true;
-    final lead = bytes[start];
-    final second = bytes[start + 1];
-    final low = lead == 0xE0 ? 0xA0 : lead == 0xF0 ? 0x90 : 0x80;
-    final high = lead == 0xED ? 0x9F : lead == 0xF4 ? 0x8F : 0xBF;
-    return second >= low && second <= high;
-  }
-  void add(List<int> chunk) {
-    var bytes = [..._pending, ...chunk];
-    var end = bytes.length;
-    var start = end - 1;
-    while (start >= 0 && start > end - 4 && (bytes[start] & 0xC0) == 0x80) start--;
-    if (start >= 0) {
-      var lead = bytes[start];
-      // Only a byte that can begin a character, C2 to F4, waits for the rest of it.
-      var length = lead < 0xC2 || lead > 0xF4 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
-      if (start + length > end && _beginsCharacter(bytes, start)) end = start;
-    }
-    final carried = _pending.length;
-    _pending = bytes.sublist(end);
-    if (end == 0) return;
-    try {
-      _sink.add(_utf8Decode(bytes, _allowMalformed, 0, end));
-    } on FormatException catch (error) {
-      // The SDK's decoder keeps a split character's state, so it reports a position in the chunk it was given.
-      final offset = error.offset;
-      throw FormatException(error.message, error.source, offset == null || offset < carried ? offset : offset - carried);
-    }
-  }
-  void addError(Object error, [StackTrace? stackTrace]) {
-    _sink.addError(error, stackTrace);
-  }
+// From the SDK's lib/convert/string_conversion.dart (3.13.7), class _Utf8ConversionSink. Modifications: it is the
+// event sink a decoder's stream transformation adds to, so it implements EventSink<List<int>> instead of extending
+// ByteConversionSink and adds what it decodes to an EventSink<String> instead of a StringConversionSink's addSlice.
+class _Utf8ConversionSink implements EventSink<List<int>> {
+  final _Utf8Decoder _decoder;
+  final EventSink<String> _chunkedSink;
+  final StringBuffer _buffer;
+  _Utf8ConversionSink(EventSink<String> sink, bool allowMalformed)
+    : this._(sink, StringBuffer(), allowMalformed);
+
+  _Utf8ConversionSink._(
+    this._chunkedSink,
+    StringBuffer stringBuffer,
+    bool allowMalformed,
+  ) : _decoder = _Utf8Decoder(allowMalformed),
+      _buffer = stringBuffer;
+
   void close() {
-    if (_pending.isNotEmpty) {
-      // What is held is always the start of a character, which the SDK's decoder reports with no position at the end.
-      if (!_allowMalformed) throw FormatException("Unfinished UTF-8 octet sequence");
-      _sink.add(_utf8Decode(_pending, true));
+    _decoder.flush(_buffer);
+    if (_buffer.isNotEmpty) {
+      var accumulated = _buffer.toString();
+      _buffer.clear();
+      _chunkedSink.add(accumulated);
     }
-    _sink.close();
+    _chunkedSink.close();
+  }
+
+  void add(List<int> chunk) {
+    addSlice(chunk, 0, chunk.length, false);
+  }
+
+  void addSlice(List<int> chunk, int startIndex, int endIndex, bool isLast) {
+    _buffer.write(_decoder.convertChunked(chunk, startIndex, endIndex));
+    if (_buffer.isNotEmpty) {
+      var accumulated = _buffer.toString();
+      _chunkedSink.add(accumulated);
+      _buffer.clear();
+      return;
+    }
+    if (isLast) close();
+  }
+
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _chunkedSink.addError(error, stackTrace);
+  }
+}
+
+// From the SDK's lib/convert/utf.dart (3.13.7), class _Utf8Decoder, with the VM's patch of it
+// (lib/_internal/vm/lib/convert_patch.dart). Modifications: convertSingle and convertChunked run natively
+// (nativeConvert.ts), which also hold the state machine's tables, so typeTable, transitionTable, the state
+// characters, decodeGeneral, _makeUint8List and the patch's scanning are left out; the patch's constructor is used.
+class _Utf8Decoder {
+  /// Decode malformed UTF-8 as replacement characters (instead of throwing)?
+  final bool allowMalformed;
+
+  /// Decoder DFA state.
+  int _state;
+
+  /// Partially decoded character. Meaning depends on state. Not used when in
+  /// the initial/accept state. When in an error state, contains the index into
+  /// the input of the error.
+  int _charOrIndex = 0;
+
+  /// How many bytes of the BOM have been read so far. Set to -1 when the BOM
+  /// has been skipped (or was not present).
+  int _bomIndex = 0;
+
+  // States (offsets into transition table).
+  static const int IA = 0x00; // Initial / Accept
+  static const int BB = 0x10; // Before BOM
+  static const int AB = 0x20; // After BOM
+  static const int X1 = 0x30; // Expecting one extension byte
+  static const int X2 = 0x3A; // Expecting two extension bytes
+  static const int X3 = 0x44; // Expecting three extension bytes
+  static const int TO = 0x4E; // Possibly overlong 3-byte
+  static const int TS = 0x58; // Possibly surrogate
+  static const int QO = 0x62; // Possibly overlong 4-byte
+  static const int QR = 0x6C; // Possibly out-of-range 4-byte
+  static const int B1 = 0x76; // One byte into BOM
+  static const int B2 = 0x80; // Two bytes into BOM
+  static const int E1 = 0x41; // Error: Missing extension byte
+  static const int E2 = 0x43; // Error: Unexpected extension byte
+  static const int E3 = 0x45; // Error: Invalid byte
+  static const int E4 = 0x47; // Error: Overlong encoding
+  static const int E5 = 0x49; // Error: Out of range
+  static const int E6 = 0x4B; // Error: Surrogate
+  static const int E7 = 0x4D; // Error: Unfinished
+
+  // Aliases for states.
+  static const int initial = IA;
+  static const int accept = IA;
+  static const int beforeBom = BB;
+  static const int afterBom = AB;
+  static const int errorMissingExtension = E1;
+  static const int errorUnexpectedExtension = E2;
+  static const int errorInvalid = E3;
+  static const int errorOverlong = E4;
+  static const int errorOutOfRange = E5;
+  static const int errorSurrogate = E6;
+  static const int errorUnfinished = E7;
+
+  static bool isErrorState(int state) => (state & 1) != 0;
+
+  static String errorDescription(int state) {
+    switch (state) {
+      case errorMissingExtension:
+        return "Missing extension byte";
+      case errorUnexpectedExtension:
+        return "Unexpected extension byte";
+      case errorInvalid:
+        return "Invalid UTF-8 byte";
+      case errorOverlong:
+        return "Overlong encoding";
+      case errorOutOfRange:
+        return "Out of unicode range";
+      case errorSurrogate:
+        return "Encoded surrogate";
+      case errorUnfinished:
+        return "Unfinished UTF-8 octet sequence";
+      default:
+        return "";
+    }
+  }
+
+  // The VM decoder handles BOM explicitly instead of via the state machine.
+  _Utf8Decoder(this.allowMalformed) : _state = initial;
+
+  external String convertSingle(List<int> codeUnits, int start, int? maybeEnd);
+
+  external String convertChunked(List<int> codeUnits, int start, int? maybeEnd);
+
+  /// Whether the decoder expects the continuation of unfinished multi-byte
+  /// UTF8-encoding.
+  bool get expectsContinuation => _state > afterBom;
+
+  /// Flushes this decoder as if closed.
+  ///
+  /// This method throws if the input was partial and the decoder was
+  /// constructed with allowMalformed set to false.
+  void flush(StringSink sink) {
+    final int state = _state;
+    _state = initial;
+    if (state <= afterBom) {
+      return;
+    }
+    // Unfinished sequence.
+    if (allowMalformed) {
+      sink.writeCharCode(unicodeReplacementCharacterRune);
+    } else {
+      throw FormatException(errorDescription(errorUnfinished), null, null);
+    }
   }
 }
 
 external _Uint8List _utf8Encode(String input, [int start = 0, int? end]);
-external String _utf8Decode(List<int> codeUnits, bool allowMalformed, [int start = 0, int? end]);
 
 const Base64Codec base64 = Base64Codec();
 const Base64Codec base64Url = Base64Codec.urlSafe();
