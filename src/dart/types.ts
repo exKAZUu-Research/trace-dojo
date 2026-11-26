@@ -673,8 +673,7 @@ function mutualSubtypes(a: DartType, b: DartType): boolean {
 
 /** The least upper bound of two types (Dart's UP), used for conditional expressions and collection literals. */
 export function upperBound(a: DartType, b: DartType): DartType {
-  // The bound is in normal form, as the SDK's: FutureOr<Object> is Object, and FutureOr<int?>? is FutureOr<int?>.
-  const bound = norm(specialUpperBound(a, b) ?? structuralUpperBound(a, b));
+  const bound = specialUpperBound(a, b) ?? structuralUpperBound(a, b);
   // Object bounds only what it is a supertype of, which excludes extension types that implement no Object.
   return isObject(bound) && !(isSubtype(a, bound) && isSubtype(b, bound)) ? objectType(true) : bound;
 }
@@ -696,7 +695,9 @@ function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   const right = withoutOuterQuestionMark(b);
   // A type nullable only through FutureOr's argument, as FutureOr<int?>, has no `?` to take off.
   if (left || right) return makeNullable(upperBound(left ?? a, right ?? b));
-  if (isObject(a) || isObject(b)) return objectType();
+  // An Object-like type bounds as it is written, as FutureOr<Object> stays, which the SDK's diagnostics name.
+  if (isObject(a)) return a;
+  if (isObject(b)) return b;
   if (a.kind === 'typeParam' || b.kind === 'typeParam') return typeParamUpperBound(a, b);
   if (futureOrValue(a) || futureOrValue(b)) return futureOrUpperBound(a, b);
   return undefined;

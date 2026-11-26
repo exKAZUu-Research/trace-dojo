@@ -6951,6 +6951,18 @@ Future<void> main() async {
     stdout:
       'List<FutureOr<int?>>\nList<Object>\nList<Object?>\nList<FutureOr<num>>\nList<Object?>\nList<int?>\nnull\n2\n',
   });
+  // The static type keeps the bound as written, which a diagnostic names as the SDK's does.
+  for (const [left, right, bound] of [
+    ['FutureOr<String>', 'int', 'FutureOr<Object>'],
+    ['FutureOr<Object>', 'int?', 'FutureOr<Object>?'],
+    ['FutureOr<int?>', 'int?', 'FutureOr<int?>?'],
+  ]) {
+    const source = `import 'dart:async';\nvoid f(${left} a, ${right} b) { bool s = true ? a : b; }\nvoid main() {}`;
+    expect(executeProgram('dart', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: `'${bound}' 型の値は、'bool' 型の変数 s に代入できません。` }],
+    });
+  }
   const literal = 'import "dart:async"; void main() { Future<int>? Function() f = () async {}; print(f); }';
   expect(executeProgram('dart', literal)).toMatchObject({ kind: 'compileError' });
 });
