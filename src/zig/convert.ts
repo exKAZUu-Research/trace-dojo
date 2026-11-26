@@ -135,9 +135,11 @@ function containerBody(children: readonly Node[], containerKind?: Container['con
 
 function testDeclaration(node: Node): TestDeclaration {
   const nameNode = node.namedChildren.find((child) => child.type === 'identifier');
+  const titleNode = node.namedChildren.find((child) => child.type === 'string');
   return {
     ...spanOf(node),
     decl: nameNode ? { ...spanOf(nameNode), name: literals.decodeIdentifier(nameNode) } : undefined,
+    title: titleNode ? literals.decodeString(titleNode).join(',') : undefined,
     body: block(node.namedChildren.find((child) => child.type === 'block') as Node),
   };
 }

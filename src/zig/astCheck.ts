@@ -199,7 +199,14 @@ class AstChecker {
       }
       for (const block of body.comptimeBlocks)
         this.checkBody(() => this.withComptime(block, () => this.expression(block, 'value')));
+      // Zig reports a repeated name at the test that first has it.
+      const titles = new Map<string, TestDeclaration>();
       for (const test of body.tests) {
+        if (test.title !== undefined) {
+          const first = titles.get(test.title);
+          if (first) this.error(first, 'テストの名前が、ほかのテストと同じです。');
+          else titles.set(test.title, test);
+        }
         if (test.decl && !names.has(test.decl.name)) this.reference(test.decl.name, test.decl, 'value');
         this.checkBody(() => this.blockStatements(test.body.statements), true);
       }

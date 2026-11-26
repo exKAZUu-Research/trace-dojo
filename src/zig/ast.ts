@@ -127,6 +127,8 @@ export type ContainerMember = FunctionDeclaration | VariableDeclaration;
 export interface TestDeclaration extends Span {
   /** The declaration that `test name {}` documents. */
   decl?: { name: string } & Span;
+  /** The name that `test "name" {}` gives, as its bytes joined into a key. */
+  title?: string;
   body: Block;
 }
 
