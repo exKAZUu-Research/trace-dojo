@@ -256,7 +256,15 @@ export abstract class StatementCompiler extends PatternCompiler {
     const compiled = this.compileExpression(expression, context);
     const kind = compiled.type.kind;
     const voidType = isAsync ? valueType : (valueType ?? this.fn.contextReturn);
-    if (voidType?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
+    // An async function's returned future gives the value its own future completes with, as `return g();` does.
+    const valueKind = isAsync ? flatten(compiled.type).kind : kind;
+    if (
+      voidType?.kind === 'void' &&
+      !isArrow &&
+      valueKind !== 'void' &&
+      valueKind !== 'dynamic' &&
+      valueKind !== 'null'
+    ) {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
     }
     if (isAsync) {

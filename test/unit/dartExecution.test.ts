@@ -9295,6 +9295,18 @@ Future<void> main() async {
   });
 });
 
+test('an async function returning Future<void> may return a future of void, and not another value', () => {
+  const accepted = `Future<void> g() async {}
+Future<void> f() async { return g(); }
+Future<void> h() async { return Future.value(1); }
+Future<void> main() async { await f(); await h(); print('x'); }`;
+  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: 'x\n' });
+  expect(executeProgram('dart', 'Future<void> f() async { return 1; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: '戻り値の型が void の関数は、値を返せません。' }],
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

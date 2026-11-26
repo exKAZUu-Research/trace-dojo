@@ -43,9 +43,9 @@ export function childContext(construct: ContextConstruct, context: DartType | un
       return normal && normal.kind !== 'dynamic' ? interfaceType(coreTypes.futureOr, [normal]) : undefined;
     }
     case 'asyncReturn': {
-      // FutureOr of the value type, Object? and dynamic included (`Future<Object?> f() async => wrap(x)` infers
-      // wrap's T as Object?); a void value type gives none.
-      return normal && normal.kind !== 'void' ? interfaceType(coreTypes.futureOr, [normal]) : undefined;
+      // FutureOr of the value type, the top types included (`Future<Object?> f() async => wrap(x)` infers wrap's T
+      // as Object?, and `Future<void> f() async { return Future.value(1); }` Future.value's as void).
+      return normal ? interfaceType(coreTypes.futureOr, [normal]) : undefined;
     }
     case 'numericOperand': {
       return numericOperandContext(construct, normal);
