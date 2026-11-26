@@ -157,8 +157,7 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
   const restBinding = rest === undefined ? undefined : pattern.elems[rest];
   const restLocal = restBinding && c.annotations.bindings.get(restBinding);
   const restType = restLocal && normalize(shallow(restLocal.type));
-  const restByRef = restType?.kind === 'ref';
-  const restByMut = restType?.kind === 'ref' && restType.mutable;
+  const restMode = restType?.kind !== 'ref' ? 'value' : restType.mutable ? 'mut' : 'ref';
   // An element after the `..` counts from the end.
   const offsetOf = (index: number, after: number): number =>
     rest !== undefined && index > rest ? index - 1 + after : index;
@@ -175,21 +174,20 @@ function sliceMatcher(c: Compiler, pattern: PatternOf<'slice'>): PatternProbe {
     }
     if (restLocal) {
       const from = start + (rest as number);
-      bindings.push(() => {
-        const elems = sliceRest(target, base, from, from + after, restByRef);
-        // A `&mut [T]` is the place of its slice, as `&mut v[a..b]` makes one.
-        frame.locals[restLocal.slot] = restByMut ? new CellPlace(elems) : elems;
-      });
+      bindings.push(() => (frame.locals[restLocal.slot] = sliceRest(target, base, from, from + after, restMode)));
     }
     return true;
   };
 }
 
-/** What `rest @ ..` binds: a view of the elements, or for a pattern on an array, an array of them. */
-function sliceRest(target: Value, base: Value[], from: number, to: number, byRef: boolean): Value {
-  return byRef
-    ? new SliceView(base, from, to, target instanceof SliceView ? target.owner : undefined)
-    : base.slice(from, to);
+/**
+ * What `rest @ ..` binds: a view of the elements, the place of that view for a `&mut [T]` (as `&mut v[a..b]` makes),
+ * or for a pattern on an array by value, an array of them.
+ */
+function sliceRest(target: Value, base: Value[], from: number, to: number, mode: 'value' | 'ref' | 'mut'): Value {
+  if (mode === 'value') return base.slice(from, to);
+  const view = new SliceView(base, from, to, target instanceof SliceView ? target.owner : undefined);
+  return mode === 'mut' ? new CellPlace(view) : view;
 }
 
 function orMatcher(c: Compiler, pattern: PatternOf<'or'>): PatternProbe {
