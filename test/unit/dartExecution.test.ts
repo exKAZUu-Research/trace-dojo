@@ -10691,6 +10691,29 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
   });
 });
 
+test('a deferred import of a library with SDK extensions must hide them, as the SDK requires', () => {
+  expect(executeProgram('dart', "import 'dart:collection' deferred as c;\nvoid main() {}")).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 0,
+        message:
+          'deferred の import では拡張（IterableExtensions、NullableIterableExtensions）を読み込めません。hide IterableExtensions, NullableIterableExtensions を書いてください。',
+      },
+    ],
+  });
+  for (const directive of [
+    "import 'dart:collection' deferred as c hide IterableExtensions, NullableIterableExtensions;",
+    "import 'dart:async' deferred as a show Future;",
+    "import 'dart:convert' deferred as cv;",
+  ]) {
+    expect(executeProgram('dart', `${directive}\nvoid main() { print(1); }`)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+    });
+  }
+});
+
 test('a deferred Dart import reaches its library only after loadLibrary', () => {
   const program = `import 'dart:math' deferred as m;
 Future<void> main() async {

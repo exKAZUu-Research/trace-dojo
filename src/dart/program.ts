@@ -256,7 +256,17 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
   }
   for (const directive of syntax.imports) {
     env.addImport(libraryAt(envs, directive), directive.prefix, directive.show, directive.hide);
-    if (directive.isDeferred && directive.prefix) env.deferredPrefixes.add(directive.prefix);
+    if (!directive.isDeferred || !directive.prefix) continue;
+    env.deferredPrefixes.add(directive.prefix);
+    const extensions = env.sdkExtensionsOfLastImport();
+    if (extensions.length > 0) {
+      throw new CompileError([
+        {
+          row: directive.row,
+          message: `deferred の import では拡張（${extensions.join('、')}）を読み込めません。hide ${extensions.join(', ')} を書いてください。`,
+        },
+      ]);
+    }
   }
   // A program is the only library of its run, so what it exports reaches no other library.
   for (const directive of syntax.exports) libraryAt(envs, directive);
