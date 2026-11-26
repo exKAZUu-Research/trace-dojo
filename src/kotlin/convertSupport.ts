@@ -9,12 +9,41 @@ export function unavailableMessage(what: string): string {
 
 export function unavailableJavaFeature(path: string): string | undefined {
   const within = (prefix: string): boolean => path === prefix || path.startsWith(prefix + '.');
-  if (within('java.util.Scanner') || path === 'java.lang.System.in') return '標準入力';
-  if (within('java.io') || within('java.nio')) return 'ファイルの読み書き';
+  if (path === 'java.lang.System.in') return 'Java の System.in（readln() を使ってください）';
+  if (within('java.util.Scanner')) return 'Java の Scanner（readln() を使ってください）';
+  if (within('java.nio')) return 'java.nio のファイルの読み書き（java.io.File を使ってください）';
   if (within('java.net')) return 'ネットワーク';
   if (within('java.util.concurrent')) return 'コルーチン・スレッド';
   if (within('java.lang.reflect')) return 'リフレクション';
   return undefined;
+}
+
+/** What an import of a package this environment does not run names, for its message. */
+export function describeUnavailableImport(path: string): string {
+  if (path.startsWith('kotlin.io.path')) return 'kotlin.io.path のファイルの読み書き（java.io.File を使ってください）';
+  if (path.startsWith('io.ktor')) return 'ネットワーク';
+  if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
+  if (path.startsWith('kotlin.reflect')) return 'リフレクション';
+  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
+  return `標準ライブラリ以外のライブラリ（${path}）`;
+}
+
+/**
+ * The packages of the functions that start coroutines and threads, which learners write without their imports from
+ * examples: an unresolved call of one is reported as unavailable, as its import is, instead of as a missing name.
+ */
+const UNAVAILABLE_FUNCTION_PACKAGES: Readonly<Record<string, string>> = {
+  runBlocking: 'kotlinx.coroutines',
+  launch: 'kotlinx.coroutines',
+  async: 'kotlinx.coroutines',
+  delay: 'kotlinx.coroutines',
+  thread: 'kotlin.concurrent',
+};
+
+/** What an unresolved simple name is when it names a function of a package this environment does not run. */
+export function unavailableFunction(name: string): string | undefined {
+  const owner = Object.hasOwn(UNAVAILABLE_FUNCTION_PACKAGES, name) ? UNAVAILABLE_FUNCTION_PACKAGES[name] : undefined;
+  return owner && `${describeUnavailableImport(`${owner}.${name}`)}（${name}）`;
 }
 
 export function syntaxError(node: Node, message: string): CompileError {

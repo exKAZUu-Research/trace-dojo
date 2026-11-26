@@ -11,6 +11,7 @@ import {
   excludingCases,
   Flow,
   type FunctionContext,
+  Handoff,
   isBareCallExpression,
   nonNullFacts,
   reprOf,
@@ -32,12 +33,13 @@ import {
   unaryResult,
   widen,
 } from './operators';
+import { framedInstanceTest, mentionsReified, runtimeType } from './reified';
 import { type Frame } from './runtime';
 import { type ClassSymbol, type TypeParameterSymbol } from './symbols';
-import { instanceTest, throwCastFailure } from './typeChecks';
+import { throwCastFailure } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { isNullable, type KType, nonNull, nullable, resolved, substitute, typeToString } from './types';
-import { box, Boxed, type PrimitiveKind, type Value } from './values';
+import { box, Boxed, NULL, type PrimitiveKind, type Value } from './values';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -77,9 +79,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.toLongConstant(this.compilePrefix(scope, context, expression, undefined));
     }
     const operand = this.compileExpression(scope, context, expression.operand);
+    // `!` on a value that is not a Boolean calls its `operator fun not()`, as `-` calls `unaryMinus`.
+    if (operator === '!' && !isSubtype(operand.type, this.booleanType))
+      return this.compileOperatorCall(scope, context, operand, 'not', [], row, operator);
     if (operator === '!') {
-      if (!isSubtype(operand.type, this.booleanType))
-        this.error(row, typeMismatchMessage(this.booleanType, operand.type));
       const evaluate = checkedBoolean(operand, operand.eval);
       return {
         type: this.booleanType,
@@ -153,24 +156,78 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     isPrefix: boolean,
     row: number
   ): Compiled {
-    if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
+    // `a?.n++` does nothing and gives null when `a` is null.
+    const skipped = place.canSkip ? this.flow.copy() : undefined;
     const readType = place.readType ?? place.type;
     const kind = this.primitiveOf(readType);
-    if (!kind) this.error(row, `${typeToString(resolved(readType))} には ${delta === 1 ? '++' : '--'} を使えません。`);
+    const compiled = kind
+      ? this.compilePrimitiveIncrement(place, kind, delta, isPrefix)
+      : this.compileIncrementOperator(scope, context, place, readType, delta, isPrefix, row);
+    const { update } = compiled;
+    if (!skipped)
+      return {
+        type: compiled.type,
+        repr: compiled.repr,
+        eval: (frame) => place.withBound(frame, (bound) => update(frame, bound)),
+      };
+    this.flow = Flow.merge([skipped, this.flow]);
+    const repr = compiled.repr;
+    return {
+      type: nullable(compiled.type),
+      repr: 'ref',
+      eval: (frame) =>
+        place.withBound(frame, (bound) => {
+          if (bound.isSkipped) return NULL;
+          const value = update(frame, bound);
+          return repr === 'ref' ? value : box(repr, value as number | bigint);
+        }),
+    };
+  }
+
+  private compilePrimitiveIncrement(place: Place, kind: PrimitiveKind, delta: 1 | -1, isPrefix: boolean): Increment {
     const type = this.primitiveType(kind);
     place.recordAssignment?.(type);
     const toPlace = (value: number | bigint): Value => (place.repr === 'ref' ? box(kind, value) : value);
     return {
       type,
       repr: kind,
-      eval: (frame) =>
-        place.withBound(frame, (bound) => {
-          const old = unboxNumber(bound.get());
-          const next = step(kind, old, delta);
-          bound.set(toPlace(next));
-          return isPrefix ? next : old;
-        }),
+      update: (_frame, bound) => {
+        const old = unboxNumber(bound.get());
+        const next = step(kind, old, delta);
+        bound.set(toPlace(next));
+        return isPrefix ? next : old;
+      },
+    };
+  }
+
+  /** `++` and `--` of a value that is not a number, which call its `operator fun inc()` and `dec()`. */
+  // code-gauge-allow functionParameterCount -- the place, its type, and the parts of the operator are each needed.
+  private compileIncrementOperator(
+    scope: Scope,
+    context: FunctionContext,
+    place: Place,
+    readType: KType,
+    delta: 1 | -1,
+    isPrefix: boolean,
+    row: number
+  ): Increment {
+    const shown = delta === 1 ? '++' : '--';
+    const current = new Handoff<Value>();
+    const receiver: Compiled = { type: readType, repr: place.repr, eval: () => current.get() };
+    const call = this.compileOperatorCall(scope, context, receiver, delta === 1 ? 'inc' : 'dec', [], row, shown);
+    if (!isSubtype(call.type, readType)) this.error(row, typeMismatchMessage(readType, call.type));
+    place.recordAssignment?.(call.type);
+    const next = convertRepr(call.eval, call.repr, place.repr);
+    return {
+      type: isPrefix ? call.type : readType,
+      repr: place.repr,
+      update: (frame, bound) => {
+        const old = bound.get();
+        const value = current.run(frame, old, () => next(frame));
+        bound.set(value);
+        return isPrefix ? value : old;
+      },
     };
   }
 
@@ -639,7 +696,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       return this.toLongConstant(this.compileInfix(scope, context, expression, undefined));
     const { name, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
-    const levels = this.syntaxCandidateLevels(left, name, row, name, 'isInfix');
+    const levels = this.syntaxCandidateLevels(scope, left, name, row, name, 'isInfix');
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
     const call = this.resolveCall(scope, context, levels, args, false, [], expected, left, row, name);
     return { ...this.finishCall(call, left, row), isCall: false };
@@ -760,14 +817,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   ): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
     const type = this.checkableType(scope, expression.type, expression.row, operand.type);
-    const test = instanceTest(this.core, type);
+    const test = framedInstanceTest(this.core, type);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const narrowing = this.typeTestNarrowing(operand, type);
     const exclusion = isExclusion(operand, type);
     return {
       type: this.booleanType,
       repr: 'ref',
-      eval: expression.negated ? (frame) => !test(evaluate(frame)) : (frame) => test(evaluate(frame)),
+      eval: expression.negated ? (frame) => !test(frame, evaluate(frame)) : (frame) => test(frame, evaluate(frame)),
       narrowing: expression.negated
         ? { whenTrue: exclusion, whenFalse: narrowing }
         : { whenTrue: narrowing, whenFalse: exclusion },
@@ -802,7 +859,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
             args: actual.args.map(() => ({ variance: 'star' as const })),
           }
         : type;
-    const test = actual.kind === 'param' ? () => true : instanceTest(this.core, checkType);
+    const test: (frame: Frame, value: Value) => boolean =
+      actual.kind === 'param' && !mentionsReified(actual) ? () => true : framedInstanceTest(this.core, checkType);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const resultType = expression.isSafe ? nullable(type) : type;
     const repr = reprOf(this.core, resultType);
@@ -812,11 +870,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const cast: Eval = expression.isSafe
       ? (frame) => {
           const value = evaluate(frame);
-          return test(value) ? value : undefined;
+          return test(frame, value) ? value : undefined;
         }
       : (frame) => {
           const value = evaluate(frame);
-          if (!test(value)) throwCastFailure(frame, value, type);
+          if (!test(frame, value))
+            throwCastFailure(frame, value, mentionsReified(type) ? runtimeType(type, frame) : type);
           return value;
         };
     if (!expression.isSafe) return { type: resultType, repr, eval: convertRepr(cast, 'ref', repr) };
@@ -1023,4 +1082,11 @@ function isSameCachedBox(a: Value, b: Value): boolean {
 }
 function unboxNumber(value: Value): number | bigint {
   return value instanceof Boxed ? value.value : (value as number | bigint);
+}
+
+/** `++` or `--` of a place that the caller has bound, giving the value the expression has. */
+interface Increment {
+  type: KType;
+  repr: Compiled['repr'];
+  update: (frame: Frame, bound: Parameters<Parameters<Place['withBound']>[1]>[0]) => Value;
 }

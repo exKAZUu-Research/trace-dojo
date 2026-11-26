@@ -3,7 +3,8 @@ import { type Frame, KotlinThrow, ReturnSignal, UNASSIGNED } from './runtime';
 import { type KObject, UNIT, type Value } from './values';
 
 interface CatchClause {
-  test: (value: KObject) => boolean;
+  /** Whether the clause catches a thrown value, which for a reified type parameter reads the type the run passed it. */
+  test: (frame: Frame, value: KObject) => boolean;
   write: (frame: Frame, value: KObject) => void;
   slot: number;
   value: Eval;
@@ -40,7 +41,7 @@ function evaluateTryBody(frame: Frame, body: Eval, catches: CatchClause[]): Valu
   } catch (error) {
     const thrown = throwableOf(frame, error);
     if (!thrown) throw error;
-    const clause = catches.find((candidate) => candidate.test(thrown));
+    const clause = catches.find((candidate) => candidate.test(frame, thrown));
     if (!clause) throw error instanceof KotlinThrow ? error : new KotlinThrow(thrown);
     clause.write(frame, thrown);
     try {

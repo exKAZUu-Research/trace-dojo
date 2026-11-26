@@ -1,4 +1,6 @@
 import type { Eval, Repr } from './compilerBase';
+import { callFunction } from './dispatch';
+import { libraryClass } from './natives/registry';
 import type { Frame, FunctionInfo } from './runtime';
 import type { ClassSymbol } from './symbols';
 import { Boxed, KObject, type Value } from './values';
@@ -44,8 +46,15 @@ export function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[]): V
   if ((fn as KObject | undefined) === undefined)
     return frame.runtime.throwError(frame, 'java.lang.NullPointerException');
   const { function: callable } = fn;
-  if (!callable) throw new Error('A function value without its function');
+  if (!callable) return invokeFunctionObject(frame, fn, args);
   return callable.call(frame, args);
+}
+
+/** Calls an instance of a class that implements a function type, as `class Twice : (Int) -> Int` does, by its `invoke`. */
+function invokeFunctionObject(frame: Frame, fn: KObject, args: Value[]): Value {
+  const invoke = libraryClass(`kotlin.jvm.functions.Function${args.length}`).members.get('invoke')?.[0];
+  if (invoke?.kind !== 'function') throw new Error('A function value without its function');
+  return callFunction(invoke, frame, fn, args, undefined);
 }
 
 /** Function values receive their arguments boxed, while a parameter of a primitive type holds the bare value. */

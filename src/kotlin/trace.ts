@@ -9,6 +9,7 @@ import type { CompiledProgram } from './compiler';
 import { runProgram } from './execute';
 import { charToString } from './format';
 import { compileKotlin, getLibrary, libraryExceptions } from './library';
+import { traceShapeOf } from './natives/registry';
 import { parseKotlin } from './parse';
 import { UNSIGNED_ARRAYS } from './prelude/arrays';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
@@ -300,7 +301,10 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
 /** Lists, arrays, and sets show as arrays of their elements, and maps as objects keyed by their keys. */
 function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | undefined {
   const kind = isArray(object) ? arrayElementKind(object) : undefined;
+  // A library class whose fields are how it is implemented declares what it shows as.
+  const shape = traceShapeOf(object);
   const items =
+    (shape?.kind === 'array' ? shape.items : undefined) ??
     indexedItems(object) ??
     (object.store && object.native?.isSet ? object.store.ordered().map((entry) => entry.key) : undefined);
   if (items && !object.cls.name.endsWith('Iterator')) {
@@ -311,11 +315,11 @@ function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | un
     }
     return { kind: 'array', entries };
   }
-  if (!object.store) return undefined;
+  const mapEntries = shape?.kind === 'map' ? shape.entries : object.store?.ordered();
+  if (!mapEntries) return undefined;
   // Keys are the learner's strings, so they must not reach Object.prototype's setters, as `__proto__` would.
   const entries = Object.create(null) as Record<string, DisplayNode>;
-  for (const entry of object.store.ordered())
-    entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
+  for (const entry of mapEntries) entries[keyText(entry.key, seen)] = displayNodeOf(entry.value, seen) ?? NULL_NODE;
   return { kind: 'object', entries };
 }
 

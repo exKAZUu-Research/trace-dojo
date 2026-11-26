@@ -1,10 +1,13 @@
 // code-gauge-allow-file fileNcss -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
-import { VISIBILITY_KEYWORDS } from './ast';
+import { annotationSite } from './annotationSites';
+import { visibilityOfKeywords } from './ast';
 import type {
   ClassDecl,
   ClassParameterDecl,
   Declaration,
+  EnumEntryDecl,
+  Expression,
   FunctionDecl,
   Import,
   KotlinFile,
@@ -12,12 +15,14 @@ import type {
   Modifiers,
   ParameterDecl,
   PropertyDecl,
+  SecondaryConstructorDecl,
   SuperSpec,
+  TypeAliasDecl,
   TypeParameterDecl,
 } from './ast';
 import { type Compiled, convertRepr, FunctionContext, type PackageScope, type Repr, Scope } from './compilerBase';
 import type { FileContext, MemberRef } from './compilerCore';
-import { unavailableMessage } from './convertSupport';
+import { describeUnavailableImport, unavailableMessage } from './convertSupport';
 import { type DataArrayField, dataArrayField, dataFieldString } from './dataFields';
 import { callFunction, getPropertyValue, isVirtual, propertyRepr, setPropertyValue } from './dispatch';
 import { hashOf, stringHash, valueEquals } from './format';
@@ -32,6 +37,7 @@ import {
 import { jvmSignatures, overriddenMembers } from './jvmSignatures';
 import { isKnownLibraryAnnotation, isKnownLibraryPackage } from './libraryApi';
 import { arrayContentHash } from './natives/arrays';
+import { suspendNatives } from './natives/registry';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
 import { toInt32 } from './operators';
@@ -44,11 +50,23 @@ import {
   type MemberSymbol,
   type ParameterSymbol,
   PropertySymbol,
+  TypeAliasSymbol,
   TypeParameterSymbol,
   type Visibility,
 } from './symbols';
-import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
-import { type ClassType, type KType, NOTHING, resolved, substitute, type Substitution, typeToString } from './types';
+import { anyType, functionInterfaceOf, isSameType, isSubtype, substitutionOf } from './typeRelations';
+import {
+  type ClassType,
+  type FunctionType,
+  isNullable,
+  type KType,
+  NOTHING,
+  resolved,
+  substitute,
+  type Substitution,
+  typeToString,
+} from './types';
+import { uninitializedCheck } from './uninitialized';
 import { KObject, type Value } from './values';
 
 export interface ClassEntry {
@@ -63,6 +81,8 @@ export interface ClassEntry {
   constructorSymbol: FunctionSymbol | undefined;
   /** Parameters of the primary constructor that declare properties, with those properties. */
   parameterProperties: { param: ClassParameterDecl; symbol: PropertySymbol; index: number }[];
+  /** The constructors written as `constructor(...)` in the body. */
+  secondaryConstructors: { decl: SecondaryConstructorDecl; symbol: FunctionSymbol }[];
 }
 
 export interface FunctionEntry {
@@ -86,6 +106,11 @@ export interface PropertyEntry {
   state: 'pending' | 'compiling' | 'done';
   /** The initializer, compiled in the class's initializer or the file's, when its type had to be inferred first. */
   initializer: Compiled | undefined;
+  /**
+   * An initializer that is an object expression, compiled once when the property's type is inferred: compiling it
+   * again would declare another anonymous class, which the type inferred from the first does not include.
+   */
+  inferredObject?: Compiled;
   /** The slot of a delegate the property is delegated to. */
   delegateSlot: number | undefined;
   /** For a top-level property, the global that holds its delegate. */
@@ -94,8 +119,37 @@ export interface PropertyEntry {
 
 const VISIBILITY_RANK: Record<Visibility, number> = { private: 0, protected: 1, internal: 2, public: 2 };
 
+/** The class of an enum entry's body, which extends the enum class with the members of the body. */
+function enumEntryClassDecl(decl: ClassDecl, enumEntry: EnumEntryDecl): ClassDecl {
+  const { row } = enumEntry;
+  return {
+    kind: 'class',
+    row,
+    isLocal: false,
+    headerEndRow: row,
+    endRow: row,
+    classKind: 'class',
+    name: enumEntry.name,
+    isFunInterface: false,
+    modifiers: { keywords: new Set(), annotations: [] },
+    typeParameters: [],
+    primaryConstructor: undefined,
+    supers: [
+      { kind: 'type', row, type: { kind: 'named', row, parts: [{ name: decl.name, args: [] }], nullable: false } },
+    ],
+    members: enumEntry.members ?? [],
+    enumEntries: [],
+  };
+}
+
+/** The modifiers a function's parameter may have. */
+const PARAMETER_MODIFIERS = new Set(['vararg', 'noinline', 'crossinline']);
+
+/** The modifiers that only properties may have. */
+const PROPERTY_ONLY_MODIFIERS = new Set(['lateinit', 'const']);
+
 function visibilityOf(modifiers: Modifiers): Visibility {
-  return VISIBILITY_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
+  return visibilityOfKeywords(modifiers.keywords);
 }
 
 export abstract class DeclarationCompiler extends StatementCompiler {
@@ -118,8 +172,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected declareClasses(file: KotlinFile, context: FileContext): void {
     const packageScope = this.packageScope(context.packageName);
     for (const declaration of file.declarations) {
+      if (declaration.kind === 'typeAlias') {
+        if (packageScope.classes.has(declaration.name) || packageScope.typeAliases.has(declaration.name))
+          this.error(declaration.row, `${declaration.name} が2回宣言されています。`);
+        packageScope.typeAliases.set(declaration.name, this.declareTypeAlias(declaration, context, undefined));
+        continue;
+      }
       if (declaration.kind !== 'class') continue;
-      if (packageScope.classes.has(declaration.name)) {
+      if (packageScope.classes.has(declaration.name) || packageScope.typeAliases.has(declaration.name)) {
         this.error(declaration.row, `クラス ${declaration.name} が2回宣言されています。`);
       }
       const entry = this.declareClass(declaration, context, undefined);
@@ -129,8 +189,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // code-gauge-allow functionNcss -- One flag per modifier of a class.
   // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private declareClass(decl: ClassDecl, file: FileContext, outer: ClassEntry | undefined): ClassEntry {
-    const kind: ClassSymbolKind = decl.classKind === 'enum' ? 'enum' : decl.classKind;
+  private declareClass(
+    decl: ClassDecl,
+    file: FileContext,
+    outer: ClassEntry | undefined,
+    kindOverride?: ClassSymbolKind,
+    parentScope?: Scope
+  ): ClassEntry {
+    const kind: ClassSymbolKind = kindOverride ?? (decl.classKind === 'enum' ? 'enum' : decl.classKind);
     const prefix = outer ? `${outer.symbol.qualifiedName}$` : file.packageName ? `${file.packageName}.` : '';
     const kotlinPrefix = outer ? `${outer.symbol.kotlinName}.` : file.packageName ? `${file.packageName}.` : '';
     const symbol = new ClassSymbol(kind, decl.name, `${prefix}${decl.name}`, outer?.symbol);
@@ -143,13 +209,18 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isData = keywords.has('data');
     symbol.isValue = keywords.has('value');
     symbol.isFunInterface = decl.isFunInterface;
+    symbol.isAnnotation = keywords.has('annotation');
+    symbol.isInner = keywords.has('inner');
+    if (symbol.isInner && (!outer || outer.symbol.isInterface || outer.symbol.isObject || decl.classKind !== 'class'))
+      this.error(decl.row, 'inner は、クラスの中のクラスにだけ付けられます。');
+    if (symbol.isAnnotation) symbol.ownAnnotations = decl.modifiers.annotations;
     symbol.isNative = file.isLibrary && keywords.has('external');
     symbol.visibility = visibilityOf(decl.modifiers);
     symbol.row = decl.row;
     symbol.isLibrary = file.isLibrary;
     symbol.enumEntries = decl.enumEntries.map((entry, ordinal) => ({ name: entry.name, ordinal }));
     this.checkClassHeader(decl, symbol);
-    const scope = new Scope(outer?.scope, undefined);
+    const scope = new Scope(parentScope ?? outer?.scope, undefined);
     scope.staticClass = symbol;
     const entry: ClassEntry = {
       decl,
@@ -160,19 +231,96 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       delegateFields: [],
       constructorSymbol: undefined,
       parameterProperties: [],
+      secondaryConstructors: [],
     };
     this.classEntries.push(entry);
     this.entryOfClass.set(symbol, entry);
     for (const member of decl.members) {
+      if (member.kind === 'typeAlias') {
+        if (symbol.nested.has(member.name) || symbol.typeAliases.has(member.name))
+          this.error(member.row, `${member.name} が2回宣言されています。`);
+        symbol.typeAliases.set(member.name, this.declareTypeAlias(member, file, entry));
+        continue;
+      }
       if (member.kind !== 'class') continue;
-      if (symbol.nested.has(member.name)) this.error(member.row, `クラス ${member.name} が2回宣言されています。`);
+      if (symbol.nested.has(member.name) || symbol.typeAliases.has(member.name))
+        this.error(member.row, `クラス ${member.name} が2回宣言されています。`);
       if (member.classKind === 'companion' && symbol.companion)
         this.error(member.row, 'companion object は1つしか書けません。');
       const nested = this.declareClass(member, file, entry);
       symbol.nested.set(member.name, nested.symbol);
       if (member.classKind === 'companion') symbol.companion = nested.symbol;
     }
+    for (const enumEntry of decl.enumEntries) {
+      if (!enumEntry.members) continue;
+      const entryClass = this.declareClass(enumEntryClassDecl(decl, enumEntry), file, entry, 'enumEntry');
+      symbol.enumEntryClasses.set(enumEntry.name, entryClass.symbol);
+    }
     return entry;
+  }
+
+  /** Whether the classes' members are declared, which imports of the program's own classes' members need. */
+  protected membersDeclared = false;
+
+  /** The names of the suspend functions the program and a sequence builder's scope declare, whose calls may suspend. */
+  protected readonly suspendFunctionNames = new Set(['yield', 'yieldAll']);
+
+  /** The type aliases of the program, whose expansions are checked even when nothing uses them. */
+  protected readonly typeAliasSymbols: TypeAliasSymbol[] = [];
+
+  private declareTypeAlias(decl: TypeAliasDecl, file: FileContext, outer: ClassEntry | undefined): TypeAliasSymbol {
+    const symbol = new TypeAliasSymbol(decl.name, decl.row, () => {
+      const saved = this.file;
+      this.file = file;
+      try {
+        const scope = new Scope(outer?.scope, undefined);
+        const typeParameters = this.declareTypeParameters(scope, decl.typeParameters);
+        for (const param of decl.typeParameters) {
+          if (param.bounds.length > 0) this.error(param.row, '型の別名の型引数には、上限を書けません。');
+          if (param.variance) this.error(param.row, '型の別名の型引数には、in・out を書けません。');
+        }
+        this.validateAnnotations(scope, decl.modifiers, annotationSite(['TYPEALIAS']));
+        return { typeParameters, expansion: this.resolveType(scope, decl.type) };
+      } finally {
+        this.file = saved;
+      }
+    });
+    symbol.visibility = visibilityOf(decl.modifiers);
+    if (!file.isLibrary) this.typeAliasSymbols.push(symbol);
+    return symbol;
+  }
+
+  /**
+   * Declares a class of a function body or of an object expression, whose scope is the body's, with the classes
+   * nested in it, and resolves their headers, as the phases do for the file's classes.
+   */
+  protected declareClassInScope(
+    decl: ClassDecl,
+    scope: Scope,
+    isAnonymous: boolean,
+    beforeHeaders: (entries: ClassEntry[]) => void
+  ): ClassEntry[] {
+    const first = this.classEntries.length;
+    const entry = this.declareClass(decl, this.file, undefined, undefined, scope);
+    entry.symbol.isLocal = true;
+    entry.symbol.isAnonymous = isAnonymous;
+    entry.symbol.qualifiedName = decl.name;
+    if (!isAnonymous) scope.classes.set(decl.name, entry.symbol);
+    const entries = this.classEntries.slice(first);
+    beforeHeaders(entries);
+    this.checkTypeBoundsAfter(() => {
+      for (const each of entries) {
+        this.rejectReifiedClassParameters(each.decl.typeParameters);
+        this.declareTypeParameters(each.scope, each.decl.typeParameters, (params) => {
+          each.symbol.typeParameters = params;
+        });
+      }
+      for (const each of entries) this.declareSupertypes(each);
+    });
+    for (const each of entries) this.declareMembers(each);
+    for (const each of entries) this.validateClassAnnotations(each);
+    this.linkClasses(entries);
+    return entries;
   }
 
   private checkClassHeader(decl: ClassDecl, symbol: ClassSymbol): void {
@@ -192,25 +340,40 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected resolveImports(file: KotlinFile, context: FileContext): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
       if (declaration.isWildcard) {
         const name = path.join('.');
+        const owner = this.packages.has(name) ? undefined : this.findQualifiedClass(path);
+        if (owner) {
+          if (owner.isObject) this.error(row, `object ${owner.name} からは、* で import できません。`);
+          this.importClassMembers(context, owner);
+          continue;
+        }
         if (!this.packages.has(name) && !isKnownLibraryPackage(name)) this.rejectImport(row, name);
         context.starPackages.push(name);
         continue;
       }
-      const name = path.at(-1) as string;
+      const name = declaration.alias ?? (path.at(-1) as string);
       const qualified = path.join('.');
-      if (isKnownLibraryAnnotation(qualified)) {
+      const packageScope = this.packages.get(path.slice(0, -1).join('.'));
+      const declared = packageScope?.classes.has(path.at(-1) as string) === true;
+      if (isKnownLibraryAnnotation(qualified) && !declared) {
         context.importedAnnotations.set(name, qualified);
         continue;
       }
-      const packageScope = this.packages.get(path.slice(0, -1).join('.'));
       if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
       else this.importFromClass(context, name, declaration);
     }
+  }
+
+  /** `import a.Owner.*`, which imports an object's members, an enum's entries, and the nested classes. */
+  private importClassMembers(context: FileContext, owner: ClassSymbol): void {
+    for (const [name, nested] of owner.nested) context.importedClasses.set(name, nested);
+    for (const entry of owner.enumEntries) context.importedEnumEntries.set(entry.name, { owner, entry: entry.name });
+    if (owner.isObject) for (const [name, members] of owner.members) this.importObjectMembers(context, name, members);
   }
 
   /** Imports a class, functions, or properties of a package by their name. */
@@ -220,11 +383,15 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     name: string,
     { path, row }: Import
   ): void {
-    const cls = packageScope.classes.get(name);
-    const functions = packageScope.functions.get(name);
-    const properties = packageScope.properties.get(name);
-    if (!cls && !functions && !properties) this.rejectImport(row, path.join('.'));
+    const original = path.at(-1) as string;
+    const declared = packageScope.classes.get(original);
+    const cls = declared && this.canName(declared) ? declared : undefined;
+    const alias = packageScope.typeAliases.get(original);
+    const functions = packageScope.functions.get(original);
+    const properties = packageScope.properties.get(original);
+    if (!cls && !alias && !functions && !properties) this.rejectImport(row, path.join('.'));
     if (cls) context.importedClasses.set(name, cls);
+    if (alias) context.importedTypeAliases.set(name, alias);
     if (functions)
       context.importedFunctions.set(name, [...new Set([...(context.importedFunctions.get(name) ?? []), ...functions])]);
     if (properties)
@@ -236,15 +403,25 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Imports a nested class or the members of an object, or a class by its qualified name. */
   private importFromClass(context: FileContext, name: string, { path, row }: Import): void {
     const owner = this.findQualifiedClass(path.slice(0, -1));
-    const nested = owner?.nested.get(name);
+    const original = path.at(-1) as string;
+    const nested = owner?.nested.get(original);
     if (nested) {
       context.importedClasses.set(name, nested);
       return;
     }
+    const nestedAlias = owner?.typeAliases.get(original);
+    if (nestedAlias) {
+      context.importedTypeAliases.set(name, nestedAlias);
+      return;
+    }
+    if (owner?.kind === 'enum' && owner.enumEntries.some((entry) => entry.name === original)) {
+      context.importedEnumEntries.set(name, { owner, entry: original });
+      return;
+    }
+    // The program's own classes declare their members after the first pass of the imports, which the second resolves.
+    if (owner && !owner.isLibrary && !this.membersDeclared) return;
     if (owner) {
-      // The program's own objects reach their members as `Obj.member`; importing them is left to a later change.
-      if (!owner.isLibrary) this.unavailable(row, 'オブジェクトのメンバーのインポート');
-      const members = owner.members.get(name) ?? [];
+      const members = owner.members.get(original) ?? [];
       if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
       this.importObjectMembers(context, name, members);
       return;
@@ -257,12 +434,26 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
   protected abstract importObjectMembers(context: FileContext, name: string, members: MemberSymbol[]): void;
 
+  /**
+   * The type a parameter's value has inside its function, constructor, or property: for a `vararg`, the array of its
+   * elements, which callers pass one by one.
+   */
+  protected parameterValueType(param: ParameterSymbol): KType {
+    return param.isVararg ? this.varargType(param.type) : param.type;
+  }
+
   private rejectImport(row: number, path: string): never {
     this.rejectUnavailableLibraryReference(path, row);
     return this.error(row, unavailableMessage(describeUnavailableImport(path)));
   }
 
   // Phase 2: headers.
+
+  /** Rejects reified on a class's type parameters, which kotlinc allows only on inline functions'. */
+  private rejectReifiedClassParameters(decls: TypeParameterDecl[]): void {
+    const reified = decls.find((decl) => decl.isReified);
+    if (reified) this.error(reified.row, 'reified な型引数は、インライン関数にだけ書けます。');
+  }
 
   /** @param assign Receives the parameters before their bounds are resolved, since a bound may mention its class. */
   protected declareTypeParameters(
@@ -276,18 +467,27 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       return param;
     });
     assign?.(params);
-    for (const [index, decl] of decls.entries()) {
-      params[index].bounds = decl.bounds.map((bound) => this.resolveType(scope, bound));
-    }
+    // A bound may mention its own parameter, as `T : Enum<T>`, whose bounds the check needs, so it checks after all.
+    this.checkTypeBoundsAfter(() => {
+      for (const [index, decl] of decls.entries()) {
+        params[index].bounds = decl.bounds.map((bound) => this.resolveType(scope, bound));
+      }
+    });
     return params;
   }
 
   /** Resolves the supertypes and members' signatures of every class, and declares the top-level functions and properties. */
   protected declareHeaders(files: { file: KotlinFile; context: FileContext }[]): ClassEntry[] {
+    this.membersDeclared = false;
     const classOrder = this.checkTypeBoundsAfter(() => this.resolveClassHierarchy());
+    for (const alias of this.typeAliasSymbols) this.typeAliasExpansion(alias, alias.row);
     for (const entry of this.classEntries) {
       this.file = entry.file;
       this.declareMembers(entry);
+    }
+    for (const entry of this.classEntries) {
+      this.file = entry.file;
+      this.validateClassAnnotations(entry);
     }
     for (const { file, context } of files) {
       this.file = context;
@@ -295,12 +495,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const fileScope = new Scope(undefined, undefined);
       for (const declaration of file.declarations) this.declareTopLevel(declaration, fileScope, context, packageScope);
     }
+    this.membersDeclared = true;
     return classOrder;
   }
 
   private resolveClassHierarchy(): ClassEntry[] {
     for (const entry of this.classEntries) {
       this.file = entry.file;
+      this.rejectReifiedClassParameters(entry.decl.typeParameters);
       this.declareTypeParameters(entry.scope, entry.decl.typeParameters, (params) => {
         entry.symbol.typeParameters = params;
       });
@@ -358,17 +560,43 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  /**
+   * Checks a class's annotations once every class has its members, as an annotation's arguments go to the constructor
+   * of an annotation class, which may come later in the program.
+   */
+  private validateClassAnnotations(entry: ClassEntry): void {
+    const { symbol } = entry;
+    this.withOptIns(this.classOptIns(symbol), () =>
+      this.validateAnnotations(
+        entry.scope,
+        entry.decl.modifiers,
+        annotationSite(symbol.isAnnotation ? ['ANNOTATION_CLASS', 'CLASS'] : ['CLASS'])
+      )
+    );
+  }
+
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol } = entry;
-    this.validateAnnotations(entry.scope, entry.decl.modifiers);
+    symbol.optInMarkers = this.optInMarkersOf(entry.scope, entry.decl.modifiers.annotations);
+    symbol.optIns = this.optInsOf(entry.scope, entry.decl.modifiers.annotations);
+    this.withOptIns(this.classOptIns(symbol), () => this.declareSupertypesOpted(entry));
+  }
+
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private declareSupertypesOpted(entry: ClassEntry): void {
+    const { symbol } = entry;
     for (const spec of entry.decl.supers) {
-      const type = this.resolveType(entry.scope, spec.type) as ClassType;
+      const written = this.resolveType(entry.scope, spec.type);
+      const type = written.kind === 'function' ? this.functionInterfaceType(written, spec.row) : (written as ClassType);
       if (type.kind !== 'class') this.error(spec.row, '親にはクラスかインターフェースを書いてください。');
       if (type.cls.isInterface) this.declareInterface(entry, spec, type);
       else if (symbol.kind === 'enum' && !entry.file.isLibrary)
         this.error(spec.row, 'enum class は、ほかのクラスを継承できません。');
       else this.declareSuperclass(entry, spec, type);
     }
+    if (symbol.isAnnotation) this.declareAnnotationSupertype(entry);
+    for (const enumEntry of entry.decl.enumEntries)
+      this.validateAnnotations(entry.scope, enumEntry.modifiers, annotationSite(['FIELD', 'PROPERTY', 'CLASS']));
     if (symbol.kind === 'enum') {
       symbol.superclass = {
         kind: 'class',
@@ -379,6 +607,32 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     if (!symbol.superclass && !symbol.isInterface && symbol !== this.core?.any)
       symbol.superclass = this.core ? anyType() : undefined;
+  }
+
+  /** An annotation class implements `kotlin.Annotation` and nothing else, and holds only its parameters. */
+  private declareAnnotationSupertype(entry: ClassEntry): void {
+    const { symbol, decl } = entry;
+    if (decl.classKind !== 'class') this.error(decl.row, 'annotation 修飾子は、クラスにだけ付けられます。');
+    if (decl.supers.length > 0) this.error(decl.supers[0].row, 'アノテーションクラスは、ほかの型を継承できません。');
+    if (decl.typeParameters.length > 0 && !entry.file.isLibrary)
+      this.error(decl.row, 'アノテーションクラスには型引数を書けません。');
+    for (const member of decl.members) {
+      if (member.kind === 'class') continue;
+      this.error(member.row, 'アノテーションクラスの本体には、入れ子のクラスと companion object だけを書けます。');
+    }
+    for (const param of decl.primaryConstructor?.params ?? []) {
+      if (param.binding !== 'val') this.error(param.row, 'アノテーションクラスの引数には val を付けてください。');
+    }
+    const annotation = this.findQualifiedClass(['kotlin', 'Annotation']);
+    if (annotation) symbol.interfaces.push(annotation.type);
+  }
+
+  /** The `FunctionN` interface that a function type written as a supertype stands for. */
+  private functionInterfaceType(type: FunctionType, row: number): ClassType {
+    const found = functionInterfaceOf(type);
+    if (!found) this.error(row, '引数が多すぎる関数型は、親に書けません。');
+    if (type.nullable) this.error(row, '親には null かもしれない型を書けません。');
+    return found;
   }
 
   private declareInterface(entry: ClassEntry, spec: SuperSpec, type: ClassType): void {
@@ -399,16 +653,23 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (spec.kind === 'delegated') this.error(spec.row, '委譲（by）できるのはインターフェースだけです。');
     if (symbol.superclass) this.error(spec.row, '親のクラスは1つだけ書けます。');
     if (symbol.isInterface) this.error(spec.row, 'インターフェースの親にはインターフェースだけを書けます。');
-    this.checkInheritable(parent, spec.row);
+    if (symbol.kind !== 'enumEntry') this.checkInheritable(parent, spec.row);
     if (
+      symbol.kind !== 'enumEntry' &&
       spec.kind === 'type' &&
       !symbol.isInterface &&
       // A class of the program has its primary constructor, which phase 2 declares only after the supertypes.
       (parent.constructors.length > 0 || !parent.isLibrary) &&
-      !this.hasSecondaryConstructors(decl)
+      (decl.primaryConstructor !== undefined || !this.hasSecondaryConstructors(decl))
     ) {
       this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
     }
+    // Without a primary constructor, each constructor(...) calls the superclass's, as kotlinc requires.
+    if (spec.kind === 'constructorCall' && decl.primaryConstructor === undefined && this.hasSecondaryConstructors(decl))
+      this.error(
+        spec.row,
+        `主コンストラクタのないクラスでは、${parent.name} のコンストラクタを constructor(...) の : super(...) で呼んでください。`
+      );
     if (parent.isSealed) this.declareSealedCase(symbol, parent, spec, 'sealed class');
     symbol.superclass = type;
   }
@@ -432,6 +693,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareMembers(entry: ClassEntry): void {
+    this.withOptIns(this.classOptIns(entry.symbol), () => this.declareMembersOpted(entry));
+  }
+
+  private declareMembersOpted(entry: ClassEntry): void {
     const { symbol, decl } = entry;
     const primary = decl.primaryConstructor;
     if (primary && symbol.isObject) this.error(decl.row, 'object にはコンストラクタを書けません。');
@@ -439,7 +704,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (!symbol.isInterface && !symbol.isObject) {
       const constructorSymbol = this.declarePrimaryConstructor(entry);
       for (const [index, param] of (primary?.params ?? []).entries()) {
-        this.declareParameterProperty(entry, param, constructorSymbol.params[index].type, index);
+        this.declareParameterProperty(entry, param, this.parameterValueType(constructorSymbol.params[index]), index);
       }
     }
     for (const member of decl.members) this.declareMember(entry, member);
@@ -467,7 +732,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   private declarePrimaryConstructor(entry: ClassEntry): FunctionSymbol {
     const { symbol, decl, scope } = entry;
     const primary = decl.primaryConstructor;
-    if (primary) this.validateAnnotations(scope, primary.modifiers);
+    if (primary) this.validateAnnotations(scope, primary.modifiers, annotationSite(['CONSTRUCTOR']));
     const constructorSymbol = new FunctionSymbol(symbol.name);
     constructorSymbol.isConstructor = true;
     constructorSymbol.owner = symbol;
@@ -486,7 +751,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     // An external class of the library has only the constructors it declares: the natives make the others' instances,
     // as `EmptyList`'s, which a program cannot create.
     const isExternal = entry.file.isLibrary && decl.modifiers.keywords.has('external');
-    if (!(entry.file.isLibrary && primary === undefined && (this.hasSecondaryConstructors(decl) || isExternal))) {
+    if (!(primary === undefined && (this.hasSecondaryConstructors(decl) || (entry.file.isLibrary && isExternal)))) {
       symbol.constructors.push(constructorSymbol);
     }
     entry.constructorSymbol = constructorSymbol;
@@ -505,12 +770,19 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const property = new PropertySymbol(param.name);
     property.owner = symbol;
     property.type = type;
+    this.noteSuspendProperty(property);
     property.isVar = param.binding === 'var';
     this.applyMemberModifiers(property, param.modifiers, symbol);
     property.row = param.row;
     property.isLibrary = entry.file.isLibrary;
     symbol.addMember(property);
     entry.parameterProperties.push({ param, symbol: property, index });
+  }
+
+  /** Counts a property of a suspend function type among the names whose calls may suspend, as `h.g(3)` calls it. */
+  private noteSuspendProperty(property: PropertySymbol): void {
+    const type = property.type && resolved(property.type);
+    if (type?.kind === 'function' && type.isSuspend) this.suspendFunctionNames.add(property.name);
   }
 
   private unitTypeOrUndefined(): KType {
@@ -549,16 +821,49 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         break;
       }
       case 'constructor': {
-        if (!entry.file.isLibrary || !member.modifiers.keywords.has('external')) {
-          this.unavailable(member.row, '2つ目以降のコンストラクタ（constructor(...)）');
-        }
-        this.declareNativeConstructor(entry, member);
+        if (entry.file.isLibrary && member.modifiers.keywords.has('external'))
+          this.declareNativeConstructor(entry, member);
+        else this.declareSecondaryConstructor(entry, member);
         break;
       }
       default: {
         break;
       }
     }
+  }
+
+  /** A constructor written as `constructor(...)`, which delegates to another constructor before its body runs. */
+  private declareSecondaryConstructor(entry: ClassEntry, member: SecondaryConstructorDecl): void {
+    const { symbol: cls } = entry;
+    if (cls.isInterface || cls.isObject) this.error(member.row, `${cls.name} にはコンストラクタを書けません。`);
+    if (cls.isAnnotation) this.error(member.row, 'アノテーションクラスにはコンストラクタを書けません。');
+    this.validateAnnotations(entry.scope, member.modifiers, annotationSite(['CONSTRUCTOR']));
+    const ctor = new FunctionSymbol(cls.name);
+    ctor.isConstructor = true;
+    ctor.owner = cls;
+    ctor.row = member.row;
+    ctor.isLibrary = entry.file.isLibrary;
+    ctor.returnType = this.core.unit.type;
+    ctor.isAtomic = !entry.file.isLibrary && this.claimAtomicRange(member.row, member.headerEndRow);
+    ctor.visibility =
+      cls.kind === 'enum'
+        ? 'private'
+        : cls.isSealed && !member.modifiers.keywords.has('private')
+          ? 'protected'
+          : visibilityOf(member.modifiers);
+    const scope = new Scope(entry.scope, undefined);
+    ctor.params = member.params.map((param) => this.declareParameter(scope, param));
+    this.rejectDuplicateNames(member.params);
+    this.checkDuplicateFunction(cls.constructors, ctor, member.row);
+    if (!member.delegation && entry.decl.primaryConstructor)
+      this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で主コンストラクタに委譲してください。');
+    // An enum's constructors call Enum's, which only its constants' declarations give the arguments of.
+    if (member.delegation?.kind === 'super' && cls.kind === 'enum')
+      this.error(member.delegation.row, 'enum のコンストラクタからは super(...) を呼べません。');
+    if (member.delegation?.kind === 'super' && entry.decl.primaryConstructor)
+      this.error(member.row, '主コンストラクタがあるクラスでは、: this(...) で委譲してください。');
+    cls.constructors.push(ctor);
+    entry.secondaryConstructors.push({ decl: member, symbol: ctor });
   }
 
   /** A constructor of a library class that a native implements, which initializes the instance `invoke` creates. */
@@ -621,7 +926,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareParameter(scope: Scope, param: ParameterDecl): ParameterSymbol {
-    this.validateAnnotations(scope, param.modifiers);
+    const binding = 'binding' in param ? (param as ClassParameterDecl).binding : undefined;
+    this.validateAnnotations(
+      scope,
+      param.modifiers,
+      binding
+        ? annotationSite(
+            ['VALUE_PARAMETER', 'PROPERTY', 'FIELD'],
+            ['param', 'property', 'field', 'get', ...(binding === 'var' ? ['set', 'setparam'] : [])]
+          )
+        : annotationSite(['VALUE_PARAMETER'], ['param'])
+    );
     if (!param.type) this.error(param.row, `引数 ${param.name} の型を書いてください。`);
     const { keywords } = param.modifiers;
     return {
@@ -642,9 +957,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isOverride = keywords.has('override');
     symbol.isOpen = keywords.has('open') || (symbol.isOverride && !keywords.has('final'));
     if (owner?.isInterface && !keywords.has('private')) symbol.isOpen = true;
-    if (symbol.isAbstract && owner && !owner.isAbstract) {
+    if (symbol.isAbstract && owner && !owner.isAbstract && owner.kind !== 'enum') {
       this.error(symbol.row, `abstract なメンバー ${symbol.name} は、abstract なクラスにだけ書けます。`);
     }
+    // An object that is no companion has no subclasses, so its members cannot be protected, as kotlinc says.
+    if (keywords.has('protected') && owner?.isObject && owner.outer?.companion !== owner && !owner.isAnonymous)
+      this.error(symbol.row, 'object のメンバーには protected を付けられません。');
     const memberOnly = ['open', 'abstract', 'override', 'protected'].find((keyword) => keywords.has(keyword));
     if (!owner && memberOnly) {
       this.error(symbol.row, `${memberOnly} 修飾子は、クラスのメンバーにだけ書けます。`);
@@ -655,16 +973,34 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss -- builds the function symbol from the declaration and its modifiers.
-  // code-gauge-allow functionNcss -- declaration flags and type constraints describe the same signature.
-  // code-gauge-allow functionNcss -- Declaration flags, annotations, and the signature share the scope.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
     cls: ClassEntry | undefined,
     file: FileContext
   ): FunctionEntry {
-    this.validateAnnotations(ownerScope, decl.modifiers);
+    const markers = this.optInMarkersOf(ownerScope, decl.modifiers.annotations);
+    const optIns = this.optInsOf(ownerScope, decl.modifiers.annotations);
+    const entry = this.withOptIns([...this.classOptIns(cls?.symbol), ...optIns], () =>
+      this.declareFunctionOpted(decl, ownerScope, cls, file)
+    );
+    entry.symbol.optInMarkers = markers;
+    entry.symbol.optIns = optIns;
+    return entry;
+  }
+
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  private declareFunctionOpted(
+    decl: FunctionDecl,
+    ownerScope: Scope,
+    cls: ClassEntry | undefined,
+    file: FileContext
+  ): FunctionEntry {
+    this.validateAnnotations(
+      ownerScope,
+      decl.modifiers,
+      annotationSite(['FUNCTION'], decl.receiver ? ['receiver'] : [])
+    );
     const symbol = new FunctionSymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -674,17 +1010,30 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.typeParameters = this.declareTypeParameters(scope, decl.typeParameters);
     const { keywords } = decl.modifiers;
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
+    if (!file.isLibrary && !cls?.symbol.isObject && decl.modifiers.annotations.some(({ name }) => name === 'JvmStatic'))
+      this.error(decl.row, '@JvmStatic は、object と companion object のメンバーにだけ付けられます。');
     symbol.isInline = keywords.has('inline');
+    symbol.isTailrec = keywords.has('tailrec');
+    symbol.isSuspend = keywords.has('suspend');
+    if (symbol.isSuspend) this.suspendFunctionNames.add(symbol.name);
+    if (!file.isLibrary) this.checkFunctionModifiers(decl, symbol, cls?.symbol);
     symbol.resolvesByLambdaResult = decl.modifiers.annotations.some(
       ({ name }) => name === 'OverloadResolutionByLambdaReturnType'
     );
+    const deprecation = this.deprecationLevel(ownerScope, decl.modifiers);
     symbol.isDeprecatedError =
-      file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError');
+      (file.isLibrary && decl.modifiers.annotations.some(({ name }) => name === 'DeprecatedError')) ||
+      deprecation === 'ERROR' ||
+      deprecation === 'HIDDEN';
     symbol.isInfix = keywords.has('infix');
     symbol.isOperator = keywords.has('operator');
     symbol.isAtomic = !file.isLibrary && this.claimAtomicRange(decl.row, decl.headerEndRow);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     symbol.params = decl.params.map((param) => this.declareParameter(scope, param));
+    symbol.contextParameters = (decl.modifiers.contextParameters ?? []).map((param) => {
+      if (!param.type) this.error(param.row, `コンテキスト引数 ${param.name} の型を書いてください。`);
+      return { name: param.name, type: this.resolveType(scope, param.type) };
+    });
     this.rejectDuplicateNames(decl.params);
     if (decl.returnType) symbol.returnType = this.resolveType(scope, decl.returnType);
     else if (decl.body?.kind !== 'expression') symbol.returnType = this.core.unit.type;
@@ -694,6 +1043,26 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.functionEntries.push(entry);
     this.entryOfFunction.set(symbol, entry);
     return entry;
+  }
+
+  /** Checks the modifiers of a function and its parameters that kotlinc restricts. */
+  protected checkFunctionModifiers(decl: FunctionDecl, symbol: FunctionSymbol, owner: ClassSymbol | undefined): void {
+    if (decl.typeParameters.some((param) => param.isReified) && !symbol.isInline)
+      this.error(decl.row, 'reified な型引数は、インライン関数にだけ書けます。');
+    if (decl.params.filter((param) => param.modifiers.keywords.has('vararg')).length > 1)
+      this.error(decl.row, 'vararg の引数は1つだけ書けます。');
+    for (const param of decl.params) {
+      const { keywords } = param.modifiers;
+      const misplaced = [...keywords].find((keyword) => !PARAMETER_MODIFIERS.has(keyword));
+      if (misplaced) this.error(param.row, `引数には ${misplaced} 修飾子を付けられません。`);
+      if ((keywords.has('noinline') || keywords.has('crossinline')) && !symbol.isInline)
+        this.error(param.row, 'noinline・crossinline は、インライン関数の引数にだけ付けられます。');
+    }
+    // An open member of a final class or object has no overrides, as kotlinc counts it.
+    if (symbol.isTailrec && (owner?.isInterface || (symbol.isOpen && owner?.isInheritable)))
+      this.error(decl.row, 'tailrec は、オーバーライドできない関数にだけ付けられます。');
+    const misplaced = [...decl.modifiers.keywords].find((keyword) => PROPERTY_ONLY_MODIFIERS.has(keyword));
+    if (misplaced) this.error(decl.row, `関数には ${misplaced} 修飾子を付けられません。`);
   }
 
   private checkFunctionBody(decl: FunctionDecl, symbol: FunctionSymbol, owner: ClassSymbol | undefined): void {
@@ -749,6 +1118,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const receiverText = decl.receiver ? typeRefText(decl.receiver) : undefined;
     const base = this.nativeKey(owner, file, receiverText, decl.name);
     const key = `${base}(${decl.params.map(nativeParameterText).join(', ')})`;
+    const suspendNative = suspendNatives.get(key);
+    if (suspendNative) {
+      symbol.invokeSuspend = suspendNative;
+      return;
+    }
     const native = this.natives.get(key);
     if (!native) {
       this.missingNatives.push(key);
@@ -763,15 +1137,47 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     native: NativeFunction
   ): NonNullable<FunctionSymbol['invoke']>;
 
-  // code-gauge-allow functionNcss -- The parts of a property declaration and their checks.
-  // code-gauge-allow functionCognitiveComplexity -- modifier, backing-field, and initialization rules share one declaration check.
   private declareProperty(
     decl: PropertyDecl,
     ownerScope: Scope,
     cls: ClassEntry | undefined,
     file: FileContext
   ): PropertyEntry {
-    this.validateAnnotations(ownerScope, decl.modifiers);
+    const markers = this.optInMarkersOf(ownerScope, decl.modifiers.annotations);
+    const optIns = this.optInsOf(ownerScope, decl.modifiers.annotations);
+    const entry = this.withOptIns([...this.classOptIns(cls?.symbol), ...optIns], () =>
+      this.declarePropertyOpted(decl, ownerScope, cls, file)
+    );
+    entry.symbol.optInMarkers = markers;
+    entry.symbol.optIns = optIns;
+    return entry;
+  }
+
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private declarePropertyOpted(
+    decl: PropertyDecl,
+    ownerScope: Scope,
+    cls: ClassEntry | undefined,
+    file: FileContext
+  ): PropertyEntry {
+    this.validateAnnotations(
+      ownerScope,
+      decl.modifiers,
+      annotationSite(
+        ['PROPERTY', 'FIELD'],
+        [
+          'property',
+          'field',
+          'get',
+          ...(decl.isVar ? ['set', 'setparam'] : []),
+          ...(decl.delegate ? ['delegate'] : []),
+          ...(decl.receiver ? ['receiver'] : []),
+        ]
+      )
+    );
+    if (decl.getter) this.validateAnnotations(ownerScope, decl.getter.modifiers, annotationSite(['PROPERTY_GETTER']));
+    if (decl.setter) this.validateAnnotations(ownerScope, decl.setter.modifiers, annotationSite(['PROPERTY_SETTER']));
     const symbol = new PropertySymbol(decl.name);
     symbol.owner = cls?.symbol;
     symbol.row = decl.row;
@@ -783,6 +1189,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.applyMemberModifiers(symbol, decl.modifiers, cls?.symbol);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     if (decl.type) symbol.type = this.resolveType(scope, decl.type);
+    this.noteSuspendProperty(symbol);
     symbol.hasCustomGetter = decl.getter?.body !== undefined || decl.delegate !== undefined;
     if (decl.setter) symbol.setterVisibility = visibilityOf(decl.setter.modifiers);
     if (
@@ -806,6 +1213,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (decl.modifiers.keywords.has('abstract') && (decl.getter?.body || decl.setter?.body))
       this.error(decl.row, `abstract なプロパティ ${decl.name} には get() や set() の中身を書けません。`);
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
+    // What the modifiers make the property, which the library's declarations need too, as Int.MAX_VALUE is a constant.
+    symbol.isConst = decl.modifiers.keywords.has('const');
+    if (!file.isLibrary) this.checkPropertyModifiers(decl, symbol, cls?.symbol, scope);
     const entry: PropertyEntry = {
       kind: 'property',
       declarationIndex: this.propertyEntries.length,
@@ -822,6 +1232,62 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     this.entryOfProperty.set(symbol, entry);
     return entry;
   }
+
+  /** Checks `lateinit` and `const`, which kotlinc allows only on the properties that can hold them. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private checkPropertyModifiers(
+    decl: PropertyDecl,
+    symbol: PropertySymbol,
+    owner: ClassSymbol | undefined,
+    scope: Scope
+  ): void {
+    const { keywords } = decl.modifiers;
+    if (keywords.has('lateinit')) {
+      symbol.isLateinit = true;
+      if (!decl.isVar) this.error(decl.row, 'lateinit は var にだけ付けられます。');
+      if (decl.initializer) this.error(decl.row, 'lateinit のプロパティには初期値を書けません。');
+      if (decl.getter?.body || decl.setter?.body)
+        this.error(decl.row, 'lateinit のプロパティには get・set を書けません。');
+      if (decl.delegate || decl.receiver || symbol.isAbstract)
+        this.error(decl.row, 'このプロパティには lateinit を付けられません。');
+      this.checkLateinitType(symbol.type, decl.row);
+    }
+    if (keywords.has('const')) {
+      if (symbol.type && !this.isConstantType(symbol.type))
+        this.error(decl.row, 'const val の型は、基本型か String にしてください。');
+      if (owner && !owner.isObject) this.error(decl.row, 'const val は、トップレベルか object の中にだけ書けます。');
+      if (decl.isVar) this.error(decl.row, 'const は val にだけ付けられます。');
+      if (decl.getter?.body || decl.delegate) this.error(decl.row, 'const val には get や by を書けません。');
+      if (!decl.initializer) this.error(decl.row, 'const val には初期値を書いてください。');
+      else if (!this.isConstantExpression(scope, decl.initializer))
+        this.error(decl.initializer.row, 'const val の初期値には、定数を書いてください。');
+    }
+    if (decl.typeParameters.some((param) => param.isReified))
+      this.error(decl.row, 'reified な型引数は、インライン関数にだけ書けます。');
+  }
+
+  /** Whether a type can be a constant's, as kotlinc requires of a const val: a non-null primitive type or String. */
+  protected isConstantType(type: KType): boolean {
+    const actual = resolved(type);
+    return (
+      actual.kind === 'class' &&
+      !actual.nullable &&
+      (this.core.primitives.has(actual.cls) || actual.cls === this.core.boolean || actual.cls === this.core.string)
+    );
+  }
+
+  protected checkLateinitType(type: KType | undefined, row: number): void {
+    if (!type) return this.error(row, 'lateinit のプロパティには型を書いてください。');
+    const actual = resolved(type);
+    if (actual.nullable) this.error(row, 'lateinit のプロパティの型には、null かもしれない型を使えません。');
+    if (actual.kind === 'class' && (this.core.primitives.has(actual.cls) || actual.cls === this.core.boolean))
+      this.error(row, `lateinit のプロパティの型には、${actual.cls.name} を使えません。`);
+    if (actual.kind === 'param' && isNullable(actual))
+      this.error(row, 'lateinit のプロパティの型には、null かもしれない型引数を使えません。');
+  }
+
+  /** Whether an expression is a compile-time constant: literals, `const val`s, and operators on them. */
+  protected abstract isConstantExpression(scope: Scope, expression: Expression): boolean;
 
   private bindNativeProperty(
     symbol: PropertySymbol,
@@ -1008,6 +1474,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected layOutFields(entry: ClassEntry): void {
     const { symbol } = entry;
     let count = symbol.superclass?.cls.fieldCount ?? 0;
+    if (symbol.isInner) symbol.outerSlot = count++;
     for (const field of entry.delegateFields) field.slot = count++;
     for (const { symbol: property } of entry.parameterProperties) {
       property.slot = count++;
@@ -1057,7 +1524,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Reads and writes a property's backing field directly, as its default accessors do. */
   protected bindFieldAccessors(property: PropertySymbol): void {
     const slot = property.slot as number;
-    property.get ??= (_frame, receiver) => (receiver as KObject).fields[slot];
+    const { name } = property;
+    property.get ??= property.isLateinit
+      ? (frame, receiver) => uninitializedCheck(frame, (receiver as KObject).fields[slot], name)
+      : (_frame, receiver) => (receiver as KObject).fields[slot];
     property.set ??= (_frame, receiver, value) => {
       (receiver as KObject).fields[slot] = value;
     };
@@ -1153,6 +1623,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     for (const [root, implementation] of symbol.vtable) {
       if (!implementation.isAbstract) continue;
       const kind = root.kind === 'function' ? '関数' : 'プロパティ';
+      // An enum class leaves its abstract members to its entries, each of which must implement them in its body.
+      if (symbol.kind === 'enum') {
+        const plain = symbol.enumEntries.find(({ name }) => !symbol.enumEntryClasses.has(name));
+        if (plain)
+          this.error(
+            symbol.row,
+            `列挙型の定数 ${plain.name} には、${kind} ${root.name} を実装する本体を書いてください。`
+          );
+        continue;
+      }
       this.error(
         symbol.row,
         `クラス ${symbol.name} は abstract ではないので、${kind} ${root.name} を実装してください。`
@@ -1176,15 +1656,29 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const candidates = this.membersOf<MemberSymbol>(supertype, member.name, member.kind);
       for (const { symbol: candidate, substitution } of candidates) {
         if (candidate.visibility === 'private') continue;
+        // The function's own type parameters correspond by position, as `fun <T> map(x: T)` overrides its parent's.
+        const paired = new Map(memberTypes);
         if (member.kind === 'function' && candidate.kind === 'function') {
           if (candidate.params.length !== member.params.length) continue;
+          if (candidate.typeParameters.length !== member.typeParameters.length) continue;
+          for (const [index, param] of member.typeParameters.entries())
+            paired.set(param, { kind: 'param', param: candidate.typeParameters[index], nullable: false });
           const matches = candidate.params.every((param, index) =>
-            isSameType(substitute(param.type, substitution), substitute(member.params[index].type, memberTypes))
+            isSameType(substitute(param.type, substitution), substitute(member.params[index].type, paired))
           );
           if (!matches) continue;
         }
         if ((member.extensionReceiver === undefined) !== (candidate.extensionReceiver === undefined)) continue;
-        this.checkOverrideType(cls, member, candidate, substitution, memberTypes);
+        if (
+          member.extensionReceiver &&
+          candidate.extensionReceiver &&
+          !isSameType(
+            substitute(candidate.extensionReceiver, substitution),
+            substitute(member.extensionReceiver, paired)
+          )
+        )
+          continue;
+        this.checkOverrideType(cls, member, candidate, substitution, paired);
         if (!found.includes(candidate)) found.push(candidate);
       }
     }
@@ -1387,6 +1881,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       packageName,
       isLibrary,
       importedClasses: new Map(),
+      importedTypeAliases: new Map(),
+      importedEnumEntries: new Map(),
+      optIns: [],
       importedAnnotations: new Map(),
       importedFunctions: new Map(),
       importedProperties: new Map(),
@@ -1459,17 +1956,7 @@ function nativeParameterText(param: ParameterDecl): string {
   return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;
 }
 
-/** What an import names that this environment cannot run, by the feature it stands for. */
-function describeUnavailableImport(path: string): string {
-  if (path.startsWith('kotlin.io.readLine')) return '標準入力';
-  if (path.startsWith('kotlin.io.path')) return 'ファイルの読み書き';
-  if (path.startsWith('io.ktor')) return 'ネットワーク';
-  if (path.startsWith('kotlinx.coroutines') || path.startsWith('kotlin.concurrent')) return 'コルーチン・スレッド';
-  if (path.startsWith('kotlin.reflect')) return 'リフレクション';
-  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
-  return `標準ライブラリ以外のライブラリ（${path}）`;
-}
-
+/** The function a class declares itself, not inherits, of a name and a number of parameters. */
 function declaredFunction(symbol: ClassSymbol, name: string, paramCount: number): FunctionSymbol | undefined {
   return symbol.members
     .get(name)

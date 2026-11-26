@@ -684,7 +684,7 @@ function patternSyntaxErrorOf(receiver: Value): { description: string; index: nu
 }
 
 /** The message of a `PatternSyntaxException`, which points at its index with a caret under the pattern. */
-function patternSyntaxMessage(description: string, index: number, pattern: string): string {
+export function patternSyntaxMessage(description: string, index: number, pattern: string): string {
   if (index < 0) return `${description}\n${pattern}`;
   const caret = index < pattern.length ? `\n${' '.repeat(index)}^` : '';
   return `${description} near index ${index}\n${pattern}${caret}`;

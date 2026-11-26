@@ -23,6 +23,8 @@ export interface CoreClasses {
   any: ClassSymbol;
   /** `kotlin.Function`, the supertype of every function type. */
   function: ClassSymbol;
+  /** `kotlin.jvm.functions.Function0` and the others, by their number of parameters. */
+  functionInterfaces: ClassSymbol[];
 }
 
 let core: CoreClasses | undefined;
@@ -127,15 +129,36 @@ export function isSubtype(subType: KType, superType: KType): boolean {
   }
   if (sup.kind === 'param') return false;
   if (sub.kind === 'function') {
-    if (sup.kind === 'class') return sup.cls === coreClasses().function;
-    return isFunctionSubtype(sub, sup);
+    if (sup.kind === 'function') return isFunctionSubtype(sub, sup);
+    if (sup.cls === coreClasses().function) return true;
+    const asInterface = functionInterfaceOf(sub);
+    return asInterface !== undefined && isSubtype(asInterface, sup);
   }
-  if (sup.kind === 'function') return false;
+  if (sup.kind === 'function') {
+    const asInterface = functionInterfaceOf(sup);
+    return asInterface !== undefined && isSubtype(sub, asInterface);
+  }
   const supertype = asSuper(withNullability(sub, false), sup.cls);
   if (!supertype) return false;
   return sup.args.every((argument, index) =>
     isArgumentSubtype(supertype.args[index], argument, sup.cls.typeParameters[index]?.variance ?? 'inv')
   );
+}
+
+/**
+ * The `FunctionN` interface a function type stands for, as `Function1<Int, String>` for `(Int) -> String`, where a
+ * receiver is the first parameter.
+ */
+export function functionInterfaceOf(type: FunctionType): ClassType | undefined {
+  const params = type.receiver ? [type.receiver, ...type.params] : type.params;
+  const cls = coreClasses().functionInterfaces[params.length];
+  if (!cls) return undefined;
+  return {
+    kind: 'class',
+    cls,
+    args: [...params, type.returnType].map((argument) => ({ variance: 'inv', type: argument })),
+    nullable: type.nullable,
+  };
 }
 
 function constrainSubtype(sub: KType, sup: KType): boolean {
@@ -153,6 +176,11 @@ function constrainSubtype(sub: KType, sup: KType): boolean {
 }
 
 function isFunctionSubtype(sub: FunctionType, sup: FunctionType): boolean {
+  if ((sub.isSuspend ?? false) !== (sup.isSuspend ?? false)) return false;
+  const subContexts = sub.contextTypes ?? [];
+  const supContexts = sup.contextTypes ?? [];
+  if (subContexts.length !== supContexts.length) return false;
+  if (!supContexts.every((type, index) => isSubtype(type, subContexts[index] as KType))) return false;
   const subParams = sub.receiver ? [sub.receiver, ...sub.params] : sub.params;
   const supParams = sup.receiver ? [sup.receiver, ...sup.params] : sup.params;
   if (subParams.length !== supParams.length) return false;

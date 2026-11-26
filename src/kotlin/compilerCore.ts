@@ -1,4 +1,6 @@
-import type { Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
+// code-gauge-allow-file fileNcss -- the file holds one layer of the compiler, whose parts share its state.
+import type { AnnotationSite } from './annotationSites';
+import type { Annotation, Expression, Modifiers, Statement, TypeProjectionRef, TypeRef } from './ast';
 import {
   compileError,
   type Core,
@@ -12,12 +14,19 @@ import {
   Scope,
   typeMismatchMessage,
 } from './compilerBase';
-import { unavailableJavaFeature, unavailableMessage } from './convertSupport';
+import { unavailableFunction, unavailableJavaFeature, unavailableMessage } from './convertSupport';
 import { keyOf } from './flowKeys';
 import { assignedNames } from './flowWrites';
-import { isJavaTypeAlias, isKnownLibraryAnnotation, knownLibraryDeclaration } from './libraryApi';
+import { isJavaTypeAlias, knownLibraryDeclaration } from './libraryApi';
 import type { Frame } from './runtime';
-import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
+import type {
+  ClassSymbol,
+  FunctionSymbol,
+  MemberSymbol,
+  PropertySymbol,
+  TypeAliasSymbol,
+  TypeParameterSymbol,
+} from './symbols';
 import { VariableSymbol } from './symbols';
 import {
   anyType,
@@ -55,6 +64,8 @@ export const DEFAULT_IMPORTS = [
   'kotlin.text',
   'java.lang',
   'kotlin.jvm',
+  // Where the prelude declares Function0 to Function22, which kotlinc names without an import as kotlin's built-ins.
+  'kotlin.jvm.functions',
 ];
 
 /** The names a file sees beyond its own scopes: its package, its imports, and the default imports. */
@@ -62,11 +73,19 @@ export interface FileContext {
   packageName: string;
   isLibrary: boolean;
   importedClasses: Map<string, ClassSymbol>;
+  importedTypeAliases: Map<string, TypeAliasSymbol>;
+  /**
+   * The enum entries the file imports by name, by the name it uses, which an alias may give, as `RED` of
+   * `import demo.Color.RED`: their enum class and their own name.
+   */
+  importedEnumEntries: Map<string, { owner: ClassSymbol; entry: string }>;
   importedAnnotations: Map<string, string>;
   importedFunctions: Map<string, FunctionSymbol[]>;
   importedProperties: Map<string, PropertySymbol[]>;
   /** The packages of the file's `import p.*`, which come before the default imports. */
   starPackages: string[];
+  /** The opt-in markers that `@file:OptIn` opts the whole file in to. */
+  optIns: ClassSymbol[];
 }
 
 /** A member found on a receiver's type, with the type arguments that the receiver gives its class. */
@@ -108,29 +127,55 @@ export abstract class CompilerCore {
       this.unavailable(row, `Java のクラスの直接の利用（${qualified}）`);
     }
     if (known) this.unavailable(row, known);
+    const unavailableName = unavailableFunction(path);
+    if (unavailableName) this.unavailable(row, unavailableName);
   }
 
-  protected validateAnnotations(scope: Scope, modifiers: Modifiers): void {
+  /** Checks the annotations of a declaration written at `site`, as kotlinc does. */
+  protected validateAnnotations(scope: Scope, modifiers: Modifiers, site: AnnotationSite): void {
     if (this.file.isLibrary) return;
-    for (const { qualifiedName, name, row, markers } of modifiers.annotations) {
-      if (!qualifiedName && this.findClass(scope, name))
-        this.error(row, `${name} はアノテーションクラスではありません。`);
-      for (const marker of markers ?? []) this.validateAnnotationMarker(scope, marker.path, marker.row);
+    this.checkAnnotations(scope, modifiers.annotations, site);
+  }
+
+  protected abstract checkAnnotations(scope: Scope, annotations: Annotation[], site: AnnotationSite): void;
+
+  /** The opt-in markers among annotations: annotation classes that `@RequiresOptIn` marks with an error level. */
+  protected abstract optInMarkersOf(scope: Scope, annotations: Annotation[]): ClassSymbol[];
+
+  /** The markers annotations opt their declaration in to: those `@OptIn` names and the markers it carries. */
+  protected abstract optInsOf(scope: Scope, annotations: Annotation[]): ClassSymbol[];
+
+  /** The opt-in markers the code being compiled is opted in to. */
+  protected currentOptIns: ReadonlySet<ClassSymbol> = new Set();
+
+  protected withOptIns<T>(added: Iterable<ClassSymbol>, run: () => T): T {
+    const saved = this.currentOptIns;
+    this.currentOptIns = new Set([...saved, ...added]);
+    try {
+      return run();
+    } finally {
+      this.currentOptIns = saved;
     }
   }
 
-  private validateAnnotationMarker(scope: Scope, path: string[], row: number): void {
-    const name = path.join('.');
-    const qualified = path.length > 1;
-    const ordinary = qualified ? this.findQualifiedClass(path) : this.findClass(scope, name);
-    const libraryName = qualified
-      ? name
-      : (this.file.importedAnnotations.get(name) ?? knownLibraryDeclaration(name, this.visiblePackageLevels()));
-    if (!ordinary && libraryName && isKnownLibraryAnnotation(libraryName)) return;
-    if (ordinary || (libraryName && knownLibraryDeclaration(libraryName, [])))
-      this.error(row, `${name} はアノテーションクラスではありません。`);
-    this.error(row, `${name} 型が見つかりません。`);
+  /** The markers code in a class is opted in to: the file's, and each enclosing class's. */
+  protected classOptIns(cls: ClassSymbol | undefined): ClassSymbol[] {
+    const optIns = [...this.file.optIns];
+    for (let current = cls; current; current = current.outer) optIns.push(...current.optIns);
+    return optIns;
   }
+
+  /** Rejects a use of a declaration that an opt-in marker marks, in code that is not opted in to the marker. */
+  protected requireOptIn(markers: readonly ClassSymbol[], name: string, row: number): void {
+    if (this.file.isLibrary) return;
+    for (const marker of markers) {
+      if (!this.currentOptIns.has(marker))
+        this.error(row, `${name} を使うには、@OptIn(${marker.name}::class) か @${marker.name} が必要です。`);
+    }
+  }
+
+  /** The level of a declaration's `@Deprecated`, whose `ERROR` and `HIDDEN` reject uses of the declaration. */
+  protected abstract deprecationLevel(scope: Scope, modifiers: Modifiers): 'WARNING' | 'ERROR' | 'HIDDEN' | undefined;
 
   protected packageScope(name: string): PackageScope {
     let scope = this.packages.get(name);
@@ -159,6 +204,9 @@ export abstract class CompilerCore {
         params: ref.params.map((param) => this.resolveType(scope, param)),
         returnType: this.resolveType(scope, ref.returnType),
         nullable: ref.nullable,
+        isSuspend: ref.isSuspend || undefined,
+        contextTypes:
+          ref.contextTypes.length > 0 ? ref.contextTypes.map((each) => this.resolveType(scope, each)) : undefined,
       };
     }
     const [first, ...rest] = ref.parts;
@@ -166,15 +214,20 @@ export abstract class CompilerCore {
       const param = this.findTypeParameter(scope, first.name);
       if (param) {
         if (first.args.length > 0) this.error(ref.row, `型引数 ${first.name} には型引数を書けません。`);
+        if (ref.definitelyNonNull) return { kind: 'param', param, nullable: false, definitelyNonNull: true };
         return { kind: 'param', param, nullable: ref.nullable };
       }
+      if (ref.definitelyNonNull) this.error(ref.row, '& Any の前には、型引数を書いてください。');
       if (first.name === 'Nothing' && !this.findClass(scope, 'Nothing')) {
         return ref.nullable ? nullable(NOTHING) : NOTHING;
       }
+      const alias = this.findTypeAlias(scope, first.name);
+      if (alias) return this.expandTypeAlias(scope, alias, first.args, ref.nullable, ref.row);
     }
     const local = this.findClass(scope, first.name);
     const names = ref.parts.map((part) => part.name);
-    const qualified = local ? undefined : this.findQualifiedClass(names);
+    const found = local ? undefined : this.findQualifiedClass(names);
+    const qualified = found && this.canName(found) ? found : undefined;
     let cls = local ?? qualified;
     if (!cls) {
       const path = names.join('.');
@@ -192,7 +245,10 @@ export abstract class CompilerCore {
         : allowsBareClass && argumentsPart.args.length === 0 && !isQualifier
           ? cls.typeParameters.map((): TypeArgument => ({ variance: 'star' }))
           : this.resolveArguments(scope, cls, argumentsPart.args, ref.row);
-    for (const part of ref.parts.slice(consumed)) {
+    for (const [index, part] of ref.parts.slice(consumed).entries()) {
+      const nestedAlias = cls.typeAliases.get(part.name);
+      if (nestedAlias && index === ref.parts.length - consumed - 1)
+        return this.expandTypeAlias(scope, nestedAlias, part.args, ref.nullable, ref.row);
       const nested: ClassSymbol | undefined = cls.nested.get(part.name);
       if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
       cls = nested;
@@ -202,6 +258,18 @@ export abstract class CompilerCore {
           : this.resolveArguments(scope, cls, part.args, ref.row);
     }
     this.checkNestedAccessible(scope, cls, ref.row);
+    this.requireOptIn(cls.optInMarkers, cls.name, ref.row);
+    // A program's FunctionN<P..., R> is the function type (P...) -> R, as kotlinc reads it, which lambdas then fit.
+    const arity = this.core.functionInterfaces.indexOf(cls);
+    const types = args.flatMap((argument) => (argument.variance === 'star' ? [] : [argument.type]));
+    if (arity !== -1 && !this.file.isLibrary && types.length === args.length)
+      return {
+        kind: 'function',
+        receiver: undefined,
+        params: types.slice(0, -1),
+        returnType: types.at(-1) as KType,
+        nullable: ref.nullable,
+      };
     return { kind: 'class', cls, args, nullable: ref.nullable };
   }
 
@@ -255,17 +323,83 @@ export abstract class CompilerCore {
     return undefined;
   }
 
+  /** A type alias's expansion with the type arguments of a use, as `StrMap<Int>` is `Map<String, Int>`. */
+  protected expandTypeAlias(
+    scope: Scope,
+    alias: TypeAliasSymbol,
+    refs: TypeProjectionRef[],
+    isNullable: boolean,
+    row: number
+  ): KType {
+    const expansion = this.typeAliasExpansion(alias, row);
+    if (refs.length !== alias.typeParameters.length) this.error(row, `型の別名 ${alias.name} の型引数の数が違います。`);
+    const substitution = new Map<TypeParameterSymbol, KType>();
+    for (const [index, projection] of refs.entries()) {
+      if (projection.star || projection.variance)
+        this.error(row, `型の別名 ${alias.name} の型引数には、* や in・out を書けません。`);
+      substitution.set(alias.typeParameters[index], this.resolveType(scope, projection.type));
+    }
+    const type = substitute(expansion, substitution);
+    return isNullable ? nullable(type) : type;
+  }
+
+  protected typeAliasExpansion(alias: TypeAliasSymbol, row: number): KType {
+    if (alias.expansion) return alias.expansion;
+    if (alias.isResolving) this.error(row, `型の別名 ${alias.name} が自分自身を使っています。`);
+    alias.isResolving = true;
+    try {
+      const { typeParameters, expansion } = alias.resolve();
+      alias.typeParameters = typeParameters;
+      alias.expansion = expansion;
+      return expansion;
+    } finally {
+      alias.isResolving = false;
+    }
+  }
+
+  /**
+   * The type alias a simple name stands for, when no class of the name is nearer: in the classes around the scope, then
+   * the file's explicit imports, its package, and its star imports.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  protected findTypeAlias(scope: Scope | undefined, name: string): TypeAliasSymbol | undefined {
+    if (findClassInScope(scope, name)) return undefined;
+    for (let current = scope; current; current = current.parent) {
+      for (let cls = current.staticClass; cls; cls = cls.outer) {
+        const nested = cls.typeAliases.get(name);
+        if (nested) return nested;
+      }
+    }
+    const imported = this.file.importedTypeAliases.get(name);
+    if (imported) return imported;
+    if (this.file.importedClasses.has(name)) return undefined;
+    const own = this.packages.get(this.file.packageName)?.typeAliases.get(name);
+    if (own) return own;
+    if (this.packages.get(this.file.packageName)?.classes.has(name)) return undefined;
+    for (const packageName of this.file.starPackages) {
+      const found = this.packages.get(packageName)?.typeAliases.get(name);
+      if (found) return found;
+      if (this.packages.get(packageName)?.classes.has(name)) return undefined;
+    }
+    return undefined;
+  }
+
   /**
    * The class a simple name stands for: in the scopes, then the file's explicit imports, its package, its star imports,
-   * and the defaults.
+   * and the defaults. A type alias of a class stands for that class.
    */
   findClass(scope: Scope | undefined, name: string): ClassSymbol | undefined {
+    const alias = this.findTypeAlias(scope, name);
+    if (alias) {
+      const expansion = resolved(this.typeAliasExpansion(alias, alias.row));
+      return expansion.kind === 'class' ? expansion.cls : undefined;
+    }
     const local = findClassInScope(scope, name);
     if (local) return local;
     const imported = this.file.importedClasses.get(name);
     if (imported) return imported;
     const own = this.packages.get(this.file.packageName)?.classes.get(name);
-    if (own) return own;
+    if (own && this.canName(own)) return own;
     const fromWildcard = this.findClassInPackages(name, this.file.starPackages);
     if (fromWildcard) return fromWildcard;
     const omittedJava = this.file.starPackages.filter(isJavaPath);
@@ -278,9 +412,17 @@ export abstract class CompilerCore {
   private findClassInPackages(name: string, packages: string[]): ClassSymbol | undefined {
     for (const packageName of packages) {
       const found = this.packages.get(packageName)?.classes.get(name);
-      if (found) return found;
+      if (found && this.canName(found)) return found;
     }
     return undefined;
+  }
+
+  /**
+   * Whether the code compiling may name a class: a program sees only the library's public classes, as code outside a
+   * module sees, so the internal classes that implement the library, as java.util.TreeMap, read as unknown to it.
+   */
+  protected canName(cls: ClassSymbol): boolean {
+    return this.file.isLibrary || !cls.isLibrary || cls.visibility === 'public';
   }
 
   /** The class a fully qualified name such as `kotlin.collections.List` stands for. */
@@ -448,6 +590,15 @@ export abstract class CompilerCore {
     return this.file.starPackages.some((packageName) => this.packages.get(packageName)?.classes.has(name)) ? 2 : 3;
   }
 
+  /** The local functions of a name that a scope sees, innermost first, which hide the other functions of the name. */
+  protected localFunctions(scope: Scope, name: string): FunctionSymbol[] {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      const found = current.functions.get(name);
+      if (found && found.length > 0) return found;
+    }
+    return [];
+  }
+
   protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       const found = current.variables.get(name);
@@ -516,6 +667,15 @@ export abstract class CompilerCore {
 
   /** Reads an implicit receiver, which a lambda inside the function that has it captures. */
   protected receiverAccess(context: FunctionContext, receiver: ReceiverSymbol): Eval {
+    const path = receiver.outerPath;
+    if (receiver.context === context && path)
+      return (frame) => {
+        let value = frame.thisValue;
+        for (const inner of path) value = (value as KObject).fields[inner.outerSlot as number];
+        return value;
+      };
+    const { slot } = receiver;
+    if (receiver.context === context && slot !== undefined) return (frame) => frame.locals[slot] as Value;
     if (receiver.context === context) return (frame) => frame.thisValue;
     const index = context.captureIndex(receiver);
     return (frame) => frame.captured[index] as Value;
@@ -526,6 +686,16 @@ export abstract class CompilerCore {
     if (target === context) return (frame) => frame;
     const index = context.captureIndex(target);
     return (frame) => frame.captured[index] as Frame;
+  }
+
+  /**
+   * Makes code that calls a local function or creates a local class elsewhere than where it is declared capture what
+   * the declaration made, as it captures a variable, so that a lambda outliving the declaring block keeps it.
+   */
+  protected useLocalEnv(context: FunctionContext, envVariable: VariableSymbol | undefined): void {
+    if (!envVariable || envVariable.owner === context) return;
+    const index = context.captureIndex(envVariable);
+    (context.info.localEnvs ??= new Map()).set(envVariable, index);
   }
 
   /** Builds what a lambda captures, as the function creating it sees each captured thing. */

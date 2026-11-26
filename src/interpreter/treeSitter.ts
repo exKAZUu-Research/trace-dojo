@@ -195,7 +195,9 @@ export function isExplainedError(node: Node, isBenignError: (node: Node) => bool
 /** The error a node is itself: a token the parser inserted, or text it could not parse. */
 function ownError(node: Node, missingTokenNames: Record<string, string>): SourceDiagnostic | undefined {
   if (node.isMissing) {
-    return { row: rowBeforeMissing(node), message: `「${missingTokenNames[node.type] ?? node.type}」が足りません。` };
+    // An own name only, as a token type such as `constructor` would otherwise find Object.prototype's.
+    const name = Object.hasOwn(missingTokenNames, node.type) ? missingTokenNames[node.type] : node.type;
+    return { row: rowBeforeMissing(node), message: `「${name}」が足りません。` };
   }
   return node.isError ? { row: node.startPosition.row, message: '書き方に誤りがあります。' } : undefined;
 }

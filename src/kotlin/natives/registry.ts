@@ -1,5 +1,5 @@
 import type { NativeFunction, NativeProperty } from '../nativeTypes';
-import type { Frame } from '../runtime';
+import type { Frame, SuspendInvoker } from '../runtime';
 import type { ClassSymbol } from '../symbols';
 import { KObject, type Value } from '../values';
 
@@ -10,6 +10,13 @@ export const nativeProperties = new Map<string, NativeProperty>();
 export function defineNative(key: string, native: NativeFunction): void {
   if (nativeFunctions.has(key)) throw new Error(`The native ${key} is defined twice`);
   nativeFunctions.set(key, native);
+}
+
+/** The natives of the prelude's `external suspend` functions, which suspend where their generators yield. */
+export const suspendNatives = new Map<string, SuspendInvoker>();
+
+export function defineSuspendNative(key: string, native: SuspendInvoker): void {
+  suspendNatives.set(key, native);
 }
 
 export function defineNativeProperty(key: string, get: NativeProperty['get'], set?: NativeProperty['set']): void {
@@ -41,4 +48,33 @@ export function newItems(frame: Frame, kotlinName: string, items: Value[]): KObj
 
 export function throwError(frame: Frame, qualifiedName: string, message?: string): never {
   return frame.runtime.throwError(frame, qualifiedName, message);
+}
+
+/**
+ * How an object of a library class shows in a trace, which the class declares when its fields are how it is
+ * implemented rather than what it holds: the elements of an array, or a map's entries.
+ */
+export type TraceShape = { kind: 'array'; items: Value[] } | { kind: 'map'; entries: { key: Value; value: Value }[] };
+
+const traceShapes = new Map<string, (object: KObject) => TraceShape | undefined>();
+
+/**
+ * Declares how the objects of a library class, by its Kotlin name, show in a trace; an object for which the
+ * declaration gives no shape shows as its fields.
+ */
+export function defineTraceShape(kotlinName: string, shape: (object: KObject) => TraceShape | undefined): void {
+  traceShapes.set(kotlinName, shape);
+}
+
+export function traceShapeOf(object: KObject): TraceShape | undefined {
+  return traceShapes.get(object.cls.kotlinName)?.(object);
+}
+
+/** A field of an object of a prelude class, by the name its declaration gives it. */
+export function fieldValue(object: KObject, name: string): Value {
+  for (let cls: ClassSymbol | undefined = object.cls; cls; cls = cls.superclass?.cls) {
+    const field = cls.ownFields.find((property) => property.name === name);
+    if (field) return object.fields[field.slot as number] as Value;
+  }
+  throw new Error(`The class ${object.cls.name} has no field ${name}`);
 }

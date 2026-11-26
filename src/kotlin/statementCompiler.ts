@@ -1,11 +1,14 @@
+import { annotationSite } from './annotationSites';
 // code-gauge-allow-file fileNcss -- One method per kind of Kotlin statement and control structure.
 import type {
   AssignmentStatement,
   Block,
+  ClassDecl,
   DestructuringDecl,
   DoWhileStatement,
   Expression,
   ForStatement,
+  FunctionDecl,
   PropertyDecl,
   Statement,
   WhenCondition,
@@ -39,10 +42,12 @@ import { assignedNames, localRefinement, refineLocalType, remainingWrites } from
 import { valueEquals } from './format';
 import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
+import { framedInstanceTest } from './reified';
 import { needsSiblingHint, siblingResultType } from './resultInference';
 import { type Frame, LoopSignal, UNASSIGNED } from './runtime';
+import { isHiddenSubject } from './suspendRewrites';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
-import { checkedRead, instanceTest } from './typeChecks';
+import { checkedRead } from './typeChecks';
 import { commonSupertype, isSubtype } from './typeRelations';
 import {
   type ClassType,
@@ -57,7 +62,7 @@ import {
 import { Boxed, Cell, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 import { WhenCoverage } from './whenCoverage';
 
-type Exec = (frame: Frame) => void;
+export type Exec = (frame: Frame) => void;
 
 /** Learners answer the values of primitive types and strings, so a loop variable of those records a step. */
 const ANSWERED_CLASSES = new Set([
@@ -202,28 +207,59 @@ export abstract class StatementCompiler extends OperatorCompiler {
         if (!this.recordsStepOf(statement.expression)) return exec;
         return this.withStep(statement.row, exec, compiled.isCall === true || compiled.isCreation === true);
       }
-      case 'function':
+      case 'function': {
+        return this.compileLocalFunction(scope, context, statement);
+      }
       case 'class': {
-        return this.unavailable(
-          statement.row,
-          statement.kind === 'function' ? '関数の中での関数の宣言' : '関数の中でのクラスの宣言'
-        );
+        return this.compileLocalClass(scope, context, statement);
+      }
+      case 'typeAlias': {
+        return this.error(statement.row, '型の別名（typealias）は、関数の中には書けません。');
       }
     }
   }
 
   // Declarations.
 
+  protected abstract checkLateinitType(type: KType | undefined, row: number): void;
+
+  /** Declares a function in a function body, whose body sees the variables declared before it. */
+  protected abstract compileLocalFunction(scope: Scope, context: FunctionContext, decl: FunctionDecl): Exec;
+
+  /** Declares a class in a function body, whose members see the variables declared before it. */
+  protected abstract compileLocalClass(scope: Scope, context: FunctionContext, decl: ClassDecl): Exec;
+
   private compileLocalProperty(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
-    this.validateAnnotations(scope, statement.modifiers);
+    return this.withOptIns(this.optInsOf(scope, statement.modifiers.annotations), () =>
+      this.compileLocalPropertyOpted(scope, context, statement)
+    );
+  }
+
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private compileLocalPropertyOpted(scope: Scope, context: FunctionContext, statement: PropertyDecl): Exec {
+    this.validateAnnotations(
+      scope,
+      statement.modifiers,
+      annotationSite(['LOCAL_VARIABLE'], statement.delegate ? ['delegate'] : [])
+    );
     const { row, name } = statement;
     if (statement.getter || statement.setter) this.error(row, 'ローカル変数には get・set を書けません。');
+    const misplaced = [...statement.modifiers.keywords].find((keyword) => keyword !== 'lateinit');
+    if (misplaced) this.error(row, `ローカル変数には ${misplaced} 修飾子を付けられません。`);
+    const isLateinit = statement.modifiers.keywords.has('lateinit');
     const declared = statement.type ? this.resolveType(scope, statement.type) : undefined;
+    if (isLateinit) {
+      if (!statement.isVar) this.error(row, 'lateinit は var にだけ付けられます。');
+      if (statement.initializer || statement.delegate) this.error(row, 'lateinit の変数には初期値を書けません。');
+      this.checkLateinitType(declared, row);
+    }
     if (statement.delegate) return this.compileLocalDelegate(scope, context, statement, declared);
     if (!statement.initializer) {
       if (!declared) this.error(row, `変数 ${name} の型を書くか、初期値を書いてください。`);
       const variable = this.newVariable(scope, context, name, declared, statement.isVar, row);
       variable.awaitsValue = !statement.isVar;
+      variable.isLateinit = isLateinit;
       return (frame) => {
         if (variable.isCell) frame.locals[variable.slot] = new Cell(undefined, false);
       };
@@ -239,6 +275,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.flow.maybeAssigned.add(variable);
     if (unnarrowed) this.flow.narrowed.set(keyOf(variable), initializer.type);
     if (!declared) this.narrowToCase(keyOf(variable), initializer);
+    // A suspend function's `when (v)` tests a variable holding `v`, whose tests smart-cast `v` as kotlinc's do.
+    if (isHiddenSubject(name)) variable.subjectKey = initializer.stableKey;
     const write = this.variableAccess(context, variable).write;
     return this.withStep(
       row,
@@ -276,7 +314,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const held = new Handoff<{ delegate: Value; value?: Value }>();
     const delegateCompiled: Compiled = { type: delegate.type, repr: delegate.repr, eval: () => held.get().delegate };
     const args = [this.nullArgument(row), this.propertyReference(scope, name, row)];
-    const getter = this.compileDelegateCall(scope, context, delegateCompiled, 'getValue', args, row);
+    const getter = this.compileDelegateCall(scope, context, delegateCompiled, 'getValue', args, row, declared);
     const type = declared ?? getter.type;
     if (declared && !isSubtype(getter.type, declared)) this.error(row, typeMismatchMessage(declared, getter.type));
     const evaluateGet = convertRepr(getter.eval, getter.repr, reprOf(this.core, type));
@@ -331,9 +369,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     delegate: Compiled,
     name: string,
     args: ArgumentSyntax[],
-    row: number
+    row: number,
+    expected?: KType
   ): Compiled {
-    return this.compileOperatorCall(scope, context, delegate, name, args, row, `by（${name}）`);
+    // A getValue gives the property's declared type, which may infer its type arguments, as a map's V1 does.
+    return this.compileOperatorCall(scope, context, delegate, name, args, row, `by（${name}）`, expected);
   }
 
   private compileDestructuring(scope: Scope, context: FunctionContext, statement: DestructuringDecl): Exec {
@@ -360,18 +400,16 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const evaluate = initializer.eval;
     // Releasing the initializer lets the collector remove what no component keeps, such as a skipped `_` turtle.
     const releasesHolder = initializer.repr === 'ref';
-    return this.withStep(
-      row,
-      (frame) => {
-        holderWrite(frame, evaluate(frame));
-        try {
-          for (const write of writes) write?.(frame);
-        } finally {
-          if (releasesHolder) holderWrite(frame, NULL);
-        }
-      },
-      false
-    );
+    const exec: Exec = (frame) => {
+      holderWrite(frame, evaluate(frame));
+      try {
+        for (const write of writes) write?.(frame);
+      } finally {
+        if (releasesHolder) holderWrite(frame, NULL);
+      }
+    };
+    if (statement.isParameter) return exec;
+    return this.withStep(row, exec, false);
   }
 
   // Assignments.
@@ -550,7 +588,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   ): Place {
     if (target.receiver.kind === 'super') {
       if (target.isSafe) this.error(row, 'super には ?. を使えません。');
-      const { property, receiver } = this.resolveSuperProperty(scope, context, target.name, row);
+      const { property, receiver } = this.resolveSuperProperty(scope, context, target.name, row, target.receiver);
       return this.propertyPlace(property, receiver, row, scope);
     }
     const qualified = this.compileQualifier(scope, target.receiver);
@@ -833,12 +871,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
 
   // Loops.
 
-  private newLoop(scope: Scope): LoopContext {
+  private newLoop(scope: Scope, label: string | undefined): LoopContext {
     const outerVals = new Set<VariableSymbol>();
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (const variable of current.variables.values()) if (!variable.isVar) outerVals.add(variable);
     }
-    return { identity: {}, outerVals, breaks: [], continues: [], valWrites: new Map() };
+    return { identity: {}, label, outerVals, breaks: [], continues: [], valWrites: new Map() };
   }
 
   private recordAssignment(context: FunctionContext, target: VariableSymbol | PropertySymbol, row: number): void {
@@ -910,7 +948,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     normalExit.isDead ||= condition.compiled.constant === true;
     this.applyNarrowing(condition.whenTrue);
     this.flow.isDead ||= condition.compiled.constant === false;
-    const loop = this.newLoop(scope);
+    const loop = this.newLoop(scope, statement.label);
     const body = this.compileLoopBody(scope, context, loop, statement.body);
     this.checkLoopBackEdge(loop, Flow.merge([this.flow, ...loop.continues]));
     this.flow = Flow.merge([normalExit, ...loop.breaks]);
@@ -927,7 +965,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private compileDoWhile(scope: Scope, context: FunctionContext, statement: DoWhileStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     this.forgetAssignedIn(scope, statement.condition);
-    const loop = this.newLoop(scope);
+    const loop = this.newLoop(scope, statement.label);
     // The condition sees the body's variables, as Kotlin's scoping of do-while does.
     const bodyScope = new Scope(scope, context);
     context.loops.push(loop);
@@ -976,7 +1014,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const iterable = this.compileExpression(scope, context, statement.iterable);
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     const loopScope = new Scope(scope, context);
-    const loop = this.newLoop(scope);
+    const loop = this.newLoop(scope, statement.label);
     const firstSlot = context.info.slotCount;
     const progression = this.progressionOf(iterable.type);
     const { elementType, elementRepr, start, next } = progression
@@ -1293,6 +1331,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity -- exhaustiveness selects the result type and participates in branch flow.
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,
@@ -1301,7 +1340,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
     use: ExpressionUse
   ): Compiled {
     const { row } = expression;
-    const subject = expression.subject ? this.compileExpression(scope, context, expression.subject) : undefined;
+    if (expression.subjectVariable) scope = new Scope(scope, context);
+    const subject = expression.subject && this.compileWhenSubject(scope, context, expression);
     const subjectSlot = subject ? context.allocate('\0subject', subject.type, false) : -1;
     const subjectValue: Compiled | undefined = subject && {
       type: subject.type,
@@ -1316,8 +1356,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
     let hasElse = false;
     const heads = expression.entries.map((entry) => {
       if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
-      hasElse = entry.conditions.length === 0;
-      return this.compileWhenEntryHead(scope, context, subjectValue, entry, covered);
+      hasElse = entry.conditions.length === 0 && !entry.guard;
+      return entry.guard
+        ? this.compileGuardedEntryHead(scope, context, subjectValue, entry)
+        : this.compileWhenEntryHead(scope, context, subjectValue, entry, covered);
     });
     const afterHeads = this.flow;
     const branches = this.compileResultBranches(
@@ -1357,6 +1399,71 @@ export abstract class StatementCompiler extends OperatorCompiler {
         compiledEntries
       ),
     };
+  }
+
+  /** The subject of `when`, which `when (val x = ...)` also stores in its variable, whose smart casts the branches see. */
+  private compileWhenSubject(
+    scope: Scope,
+    context: FunctionContext,
+    expression: Extract<Expression, { kind: 'when' }>
+  ): Compiled {
+    const initializer = this.compileExpression(scope, context, expression.subject as Expression);
+    const declaration = expression.subjectVariable;
+    if (!declaration) return initializer;
+    const declared = declaration.type ? this.resolveType(scope, declaration.type) : undefined;
+    const type = declared ?? this.inferredVariableType(initializer);
+    const value = this.expectType(initializer, type, declaration.row);
+    const variable = this.newVariable(scope, context, declaration.name, type, false, declaration.row);
+    this.flow.assigned.add(variable);
+    this.flow.maybeAssigned.add(variable);
+    if (!declared) this.narrowToCase(keyOf(variable), initializer);
+    const { write } = this.variableAccess(context, variable);
+    const read = this.readVariable(scope, context, variable, declaration.row);
+    const readEval = read.eval;
+    return {
+      ...read,
+      eval: (frame) => {
+        write(frame, value(frame));
+        return readEval(frame);
+      },
+    };
+  }
+
+  /** Checks where a when's branch may have an `if` guard, as kotlinc does. */
+  protected checkGuardedEntry(
+    hasSubject: boolean,
+    entry: Extract<Expression, { kind: 'when' }>['entries'][number]
+  ): void {
+    if (!hasSubject) this.error(entry.row, 'if のガードは、主語のある when にだけ書けます。');
+    if (entry.conditions.length > 1)
+      this.error(entry.conditions[1].row, 'if のガードがある分岐には、条件を1つだけ書けます。');
+  }
+
+  /**
+   * The head of a branch with a guard, as `is Int if x > 0 ->` or `else if c ->`, which matches when its condition and
+   * then its guard hold. The guard may fail after the condition matched, so the branch covers no case and leaves the
+   * later branches no smart cast.
+   */
+  private compileGuardedEntryHead(
+    scope: Scope,
+    context: FunctionContext,
+    subject: Compiled | undefined,
+    entry: Extract<Expression, { kind: 'when' }>['entries'][number]
+  ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
+    this.checkGuardedEntry(subject !== undefined, entry);
+    const before = this.flow.copy();
+    const [condition] = entry.conditions;
+    let matches: (frame: Frame) => boolean = alwaysMatches;
+    if (condition) {
+      const compiled = this.compileWhenCondition(scope, context, subject, condition, new WhenCoverage());
+      matches = compiled.test;
+      this.applyNarrowing(compiled.whenTrue);
+    }
+    const guard = this.compileCondition(scope, context, entry.guard as Expression);
+    const flow = this.withNarrowing(this.flow, guard.whenTrue);
+    this.flow = Flow.merge([before, this.flow]);
+    const guardEval = guard.compiled.eval;
+    return { tests: [(frame) => matches(frame) && (guardEval(frame) as boolean)], flow };
   }
 
   private compileWhenEntryHead(
@@ -1418,14 +1525,14 @@ export abstract class StatementCompiler extends OperatorCompiler {
     }
     if (condition.kind === 'is') {
       const type = this.checkableType(scope, condition.type, condition.row, subject.type);
-      const test = instanceTest(this.core, type);
+      const test = framedInstanceTest(this.core, type);
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = this.typeTestNarrowing(subject, type);
       covered.coverTypeCases(subject.type, type, condition.negated, this.core.boolean);
       const exclusion = isExclusion(subject, type);
       return condition.negated
-        ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
-        : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
+        ? { test: (frame) => !test(frame, evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
+        : { test: (frame) => test(frame, evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
     }
     if (condition.kind === 'in') return this.compileWhenIn(scope, context, subject, condition);
     return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered.cases);
@@ -1688,7 +1795,12 @@ export abstract class StatementCompiler extends OperatorCompiler {
     scope: Scope,
     context: FunctionContext,
     clause: Extract<Expression, { kind: 'try' }>['catches'][number]
-  ): { scope: Scope; test: (value: Value) => boolean; write: (frame: Frame, value: Value) => void; slot: number } {
+  ): {
+    scope: Scope;
+    test: (frame: Frame, value: Value) => boolean;
+    write: (frame: Frame, value: Value) => void;
+    slot: number;
+  } {
     const catchScope = new Scope(scope, context);
     const type = this.resolveType(scope, clause.type);
     if (!isSubtype(type, this.core.throwable.type))
@@ -1696,7 +1808,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const variable = this.newVariable(catchScope, context, clause.name, type, false, clause.row);
     this.flow.assigned.add(variable);
     const { write } = this.variableAccess(context, variable);
-    return { scope: catchScope, test: instanceTest(this.core, type), write, slot: variable.slot };
+    return { scope: catchScope, test: framedInstanceTest(this.core, type), write, slot: variable.slot };
   }
 
   private compileFinally(
@@ -1755,6 +1867,10 @@ const ASSIGN_OPERATORS = {
 } as const;
 
 export type { ClassType };
+
+function alwaysMatches(): boolean {
+  return true;
+}
 
 function typeForBranch(block: Block, expected: KType | undefined, inferred: KType | undefined): KType | undefined {
   return inferred && isBareCall(block) ? inferred : expected;

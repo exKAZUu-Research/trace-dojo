@@ -6,6 +6,7 @@ import {
   ClassSymbol,
   type FunctionSymbol,
   type PropertySymbol,
+  type TypeAliasSymbol,
   type TypeParameterSymbol,
   VariableSymbol,
 } from './symbols';
@@ -46,6 +47,11 @@ export interface Compiled {
   whenNonNull?: Map<string, KType>;
   /** For a condition, the smart casts that hold when it is true and when it is false. */
   narrowing?: { whenTrue: Map<string, KType>; whenFalse: Map<string, KType> };
+  /**
+   * Whether the value is a function whose calls suspend: a lambda passed to an inline function that makes suspend
+   * calls, or a function parameter of an inline function's suspend version.
+   */
+  suspending?: boolean;
 }
 
 /** The classes of the standard library that the compiler gives meaning to. */
@@ -69,6 +75,8 @@ export interface Core {
   map: ClassSymbol;
   mutableMap: ClassSymbol;
   function: ClassSymbol;
+  /** `kotlin.jvm.functions.Function0` and the others, by their number of parameters. */
+  functionInterfaces: ClassSymbol[];
   enum: ClassSymbol;
   intRange: ClassSymbol;
   longRange: ClassSymbol;
@@ -82,6 +90,7 @@ export interface Core {
 
 export class PackageScope {
   readonly classes = new Map<string, ClassSymbol>();
+  readonly typeAliases = new Map<string, TypeAliasSymbol>();
   readonly functions = new Map<string, FunctionSymbol[]>();
   readonly properties = new Map<string, PropertySymbol[]>();
 
@@ -106,12 +115,22 @@ export class ReceiverSymbol {
     /** The class whose `this` the receiver is, for a class's members. */
     readonly cls: ClassSymbol | undefined,
     /** The name `this@name` refers to it by: its class's, or its extension function's. */
-    readonly label?: string
+    readonly label?: string,
+    /**
+     * For the instance of a class around an inner class, the inner classes whose outer instances lead to it from the
+     * context's `this`, innermost first.
+     */
+    readonly outerPath?: readonly ClassSymbol[]
   ) {}
+
+  /** For the dispatch receiver of an extension declared in a class, the slot of the frame that holds it. */
+  slot: number | undefined;
 }
 
 export interface LoopContext {
   identity: object;
+  /** The label of `label@ for (...)`, which `break@label` and `continue@label` name. */
+  label: string | undefined;
   breaks: Flow[];
   continues: Flow[];
   valWrites: Map<VariableSymbol | PropertySymbol, number>;
@@ -139,9 +158,24 @@ export class FunctionContext {
   /** Gives the returns compiled before an inferred result type the representation that type settles on. */
   readonly inferredReturns: ((to: Repr) => void)[] = [];
   inlineLambda = false;
+  /** The name `return@label` leaves the context by: a function's name, or a lambda's label. */
+  label: string | undefined;
+  /** Whether the context is a suspend function's or lambda's, which may call suspend functions. */
+  isSuspend = false;
+  /**
+   * For a suspend context whose receiver is a sequence builder's scope, the scope's class: as the scope is
+   * `@RestrictsSuspension`, the context calls only the suspend functions that are its members or extensions.
+   */
+  restrictedScope: ClassSymbol | undefined;
+  /** For a `tailrec` function, the function and the calls in tail position of its body. */
+  tailrec: { symbol: FunctionSymbol; calls: ReadonlySet<Expression> } | undefined;
+  /** For a lambda, what its `return@label` must give and has given, which its result type joins. */
+  lambdaResult: { expected: KType | undefined; returnsUnit: boolean; returned: Compiled[] } | undefined;
   /** A discarded probe may retain open types until the enclosing argument reveals their positions. */
   allowOpenCallTypes: boolean;
   invokesExactlyOnce = false;
+  /** Whether the context is a probe's own, which stands in the place of the code it compiles only for its types. */
+  isProbeRoot = false;
   readonly inlineWrites = new Set<VariableSymbol>();
 
   constructor(
@@ -213,6 +247,8 @@ export class Scope {
   pendingWrites: ReadonlyMap<string, number> | undefined;
   readonly classes = new Map<string, ClassSymbol>();
   readonly typeParameters = new Map<string, TypeParameterSymbol>();
+  /** The functions declared in the scope's function body, which hide the other functions of their names. */
+  readonly functions = new Map<string, FunctionSymbol[]>();
   receiver: ReceiverSymbol | undefined;
   /** A class whose companion object's members and nested classes the scope's names reach. */
   staticClass: ClassSymbol | undefined;

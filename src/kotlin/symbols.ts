@@ -1,6 +1,6 @@
 import type { VISIBILITY_KEYWORDS } from './ast';
 import type { FunctionContext, ReceiverSymbol } from './compilerBase';
-import type { Frame, FunctionInfo, Invoker } from './runtime';
+import type { Frame, FunctionInfo, Invoker, SuspendInvoker } from './runtime';
 import type { ClassType, KType } from './types';
 import type { Value } from './values';
 
@@ -18,6 +18,22 @@ export class TypeParameterSymbol {
   ) {}
 }
 
+/** A `typealias`, which stands for its expansion with its type parameters replaced by the arguments of a use. */
+export class TypeAliasSymbol {
+  typeParameters: TypeParameterSymbol[] = [];
+  /** The type the alias stands for, resolved when first used. */
+  expansion: KType | undefined;
+  isResolving = false;
+  visibility: Visibility = 'public';
+
+  constructor(
+    readonly name: string,
+    readonly row: number,
+    /** Resolves the expansion in the scope of the declaration, after declaring the alias's type parameters. */
+    readonly resolve: () => { typeParameters: TypeParameterSymbol[]; expansion: KType }
+  ) {}
+}
+
 export type ClassSymbolKind = 'class' | 'interface' | 'object' | 'companion' | 'enum' | 'enumEntry';
 
 export interface EnumEntrySymbol {
@@ -26,12 +42,17 @@ export interface EnumEntrySymbol {
 }
 
 export class ClassSymbol {
+  /** For a class declared in a function body, the variable holding what its declaration made, which creating it reads. */
+  localEnv: VariableSymbol | undefined;
   typeParameters: TypeParameterSymbol[] = [];
   superclass: ClassType | undefined;
   interfaces: ClassType[] = [];
   readonly members = new Map<string, MemberSymbol[]>();
   readonly constructors: FunctionSymbol[] = [];
   readonly nested = new Map<string, ClassSymbol>();
+  readonly typeAliases = new Map<string, TypeAliasSymbol>();
+  /** For an enum class, the classes of its entries that have bodies, as `PLUS { ... }`, by the entries' names. */
+  readonly enumEntryClasses = new Map<string, ClassSymbol>();
   companion: ClassSymbol | undefined;
   enumEntries: EnumEntrySymbol[] = [];
   /** The subclasses of a sealed class, which `when` must cover to be exhaustive. */
@@ -45,6 +66,22 @@ export class ClassSymbol {
   isNative = false;
   /** Whether the class is a `fun interface`, which a lambda converts to. */
   isFunInterface = false;
+  /** Whether the class is declared in a function body, which `KClass.qualifiedName` does not name. */
+  isLocal = false;
+  /** Whether the class is an object expression's, which has no name. */
+  isAnonymous = false;
+  /** Whether the class is an `annotation class`. */
+  isAnnotation = false;
+  /** The opt-in markers on the class, as `@Exp` of `@RequiresOptIn annotation class Exp`, which its uses need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the class's code is opted in to: those its `@OptIn` names and those it carries. */
+  optIns: ClassSymbol[] = [];
+  /** Whether the class is `inner`, whose instances hold an instance of the class around it. */
+  isInner = false;
+  /** For an inner class, the slot of the field that holds the instance of the class around it. */
+  outerSlot: number | undefined;
+  /** For an annotation class, the annotations written on it, whose `@Target` and `@Repeatable` say where it applies. */
+  ownAnnotations: readonly { name: string; args?: readonly { value: unknown }[] }[] = [];
   visibility: Visibility = 'public';
   /** The number of fields each instance holds, its superclasses' first. */
   fieldCount = 0;
@@ -155,6 +192,8 @@ interface MemberBase {
 export class FunctionSymbol implements MemberBase {
   readonly kind = 'function';
   owner: ClassSymbol | undefined;
+  /** For a function declared in a function body, the variable holding what its declaration made, which calls read. */
+  localEnv: VariableSymbol | undefined;
   extensionReceiver: KType | undefined;
   typeParameters: TypeParameterSymbol[] = [];
   params: ParameterSymbol[] = [];
@@ -165,6 +204,32 @@ export class FunctionSymbol implements MemberBase {
   isOpen = false;
   isOverride = false;
   isInline = false;
+  /** The context parameters of `context(name: Type) fun f()`, which calls pass after the arguments. */
+  contextParameters: { name: string; type: KType }[] = [];
+  /**
+   * For a member extension, the index among the values a call passes of the instance of the class that declares it,
+   * which calls pass after the context arguments.
+   */
+  dispatchReceiverIndex: number | undefined;
+  /** Whether calls pass the type arguments of the function's reified type parameters after its arguments. */
+  passesTypeArguments = false;
+  /** The opt-in markers on the function, which its calls need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the function's code is opted in to. */
+  optIns: ClassSymbol[] = [];
+  /** Whether the function is `suspend`, which only coroutines and other suspend functions call. */
+  isSuspend = false;
+  /** Runs a suspend function as a coroutine's step, which suspends where the generator yields. */
+  invokeSuspend: SuspendInvoker | undefined;
+  /**
+   * For an inline function, the version that a coroutine calls with lambdas that suspend: a suspend function with
+   * the same body, whose calls of its function parameters suspend where the lambdas do.
+   */
+  suspendVersion: FunctionSymbol | undefined;
+  /** Whether the function is the suspend version of an inline function. */
+  isSuspendVersion = false;
+  /** Whether the function is `tailrec`, whose calls of itself in tail position reuse its frame. */
+  isTailrec = false;
   resolvesByLambdaResult = false;
   isDeprecatedError = false;
   isInfix = false;
@@ -215,6 +280,14 @@ export class PropertySymbol implements MemberBase {
   constantInitializer: Value | undefined;
   /** The visibility of a `var`'s setter, such as `private set`. */
   setterVisibility: Visibility = 'public';
+  /** The opt-in markers on the property, which its uses need. */
+  optInMarkers: ClassSymbol[] = [];
+  /** The markers the property's code is opted in to. */
+  optIns: ClassSymbol[] = [];
+  /** Whether the property is `lateinit`, whose read before its first assignment throws. */
+  isLateinit = false;
+  /** Whether the property is a `const val`, a compile-time constant. */
+  isConst = false;
 
   constructor(readonly name: string) {}
 }
@@ -240,7 +313,21 @@ export class VariableSymbol {
     | undefined;
   /** Whether the variable is a `val` declared without a value, which one assignment may give it later. */
   awaitsValue = false;
+  /** Whether the variable is a `lateinit var`, whose read before its first assignment throws. */
+  isLateinit = false;
+  /** Whether the variable is a context parameter, which calls needing a context of its type receive. */
+  isContextParameter = false;
+  /**
+   * Whether the variable is a function parameter of an inline function's suspend version, whose calls suspend when
+   * the lambda passed suspends.
+   */
+  suspendInvocable = false;
   isParameter = false;
+  /**
+   * For the variable that holds a `when` subject in a suspend function's rewrite, the key of the stable value the subject
+   * reads, which the variable's tests narrow as `when (v) { is String -> ... }` narrows `v`.
+   */
+  subjectKey: string | undefined;
 
   constructor(
     readonly name: string,

@@ -1,5 +1,5 @@
+import { annotationSite } from './annotationSites';
 import type { Expression, KotlinFile } from './ast';
-import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -10,18 +10,19 @@ import {
   type FunctionContext,
   type PackageScope,
   reprOf,
-  type Scope,
+  Scope,
   typeMismatchMessage,
 } from './compilerBase';
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
-import { unavailableMessage } from './convertSupport';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { jvmParameterDescriptor } from './jvmSignatures';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
+import { runtimeType } from './reified';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
-import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
+import { SuspendCompiler } from './suspendCompiler';
+import { ClassSymbol, FunctionSymbol, type MemberSymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { anyType, fixVariable, isSubtype } from './typeRelations';
 import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
@@ -104,26 +105,7 @@ export interface CompileOptions {
   recordsSteps?: boolean;
 }
 
-/** The names of functions of the standard library that read input, files, or the network, by what they need. */
-const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
-  readln: '標準入力（readln）',
-  readLine: '標準入力（readLine）',
-  readlnOrNull: '標準入力（readlnOrNull）',
-  thread: 'スレッド（thread）',
-  runBlocking: 'コルーチン（runBlocking）',
-  launch: 'コルーチン（launch）',
-  async: 'コルーチン（async）',
-  delay: 'コルーチン（delay）',
-  sequence: 'シーケンスを作る sequence { }',
-  iterator: 'イテレータを作る iterator { }',
-  sequenceOf: 'シーケンス（sequenceOf）',
-  generateSequence: 'シーケンス（generateSequence）',
-  runCatching: '失敗を値として受け取る runCatching（Result）',
-  Regex: '正規表現（Regex）',
-  exitProcess: 'プログラムの終了（exitProcess）',
-};
-
-export class Compiler extends BodyCompiler {
+export class Compiler extends SuspendCompiler {
   constructor(
     packages: Map<string, PackageScope>,
     core: Core | undefined,
@@ -146,6 +128,7 @@ export class Compiler extends BodyCompiler {
 
   /** Compiles files together: their classes first, then their signatures, then their bodies. */
   // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   compileFiles(
     files: { file: KotlinFile; isLibrary: boolean }[],
     afterClasses: () => void,
@@ -171,8 +154,20 @@ export class Compiler extends BodyCompiler {
       this.file = context;
       this.resolveImports(file, context);
     }
+    for (const { file, context } of prepared) {
+      this.file = context;
+      context.optIns = this.optInsOf(new Scope(undefined, undefined), file.annotations);
+    }
     const classOrder = this.declareHeaders(prepared);
     this.checkAtomicRows();
+    for (const { file, context } of prepared) {
+      if (context.isLibrary) continue;
+      this.file = context;
+      const fileScope = new Scope(undefined, undefined);
+      this.checkAnnotations(fileScope, file.annotations, annotationSite(['FILE'], ['file']));
+      for (const { annotation, target } of file.looseAnnotations)
+        this.checkAnnotations(fileScope, [annotation], annotationSite([target]));
+    }
     for (const { file, context } of prepared) {
       this.file = context;
       this.resolveImports(file, context);
@@ -205,9 +200,11 @@ export class Compiler extends BodyCompiler {
       const context = this.initializerContext(entry);
       const scope = this.initializerScope(entry, context);
       const type = entry.symbol.type as KType;
-      const compiled = this.inPropertyInitializer(entry, context, () =>
-        this.compileExpression(scope, context, initializer, type)
-      );
+      const compiled =
+        entry.inferredObject ??
+        this.withOptIns(entry.symbol.optIns, () =>
+          this.inPropertyInitializer(entry, context, () => this.compileExpression(scope, context, initializer, type))
+        );
       const evaluate = convertRepr(
         this.expectType(compiled, type, initializer.row),
         reprOf(this.core, type),
@@ -339,8 +336,8 @@ export class Compiler extends BodyCompiler {
 
   /**
    * A `fun interface`'s constructor takes its type arguments from the call or from a complete expected type, as
-   * `Comparator<Int> { ... }` and `sortedWith(Comparator { ... })` do; inferring them from the lambda's parameter types or
-   * a delegated property, which kotlinc also does, is not supported.
+   * `Comparator<Int> { ... }` and `sortedWith(Comparator { ... })` do, or else infers them as kotlinc does: from the
+   * types the lambda declares for its parameters, as `Comparator { a: Int, b: Int -> ... }`, and from its result.
    */
   private compileSamConstructor(
     scope: Scope,
@@ -359,16 +356,13 @@ export class Compiler extends BodyCompiler {
       expectedType.args.every((typeArgument) => typeArgument.variance !== 'star')
     )
       type = { ...expectedType, nullable: false };
-    else
-      return this.unavailable(
-        argument.row,
-        `型引数を書かない ${cls.name} { ... }（${cls.name}<型> { ... } と書いてください）`
-      );
+    else type = this.inferredSamType(scope, cls, argument);
     const sam = this.samOf(type) as NonNullable<ReturnType<Compiler['samOf']>>;
     // The lambda's parameters need their types, which variables of an expected type such as `Comparator<in T>` give.
     for (const param of sam.functionType.params) {
       const actual = resolved(param);
-      if (actual.kind === 'variable' && !actual.variable.fixed) fixVariable(actual.variable);
+      if (actual.kind === 'variable' && !actual.variable.fixed && !fixVariable(actual.variable))
+        this.error(argument.row, `${cls.name} の型引数を推論できません。${cls.name}<型> { ... } と書いてください。`);
     }
     const compiled = this.compileSamFunction(scope, context, argument, sam.functionType);
     for (const typeArgument of type.args) {
@@ -377,6 +371,27 @@ export class Compiler extends BodyCompiler {
         actual.variable.fixed = fixVariable(actual.variable) ?? anyType(true);
     }
     return { ...this.samWrap(compiled, sam, type), isCreation: true };
+  }
+
+  /**
+   * The type of a `fun interface`'s constructor written without type arguments: a type variable for each, which the
+   * types the lambda declares for the parameters of the interface's function fix.
+   */
+  private inferredSamType(scope: Scope, cls: ClassSymbol, argument: Expression): ClassType {
+    const variables = cls.typeParameters.map((param) => ({ param, lower: [], upper: [], fixed: undefined }));
+    const type = classType(
+      cls,
+      variables.map((variable) => ({ kind: 'variable', variable, nullable: false }) as KType)
+    );
+    const sam = this.samOf(type);
+    const declared = argument.kind === 'lambda' ? (argument.params ?? []) : [];
+    for (const [index, param] of (sam?.functionType.params ?? []).entries()) {
+      const actual = resolved(param);
+      const declaredType = declared[index]?.type;
+      if (actual.kind === 'variable' && !actual.variable.fixed && declaredType)
+        actual.variable.fixed = this.resolveType(scope, declaredType);
+    }
+    return type;
   }
 
   /** The function a `fun interface`'s constructor wraps: a lambda, or a value of a function type such as `(Int, Int) -> Int`. */
@@ -456,16 +471,6 @@ export class Compiler extends BodyCompiler {
     };
   }
 
-  protected nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value {
-    const { symbol, evaluateArgs, callRow } = call;
-    return (frame, receiver) => {
-      const values = evaluateArgs(frame);
-      return frame.runtime.withNativeRoots([receiver, values], () =>
-        (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, values, callRow)
-      );
-    };
-  }
-
   protected constructorCandidates(cls: ClassSymbol, row: number): Candidate[] {
     if (cls.isInterface) this.error(row, `インターフェース ${cls.name} のインスタンスは作れません。`);
     if (cls.isObject) return [];
@@ -507,6 +512,43 @@ export class Compiler extends BodyCompiler {
       row,
       name
     );
+  }
+
+  protected compileReifiedEnumFunction(
+    scope: Scope,
+    context: FunctionContext,
+    param: TypeParameterSymbol,
+    name: 'enumValues' | 'enumValueOf',
+    args: ArgumentSyntax[],
+    row: number
+  ): Compiled {
+    const paramType: KType = { kind: 'param', param, nullable: false };
+    const symbol = new FunctionSymbol(name);
+    symbol.isLibrary = true;
+    // The enum class of the type argument the run passed, initialized as the JVM initializes it on the call.
+    const enumOf = (frame: Frame): ClassSymbol => {
+      const actual = resolved(runtimeType(paramType, frame));
+      if (actual.kind !== 'class' || actual.cls.kind !== 'enum') throw new Error(`${name} of a type that is no enum`);
+      this.objectInstance(actual.cls)(frame);
+      return actual.cls;
+    };
+    const arrayClass = this.core.array;
+    if (name === 'enumValues') {
+      symbol.returnType = {
+        kind: 'class',
+        cls: arrayClass,
+        args: [{ variance: 'inv', type: paramType }],
+        nullable: false,
+      };
+      symbol.invoke = (frame) => enumValuesArray(frame, enumOf(frame), arrayClass);
+    } else {
+      symbol.params = [{ name: 'name', type: this.stringType, hasDefault: false, isVararg: false }];
+      symbol.returnType = paramType;
+      symbol.invoke = (frame, _receiver, [entryName]) => enumEntryNamed(frame, enumOf(frame), entryName);
+    }
+    const candidate: Candidate = { symbol, kind: 'function', substitution: new Map(), receiverType: undefined };
+    const levels = [{ candidates: [candidate], receiver: undefined }];
+    return this.resolveInLevels(scope, context, levels, args, false, [], undefined, row, name);
   }
 
   private enumFunction(cls: ClassSymbol, name: EnumFunctionName): FunctionSymbol {
@@ -568,8 +610,6 @@ export class Compiler extends BodyCompiler {
   }
 
   protected reportUnknownFunction(name: string, row: number): never {
-    // An own property only, as a name such as `valueOf` would otherwise find Object.prototype's.
-    if (Object.hasOwn(UNAVAILABLE_FUNCTIONS, name)) this.error(row, unavailableMessage(UNAVAILABLE_FUNCTIONS[name]));
     this.rejectUnavailableLibraryReference(name, row);
     return this.error(row, `${name} が見つかりません。`);
   }

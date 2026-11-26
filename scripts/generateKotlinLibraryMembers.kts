@@ -145,6 +145,42 @@ for ((kotlinName, javaType) in mapOf(
     "kotlin.collections.LinkedHashSet" to java.util.LinkedHashSet::class.java,
     // The prelude declares System.out's class beside System, in java.lang.
     "java.lang.PrintStream" to java.io.PrintStream::class.java,
+    // The JVM classes the prelude and the natives declare under their own names, whose members they leave out read
+    // as unavailable.
+    "java.io.BufferedReader" to java.io.BufferedReader::class.java,
+    "java.io.BufferedWriter" to java.io.BufferedWriter::class.java,
+    "java.io.Closeable" to java.io.Closeable::class.java,
+    "java.io.File" to java.io.File::class.java,
+    "java.io.PrintWriter" to java.io.PrintWriter::class.java,
+    "java.util.AbstractMap" to java.util.AbstractMap::class.java,
+    "java.util.AbstractSet" to java.util.AbstractSet::class.java,
+    "java.util.Locale" to java.util.Locale::class.java,
+    "java.util.NavigableSet" to java.util.NavigableSet::class.java,
+    "java.util.SortedMap" to java.util.SortedMap::class.java,
+    "java.util.SortedSet" to java.util.SortedSet::class.java,
+    "java.util.TreeMap" to java.util.TreeMap::class.java,
+    "java.util.TreeSet" to java.util.TreeSet::class.java,
+    "java.nio.charset.Charset" to java.nio.charset.Charset::class.java,
+    // The JVM exceptions the prelude declares, which the natives throw as the JVM does.
+    "java.io.FileNotFoundException" to java.io.FileNotFoundException::class.java,
+    "java.io.IOException" to java.io.IOException::class.java,
+    "java.lang.ArrayStoreException" to java.lang.ArrayStoreException::class.java,
+    "java.lang.ExceptionInInitializerError" to java.lang.ExceptionInInitializerError::class.java,
+    "java.lang.LinkageError" to java.lang.LinkageError::class.java,
+    "java.lang.NegativeArraySizeException" to java.lang.NegativeArraySizeException::class.java,
+    "java.lang.NoClassDefFoundError" to java.lang.NoClassDefFoundError::class.java,
+    "java.util.DuplicateFormatFlagsException" to java.util.DuplicateFormatFlagsException::class.java,
+    "java.util.FormatFlagsConversionMismatchException" to java.util.FormatFlagsConversionMismatchException::class.java,
+    "java.util.IllegalFormatCodePointException" to java.util.IllegalFormatCodePointException::class.java,
+    "java.util.IllegalFormatConversionException" to java.util.IllegalFormatConversionException::class.java,
+    "java.util.IllegalFormatException" to java.util.IllegalFormatException::class.java,
+    "java.util.IllegalFormatFlagsException" to java.util.IllegalFormatFlagsException::class.java,
+    "java.util.IllegalFormatPrecisionException" to java.util.IllegalFormatPrecisionException::class.java,
+    "java.util.IllegalFormatWidthException" to java.util.IllegalFormatWidthException::class.java,
+    "java.util.MissingFormatArgumentException" to java.util.MissingFormatArgumentException::class.java,
+    "java.util.MissingFormatWidthException" to java.util.MissingFormatWidthException::class.java,
+    "java.util.UnknownFormatConversionException" to java.util.UnknownFormatConversionException::class.java,
+    "java.util.regex.PatternSyntaxException" to java.util.regex.PatternSyntaxException::class.java,
 )) {
     val names = members.getOrPut(kotlinName) { sortedSetOf() }
     for (method in javaType.methods) {

@@ -108,6 +108,20 @@ inline fun <T> Iterable<T>.filterIndexed(predicate: (index: Int, T) -> Boolean):
     return destination
 }
 
+inline fun <reified R> Iterable<*>.filterIsInstance(): List<R> = filterIsInstanceTo(ArrayList<R>())
+
+inline fun <reified R, C : MutableCollection<in R>> Iterable<*>.filterIsInstanceTo(destination: C): C {
+    for (element in this) if (element is R) destination.add(element)
+    return destination
+}
+
+inline fun <reified R> Array<*>.filterIsInstance(): List<R> = filterIsInstanceTo(ArrayList<R>())
+
+inline fun <reified R, C : MutableCollection<in R>> Array<*>.filterIsInstanceTo(destination: C): C {
+    for (element in this) if (element is R) destination.add(element)
+    return destination
+}
+
 fun <T : Any> Iterable<T?>.filterNotNull(): List<T> {
     val destination = ArrayList<T>()
     for (element in this) if (element != null) destination.add(element)
@@ -1484,6 +1498,12 @@ operator fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.Muta
 operator fun <K, V> Map.Entry<K, V>.component1(): K = key
 operator fun <K, V> Map.Entry<K, V>.component2(): V = value
 
+/** Appends what \`joinToString\` gives to \`buffer\`, which is a \`StringBuilder\` here, the only \`Appendable\` the library has. */
+fun <T, A : StringBuilder> Iterable<T>.joinTo(buffer: A, separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((T) -> CharSequence)? = null): A {
+    buffer.append(joinToString(separator, prefix, postfix, limit, truncated, transform))
+    return buffer
+}
+
 fun <K, V> Map.Entry<K, V>.toPair(): Pair<K, V> = Pair(key, value)
 
 external fun <K, V> Map<out K, V>.getOrDefault(key: K, defaultValue: V): V
@@ -1503,8 +1523,114 @@ inline fun <K, V> MutableMap<K, V>.getOrPut(key: K, defaultValue: () -> V): V {
 
 fun <K, V> Map<K, V>.getValue(key: K): V {
     val value = get(key)
-    if (value == null && !containsKey(key)) throw NoSuchElementException("Key $key is missing in the map.")
+    if (value == null && !containsKey(key)) {
+        if (this is MapWithDefault<K, V>) return defaultOf(key)
+        throw NoSuchElementException("Key $key is missing in the map.")
+    }
     return value as V
+}
+
+// A property delegated to a map, as \`val name: String by map\`, reads and writes its name's entry. The value's type is
+// the property's declared one, which the stdlib's V1 : V also takes.
+@Suppress("UNCHECKED_CAST")
+operator fun <V1> Map<in String, *>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): V1 =
+    (this as Map<String, Any?>).getValue(property.name) as V1
+
+operator fun <V> MutableMap<in String, in V>.setValue(
+    thisRef: Any?,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    put(property.name, value)
+}
+
+/** The map that \`withDefault\` gives, whose \`getValue\` gives the default for a missing key; its other reads are the map's. */
+private interface MapWithDefault<K, out V> : Map<K, V> {
+    fun defaultOf(key: K): V
+}
+
+private class MapWithDefaultImpl<K, out V>(val map: Map<K, V>, val default: (K) -> V) : MapWithDefault<K, V>, Map<K, V> by map {
+    override fun defaultOf(key: K): V = default(key)
+    override fun equals(other: Any?): Boolean = map.equals(other)
+    override fun hashCode(): Int = map.hashCode()
+    override fun toString(): String = map.toString()
+}
+
+private class MutableMapWithDefaultImpl<K, V>(val map: MutableMap<K, V>, val default: (K) -> V) : MapWithDefault<K, V>, MutableMap<K, V> by map {
+    override fun defaultOf(key: K): V = default(key)
+    override fun equals(other: Any?): Boolean = map.equals(other)
+    override fun hashCode(): Int = map.hashCode()
+    override fun toString(): String = map.toString()
+}
+
+fun <K, V> Map<K, V>.withDefault(defaultValue: (key: K) -> V): Map<K, V> =
+    if (this is MapWithDefaultImpl<K, V>) map.withDefault(defaultValue) else MapWithDefaultImpl(this, defaultValue)
+
+fun <K, V> MutableMap<K, V>.withDefault(defaultValue: (key: K) -> V): MutableMap<K, V> =
+    if (this is MutableMapWithDefaultImpl<K, V>) map.withDefault(defaultValue) else MutableMapWithDefaultImpl(this, defaultValue)
+
+// The default methods of Java's Map, which Kotlin's MutableMap has on the JVM, with Java's rules for null values.
+fun <K, V> MutableMap<K, V>.putIfAbsent(key: K, value: V): V? {
+    val current = get(key)
+    return current ?: put(key, value)
+}
+
+// java.util.Map's replace and two-argument remove, which act only on a key the map holds.
+fun <K, V> MutableMap<K, V>.replace(key: K, value: V): V? = if (containsKey(key)) put(key, value) else null
+
+fun <K, V> MutableMap<K, V>.replace(key: K, oldValue: V, newValue: V): Boolean {
+    if (!containsKey(key) || get(key) != oldValue) return false
+    put(key, newValue)
+    return true
+}
+
+fun <K, V> MutableMap<K, V>.remove(key: K, value: V): Boolean {
+    if (!containsKey(key) || get(key) != value) return false
+    remove(key)
+    return true
+}
+
+inline fun <K, V> MutableMap<K, V>.merge(key: K, value: V, remappingFunction: (V, V) -> V?): V? {
+    val old = get(key)
+    val new = if (old == null) value else remappingFunction(old, value)
+    if (new == null) remove(key) else put(key, new)
+    return new
+}
+
+inline fun <K, V> MutableMap<K, V>.compute(key: K, remappingFunction: (K, V?) -> V?): V? {
+    val old = get(key)
+    val new = remappingFunction(key, old)
+    if (new == null) {
+        if (old != null || containsKey(key)) remove(key)
+        return null
+    }
+    put(key, new)
+    return new
+}
+
+inline fun <K, V> MutableMap<K, V>.computeIfAbsent(key: K, mappingFunction: (K) -> V): V {
+    val current = get(key)
+    if (current != null) return current
+    val new = mappingFunction(key)
+    if (new != null) put(key, new)
+    return new
+}
+
+inline fun <K, V> MutableMap<K, V>.computeIfPresent(key: K, remappingFunction: (K, V) -> V?): V? {
+    val old = get(key) ?: return null
+    val new = remappingFunction(key, old)
+    if (new == null) remove(key) else put(key, new)
+    return new
+}
+
+inline fun <K, V> MutableMap<K, V>.replaceAll(function: (K, V) -> V) {
+    for (entry in entries) entry.setValue(function(entry.key, entry.value))
+}
+
+/** Java's List.replaceAll, which Kotlin's MutableList has on the JVM. */
+inline fun <E> MutableList<E>.replaceAll(operator: (E) -> E) {
+    val iterator = listIterator()
+    while (iterator.hasNext()) iterator.set(operator(iterator.next()))
 }
 
 inline fun <K, V> Map<out K, V>.forEach(action: (Map.Entry<K, V>) -> Unit) {

@@ -11,20 +11,33 @@ import {
 import type { Expression, LambdaExpression } from './ast';
 import {
   type Compiled,
+  convertRepr,
   type Eval,
   FunctionContext,
   isBareCallExpression,
   nullableReceiverMessage,
+  type ReceiverSymbol,
   reprOf,
   type Scope,
   typeMismatchMessage,
 } from './compilerBase';
 import { CompilerCore } from './compilerCore';
-import { callFunction, getPropertyValue, parameterReprs, receiverRepr, returnRepr } from './dispatch';
+import {
+  callFunction,
+  getPropertyValue,
+  isVirtual,
+  needsDefaults,
+  parameterReprs,
+  receiverRepr,
+  returnRepr,
+  runtimeClassOf,
+  withDefaults,
+} from './dispatch';
 import { mostSpecificReceivers, type ReceiverSpecificity } from './extensionResolution';
 import { literalFits } from './literals';
+import { runtimeType } from './reified';
 import { siblingResultType } from './resultInference';
-import type { Frame } from './runtime';
+import { type Frame, SuspendCall } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import {
   approximatedReadType,
@@ -81,6 +94,8 @@ export interface Candidate {
   substitution: Substitution;
   /** The receiver's static type, for a member or an extension. */
   receiverType: KType | undefined;
+  /** For an extension declared in a class, the implicit receiver that is the class's instance the call passes. */
+  dispatch?: ReceiverSymbol;
 }
 
 interface DeclaredCallLevel {
@@ -104,6 +119,8 @@ export interface ResolvedCall {
   repr: ReturnType<typeof reprOf>;
   /** Evaluates the arguments in the order they are written and calls the function on the receiver. */
   call: (frame: Frame, receiver: Value) => Value;
+  /** As `call`, calling the resolved function itself without dispatching on the receiver's class, as `super.f()` does. */
+  nonVirtualCall: (frame: Frame, receiver: Value) => Value;
   /** Evaluates the arguments in the order they are written, as the function's parameters receive them. */
   evaluateArgs: (frame: Frame) => Value[];
   callRow: number | undefined;
@@ -159,10 +176,6 @@ function mapArguments(
     : undefined;
 }
 
-function parameterOf(symbol: FunctionSymbol, mapping: number[][], argumentIndex: number): ParameterSymbol | undefined {
-  return symbol.params[mapping.findIndex((indexes) => indexes.includes(argumentIndex))];
-}
-
 /**
  * A lambda's probed result that is still a variable, as `if (c) 1 else 2` leaves one with an Int lower bound, is the
  * type inference would fix it to, so it matches the overload a lone literal does.
@@ -174,8 +187,89 @@ function settledResult(result: KType | undefined): KType | undefined {
   return lower.length > 0 ? commonSupertype(lower) : result;
 }
 
+/** The suspend context a context's suspend calls run in: its own, or the one around the inline lambdas it is in. */
+function suspendContextOf(context: FunctionContext): FunctionContext | undefined {
+  for (let current: FunctionContext | undefined = context; current; current = current.parent) {
+    if (current.isSuspend) return current;
+    // A probe compiles code only to learn its types, in the place of the code it stands for.
+    if (current.isProbeRoot) continue;
+    if (!current.isLambda || !current.inlineLambda) return undefined;
+  }
+  return undefined;
+}
+
+/** Whether a context may call suspend functions: a suspend function's or lambda's, or an inline lambda inside one. */
+export function allowsSuspendCalls(context: FunctionContext): boolean {
+  for (let current: FunctionContext | undefined = context; current; current = current.parent) {
+    if (current.isSuspend) return true;
+    // A probe compiles code only to learn its types, in the place of the code it stands for.
+    if (current.isProbeRoot) continue;
+    if (!current.isLambda || !current.inlineLambda) return false;
+  }
+  return false;
+}
+
+/**
+ * A call of a function, or of a suspend function as the coroutine running the caller performs it, dispatching on
+ * `dispatcher`: the receiver, or for a member extension, the value of its class that the call passes. A call without a
+ * dispatcher, as `super.f()` makes, calls the function itself.
+ */
+function callOrSuspend(
+  symbol: FunctionSymbol,
+  frame: Frame,
+  receiver: Value,
+  values: Value[],
+  callRow: number | undefined,
+  dispatcher: Value | undefined
+): Value {
+  if (symbol.isSuspend) return suspendCall(symbol, receiver, values, callRow, dispatcher);
+  if (dispatcher === undefined)
+    return (symbol.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, receiver, values, callRow);
+  return callFunction(symbol, frame, receiver, values, callRow);
+}
+
+/** A call of a suspend function, which the coroutine running the caller performs, dispatching on `dispatcher`. */
+function suspendCall(
+  symbol: FunctionSymbol,
+  receiver: Value,
+  args: Value[],
+  callRow: number | undefined,
+  dispatcher: Value | undefined
+): Value {
+  return new SuspendCall((caller) => {
+    const target = dispatcher !== undefined && isVirtual(symbol) ? runtimeClassOf(dispatcher).dispatch(symbol) : symbol;
+    const invoke = target.invokeSuspend;
+    if (!invoke) throw new Error(`The suspend function ${symbol.name} has no implementation`);
+    // An override does not fill the defaults it inherits, as callFunction fills them for other calls.
+    if (!needsDefaults(symbol, target, args)) return invoke(caller, receiver, args, callRow);
+    const mark = caller.temporaries.length;
+    const values = withDefaults(symbol, caller, receiver, args);
+    // The coroutine's frame holds the filled arguments from here on.
+    caller.temporaries.length = mark;
+    return invoke(caller, receiver, values, callRow);
+  }) as unknown as Value;
+}
+
+/** Whether an argument's spread fits its parameter: a spread argument goes only to a vararg parameter, as kotlinc requires. */
+function spreadFits(argument: ArgumentSyntax, param: ParameterSymbol): boolean {
+  return argument.isSpread !== true || param.isVararg;
+}
+
+/** Whether an argument passes a vararg parameter's array, spread as `*array` or named. */
+function passesArray(argument: ArgumentSyntax, param: ParameterSymbol): boolean {
+  return argument.isSpread === true || (argument.name !== undefined && param.isVararg);
+}
+
 function isLambdaArgument(expression: Expression): expression is LambdaExpression {
   return expression.kind === 'lambda';
+}
+
+/**
+ * Whether an argument waits until the call's other arguments give its function type, as a lambda does and a callable
+ * reference, whose overloads that type selects, does too.
+ */
+function isPostponedArgument(expression: Expression): boolean {
+  return isLambdaArgument(expression) || (expression.kind === 'reference' && expression.name !== 'class');
 }
 
 function hasTypedParameters(expression: Expression | undefined): boolean {
@@ -404,7 +498,12 @@ export abstract class CallCompiler extends CompilerCore {
     }
     this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
     if (!this.file.isLibrary && chosen.candidate.symbol.isDeprecatedError)
-      this.error(row, `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`);
+      this.error(
+        row,
+        chosen.candidate.symbol.isLibrary
+          ? `${chosen.candidate.symbol.name} は Kotlin で非推奨になり、使用できません。`
+          : `${chosen.candidate.symbol.name} は @Deprecated で使えなくされています。`
+      );
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -506,7 +605,7 @@ export abstract class CallCompiler extends CompilerCore {
     let viable = attempts;
     for (const attempt of attempts) this.constrainFromLambdaParameters(scope, attempt, args);
     for (const [index, argument] of args.entries()) {
-      if (isLambdaArgument(argument.value)) {
+      if (isPostponedArgument(argument.value)) {
         compiledArgs.push(undefined);
         continue;
       }
@@ -639,9 +738,10 @@ export abstract class CallCompiler extends CompilerCore {
         return attempt && this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
       if (applicable.length === 0) continue;
-      return checkingApplicability || applicable.length === 1
-        ? applicable[0]
-        : this.mostSpecific(applicable, compiledArgs, args, scope, context, row, name);
+      const fitting = applicable.length > 1 ? this.fittingReferences(scope, context, applicable, args) : applicable;
+      return checkingApplicability || fitting.length === 1
+        ? fitting[0]
+        : this.mostSpecific(fitting, compiledArgs, args, scope, context, row, name);
     }
     return undefined;
   }
@@ -760,10 +860,15 @@ export abstract class CallCompiler extends CompilerCore {
       const paramType = substitute(param.type, attempt.substitution);
       const compiled = compiledArgs[index];
       if (!compiled) {
-        if (!this.lambdaFits(args[index].value as LambdaExpression, paramType)) return false;
+        const { value } = args[index];
+        if (value.kind === 'lambda' ? !this.lambdaFits(value, paramType) : !this.referenceFits(paramType)) return false;
         continue;
       }
-      if (args[index].isSpread) continue;
+      if (!spreadFits(args[index], param)) return false;
+      if (passesArray(args[index], param)) {
+        if (!this.acceptsArgument(compiled, this.varargArrayOf(param, paramType))) return false;
+        continue;
+      }
       if (!this.acceptsArgument(compiled, param.isVararg ? this.varargElementType(paramType) : paramType)) return false;
     }
     for (const variable of attempt.variables) {
@@ -779,6 +884,60 @@ export abstract class CallCompiler extends CompilerCore {
     return true;
   }
 
+  /**
+   * The value a call passes a context parameter of a type: the nearest implicit receiver or context parameter around
+   * the call that is of the type.
+   */
+  protected contextArgument(scope: Scope, context: FunctionContext, type: KType, row: number): Compiled {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      const { receiver } = current;
+      if (receiver && isSubtype(this.receiverTypeOf(receiver), type))
+        return {
+          type: receiver.type,
+          repr: reprOf(this.core, receiver.type),
+          eval: this.receiverAccess(context, receiver),
+        };
+      for (const variable of current.variables.values()) {
+        if (variable.isContextParameter && isSubtype(variable.type, type))
+          return {
+            type: variable.type,
+            repr: reprOf(this.core, variable.type),
+            eval: this.variableAccess(context, variable).read,
+          };
+      }
+    }
+    return this.error(row, `${typeToString(resolved(type))} のコンテキストがありません。with などで用意してください。`);
+  }
+
+  protected abstract receiverTypeOf(receiver: ReceiverSymbol): KType;
+
+  /** Rejects a suspend call that a sequence builder's scope does not allow, as `@RestrictsSuspension` makes kotlinc. */
+  private checkRestrictedSuspension(context: FunctionContext, symbol: FunctionSymbol, row: number): void {
+    const scopeClass = suspendContextOf(context)?.restrictedScope;
+    if (!scopeClass) return;
+    const receiver = symbol.extensionReceiver && resolved(symbol.extensionReceiver);
+    const onScope =
+      symbol.owner?.isSubclassOf(scopeClass) === true ||
+      (receiver?.kind === 'class' && receiver.cls.isSubclassOf(scopeClass));
+    if (!onScope)
+      this.error(
+        row,
+        `sequence や iterator の中では、${scopeClass.name} のメンバーか拡張の suspend 関数だけを呼べます。`
+      );
+  }
+
+  /** The type a `vararg` parameter has inside its function: an array of its elements. */
+  protected abstract varargType(elementType: KType): KType;
+
+  /**
+   * The array a vararg parameter holds, whose class its declared type decides: `IntArray` for `vararg xs: Int`, and
+   * `Array<out T>` for `vararg xs: T` whatever `T` is.
+   */
+  private varargArrayOf(param: ParameterSymbol, paramType: KType): KType {
+    if (resolved(param.type).kind === 'class') return this.varargType(paramType);
+    return { kind: 'class', cls: this.core.array, args: [{ variance: 'out', type: paramType }], nullable: false };
+  }
+
   /** The type of each element a `vararg` parameter collects; its declared type is that of one element. */
   protected varargElementType(type: KType): KType {
     return type;
@@ -791,12 +950,22 @@ export abstract class CallCompiler extends CompilerCore {
   protected samOf(type: KType): { functionType: FunctionType; method: FunctionSymbol; cls: ClassSymbol } | undefined {
     const actual = resolved(type);
     if (actual.kind !== 'class' || !actual.cls.isFunInterface) return undefined;
-    for (const members of actual.cls.members.values()) {
+    // The abstract method may be declared by an interface the fun interface extends.
+    const classes: ClassSymbol[] = [];
+    const visit = (cls: ClassSymbol): void => {
+      if (classes.includes(cls)) return;
+      classes.push(cls);
+      for (const parent of cls.interfaces) visit(parent.cls);
+    };
+    visit(actual.cls);
+    for (const members of classes.flatMap((cls) => [...cls.members.values()])) {
       for (const member of members) {
         if (member.kind !== 'function' || !member.isAbstract) continue;
         const found = this.membersOf<FunctionSymbol>(actual, member.name, 'function').find(
           (candidate) => candidate.symbol === member
         );
+        // A method that a nearer interface implements is not the abstract one.
+        if (!found) continue;
         const substitution = found?.substitution ?? new Map();
         return {
           functionType: {
@@ -820,6 +989,78 @@ export abstract class CallCompiler extends CompilerCore {
     sam: NonNullable<ReturnType<CallCompiler['samOf']>>,
     type: KType
   ): Compiled;
+
+  /**
+   * The candidates whose function types the call's callable references fit, as `sumOf(String::length)` picks the
+   * overload whose selector returns Int and `pick(String::length)` the one whose function takes one parameter. A
+   * reference compiled for each candidate's function type tells, which `referenceFits` cannot before inference; when
+   * it rules out every candidate, they all stay, for the call to report as it would.
+   */
+  private fittingReferences(
+    scope: Scope,
+    context: FunctionContext,
+    attempts: Attempt[],
+    args: ArgumentSyntax[]
+  ): Attempt[] {
+    const references = [...args.keys()].filter((index) => args[index].value.kind === 'reference');
+    if (references.length === 0) return attempts;
+    const fitting = attempts.filter((attempt) =>
+      references.every((index) => {
+        const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(index));
+        const param = attempt.candidate.symbol.params[paramIndex];
+        if (!param || passesArray(args[index], param)) return true;
+        const paramType = substitute(param.type, attempt.substitution);
+        const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
+        // The probe's bounds on the candidate's type variables are undone, as a candidate kept is checked again.
+        const bounds = attempt.variables.map((variable) => ({
+          lower: [...variable.lower],
+          upper: [...variable.upper],
+        }));
+        let fits = false;
+        const error = this.probeApplicability(context, (probe) => {
+          fits = this.compileReferenceArgument(scope, probe, args[index].value, elementType, attempt).fits;
+        });
+        for (const [variableIndex, variable] of attempt.variables.entries()) {
+          variable.lower = bounds[variableIndex].lower;
+          variable.upper = bounds[variableIndex].upper;
+        }
+        return !error && fits;
+      })
+    );
+    return fitting.length > 0 ? fitting : attempts;
+  }
+
+  /**
+   * A callable reference compiled for a parameter's type, and whether it fits: the one place a reference is checked,
+   * for a function type and a fun interface's function alike. Relating the reference's type to the expected one gives
+   * the call's type variables their types, as `R` of `map(String::length)`.
+   */
+  private compileReferenceArgument(
+    scope: Scope,
+    context: FunctionContext,
+    value: Expression,
+    elementType: KType,
+    attempt: Attempt
+  ): { reference: Compiled; sam: ReturnType<CallCompiler['samOf']>; fits: boolean } {
+    const sam = this.samOf(elementType);
+    const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
+    const reference = this.compileExpression(scope, context, value, lambdaType ?? elementType);
+    const fits = this.acceptsArgument(reference, sam ? (lambdaType ?? sam.functionType) : elementType);
+    return { reference, sam, fits };
+  }
+
+  /** Whether a callable reference may stand for a value of the type, which its expected function type then selects. */
+  private referenceFits(type: KType): boolean {
+    if (this.samOf(type)) return true;
+    const actual = resolved(type);
+    if (actual.kind === 'class')
+      return (
+        actual.cls === this.core.function ||
+        actual.cls === this.core.any ||
+        this.core.functionInterfaces.includes(actual.cls)
+      );
+    return actual.kind !== 'nothing';
+  }
 
   /** Whether a lambda's parameters fit a function type, which only its number of parameters can tell before inference. */
   private lambdaFits(lambda: LambdaExpression, type: KType): boolean {
@@ -964,9 +1205,14 @@ export abstract class CallCompiler extends CompilerCore {
           });
     if (fitting.length === 1) return fitting[0];
     if (fitting.length === 0 && probe && !hasOpenVariables(probe) && resolved(probe).kind !== 'nothing') {
+      // A result type with variables still fits only when the lambda's result is of its class, as a Sequence fits
+      // flatMap's Sequence<R> and not its Iterable<R>.
+      const result = resolved(probe);
       const inferred = attempts.filter((_, index) => {
         const type = lambdaTypes[index];
-        return type.kind === 'function' && hasOpenVariables(type.returnType);
+        if (type.kind !== 'function' || !hasOpenVariables(type.returnType)) return false;
+        const expected = resolved(type.returnType);
+        return expected.kind !== 'class' || result.kind !== 'class' || result.cls.isSubclassOf(expected.cls);
       });
       if (inferred.length === 1) return inferred[0];
     }
@@ -983,6 +1229,19 @@ export abstract class CallCompiler extends CompilerCore {
     options: { isInline: boolean; useExpectedResult?: boolean }
   ): KType | undefined;
 
+  /** Rejects a use of a member whose opt-in markers, or its class's, the code is not opted in to. */
+  protected requireMemberOptIn(symbol: FunctionSymbol | PropertySymbol, row: number): void {
+    const owner = symbol.owner;
+    this.requireOptIn(
+      [
+        ...symbol.optInMarkers,
+        ...(symbol.kind === 'function' && symbol.isConstructor ? (owner?.optInMarkers ?? []) : []),
+      ],
+      symbol.name,
+      row
+    );
+  }
+
   /**
    * Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. A subclass
    * uses a protected member only through a receiver of the subclass, or through `super`, whose receiver is undefined.
@@ -993,20 +1252,37 @@ export abstract class CallCompiler extends CompilerCore {
     row: number,
     receiverType: KType | undefined
   ): void {
+    this.requireMemberOptIn(member, row);
     const { owner, visibility } = member;
-    if (!owner || visibility === 'public' || visibility === 'internal') return;
-    const classes = this.enclosingClasses(scope);
-    if (visibility === 'private') {
-      // A class sees the private members of its companion object.
-      if (classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer))) return;
+    // The library's internal declarations are the prelude's helpers, which programs, another module, cannot see: a
+    // top-level one is no name of kotlinc's library at all.
+    if (visibility === 'internal' && member.isLibrary && !this.file.isLibrary)
+      this.error(
+        row,
+        owner
+          ? `${member.name} は internal なので、${owner.name} のモジュールの外からは使えません。`
+          : `${member.name} が見つかりません。`
+      );
+    if (!owner || this.isVisible(scope, member, receiverType)) return;
+    if (visibility === 'private')
       this.error(row, `${member.name} は private なので、${owner.name} の外からは使えません。`);
-    }
-    if (
-      !classes.some(
-        (cls) => cls.isSubclassOf(owner) && (!receiverType || isSubtype(nonNull(receiverType), cls.selfType))
-      )
-    )
-      this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+    this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+  }
+
+  /**
+   * Whether code of a scope may use a private or protected member, as kotlinc decides: a private one inside its class at
+   * any depth, or its companion's class, and a protected one inside a subclass, through a receiver of that subclass.
+   */
+  protected isVisible(scope: Scope, member: FunctionSymbol | PropertySymbol, receiverType: KType | undefined): boolean {
+    const { owner, visibility } = member;
+    if (!owner || visibility === 'public' || visibility === 'internal') return true;
+    const classes = this.enclosingClasses(scope);
+    // A class sees the private members of its companion object.
+    if (visibility === 'private')
+      return classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer));
+    return classes.some(
+      (cls) => cls.isSubclassOf(owner) && (!receiverType || isSubtype(nonNull(receiverType), cls.selfType))
+    );
   }
 
   /** The classes whose declarations hold the code of a scope, nested classes' outer classes included. */
@@ -1095,19 +1371,72 @@ export abstract class CallCompiler extends CompilerCore {
       (type) => this.varargArrayFactory(type)
     );
     const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
-    const call = (frame: Frame, receiver: Value): Value => {
-      const { temporaries } = frame;
-      const mark = temporaries.length;
-      temporaries.push(receiver);
-      try {
-        if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
-        const values = evaluateArgs(frame);
-        for (const value of values) temporaries.push(value);
-        return callFunction(symbol, frame, receiver, values, callRow);
-      } finally {
-        temporaries.length = mark;
-      }
-    };
+    const contextEvals = symbol.contextParameters.map((param) => {
+      const type = substitute(param.type, substitution);
+      const argument = this.contextArgument(scope, context, type, row);
+      return convertRepr(argument.eval, argument.repr, reprOf(this.core, type));
+    });
+    const dispatchEval = candidate.dispatch && this.receiverAccess(context, candidate.dispatch);
+    this.useLocalEnv(
+      context,
+      symbol.localEnv ?? (candidate.kind === 'constructor' ? symbol.owner?.localEnv : undefined)
+    );
+    const reifiedParams = symbol.typeParameters.filter((param) => param.isReified);
+    const reifiedTypes = reifiedParams.map((param) =>
+      substitute({ kind: 'param', param, nullable: false }, substitution)
+    );
+    // A reified type argument must be known when the program runs, which a type parameter that is not reified is not.
+    for (const [index, type] of reifiedTypes.entries()) {
+      const actual = resolved(type);
+      if (actual.kind === 'param' && !actual.param.isReified)
+        this.error(
+          row,
+          `型引数 ${actual.param.name} は reified でないので、reified な型引数 ${reifiedParams[index].name} には渡せません。`
+        );
+    }
+    const suspendVersion = this.checkSuspendCall(context, symbol, compiledArgs, row);
+    // A virtual call dispatches on the instance's class; `super.f()` calls the function it resolved to itself.
+    const callOf =
+      (virtual: boolean) =>
+      (frame: Frame, receiver: Value): Value => {
+        const { temporaries } = frame;
+        const mark = temporaries.length;
+        temporaries.push(receiver);
+        try {
+          if (candidate.kind === 'constructor' && symbol.owner) this.ensureClassInitialized(frame, symbol.owner);
+          const values = evaluateArgs(frame);
+          for (const evaluate of contextEvals) values.push(evaluate(frame));
+          if (dispatchEval) {
+            const dispatch = dispatchEval(frame);
+            values.push(dispatch);
+            if (symbol.passesTypeArguments)
+              values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
+            for (const value of values) temporaries.push(value);
+            const target = virtual && isVirtual(symbol) ? runtimeClassOf(dispatch).dispatch(symbol) : symbol;
+            return callOrSuspend(
+              suspendVersion ?? target,
+              frame,
+              receiver,
+              values,
+              callRow,
+              virtual ? dispatch : undefined
+            );
+          }
+          if (symbol.passesTypeArguments)
+            values.push(reifiedTypes.map((type) => runtimeType(resolved(type), frame)) as unknown as Value);
+          for (const value of values) temporaries.push(value);
+          return callOrSuspend(
+            suspendVersion ?? symbol,
+            frame,
+            receiver,
+            values,
+            callRow,
+            virtual ? receiver : undefined
+          );
+        } finally {
+          temporaries.length = mark;
+        }
+      };
     const typeArguments = new Map<TypeParameterSymbol, KType>();
     for (const param of this.inferredTypeParameters(candidate))
       typeArguments.set(param, resolved(substitution.get(param) as KType));
@@ -1116,7 +1445,8 @@ export abstract class CallCompiler extends CompilerCore {
       candidate,
       type: this.callResultType(attempt, typeArguments, row),
       repr: candidate.kind === 'constructor' ? 'ref' : returnRepr(symbol),
-      call,
+      call: callOf(true),
+      nonVirtualCall: callOf(false),
       evaluateArgs,
       callRow,
       argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
@@ -1130,7 +1460,29 @@ export abstract class CallCompiler extends CompilerCore {
     };
   }
 
+  /**
+   * Checks where a suspend function is called, and gives the suspend version that a call of an inline function runs
+   * when a lambda it is given suspends.
+   */
+  private checkSuspendCall(
+    context: FunctionContext,
+    symbol: FunctionSymbol,
+    compiledArgs: (Compiled | undefined)[],
+    row: number
+  ): FunctionSymbol | undefined {
+    if (symbol.isSuspend && !this.file.isLibrary) {
+      if (!allowsSuspendCalls(context))
+        this.error(row, `suspend 関数 ${symbol.name} は、suspend 関数かコルーチンの中でだけ呼べます。`);
+      this.checkRestrictedSuspension(context, symbol, row);
+    }
+    const suspends = symbol.isInline && compiledArgs.some((compiled) => compiled?.suspending === true);
+    return suspends ? this.suspendVersionOf(symbol, row) : undefined;
+  }
+
   protected abstract ensureClassInitialized(frame: Frame, cls: ClassSymbol): void;
+
+  /** The suspend version of an inline function, which runs its body as a coroutine's steps. */
+  protected abstract suspendVersionOf(symbol: FunctionSymbol, row: number): FunctionSymbol;
 
   /** A lambda argument, compiled now that the other arguments constrain the types of its parameters. */
   private compileLambdaArgument(
@@ -1146,6 +1498,15 @@ export abstract class CallCompiler extends CompilerCore {
     const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
     const sam = this.samOf(elementType);
     const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
+    if (argument.value.kind === 'reference') {
+      const {
+        reference,
+        sam: referenceSam,
+        fits,
+      } = this.compileReferenceArgument(scope, context, argument.value, elementType, attempt);
+      if (!fits) this.error(argument.row, typeMismatchMessage(elementType, reference.type));
+      return referenceSam ? this.samWrap(reference, referenceSam, resolved(elementType)) : reference;
+    }
     const compiled = this.compileLambda(
       scope,
       context,
@@ -1219,17 +1580,13 @@ export abstract class CallCompiler extends CompilerCore {
   }
 
   /** The arguments, in the order they are written, converted to the parameters' declared representations. */
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private argumentEvaluations(
     { candidate, substitution, mapping }: Attempt,
     args: ArgumentSyntax[],
     compiledArgs: Compiled[]
   ): ArgumentEvaluation[] {
     const { symbol } = candidate;
-    // Kotlin passes a named vararg argument as the whole array, as `*array` spreads one, which learners cannot use.
-    const namedVararg = mapping
-      .flat()
-      .find((index) => args[index].name !== undefined && parameterOf(symbol, mapping, index)?.isVararg);
-    if (namedVararg !== undefined) this.unavailable(args[namedVararg].row, '可変長引数（vararg）への名前付きの引数');
     const reprs = parameterReprs(symbol);
     const evaluations = mapping.flatMap((indexes, paramIndex) =>
       indexes.map((index): ArgumentEvaluation => {
@@ -1237,8 +1594,14 @@ export abstract class CallCompiler extends CompilerCore {
         const compiled = compiledArgs[index];
         const paramType = substitute(param.type, substitution);
         const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
-        const isSpread = args[index].isSpread === true;
-        if (isSpread) return { index, paramIndex, eval: compiled.eval, isSpread };
+        // A named argument of a vararg parameter is the whole array, as `*array` spreads one.
+        const isSpread = passesArray(args[index], param);
+        if (isSpread) {
+          const arrayType = this.varargArrayOf(param, paramType);
+          if (!this.acceptsArgument(compiled, arrayType))
+            this.error(args[index].row, typeMismatchMessage(arrayType, compiled.type));
+          return { index, paramIndex, eval: compiled.eval, isSpread };
+        }
         if (!this.acceptsArgument(compiled, elementType)) {
           this.error(args[index].row, typeMismatchMessage(elementType, compiled.type));
         }
@@ -1410,6 +1773,7 @@ export abstract class CallCompiler extends CompilerCore {
   protected probeContext(context: FunctionContext): FunctionContext {
     const returnTarget = context.isLambda ? context.returnTarget : context;
     const probe = new FunctionContext(context, true, '<probe>', context.info.isLibrary, returnTarget, true);
+    probe.isProbeRoot = true;
     probe.loops = context.loops.map((loop) => ({ ...loop, breaks: [], continues: [], valWrites: new Map() }));
     return probe;
   }

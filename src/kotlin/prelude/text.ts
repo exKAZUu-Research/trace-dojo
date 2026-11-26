@@ -8,11 +8,28 @@ package java.util
 class Locale private constructor()
 `;
 
+/** java.nio.charset.Charset, which only Kotlin's Charsets gives programs. */
+export const CHARSET_SOURCE = kotlin`
+package java.nio.charset
+
+class Charset internal constructor(private val charsetName: String) {
+    fun name(): String = charsetName
+    fun displayName(): String = charsetName
+    override fun toString(): String = charsetName
+}
+`;
+
 /** `kotlin.text`: `StringBuilder` and the functions of strings and characters. */
 export const TEXT_SOURCE = kotlin`
 package kotlin.text
 
+import java.nio.charset.Charset
 import java.util.Locale
+
+// The charsets programs name; files and streams in this environment are UTF-8, as the JVM's default is.
+object Charsets {
+    val UTF_8: Charset = Charset("UTF-8")
+}
 
 external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external constructor()

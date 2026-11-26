@@ -36,9 +36,45 @@ export interface FunctionInfo {
   isLambda: boolean;
   /** Whether `this` is an instance of a class of the program, whose properties the trace shows as `this.x`. */
   showsThis: boolean;
+  /**
+   * For the local functions and classes the code calls or creates from a lambda or another function, the index in the
+   * frame's captures of what their declaration made, keyed by the variable that holds it where they are declared.
+   */
+  localEnvs?: Map<unknown, number>;
+}
+
+/** What running the declaration of a local function or class makes: what its code captures, and the frame running it. */
+export interface LocalEnv {
+  captured: unknown[];
+  declaring: Frame;
+}
+
+/**
+ * What the declaration of a local function or class made, as the frame calling it sees it: the slot of the declaring
+ * frame, when the call is in the declaring code itself, or else what the caller's code captured, as every other use
+ * registers it to.
+ */
+export function localEnvOf(caller: Frame, key: unknown, declaringInfo: FunctionInfo, slot: number): LocalEnv {
+  if (caller.info === declaringInfo) return caller.locals[slot] as unknown as LocalEnv;
+  const index = caller.info.localEnvs?.get(key);
+  if (index === undefined) throw new Error('A local function or class was used by code that does not capture it');
+  return caller.captured[index] as LocalEnv;
 }
 
 export type Invoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
+
+/** A coroutine's step: a generator that yields the values a sequence produces and returns the call's result. */
+export type Suspension = Generator<Value, Value, undefined>;
+
+export type SuspendInvoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Suspension;
+
+/**
+ * A call of a suspend function or suspend function value whose arguments are evaluated, which the coroutine running
+ * the caller performs, as only it can suspend.
+ */
+export class SuspendCall {
+  constructor(readonly run: (caller: Frame) => Suspension) {}
+}
 
 const JVM_MAX_STRING_LENGTH = 2 ** 31 - 5;
 
@@ -211,8 +247,40 @@ export class Runtime implements TracedRuntime<Frame> {
     throw new KotlinThrow(this.exceptions.create(frame, qualifiedName, message));
   }
 
+  /** Runs a suspend function's body in a new frame as `call` does, suspending where the body's generator yields. */
+  // code-gauge-allow functionParameterCount -- the same parts as `call`'s.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
+  *callSuspend(
+    info: FunctionInfo,
+    caller: Frame,
+    captured: readonly unknown[],
+    thisValue: Value,
+    args: readonly Value[],
+    callRow: number | undefined,
+    body: (frame: Frame) => Suspension,
+    enclosing?: Frame
+  ): Suspension {
+    this.spend();
+    const frame = new Frame(this, info, captured, thisValue, info.isLibrary ? undefined : callRow);
+    frame.enclosing = enclosing;
+    if (this.frames.length >= LIMITS.maxCallDepth) this.throwError(caller, 'java.lang.StackOverflowError');
+    for (const [index, arg] of args.entries()) frame.locals[index] = arg;
+    this.frames.push(frame);
+    try {
+      return yield* body(frame);
+    } catch (error) {
+      if (error instanceof ReturnSignal && error.frame === frame) return error.value;
+      throw error;
+    } finally {
+      this.onExit?.(frame);
+      this.frames.splice(this.frames.lastIndexOf(frame), 1);
+      if (info.isAtomic) this.steps.completeAtomicCall();
+    }
+  }
+
   /** Runs a function's body in a new frame, returning what it returns. */
   // code-gauge-allow functionParameterCount -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   call(
     info: FunctionInfo,
     caller: Frame | undefined,
@@ -282,6 +350,7 @@ export class Runtime implements TracedRuntime<Frame> {
 function enqueueObjectReferences(stack: unknown[], object: KObject): void {
   enqueueObjects(stack, object.fields);
   if (object.env) enqueueObjects(stack, object.env);
+  if (object.localFrames) enqueueObjects(stack, object.localFrames.values());
   if (object.items) enqueueObjects(stack, object.items);
   if (object.store) for (const entry of object.store.entries) stack.push(entry.key, entry.value);
   if (object.native) enqueueObjects(stack, Object.values(object.native));

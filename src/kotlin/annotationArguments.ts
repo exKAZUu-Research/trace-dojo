@@ -1,7 +1,8 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import type { Annotation } from './ast';
+import type { Annotation, Argument } from './ast';
 import {
+  children,
   firstOfType,
   hasToken,
   identifierName,
@@ -10,27 +11,42 @@ import {
   required,
   rowOf,
   syntaxError,
-  unavailable,
 } from './convertSupport';
 
-export function convertAnnotation(node: Node, isLibrary: boolean): Annotation {
+/**
+ * Reads an annotation such as `@get:JvmName("x")`, `@Deprecated("old")`, or `@OptIn(Marker::class)`.
+ *
+ * @param convertArgument Converts an argument of the annotation as an argument of a call.
+ */
+export function convertAnnotation(node: Node, convertArgument: (node: Node) => Argument): Annotation {
   const parts = named(node);
-  if (parts.some((part) => part.type === 'use_site_target'))
-    throw unavailable(node, '対象を指定したアノテーション（@get: など）');
-  const target = parts[0];
+  const targetNode = parts.find((part) => part.type === 'use_site_target');
+  const target = required(parts.find((part) => part.type !== 'use_site_target'));
+  const useSiteTarget = targetNode ? (children(targetNode)[0]?.type ?? targetNode.text.replace(/:$/, '')) : undefined;
+  return convertAnnotationEntry(target, useSiteTarget, convertArgument);
+}
+
+/** An annotation from what follows its `@` and use-site target: its class, with arguments when it has them. */
+export function convertAnnotationEntry(
+  target: Node,
+  useSiteTarget: string | undefined,
+  convertArgument: (node: Node) => Argument
+): Annotation {
   const typeNode = target.type === 'constructor_invocation' ? named(target)[0] : target;
-  const spelling = typeNode.text;
-  if (isLibrary) return { row: rowOf(node), name: spelling };
-  if (!LEARNER_ANNOTATIONS.has(spelling)) throw unavailable(node, `アノテーション @${spelling}`);
-  const name = spelling.endsWith('JvmInline') ? 'JvmInline' : 'OptIn';
-  const qualifiedName = spelling.includes('.') ? spelling : undefined;
-  const args = firstOfType(target, 'value_arguments');
-  const arguments_ = args ? namedOfType(args, 'value_argument') : [];
-  if (name === 'JvmInline') {
-    if (arguments_.length > 0) throw syntaxError(node, '@JvmInline には引数を書けません。');
-    return { row: rowOf(node), name, qualifiedName };
-  }
-  return { row: rowOf(node), name, qualifiedName, markers: optInMarkerArguments(arguments_) };
+  const path = namedOfType(typeNode, 'identifier').map(identifierName);
+  const name = path.at(-1) as string;
+  const qualifiedName = path.length > 1 ? path.join('.') : undefined;
+  const argumentsNode = firstOfType(target, 'value_arguments');
+  const argumentNodes = argumentsNode ? namedOfType(argumentsNode, 'value_argument') : undefined;
+  return {
+    row: rowOf(target),
+    name,
+    qualifiedName,
+    path,
+    useSiteTarget,
+    args: argumentNodes?.map(convertArgument),
+    markers: name === 'OptIn' && argumentNodes ? optInMarkerArguments(argumentNodes) : undefined,
+  };
 }
 
 function optInMarkerArguments(args: Node[]): NonNullable<Annotation['markers']> {
@@ -82,6 +98,3 @@ function annotationClassPath(node: Node): string[] | undefined {
   const path = annotationClassPath(receiver);
   return path && [...path, identifierName(member)];
 }
-
-/** The annotations of the Kotlin tour, which change nothing a program prints. */
-const LEARNER_ANNOTATIONS = new Set(['JvmInline', 'OptIn', 'kotlin.jvm.JvmInline', 'kotlin.OptIn']);

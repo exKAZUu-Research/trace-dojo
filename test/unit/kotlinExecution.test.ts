@@ -6160,34 +6160,14 @@ test.each([
     'String の chunkedSequenceは、この採点環境では使えません。',
   ],
   [
-    'the Result companion',
-    'fun main() { println(Result.success(1)) }',
-    'kotlin.Resultは、この採点環境では使えません。',
-  ],
-  [
     'a JVM class implicitly imported by Kotlin',
     'fun main() { println(StringBuffer()) }',
     'Java のクラスの直接の利用（java.lang.StringBuffer）は、この採点環境では使えません。',
   ],
   [
-    'a recognized static System method',
-    'fun main() { println(System.currentTimeMillis()) }',
-    'System.currentTimeMillisは、この採点環境では使えません。',
-  ],
-  [
-    'an imported standard time function',
-    'import kotlin.system.measureTimeMillis\nfun main() { println(measureTimeMillis { }) }',
-    'kotlin.system.measureTimeMillisは、この採点環境では使えません。',
-  ],
-  [
-    'an omitted collection factory',
-    'fun main() { println(sortedMapOf(1 to 2)) }',
-    'kotlin.collections.sortedMapOfは、この採点環境では使えません。',
-  ],
-  [
     'a Java method mapped to a mutable Kotlin collection',
-    'fun main() { mutableMapOf("a" to 1).putIfAbsent("b", 2) }',
-    'MutableMap<String, Int> の putIfAbsentは、この採点環境では使えません。',
+    'fun main() { mutableListOf(1).parallelStream() }',
+    'MutableList<Int> の parallelStreamは、この採点環境では使えません。',
   ],
   [
     'a Java method inherited by read-only Kotlin collections',
@@ -6210,19 +6190,9 @@ test.each([
     'Map<Int, String> の maxWithOrNullは、この採点環境では使えません。',
   ],
   [
-    'filterIsInstance',
-    'fun main() { println(listOf(1, "a").filterIsInstance<Int>()) }',
-    '型で要素を絞り込む filterIsInstanceは、この採点環境では使えません。',
-  ],
-  [
-    'standard input',
-    'fun main() {\n    val s = readln()\n    println(s)\n}',
-    '標準入力（readln）は、この採点環境では使えません。',
-  ],
-  [
     'standard input through a wildcard import',
     'import java.util.*\nfun main() { println(Scanner(System.`in`).nextInt()) }',
-    '標準入力は、この採点環境では使えません。',
+    'Java の Scanner（readln() を使ってください）は、この採点環境では使えません。',
   ],
   [
     'a Java class through a wildcard import',
@@ -6237,27 +6207,12 @@ test.each([
   [
     'standard input through a qualified class name',
     'fun main() { println(java.util.Scanner(System.`in`).nextInt()) }',
-    '標準入力は、この採点環境では使えません。',
-  ],
-  [
-    'a qualified file constructor',
-    'fun main() { println(java.io.File("a.txt").readText()) }',
-    'ファイルの読み書きは、この採点環境では使えません。',
-  ],
-  [
-    'a qualified file type',
-    'fun main() { val file: java.io.File? = null; println(file) }',
-    'ファイルの読み書きは、この採点環境では使えません。',
+    'Java の Scanner（readln() を使ってください）は、この採点環境では使えません。',
   ],
   [
     'standard input through System',
     'fun main() { println(System.`in`.read()) }',
-    '標準入力は、この採点環境では使えません。',
-  ],
-  [
-    'files',
-    'import java.io.File\nfun main() {\n    println(File("a.txt").readText())\n}',
-    'ファイルの読み書きは、この採点環境では使えません。',
+    'Java の System.in（readln() を使ってください）は、この採点環境では使えません。',
   ],
 ])('rejects %s as unavailable', (_name, source, message) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
@@ -6344,5 +6299,822 @@ test.each([
   expect(executeProgram('kotlin', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message }],
+  });
+});
+
+test("runs Java's default map methods with its null rules, and a map's default for getValue", () => {
+  const source = `fun main() {
+    val counts = mutableMapOf<String, Int>()
+    for (w in "a b a c".split(" ")) counts.merge(w, 1, Int::plus)
+    println(counts.merge("c", 1) { _, _ -> null })
+    val groups = mutableMapOf<Int, MutableList<String>>()
+    for (s in listOf("aa", "b", "cc")) groups.computeIfAbsent(s.length) { mutableListOf() }.add(s)
+    println(listOf(counts, groups, counts.putIfAbsent("a", 9), groups.computeIfPresent(9) { _, v -> v }))
+    val withDefault = mutableMapOf<String, Int>().withDefault { 0 }
+    withDefault["k"] = withDefault.getValue("k") + 1
+    println(listOf(withDefault, withDefault["q"], withDefault.getValue("q")))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'null\n[{a=2, b=1}, {2=[aa, cc], 1=[b]}, 2, null]\n[{k=1}, null, 0]\n',
+  });
+});
+
+test('reads standard input and the files of a run, and leaves the files it writes', () => {
+  const source = `import java.io.File
+fun main() {
+    val count = readln().toInt()
+    File("out.txt").writeText("x".repeat(count))
+    File("out.txt").appendText("!")
+    println(File("in.txt").readLines() + readlnOrNull())
+}`;
+  expect(executeProgram('kotlin', source, { stdin: '3\n', files: { 'in.txt': 'a\nb\n' } })).toMatchObject({
+    kind: 'executed',
+    stdout: '[a, b, null]\n',
+    finalFiles: { 'in.txt': 'a\nb\n', 'out.txt': 'xxx!' },
+  });
+});
+
+test('keeps what writers write until they flush or close, and loses what an unclosed writer holds', () => {
+  const source = `import java.io.File
+fun main() {
+    val printed = File("printed.txt")
+    val writer = printed.printWriter()
+    writer.println("x")
+    println(printed.readText().length)
+    writer.close()
+    writer.println("after close")
+    val buffered = File("buffered.txt").bufferedWriter()
+    buffered.write("hello")
+    buffered.close()
+    try { buffered.write("!") } catch (e: java.io.IOException) { println(e.message) }
+    File("lost.txt").bufferedWriter().write("never flushed")
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '0\nStream closed\n',
+    finalFiles: { 'printed.txt': 'x\n', 'buffered.txt': 'hello', 'lost.txt': '' },
+  });
+});
+
+test.each([
+  ['a local function', 'fun main() {\n  fun local(x: Int) = x + 100; println(local(1))\n}', false],
+  ['an anonymous function', 'fun main() {\n  val f = fun(x: Int) = x + 1; println(f(1))\n}', false],
+  ['a block body', 'fun main() {\n  fun local(x: Int): Int { return x }; println(local(1))\n}', true],
+  ['a semicolon at the end of the row', 'fun main() {\n  fun local(x: Int) = x;\n  println(local(1))\n}', true],
+  ['top-level functions', 'fun top() = 1; fun main() { println(top()) }', true],
+])('compiles a statement after %s on the row of its semicolon only when kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
+});
+
+const SUSPEND_LOG = `var log = ""
+suspend fun f(x: Int): Int { log += "f$x "; return x }
+fun g(x: Int): Int { log += "g$x "; return x }
+`;
+
+test.each([
+  ['an operand before a suspend call', 'println(g(1) + f(2))', '3\ng1 f2 \n'],
+  ['a variable read before a suspend call changes it', 'println(log.length + f(1))', '1\nf1 \n'],
+  ['a destructuring declaration', 'val (a, b) = Pair(f(1), f(2))\n    println(a + b)', '3\nf1 f2 \n'],
+  [
+    'indexed and compound assignments',
+    'val a = intArrayOf(0, 0)\n    a[g(1)] = f(5)\n    a[0] += f(3)\n    println(a.toList())',
+    '[3, 5]\ng1 f5 f3 \n',
+  ],
+  ['short-circuit operators', 'println(f(1) > 0 && f(2) > 5 || f(3) == 3)', 'true\nf1 f2 f3 \n'],
+  [
+    'when with a subject variable and a value',
+    'when (val r = f(2)) { 2 -> println("two $r") else -> println("other") }\n    println(when (f(3)) { 3 -> f(30) else -> 0 })',
+    'two 2\n30\nf2 f3 f30 \n',
+  ],
+  [
+    'when whose type tests smart-cast its subject',
+    'val v: Any = "abc"\n    println(when (v) { is Int -> f(v + 1); is String -> f(v.length); else -> 0 })',
+    '3\nf3 \n',
+  ],
+  [
+    'when whose every branch returns',
+    'suspend fun sign(x: Int): Int { when (x) { 0 -> return f(0); else -> return f(x / kotlin.math.abs(x)) } }\n    println(sign(-3))',
+    '-1\nf-1 \n',
+  ],
+  [
+    'try as a value',
+    'val x = try { f(1) / 0 } catch (e: ArithmeticException) { f(7) } finally { g(9) }\n    println(x)',
+    '7\nf1 f7 g9 \n',
+  ],
+  [
+    'loop conditions',
+    'var i = 0\n    while (f(i) < 2) i++\n    do { i-- } while (f(i) > 0)\n    println(i)',
+    '0\nf0 f1 f2 f1 f0 \n',
+  ],
+  [
+    'inline lambdas with labeled returns',
+    'println(listOf(1, 2, 3).map { if (it == 2) return@map 0; it + f(it) })',
+    '[2, 0, 6]\nf1 f3 \n',
+  ],
+  [
+    'inline lambdas chosen by their result type',
+    'println(listOf(1, 2, 3).filter { f(it) % 2 == 1 }.sumOf { f(it * 10) })',
+    '40\nf1 f2 f3 f10 f30 \n',
+  ],
+  [
+    'safe calls and assignments',
+    'val b: StringBuilder? = null\n    println(b?.append(f(1)))\n    val c: StringBuilder? = StringBuilder()\n    println(c?.append(f(2)))',
+    'null\n2\nf2 \n',
+  ],
+])("runs suspend calls in %s in kotlinc's order", (_name, body, stdout) => {
+  const source = `${SUSPEND_LOG}suspend fun main() {
+    ${body}
+    print(log)
+    println()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test("reads the variables of the enclosing function in local classes' initializers and constructors", () => {
+  const source = `fun main() {
+    val seed = 7
+    val o = object { val v = seed }
+    class C(val x: Int) { val v = seed + x; constructor() : this(seed) }
+    println(listOf(o.v, C(1).v, C().v))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[7, 8, 14]\n' });
+});
+
+test('chooses overloads and infers result types from the callable references calls pass', () => {
+  const source = `fun len(s: String) = s.length
+fun main() {
+    println(listOf("a", "bb").map(String::length))
+    println(listOf("a", "bb").map(::len))
+    println(" x ".let(String::trim))
+    println(listOf("ab", "c").sumOf(String::length))
+    println(pick(String::length))
+    println(doubled(4))
+    val five = 5
+    println(listOf((five::toString)(), (five::inc)()))
+}
+val doubled = ::twiceOf
+fun twiceOf(x: Int) = x * 2
+fun pick(f: (String) -> Int) = 1
+fun pick(f: (String, Int) -> Int) = 2`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2]\n[1, 2]\nx\n3\n1\n8\n[5, 6]\n',
+  });
+});
+
+test('initializes an enum entry with a body once, with the arguments it passes', () => {
+  const source = `enum class P(val n: Int) {
+    X(1) { override fun d() = "x$n" };
+    init { println("init $n") }
+    abstract fun d(): String
+}
+fun main() { println(P.X.d()) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'init 1\nx1\n' });
+});
+
+test('keeps what local functions and classes captured in lambdas that outlive the block declaring them', () => {
+  const source = `fun main() {
+    val xs = mutableListOf<() -> Int>()
+    for (i in 1..2) {
+        class K { fun v() = i }
+        fun fact(k: Int): Int {
+            return if (k <= 1) i else k * fact(k - 1)
+        }
+        xs.add { K().v() * 100 + fact(3) }
+    }
+    println(xs.map { it() })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[106, 212]\n' });
+});
+
+test.each([
+  ['String::length', true],
+  ['String::uppercase', false],
+])('checks the function type of %s passed for a fun interface', (reference, compiles) => {
+  const source = `fun interface S { fun m(s: String): Int }
+fun use(s: S) = s.m("abc")
+fun main() { println(use(${reference})) }`;
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
+test('calls values through invoke operators declared as extensions', () => {
+  const source = `class A(val n: Int)
+operator fun A.invoke(x: Int): Int = n + x
+operator fun String.invoke(k: Int) = repeat(k)
+fun main() {
+    val a = A(1)
+    println(a(2))
+    println("ab"(2))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '3\nabab\n' });
+});
+
+test('finds and merges the elements of sorted sets and maps by their order, as java.util.TreeSet and TreeMap do', () => {
+  const source = `fun main() {
+    val t = sortedSetOf(5, 2, 9, 7)
+    println(listOf(t.ceiling(3), t.floor(3), t.higher(7), t.lower(2)))
+    println(t.descendingSet())
+    println(t.subSet(2, false, 7, true))
+    println(listOf(t.pollFirst(), t.pollLast()))
+    println(t)
+    val parity = Comparator<Int> { a, b -> a % 2 - b % 2 }
+    val odd = sortedSetOf(parity, 1, 3)
+    println(listOf(odd, odd.add(5), odd.contains(7)))
+    val m = sortedMapOf(parity, 1 to "a", 3 to "b")
+    println(listOf(m, 5 in m.keys, odd == setOf(7)))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[5, 2, 9, null]\n[9, 7, 5, 2]\n[5, 7]\n[2, 9]\n[5, 7]\n[[1], false, true]\n[{1=b}, true, true]\n',
+  });
+});
+
+test("gives views of sorted sets and maps that read and write them, as java.util's do", () => {
+  const source = `fun main() {
+    val s = sortedSetOf(3, 1, 2)
+    val head = s.headSet(3)
+    val descending = s.descendingSet()
+    s.add(0)
+    val tail = s.tailSet(2)
+    tail.add(7)
+    println(listOf(head, descending, s))
+    try { tail.add(0) } catch (e: Exception) { println(e) }
+    val m = sortedMapOf(1 to "a", 2 to "b")
+    val headMap = m.headMap(2)
+    m[0] = "z"
+    println(headMap)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[0, 1, 2], [7, 3, 2, 1, 0], [0, 1, 2, 3, 7]]\njava.lang.IllegalArgumentException: key out of range\n{0=z, 1=a}\n',
+  });
+});
+
+test('removes elements of sorted sets by their order after their hash codes change', () => {
+  const source = `data class P(val name: String, var score: Int)
+fun main() {
+    val s = sortedSetOf(compareBy<P> { it.name }, P("a", 1), P("b", 2))
+    s.first().score = 9
+    println(listOf(s.pollFirst(), s.size))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[P(name=a, score=9), 1]\n' });
+});
+
+test('looks keys up in sorted sets and maps within the operation limit', () => {
+  const source = `fun main() {
+    val s = sortedSetOf<Int>()
+    val m = sortedMapOf<Int, Int>()
+    for (i in 0 until 100) { s.add(i); m[i] = i }
+    var count = 0
+    for (i in 0 until 5000) if (i % 100 in s && m[i % 100] == i % 100) count++
+    println(count)
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '5000\n' });
+});
+
+test("gives regexes Kotlin/JVM's options, escapes, and errors", () => {
+  const source = `fun main() {
+    println(Regex("É", RegexOption.IGNORE_CASE).matches("é"))
+    println(Regex("b", RegexOption.IGNORE_CASE).options.size)
+    println(Regex(Regex.escape("a\\\\Eb")).matches("a\\\\Eb"))
+    try { Regex("a").find("aaa", 9) } catch (e: Exception) { println(e) }
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n1\ntrue\njava.lang.IndexOutOfBoundsException: Illegal start index\n',
+  });
+});
+
+test.each([
+  ["the library's constants", 'const val M = Int.MAX_VALUE + 0L\nfun main() { println(M) }', true],
+  [
+    'the types of constants',
+    "const val B: Boolean = true\nconst val C: Char = 'x'\nfun main() { println(listOf(B, C)) }",
+    true,
+  ],
+  ['a type that may be null', 'const val Y: Int? = 1\nfun main() { println(Y) }', false],
+  ['a lateinit Boolean', 'class A { lateinit var b: Boolean }\nfun main() { println(1) }', false],
+  [
+    'an override whose extension receiver differs',
+    'open class B { open fun String.f() = "b" }\nclass S : B() { override fun Int.f() = "s" }\nfun main() { println(1) }',
+    false,
+  ],
+  ['a type that is not primitive', 'const val X: Any = 1\nfun main() { println(X) }', false],
+])('compiles const vals of %s only as kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
+test.each([
+  ['a modifier of classes on a function', 'sealed fun f() = 1\nfun main() { println(f()) }', false],
+  ['a modifier of functions on a class', 'suspend class A\nfun main() { println(1) }', false],
+  ['a getter less visible than its property', 'class A { var x = 0; private get }\nfun main() { println(1) }', false],
+  [
+    'modifiers on the declarations they apply to',
+    'data object O\nclass D { companion object { const val K = 1 } }\nfun main() { println(listOf(O, D.K)) }',
+    true,
+  ],
+  [
+    'an annotation with arguments on a class',
+    'annotation class A(val s: String)\n@A("x") class C\nfun main() { println(1) }',
+    true,
+  ],
+  [
+    'an annotation missing its argument on a class',
+    'annotation class A(val s: String)\n@A class C\nfun main() { println(1) }',
+    false,
+  ],
+  [
+    'an interface declared in a function body',
+    'fun main() {\n  interface I { fun f() = 1 }\n  class C : I\n  println(C().f())\n}',
+    false,
+  ],
+  [
+    'a spread argument for a parameter that is not vararg',
+    'fun f(x: Int) = x\nfun main() { println(f(*intArrayOf(1))) }',
+    false,
+  ],
+  [
+    'a spread argument for a vararg',
+    'fun g(vararg x: Int) = x.sum()\nfun main() { println(g(*intArrayOf(1, 2), 3)) }',
+    true,
+  ],
+  [
+    "an integer literal for an annotation's String",
+    'annotation class A(val s: String)\n@A(1) fun f() = 1\nfun main() { println(f()) }',
+    false,
+  ],
+  [
+    "integer literals for an annotation's Long and Byte",
+    'annotation class N(val n: Long, val b: Byte)\n@N(1, 2) fun f() = 1\nfun main() { println(f()) }',
+    true,
+  ],
+])('compiles %s only as kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind).toBe(compiles ? 'executed' : 'compileError');
+});
+
+test('keeps the anonymous types of private properties that object expressions initialize', () => {
+  const source = `interface Greeter { fun hi(): String }
+class Service(val name: String) {
+    private val greeter = object : Greeter { override fun hi() = "hello " + name }
+    private val counter = object { var n = 0 }
+    fun run(): String { counter.n++; return greeter.hi() + counter.n }
+}
+private val shared = object { fun twice(x: Int) = x * 2 }
+fun main() { println(Service("u").run()); println(shared.twice(3)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'hello u1\n6\n' });
+});
+
+test('reads FunctionN types as the function types kotlinc reads them as', () => {
+  const source = `fun apply(f: Function1<Int, Int>, x: Int) = f(x)
+class Doubler : Function1<Int, Int> { override fun invoke(p1: Int) = p1 * 2 }
+fun main() { println(listOf(apply({ it * 2 }, 3), Doubler()(4))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8]\n' });
+});
+
+test.each([
+  [
+    'a local function',
+    'fun main() {\n    tailrec fun loop(n: Int): Int = if (n == 0) 0 else loop(n - 1)\n    println(loop(100000))\n}',
+    '0\n',
+  ],
+  [
+    'a member extension',
+    'class C(val base: Int) {\n    tailrec fun Int.up(acc: Int): Int = if (acc >= this) acc + base else up(acc + 1)\n    fun run() = 5.up(0)\n}\nfun main() { println(C(100).run()) }',
+    '105\n',
+  ],
+  [
+    'a suspend function',
+    'tailrec suspend fun loop(n: Int): Int = if (n == 0) 0 else loop(n - 1)\nsuspend fun main() { println(loop(3)) }',
+    '0\n',
+  ],
+])('runs a tailrec %s', (_kind, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('checks reified type arguments in both the ordinary and the suspend version of an inline function', () => {
+  const source = `inline fun <reified T> isOf(x: Any, f: (Int) -> Unit): Boolean { f(1); return x is T }
+fun main() {
+    println(listOf(isOf<String>("a") { }, isOf<String>(5) { }))
+    println(sequence { yield(if (isOf<String>(5) { yield(8) }) 1 else 0) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[true, false]\n[8, 0]\n' });
+});
+
+test('normalizes the paths of files as java.io.File does', () => {
+  const source = `import java.io.File
+fun main() { println(listOf(File("a/b/").name, File("a", "/b").path, File("a") == File("a/"))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[b, a/b, true]\n' });
+});
+
+test('finds operators and infix functions where a call of them finds them', () => {
+  const source = `data class V(val x: Int)
+class Ops { operator fun V.times(k: Int) = V(x * k) }
+fun main() {
+    operator fun V.div(k: Int) = V(x / k)
+    infix fun Int.pow(e: Int): Int { var r = 1; repeat(e) { r *= this }; return r }
+    println(listOf(V(6) / 3, 2 pow 3, with(Ops()) { V(2) * 5 }))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[V(x=2), 8, V(x=10)]\n' });
+});
+
+test("catches only the exceptions of a reified type parameter's type", () => {
+  const source = `inline fun <reified E : Throwable> caught(block: () -> Unit): String {
+    try { block(); return "none" } catch (e: E) { return "caught" }
+}
+fun main() {
+    println(caught<IllegalStateException> { throw IllegalStateException("x") })
+    println(caught<IllegalArgumentException> { throw IllegalStateException("y") })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'caught\n',
+    uncaughtException: 'java.lang.IllegalStateException: y',
+  });
+});
+
+test.each([
+  [
+    "an inner class's header reading the class around it",
+    'open class Base(val t: String)\nclass Outer(val s: String) { inner class In : Base(s + "?") }\nfun main() { println(Outer("a").In().t) }',
+    'a?\n',
+  ],
+  [
+    'a lateinit property read in an init block',
+    'class L { lateinit var s: String; init { s = "x"; println(s) } }\nfun main() { L() }',
+    'x\n',
+  ],
+  [
+    'a file at the root',
+    'import java.io.File\nfun main() { println(listOf(File("/").parent, File("/a").parent)) }',
+    '[null, /]\n',
+  ],
+  [
+    'a regex group the pattern lacks',
+    'fun main() { try { Regex("(a)").find("a")!!.groups[5] } catch (e: Exception) { println(e) } }',
+    'java.lang.IndexOutOfBoundsException: No group 5\n',
+  ],
+  [
+    'an iterator of a sorted map after its last element',
+    'fun main() { val m = sortedMapOf(1 to "a", 2 to "b"); for (k in m.keys) if (k == 2) m[3] = "c"; println(m) }',
+    '{1=a, 2=b, 3=c}\n',
+  ],
+])('runs %s as kotlinc does', (_name, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  [
+    'a member extension on an explicit receiver',
+    'class Ctx(val name: String) { fun Ctx.label() = this.name + this@Ctx.name }\nfun main() { with(Ctx("A")) { println(Ctx("B").label()) } }',
+    'BA\n',
+  ],
+  [
+    'a member property called through its invoke operator',
+    'class Adder(val base: Int) { operator fun invoke(x: Int) = base + x }\nclass Holder { val adder = Adder(100) }\nfun main() { println(Holder().adder(1)) }',
+    '101\n',
+  ],
+  [
+    'an override of a generic function',
+    'interface Mapper { fun <T> map(x: T): String }\nclass M : Mapper { override fun <T> map(x: T): String = "m$x" }\nfun main() { println(M().map(1)) }',
+    'm1\n',
+  ],
+  [
+    'a not operator',
+    'class Money(val cents: Int) { operator fun not() = cents == 0 }\nfun main() { println(!Money(5)) }',
+    'false\n',
+  ],
+])('calls %s as kotlinc does', (_name, source, stdout) => {
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout });
+});
+
+test("runs sequences' indexed filters and overloads chosen by their lambdas' results as kotlinc does", () => {
+  const source = `fun main() {
+    val even = sequenceOf(1, 2, 3).filterIndexed { i, _ -> i % 2 == 0 }
+    println(listOf(even.toList(), even.toList()))
+    println(sequenceOf(1, 2).flatMap { listOf(it, it) }.toList())
+    println(sequenceOf(1.5, 2.25).sumOf { it })
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1, 3], [1, 3]]\n[1, 1, 2, 2]\n3.75\n',
+  });
+});
+
+test("runs initializers with their own locals and objects before a secondary constructor's body", () => {
+  const source = `interface R { fun run2(): Int }
+class K {
+    val a: Int
+    val r = object : R { override fun run2() = 7 }
+    init { val t = 40; a = t + 2 }
+    constructor(z: Int) { println(z + a + r.run2()) }
+}
+fun main() { K(1) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '50\n' });
+});
+
+test('reports coroutine and thread functions written without their imports as unavailable', () => {
+  for (const name of ['runBlocking', 'launch', 'thread']) {
+    expect(executeProgram('kotlin', `fun main() { ${name} { println(1) } }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('この採点環境では使えません') }],
+    });
+  }
+});
+
+test('gives suspending lambdas their primitive receivers as values', () => {
+  const source =
+    'fun main() { println(sequence { with(3) { yield(this * 2) }; with(8L) { yield(this + 1) } }.toList()) }';
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 9]\n' });
+});
+
+test('runs safe forEach calls whose lambdas suspend only on receivers that are not null', () => {
+  const source = `fun main() {
+    val xs: List<Int>? = listOf(4)
+    val ys: List<Int>? = null
+    println(sequence { xs?.forEach { yield(it) }; ys?.forEach { yield(it) }; yield(99) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 99]\n' });
+});
+
+test('suspends on suspend function values called with a receiver, through invoke, or as properties', () => {
+  const source = `class H { val g: suspend (Int) -> Int = { it * 2 } }
+fun main() {
+    val f: suspend Int.() -> Int = { this * 2 }
+    println(sequence { yield(3.f()); yield(f.invoke(4)); yield(H().g(5)) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[6, 8, 10]\n' });
+});
+
+test('constructs enum constants with the secondary constructors their arguments fit', () => {
+  const source = `enum class Level(val n: Int) {
+    LOW(1), MID("abc");
+    constructor(s: String) : this(s.length)
+}
+enum class Size { S(1), L("xl"); val n: Int
+    constructor(i: Int) { n = i }
+    constructor(s: String) { n = s.length + 10 }
+}
+fun main() { println(listOf(Level.MID.n, Level.LOW.n, Size.S.n, Size.L.n)); println(Size.L.name + Size.L.ordinal) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[3, 1, 1, 12]\nL1\n' });
+});
+
+test('runs declarations inside forEach and repeat lambdas that suspend', () => {
+  const source = `fun main() {
+    println(sequence { listOf(1, 2, 3).forEach { if (it == 2) return@forEach; val sq = it * it; yield(sq) } }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 9]\n' });
+});
+
+test('narrows and scopes suspending loops as other loops', () => {
+  const source = `class Node(val value: Int, val next: Node?)
+fun main() {
+    val head = Node(1, Node(2, null))
+    println(sequence { var node: Node? = head; while (node != null) { yield(node.value); node = node.next } }.toList())
+    println(sequence { var i = 0; do { val v = i++; yield(v) } while (v < 2) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[0, 1, 2]\n' });
+});
+
+test('folds the conversions of constants into const vals as kotlinc does', () => {
+  const source = `const val INF = 1e18.toLong()
+const val MOD = 1e9.toInt() + 7
+const val A = 'a'.code
+fun main() { println(listOf(INF, MOD, A)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1000000000000000000, 1000000007, 97]\n',
+  });
+});
+
+test('delegates properties to maps by their names', () => {
+  const source = `class User(val map: MutableMap<String, Any?>) {
+    val name: String by map
+    var age: Int by map
+}
+fun main() { val u = User(mutableMapOf("name" to "Ann", "age" to 3)); u.age = 4; println("\${u.name} \${u.age} \${u.map}") }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'Ann 4 {name=Ann, age=4}\n' });
+});
+
+test('gives vararg parameters of constructors and their properties array types', () => {
+  const source = `class Names(vararg val names: String)
+class Total(vararg items: Int) { val total = items.sum() }
+fun main() { println(listOf(Names("z", "y").names.size, Total(1, 2).total)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
+});
+
+test('binds references to members of objects and companion objects', () => {
+  const source = `object Util { fun sq(x: Int) = x * x }
+class A {
+    companion object { fun parse(s: String) = s.toInt() * 2 }
+    fun all(xs: List<String>) = xs.map(::parse)
+}
+fun main() { println(listOf(listOf(1, 2).map(Util::sq), A().all(listOf("1")), listOf("3").map(A::parse))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[[1, 4], [2], [6]]\n' });
+});
+
+test('lets the last expression of a suspending lambda see its earlier declarations', () => {
+  const source = `suspend fun d(x: Int) = x * 2
+suspend fun main() { println(listOf(1).map { val y = it + 1; d(y) } + mapOf(1 to 2).map { (k, v) -> d(k) + v }) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 4]\n' });
+});
+
+test('reads the enum of a reified type parameter for enumValues and enumValueOf', () => {
+  const source = `inline fun <reified T : Enum<T>> names() = enumValues<T>().joinToString { it.name }
+inline fun <reified T : Enum<T>> parse(s: String): T = enumValueOf<T>(s)
+enum class E { X, Y }
+fun main() { println(names<E>() + " " + parse<E>("Y")) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'X, Y Y\n' });
+});
+
+test('reads enum entries imported under an alias', () => {
+  const source = `package demo
+import demo.Color.GREEN as G
+enum class Color { RED, GREEN }
+fun main() { println(listOf(G, G == Color.GREEN)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[GREEN, true]\n' });
+});
+
+test('reads regex groups by name, as Kotlin/JVM does', () => {
+  const source = `fun main() {
+    val m = Regex("(?<year>\\\\d{4})-(\\\\d{2})").find("on 2024-05")!!
+    println(m.groups["year"]?.value)
+    println(m.groups.get("year")?.range)
+    println(runCatching { m.groups["month"] }.exceptionOrNull())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2024\n3..6\njava.lang.IllegalArgumentException: No group with name <month>\n',
+  });
+});
+
+/**
+ * The forms a call takes, each of which chooses its receivers, its target, and whether it suspends on its own path:
+ * the declarations, with `S` where `suspend` goes, and a call of them that gives 42.
+ */
+const CALL_FORMS: [string, string, string][] = [
+  ['a function', 'S fun f(x: Int): Int = x + 1', 'f(41)'],
+  ['a member', 'class C { S fun f(x: Int): Int = x + 1 }', 'C().f(41)'],
+  ['a member extension', 'class C { S fun Int.f(): Int = this + 1 }', 'with(C()) { 41.f() }'],
+  [
+    'a member through super',
+    'open class A { open S fun f(x: Int): Int = x }\nclass B : A() { override S fun f(x: Int): Int = super.f(x) + 1 }',
+    'B().f(41)',
+  ],
+  ['an invoke operator', 'class C { S operator fun invoke(x: Int): Int = x + 1 }', 'C().let { c -> c(41) }'],
+  ['an extension invoke operator', 'class C\nS operator fun C.invoke(x: Int): Int = x + 1', 'C().let { c -> c(41) }'],
+];
+
+test.each(
+  CALL_FORMS.flatMap(([form, declarations, call]) =>
+    ['', 'suspend '].flatMap((modifier) =>
+      [false, true].map((isLocal) => [form, modifier, isLocal, declarations.replaceAll('S ', modifier), call] as const)
+    )
+  )
+)('calls %s %sdeclared locally: %s', (_form, modifier, isLocal, declarations, call) => {
+  const source = isLocal
+    ? `${modifier}fun main() {
+    var g: ${modifier}() -> Int = { 0 }
+    run {
+        ${declarations.replaceAll('\n', '\n        ')}
+        g = { ${call} }
+    }
+    println(g())
+}`
+    : `${declarations}
+${modifier}fun main() { println(${call}) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '42\n' });
+});
+
+test('calls suspend functions through super, but not member extensions, which super cannot receive', () => {
+  const source = `open class A {
+    open suspend fun f(x: Int): Int = x
+    open fun g(): Int = 1
+    open fun Int.g(): Int = this + 1
+}
+class B : A() {
+    override suspend fun f(x: Int): Int = super.f(x) * 2
+    fun h(): Int = with(10) { super.g() }
+}
+suspend fun main() { println(B().f(5)); println(B().h()) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '10\n1\n' });
+  const extension = `open class A { open fun Int.f(): Int = this }
+class B : A() { override fun Int.f(): Int = super.f() + 1 }
+fun main() { with(B()) { println(41.f()) } }`;
+  expect(executeProgram('kotlin', extension).kind).toBe('compileError');
+});
+
+test('calls suspend member extensions, dispatching on the value of their class', () => {
+  const source = `open class A { open suspend fun Int.tag(): String = "A$this" }
+class C : A() { override suspend fun Int.tag(): String = "C$this" }
+suspend fun main() {
+    with(A()) { println(1.tag()) }
+    with(C() as A) { println(listOf(2, 3).map { it.tag() }) }
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'A1\n[C2, C3]\n' });
+});
+
+test('suspends a sequence builder inside the inline lambdas and branches its block runs', () => {
+  const source = `fun main() {
+    val filtered = sequence { listOf(1, 2, 3).filter { yield(it); it > 1 }.forEach { yield(it * 10) } }
+    println(filtered.toList())
+    val branches = iterator { for (i in 1..3) { val v = if (i % 2 == 0) { yield(i); i * 10 } else -i; yield(v) } }
+    for (x in branches) print("$x ")
+    println()
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1, 2, 3, 20, 30]\n-1 2 20 -3 \n',
+  });
+});
+
+test.each([
+  ['a local function', 'fun main() {\n  inline fun twice(b: () -> Int) = b() + b()\n  println(twice { 1 })\n}', false],
+  [
+    'a local class member',
+    'fun main() {\n  class L { inline fun twice(b: () -> Int) = b() + b() }\n  println(L().twice { 1 })\n}',
+    true,
+  ],
+])('accepts inline on %s only where kotlinc does', (_name, source, compiles) => {
+  expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
+});
+
+test('increments through a safe call and infers a fun interface from its lambda', () => {
+  const source = `class C { var n = 1 }
+fun interface Mapper<A, B> { fun map(a: A): B }
+fun main() {
+    var c: C? = C()
+    println(c?.n++)
+    println(++c?.n)
+    c = null
+    println(c?.n++)
+    println(listOf(3, 1, 2).sortedWith(Comparator { a: Int, b: Int -> b - a }))
+    println(Mapper { s: String -> s.length }.map("abc"))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '1\n3\nnull\n[3, 2, 1]\n3\n' });
+  expect(executeProgram('kotlin', 'fun main() { println(Comparator { a, b -> 0 }) }')).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test("fails a sequence builder's iterator after its block throws or is resumed from inside, as kotlinc does", () => {
+  const source = `fun main() {
+    val it = sequence { yield(1); throw IllegalStateException("boom") }.iterator()
+    println(it.next())
+    try { it.hasNext() } catch (e: Exception) { println(e) }
+    try { it.hasNext() } catch (e: Exception) { println(e) }
+    lateinit var inner: Iterator<Int>
+    inner = iterator { yield(1); inner.hasNext() }
+    inner.next()
+    try { inner.next() } catch (e: Exception) { println(e) }
+    println(sequence { println(yield(1)) }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '1\njava.lang.IllegalStateException: boom\njava.lang.IllegalStateException: Iterator has failed.\n' +
+      'java.lang.IllegalStateException: Iterator has failed.\nkotlin.Unit\n[1]\n',
+  });
+});
+
+test('returns from the lambdas of repeat and forEach that suspend by their implicit labels', () => {
+  const source = `fun main() {
+    val s = sequence {
+        repeat(4) { if (it == 1) return@repeat; if (it == 3) return@sequence; yield(it) }
+        yield(99)
+    }
+    println(s.toList())
+    println(sequence { listOf(1, 2, 3).forEach { if (it == 2) return@forEach; yield(it) } }.toList())
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[0, 2]\n[1, 3]\n' });
+});
+
+test('stops single and joinToString on infinite sequences where kotlinc does', () => {
+  const source = `fun main() {
+    val naturals = generateSequence(1) { it + 1 }
+    try { naturals.single() } catch (e: Exception) { println(e) }
+    println(naturals.joinToString(limit = 3))
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'java.lang.IllegalArgumentException: Sequence has more than one element.\n1, 2, 3, ...\n',
+  });
+});
+
+test('runs a sequence builder only as far as its consumer asks, suspending at each yield', () => {
+  const source = `suspend fun SequenceScope<Int>.countTo(n: Int) { for (i in 1..n) yield(i) }
+fun main() {
+    val numbers = sequence {
+        println("start")
+        countTo(2)
+        var n = 10
+        while (true) yield(n++)
+    }
+    for (x in numbers.take(4)) println("got $x")
+}`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'start\ngot 1\ngot 2\ngot 10\ngot 11\n',
   });
 });

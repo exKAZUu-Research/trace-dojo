@@ -1,7 +1,9 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
+import { convertAnnotationEntry } from './annotationArguments';
 import type {
   Accessor,
+  Annotation,
   AssignmentOperator,
   ClassDecl,
   ClassKind,
@@ -21,8 +23,10 @@ import type {
   PropertyDecl,
   Statement,
   SuperSpec,
+  TypeAliasDecl,
   TypeParameterDecl,
 } from './ast';
+import { visibilityOfKeywords, writtenVisibility } from './ast';
 import { ExpressionConverter } from './convertExpression';
 import {
   firstOfType,
@@ -33,31 +37,8 @@ import {
   required,
   rowOf,
   syntaxError,
-  unavailable,
 } from './convertSupport';
 
-/** The modifiers of the Kotlin tour and of the curriculum's Java programs, which learners' programs may use. */
-const CLASS_MODIFIERS = new Set([
-  'data',
-  'sealed',
-  'enum',
-  'value',
-  'open',
-  'abstract',
-  'private',
-  'public',
-  'protected',
-]);
-const MEMBER_MODIFIERS = new Set([
-  'open',
-  'abstract',
-  'override',
-  'private',
-  'public',
-  'protected',
-  'operator',
-  'infix',
-]);
 const NO_MODIFIERS = new Set<string>();
 
 /**
@@ -73,12 +54,25 @@ function checkAccessorsSeparated(property: Node, getter: Node, setter: Node): vo
 
 /** Converts tree-sitter's tree into the AST, rejecting syntax that this environment does not run. */
 export class Converter extends ExpressionConverter {
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
   convertFile(root: Node): KotlinFile {
+    // `dynamic` is a type of Kotlin/JS alone, which kotlinc rejects on the JVM.
+    const dynamic = root.descendantsOfType('dynamic')[0];
+    if (dynamic) throw syntaxError(dynamic, 'dynamic 型は Kotlin/JS でだけ使えます。');
     let packageName: string | undefined;
+    const annotations: Annotation[] = [];
     const imports: Import[] = [];
     const declarations: Declaration[] = [];
     for (const child of named(root)) {
       switch (child.type) {
+        case 'shebang': {
+          break;
+        }
+        case 'file_annotation': {
+          for (const entry of named(child))
+            annotations.push(convertAnnotationEntry(entry, 'file', (argument) => this.convertArgument(argument)));
+          break;
+        }
         case 'package_header': {
           packageName = named(child)[0].text;
           break;
@@ -87,28 +81,20 @@ export class Converter extends ExpressionConverter {
           imports.push(this.convertImport(child));
           break;
         }
-        case 'shebang': {
-          throw unavailable(child, '#! の行');
-        }
-        case 'file_annotation': {
-          throw unavailable(child, 'ファイルへのアノテーション（@file:）');
-        }
         case 'class_declaration':
         case 'object_declaration':
         case 'function_declaration':
-        case 'property_declaration': {
+        case 'property_declaration':
+        case 'type_alias': {
           declarations.push(this.convertDeclaration(child, true));
           break;
-        }
-        case 'type_alias': {
-          throw unavailable(child, '型の別名（typealias）');
         }
         default: {
           throw syntaxError(child, '関数やクラス、変数の宣言の外に文は書けません。');
         }
       }
     }
-    return { packageName, imports, declarations };
+    return { packageName, annotations, imports, declarations, looseAnnotations: this.looseAnnotations };
   }
 
   private convertImport(node: Node): Import {
@@ -118,8 +104,8 @@ export class Converter extends ExpressionConverter {
       pathNode.type === 'qualified_identifier' ? named(pathNode).map(identifierName) : [identifierName(pathNode)];
     const isWildcard = hasToken(node, '*');
     const aliasNode = parts[1];
-    if (aliasNode) throw unavailable(aliasNode, 'import の別名（as）');
-    return { row: rowOf(node), path, isWildcard, alias: undefined };
+    if (aliasNode && isWildcard) throw syntaxError(aliasNode, '* の import には別名を付けられません。');
+    return { row: rowOf(node), path, isWildcard, alias: aliasNode ? identifierName(aliasNode) : undefined };
   }
 
   private convertDeclaration(node: Node, isTopLevel: boolean): Declaration {
@@ -138,12 +124,26 @@ export class Converter extends ExpressionConverter {
         return this.convertDestructuring(node, multi);
       }
       case 'type_alias': {
-        throw unavailable(node, '型の別名（typealias）');
+        if (this.isLocal) throw syntaxError(node, '型の別名（typealias）は、関数の中には書けません。');
+        return this.convertTypeAlias(node);
       }
       default: {
         throw syntaxError(node, '書き方に誤りがあります。');
       }
     }
+  }
+
+  private convertTypeAlias(node: Node): TypeAliasDecl {
+    const parts = named(node);
+    const typeNode = required(parts.findLast((part) => isTypeNode(part)));
+    return {
+      kind: 'typeAlias',
+      row: rowOf(node),
+      name: identifierName(required(node.childForFieldName('type'))),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'typeAlias'),
+      typeParameters: this.convertTypeParameterList(firstOfType(node, 'type_parameters')),
+      type: this.convertType(typeNode),
+    };
   }
 
   private convertTypeParameters(node: Node | undefined, constraints?: Node): TypeParameterDecl[] {
@@ -158,13 +158,22 @@ export class Converter extends ExpressionConverter {
     return declared;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private convertTypeParameterList(node: Node | undefined): TypeParameterDecl[] {
     if (!node) return [];
-    this.requireLibrary(node, '型引数を持つ関数・クラスの宣言');
     return namedOfType(node, 'type_parameter').map((parameter) => {
       const parts = named(parameter);
       const modifiers = parts.find((part) => part.type === 'type_parameter_modifiers');
-      const keywords = modifiers ? named(modifiers).map((modifier) => modifier.text) : [];
+      const modifierNodes = modifiers ? named(modifiers) : [];
+      const annotations = modifierNodes
+        .filter((modifier) => modifier.type === 'annotation')
+        .map((annotation) => this.convertAnnotation(annotation));
+      const keywords = modifierNodes.filter((modifier) => modifier.type !== 'annotation').map(({ text }) => text);
+      for (const keyword of new Set(keywords))
+        if (keywords.indexOf(keyword) !== keywords.lastIndexOf(keyword))
+          throw syntaxError(parameter, `${keyword} 修飾子が2回書かれています。`);
+      if (keywords.includes('in') && keywords.includes('out'))
+        throw syntaxError(parameter, '型引数に in と out は同時に書けません。');
       const bound = parts.find((part) => part.type !== 'identifier' && part.type !== 'type_parameter_modifiers');
       return {
         row: rowOf(parameter),
@@ -172,7 +181,8 @@ export class Converter extends ExpressionConverter {
         bounds: bound ? [this.convertType(bound)] : [],
         variance: keywords.includes('in') ? 'in' : keywords.includes('out') ? 'out' : undefined,
         isReified: keywords.includes('reified'),
-        onlyInputTypes: keywords.includes('@OnlyInputTypes'),
+        onlyInputTypes: annotations.some(({ name }) => name === 'OnlyInputTypes'),
+        annotations,
       };
     });
   }
@@ -183,7 +193,7 @@ export class Converter extends ExpressionConverter {
     let modifiers: Modifiers = { keywords: NO_MODIFIERS, annotations: [] };
     for (const child of named(node)) {
       if (child.type === 'parameter_modifiers') {
-        modifiers = this.convertModifiers(child, NO_MODIFIERS);
+        modifiers = this.convertModifiers(child, 'parameter');
         continue;
       }
       if (child.type === 'parameter') {
@@ -205,12 +215,10 @@ export class Converter extends ExpressionConverter {
     return parameters;
   }
 
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private convertFunction(node: Node, isTopLevel: boolean): FunctionDecl {
-    if (!isTopLevel && !this.isLibrary && this.isLocal) throw unavailable(node, '関数の中での関数の宣言');
     const parts = named(node);
-    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'), MEMBER_MODIFIERS);
-    if (parts.some((part) => part.type === 'type_constraints')) this.requireLibrary(node, '型引数の制約（where）');
-    if (parts.some((part) => part.type === 'type_modifiers')) throw unavailable(node, '型へのアノテーション');
+    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'), 'function');
     const nameNode = required(node.childForFieldName('name'));
     const parametersNode = required(firstOfType(node, 'function_value_parameters'));
     const bodyNode = firstOfType(node, 'function_body');
@@ -219,12 +227,10 @@ export class Converter extends ExpressionConverter {
     const receiverNode = typeNodes.find((part) => part.startIndex < nameNode.startIndex);
     const returnNode = typeNodes.find((part) => part.startIndex > parametersNode.startIndex);
     const name = identifierName(nameNode);
-    if (modifiers.keywords.has('operator') && !this.isLibrary && !['getValue', 'setValue'].includes(name)) {
-      throw unavailable(node, '演算子のオーバーロード（operator fun）');
-    }
     return {
       kind: 'function',
       row: rowOf(node),
+      isLocal: !isTopLevel && this.isLocal,
       headerEndRow: rowOf(bodyNode ?? node),
       name,
       modifiers,
@@ -260,11 +266,7 @@ export class Converter extends ExpressionConverter {
 
   private convertProperty(node: Node, isTopLevel: boolean): PropertyDecl {
     const parts = named(node);
-    const modifiers = this.convertModifiers(
-      firstOfType(node, 'modifiers'),
-      this.isLocal ? NO_MODIFIERS : MEMBER_MODIFIERS
-    );
-    if (parts.some((part) => part.type === 'type_constraints')) this.requireLibrary(node, '型引数の制約（where）');
+    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'), 'property');
     const variable = required(firstOfType(node, 'variable_declaration'));
     const declared = this.convertVariableDeclaration(variable);
     if (declared.name === undefined) throw syntaxError(variable, '_ は変数の名前に使えません。');
@@ -281,6 +283,11 @@ export class Converter extends ExpressionConverter {
     if (getterNode && setterNode) checkAccessorsSeparated(node, getterNode, setterNode);
     if (!isTopLevel && this.isLocal && (getterNode || setterNode))
       throw syntaxError(node, 'ローカル変数には get・set を書けません。');
+    const getter = getterNode ? this.convertAccessor(getterNode) : undefined;
+    // A getter is as visible as its property, as kotlinc requires.
+    const getterVisibility = getter && writtenVisibility(getter.modifiers.keywords);
+    if (!this.isLibrary && getterVisibility && getterVisibility !== visibilityOfKeywords(modifiers.keywords))
+      throw syntaxError(required(getterNode), 'get の公開範囲は、プロパティと同じにしてください。');
     return {
       kind: 'property',
       row: rowOf(node),
@@ -295,7 +302,7 @@ export class Converter extends ExpressionConverter {
       ),
       initializer: initializerNode ? this.convertExpression(initializerNode) : undefined,
       delegate: delegateNode ? this.convertExpression(named(delegateNode)[0]) : undefined,
-      getter: getterNode ? this.convertAccessor(getterNode) : undefined,
+      getter,
       setter: setterNode ? this.convertAccessor(setterNode) : undefined,
     };
   }
@@ -303,31 +310,25 @@ export class Converter extends ExpressionConverter {
   private convertAccessor(node: Node): Accessor {
     const parts = named(node);
     const modifiersNode = firstOfType(node, 'modifiers');
-    if (modifiersNode) this.requireLibrary(modifiersNode, 'get・set への修飾子（private set など）');
     const parameterNode = parts.find((part) => part.type === 'identifier');
     const typeNode = parts.find((part) => isTypeNode(part));
     const bodyNode = firstOfType(node, 'function_body');
     return {
       row: rowOf(node),
-      modifiers: this.convertModifiers(modifiersNode, NO_MODIFIERS),
+      modifiers: this.convertModifiers(modifiersNode, 'accessor'),
       parameterName: parameterNode ? identifierName(parameterNode) : undefined,
       type: typeNode ? this.convertType(typeNode) : undefined,
       body: bodyNode ? this.withLocal(true, () => this.convertFunctionBody(bodyNode)) : undefined,
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- class kind and allowed class annotation targets share the syntax.
   private convertClass(node: Node, isTopLevel: boolean): ClassDecl {
-    if (!isTopLevel && this.isLocal && !this.isLibrary) throw unavailable(node, '関数の中でのクラスの宣言');
     const modifiersNode = firstOfType(node, 'modifiers');
     const modifiers = this.convertModifiers(
       modifiersNode,
-      CLASS_MODIFIERS,
+      node.type === 'object_declaration' ? 'object' : 'class',
       node.type === 'class_declaration' && !hasToken(node, 'interface')
     );
-    if (hasToken(node, 'interface') && hasToken(node, 'fun')) {
-      this.requireLibrary(node, '関数型のインターフェース（fun interface）');
-    }
     const classKind: ClassKind =
       node.type === 'object_declaration'
         ? 'object'
@@ -344,10 +345,10 @@ export class Converter extends ExpressionConverter {
     }
     const primaryNode = firstOfType(node, 'primary_constructor');
     const bodyNode = firstOfType(node, 'class_body') ?? firstOfType(node, 'enum_class_body');
-    if (firstOfType(node, 'type_constraints')) this.requireLibrary(node, '型引数の制約（where）');
     return {
       kind: 'class',
       row: rowOf(node),
+      isLocal: !isTopLevel && this.isLocal,
       headerEndRow: bodyNode?.startPosition.row ?? node.endPosition.row,
       endRow: node.endPosition.row,
       classKind,
@@ -364,15 +365,58 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
+  protected convertObjectLiteral(node: Node): ClassDecl {
+    const bodyNode = firstOfType(node, 'class_body');
+    return {
+      kind: 'class',
+      row: rowOf(node),
+      isLocal: true,
+      headerEndRow: bodyNode?.startPosition.row ?? node.endPosition.row,
+      endRow: node.endPosition.row,
+      classKind: 'class',
+      name: '<anonymous>',
+      isFunInterface: false,
+      modifiers: { keywords: NO_MODIFIERS, annotations: [] },
+      typeParameters: [],
+      primaryConstructor: undefined,
+      supers: this.convertSupers(firstOfType(node, 'delegation_specifiers')),
+      ...this.withLocal(false, () => this.convertClassBody(bodyNode)),
+    };
+  }
+
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
+  protected convertAnonymousFunction(node: Node): FunctionDecl {
+    const parts = named(node);
+    const parametersNode = required(firstOfType(node, 'function_value_parameters'));
+    const bodyNode = firstOfType(node, 'function_body');
+    const typeNodes = parts.filter((part) => isTypeNode(part));
+    const receiverNode = typeNodes.find((part) => part.startIndex < parametersNode.startIndex);
+    const returnNode = typeNodes.find((part) => part.startIndex > parametersNode.startIndex);
+    return {
+      kind: 'function',
+      row: rowOf(node),
+      isLocal: true,
+      headerEndRow: rowOf(bodyNode ?? node),
+      name: '',
+      modifiers: { keywords: NO_MODIFIERS, annotations: [] },
+      typeParameters: [],
+      receiver: receiverNode ? this.convertType(receiverNode) : undefined,
+      params: this.convertParameters(parametersNode),
+      returnType: returnNode ? this.convertType(returnNode) : undefined,
+      body: bodyNode ? this.withLocal(true, () => this.convertFunctionBody(bodyNode)) : undefined,
+    };
+  }
+
   private convertPrimaryConstructor(node: Node): NonNullable<ClassDecl['primaryConstructor']> {
     const modifiersNode = firstOfType(node, 'modifiers');
-    if (modifiersNode || hasToken(node, 'constructor'))
-      this.requireLibrary(node, 'constructor キーワードを書いた主コンストラクタ');
+    if (modifiersNode && !hasToken(node, 'constructor'))
+      throw syntaxError(node, '主コンストラクタに修飾子を付けるときは、constructor キーワードを書いてください。');
     const parametersNode = firstOfType(node, 'class_parameters');
     const params = (parametersNode ? namedOfType(parametersNode, 'class_parameter') : []).map(
       (parameter): ClassParameterDecl => {
         const parts = named(parameter);
-        const parameterModifiers = this.convertModifiers(firstOfType(parameter, 'modifiers'), MEMBER_MODIFIERS);
+        const parameterModifiers = this.convertModifiers(firstOfType(parameter, 'modifiers'), 'classParameter');
         const nameNode = required(parts.find((part) => part.type === 'identifier'));
         const typeNode = parts.find((part) => isTypeNode(part));
         const defaultNode = parts.find((part) => part !== nameNode && part !== typeNode && part.type !== 'modifiers');
@@ -386,7 +430,7 @@ export class Converter extends ExpressionConverter {
         };
       }
     );
-    return { row: rowOf(node), params, modifiers: this.convertModifiers(modifiersNode, NO_MODIFIERS) };
+    return { row: rowOf(node), params, modifiers: this.convertModifiers(modifiersNode, 'constructor') };
   }
 
   private convertSupers(node: Node | undefined): SuperSpec[] {
@@ -413,8 +457,11 @@ export class Converter extends ExpressionConverter {
             delegate: this.convertExpression(delegateNode),
           };
         }
-        case 'annotation': {
-          throw unavailable(inner, '親の型へのアノテーション');
+        case 'function_type': {
+          const type = this.convertType(inner);
+          if (type.kind !== 'function' || type.isSuspend)
+            throw syntaxError(inner, '親にはクラスかインターフェースを書いてください。');
+          return { kind: 'functionType', row, type };
         }
         default: {
           return { kind: 'type', row, type: this.namedType(inner) };
@@ -445,17 +492,16 @@ export class Converter extends ExpressionConverter {
 
   private convertEnumEntry(node: Node): EnumEntryDecl {
     const parts = named(node);
-    if (firstOfType(node, 'modifiers')) throw unavailable(node, '列挙型の定数へのアノテーション');
     const argumentsNode = firstOfType(node, 'value_arguments');
     const bodyNode = firstOfType(node, 'class_body');
-    if (bodyNode) this.requireLibrary(bodyNode, '本体を持つ列挙型の定数');
     return {
       row: rowOf(node),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'enumEntry'),
       name: identifierName(required(parts.find((part) => part.type === 'identifier'))),
       args: argumentsNode
         ? namedOfType(argumentsNode, 'value_argument').map((argument) => this.convertArgument(argument))
         : [],
-      members: bodyNode ? this.convertClassBody(bodyNode).members : undefined,
+      members: bodyNode ? this.withLocal(false, () => this.convertClassBody(bodyNode).members) : undefined,
     };
   }
 
@@ -469,7 +515,6 @@ export class Converter extends ExpressionConverter {
         };
       }
       case 'secondary_constructor': {
-        this.requireLibrary(node, '2つ目以降のコンストラクタ（constructor(...)）');
         return this.convertSecondaryConstructor(node);
       }
       case 'companion_object': {
@@ -478,11 +523,9 @@ export class Converter extends ExpressionConverter {
       case 'class_declaration':
       case 'object_declaration':
       case 'function_declaration':
-      case 'property_declaration': {
-        return this.withLocal(false, () => this.convertDeclaration(node, false)) as MemberDecl;
-      }
+      case 'property_declaration':
       case 'type_alias': {
-        throw unavailable(node, '型の別名（typealias）');
+        return this.withLocal(false, () => this.convertDeclaration(node, false)) as MemberDecl;
       }
       default: {
         throw syntaxError(node, 'クラスの本体に書けるのは、プロパティや関数などの宣言だけです。');
@@ -490,18 +533,20 @@ export class Converter extends ExpressionConverter {
     }
   }
 
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private convertCompanion(node: Node): ClassDecl {
     const nameNode = node.childForFieldName('name');
     const bodyNode = firstOfType(node, 'class_body');
     return {
       kind: 'class',
       row: rowOf(node),
+      isLocal: false,
       headerEndRow: rowOf(bodyNode ?? node),
       endRow: node.endPosition.row,
       classKind: 'companion',
       name: nameNode ? identifierName(nameNode) : 'Companion',
       isFunInterface: false,
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), CLASS_MODIFIERS),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'companion'),
       typeParameters: [],
       primaryConstructor: undefined,
       supers: this.convertSupers(firstOfType(node, 'delegation_specifiers')),
@@ -516,7 +561,7 @@ export class Converter extends ExpressionConverter {
       kind: 'constructor',
       row: rowOf(node),
       headerEndRow: rowOf(bodyNode ?? node),
-      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), MEMBER_MODIFIERS),
+      modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), 'constructor'),
       params: this.convertParameters(firstOfType(node, 'function_value_parameters')),
       delegation: delegationNode
         ? {
@@ -537,11 +582,9 @@ export class Converter extends ExpressionConverter {
       case 'class_declaration':
       case 'object_declaration':
       case 'function_declaration':
-      case 'property_declaration': {
-        return this.withLocal(true, () => this.convertDeclaration(node, false));
-      }
+      case 'property_declaration':
       case 'type_alias': {
-        throw unavailable(node, '型の別名（typealias）');
+        return this.withLocal(true, () => this.convertDeclaration(node, false));
       }
       case 'destructuring_declaration': {
         return this.convertDestructuring(node, required(firstOfType(node, 'multi_variable_declaration')));
@@ -559,20 +602,20 @@ export class Converter extends ExpressionConverter {
         return this.convertFor(node);
       }
       case 'while_statement': {
-        if (firstOfType(node, 'label') || firstOfType(node, 'annotation')) throw unavailable(node, 'ラベル（名前@）');
         return {
           kind: 'while',
           row,
+          label: labelOf(node),
           condition: this.convertExpression(required(node.childForFieldName('condition'))),
           body: this.withLocal(true, () => this.convertBody(node.childForFieldName('body'), node)),
         };
       }
       case 'do_while_statement': {
-        if (firstOfType(node, 'label') || firstOfType(node, 'annotation')) throw unavailable(node, 'ラベル（名前@）');
         const condition = required(node.childForFieldName('condition'));
         return {
           kind: 'doWhile',
           row,
+          label: labelOf(node),
           conditionRow: rowOf(condition),
           condition: this.convertExpression(condition),
           body: this.withLocal(true, () => this.convertBody(node.childForFieldName('body'), node)),
@@ -589,9 +632,7 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertFor(node: Node): Statement {
-    const parts = named(node);
-    if (parts.some((part) => part.type === 'label' || part.type === 'annotation'))
-      throw unavailable(node, 'ラベル（名前@）');
+    const parts = named(node).filter((part) => part.type !== 'label' && part.type !== 'annotation');
     const body = node.childForFieldName('body');
     const variableNode = required(
       parts.find((part) => part.type === 'variable_declaration' || part.type === 'multi_variable_declaration')
@@ -603,12 +644,13 @@ export class Converter extends ExpressionConverter {
       variable = { row: rowOf(variableNode), names: this.destructuredNames(variableNode) };
     } else {
       const declared = this.convertVariableDeclaration(variableNode);
-      if (declared.name === undefined) throw unavailable(variableNode, 'for の名前のない変数');
+      if (declared.name === undefined) throw syntaxError(variableNode, '_ は for の変数の名前に使えません。');
       variable = { row: declared.row, name: declared.name, type: declared.type };
     }
     return {
       kind: 'for',
       row: rowOf(node),
+      label: labelOf(node),
       variable,
       iterable: this.convertExpression(iterableNode),
       body: this.withLocal(true, () => this.convertBody(body, node)),
@@ -616,13 +658,14 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertDestructuring(node: Node, multi: Node): DestructuringDecl {
-    if (firstOfType(node, 'modifiers')) throw unavailable(node, '分解宣言への修飾子・アノテーション');
+    const modifiers = this.convertModifiers(firstOfType(node, 'modifiers'));
     if (multi.childForFieldName('type')) throw syntaxError(multi, '分解宣言の全体には型を書けません。');
     const initializer = named(node).find((part) => part.startIndex > multi.startIndex);
     if (!initializer) throw syntaxError(node, '分解宣言には = で値を書いてください。');
     return {
       kind: 'destructuring',
       row: rowOf(node),
+      modifiers,
       isVar: hasToken(node, 'var'),
       names: this.destructuredNames(multi),
       initializer: this.convertExpression(initializer),
@@ -635,6 +678,12 @@ export class Converter extends ExpressionConverter {
       return declared.name === undefined ? undefined : { row: declared.row, name: declared.name, type: declared.type };
     });
   }
+}
+
+/** The label written before a loop, as `outer` of `outer@ for (...)`. */
+function labelOf(node: Node): string | undefined {
+  const label = firstOfType(node, 'label');
+  return label ? label.text.slice(0, -1).replaceAll(/^`|`$/g, '') : undefined;
 }
 
 const TYPE_NODES = new Set(['user_type', 'nullable_type', 'function_type', 'parenthesized_type', 'non_nullable_type']);

@@ -42,6 +42,7 @@ const ROOT_INFO: FunctionInfo = {
  *
  * @param onMainExit Receives `main`'s frame when it returns or throws, while the frame still holds its variables.
  */
+// code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
 export function runProgram(
   runtime: Runtime,
   program: CompiledProgram,
@@ -71,7 +72,12 @@ export function runProgram(
     runtime.onExit = (frame) => {
       if (frame.info.name === program.main.name && runtime.frames.length === 1) isMainFrame(frame);
     };
-    (program.main.invoke as NonNullable<typeof program.main.invoke>)(root, undefined, args, undefined);
+    const { main } = program;
+    if (main.invokeSuspend) {
+      // `suspend fun main` runs as a coroutine that nothing can suspend without a library of coroutines.
+      const step = main.invokeSuspend(root, undefined, args, undefined).next();
+      if (!step.done) throw new Error('suspend fun main suspended');
+    } else (main.invoke as NonNullable<typeof main.invoke>)(root, undefined, args, undefined);
   } catch (error) {
     uncaughtException = describeUncaught(root, error);
   }

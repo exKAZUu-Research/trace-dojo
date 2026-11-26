@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss -- the compiler of one area of Kotlin, whose parts call each other closely.
-import type { Expression, ParameterDecl, PropertyDecl } from './ast';
+import type { Expression, ParameterDecl, PropertyDecl, SecondaryConstructorDecl } from './ast';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -15,13 +15,61 @@ import {
 } from './compilerBase';
 import { type FileContext } from './compilerCore';
 import { type ClassEntry, DeclarationCompiler, type FunctionEntry, type PropertyEntry } from './declarationCompiler';
-import { propertyRepr, returnRepr } from './dispatch';
-import { Frame, type FunctionInfo, MISSING } from './runtime';
+import { instanceOf, propertyRepr, returnRepr } from './dispatch';
+import { setReifiedAccess } from './reified';
+import { Frame, type FunctionInfo, localEnvOf, MISSING, UNASSIGNED } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol } from './symbols';
 import { VariableSymbol } from './symbols';
+import { TailCallSignal, tailCallsOf } from './tailCalls';
 import { anyType, isSameType, isSubtype, substitutionOf } from './typeRelations';
 import { type ClassType, isNonNullClass, type KType, resolved } from './types';
+import { uninitializedCheck } from './uninitialized';
 import { KObject, UNIT, type Value } from './values';
+
+/** A class declared in a function body: the context of what it captures, and where its declaration stores that. */
+export interface LocalClass {
+  context: FunctionContext;
+  declaringInfo: FunctionInfo;
+  envVariable: VariableSymbol;
+}
+
+/**
+ * The frame of what a class declared in a function body captured for an instance, made when the instance is first
+ * initialized from what the declaration made, as the code creating the instance sees it.
+ */
+function localFrameOf(caller: Frame, instance: KObject, cls: ClassSymbol, local: LocalClass): Frame {
+  const existing = instance.localFrames?.get(cls) as Frame | undefined;
+  if (existing) return existing;
+  const { envVariable } = local;
+  const { captured, declaring } = localEnvOf(caller, envVariable, local.declaringInfo, envVariable.slot);
+  const frame = new Frame(caller.runtime, local.context.info, captured, instance, undefined);
+  frame.enclosing = declaring;
+  instance.localFrames ??= new Map();
+  instance.localFrames.set(cls, frame);
+  return frame;
+}
+
+/**
+ * Runs a `tailrec` function's body again in its frame with the arguments of each tail call it makes of itself. The
+ * slots after the arguments up to `hiddenEnd` hold what a call passes besides them, as a member extension's instance,
+ * which a call of the function itself passes again, so they keep their values while the body's locals start over.
+ */
+export function restartingOnTailCalls(run: Eval, hiddenEnd: number): Eval {
+  return (frame) => {
+    for (;;) {
+      try {
+        return run(frame);
+      } catch (error) {
+        if (!(error instanceof TailCallSignal) || error.frame !== frame) throw error;
+        const hidden = frame.locals.slice(error.args.length, hiddenEnd);
+        frame.locals.fill(UNASSIGNED);
+        for (const [index, value] of error.args.entries()) frame.locals[index] = value;
+        for (const [index, value] of hidden.entries()) frame.locals[error.args.length + index] = value;
+        frame.runtime.spend();
+      }
+    }
+  };
+}
 
 /** Compiles the bodies of functions, the accessors and initializers of properties, and the initializers of classes and objects. */
 export abstract class BodyCompiler extends DeclarationCompiler {
@@ -30,31 +78,101 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   protected compileBodies(): void {
     for (const entry of this.propertyEntries) this.ensurePropertyCompiled(entry);
     // The defaults need the types of the fields, which inferred properties have only now.
-    const done = new Set<ClassSymbol>();
-    const setDefaults = (cls: ClassSymbol): void => {
-      const entry = this.entryOfClass.get(cls);
-      if (!entry || done.has(cls)) return;
-      done.add(cls);
-      if (cls.superclass) setDefaults(cls.superclass.cls);
-      this.layOutFields(entry);
-      const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
-      defaults.length = cls.fieldCount;
-      for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
-      cls.fieldDefaults = defaults;
-    };
-    for (const entry of this.classEntries) setDefaults(entry.symbol);
+    for (const entry of this.classEntries) this.setFieldDefaults(entry.symbol);
     for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
     this.validateOverrideTypes();
     this.validateJvmSignatures();
     for (const entry of this.classEntries) {
+      if (this.classesCompiledInScope.has(entry)) continue;
       this.file = entry.file;
       this.compileClassInitializer(entry);
     }
   }
 
+  private readonly laidOutClasses = new Set<ClassSymbol>();
+
+  /** Lays out a class's fields after its superclass's, with the JVM's default value of each field's type. */
+  private setFieldDefaults(cls: ClassSymbol): void {
+    const entry = this.entryOfClass.get(cls);
+    if (!entry || this.laidOutClasses.has(cls)) return;
+    this.laidOutClasses.add(cls);
+    if (cls.superclass) this.setFieldDefaults(cls.superclass.cls);
+    this.layOutFields(entry);
+    const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
+    defaults.length = cls.fieldCount;
+    for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
+    cls.fieldDefaults = defaults;
+  }
+
+  /** The classes compiled where a function body or an object expression declares them, which the phases skip. */
+  private readonly classesCompiledInScope = new Set<ClassEntry>();
+
+  /** What a class declared in a function body captures, which its members read when they run. */
+  protected readonly localClasses = new Map<ClassSymbol, LocalClass>();
+
+  /**
+   * Compiles the classes a function body or an object expression declares, there, with the bodies of their members,
+   * whose contexts capture what they read through their class's capture context.
+   */
+  protected compileClassesInScope(entries: ClassEntry[]): void {
+    const savedFlow = this.flow;
+    const savedFile = this.file;
+    const savedBase = this.localFlowBase;
+    this.localFlowBase = savedFlow.copy();
+    try {
+      for (const entry of entries) this.classesCompiledInScope.add(entry);
+      for (const entry of this.propertyEntries)
+        if (entry.cls && entries.includes(entry.cls)) this.ensurePropertyCompiled(entry);
+      for (const entry of entries) this.setFieldDefaults(entry.symbol);
+      for (const entry of this.functionEntries)
+        if (entry.cls && entries.includes(entry.cls)) this.ensureFunctionCompiled(entry);
+      this.validateOverrideTypes();
+      for (const entry of entries) {
+        this.file = entry.file;
+        this.compileClassInitializer(entry);
+      }
+    } finally {
+      this.flow = savedFlow;
+      this.file = savedFile;
+      this.localFlowBase = savedBase;
+    }
+  }
+
+  /** The flow around a local class's declaration, whose assigned variables its members may read. */
+  private localFlowBase: Flow | undefined;
+
+  /** The capture context of a class declared in a function body, the parent of its members' contexts. */
+  protected captureParentOf(cls: ClassSymbol | undefined): FunctionContext | undefined {
+    return cls ? this.localClasses.get(cls)?.context : undefined;
+  }
+
+  /**
+   * What a member of a class declared in a function body runs with: what its context captured, built from the frame
+   * of what the class captured, which an instance gets when it is created, and that frame, which leads to the frame
+   * that declared the class.
+   */
+  protected localCapture(
+    cls: ClassSymbol | undefined,
+    context: FunctionContext
+  ): ((caller: Frame, receiver: Value) => { captured: unknown[]; enclosing: Frame | undefined }) | undefined {
+    const local = cls && this.localClasses.get(cls);
+    if (!local) return undefined;
+    const build = this.captureBuilder(local.context, context);
+    return (caller, receiver) => {
+      const frame = localFrameOf(caller, receiver as KObject, cls, local);
+      return { captured: build(frame), enclosing: frame };
+    };
+  }
+
+  /** The local functions whose bodies are being compiled to infer their result types. */
+  protected readonly inferringLocalFunctions = new Set<FunctionSymbol>();
+
   protected ensureReturnType(func: FunctionSymbol, row: number): KType {
     if (func.returnType) return func.returnType;
     const entry = this.entryOfFunction.get(func);
+    // A local function infers its result type from its body, which then cannot call it.
+    if (this.inferringLocalFunctions.has(func))
+      this.error(row, `関数 ${func.name} は自分を呼んでいるので、戻り値の型を書いてください。`);
     if (!entry) return this.core.unit.type;
     if (entry.state === 'compiling')
       this.error(row, `関数 ${func.name} は自分を呼んでいるので、戻り値の型を書いてください。`);
@@ -72,10 +190,19 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     return property.type ?? anyType(true);
   }
 
-  /** Starts the flow of code compiled on its own, where only the constructor parameters initializers see are assigned. */
+  /**
+   * Starts the flow of code compiled on its own, where only the constructor parameters initializers see, and the
+   * variables assigned where a local class is declared, are assigned.
+   */
   protected startFlow(): void {
-    this.flow = new Flow();
+    this.startOwnFlow();
     for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
+  }
+
+  /** Starts a flow where only the variables assigned where a local class is declared are assigned. */
+  private startOwnFlow(): void {
+    this.flow = new Flow();
+    for (const variable of this.localFlowBase?.assigned ?? []) this.flow.assigned.add(variable);
   }
 
   /**
@@ -91,7 +218,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     this.startFlow();
     this.uninitializedProperties = undefined;
     try {
-      return compile();
+      return this.withOptIns([...this.classOptIns(entry.cls?.symbol), ...entry.symbol.optIns], compile);
     } catch (error) {
       entry.state = 'pending';
       throw error;
@@ -103,31 +230,81 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   }
 
   // code-gauge-allow functionNcss -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow duplicateLines -- the copies compile the same Kotlin construct in different contexts, whose differences sit between the shared lines.
   private ensureFunctionCompiled(entry: FunctionEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
     this.withSavedState(entry, () => {
       const { decl, symbol } = entry;
-      const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
+      const context = new FunctionContext(
+        this.captureParentOf(entry.cls?.symbol),
+        false,
+        symbol.name,
+        entry.file.isLibrary,
+        undefined
+      );
       Object.defineProperty(context, 'returnTarget', { value: context });
+      context.label = symbol.name;
+      // A suspend function's calls of itself stay calls, as its body runs as a coroutine's steps.
+      if (symbol.isTailrec && decl.body && !symbol.isSuspend)
+        context.tailrec = { symbol, calls: tailCallsOf(decl.body, isNonNullClass(symbol.returnType, this.core.unit)) };
       context.info.isAtomic = symbol.isAtomic;
-      const scope = new Scope(entry.scope, context);
+      let base = this.withOuterReceivers(entry.scope, entry.cls?.symbol, context);
+      // An extension declared in a class sees the class's instance, which calls pass, around its extension receiver.
+      const dispatch =
+        entry.cls && symbol.extensionReceiver && !(entry.cls.symbol.isObject && entry.cls.file.isLibrary)
+          ? new ReceiverSymbol(this.thisTypeOf(entry.cls.symbol), context, entry.cls.symbol, entry.cls.symbol.name)
+          : undefined;
+      if (dispatch) {
+        base = new Scope(base, context);
+        base.receiver = dispatch;
+      }
+      const scope = new Scope(base, context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
       // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
       context.info.showsThis =
         thisType !== undefined && entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       const variables = symbol.params.map((param, index) =>
-        this.newParameter(
+        this.newParameter(scope, context, param.name, this.parameterValueType(param), decl.params[index].row)
+      );
+      for (const [index, param] of symbol.contextParameters.entries()) {
+        const declared = decl.modifiers.contextParameters?.[index];
+        const variable = this.newParameter(
           scope,
           context,
-          param.name,
-          param.isVararg ? this.varargType(param.type) : param.type,
-          decl.params[index].row
-        )
-      );
+          param.name === '_' ? undefined : param.name,
+          param.type,
+          declared?.row ?? decl.row
+        );
+        variable.isContextParameter = true;
+        this.flow.assigned.add(variable);
+        if (param.name === '_') scope.variables.set(`\0context${index}`, variable);
+      }
+      if (dispatch) {
+        dispatch.slot = context.allocate('\0dispatchReceiver', dispatch.type, false);
+        symbol.dispatchReceiverIndex = dispatch.slot;
+      }
+      const reified = symbol.typeParameters.filter((param) => param.isReified);
+      if (reified.length > 0 && decl.body) {
+        // A call passes the reified type arguments after the arguments, in the frame's next slot.
+        const slot = context.allocate('\0typeArguments', this.core.any.type, false);
+        for (const [index, param] of reified.entries()) setReifiedAccess(param, { info: context.info, slot, index });
+        symbol.passesTypeArguments = true;
+      }
+      if (symbol.isSuspendVersion) {
+        for (const [index, variable] of variables.entries())
+          variable.suspendInvocable = resolved(symbol.params[index].type).kind === 'function';
+      }
+      const hiddenEnd = context.info.slotCount;
       const defaults = this.compileParameterDefaults(decl.params, symbol.params, variables, scope, context);
       symbol.defaultsInfo = context.info;
       if (!decl.body) {
+        entry.state = 'done';
+        return;
+      }
+      if (symbol.isSuspend) {
+        context.isSuspend = true;
+        this.compileSuspendFunction(entry, scope, context, defaults);
         entry.state = 'done';
         return;
       }
@@ -156,18 +333,81 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           return UNIT;
         };
       }
-      this.finishFunction(symbol, context, defaults, body);
+      this.finishFunction(symbol, context, defaults, body, hiddenEnd);
       entry.state = 'done';
     });
   }
 
-  /** The type a `vararg` parameter has inside its function: an array of its elements. */
-  protected abstract varargType(elementType: KType): KType;
+  /** The compiler of the standard library, whose declarations a program's compiler has no entries for. */
+  private libraryCompiler: BodyCompiler | undefined;
+
+  setLibraryCompiler(compiler: BodyCompiler): void {
+    this.libraryCompiler = compiler;
+  }
+
+  protected suspendVersionOf(symbol: FunctionSymbol, row: number): FunctionSymbol {
+    if (symbol.suspendVersion) return symbol.suspendVersion;
+    const entry = this.entryOfFunction.get(symbol);
+    if (!entry && this.libraryCompiler) return this.libraryCompiler.suspendVersionOf(symbol, row);
+    if (!entry?.decl.body)
+      return this.unavailable(
+        row,
+        `suspend 関数を呼ぶラムダを、関数の中で宣言したインライン関数 ${symbol.name} に渡すこと`
+      );
+    // The version shares the declaration and the symbol's types, with its own implementation.
+    const version = Object.assign(Object.create(Object.getPrototypeOf(symbol) as object) as FunctionSymbol, symbol);
+    version.isSuspend = true;
+    version.isSuspendVersion = true;
+    version.invoke = undefined;
+    version.invokeSuspend = undefined;
+    version.suspendVersion = undefined;
+    symbol.suspendVersion = version;
+    this.ensureFunctionCompiled({ ...entry, symbol: version, state: 'pending' });
+    return version;
+  }
+
+  /** Compiles a suspend function's body as a coroutine's steps, which its `invokeSuspend` runs. */
+  protected abstract compileSuspendFunction(
+    entry: FunctionEntry,
+    scope: Scope,
+    context: FunctionContext,
+    defaults: (Eval | undefined)[]
+  ): void;
+
+  /**
+   * The type a declaration infers from an object expression: its anonymous type only when the declaration is private,
+   * and otherwise the one supertype it names, or `Any`.
+   */
+  protected approximatedDeclarationType(type: KType, visibility: string): KType {
+    if (visibility === 'private' || type.kind !== 'class' || !type.cls.isAnonymous) return type;
+    const supertypes = type.cls.supertypes.filter((supertype) => supertype.cls !== this.core.any);
+    const approximated = supertypes.length === 1 ? supertypes[0] : this.core.any.type;
+    return type.nullable ? { ...approximated, nullable: true } : approximated;
+  }
 
   private inferredResultType(compiled: Compiled): KType {
     const type = resolved(compiled.type);
     if (compiled.integerLiteral) return this.primitiveType(this.primitiveOf(type) ?? 'Int');
     return type;
+  }
+
+  /**
+   * The scope that sees the instances of the classes around an inner class as implicit receivers, nearest first, as
+   * `this@Outer` names them, after the inner class's own instance.
+   */
+  protected withOuterReceivers(base: Scope, cls: ClassSymbol | undefined, context: FunctionContext): Scope {
+    const outers: { cls: ClassSymbol; path: ClassSymbol[] }[] = [];
+    let path: ClassSymbol[] = [];
+    for (let current = cls; current?.isInner && current.outer; current = current.outer) {
+      path = [...path, current];
+      outers.push({ cls: current.outer, path });
+    }
+    let scope = base;
+    for (const outer of outers.toReversed()) {
+      scope = new Scope(scope, context);
+      scope.receiver = new ReceiverSymbol(this.thisTypeOf(outer.cls), context, outer.cls, outer.cls.name, outer.path);
+    }
+    return scope;
   }
 
   /** Adds the implicit receivers of a member or extension: the class's instance, and an extension's receiver. */
@@ -182,9 +422,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     if (cls) {
       thisType = this.thisTypeOf(cls.symbol);
       if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol, cls.symbol.name);
-      // An extension declared in an object, as `Int.minutes` in `Duration.Companion`, needs no instance of it.
-      else if (!cls.symbol.isObject || !cls.file.isLibrary)
-        this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
     }
     if (extension) {
       scope.receiver = new ReceiverSymbol(extension, context, undefined, label);
@@ -197,7 +434,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     symbol: FunctionSymbol,
     context: FunctionContext,
     defaults: (Eval | undefined)[],
-    body: Eval
+    body: Eval,
+    hiddenEnd: number
   ): void {
     const { info } = context;
     const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
@@ -210,8 +448,14 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         }
       : body;
     const none: unknown[] = [];
-    symbol.invoke = (caller, receiver, args, callRow) =>
-      caller.runtime.call(info, caller, none, receiver, args, callRow, run);
+    const runs = context.tailrec ? restartingOnTailCalls(run, hiddenEnd) : run;
+    const local = this.localCapture(symbol.owner, context);
+    symbol.invoke = local
+      ? (caller, receiver, args, callRow) => {
+          const { captured, enclosing } = local(caller, instanceOf(symbol, receiver, args));
+          return caller.runtime.call(info, caller, captured, receiver, args, callRow, runs, enclosing);
+        }
+      : (caller, receiver, args, callRow) => caller.runtime.call(info, caller, none, receiver, args, callRow, runs);
   }
 
   private compileExpressionBody(
@@ -227,7 +471,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       context.returnRepr = returnRepr(symbol);
     }
     const compiled = this.compileExpression(scope, context, expression, symbol.returnType);
-    symbol.returnType ??= this.inferredResultType(compiled);
+    symbol.returnType ??= this.approximatedDeclarationType(this.inferredResultType(compiled), symbol.visibility);
     // The returns of an inferred body must fit the type its value gives, as a declared one checks them as they compile.
     const returnType = symbol.returnType;
     const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));
@@ -254,8 +498,9 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         const compiled = this.inPropertyInitializer(entry, context, () =>
           this.compileExpression(scope, context, decl.initializer as Expression)
         );
-        const type = resolved(compiled.type);
+        const type = this.approximatedDeclarationType(resolved(compiled.type), symbol.visibility);
         symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
+        if (decl.initializer.kind === 'object') entry.inferredObject = compiled;
       }
       if (decl.delegate) this.compileMemberDelegate(entry);
       else if (!symbol.type && decl.getter?.body) {
@@ -299,7 +544,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     let context = this.initializerContexts.get(key);
     if (!context) {
       const name = entry.cls ? entry.cls.symbol.name : '<init>';
-      context = new FunctionContext(undefined, false, name, entry.file.isLibrary, undefined);
+      context = new FunctionContext(
+        this.captureParentOf(entry.cls?.symbol),
+        false,
+        name,
+        entry.file.isLibrary,
+        undefined
+      );
       context.forbidsReturn = true;
       context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       this.initializerContexts.set(key, context);
@@ -316,7 +567,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   ): Scope {
     let scope = this.initializerScopes.get(context);
     if (scope) return scope;
-    scope = new Scope(entry.cls ? entry.cls.scope : entry.scope, context);
+    scope = new Scope(
+      entry.cls ? this.withOuterReceivers(entry.cls.scope, entry.cls.symbol, context) : entry.scope,
+      context
+    );
     if (entry.cls) {
       scope.receiver = new ReceiverSymbol(
         this.thisTypeOf(entry.cls.symbol),
@@ -325,15 +579,16 @@ export abstract class BodyCompiler extends DeclarationCompiler {
         entry.cls.symbol.name
       );
       const ctor = entry.cls.constructorSymbol;
-      // The header's names do not reach the instance it builds, as in Kotlin.
-      const headerScope = new Scope(entry.cls.scope, context);
+      // The header's names do not reach the instance it builds, as in Kotlin, but an inner class's do reach the
+      // instances of the classes around it.
+      const headerScope = new Scope(this.withOuterReceivers(entry.cls.scope, entry.cls.symbol, context), context);
       for (const [index, param] of (ctor?.params ?? []).entries()) {
         const declaration = entry.cls.decl.primaryConstructor?.params[index];
         const variable = this.newParameter(
           headerScope,
           context,
           param.name,
-          param.type,
+          this.parameterValueType(param),
           declaration?.row ?? entry.cls.decl.row
         );
         if (!declaration?.binding) scope.variables.set(param.name, variable);
@@ -359,7 +614,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return;
     }
     if (entry.cls) return;
-    if (!decl.initializer) this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
+    if (!decl.initializer && !symbol.isLateinit)
+      this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
     this.bindGlobal(entry);
   }
 
@@ -368,7 +624,10 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const slot = this.globalDefaults.length;
     this.globalDefaults.push(this.defaultValueOf(symbol.type));
     symbol.slot = slot;
-    symbol.get ??= (frame) => frame.runtime.globals[slot];
+    const { name } = symbol;
+    symbol.get ??= symbol.isLateinit
+      ? (frame) => uninitializedCheck(frame, frame.runtime.globals[slot], name)
+      : (frame) => frame.runtime.globals[slot];
     symbol.set ??= (frame, _receiver, value) => {
       frame.runtime.globals[slot] = value;
     };
@@ -395,7 +654,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     isProbe = false
   ): { context: FunctionContext; scope: Scope } {
     const context = new FunctionContext(
-      undefined,
+      this.captureParentOf(entry.cls?.symbol),
       false,
       `${kind}-${entry.symbol.name}`,
       entry.file.isLibrary,
@@ -404,7 +663,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     );
     Object.defineProperty(context, 'returnTarget', { value: context });
     context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-    const scope = new Scope(entry.scope, context);
+    const scope = new Scope(this.withOuterReceivers(entry.scope, entry.cls?.symbol, context), context);
     this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
     if (this.canHaveBackingField(entry.decl, entry.symbol)) {
       const field = new VariableSymbol(
@@ -451,7 +710,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     }
     const { info } = context;
     const none: unknown[] = [];
-    symbol.get = (frame, receiver) => frame.runtime.call(info, frame, none, receiver, [], undefined, run);
+    const local = this.localCapture(entry.cls?.symbol, context);
+    symbol.get = local
+      ? (frame, receiver) => {
+          const { captured, enclosing } = local(frame, receiver);
+          return frame.runtime.call(info, frame, captured, receiver, [], undefined, run, enclosing);
+        }
+      : (frame, receiver) => frame.runtime.call(info, frame, none, receiver, [], undefined, run);
   }
 
   private compileSetter(entry: PropertyEntry): void {
@@ -472,11 +737,22 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     const evaluate = compiled.eval;
     const { info } = context;
     const none: unknown[] = [];
+    const local = this.localCapture(entry.cls?.symbol, context);
     symbol.set = (frame, receiver, newValue) => {
-      frame.runtime.call(info, frame, none, receiver, [newValue], undefined, (inner) => {
-        evaluate(inner);
-        return UNIT;
-      });
+      const { captured, enclosing } = local?.(frame, receiver) ?? { captured: none, enclosing: undefined };
+      frame.runtime.call(
+        info,
+        frame,
+        captured,
+        receiver,
+        [newValue],
+        undefined,
+        (inner) => {
+          evaluate(inner);
+          return UNIT;
+        },
+        enclosing
+      );
     };
   }
 
@@ -507,7 +783,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       holderCompiled,
       'getValue',
       [thisArgument, this.propertyReference(holderScope, decl.name, decl.row)],
-      decl.row
+      decl.row,
+      symbol.type
     );
     if (!symbol.type) symbol.type = getter.type;
     else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));
@@ -556,21 +833,35 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   // Classes' initializers.
 
-  // code-gauge-allow functionNcss -- the parts of a class's initializer, from the defaults to the constructor, which follow one another.
   private compileClassInitializer(entry: ClassEntry): void {
+    this.withOptIns(this.classOptIns(entry.symbol), () => this.compileClassInitializerOpted(entry));
+  }
+
+  // code-gauge-allow functionNcss -- the parts of the construct this function compiles follow one another, and splitting them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private compileClassInitializerOpted(entry: ClassEntry): void {
     const { symbol } = entry;
     if (symbol.isInterface || symbol.isNative) return;
     const owner = { cls: entry, scope: entry.scope, file: entry.file };
     const context = this.initializerContext(owner);
     const scope = this.initializerScope(owner, context);
-    this.flow = new Flow();
-    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
+    this.startFlow();
     const headerScope = this.constructorHeaderScopes.get(scope) ?? scope;
-    const { defaults, superCall, fieldSteps } = this.compileConstructorHeader(entry, scope, headerScope, context);
+    // Without a primary constructor, each `constructor(...)` calls the superclass's own constructor.
+    const delegatesToSecondaries = !entry.decl.primaryConstructor && entry.secondaryConstructors.length > 0;
+    const { defaults, superCall, fieldSteps } = this.compileConstructorHeader(
+      entry,
+      scope,
+      headerScope,
+      context,
+      delegatesToSecondaries
+    );
     const steps = [...fieldSteps, ...this.compileMemberSteps(entry, scope, context)];
-    this.checkValsInitialized(entry);
+    const initializedFlow = this.flow.copy();
+    if (!delegatesToSecondaries) this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
-    const info = { ...context.info, isAtomic: entry.constructorSymbol?.isAtomic ?? false };
+    const { info } = context;
+    info.isAtomic = entry.constructorSymbol?.isAtomic ?? false;
     const run = (frame: Frame): Value => {
       for (const [index, evaluate] of defaults.entries()) {
         if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
@@ -580,19 +871,210 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return UNIT;
     };
     const none: unknown[] = [];
+    const local = this.localCapture(symbol, context);
     const initialize = (caller: Frame, instance: Value, args: Value[], callRow: number | undefined): void => {
-      caller.runtime.call(info, caller, none, instance, args, callRow, run);
+      const { captured, enclosing } = local?.(caller, instance) ?? { captured: none, enclosing: undefined };
+      caller.runtime.call(info, caller, captured, instance, args, callRow, run, enclosing);
     };
     symbol.initialize = (frame, instance) => initialize(frame, instance, [], undefined);
     if (symbol.isObject) this.objectInitializers.set(symbol, initialize);
-    else if (entry.constructorSymbol) this.bindConstructor(symbol, entry.constructorSymbol, initialize);
+    else if (entry.constructorSymbol && !delegatesToSecondaries)
+      this.bindConstructor(symbol, entry.constructorSymbol, initialize);
+    this.compileSecondaryConstructors(
+      entry,
+      delegatesToSecondaries ? { initialize: symbol.initialize, flow: initializedFlow } : undefined
+    );
   }
+
+  /**
+   * Compiles each `constructor(...)`: its parameters' defaults, the constructor it delegates to, and its body. Without
+   * a primary constructor, a delegation to the superclass then runs the class's property initializers and `init`
+   * blocks, as `classSteps` does, before the body: in their own frame, whose slots their code was given.
+   */
+  private compileSecondaryConstructors(
+    entry: ClassEntry,
+    classSteps: { initialize: (frame: Frame, instance: Value) => void; flow: Flow } | undefined
+  ): void {
+    const targets = new Map<FunctionSymbol, FunctionSymbol>();
+    for (const { decl, symbol: ctor } of entry.secondaryConstructors) {
+      this.file = entry.file;
+      const context = new FunctionContext(
+        this.captureParentOf(entry.symbol),
+        false,
+        entry.symbol.name,
+        entry.file.isLibrary,
+        undefined
+      );
+      Object.defineProperty(context, 'returnTarget', { value: context });
+      context.returnType = this.core.unit.type;
+      context.returnRepr = 'ref';
+      context.info.isAtomic = ctor.isAtomic;
+      context.info.showsThis = !entry.file.isLibrary;
+      this.secondaryConstructorContexts.set(context, entry);
+      const base = this.withOuterReceivers(entry.scope, entry.symbol, context);
+      const headerScope = new Scope(base, context);
+      this.startOwnFlow();
+      const variables = ctor.params.map((param, index) => {
+        const variable = this.newParameter(
+          headerScope,
+          context,
+          param.name,
+          this.parameterValueType(param),
+          decl.params[index].row
+        );
+        this.flow.assigned.add(variable);
+        return variable;
+      });
+      const thisType = this.thisTypeOf(entry.symbol);
+      this.headerInstance = thisType;
+      let delegate: ((frame: Frame, instance: Value) => void) | undefined;
+      let defaults: (Eval | undefined)[];
+      try {
+        defaults = this.compileParameterDefaults(decl.params, ctor.params, variables, headerScope, context);
+        delegate = this.compileConstructorDelegation(entry, ctor, decl, headerScope, context, targets);
+      } finally {
+        this.headerInstance = undefined;
+      }
+      if (classSteps && decl.delegation?.kind !== 'this')
+        for (const assigned of classSteps.flow.assigned) this.flow.assigned.add(assigned);
+      // The constructor `this(...)` calls has initialized every property, which the body may not assign again.
+      if (decl.delegation?.kind === 'this')
+        for (const property of entry.symbol.ownFields) {
+          this.flow.assigned.add(property);
+          this.flow.maybeAssigned.add(property);
+        }
+      const bodyScope = new Scope(headerScope, context);
+      bodyScope.receiver = new ReceiverSymbol(thisType, context, entry.symbol, entry.symbol.name);
+      const body = this.compileStatementsValue(
+        bodyScope,
+        context,
+        decl.body?.statements ?? [],
+        undefined,
+        true,
+        false
+      ).eval;
+      if (classSteps && decl.delegation?.kind !== 'this') this.checkValsInitialized(entry);
+      const initializeClass = decl.delegation?.kind === 'this' ? undefined : classSteps?.initialize;
+      const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
+      const run = (frame: Frame): Value => {
+        if (fillsDefaults)
+          for (const [index, evaluate] of defaults.entries()) {
+            if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
+          }
+        delegate?.(frame, frame.thisValue);
+        initializeClass?.(frame, frame.thisValue);
+        body(frame);
+        return UNIT;
+      };
+      const none: unknown[] = [];
+      const local = this.localCapture(entry.symbol, context);
+      this.bindConstructor(entry.symbol, ctor, (caller, instance, args, callRow) => {
+        const { captured, enclosing } = local?.(caller, instance) ?? { captured: none, enclosing: undefined };
+        caller.runtime.call(context.info, caller, captured, instance, args, callRow, run, enclosing);
+      });
+    }
+    this.rejectDelegationCycles(targets);
+  }
+
+  /** The constructor a `constructor(...)` delegates to: another of its class's with `this(...)`, or the superclass's. */
+  private compileConstructorDelegation(
+    entry: ClassEntry,
+    ctor: FunctionSymbol,
+    decl: SecondaryConstructorDecl,
+    scope: Scope,
+    context: FunctionContext,
+    targets: Map<FunctionSymbol, FunctionSymbol>
+  ): ((frame: Frame, instance: Value) => void) | undefined {
+    const { symbol } = entry;
+    const delegation = decl.delegation;
+    const args: ArgumentSyntax[] = (delegation?.args ?? []).map((argument) => ({
+      row: argument.row,
+      name: argument.name,
+      value: argument.value,
+      isSpread: argument.isSpread,
+    }));
+    const row = delegation?.row ?? decl.row;
+    const callRow = this.recordsSteps && !entry.file.isLibrary && delegation ? row : undefined;
+    if (delegation?.kind === 'this') {
+      const candidates: Candidate[] = symbol.constructors
+        .filter((other) => other !== ctor)
+        .map((other) => ({ symbol: other, kind: 'constructor', substitution: new Map(), receiverType: undefined }));
+      const call = this.resolveCall(
+        scope,
+        context,
+        [candidates],
+        args,
+        false,
+        [],
+        undefined,
+        undefined,
+        row,
+        symbol.name
+      );
+      targets.set(ctor, call.symbol);
+      return this.superInitializer(call, callRow);
+    }
+    if (symbol.kind === 'enum') return this.enumSuperInitializer();
+    const superclass = symbol.superclass;
+    if (!superclass || superclass.cls === this.core.any) {
+      if (args.length > 0) this.error(row, 'Any のコンストラクタには引数を渡せません。');
+      return undefined;
+    }
+    const candidates: Candidate[] = superclass.cls.constructors.map((other) => ({
+      symbol: other,
+      kind: 'constructor',
+      substitution: substitutionOf(superclass),
+      receiverType: undefined,
+    }));
+    if (candidates.length === 0) this.error(row, `${superclass.cls.name} のコンストラクタを呼べません。`);
+    const call = this.resolveCall(
+      scope,
+      context,
+      [candidates],
+      args,
+      false,
+      [],
+      undefined,
+      undefined,
+      row,
+      superclass.cls.name
+    );
+    return this.superInitializer(call, callRow);
+  }
+
+  /** Kotlin's Enum constructor run with the name and ordinal createEnumEntries gave the constant. */
+  private enumSuperInitializer(): (frame: Frame, instance: Value) => void {
+    const enumCtor = this.core.enum.constructors[0];
+    return (frame, instance) => {
+      const native = (instance as KObject).native as { name: string; ordinal: number };
+      (enumCtor.initialize as NonNullable<FunctionSymbol['initialize']>)(
+        frame,
+        instance,
+        [native.name, native.ordinal],
+        undefined
+      );
+    };
+  }
+
+  private rejectDelegationCycles(targets: Map<FunctionSymbol, FunctionSymbol>): void {
+    for (const start of targets.keys()) {
+      const seen = new Set<FunctionSymbol>();
+      for (let current: FunctionSymbol | undefined = start; current; current = targets.get(current)) {
+        if (seen.has(current)) this.error(start.row, 'コンストラクタの委譲が循環しています。');
+        seen.add(current);
+      }
+    }
+  }
+
+  /** The contexts of `constructor(...)` bodies, by their classes, where a `val` without an initializer may get its value. */
+  private readonly secondaryConstructorContexts = new Map<FunctionContext, ClassEntry>();
 
   private compileConstructorHeader(
     entry: ClassEntry,
     scope: Scope,
     headerScope: Scope,
-    context: FunctionContext
+    context: FunctionContext,
+    delegatesToSecondaries: boolean
   ): {
     defaults: (Eval | undefined)[];
     superCall: ((frame: Frame) => void) | undefined;
@@ -602,7 +1084,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     try {
       return {
         defaults: this.compileConstructorDefaults(entry, headerScope, context),
-        superCall: this.compileSuperConstructorCall(entry, headerScope, context),
+        superCall: delegatesToSecondaries ? undefined : this.compileSuperConstructorCall(entry, headerScope, context),
         fieldSteps: this.compileFieldSteps(entry, headerScope, context),
       };
     } finally {
@@ -627,7 +1109,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
    * shows, such as a smart cast or a `Nothing` result, holds only merged with the path that skips it. The body starts
    * with every parameter assigned.
    */
-  private compileParameterDefaults(
+  protected compileParameterDefaults(
     declarations: ParameterDecl[],
     params: ParameterSymbol[],
     variables: VariableSymbol[],
@@ -726,7 +1208,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       return this.withStep(member.row, store, delegate.isCreation === true);
     }
     if (!member.initializer || property.slot === undefined) return undefined;
-    const compiled = this.compileExpression(scope, context, member.initializer, property.type);
+    const compiled =
+      propertyEntry.inferredObject ?? this.compileExpression(scope, context, member.initializer, property.type);
     const type = property.type as KType;
     const evaluate = convertRepr(
       this.expectType(compiled, type, member.initializer.row),
@@ -753,10 +1236,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     ctor.initialize = initialize;
     const fieldCount = (): number => symbol.fieldCount;
     const isAbstract = symbol.isAbstract;
-    ctor.invoke = (caller, _receiver, args, callRow) => {
+    ctor.invoke = (caller, receiver, args, callRow) => {
       if (isAbstract) return caller.runtime.throwError(caller, 'java.lang.InstantiationError', symbol.qualifiedName);
       this.ensureClassInitialized(caller, symbol);
       const instance = new KObject(symbol, fieldCount());
+      // An inner class's constructor takes the instance of the class around it as its receiver.
+      if (symbol.isInner) instance.fields[symbol.outerSlot as number] = receiver;
       caller.runtime.allocate(caller, instance.fields.length + 1);
       initialize(caller, instance, args, callRow);
       return instance;
@@ -774,7 +1259,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       // A property with accessors needs a value only when they use its backing field, which then has a slot.
       if (member.kind !== 'property' || member.initializer || member.delegate) continue;
       const property = this.findOwnProperty(entry.symbol, member.name);
-      if (property.isAbstract || property.slot === undefined) continue;
+      if (property.isAbstract || property.isLateinit || property.slot === undefined) continue;
       if (!this.flow.assigned.has(property)) {
         this.error(member.row, `プロパティ ${member.name} には初期値を書くか、init で値を入れてください。`);
       }
@@ -784,8 +1269,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   protected mayInitializeVal(context: FunctionContext, symbol: PropertySymbol): boolean {
     if (!symbol.owner || symbol.slot === undefined) return false;
     const entry = this.entryOfProperty.get(symbol);
-    if (!entry || entry.decl.initializer || entry.decl.delegate) return false;
-    return this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry) === context;
+    // A lateinit property is read whenever the code says, which throws at run time when nothing assigned it yet.
+    if (!entry || entry.decl.initializer || entry.decl.delegate || symbol.isLateinit) return false;
+    const owner = this.entryOfClass.get(symbol.owner) as ClassEntry;
+    if (this.secondaryConstructorContexts.get(context) === owner && !owner.decl.primaryConstructor) return true;
+    return this.initializerContexts.get(owner) === context;
   }
 
   private compileSuperConstructorCall(
@@ -794,18 +1282,11 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     context: FunctionContext
   ): ((frame: Frame) => void) | undefined {
     const { symbol, decl } = entry;
+    // createEnumEntries runs the enum's constructor, with the entry's arguments, before an entry's body initializes.
+    if (symbol.kind === 'enumEntry') return undefined;
     if (symbol.kind === 'enum') {
-      const enumCtor = this.core.enum.constructors[0];
-      return (frame) => {
-        const instance = frame.thisValue as KObject;
-        const native = instance.native as { name: string; ordinal: number };
-        (enumCtor.initialize as NonNullable<FunctionSymbol['initialize']>)(
-          frame,
-          instance,
-          [native.name, native.ordinal],
-          undefined
-        );
-      };
+      const initializeEnum = this.enumSuperInitializer();
+      return (frame) => initializeEnum(frame, frame.thisValue);
     }
     const superclass = symbol.superclass;
     if (!superclass || superclass.cls === this.core.any) return undefined;
@@ -902,22 +1383,24 @@ export abstract class BodyCompiler extends DeclarationCompiler {
   private createEnumEntries(
     frame: Frame,
     cls: ClassSymbol,
-    ctor: FunctionSymbol,
-    evaluators: { info: FunctionInfo; evaluate: ((frame: Frame) => Value[])[] },
+    evaluators: { info: FunctionInfo; entries: { ctor: FunctionSymbol; evaluate: (frame: Frame) => Value[] }[] },
     createList: (entries: KObject[]) => KObject
   ): void {
     const state: { values: KObject[]; entries?: KObject } = { values: [] };
     frame.runtime.enumEntries.set(cls, state);
-    const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
     // The arguments' temporaries live in slots of their own context, apart from the locals of the function running.
     const argumentFrame = new Frame(frame.runtime, evaluators.info, [], undefined, undefined);
     const roots = [state.values, argumentFrame.locals as Value[], argumentFrame.temporaries];
     frame.runtime.withNativeRoots(roots, () => {
       for (const [ordinal, enumEntry] of cls.enumEntries.entries()) {
-        const instance = new KObject(cls);
+        const entryClass = cls.enumEntryClasses.get(enumEntry.name);
+        const instance = new KObject(entryClass ?? cls);
         instance.native = { name: enumEntry.name, ordinal };
         state.values.push(instance);
-        initialize(frame, instance, evaluators.evaluate[ordinal](argumentFrame), undefined);
+        const { ctor, evaluate } = evaluators.entries[ordinal];
+        const initialize = ctor.initialize as NonNullable<FunctionSymbol['initialize']>;
+        initialize(frame, instance, evaluate(argumentFrame), undefined);
+        entryClass?.initialize?.(frame, instance);
       }
     });
     state.entries = createList(state.values);
@@ -925,7 +1408,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
 
   /** Compiles the arguments each enum constant passes to its class's constructor, as `RED(0xFF0000)` does. */
   private compileEnumArguments(entry: ClassEntry): void {
-    const ctor = entry.constructorSymbol as FunctionSymbol;
     const context = new FunctionContext(
       undefined,
       false,
@@ -934,9 +1416,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       undefined
     );
     const scope = new Scope(entry.scope, context);
-    const candidates: Candidate[] = [
-      { symbol: ctor, kind: 'constructor', substitution: new Map(), receiverType: undefined },
-    ];
+    // A constant calls whichever of its class's constructors its arguments fit, as `MID("abc")` calls `constructor(s)`.
+    const candidates: Candidate[] = entry.symbol.constructors.map((symbol) => ({
+      symbol,
+      kind: 'constructor',
+      substitution: new Map(),
+      receiverType: undefined,
+    }));
     const savedRecords = this.recordsSteps;
     this.recordsSteps = false;
     try {
@@ -946,7 +1432,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           name: argument.name,
           value: argument.value,
         }));
-        return this.resolveCall(
+        const { symbol, evaluateArgs } = this.resolveCall(
           scope,
           context,
           [candidates],
@@ -957,11 +1443,12 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           undefined,
           enumEntry.row,
           enumEntry.name
-        ).evaluateArgs;
+        );
+        return { ctor: symbol, evaluate: evaluateArgs };
       });
       const createList = this.enumEntriesValue();
       entry.symbol.initializeEnumEntries = (frame) =>
-        this.createEnumEntries(frame, entry.symbol, ctor, { info: context.info, evaluate: evaluators }, createList);
+        this.createEnumEntries(frame, entry.symbol, { info: context.info, entries: evaluators }, createList);
     } finally {
       this.recordsSteps = savedRecords;
     }

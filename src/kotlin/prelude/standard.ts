@@ -108,6 +108,109 @@ fun <T> lazy(initializer: () -> T): Lazy<T> = SynchronizedLazyImpl(initializer)
 
 operator fun <T> Lazy<T>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): T = value
 
+// A property delegated to another property's reference, as \`var alias by ::total\`, reads and writes that property.
+operator fun <V> kotlin.reflect.KProperty0<V>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): V = get()
+
+operator fun <V> kotlin.reflect.KMutableProperty0<V>.setValue(
+    thisRef: Any?,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    set(value)
+}
+
+operator fun <T, V> kotlin.reflect.KProperty1<T, V>.getValue(thisRef: T, property: kotlin.reflect.KProperty<*>): V =
+    get(thisRef)
+
+operator fun <T, V> kotlin.reflect.KMutableProperty1<T, V>.setValue(
+    thisRef: T,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    set(thisRef, value)
+}
+
+// The bits of integers, as Java's Integer and Long count and move them.
+fun Int.countOneBits(): Int {
+    var bits = this
+    var count = 0
+    while (bits != 0) {
+        bits = bits and (bits - 1)
+        count++
+    }
+    return count
+}
+
+fun Int.countLeadingZeroBits(): Int {
+    if (this == 0) return 32
+    var count = 0
+    var bits = this
+    while ((bits and Int.MIN_VALUE) == 0) {
+        bits = bits shl 1
+        count++
+    }
+    return count
+}
+
+fun Int.countTrailingZeroBits(): Int {
+    if (this == 0) return 32
+    var count = 0
+    var bits = this
+    while ((bits and 1) == 0) {
+        bits = bits ushr 1
+        count++
+    }
+    return count
+}
+
+fun Int.takeHighestOneBit(): Int = if (this == 0) 0 else Int.MIN_VALUE ushr countLeadingZeroBits()
+
+fun Int.takeLowestOneBit(): Int = this and -this
+
+fun Int.rotateLeft(bitCount: Int): Int = (this shl bitCount) or (this ushr -bitCount)
+
+fun Int.rotateRight(bitCount: Int): Int = (this ushr bitCount) or (this shl -bitCount)
+
+fun Long.countOneBits(): Int {
+    var bits = this
+    var count = 0
+    while (bits != 0L) {
+        bits = bits and (bits - 1L)
+        count++
+    }
+    return count
+}
+
+fun Long.countLeadingZeroBits(): Int {
+    if (this == 0L) return 64
+    var count = 0
+    var bits = this
+    while ((bits and Long.MIN_VALUE) == 0L) {
+        bits = bits shl 1
+        count++
+    }
+    return count
+}
+
+fun Long.countTrailingZeroBits(): Int {
+    if (this == 0L) return 64
+    var count = 0
+    var bits = this
+    while ((bits and 1L) == 0L) {
+        bits = bits ushr 1
+        count++
+    }
+    return count
+}
+
+fun Long.takeHighestOneBit(): Long = if (this == 0L) 0L else Long.MIN_VALUE ushr countLeadingZeroBits()
+
+fun Long.takeLowestOneBit(): Long = this and -this
+
+fun Long.rotateLeft(bitCount: Int): Long = (this shl bitCount) or (this ushr -bitCount)
+
+fun Long.rotateRight(bitCount: Int): Long = (this ushr bitCount) or (this shl -bitCount)
+
 fun Int.mod(other: Int): Int {
     val r = this % other
     return if (r != 0 && (r xor other) < 0) r + other else r

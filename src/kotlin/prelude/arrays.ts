@@ -168,6 +168,7 @@ function functionsOf(kind: ArrayKind): string {
     `infix fun ${g('R')}${r}.zip(other: Iterable<R>): List<Pair<${e}, R>> = zipArrayWithIterable(size, other) { index, item -> get(index) to item }`,
     `inline fun ${g('R, V')}${r}.zip(other: Iterable<R>, transform: (a: ${e}, b: R) -> V): List<V> = zipArrayWithIterable(size, other) { index, item -> transform(get(index), item) }`,
     `fun ${g()}${r}.joinToString(separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((${e}) -> CharSequence)? = null): String = asList().joinToString(separator, prefix, postfix, limit, truncated, transform)`,
+    `fun ${g('A : StringBuilder')}${r}.joinTo(buffer: A, separator: CharSequence = ", ", prefix: CharSequence = "", postfix: CharSequence = "", limit: Int = -1, truncated: CharSequence = "...", transform: ((${e}) -> CharSequence)? = null): A = asList().joinTo(buffer, separator, prefix, postfix, limit, truncated, transform)`,
     `fun ${g()}${r}.random(): ${e} = random(kotlin.random.Random)`,
     `fun ${g()}${r}.random(random: kotlin.random.Random): ${e} {
         if (isEmpty()) throw NoSuchElementException("Array is empty.")

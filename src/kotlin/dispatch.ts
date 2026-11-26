@@ -25,6 +25,10 @@ export function runtimeClassOf(value: Value): ClassSymbol {
   return classes.any;
 }
 
+function isFunctionInterface(cls: ClassSymbol | undefined): boolean {
+  return cls !== undefined && coreClasses().functionInterfaces.includes(cls);
+}
+
 /** Whether calls of a member must look up the implementation in the receiver's class. */
 export function isVirtual(member: FunctionSymbol | PropertySymbol): boolean {
   const { owner } = member;
@@ -33,6 +37,11 @@ export function isVirtual(member: FunctionSymbol | PropertySymbol): boolean {
   // whose class a raw number does not tell.
   if (!owner.isInheritable && owner.kind !== 'enum') return false;
   return member.isAbstract || member.isOpen || (member.isOverride && owner.isInheritable) || owner.isInterface;
+}
+
+/** The instance a member of a class runs on: the receiver, or for a member extension, the value its call passes. */
+export function instanceOf(symbol: FunctionSymbol, receiver: Value, args: Value[]): Value {
+  return symbol.dispatchReceiverIndex === undefined ? receiver : args[symbol.dispatchReceiverIndex];
 }
 
 /** How the arguments of a function are held, which a call converts them to. */
@@ -129,24 +138,38 @@ export function callFunction(
   callRow: number | undefined
 ): Value {
   requireMemberReceiver(symbol, frame, receiver);
+  // A lambda is an instance of every function interface of its arity, whose `invoke` calls the lambda.
+  if (receiver instanceof KObject && receiver.function && symbol.name === 'invoke' && isFunctionInterface(symbol.owner))
+    return receiver.function.call(frame, args);
   const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
-  const needsDefaults =
-    (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);
-  if (!needsDefaults) return invokeTarget(symbol, target, frame, receiver, args, callRow);
+  if (!needsDefaults(symbol, target, args)) return invokeTarget(symbol, target, frame, receiver, args, callRow);
   const { temporaries } = frame;
   const mark = temporaries.length;
   try {
-    const filled = [...args];
-    for (const [index, value] of args.entries()) {
-      if (value !== MISSING) continue;
-      const resolved = evaluateDefault(symbol, frame, receiver, filled, index);
-      temporaries.push(resolved);
-      filled[index] = resolved;
-    }
-    return invokeTarget(symbol, target, frame, receiver, filled, callRow);
+    return invokeTarget(symbol, target, frame, receiver, withDefaults(symbol, frame, receiver, args), callRow);
   } finally {
     temporaries.length = mark;
   }
+}
+
+/**
+ * Whether a call's omitted arguments need the defaults the resolved function declares, which an override that the call
+ * dispatches to, or a function inheriting its defaults, does not fill itself.
+ */
+export function needsDefaults(symbol: FunctionSymbol, target: FunctionSymbol, args: Value[]): boolean {
+  return (target !== symbol || symbol.params.some((parameter) => parameter.defaultOwner)) && args.includes(MISSING);
+}
+
+/** A call's arguments with each omitted one filled from the default the resolved function declares or inherits. */
+export function withDefaults(symbol: FunctionSymbol, frame: Frame, receiver: Value, args: Value[]): Value[] {
+  const filled = [...args];
+  for (const [index, value] of args.entries()) {
+    if (value !== MISSING) continue;
+    const resolved = evaluateDefault(symbol, frame, receiver, filled, index);
+    frame.temporaries.push(resolved);
+    filled[index] = resolved;
+  }
+  return filled;
 }
 
 function invokeTarget(
