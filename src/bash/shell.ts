@@ -183,6 +183,8 @@ export class Shell implements ArithmeticHost {
    * nothing can, as their input then reaches its end.
    */
   private readonly lingeringSubstitutions: { file: OpenFile; holder: DescriptorTable; finish: () => void }[] = [];
+  /** Whether a `>(...)` command was left unrun as its command stopped early, which a coprocess that waited checks. */
+  private leftSubstitutionUnrun = false;
   /**
    * The simple command this subshell runs as a pipeline element or with `&`, whose own failure the parent's pipeline
    * or nothing checks, as Bash runs no `ERR` trap and no `set -e` in the forked process for it.
@@ -519,6 +521,7 @@ export class Shell implements ArithmeticHost {
     for (const { fd, file, consumer } of closed) {
       this.fds.close(fd);
       if (completed && consumer) this.lingeringSubstitutions.push({ file, ...consumer });
+      else if (consumer) this.leftSubstitutionUnrun = true;
     }
     if (this.lingeringSubstitutions.length > 0) this.runReadySubstitutions(false);
   }
@@ -813,10 +816,13 @@ export class Shell implements ArithmeticHost {
         if (!(error instanceof CoprocessWaitSignal)) throw error;
         job.waiting = true;
         // The body cannot go on from where it waited; it can be left only where the rest would do nothing.
+        // A `>(...)` its commands opened would also run once the input ends.
         job.losesRemainder =
           error.waitingLoop === undefined ||
           !endsWith(child.shell, body, error.waitingLoop) ||
-          child.shell.traps.has('EXIT');
+          child.shell.traps.has('EXIT') ||
+          child.shell.leftSubstitutionUnrun ||
+          child.shell.lingeringSubstitutions.length > 0;
       }
       output = capture.read();
     };
