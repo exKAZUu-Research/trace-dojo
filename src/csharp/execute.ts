@@ -88,7 +88,7 @@ function runEntry(evaluator: Evaluator): string | undefined {
     if (error instanceof ProgramExit) return undefined;
     if (error instanceof DeadlockError) return error.message;
     if (error instanceof PointerRangeError) return error.message;
-    if (error instanceof UnhandledAsyncException) return describeUncaught(evaluator, error.thrown);
+    if (error instanceof UnhandledAsyncException) return describeUncaught(evaluator, error.thrown, error.isRethrown);
     if (evaluator.isStackOverflow(error)) {
       runtime.io.stderr.write('Stack overflow.\n');
       return 'Stack overflow.';
@@ -100,7 +100,7 @@ function runEntry(evaluator: Evaluator): string | undefined {
 }
 
 /** Reports an exception that escaped the entry point as .NET does on standard error, and describes it. */
-function describeUncaught(evaluator: Evaluator, thrown: CsThrow): string {
+function describeUncaught(evaluator: Evaluator, thrown: CsThrow, isRethrown = false): string {
   let description: string;
   try {
     description = evaluator.uncaughtText(thrown.exception);
@@ -109,5 +109,6 @@ function describeUncaught(evaluator: Evaluator, thrown: CsThrow): string {
     description = runtimeTypeName(thrown.exception.type);
   }
   evaluator.runtime.io.stderr.write(`Unhandled exception. ${description}\n`);
+  if (isRethrown) evaluator.runtime.io.stderr.write('--- End of stack trace from previous location ---\n');
   return description;
 }

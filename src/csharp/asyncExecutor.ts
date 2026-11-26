@@ -1,17 +1,29 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { BoundArgument, BoundBlock, BoundExpression, BoundLValue } from './bound';
-import { IteratorExecutor, type IteratorState, type Steps, type Suspension } from './iterators';
+import { NULL_REFERENCE } from './evaluatorBase';
+import {
+  type Awaiting,
+  IteratorExecutor,
+  type IteratorState,
+  type PendingAwaiter,
+  type Steps,
+  type Suspension,
+} from './iterators';
 import type { PendingException } from './numeric';
 import type { Frame } from './runtime';
+import { cancellationTokenOf, isCancellationException, taskObject, TaskState, UnhandledAsyncException } from './tasks';
+import { type AsyncShape, type MethodSymbol, type NamedType, namedType } from './types';
 import {
-  cancellationTokenOf,
-  isCancellationException,
-  taskObject,
-  type TaskState,
-  UnhandledAsyncException,
-} from './tasks';
-import { type AsyncShape, isDynamicType, type MethodSymbol, type NamedType } from './types';
-import { Cell, copyValue, CsBox, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
+  Cell,
+  copyValue,
+  CsBox,
+  CsDelegate,
+  CsObject,
+  CsStruct,
+  type DelegateEntry,
+  UNASSIGNED,
+  type Value,
+} from './values';
 
 /**
  * Runs async functions (C# spec §15.14): a call runs the body until its first `await` of an unfinished task, then
@@ -147,20 +159,38 @@ export abstract class AsyncExecutor extends IteratorExecutor {
     }
   }
 
-  /** `await`: an awaiter that is not completed suspends the body until its task is done, then gives its result. */
+  /**
+   * `await`: an awaiter that is not completed suspends the body until it is done, then gives its result. The
+   * library's awaiters wait for their tasks; a program's awaiter is handed the continuation once the body has left
+   * its frame, so that its `OnCompleted` may resume the body before it returns, as .NET's state machine allows.
+   */
   private *awaitSteps(expression: Extract<BoundExpression, { kind: 'await' }>, frame: Frame): Steps<Value> {
     const awaitable = yield* this.evaluateSteps(expression.operand, frame);
     const awaiter = this.withOperand(frame, awaitable, () => this.evaluate(expression.getAwaiter, frame));
-    // A `dynamic` operand's awaiter, boxed as a `dynamic` value, is known only now; the scheduler knows the waits of
-    // the library's awaiters alone.
-    const unboxed = awaiter instanceof CsBox ? awaiter.value : awaiter;
-    if (isDynamicType(expression.getAwaiter.type) && !(unboxed instanceof CsStruct && unboxed.type.symbol.isLibrary))
-      throw new CompileError([
-        { row: expression.row, message: '独自の awaiter（`GetAwaiter`）は、この採点環境では使えません。' },
-      ]);
     const isCompleted = this.withOperand(frame, awaiter, () => this.evaluate(expression.isCompleted, frame));
-    if (!isCompleted) yield { awaiting: awaitedTask(unboxed) };
+    if (!isCompleted) yield { awaiting: this.awaitingOf(awaiter, expression.row) };
     return this.withOperand(frame, awaiter, () => this.evaluate(expression.getResult, frame));
+  }
+
+  /**
+   * What an awaiter that is not completed waits for. A program's awaiter takes the continuation through
+   * ICriticalNotifyCompletion when its runtime type implements it, as the state machine prefers, and otherwise through
+   * INotifyCompletion, which a `dynamic` awaiter that implements neither fails to convert to; a struct awaiter takes
+   * it on a copy, as the state machine keeps the awaiter apart from the one whose `GetResult` it calls.
+   */
+  private awaitingOf(awaiter: Value, row: number): Awaiting {
+    const unboxed = awaiter instanceof CsBox ? awaiter.value : awaiter;
+    if (unboxed instanceof CsStruct && unboxed.type.symbol.isLibrary) return awaitedTask(unboxed);
+    const interfaceType = (name: string): NamedType =>
+      namedType(this.runtime.library.typeNamed(`System.Runtime.CompilerServices.${name}`));
+    const notify = interfaceType('INotifyCompletion');
+    const target = copyValue(this.unbox(awaiter, notify));
+    const critical = interfaceType('ICriticalNotifyCompletion');
+    const [owner, name] = this.isInstanceOf(target, critical)
+      ? [critical, 'UnsafeOnCompleted']
+      : [notify, 'OnCompleted'];
+    const onCompleted = owner.symbol.methods.find((method) => method.name === name) as MethodSymbol;
+    return { awaiter: target, onCompleted, row };
   }
 
   /**
@@ -209,10 +239,63 @@ export abstract class AsyncExecutor extends IteratorExecutor {
       );
       return;
     }
-    const { awaiting } = result.value as { awaiting: TaskState | 'yield' };
+    const { awaiting } = result.value as { awaiting: Awaiting };
     const resume = (): void => this.advanceAsync(state, frame, steps, shape);
+    this.resumeAfter(awaiting, frame, resume, () => methodPhase(state, frame));
+  }
+
+  /** Runs `resume` when what an `await` waits for is done. */
+  private resumeAfter(awaiting: Awaiting, frame: Frame, resume: () => void, phase: () => BodyPhase): void {
     if (awaiting === 'yield') this.runtime.scheduler.queue(resume);
-    else awaiting.whenDone(resume);
+    else if (awaiting instanceof TaskState) awaiting.whenDone(resume);
+    else this.notifyCompletion(awaiting, frame, resume, phase);
+  }
+
+  /**
+   * Calls a program's awaiter's `OnCompleted` with the continuation, an Action that resumes the body wherever it is
+   * suspended, as .NET's one continuation of a method does for each of its awaits. Invoked after the method ended, it
+   * throws the NullReferenceException that .NET's does; invoked while the body is not suspended at an `await`, as while
+   * it runs, where .NET would restart the body from its beginning, it is rejected. An exception that leaves `OnCompleted` reaches no caller, as .NET throws it on
+   * the thread pool, and ends the process when the scheduler next runs.
+   */
+  private notifyCompletion(pending: PendingAwaiter, frame: Frame, resume: () => void, phase: () => BodyPhase): void {
+    const native = (): Value => {
+      const now = phase();
+      if (now === 'done') throw NULL_REFERENCE();
+      if (now === 'running')
+        throw new CompileError([
+          {
+            row: pending.row,
+            message: '`await` で止まっていない非同期メソッドの継続の呼び出しは、この採点環境では使えません。',
+          },
+        ]);
+      resume();
+      return undefined;
+    };
+    const actionType = namedType(this.runtime.library.typeNamed('System.Action'));
+    const continuation = new CsDelegate(actionType, [
+      { method: undefined, target: undefined, typeArgs: [], owner: undefined, isVirtual: false, native },
+    ]);
+    const onCompleted: DelegateEntry = {
+      method: pending.onCompleted,
+      target: pending.awaiter,
+      typeArgs: [],
+      owner: undefined,
+      isVirtual: true,
+    };
+    // The call comes from the suspended method's frame, as .NET's comes from the state machine's MoveNext.
+    this.runtime.pushFrame(frame);
+    try {
+      this.evaluator().invokeEntry(frame, onCompleted, [continuation], pending.row);
+    } catch (error) {
+      const thrown = this.asThrow(error);
+      if (!thrown) throw error;
+      this.runtime.scheduler.queue(() => {
+        throw new UnhandledAsyncException(thrown, true);
+      });
+    } finally {
+      this.runtime.popFrame();
+    }
   }
 
   /**
@@ -254,8 +337,10 @@ export abstract class AsyncExecutor extends IteratorExecutor {
       return;
     }
     const resume = (): void => this.advanceAsyncIterator(state, task);
-    if (suspension.awaiting === 'yield') this.runtime.scheduler.queue(resume);
-    else suspension.awaiting.whenDone(resume);
+    this.resumeAfter(suspension.awaiting, state.frame, resume, () => {
+      if (state.status === 'after') return 'done';
+      return state.status === 'running' && state.frame.isSuspended ? 'awaiting' : 'running';
+    });
   }
 
   /** `DisposeAsync` of an async iterator: runs the finally blocks around the `yield return` it is suspended at. */
@@ -295,6 +380,14 @@ export abstract class AsyncExecutor extends IteratorExecutor {
   waitFor(state: TaskState): void {
     this.runtime.scheduler.runUntil(() => state.isDone);
   }
+}
+
+/** Where an async body is when its continuation is invoked: suspended at an `await`, running, or at its end. */
+type BodyPhase = 'awaiting' | 'running' | 'done';
+
+function methodPhase(state: TaskState, frame: Frame): BodyPhase {
+  if (state.isDone) return 'done';
+  return frame.isSuspended ? 'awaiting' : 'running';
 }
 
 /** The task that an awaiter of the library waits for, or Task.Yield's request to run the rest later. */

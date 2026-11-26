@@ -16,10 +16,19 @@ import type { LocalSymbol, MethodSymbol, Type } from './types';
 import { Cell, copyValue, type CsObject, type CsStruct, UNASSIGNED, type Value } from './values';
 
 /**
- * What a suspended body yields to its driver: the value of a `yield return`, or the task an `await` waits for, or
- * `Task.Yield()`'s request to run the rest later.
+ * What a suspended body yields to its driver: the value of a `yield return`, or what an `await` waits for: a task,
+ * `Task.Yield()`'s request to run the rest later, or a program's awaiter.
  */
-export type Suspension = { value: Value } | { awaiting: TaskState | 'yield' };
+export type Suspension = { value: Value } | { awaiting: Awaiting };
+
+export type Awaiting = TaskState | 'yield' | PendingAwaiter;
+
+/** A program's awaiter that is not completed, whose `OnCompleted` or `UnsafeOnCompleted` takes the continuation. */
+export interface PendingAwaiter {
+  awaiter: Value;
+  onCompleted: MethodSymbol;
+  row: number;
+}
 
 /** The execution of code that may suspend at a `yield return` or an `await`, as a generator of its suspensions. */
 export type Steps<T> = Generator<Suspension, T, undefined>;

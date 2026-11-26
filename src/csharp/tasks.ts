@@ -2,9 +2,13 @@ import { CsThrow, type ExceptionState, type Runtime } from './runtime';
 import type { NamedType } from './types';
 import { CsObject, type Value } from './values';
 
-/** An exception that left an `async void` method, which reaches no caller and ends the process. */
+/** An exception that left an `async void` method, or another one that reaches no caller, and ends the process. */
 export class UnhandledAsyncException extends Error {
-  constructor(readonly thrown: CsThrow) {
+  constructor(
+    readonly thrown: CsThrow,
+    /** Whether .NET throws it again where it caught it, which splits its stack trace. */
+    readonly isRethrown = false
+  ) {
     super('An exception left an async void method');
   }
 }
