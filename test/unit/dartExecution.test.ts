@@ -9497,6 +9497,21 @@ void main() {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\n1\n1\n2\n' });
 });
 
+test('a json.decoder stream with a reviver is unavailable, as its calls would move to the end', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  try {
+    await Stream.fromIterable(['[1]']).transform(JsonDecoder((k, v) => v)).toList();
+  } on UnsupportedError catch (e) {
+    print(e.message);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'reviver を指定した json.decoder のストリームは、この採点環境では使えません。\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

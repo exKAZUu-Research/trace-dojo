@@ -884,8 +884,12 @@ final class JsonDecoder extends Converter<String, Object?> {
   final Object? Function(Object? key, Object? value)? _reviver;
   const JsonDecoder([Object? Function(Object? key, Object? value)? reviver]) : _reviver = reviver;
   dynamic convert(String input) => _jsonDecode(input, _reviver);
-  Stream<Object?> bind(Stream<String> stream) =>
-      Stream<Object?>.eventTransformed(stream, (EventSink<Object?> sink) => _JsonStringDecoderSink(sink, _reviver));
+  Stream<Object?> bind(Stream<String> stream) {
+    // The SDK's chunked parser runs a reviver as each element completes while chunks arrive, which parsing the text
+    // once at the end cannot give.
+    if (_reviver != null) _unavailable("reviver を指定した json.decoder のストリーム");
+    return Stream<Object?>.eventTransformed(stream, (EventSink<Object?> sink) => _JsonStringDecoderSink(sink, _reviver));
+  }
 }
 
 /**
