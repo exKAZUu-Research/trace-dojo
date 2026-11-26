@@ -115,7 +115,9 @@ export type TestExpression =
   | { kind: 'binary'; operator: string; left: Word; right: Word }
   | { kind: 'regex'; left: Word; right: Word }
   | { kind: 'and' | 'or'; left: TestExpression; right: TestExpression }
-  | { kind: 'not'; expression: TestExpression };
+  | { kind: 'not'; expression: TestExpression }
+  /** `( expression )`, which a `!` before it negates as a whole, so `set -x` shows no `!` on the terms inside. */
+  | { kind: 'group'; expression: TestExpression };
 
 export interface CaseItem {
   patterns: Word[];

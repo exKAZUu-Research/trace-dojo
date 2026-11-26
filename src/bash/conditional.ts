@@ -36,6 +36,9 @@ export function conditionalStatus(shell: Shell, expression: TestExpression, inve
     case 'not': {
       return conditionalStatus(shell, expression.expression, !inverted) === 0 ? 1 : 0;
     }
+    case 'group': {
+      return conditionalStatus(shell, expression.expression);
+    }
     case 'and': {
       const left = conditionalStatus(shell, expression.left);
       return left === 0 ? conditionalStatus(shell, expression.right) : left;

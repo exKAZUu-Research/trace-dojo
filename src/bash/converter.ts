@@ -689,7 +689,7 @@ export class Converter {
         return { kind: 'not', expression: this.testOf(this.innerTest(node)) };
       }
       case 'parenthesized_test': {
-        return this.testOf(this.innerTest(node));
+        return { kind: 'group', expression: this.testOf(this.innerTest(node)) };
       }
       case 'logical_test': {
         const [left, right] = node.namedChildren.filter((child) => child?.type !== 'comment') as Node[];
