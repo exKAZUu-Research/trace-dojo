@@ -1,10 +1,23 @@
-import { type DartType, DYNAMIC, type FunctionType, makeNullable, substitute, TypeParam, typeParamType } from './types';
+import {
+  type DartType,
+  DYNAMIC,
+  type FunctionType,
+  makeNullable,
+  norm,
+  substitute,
+  TypeParam,
+  typeParamType,
+} from './types';
 
+/**
+ * A type as the running program sees it: extension types erased to their representations, and every part in the
+ * normal form the VM builds its runtime types from, so that `<FutureOr<Object>>[]` is a `List<Object>`.
+ */
 export function eraseExtensionTypes(type: DartType): DartType {
   switch (type.kind) {
     case 'interface': {
       const args = type.args.map(eraseExtensionTypes);
-      if (type.cls.kind !== 'extensionType' || !type.cls.representationType) return { ...type, args };
+      if (type.cls.kind !== 'extensionType' || !type.cls.representationType) return norm({ ...type, args });
       const map = new Map(type.cls.typeParams.map((param, index) => [param, args[index] ?? DYNAMIC]));
       const representation = eraseExtensionTypes(substitute(type.cls.representationType, map));
       return type.nullable ? makeNullable(representation) : representation;
