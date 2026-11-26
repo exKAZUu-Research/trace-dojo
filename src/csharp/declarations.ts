@@ -1269,7 +1269,42 @@ export class DeclarationBinder extends BinderBase {
     this.methodContexts.set(constructor, context);
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  /** Reports an instance constructor in a type that cannot declare one as written. */
+  private checkInstanceConstructorOwner(
+    symbol: DeclaredType['symbol'],
+    member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
+  ): void {
+    if (symbol.kind === 'interface')
+      this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
+    if (symbol.isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
+    if (symbol.primaryParameters && member.initializer?.kind !== 'this') {
+      this.error(
+        member,
+        'CS8862',
+        "パラメーター リストを持つ型で宣言されたコンストラクターには、'this' コンストラクター初期化子が必要です。"
+      );
+    }
+  }
+
+  /** Reports parameters or access modifiers on a static constructor. */
+  private checkStaticConstructorShape(
+    constructor: MethodSymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
+  ): void {
+    if (member.parameters.length > 0)
+      this.error(
+        member,
+        'CS0132',
+        `'${displayMethod(constructor)}': 静的コンストラクターにパラメーターがあってはなりません`
+      );
+    if (accessModifierCount(member.modifiers) > 0)
+      this.error(
+        member,
+        'CS0515',
+        `'${displayMethod(constructor)}': アクセス修飾子は静的コンストラクターでは許可されていません`
+      );
+  }
+
   private declareConstructor(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
@@ -1289,30 +1324,10 @@ export class DeclarationBinder extends BinderBase {
       this.error(member, 'CS1520', 'メソッドは戻り値の型を持たなければなりません');
       return;
     }
-    if (symbol.kind === 'interface' && !isStatic)
-      this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
-    if (symbol.isStatic && !isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
-    if (symbol.primaryParameters && !isStatic && member.initializer?.kind !== 'this') {
-      this.error(
-        member,
-        'CS8862',
-        "パラメーター リストを持つ型で宣言されたコンストラクターには、'this' コンストラクター初期化子が必要です。"
-      );
-    }
+    if (!isStatic) this.checkInstanceConstructorOwner(symbol, member);
     constructor.parameters = this.resolveParameters(member.parameters, context, constructor);
     this.collectAttributes(member.attributes, 'constructor', constructor, context, { method: constructor });
-    if (isStatic && member.parameters.length > 0)
-      this.error(
-        member,
-        'CS0132',
-        `'${displayMethod(constructor)}': 静的コンストラクターにパラメーターがあってはなりません`
-      );
-    if (isStatic && accessModifierCount(member.modifiers) > 0)
-      this.error(
-        member,
-        'CS0515',
-        `'${displayMethod(constructor)}': アクセス修飾子は静的コンストラクターでは許可されていません`
-      );
+    if (isStatic) this.checkStaticConstructorShape(constructor, member);
     this.methodContexts.set(constructor, context);
     this.attachNative(constructor, member.body === undefined);
     if (isStatic) {

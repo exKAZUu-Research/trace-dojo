@@ -716,6 +716,25 @@ export abstract class StatementBinder extends PatternBinder {
    * ref struct's `Dispose()` or of a `DisposeAsync()` returning a task without the interface, reporting a resource
    * that has neither.
    */
+  /** The resource's own instance `Dispose()`, or `DisposeAsync()` returning a task, when it has one. */
+  private patternDisposeCall(
+    local: LocalSymbol,
+    position: Position,
+    isAwait: boolean,
+    context: BindContext
+  ): BoundExpression | undefined {
+    const call = this.quietly(() => {
+      const receiver: BoundExpression = { kind: 'local', local, type: local.type, row: position.row };
+      const name = isAwait ? 'DisposeAsync' : 'Dispose';
+      const group = this.bindInstanceMember(receiver, name, undefined, position, context, true);
+      return group.kind === 'methodGroup' ? this.invokeMethodGroup(group, [], position, context) : undefined;
+    });
+    if (call?.kind !== 'call' || call.method.isStatic) return undefined;
+    if (!isAwait) return call;
+    const shape = this.asyncShapeOf(call.type)?.kind;
+    return shape === 'task' || shape === 'valueTask' ? call : undefined;
+  }
+
   private disposeResourceBy(
     local: LocalSymbol,
     position: Position,
@@ -732,15 +751,8 @@ export abstract class StatementBinder extends PatternBinder {
     // `await using` also takes a `DisposeAsync()` that returns a task without the interface, as `using` a ref struct's
     // `Dispose()`.
     if (isAwait || isRefLikeType(type)) {
-      const call = this.quietly(() => {
-        const receiver: BoundExpression = { kind: 'local', local, type, row: position.row };
-        const name = isAwait ? 'DisposeAsync' : 'Dispose';
-        const group = this.bindInstanceMember(receiver, name, undefined, position, context, true);
-        return group.kind === 'methodGroup' ? this.invokeMethodGroup(group, [], position, context) : undefined;
-      });
-      const shape = isAwait && call ? this.asyncShapeOf(call.type)?.kind : undefined;
-      if (call?.kind === 'call' && !call.method.isStatic && (!isAwait || shape === 'task' || shape === 'valueTask'))
-        return call;
+      const call = this.patternDisposeCall(local, position, isAwait, context);
+      if (call) return call;
     }
     if (isAwait) {
       this.error(

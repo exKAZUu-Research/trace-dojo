@@ -764,18 +764,7 @@ export abstract class CallBinder extends OperatorBinder {
       if (expression.node.kind === 'collection') return this.compareCollectionConversions(expression, a, b);
       return this.compareLambdaConversions(expression, a, b) ?? this.betterTarget(a, b);
     }
-    // A handler conversion is better than any other for an interpolated string that is not constant (C# 10).
-    if (expression.kind === 'interpolated') {
-      const aIsHandler = interpolationTargetOf(a) === 'handler';
-      if (aIsHandler !== (interpolationTargetOf(b) === 'handler')) return aIsHandler ? 1 : -1;
-    }
-    if (!arg.isOutVar) {
-      const aExact = sameType(expression.type, a);
-      const bExact = sameType(expression.type, b);
-      if (aExact && !bExact) return 1;
-      if (bExact && !aExact) return -1;
-    }
-    return this.betterTarget(a, b);
+    return compareHandlerConversions(expression, a, b) ?? compareExactConversions(arg, a, b) ?? this.betterTarget(a, b);
   }
 
   /**
@@ -1638,4 +1627,21 @@ function isBetterCollectionType(a: Type, b: Type, converts: (from: Type, to: Typ
   if (aSpan === 'System.ReadOnlySpan`1' && bSpan === 'System.Span`1') return true;
   if (aSpan) return b.kind === 'array' || (b.kind === 'named' && !bSpan && ARRAY_INTERFACES.has(b.symbol.fullName));
   return !bSpan && converts(a, b);
+}
+
+/** A handler conversion is better than any other for an interpolated string that is not constant (C# 10). */
+function compareHandlerConversions(expression: BoundExpression, a: Type, b: Type): number | undefined {
+  if (expression.kind !== 'interpolated') return undefined;
+  const aIsHandler = interpolationTargetOf(a) === 'handler';
+  if (aIsHandler === (interpolationTargetOf(b) === 'handler')) return undefined;
+  return aIsHandler ? 1 : -1;
+}
+
+/** A conversion to the argument's own type is better than one to another type. */
+function compareExactConversions(arg: ArgumentInfo, a: Type, b: Type): number | undefined {
+  if (arg.isOutVar) return undefined;
+  const aExact = sameType(arg.expression.type, a);
+  const bExact = sameType(arg.expression.type, b);
+  if (aExact === bExact) return undefined;
+  return aExact ? 1 : -1;
 }

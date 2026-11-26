@@ -154,26 +154,35 @@ export class Compiler extends AttributeBinder {
     super(library);
   }
 
-  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  /** Declares the program's types and top-level statements, handing the types over as soon as they exist. */
+  private declareProgram(
+    unit: CompilationUnit,
+    onDeclared: (declared: DeclaredType[]) => void
+  ): ReturnType<Compiler['declareTopLevel']> | undefined {
+    // Roslyn reports `unsafe` without `AllowUnsafeBlocks` among the declarations' errors, so no method body is bound.
+    for (const row of unit.unsafeRows ?? [])
+      this.error(row, 'CS0227', 'アンセーフ コードは /unsafe でコンパイルした場合のみ有効です');
+    const declared = this.declareUnit(unit, this.userRoot, false);
+    onDeclared(declared);
+    this.checkStructLayouts(declared);
+    const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
+    this.collectAttributes(unit.attributes, 'assembly', undefined, this.rootContext(unit), {
+      assembly: undefined,
+      module: undefined,
+    });
+    this.definedSymbols = new Set(unit.options?.symbols);
+    this.bindPendingAttributes();
+    this.removeConditionalCalls(declared);
+    return program;
+  }
+
   compile(unit: CompilationUnit): CompiledProgram {
     let entry: MethodSymbol | undefined;
     let isTopLevel = false;
     let declared: DeclaredType[] = [];
     this.lineMap = unit.lineMap;
     this.runGuarded(() => {
-      // Roslyn reports `unsafe` without `AllowUnsafeBlocks` among the declarations' errors, so no method body is bound.
-      for (const row of unit.unsafeRows ?? [])
-        this.error(row, 'CS0227', 'アンセーフ コードは /unsafe でコンパイルした場合のみ有効です');
-      declared = this.declareUnit(unit, this.userRoot, false);
-      this.checkStructLayouts(declared);
-      const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
-      this.collectAttributes(unit.attributes, 'assembly', undefined, this.rootContext(unit), {
-        assembly: undefined,
-        module: undefined,
-      });
-      this.definedSymbols = new Set(unit.options?.symbols);
-      this.bindPendingAttributes();
-      this.removeConditionalCalls(declared);
+      const program = this.declareProgram(unit, (types) => (declared = types));
       // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
       if (this.diagnostics.length > 0) return;
       // Roslyn reports a missing or misdeclared entry point before the errors of method bodies.

@@ -2768,26 +2768,26 @@ export abstract class ExpressionBinder extends LambdaBinder {
     targets: DeconstructTargets,
     context: BindContext
   ): Type | undefined {
-    let isTypeless = false;
-    const types = node.elements.map((element, index): Type => {
-      const target = targets[index];
-      if (target && !Array.isArray(target) && target.kind !== 'error') return target;
-      if (element.value.kind === 'tuple' && element.value.elements.length >= 2) {
-        const inner = this.mergedTupleType(element.value, Array.isArray(target) ? target : [], context);
-        isTypeless ||= !inner;
-        return inner ?? ERROR_TYPE;
-      }
-      const bound = this.quietly(() => this.bindValue(element.value, context));
-      if (bound && this.isTypelessInDeconstruction(bound)) {
-        isTypeless = true;
-        return ERROR_TYPE;
-      }
-      const typed = this.quietly(() => this.bindTypedValue(element.value, context));
-      if (typed && typed.type.kind !== 'error') return typed.type;
-      return this.bindTypedValue(element.value, context).type;
-    });
-    if (isTypeless) return undefined;
-    return types.some((type) => type.kind === 'error') ? ERROR_TYPE : this.tupleType(types);
+    const types = node.elements.map((element, index) => this.mergedElementType(element.value, targets[index], context));
+    if (types.includes(undefined)) return undefined;
+    const known = types as Type[];
+    return known.some((type) => type.kind === 'error') ? ERROR_TYPE : this.tupleType(known);
+  }
+
+  /** The type of one element of a deconstructed tuple literal, or undefined when it leaves no type. */
+  private mergedElementType(
+    value: Expression,
+    target: DeconstructTargets[number] | undefined,
+    context: BindContext
+  ): Type | undefined {
+    if (target && !Array.isArray(target) && target.kind !== 'error') return target;
+    if (value.kind === 'tuple' && value.elements.length >= 2)
+      return this.mergedTupleType(value, Array.isArray(target) ? target : [], context);
+    const bound = this.quietly(() => this.bindValue(value, context));
+    if (bound && this.isTypelessInDeconstruction(bound)) return undefined;
+    const typed = this.quietly(() => this.bindTypedValue(value, context));
+    if (typed && typed.type.kind !== 'error') return typed.type;
+    return this.bindTypedValue(value, context).type;
   }
 
   private isTypelessInDeconstruction(value: BoundExpression): boolean {
