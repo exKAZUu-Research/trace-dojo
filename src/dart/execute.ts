@@ -46,11 +46,11 @@ export function runProgram(
     if (frame) onMainExit?.(frame);
     runtime.collectGarbage();
     finalTurtles = runtime.world.turtleTraces();
-    // What main's variables held when it returned stays reached for the work after it, as the turtles the trace ends
-    // with then are the ones main left, as the synchronous run's are.
+    // Main's variables stay reached for the work after it, through their cells, which closures that run later may
+    // assign, so that the turtles the trace ends with are the ones the variables hold then, as a synchronous run's are.
     if (frame) {
-      const held = [...frame.locals.map((cell) => cell?.v), ...frame.captured.map((cell) => cell.v)];
-      runtime.roots.add(() => held);
+      const cells = [...frame.locals, ...frame.captured];
+      runtime.roots.add(() => cells.map((cell) => cell?.v));
     }
   };
   runtime.onMainExit = recordEnd;

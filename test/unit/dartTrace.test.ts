@@ -561,6 +561,13 @@ void main() {
 }`;
   const trace = traceProgram('dart', program, program);
   expect(trace.finalTurtles).toEqual([{ x: 1, y: 3, color: '#', dir: 'N' }]);
+  // A variable that later work assigns holds its new turtle, as a synchronous run's does.
+  const reassigned = `import 'dart:async';
+void main() {
+  var t = Turtle(1, 1);
+  scheduleMicrotask(() { t = Turtle(5, 5); t.forward(); });
+}`;
+  expect(traceProgram('dart', reassigned, reassigned).finalTurtles).toEqual([{ x: 5, y: 6, color: '#', dir: 'N' }]);
 });
 
 test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
