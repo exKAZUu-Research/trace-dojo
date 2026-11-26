@@ -346,7 +346,13 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'redirected': {
-        status = this.withRedirects(statement.redirects, () => this.execute(statement.body, guarded));
+        let redirected = false;
+        status = this.withRedirects(statement.redirects, () => {
+          redirected = true;
+          return this.execute(statement.body, guarded);
+        });
+        // A failed redirection fails the compound command itself, while its body applies the rules on its own.
+        if (!redirected) this.checkErrexit(status);
         break;
       }
       case 'subshell':
