@@ -38,6 +38,16 @@ export interface Annotation {
 
 export const VISIBILITY_KEYWORDS = ['private', 'protected', 'internal', 'public'] as const;
 
+/** The visibility a declaration's modifiers write, if any: the one rule converter and compiler share. */
+export function writtenVisibility(keywords: ReadonlySet<string>): (typeof VISIBILITY_KEYWORDS)[number] | undefined {
+  return VISIBILITY_KEYWORDS.find((keyword) => keywords.has(keyword));
+}
+
+/** The visibility of a declaration, public unless its modifiers write another. */
+export function visibilityOfKeywords(keywords: ReadonlySet<string>): (typeof VISIBILITY_KEYWORDS)[number] {
+  return writtenVisibility(keywords) ?? 'public';
+}
+
 export interface Modifiers {
   keywords: ReadonlySet<string>;
   annotations: Annotation[];

@@ -26,7 +26,7 @@ import type {
   TypeAliasDecl,
   TypeParameterDecl,
 } from './ast';
-import { VISIBILITY_KEYWORDS } from './ast';
+import { visibilityOfKeywords, writtenVisibility } from './ast';
 import { ExpressionConverter } from './convertExpression';
 import {
   firstOfType,
@@ -40,10 +40,6 @@ import {
 } from './convertSupport';
 
 const NO_MODIFIERS = new Set<string>();
-
-function visibilityOf(keywords: ReadonlySet<string>): string {
-  return VISIBILITY_KEYWORDS.find((keyword) => keywords.has(keyword)) ?? 'public';
-}
 
 /**
  * Rejects a setter on the getter's line after an expression body without `;`, as kotlinc reads `get() = c set(v) {}`
@@ -289,8 +285,8 @@ export class Converter extends ExpressionConverter {
       throw syntaxError(node, 'ローカル変数には get・set を書けません。');
     const getter = getterNode ? this.convertAccessor(getterNode) : undefined;
     // A getter is as visible as its property, as kotlinc requires.
-    const getterVisibility = getter && VISIBILITY_KEYWORDS.find((keyword) => getter.modifiers.keywords.has(keyword));
-    if (!this.isLibrary && getterVisibility && getterVisibility !== visibilityOf(modifiers.keywords))
+    const getterVisibility = getter && writtenVisibility(getter.modifiers.keywords);
+    if (!this.isLibrary && getterVisibility && getterVisibility !== visibilityOfKeywords(modifiers.keywords))
       throw syntaxError(required(getterNode), 'get の公開範囲は、プロパティと同じにしてください。');
     return {
       kind: 'property',

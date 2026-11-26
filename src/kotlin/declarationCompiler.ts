@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- The declaration compiler shares symbol and class-linking logic.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import { annotationSite } from './annotationSites';
-import { VISIBILITY_KEYWORDS } from './ast';
+import { visibilityOfKeywords } from './ast';
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -149,7 +149,7 @@ const PARAMETER_MODIFIERS = new Set(['vararg', 'noinline', 'crossinline']);
 const PROPERTY_ONLY_MODIFIERS = new Set(['lateinit', 'const']);
 
 function visibilityOf(modifiers: Modifiers): Visibility {
-  return VISIBILITY_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
+  return visibilityOfKeywords(modifiers.keywords);
 }
 
 export abstract class DeclarationCompiler extends StatementCompiler {
