@@ -453,7 +453,11 @@ export abstract class StatementCompiler extends CallCompiler {
     if (declared) value = this.coerce(value, declared, valueSyntax);
     const type = value.type;
     if (type.kind === 'noreturn') return { exec: this.valueExec(value), noreturn: true };
-    if (statement.addressSpace) this.addressSpace(statement.addressSpace);
+    if (statement.addressSpace)
+      this.error(
+        statement.addressSpace,
+        `ローカル変数「${statement.name}」には、アドレス空間（addrspace）を指定できません。`
+      );
     const alignment = statement.alignment ? alignmentOperand(this, statement.alignment) : undefined;
     const binding = this.declareLocal(statement.name, type, statement.isConst, value, statement.quotedName, alignment);
     const { slot } = binding;
