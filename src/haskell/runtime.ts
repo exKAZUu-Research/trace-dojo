@@ -19,12 +19,10 @@ const ALLOCATION_OVERHEAD = 8;
 const ALLOCATION_LIMIT = LIMITS.maxSlots * ALLOCATION_OVERHEAD;
 export const MAX_DISPLAY_NODES = Math.floor(LIMITS.maxSlots / ALLOCATION_OVERHEAD);
 
-/** A call shown in a trace: a named function (or the program's `main`) running `IO` statements. */
 export class TraceFrame implements TracedFrame {
   readonly contexts: TraceContext[] = [];
 
   constructor(
-    /** The frame of the call whose statements this trace frame shows. */
     readonly invocation: Env | undefined,
     readonly callRow: number | undefined
   ) {}
@@ -49,11 +47,12 @@ export class TraceFrame implements TracedFrame {
 
 export type PreviewContext = Pick<PreviewView, 'owner' | 'scope'> & { frame: TraceFrame };
 
-/** The state of one run: its globals, its machine, its trace frames, its turtles, and its output. */
 export class Runtime implements TracedRuntime<TraceFrame> {
   readonly world = new TurtleWorld();
-  readonly budget = new ExecutionBudget();
+  readonly budget: ExecutionBudget;
   readonly io: ProgramIO;
+  /** What a Template Haskell splice's program, run while a program compiles, stores for the compiler. */
+  readonly splice: { result?: Slot; errors: string[]; exit?: string } = { errors: [] };
   readonly steps = new StepTracker();
   readonly frames: TraceFrame[] = [];
   readonly machine: Machine;
@@ -64,7 +63,8 @@ export class Runtime implements TracedRuntime<TraceFrame> {
   private gcMilliseconds = 0;
   private readonly previews = new PreviewBudget();
 
-  constructor(input?: ProgramInput) {
+  constructor(input?: ProgramInput, budget = new ExecutionBudget()) {
+    this.budget = budget;
     this.io = new ProgramIO(this.budget, input);
     this.machine = new Machine(this);
   }
@@ -110,6 +110,11 @@ export class Runtime implements TracedRuntime<TraceFrame> {
     } finally {
       this.displayRemaining = undefined;
     }
+  }
+
+  /** Whether evaluation runs for a trace's display, which must never perform an effect. */
+  get displaying(): boolean {
+    return this.displayRemaining !== undefined;
   }
 
   endPreviewStatement(owner: DoFrame, frame: TraceFrame): void {

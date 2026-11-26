@@ -18,6 +18,8 @@ export function surfacePatternText(pat: Pat): string {
       return `[${pat.elems.map(surfacePatternText).join(', ')}]`;
     }
     case 'pas': {
+      // A name the conversion generates, which starts with a space, names a pattern the program wrote without one.
+      if (pat.name.name.startsWith(' ')) return surfacePatternText(pat.pat);
       return `${pat.name.name}@${patternArgument(pat.pat)}`;
     }
     case 'pcon': {
@@ -35,6 +37,25 @@ export function surfacePatternText(pat: Pat): string {
     }
     case 'pchain': {
       return chainText(pat);
+    }
+    case 'pbang': {
+      return `!${patternArgument(pat.pat)}`;
+    }
+    case 'plazy': {
+      return `~${patternArgument(pat.pat)}`;
+    }
+    case 'pview': {
+      if (pat.written) return surfacePatternText(pat.written);
+      return `(${pat.exprText} -> ${surfacePatternText(pat.pat)})`;
+    }
+    case 'por': {
+      return `(${pat.alts.map(surfacePatternText).join('; ')})`;
+    }
+    case 'psig': {
+      return surfacePatternText(pat.pat);
+    }
+    case 'ptybinder': {
+      return `@${pat.name.name}`;
     }
   }
 }
