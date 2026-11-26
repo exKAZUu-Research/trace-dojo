@@ -31,6 +31,7 @@ import {
   tap,
   tcon,
   type Type,
+  typeChildren,
   unifyKinds,
   type Visibility,
   zonk,
@@ -159,13 +160,34 @@ function defineConstructors(decl: RDataDecl): void {
     field.fieldType = first;
     const [con, position] = [...field.positions].find(([candidate]) => own.has(candidate)) as [ConInfo, number];
     const { kinds, record, field: fieldType } = fieldSelectorType(con, position);
-    field.entity.scheme = {
-      kinds,
-      visibilities: kinds.map((): Visibility => 'inferred'),
-      preds: [],
-      type: tap(tcon(FUNCTION_TYPE), record, fieldType),
-    };
+    field.entity.scheme = selectorScheme(kinds, tap(tcon(FUNCTION_TYPE), record, fieldType));
   }
+}
+
+/**
+ * A selector's scheme as GHC's user guide gives it: the variables in the order they occur in its type, record first,
+ * all specified, so `@` can instantiate them; a variable its type does not mention stays inferred.
+ */
+function selectorScheme(kinds: readonly Kind[], type: Type): Scheme {
+  const order: number[] = [];
+  const visit = (node: Type): void => {
+    if (node.tag === 'tgen') {
+      if (!order.includes(node.index)) order.push(node.index);
+    } else {
+      for (const child of typeChildren(node)) visit(child);
+    }
+  };
+  visit(type);
+  const mentioned = order.length;
+  for (const index of kinds.keys()) if (!order.includes(index)) order.push(index);
+  const renumbered: Type[] = [];
+  for (const [position, index] of order.entries()) renumbered[index] = { tag: 'tgen', index: position };
+  return {
+    kinds: order.map((index) => kinds[index]),
+    visibilities: order.map((_, position): Visibility => (position < mentioned ? 'specified' : 'inferred')),
+    preds: [],
+    type: instantiateType(type, renumbered),
+  };
 }
 
 function defineClassMethods(decl: RClassDecl, undecidable: boolean): void {
