@@ -9354,6 +9354,20 @@ test.each([
   });
 });
 
+test('a standard stream holds a character its byte writes split, and rejects text or an end while it does', () => {
+  const split = `import 'dart:io';
+void main() { stdout.add([0xE3]); stdout.add([0x81, 0x82, 10]); print('end'); }`;
+  expect(executeProgram('dart', split)).toMatchObject({ kind: 'executed', stdout: 'あ\nend\n' });
+  const unfinished = `import 'dart:io';
+void main() { stdout.add([0x41, 0xE3]); }`;
+  expect(executeProgram('dart', unfinished)).toMatchObject({
+    kind: 'executed',
+    stdout: 'A',
+    uncaughtException:
+      'Unhandled exception:\nUnsupported operation: 文字の途中で終わるバイト列を標準出力に残したままの出力や終了は、この採点環境では使えません。',
+  });
+});
+
 test('byte writes keep a byte order mark and text reads drop one, as the VM decodes them', () => {
   const source = `import 'dart:io';
 void main() {

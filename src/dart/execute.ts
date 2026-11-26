@@ -4,6 +4,7 @@ import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { CompiledProgram } from './compiler';
 import { initialGlobals, topLevelFunctionClosure } from './declarationRuntime';
+import { requireFinishedCharacter } from './library/nativeOthers';
 import { parseDart } from './parse';
 import { compileProgram, LINKS } from './program';
 import { DartThrow, type Frame, ProgramExit, Runtime } from './runtime';
@@ -52,6 +53,8 @@ export function runProgram(
     runMain(runtime, program);
     // The isolate keeps running the microtasks and timers that `main` left until none remain.
     runtime.events.run();
+    requireFinishedCharacter(runtime, false);
+    requireFinishedCharacter(runtime, true);
   } catch (error) {
     uncaughtException = describeUncaught(runtime, error);
   }

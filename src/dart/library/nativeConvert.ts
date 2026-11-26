@@ -865,6 +865,36 @@ const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
  * The text of bytes a run writes to a standard stream, which holds text: bytes that are not UTF-8 are rejected, as
  * dart:io's _textOfBytes rejects them. A byte order mark stays, as the VM writes the bytes as they are.
  */
+/**
+ * The text of bytes a run writes to a standard stream in parts: the bytes of a character the parts split wait in
+ * `pending` for the rest of it, as one decoder holds them for a file sink; the rest is decoded as textOfWrittenBytes
+ * decodes it.
+ */
+export function textOfWrittenPart(runtime: Runtime, pending: number[], bytes: Value): string {
+  const read = readByteList(runtime, bytes, 'buffer', (value) =>
+    value >= 0n && value <= 0xffn ? Number(value) : 0xff
+  );
+  const all = pending.length > 0 ? Uint8Array.of(...pending, ...read) : read;
+  const cut = all.length - unfinishedTail(all);
+  pending.splice(0, pending.length, ...all.subarray(cut));
+  try {
+    return STRICT_UTF8.decode(all.subarray(0, cut));
+  } catch {
+    return throwUnavailable(runtime, 'UTF-8 でないバイト列の書き込み');
+  }
+}
+
+/** How many bytes at the end begin a character that needs more of them. */
+function unfinishedTail(bytes: Uint8Array): number {
+  for (let back = 1; back <= Math.min(3, bytes.length); back++) {
+    const byte = bytes[bytes.length - back] as number;
+    if ((byte & 0xc0) === 0x80) continue;
+    const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    return length > back ? back : 0;
+  }
+  return 0;
+}
+
 export function textOfWrittenBytes(runtime: Runtime, bytes: Value): string {
   const read = readByteList(runtime, bytes, 'buffer', (value) =>
     value >= 0n && value <= 0xffn ? Number(value) : 0xff

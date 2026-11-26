@@ -3,9 +3,9 @@ import type { OutputChannel } from '../../interpreter/programIo';
 import { encodableText } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { textOfWrittenBytes } from './nativeConvert';
+import { textOfWrittenPart } from './nativeConvert';
 import { toDouble } from './nativeNumbers';
-import { define, defineConstructor, intArg, numArg } from './nativeSupport';
+import { define, defineConstructor, intArg, numArg, throwUnavailable } from './nativeSupport';
 
 // dart:math
 
@@ -167,14 +167,43 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 // Whether a standard stream is closed is its shared channel's isClosed, the one place it is kept: a closed channel
 // drops what print writes, as the VM's closed descriptor does, and the sink's consumer fails a write.
 define('_writeStream', (runtime, _receiver, [isError, bytes]) => {
-  standardChannel(runtime, isError).write(textOfWrittenBytes(runtime, bytes), encodableText);
+  standardChannel(runtime, isError).write(
+    textOfWrittenPart(runtime, pendingBytesOf(runtime, isError), bytes),
+    encodableText
+  );
   return;
 });
 define('_isStreamClosed', (runtime, _receiver, [isError]) => standardChannel(runtime, isError).isClosed);
 define('_closeStream', (runtime, _receiver, [isError]) => {
+  requireFinishedCharacter(runtime, isError === true);
   standardChannel(runtime, isError).isClosed = true;
   return;
 });
+
+/**
+ * The bytes of a character each standard stream's writes split, which wait for the rest of it, the one pending
+ * state of a standard stream, as a file sink's decoder holds its own.
+ */
+const pendingStandardBytes = new WeakMap<Runtime, { out: number[]; err: number[] }>();
+
+function pendingBytesOf(runtime: Runtime, isError: Value): number[] {
+  let pending = pendingStandardBytes.get(runtime);
+  if (!pending) {
+    pending = { out: [], err: [] };
+    pendingStandardBytes.set(runtime, pending);
+  }
+  return isError === true ? pending.err : pending.out;
+}
+
+/**
+ * Rejects text that would follow, or an end that would leave, a character a standard stream's bytes split: the VM
+ * writes the bytes as they are, which the run's text output cannot hold.
+ */
+export function requireFinishedCharacter(runtime: Runtime, isError: boolean): void {
+  if (pendingStandardBytes.get(runtime)?.[isError ? 'err' : 'out'].length) {
+    throwUnavailable(runtime, '文字の途中で終わるバイト列を標準出力に残したままの出力や終了');
+  }
+}
 
 function standardChannel(runtime: Runtime, isError: Value): OutputChannel {
   return isError === true ? runtime.io.stderr : runtime.io.stdout;

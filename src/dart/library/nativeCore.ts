@@ -6,6 +6,7 @@ import type { Runtime } from '../runtime';
 import { coreTypes, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
+import { requireFinishedCharacter } from './nativeOthers';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
 import {
   define,
@@ -367,6 +368,7 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
 
 define('print', (runtime, _receiver, [value]) => {
   const text = `${stringOf(runtime, value)}\n`;
+  requireFinishedCharacter(runtime, false);
   // The VM's print still converts its argument once stdout is closed; the closed channel drops the text.
   runtime.io.stdout.write(text, encodableText);
   return;
