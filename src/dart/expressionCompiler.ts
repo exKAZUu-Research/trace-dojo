@@ -20,13 +20,7 @@ import { shortCircuiting } from './awaitSteps';
 import type { ClassInfo, FieldMember, Member } from './classes';
 import { addToList, building, type ElementCode } from './collectionElements';
 import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
-import {
-  elementTypeOfContext,
-  isDoubleLiteralContext,
-  literalTypeArgument,
-  mapTypesOfContext,
-  unresolvedCollectionType,
-} from './contextTypes';
+import { childContext, literalTypeArgument, unresolvedCollectionType } from './contextTypes';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
@@ -658,7 +652,8 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     negated: boolean
   ): Compiled {
     const exact = negated ? -expression.value : expression.value;
-    if (context && isDoubleLiteralContext(context)) {
+    const literalType = context && childContext({ kind: 'intLiteral' }, context);
+    if (literalType?.kind === 'interface' && literalType.cls === coreTypes.double) {
       // Negating the converted magnitude keeps `-0` negative, which a bigint cannot.
       const magnitude = Number(expression.value);
       const value = negated ? -magnitude : magnitude;
@@ -720,7 +715,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
       if (expression.typeArguments.length !== 1) this.error(expression, 'リストのリテラルの型引数は 1 つです。');
       elementType = this.resolveType(expression.typeArguments[0]);
     }
-    const contextElement = elementType ?? elementTypeOfContext(context, coreTypes.list);
+    const contextElement = elementType ?? childContext({ kind: 'element', cls: coreTypes.list }, context);
     const elements = this.withConstContext(expression.isConst, () =>
       this.compileCollectionElements(expression.elements, 'list', contextElement, undefined)
     );
@@ -773,7 +768,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     }
     const types = typeArguments?.map((argument) => this.resolveType(argument));
     if (kind === 'set') {
-      const contextElement = types?.[0] ?? elementTypeOfContext(context, coreTypes.set);
+      const contextElement = types?.[0] ?? childContext({ kind: 'element', cls: coreTypes.set }, context);
       const compiled = this.withConstContext(expression.isConst, () =>
         this.compileCollectionElements(syntax, 'set', contextElement, undefined)
       );
@@ -791,9 +786,8 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
         expression.isConst || (this.inConstContext && compiled.isConst)
       );
     }
-    const contextMap = mapTypesOfContext(context);
-    const keyContext = types?.[0] ?? contextMap?.[0];
-    const valueContext = types?.[1] ?? contextMap?.[1];
+    const keyContext = types?.[0] ?? childContext({ kind: 'mapKey' }, context);
+    const valueContext = types?.[1] ?? childContext({ kind: 'mapValue' }, context);
     const compiled = this.withConstContext(expression.isConst, () =>
       this.compileCollectionElements(syntax, 'map', keyContext, valueContext)
     );

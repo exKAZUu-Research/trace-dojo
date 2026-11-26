@@ -3,7 +3,7 @@ import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } f
 import { awaitingCompiled } from './awaitCompiler';
 import { containsAwait, runSteps, shortCircuiting } from './awaitSteps';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { branchesType, intArithmeticContext } from './contextTypes';
+import { branchesType, childContext } from './contextTypes';
 import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
 import {
   BITWISE_OPERATORS,
@@ -42,25 +42,6 @@ import {
   vmTypeString,
 } from './types';
 import { Cell, type Value } from './values';
-
-const DOUBLE_CONTEXT_OPERATORS = new Set(['+', '-', '*', '%']);
-const INT_OPERAND_OPERATORS = new Set(['&', '|', '^', '<<', '>>', '>>>']);
-
-/**
- * The context of a numeric operator's right operand: its parameter type, int for a bitwise or shift operator and num
- * for the others (`var b = x + await f` infers f's type argument as num), or what Dart's rule for int arithmetic
- * passes on from the whole expression's context to an int's or a num's operand.
- */
-function numericOperandContext(
-  leftNumeric: 'int' | 'double' | 'num',
-  operator: string,
-  context: DartType | undefined
-): DartType | undefined {
-  if (INT_OPERAND_OPERATORS.has(operator)) return interfaceType(coreTypes.int);
-  const special =
-    leftNumeric !== 'double' && DOUBLE_CONTEXT_OPERATORS.has(operator) ? intArithmeticContext(context) : undefined;
-  return special ?? interfaceType(coreTypes.num);
-}
 
 /** Operators, conditionals, casts, throws, and cascades. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -164,7 +145,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (left.extensionOverride) return this.compileOperatorCall(left, operator, [rightSyntax], span);
     const leftNumeric = numericClassOf(left.type);
     if (leftNumeric) {
-      const right = this.compileExpression(expression.right, numericOperandContext(leftNumeric, operator, context));
+      const right = this.compileExpression(
+        expression.right,
+        childContext({ kind: 'numericOperand', operator, left: leftNumeric }, context)
+      );
       return this.numericOperator(operator, left, right, leftNumeric, span);
     }
     if (left.type.kind === 'dynamic') {

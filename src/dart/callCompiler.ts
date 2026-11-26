@@ -10,7 +10,7 @@ import type {
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { intArithmeticContext, isDoubleContext } from './contextTypes';
+import { childContext, isDoubleContext } from './contextTypes';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
@@ -575,7 +575,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       ...signature,
       positional: signature.positional.map(() => interfaceType(cls)),
     });
-    const special = intArithmeticContext(context);
+    const special = childContext({ kind: 'intArithmetic' }, context);
     if (receiver === 'int' && special?.kind === 'interface' && special.cls === coreTypes.int) {
       return argumentsOf(coreTypes.int);
     }

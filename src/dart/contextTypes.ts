@@ -7,16 +7,90 @@ import {
   futureOrValue,
   interfaceType,
   isSubtype,
+  norm,
   resolveBound,
   upperBound,
 } from './types';
+
+/**
+ * A construct whose child Dart infers under a context it derives from the construct's own context K: an await's
+ * operand, an async function's returned expression (whose K is the value type), a numeric operator's right operand
+ * (by the left operand's class), an int's `clamp` or `remainder` argument, an integer literal (read as double or
+ * int), and a list's, set's or map's element.
+ */
+export type ContextConstruct =
+  | { kind: 'awaitOperand' }
+  | { kind: 'asyncReturn' }
+  | { kind: 'numericOperand'; operator: string; left: 'int' | 'double' | 'num' }
+  | { kind: 'intArithmetic' }
+  | { kind: 'intLiteral' }
+  | { kind: 'element'; cls: ClassInfo }
+  | { kind: 'mapKey' }
+  | { kind: 'mapValue' };
+
+const DOUBLE_CONTEXT_OPERATORS = new Set(['+', '-', '*', '%']);
+const INT_OPERAND_OPERATORS = new Set(['&', '|', '^', '<<', '>>', '>>>']);
+
+/**
+ * The context Dart's rules give a construct's child from the construct's context, the one place they are decided
+ * for every construct that derives one; each rule reads the context's normal form.
+ */
+export function childContext(construct: ContextConstruct, context: DartType | undefined): DartType | undefined {
+  const normal = context && norm(context);
+  switch (construct.kind) {
+    case 'awaitOperand': {
+      // Every context but dynamic, the top types included, is wrapped, as the SDK infers `await f()` under it.
+      return normal && normal.kind !== 'dynamic' ? interfaceType(coreTypes.futureOr, [normal]) : undefined;
+    }
+    case 'asyncReturn': {
+      // FutureOr of the value type, Object? and dynamic included (`Future<Object?> f() async => wrap(x)` infers
+      // wrap's T as Object?); a void value type gives none.
+      return normal && normal.kind !== 'void' ? interfaceType(coreTypes.futureOr, [normal]) : undefined;
+    }
+    case 'numericOperand': {
+      return numericOperandContext(construct, normal);
+    }
+    case 'intArithmetic': {
+      return intArithmeticContext(normal);
+    }
+    case 'intLiteral': {
+      return normal && isDoubleLiteralContext(normal) ? interfaceType(coreTypes.double) : interfaceType(coreTypes.int);
+    }
+    case 'element': {
+      return elementTypeOfContext(context, construct.cls);
+    }
+    case 'mapKey': {
+      return mapTypesOfContext(context)?.[0];
+    }
+    case 'mapValue': {
+      return mapTypesOfContext(context)?.[1];
+    }
+  }
+}
+
+/**
+ * A numeric operator's right operand's context: a bitwise or shift operator's parameter is int; the others' num
+ * (`var b = x + await f` infers f's type argument as num), unless the rule for int arithmetic passes on the whole
+ * expression's context.
+ */
+function numericOperandContext(
+  construct: Extract<ContextConstruct, { kind: 'numericOperand' }>,
+  context: DartType | undefined
+): DartType {
+  if (INT_OPERAND_OPERATORS.has(construct.operator)) return interfaceType(coreTypes.int);
+  const special =
+    construct.left !== 'double' && DOUBLE_CONTEXT_OPERATORS.has(construct.operator)
+      ? intArithmeticContext(context)
+      : undefined;
+  return special ?? interfaceType(coreTypes.num);
+}
 
 /**
  * The type Dart's rule for int arithmetic passes from the context K of an int's `+`, `-`, `*`, `%`, `remainder` or
  * `clamp` to its operands: int when int is a subtype of K and num is not, as for int and int?; double likewise;
  * otherwise none, so that the operands take the operation's own parameter type.
  */
-export function intArithmeticContext(context: DartType | undefined): DartType | undefined {
+function intArithmeticContext(context: DartType | undefined): DartType | undefined {
   if (!context) return undefined;
   const num = interfaceType(coreTypes.num);
   if (isSubtype(num, context)) return undefined;
@@ -31,7 +105,7 @@ export function intArithmeticContext(context: DartType | undefined): DartType | 
  * Whether an integer literal in the context is a double, as Dart's rule says: double is assignable to the context
  * and int is not, as for double, double?, and FutureOr<double>.
  */
-export function isDoubleLiteralContext(context: DartType): boolean {
+function isDoubleLiteralContext(context: DartType): boolean {
   if (context.kind === 'dynamic' || isInferenceHole(context)) return false;
   return isSubtype(interfaceType(coreTypes.double), context) && !isSubtype(interfaceType(coreTypes.int), context);
 }
@@ -52,7 +126,7 @@ function collectionContext(context: DartType): DartType {
 }
 
 /** The element type a context gives a collection literal, as `List<int>` gives `int` to `[...]`. */
-export function elementTypeOfContext(context: DartType | undefined, cls: ClassInfo): DartType | undefined {
+function elementTypeOfContext(context: DartType | undefined, cls: ClassInfo): DartType | undefined {
   if (!context) return undefined;
   const base = collectionContext(context);
   if (base.kind !== 'interface') return undefined;
@@ -64,7 +138,7 @@ export function elementTypeOfContext(context: DartType | undefined, cls: ClassIn
   return base.args[0];
 }
 
-export function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] | undefined {
+function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] | undefined {
   if (!context) return undefined;
   const base = collectionContext(context);
   if (base.kind !== 'interface' || base.cls !== coreTypes.map) return undefined;

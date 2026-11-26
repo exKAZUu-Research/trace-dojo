@@ -12,6 +12,7 @@ import {
   suspensionStarts,
 } from './awaitSteps';
 import { type Compiled, CompilerBase, type Eval } from './compilerBase';
+import { childContext } from './contextTypes';
 import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype } from './types';
 import type { Cell } from './values';
@@ -120,8 +121,7 @@ export abstract class AwaitCompiler extends CompilerBase {
     // A late variable's initializer runs when it is first read, outside the statement that can suspend.
     if (root?.fn !== this.fn || !rootCovers(root, expression))
       return this.error(expression, 'ここでは await を使えません。');
-    const operandContext =
-      context && context.kind !== 'dynamic' ? interfaceType(coreTypes.futureOr, [context]) : undefined;
+    const operandContext = childContext({ kind: 'awaitOperand' }, context);
     const { result: operand, steps } = this.compileWithSteps(expression.value, () =>
       this.compileExpression(expression.value, operandContext)
     );

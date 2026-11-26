@@ -209,6 +209,9 @@ function isFutureLike(type: DartType): boolean {
 /** `factor(T, S)`: what remains of `T` once a value is known not to be an `S`. */
 export function factorType(type: DartType, removed: DartType): DartType {
   if (isSubtype(type, removed)) return NEVER;
+  // A FutureOr is factored by its normal form, as FutureOr<Object> is Object.
+  const normal = norm(type);
+  if (!sameType(normal, type)) return factorType(normal, removed);
   const nonNull = nonNullable(type);
   if (type.kind !== 'typeParam' && isNullable(type) && !sameType(nonNull, type)) {
     const rest = factorType(nonNull, removed);

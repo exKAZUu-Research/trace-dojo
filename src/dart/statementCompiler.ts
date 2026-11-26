@@ -18,6 +18,7 @@ import { type AwaitRequest, containsAwait, type YieldEachRequest } from './await
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import { childContext } from './contextTypes';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
 import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar, type ReturnRule } from './scope';
@@ -174,11 +175,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (isAsync) {
       const declared = spec.returnType ?? spec.contextReturnType;
       const valueType = declared ? futureValueType(declared) : undefined;
-      // The returned expression is inferred under FutureOr of its value type, Object? and dynamic included, as the
-      // SDK does: `Future<Object?> f() async => wrap(x)` infers wrap's T as Object?; a void value type gives none.
-      const context =
-        valueType && valueType.kind !== 'void' ? interfaceType(coreTypes.futureOr, [valueType]) : undefined;
-      return { checked, valueType, context, isAsync };
+      return { checked, valueType, context: childContext({ kind: 'asyncReturn' }, valueType), isAsync };
     }
     const context = spec.returnType ?? spec.contextReturnType;
     return { checked, valueType: checked, context: context?.kind === 'void' ? undefined : context, isAsync };
