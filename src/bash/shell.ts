@@ -100,6 +100,13 @@ interface ShellContextOptions {
   readonly loopDepth?: number;
 }
 
+/** Whether a redirection gives the standard input, as Bash's `stdin_redirects` counts one; `{name}` ones never do. */
+function redirectsStandardInput(redirect: Redirect): boolean {
+  if (redirect.fd !== 0 || redirect.fdVariable !== undefined) return false;
+  if (redirect.kind === 'file') return redirect.operator === '<' || redirect.operator === '<>';
+  return redirect.kind !== 'duplicate' || redirect.operator === '<&';
+}
+
 /**
  * Whether a forked process runs a compound command, in which `break` and `continue` are outside every loop, as in
  * Bash; a simple command, with `!` or alone in a pipeline, keeps the loops it was written in.
@@ -163,8 +170,9 @@ export class Shell implements ArithmeticHost {
   /** Whether this subshell runs a pipeline started with `&`, each of whose elements Bash counts one level deep. */
   private runsAsyncPipeline = false;
   /**
-   * Whether a compound command's redirection or a pipeline gave the commands running now their standard input, which
-   * a command started with `&` then reads instead of `/dev/null`, as Bash does without job control.
+   * Whether the commands running now take the standard input a redirection or a pipe gave, which a command started with
+   * `&` then reads instead of `/dev/null`, as Bash's `stdin_redir` does without job control: the innermost compound
+   * command or function with redirections decides it by whether they redirect the standard input.
    */
   private standardInputRedirected: boolean;
   /** The `set` options to restore when the running function returns, which `local -` keeps. */
@@ -553,10 +561,9 @@ export class Shell implements ArithmeticHost {
     }
     let redirected = false;
     const trapped = this.errTrapSet;
-    const input = this.fds.get(0);
     const status = this.withRedirects(statement.redirects, () => {
       redirected = true;
-      return this.withStandardInputMark(this.fds.get(0) !== input, () => this.execute(statement.body, guarded));
+      return this.withStandardInputMark(statement.redirects, () => this.execute(statement.body, guarded));
     });
     // A failed redirection fails the compound command itself, while its body applies the rules on its own.
     if (!redirected) this.checkErrexit(status, trapped);
@@ -804,20 +811,21 @@ export class Shell implements ArithmeticHost {
     const saved = this.saveDescriptors();
     this.fds.set(0, input);
     try {
-      return this.withStandardInputMark(true, () => this.execute(command));
+      return this.execute(command);
     } finally {
       this.restoreDescriptors(saved, [0]);
     }
   }
 
-  /** Runs commands marked as having their standard input given by a redirection or a pipe, when `given` is true. */
-  private withStandardInputMark(given: boolean, run: () => number): number {
-    if (!given || this.standardInputRedirected) return run();
-    this.standardInputRedirected = true;
+  /** Runs commands marked by whether `redirects`, of a compound command or a function, redirect standard input. */
+  private withStandardInputMark(redirects: readonly Redirect[], run: () => number): number {
+    if (redirects.length === 0) return run();
+    const saved = this.standardInputRedirected;
+    this.standardInputRedirected = redirects.some(redirectsStandardInput);
     try {
       return run();
     } finally {
-      this.standardInputRedirected = false;
+      this.standardInputRedirected = saved;
     }
   }
 
@@ -1475,7 +1483,9 @@ export class Shell implements ArithmeticHost {
     try {
       // Bash names the line where the definition starts when the function's own redirections fail.
       if (fn.redirects.length > 0) this.currentRow = fn.definitionRow;
-      return this.restoringLine(() => this.withRedirects(fn.redirects, () => this.execute(fn.body)));
+      return this.restoringLine(() =>
+        this.withRedirects(fn.redirects, () => this.withStandardInputMark(fn.redirects, () => this.execute(fn.body)))
+      );
     } catch (error) {
       if (error instanceof ReturnSignal) return error.status;
       throw error;
