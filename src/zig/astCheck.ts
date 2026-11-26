@@ -784,8 +784,11 @@ class AstChecker {
   }
 
   private builtinCall(expression: Extract<Expression, { kind: 'builtinCall' }>): void {
-    if (expression.name === '@branchHint' && !this.hintable)
-      this.error(expression, '@branchHint は、関数か条件の分岐の最初の文に書いてください。');
+    if (expression.name === '@branchHint') {
+      if (!this.hintable) this.error(expression, '@branchHint は、関数か条件の分岐の最初の文に書いてください。');
+      // The hint uses up its place, so another hint in the same statement is not first.
+      this.hintable = false;
+    }
     if (expression.name === '@import') {
       const [path] = expression.args;
       if (expression.args.length !== 1 || path.kind !== 'string') {
