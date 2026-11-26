@@ -876,8 +876,8 @@ final class JsonDecoder extends Converter<String, Object?> {
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
  * as it comes: the chunks so far are parsed again as each arrives, so that an error is reported when its chunk
  * arrives, in that chunk at its offset there, as the chunked parser reports it, and the value when the stream ends.
- * What that parser does after an error (a second error, or a value it had completed) depends on its internal state,
- * so a later chunk or the stream's end after an error is reported as unavailable.
+ * What that parser does after an error (a second error, or a value it had completed), and the error of a number or
+ * literal a chunk boundary splits, depend on its internal state, so they are reported as unavailable.
  */
 class _JsonStringDecoderSink implements EventSink<String> {
   final EventSink<Object?> _sink;
@@ -890,6 +890,20 @@ class _JsonStringDecoderSink implements EventSink<String> {
    * when that chunk has only whitespace before its error, so that it cannot have continued the value.
    */
   List<Object?>? _committed;
+
+  /**
+   * Whether a number or literal may run across the end of the text, whose error the chunked parser reports from its
+   * own state of the token, in words or at a place the joined text's parse does not give.
+   */
+  static bool _endsInToken(String text) {
+    if (text.isEmpty) return false;
+    final char = text.codeUnitAt(text.length - 1);
+    return (char >= 0x30 && char <= 0x39) ||
+        ((char | 0x20) >= 0x61 && (char | 0x20) <= 0x7A) ||
+        char == 0x2E ||
+        char == 0x2B ||
+        char == 0x2D;
+  }
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
@@ -906,7 +920,9 @@ class _JsonStringDecoderSink implements EventSink<String> {
       if (offset != null && offset < source.length) {
         _hasFailed = true;
         final before = source.length - chunk.length;
-        if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(source.substring(0, before));
+        final earlier = source.substring(0, before);
+        if (_endsInToken(earlier)) _afterError();
+        if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(earlier);
         throw _inChunk(error, offset);
       }
     }
@@ -918,7 +934,7 @@ class _JsonStringDecoderSink implements EventSink<String> {
   }
 
   static final UnsupportedError _unavailableAfterError =
-      UnsupportedError("エラーの後の json.decoder のストリームは、この採点環境では使えません。");
+      UnsupportedError("エラーを含む json.decoder のストリームの一部は、この採点環境では使えません。");
 
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);
@@ -938,6 +954,13 @@ class _JsonStringDecoderSink implements EventSink<String> {
     try {
       value = _jsonDecode(source, _reviver);
     } on FormatException catch (error) {
+      for (var i = 0; i < _chunks.length - 1; i++) {
+        if (_endsInToken(_chunks[i])) {
+          _sink.addError(_unavailableAfterError);
+          _sink.close();
+          return;
+        }
+      }
       throw _inChunk(error, error.offset ?? source.length);
     }
     _sink.add(value);
