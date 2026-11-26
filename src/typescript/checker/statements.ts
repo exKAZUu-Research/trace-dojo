@@ -4,6 +4,7 @@ import { assert } from 'es-toolkit';
 
 import { isCheckedAmbientDeclaration } from '../namespaceInstantiation';
 import { awaitedType, checkAwaitPlace } from './awaited';
+import { declaredNames } from './binder';
 import type { Checker } from './checker';
 import { checkConstraintDeclarations } from './circularConstraints';
 import {
@@ -206,19 +207,25 @@ export class StatementChecker {
     }
   }
 
-  /** Reports a default or an `export { ... }` name that another export of the module exports too, as tsc does. */
+  /**
+   * Reports a name that the module exports more than once, as tsc does, where a default or an `export { ... }` name
+   * takes part: declarations exported twice are reported as redeclarations.
+   */
   private checkDuplicateExports(node: TreeNode): void {
     if (node.parent?.type !== 'program') return;
-    const others = named(node.parent).filter((child) => child.type === 'export_statement' && child.id !== node.id);
-    const exportedElsewhere = new Set(others.flatMap((other) => exportedNames(other).map(([name]) => name)));
-    for (const [name, site] of exportedNames(node)) {
-      if (!exportedElsewhere.has(name)) continue;
-      this.c.error(
-        site,
-        name === 'default'
+    const all = named(node.parent)
+      .filter((child) => child.type === 'export_statement')
+      .flatMap(exportedNames);
+    for (const own of exportedNames(node)) {
+      const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
+      if (others.length === 0 || (own.isDeclared && others.every((other) => other.isDeclared))) continue;
+      const message =
+        own.name === 'default'
           ? 'モジュールに複数の既定のエクスポートを含めることはできません。'
-          : `識別子 '${name}' が重複しています。`
-      );
+          : own.isDeclared || others.some((other) => other.isDeclared)
+            ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
+            : `識別子 '${own.name}' が重複しています。`;
+      this.c.error(own.site, message);
     }
   }
 
@@ -1122,14 +1129,16 @@ function literalTypeofName(node: TreeNode): string | undefined {
   return parts.map((part) => templateFragmentText(part)).join('');
 }
 
-/** The default and the `export { ... }` names an export statement exports, with the node naming each. */
-function exportedNames(node: TreeNode): [string, TreeNode][] {
+/** The names an export statement exports, with the node naming each and whether a declaration declares it. */
+function exportedNames(node: TreeNode): { name: string; site: TreeNode; isDeclared: boolean }[] {
   if (node.childForFieldName('source')) return [];
-  const isDefault = node.children.some((child) => child?.type === 'default');
-  if (isDefault) return [['default', node.childForFieldName('value') ?? node.childForFieldName('declaration') ?? node]];
+  const declaration = node.childForFieldName('declaration');
+  if (node.children.some((child) => child?.type === 'default'))
+    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node, isDeclared: false }];
+  if (declaration) return declaredNames(declaration).map((name) => ({ name: name.text, site: name, isDeclared: true }));
   const clause = named(node).find((child) => child.type === 'export_clause');
-  return (clause ? named(clause) : []).flatMap((specifier): [string, TreeNode][] => {
+  return (clause ? named(clause) : []).flatMap((specifier) => {
     const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
-    return exported ? [[exported.text, exported]] : [];
+    return exported ? [{ name: exported.text, site: exported, isDeclared: false }] : [];
   });
 }
