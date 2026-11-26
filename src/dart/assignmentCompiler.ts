@@ -460,9 +460,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const setter = this.memberFor(receiver, lookupType, name, span, true);
     if (!setter) {
-      this.checkUnimplementedMember(lookupType, name, span);
+      // A member the interpreter has as a getter is implemented; only one it lacks altogether may be unavailable.
       const getter = this.memberFor(receiver, lookupType, name, span);
       if (getter) return this.error(span, `${name} は final か getter だけなので、代入できません。`);
+      this.checkUnimplementedMember(lookupType, name, span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
     if (!this.canAccessTarget(receiverType, nullAware, setter)) {
