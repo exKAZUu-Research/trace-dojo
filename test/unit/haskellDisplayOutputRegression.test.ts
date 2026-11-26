@@ -173,5 +173,5 @@ test('trace stops when visible-name metadata exceeds export capacity', () => {
 });
 
 function runHelper(path: string, heap: number, args: string[] = []): unknown {
-  return JSON.parse(runNodeBundle(path, { heapMb: heap, timeout: 10_000, args }));
+  return JSON.parse(runNodeBundle(path, { heapMb: heap, args }));
 }
