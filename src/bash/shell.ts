@@ -263,6 +263,11 @@ export class Shell implements ArithmeticHost {
       const status = this.executeStatement(statement, guarded);
       completed = true;
       return status;
+    } catch (error) {
+      // A command that leaves by `return`, `exit`, `break`, `continue`, or an error Bash recovers from still
+      // closes its process substitutions, which then read what it wrote; a stopped program runs nothing more.
+      completed = isShellSignal(error);
+      throw error;
     } finally {
       this.closeProcessSubstitutions(mark, completed);
     }
@@ -1525,19 +1530,24 @@ function isFileReadSubstitution(body: readonly Statement[]): boolean {
   );
 }
 
+/** Whether `error` is how the shell leaves commands as Bash does, rather than a stop of the whole program. */
+function isShellSignal(
+  error: unknown
+): error is ExitSignal | DiscardSignal | ReturnSignal | BreakSignal | ContinueSignal {
+  return (
+    error instanceof ExitSignal ||
+    error instanceof DiscardSignal ||
+    error instanceof ReturnSignal ||
+    error instanceof BreakSignal ||
+    error instanceof ContinueSignal
+  );
+}
+
 function runSubshellCommands(childShell: Shell, body: Statement[]): number {
   try {
     return childShell.runStatements(body);
   } catch (error) {
-    if (
-      error instanceof ExitSignal ||
-      error instanceof DiscardSignal ||
-      error instanceof ReturnSignal ||
-      error instanceof BreakSignal
-    ) {
-      return error.status;
-    }
-    if (error instanceof ContinueSignal) return 0;
-    throw error;
+    if (!isShellSignal(error)) throw error;
+    return error instanceof ContinueSignal ? 0 : error.status;
   }
 }
