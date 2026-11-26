@@ -39,6 +39,8 @@ export interface ClassDefinition {
   name: string;
   members: MemberDefinition[];
   classDecorators: Value[];
+  /** The rows the class's decorators are written on, which call them. */
+  classDecoratorRows: number[];
 }
 
 /** The class a definition's decorators give, and the functions their `addInitializer` added, by when they run. */
@@ -84,14 +86,16 @@ export function decorateClassDefinition(runtime: Runtime, definition: ClassDefin
   ];
   for (const member of order) {
     const added = member.member.isStatic ? staticInitializers : instanceInitializers;
-    for (const decorator of (member.decorators ?? []).toReversed())
-      decorateMember(runtime, member, decorator, added, metadata);
+    const decorators = member.decorators ?? [];
+    for (let index = decorators.length - 1; index >= 0; index--)
+      decorateMember(runtime, member, index, added, metadata);
   }
   let cls = definition.cls;
   const classInitializers: Value[] = [];
-  for (const decorator of definition.classDecorators.toReversed()) {
+  for (let index = definition.classDecorators.length - 1; index >= 0; index--) {
     const context = decoratorContext(runtime, 'class', definition.name, classInitializers, metadata);
-    const result = runtime.call(requireCallable(runtime, decorator), undefined, [cls, context]);
+    const decorator = requireCallable(runtime, definition.classDecorators[index]);
+    const result = runtime.call(decorator, undefined, [cls, context], definition.classDecoratorRows[index]);
     if (result === undefined) continue;
     if (!(result instanceof JsFunction)) runtime.throwError('TypeError', 'class decorators must return a function');
     cls = result as JsFunction;
@@ -128,48 +132,52 @@ export function runInitializers(runtime: Runtime, initializers: Value[], thisVal
 function decorateMember(
   runtime: Runtime,
   definition: MemberDefinition,
-  decorator: Value,
+  index: number,
   initializers: Value[],
   metadata: JsObject
 ): void {
   const { member, property, field } = definition;
+  const callRow = member.decorators?.[index]?.row;
   const kind = member.kind === 'field' ? (member.isAutoAccessor ? 'accessor' : 'field') : member.kind;
   // A field's or an auto-accessor's decorators add initializers that run right after its storage is defined on each
   // instance or the class.
   const added = (kind === 'field' || kind === 'accessor') && field ? (field.initializers ??= []) : initializers;
   const context = decoratorContext(runtime, kind, definition.name, added, metadata, definition);
-  const callable = requireCallable(runtime, decorator);
+  const callable = requireCallable(runtime, definition.decorators?.[index]);
   if (kind === 'field') {
-    const initializer = runtime.call(callable, undefined, [undefined, context]);
+    const initializer = runtime.call(callable, undefined, [undefined, context], callRow);
     if (initializer !== undefined) addTransform(field, requireCallable(runtime, initializer));
     return;
   }
   if (!property) return;
   if (isAccessor(property)) {
-    if (kind === 'accessor') decorateAutoAccessor(runtime, property, field, callable, context);
+    if (kind === 'accessor') decorateAutoAccessor(runtime, { property, field, decorator: callable, context, callRow });
     else {
       const slot = kind === 'getter' ? 'get' : 'set';
-      const result = runtime.call(callable, undefined, [property[slot], context]);
+      const result = runtime.call(callable, undefined, [property[slot], context], callRow);
       if (result !== undefined) property[slot] = requireFunction(runtime, result);
     }
     return;
   }
-  const result = runtime.call(callable, undefined, [property.value, context]);
+  const result = runtime.call(callable, undefined, [property.value, context], callRow);
   if (result !== undefined) property.value = requireFunction(runtime, result);
 }
 
 /** An auto-accessor's decorator, which may replace its getter and setter and transform its initial value. */
 function decorateAutoAccessor(
   runtime: Runtime,
-  property: AccessorProperty,
-  field: ClassField | undefined,
-  decorator: Value,
-  context: JsObject
+  {
+    property,
+    field,
+    decorator,
+    context,
+    callRow,
+  }: { property: AccessorProperty; field?: ClassField; decorator: Value; context: JsObject; callRow?: number }
 ): void {
   const target = runtime.newObject();
   runtime.createDataProperty(target, 'get', property.get);
   runtime.createDataProperty(target, 'set', property.set);
-  const result = runtime.call(decorator, undefined, [target, context]);
+  const result = runtime.call(decorator, undefined, [target, context], callRow);
   if (result === undefined) return;
   if (!isObject(result)) runtime.throwError('TypeError', 'accessor decorators must return an object');
   const get = runtime.get(result, 'get');

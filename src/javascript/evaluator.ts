@@ -636,7 +636,14 @@ export class Evaluator extends SuspendableStatementEvaluator {
     );
     const name = cls.name || (typeof inferredName === 'string' ? inferredName : '');
     const decorated =
-      classDecorators && decorateClassDefinition(runtime, { cls: fn, name, members: definitions, classDecorators });
+      classDecorators &&
+      decorateClassDefinition(runtime, {
+        cls: fn,
+        name,
+        members: definitions,
+        classDecorators,
+        classDecoratorRows: (cls.decorators ?? []).map((decorator) => decorator.row),
+      });
     if (decorated && decorated.instanceInitializers.length > 0) behavior.initializers = decorated.instanceInitializers;
     if (decorated && decorated.staticInitializers.length > 0)
       staticInitializers.unshift(() => runInitializers(runtime, decorated.staticInitializers, fn));
