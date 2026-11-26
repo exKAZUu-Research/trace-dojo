@@ -161,6 +161,9 @@ export class Compiler extends AttributeBinder {
     let declared: DeclaredType[] = [];
     this.lineMap = unit.lineMap;
     this.runGuarded(() => {
+      // Roslyn reports `unsafe` without `AllowUnsafeBlocks` among the declarations' errors, so no method body is bound.
+      for (const row of unit.unsafeRows ?? [])
+        this.error(row, 'CS0227', 'アンセーフ コードは /unsafe でコンパイルした場合のみ有効です');
       declared = this.declareUnit(unit, this.userRoot, false);
       this.checkStructLayouts(declared);
       const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;

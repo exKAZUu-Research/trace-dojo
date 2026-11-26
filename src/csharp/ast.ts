@@ -629,4 +629,6 @@ export interface CompilationUnit {
   lineMap?: LineMap;
   /** The `[assembly: ...]` and `[module: ...]` attributes. */
   attributes?: AttributeNode[];
+  /** The rows of the `unsafe` code of a program built without `AllowUnsafeBlocks`, each an error (CS0227). */
+  unsafeRows?: number[];
 }

@@ -166,26 +166,22 @@ function rejectKeywordIdentifiers(root: Node): void {
   }
 }
 
-/** Reports each `unsafe` of a program built without `AllowUnsafeBlocks`, as Roslyn does (CS0227). */
-function rejectUnsafe(root: Node): void {
-  const rows = [
+/** The rows of each `unsafe` of a program, which one built without `AllowUnsafeBlocks` reports (CS0227). */
+function unsafeRowsIn(root: Node): number[] {
+  return [
     ...root.descendantsOfType('unsafe_statement'),
     ...root.descendantsOfType('modifier').filter((node) => node?.text === 'unsafe'),
   ]
     .map((node) => node?.startPosition.row as number)
     .toSorted((a, b) => a - b);
-  if (rows.length === 0) return;
-  throw new CompileError(
-    rows.map((row) => ({ row, message: 'CS0227: アンセーフ コードは /unsafe でコンパイルした場合のみ有効です' }))
-  );
 }
 
 /** Converts tree-sitter's C# tree into the program's syntax tree. */
 export class Converter extends ExpressionConverter {
   convertCompilationUnit(root: Node): CompilationUnit {
     if (!this.isLibrary) rejectKeywordIdentifiers(root);
-    if (!this.isLibrary && !this.allowsUnsafe) rejectUnsafe(root);
     const unit: CompilationUnit = { usings: [], statements: [], members: [], sourceRows: root.endPosition.row + 1 };
+    if (!this.isLibrary && !this.allowsUnsafe) unit.unsafeRows = unsafeRowsIn(root);
     for (const child of namedChildren(root)) {
       switch (child.type) {
         case 'using_directive': {
