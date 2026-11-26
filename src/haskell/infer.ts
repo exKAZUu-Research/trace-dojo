@@ -1283,15 +1283,15 @@ export class Checker {
     this.unify(target, input.type, expr.expr.span, 'レコードの更新');
     // A data family's other instances may share the fields' names; the update keeps to the first constructor's instance.
     for (const con of cons.filter((candidate) => candidate.instanceArgs === cons[0].instanceArgs)) {
+      // Each constructor has variables of its own (a GADT constructor's, existential ones), typed at both records.
+      const [from, to] = con === cons[0] ? [input, output] : [this.instantiateCon(con), this.instantiateCon(con)];
+      if (con !== cons[0]) {
+        this.unify(from.type, input.type, expr.span, 'レコードの更新');
+        this.unify(to.type, output.type, expr.span, 'レコードの更新');
+      }
       const updated = new Set(expr.fields.map((field) => field.field.positions.get(con)));
-      for (const [position, fieldType] of con.fieldTypes.entries()) {
-        if (updated.has(position)) continue;
-        this.unify(
-          instantiateType(fieldType, input.vars),
-          instantiateType(fieldType, output.vars),
-          expr.span,
-          'レコードの更新'
-        );
+      for (const [position, fieldType] of from.fieldTypes.entries()) {
+        if (!updated.has(position)) this.unify(fieldType, to.fieldTypes[position], expr.span, 'レコードの更新');
       }
     }
     this.checkFields(expr.fields, cons[0], output.fieldTypes);
