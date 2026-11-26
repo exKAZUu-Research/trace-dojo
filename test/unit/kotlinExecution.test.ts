@@ -6904,6 +6904,16 @@ fun main() { println(listOf(Names("z", "y").names.size, Total(1, 2).total)) }`;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
 });
 
+test('binds references to members of objects and companion objects', () => {
+  const source = `object Util { fun sq(x: Int) = x * x }
+class A {
+    companion object { fun parse(s: String) = s.toInt() * 2 }
+    fun all(xs: List<String>) = xs.map(::parse)
+}
+fun main() { println(listOf(listOf(1, 2).map(Util::sq), A().all(listOf("1")), listOf("3").map(A::parse))) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[[1, 4], [2], [6]]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

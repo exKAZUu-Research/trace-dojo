@@ -186,13 +186,47 @@ export abstract class LocalCompiler extends AnnotationCompiler {
     context: FunctionContext,
     expression: Extract<Expression, { kind: 'reference' }>
   ): ReferenceTarget {
-    const { receiver } = expression;
-    if (!receiver) return { kind: 'free' };
+    const { receiver, name } = expression;
+    if (!receiver) {
+      // A name the class's code calls through its companion object, as `parse` of `xs.map(::parse)`, is bound to it.
+      const free = this.freeFunctions(scope, name, expression.row).length > 0 || this.freeProperty(scope, name);
+      const companion = free
+        ? undefined
+        : this.receiversOf(scope).find((each) => holdsMember(each.cls?.companion, name));
+      return companion?.cls?.companion
+        ? this.boundTarget(scope, context, this.objectValue(companion.cls.companion), expression.row)
+        : { kind: 'free' };
+    }
+    const written =
+      receiver.kind === 'type'
+        ? resolved(this.resolveType(scope, receiver.type, true))
+        : this.compileQualifier(scope, receiver.expression);
+    const cls = written?.kind === 'class' ? written.cls : undefined;
+    if (cls) {
+      // An object's member, or a member of a class's companion object, is bound to that object, as `Util::sq` is.
+      const holder = cls.isObject ? cls : holdsMember(cls, name) ? undefined : cls.companion;
+      if (holder && holdsMember(holder, name))
+        return this.boundTarget(scope, context, this.objectValue(holder), expression.row);
+      if (receiver.kind === 'type') return { kind: 'unbound', type: written as KType };
+      return { kind: 'unbound', type: this.starredClassType(cls) };
+    }
     if (receiver.kind === 'type') return { kind: 'unbound', type: this.resolveType(scope, receiver.type, true) };
-    const qualifier = this.compileQualifier(scope, receiver.expression);
-    if (qualifier?.kind === 'class') return { kind: 'unbound', type: this.starredClassType(qualifier.cls) };
-    const compiled = this.compileExpression(scope, context, receiver.expression);
-    const variable = this.newVariable(scope, context, BOUND_RECEIVER, compiled.type, false, expression.row, false);
+    return this.boundTarget(
+      scope,
+      context,
+      this.compileExpression(scope, context, receiver.expression),
+      expression.row
+    );
+  }
+
+  /** An object's instance as a value. */
+  private objectValue(cls: ClassSymbol): Compiled {
+    return { type: cls.type, repr: 'ref', eval: this.objectInstance(cls) };
+  }
+
+  /** A reference bound to a receiver, which is evaluated once, when the reference is created. */
+  private boundTarget(scope: Scope, context: FunctionContext, compiled: Compiled, row: number): ReferenceTarget {
+    const variable = this.newVariable(scope, context, BOUND_RECEIVER, compiled.type, false, row, false);
     this.flow.assigned.add(variable);
     const { write } = this.variableAccess(context, variable);
     // The variable holds the receiver as its type holds values, as an Int's raw number, which reads of it expect.
@@ -996,4 +1030,9 @@ function syntheticLambda(names: string[], statements: Statement[], row: number):
     params: names.map((name) => ({ row, name, type: undefined })),
     statements,
   };
+}
+
+/** Whether a class declares a member of a name itself. */
+function holdsMember(cls: ClassSymbol | undefined, name: string): boolean {
+  return (cls?.members.get(name)?.length ?? 0) > 0;
 }
