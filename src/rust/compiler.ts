@@ -10,6 +10,7 @@ import { compileMacro } from './compilerMacros';
 import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
 import { compileConstant, compileMatcher, compilePatternInput, type Matcher, takesWhole } from './compilerPatterns';
 import { compileField, compileIndex, compilePlace, userDerefCall } from './compilerPlaces';
+import { dropsBorrowedTemporary } from './compilerTemporaries';
 import type { Dropper } from './drops';
 import type { Formatter } from './fmt';
 import { normalize } from './infer';
@@ -19,6 +20,7 @@ import { derefOnce } from './methods';
 import { castValue, copyValue, needsCopy } from './ops';
 import { ControlSignal, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
 import { concreteType, runtimeType } from './runtimeTypes';
+import { markExtendedTemporaries } from './temporaryScopes';
 import { trackCollectionStorage } from './turtleTypes';
 import { constArgValue, type ConstDef, type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
@@ -126,6 +128,8 @@ export class Compiler {
   private fn!: FnContext;
   /** Whether the body being compiled records steps (tracing, and not an atomic function's body). */
   private recordsSteps = false;
+  /** The operands of `&` whose temporaries a `let` extends, with the slot of the variable they live as long as. */
+  private readonly extendedOperands = new WeakMap<Expr, number>();
 
   constructor(
     readonly program: Program,
@@ -279,6 +283,12 @@ export class Compiler {
   // code-gauge-allow functionCognitiveComplexity -- One case per kind of let statement (plain, destructuring, let-else).
   // code-gauge-allow functionNcss -- One case per kind of let statement (plain, destructuring, let-else).
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
+    const lastLocal = patternBindings(stmt.pattern, this.annotations).at(-1);
+    if (stmt.init && lastLocal) {
+      markExtendedTemporaries(stmt.init, this.annotations, (operand) =>
+        this.extendedOperands.set(operand, lastLocal.slot)
+      );
+    }
     if (!stmt.init) {
       const locals = patternBindings(stmt.pattern, this.annotations);
       return (frame) => {
@@ -702,6 +712,11 @@ export class Compiler {
     };
   }
 
+  /** The slot of the variable whose `let` extends the temporary of an operand of `&`, if one does. */
+  extendedTemporarySlot(operand: Expr): number | undefined {
+    return this.extendedOperands.get(operand);
+  }
+
   /** The concrete type of a value that may need dropping where code discards it, or undefined when none can. */
   droppedType(type: Type | undefined): ((frame: Frame) => Type) | undefined {
     if (!type || !this.support.dropper.active) return undefined;
@@ -929,11 +944,8 @@ function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
     const place = c.place(expr.operand);
     return (frame) => new RawPtr(place(frame));
   }
-  if (expr.mutable) {
-    const place = c.place(expr.operand);
-    return (frame) => place(frame);
-  }
-  return c.read(expr.operand);
+  if (expr.mutable) return dropsBorrowedTemporary(c, expr.operand, c.place(expr.operand));
+  return dropsBorrowedTemporary(c, expr.operand, c.read(expr.operand));
 }
 
 /**

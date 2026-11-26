@@ -3,6 +3,7 @@ import type { Expr, Pattern } from './ast';
 import { patternBindingParts } from './astWalk';
 import type { Compiler } from './compiler';
 import { derefAll, isPlaceExpr, isRefType, stripRefs } from './compilerCommon';
+import { holdTemporary } from './compilerTemporaries';
 import { normalize } from './infer';
 import { projectedBindings } from './loanCaptures';
 import { derefOnce } from './methods';
@@ -54,8 +55,11 @@ export function compilePatternInput(
     const read = c.read(expr);
     return (frame) => ({ value: read(frame), place: place(frame) });
   }
+  // A value that no variable holds is a temporary, which goes with what the patterns leave of it.
+  const dropped = isPlaceExpr(expr, c.annotations) ? undefined : c.droppedType(expr.ty);
   return (frame) => {
     const evaluated = place(frame);
+    if (dropped) holdTemporary(frame, evaluated, dropped(frame));
     return { value: evaluated.get(), place: evaluated };
   };
 }

@@ -65,6 +65,14 @@ export class Frame implements TracedFrame {
    * behind. A reference coerced on borrowing (to `&str` or a trait object) shows the coercion (`view`) of that value.
    */
   readonly referents = new Map<number, { place: Place; root: number; view?: (value: Value) => Value }>();
+  /** The temporaries a `let` extends to the life of the variable in each slot (`let r = &make();`), in order made. */
+  readonly extendedTemporaries = new Map<number, (() => void)[]>();
+
+  holdUntilDropped(slot: number, release: () => void): void {
+    const held = this.extendedTemporaries.get(slot);
+    if (held) held.push(release);
+    else this.extendedTemporaries.set(slot, [release]);
+  }
 
   /**
    * Ends the scope of variables, which leave the trace with the references to them, dropping their values; with

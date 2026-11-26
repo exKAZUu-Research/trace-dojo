@@ -170,13 +170,19 @@ function compileCondition(c: Compiler, cond: Condition): ConditionalEval {
   const matcher = c.compileMatcher(cond.pattern);
   const takeAll = takesWhole(c, cond.value, cond.pattern);
   return (frame, onMatch) => {
+    const mark = frame.runtime.liveGuards.length;
     const { value, place } = input(frame);
-    return frame.runtime.withRoots([place], () => {
-      if (!matcher(frame, value, () => place)) return false;
-      takeAll?.(frame);
-      onMatch();
-      return true;
-    });
+    // Edition 2024 drops the scrutinee's temporaries when the matched branch ends, or before `else` runs.
+    try {
+      return frame.runtime.withRoots([place], () => {
+        if (!matcher(frame, value, () => place)) return false;
+        takeAll?.(frame);
+        onMatch();
+        return true;
+      });
+    } finally {
+      frame.runtime.releaseGuards(frame, mark);
+    }
   };
 }
 

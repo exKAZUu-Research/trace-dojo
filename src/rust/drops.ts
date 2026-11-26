@@ -225,14 +225,22 @@ export class Dropper {
     if (!this.active) return;
     for (let index = slots.length - 1; index >= 0; index--) {
       const slot = slots[index];
-      const local = frame.info.locals.find((info) => info.slot === slot);
-      const value = frame.locals[slot];
-      if (!local || value === UNASSIGNED || value === MOVED) continue;
-      const type = concreteType(local.type, frame.typeArgs);
-      if (!this.needsDrop(type)) continue;
-      frame.locals[slot] = MOVED;
-      this.drop(value, type);
+      this.dropSlot(frame, slot);
+      // The temporaries a `let` extended go after its variable, the last made first.
+      const held = frame.extendedTemporaries.get(slot);
+      frame.extendedTemporaries.delete(slot);
+      for (const release of held?.toReversed() ?? []) release();
     }
+  }
+
+  private dropSlot(frame: Frame, slot: number): void {
+    const local = frame.info.locals.find((info) => info.slot === slot);
+    const value = frame.locals[slot];
+    if (!local || value === UNASSIGNED || value === MOVED) return;
+    const type = concreteType(local.type, frame.typeArgs);
+    if (!this.needsDrop(type)) return;
+    frame.locals[slot] = MOVED;
+    this.drop(value, type);
   }
 
   private implFor(t: Type & { kind: 'adt' }): ImplDef | undefined {
