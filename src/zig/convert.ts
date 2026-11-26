@@ -152,6 +152,8 @@ function rejectExtern(node: Node): void {
   for (const child of node.children) {
     if (!child.isNamed && child.type === 'extern') unavailable(child, 'syntax:extern');
     if (!child.isNamed && child.type === 'export') unavailable(child, 'syntax:export');
+    if (!child.isNamed && child.type === 'threadlocal' && node.children.some((part) => part.type === 'const'))
+      fail(child, 'threadlocal は、const の宣言には付けられません。');
   }
 }
 
