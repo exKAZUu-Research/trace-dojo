@@ -141,21 +141,14 @@ export function runWithoutWaiting<T>(generator: Generator<AwaitRequest, T, Value
 }
 
 /** Evaluates a statement's steps, then `run`, which reads what they computed. */
-export function* evaluateParts<T>(
+export function evaluateParts<T>(
   frame: Frame,
   root: AwaitRoot | undefined,
   run: () => T
 ): Generator<AwaitRequest, T, Value> {
-  if (!root) return run();
-  // A part may leave values in flight when an await in a later one throws, such as a `??=`'s prepared target.
-  const mark = frame.temporaries.length;
-  try {
-    yield* runSteps(frame, root.staging.steps);
+  return evaluatePartsThen(frame, root, function* () {
     return run();
-  } finally {
-    for (const slot of root.slots) frame.locals[slot] = undefined;
-    frame.temporaries.length = mark;
-  }
+  });
 }
 
 /** Evaluates a statement's steps, then `run`'s generator, which reads what they computed and may wait too. */
