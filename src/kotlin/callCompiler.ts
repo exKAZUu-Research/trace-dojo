@@ -1263,19 +1263,26 @@ export abstract class CallCompiler extends CompilerCore {
           ? `${member.name} は internal なので、${owner.name} のモジュールの外からは使えません。`
           : `${member.name} が見つかりません。`
       );
-    if (!owner || visibility === 'public' || visibility === 'internal') return;
-    const classes = this.enclosingClasses(scope);
-    if (visibility === 'private') {
-      // A class sees the private members of its companion object.
-      if (classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer))) return;
+    if (!owner || this.isVisible(scope, member, receiverType)) return;
+    if (visibility === 'private')
       this.error(row, `${member.name} は private なので、${owner.name} の外からは使えません。`);
-    }
-    if (
-      !classes.some(
-        (cls) => cls.isSubclassOf(owner) && (!receiverType || isSubtype(nonNull(receiverType), cls.selfType))
-      )
-    )
-      this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+    this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+  }
+
+  /**
+   * Whether code of a scope may use a private or protected member, as kotlinc decides: a private one inside its class at
+   * any depth, or its companion's class, and a protected one inside a subclass, through a receiver of that subclass.
+   */
+  protected isVisible(scope: Scope, member: FunctionSymbol | PropertySymbol, receiverType: KType | undefined): boolean {
+    const { owner, visibility } = member;
+    if (!owner || visibility === 'public' || visibility === 'internal') return true;
+    const classes = this.enclosingClasses(scope);
+    // A class sees the private members of its companion object.
+    if (visibility === 'private')
+      return classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer));
+    return classes.some(
+      (cls) => cls.isSubclassOf(owner) && (!receiverType || isSubtype(nonNull(receiverType), cls.selfType))
+    );
   }
 
   /** The classes whose declarations hold the code of a scope, nested classes' outer classes included. */

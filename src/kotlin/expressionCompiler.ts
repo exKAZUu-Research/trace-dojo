@@ -1313,7 +1313,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     );
   }
 
-  /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
   /**
    * The constructors a call of a class's name may call: none of a class that cannot be instantiated, unless nothing
    * else answers the name, which then reports it; with a companion `invoke` operator, only those visible here, as a
@@ -1325,10 +1324,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (!instantiable) return hasNoOtherLevel && !hasInvoke ? this.constructorCandidates(cls, row) : [];
     const candidates = this.constructorCandidates(cls, row);
     if (!hasInvoke) return candidates;
-    const isInside = this.receiversOf(scope).some((receiver) => receiver.cls === cls || receiver.cls?.outer === cls);
-    return candidates.filter((candidate) => candidate.symbol.visibility !== 'private' || isInside);
+    return candidates.filter((candidate) => this.isVisible(scope, candidate.symbol, undefined));
   }
 
+  /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
   private withConstructors(
     scope: Scope,
     name: string,
@@ -1861,7 +1860,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
       cls && !(cls.isAbstract && functions.some((symbol) => !symbol.extensionReceiver))
         ? this.constructorCandidates(cls, row)
         : [];
-    if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
+    // A program's class with a companion `invoke` answers `demo.Foo(2)` as it answers `Foo(2)`.
+    const invokes = cls?.companion ? this.companionInvokeLevels(scope, cls.companion, row) : [];
+    const callable =
+      cls && invokes.length > 0 ? this.callableConstructors(scope, cls, levels.length === 0, row) : constructors;
+    if (callable.length > 0) levels.push({ candidates: callable, receiver: undefined });
+    levels.push(...invokes);
     if (levels.length === 0) {
       this.rejectUnavailableLibraryReference(`${qualified.path}.${name}`, row);
       this.error(row, `${name} が見つかりません。`);
