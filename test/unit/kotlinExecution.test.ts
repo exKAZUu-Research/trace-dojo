@@ -6920,6 +6920,14 @@ suspend fun main() { println(listOf(1).map { val y = it + 1; d(y) } + mapOf(1 to
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[4, 4]\n' });
 });
 
+test('reads the enum of a reified type parameter for enumValues and enumValueOf', () => {
+  const source = `inline fun <reified T : Enum<T>> names() = enumValues<T>().joinToString { it.name }
+inline fun <reified T : Enum<T>> parse(s: String): T = enumValueOf<T>(s)
+enum class E { X, Y }
+fun main() { println(names<E>() + " " + parse<E>("Y")) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'X, Y Y\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

@@ -19,9 +19,10 @@ import { jvmParameterDescriptor } from './jvmSignatures';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
 import { hasNonNullReceiver, nonNullParameterIndexes, rejectNullArguments } from './nullArguments';
+import { runtimeType } from './reified';
 import { Frame, type FunctionInfo, MISSING } from './runtime';
 import { SuspendCompiler } from './suspendCompiler';
-import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
+import { ClassSymbol, FunctionSymbol, type MemberSymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { anyType, fixVariable, isSubtype } from './typeRelations';
 import { type ClassType, classType, type FunctionType, isNonNullClass, type KType, resolved } from './types';
 import { KObject, NULL, type Value } from './values';
@@ -515,6 +516,43 @@ export class Compiler extends SuspendCompiler {
       row,
       name
     );
+  }
+
+  protected compileReifiedEnumFunction(
+    scope: Scope,
+    context: FunctionContext,
+    param: TypeParameterSymbol,
+    name: 'enumValues' | 'enumValueOf',
+    args: ArgumentSyntax[],
+    row: number
+  ): Compiled {
+    const paramType: KType = { kind: 'param', param, nullable: false };
+    const symbol = new FunctionSymbol(name);
+    symbol.isLibrary = true;
+    // The enum class of the type argument the run passed, initialized as the JVM initializes it on the call.
+    const enumOf = (frame: Frame): ClassSymbol => {
+      const actual = resolved(runtimeType(paramType, frame));
+      if (actual.kind !== 'class' || actual.cls.kind !== 'enum') throw new Error(`${name} of a type that is no enum`);
+      this.objectInstance(actual.cls)(frame);
+      return actual.cls;
+    };
+    const arrayClass = this.core.array;
+    if (name === 'enumValues') {
+      symbol.returnType = {
+        kind: 'class',
+        cls: arrayClass,
+        args: [{ variance: 'inv', type: paramType }],
+        nullable: false,
+      };
+      symbol.invoke = (frame) => enumValuesArray(frame, enumOf(frame), arrayClass);
+    } else {
+      symbol.params = [{ name: 'name', type: this.stringType, hasDefault: false, isVararg: false }];
+      symbol.returnType = paramType;
+      symbol.invoke = (frame, _receiver, [entryName]) => enumEntryNamed(frame, enumOf(frame), entryName);
+    }
+    const candidate: Candidate = { symbol, kind: 'function', substitution: new Map(), receiverType: undefined };
+    const levels = [{ candidates: [candidate], receiver: undefined }];
+    return this.resolveInLevels(scope, context, levels, args, false, [], undefined, row, name);
   }
 
   private enumFunction(cls: ClassSymbol, name: EnumFunctionName): FunctionSymbol {

@@ -1359,6 +1359,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const element = fromExpected?.kind === 'class' ? fromExpected.args[0] : undefined;
     const inferred = name === 'enumValueOf' ? fromExpected : element?.variance === 'star' ? undefined : element?.type;
     const argument = typeArgs.length === 1 ? resolved(typeArgs[0]) : inferred && resolved(inferred);
+    // A reified type parameter names the enum only when the program runs, as `enumValues<T>()` of an inline function.
+    if (argument?.kind === 'param' && argument.param.isReified)
+      return this.compileReifiedEnumFunction(scope, context, argument.param, name, args, row);
     if (argument?.kind !== 'class' || argument.cls.kind !== 'enum') return undefined;
     // The type argument names the enum, so the call passes none to the function it means.
     return this.compileEnumFunction(scope, context, argument.cls, name, { args, typeArgs: [] }, row);
@@ -1829,6 +1832,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
   }
+
+  protected abstract compileReifiedEnumFunction(
+    scope: Scope,
+    context: FunctionContext,
+    param: TypeParameterSymbol,
+    name: 'enumValues' | 'enumValueOf',
+    args: ArgumentSyntax[],
+    row: number
+  ): Compiled;
 
   protected abstract compileEnumFunction(
     scope: Scope,
