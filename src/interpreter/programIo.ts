@@ -143,6 +143,9 @@ export class TextReader {
     private readonly onEmptyPoll?: () => void
   ) {}
 
+  /** Whether a read found the end of the text, which shows its writer has closed the pipe. */
+  private endSeen = false;
+
   /** Treats the writer as having written its text, as once the shell has waited for it. */
   markWritten(): void {
     this.writtenLate = false;
@@ -153,7 +156,8 @@ export class TextReader {
    * so it neither starts nor waits for the command writing the pipe.
    */
   get readyToPoll(): boolean {
-    if (!this.throughPipe) return true;
+    // A pipe whose end a read has found is closed by its writer, which a poll finds ready, as at a file's end.
+    if (!this.throughPipe || this.endSeen) return true;
     const notYetWritten = this.writtenLate && this.position === 0;
     // Time passes between polls, in which the writer writes.
     this.writtenLate = false;
@@ -169,7 +173,10 @@ export class TextReader {
   /** Whether no text remains, after refilling the source when it can. */
   get isAtEnd(): boolean {
     while (this.position >= this.text.length) {
-      if (!this.refill?.()) return true;
+      if (!this.refill?.()) {
+        this.endSeen = true;
+        return true;
+      }
     }
     return false;
   }
