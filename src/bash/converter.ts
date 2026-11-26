@@ -350,7 +350,10 @@ export class Converter {
       if (child.type === '|&') {
         const previous = commands.pop() as Statement;
         commands.push(withStandardErrorToOutput(previous, child.startPosition.row));
-      } else if (child.isNamed && child.type !== 'comment') commands.push(this.statement(child));
+      } else if (child.isNamed && child.type !== 'comment' && child.type !== 'heredoc_body') {
+        // A here-document's body the grammar puts inside the pipeline belongs to its redirection, not a command.
+        commands.push(this.statement(child));
+      }
     }
     return { ...base, kind: 'pipeline', commands };
   }
@@ -649,8 +652,12 @@ export class Converter {
     // delimiter followed by the `)` closing it, both of which Bash warns of.
     const source = this.analyzed.originalSource;
     // The end of a backquoted substitution ends its delimiter line.
+    // An empty delimiter ends the body at its first empty line, which leaves the grammar's end node empty.
+    const endsAtEmptyLine =
+      delimiter.replaceAll(/['"\\]/g, '') === '' && end !== undefined && source[end.startIndex] === '\n';
     const endsAtDelimiterLine =
-      end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|`|$)/.test(source.slice(end.endIndex));
+      endsAtEmptyLine ||
+      (end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|`|$)/.test(source.slice(end.endIndex)));
     const closedRow = end !== undefined && end.startIndex < end.endIndex ? end.startPosition.row : undefined;
     if (!endsAtDelimiterLine) {
       const startLine = source[body.startIndex] === '\n' ? body.startPosition.row + 1 : body.startPosition.row;
