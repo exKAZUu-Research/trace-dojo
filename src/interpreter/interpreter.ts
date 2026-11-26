@@ -25,7 +25,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its atomic annotations (`// atomic`, `# atomic` in Python and Ruby, or `-- atomic` in Haskell), whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, `# atomic` in Python, Ruby, and Bash, or `-- atomic` in Haskell), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -39,7 +39,7 @@ export interface Interpreter {
 }
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python and Ruby, `-- atomic` in Haskell).
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python, Ruby, and Bash, `-- atomic` in Haskell).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.

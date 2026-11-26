@@ -1,10 +1,10 @@
+import { formatFloatField, padPrintfBytes } from '../../interpreter/floatFormat';
 import type { Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { Runtime } from '../runtime';
 import { storerOf } from '../runtime';
 import { CHAR, type CType, INT, INT_PROPERTIES, LONG, SHORT } from '../types';
 import { unsupportedMessage } from '../unsupported';
-import { formatFixed, formatGeneral, formatHex, formatScientific } from './floatFormat';
 import { readCString, startsWithAt } from './support';
 
 interface Spec {
@@ -78,7 +78,7 @@ export function formatPrintf(runtime: Runtime, format: Uint8Array, values: Value
     const field = convert(runtime, spec, args, out.length);
     if (field === undefined) continue;
     if (typeof field === 'string') pushText(pad(spec, field));
-    else for (const byte of padBytes(spec, field)) out.push(byte);
+    else for (const byte of padPrintfBytes(field, spec)) out.push(byte);
   }
   return out;
 }
@@ -173,7 +173,7 @@ function convert(runtime: Runtime, spec: Spec, args: Arguments, written: number)
     case 'G':
     case 'a':
     case 'A': {
-      return floatField(spec, args.double());
+      return formatFloatField(spec, args.double());
     }
     case 'n': {
       storeWritten(runtime, length, args.pointer(), written);
@@ -251,67 +251,10 @@ function integerField(
   return lead + body;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
-// code-gauge-allow functionNcss -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
-function floatField(spec: Spec, value: number): string {
-  const { conversion } = spec;
-  const upper = conversion === conversion.toUpperCase();
-  const negative = value < 0 || Object.is(value, -0);
-  const sign = negative ? '-' : signOf(spec);
-  const magnitude = Math.abs(value);
-  const alternate = spec.flags.includes('#');
-  if (!Number.isFinite(magnitude)) {
-    const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
-    // macOS prints no sign for a NaN.
-    const shownSign = Number.isNaN(magnitude) ? '' : sign;
-    return shownSign + (upper ? text.toUpperCase() : text);
-  }
-  let body: string;
-  switch (conversion.toLowerCase()) {
-    case 'f': {
-      body = formatFixed(magnitude, spec.precision ?? 6);
-      if (alternate && !body.includes('.')) body += '.';
-      break;
-    }
-    case 'e': {
-      body = formatScientific(magnitude, spec.precision ?? 6, alternate);
-      break;
-    }
-    case 'g': {
-      body = formatGeneral(magnitude, spec.precision ?? 6, alternate);
-      break;
-    }
-    default: {
-      body = formatHex(magnitude, spec.precision, alternate);
-      break;
-    }
-  }
-  if (upper) body = body.toUpperCase();
-  const width = spec.width ?? 0;
-  if (spec.flags.includes('0') && !spec.flags.includes('-')) {
-    if (conversion.toLowerCase() === 'a') {
-      const prefix = body.slice(0, 2);
-      return sign + prefix + body.slice(2).padStart(width - sign.length - 2, '0');
-    }
-    return sign + body.padStart(width - sign.length, '0');
-  }
-  return sign + body;
-}
-
 function pad(spec: Spec, text: string): string {
   const width = spec.width ?? 0;
   if (text.length >= width) return text;
   return spec.flags.includes('-')
     ? text.padEnd(width, ' ')
     : text.padStart(width, spec.flags.includes('0') && ['s', 'c', '%'].includes(spec.conversion) ? '0' : ' ');
-}
-
-function padBytes(spec: Spec, bytes: Uint8Array): Uint8Array {
-  const width = spec.width ?? 0;
-  const padding = Math.max(width - bytes.length, 0);
-  const result = new Uint8Array(bytes.length + padding).fill(
-    spec.flags.includes('0') && !spec.flags.includes('-') ? 0x30 : 0x20
-  );
-  result.set(bytes, spec.flags.includes('-') ? 0 : padding);
-  return result;
 }
