@@ -77,7 +77,6 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'EDITOR',
   'PS1',
   'PS2',
-  '_',
 ]);
 
 export const DECLARATION_BUILTIN_NAMES = new Set(['declare', 'typeset', 'local', 'readonly', 'export']);
