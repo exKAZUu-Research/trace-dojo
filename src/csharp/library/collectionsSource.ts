@@ -92,7 +92,7 @@ namespace System.Collections.Generic {
     public List(IEnumerable<T> collection);
     public int Capacity { get; set; }
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T this[int index] { get; set; }
     public void Add(T item);
     public void AddRange(IEnumerable<T> collection);
@@ -154,7 +154,7 @@ namespace System.Collections.Generic {
     public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer);
     public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public KeyCollection Keys { get; }
     public ValueCollection Values { get; }
@@ -184,7 +184,7 @@ namespace System.Collections.Generic {
     }
     public sealed class KeyCollection : ICollection<TKey>, IReadOnlyCollection<TKey> {
       public int Count { get; }
-      public bool IsReadOnly { get; }
+      bool ICollection<TKey>.IsReadOnly { get; }
       public Enumerator GetEnumerator();
       public bool Contains(TKey item);
       public void CopyTo(TKey[] array, int index);
@@ -200,7 +200,7 @@ namespace System.Collections.Generic {
     }
     public sealed class ValueCollection : ICollection<TValue>, IReadOnlyCollection<TValue> {
       public int Count { get; }
-      public bool IsReadOnly { get; }
+      bool ICollection<TValue>.IsReadOnly { get; }
       public Enumerator GetEnumerator();
       public bool Contains(TValue item);
       public void CopyTo(TValue[] array, int index);
@@ -220,7 +220,7 @@ namespace System.Collections.Generic {
     public SortedDictionary(IComparer<TKey>? comparer);
     public SortedDictionary(IDictionary<TKey, TValue> dictionary);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public ICollection<TKey> Keys { get; }
     public ICollection<TValue> Values { get; }
@@ -241,7 +241,7 @@ namespace System.Collections.Generic {
     public SortedList();
     public SortedList(IComparer<TKey>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public IList<TKey> Keys { get; }
     public IList<TValue> Values { get; }
@@ -267,7 +267,7 @@ namespace System.Collections.Generic {
     public HashSet(IEqualityComparer<T>? comparer);
     public HashSet(IEnumerable<T> collection, IEqualityComparer<T>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public bool Add(T item);
     public void Clear();
     public bool Contains(T item);
@@ -300,7 +300,7 @@ namespace System.Collections.Generic {
     public SortedSet(IComparer<T>? comparer);
     public SortedSet(IEnumerable<T> collection, IComparer<T>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T? Min { get; }
     public T? Max { get; }
     public bool Add(T item);
@@ -369,10 +369,10 @@ namespace System.Collections.Generic {
     public LinkedList();
     public LinkedList(IEnumerable<T> collection);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public LinkedListNode<T>? First { get; }
     public LinkedListNode<T>? Last { get; }
-    public void Add(T item);
+    void ICollection<T>.Add(T item);
     public LinkedListNode<T> AddAfter(LinkedListNode<T> node, T value);
     public LinkedListNode<T> AddBefore(LinkedListNode<T> node, T value);
     public LinkedListNode<T> AddFirst(T value);
@@ -424,7 +424,7 @@ namespace System.Collections.ObjectModel {
   public class ReadOnlyCollection<T> : IList<T>, IReadOnlyList<T> {
     public ReadOnlyCollection(IList<T> list);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T this[int index] { get; private set; }
     public bool Contains(T value);
     public void CopyTo(T[] array, int index);
