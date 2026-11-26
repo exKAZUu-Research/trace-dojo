@@ -279,11 +279,11 @@ function qualifiedPath(node: TreeNode): TreeNode[] {
   return [...(left ? qualifiedPath(left) : []), ...(right ? [right] : [])];
 }
 
-/** The name a namespace is printed with, `A.B` for `B` in `A`. */
 function missingMemberError(container: Sym, name: string): string {
   return `名前空間 '${qualifiedName(container)}' には、エクスポートされたメンバー '${name}' がありません。`;
 }
 
+/** The name a namespace is printed with, `A.B` for `B` in `A`. */
 function qualifiedName(symbol: Sym): string {
   return symbol.exportedFrom ? `${qualifiedName(symbol.exportedFrom)}.${symbol.name}` : symbol.name;
 }
