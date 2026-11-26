@@ -5,10 +5,10 @@ import type { LocalVar } from './rast';
 import { chargeTypeWork } from './typeWorkBudget';
 
 /**
- * The namespaces of local names: variables, and the constructors, types, and type variables that only a Template
- * Haskell quote's declarations bind locally.
+ * The namespaces of local names: variables, and the constructors, types, type variables, and record fields (which are
+ * variables too) that only a Template Haskell quote's declarations bind locally.
  */
-export type LocalNamespace = 'value' | 'con' | 'type' | 'tyVar';
+export type LocalNamespace = 'value' | 'con' | 'type' | 'tyVar' | 'field';
 
 export class LocalScope {
   private readonly own = new Map<string, LocalVar>();

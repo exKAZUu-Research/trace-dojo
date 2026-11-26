@@ -2579,6 +2579,12 @@ class Renamer {
     return this.quoteGlobal(namespace, name, required);
   }
 
+  /** A record field's label, which names a field (one a quoted declaration declares, or a global one), never a variable. */
+  private quoteFieldRef(name: QName, scope: LocalScope): QRef {
+    const local = name.qualifier ? undefined : scope.lookup(name.name, 'field');
+    return local ? { k: 'bound', local } : this.quoteGlobal('value', name, true);
+  }
+
   private quoteConRef(name: QName, scope: LocalScope, required: boolean): QRef {
     const local = name.qualifier ? undefined : scope.lookup(name.name, 'con');
     return local ? { k: 'bound', local } : this.quoteGlobal('con', name, required);
@@ -2732,7 +2738,7 @@ class Renamer {
 
   private quoteFieldExps(fields: FieldBind[], scope: LocalScope): QFieldExp[] {
     return fields.map((field) => ({
-      field: this.quoteValueRef(field.field, scope, 'value', true),
+      field: this.quoteFieldRef(field.field, scope),
       value: this.quoteExpr(field.value, scope),
     }));
   }
@@ -2871,7 +2877,7 @@ class Renamer {
       case 'precord': {
         if (pat.wildcard) throw this.unsupportedInQuote(pat.span, 'レコードのワイルドカード');
         const fields = pat.fields.map((field) => ({
-          field: this.quoteValueRef(field.field, scope, 'value', true),
+          field: this.quoteFieldRef(field.field, scope),
           pat: sub(field.pat),
         }));
         return { k: 'record', con: this.quoteConRef(pat.con, scope, true), fields };
@@ -3045,6 +3051,11 @@ class Renamer {
     const scope = new LocalScope(parent);
     for (const local of values.values()) scope.define(local.name, local);
     for (const [local, namespace] of others) scope.define(local.name, local, namespace);
+    for (const name of decls
+      .flatMap((decl) => (decl.kind === 'data' ? decl.cons : []))
+      .flatMap((con) => con.fieldNames ?? [])) {
+      scope.define(name.name, values.get(name.name) as LocalVar, 'field');
+    }
     const renamed = this.quoteBindings(decls, scope, (name) => this.quoteValueRef(name, scope, 'var'), values);
     const binders = [...values.values(), ...others.map(([local]) => local)].toSorted((a, b) =>
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0
