@@ -36,8 +36,6 @@ type FileRedirectOperator = Extract<Redirect, { kind: 'file' }>['operator'];
 
 const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>', '&>>']);
 
-/** A `{name}` word written right before a redirection, which names the variable that receives its descriptor. */
-
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
   /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
