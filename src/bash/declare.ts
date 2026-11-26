@@ -396,10 +396,10 @@ function executeCompoundDeclarationOperand(
 ): boolean {
   state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
-  // A failed compound value abandons the line outside a function and fails the builtin inside one; without `-a` or
-  // `-A` it is assigned as a plain array assignment is, whose readonly error `set -e` ends the shell at.
+  // A failed compound value abandons the line outside a function and fails the builtin inside one; to a global
+  // without `-a` or `-A` it is assigned as a plain array assignment is, whose readonly error `set -e` ends the shell at.
   const inFunction = shell.isInFunction && builtin !== 'readonly' && builtin !== 'export';
-  const plain = !set.has('a') && !set.has('A');
+  const plain = !set.has('a') && !set.has('A') && intent !== 'local';
   const failCtx: FailureContext = plain
     ? inFunction
       ? 'arrayAssignmentInFunction'
