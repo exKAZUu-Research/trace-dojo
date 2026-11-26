@@ -9295,6 +9295,15 @@ Future<void> main() async {
   });
 });
 
+test.each([
+  'Future<Object> f() async { return g(); }',
+  'Future<Object?> f() async { return vf(); }',
+  'Future<Object?> f() async => vf();',
+])('an async function whose value type is not void or dynamic rejects a void value: %s', (declaration) => {
+  const source = `Future<void> g() async {}\nvoid vf() {}\n${declaration}\nvoid main() {}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 2 }] });
+});
+
 test('an async function returning Future<void> may return a future of void, and not another value', () => {
   const accepted = `Future<void> g() async {}
 Future<void> f() async { return g(); }

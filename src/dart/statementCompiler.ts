@@ -268,8 +268,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
     }
     if (isAsync) {
-      const fits = !valueType || isTop(valueType) || kind === 'dynamic';
-      if (!fits && !isSubtype(compiled.type, interfaceType(coreTypes.futureOr, [valueType]))) {
+      if (valueType && !asyncValueFits(compiled.type, valueType)) {
         this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
       }
       this.fn.returnTypes?.push(flatten(compiled.type));
@@ -1512,4 +1511,15 @@ function isConditionShaped(expression: Expression): boolean {
       return false;
     }
   }
+}
+
+/**
+ * Whether an async function whose future completes with `valueType` may return a value of `type`: a FutureOr of the
+ * value type, as Dart's rule says, which flatten would not tell for a value type that is itself a future; a value
+ * whose future gives void fits only a void or dynamic value type, even where a top value type takes any other.
+ */
+function asyncValueFits(type: DartType, valueType: DartType): boolean {
+  if (type.kind === 'dynamic') return true;
+  if (flatten(type).kind === 'void') return valueType.kind === 'void' || valueType.kind === 'dynamic';
+  return isTop(valueType) || isSubtype(type, interfaceType(coreTypes.futureOr, [valueType]));
 }
