@@ -3,6 +3,7 @@ import Base
 import qualified Data.Set.Internal as S
 import qualified Data.Map.Internal as M
 import qualified Data.Sequence.Internal as Q
+import qualified Data.List.NonEmpty.Internal as NE
 
 class IsString a where
   fromString :: String -> a
@@ -34,6 +35,11 @@ instance Ord k => IsList (M.Map k v) where
   type Item (M.Map k v) = (k, v)
   fromList = M.fromList
   toList = M.toList
+
+instance IsList (NonEmpty a) where
+  type Item (NonEmpty a) = a
+  fromList = NE.fromList
+  toList = NE.toList
 
 instance IsList (Q.Seq a) where
   type Item (Q.Seq a) = a
