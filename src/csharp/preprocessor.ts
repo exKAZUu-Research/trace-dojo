@@ -61,7 +61,7 @@ export class LineMap {
   }
 }
 
-/** The `#:property` names whose values the run follows, and those that change nothing a program can observe. */
+/** The `#:property` names that change nothing a program can observe, whatever their values. */
 const IGNORED_PROPERTIES = new Set([
   'Nullable',
   'WarningLevel',
@@ -75,7 +75,24 @@ const IGNORED_PROPERTIES = new Set([
   'DebugType',
   'DebugSymbols',
   'GenerateDocumentationFile',
+  'ServerGarbageCollection',
+  'ConcurrentGarbageCollection',
+  'TieredCompilation',
+  'TieredPGO',
+  'Version',
+  'UserSecretsId',
+  'PredefinedCulturesOnly',
+  'EnablePreviewFeatures',
+  'Platforms',
+  'SatelliteResourceLanguages',
+  'AutoreleasePoolSupport',
+  'EventSourceSupport',
 ]);
+/**
+ * The `#:property` settings that change nothing only with one value: the target framework that the run reproduces, and
+ * warnings left as warnings, since the run reports no warnings that could become errors.
+ */
+const IGNORED_SETTINGS: Record<string, string> = { TargetFramework: 'net10.0', TreatWarningsAsErrors: 'false' };
 const LANGUAGE_VERSIONS = new Set(['latest', 'latestmajor', 'preview', 'default', '14', '14.0']);
 
 interface Conditional {
@@ -175,7 +192,7 @@ class Preprocessor {
     if (body.startsWith(':')) {
       if (this.tokenSeen)
         this.error(row, 'CS9297', "ファイル内の最初のトークンの後に '#:' ディレクティブを指定することはできません");
-      else if (this.isActive()) applyFileDirective(body.slice(1), row, this.options);
+      else if (this.isActive()) applyFileDirective(body.slice(1), row, this.options, this.symbols);
       return;
     }
     if (!this.isActive() && !['if', 'elif', 'else', 'endif', 'region', 'endregion'].includes(name)) return;
@@ -312,7 +329,7 @@ function isBranchActive(conditional: Conditional): boolean {
  * NuGet packages, other projects, or another SDK, which a run cannot reach.
  */
 // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
-function applyFileDirective(text: string, row: number, options: BuildOptions): void {
+function applyFileDirective(text: string, row: number, options: BuildOptions, symbols: Set<string>): void {
   const [kind, ...parts] = text.trim().split(/\s+/);
   const value = parts.join(' ');
   if (kind === 'package' || kind === 'project' || kind === 'sdk')
@@ -349,12 +366,20 @@ function applyFileDirective(text: string, row: number, options: BuildOptions): v
       options.implicitUsings = ['enable', 'true'].includes(setting.toLowerCase());
       return;
     }
+    case 'DefineConstants': {
+      // A value that refers to MSBuild properties, as `$(DefineConstants);X`, needs MSBuild to expand it.
+      if (setting.includes('$(')) break;
+      // The SDK adds `DEBUG` and the target framework's symbols to the constants a project defines, but not `TRACE`.
+      symbols.delete('TRACE');
+      for (const symbol of setting.split(/[;,\s]+/)) if (symbol !== '') symbols.add(symbol);
+      return;
+    }
     case 'LangVersion': {
       if (LANGUAGE_VERSIONS.has(setting.toLowerCase())) return;
       break;
     }
     default: {
-      if (IGNORED_PROPERTIES.has(name)) return;
+      if (IGNORED_PROPERTIES.has(name) || IGNORED_SETTINGS[name] === setting.toLowerCase()) return;
     }
   }
   unsupported({ row, column: 0 }, `\`#:property ${name}=${setting}\``);
