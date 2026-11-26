@@ -188,16 +188,16 @@ define('_File._read', (runtime, _self, [path, failure]) => readFileAt(runtime, p
 define('_File._peek', (runtime, _self, [path, failure]) => readFileAt(runtime, path, failure, false));
 
 /**
- * A file's text, where `/dev/stdin` gives standard input, as ProgramIO's readers of every language do: what remains
- * of it for a read, which consumes it, and all of it for a length or an open, which the VM's fstat answers without
- * moving the descriptor.
- */
-/**
  * The paths at which the VM reads its standard input as a file: ProgramIO's, and the descriptor's own, which the
  * shared file system does not know and only Dart reads here, leaving other languages' readers as they are.
  */
 const STDIN_PATHS = new Set([STDIN_PATH, '/dev/fd/0']);
 
+/**
+ * A file's text, where `/dev/stdin` gives standard input, as ProgramIO's readers of every language do: what remains
+ * of it for a read, which consumes it, and all of it for a length or an open, which the VM's fstat answers without
+ * moving the descriptor.
+ */
 function readFileAt(runtime: Runtime, path: Value, failure: Value, consumes: boolean): string {
   const filePath = stringArg(runtime, path, 'path');
   if (STDIN_PATHS.has(resolvePath(filePath))) return consumes ? restOfStdin(runtime) : runtime.io.stdin.reader.text;
