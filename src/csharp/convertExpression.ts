@@ -28,6 +28,7 @@ import {
   field,
   fieldChildren,
   hasToken,
+  identifierText,
   inUnsafeContext,
   namedChildren,
   positionOf,
@@ -35,6 +36,7 @@ import {
   sameNode,
   unescape,
   unsupported,
+  withoutVerbatimPrefix,
 } from './convertBase';
 
 const UNSUPPORTED_TYPES: Record<string, string> = {};
@@ -89,7 +91,7 @@ export class ExpressionConverter {
         return { kind: 'varType', ...position };
       }
       case 'identifier': {
-        return { kind: 'namedType', name: node.text, typeArgs: undefined, ...position };
+        return { kind: 'namedType', name: identifierText(node), typeArgs: undefined, ...position };
       }
       case 'generic_name': {
         const [name, args] = this.genericParts(node);
@@ -103,7 +105,7 @@ export class ExpressionConverter {
         const left = this.convertType(requiredField(node, 'qualifier'));
         const nameNode = requiredField(node, 'name');
         const [name, typeArgs] =
-          nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
+          nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
         return { kind: 'qualifiedType', left, name, typeArgs, ...position };
       }
       case 'array_type': {
@@ -138,7 +140,7 @@ export class ExpressionConverter {
       case 'tuple_type': {
         const elements = namedChildren(node).map((element) => ({
           type: this.convertType(requiredField(element, 'type')),
-          name: field(element, 'name')?.text,
+          name: identifierText(field(element, 'name')),
         }));
         return { kind: 'tupleType', elements, ...position };
       }
@@ -190,8 +192,8 @@ export class ExpressionConverter {
   protected aliasQualifiedParts(node: Node): { alias: string; name: string; typeArgs: TypeNode[] | undefined } {
     const nameNode = requiredField(node, 'name');
     const [name, typeArgs] =
-      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
-    return { alias: requiredField(node, 'alias').text, name, typeArgs };
+      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
+    return { alias: identifierText(requiredField(node, 'alias')), name, typeArgs };
   }
 
   /** The attributes of a declaration's attribute lists, as a property to spread into its syntax, if it has any. */
@@ -218,15 +220,23 @@ export class ExpressionConverter {
       const nameNode = field(arg, 'name');
       const valueNode = namedChildren(arg).find((child) => !sameNode(child, nameNode)) as Node;
       const value = this.convertExpression(valueNode);
-      if (nameNode && hasToken(arg, '=')) assignments.push({ name: nameNode.text, value, ...positionOf(nameNode) });
-      else args.push({ name: nameNode?.text, modifier: undefined, value, text: valueNode.text, ...positionOf(arg) });
+      if (nameNode && hasToken(arg, '='))
+        assignments.push({ name: identifierText(nameNode), value, ...positionOf(nameNode) });
+      else
+        args.push({
+          name: identifierText(nameNode),
+          modifier: undefined,
+          value,
+          text: valueNode.text,
+          ...positionOf(arg),
+        });
     }
     return { name: this.convertType(requiredField(node, 'name')), args, assignments, target, ...positionOf(node) };
   }
 
   protected genericParts(node: Node): [string, TypeNode[]] {
     const [nameNode, argsNode] = namedChildren(node);
-    return [nameNode.text, namedChildren(argsNode).map((arg) => this.convertType(arg))];
+    return [identifierText(nameNode), namedChildren(argsNode).map((arg) => this.convertType(arg))];
   }
 
   convertExpression(node: Node): Expression {
@@ -265,7 +275,7 @@ export class ExpressionConverter {
           this.fieldKeywordUses++;
           return { kind: 'name', name: node.text, typeArgs: undefined, isFieldKeyword: true, ...position };
         }
-        return { kind: 'name', name: node.text, typeArgs: undefined, ...position };
+        return { kind: 'name', name: identifierText(node), typeArgs: undefined, ...position };
       }
       case 'generic_name': {
         const [name, typeArgs] = this.genericParts(node);
@@ -293,7 +303,7 @@ export class ExpressionConverter {
         const designation: Designation =
           name.text === '_'
             ? { kind: 'discard', ...positionOf(name) }
-            : { kind: 'single', name: name.text, ...positionOf(name) };
+            : { kind: 'single', name: identifierText(name), ...positionOf(name) };
         return { kind: 'declaration', type: this.convertType(requiredField(node, 'type')), designation, ...position };
       }
       case 'tuple_expression': {
@@ -617,7 +627,7 @@ export class ExpressionConverter {
 
   private memberAccess(target: Expression, nameNode: Node, position: ReturnType<typeof positionOf>): Expression {
     const [name, typeArgs] =
-      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
+      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
     return {
       kind: 'memberAccess',
       target,
@@ -686,7 +696,7 @@ export class ExpressionConverter {
       ]);
     const modifier = (['ref', 'out', 'in'] as const).find((token) => hasToken(node, token));
     return {
-      name: nameNode?.text,
+      name: identifierText(nameNode),
       modifier,
       value: this.convertExpression(valueNode),
       text: valueNode.text,
@@ -778,7 +788,8 @@ export class ExpressionConverter {
     const right = requiredField(node, 'right');
     const value =
       right.type === 'initializer_expression' ? this.convertInitializer(right) : this.convertExpression(right);
-    if (left.type === 'identifier') return { kind: 'memberAssign', name: left.text, value, ...positionOf(node) };
+    if (left.type === 'identifier')
+      return { kind: 'memberAssign', name: identifierText(left), value, ...positionOf(node) };
     if (left.type === 'element_binding_expression') {
       return {
         kind: 'indexAssign',
@@ -795,7 +806,7 @@ export class ExpressionConverter {
     const parts = namedChildren(node);
     for (let index = 0; index + 1 < parts.length; index += 2) {
       const value = this.convertExpression(parts[index + 1]);
-      members.push({ kind: 'memberAssign', name: parts[index].text, value, ...positionOf(parts[index]) });
+      members.push({ kind: 'memberAssign', name: identifierText(parts[index]), value, ...positionOf(parts[index]) });
     }
     return members;
   }
@@ -813,7 +824,7 @@ export class ExpressionConverter {
       const child = children[index];
       if (!child.isNamed) continue;
       if (children[index + 1]?.type === '=') {
-        members.push({ name: child.text, value: this.convertExpression(children[index + 2]) });
+        members.push({ name: identifierText(child), value: this.convertExpression(children[index + 2]) });
         index += 2;
       } else {
         members.push({ name: undefined, value: this.convertExpression(child) });
@@ -854,7 +865,7 @@ export class ExpressionConverter {
         const typeNode = children[index + 1];
         const nameNode = children[index + 2];
         parameters.push({
-          name: nameNode.text,
+          name: identifierText(nameNode),
           type: this.convertType(typeNode),
           modifier: undefined,
           isParams: true,
@@ -880,7 +891,7 @@ export class ExpressionConverter {
     const written = this.lambdaParameterModifiers(parameter, modifiers);
     return {
       ...written,
-      name: nameNode.text,
+      name: identifierText(nameNode),
       type: typeNode ? this.convertType(typeNode) : undefined,
       ...(typeNode?.type === 'scoped_type' ? { isScoped: true as const } : {}),
       ...(defaultNode ? { defaultValue: this.convertExpression(defaultNode) } : {}),
@@ -924,7 +935,7 @@ export class ExpressionConverter {
       else if (parameterNode.type === 'implicit_parameter') {
         parameters.push({
           ...this.lambdaParameterModifiers(parameterNode, written),
-          name: parameterNode.text,
+          name: identifierText(parameterNode),
           type: undefined,
         });
         written = [];
@@ -988,7 +999,7 @@ export class ExpressionConverter {
           const source = parts.find((part) => !sameNode(part, nameNode) && !sameNode(part, typeNode)) as Node;
           clauses.push({
             kind: 'from',
-            name: nameNode.text,
+            name: identifierText(nameNode),
             type: typeNode ? this.convertType(typeNode) : undefined,
             source: this.convertExpression(source),
             ...position,
@@ -996,7 +1007,12 @@ export class ExpressionConverter {
           break;
         }
         case 'let_clause': {
-          clauses.push({ kind: 'let', name: parts[0].text, value: this.convertExpression(parts[1]), ...position });
+          clauses.push({
+            kind: 'let',
+            name: identifierText(parts[0]),
+            value: this.convertExpression(parts[1]),
+            ...position,
+          });
           break;
         }
         case 'where_clause': {
@@ -1026,7 +1042,7 @@ export class ExpressionConverter {
         }
         case 'into': {
           const nameNode = children[index + 1];
-          clauses.push({ kind: 'into', name: nameNode.text, ...positionOf(nameNode) });
+          clauses.push({ kind: 'into', name: identifierText(nameNode), ...positionOf(nameNode) });
           index++;
           break;
         }
@@ -1048,12 +1064,12 @@ export class ExpressionConverter {
     const [nameNode, source, outerKey, innerKey] = parts.filter((part) => !sameNode(part, intoNode));
     return {
       kind: 'join',
-      name: nameNode.text,
+      name: identifierText(nameNode),
       type: typeNode ? this.convertType(typeNode) : undefined,
       source: this.convertExpression(source),
       outerKey: this.convertExpression(outerKey),
       innerKey: this.convertExpression(innerKey),
-      into: intoNode ? namedChildren(intoNode)[0].text : undefined,
+      into: intoNode ? identifierText(namedChildren(intoNode)[0]) : undefined,
       ...positionOf(node),
     };
   }
@@ -1079,7 +1095,7 @@ export class ExpressionConverter {
         const typeNode = requiredField(node, 'type');
         const nameNode = field(node, 'name');
         const designation: Designation = nameNode
-          ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) }
+          ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) }
           : { kind: 'discard', ...position };
         if (typeNode.type === 'implicit_type') return { kind: 'varPattern', designation, ...position };
         return { kind: 'declarationPattern', type: this.convertType(typeNode), designation, ...position };
@@ -1120,7 +1136,9 @@ export class ExpressionConverter {
         return {
           kind: 'listPattern',
           elements: parts.filter((part) => !sameNode(part, nameNode)).map((part) => this.convertPattern(part)),
-          designation: nameNode ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) } : undefined,
+          designation: nameNode
+            ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) }
+            : undefined,
           ...position,
         };
       }
@@ -1166,7 +1184,7 @@ export class ExpressionConverter {
       type: typeNode ? this.convertType(typeNode) : undefined,
       positional,
       properties,
-      designation: nameNode ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) } : undefined,
+      designation: nameNode ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) } : undefined,
       ...positionOf(node),
     };
   }
@@ -1185,13 +1203,13 @@ export class ExpressionConverter {
         ]);
       return { names: undefined, pattern: this.convertPattern(patternNode), ...positionOf(node) };
     }
-    const names = parts[0].text.split('.').map((name) => name.trim());
+    const names = parts[0].text.split('.').map((name) => withoutVerbatimPrefix(name.trim()));
     return { names, pattern: this.convertPattern(patternNode), ...positionOf(node) };
   }
 
   protected convertDesignation(node: Node): Designation {
     const position = positionOf(node);
-    if (node.type === 'identifier') return { kind: 'single', name: node.text, ...position };
+    if (node.type === 'identifier') return { kind: 'single', name: identifierText(node), ...position };
     if (node.type === 'discard') return { kind: 'discard', ...position };
     if (node.type === 'parenthesized_variable_designation' || node.type === 'tuple_pattern') {
       return {

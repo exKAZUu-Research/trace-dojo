@@ -35,6 +35,7 @@ import {
   field,
   fieldChildren,
   hasToken,
+  identifierText,
   inUnsafeContext,
   namedChildren,
   positionOf,
@@ -222,7 +223,7 @@ export class Converter extends ExpressionConverter {
     const aliasNode = field(node, 'name');
     const target = namedChildren(node).find((child) => !sameNode(child, aliasNode)) as Node;
     const common = { name: this.convertType(target), isGlobal: hasToken(node, 'global'), ...positionOf(node) };
-    if (aliasNode) return { kind: 'alias', alias: aliasNode.text, ...common };
+    if (aliasNode) return { kind: 'alias', alias: identifierText(aliasNode), ...common };
     return { kind: hasToken(node, 'static') ? 'static' : 'namespace', ...common };
   }
 
@@ -317,7 +318,7 @@ export class Converter extends ExpressionConverter {
       isRecord: node.type === 'record_declaration',
       isRefStruct: typeKind === 'struct' && hasToken(node, 'ref'),
       modifiers: this.convertModifiers(node),
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       typeParameters: [],
       constraints: [],
       primaryParameters: undefined,
@@ -383,7 +384,7 @@ export class Converter extends ExpressionConverter {
   private convertEnumMember(node: Node): EnumMember {
     const valueNode = field(node, 'value');
     return {
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       value: valueNode ? this.convertExpression(valueNode) : undefined,
       ...this.attributed(node),
       ...positionOf(node),
@@ -394,7 +395,7 @@ export class Converter extends ExpressionConverter {
     return namedChildren(node).map((parameter) => {
       const variance = hasToken(parameter, 'out') ? 'out' : hasToken(parameter, 'in') ? 'in' : undefined;
       return {
-        name: requiredField(parameter, 'name').text,
+        name: identifierText(requiredField(parameter, 'name')),
         variance,
         ...this.attributed(parameter),
         ...positionOf(parameter),
@@ -424,7 +425,7 @@ export class Converter extends ExpressionConverter {
       if (hasToken(constraint, 'default')) return { kind: 'default', ...position };
       return unsupported(constraint, 'この制約');
     });
-    return { name: nameNode.text, constraints, ...positionOf(node) };
+    return { name: identifierText(nameNode), constraints, ...positionOf(node) };
   }
 
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
@@ -471,7 +472,7 @@ export class Converter extends ExpressionConverter {
           {
             kind: 'constructor',
             modifiers: this.convertModifiers(node),
-            name: requiredField(node, 'name').text,
+            name: identifierText(requiredField(node, 'name')),
             parameters: this.convertParameters(requiredField(node, 'parameters')),
             initializer: initializerNode
               ? {
@@ -491,7 +492,7 @@ export class Converter extends ExpressionConverter {
         return [
           {
             kind: 'destructor',
-            name: requiredField(node, 'name').text,
+            name: identifierText(requiredField(node, 'name')),
             body: this.convertBody(field(node, 'body')),
             ...position,
           },
@@ -591,7 +592,7 @@ export class Converter extends ExpressionConverter {
       kind: 'method',
       modifiers: this.convertModifiers(node),
       returnType: this.convertType(requiredField(node, node.type === 'local_function_statement' ? 'type' : 'returns')),
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       typeParameters: typeParametersNode ? this.convertTypeParameters(typeParametersNode) : [],
       constraints: namedChildren(node)
         .filter((child) => child.type === 'type_parameter_constraints_clause')
@@ -620,7 +621,7 @@ export class Converter extends ExpressionConverter {
       kind: 'eventAccessors',
       modifiers: this.convertModifiers(node),
       type: this.convertType(requiredField(node, 'type')),
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       add: bodyOf('add'),
       remove: bodyOf('remove'),
       ...(explicitInterface ? { explicitInterface } : {}),
@@ -652,7 +653,7 @@ export class Converter extends ExpressionConverter {
       kind: 'property',
       modifiers: this.convertModifiers(node),
       type: this.convertType(requiredField(node, 'type')),
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       accessors,
       initializer,
       isExpressionBodied,
@@ -712,7 +713,7 @@ export class Converter extends ExpressionConverter {
         const typeNode = children[index + 1];
         const nameNode = children[index + 2];
         parameters.push({
-          name: nameNode.text,
+          name: identifierText(nameNode),
           type: this.convertType(typeNode),
           modifier: 'params',
           isThis: false,
@@ -752,7 +753,7 @@ export class Converter extends ExpressionConverter {
         child.type !== 'attribute_list'
     );
     return {
-      name: requiredField(node, 'name').text,
+      name: identifierText(requiredField(node, 'name')),
       type: this.convertType(typeNode),
       modifier,
       ...(isRefReadonly ? { isRefReadonly: true as const } : {}),
@@ -786,7 +787,7 @@ export class Converter extends ExpressionConverter {
       .map((part) => this.convertConstraintClause(part));
     const receiverNode = parts.find((part) => part.type === 'receiver_parameter') as Node;
     const receiverType = this.convertType(requiredField(receiverNode, 'type'));
-    const receiverName = field(receiverNode, 'name')?.text;
+    const receiverName = identifierText(field(receiverNode, 'name'));
     const receiverModifier = namedChildren(receiverNode)
       .filter((child) => child.type === 'modifier')
       .map((child) => child.text)
@@ -1061,11 +1062,16 @@ export class Converter extends ExpressionConverter {
         if (hasToken(node, 'case'))
           return { kind: 'goto', target: { kind: 'case', value: this.convertExpression(parts[0]) }, ...position };
         if (hasToken(node, 'default')) return { kind: 'goto', target: { kind: 'default' }, ...position };
-        return { kind: 'goto', target: { kind: 'label', name: parts[0].text }, ...position };
+        return { kind: 'goto', target: { kind: 'label', name: identifierText(parts[0]) }, ...position };
       }
       case 'labeled_statement': {
         // A label may stand before a declaration in a block, whose scope the declaration's variables belong to.
-        return { kind: 'labeled', label: parts[0].text, statement: this.convertStatement(parts[1]), ...position };
+        return {
+          kind: 'labeled',
+          label: identifierText(parts[0]),
+          statement: this.convertStatement(parts[1]),
+          ...position,
+        };
       }
       case 'using_statement': {
         return this.convertUsingStatement(node);
@@ -1188,7 +1194,7 @@ export class Converter extends ExpressionConverter {
             valueNode.type === 'initializer_expression'
               ? this.convertArrayInitializer(valueNode)
               : this.convertExpression(valueNode);
-        return { name: nameNode.text, initializer, ...positionOf(nameNode) };
+        return { name: identifierText(nameNode), initializer, ...positionOf(nameNode) };
       });
     return { type, declarators };
   }
@@ -1208,7 +1214,7 @@ export class Converter extends ExpressionConverter {
         { row: bracketed.startPosition.row, message: 'CS7092: 固定バッファーには 1 次元のみを指定できます。' },
       ]);
     return {
-      name: nameNode.text,
+      name: identifierText(nameNode),
       initializer: undefined,
       fixedSize: this.convertExpression(namedChildren(sizes[0])[0]),
       ...positionOf(nameNode),
@@ -1360,7 +1366,7 @@ export class Converter extends ExpressionConverter {
     const nameNode = declaration ? field(declaration, 'name') : undefined;
     return {
       type: declaration ? this.convertType(requiredField(declaration, 'type')) : undefined,
-      name: nameNode?.text,
+      name: identifierText(nameNode),
       filter: filter ? this.convertExpression(namedChildren(filter)[0]) : undefined,
       body: this.convertBlockNode(requiredField(node, 'body')),
       ...positionOf(node),
@@ -1373,7 +1379,7 @@ function emptyModifiers(): Modifiers {
 }
 
 function qualifiedNameParts(node: Node): string[] {
-  if (node.type === 'identifier') return [node.text];
+  if (node.type === 'identifier') return [identifierText(node)];
   if (node.type === 'qualified_name') {
     return [
       ...qualifiedNameParts(requiredField(node, 'qualifier')),
