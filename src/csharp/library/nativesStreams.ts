@@ -58,8 +58,26 @@ function incompleteTailLength(bytes: Uint8Array): number {
   return 0;
 }
 
+/** What the Stream members read and write: a FileStream's file, or the console's input or output. */
+export interface StreamState {
+  readonly name: string;
+  readonly canRead: boolean;
+  readonly canWrite: boolean;
+  readonly canSeek: boolean;
+  isClosed: boolean;
+  position: number;
+  readonly length: number;
+  read(call: NativeCall, count: number): Uint8Array;
+  write(call: NativeCall, bytes: readonly number[]): void;
+  writeByte(call: NativeCall, byte: number): void;
+  flush(call: NativeCall, isClosing: boolean): void;
+  seek(call: NativeCall, offset: number, origin: number): number;
+  close(call: NativeCall): void;
+}
+
 /** An open FileStream, which reads and writes its file's bytes at its position. */
-class FileStreamState {
+class FileStreamState implements StreamState {
+  readonly canSeek = true;
   position = 0;
   isClosed = false;
   /** The bytes written but not yet stored, from a position of the file. */
@@ -309,23 +327,19 @@ defineNatives({
 // ---- Stream members ----
 
 /** The stream of a receiver, failing with .NET's message for the member when it is closed. */
-function openStateOf(
-  call: NativeCall,
-  receiver: Value,
-  closedMessage = 'Cannot access a closed file.'
-): FileStreamState {
-  const state = (receiver as CsObject).native as FileStreamState;
+function openStateOf(call: NativeCall, receiver: Value, closedMessage = 'Cannot access a closed file.'): StreamState {
+  const state = (receiver as CsObject).native as StreamState;
   if (state.isClosed) throwException(call, 'System.ObjectDisposedException', closedMessage);
   return state;
 }
 
 const CLOSED_STREAM = 'Cannot access a closed Stream.';
 
-function checkCanRead(state: FileStreamState): void {
+function checkCanRead(state: StreamState): void {
   if (!state.canRead) fail('System.NotSupportedException', 'Stream does not support reading.');
 }
 
-function checkCanWrite(state: FileStreamState): void {
+function checkCanWrite(state: StreamState): void {
   if (!state.canWrite) fail('System.NotSupportedException', 'Stream does not support writing.');
 }
 
@@ -344,19 +358,22 @@ function bufferArguments(buffer: Value, offset: number, count: number): CsArray 
 }
 
 const closing: NativeMethod = (call, receiver) => {
-  ((receiver as CsObject).native as FileStreamState).close(call);
+  ((receiver as CsObject).native as StreamState).close(call);
 };
 
 defineNatives({
   'System.IO.Stream.get_CanRead': (_call, receiver) => {
-    const state = (receiver as CsObject).native as FileStreamState;
+    const state = (receiver as CsObject).native as StreamState;
     return !state.isClosed && state.canRead;
   },
   'System.IO.Stream.get_CanWrite': (_call, receiver) => {
-    const state = (receiver as CsObject).native as FileStreamState;
+    const state = (receiver as CsObject).native as StreamState;
     return !state.isClosed && state.canWrite;
   },
-  'System.IO.Stream.get_CanSeek': (_call, receiver) => !((receiver as CsObject).native as FileStreamState).isClosed,
+  'System.IO.Stream.get_CanSeek': (_call, receiver) => {
+    const state = (receiver as CsObject).native as StreamState;
+    return !state.isClosed && state.canSeek;
+  },
   'System.IO.Stream.get_Length': (call, receiver) => BigInt(openStateOf(call, receiver).length),
   'System.IO.Stream.get_Position': (call, receiver) => BigInt(openStateOf(call, receiver).position),
   'System.IO.Stream.set_Position': (call, receiver, [value]) => {
@@ -405,9 +422,9 @@ defineNatives({
 
 // ---- Readers and writers on streams ----
 
-function streamArgument(stream: Value): FileStreamState {
+function streamArgument(stream: Value): StreamState {
   if (stream === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', 'stream');
-  return (stream as CsObject).native as FileStreamState;
+  return (stream as CsObject).native as StreamState;
 }
 
 /** A StreamWriter on a stream, which closes the stream when it is closed, as .NET's does by default. */
@@ -423,7 +440,8 @@ const streamWriter: NativeMethod = (call, receiver, args) => {
       state.flush(flushCall, false);
     },
   };
-  const writer = new FileWriter(sink, false, encoding !== undefined && state.position === 0);
+  // .NET's StreamWriter writes the byte order mark at a seekable stream's start, and always to another stream.
+  const writer = new FileWriter(sink, false, encoding !== undefined && (!state.canSeek || state.position === 0));
   writer.onClose = (closeCall) => {
     state.close(closeCall);
   };

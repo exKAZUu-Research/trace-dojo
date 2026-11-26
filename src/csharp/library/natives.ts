@@ -12,6 +12,7 @@ import './nativesIo';
 import './nativesConsole';
 import './nativesFileInfo';
 import './nativesStreams';
+import './nativesConsoleStreams';
 import './nativesTasks';
 import './nativesLazy';
 import './nativesCancellation';

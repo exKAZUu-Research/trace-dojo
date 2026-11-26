@@ -3,11 +3,12 @@ import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { exceptionText } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
 import { CsObject, isString, type Value } from '../values';
+import { type ConsoleRedirection, forwardTo, redirectionOf } from './consoleRedirection';
 import { checkLock, holdLock } from './fileLocks';
 import { iterate } from './iteration';
 import { writeText } from './nativesCore';
 import { fullPathOf, pathArgument, valueText } from './nativesPath';
-import { evaluatorOf, fail, libraryType, newArray } from './support';
+import { evaluatorOf, fail, failNull, libraryType, newArray } from './support';
 
 /** Where a TextWriter's text goes: the console, a file, a stream, or a string. */
 interface WriterState {
@@ -296,6 +297,15 @@ function consoleObject(call: NativeCall, which: 'stdout' | 'stderr' | 'stdin'): 
   return objects[which];
 }
 
+/** `Console.SetOut`, `SetError`, or `SetIn`, after which Console's members use the given writer or reader. */
+const redirect =
+  (which: keyof ConsoleRedirection, paramName: string): NativeMethod =>
+  (call, _receiver, [target]) => {
+    if (target === undefined) failNull(paramName);
+    redirectionOf(call)[which] = target as CsObject;
+    return;
+  };
+
 function readLineOf(reader: TextReader): string | undefined {
   return reader.readLine();
 }
@@ -324,11 +334,22 @@ function stringArray(call: NativeCall, values: string[]): Value {
 }
 
 defineNatives({
-  'System.Console.get_Out': (call) => consoleObject(call, 'stdout'),
-  'System.Console.get_Error': (call) => consoleObject(call, 'stderr'),
-  'System.Console.get_In': (call) => consoleObject(call, 'stdin'),
-  'System.Console.ReadLine': (call) => readLineOf(call.frame.runtime.io.stdin.reader),
-  'System.Console.Read': (call) => readCharOf(call.frame.runtime.io.stdin.reader),
+  'System.Console.get_Out': (call) => redirectionOf(call).out ?? consoleObject(call, 'stdout'),
+  'System.Console.get_Error': (call) => redirectionOf(call).error ?? consoleObject(call, 'stderr'),
+  'System.Console.get_In': (call) => redirectionOf(call).in ?? consoleObject(call, 'stdin'),
+  'System.Console.SetOut': redirect('out', 'newOut'),
+  'System.Console.SetError': redirect('error', 'newError'),
+  'System.Console.SetIn': redirect('in', 'newIn'),
+  'System.Console.ReadLine': (call, _receiver, args) => {
+    const redirected = redirectionOf(call).in;
+    if (redirected) return forwardTo(call, redirected, 'System.IO.TextReader', args);
+    return readLineOf(call.frame.runtime.io.stdin.reader);
+  },
+  'System.Console.Read': (call, _receiver, args) => {
+    const redirected = redirectionOf(call).in;
+    if (redirected) return forwardTo(call, redirected, 'System.IO.TextReader', args);
+    return readCharOf(call.frame.runtime.io.stdin.reader);
+  },
 
   'System.IO.TextWriter.Write': writing(false),
   'System.IO.TextWriter.WriteLine': writing(true),

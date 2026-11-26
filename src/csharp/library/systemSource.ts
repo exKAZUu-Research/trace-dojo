@@ -786,6 +786,12 @@ namespace System {
     public static System.IO.TextWriter Out { get; }
     public static System.IO.TextWriter Error { get; }
     public static System.IO.TextReader In { get; }
+    public static void SetOut(System.IO.TextWriter newOut);
+    public static void SetError(System.IO.TextWriter newError);
+    public static void SetIn(System.IO.TextReader newIn);
+    public static System.IO.Stream OpenStandardOutput();
+    public static System.IO.Stream OpenStandardError();
+    public static System.IO.Stream OpenStandardInput();
     public static string? ReadLine();
     public static int Read();
     public static ConsoleKeyInfo ReadKey();

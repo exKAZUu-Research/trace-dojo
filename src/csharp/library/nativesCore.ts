@@ -64,6 +64,7 @@ import {
   type Value,
   type VariableReference,
 } from '../values';
+import { forwardTo, redirectionOf } from './consoleRedirection';
 import { formatValue } from './formatting';
 import { linqDisplayName } from './nativesLinq';
 import {
@@ -1276,6 +1277,8 @@ import { FORMAT_INDEX_ERROR as FORMAT_INDEX, parseCompositeFormat as parseFormat
 const writers =
   (stream: 'stdout' | 'stderr', newline: boolean): NativeMethod =>
   (call, _receiver, args) => {
+    const redirected = stream === 'stdout' ? redirectionOf(call).out : undefined;
+    if (redirected) return forwardTo(call, redirected, 'System.IO.TextWriter', args);
     const text = writeText(call, args as Value[]) + (newline ? '\n' : '');
     call.frame.runtime.io[stream].write(text);
     return;

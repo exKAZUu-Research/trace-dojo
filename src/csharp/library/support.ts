@@ -3,10 +3,11 @@ import { checkElementStore } from '../arrayStore';
 import type { Evaluator } from '../evaluator';
 import type { NativeCall, NativeMethod } from '../natives';
 import { convertNumeric, type NumericValue, PendingException } from '../numeric';
-import { stringOf } from '../objects';
+import { environmentOf, stringOf } from '../objects';
 import { CsThrow, type ExceptionState } from '../runtime';
 import {
   isReferenceType,
+  type MethodSymbol,
   type NamedType,
   namedType,
   nullableUnderlying,
@@ -32,6 +33,25 @@ import {
 /** The evaluator that runs the call. */
 export function evaluatorOf(call: NativeCall): Evaluator {
   return call.frame.runtime.evaluator;
+}
+
+/** Calls a method as the implementation that the receiver's runtime type has, as a virtual or interface call does. */
+export function callImplementation(
+  call: NativeCall,
+  method: MethodSymbol,
+  receiver: Value,
+  args: (Value | VariableReference)[]
+): Value {
+  const evaluator = evaluatorOf(call);
+  const implementation = evaluator.runtime.dispatch(method, receiver);
+  return evaluator.invoke(
+    call.frame,
+    implementation,
+    receiver,
+    args,
+    call.row,
+    environmentOf(evaluator, implementation, receiver)
+  );
 }
 
 /** The text of a value of a parameter's declared type, as the library prints it. */
