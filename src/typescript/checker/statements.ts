@@ -209,7 +209,8 @@ export class StatementChecker {
 
   /**
    * Reports a name that the module exports more than once, as tsc does, where a default or an `export { ... }` name
-   * takes part: declarations exported twice are reported as redeclarations.
+   * takes part: declarations exported twice are reported as redeclarations, and a clause that names a type, enum,
+   * or namespace exported by its declaration only at the clause.
    */
   private checkDuplicateExports(node: TreeNode): void {
     if (node.parent?.type !== 'program') return;
@@ -218,11 +219,12 @@ export class StatementChecker {
       .flatMap(exportedNames);
     for (const own of exportedNames(node)) {
       const others = all.filter((other) => other.name === own.name && other.site.id !== own.site.id);
-      if (others.length === 0 || (own.isDeclared && others.every((other) => other.isDeclared))) continue;
+      if (others.length === 0 || (own.declaration && others.every((other) => other.declaration))) continue;
+      if (own.declaration && !valueDeclarationTypes.has(own.declaration.type)) continue;
       const message =
         own.name === 'default'
           ? 'モジュールに複数の既定のエクスポートを含めることはできません。'
-          : own.isDeclared || others.some((other) => other.isDeclared)
+          : own.declaration || others.some((other) => other.declaration)
             ? `エクスポートされた変数 '${own.name}' を再宣言することはできません。`
             : `識別子 '${own.name}' が重複しています。`;
       this.c.error(own.site, message);
@@ -1129,16 +1131,29 @@ function literalTypeofName(node: TreeNode): string | undefined {
   return parts.map((part) => templateFragmentText(part)).join('');
 }
 
-/** The names an export statement exports, with the node naming each and whether a declaration declares it. */
-function exportedNames(node: TreeNode): { name: string; site: TreeNode; isDeclared: boolean }[] {
-  if (node.childForFieldName('source')) return [];
+/** The declarations whose own row tsc reports when an `export { ... }` exports their name again. */
+const valueDeclarationTypes = new Set([
+  'lexical_declaration',
+  'variable_declaration',
+  'function_declaration',
+  'generator_function_declaration',
+  'class_declaration',
+  'abstract_class_declaration',
+]);
+
+/**
+ * The names an export statement exports, with the node naming each and the declaration declaring it, if any. An
+ * overload signature exports nothing of its own: its implementation exports the name.
+ */
+function exportedNames(node: TreeNode): { name: string; site: TreeNode; declaration?: TreeNode }[] {
   const declaration = node.childForFieldName('declaration');
+  if (node.childForFieldName('source') || declaration?.type === 'function_signature') return [];
   if (node.children.some((child) => child?.type === 'default'))
-    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node, isDeclared: false }];
-  if (declaration) return declaredNames(declaration).map((name) => ({ name: name.text, site: name, isDeclared: true }));
+    return [{ name: 'default', site: node.childForFieldName('value') ?? declaration ?? node }];
+  if (declaration) return declaredNames(declaration).map((name) => ({ name: name.text, site: name, declaration }));
   const clause = named(node).find((child) => child.type === 'export_clause');
   return (clause ? named(clause) : []).flatMap((specifier) => {
     const exported = specifier.childForFieldName('alias') ?? specifier.childForFieldName('name');
-    return exported ? [{ name: exported.text, site: exported, isDeclared: false }] : [];
+    return exported ? [{ name: exported.text, site: exported }] : [];
   });
 }
