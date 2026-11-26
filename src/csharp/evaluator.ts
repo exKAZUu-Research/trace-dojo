@@ -1309,7 +1309,7 @@ export class Evaluator extends PointerEvaluator {
     return created;
   }
 
-  private initialize(entries: BoundInitializerEntry[], frame: Frame): void {
+  protected initialize(entries: BoundInitializerEntry[], frame: Frame): void {
     for (const entry of entries) {
       if (entry.kind === 'collectionAdd') {
         this.evaluate(entry.call, frame);

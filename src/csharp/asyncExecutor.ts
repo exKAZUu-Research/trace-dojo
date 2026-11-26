@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { BoundArgument, BoundBlock, BoundExpression, BoundLValue } from './bound';
+import type { BoundArgument, BoundBlock, BoundExpression, BoundInitializerEntry, BoundLValue } from './bound';
 import { NULL_REFERENCE } from './evaluatorBase';
 import {
   type Awaiting,
@@ -80,20 +80,64 @@ export abstract class AsyncExecutor extends IteratorExecutor {
       case 'compoundAssign': {
         return yield* this.compoundAssignSteps(expression, frame);
       }
-      case 'with':
-      case 'new': {
-        if (
-          expression.kind === 'with'
-            ? hasSuspension(expression.assignments)
-            : expression.initializer?.some((entry) => hasSuspension(entry))
-        )
+      case 'with': {
+        if (hasSuspension(expression.assignments))
           throw new CompileError([
             { row: expression.row, message: 'オブジェクト初期化子の中の `await`は、この採点環境では使えません。' },
           ]);
         return yield* this.operandsFirstSteps(expression, frame);
       }
+      case 'new': {
+        const { initializer } = expression;
+        if (!initializer?.some((entry) => hasSuspension(entry)))
+          return yield* this.operandsFirstSteps(expression, frame);
+        // The object comes first, with its constructor's arguments, and then each entry of its initializer in order.
+        const created = yield* this.operandsFirstSteps({ ...expression, initializer: undefined }, frame);
+        frame.temporaries.push(created);
+        frame.operands.push(created);
+        try {
+          yield* this.initializeSteps(initializer, frame);
+        } finally {
+          frame.operands.pop();
+          frame.temporaries.pop();
+        }
+        return created;
+      }
       default: {
         return yield* this.operandsFirstSteps(expression, frame);
+      }
+    }
+  }
+
+  /** Runs an object or collection initializer's entries, whose object is the frame's operand, as `initialize` does. */
+  protected abstract initialize(entries: BoundInitializerEntry[], frame: Frame): void;
+
+  /** The entries of an initializer with an `await` among them, each in order as {@link initialize} runs it. */
+  private *initializeSteps(entries: BoundInitializerEntry[], frame: Frame): Steps<void> {
+    for (const entry of entries) {
+      if (!hasSuspension(entry)) {
+        this.initialize([entry], frame);
+      } else if (entry.kind === 'collectionAdd') {
+        yield* this.evaluateSteps(entry.call, frame);
+      } else if (entry.nested) {
+        const nested = this.place(entry.target, frame).get();
+        frame.operands.push(nested);
+        try {
+          yield* this.initializeSteps(entry.nested, frame);
+        } finally {
+          frame.operands.pop();
+        }
+      } else {
+        // `[i] = await v` evaluates the index before the value, and then assigns the element.
+        const operands = variableOperands(entry.target);
+        const memo = (frame.memo ??= new Map());
+        for (const operand of operands) memo.set(operand, yield* this.evaluateSteps(operand, frame));
+        try {
+          const value = yield* this.evaluateSteps(entry.value as BoundExpression, frame);
+          this.place(entry.target, frame).set(copyValue(value));
+        } finally {
+          for (const operand of operands) frame.memo?.delete(operand);
+        }
       }
     }
   }
