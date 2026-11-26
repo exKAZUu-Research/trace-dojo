@@ -312,20 +312,26 @@ export abstract class CallCompiler extends OperatorCompiler {
     const { arguments: args, typeArguments } = expression;
     const target = this.staticTarget(callee.object);
     if (target?.kind === 'class') {
-      const member = target.cls.staticMembers.get(callee.name);
-      if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
-      const name = callee.name === 'new' ? undefined : callee.name;
-      if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
-        const types =
-          target.typeArgs ??
-          (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
-        return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
-      }
-      this.checkUnavailableStaticMember(target.cls, callee.name, callee);
-      return this.error(
-        callee,
-        `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
-      );
+      // A class reached through a deferred prefix fails until its library is loaded, before the arguments run.
+      const { prefix } = target.syntax;
+      if (prefix) this.checkLoadedFirst(prefix, expression);
+      const compileClassCall = (): Compiled => {
+        const member = target.cls.staticMembers.get(callee.name);
+        if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
+        const name = callee.name === 'new' ? undefined : callee.name;
+        if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
+          const types =
+            target.typeArgs ??
+            (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
+          return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
+        }
+        this.checkUnavailableStaticMember(target.cls, callee.name, callee);
+        return this.error(
+          callee,
+          `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
+        );
+      };
+      return prefix ? this.loadedOnly(prefix, compileClassCall()) : compileClassCall();
     }
     if (target?.kind === 'prefix') {
       const { prefix } = target;
@@ -686,15 +692,18 @@ export abstract class CallCompiler extends OperatorCompiler {
       prefix = undefined;
     }
     const target = this.resolveConstructorType({ ...typeSyntax, name, prefix }, expression, expression.isSelectorCall);
-    return this.compileConstructorCall(
-      target.cls,
-      constructorName,
-      target.types,
-      expression.arguments,
-      undefined,
-      expression,
-      context,
-      expression.isConst
+    if (prefix) this.checkLoadedFirst(prefix, expression);
+    return this.loadedOnlyIfPrefixed(prefix, () =>
+      this.compileConstructorCall(
+        target.cls,
+        constructorName,
+        target.types,
+        expression.arguments,
+        undefined,
+        expression,
+        context,
+        expression.isConst
+      )
     );
   }
 

@@ -1591,6 +1591,11 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     });
   }
 
+  protected loadedOnlyIfPrefixed(prefix: string | undefined, compile: () => Compiled): Compiled {
+    const compiled = compile();
+    return prefix ? this.loadedOnly(prefix, compiled) : compiled;
+  }
+
   /** What a prefix of a `deferred as` import reaches, which fails until its library is loaded. */
   protected loadedOnly(prefix: string, compiled: Compiled): Compiled {
     if (!this.library.deferredPrefixes.has(prefix)) return compiled;
@@ -1623,9 +1628,10 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
       return this.readStatic(member, span);
     }
     const member = target.cls.staticMembers.get(name);
-    if (member) return this.readStatic(member, span);
+    const { prefix } = target.syntax;
+    if (member) return this.loadedOnlyIfPrefixed(prefix, () => this.readStatic(member, span));
     if (target.cls.constructors.has(name === 'new' ? '' : name))
-      return this.compileConstructorTearoff(target.syntax, name, span);
+      return this.loadedOnlyIfPrefixed(prefix, () => this.compileConstructorTearoff(target.syntax, name, span));
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
     this.checkUnavailableStaticMember(target.cls, name, span);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
