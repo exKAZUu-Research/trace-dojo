@@ -1,0 +1,13 @@
+class A1 { accessor x = 1; }
+class B1 extends A1 {
+  x = 2;
+}
+class A2 { x = 1; }
+class B2 extends A2 {
+  accessor x = 2;
+}
+class A3 { accessor x = 1; }
+class B3 extends A3 {
+  x() { return 2; }
+}
+console.log(new B1().x, new B2().x, new B3().x());

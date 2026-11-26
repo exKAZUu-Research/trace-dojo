@@ -577,8 +577,12 @@ export class ClassDeclarationChecker {
 /** Whether a member is a method, an accessor, or a field, which a member overriding it must agree with. */
 function memberKind(property: Property): 'method' | 'accessor' | 'field' {
   if (property.isMethod) return 'method';
-  const declarationType = property.declaration?.type ?? '';
-  return ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
+  const declaration = property.declaration;
+  const declarationType = declaration?.type ?? '';
+  // `accessor x = 1` declares a getter and a setter, as tsc compares it.
+  const isAutoAccessor = declarationType === 'field_definition' && declaration && hasToken(declaration, 'accessor');
+  return isAutoAccessor ||
+    ['method_definition', 'method_signature', 'abstract_method_signature'].includes(declarationType)
     ? 'accessor'
     : 'field';
 }

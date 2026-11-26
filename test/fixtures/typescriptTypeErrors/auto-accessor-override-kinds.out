@@ -1,0 +1,5 @@
+(3,3): error TS2610: 'x' is defined as an accessor in class 'A1', but is overridden here in 'B1' as an instance property.
+(7,12): error TS2611: 'x' is defined as a property in class 'A2', but is overridden here in 'B2' as an accessor.
+(11,3): error TS2416: Property 'x' in type 'B3' is not assignable to the same property in base type 'A3'.
+  Type '() => number' is not assignable to type 'number'.
+(11,3): error TS2426: Class 'A3' defines instance member accessor 'x', but extended class 'B3' defines it as instance member function.
