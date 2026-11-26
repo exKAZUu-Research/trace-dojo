@@ -46,6 +46,7 @@ import {
   upperBound,
   vmTypeString,
   VOID,
+  withoutOuterQuestionMark,
 } from './types';
 import { type Arguments, Cell, LateInitializer, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
@@ -184,8 +185,12 @@ export abstract class StatementCompiler extends PatternCompiler {
    * context gives, once that is known; a literal without a context infers its return type instead.
    */
   protected checkedReturnType(spec: FunctionSpec): DartType | undefined {
+    if (spec.returnType) return spec.returnType;
     const context = spec.contextReturnType;
-    return spec.returnType ?? (context && !containsInferenceHole(context) ? context : undefined);
+    if (!context || containsInferenceHole(context)) return undefined;
+    // An async literal returns a future, never null, so the `?` outside its context's future does not let it end
+    // without a value: Dart infers `Future<int>` for one whose context is `Future<int>?`.
+    return spec.kind.isAsync ? (withoutOuterQuestionMark(context) ?? context) : context;
   }
 
   /**

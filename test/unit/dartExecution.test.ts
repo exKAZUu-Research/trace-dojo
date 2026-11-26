@@ -6893,6 +6893,32 @@ void main() {
   }
 });
 
+test('Dart types FutureOr and nullable types by their normal form', async () => {
+  // Expected output from Dart SDK 3.13.7: a FutureOr of a top type or of Object is that type, and a nullable FutureOr
+  // of a nullable type is the FutureOr itself, in upper bounds, awaits, and async returns.
+  const program = `import 'dart:async';
+T id<T>(T t) => t;
+FutureOr<int?> f1() async => null;
+FutureOr<Object> f2() async => 2;
+Future<void> main() async {
+  print([true ? id<FutureOr<int?>>(1) : id<int?>(2)].runtimeType);
+  print([true ? id<FutureOr<int>>(1) : id<String>('s')].runtimeType);
+  print([true ? id<FutureOr<int>?>(1) : id<String>('s')].runtimeType);
+  print([true ? id<FutureOr<int>>(1) : id<double>(2)].runtimeType);
+  print([true ? id<FutureOr<Object>>(1) : id<int?>(2)].runtimeType);
+  print([await id<FutureOr<int?>>(null)].runtimeType);
+  print(await f1());
+  print(await f2());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'List<FutureOr<int?>>\nList<Object>\nList<Object?>\nList<FutureOr<num>>\nList<Object?>\nList<int?>\nnull\n2\n',
+  });
+  const literal = 'import "dart:async"; void main() { Future<int>? Function() f = () async {}; print(f); }';
+  expect(executeProgram('dart', literal)).toMatchObject({ kind: 'compileError' });
+});
+
 test('Dart num arithmetic returns double from a double operand or contextual literal', () => {
   const program = `double twice(num value) => value * 2;
 void examples(num value, double fraction) {

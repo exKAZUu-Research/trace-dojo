@@ -111,18 +111,64 @@ export function boundOf(param: TypeParam): DartType {
   return param.bound ?? objectType(true);
 }
 
-/** Whether a type is `dynamic`, `void`, `Object?`, or another top type. */
-export function isTop(type: DartType): boolean {
-  if (type.kind === 'dynamic' || type.kind === 'void') return true;
+/**
+ * `NORM(T)`, the Dart specification's normal form of a type's outer structure, on which top-ness, Object-ness,
+ * nullability, `flatten` and `futureValueType` are decided: `FutureOr<T>` of a top type or of Object is that type, of
+ * Never is `Future<Never>` and of Null is `Future<Null>?`; `T?` of a top type is that type, of Never or Null is Null,
+ * and of a nullable FutureOr, as `FutureOr<int?>`, is the FutureOr itself.
+ */
+export function norm(type: DartType): DartType {
+  if (type.kind !== 'interface') return type;
   const value = futureOrValue(type);
-  if (value) return isTop(value) || (isNullable(type) && isObject(value));
-  return type.kind === 'interface' && type.cls === coreTypes.object && type.nullable;
+  const nonNull = value ? normFutureOr(type, norm(value)) : type.nullable ? { ...type, nullable: false } : type;
+  return type.nullable ? normNullable(nonNull) : nonNull;
 }
 
-export function isObject(type: DartType): boolean {
-  const value = futureOrValue(type);
-  if (value) return !(type as InterfaceType).nullable && isObject(value);
+function normFutureOr(type: InterfaceType, value: DartType): DartType {
+  if (isTopNormal(value) || isObjectNormal(value)) return value;
+  if (value.kind === 'never' && !value.nullable) return interfaceType(coreTypes.future, [NEVER]);
+  if (value.kind === 'null') return makeNullable(interfaceType(coreTypes.future, [NULL]));
+  return value === type.args[0] && !type.nullable ? type : interfaceType(coreTypes.futureOr, [value]);
+}
+
+function normNullable(normal: DartType): DartType {
+  if (isTopNormal(normal)) return normal;
+  if (normal.kind === 'never' || normal.kind === 'null') return NULL;
+  const value = futureOrValue(normal);
+  if (value && isNullable(value)) return normal;
+  return makeNullable(normal);
+}
+
+function isTopNormal(type: DartType): boolean {
+  return (
+    type.kind === 'dynamic' ||
+    type.kind === 'void' ||
+    (type.kind === 'interface' && type.cls === coreTypes.object && type.nullable)
+  );
+}
+
+function isObjectNormal(type: DartType): boolean {
   return type.kind === 'interface' && type.cls === coreTypes.object && !type.nullable;
+}
+
+/**
+ * The type with the `?` its normal form writes outside taken off, or undefined when the normal form has none: a
+ * `FutureOr<int?>` is nullable through its argument and has none.
+ */
+export function withoutOuterQuestionMark(type: DartType): DartType | undefined {
+  const normal = norm(type);
+  if ((normal.kind !== 'interface' && normal.kind !== 'typeParam') || !normal.nullable) return undefined;
+  return nonNullable(normal);
+}
+
+/** Whether a type is `dynamic`, `void`, `Object?`, or another top type, as `FutureOr<Object?>`. */
+export function isTop(type: DartType): boolean {
+  return isTopNormal(norm(type));
+}
+
+/** Whether a type is Object, or another type whose normal form is, as `FutureOr<Object>`. */
+export function isObject(type: DartType): boolean {
+  return isObjectNormal(norm(type));
 }
 
 /** The `T` of `FutureOr<T>`, the union of `T` and `Future<T>`, or undefined for other types. */
@@ -132,8 +178,9 @@ export function futureOrValue(type: DartType): DartType | undefined {
   return type.args[0] ?? DYNAMIC;
 }
 
-/** `flatten(T)`: the type `await` gives a value of type `T`. */
-export function flatten(type: DartType): DartType {
+/** `flatten(T)`: the type `await` gives a value of type `T`, decided on its normal form. */
+export function flatten(given: DartType): DartType {
+  const type = norm(given);
   if (type.kind === 'typeParam') {
     const bound = type.promoted ?? boundOf(type.param);
     const flattened = flatten(bound);
@@ -178,7 +225,8 @@ export function factorType(type: DartType, removed: DartType): DartType {
 
 /** `futureValueType(T)`: what an `async` function declared to return `T` completes its future with. */
 export function futureValueType(type: DartType): DartType {
-  // futureValueType(S?) is futureValueType(S): only the outer `?` goes, so FutureOr<int?> keeps int?.
+  // The specification defines it on the type as written, not its normal form, which turns FutureOr<Object> into
+  // Object: futureValueType(S?) is futureValueType(S), only the outer `?` going, so FutureOr<int?> keeps int?.
   if (type.kind === 'interface' && type.cls === coreTypes.future) return type.args[0] ?? DYNAMIC;
   const value = futureOrValue(type);
   if (value) return value;
@@ -188,7 +236,8 @@ export function futureValueType(type: DartType): DartType {
 }
 
 /** Whether `null` is a value of the type. */
-export function isNullable(type: DartType): boolean {
+export function isNullable(given: DartType): boolean {
+  const type = given.kind === 'interface' ? norm(given) : given;
   switch (type.kind) {
     case 'dynamic':
     case 'void':
@@ -613,7 +662,8 @@ function mutualSubtypes(a: DartType, b: DartType): boolean {
 
 /** The least upper bound of two types (Dart's UP), used for conditional expressions and collection literals. */
 export function upperBound(a: DartType, b: DartType): DartType {
-  const bound = specialUpperBound(a, b) ?? structuralUpperBound(a, b);
+  // The bound is in normal form, as the SDK's: FutureOr<Object> is Object, and FutureOr<int?>? is FutureOr<int?>.
+  const bound = norm(specialUpperBound(a, b) ?? structuralUpperBound(a, b));
   // Object bounds only what it is a supertype of, which excludes extension types that implement no Object.
   return isObject(bound) && !(isSubtype(a, bound) && isSubtype(b, bound)) ? objectType(true) : bound;
 }
@@ -631,12 +681,10 @@ function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (b.kind === 'never' && !b.nullable) return a;
   if (a.kind === 'null' || (a.kind === 'never' && a.nullable)) return makeNullable(b);
   if (b.kind === 'null' || (b.kind === 'never' && b.nullable)) return makeNullable(a);
-  if (isNullable(a) || isNullable(b)) {
-    // A type nullable only through FutureOr's argument, as FutureOr<int?>, has no `?` to take off.
-    const left = nonNullable(a);
-    const right = nonNullable(b);
-    if (left !== a || right !== b) return makeNullable(upperBound(left, right));
-  }
+  const left = withoutOuterQuestionMark(a);
+  const right = withoutOuterQuestionMark(b);
+  // A type nullable only through FutureOr's argument, as FutureOr<int?>, has no `?` to take off.
+  if (left || right) return makeNullable(upperBound(left ?? a, right ?? b));
   if (isObject(a) || isObject(b)) return objectType();
   if (a.kind === 'typeParam' || b.kind === 'typeParam') return typeParamUpperBound(a, b);
   if (futureOrValue(a) || futureOrValue(b)) return futureOrUpperBound(a, b);
