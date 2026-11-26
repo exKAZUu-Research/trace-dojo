@@ -37,7 +37,6 @@ type FileRedirectOperator = Extract<Redirect, { kind: 'file' }>['operator'];
 const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>', '&>>']);
 
 /** A `{name}` word written right before a redirection, which names the variable that receives its descriptor. */
-const FD_VARIABLE_PATTERN = /^\{([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)\}$/;
 
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
@@ -236,9 +235,7 @@ export class Converter {
 
   private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const bodyNode = node.childForFieldName('body');
-    const redirects = this.fieldNodes(node, 'redirect').map((redirect) =>
-      this.redirect(redirect, this.analyzed.descriptorVariables.get(redirect.startIndex))
-    );
+    const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
     if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
     const converted = this.statement(bodyNode);
     if (converted.kind === 'command' || converted.kind === 'declaration' || converted.kind === 'function') {
@@ -287,13 +284,7 @@ export class Converter {
       const child = children[index];
       const field = node.fieldNameForChild(index);
       if (field === 'redirect') redirects.push(this.redirect(child));
-      if (field !== 'argument') continue;
-      const next = children[index + 1];
-      const fdVariable = FD_VARIABLE_PATTERN.exec(child.text)?.[1];
-      if (fdVariable && node.fieldNameForChild(index + 1) === 'redirect' && next?.startIndex === child.endIndex) {
-        redirects.push(this.redirect(next, fdVariable));
-        index++;
-      } else words.push(this.word(child));
+      else if (field === 'argument') words.push(this.word(child));
     }
     return { row, lineRow: lineRowOf(node), kind: 'command', assignments, words, redirects };
   }
@@ -498,7 +489,8 @@ export class Converter {
     };
   }
 
-  private redirect(node: Node, fdVariable?: string): Redirect {
+  /** Converts a redirection, whose `{name}`, if the syntax check found one before it, names its descriptor. */
+  private redirect(node: Node, fdVariable = this.analyzed.descriptorVariables.get(node.startIndex)): Redirect {
     const descriptorText = node.childForFieldName('descriptor')?.text;
     const variable = fdVariable === undefined ? {} : { fdVariable };
     if (node.type === 'heredoc_redirect') {

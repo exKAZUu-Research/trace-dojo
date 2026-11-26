@@ -1271,7 +1271,7 @@ class ShellGrammarValidator {
       const context: WordContext =
         commandName === undefined ? 'command' : DECLARATION_NAMES.has(commandName) ? 'declaration' : 'argument';
       const token = this.peek(context);
-      if (token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
+      if (this.consumeDescriptorVariable(token) || token.kind === 'ioNumber' || this.isRedirectionOperator(token)) {
         this.parseOneRedirection();
         continue;
       }
@@ -1314,13 +1314,22 @@ class ShellGrammarValidator {
   private parseTrailingRedirections(): void {
     for (;;) {
       const token = this.peek();
-      // `{name}` right before an operator names the descriptor the redirection allocates, as after a simple command.
-      if (isDescriptorVariableWord(token, this.text.source)) {
-        this.text.descriptorVariables.push({ start: token.start, end: token.end, name: token.value.slice(1, -1) });
-        this.advance();
-      } else if (token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) return;
+      if (!this.consumeDescriptorVariable(token) && token.kind !== 'ioNumber' && !this.isRedirectionOperator(token)) {
+        return;
+      }
       this.parseOneRedirection();
     }
+  }
+
+  /**
+   * Reads `{name}` written right before a redirection operator, which names the descriptor the redirection allocates
+   * wherever a redirection may stand, recording it for the grammar, which reads it only as a word.
+   */
+  private consumeDescriptorVariable(token: ShellToken): boolean {
+    if (!isDescriptorVariableWord(token, this.text.source)) return false;
+    this.text.descriptorVariables.push({ start: token.start, end: token.end, name: token.value.slice(1, -1) });
+    this.advance();
+    return true;
   }
 
   private parseOneRedirection(): void {
