@@ -9427,9 +9427,10 @@ Future<void> main() async {
   FutureOr<Future<int>> q = fi;
   var y = await q;
   FutureOr<int> a = Future.value(5);
-  print([y is Future<int>, await a]);
-}`;
-  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[true, 5]\n' });
+  print([y is Future<int>, await a, await f<Future<int>>(fi)]);
+}
+Future<bool> f<T extends FutureOr<Future<int>>>(T x) async => (await x) is Future<int>;`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[true, 5, true]\n' });
 });
 
 test('an error thrown at the bottom of a deep chain of awaiting calls reaches the outermost catch', () => {

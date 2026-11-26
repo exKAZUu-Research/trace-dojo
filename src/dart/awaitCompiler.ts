@@ -15,7 +15,17 @@ import {
 import { type Compiled, CompilerBase, type Eval } from './compilerBase';
 import { childContext } from './contextTypes';
 import type { Frame } from './runtime';
-import { coreTypes, type DartType, DYNAMIC, flatten, futureOrValue, interfaceType, isSubtype, norm } from './types';
+import {
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  flatten,
+  futureOrValue,
+  interfaceType,
+  isSubtype,
+  norm,
+  resolveBound,
+} from './types';
 import type { Cell } from './values';
 
 /** Whether a null-aware selector shorts the chain, reading its receiver, which a step already evaluated. */
@@ -166,10 +176,11 @@ export abstract class AwaitCompiler extends CompilerBase {
     // The VM awaits a future whose static type is not a Future only when it is a Future<flatten(T)>, as its
     // `_awaitWithTypeCheck` checks, so that `await t` with `T t` keeps a Future that T stands for.
     // A FutureOr is checked too, though a non-nullable one is a subtype of Future: the VM checks every operand whose
-    // static type is not a Future, so `await q` with `FutureOr<Future<int>> q` keeps the inner Future<int>.
+    // static type is not a Future, so `await q` with `FutureOr<Future<int>> q` keeps the inner Future<int>. A type
+    // variable is decided by its promotion or bound, as flatten reads it.
     const isFuture =
       isSubtype(operand.type, interfaceType(coreTypes.future, [DYNAMIC])) &&
-      futureOrValue(norm(operand.type)) === undefined;
+      futureOrValue(norm(resolveBound(operand.type))) === undefined;
     const awaitedType = isFuture ? undefined : this.runtimeType(interfaceType(coreTypes.future, [type]));
     const { run } = operand;
     return awaitingCompiled(type, function* (frame) {
