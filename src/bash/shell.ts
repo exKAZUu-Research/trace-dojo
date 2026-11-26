@@ -353,7 +353,10 @@ export class Shell implements ArithmeticHost {
    */
   private runTrap(condition: TrapCondition, status: number): void {
     const trap = this.traps.get(condition);
-    if (!trap || trap.statements.length === 0 || this.runningTraps.has(condition)) return;
+    if (!trap || this.runningTraps.has(condition)) return;
+    // Bash reads the action only as it runs it, where a syntax error in it stops the action.
+    if (trap.unreadable) rejectUnsupportedFeature('構文エラーのある trap の文字列');
+    if (trap.statements.length === 0) return;
     const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
     this.trapStartStatus = status;
@@ -1434,9 +1437,10 @@ export class Shell implements ArithmeticHost {
     lastArg: string,
     kind: 'function' | 'builtin' | 'notFound'
   ): number {
-    return this.withTemporaryScope(statement.assignments, () =>
-      this.withRedirects(statement.redirects, () => {
-        if (this.options.xtrace) traceWords(this, [name, ...args]);
+    return this.withTemporaryScope(statement.assignments, () => {
+      // Bash traces the expanded words before it applies the command's redirections, to the shell's own error output.
+      if (this.options.xtrace) traceWords(this, [name, ...args]);
+      return this.withRedirects(statement.redirects, () => {
         let code = 127;
         if (kind === 'function') {
           this.deepenForElementCall(statement);
@@ -1448,8 +1452,8 @@ export class Shell implements ArithmeticHost {
         }
         this.store.lastArgument = lastArg;
         return code;
-      })
-    );
+      });
+    });
   }
 
   /**
@@ -1824,7 +1828,8 @@ export class Shell implements ArithmeticHost {
   > {
     // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
     const traps = [...this.traps].filter(
-      ([condition, trap]) => trap.statements.length === 0 || (condition === 'ERR' && this.options.errtrace)
+      ([condition, trap]) =>
+        (trap.statements.length === 0 && !trap.unreadable) || (condition === 'ERR' && this.options.errtrace)
     );
     return {
       fds: this.fds.clone(),
