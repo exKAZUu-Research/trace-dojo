@@ -433,6 +433,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
   protected abstract importObjectMembers(context: FileContext, name: string, members: MemberSymbol[]): void;
 
+  /** The type a `vararg` parameter has inside its function: an array of its elements. */
+  protected abstract varargType(elementType: KType): KType;
+
+  /**
+   * The type a parameter's value has inside its function, constructor, or property: for a `vararg`, the array of its
+   * elements, which callers pass one by one.
+   */
+  protected parameterValueType(param: ParameterSymbol): KType {
+    return param.isVararg ? this.varargType(param.type) : param.type;
+  }
+
   private rejectImport(row: number, path: string): never {
     this.rejectUnavailableLibraryReference(path, row);
     return this.error(row, unavailableMessage(describeUnavailableImport(path)));
@@ -685,7 +696,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (!symbol.isInterface && !symbol.isObject) {
       const constructorSymbol = this.declarePrimaryConstructor(entry);
       for (const [index, param] of (primary?.params ?? []).entries()) {
-        this.declareParameterProperty(entry, param, constructorSymbol.params[index].type, index);
+        this.declareParameterProperty(entry, param, this.parameterValueType(constructorSymbol.params[index]), index);
       }
     }
     for (const member of decl.members) this.declareMember(entry, member);

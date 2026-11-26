@@ -695,7 +695,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
         scope,
         context,
         param.name,
-        param.isVararg ? this.varargType(param.type) : param.type,
+        this.parameterValueType(param),
         decl.params[index].row
       );
       this.flow.assigned.add(variable);

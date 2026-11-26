@@ -265,13 +265,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       context.info.showsThis =
         thisType !== undefined && entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       const variables = symbol.params.map((param, index) =>
-        this.newParameter(
-          scope,
-          context,
-          param.name,
-          param.isVararg ? this.varargType(param.type) : param.type,
-          decl.params[index].row
-        )
+        this.newParameter(scope, context, param.name, this.parameterValueType(param), decl.params[index].row)
       );
       for (const [index, param] of symbol.contextParameters.entries()) {
         const declared = decl.modifiers.contextParameters?.[index];
@@ -379,9 +373,6 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     context: FunctionContext,
     defaults: (Eval | undefined)[]
   ): void;
-
-  /** The type a `vararg` parameter has inside its function: an array of its elements. */
-  protected abstract varargType(elementType: KType): KType;
 
   /**
    * The type a declaration infers from an object expression: its anonymous type only when the declaration is private,
@@ -597,7 +588,7 @@ export abstract class BodyCompiler extends DeclarationCompiler {
           headerScope,
           context,
           param.name,
-          param.type,
+          this.parameterValueType(param),
           declaration?.row ?? entry.cls.decl.row
         );
         if (!declaration?.binding) scope.variables.set(param.name, variable);
@@ -924,7 +915,13 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       const headerScope = new Scope(base, context);
       this.startOwnFlow();
       const variables = ctor.params.map((param, index) => {
-        const variable = this.newParameter(headerScope, context, param.name, param.type, decl.params[index].row);
+        const variable = this.newParameter(
+          headerScope,
+          context,
+          param.name,
+          this.parameterValueType(param),
+          decl.params[index].row
+        );
         this.flow.assigned.add(variable);
         return variable;
       });

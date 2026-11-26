@@ -6897,6 +6897,13 @@ fun main() { val u = User(mutableMapOf("name" to "Ann", "age" to 3)); u.age = 4;
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'Ann 4 {name=Ann, age=4}\n' });
 });
 
+test('gives vararg parameters of constructors and their properties array types', () => {
+  const source = `class Names(vararg val names: String)
+class Total(vararg items: Int) { val total = items.sum() }
+fun main() { println(listOf(Names("z", "y").names.size, Total(1, 2).total)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[2, 3]\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

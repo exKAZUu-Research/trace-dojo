@@ -89,8 +89,13 @@ export abstract class SuspendCompiler extends LocalCompiler {
     context.isSuspend = true;
     this.suspendFunctionNames.add(symbol.name);
     const variables = symbol.params.map((param, index) => {
-      const type = param.isVararg ? this.varargType(param.type) : param.type;
-      const variable = this.newParameter(scope, context, param.name, type, decl.params[index].row);
+      const variable = this.newParameter(
+        scope,
+        context,
+        param.name,
+        this.parameterValueType(param),
+        decl.params[index].row
+      );
       this.flow.assigned.add(variable);
       return variable;
     });
