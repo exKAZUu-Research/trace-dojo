@@ -16,14 +16,17 @@ export class AsyncTask {
   /** Whether the body has ended, after its last run. */
   isDone = false;
   /**
-   * The detached steps of this task and every task below it, fixed once the task and all of them have ended, which
-   * no later run can change; a statement reads it instead of walking the tasks again.
+   * The detached steps of the tasks below this one that have ended, which each adds here when it ends, and the tasks
+   * below still running, whose own counts are read live: together with this task's own, the subtree's detached steps,
+   * which a statement reads without walking the tasks that ended.
    */
-  private subtreeSteps: number | undefined;
+  private endedBelow = 0;
+  private readonly runningBelow = new Set<AsyncTask>();
 
   constructor(private readonly tracker: { statementMark(): number }) {
     this.parent = running.get(tracker);
     this.parent?.spawned.push(this);
+    this.parent?.runningBelow.add(this);
   }
 
   run<T>(work: () => T): T {
@@ -41,18 +44,31 @@ export class AsyncTask {
       this.enteredAt = undefined;
       if (outer) running.set(this.tracker, outer);
       else running.delete(this.tracker);
-      if (this.isDone) this.fixSubtree();
+      if (this.isDone) this.foldIntoParent();
     }
   }
 
-  /** Fixes the subtree's detached steps when every task below has fixed its own, as an ended recursion's have. */
-  private fixSubtree(): void {
-    let total = this.detachedSteps;
-    for (const task of this.spawned) {
-      if (task.subtreeSteps === undefined) return;
-      total += task.subtreeSteps;
+  /**
+   * Adds this ended task's counts to its parent's, and hands it the tasks below still running, so that the parent's
+   * subtree needs no walk through this one; this task keeps its own counts for a statement that started it.
+   */
+  private foldIntoParent(): void {
+    const { parent } = this;
+    if (!parent) return;
+    parent.endedBelow += this.detachedSteps + this.endedBelow;
+    parent.runningBelow.delete(this);
+    for (const task of this.runningBelow) parent.runningBelow.add(task);
+  }
+
+  /** The detached steps of this task and every task below it. */
+  private subtreeSteps(): number {
+    let total = 0;
+    const pending: AsyncTask[] = [this];
+    for (let task = pending.pop(); task; task = pending.pop()) {
+      total += task.detachedSteps + task.endedBelow;
+      pending.push(...task.runningBelow);
     }
-    this.subtreeSteps = total;
+    return total;
   }
 
   get recordedSteps(): number {
@@ -63,15 +79,7 @@ export class AsyncTask {
   spawnedSteps(start: number): number {
     // A loop over the tasks, as a deep recursion of async calls makes a deep tree of them.
     let total = 0;
-    const pending = this.spawned.slice(start);
-    for (let task = pending.pop(); task; task = pending.pop()) {
-      if (task.subtreeSteps !== undefined) {
-        total += task.subtreeSteps;
-        continue;
-      }
-      total += task.detachedSteps;
-      pending.push(...task.spawned);
-    }
+    for (const task of this.spawned.slice(start)) total += task.subtreeSteps();
     return total;
   }
 }
