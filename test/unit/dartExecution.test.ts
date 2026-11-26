@@ -10784,6 +10784,19 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
   });
 });
 
+test('an extension application before an await evaluates its receiver first and once, as any receiver', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const program = `class Box { int v = 0; }
+extension Ext on Box { void m(int x) => print('m $x'); int get g => v; set g(int x) => v = x; }
+Future<int> f(String s, int x) async { print('f $s'); return x; }
+Box mk(String s) { print('mk $s'); return Box(); }
+void main() async {
+  Ext(mk('b')).m(await f('b', 2));
+  Ext(mk('d')).g += await f('d', 4);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'mk b\nf b\nm 2\nmk d\nf d\n' });
+});
+
 test('catchError takes a handler of any type and fails when an error reaches one that does not take Object', () => {
   // Expected output from Dart SDK 3.13.7, whose root zone checks the handler of then but not of catchError.
   const program = `import 'dart:async';

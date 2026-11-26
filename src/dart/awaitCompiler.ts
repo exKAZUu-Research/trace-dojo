@@ -294,7 +294,11 @@ function handlesAwaitItself(expression: Expression): boolean {
   }
 }
 
-/** Whether a part's value can change between its evaluation and an `await` after it, so that it must be lifted. */
+/**
+ * Whether a part's value can change between its evaluation and an `await` after it, so that it must be lifted. An
+ * extension application `E(x)` is its receiver `x`, evaluated once before the await as any receiver; the implicit
+ * `this` of an extension's own member is a this reference.
+ */
 function isLiftable(compiled: Compiled): boolean {
-  return !compiled.isConst && !compiled.isSuper && !compiled.thisReference && !compiled.extensionOverride;
+  return !compiled.isConst && !compiled.isSuper && !compiled.thisReference;
 }
