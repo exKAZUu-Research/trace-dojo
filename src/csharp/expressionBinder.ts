@@ -533,7 +533,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
     if (suffix === 'm') {
       const value = CsDecimal.parse(text);
       if (!value) {
-        this.error(position, 'CS0594', "浮動小数点定数が、型 'decimal' の範囲外にあります");
+        this.error(position, 'CS0594', "浮動小数点定数が型 'decimal' の範囲外です");
         return this.constant(CsDecimal.ZERO, this.specialType('decimal'), position.row);
       }
       return this.constant(value, this.specialType('decimal'), position.row);
