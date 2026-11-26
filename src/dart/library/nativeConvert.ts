@@ -727,7 +727,16 @@ function decodeGeneral(decoder: DecoderState, bytes: Uint8Array, start: number, 
     units.push(0xff_fd);
   }
   Object.assign(decoder, { state, charOrIndex: char });
-  return String.fromCodePoint(...units);
+  return fromCodePoints(units);
+}
+
+/** The text of code points, built a bounded number at a time, as a call takes only so many arguments. */
+function fromCodePoints(units: readonly number[]): string {
+  let text = '';
+  for (let start = 0; start < units.length; start += 0x20_00) {
+    text += String.fromCodePoint(...units.slice(start, start + 0x20_00));
+  }
+  return text;
 }
 
 /**

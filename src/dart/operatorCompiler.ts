@@ -478,9 +478,11 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         const previous = frame.locals[slot];
         frame.locals[slot] = new Cell(value);
         try {
+          // A section that awaits inside itself, as `..x ??= await f()` does, runs through its generator.
           for (const { result, steps } of sections) {
             yield* runSteps(frame, steps);
-            result(frame);
+            if (result.gen) yield* result.gen(frame);
+            else result.run(frame);
           }
         } finally {
           frame.locals[slot] = previous;
@@ -496,7 +498,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         const previous = frame.locals[slot];
         frame.locals[slot] = new Cell(value);
         try {
-          for (const { result } of sections) result(frame);
+          for (const { result } of sections) result.run(frame);
         } finally {
           frame.locals[slot] = previous;
         }
@@ -508,7 +510,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
-  private compileCascadeSection(receiver: Compiled, section: CascadeSection): Eval {
+  private compileCascadeSection(receiver: Compiled, section: CascadeSection): Compiled {
     const span = section;
     let current: Compiled = receiver;
     const { selectors, assignment } = section;
@@ -564,10 +566,9 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       }
     }
     if (assignment && last) {
-      const compiled = this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
-      return compiled.run;
+      return this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
     }
-    return current.run;
+    return current;
   }
 }
 

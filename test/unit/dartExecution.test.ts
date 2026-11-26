@@ -9188,6 +9188,54 @@ void main() {
   });
 });
 
+test('Expando finds a Type key as identical does, whichever evaluation made it', () => {
+  const source = `class A {}
+void main() {
+  final m = Expando<String>();
+  m[int] = 'x';
+  m[A().runtimeType] = 'a';
+  print([m[int], m[A], m[String]]);
+  m[int] = null;
+  print(m[int]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[x, a, null]\nnull\n' });
+});
+
+test.each(['await for (var i = 0; i < 2; i++) { print(i); }', 'print([await for (var i = 0; i < 2; i++) i]);'])(
+  'await on a C-style for is a compile error, as the SDK reports it: %s',
+  (body) => {
+    expect(executeProgram('dart', `Future<void> main() async { ${body} }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message: 'await は、for-in の for にしか付けられません。' }],
+    });
+  }
+);
+
+test('an unavailable dart:async name is unavailable through a prefix too', () => {
+  const source = `import 'dart:async' as async;
+void main() { print(async.Zone.current); }`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: 'Zone（非同期処理）は、この採点環境では使えません。' }],
+  });
+});
+
+test('a cascade section whose ??= value awaits waits for it, in the order of the sections', () => {
+  const source = `class Box { int? x; Map<int, int> m = {}; }
+Future<int> f(int x) async { print('f $x'); return x; }
+Future<void> main() async {
+  final b = Box()..x ??= await f(1)..x ??= await f(2);
+  Box? n;
+  n?..x ??= await f(3);
+  final c = Box()..m[await f(4)] ??= await f(5);
+  print([b.x, n, c.m]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'f 1\nf 4\nf 5\n[1, null, {4: 5}]\n',
+  });
+});
+
 test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

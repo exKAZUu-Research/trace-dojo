@@ -7,6 +7,24 @@ export const URI_LIBRARY = 'dart:_uri';
 // Dart SDK 3.13.7 public declarations and explicit re-exports. Keep unavailable names visible to diagnostics.
 const SDK_EXPORTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   [
+    'dart:async',
+    new Set(
+      `
+    AsyncError Completer ControllerCallback ControllerCancelCallback CreatePeriodicTimerHandler CreateTimerHandler
+    DeferredLoadException ErrorCallbackHandler EventSink ForkHandler Future FutureExtensions FutureIterable FutureOr
+    FutureRecord2 FutureRecord3 FutureRecord4 FutureRecord5 FutureRecord6 FutureRecord7 FutureRecord8 FutureRecord9
+    HandleUncaughtErrorHandler MultiStreamController ParallelWaitError PrintHandler RegisterBinaryCallbackHandler
+    RegisterCallbackHandler RegisterUnaryCallbackHandler RunBinaryHandler RunHandler RunUnaryHandler runZoned
+    runZonedGuarded scheduleMicrotask ScheduleMicrotaskHandler Stream StreamConsumer StreamController StreamIterator
+    StreamSink StreamSubscription StreamTransformer StreamTransformerBase StreamView SynchronousStreamController
+    TimeoutException Timer unawaited Zone ZoneBinaryCallback ZoneCallback ZoneDelegate ZoneSpecification
+    ZoneUnaryCallback
+  `
+        .trim()
+        .split(/\s+/)
+    ),
+  ],
+  [
     'dart:collection',
     new Set(
       `

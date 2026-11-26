@@ -1803,6 +1803,12 @@ export class Compiler extends MemberCompiler {
   }
 
   protected onlyCalls(expression: Expression, compiled: Compiled): boolean {
+    // An awaited call records what the call records, as the same call without await does.
+    if (expression.kind === 'await') {
+      let operand = expression.value;
+      while (operand.kind === 'parenthesized') operand = operand.expression;
+      return operand.kind === 'call' || operand.kind === 'new';
+    }
     if (expression.kind === 'assign') return expression.operator === '=' && compiled.creates === true;
     if (expression.kind === 'cascade') return false;
     return expression.kind === 'call' || expression.kind === 'new';

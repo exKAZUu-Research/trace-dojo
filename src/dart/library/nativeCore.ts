@@ -459,18 +459,39 @@ defineTurtle('remove', (runtime, state) => {
 export { asciiNames, formatDouble, identityOf };
 
 /** Each Expando's entries; the weak table drops an entry once its key object is no longer reachable, as the VM's does. */
-const expandoEntries = new WeakMap<DartObject, WeakMap<object, Value>>();
+/**
+ * Each Expando's values, by key. A key is found as identical() finds it: objects by identity, and Type values, which
+ * each evaluation of a type literal or runtimeType makes anew, by the type they stand for.
+ */
+interface ExpandoEntries {
+  objects: WeakMap<object, Value>;
+  types: { type: DartTypeValue; value: Value }[];
+}
 
-define('Expando._get', (_runtime, receiver, [object]) =>
-  expandoEntries.get(receiver as DartObject)?.get(object as object)
-);
-define('Expando._set', (_runtime, receiver, [object, value]) => {
+const expandoEntries = new WeakMap<DartObject, ExpandoEntries>();
+
+function expandoEntriesOf(receiver: Value): ExpandoEntries {
   let entries = expandoEntries.get(receiver as DartObject);
   if (!entries) {
-    entries = new WeakMap();
+    entries = { objects: new WeakMap(), types: [] };
     expandoEntries.set(receiver as DartObject, entries);
   }
-  if (value === undefined) entries.delete(object as object);
-  else entries.set(object as object, value);
+  return entries;
+}
+
+define('Expando._get', (_runtime, receiver, [object]) => {
+  const entries = expandoEntriesOf(receiver);
+  if (object instanceof DartTypeValue) return entries.types.find((entry) => identical(entry.type, object))?.value;
+  return entries.objects.get(object as object);
+});
+define('Expando._set', (_runtime, receiver, [object, value]) => {
+  const entries = expandoEntriesOf(receiver);
+  if (object instanceof DartTypeValue) {
+    entries.types = entries.types.filter((entry) => !identical(entry.type, object));
+    if (value !== undefined) entries.types.push({ type: object, value });
+    return;
+  }
+  if (value === undefined) entries.objects.delete(object as object);
+  else entries.objects.set(object as object, value);
   return;
 });

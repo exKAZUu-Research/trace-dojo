@@ -497,6 +497,31 @@ test('learner callbacks retain a single call row for native and SDK operations',
   }
 });
 
+const traceLines = (program: string): number[] =>
+  traceProgram('dart', program, program).traceItems.map(({ line }) => line);
+
+test('an awaited call statement records only what the call records, as the same call without await does', () => {
+  const asyncProgram = `Future<void> walk(Turtle t) async {
+  t.forward();
+}
+Future<void> main() async {
+  var t = Turtle(1, 1);
+  await walk(t);
+  await (walk(t));
+  print('end');
+}`;
+  const syncProgram = `void walk(Turtle t) {
+  t.forward();
+}
+void main() {
+  var t = Turtle(1, 1);
+  walk(t);
+  walk(t);
+  print('end');
+}`;
+  expect(traceLines(asyncProgram)).toEqual(traceLines(syncProgram));
+});
+
 test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
   const program = `Future<int> walk(Turtle t, int n) async {
   for (var i = 0; i < n; i++) {

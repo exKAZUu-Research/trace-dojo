@@ -1376,6 +1376,8 @@ export abstract class ExpressionConverter {
         isAwait,
       };
     }
+    // Statements and collection elements alike: only a for-in loop may await, as the SDK's parser decides.
+    if (isAwait) syntaxError(node, 'await は、for-in の for にしか付けられません。');
     const initNodes = fieldsOf(node, 'init');
     let init: ForInitializer;
     if (initNodes.length === 1 && initNodes[0].type === 'local_variable_declaration') {
