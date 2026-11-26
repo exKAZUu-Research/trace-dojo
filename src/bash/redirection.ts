@@ -46,21 +46,21 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
   }
   const target = openRedirectTarget(shell, redirect);
   const file = target === 'close' ? target : target.file;
-  const movedFrom = target === 'close' ? undefined : target.movedFrom;
   if (redirect.fdVariable && file !== 'close') {
+    // The descriptor a `{name}` redirection allocates stays after the command, so it is not recorded.
     const fd = shell.fds.allocate();
     shell.fds.set(fd, file);
-    // A `{name}` redirection's changes stay after the command, its move's closed source as well.
-    if (movedFrom !== undefined) shell.fds.close(movedFrom);
     shell.assignVariable(redirect.fdVariable, String(fd));
-    return;
+  } else {
+    const sendsStandardError = target !== 'close' && target.withStandardError;
+    for (const fd of sendsStandardError ? [redirect.fd, 2] : [redirect.fd]) {
+      changed.push(fd);
+      if (file === 'close') shell.fds.close(fd);
+      else shell.fds.set(fd, file);
+    }
   }
-  const sendsStandardError = target !== 'close' && target.withStandardError;
-  for (const fd of sendsStandardError ? [redirect.fd, 2] : [redirect.fd]) {
-    changed.push(fd);
-    if (file === 'close') shell.fds.close(fd);
-    else shell.fds.set(fd, file);
-  }
+  // A move's source closes until the command's end, whatever its destination.
+  const movedFrom = target === 'close' ? undefined : target.movedFrom;
   if (movedFrom !== undefined) {
     changed.push(movedFrom);
     shell.fds.close(movedFrom);
