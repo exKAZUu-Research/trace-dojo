@@ -645,6 +645,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     ) {
       this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
     }
+    // Without a primary constructor, each constructor(...) calls the superclass's, as kotlinc requires.
+    if (spec.kind === 'constructorCall' && decl.primaryConstructor === undefined && this.hasSecondaryConstructors(decl))
+      this.error(
+        spec.row,
+        `主コンストラクタのないクラスでは、${parent.name} のコンストラクタを constructor(...) の : super(...) で呼んでください。`
+      );
     if (parent.isSealed) this.declareSealedCase(symbol, parent, spec, 'sealed class');
     symbol.superclass = type;
   }
