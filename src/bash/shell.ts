@@ -887,6 +887,8 @@ export class Shell implements ArithmeticHost {
       reaped = true;
       this.store.unsetNamed(name, false);
       this.store.unsetNamed(`${name}_PID`, false);
+      // Its output has no writer any more, which copies of the read end poll as ready.
+      readEnd?.input?.markWritten();
       // Bash closes the shell's two ends as it reaps the coprocess; copies the program made of them stay open.
       if (this.fds.get(readFd) === readEnd) this.fds.close(readFd);
       if (this.fds.get(writeFd) === writeEnd) this.fds.close(writeFd);
@@ -903,6 +905,7 @@ export class Shell implements ArithmeticHost {
       // What waited is a `while read` loop that ends the coprocess, which then ends with the loop's status.
       job.waiting = false;
       job.status = endStatus;
+      readEnd?.input?.markWritten();
     };
     // Bash moves both ends of both pipes to high descriptors and keeps the first and the last of the four.
     const pipeEnds: number[] = [];

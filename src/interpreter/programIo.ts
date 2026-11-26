@@ -160,10 +160,14 @@ export class TextReader {
     // A pipe whose end a read has found is closed by its writer, which a poll finds ready, as at a file's end.
     if (!this.throughPipe || this.endSeen) return true;
     const notYetWritten = this.writtenLate && this.position === 0;
-    // Time passes between polls, in which the writer writes.
+    // Time passes between polls, in which the writer writes, and a writer that has already run to its end closes the
+    // pipe: a pipe with nothing left polls as not ready once, then ready.
     this.writtenLate = false;
     const ready = !notYetWritten && this.position < this.text.length;
-    if (!ready) this.onEmptyPoll?.();
+    if (!ready) {
+      this.onEmptyPoll?.();
+      if (this.refill === undefined && !notYetWritten) this.endSeen = true;
+    }
     return ready;
   }
 
@@ -212,6 +216,7 @@ export class TextReader {
     while (this.refill?.()) {
       // Each refill adds a part until none remains.
     }
+    this.endSeen = true;
     const { text } = this;
     const rest = text.slice(this.position);
     this.position = text.length;
