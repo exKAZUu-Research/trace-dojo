@@ -792,7 +792,8 @@ export abstract class BodyCompiler extends DeclarationCompiler {
       holderCompiled,
       'getValue',
       [thisArgument, this.propertyReference(holderScope, decl.name, decl.row)],
-      decl.row
+      decl.row,
+      symbol.type
     );
     if (!symbol.type) symbol.type = getter.type;
     else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));

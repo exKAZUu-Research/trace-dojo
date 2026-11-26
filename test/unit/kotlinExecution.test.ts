@@ -6888,6 +6888,15 @@ fun main() { println(listOf(INF, MOD, A)) }`;
   });
 });
 
+test('delegates properties to maps by their names', () => {
+  const source = `class User(val map: MutableMap<String, Any?>) {
+    val name: String by map
+    var age: Int by map
+}
+fun main() { val u = User(mutableMapOf("name" to "Ann", "age" to 3)); u.age = 4; println("\${u.name} \${u.age} \${u.map}") }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: 'Ann 4 {name=Ann, age=4}\n' });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

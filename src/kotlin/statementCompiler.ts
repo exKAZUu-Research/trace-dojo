@@ -314,7 +314,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     const held = new Handoff<{ delegate: Value; value?: Value }>();
     const delegateCompiled: Compiled = { type: delegate.type, repr: delegate.repr, eval: () => held.get().delegate };
     const args = [this.nullArgument(row), this.propertyReference(scope, name, row)];
-    const getter = this.compileDelegateCall(scope, context, delegateCompiled, 'getValue', args, row);
+    const getter = this.compileDelegateCall(scope, context, delegateCompiled, 'getValue', args, row, declared);
     const type = declared ?? getter.type;
     if (declared && !isSubtype(getter.type, declared)) this.error(row, typeMismatchMessage(declared, getter.type));
     const evaluateGet = convertRepr(getter.eval, getter.repr, reprOf(this.core, type));
@@ -369,9 +369,11 @@ export abstract class StatementCompiler extends OperatorCompiler {
     delegate: Compiled,
     name: string,
     args: ArgumentSyntax[],
-    row: number
+    row: number,
+    expected?: KType
   ): Compiled {
-    return this.compileOperatorCall(scope, context, delegate, name, args, row, `by（${name}）`);
+    // A getValue gives the property's declared type, which may infer its type arguments, as a map's V1 does.
+    return this.compileOperatorCall(scope, context, delegate, name, args, row, `by（${name}）`, expected);
   }
 
   private compileDestructuring(scope: Scope, context: FunctionContext, statement: DestructuringDecl): Exec {

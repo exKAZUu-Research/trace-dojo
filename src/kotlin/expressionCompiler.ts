@@ -2042,9 +2042,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     name: string,
     args: ArgumentSyntax[],
     row: number,
-    shown: string
+    shown: string,
+    expected?: KType
   ): Compiled {
-    return this.resolveOperator(scope, context, receiver, name, args, row, shown).compiled;
+    return this.resolveOperator(scope, context, receiver, name, args, row, shown, expected).compiled;
   }
 
   /** Resolves an operator call, giving both the resolved function and its compiled call. */
@@ -2056,10 +2057,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     name: string,
     args: ArgumentSyntax[],
     row: number,
-    shown: string
+    shown: string,
+    expected?: KType
   ): { call: ResolvedCall; compiled: Compiled } {
     const levels = this.syntaxCandidateLevels(scope, receiver, name, row, shown, 'isOperator');
-    const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
+    const call = this.resolveCall(scope, context, levels, args, false, [], expected, receiver, row, shown);
     return {
       call,
       compiled: { ...this.finishCall(call, receiver, row), isCall: false },

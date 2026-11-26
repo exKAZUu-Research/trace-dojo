@@ -1530,6 +1530,20 @@ fun <K, V> Map<K, V>.getValue(key: K): V {
     return value as V
 }
 
+// A property delegated to a map, as \`val name: String by map\`, reads and writes its name's entry. The value's type is
+// the property's declared one, which the stdlib's V1 : V also takes.
+@Suppress("UNCHECKED_CAST")
+operator fun <V1> Map<in String, *>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): V1 =
+    (this as Map<String, Any?>).getValue(property.name) as V1
+
+operator fun <V> MutableMap<in String, in V>.setValue(
+    thisRef: Any?,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    put(property.name, value)
+}
+
 /** The map that \`withDefault\` gives, whose \`getValue\` gives the default for a missing key; its other reads are the map's. */
 private interface MapWithDefault<K, out V> : Map<K, V> {
     fun defaultOf(key: K): V
