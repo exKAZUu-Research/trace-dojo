@@ -63,12 +63,6 @@ export type NonValue =
 
 export type BindResult = BoundExpression | NonValue;
 
-/**
- * The types of a deconstruction's targets: a type, the targets of a nested tuple, or undefined for one that takes the
- * value's (`var x`, `_`).
- */
-export type DeconstructTargets = (Type | DeconstructTargets | undefined)[];
-
 export function isNonValue(result: BindResult): result is NonValue {
   return (
     result.kind === 'namespaceRef' ||
@@ -152,68 +146,6 @@ export abstract class MemberBinder extends CallBinder {
     if (natural) return this.convert(value, natural, node);
     this.reportWithoutNaturalType(value, node);
     return { kind: 'default', type: ERROR_TYPE, row: node.row };
-  }
-
-  /**
-   * Binds the value a deconstruction takes apart. A tuple literal's elements convert to the types of their targets
-   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own; undefined for a
-   * value without a type, as `var (a, b) = default` (CS8131), or a tuple literal that some element leaves without
-   * one, as `var (a, b) = (null, 1)`, whose targets the caller reports.
-   */
-  protected deconstructedValue(
-    node: Expression,
-    context: BindContext,
-    targets: DeconstructTargets = []
-  ): BoundExpression | undefined {
-    const value = this.bindValue(node, context);
-    if (value.kind === 'unbound' && value.node.kind === 'tuple') {
-      const type = this.mergedTupleType(value.node, targets, context);
-      if (!type) return undefined;
-      if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
-      return this.convert(value, type, node);
-    }
-    if (!this.isTypelessInDeconstruction(value)) return this.typedValue(value, node);
-    if (value.kind === 'unbound' && value.node.kind !== 'lambda' && !value.methodGroup)
-      this.reportWithoutNaturalType(value, node);
-    this.error(node, 'CS8131', '分解の代入には、右側の型を持つ式が必要です。');
-    return undefined;
-  }
-
-  /**
-   * The type a tuple literal takes from the targets it is deconstructed into, each element its target's type or else
-   * its own, or undefined when an element has neither: Roslyn's merged tuple type, which counts a lambda, `null`, or
-   * `default` as typeless even where it has a natural type.
-   */
-  private mergedTupleType(
-    node: Extract<Expression, { kind: 'tuple' }>,
-    targets: DeconstructTargets,
-    context: BindContext
-  ): Type | undefined {
-    let isTypeless = false;
-    const types = node.elements.map((element, index): Type => {
-      const target = targets[index];
-      if (target && !Array.isArray(target) && target.kind !== 'error') return target;
-      if (element.value.kind === 'tuple' && element.value.elements.length >= 2) {
-        const inner = this.mergedTupleType(element.value, Array.isArray(target) ? target : [], context);
-        isTypeless ||= !inner;
-        return inner ?? ERROR_TYPE;
-      }
-      const bound = this.quietly(() => this.bindValue(element.value, context));
-      if (bound && this.isTypelessInDeconstruction(bound)) {
-        isTypeless = true;
-        return ERROR_TYPE;
-      }
-      const typed = this.quietly(() => this.bindTypedValue(element.value, context));
-      if (typed && typed.type.kind !== 'error') return typed.type;
-      return this.bindTypedValue(element.value, context).type;
-    });
-    if (isTypeless) return undefined;
-    return types.some((type) => type.kind === 'error') ? ERROR_TYPE : this.tupleType(types);
-  }
-
-  private isTypelessInDeconstruction(value: BoundExpression): boolean {
-    if (value.kind !== 'unbound') return value.type.kind === 'null';
-    return value.node.kind === 'lambda' || value.methodGroup !== undefined || !this.naturalTypeOf(value);
   }
 
   /** The target of the `+=` or `-=` being bound, the one expression that may name an event outside its type. */
@@ -2124,29 +2056,8 @@ export abstract class MemberBinder extends CallBinder {
       this.isAccessible(method.access, symbol, context.fn.typeContext);
     const candidates = all.filter(isAccessible);
     const inaccessible = all.filter((candidate) => !isAccessible(candidate));
-    if (
-      inaccessible.length > 0 &&
-      !this.quietly(() => this.resolveCall(candidates, args, undefined, node.row, description))
-    ) {
-      // Roslyn reports an inaccessible constructor that the arguments fit over the accessible ones that they do not,
-      // and with none of either, the arguments' count.
-      const fitting = this.quietly(() => this.resolveCall(inaccessible, args, undefined, node.row, description));
-      if (fitting || candidates.length === 0) {
-        if (fitting)
-          this.error(
-            node,
-            'CS0122',
-            `'${displayMethod(fitting.candidate.method)}' はアクセスできない保護レベルになっています`
-          );
-        else
-          this.error(
-            node,
-            'CS1729',
-            `'${displayType(type)}' には、引数 ${args.length} を指定するコンストラクターは含まれていません`
-          );
-        return { kind: 'default', type: ERROR_TYPE, row: node.row };
-      }
-    }
+    if (this.reportInaccessibleConstructor(type, candidates, inaccessible, args, node, description))
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const resolved = this.resolveCall(candidates, args, undefined, node.row, description);
     // A creation whose arguments fit no constructor still has its type, which later errors then use, as in Roslyn.
     if (!resolved)
@@ -2173,6 +2084,38 @@ export abstract class MemberBinder extends CallBinder {
       type,
       row: node.row,
     };
+  }
+
+  /**
+   * Reports an inaccessible constructor that the arguments fit when no accessible one does (CS0122), and with none of
+   * either, the arguments' count (CS1729), as Roslyn's overload resolution does, telling whether it reported.
+   */
+  private reportInaccessibleConstructor(
+    type: NamedType,
+    candidates: MethodCandidate[],
+    inaccessible: MethodCandidate[],
+    args: ArgumentInfo[],
+    node: Position,
+    description: CallDescription
+  ): boolean {
+    if (inaccessible.length === 0) return false;
+    if (this.quietly(() => this.resolveCall(candidates, args, undefined, node.row, description))) return false;
+    const fitting = this.quietly(() => this.resolveCall(inaccessible, args, undefined, node.row, description));
+    if (fitting) {
+      this.error(
+        node,
+        'CS0122',
+        `'${displayMethod(fitting.candidate.method)}' はアクセスできない保護レベルになっています`
+      );
+      return true;
+    }
+    if (candidates.length > 0) return false;
+    this.error(
+      node,
+      'CS1729',
+      `'${displayType(type)}' には、引数 ${args.length} を指定するコンストラクターは含まれていません`
+    );
+    return true;
   }
 
   /**

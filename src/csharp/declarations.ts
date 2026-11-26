@@ -2198,21 +2198,7 @@ export class DeclarationBinder extends BinderBase {
     for (const method of symbol.methods) this.resolveOverride(method, symbol);
     for (const property of symbol.properties) this.resolvePropertyOverride(property, symbol);
     for (const method of symbol.methods) this.checkExplicitImplementation(symbol, method);
-    if (symbol.kind === 'class' && !symbol.isAbstract) {
-      for (const field of symbol.fields.filter((member) => member.virtualEventAccessors?.add.isAbstract))
-        this.error(
-          field.row,
-          'CS0513',
-          `'${displayTypeSymbol(symbol)}.${field.name}' は抽象ですが、非抽象型の '${displayTypeSymbol(symbol)}' に含まれています`
-        );
-      for (const missing of this.unimplementedAbstracts(symbol)) {
-        this.error(
-          symbol.row,
-          'CS0534',
-          `'${displayTypeSymbol(symbol)}' は継承抽象メンバー '${missing}' を実装しません`
-        );
-      }
-    }
+    if (symbol.kind === 'class' && !symbol.isAbstract) this.reportAbstractMembers(symbol);
     // The library's classes implement their interfaces in .NET, which their declarations here do not all spell out.
     const libraryBase = this.libraryBaseOf(symbol);
     const inherited = libraryBase ? this.allInterfaces(libraryBase) : [];
@@ -2441,6 +2427,19 @@ export class DeclarationBinder extends BinderBase {
       'CS0115',
       `'${displayTypeSymbol(symbol)}.${property.name}': オーバーライドする適切なメソッドが見つかりませんでした`
     );
+  }
+
+  /** Reports the abstract members of a class that is not abstract: its own events (CS0513), inherited ones (CS0534). */
+  private reportAbstractMembers(symbol: TypeSymbol): void {
+    for (const field of symbol.fields.filter((member) => member.virtualEventAccessors?.add.isAbstract))
+      this.error(
+        field.row,
+        'CS0513',
+        `'${displayTypeSymbol(symbol)}.${field.name}' は抽象ですが、非抽象型の '${displayTypeSymbol(symbol)}' に含まれています`
+      );
+    for (const missing of this.unimplementedAbstracts(symbol)) {
+      this.error(symbol.row, 'CS0534', `'${displayTypeSymbol(symbol)}' は継承抽象メンバー '${missing}' を実装しません`);
+    }
   }
 
   private accessorOf(property: PropertySymbol, kind: 'getter' | 'setter'): MethodSymbol | undefined {

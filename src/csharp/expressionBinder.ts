@@ -23,7 +23,7 @@ import {
 } from './interpolatedConversions';
 import { LambdaBinder, typeIdentityKey } from './lambdaBinder';
 import type { MethodCandidate } from './lookup';
-import { type BindResult, type DeconstructTargets, isNonValue, type NonValue } from './memberBinder';
+import { type BindResult, isNonValue, type NonValue } from './memberBinder';
 import { ASSIGNMENT_OPERATOR_NAMES, checkedOperatorName } from './natives';
 import { paramsCollectionOf } from './paramsCollections';
 import type { Space } from './patternSpace';
@@ -67,6 +67,12 @@ import type { CsObject } from './values';
 import { isFixedBufferAccess, isFixedVariable } from './variables';
 
 type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
+
+/**
+ * The types of a deconstruction's targets: a type, the targets of a nested tuple, or undefined for one that takes the
+ * value's (`var x`, `_`).
+ */
+export type DeconstructTargets = (Type | DeconstructTargets | undefined)[];
 
 /** Binds every kind of expression, and the target-typed ones once their targets are known. */
 export abstract class ExpressionBinder extends LambdaBinder {
@@ -1422,20 +1428,7 @@ export abstract class ExpressionBinder extends LambdaBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
-    // A collection with only a non-generic IEnumerable passes each element to its `Add` as it is, as Roslyn does.
-    const addsAsIs =
-      target.kind === 'named' &&
-      this.collectionElementType(target) === this.objectType &&
-      !this.isGenericEnumerable(target);
-    const elements = node.elements.map((element) => {
-      if (!element.spread)
-        return {
-          spread: false,
-          value: addsAsIs ? this.bindValue(element.value, context) : this.bindAs(element.value, elementType, context),
-        };
-      const value = this.bindValue(element.value, context);
-      return { spread: true, value };
-    });
+    const elements = this.bindCollectionElements(node, target, elementType, context);
     const row = node.row;
     const listType = namedType(this.library.typeNamed('System.Collections.Generic.List', 1), [elementType]);
     const createType =
@@ -1644,6 +1637,26 @@ export abstract class ExpressionBinder extends LambdaBinder {
       type: VOID_TYPE,
       row: position.row,
     };
+  }
+
+  /**
+   * The elements of a collection expression, each converted to the element type, except for a collection with only
+   * a non-generic IEnumerable, which passes each to its `Add` as it is, as Roslyn does.
+   */
+  private bindCollectionElements(
+    node: Extract<Expression, { kind: 'collection' }>,
+    target: Type,
+    elementType: Type,
+    context: BindContext
+  ): { spread: boolean; value: BoundExpression }[] {
+    const addsAsIs =
+      target.kind === 'named' &&
+      this.collectionElementType(target) === this.objectType &&
+      !this.isGenericEnumerable(target);
+    return node.elements.map((element) => {
+      if (element.spread || addsAsIs) return { spread: element.spread, value: this.bindValue(element.value, context) };
+      return { spread: false, value: this.bindAs(element.value, elementType, context) };
+    });
   }
 
   protected collectionElementValues(expression: Unbound): BoundExpression[] {
@@ -2718,6 +2731,68 @@ export abstract class ExpressionBinder extends LambdaBinder {
       type: valueType,
       row: node.row,
     };
+  }
+
+  /**
+   * Binds the value a deconstruction takes apart. A tuple literal's elements convert to the types of their targets
+   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own; undefined for a
+   * value without a type, as `var (a, b) = default` (CS8131), or a tuple literal that some element leaves without
+   * one, as `var (a, b) = (null, 1)`, whose targets the caller reports.
+   */
+  protected deconstructedValue(
+    node: Expression,
+    context: BindContext,
+    targets: DeconstructTargets = []
+  ): BoundExpression | undefined {
+    const value = this.bindValue(node, context);
+    if (value.kind === 'unbound' && value.node.kind === 'tuple') {
+      const type = this.mergedTupleType(value.node, targets, context);
+      if (!type) return undefined;
+      if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      return this.convert(value, type, node);
+    }
+    if (!this.isTypelessInDeconstruction(value)) return this.typedValue(value, node);
+    if (value.kind === 'unbound' && value.node.kind !== 'lambda' && !value.methodGroup)
+      this.reportWithoutNaturalType(value, node);
+    this.error(node, 'CS8131', '分解の代入には、右側の型を持つ式が必要です。');
+    return undefined;
+  }
+
+  /**
+   * The type a tuple literal takes from the targets it is deconstructed into, each element its target's type or else
+   * its own, or undefined when an element has neither: Roslyn's merged tuple type, which counts a lambda, `null`, or
+   * `default` as typeless even where it has a natural type.
+   */
+  private mergedTupleType(
+    node: Extract<Expression, { kind: 'tuple' }>,
+    targets: DeconstructTargets,
+    context: BindContext
+  ): Type | undefined {
+    let isTypeless = false;
+    const types = node.elements.map((element, index): Type => {
+      const target = targets[index];
+      if (target && !Array.isArray(target) && target.kind !== 'error') return target;
+      if (element.value.kind === 'tuple' && element.value.elements.length >= 2) {
+        const inner = this.mergedTupleType(element.value, Array.isArray(target) ? target : [], context);
+        isTypeless ||= !inner;
+        return inner ?? ERROR_TYPE;
+      }
+      const bound = this.quietly(() => this.bindValue(element.value, context));
+      if (bound && this.isTypelessInDeconstruction(bound)) {
+        isTypeless = true;
+        return ERROR_TYPE;
+      }
+      const typed = this.quietly(() => this.bindTypedValue(element.value, context));
+      if (typed && typed.type.kind !== 'error') return typed.type;
+      return this.bindTypedValue(element.value, context).type;
+    });
+    if (isTypeless) return undefined;
+    return types.some((type) => type.kind === 'error') ? ERROR_TYPE : this.tupleType(types);
+  }
+
+  private isTypelessInDeconstruction(value: BoundExpression): boolean {
+    if (value.kind !== 'unbound') return value.type.kind === 'null';
+    return value.node.kind === 'lambda' || value.methodGroup !== undefined || !this.naturalTypeOf(value);
   }
 
   /** The types of the targets of `(a, (b, c)) = value`, each undefined where a target takes the value's. */
