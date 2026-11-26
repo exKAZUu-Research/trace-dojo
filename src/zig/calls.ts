@@ -384,9 +384,10 @@ export abstract class CallCompiler extends ReflectionCompiler {
       params.push(generic ? ANYTYPE : (declared[index] as Type));
       if (generic) unknown.add(param.name);
       const type = params[index] === ANYTYPE ? undefined : params[index];
+      // An optional C pointer is no pointer to Zig, since a C pointer already holds null.
       const pointee = type?.kind === 'optional' ? type.child : type;
-      if (param.isNoalias && pointee && pointee.kind !== 'pointer')
-        this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
+      const isPointer = pointee?.kind === 'pointer' && !(type?.kind === 'optional' && pointee.size === 'c');
+      if (param.isNoalias && pointee && !isPointer) this.error(param, 'noalias は、ポインタの引数にだけ書けます。');
     }
     return { params, declared, unknown };
   }
