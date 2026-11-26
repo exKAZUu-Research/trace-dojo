@@ -13,18 +13,18 @@ import {
 import { fail, failNull, failOutOfRange, libraryType, refOf, unsupportedCall } from './support';
 
 /** DateTime and TimeSpan keep their ticks (100 ns) in their one field. */
-const TICKS_PER_MILLISECOND = 10_000n;
-const TICKS_PER_SECOND = 10_000_000n;
-const TICKS_PER_MINUTE = 600_000_000n;
-const TICKS_PER_HOUR = 36_000_000_000n;
-const TICKS_PER_DAY = 864_000_000_000n;
+export const TICKS_PER_MILLISECOND = 10_000n;
+export const TICKS_PER_SECOND = 10_000_000n;
+export const TICKS_PER_MINUTE = 600_000_000n;
+export const TICKS_PER_HOUR = 36_000_000_000n;
+export const TICKS_PER_DAY = 864_000_000_000n;
 const MAX_DATE_TICKS = 3_155_378_975_999_999_999n;
 /** The offset of the reference machine's time zone (Japan), where `DateTime.Now` is local time. */
 const LOCAL_OFFSET_TICKS = 9n * TICKS_PER_HOUR;
 /** The ticks of 1970-01-01, where JavaScript's clock starts. */
 const UNIX_EPOCH_TICKS = 621_355_968_000_000_000n;
 
-function ticksOf(value: Value): bigint {
+export function ticksOf(value: Value): bigint {
   return (unboxedTime(value) as CsStruct).fields[0] as bigint;
 }
 
@@ -34,7 +34,7 @@ function unboxedTime(value: Value): Value {
 }
 
 /** `Equals(object)` of DateTime and TimeSpan, true for the same type's value with the same ticks, boxed or not. */
-function timeEquals(receiver: Value, other: Value): boolean {
+export function timeEquals(receiver: Value, other: Value): boolean {
   const value = unboxedTime(other);
   return (
     value instanceof CsStruct &&
@@ -44,7 +44,7 @@ function timeEquals(receiver: Value, other: Value): boolean {
 }
 
 /** `CompareTo(object)` of DateTime and TimeSpan, which puts null first and rejects other types. */
-function timeCompare(receiver: Value, other: Value): number {
+export function timeCompare(receiver: Value, other: Value): number {
   if (other === undefined) return 1;
   const value = unboxedTime(other);
   const symbol = (receiver as CsStruct).type.symbol;
@@ -63,14 +63,14 @@ function dateTime(call: NativeCall, ticks: bigint): CsStruct {
   return new CsStruct(libraryType(call, 'System.DateTime'), [ticks]);
 }
 
-function timeSpan(call: NativeCall, ticks: bigint): CsStruct {
+export function timeSpan(call: NativeCall, ticks: bigint): CsStruct {
   if (ticks > 9_223_372_036_854_775_807n || ticks < -9_223_372_036_854_775_808n)
     fail('System.OverflowException', 'TimeSpan overflowed because the duration is too long.');
   return new CsStruct(libraryType(call, 'System.TimeSpan'), [ticks]);
 }
 
 /** The days from 0001-01-01 to a date of the proleptic Gregorian calendar. */
-function daysFromCivil(year: number, month: number, day: number): number {
+export function daysFromCivil(year: number, month: number, day: number): number {
   const y = month <= 2 ? year - 1 : year;
   const era = Math.floor(y / 400);
   const yearOfEra = y - era * 400;
@@ -80,7 +80,7 @@ function daysFromCivil(year: number, month: number, day: number): number {
   return era * 146_097 + dayOfEra - 719_468 + 719_162;
 }
 
-function civilFromDays(days: number): { year: number; month: number; day: number } {
+export function civilFromDays(days: number): { year: number; month: number; day: number } {
   const z = days + 719_468 - 719_162;
   const era = Math.floor(z / 146_097);
   const dayOfEra = z - era * 146_097;
@@ -98,7 +98,7 @@ function isLeapYear(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
-function daysInMonth(year: number, month: number): number {
+export function daysInMonth(year: number, month: number): number {
   return [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
 }
 
@@ -115,7 +115,7 @@ interface DateParts {
   dayOfYear: number;
 }
 
-function partsOf(ticks: bigint): DateParts {
+export function partsOf(ticks: bigint): DateParts {
   const days = Number(ticks / TICKS_PER_DAY);
   const rest = ticks % TICKS_PER_DAY;
   const { year, month, day } = civilFromDays(days);
@@ -134,7 +134,7 @@ function partsOf(ticks: bigint): DateParts {
 }
 
 // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
-function ticksFromParts(
+export function ticksFromParts(
   year: number,
   month: number,
   day: number,
@@ -172,7 +172,7 @@ function nowTicks(call: NativeCall): bigint {
 }
 
 /** Truncates a double number of a unit to ticks as .NET's `TimeSpan.From*` and `DateTime.Add*` do. */
-function ticksFromDouble(
+export function ticksFromDouble(
   value: number,
   unit: bigint,
   /** How .NET truncates: TimeSpan's factories the whole product, DateTime's Add* the whole units and fraction apart. */
@@ -523,7 +523,7 @@ function compareTicks(a: bigint, b: bigint): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function comparisons(type: string): Record<string, NativeMethod> {
+export function comparisons(type: string): Record<string, NativeMethod> {
   const operators: [string, (order: number) => boolean][] = [
     ['op_Equality', (order) => order === 0],
     ['op_Inequality', (order) => order !== 0],
@@ -653,7 +653,7 @@ function dateText(call: NativeCall, receiver: Value, format: Value, provider?: V
 }
 
 /** The white space that `DateTimeStyles` may allow, which `Parse` skips anyway. */
-const WHITE_SPACE_STYLES = 7;
+export const WHITE_SPACE_STYLES = 7;
 
 /** The string and the culture of a `DateTime.Parse` or `TryParse` call, by the parameters' names. */
 function dateParseArguments(call: NativeCall, args: Value[]): { text: string | undefined; culture: Culture } {
@@ -772,7 +772,7 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
  * throws the FormatException .NET throws for a string it cannot read, though .NET reads some such strings, such as
  * ja-JP's `5/6/2024`, a time alone, and English month names.
  */
-function parseDate(text: string, culture: Culture): bigint | undefined {
+export function parseDate(text: string, culture: Culture): bigint | undefined {
   if (culture.isInvariant) return parseDateParts(text.replace(/^(\s*)(\d{1,2})\/(\d{1,2})\/(\d{4})/, '$1$4/$2/$3'));
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`, with the weekday that the D and F formats write, which
   // must be the date's.

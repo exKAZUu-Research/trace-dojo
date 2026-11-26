@@ -1,4 +1,4 @@
-import { providerCulture } from '../cultures';
+import { type Culture, providerCulture } from '../cultures';
 import type { Evaluator } from '../evaluator';
 import { formatNumber, type NumericKind } from '../format';
 import { PendingException } from '../numeric';
@@ -6,6 +6,7 @@ import { enumText, environmentOf, flagsText, stringOf, unboxed } from '../object
 import type { Frame } from '../runtime';
 import { type NamedType, nullableUnderlying, type Type } from '../types';
 import { CsBox, type CsString, CsStruct, stringText, type Value } from '../values';
+import { formatDateOrTimeOnly } from './nativesDateOnly';
 import { formatDateTime, formatTimeSpan } from './nativesTime';
 
 const NUMERIC_KINDS: Record<string, NumericKind> = {
@@ -58,13 +59,34 @@ export function formatValue(
     const kind = special ? NUMERIC_KINDS[special] : undefined;
     if (kind) return formatNumber(inner as number, kind, format, culture, special ? (INTEGER_BITS[special] ?? 32) : 32);
     if (actualType.symbol.kind === 'enum' && format !== undefined) return formatEnum(actualType, inner, format);
-    if (inner instanceof CsStruct) {
-      const name = actualType.symbol.fullName;
-      if (name === 'System.DateTime') return formatDateTime(evaluator.runtime, inner, format, culture);
-      if (name === 'System.TimeSpan') return formatTimeSpan(evaluator.runtime, inner, format);
-    }
+    const time = inner instanceof CsStruct ? formatTime(evaluator, inner, format, culture) : undefined;
+    if (time !== undefined) return time;
   }
   return stringOf(evaluator, value, type, frame);
+}
+
+/** The text of a DateTime, TimeSpan, DateOnly, or TimeOnly in a format, undefined for another struct. */
+function formatTime(
+  evaluator: Evaluator,
+  value: CsStruct,
+  format: string | undefined,
+  culture: Culture
+): string | undefined {
+  switch (value.type.symbol.fullName) {
+    case 'System.DateTime': {
+      return formatDateTime(evaluator.runtime, value, format, culture);
+    }
+    case 'System.TimeSpan': {
+      return formatTimeSpan(evaluator.runtime, value, format);
+    }
+    case 'System.DateOnly':
+    case 'System.TimeOnly': {
+      return formatDateOrTimeOnly(evaluator.runtime, value, format, culture);
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 /**

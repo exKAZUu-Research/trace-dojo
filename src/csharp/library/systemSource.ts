@@ -1309,6 +1309,103 @@ namespace System {
     public static bool operator >(DateTime t1, DateTime t2);
     public static bool operator >=(DateTime t1, DateTime t2);
   }
+  public readonly struct DateOnly : IComparable, IComparable<DateOnly>, IEquatable<DateOnly>, IFormattable {
+    private readonly int _dayNumber;
+    public static DateOnly MinValue { get; }
+    public static DateOnly MaxValue { get; }
+    public DateOnly(int year, int month, int day);
+    public static DateOnly FromDayNumber(int dayNumber);
+    public static DateOnly FromDateTime(DateTime dateTime);
+    public int Year { get; }
+    public int Month { get; }
+    public int Day { get; }
+    public DayOfWeek DayOfWeek { get; }
+    public int DayOfYear { get; }
+    public int DayNumber { get; }
+    public DateOnly AddDays(int value);
+    public DateOnly AddMonths(int value);
+    public DateOnly AddYears(int value);
+    public DateTime ToDateTime(TimeOnly time);
+    public void Deconstruct(out int year, out int month, out int day);
+    public int CompareTo(DateOnly value);
+    public int CompareTo(object? value);
+    public bool Equals(DateOnly value);
+    public override bool Equals(object? value);
+    public override int GetHashCode();
+    public override string ToString();
+    public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
+    public string ToString(string? format, IFormatProvider? provider);
+    public string ToLongDateString();
+    public string ToShortDateString();
+    public static DateOnly Parse(string s);
+    public static DateOnly Parse(string s, IFormatProvider? provider);
+    public static DateOnly ParseExact(string s, string format);
+    public static DateOnly ParseExact(string s, string format, IFormatProvider? provider);
+    public static bool TryParse(string? s, out DateOnly result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out DateOnly result);
+    public static bool TryParseExact(string? s, string? format, out DateOnly result);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateOnly result);
+    public static bool operator ==(DateOnly left, DateOnly right);
+    public static bool operator !=(DateOnly left, DateOnly right);
+    public static bool operator <(DateOnly left, DateOnly right);
+    public static bool operator <=(DateOnly left, DateOnly right);
+    public static bool operator >(DateOnly left, DateOnly right);
+    public static bool operator >=(DateOnly left, DateOnly right);
+  }
+  public readonly struct TimeOnly : IComparable, IComparable<TimeOnly>, IEquatable<TimeOnly>, IFormattable {
+    private readonly long _ticks;
+    public static TimeOnly MinValue { get; }
+    public static TimeOnly MaxValue { get; }
+    public TimeOnly(int hour, int minute);
+    public TimeOnly(int hour, int minute, int second);
+    public TimeOnly(int hour, int minute, int second, int millisecond);
+    public TimeOnly(long ticks);
+    public static TimeOnly FromDateTime(DateTime dateTime);
+    public static TimeOnly FromTimeSpan(TimeSpan timeSpan);
+    public int Hour { get; }
+    public int Minute { get; }
+    public int Second { get; }
+    public int Millisecond { get; }
+    public long Ticks { get; }
+    public TimeOnly Add(TimeSpan value);
+    public TimeOnly Add(TimeSpan value, out int wrappedDays);
+    public TimeOnly AddHours(double value);
+    public TimeOnly AddHours(double value, out int wrappedDays);
+    public TimeOnly AddMinutes(double value);
+    public TimeOnly AddMinutes(double value, out int wrappedDays);
+    public bool IsBetween(TimeOnly start, TimeOnly end);
+    public TimeSpan ToTimeSpan();
+    public void Deconstruct(out int hour, out int minute);
+    public void Deconstruct(out int hour, out int minute, out int second);
+    public void Deconstruct(out int hour, out int minute, out int second, out int millisecond);
+    public int CompareTo(TimeOnly value);
+    public int CompareTo(object? value);
+    public bool Equals(TimeOnly value);
+    public override bool Equals(object? value);
+    public override int GetHashCode();
+    public override string ToString();
+    public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
+    public string ToString(string? format, IFormatProvider? provider);
+    public string ToLongTimeString();
+    public string ToShortTimeString();
+    public static TimeOnly Parse(string s);
+    public static TimeOnly Parse(string s, IFormatProvider? provider);
+    public static TimeOnly ParseExact(string s, string format);
+    public static TimeOnly ParseExact(string s, string format, IFormatProvider? provider);
+    public static bool TryParse(string? s, out TimeOnly result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out TimeOnly result);
+    public static bool TryParseExact(string? s, string? format, out TimeOnly result);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out TimeOnly result);
+    public static TimeSpan operator -(TimeOnly t1, TimeOnly t2);
+    public static bool operator ==(TimeOnly left, TimeOnly right);
+    public static bool operator !=(TimeOnly left, TimeOnly right);
+    public static bool operator <(TimeOnly left, TimeOnly right);
+    public static bool operator <=(TimeOnly left, TimeOnly right);
+    public static bool operator >(TimeOnly left, TimeOnly right);
+    public static bool operator >=(TimeOnly left, TimeOnly right);
+  }
 }
 
 namespace System.Diagnostics {
