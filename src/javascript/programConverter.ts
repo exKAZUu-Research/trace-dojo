@@ -545,7 +545,7 @@ export class ProgramConverter extends ExpressionConverter {
         isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
         key,
         value,
-        // The member's own row starts at its decorators.
+        // The name's row, since the member node starts at its decorators, which may be on earlier rows.
         row: rowOf(nameNode),
         decorators: this.decoratorsOf(member),
         isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
