@@ -9449,6 +9449,24 @@ Future<void> main() async {
   });
 });
 
+test('an async* stream a yield* forwarded counts as listened to, for a later listen or yield*', () => {
+  const twice = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
+Stream<int> twice() async* { final s = c(2); yield* s; try { yield* s; } catch (e) { print('inner \${e.runtimeType}'); } yield 99; }
+Future<void> main() async { await for (final v in twice()) print('v $v'); }`;
+  expect(executeProgram('dart', twice)).toMatchObject({
+    kind: 'executed',
+    stdout: 'v 2\nv 1\ninner StateError\nv 99\n',
+  });
+  const later = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
+Stream<int> forward(Stream<int> s) async* { yield* s; }
+Future<void> main() async {
+  final s = c(1);
+  await for (final v in forward(s)) print('f $v');
+  try { s.listen(null); } catch (e) { print('err \${e.runtimeType}'); }
+}`;
+  expect(executeProgram('dart', later)).toMatchObject({ kind: 'executed', stdout: 'f 1\nerr StateError\n' });
+});
+
 test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
   const source = `import 'dart:async';
 var ticks = 0;

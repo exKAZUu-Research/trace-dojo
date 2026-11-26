@@ -152,10 +152,17 @@ function perform(
     }
     default: {
       state.hasSuspended = true;
-      const cancelled =
-        outcome.kind === 'yieldEach'
-          ? call('_yieldEachAsyncStar', outcome.stream)
-          : call('_yieldAsyncStar', outcome.value);
+      let cancelled: Value;
+      try {
+        cancelled =
+          outcome.kind === 'yieldEach'
+            ? call('_yieldEachAsyncStar', outcome.stream)
+            : call('_yieldAsyncStar', outcome.value);
+      } catch (error) {
+        // A stream yield* cannot listen to, as one already listened to, throws at the yield*, inside the body.
+        if (error instanceof DartThrow) return { kind: 'throw', error };
+        throw error;
+      }
       // An `async*` body's `yield` ends it when the stream's listener has gone, and otherwise waits for the listener.
       if (cancelled === true) return { kind: 'next', value: LISTENER_CANCELLED };
       state.atYield = true;

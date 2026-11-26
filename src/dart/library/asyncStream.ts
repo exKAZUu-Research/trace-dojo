@@ -3253,11 +3253,12 @@ class _AsyncStarStreamController<T> {
     isAdding = true;
     final body = _streams[stream];
     if (body != null && !body.onListenReceived && !body.controller.hasListener) {
-      // The attached body starts as the subscription's listen would start it.
+      // The attached body's stream is listened to, as the subscription's listen would, which starts the body and
+      // makes a later listen of the stream fail; its events go to the root, so the listener receives none.
       body._root = _root ?? this;
       body._forwarder = this;
       _attached = body;
-      body.onListen();
+      body.controller.stream.listen(null);
       return false;
     }
     final whenDoneAdding = controller.addStream(stream, cancelOnError: false);
