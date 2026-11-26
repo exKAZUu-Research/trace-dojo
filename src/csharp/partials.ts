@@ -77,16 +77,9 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
       joined.push(member);
       continue;
     }
-    if (!isPartialType) {
-      reportOutsidePartialType(owner, member, report);
-      joined.push(member);
-      continue;
-    }
-    const key = memberKey(member);
-    const group = groups.get(key);
-    if (group) group.push(member);
+    if (isPartialType) addToGroup(groups, memberKey(member), member, joined);
     else {
-      groups.set(key, [member]);
+      reportOutsidePartialType(owner, member, report);
       joined.push(member);
     }
   }
@@ -94,7 +87,27 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
   const duplicates: LaterPartialMember[] = [];
   for (const group of laterGroups.values())
     joined[joined.indexOf(group[0])] = joinLaterGroup(owner, group, duplicates, report);
-  // Roslyn reports a repeated part as a repeated member once it has checked every partial member's parts.
+  reportRepeatedParts(owner, duplicates, report);
+  owner.members = joined;
+}
+
+/** Adds a member to the group of its key, keeping the first one of each group in the type's members. */
+function addToGroup<T extends MemberDeclaration>(
+  groups: Map<string, T[]>,
+  key: string,
+  member: T,
+  joined: MemberDeclaration[]
+): void {
+  const group = groups.get(key);
+  if (group) group.push(member);
+  else {
+    groups.set(key, [member]);
+    joined.push(member);
+  }
+}
+
+/** Roslyn reports a repeated part as a repeated member once it has checked every partial member's parts. */
+function reportRepeatedParts(owner: TypeDeclaration, duplicates: LaterPartialMember[], report: Report): void {
   for (const duplicate of duplicates) {
     if (duplicate.kind === 'constructor')
       report(
@@ -104,7 +117,6 @@ export function joinPartialMembers(owner: TypeDeclaration, report: Report): void
       );
     else report(duplicate, 'CS0102', `型 '${owner.name}' は既に '${laterName(duplicate)}' の定義を含んでいます`);
   }
-  owner.members = joined;
 }
 
 /** A partial event (a field-like definition and an implementation with accessors) or constructor, which C# 14 adds. */
@@ -145,12 +157,7 @@ function addLaterPartial(
   }
   const key =
     member.kind === 'constructor' ? `constructor(${parameterText(member.parameters)})` : `event ${laterName(member)}`;
-  const group = groups.get(key);
-  if (group) group.push(member);
-  else {
-    groups.set(key, [member]);
-    joined.push(member);
-  }
+  addToGroup(groups, key, member, joined);
 }
 
 /** The one member that a partial event's or constructor's declarations join into, reporting what is missing or repeated. */
