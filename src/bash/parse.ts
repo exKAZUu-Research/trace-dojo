@@ -27,7 +27,7 @@ export function parseBash(source: string, trace?: TraceOptions): Program {
   return parseText(source, new Set(trace?.atomicAnnotations.keys()));
 }
 
-function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
+function parseText(source: string, atomicRows: ReadonlySet<number>, readsApart = false): Program {
   const analyzed = analyzeBashSource(parser, source);
   return parseSource(
     parser,
@@ -39,6 +39,7 @@ function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
         reparse: reparseBackquoted,
         parseSubscriptParts: parseSubscriptWordParts,
         parseBracedExpansion: parseBracedParameterExpansion,
+        readsApart,
       });
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
@@ -367,7 +368,7 @@ function readDollarGroupPiece(raw: string, i: number, text: SourceText): { parts
 
 function parseSafeSubstitutionBody(inner: string): Statement[] | undefined {
   try {
-    return parseText(inner, new Set()).units.flat();
+    return parseText(inner, new Set(), true).units.flat();
   } catch (error) {
     if (error instanceof CompileError) {
       const msg = error.diagnostics[0]?.message ?? '';

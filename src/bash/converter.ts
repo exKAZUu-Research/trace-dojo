@@ -42,6 +42,16 @@ export interface ConverterHooks {
   readonly reparse: (text: string, row: number) => Statement[];
   readonly parseSubscriptParts?: (raw: string) => WordPart[];
   readonly parseBracedExpansion?: (slice: string, inDouble: boolean, row: number) => ParameterExpansion;
+  /** Whether the text is a `${ ...; }` body read apart from the lines after it, which may hold its here-documents. */
+  readonly readsApart?: boolean;
+}
+
+/** Whether a node lies in a `${ ...; }` or `${| ...; }`, whose body Bash reads apart from the lines after it. */
+function insideCurrentShellSubstitution(node: Node): boolean {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'command_substitution' && current.text.startsWith('${')) return true;
+  }
+  return false;
 }
 
 /** Converts the tree of a program into statements, consulting `capabilities.ts` for unsupported syntax. */
@@ -50,8 +60,11 @@ export class Converter {
   readonly claimedAtomicRows = new Set<number>();
   /** The body of each here-document, by the start of its redirection, which the grammar puts after the command. */
   private readonly heredocBodies = new Map<number, Node>();
-  /** The here-documents the end of the input ends, by the row of their redirection, with the delimiter they wanted. */
-  private readonly unterminatedHeredocs: { row: number; delimiter: string }[] = [];
+  /**
+   * The here-documents that end without their delimiter line, with the row of the redirection, the line Bash's warning
+   * names as where the body starts, the line it reports from, and the delimiter they wanted.
+   */
+  private readonly unterminatedHeredocs: { row: number; startLine: number; line: number; delimiter: string }[] = [];
 
   private get source(): string {
     return this.analyzed.grammarSource;
@@ -110,14 +123,34 @@ export class Converter {
    */
   private readWarnings(unitEndRows: readonly number[]): Map<number, string[]> {
     const warnings = new Map<number, string[]>();
-    const endLine = this.analyzed.originalSource.split('\n').length;
-    for (const { row, delimiter } of this.unterminatedHeredocs) {
+    for (const { row, startLine, line, delimiter } of this.unterminatedHeredocs) {
       const index = unitEndRows.findIndex((endRow) => endRow >= row);
       const unit = index === -1 ? unitEndRows.length - 1 : index;
-      const message = `line ${endLine}: warning: here-document at line ${row + 1} delimited by end-of-file (wanted \`${delimiter}')`;
+      const message = `line ${line}: warning: here-document at line ${startLine} delimited by end-of-file (wanted \`${delimiter}')`;
       warnings.set(unit, [...(warnings.get(unit) ?? []), message]);
     }
     return warnings;
+  }
+
+  /**
+   * Notes a here-document that ends without its delimiter line: Bash names the line it was on as it began reading the
+   * body (`startLine`), and reports from the line where the substitution closed it (`closedRow`) or else the last
+   * line of the input, which a final newline does not add to.
+   */
+  private noteUnterminatedHeredoc(
+    row: number,
+    startLine: number,
+    delimiter: string,
+    closedRow: number | undefined
+  ): void {
+    const source = this.analyzed.originalSource;
+    const lastLine = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
+    this.unterminatedHeredocs.push({
+      row,
+      startLine,
+      line: closedRow === undefined ? lastLine : closedRow + 1,
+      delimiter: delimiter.replaceAll(/['"\\]/g, ''),
+    });
   }
 
   /**
@@ -571,15 +604,28 @@ export class Converter {
     const body = this.heredocBodies.get(redirect.startIndex);
     const row = redirect.startPosition.row;
     const stripsTabs = redirect.childForFieldName('operator')?.type === '<<-';
-    // Only a `${ ...; }` is read apart from the lines after it, which may hold its here-document's body, as Bash 5.3
-    // reads with a warning; every other here-document has a body, which ends at the end of the input at the latest.
-    if (!body) return this.unsupported(redirect, 'outerHeredocBody');
+    const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
+    if (!body) {
+      // A `${ ...; }` is read apart from the lines after it, which may hold its here-document's body, as Bash 5.3
+      // reads with a warning; elsewhere, the input ends before the body's first line.
+      if (this.hooks.readsApart || insideCurrentShellSubstitution(redirect)) {
+        return this.unsupported(redirect, 'outerHeredocBody');
+      }
+      this.noteUnterminatedHeredoc(row, row + 1, delimiter, undefined);
+      return { parts: [], row, text: '' };
+    }
     const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
     const contentEnd = end?.startIndex ?? body.endIndex;
-    const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
-    // The grammar ends a body the end of the input ends with an empty `heredoc_end`.
-    if (!end || end.startIndex === end.endIndex)
-      this.unterminatedHeredocs.push({ row, delimiter: delimiter.replaceAll(/['"\\]/g, '') });
+    // The grammar ends a body the end of the input ends with an empty `heredoc_end`, and one in a substitution at the
+    // delimiter followed by the `)` closing it, both of which Bash warns of.
+    const source = this.analyzed.originalSource;
+    const endsAtDelimiterLine =
+      end !== undefined && end.startIndex < end.endIndex && /^[ \t]*(\n|$)/.test(source.slice(end.endIndex));
+    if (!endsAtDelimiterLine) {
+      const startLine = source[body.startIndex] === '\n' ? body.startPosition.row + 1 : body.startPosition.row;
+      const closedRow = end !== undefined && end.startIndex < end.endIndex ? end.startPosition.row : undefined;
+      this.noteUnterminatedHeredoc(row, startLine, delimiter, closedRow);
+    }
     const strip = (text: string, atLineStart: boolean): string =>
       stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
     if (/['"\\]/.test(delimiter)) {

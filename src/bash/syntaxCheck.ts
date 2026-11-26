@@ -569,7 +569,9 @@ class ShellTokenStream {
     private readonly text: SourceText,
     public position: number,
     /** Whether a `}` that starts a command ends the list, even with a word right after it, as in `"${ f; }"`. */
-    private readonly closesBrace = false
+    private readonly closesBrace = false,
+    /** Whether a `)` closes the list being read, as in `$( )`, which also ends a here-document on its delimiter line. */
+    private readonly closesParen = false
   ) {}
 
   readNext(context: WordContext): ShellToken {
@@ -615,7 +617,14 @@ class ShellTokenStream {
       for (;;) {
         const lineStart = this.position;
         line = this.consumeRawLine();
-        if (line === undefined || (stripLeadingTabs ? line.replace(/^\t+/, '') : line) === endMarker) break;
+        if (line === undefined) break;
+        const stripped = stripLeadingTabs ? line.replace(/^\t+/, '') : line;
+        if (stripped === endMarker) break;
+        // In a substitution, Bash ends the body at the delimiter followed by the `)` closing it, with a warning.
+        if (this.closesParen && stripped.startsWith(endMarker) && /^[ \t]*\)/.test(stripped.slice(endMarker.length))) {
+          this.position = lineStart + (line.length - stripped.length) + endMarker.length;
+          break;
+        }
         bodyEnd = lineStart + line.length;
       }
       if (expands) collectHeredocDescriptorVariables(this.text, bodyStart, bodyEnd);
@@ -817,7 +826,7 @@ class ShellGrammarValidator {
     private readonly insideSubstitution: boolean,
     closesBrace = false
   ) {
-    this.stream = new ShellTokenStream(text, start, closesBrace);
+    this.stream = new ShellTokenStream(text, start, closesBrace, insideSubstitution && !closesBrace);
     if (insideSubstitution) {
       const { on, uncertain } = text.readingExtglob;
       this.possibleExtglob.clear();
