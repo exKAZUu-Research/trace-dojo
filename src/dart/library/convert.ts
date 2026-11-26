@@ -448,6 +448,62 @@ final class JsonEncoder extends Converter<Object?, String> {
   String convert(Object? object) => _jsonEncode(object, _toEncodable, indent);
   Stream<String> bind(Stream<Object?> stream) =>
       Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _JsonEncoderSink(sink, _toEncodable, indent));
+  // As the SDK's, a fuse with a UTF-8 encoder is a JsonUtf8Encoder, which writes bytes in buffers of its own size.
+  Converter<Object?, T> fuse<T>(Converter<String, T> other) {
+    if (other is Utf8Encoder) return JsonUtf8Encoder(indent, _toEncodable) as Converter<Object?, T>;
+    return super.fuse<T>(other);
+  }
+}
+
+/**
+ * The SDK's JsonUtf8Encoder: the JSON text of a value as UTF-8 bytes, which a stream gives in chunks of the buffer
+ * size, as the SDK's stringifier flushes each full buffer. Modification: the text is encoded natively, then split, as
+ * a single conversion is, since the Dart stringifier would charge operations for each byte.
+ */
+final class JsonUtf8Encoder extends Converter<Object?, List<int>> {
+  static const int _defaultBufferSize = 256;
+  final String? _indent;
+  final Object? Function(dynamic)? _toEncodable;
+  final int _bufferSize;
+  JsonUtf8Encoder([String? indent, dynamic toEncodable(dynamic object)?, int? bufferSize])
+    : _indent = indent,
+      _toEncodable = toEncodable,
+      _bufferSize = bufferSize ?? _defaultBufferSize;
+  List<int> convert(Object? object) => utf8.encode(_jsonEncode(object, _toEncodable, _indent));
+  Stream<List<int>> bind(Stream<Object?> stream) => Stream<List<int>>.eventTransformed(
+    stream,
+    (EventSink<List<int>> sink) => _JsonUtf8EncoderSink(sink, this),
+  );
+}
+
+class _JsonUtf8EncoderSink implements EventSink<Object?> {
+  final EventSink<List<int>> _sink;
+  final JsonUtf8Encoder _encoder;
+  bool _isDone = false;
+  _JsonUtf8EncoderSink(this._sink, this._encoder);
+  void add(Object? object) {
+    if (_isDone) {
+      throw StateError("Only one call to add allowed");
+    }
+    _isDone = true;
+    final bytes = _encoder.convert(object);
+    final size = _encoder._bufferSize;
+    for (var start = 0; start < bytes.length; start += size) {
+      final end = start + size < bytes.length ? start + size : bytes.length;
+      _sink.add(bytes.sublist(start, end));
+    }
+    // The one value ends the output, as the SDK's sink closes it after its add.
+    _sink.close();
+  }
+  void addError(Object error, [StackTrace? stackTrace]) {
+    _sink.addError(error, stackTrace);
+  }
+  void close() {
+    if (!_isDone) {
+      _isDone = true;
+      _sink.close();
+    }
+  }
 }
 
 // From the SDK's lib/convert/json.dart (3.13.7): _JsonEncoderSink, _JsonStringifier, _JsonPrettyPrintMixin,

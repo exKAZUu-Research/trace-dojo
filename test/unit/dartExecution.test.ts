@@ -9691,6 +9691,20 @@ Future<void> main() async {
   });
 });
 
+test('json.fuse(utf8).encoder is a JsonUtf8Encoder, which streams its bytes in buffers', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  print(await Stream<Object?>.fromIterable([[1]]).transform(json.fuse(utf8).encoder).toList());
+  final big = List.generate(100, (i) => 'é$i');
+  final chunks = await Stream<Object?>.fromIterable([big]).transform(json.fuse(utf8).encoder).toList();
+  print([json.fuse(utf8).encoder.runtimeType, chunks.map((c) => c.length).toList()]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[91, 49, 93]]\n[JsonUtf8Encoder, [256, 256, 179]]\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
