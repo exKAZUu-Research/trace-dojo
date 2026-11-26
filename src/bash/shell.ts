@@ -118,18 +118,20 @@ function isLoneRead(condition: readonly Statement[]): boolean {
 }
 
 /**
- * Whether `statement` is the last command `body` runs, at the end of any `{ }` around it or of the function a last
- * command without arguments calls in `shell`.
+ * Whether `statement` is the last command `body` runs, at the end of any `{ }` or redirections around it or of the
+ * function a last command without arguments calls in `shell`; redirections run nothing after the commands they apply
+ * to.
  */
 function endsWith(shell: Shell, body: Statement, statement: Statement): boolean {
   if (body === statement) return true;
+  if (body.kind === 'redirected') return endsWith(shell, body.body, statement);
   if (body.kind === 'group') {
     return body.body.length > 0 && endsWith(shell, body.body.at(-1) as Statement, statement);
   }
-  if (body.kind !== 'command' || body.words.length !== 1 || body.redirects.length > 0) return false;
+  if (body.kind !== 'command' || body.words.length !== 1) return false;
   const name = body.words[0].text;
   const fn = shell.store.hasFunction(name) ? shell.store.getFunction(name) : undefined;
-  return fn !== undefined && fn.redirects.length === 0 && endsWith(shell, fn.body, statement);
+  return fn !== undefined && endsWith(shell, fn.body, statement);
 }
 
 function runsCompoundCommand(command: Statement): boolean {
