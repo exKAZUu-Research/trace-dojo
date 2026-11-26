@@ -223,7 +223,7 @@ defineNatives({
  * A `System.Type` object standing for a type, which only names it: a type of the program or the library, or the full
  * name of a LINQ iterator, which stands for .NET's internal classes.
  */
-function typeObject(call: NativeCall, type: Type | string): CsObject {
+export function typeObject(call: NativeCall, type: Type | string): CsObject {
   return typeObjectOf(call.frame.runtime, type);
 }
 
@@ -247,7 +247,7 @@ export function typeObjectOf(runtime: Runtime, type: Type | string): CsObject {
 
 const typeObjects = new WeakMap<object, Map<string, CsObject>>();
 
-function typeOf(receiver: Value): Type | string {
+export function typeOf(receiver: Value): Type | string {
   return (receiver as CsObject).native as Type | string;
 }
 
@@ -334,7 +334,7 @@ defineNatives({
 });
 
 /** The members of an enum in the order of their values as unsigned numbers, as `GetValues` and `GetNames` list them. */
-function enumMembers(type: NamedType): FieldSymbol[] {
+export function enumMembers(type: NamedType): FieldSymbol[] {
   return type.symbol.fields
     .filter((field) => field.isConst)
     .toSorted((a, b) => {
@@ -348,10 +348,19 @@ function unsignedValue(field: FieldSymbol): bigint {
 }
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
-function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boolean, throws: boolean): Value {
-  const type = call.typeArgs[0] as NamedType;
+export function parseEnum(
+  call: NativeCall,
+  text: string | undefined,
+  ignoreCase: boolean,
+  throws: boolean,
+  type = call.typeArgs[0] as NamedType
+): Value {
   if (text === undefined) {
     if (throws) failNull('value');
+    return undefined;
+  }
+  if (text.trim() === '') {
+    if (throws) fail('System.ArgumentException', 'Must specify valid information for parsing in the string.', 'value');
     return undefined;
   }
   // .NET reads a list of names as the bitwise OR of their members, with or without `[Flags]`.

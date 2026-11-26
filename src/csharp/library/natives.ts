@@ -1,5 +1,6 @@
 /** Loads the native implementations of the library, which register themselves. */
 import './nativesCore';
+import './nativesEnumType';
 import './nativesTime';
 import './nativesGlobalization';
 import './nativesIndex';

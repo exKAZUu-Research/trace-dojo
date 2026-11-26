@@ -66,6 +66,18 @@ namespace System {
     public static TEnum Parse<TEnum>(string value, bool ignoreCase) where TEnum : struct;
     public static bool TryParse<TEnum>(string? value, out TEnum result) where TEnum : struct;
     public static bool TryParse<TEnum>(string? value, bool ignoreCase, out TEnum result) where TEnum : struct;
+    public static string? GetName(Type enumType, object value);
+    public static string[] GetNames(Type enumType);
+    public static Array GetValues(Type enumType);
+    public static bool IsDefined(Type enumType, object value);
+    public static object Parse(Type enumType, string value);
+    public static object Parse(Type enumType, string value, bool ignoreCase);
+    public static bool TryParse(Type enumType, string? value, out object? result);
+    public static bool TryParse(Type enumType, string? value, bool ignoreCase, out object? result);
+    public static Type GetUnderlyingType(Type enumType);
+    public static object ToObject(Type enumType, object value);
+    public static object ToObject(Type enumType, int value);
+    public static object ToObject(Type enumType, long value);
   }
   public interface IComparable { int CompareTo(object? obj); }
   public interface IComparable<in T> { int CompareTo(T? other); }
