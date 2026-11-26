@@ -146,8 +146,10 @@ export class Shell implements ArithmeticHost {
    * or nothing checks, as Bash runs no `ERR` trap and no `set -e` in the forked process for it.
    */
   private elementCommand: Statement | undefined;
-  /** Whether the next function call is this pipeline element's own, which Bash counts as a `BASH_SUBSHELL` level. */
-  private deepensAtFunctionCall = false;
+  /** Whether a function this pipeline element's own command calls counts as one more `BASH_SUBSHELL` level. */
+  private elementCallDeepens = false;
+  /** Whether this subshell runs a pipeline started with `&`, each of whose elements Bash counts one level deep. */
+  private runsAsyncPipeline = false;
   /**
    * Whether a compound command's redirection or a pipeline gave the commands running now their standard input, which
    * a command started with `&` then reads instead of `/dev/null`, as Bash does without job control.
@@ -1160,6 +1162,16 @@ export class Shell implements ArithmeticHost {
     return this.store.isAssociativeName(resolveTargetName(this, name));
   }
 
+  /**
+   * Counts the function a pipeline element's own command calls as one more `BASH_SUBSHELL` level, as Bash does; a
+   * function called while expanding its words, as `${ f; }` does, is not the element's own.
+   */
+  private deepenForElementCall(statement: Statement): void {
+    if (!this.elementCallDeepens || statement !== this.elementCommand) return;
+    this.elementCallDeepens = false;
+    this.store.deepenSubshellLevel();
+  }
+
   /** Runs a function or a builtin by name with arguments that need no expansion, as a builtin's callback does. */
   invokeCommand(name: string, args: string[], { skipFunctions = false } = {}): number {
     const hasFunction = !skipFunctions && this.store.hasFunction(name);
@@ -1245,6 +1257,7 @@ export class Shell implements ArithmeticHost {
         if (this.options.xtrace) traceWords(this, [name, ...args]);
         let code = 127;
         if (kind === 'function') {
+          this.deepenForElementCall(statement);
           code = this.callFunction(this.store.getFunction(name) as FunctionDefinition, args, statement.row);
         } else if (kind === 'builtin') {
           code = this.runBuiltin(name, args);
@@ -1289,7 +1302,10 @@ export class Shell implements ArithmeticHost {
     }
     const fn = this.store.getFunction(statement.name) as FunctionDefinition;
     const status = this.withTemporaryScope(statement.assignments, () =>
-      this.withRedirects(statement.redirects, () => this.callFunction(fn, args, statement.row))
+      this.withRedirects(statement.redirects, () => {
+        this.deepenForElementCall(statement);
+        return this.callFunction(fn, args, statement.row);
+      })
     );
     this.store.lastArgument = args.at(-1) ?? statement.name;
     return status;
@@ -1396,10 +1412,6 @@ export class Shell implements ArithmeticHost {
   callFunction(fn: FunctionDefinition, args: string[], callRow: number): number {
     this.runtime.checkCallDepth();
     rejectControlVariable(this.store.readScalar('FUNCNEST'), 'FUNCNEST', '関数の入れ子の上限');
-    if (this.deepensAtFunctionCall) {
-      this.deepensAtFunctionCall = false;
-      this.store.deepenSubshellLevel();
-    }
     const reportedRow = this.currentRow;
     const scopeIndex = this.store.pushFunctionScope(fn.name, reportedRow + 1, args);
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, store: this.store, scopeIndex };
@@ -1516,16 +1528,19 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Runs a pipeline element or a command started with `&` in a subshell. Bash counts it in `BASH_SUBSHELL` except a
-   * pipeline's simple command, which runs in the forked process itself unless it calls a function, `( )`, which
-   * merges with the fork, and a pipeline started with `&`, whose elements fork from the shell themselves.
+   * pipeline's simple command, which runs in the forked process itself unless it calls a function, and `( )`, which
+   * merges with the fork; a pipeline started with `&` adds no level itself, but each of its elements counts one.
    */
   private runElementSubshell(command: Statement, fds: DescriptorTable, background = false): number {
     const simple = command.kind === 'command' || command.kind === 'declaration';
-    const sameLevel = command.kind === 'subshell' || command.kind === 'pipeline' || (simple && !background);
+    const asyncElement = this.runsAsyncPipeline && !background;
+    const sameLevel =
+      command.kind === 'subshell' || command.kind === 'pipeline' || (simple && !background && !asyncElement);
     const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1, background);
     if (simple) child.shell.elementCommand = command;
     // Whether the command calls a function is known only once its name is expanded.
-    if (simple && !background) child.shell.deepensAtFunctionCall = true;
+    child.shell.elementCallDeepens = simple && !background && !asyncElement;
+    child.shell.runsAsyncPipeline = background && command.kind === 'pipeline';
     // A pipeline element after the first reads the pipe, which a command it starts with `&` reads as well.
     if (!background && fds.get(0) !== this.fds.get(0)) child.shell.standardInputRedirected = true;
     child.shell.functionDefinitionRow = this.functionDefinitionRow;
