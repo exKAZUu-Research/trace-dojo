@@ -463,9 +463,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       return param;
     });
     assign?.(params);
-    for (const [index, decl] of decls.entries()) {
-      params[index].bounds = decl.bounds.map((bound) => this.resolveType(scope, bound));
-    }
+    // A bound may mention its own parameter, as `T : Enum<T>`, whose bounds the check needs, so it checks after all.
+    this.checkTypeBoundsAfter(() => {
+      for (const [index, decl] of decls.entries()) {
+        params[index].bounds = decl.bounds.map((bound) => this.resolveType(scope, bound));
+      }
+    });
     return params;
   }
 
