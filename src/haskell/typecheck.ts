@@ -678,13 +678,6 @@ function derivingStrategy(
   return 'stock';
 }
 
-/**
- * The strategy GHC's user guide gives a deriving clause that names none ("Default deriving strategy"): a stock class
- * is derived by stock, except that for a newtype Eq, Ord, Ix and Bounded always take the newtype strategy, and
- * Functor, Foldable and Enum do under GeneralizedNewtypeDeriving when that derivation succeeds (the newtype's field
- * eta-reduces); another class by anyclass under DeriveAnyClass, else by newtype for a newtype under
- * GeneralizedNewtypeDeriving.
- */
 /** Whether a newtype's field reduces to a type the class's instance can be reused at: GHC's `eta_ok`. */
 function newtypeDerivable(decl: RDataDecl, cls: ClassEntity): boolean {
   if (cls.packed || decl.instanceArgs) return false;
@@ -693,6 +686,13 @@ function newtypeDerivable(decl: RDataDecl, cls: ClassEntity): boolean {
   return dropped <= kinds.length && etaReduce(decl.cons[0].con.fieldTypes[0], kinds.length, dropped) !== undefined;
 }
 
+/**
+ * The strategy GHC's user guide gives a deriving clause that names none ("Default deriving strategy"): a stock class
+ * is derived by stock, except that for a newtype Eq, Ord, Ix and Bounded always take the newtype strategy, and
+ * Functor, Foldable and Enum do under GeneralizedNewtypeDeriving when that derivation succeeds (the newtype's field
+ * eta-reduces); another class by anyclass under DeriveAnyClass, else by newtype for a newtype under
+ * GeneralizedNewtypeDeriving.
+ */
 function defaultStrategy(
   cls: string,
   stock: boolean,
