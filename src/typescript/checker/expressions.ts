@@ -122,7 +122,12 @@ export class ExpressionChecker {
     [
       'call_expression',
       (node, contextual) =>
-        this.c.members.chainLink(node, () => this.uniqueSymbols.typeOfCall(node, this.calls.call(node, contextual))),
+        this.c.members.chainLink(node, () =>
+          this.c.members.rejectLibraryBuffer(
+            node,
+            this.uniqueSymbols.typeOfCall(node, this.calls.call(node, contextual))
+          )
+        ),
     ],
     ['new_expression', (node, contextual) => this.calls.newExpression(node, contextual)],
     ['assignment_expression', (node) => this.c.assignments.assignment(node)],

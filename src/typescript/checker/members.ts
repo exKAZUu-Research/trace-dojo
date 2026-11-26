@@ -19,6 +19,7 @@ import { spellingSuggestion } from './spelling';
 import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
+  anyType,
   errorType,
   intersectionOf,
   isAnyLike,
@@ -400,11 +401,6 @@ export class MemberChecker {
       );
       return;
     }
-    // The library declares `Buffer` only as far as a program can use one without running into this rejection.
-    if (this.isLibraryBuffer(node, apparent)) {
-      this.c.error(node, unsupportedMessage('エンコーディングを指定しない readFileSync（Buffer）'));
-      return;
-    }
     // TypeScript names the union a generic type's apparent type is, as `string | number` for `T extends string | number`.
     const shown = apparent.kind === 'union' ? apparent : type;
     const suggestion = this.suggestProperty(shown, name);
@@ -412,6 +408,16 @@ export class MemberChecker {
       node,
       `プロパティ '${name}' は型 '${this.c.print(shown)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
     );
+  }
+
+  /**
+   * A call that gives a library `Buffer`, as `readFileSync` without an encoding does, which this interpreter does not
+   * provide: its value is any, so that no use of it reports more than the call does.
+   */
+  rejectLibraryBuffer(call: TreeNode, type: Type): Type {
+    if (!this.isLibraryBuffer(call, type)) return type;
+    this.c.error(call, unsupportedMessage('エンコーディングを指定しない readFileSync（Buffer）'));
+    return anyType;
   }
 
   private isLibraryBuffer(node: TreeNode, type: Type): boolean {
