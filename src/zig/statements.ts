@@ -906,10 +906,6 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  /**
-   * The value `=` stores into a `comptime var`, which Zig analyzes where the assignment stands, so it must be known at
-   * compile time: a call to a runtime function gives a runtime value even when its arguments are known.
-   */
   /** A `comptime` block inside a runtime branch still stores under the branch's condition, which Zig refuses. */
   private refuseComptimeStoreUnderRuntimeCondition(variable: LocalBinding, span: Span): void {
     const cell = variable.comptimeCell;
@@ -939,6 +935,10 @@ export abstract class StatementCompiler extends CallCompiler {
     return { exec: () => {}, noreturn: false };
   }
 
+  /**
+   * The value `=` stores into a `comptime var`, which Zig analyzes where the assignment stands, so it must be known at
+   * compile time: a call to a runtime function gives a runtime value even when its arguments are known.
+   */
   private comptimeStoredValue(target: Expression, value: Expression, variable: LocalBinding): TExpr {
     const { type } = this.compile(target);
     const stored = this.coerce(this.compile(value, type), type, value);
@@ -3367,27 +3367,58 @@ export abstract class StatementCompiler extends CallCompiler {
 function reachesAnonymousLiteral(expression: Expression): boolean {
   const value = unwrapParens(expression);
   if (value.kind === 'arrayInit') return !value.type;
-  if (value.kind === 'if')
-    return (
-      reachesAnonymousLiteral(value.consequent) || (value.otherwise ? reachesAnonymousLiteral(value.otherwise) : false)
-    );
-  if (value.kind === 'block' && value.label) return breaksWithLiteral(value.statements, value.label.name);
-  return false;
+  if (value.kind === 'block' && value.label) return breaksWithLiteral(value, value.label.name);
+  return resultOperands(value).some(reachesAnonymousLiteral);
 }
 
-/** Whether a statement among these breaks out of the block labeled `label` with an anonymous literal. */
-function breaksWithLiteral(statements: readonly Statement[], label: string): boolean {
-  const reaches = (expression: Expression): boolean => {
-    if (expression.kind === 'break')
+/** The operands that receive an expression's result location, as Zig forwards it. */
+function resultOperands(expression: Expression): Expression[] {
+  switch (expression.kind) {
+    case 'if': {
+      return expression.otherwise ? [expression.consequent, expression.otherwise] : [expression.consequent];
+    }
+    case 'switch': {
+      return expression.cases.map((each) => each.body);
+    }
+    case 'catch': {
+      return [expression.handler];
+    }
+    case 'binary': {
+      return expression.operator === 'orelse' ? [expression.right] : [];
+    }
+    case 'while':
+    case 'for': {
+      return expression.otherwise ? [expression.otherwise] : [];
+    }
+    default: {
+      return [];
+    }
+  }
+}
+
+/** Whether code inside an expression breaks out of the block labeled `label` with an anonymous literal. */
+function breaksWithLiteral(expression: Expression, label: string): boolean {
+  switch (expression.kind) {
+    case 'break': {
       return (
         expression.label?.name === label && expression.value !== undefined && reachesAnonymousLiteral(expression.value)
       );
-    if (expression.kind === 'block') return breaksWithLiteral(expression.statements, label);
-    if (expression.kind === 'if')
-      return reaches(expression.consequent) || (expression.otherwise ? reaches(expression.otherwise) : false);
-    return false;
-  };
-  return statements.some((statement) => statement.kind === 'expression' && reaches(statement.expression));
+    }
+    case 'block': {
+      return expression.statements.some(
+        (statement) => statement.kind === 'expression' && breaksWithLiteral(statement.expression, label)
+      );
+    }
+    case 'while':
+    case 'for': {
+      return [expression.body, ...(expression.otherwise ? [expression.otherwise] : [])].some((part) =>
+        breaksWithLiteral(part, label)
+      );
+    }
+    default: {
+      return resultOperands(expression).some((part) => breaksWithLiteral(part, label));
+    }
+  }
 }
 
 function unwrapParens(expression: Expression): Expression {
