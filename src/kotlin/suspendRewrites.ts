@@ -109,11 +109,16 @@ export function whenAsIf(expression: Extract<Expression, { kind: 'when' }>): Sta
       chain = entry.body;
       continue;
     }
-    const [first, ...rest] = entry.conditions.map(test);
-    let condition: Expression = first;
-    for (const right of rest) condition = { kind: 'binary', row: entry.row, operator: '||', left: condition, right };
+    // A branch is taken when any of its conditions holds and its guard does; `else if g` has the guard alone.
+    const tests = entry.conditions.map(test);
+    let condition: Expression | undefined = tests[0];
+    for (const right of tests.slice(1))
+      condition = { kind: 'binary', row: entry.row, operator: '||', left: condition as Expression, right };
     if (entry.guard)
-      condition = { kind: 'binary', row: entry.row, operator: '&&', left: condition, right: entry.guard };
+      condition = condition
+        ? { kind: 'binary', row: entry.row, operator: '&&', left: condition, right: entry.guard }
+        : entry.guard;
+    if (!condition) throw new Error('A when branch without a condition or guard');
     chain = {
       row: entry.row,
       endRow: entry.body.endRow,
