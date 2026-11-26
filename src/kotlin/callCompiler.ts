@@ -1366,9 +1366,19 @@ export abstract class CallCompiler extends CompilerCore {
       context,
       symbol.localEnv ?? (candidate.kind === 'constructor' ? symbol.owner?.localEnv : undefined)
     );
-    const reifiedTypes = symbol.typeParameters
-      .filter((param) => param.isReified)
-      .map((param) => substitute({ kind: 'param', param, nullable: false }, substitution));
+    const reifiedParams = symbol.typeParameters.filter((param) => param.isReified);
+    const reifiedTypes = reifiedParams.map((param) =>
+      substitute({ kind: 'param', param, nullable: false }, substitution)
+    );
+    // A reified type argument must be known when the program runs, which a type parameter that is not reified is not.
+    for (const [index, type] of reifiedTypes.entries()) {
+      const actual = resolved(type);
+      if (actual.kind === 'param' && !actual.param.isReified)
+        this.error(
+          row,
+          `型引数 ${actual.param.name} は reified でないので、reified な型引数 ${reifiedParams[index].name} には渡せません。`
+        );
+    }
     const suspendVersion = this.checkSuspendCall(context, symbol, compiledArgs, row);
     // A virtual call dispatches on the instance's class; `super.f()` calls the function it resolved to itself.
     const callOf =
