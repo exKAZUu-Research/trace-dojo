@@ -878,6 +878,8 @@ export class Shell implements ArithmeticHost {
           child.shell.lingeringSubstitutions.length > 0;
       }
       output = capture.read();
+      // A coprocess that ran to its end has closed its output, which a poll then finds ready once it is drained.
+      if (!job.waiting) readEnd?.input?.markWritten();
     };
     job.finish = run;
     // Bash reaps a coprocess once, on whichever path gets there first, and unsets its names only then.
