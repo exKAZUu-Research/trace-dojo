@@ -33,7 +33,8 @@ fun File.readLines(): List<String> {
     return lines
 }
 
-inline fun File.forEachLine(action: (line: String) -> Unit) {
+// Not inline, as the stdlib's is not, so that its lambda cannot return from the caller.
+fun File.forEachLine(action: (line: String) -> Unit) {
     for (line in readLines()) action(line)
 }
 
@@ -47,7 +48,7 @@ fun File.readLines(charset: java.nio.charset.Charset): List<String> = readLines(
 fun File.bufferedReader(charset: java.nio.charset.Charset): BufferedReader = bufferedReader()
 fun File.bufferedWriter(charset: java.nio.charset.Charset): BufferedWriter = bufferedWriter()
 fun File.printWriter(charset: java.nio.charset.Charset): PrintWriter = printWriter()
-inline fun File.forEachLine(charset: java.nio.charset.Charset, action: (line: String) -> Unit) = forEachLine(action)
+fun File.forEachLine(charset: java.nio.charset.Charset, action: (line: String) -> Unit) = forEachLine(action)
 inline fun <T> File.useLines(charset: java.nio.charset.Charset, block: (Sequence<String>) -> T): T = useLines(block)
 
 // A reader's lines and text, as Kotlin's extensions of java.io.Reader and BufferedReader read them.
