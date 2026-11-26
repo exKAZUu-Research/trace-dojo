@@ -23,8 +23,10 @@ export class AsyncTask {
   private endedBelow = 0;
   private readonly runningBelow = new Set<AsyncTask>();
 
-  constructor(private readonly tracker: { statementMark(): number }) {
+  constructor(private readonly tracker: { statementMark(): number; recorder?: unknown }) {
     this.parent = running.get(tracker);
+    // Only a traced run counts what the tasks a statement started recorded, so another run keeps no tree of them.
+    if (tracker.recorder === undefined) return;
     this.parent?.spawned.push(this);
     this.parent?.runningBelow.add(this);
   }
@@ -44,7 +46,7 @@ export class AsyncTask {
       this.enteredAt = undefined;
       if (outer) running.set(this.tracker, outer);
       else running.delete(this.tracker);
-      if (this.isDone) this.foldIntoParent();
+      if (this.isDone && this.tracker.recorder !== undefined) this.foldIntoParent();
     }
   }
 
