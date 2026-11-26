@@ -4,7 +4,7 @@
  */
 const SET_OPTION_TABLE = [
   ['allexport', 'a', false, false],
-  ['braceexpand', 'B', true, true],
+  ['braceexpand', 'B', true, false],
   ['emacs', undefined, false, false],
   ['errexit', 'e', false, true],
   ['errtrace', 'E', false, true],
