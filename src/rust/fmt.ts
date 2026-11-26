@@ -65,7 +65,6 @@ export interface FormatHooks {
 }
 
 /** A lock's `poisoned` field in `Debug`: no thread here panics while it holds a lock. */
-const NOT_POISONED: DebugPart = (_inner, sink) => emit('false', sink);
 
 export class Formatter {
   constructor(private readonly hooks: FormatHooks) {}
@@ -194,6 +193,9 @@ export class Formatter {
           }
           case 'SendError': {
             return padString('sending on a closed channel', spec, write);
+          }
+          case 'PoisonError': {
+            return padString('poisoned lock: another task failed inside', spec, write);
           }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
@@ -410,7 +412,7 @@ export class Formatter {
           def.builtin,
           [
             ['data', data],
-            ['poisoned', NOT_POISONED],
+            ['poisoned', (_inner, sink) => emit(String(cell.poisoned), sink)],
           ],
           indent,
           true,
@@ -439,6 +441,7 @@ export class Formatter {
       }
       case 'Sender':
       case 'SendError':
+      case 'PoisonError':
       case 'Receiver':
       case 'JoinHandle': {
         return emit(`${def.builtin} { .. }`, write);

@@ -346,6 +346,8 @@ export class WeakRef {
 export class CellBox {
   /** The shared borrows in use, or -1 while a mutable one is. */
   borrows = 0;
+  /** Whether a thread panicked while it held the lock for writing, as a `Mutex` or an `RwLock` records. */
+  poisoned = false;
   constructor(public value: Value) {}
 }
 
@@ -354,13 +356,16 @@ export class BorrowGuard {
   released = false;
   constructor(
     readonly cell: CellBox,
-    readonly mutable: boolean
+    readonly mutable: boolean,
+    /** For a lock's guard, whether a panic is unwinding the thread, which poisons a lock held for writing. */
+    readonly unwinding?: () => boolean
   ) {}
 
   /** Ends the borrow, once. */
   release(): void {
     if (this.released) return;
     this.released = true;
+    if (this.mutable && this.unwinding?.()) this.cell.poisoned = true;
     if (this.mutable) this.cell.borrows = 0;
     else this.cell.borrows--;
   }

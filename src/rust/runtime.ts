@@ -263,6 +263,8 @@ export class Runtime implements TracedRuntime<Frame> {
    * borrows as its receiver (`v.into_iter().next()`), which need dropping.
    */
   readonly liveGuards: { release(): void }[] = [];
+  /** Whether a panic is unwinding the running thread, dropping its values on the way out. */
+  unwinding = false;
 
   /**
    * Ends the borrows of the guards made since `mark` that no variable of the frame holds (and that `kept` is not),

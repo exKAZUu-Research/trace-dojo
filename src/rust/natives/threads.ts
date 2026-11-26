@@ -46,6 +46,7 @@ export class Scheduler {
       thread.state = 'done';
     } catch (error) {
       if (!(error instanceof RustPanic)) throw error;
+      ctx.runtime.unwinding = false;
       thread.state = 'panicked';
       thread.result = error.message;
       ctx.runtime.write('stderr', this.panicText(error, thread.id));
@@ -105,9 +106,19 @@ function lock(ctx: NativeContext, target: CellBox, mutable: boolean): Value {
     panic(ctx, 'デッドロックしました（ロックを持っているスレッドが、このスレッドを待っています）。');
   }
   target.borrows = mutable ? -1 : target.borrows + 1;
-  const guard = new BorrowGuard(target, mutable);
-  ctx.runtime.liveGuards.push(guard);
-  return ok(ctx, guard);
+  const { runtime } = ctx;
+  const guard = new BorrowGuard(target, mutable, () => runtime.unwinding);
+  runtime.liveGuards.push(guard);
+  return target.poisoned ? err(ctx, poisonError(ctx, guard)) : ok(ctx, guard);
+}
+
+/** A `LockResult` of what a lock holds: `Err` of it in a `PoisonError` once a thread panicked holding the lock. */
+function lockResult(ctx: NativeContext, target: CellBox, value: Value): Value {
+  return target.poisoned ? err(ctx, poisonError(ctx, value)) : ok(ctx, value);
+}
+
+function poisonError(ctx: NativeContext, inner: Value): Value {
+  return new StructValue(syncDef(ctx, 'PoisonError'), [inner]);
 }
 
 /**
@@ -121,7 +132,11 @@ function waitOnCondvar(ctx: NativeContext, held: Value, waiting: (place: Value) 
   for (;;) {
     if (!scheduler(ctx).runAll(ctx))
       panic(ctx, 'デッドロックしました（通知するスレッドがないまま、Condvar を待っています）。');
-    const relocked = (lock(ctx, guard.cell, true) as EnumValue).fields[0] as BorrowGuard;
+    const result = lock(ctx, guard.cell, true) as EnumValue;
+    // A poisoned lock still gives its guard, inside the `PoisonError`.
+    const relocked = (
+      result.variant === 0 ? result.fields[0] : (result.fields[0] as StructValue).fields[0]
+    ) as BorrowGuard;
     if (once || !waiting(relocked.place())) return ok(ctx, relocked);
     relocked.release();
   }
@@ -231,15 +246,18 @@ define({
   'Mutex<_>::lock': ([self], ctx) => lock(ctx, deref(self) as CellBox, true),
   'Mutex<_>::try_lock': ([self], ctx) => {
     const target = deref(self) as CellBox;
-    if (target.borrows !== 0) return err(ctx, UNIT_VALUE);
-    return lock(ctx, target, true);
+    const def = syncDef(ctx, 'TryLockError');
+    if (target.borrows !== 0) return err(ctx, new EnumValue(def, 1, []));
+    const result = lock(ctx, target, true) as EnumValue;
+    return result.variant === 0 ? result : err(ctx, new EnumValue(def, 0, [result.fields[0]]));
   },
-  'Mutex<_>::into_inner': ([self], ctx) => ok(ctx, (deref(self) as CellBox).value),
-  'Mutex<_>::get_mut': ([self], ctx) => {
-    const target = deref(self) as CellBox;
-    return ok(ctx, { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) });
+  'Mutex<_>::into_inner': ([self], ctx) => lockResult(ctx, deref(self) as CellBox, (deref(self) as CellBox).value),
+  'Mutex<_>::get_mut': ([self], ctx) => lockResult(ctx, deref(self) as CellBox, cellPlace(deref(self) as CellBox)),
+  'Mutex<_>::is_poisoned': ([self]) => (deref(self) as CellBox).poisoned,
+  'Mutex<_>::clear_poison': ([self]) => {
+    (deref(self) as CellBox).poisoned = false;
+    return UNIT_VALUE;
   },
-  'Mutex<_>::is_poisoned': () => false,
   'Condvar::new': (_args, ctx) => new StructValue(ctx.interp.program.adtDef('Condvar'), [UNIT_VALUE]),
   'Condvar::wait': ([, guard], ctx) => waitOnCondvar(ctx, guard, () => false, true),
   'Condvar::wait_while': ([, guard, condition], ctx) =>
@@ -252,12 +270,19 @@ define({
   },
   'RwLock<_>::read': ([self], ctx) => lock(ctx, deref(self) as CellBox, false),
   'RwLock<_>::write': ([self], ctx) => lock(ctx, deref(self) as CellBox, true),
-  'RwLock<_>::into_inner': ([self], ctx) => ok(ctx, (deref(self) as CellBox).value),
-  'RwLock<_>::get_mut': ([self], ctx) => {
-    const target = deref(self) as CellBox;
-    return ok(ctx, { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) });
+  'RwLock<_>::into_inner': ([self], ctx) => lockResult(ctx, deref(self) as CellBox, (deref(self) as CellBox).value),
+  'RwLock<_>::get_mut': ([self], ctx) => lockResult(ctx, deref(self) as CellBox, cellPlace(deref(self) as CellBox)),
+  'RwLock<_>::is_poisoned': ([self]) => (deref(self) as CellBox).poisoned,
+  'RwLock<_>::clear_poison': ([self]) => {
+    (deref(self) as CellBox).poisoned = false;
+    return UNIT_VALUE;
   },
   'PoisonError<_>::into_inner': ([error]) => (deref(error) as StructValue).fields[0],
+  'PoisonError<_>::get_ref': ([error]) => (deref(error) as StructValue).fields[0],
+  'PoisonError<_>::get_mut': ([error]) => {
+    const target = deref(error) as StructValue;
+    return { isPlace: true, get: () => target.fields[0], set: (value: Value) => (target.fields[0] = value) };
+  },
   'std::sync::mpsc::channel': (_args, ctx) => {
     ctx.interp.dropper.activate();
     const channel = new ChannelEnd([]);
@@ -309,6 +334,17 @@ define({
   },
   'Duration::mul': ([d, factor]) => new DurationValue(duration(d) * (factor as bigint)),
 });
+
+function cellPlace(target: CellBox): Value {
+  return { isPlace: true, get: () => target.value, set: (value: Value) => (target.value = value) };
+}
+
+function syncDef(ctx: NativeContext, name: string): StructValue['def'] {
+  const sync = ctx.interp.program.std.types.get('sync');
+  const binding = sync?.binding.kind === 'mod' ? sync.binding.module.types.get(name)?.binding : undefined;
+  if (binding?.kind !== 'adt') throw new Error(`No ${name}`);
+  return binding.def;
+}
 
 function recvErrorDef(ctx: NativeContext): StructValue['def'] {
   return mpscDef(ctx, 'RecvError');

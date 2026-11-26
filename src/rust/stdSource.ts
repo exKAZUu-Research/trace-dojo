@@ -1728,6 +1728,7 @@ pub mod sync {
         pub fn into_inner(self) -> LockResult<T>;
         pub fn get_mut(&mut self) -> LockResult<&mut T>;
         pub fn is_poisoned(&self) -> bool;
+        pub fn clear_poison(&self);
     }
     pub struct MutexGuard<T>;
     pub struct Condvar { inner: () }
@@ -1745,13 +1746,18 @@ pub mod sync {
         pub fn write(&self) -> LockResult<RwLockWriteGuard<T>>;
         pub fn into_inner(self) -> LockResult<T>;
         pub fn get_mut(&mut self) -> LockResult<&mut T>;
+        pub fn is_poisoned(&self) -> bool;
+        pub fn clear_poison(&self);
     }
     pub struct RwLockReadGuard<T>;
     pub struct RwLockWriteGuard<T>;
     pub type LockResult<G> = Result<G, PoisonError<G>>;
-    #[derive(Debug)]
     pub struct PoisonError<T> { guard: T }
-    impl<T> PoisonError<T> { pub fn into_inner(self) -> T; }
+    impl<T> PoisonError<T> {
+        pub fn into_inner(self) -> T;
+        pub fn get_ref(&self) -> &T;
+        pub fn get_mut(&mut self) -> &mut T;
+    }
     #[derive(Debug)]
     pub enum TryLockError<T> { Poisoned(PoisonError<T>), WouldBlock }
     pub mod mpsc {

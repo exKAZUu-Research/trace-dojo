@@ -244,6 +244,10 @@ export class Compiler {
     return (frame) => {
       try {
         return run(frame);
+      } catch (error) {
+        // The block's variables go as the panic unwinds, which poisons a lock one of them holds.
+        if (error instanceof RustPanic) frame.runtime.unwinding = true;
+        throw error;
       } finally {
         frame.endScope(declared);
       }

@@ -202,6 +202,7 @@ export type BuiltinAdt =
   | 'RwLockWriteGuard'
   | 'Sender'
   | 'SendError'
+  | 'PoisonError'
   | 'Receiver'
   | 'JoinHandle'
   | 'ScopedJoinHandle'
