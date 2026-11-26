@@ -207,8 +207,13 @@ export class Enums {
   ): EnumValue | undefined {
     const initializer = memberNode.childForFieldName('value');
     if (initializer) {
+      const errorCount = context.errors.length;
       const value = this.evaluate(initializer, context);
-      const message = initializerError(value, context.isConst, isAmbient(memberNode));
+      // An evaluation that reported its own error, such as a forward reference, gets no second one, as in tsc.
+      const message =
+        context.errors.length === errorCount
+          ? initializerError(value, context.isConst, isAmbient(memberNode))
+          : undefined;
       if (message) context.errors.push({ node: initializer, message });
       return value;
     }
