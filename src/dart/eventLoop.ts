@@ -58,6 +58,11 @@ export class EventLoop {
     return missed;
   }
 
+  /** Whether a timer is due now, which runs before an answer the VM's I/O service gives after it. */
+  hasTimerDue(): boolean {
+    return this.timers.some((entry) => entry.wakeup <= this.now);
+  }
+
   unschedule(timer: DartObject): void {
     const entry = this.entries.get(timer);
     const index = entry ? this.timers.indexOf(entry) : -1;

@@ -10730,6 +10730,24 @@ Future<void> main() async {
     kind: 'executed',
     stdout: 'micro: \nevent: data\nafter: data\n',
   });
+  // A sink's close, flush and addStream complete after the events already due, as SDK 3.13.7 runs them.
+  const sink = `import 'dart:io';
+String rd() => File('s.txt').readAsStringSync();
+Future<void> main() async {
+  final s = File('s.txt').openWrite();
+  s.write('a');
+  Future(() => print('event: \${rd()}'));
+  await s.flush();
+  print('flushed: \${rd()}');
+  Future(() => print('event: \${rd()}'));
+  await s.addStream(Stream.value([98]));
+  print('added: \${rd()}');
+  await s.close();
+}`;
+  expect(executeProgram('dart', sink)).toMatchObject({
+    kind: 'executed',
+    stdout: 'event: a\nflushed: a\nevent: ab\nadded: ab\n',
+  });
 });
 
 test('a file sink writes an open file through its channel, flushed per line within the limits, and fails as the SDK does', () => {

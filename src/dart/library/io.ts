@@ -252,7 +252,12 @@ class _WriteChannel implements EventSink<List<int>> {
         _writeNow(entry as List<int>);
       }
     }
-    if (_isClosed && !_isCancelled) _completer.complete();
+    if (_isClosed && !_isCancelled) _completeAfterWrites();
+  }
+  void _completeAfterWrites() {
+    _afterQueuedEvents(() {
+      if (!_isCancelled) _completer.complete();
+    });
   }
   void _fail(Object error, StackTrace stackTrace) {
     _isCancelled = true;
@@ -262,11 +267,29 @@ class _WriteChannel implements EventSink<List<int>> {
   void close() {
     if (_isClosed) return;
     _isClosed = true;
-    if (!_isCancelled && _pending == null) _completer.complete();
+    if (_isCancelled || _pending != null) return;
+    if (_defers) {
+      _completeAfterWrites();
+    } else {
+      _completer.complete();
+    }
   }
 }
 
 external void _writeStream(bool isError, List<int> bytes);
+external bool _hasEventDue();
+
+/**
+ * Runs what a file's write completes, as the VM's I/O service answers: after the events already due, which a
+ * program can see, and at once when none is, which costs a file flushed per line no event for each flush.
+ */
+void _afterQueuedEvents(void Function() complete) {
+  if (_hasEventDue()) {
+    Timer.run(complete);
+  } else {
+    complete();
+  }
+}
 external void _closeStream(bool isError);
 external bool _isStreamClosed(bool isError);
 
@@ -894,7 +917,7 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
         });
       },
       onDone: () {
-        completer.complete(_file);
+        _afterQueuedEvents(() => completer.complete(_file));
       },
       onError: error,
       cancelOnError: true,
