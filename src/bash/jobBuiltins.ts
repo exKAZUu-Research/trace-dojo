@@ -53,7 +53,10 @@ export const waitBuiltin: Builtin = (shell, args) => {
     const pid = candidates.find(
       (candidate) => jobs.get(candidate)?.reported === false && !jobs.get(candidate)?.waiting
     );
-    return pid === undefined ? 127 : report(pid, (jobs.get(pid) as { status: number }).status);
+    if (pid === undefined) return 127;
+    // The coprocess it reports is reaped as well, which unsets its variables.
+    jobs.get(pid)?.dispose?.();
+    return report(pid, (jobs.get(pid) as { status: number }).status);
   }
   if (pids.length === 0) {
     // Bash reaps every child it waited for, so a later `wait` for one of them reports it is not a child; a job that
