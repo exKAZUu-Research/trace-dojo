@@ -350,9 +350,8 @@ function slicesReport(
     const back = diffIndex - Math.min(diffIndex, alignment);
     start = back - (back % alignment);
   }
-  const section = (title: string, values: readonly Value[], other: readonly Value[]): void => {
+  const section = (title: string, values: readonly Value[]): void => {
     const window = values.slice(start, start + windowSize);
-    void other;
     write(`\n${title}  len: ${values.length} (0x${hex(values.length)})\n\n`);
     if (start > 0) write(bytes ? `... truncated, start index: 0x${hex(start)} ...\n` : '... truncated ...\n');
     if (bytes) writeByteRows(window.map(Number), write);
@@ -369,8 +368,8 @@ function slicesReport(
           : `... truncated, remaining items: ${missing} ...\n`
       );
   };
-  section('============ expected this output: =============', expected, actual);
-  section('============= instead found this: ==============', actual, expected);
+  section('============ expected this output: =============', expected);
+  section('============= instead found this: ==============', actual);
   write('\n================================================\n\n');
   return out;
 }
