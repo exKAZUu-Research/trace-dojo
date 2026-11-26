@@ -709,7 +709,13 @@ export abstract class LocalCompiler extends AnnotationCompiler {
         context.returnType = symbol.returnType;
         context.returnRepr = returnRepr(symbol);
       }
-      const compiled = this.compileExpression(scope, context, body.expression, symbol.returnType);
+      if (!symbol.returnType) this.inferringLocalFunctions.add(symbol);
+      let compiled: Compiled;
+      try {
+        compiled = this.compileExpression(scope, context, body.expression, symbol.returnType);
+      } finally {
+        this.inferringLocalFunctions.delete(symbol);
+      }
       symbol.returnType ??= this.inferredValueType(compiled);
       const returnType = symbol.returnType;
       const misfit = context.returnedTypes.find((type) => !isSubtype(type, returnType));

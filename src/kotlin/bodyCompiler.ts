@@ -164,9 +164,15 @@ export abstract class BodyCompiler extends DeclarationCompiler {
     };
   }
 
+  /** The local functions whose bodies are being compiled to infer their result types. */
+  protected readonly inferringLocalFunctions = new Set<FunctionSymbol>();
+
   protected ensureReturnType(func: FunctionSymbol, row: number): KType {
     if (func.returnType) return func.returnType;
     const entry = this.entryOfFunction.get(func);
+    // A local function infers its result type from its body, which then cannot call it.
+    if (this.inferringLocalFunctions.has(func))
+      this.error(row, `関数 ${func.name} は自分を呼んでいるので、戻り値の型を書いてください。`);
     if (!entry) return this.core.unit.type;
     if (entry.state === 'compiling')
       this.error(row, `関数 ${func.name} は自分を呼んでいるので、戻り値の型を書いてください。`);
