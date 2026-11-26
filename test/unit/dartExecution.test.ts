@@ -10697,7 +10697,26 @@ test.each([
 });
 
 // Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
-test('a file sink writes an open file at once, flushed per line within the limits, and fails as the SDK does', () => {
+test('a file write opens the file when called and lands after the code that wrote it, as the SDK does', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const written = `import 'dart:io';
+Future<void> main() async {
+  final w = File('a.txt').writeAsString('hi');
+  print([File('a.txt').existsSync(), File('a.txt').readAsStringSync()]);
+  await w;
+  final f = File('b.txt');
+  final s = f.openWrite();
+  s.write('a');
+  await s.flush();
+  s.write('b');
+  print([File('a.txt').readAsStringSync(), f.readAsStringSync()]);
+  await s.close();
+  print(f.readAsStringSync());
+}`;
+  expect(executeProgram('dart', written)).toMatchObject({ kind: 'executed', stdout: '[true, ]\n[hi, a]\nab\n' });
+});
+
+test('a file sink writes an open file through its channel, flushed per line within the limits, and fails as the SDK does', () => {
   // Expected output from Dart SDK 3.13.7.
   const perLine = `import 'dart:io';
 Future<void> main() async {

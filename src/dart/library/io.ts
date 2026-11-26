@@ -189,15 +189,29 @@ class _StdConsumer implements StreamConsumer<List<int>> {
 class _WriteChannel implements EventSink<List<int>> {
   final void Function(List<int>) _write;
   final void Function() _onFailure;
+  /**
+   * Whether a write reaches its target after the code that wrote it, as a file's does through the VM's I/O service,
+   * rather than at once, as a standard stream's does.
+   */
+  final bool _defers;
   final Completer _completer = Completer();
   bool _isCancelled = false;
   bool _isClosed = false;
-  _WriteChannel(this._write, this._onFailure);
+  /** The writes and errors waiting for the event that applies them, in order. */
+  List<Object>? _pending;
+  _WriteChannel(this._write, this._onFailure, {bool defers = false}) : _defers = defers;
 
   Future get done => _completer.future;
 
   void add(List<int> data) {
     if (_isCancelled) return;
+    if (_defers) {
+      _enqueue(data);
+      return;
+    }
+    _writeNow(data);
+  }
+  void _writeNow(List<int> data) {
     try {
       _write(data);
     } on UnsupportedError {
@@ -209,7 +223,36 @@ class _WriteChannel implements EventSink<List<int>> {
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     if (_isCancelled) return;
+    // An error after writes still waiting reaches the target after them, as a stream delivers it after its data.
+    if (_pending != null) {
+      _enqueue(AsyncError(error, stackTrace ?? StackTrace.empty));
+      return;
+    }
     _fail(error, stackTrace ?? StackTrace.empty);
+  }
+  void _enqueue(Object entry) {
+    final pending = _pending;
+    if (pending != null) {
+      pending.add(entry);
+      return;
+    }
+    _pending = [entry];
+    // A microtask, which runs once the code that wrote ends, as the VM's write lands after it; an event per flush would
+    // cost a file flushed per line more operations than its lines.
+    scheduleMicrotask(_drain);
+  }
+  void _drain() {
+    final entries = _pending!;
+    _pending = null;
+    for (final entry in entries) {
+      if (_isCancelled) return;
+      if (entry is AsyncError) {
+        _fail(entry.error, entry.stackTrace);
+      } else {
+        _writeNow(entry as List<int>);
+      }
+    }
+    if (_isClosed && !_isCancelled) _completer.complete();
   }
   void _fail(Object error, StackTrace stackTrace) {
     _isCancelled = true;
@@ -219,7 +262,7 @@ class _WriteChannel implements EventSink<List<int>> {
   void close() {
     if (_isClosed) return;
     _isClosed = true;
-    if (!_isCancelled) _completer.complete();
+    if (!_isCancelled && _pending == null) _completer.complete();
   }
 }
 
@@ -574,19 +617,27 @@ class _File extends FileSystemEntity implements File {
     }
     _write(path, contents, mode._appends, "Cannot open file");
   }
+  /**
+   * As the SDK's, the file is opened, created or truncated, when the call is made, and the contents reach it in a
+   * later event, as the VM's I/O service writes them; a failed open fails the future later.
+   */
   Future<File> writeAsString(String contents,
-          {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) =>
-      Future(() {
-        writeAsStringSync(contents, mode: mode, encoding: encoding);
-        return this;
-      });
+      {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) {
+    _requireUtf8(encoding);
+    if (mode == FileMode.read) return Future(() {
+      writeAsStringSync(contents, mode: mode, encoding: encoding);
+      return this;
+    });
+    return _OpenedFile._openFile(path, mode._appends).then((opened) => Future(() {
+          opened._writeOpened(contents);
+          return opened.close().then((_) => this);
+        }));
+  }
   void writeAsBytesSync(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) {
     writeAsStringSync(_textOfBytes(bytes), mode: mode);
   }
-  Future<File> writeAsBytes(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) => Future(() {
-        writeAsBytesSync(bytes, mode: mode);
-        return this;
-      });
+  Future<File> writeAsBytes(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) =>
+      writeAsString(_textOfBytes(bytes), mode: mode);
   IOSink openWrite({FileMode mode = FileMode.write, Encoding encoding = utf8}) {
     if (mode != FileMode.write && mode != FileMode.append && mode != FileMode.writeOnly && mode != FileMode.writeOnlyAppend) {
       throw ArgumentError("Invalid file mode for this operation");
@@ -638,7 +689,7 @@ class _StreamSinkImpl<T> implements StreamSink<T> {
     final opened = target is _FileStreamConsumer ? (target as _FileStreamConsumer)._opened : null;
     if (opened != null) {
       // As the consumer's own failure does, nothing waits on this close, which fails a file already closed.
-      final channel = _WriteChannel(opened.writeFrom, () => opened.close(finishText: false));
+      final channel = _WriteChannel(opened.writeFrom, () => opened.close(finishText: false), defers: true);
       return (channel as EventSink<T>, channel.done);
     }
     final controller = StreamController<T>(sync: true);
@@ -819,14 +870,20 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
       openedFile.close(finishText: false);
       completer.completeError(e, stackTrace);
     }
-    // _OpenedFile writes at once, so the subscription need not pause while a write is in flight.
+    // As the SDK's, the subscription pauses while a chunk's write is in flight, which reaches the file after the code
+    // that wrote it, as the VM's I/O service applies it.
     _subscription = stream.listen(
       (d) {
-        try {
-          openedFile.writeFrom(d);
-        } catch (e, stackTrace) {
-          error(e, stackTrace);
-        }
+        _subscription.pause();
+        scheduleMicrotask(() {
+          try {
+            openedFile.writeFrom(d);
+          } catch (e, stackTrace) {
+            error(e, stackTrace);
+            return;
+          }
+          _subscription.resume();
+        });
       },
       onDone: () {
         completer.complete(_file);
