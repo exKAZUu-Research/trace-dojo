@@ -183,9 +183,11 @@ export function futureOrValue(type: DartType): DartType | undefined {
   return type.args[0] ?? DYNAMIC;
 }
 
-/** `flatten(T)`: the type `await` gives a value of type `T`, decided on its normal form. */
-export function flatten(given: DartType): DartType {
-  const type = norm(given);
+/**
+ * `flatten(T)`: the type `await` gives a value of type `T`, taking one FutureOr or Future off the type as written, so
+ * that FutureOr<FutureOr<void>> gives FutureOr<void>, which its normal form FutureOr<void> would make void.
+ */
+export function flatten(type: DartType): DartType {
   if (type.kind === 'typeParam') {
     const bound = type.promoted ?? boundOf(type.param);
     const flattened = flatten(bound);

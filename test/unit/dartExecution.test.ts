@@ -6969,6 +6969,12 @@ Future<void> main() async {
       diagnostics: [{ row: 1, message: `'${bound}' 型の値は、'bool' 型の変数 s に代入できません。` }],
     });
   }
+  // await takes one FutureOr off as written, so a FutureOr<FutureOr<void>> gives a FutureOr<void> that can be passed,
+  // where a FutureOr<void> gives void.
+  const nested = `import 'dart:async';
+Future<void> h(FutureOr<FutureOr<void>> a, int b) async { var c = true ? a : b; print(await c); print(await a); }
+void main() { h(Future.value(1), 2); }`;
+  expect(executeProgram('dart', nested)).toMatchObject({ kind: 'executed', stdout: '1\n1\n' });
   // void is more top than dynamic, so their bound cannot be used, as the SDK reports.
   expect(executeProgram('dart', 'void f(dynamic a, void b) { bool s = true ? a : b; }\nvoid main() {}')).toMatchObject({
     kind: 'compileError',
