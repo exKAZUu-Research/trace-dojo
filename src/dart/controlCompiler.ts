@@ -14,7 +14,7 @@ import {
 } from './awaitSteps';
 import type { FunctionSpec } from './callCompiler';
 import { type ClassInfo, scopedMemberName } from './classes';
-import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import { type Compiled, type Eval, typeName } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
 import { type CompiledPattern, PatternCache } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
@@ -421,7 +421,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { body: functionBody } = spec;
     const body =
       functionBody.kind === 'expression'
-        ? this.compileGenStatement({ kind: 'return', value: functionBody.expression, ...at(functionBody.expression) })
+        ? this.compileGenStatement(this.arrowBodyReturn(functionBody.expression))
         : this.compileGenBlock(functionBody.block, false);
     if (functionBody.kind === 'block' && this.flow.reachable) {
       this.fn.returnTypes?.push(NULL);

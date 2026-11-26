@@ -1258,11 +1258,20 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
     this.fn.returnsValue = true;
     const compiled = this.fn.kind.isAsync
-      ? this.compileAsyncReturnValue(statement.value, expected, false)
+      ? this.compileAsyncReturnValue(statement.value, expected, statement === this.arrowReturn)
       : this.compileReturnValue(statement.value, expected ?? this.fn.contextReturn, false);
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });
+  }
+
+  /** The `return` an async arrow body stands for, which may give a void function's future a value, as `=>` may. */
+  private arrowReturn: Statement | undefined;
+
+  protected arrowBodyReturn(expression: Expression): Statement {
+    const statement: Statement = { kind: 'return', value: expression, ...at(expression) };
+    this.arrowReturn = statement;
+    return statement;
   }
 
   /** Rejects `return;` where the function's value type requires a value. */
