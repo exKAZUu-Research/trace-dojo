@@ -44,17 +44,15 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
     }
     return;
   }
-  const file = openRedirectTarget(shell, redirect);
+  const target = openRedirectTarget(shell, redirect);
+  const file = target === 'close' ? target : target.file;
   if (redirect.fdVariable && file !== 'close') {
     const fd = shell.fds.allocate();
     shell.fds.set(fd, file);
     shell.assignVariable(redirect.fdVariable, String(fd));
     return;
   }
-  // `&>file`, `&>>file`, and `>&file` send standard error to the file as well.
-  const sendsStandardError =
-    (redirect.kind === 'file' && (redirect.operator === '&>' || redirect.operator === '&>>')) ||
-    (file !== 'close' && isStandardOutputAndErrorToFile(redirect));
+  const sendsStandardError = target !== 'close' && target.withStandardError;
   for (const fd of sendsStandardError ? [redirect.fd, 2] : [redirect.fd]) {
     changed.push(fd);
     if (file === 'close') shell.fds.close(fd);
@@ -62,21 +60,27 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
   }
 }
 
-/** Whether a redirection is `>&word` with a word that names no descriptor, which Bash reads as `&>word`. */
-function isStandardOutputAndErrorToFile(redirect: Exclude<Redirect, { kind: 'close' }>): boolean {
-  return redirect.kind === 'duplicate' && redirect.operator === '>&' && !redirect.hasDescriptor && !redirect.fdVariable;
-}
-
 // code-gauge-allow functionCognitiveComplexity -- One case per redirection operator, as Bash's `do_redirection_internal` has.
-function openRedirectTarget(shell: Shell, redirect: Exclude<Redirect, { kind: 'close' }>): OpenFile | 'close' {
+/**
+ * Opens what a redirection names, telling whether standard error goes there too, as `&>file`, `&>>file`, and
+ * `>&file` with a word that names no descriptor send it.
+ */
+function openRedirectTarget(
+  shell: Shell,
+  redirect: Exclude<Redirect, { kind: 'close' }>
+): { file: OpenFile; withStandardError: boolean } | 'close' {
   switch (redirect.kind) {
     case 'text': {
       const text = shell.expander.expandString(redirect.body);
-      return { input: shell.runtime.io.textReader(redirect.appendsNewline ? `${text}\n` : text) };
+      return {
+        file: { input: shell.runtime.io.textReader(redirect.appendsNewline ? `${text}\n` : text) },
+        withStandardError: false,
+      };
     }
     case 'file': {
       const path = expandTarget(shell, redirect.target);
-      return openPath(shell, path, redirect.operator);
+      const withStandardError = redirect.operator === '&>' || redirect.operator === '&>>';
+      return { file: openPath(shell, path, redirect.operator), withStandardError };
     }
     case 'duplicate': {
       const target = expandTarget(shell, redirect.target);
@@ -87,9 +91,11 @@ function openRedirectTarget(shell: Shell, redirect: Exclude<Redirect, { kind: 'c
         const file = shell.fds.get(source);
         if (!file) throw new RedirectionError(`${copy[1]}: Bad file descriptor`);
         if (copy[2] === '-' && source !== redirect.fd) shell.fds.close(source);
-        return file;
+        return { file, withStandardError: false };
       }
-      if (isStandardOutputAndErrorToFile(redirect)) return openPath(shell, target, '>');
+      if (redirect.operator === '>&' && !redirect.hasDescriptor && !redirect.fdVariable) {
+        return { file: openPath(shell, target, '>'), withStandardError: true };
+      }
       throw new RedirectionError(`${redirect.target.text}: ambiguous redirect`);
     }
   }
