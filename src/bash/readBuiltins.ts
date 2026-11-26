@@ -20,6 +20,8 @@ interface ReadText {
   readonly chars: string[];
   readonly escaped: boolean[];
   readonly complete: boolean;
+  /** Whether `read -t` timed out before the input ended, keeping what it read so far. */
+  readonly timedOut?: boolean;
 }
 
 /**
@@ -53,21 +55,20 @@ export const readBuiltin: Builtin = (shell, args) => {
     return assignAll(shell, names.length === 0 ? ['REPLY'] : names, []);
   }
   const delimiter = options.has('d') ? (options.get('d') as string).slice(0, 1) || '\0' : '\n';
-  let text: ReadText;
-  try {
-    text = readText(reader, { delimiter: options.has('N') ? undefined : delimiter, count, raw: options.has('r') });
-  } catch (error) {
-    // Input that would never come times a timeout out, as Bash's `read -t` does after waiting, with status 142.
-    if (!(error instanceof DeadlockError) || options.get('t') === undefined) throw error;
-    if (arrayName === undefined) assignAll(shell, names.length === 0 ? ['REPLY'] : names, []);
-    return 142;
-  }
+  const text = readText(reader, {
+    delimiter: options.has('N') ? undefined : delimiter,
+    count,
+    raw: options.has('r'),
+    timesOut: options.get('t') !== undefined,
+  });
   const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
   let status: number;
   if (arrayName !== undefined) status = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read') ? 0 : 1;
   else if (names.length === 0) status = shell.assignVariable('REPLY', text.chars.join('')) ? 0 : 1;
   else if (options.has('N')) status = assignAll(shell, names, [text.chars.join('')]);
   else status = assignAll(shell, names, splitAmong(text, ifs, names.length));
+  // Bash saves the partial input of a `read -t` that times out and returns 142.
+  if (text.timedOut) return 142;
   return status !== 0 ? status : text.complete ? 0 : 1;
 };
 
@@ -130,10 +131,25 @@ function inputReader(shell: Shell, builtin: string, fdText: string | undefined):
 // code-gauge-allow functionCognitiveComplexity -- Handles counts, the delimiter, NULs, and backslash escapes and continuations as Bash's `read` does.
 function readText(
   reader: TextReader,
-  { delimiter, count, raw }: { delimiter: string | undefined; count: number | undefined; raw: boolean }
+  options: { delimiter: string | undefined; count: number | undefined; raw: boolean; timesOut?: boolean }
 ): ReadText {
   const chars: string[] = [];
   const escaped: boolean[] = [];
+  try {
+    return readTextInto(reader, options, chars, escaped);
+  } catch (error) {
+    // Input that would never come times a timeout out, as Bash's `read -t` does after waiting, keeping what it read.
+    if (!(error instanceof DeadlockError) || !options.timesOut) throw error;
+    return { chars, escaped, complete: false, timedOut: true };
+  }
+}
+
+function readTextInto(
+  reader: TextReader,
+  { delimiter, count, raw }: { delimiter: string | undefined; count: number | undefined; raw: boolean },
+  chars: string[],
+  escaped: boolean[]
+): ReadText {
   for (;;) {
     if (count !== undefined && chars.length >= count) return { chars, escaped, complete: true };
     const c = readCharacter(reader);
