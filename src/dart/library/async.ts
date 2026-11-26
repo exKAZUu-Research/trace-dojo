@@ -1162,6 +1162,13 @@ class _SuspendState {
     if (last._nextListener == null) future._ignore();
     return awaiter;
   }
+  /**
+   * An error an await threw from its future's own then, which the body did not catch: the VM's await raises it
+   * outside the body, so it reaches the root zone as an uncaught error and the body's future never completes.
+   */
+  void _escapeAwait(Object exception, StackTrace stackTrace) {
+    _rootHandleError(exception, stackTrace);
+  }
   void _handleException(bool isSync, Object exception, StackTrace stackTrace) {
     final functionData = _functionData;
     if (functionData is _Future) {

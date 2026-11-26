@@ -19,6 +19,12 @@ interface SuspendedBody {
   hasSuspended: boolean;
   /** For `async*`: whether the body waits at a `yield` for its stream's listener rather than at an `await`. */
   atYield: boolean;
+  /**
+   * Whether an `await` threw from its future's own `then` before the body first suspended: the VM then raises an
+   * error the body lets out, that one or a later one, as an uncaught error rather than completing its future with it,
+   * as SDK 3.13.7 does, until the body suspends.
+   */
+  escapesUncaught?: boolean;
   /** For `async*`: whether the body has not started, which it does once its stream is listened to. */
   atStart: boolean;
   isStar: boolean;
@@ -144,12 +150,27 @@ function perform(
       return undefined;
     }
     case 'throw': {
+      if (state.escapesUncaught) {
+        state.escapesUncaught = false;
+        call('_escapeAwait', outcome.error.value, outcome.error.stackTrace);
+        return undefined;
+      }
       call('_handleException', wasSuspended, outcome.error.value, outcome.error.stackTrace);
       return undefined;
     }
     case 'await': {
       state.hasSuspended = true;
-      call(outcome.isNotFuture ? '_awaitNotFutureOfType' : '_await', outcome.value);
+      try {
+        call(outcome.isNotFuture ? '_awaitNotFutureOfType' : '_await', outcome.value);
+        state.escapesUncaught = false;
+      } catch (error) {
+        // A future of the program's own whose then throws throws at the await, inside the body, which has not
+        // suspended there.
+        if (!(error instanceof DartThrow)) throw error;
+        state.hasSuspended = wasSuspended;
+        if (!wasSuspended) state.escapesUncaught = true;
+        return { kind: 'throw', error };
+      }
       return undefined;
     }
     default: {

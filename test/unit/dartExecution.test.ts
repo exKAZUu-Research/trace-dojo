@@ -10877,6 +10877,36 @@ void main() async {
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'mk b\nf b\nm 2\nmk d\nf d\n' });
 });
 
+test("an await throws a program future's failing then at the await, as SDK 3.13.7 does", () => {
+  const future = `import 'dart:async';
+class BadFuture implements Future<int> {
+  @override
+  Future<R> then<R>(FutureOr<R> Function(int value) onValue, {Function? onError}) { throw 'boom'; }
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+`;
+  // The body catches it at the await, and a body that suspended before completes its future with it.
+  const caught = `${future}Future<int> h() async { await null; await BadFuture(); return 1; }
+Future<void> main() async {
+  try { await BadFuture(); } catch (e) { print('caught $e'); }
+  try { await h(); } catch (e) { print('h $e'); }
+}`;
+  expect(executeProgram('dart', caught)).toMatchObject({ kind: 'executed', stdout: 'caught boom\nh boom\n' });
+  // One a body lets out before it first suspended ends the run as an uncaught error, after its caller goes on.
+  const escaped = `${future}Future<int> f() async { await BadFuture(); return 1; }
+Future<void> main() async {
+  final pending = f();
+  print('after call');
+  try { await pending; } catch (e) { print('not reached'); }
+}`;
+  expect(executeProgram('dart', escaped)).toMatchObject({
+    kind: 'executed',
+    stdout: 'after call\n',
+    uncaughtException: 'Unhandled exception:\nboom',
+  });
+});
+
 test('catchError takes a handler of any type and fails when an error reaches one that does not take Object', () => {
   // Expected output from Dart SDK 3.13.7, whose root zone checks the handler of then but not of catchError.
   const program = `import 'dart:async';
