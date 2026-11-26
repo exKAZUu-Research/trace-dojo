@@ -492,7 +492,17 @@ export class Checker {
       typeError(span, `型 ${head.entity.name} には、フィールド ${String(label.entity.literal)} がありません。`);
     }
     // A data instance's field is typed over the instance's own variables, which its types give the family's arguments.
-    const con = info.positions.keys().next().value as ConInfo;
+    // Data instances may share a field's name: the record's type picks the one whose instance it is.
+    const candidates = [...info.positions.keys()].filter(
+      (candidate) =>
+        !candidate.instanceArgs ||
+        candidate.instanceArgs.every((instanceArg, index) => couldMatch(instanceArg, args[index]))
+    );
+    if (candidates.length === 0) {
+      typeError(span, `型 ${head.entity.name} には、フィールド ${String(label.entity.literal)} がありません。`);
+    }
+    if (new Set(candidates.map((candidate) => candidate.instanceArgs)).size > 1) return undefined;
+    const con = candidates[0];
     let fieldArgs = args;
     if (con.instanceArgs) {
       fieldArgs = (con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
@@ -500,7 +510,8 @@ export class Checker {
         this.unify(args[index], instantiateType(instanceArg, fieldArgs), span, `フィールド ${info.name} の型`);
       }
     }
-    this.unify(field, instantiateType(info.fieldType, fieldArgs), span, `フィールド ${info.name} の型`);
+    const fieldType = con.fieldTypes[info.positions.get(con) as number];
+    this.unify(field, instantiateType(fieldType, fieldArgs), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
   }
 
