@@ -926,15 +926,15 @@ export abstract class CallCompiler extends CompilerCore {
       );
   }
 
-  /** The array a `vararg` parameter of the element type holds. */
-  protected abstract varargArrayType(elementType: KType): KType;
+  /** The type a `vararg` parameter has inside its function: an array of its elements. */
+  protected abstract varargType(elementType: KType): KType;
 
   /**
    * The array a vararg parameter holds, whose class its declared type decides: `IntArray` for `vararg xs: Int`, and
    * `Array<out T>` for `vararg xs: T` whatever `T` is.
    */
   private varargArrayOf(param: ParameterSymbol, paramType: KType): KType {
-    if (resolved(param.type).kind === 'class') return this.varargArrayType(paramType);
+    if (resolved(param.type).kind === 'class') return this.varargType(paramType);
     return { kind: 'class', cls: this.core.array, args: [{ variance: 'out', type: paramType }], nullable: false };
   }
 

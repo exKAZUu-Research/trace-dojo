@@ -433,9 +433,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
   protected abstract importObjectMembers(context: FileContext, name: string, members: MemberSymbol[]): void;
 
-  /** The type a `vararg` parameter has inside its function: an array of its elements. */
-  protected abstract varargType(elementType: KType): KType;
-
   /**
    * The type a parameter's value has inside its function, constructor, or property: for a `vararg`, the array of its
    * elements, which callers pass one by one.

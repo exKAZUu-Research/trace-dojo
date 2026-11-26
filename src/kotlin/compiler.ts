@@ -435,10 +435,6 @@ export class Compiler extends SuspendCompiler {
     };
   }
 
-  protected varargArrayType(elementType: KType): KType {
-    return this.varargType(elementType);
-  }
-
   protected varargType(elementType: KType): KType {
     const kind = this.primitiveOf(elementType);
     if (kind) {
