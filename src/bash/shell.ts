@@ -54,7 +54,19 @@ export type { CompoundElement } from './variables';
 
 type StepMode = 'statement' | 'binding' | 'skip';
 
-const CONDITION_BUILTINS = new Set<string>(['test', '[', 'true', 'false', ...TURTLE_PREDICATE_NAMES]);
+/**
+ * The builtins whose step a condition skips, as Java's conditions take none: tests, and the readers that decide a
+ * loop such as `while read -r line`, whose variables the next step shows.
+ */
+const CONDITION_BUILTINS = new Set<string>([
+  'test',
+  '[',
+  'true',
+  'false',
+  'read',
+  'getopts',
+  ...TURTLE_PREDICATE_NAMES,
+]);
 
 /** The descriptor of the first process substitution, below which Bash numbers the next ones. */
 const PROCESS_SUBSTITUTION_FIRST_FD = 63;
@@ -236,7 +248,6 @@ export class Shell implements ArithmeticHost {
     if (this.options.errexit) throw new ExitSignal(status);
   }
 
-  // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
   execute(statement: Statement, guarded = false): number {
     const mark = this.processSubstitutions.length;
     let completed = false;
@@ -281,6 +292,7 @@ export class Shell implements ArithmeticHost {
     }
   }
 
+  // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
   private executeStatement(statement: Statement, guarded: boolean): number {
     this.runtime.spend();
     this.currentRow = statement.lineRow - this.lineShift;
@@ -320,19 +332,7 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'function': {
-        if (!isValidFunctionName(statement.name)) {
-          this.reportError(`\`${statement.name}': not a valid identifier`);
-          status = 1;
-          break;
-        }
-        this.store.setFunction({
-          name: statement.name,
-          body: statement.body,
-          isAtomic: statement.isAtomic,
-          redirects: statement.redirects,
-          lineShift: this.lineShift,
-        });
-        status = 0;
+        status = this.defineFunction(statement);
         break;
       }
       case 'list': {
@@ -349,28 +349,56 @@ export class Shell implements ArithmeticHost {
         status = this.withRedirects(statement.redirects, () => this.execute(statement.body, guarded));
         break;
       }
-      case 'subshell': {
-        status = this.runSubshell(statement.body, this.fds.clone());
-        this.store.pipeStatus = [status];
-        this.checkErrexit(status);
-        break;
-      }
-      case 'pipeline': {
-        status = this.executePipeline(statement.commands);
-        this.checkErrexit(status);
-        break;
-      }
-      case 'background': {
-        status = this.runInBackground(statement.body);
-        break;
-      }
+      case 'subshell':
+      case 'pipeline':
+      case 'background':
       case 'coproc': {
-        status = this.startCoprocess(statement.name, statement.body);
+        status = this.executeProcessStatement(statement);
         break;
       }
     }
     this.store.lastStatus = status;
     return status;
+  }
+
+  private defineFunction(statement: Extract<Statement, { kind: 'function' }>): number {
+    if (!isValidFunctionName(statement.name)) {
+      this.reportError(`\`${statement.name}': not a valid identifier`);
+      return 1;
+    }
+    this.store.setFunction({
+      name: statement.name,
+      body: statement.body,
+      isAtomic: statement.isAtomic,
+      redirects: statement.redirects,
+      lineShift: this.lineShift,
+    });
+    return 0;
+  }
+
+  /** Runs a statement that Bash runs in other processes: a subshell, a pipeline, a background command, or a coprocess. */
+  private executeProcessStatement(
+    statement: Extract<Statement, { kind: 'subshell' | 'pipeline' | 'background' | 'coproc' }>
+  ): number {
+    switch (statement.kind) {
+      case 'subshell': {
+        const status = this.runSubshell(statement.body, this.fds.clone());
+        this.store.pipeStatus = [status];
+        this.checkErrexit(status);
+        return status;
+      }
+      case 'pipeline': {
+        const status = this.executePipeline(statement.commands);
+        this.checkErrexit(status);
+        return status;
+      }
+      case 'background': {
+        return this.runInBackground(statement.body);
+      }
+      case 'coproc': {
+        return this.startCoprocess(statement.name, statement.body);
+      }
+    }
   }
 
   private executeSimple(statement: Statement, guarded: boolean): number {
@@ -471,6 +499,7 @@ export class Shell implements ArithmeticHost {
    * reading what the shell wrote to it until then. A coprocess that answers each line as it comes would need to run
    * alongside the shell, so writing to it after it has run is rejected.
    */
+  // code-gauge-allow functionNcss -- Wires a coprocess's lazy start, its two descriptors, its job, and its variables together.
   private startCoprocess(name: string, body: Statement): number {
     const pid = this.runtime.allocateProcessId();
     const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
@@ -594,6 +623,7 @@ export class Shell implements ArithmeticHost {
    * with the variable set to the chosen word, or empty for a number out of range, until `break` or the end of input.
    * An empty line shows the menu again.
    */
+  // code-gauge-allow functionCognitiveComplexity -- Shows the menu, reads a reply, and binds the choice in the order of Bash's `select` loop.
   private runSelectIterations(
     statement: Extract<Statement, { kind: 'for' }>,
     values: readonly string[],

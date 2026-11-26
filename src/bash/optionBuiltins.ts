@@ -15,8 +15,10 @@ import type { Builtin } from './turtle';
 const SET_USAGE = 'set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]';
 const SHOPT_USAGE = 'shopt [-pqsu] [-o] [optname ...]';
 
+type OptionName = SetOptionName | ShoptName;
+
 /** Turns an option on or off, rejecting a change this environment does not implement. */
-function changeOption(shell: Shell, name: SetOptionName | ShoptName, value: boolean, written: string): void {
+function changeOption(shell: Shell, name: OptionName, value: boolean, written: string): void {
   if (shell.options[name] === value) return;
   if (!isImplementedOption(name)) rejectUnsupportedFeature(`シェルのオプション（${written}）`);
   shell.options[name] = value;
@@ -27,6 +29,7 @@ function changeOption(shell: Shell, name: SetOptionName | ShoptName, value: bool
  * replaces the positional parameters with the words after its options.
  */
 // code-gauge-allow functionCognitiveComplexity -- Scans flags, `-o` names, and the `--` and `-` markers in one pass as Bash's `set` does.
+// code-gauge-allow functionNcss -- Scans flags, `-o` names, and the `--` and `-` markers in one pass, as Bash `set` does.
 export const setBuiltin: Builtin = (shell, args) => {
   if (args.length === 0) rejectUnsupportedSetArgs();
   for (let index = 0; index < args.length; index++) {
@@ -79,8 +82,27 @@ function listSetOptions(shell: Shell, asTable: boolean): void {
 }
 
 /** `shopt`, which sets (`-s`), unsets (`-u`), tests (`-q`), or prints options, of `shopt` or with `-o` of `set -o`. */
-// code-gauge-allow functionCognitiveComplexity -- Combines Bash's `shopt` modes: set, unset, quiet test, and the two print formats.
+// code-gauge-allow functionCognitiveComplexity -- Chooses between setting, printing, and testing options, which Bash decides from the same flags.
 export const shoptBuiltin: Builtin = (shell, args) => {
+  const parsed = parseShoptFlags(shell, args);
+  if (typeof parsed === 'number') return parsed;
+  const { flags, requested } = parsed;
+  const usesSet = flags.has('o');
+  const { names, status } = knownOptionNames(shell, requested, usesSet);
+  const setting = flags.has('s') ? true : flags.has('u') ? false : undefined;
+  if (setting !== undefined && requested.length > 0) {
+    for (const name of names) changeOption(shell, name, setting, `shopt ${setting ? '-s' : '-u'} ${name}`);
+    return status;
+  }
+  const allNames: readonly OptionName[] = usesSet ? SET_OPTION_NAMES : SHOPT_NAMES;
+  const shown =
+    requested.length > 0 ? names : allNames.filter((name) => setting === undefined || shell.options[name] === setting);
+  if (!flags.has('q')) printShoptLines(shell, shown, usesSet, flags.has('p'));
+  const anyOff = requested.length > 0 && shown.some((name) => !shell.options[name]);
+  return anyOff ? 1 : status;
+};
+
+function parseShoptFlags(shell: Shell, args: readonly string[]): { flags: Set<string>; requested: string[] } | number {
   const flags = new Set<string>();
   let index = 0;
   for (; index < args.length && /^-[pqsuo]+$/.test(args[index]); index++) {
@@ -97,32 +119,33 @@ export const shoptBuiltin: Builtin = (shell, args) => {
     shell.reportError('shopt: cannot set and unset shell options simultaneously');
     return 1;
   }
-  const usesSet = flags.has('o');
-  const allNames: readonly (SetOptionName | ShoptName)[] = usesSet ? SET_OPTION_NAMES : SHOPT_NAMES;
-  const requested = args.slice(index);
-  const setting = flags.has('s') ? true : flags.has('u') ? false : undefined;
+  return { flags, requested: args.slice(index) };
+}
+
+/** The requested names that name options, reporting the others, which make `shopt` fail. */
+function knownOptionNames(
+  shell: Shell,
+  requested: readonly string[],
+  usesSet: boolean
+): { names: OptionName[]; status: number } {
+  const names: OptionName[] = [];
   let status = 0;
-  const names: (SetOptionName | ShoptName)[] = [];
   for (const name of requested) {
-    if (usesSet ? isSetOptionName(name) : isShoptName(name)) names.push(name as SetOptionName | ShoptName);
+    if (usesSet ? isSetOptionName(name) : isShoptName(name)) names.push(name as OptionName);
     else {
       shell.reportError(`shopt: ${name}: invalid ${usesSet ? 'option name' : 'shell option name'}`);
       status = 1;
     }
   }
-  if (setting !== undefined && requested.length > 0) {
-    for (const name of names) changeOption(shell, name, setting, `shopt ${flags.has('s') ? '-s' : '-u'} ${name}`);
-    return status;
-  }
-  const shown =
-    requested.length > 0 ? names : allNames.filter((name) => setting === undefined || shell.options[name] === setting);
-  for (const name of shown) {
+  return { names, status };
+}
+
+/** Prints options as `shopt` lists them, or with `-p` as the commands that set them. */
+// code-gauge-allow functionCognitiveComplexity -- Picks among the table and the two command formats `shopt -p` and `shopt -po` print.
+function printShoptLines(shell: Shell, names: readonly OptionName[], usesSet: boolean, asCommands: boolean): void {
+  for (const name of names) {
     const on = shell.options[name];
-    if (!on && requested.length > 0) status = 1;
-    if (flags.has('q')) continue;
-    if (flags.has('p')) {
-      shell.fd1.write(usesSet ? `set ${on ? '-' : '+'}o ${name}\n` : `shopt ${on ? '-s' : '-u'} ${name}\n`);
-    } else shell.fd1.write(`${name.padEnd(20)}\t${on ? 'on' : 'off'}\n`);
+    if (!asCommands) shell.fd1.write(`${name.padEnd(20)}\t${on ? 'on' : 'off'}\n`);
+    else shell.fd1.write(usesSet ? `set ${on ? '-' : '+'}o ${name}\n` : `shopt ${on ? '-s' : '-u'} ${name}\n`);
   }
-  return status;
-};
+}

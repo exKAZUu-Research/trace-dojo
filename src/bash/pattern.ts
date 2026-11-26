@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- Keeps the plain and the extended matchers over one atom and bracket reader.
 /**
  * Clean-room shell wildcard and POSIX bracket pattern matcher for `case`, `[[ == ]]`, and parameter-expansion
  * pattern operators (`#`, `##`, `%`, `%%`, `/`, `//`, `/#`, `/%`, `^`, `,`, `~`).
@@ -98,6 +99,7 @@ function foldAtom(atom: GlobAtom): GlobAtom {
 }
 
 /** Reads `chars[start..end]` as a sequence of characters, `*`, and `extglob` groups split at their `|`. */
+// code-gauge-allow functionCognitiveComplexity -- Reads characters, `*`, and nested groups split at `|` in one pass over the pattern.
 function parseExtendedNodes(
   chars: readonly string[],
   start: number,
@@ -149,18 +151,12 @@ function findGroupEnd(
   let depth = 0;
   for (let i = start; i < end;) {
     spend();
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
+    const skipped = skipQuotedPiece(chars, i, spend, memo);
+    if (skipped !== undefined) {
+      i = skipped;
       continue;
     }
-    if (c === '[') {
-      const bracket = readBracketExpression(chars, i + 1, spend, memo);
-      if (bracket) {
-        i = bracket.next;
-        continue;
-      }
-    }
+    const c = chars[i];
     if (c === '(') depth++;
     else if (c === ')') {
       if (depth === 0) return { close: i, separators };
@@ -223,18 +219,13 @@ function scanExtendedGlob(
   const stack: (number | undefined)[] = [];
   for (let i = 0; i < chars.length;) {
     spend();
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
+    const skipped = skipQuotedPiece(chars, i, spend, memo);
+    if (skipped !== undefined) {
+      i = skipped;
       continue;
     }
-    if (c === '[') {
-      const bracket = readBracketExpression(chars, i + 1, spend, memo);
-      if (bracket) {
-        i = bracket.next;
-        continue;
-      }
-    } else if ('?*+@!'.includes(c) && chars[i + 1] === '(') {
+    const c = chars[i];
+    if ('?*+@!'.includes(c) && chars[i + 1] === '(') {
       stack.push(i);
       i += 2;
       continue;
@@ -246,6 +237,18 @@ function scanExtendedGlob(
     i++;
   }
   return { closed: false, firstUnclosedOpener: stack.find((opener) => opener !== undefined) };
+}
+
+/** The index after an escaped character or a bracket expression at `i`, which hide `(`, `|`, and `)`. */
+function skipQuotedPiece(
+  chars: readonly string[],
+  i: number,
+  spend: StepMeter,
+  memo: BracketScanMemo
+): number | undefined {
+  if (chars[i] === '\\') return i + 2;
+  if (chars[i] !== '[') return undefined;
+  return readBracketExpression(chars, i + 1, spend, memo)?.next;
 }
 
 function readGlobAtom(
@@ -342,6 +345,7 @@ export function longestSuffixMatch(
  * Finds the leftmost-longest substring `chars[start..end]` with `start >= from` matching `glob` in one pass,
  * or `undefined` when no match exists in `chars[from..]`.
  */
+// code-gauge-allow functionCognitiveComplexity -- Runs the extended matcher or the single-pass atom automaton for the leftmost-longest match.
 export function nextLeftmostLongestMatch(
   glob: CompiledGlob,
   chars: readonly string[],

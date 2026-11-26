@@ -24,51 +24,49 @@ interface ReadText {
  * `read`, which reads a line, or up to a delimiter or a count of characters, and splits it among names by `IFS`.
  * Input never comes from a terminal here, so `-p` shows no prompt and `-e`, `-i`, and `-s` change nothing.
  */
+// code-gauge-allow functionCognitiveComplexity -- Validates names, count, descriptor, and timeout before reading, then assigns by the form Bash's `read` was given.
+// code-gauge-allow functionNcss -- Validates names, count, descriptor, and timeout before reading, then assigns by the form Bash's `read` was given.
 export const readBuiltin: Builtin = (shell, args) => {
   const parsed = parseBuiltinOptions(shell, 'read', args, 'a:d:i:n:N:p:t:u:Eers', READ_USAGE);
   if (typeof parsed === 'number') return parsed;
   const { options, operands: names } = parsed;
   const arrayName = options.get('a');
-  for (const name of arrayName === undefined ? names : [arrayName, ...names]) {
-    if (!isIdentifier(name)) {
-      shell.reportError(`read: \`${name}': not a valid identifier`);
-      return 1;
-    }
+  const invalid = (arrayName === undefined ? names : [arrayName, ...names]).find((name) => !isIdentifier(name));
+  if (invalid !== undefined) {
+    shell.reportError(`read: \`${invalid}': not a valid identifier`);
+    return 1;
   }
   const count = readCount(shell, options.get('N') ?? options.get('n'));
   if (count === 'invalid') return 1;
   const reader = inputReader(shell, 'read', options.get('u'));
   if (!reader) return 1;
-  const timeout = options.get('t');
-  if (timeout !== undefined) {
-    if (!/^\d*\.?\d*$/.test(timeout) || timeout === '' || timeout === '.') {
-      shell.reportError(`read: ${timeout}: invalid timeout specification`);
-      return 1;
-    }
-    // All input is present before the program starts, so only a zero timeout, which only tests for input, matters.
-    if (Number(timeout) === 0) return reader.isAtEnd ? 1 : 0;
-  }
+  const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'), reader);
+  if (timeoutStatus !== undefined) return timeoutStatus;
   if (count === 0) return 0;
   const delimiter = options.has('d') ? (options.get('d') as string).slice(0, 1) || '\0' : '\n';
-  const text = readText(reader, {
-    delimiter: options.has('N') ? undefined : delimiter,
-    count,
-    raw: options.has('r'),
-  });
+  const text = readText(reader, { delimiter: options.has('N') ? undefined : delimiter, count, raw: options.has('r') });
   const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
-  let ok = true;
-  if (arrayName !== undefined) {
-    ok = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read');
-  } else if (names.length === 0) {
-    ok = shell.assignVariable('REPLY', text.chars.join(''));
-  } else if (options.has('N')) {
-    ok = assignAll(shell, names, [text.chars.join('')]);
-  } else {
-    ok = assignAll(shell, names, splitAmong(text, ifs, names.length));
-  }
-  if (!ok) return 1;
-  return text.complete ? 0 : 1;
+  let ok: boolean;
+  if (arrayName !== undefined) ok = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read');
+  else if (names.length === 0) ok = shell.assignVariable('REPLY', text.chars.join(''));
+  else if (options.has('N')) ok = assignAll(shell, names, [text.chars.join('')]);
+  else ok = assignAll(shell, names, splitAmong(text, ifs, names.length));
+  return ok && text.complete ? 0 : 1;
 };
+
+/**
+ * The status of `read -t`, which ends `read` only for a zero timeout, testing for input: all input is present before
+ * the program starts, so no other timeout can pass. Reports a timeout that is not a number.
+ */
+function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: TextReader): number | undefined {
+  if (timeout === undefined) return undefined;
+  if (!/^\d*\.?\d*$/.test(timeout) || timeout === '' || timeout === '.') {
+    shell.reportError(`read: ${timeout}: invalid timeout specification`);
+    return 1;
+  }
+  if (Number(timeout) !== 0) return undefined;
+  return reader.isAtEnd ? 1 : 0;
+}
 
 function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): boolean {
   let ok = true;
@@ -107,6 +105,7 @@ function inputReader(shell: Shell, builtin: string, fdText: string | undefined):
 }
 
 /** Reads characters up to the delimiter, which it consumes, or up to `count` characters, or to the end. */
+// code-gauge-allow functionCognitiveComplexity -- Handles counts, the delimiter, NULs, and backslash escapes and continuations as Bash's `read` does.
 function readText(
   reader: TextReader,
   { delimiter, count, raw }: { delimiter: string | undefined; count: number | undefined; raw: boolean }
@@ -208,6 +207,8 @@ function splitAll(text: ReadText, ifs: string): string[] {
 }
 
 /** `mapfile` and `readarray`, which read lines into an indexed array. */
+// code-gauge-allow functionCognitiveComplexity -- Reads records with skipping, counting, origin, and callbacks, as the options of Bash `mapfile` combine.
+// code-gauge-allow functionNcss -- Reads records with skipping, counting, origin, and callbacks, as the options of Bash `mapfile` combine.
 export const mapfileBuiltin: Builtin = (shell, args, name) => {
   const parsed = parseBuiltinOptions(shell, name, args, 'd:n:O:s:tu:C:c:', MAPFILE_USAGE);
   if (typeof parsed === 'number') return parsed;

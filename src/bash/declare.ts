@@ -80,6 +80,8 @@ export function consumeDeclarationOptionToken(builtin: string, token: string, op
 }
 
 /** Runs a static `declaration` statement directly through per-operand `VariableStore` transactions. */
+// code-gauge-allow functionCognitiveComplexity -- Orders option checks, `-F`, tracing, header validation, listing, and operand execution as Bash does.
+// code-gauge-allow functionNcss -- Orders option checks, `-F`, tracing, header validation, listing, and operand execution as Bash does.
 export function executeDeclarationCommand(
   shell: Shell,
   builtin: string,
@@ -234,6 +236,7 @@ const pendingTraces = new WeakMap<Shell, { words: string[]; compounds: number }>
  * Prints a declaration under `set -x` as Bash does: its words, a compound operand by its name alone, and for
  * `readonly` and `export` each assignment again as the assignment it makes.
  */
+// code-gauge-allow functionCognitiveComplexity -- Prints the words, defers them behind compound operands, and repeats `readonly` and `export` assignments, as Bash's trace does.
 function traceDeclaration(
   shell: Shell,
   builtin: string,

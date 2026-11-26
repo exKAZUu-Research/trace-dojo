@@ -56,6 +56,7 @@ const SIGNAL_NAMES = new Set([
  * `-`, ignores them with an empty action, and prints them with `-p` or no operand. Signals cannot reach a program
  * here, and `DEBUG` and `RETURN` traps are not provided, so naming them stops the program.
  */
+// code-gauge-allow functionCognitiveComplexity -- Handles printing, resetting, ignoring, and setting traps, which Bash's `trap` tells apart by its operands.
 export const trapBuiltin: Builtin = (shell, args) => {
   let operands = args;
   let prints = false;

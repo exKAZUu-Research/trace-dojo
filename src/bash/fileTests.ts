@@ -8,6 +8,7 @@ import type { Shell } from './shell';
  * time, so they behave as files a program creates: owned by it, readable and writable, and executable only when
  * they are directories; `/dev/null` is the only device.
  */
+// code-gauge-allow functionNcss -- One case per file operator over the virtual file system and its devices.
 export function fileTest(shell: Shell, operator: string, operand: string): boolean {
   if (operator === '-o') return isSetOptionName(operand) && shell.options[operand];
   if (operator === '-t') return false;

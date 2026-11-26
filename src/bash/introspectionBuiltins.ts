@@ -60,6 +60,7 @@ function kindOf(shell: Shell, name: string): CommandKind | undefined {
  * `command`, which runs a builtin even when a function has its name, or with `-v` or `-V` tells what names run as.
  * A function's body, which `-V` shows, and `-p`, which searches the default `PATH`, are not provided.
  */
+// code-gauge-allow functionCognitiveComplexity -- Runs a command or reports names for `-v` and `-V` in one builtin, as Bash does.
 export const commandBuiltin: Builtin = (shell, args) => {
   const parsed = parseBuiltinOptions(shell, 'command', args, 'pvV', 'command [-pVv] command [arg ...]');
   if (typeof parsed === 'number') return parsed;
@@ -95,6 +96,7 @@ export const builtinBuiltin: Builtin = (shell, args) => {
 };
 
 /** `type`, which tells what names run as; `-t` prints one word for each. */
+// code-gauge-allow functionCognitiveComplexity -- Reports each name in the formats `-t`, `-p`, and the default select.
 export const typeBuiltin: Builtin = (shell, args) => {
   const parsed = parseBuiltinOptions(shell, 'type', args, 'afptP', 'type [-afptP] name [name ...]');
   if (typeof parsed === 'number') return parsed;

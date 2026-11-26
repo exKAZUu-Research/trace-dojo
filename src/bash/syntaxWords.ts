@@ -177,6 +177,7 @@ function skipBackquoted(text: SourceText, open: number): number {
   return end;
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Tells current-shell substitutions from parameter expansions, quoted or not, before skipping either.
 function skipBraces(text: SourceText, open: number, inDouble = false): number {
   return text.nested(() => {
     const { source } = text;

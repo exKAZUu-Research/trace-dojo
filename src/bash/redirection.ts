@@ -103,6 +103,7 @@ const MODES: Record<Extract<Redirect, { kind: 'file' }>['operator'], OpenMode | 
 };
 
 /** Opens a path for a redirection, where `/dev/null`, `/dev/std*`, and `/dev/fd/N` name devices and descriptors. */
+// code-gauge-allow functionNcss -- Resolves devices, descriptor paths, noclobber, and the read, write, and read-write modes of one redirection.
 export function openPath(
   shell: Shell,
   path: string,

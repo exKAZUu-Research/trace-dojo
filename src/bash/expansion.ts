@@ -406,6 +406,7 @@ export class Expander {
 
   // ---------------------------------------------------------------- parameters
 
+  // code-gauge-allow functionCognitiveComplexity -- Dispatches the braced forms of parameter expansion and the `set -u` check in Bash's order.
   expandParameter(parsed: ParameterExpansion, ctx: WordContext): WordSegment[] {
     const expansion = backgroundPidOperand(parsed);
     if (expansion.unclosedSubscript) this.failUnclosedSubscript(expansion, ctx.badSubTarget);

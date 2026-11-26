@@ -192,6 +192,7 @@ class ConditionalValidator {
     this.current = { kind: word === ']]' ? 'close' : 'word', value: word, row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Reads one conditional word across process substitutions, regex groups, extended patterns, and word breaks.
   private scanWord(context: LexContext): string {
     const { source } = this.text;
     const begin = this.cursor;

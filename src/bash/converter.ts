@@ -527,6 +527,7 @@ export class Converter {
   }
 
   /** The text of a here-document, which expands like a double-quoted string unless its delimiter is quoted. */
+  // code-gauge-allow functionCognitiveComplexity -- Handles quoted and unquoted delimiters, `<<-` tab stripping, and the body's first newline together.
   private heredocBody(redirect: Node): Word {
     const body = this.heredocBodies.get(redirect.startIndex);
     const row = redirect.startPosition.row;
@@ -824,12 +825,33 @@ export class Converter {
         ];
       }
       case 'extglob_pattern': {
-        return [{ kind: 'literal', text: this.restoreQuotes(node.text, node.startIndex) }];
+        return this.extglobParts(node);
       }
       default: {
         return this.fail(node, unexpectedTokenMessage(node.text));
       }
     }
+  }
+
+  /**
+   * The parts of an extended pattern group whose alternatives hold quotes or expansions (`@($x|b)`): its operator,
+   * `|`, `)`, and the blanks between words stay literal, while each alternative's words expand.
+   */
+  private extglobParts(node: Node): WordPart[] {
+    const parts: WordPart[] = [];
+    let position = node.startIndex;
+    for (const [index, child] of node.children.entries()) {
+      if (child.startIndex > position) {
+        parts.push({
+          kind: 'literal',
+          text: this.restoreQuotes(this.source.slice(position, child.startIndex), position),
+        });
+      }
+      if (node.fieldNameForChild(index) === 'alternative') parts.push(...this.wordParts(child));
+      else parts.push({ kind: 'literal', text: this.restoreQuotes(child.text, child.startIndex) });
+      position = child.endIndex;
+    }
+    return parts;
   }
 
   /** The parts of a double-quoted string, whose text keeps the backslashes that quote `$`, `` ` ``, `"`, and `\`. */

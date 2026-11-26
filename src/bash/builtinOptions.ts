@@ -11,6 +11,7 @@ export interface ParsedOptions {
  * `:` in `spec` takes an argument from the rest of its word or the next word, and `--` or the first word that is not
  * an option ends them. Reports an invalid or incomplete option with the builtin's usage and returns status 2.
  */
+// code-gauge-allow functionCognitiveComplexity -- Mirrors Bash's `internal_getopt`: grouped letters, attached or separate arguments, and its two errors.
 export function parseBuiltinOptions(
   shell: Shell,
   builtin: string,
