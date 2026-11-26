@@ -722,26 +722,33 @@ function tokensOfName(name: string): string[] {
 function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
   const witness = builder.con(decl.cons[0].con);
   const typeName = builder.str(decl.entity.name);
+  const first = builder.int(decl.cons[0].con.tag);
+  const count = builder.int(decl.cons.length);
   const x = builder.newVar('x');
   const y = builder.newVar('y');
   const n = builder.newVar('n');
-  const tagOf = (local: LocalVar): RExpr => builder.call('primConTag', builder.local(local));
+  const tagOf = (local: LocalVar): RExpr => builder.call('-', builder.call('primConTag', builder.local(local)), first);
   return [
     builder.method('fromEnum', [builder.clause([builder.pvar(x)], tagOf(x))]),
     builder.method('toEnum', [
-      builder.clause([builder.pvar(n)], builder.call('derivedToEnum', typeName, witness, builder.local(n))),
+      builder.clause(
+        [builder.pvar(n)],
+        builder.call('derivedToEnum', typeName, witness, first, count, builder.local(n))
+      ),
     ]),
     builder.method('succ', [
-      builder.clause([builder.pvar(x)], builder.call('derivedSucc', typeName, witness, tagOf(x))),
+      builder.clause([builder.pvar(x)], builder.call('derivedSucc', typeName, witness, first, count, tagOf(x))),
     ]),
     builder.method('pred', [
-      builder.clause([builder.pvar(x)], builder.call('derivedPred', typeName, witness, tagOf(x))),
+      builder.clause([builder.pvar(x)], builder.call('derivedPred', typeName, witness, first, count, tagOf(x))),
     ]),
-    builder.method('enumFrom', [builder.clause([builder.pvar(x)], builder.call('derivedEnumFrom', witness, tagOf(x)))]),
+    builder.method('enumFrom', [
+      builder.clause([builder.pvar(x)], builder.call('derivedEnumFrom', witness, first, count, tagOf(x))),
+    ]),
     builder.method('enumFromThen', [
       builder.clause(
         [builder.pvar(x), builder.pvar(y)],
-        builder.call('derivedEnumFromThen', witness, tagOf(x), tagOf(y))
+        builder.call('derivedEnumFromThen', witness, first, count, tagOf(x), tagOf(y))
       ),
     ]),
   ];
@@ -750,7 +757,8 @@ function deriveEnum(builder: Builder, decl: RDataDecl): RBinding[] {
 /** `lift (C a b) = appE (appE (conE 'C) (lift a)) (lift b)`, the tree of a value of the type, as DeriveLift gives. */
 function deriveLiftClause(builder: Builder, con: ConInfo): RClause {
   const vars = Array.from({ length: con.arity }, (_, index) => builder.newVar(`a${index + 1}`));
-  let expr = builder.call('quoteGlobalCon', builder.str(con.entity.module), builder.str(con.name));
+  // Only a program derives Lift, so its constructors are the main package's.
+  let expr = builder.call('quoteGlobalCon', builder.str('main'), builder.str(con.entity.module), builder.str(con.name));
   for (const variable of vars) expr = builder.call('appE', expr, builder.call('lift', builder.local(variable)));
   return builder.clause(
     [
