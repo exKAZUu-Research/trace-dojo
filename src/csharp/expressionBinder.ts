@@ -2019,7 +2019,9 @@ export abstract class ExpressionBinder extends LambdaBinder {
       this.subscriptionTarget = saved;
     }
     const eventAccessors =
-      target.kind === 'field' || target.kind === 'staticField' ? target.field.eventAccessors : undefined;
+      target.kind === 'field' || target.kind === 'staticField'
+        ? (target.field.eventAccessors ?? target.field.virtualEventAccessors)
+        : undefined;
     if (eventAccessors && (binaryOperator === '+' || binaryOperator === '-'))
       return this.callEventAccessor(
         target,

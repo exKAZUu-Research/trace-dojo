@@ -971,7 +971,7 @@ export class DeclarationBinder extends BinderBase {
     field.initializer = declarator.initializer;
     field.row = declarator.row;
     field.column = declarator.column;
-    this.declareFieldEventAccessors(symbol, field);
+    this.declareFieldEventAccessors(symbol, field, member.modifiers.set);
     if (field.type.kind !== 'error' && !(field.type.kind === 'named' && field.type.symbol.kind === 'delegate')) {
       this.error(
         declarator,
@@ -1039,15 +1039,19 @@ export class DeclarationBinder extends BinderBase {
 
   /**
    * Gives a field-like event its `add` and `remove` accessors: an interface's are abstract, which `+=` and `-=` call in
-   * place of a delegate field, and a class's subscribe to its delegate field, which calls through an interface reach.
+   * place of a delegate field, and a class's subscribe to its delegate field, which calls through an interface reach,
+   * as do `+=` and `-=` of a virtual one, which an override's field then takes.
    */
-  private declareFieldEventAccessors(symbol: TypeSymbol, field: FieldSymbol): void {
+  private declareFieldEventAccessors(symbol: TypeSymbol, field: FieldSymbol, modifiers: ReadonlySet<string>): void {
     if (field.isStatic || this.isLibraryUnit) return;
     const isInterface = symbol.kind === 'interface';
     const accessor = (kind: 'add' | 'remove'): MethodSymbol => {
       const method = new MethodSymbol(`${kind}_${field.name}`, symbol, 'method');
       method.isEventAccessor = true;
-      method.isAbstract = isInterface;
+      method.isAbstract = isInterface || modifiers.has('abstract');
+      method.isVirtual = modifiers.has('virtual');
+      method.isOverride = modifiers.has('override');
+      method.isSealed = modifiers.has('sealed');
       method.access = field.access;
       method.row = field.row;
       method.parameters = [{ name: 'value', type: field.type, refKind: undefined, isParams: false }];
@@ -1055,9 +1059,10 @@ export class DeclarationBinder extends BinderBase {
       symbol.methods.push(method);
       return method;
     };
-    const add = accessor('add');
-    const remove = accessor('remove');
-    if (isInterface) field.eventAccessors = { add, remove };
+    const accessors = { add: accessor('add'), remove: accessor('remove') };
+    if (isInterface) field.eventAccessors = accessors;
+    else if (accessors.add.isAbstract || accessors.add.isVirtual || accessors.add.isOverride)
+      field.virtualEventAccessors = accessors;
   }
 
   /** Declares an event with `add` and `remove` accessors, which `+=` and `-=` call in place of a delegate field. */
@@ -2194,6 +2199,12 @@ export class DeclarationBinder extends BinderBase {
     for (const property of symbol.properties) this.resolvePropertyOverride(property, symbol);
     for (const method of symbol.methods) this.checkExplicitImplementation(symbol, method);
     if (symbol.kind === 'class' && !symbol.isAbstract) {
+      for (const field of symbol.fields.filter((member) => member.virtualEventAccessors?.add.isAbstract))
+        this.error(
+          field.row,
+          'CS0513',
+          `'${displayTypeSymbol(symbol)}.${field.name}' は抽象ですが、非抽象型の '${displayTypeSymbol(symbol)}' に含まれています`
+        );
       for (const missing of this.unimplementedAbstracts(symbol)) {
         this.error(
           symbol.row,
@@ -2305,24 +2316,34 @@ export class DeclarationBinder extends BinderBase {
     if (method.kind === 'operator' || method.isStatic) return;
     const base = symbol.baseType;
     if (!method.isOverride) return;
+    // An event's accessors override together, and Roslyn reports the event once by its name.
+    const isEventRemover = method.isEventAccessor && method.name.startsWith('remove_');
+    const report = (code: string, message: string): void => {
+      if (!isEventRemover) this.error(method.row, code, message);
+    };
+    const shown = method.isEventAccessor
+      ? `${displayTypeSymbol(symbol)}.${eventNameOf(method)}`
+      : displayMethod(method);
+    const shownIn = (candidate: MethodSymbol, owner: NamedType): string =>
+      candidate.isEventAccessor
+        ? `${displayTypeSymbol(owner.symbol, owner.args)}.${eventNameOf(candidate)}`
+        : displayMethodIn(candidate, owner);
     for (let current = base; current; current = baseTypeOf(current)) {
       const candidate = current.symbol.methods.find(
         (other) => other.name === method.name && this.sameParameters(other, method, current, symbol.declaredType)
       );
       if (!candidate) continue;
       if (!candidate.isVirtual && !candidate.isAbstract && !candidate.isOverride) {
-        this.error(
-          method.row,
+        report(
           'CS0506',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' は virtual、abstract または override に設定されていないためオーバーライドできません`
+          `'${shown}': 継承されたメンバー '${shownIn(candidate, current)}' は virtual、abstract または override に設定されていないためオーバーライドできません`
         );
         return;
       }
       if (candidate.isSealed) {
-        this.error(
-          method.row,
+        report(
           'CS0239',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' はシールされているため、オーバーライドできません`
+          `'${shown}': 継承されたメンバー '${shownIn(candidate, current)}' はシールされているため、オーバーライドできません`
         );
         return;
       }
@@ -2337,30 +2358,24 @@ export class DeclarationBinder extends BinderBase {
         method.returnType.kind !== 'error' &&
         expectedReturn.kind !== 'error'
       ) {
-        this.error(
-          method.row,
+        report(
           'CS0508',
-          `'${displayMethod(method)}': オーバーライドされたメンバー '${displayMethodIn(candidate, current)}' に対応するために戻り値の型は '${displayType(expectedReturn)}' でなければなりません`
+          `'${shown}': オーバーライドされたメンバー '${shownIn(candidate, current)}' に対応するために戻り値の型は '${displayType(expectedReturn)}' でなければなりません`
         );
       }
       if (
         candidate.access !== method.access &&
         !(candidate.owner.isLibrary && candidate.access === 'protected' && method.access === 'protected')
       ) {
-        this.error(
-          method.row,
+        report(
           'CS0507',
-          `'${displayMethod(method)}': '${accessibilityText(candidate.access)}' の継承メンバー '${displayMethodIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
+          `'${shown}': '${accessibilityText(candidate.access)}' の継承メンバー '${shownIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
         );
       }
       method.overridden = candidate;
       return;
     }
-    this.error(
-      method.row,
-      'CS0115',
-      `'${displayMethod(method)}': オーバーライドする適切なメソッドが見つかりませんでした`
-    );
+    report('CS0115', `'${shown}': オーバーライドする適切なメソッドが見つかりませんでした`);
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
@@ -2444,7 +2459,12 @@ export class DeclarationBinder extends BinderBase {
       // The class's own abstract members are CS0513 instead, as are those of a base class that is not abstract.
       const isOwn = current.symbol === symbol || !current.symbol.isAbstract;
       for (const method of current.symbol.methods) {
-        if (method.isAbstract && !isOwn && !implemented.has(method)) missing.push(displayMethodIn(method, current));
+        if (method.isAbstract && !isOwn && !implemented.has(method))
+          missing.push(
+            method.isEventAccessor
+              ? `${displayTypeSymbol(current.symbol, current.args)}.${eventNameOf(method)}.${method.name.slice(0, method.name.indexOf('_'))}`
+              : displayMethodIn(method, current)
+          );
         addOverriddenChain(method, implemented);
       }
       for (const property of current.symbol.properties) {
@@ -2663,6 +2683,11 @@ function accessibilityText(access: Accessibility): string {
  * A method as Roslyn's diagnostics name it, such as `A.M(int)`. With `isFull`, as its ambiguity errors do, the
  * parameters carry `params` and their types' namespaces.
  */
+/** The name of the event whose `add_E` or `remove_E` accessor a method is. */
+function eventNameOf(accessor: MethodSymbol): string {
+  return accessor.name.slice(accessor.name.indexOf('_') + 1);
+}
+
 export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull = false): string {
   const substitution = substitutionOf(owner);
   const parameters = method.parameters

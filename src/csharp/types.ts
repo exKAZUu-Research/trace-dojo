@@ -276,6 +276,11 @@ export class FieldSymbol {
   /** For an event with `add` and `remove` accessors, which it uses in place of a delegate field. */
   eventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
   /**
+   * For a virtual, abstract, or override field-like event of a class, its accessors, which `+=` and `-=` call so that
+   * the handler reaches the field of the override that the object's type declares.
+   */
+  virtualEventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
+  /**
    * For a fixed-size buffer (`fixed int Buf[4]`), its elements and the length that members binding sets; the field
    * holds a struct of the elements, and naming it gives a pointer to the first one.
    */
