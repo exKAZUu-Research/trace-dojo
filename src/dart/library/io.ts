@@ -251,8 +251,11 @@ class _StdIOSink implements IOSink {
   }
   Future flush() {
     if (_isBound) throw StateError("StreamSink is bound to a stream");
-    // After an error failed done, the SDK's flush waits for a controller that never completes.
-    if (_hasError) return Completer<void>().future;
+    // After an error failed done, the SDK's flush binds the sink and waits for a controller that never completes.
+    if (_hasError) {
+      _isBound = true;
+      return Completer<void>().future;
+    }
     if (_errorAdded) return _waitForAddedError();
     return Future.value(this);
   }
