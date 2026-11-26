@@ -5284,7 +5284,7 @@ void main() {
 
 test('unsupported SDK exports respect import prefixes and visibility', () => {
   for (const [declaration, body] of [
-    ["import 'dart:convert';", 'print(JsonUtf8Encoder());'],
+    ["import 'dart:convert';", 'print(ChunkedConversionSink);'],
     ["import 'dart:convert' as codec show htmlEscape;", "print(codec.htmlEscape.convert('<'));"],
     ["import 'dart:collection' as collections;", 'collections.LinkedList<collections.LinkedListEntry>();'],
     ['', 'WeakReference<Object>? value; print(value);'],
