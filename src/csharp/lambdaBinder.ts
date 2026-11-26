@@ -3,6 +3,7 @@ import type { Block, Expression, LambdaParameter } from './ast';
 import type { BoundBlock, BoundExpression, LambdaInfo } from './bound';
 import type { ArgumentInfo } from './callBinder';
 import type { BindContext } from './convertBinder';
+import { FlowAnalyzer } from './flow';
 import { MemberBinder, type NonValue } from './memberBinder';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope } from './scopes';
@@ -308,7 +309,11 @@ export abstract class LambdaBinder extends MemberBinder {
       } else if (returnType) inferred = returnType;
     }
     method.body = body;
-    const failed = this.diagnostics.length > savedDiagnostics;
+    // A block whose end is reachable returns no value, so the lambda does not convert to a delegate that returns one
+    // (C# spec §10.7.1), which makes `Task.Run(() => { ... })` take `Action` over `Func<Task>`.
+    const failed =
+      this.diagnostics.length > savedDiagnostics ||
+      (!report && node.body.kind === 'block' && returnsValueType(bodyReturnType) && endIsReachable(method, body));
     const lambda: LambdaInfo = { method, captures: [...context.fn.captures], isStatic: node.isStatic };
     this.recordCaptureList(context.fn, (captures) => {
       lambda.captures = captures;
@@ -549,3 +554,24 @@ export function discardResult(expression: BoundExpression): void {
   else if (expression.kind === 'await') discardResult(expression.getResult);
   else if (expression.kind === 'conditionalAccess') discardResult(expression.access);
 }
+
+function returnsValueType(type: Type | undefined): boolean {
+  return type !== undefined && type.kind !== 'void' && type.kind !== 'error';
+}
+
+/** Whether the end of a function's body is reachable, which the flow analysis tells without reporting anything. */
+function endIsReachable(method: MethodSymbol, body: BoundBlock): boolean {
+  let isReachable = false;
+  new FlowAnalyzer({
+    unassigned: ignore,
+    unassignedField: ignore,
+    notAllPathsReturn: () => (isReachable = true),
+    lambdaNotAllPathsReturn: ignore,
+    fallsThrough: ignore,
+    outNotAssigned: ignore,
+    heldAcrossSuspension: ignore,
+  }).analyzeFunction(method, body, [], true, method.row);
+  return isReachable;
+}
+
+function ignore(): void {}
