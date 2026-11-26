@@ -165,15 +165,13 @@ function analyzeBackquotes(
     const { error } = inspectBackquoteSpan(source, start, end, extglob);
     if (!error) continue;
     errors.set(start, { ...error, heredocBodyRow: source.slice(0, start).split('\n').length - 1 });
-    const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
-    normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
+    normalized = blankBackquoteBody(normalized, start, end);
   }
   for (const { start, end, extglob } of backquotes) {
     const inspected = inspectBackquoteSpan(source, start, end, extglob);
     if (inspected.error) {
       errors.set(start, inspected.error);
-      const body = source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ');
-      normalized = `${normalized.slice(0, start + 1)}${body}${normalized.slice(end - 1)}`;
+      normalized = blankBackquoteBody(normalized, start, end);
     } else {
       literalSingleQuotes.push(...inspected.quoteOffsets);
       declarationFunctionStarts.push(...inspected.fnStarts);
@@ -189,6 +187,11 @@ function analyzeBackquotes(
     arithmeticRegions,
     descriptorVariables,
   };
+}
+
+/** Blanks a backquoted body with a syntax error, keeping its lines, so the grammar reads the program around it. */
+function blankBackquoteBody(source: string, start: number, end: number): string {
+  return `${source.slice(0, start + 1)}${source.slice(start + 1, end - 1).replaceAll(/[^\n]/g, ' ')}${source.slice(end - 1)}`;
 }
 
 function inspectBackquoteSpan(

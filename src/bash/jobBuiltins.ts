@@ -21,39 +21,10 @@ export const waitBuiltin: Builtin = (shell, args) => {
   const { jobs } = shell.store;
   const pids = processIds(shell, operands);
   if (pids === undefined) return 1;
-  // Bash unsets the `-p` variable before it waits, so it stays unset when no job is reported.
   const pidName = options.get('p');
-  if (pidName !== undefined) {
-    // A name that cannot be unset fails `wait` before it waits, as Bash reports it; an array element is left as it is
-    // until a job is reported.
-    if (!isIdentifier(pidName) && !isVariableReference(pidName)) {
-      shell.reportError(`wait: \`${pidName}': not a valid identifier`);
-      return 1;
-    }
-    const failure = isIdentifier(pidName) ? shell.store.unsetNamed(pidName, false) : undefined;
-    if (failure) {
-      shell.reportError(`wait: ${failure.message}`);
-      return 1;
-    }
-  }
-  // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
-  // would be waited for forever.
+  if (pidName !== undefined && !clearPidVariable(shell, pidName)) return 1;
   const targetPids = pids.length > 0 ? pids : [...jobs.keys()];
-  const targets = targetPids.map((pid) => jobs.get(pid));
-  for (const job of targets) job?.finish?.();
-  // `wait -n` returns as soon as one of them has ended, so a waiting coprocess matters only when none has.
-  const oneEnded = options.has('n') && targets.some((job) => job?.reported === false && job.waiting !== true);
-  if (!oneEnded) for (const job of targets) job?.settleWait?.();
-  // A coprocess that has ended is reaped once waited for, which unsets its variables; only `wait` without operands
-  // forgets it, while one that names it keeps its status for a later `wait` that names it again.
-  const reaped: number[] = [];
-  if (!options.has('n')) {
-    for (const [index, job] of targets.entries()) {
-      if (job?.dispose === undefined || job.finish !== undefined || job.waiting === true) continue;
-      job.dispose();
-      reaped.push(targetPids[index] as number);
-    }
-  }
+  const reaped = settleCoprocesses(shell, targetPids, options.has('n'));
   const forgetReaped = (): void => {
     for (const pid of reaped) jobs.delete(pid);
   };
@@ -96,6 +67,43 @@ export const waitBuiltin: Builtin = (shell, args) => {
   }
   return status;
 };
+
+/**
+ * Unsets the `-p` variable before `wait` waits, as Bash does, so it stays unset when no job is reported; a name that
+ * cannot be unset fails `wait` first, while an array element is left as it is until a job is reported.
+ */
+function clearPidVariable(shell: Shell, name: string): boolean {
+  if (!isIdentifier(name) && !isVariableReference(name)) {
+    shell.reportError(`wait: \`${name}': not a valid identifier`);
+    return false;
+  }
+  const failure = isIdentifier(name) ? shell.store.unsetNamed(name, false) : undefined;
+  if (failure) shell.reportError(`wait: ${failure.message}`);
+  return failure === undefined;
+}
+
+/**
+ * Runs or settles the coprocesses `wait` waits for and reaps those that have ended, returning their process IDs. One
+ * that nothing has read from yet runs now; one waiting for input the shell can still write would be waited for
+ * forever; `wait -n` returns as soon as one target has ended, so a waiting coprocess matters only when none has, and
+ * reaps only the job it reports.
+ */
+function settleCoprocesses(shell: Shell, targetPids: readonly number[], next: boolean): number[] {
+  const targets = targetPids.map((pid) => shell.store.jobs.get(pid));
+  for (const job of targets) job?.finish?.();
+  const oneEnded = next && targets.some((job) => job?.reported === false && job.waiting !== true);
+  if (!oneEnded) for (const job of targets) job?.settleWait?.();
+  if (next) return [];
+  // Only `wait` without operands forgets a reaped coprocess, while one that names it keeps its status for a later
+  // `wait` that names it again.
+  const reaped: number[] = [];
+  for (const [index, job] of targets.entries()) {
+    if (job?.dispose === undefined || job.finish !== undefined || job.waiting === true) continue;
+    job.dispose();
+    reaped.push(targetPids[index] as number);
+  }
+  return reaped;
+}
 
 /** The process numbers `wait` names, or `undefined` after reporting one that is not a number. */
 function processIds(shell: Shell, operands: readonly string[]): number[] | undefined {

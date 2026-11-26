@@ -61,12 +61,7 @@ export const readBuiltin: Builtin = (shell, args) => {
     raw: options.has('r'),
     timesOut: options.get('t') !== undefined,
   });
-  const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
-  let status: number;
-  if (arrayName !== undefined) status = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read') ? 0 : 1;
-  else if (names.length === 0) status = shell.assignVariable('REPLY', text.chars.join('')) ? 0 : 1;
-  else if (options.has('N')) status = assignAll(shell, names, [text.chars.join('')]);
-  else status = assignAll(shell, names, splitAmong(text, ifs, names.length));
+  const status = assignRead(shell, text, { arrayName, names, wholeText: options.has('N') });
   // Bash saves the partial input of a `read -t` that times out and returns 142.
   if (text.timedOut) return 142;
   return status !== 0 ? status : text.complete ? 0 : 1;
@@ -92,6 +87,19 @@ function zeroTimeoutStatus(shell: Shell, timeout: string | undefined, reader: Te
  * Assigns the values to the names in order, returning the status: Bash stops at the first name it cannot assign, with
  * status 1 when it is the last name and 2 otherwise, leaving the names after it as they were.
  */
+/** Assigns what `read` read to its `-a` array, its names split by `IFS`, its names whole with `-N`, or `REPLY`. */
+function assignRead(
+  shell: Shell,
+  text: ReadText,
+  { arrayName, names, wholeText }: { arrayName: string | undefined; names: readonly string[]; wholeText: boolean }
+): number {
+  const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
+  if (arrayName !== undefined) return shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read') ? 0 : 1;
+  if (names.length === 0) return shell.assignVariable('REPLY', text.chars.join('')) ? 0 : 1;
+  if (wholeText) return assignAll(shell, names, [text.chars.join('')]);
+  return assignAll(shell, names, splitAmong(text, ifs, names.length));
+}
+
 function assignAll(shell: Shell, names: readonly string[], values: readonly string[]): number {
   for (const [index, name] of names.entries()) {
     if (!shell.assignVariable(name, values[index] ?? '')) return index === names.length - 1 ? 1 : 2;
@@ -128,7 +136,6 @@ function inputReader(shell: Shell, builtin: string, fdText: string | undefined):
 }
 
 /** Reads characters up to the delimiter, which it consumes, or up to `count` characters, or to the end. */
-// code-gauge-allow functionCognitiveComplexity -- Handles counts, the delimiter, NULs, and backslash escapes and continuations as Bash's `read` does.
 function readText(
   reader: TextReader,
   options: { delimiter: string | undefined; count: number | undefined; raw: boolean; timesOut?: boolean }
@@ -144,6 +151,7 @@ function readText(
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity -- Handles counts, the delimiter, NULs, and backslash escapes and continuations as Bash's `read` does.
 function readTextInto(
   reader: TextReader,
   { delimiter, count, raw }: { delimiter: string | undefined; count: number | undefined; raw: boolean },
