@@ -152,8 +152,15 @@ class _StdIOSink implements IOSink {
   final Completer<void> _done = Completer<void>();
   bool _isClosed = false;
   bool _isBound = false;
-  /** Whether an error was added, after which the SDK's consumer, its subscription cancelled, drops what is written. */
+  /**
+   * Whether an error was added that has not reached a flush or addStream, after which the SDK's consumer, its
+   * subscription cancelled, drops what is written.
+   */
+  bool _errorAdded = false;
+  /** Whether an added error failed done, as the SDK's _hasError records. */
   bool _hasError = false;
+  /** The flush or addStream waiting for what was added to be written, which takes an added error. */
+  Completer<void>? _waiting;
   _StdIOSink(this._isError);
   Encoding get encoding => utf8;
   set encoding(Encoding value) => _requireUtf8(value);
@@ -185,13 +192,13 @@ class _StdIOSink implements IOSink {
   }
   void add(List<int> data) {
     _requireWritable();
-    if (_hasError) return;
+    if (_errorAdded) return;
     // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
     _writeStream(_isError, _textOfBytes(data));
   }
   void _add(String text) {
     _requireWritable();
-    if (_hasError) return;
+    if (_errorAdded) return;
     _writeStream(_isError, text);
   }
   /** Fails a write as the SDK's sink does: once it is closed, and while a stream is added to it. */
@@ -199,16 +206,40 @@ class _StdIOSink implements IOSink {
     if (_isClosed) throw StateError("StreamSink is closed");
     if (_isBound) throw StateError("StreamSink is bound to a stream");
   }
-  /** The error reaches the SDK's consumer, which fails the sink's done, unhandled unless something waits on it. */
+  /**
+   * The error reaches the SDK's consumer a microtask later, as its controller's completion does: a flush or addStream
+   * waiting by then takes it, after which writes go on, and otherwise it fails done, unhandled unless something waits
+   * on it.
+   */
   void addError(Object error, [StackTrace? stackTrace]) {
     _requireWritable();
-    if (_hasError) return;
-    _hasError = true;
-    _done.completeError(error, stackTrace ?? StackTrace.empty);
+    if (_errorAdded) return;
+    _errorAdded = true;
+    Future<void>.error(error, stackTrace ?? StackTrace.empty).then((_) {}, onError: (Object e, StackTrace s) {
+      final waiting = _waiting;
+      _waiting = null;
+      if (waiting != null) {
+        _errorAdded = false;
+        waiting.completeError(e, s);
+      } else {
+        _hasError = true;
+        _done.completeError(e, s);
+      }
+    });
+  }
+  /** Waits, bound, for the added error, which then fails the call; the SDK's sink waits for its controller. */
+  Future _waitForAddedError() {
+    _isBound = true;
+    final waiting = Completer<void>();
+    _waiting = waiting;
+    return waiting.future.whenComplete(() {
+      _isBound = false;
+    });
   }
   Future addStream(Stream<List<int>> stream) {
     if (_isBound) throw StateError("StreamSink is already bound to a stream");
     if (_hasError) return done;
+    if (_errorAdded) return _waitForAddedError();
     _isBound = true;
     return stream.forEach((data) {
       // The VM's sink hands a stream to the descriptor's file, which fails each chunk, even an empty one, once closed.
@@ -220,6 +251,9 @@ class _StdIOSink implements IOSink {
   }
   Future flush() {
     if (_isBound) throw StateError("StreamSink is bound to a stream");
+    // After an error failed done, the SDK's flush waits for a controller that never completes.
+    if (_hasError) return Completer<void>().future;
+    if (_errorAdded) return _waitForAddedError();
     return Future.value(this);
   }
   // Closing completes, and so does done, once closed; afterwards a write fails, and print drops what it prints.
@@ -227,7 +261,8 @@ class _StdIOSink implements IOSink {
     if (_isBound) throw StateError("StreamSink is bound to a stream");
     _closeStream(_isError);
     _isClosed = true;
-    if (!_done.isCompleted) _done.complete();
+    // An added error still on its way fails done, which close returns, as the SDK's closed controller does.
+    if (!_done.isCompleted && !_errorAdded) _done.complete();
     return _done.future;
   }
   Future get done => _done.future;
