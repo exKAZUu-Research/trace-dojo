@@ -907,7 +907,9 @@ export abstract class StatementCompiler extends CallCompiler {
     const { type } = this.compile(target);
     const stored = this.coerce(this.compile(value, type), type, value);
     this.requireComptimeOperand(stored, variable);
-    return stored;
+    // The value's own code may use locals of the function, such as a block's, which compile-time evaluation cannot read.
+    const fact = staticResultOf(stored);
+    return fact && !stored.known ? known(stored.type, fact.value, stored.span) : stored;
   }
 
   /** The operand of a store into a `comptime var`, which, analyzed where the assignment stands, must be known then. */
