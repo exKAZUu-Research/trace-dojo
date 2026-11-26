@@ -1,4 +1,8 @@
-/** dart:async's streams: the SDK's, transcribed with every zone being the root zone. The source must not contain `${`. */
+/**
+ * dart:async's streams: the SDK's, transcribed with every zone being the root zone, and `StackTrace.current` in place
+ * of a trace the run's stack trace value, whose contents are unavailable as a thrown error's are. The source must not
+ * contain `${`.
+ */
 export const STREAM_SOURCE = String.raw`
 abstract mixin class Stream<T> {
   const Stream();
@@ -310,7 +314,7 @@ abstract mixin class Stream<T> {
       onError: result._completeError,
       onDone: () {
         if (!seenFirst) {
-          var stack = StackTrace.empty;
+          var stack = _StackTrace();
           var error = IterableElementError.noElement();
           _trySetStackTrace(error, stack);
           _completeWithErrorCallback(result, error, stack);
@@ -549,7 +553,7 @@ abstract mixin class Stream<T> {
       null,
       onError: future._completeError,
       onDone: () {
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -576,7 +580,7 @@ abstract mixin class Stream<T> {
           future._complete(result);
           return;
         }
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -597,7 +601,7 @@ abstract mixin class Stream<T> {
           future._complete(result);
           return;
         }
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -606,7 +610,7 @@ abstract mixin class Stream<T> {
     );
     subscription.onData((T value) {
       if (foundResult) {
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.tooMany();
         _trySetStackTrace(error, stack);
         _cancelAndErrorWithReplacement(subscription, future, error, stack);
@@ -627,7 +631,7 @@ abstract mixin class Stream<T> {
           _runUserCode(orElse, future._complete, future._completeError);
           return;
         }
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -659,7 +663,7 @@ abstract mixin class Stream<T> {
           _runUserCode(orElse, future._complete, future._completeError);
           return;
         }
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -692,7 +696,7 @@ abstract mixin class Stream<T> {
           _runUserCode(orElse, future._complete, future._completeError);
           return;
         }
-        var stack = StackTrace.empty;
+        var stack = _StackTrace();
         var error = IterableElementError.noElement();
         _trySetStackTrace(error, stack);
         _completeWithErrorCallback(future, error, stack);
@@ -703,7 +707,7 @@ abstract mixin class Stream<T> {
       _runUserCode(() => test(value), (bool isMatch) {
         if (isMatch) {
           if (foundResult) {
-            var stack = StackTrace.empty;
+            var stack = _StackTrace();
             var error = IterableElementError.tooMany();
             _trySetStackTrace(error, stack);
             _cancelAndErrorWithReplacement(subscription, future, error, stack);
@@ -732,7 +736,7 @@ abstract mixin class Stream<T> {
             indexable: this,
             name: "index",
           ),
-          StackTrace.empty,
+          _StackTrace(),
         );
       },
       cancelOnError: true,

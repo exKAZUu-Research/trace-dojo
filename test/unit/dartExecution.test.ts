@@ -9605,6 +9605,21 @@ void main() {
   });
 });
 
+test("a stream error's stack trace is unavailable to print, as a thrown error's is", () => {
+  const source = `Future<void> main() async {
+  try {
+    await Stream<int>.empty().first;
+  } catch (e, s) {
+    print(e);
+    try { print(s.toString()); } on UnsupportedError catch (x) { print(x.message); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Bad state: No element\nスタックトレースの中身は、この採点環境では使えません。\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
