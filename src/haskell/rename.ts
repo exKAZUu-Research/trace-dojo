@@ -19,7 +19,7 @@ import {
   UNIT_CON,
   UNIT_TYPE,
 } from './builtinTypes';
-import { hasStarArgument, QUALIFIED_DO_BIND } from './convert';
+import { hasStarArgument } from './convert';
 import { forEachVar } from './dependencies';
 import {
   type ClassEntity,
@@ -78,6 +78,7 @@ import type {
 import { substituteRType } from './rast';
 import { rpatChildren, rpatLocals } from './rastChildren';
 import { RecursionBudget } from './recursionBudget';
+import { LAMBDA_CASE, MULTI_WAY_IF, QUALIFIED_DO_BIND } from './surfaceForms';
 import type {
   Alt,
   ChainItem,
@@ -2715,17 +2716,15 @@ class Renamer {
 
   /** `\case` and tuple sections, which the conversion writes as lambdas of generated variables. */
   private quoteLambdaSugar(expr: Extract<Expr, { kind: 'lambda' }>, scope: LocalScope): QExpr | undefined {
-    const generated = expr.pats.map((pat) =>
-      pat.kind === 'pvar' && pat.name.name.includes(' ') ? pat.name.name : undefined
-    );
-    if (!generated.every(Boolean)) return undefined;
+    if (!expr.generated) return undefined;
+    const generated = new Set(expr.pats.flatMap((pat) => (pat.kind === 'pvar' ? [pat.name.name] : [])));
     const { body } = expr;
-    if (body.kind === 'case' && body.what === String.raw`\case`) {
+    if (body.kind === 'case' && body.what === LAMBDA_CASE) {
       return { k: 'lamCase', alts: body.alts.map((alt) => this.quoteMatch(alt, scope)) };
     }
     if (body.kind === 'tuple') {
       const elems = body.elems.map((elem) =>
-        elem.kind === 'var' && generated.includes(elem.name.name) ? undefined : this.quoteExpr(elem, scope)
+        elem.kind === 'var' && generated.has(elem.name.name) ? undefined : this.quoteExpr(elem, scope)
       );
       return { k: 'tupleSection', elems };
     }
@@ -2733,7 +2732,7 @@ class Renamer {
   }
 
   private quoteCase(expr: Extract<Expr, { kind: 'case' }>, scope: LocalScope): QExpr {
-    if (expr.what === 'multi-way if') {
+    if (expr.what === MULTI_WAY_IF) {
       const rhs = expr.alts[0]?.rhs;
       if (rhs?.body.kind !== 'guarded') throw compileError(expr.span, '書き方に誤りがあります。');
       return {
@@ -2742,7 +2741,7 @@ class Renamer {
       };
     }
     const alts = expr.alts.map((alt) => this.quoteMatch(alt, scope));
-    if (expr.what === String.raw`\case` && expr.scrutinee.kind === 'var') return { k: 'lamCase', alts };
+    if (expr.what === LAMBDA_CASE && expr.scrutinee.kind === 'var') return { k: 'lamCase', alts };
     return { k: 'case', scrutinee: this.quoteExpr(expr.scrutinee, scope), alts };
   }
 
@@ -2754,6 +2753,7 @@ class Renamer {
 
   /** A right side, whose guards and bodies see its `where` bindings. */
   private quoteRhs(rhs: Rhs, scope: LocalScope): { body: QBody; where: QDecls } {
+    if (rhs.implicit) throw this.unsupportedInQuote(rhs.span, 'この式');
     const where = this.quoteDeclGroup(rhs.where, scope);
     if (rhs.body.kind === 'plain') {
       return { body: { k: 'plain', expr: this.quoteExpr(rhs.body.expr, where.scope) }, where: where.decls };
@@ -2766,7 +2766,7 @@ class Renamer {
   private quoteGuarded(guards: Guard[], expr: Expr, scope: LocalScope): QGuarded {
     const stmts = guards.map((guard): Stmt => {
       if (guard.kind === 'bool') return { kind: 'exp', expr: guard.expr, span: guard.span };
-      if (guard.kind === 'let') return { kind: 'let', decls: guard.decls, span: guard.span };
+      if (guard.kind === 'let') return guard;
       return { kind: 'bind', pat: guard.pat, expr: guard.expr, span: guard.span };
     });
     const renamed = this.quoteStmts(stmts, scope);
@@ -2791,6 +2791,7 @@ class Renamer {
           break;
         }
         case 'let': {
+          if (stmt.implicit) throw this.unsupportedInQuote(stmt.span, 'この式');
           const group = this.quoteDeclGroup(stmt.decls, scope);
           scope = group.scope;
           stmts.push({ k: 'let', decls: group.decls });
@@ -3171,7 +3172,7 @@ class Renamer {
       const fieldName = con.fieldNames?.[index];
       return {
         name: fieldName && this.quoteValueRef(fieldName, scope, 'value', true),
-        strict: con.strictFields?.includes(index) ?? false,
+        bang: con.bangs?.[index],
         type: this.quoteType(type, scope),
       };
     });

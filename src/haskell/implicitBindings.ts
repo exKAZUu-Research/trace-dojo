@@ -1,5 +1,6 @@
 import { compileError, unsupportedError } from './errors';
 import type { Decl, Expr, Guard, GuardedExpr, ImplicitBind, Pat, Rhs, Span, Stmt } from './syntax';
+import { LoweringPass } from './syntaxChildren';
 
 export function implicitStmt(binds: ImplicitBind[], span: Span): Stmt {
   return { kind: 'let', decls: [], span, implicit: binds };
@@ -9,17 +10,46 @@ export function implicitGuard(binds: ImplicitBind[], span: Span): Guard {
   return { kind: 'let', decls: [], span, implicit: binds };
 }
 
-export function lowerImplicitStmts(stmts: Stmt[], what: 'do' | 'mdo' | 'rec' | 'qualifiedDo'): Stmt[] {
+/** Rejects the implicit-parameter bindings of statements whose block (`mdo`, `rec`, a qualified do) cannot scope them. */
+export function rejectImplicitStmts(stmts: Stmt[], place: string): void {
+  const stmt = stmts.find((candidate) => isImplicit(candidate));
+  if (stmt) throw unsupportedError(stmt.span, `${place} の中の暗黙のパラメータの束縛`);
+}
+
+/**
+ * Lowers the bindings of implicit parameters in `where`s, guards, do blocks, and comprehensions into `let ?x = e in`
+ * expressions around what each scopes over.
+ */
+export function lowerImplicitParams(decls: Decl[]): Decl[] {
+  const pass = new ImplicitParamLowering();
+  return decls.map((decl) => pass.decl(decl));
+}
+
+class ImplicitParamLowering extends LoweringPass {
+  override expr(expr: Expr): Expr {
+    const mapped = super.expr(expr);
+    if (mapped.kind === 'do') return { ...mapped, stmts: lowerImplicitStmts(mapped.stmts) };
+    if (mapped.kind === 'comprehension') return lowerImplicitComprehension(mapped);
+    return mapped;
+  }
+
+  override rhs(rhs: Rhs): Rhs {
+    const { implicit, ...mapped } = super.rhs(rhs);
+    const lowered: Rhs =
+      mapped.body.kind === 'plain'
+        ? mapped
+        : { ...mapped, body: { kind: 'guarded', branches: mapped.body.branches.map(lowerImplicitGuards) } };
+    return implicit ? withImplicitWhere(lowered, implicit) : lowered;
+  }
+}
+
+function lowerImplicitStmts(stmts: Stmt[]): Stmt[] {
   const index = stmts.findIndex((stmt) => isImplicit(stmt));
   if (index === -1) return stmts;
   const stmt = stmts[index];
-  if (what !== 'do') {
-    const place = { mdo: 'mdo', rec: 'rec', qualifiedDo: '修飾つきの do' }[what];
-    throw unsupportedError(stmt.span, `${place} の中の暗黙のパラメータの束縛`);
-  }
   const rest = stmts.slice(index + 1);
   if (rest.length === 0) throw compileError(stmt.span, 'do の最後の文は、式にしてください。');
-  const body: Expr = { kind: 'do', stmts: lowerImplicitStmts(rest, what), span: stmt.span };
+  const body: Expr = { kind: 'do', stmts: lowerImplicitStmts(rest), span: stmt.span };
   return [...stmts.slice(0, index), { kind: 'exp', expr: implicitLet(stmt, body), span: stmt.span }];
 }
 
@@ -27,7 +57,7 @@ export function lowerImplicitStmts(stmts: Stmt[], what: 'do' | 'mdo' | 'rec' | '
  * A comprehension whose qualifiers bind implicit parameters: `[e | qs, let ?x = v, rs]` is
  * `[r | qs, r <- let ?x = v in [e | rs]]`, the same in a list or any monad.
  */
-export function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
+function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehension' }>): Expr {
   const branches = [expr.quals, ...(expr.parallel ?? [])];
   const marked = branches.flat().find((stmt) => isImplicit(stmt));
   if (!marked) return expr;
@@ -54,7 +84,7 @@ export function lowerImplicitComprehension(expr: Extract<Expr, { kind: 'comprehe
  * A right-hand side whose `where` binds implicit parameters, which scope over its guards and bodies: each value is a
  * `where` binding, shared by every guard that reads it, which the implicit bindings name.
  */
-export function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
+function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
   // A lazy pattern, which Strict leaves lazy, as GHC leaves the implicit binding it stands for.
   const values: Decl[] = binds.map((bind) => ({
     kind: 'patBind',
@@ -85,7 +115,7 @@ export function withImplicitWhere(rhs: Rhs, binds: ImplicitBind[]): Rhs {
  * expression giving the branch's value as a one-element list, or the empty list when a guard fails, which a pattern
  * guard matches, so that the branch still falls through to the next as GHC's does.
  */
-export function lowerImplicitGuards(branch: GuardedExpr): GuardedExpr {
+function lowerImplicitGuards(branch: GuardedExpr): GuardedExpr {
   const index = branch.guards.findIndex((guard) => isImplicit(guard));
   if (index === -1) return branch;
   const { span } = branch.guards[index];

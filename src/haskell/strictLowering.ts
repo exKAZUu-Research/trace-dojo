@@ -1,53 +1,96 @@
 import type { FeatureGates } from './features';
-import type { Decl, Expr, Guard, Pat, Rhs, Span, Stmt } from './syntax';
-import {
-  mapDeclChildren,
-  mapExprChildren,
-  mapGuardChildren,
-  mapPatChildren,
-  mapStmtChildren,
-  type StmtContext,
-  type SyntaxMapper,
-} from './syntaxChildren';
+import { LAMBDA_CASES, MULTI_WAY_IF, QUALIFIED_DO_BIND } from './surfaceForms';
+import type { Alt, Decl, Expr, Guard, Pat, Rhs, Span, Stmt } from './syntax';
+import { LoweringPass, mapGuardChildren, mapStmtChildren, type StmtContext } from './syntaxChildren';
+
+/**
+ * Under Strict, matches the patterns the source binds with strictly, as if each had a `!`, unless it is lazy, `~p`:
+ * a function's and a lambda's parameters, case alternatives, and the patterns of binds and pattern guards.
+ */
+export function bangStrictPatterns(decls: Decl[]): Decl[] {
+  const pass = new StrictPatterns();
+  return decls.map((decl) => pass.decl(decl));
+}
+
+class StrictPatterns extends LoweringPass {
+  override expr(expr: Expr): Expr {
+    const mapped = super.expr(expr);
+    if (mapped.kind === 'lambda' && !mapped.generated) return { ...mapped, pats: mapped.pats.map(banged) };
+    if (mapped.kind === 'case') return { ...mapped, alts: strictAlternatives(mapped) };
+    return mapped;
+  }
+
+  override decl(decl: Decl): Decl {
+    const mapped = super.decl(decl);
+    return mapped.kind === 'funClause' ? { ...mapped, args: mapped.args.map(banged) } : mapped;
+  }
+
+  override stmts(stmts: Stmt[], context: StmtContext): Stmt[] {
+    return super
+      .stmts(stmts, context)
+      .map((stmt) => (stmt.kind === 'bind' ? { ...stmt, pat: banged(stmt.pat) } : stmt));
+  }
+
+  override guards(guards: Guard[]): Guard[] {
+    return super.guards(guards).map((guard) => (guard.kind === 'pat' ? { ...guard, pat: banged(guard.pat) } : guard));
+  }
+}
+
+/** The alternatives of a case, whose patterns are the source's except where the case stands for other syntax. */
+function strictAlternatives(expr: Extract<Expr, { kind: 'case' }>): Alt[] {
+  switch (expr.what) {
+    case MULTI_WAY_IF: {
+      return expr.alts;
+    }
+    // The bind's own pattern, and the alternative that fails.
+    case QUALIFIED_DO_BIND: {
+      return [bangedAlternative(expr.alts[0]), ...expr.alts.slice(1)];
+    }
+    // The parameters' patterns, a tuple's elements when there are several.
+    case LAMBDA_CASES: {
+      if (expr.scrutinee.kind !== 'tuple') return expr.alts.map(bangedAlternative);
+      return expr.alts.map((alt) =>
+        alt.pat.kind === 'ptuple' ? { ...alt, pat: { ...alt.pat, elems: alt.pat.elems.map(banged) } } : alt
+      );
+    }
+    default: {
+      return expr.alts.map(bangedAlternative);
+    }
+  }
+}
+
+function bangedAlternative(alt: Alt): Alt {
+  return { ...alt, pat: banged(alt.pat) };
+}
+
+function banged(pat: Pat): Pat {
+  // A type binder, `@a`, binds no value to evaluate.
+  if (pat.kind === 'plazy' || pat.kind === 'pbang' || pat.kind === 'ptybinder') return pat;
+  return { kind: 'pbang', pat, span: pat.span };
+}
 
 /**
  * Makes the strict bindings of a module's `let`s, `where`s, guards, and statements evaluate before what follows
  * them, wherever they are: `!x = e` evaluates `x`, and `!(a, b) = e` matches the whole pattern, as do all of a
- * group's bindings under Strict. Source code and the code Template Haskell splices give both go through it once.
+ * group's bindings under Strict.
  */
 export function lowerStrictBindings(features: FeatureGates<'convert'>, decls: Decl[]): Decl[] {
   const lowering = new StrictLowering(features);
   return decls.map((decl) => lowering.decl(decl));
 }
 
-class StrictLowering implements SyntaxMapper {
-  constructor(private readonly features: FeatureGates<'convert'>) {}
-
-  expr(expr: Expr): Expr {
-    switch (expr.kind) {
-      // A quote's tree keeps the syntax it quotes.
-      case 'quote': {
-        return expr;
-      }
-      case 'let': {
-        const { decls, forced } = this.group(expr.decls);
-        return { ...expr, decls, body: forcing(forced, this.expr(expr.body), expr.span) };
-      }
-      default: {
-        return mapExprChildren(expr, this);
-      }
-    }
+class StrictLowering extends LoweringPass {
+  constructor(private readonly features: FeatureGates<'convert'>) {
+    super();
   }
 
-  pat(pat: Pat): Pat {
-    return mapPatChildren(pat, this);
+  override expr(expr: Expr): Expr {
+    if (expr.kind !== 'let') return super.expr(expr);
+    const { decls, forced } = this.group(expr.decls);
+    return { ...expr, decls, body: forcing(forced, this.expr(expr.body), expr.span) };
   }
 
-  decl(decl: Decl): Decl {
-    return mapDeclChildren(decl, this);
-  }
-
-  rhs(rhs: Rhs): Rhs {
+  override rhs(rhs: Rhs): Rhs {
     const { decls: where, forced } = this.group(rhs.where);
     const { span } = rhs;
     if (rhs.body.kind === 'plain') {
@@ -69,7 +112,7 @@ class StrictLowering implements SyntaxMapper {
     };
   }
 
-  stmts(stmts: Stmt[], context: StmtContext): Stmt[] {
+  override stmts(stmts: Stmt[], context: StmtContext): Stmt[] {
     return stmts.flatMap((stmt): Stmt[] => {
       if (stmt.kind !== 'let') return [mapStmtChildren(stmt, context, this)];
       const { decls, forced } = this.group(stmt.decls);
@@ -85,7 +128,7 @@ class StrictLowering implements SyntaxMapper {
     });
   }
 
-  guards(guards: Guard[]): Guard[] {
+  override guards(guards: Guard[]): Guard[] {
     return guards.flatMap((guard): Guard[] => {
       if (guard.kind !== 'let') return [mapGuardChildren(guard, this)];
       const { decls, forced } = this.group(guard.decls);

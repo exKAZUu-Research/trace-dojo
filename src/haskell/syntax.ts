@@ -52,12 +52,17 @@ export type Expr =
       forcing?: true;
     }
   | { kind: 'con'; name: QName; span: Span }
-  | { kind: 'lit'; lit: Literal; span: Span }
+  /** A literal; a `generated` one is the conversion's, such as a failure message, which overloading leaves alone. */
+  | { kind: 'lit'; lit: Literal; span: Span; generated?: true }
   | { kind: 'app'; fn: Expr; arg: Expr; span: Span }
   | { kind: 'chain'; items: ChainItem<Expr>[]; span: Span }
   | { kind: 'binop'; op: Operator; left: Expr; right: Expr; span: Span }
   | { kind: 'neg'; expr: Expr; span: Span }
-  | { kind: 'lambda'; pats: Pat[]; body: Expr; span: Span }
+  /**
+   * A lambda; a `generated` one stands for syntax the conversion desugars, such as `\case` or a tuple section, whose
+   * variables bind no pattern the source wrote.
+   */
+  | { kind: 'lambda'; pats: Pat[]; body: Expr; span: Span; generated?: true }
   | { kind: 'let'; decls: Decl[]; body: Expr; span: Span }
   | { kind: 'if'; cond: Expr; ifTrue: Expr; ifFalse: Expr; span: Span }
   | {
@@ -223,6 +228,8 @@ export type Guard =
 export interface Rhs {
   body: { kind: 'plain'; expr: Expr } | { kind: 'guarded'; branches: GuardedExpr[] };
   where: Decl[];
+  /** A `where` that binds implicit parameters, `where ?x = e`, instead of the declarations of `where`. */
+  implicit?: ImplicitBind[];
   span: Span;
 }
 
@@ -247,7 +254,9 @@ export type Stmt =
 export interface ConDecl {
   name: Name;
   fields: TypeExpr[];
-  /** The positions of the strict fields: those marked `!`, and under StrictData those not marked `~`. */
+  /** The strictness each field is marked with, `!` or `~`, or `undefined` for one left unmarked. */
+  bangs?: FieldBang[];
+  /** The positions of the strict fields, which lowering decides from the marks and StrictData. */
   strictFields?: number[];
   fieldNames?: Name[];
   isInfix: boolean;
@@ -377,6 +386,8 @@ export type Decl =
     }
   /** `type role T nominal representational`, the roles of a type's parameters; `undefined` is `_`, inferred. */
   | { kind: 'roleAnnotation'; name: QName; roles: (Role | undefined)[]; span: Span };
+
+export type FieldBang = 'strict' | 'lazy' | undefined;
 
 export type Role = 'nominal' | 'representational' | 'phantom';
 

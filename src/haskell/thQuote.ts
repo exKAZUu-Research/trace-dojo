@@ -574,7 +574,7 @@ export class QuoteBuilder {
         this.call(
           'bang',
           this.sup('noSourceUnpackedness'),
-          this.sup(field.strict ? 'sourceStrict' : 'noSourceStrictness')
+          this.sup({ strict: 'sourceStrict', lazy: 'sourceLazy', none: 'noSourceStrictness' }[field.bang ?? 'none'])
         ),
         this.type(field.type)
       );

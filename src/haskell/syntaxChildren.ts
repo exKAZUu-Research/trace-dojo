@@ -16,6 +16,55 @@ export interface SyntaxMapper {
   guards(guards: Guard[]): Guard[];
 }
 
+/**
+ * A pass that rebuilds every node with its children mapped and lowers what it overrides, leaving a quote's body as the
+ * quote wrote it, which its tree holds. The code of the splices inside a quote, and a typed quote's witness, are the
+ * module's code and go through the pass.
+ */
+export class LoweringPass implements SyntaxMapper {
+  expr(expr: Expr): Expr {
+    if (expr.kind !== 'quote') return mapExprChildren(expr, this);
+    return {
+      ...expr,
+      body: mapSpliceCode(expr.body, (code) => this.expr(code)),
+      ...(expr.witness ? { witness: this.expr(expr.witness) } : {}),
+    };
+  }
+
+  pat(pat: Pat): Pat {
+    return mapPatChildren(pat, this);
+  }
+
+  decl(decl: Decl): Decl {
+    return mapDeclChildren(decl, this);
+  }
+
+  rhs(rhs: Rhs): Rhs {
+    return mapRhsChildren(rhs, this);
+  }
+
+  stmts(stmts: Stmt[], context: StmtContext): Stmt[] {
+    return stmts.map((stmt) => mapStmtChildren(stmt, context, this));
+  }
+
+  guards(guards: Guard[]): Guard[] {
+    return guards.map((guard) => mapGuardChildren(guard, this));
+  }
+}
+
+/**
+ * Syntax with the code of each splice in it, `$(e)` in an expression or a type, mapped, and everything else kept: the
+ * splices may be anywhere in a quote's body, its types and declarations included.
+ */
+function mapSpliceCode<T>(node: T, map: (code: Expr) => Expr): T {
+  if (Array.isArray(node)) return node.map((item: unknown) => mapSpliceCode(item, map)) as T;
+  if (typeof node !== 'object' || node === null) return node;
+  const fields = node as Record<string, unknown>;
+  if (fields.kind === 'thSplice' || fields.kind === 'tsplice')
+    return { ...fields, expr: map(fields.expr as Expr) } as T;
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, mapSpliceCode(value, map)])) as T;
+}
+
 /** An expression with its children mapped, every other field kept; one without children is returned as it is. */
 // code-gauge-allow functionNcss -- One short case per expression kind.
 export function mapExprChildren(expr: Expr, mapper: Omit<SyntaxMapper, 'guards'>): Expr {
@@ -217,16 +266,20 @@ export function mapDeclChildren(decl: Decl, mapper: Pick<SyntaxMapper, 'pat' | '
   }
 }
 
-/** A right side with its children mapped, every other field kept. */
+/** A right side with its children mapped, its implicit bindings' expressions too, every other field kept. */
 export function mapRhsChildren(rhs: Rhs, mapper: Pick<SyntaxMapper, 'expr' | 'decl' | 'guards'>): Rhs {
-  const where = rhs.where.map((decl) => mapper.decl(decl));
-  if (rhs.body.kind === 'plain') return { ...rhs, where, body: { kind: 'plain', expr: mapper.expr(rhs.body.expr) } };
+  const mapped: Rhs = {
+    ...rhs,
+    where: rhs.where.map((decl) => mapper.decl(decl)),
+    ...(rhs.implicit ? { implicit: mapImplicitBinds(rhs.implicit, mapper) } : {}),
+  };
+  if (rhs.body.kind === 'plain') return { ...mapped, body: { kind: 'plain', expr: mapper.expr(rhs.body.expr) } };
   const branches = rhs.body.branches.map((branch) => ({
     ...branch,
     guards: mapper.guards(branch.guards),
     expr: mapper.expr(branch.expr),
   }));
-  return { ...rhs, where, body: { kind: 'guarded', branches } };
+  return { ...mapped, body: { kind: 'guarded', branches } };
 }
 
 /** A statement with its children mapped, a `let`'s implicit bindings' expressions too, its other fields kept. */

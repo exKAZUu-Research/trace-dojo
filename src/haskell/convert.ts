@@ -6,24 +6,22 @@ import { unboxedSumConName, unboxedTupleName } from './builtinTypes';
 import { compileError as syntaxError, unsupportedError } from './errors';
 import type { Extensions } from './extensions';
 import type { FeatureGates } from './features';
-import {
-  implicitGuard,
-  implicitStmt,
-  lowerImplicitComprehension,
-  lowerImplicitGuards,
-  lowerImplicitStmts,
-  withImplicitWhere,
-} from './implicitBindings';
+import { implicitGuard, implicitStmt, rejectImplicitStmts } from './implicitBindings';
 import { parseCharLiteral, parseNumberLiteral, parseStringLiteral } from './literals';
-import {
-  overloadedList,
-  overloadedListPattern,
-  overloadedSequence,
-  overloadedString,
-  overloadedStringPattern,
-} from './overloadedLiterals';
+import { lowerDeclarations } from './lowering';
 import { sourceColumns } from './sourceCoordinates';
-import { lowerStrictBindings } from './strictLowering';
+import {
+  generatedLambda,
+  generatedName,
+  LAMBDA_CASE,
+  LAMBDA_CASES,
+  lambdaCase,
+  multiWayIf,
+  projectionSelector,
+  QUALIFIED_DO_BIND,
+  tupleSection,
+  variable,
+} from './surfaceForms';
 import type {
   Alt,
   ChainItem,
@@ -33,6 +31,7 @@ import type {
   DerivingClause,
   DerivingStrategy,
   Expr,
+  FieldBang,
   FieldBind,
   Guard,
   GuardedExpr,
@@ -199,7 +198,7 @@ export function convertModule(
     extensions,
     exports: header ? convertExports(features, header) : undefined,
     imports,
-    decls: lowerStrictBindings(features, decls),
+    decls: lowerDeclarations(extensions, decls),
     span: spanOf(root),
   };
 }
@@ -612,10 +611,10 @@ function convertFunction(features: ConvertContext, node: Node): Decl {
     const op = convertOperator(operator);
     if (op.qualifier) throw syntaxError(spanOf(operator), '修飾された名前は、ここには書けません。');
     if (op.isConstructor) throw syntaxError(spanOf(operator), '構成子は、関数として定義できません。');
-    const left = strictPattern(features, convertPattern(features, required(head, 'left_operand')));
-    const right = strictPattern(features, convertPattern(features, required(head, 'right_operand')));
+    const left = convertPattern(features, required(head, 'left_operand'));
+    const right = convertPattern(features, required(head, 'right_operand'));
     const extra = fields(node, 'patterns').flatMap((patterns) =>
-      namedChildren(patterns).map((child) => strictPattern(features, convertPattern(features, child)))
+      namedChildren(patterns).map((child) => convertPattern(features, child))
     );
     return {
       kind: 'funClause',
@@ -627,7 +626,7 @@ function convertFunction(features: ConvertContext, node: Node): Decl {
   }
   const nameNode = required(node, 'name');
   const patterns = fields(node, 'patterns').flatMap((patternsNode) =>
-    namedChildren(patternsNode).map((child) => strictPattern(features, convertPattern(features, child)))
+    namedChildren(patternsNode).map((child) => convertPattern(features, child))
   );
   return { kind: 'funClause', name: plainName(nameNode), args: patterns, rhs, span: spanOf(node) };
 }
@@ -658,7 +657,7 @@ function convertRhs(features: ConvertContext, node: Node, separator: '=' | '->')
   const whereNode = field(node, 'binds');
   const whereBinds = whereNode && field(whereNode, 'binds');
   const implicit = implicitBindsOf(features, whereBinds, spanOf(node));
-  if (implicit) return withImplicitWhere(convertRhsBody(features, node, separator, matches, []), implicit);
+  if (implicit) return { ...convertRhsBody(features, node, separator, matches, []), implicit };
   const where = convertLocalBinds(features, whereBinds);
   return convertRhsBody(features, node, separator, matches, where);
 }
@@ -681,11 +680,11 @@ function convertRhsBody(
     checkSeparator(match, separator);
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
-    return lowerImplicitGuards({
+    return {
       guards: fields(guardsNode, 'guard').flatMap((node) => convertGuard(features, node)),
       expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
-    });
+    };
   });
   return { body: { kind: 'guarded', branches }, where, span };
 }
@@ -718,7 +717,7 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
       return [
         {
           kind: 'pat',
-          pat: strictPattern(features, convertPattern(features, required(node, 'pattern'))),
+          pat: convertPattern(features, required(node, 'pattern')),
           expr: convertExpr(features, required(node, 'expression')),
           span,
         },
@@ -728,14 +727,6 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
       throw syntaxError(span, '書き方に誤りがあります。');
     }
   }
-}
-
-/** Under Strict, a pattern that binds is matched strictly, as if it had a `!`, unless it is lazy, `~p`. */
-function strictPattern(features: ConvertContext, pat: Pat): Pat {
-  // A type binder, `@a`, binds no value to evaluate.
-  if (!features.allows('strict') || pat.kind === 'plazy' || pat.kind === 'pbang' || pat.kind === 'ptybinder')
-    return pat;
-  return { kind: 'pbang', pat, span: pat.span };
 }
 
 /** The bindings of a group of implicit parameters, `?x = e`, or `undefined` for a group of ordinary bindings. */
@@ -1077,9 +1068,7 @@ function convertNewtype(features: ConvertContext, node: Node, isInstance = false
     if (constructorsNode.descendantsOfType(['strict_field', 'lazy_field']).length > 0) {
       throw syntaxError(spanOf(constructorsNode), 'newtype の構成子のフィールドには、! や ~ を付けられません。');
     }
-    // StrictData makes only a data constructor's fields strict.
-    const { strictFields: _, ...lazy } = cons[0];
-    con = lazy;
+    con = cons[0];
     checkGadtNewtypeConstructor(con);
   } else {
     con = convertNewtypeConstructor(features, required(node, 'constructor'));
@@ -1340,14 +1329,14 @@ function convertGadtConstructor(features: ConvertContext, node: Node): ConDecl[]
   const context = contextNode ? convertContext(features, contextNode) : [];
   let fieldTypes: TypeExpr[] = [];
   let fieldNames: Name[] | undefined;
-  const strictFields: number[] = [];
+  const bangs: FieldBang[] = [];
   let result: TypeExpr;
   if (typeNode.type === 'record') {
     fieldNames = [];
     for (const fieldNode of fields(required(typeNode, 'fields'), 'field')) {
       const fieldType = required(fieldNode, 'type');
       for (const nameNode of fields(fieldNode, 'name')) {
-        if (isStrictField(features, fieldType)) strictFields.push(fieldTypes.length);
+        bangs.push(fieldBang(fieldType));
         fieldNames.push(plainName(nameNode));
         fieldTypes.push(convertFieldType(features, fieldType));
       }
@@ -1358,7 +1347,7 @@ function convertGadtConstructor(features: ConvertContext, node: Node): ConDecl[]
     // A constructor's fields are linear, so an arrow of a multiplicity separates them like any other.
     while (current.type === 'function' || current.type === 'linear_function') {
       const parameter = required(current, 'parameter');
-      if (isStrictField(features, parameter)) strictFields.push(fieldTypes.length);
+      bangs.push(fieldBang(parameter));
       fieldTypes.push(convertFieldType(features, parameter));
       current = required(current, 'result');
     }
@@ -1370,7 +1359,7 @@ function convertGadtConstructor(features: ConvertContext, node: Node): ConDecl[]
     name: plainName(nameNode),
     fields: fieldTypes,
     ...(fieldNames ? { fieldNames } : {}),
-    ...(strictFields.length > 0 ? { strictFields } : {}),
+    ...withBangs(bangs),
     isInfix: false,
     span: spanOf(node),
     exVars,
@@ -1419,12 +1408,12 @@ function convertRecordConstructor(features: ConvertContext, node: Node): ConDecl
   const fieldsNode = field(node, 'fields');
   const fieldTypes: TypeExpr[] = [];
   const fieldNames: Name[] = [];
-  const strictFields: number[] = [];
+  const bangs: FieldBang[] = [];
   for (const fieldNode of fieldsNode ? fields(fieldsNode, 'field') : []) {
     const typeNode = required(fieldNode, 'type');
     const type = convertFieldType(features, typeNode);
     for (const nameNode2 of fields(fieldNode, 'name')) {
-      if (isStrictField(features, typeNode)) strictFields.push(fieldTypes.length);
+      bangs.push(fieldBang(typeNode));
       fieldNames.push(plainName(nameNode2));
       fieldTypes.push(type);
     }
@@ -1433,7 +1422,7 @@ function convertRecordConstructor(features: ConvertContext, node: Node): ConDecl
     name: plainName(nameNode),
     fields: fieldTypes,
     fieldNames,
-    ...(strictFields.length > 0 ? { strictFields } : {}),
+    ...withBangs(bangs),
     isInfix: false,
     span: spanOf(node),
   };
@@ -1450,12 +1439,12 @@ function convertPrefixConstructor(features: ConvertContext, node: Node): ConDecl
   };
 }
 
-function constructorFields(features: ConvertContext, nodes: Node[]): Pick<ConDecl, 'fields' | 'strictFields'> {
-  const strictFields = nodes.flatMap((node, index) => (isStrictField(features, node) ? [index] : []));
-  return {
-    fields: nodes.map((node) => convertFieldType(features, node)),
-    ...(strictFields.length > 0 ? { strictFields } : {}),
-  };
+function constructorFields(features: ConvertContext, nodes: Node[]): Pick<ConDecl, 'fields' | 'bangs'> {
+  return { fields: nodes.map((node) => convertFieldType(features, node)), ...withBangs(nodes.map(fieldBang)) };
+}
+
+function withBangs(bangs: FieldBang[]): Pick<ConDecl, 'bangs'> {
+  return bangs.some(Boolean) ? { bangs } : {};
 }
 
 function convertFieldType(features: ConvertContext, node: Node): TypeExpr {
@@ -1470,9 +1459,8 @@ function convertFieldType(features: ConvertContext, node: Node): TypeExpr {
   return convertType(features, node);
 }
 
-/** Whether constructing a value evaluates a field first: one marked `!`, or any not marked `~` under StrictData. */
-function isStrictField(features: ConvertContext, node: Node): boolean {
-  return node.type === 'strict_field' || (features.allows('strictData') && node.type !== 'lazy_field');
+function fieldBang(node: Node): FieldBang {
+  return node.type === 'strict_field' ? 'strict' : node.type === 'lazy_field' ? 'lazy' : undefined;
 }
 
 function convertTypeSynonym(features: ConvertContext, node: Node): Decl {
@@ -1926,9 +1914,7 @@ export function convertExpr(features: ConvertContext, node: Node): Expr {
         lit: convertLiteral(features, namedChildren(node)[0] ?? node),
         span,
       };
-      return literal.lit.kind === 'string' && features.allows('overloadedStrings')
-        ? overloadedString(literal)
-        : literal;
+      return literal;
     }
     case 'label': {
       if (!features.allows('overloadedLabels'))
@@ -2007,9 +1993,7 @@ export function convertExpr(features: ConvertContext, node: Node): Expr {
       return convertSection(features, node, span);
     }
     case 'lambda': {
-      const patterns = namedChildren(required(node, 'patterns')).map((child) =>
-        strictPattern(features, convertPattern(features, child))
-      );
+      const patterns = namedChildren(required(node, 'patterns')).map((child) => convertPattern(features, child));
       return { kind: 'lambda', pats: patterns, body: convertExpr(features, required(node, 'expression')), span };
     }
     case 'conditional': {
@@ -2043,11 +2027,7 @@ export function convertExpr(features: ConvertContext, node: Node): Expr {
     }
     case 'projection_selector': {
       requireRecordDot(features, span);
-      const name = generatedName('record', 0);
-      const fields = fieldsOfSelector(node);
-      let body: Expr = varOf(name, span);
-      for (const label of fields) body = { kind: 'projection', expr: body, field: label, span };
-      return lambdaOf([name], body, span);
+      return projectionSelector(fieldsOfSelector(node), span);
     }
     case 'let_in': {
       const bindsNode = field(node, 'binds');
@@ -2129,7 +2109,7 @@ function convertCollection(features: ConvertContext, node: Node, span: Span): Ex
         elems: fields(node, 'element').map((node) => convertExpr(features, node)),
         span,
       };
-      return features.allows('overloadedLists') ? overloadedList(list) : list;
+      return list;
     }
     case 'arithmetic_sequence': {
       const step = field(node, 'step');
@@ -2141,7 +2121,7 @@ function convertCollection(features: ConvertContext, node: Node, span: Span): Ex
         to: to ? convertExpr(features, to) : undefined,
         span,
       };
-      return features.allows('overloadedLists') ? overloadedSequence(sequence) : sequence;
+      return sequence;
     }
     case 'list_comprehension': {
       const branches = fields(node, 'qualifiers').map((qualifiers) =>
@@ -2150,13 +2130,13 @@ function convertCollection(features: ConvertContext, node: Node, span: Span): Ex
       if (branches.length > 1 && !features.allows('parallelListComp')) {
         throw syntaxError(span, '並列の内包表記を使うには、ParallelListComp の拡張が要ります。');
       }
-      return lowerImplicitComprehension({
+      return {
         kind: 'comprehension',
         expr: convertExpr(features, required(node, 'expression')),
         quals: branches[0] ?? [],
         span,
         ...(branches.length > 1 ? { parallel: branches.slice(1) } : {}),
-      });
+      };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
@@ -2177,27 +2157,12 @@ function convertTupleExpr(features: ConvertContext, node: Node, span: Span): Exp
   if (!features.allows('tupleSections')) {
     throw syntaxError(span, 'タプルの節を使うには、TupleSections の拡張が要ります。');
   }
-  const pats: Pat[] = [];
-  const elems = slots.map((slot) => {
-    if (slot) return slot;
-    const name = generatedName('section', pats.length);
-    pats.push({ kind: 'pvar', name: { name, span }, span });
-    return { kind: 'var', name: { name, span }, span } as Expr;
-  });
-  return { kind: 'lambda', pats, body: { kind: 'tuple', elems, span }, span };
-}
-
-/**
- * A name for a variable the conversion introduces, which no program can spell, since it holds a space; traces do not
- * show such variables.
- */
-export function generatedName(purpose: string, index: number): string {
-  return ` ${purpose}${index}`;
+  return tupleSection(slots, span);
 }
 
 /** Converts `\case` into a lambda of a `case`, and `\cases` into one of a `case` of a tuple of its parameters. */
 function convertLambdaCase(features: ConvertContext, node: Node, span: Span): Expr {
-  const what = node.type === 'lambda_case' ? String.raw`\case` : String.raw`\cases`;
+  const what = node.type === 'lambda_case' ? LAMBDA_CASE : LAMBDA_CASES;
   if (!features.allows('lambdaCase')) throw syntaxError(span, `${what} を使うには、LambdaCase の拡張が要ります。`);
   const alternatives = field(node, 'alternatives');
   const alternativeNodes = alternatives ? fields(alternatives, 'alternative') : [];
@@ -2205,17 +2170,16 @@ function convertLambdaCase(features: ConvertContext, node: Node, span: Span): Ex
     if (alternativeNodes.length === 0 && !features.allows('emptyCase')) {
       throw syntaxError(span, String.raw`選択肢のない \case を使うには、EmptyCase の拡張が要ります。`);
     }
-    const name = generatedName('case', 0);
-    const alts = alternativeNodes.map((node) => convertAlternative(features, node));
-    return lambdaOf([name], { kind: 'case', scrutinee: varOf(name, span), alts, span, what }, span);
+    return lambdaCase(
+      alternativeNodes.map((node) => convertAlternative(features, node)),
+      span
+    );
   }
   const clauses = alternativeNodes.map((alternative) => {
     const patternsNode = field(alternative, 'patterns');
-    const pats = (
-      patternsNode
-        ? namedChildren(patternsNode).map((node) => convertPattern(features, node))
-        : [convertPattern(features, required(alternative, 'pattern'))]
-    ).map((pat) => strictPattern(features, pat));
+    const pats = patternsNode
+      ? namedChildren(patternsNode).map((node) => convertPattern(features, node))
+      : [convertPattern(features, required(alternative, 'pattern'))];
     return { pats, rhs: convertRhs(features, alternative, '->'), span: spanOf(alternative) };
   });
   const arity = clauses[0]?.pats.length ?? 0;
@@ -2227,14 +2191,14 @@ function convertLambdaCase(features: ConvertContext, node: Node, span: Span): Ex
   const names = Array.from({ length: arity }, (_, index) => generatedName('cases', index));
   const scrutinee =
     arity === 1
-      ? varOf(names[0], span)
-      : ({ kind: 'tuple', elems: names.map((name) => varOf(name, span)), span } as Expr);
+      ? variable(names[0], span)
+      : ({ kind: 'tuple', elems: names.map((name) => variable(name, span)), span } as Expr);
   const alts: Alt[] = clauses.map((clause) => ({
     pat: clause.pats.length === 1 ? clause.pats[0] : { kind: 'ptuple', elems: clause.pats, span: clause.span },
     rhs: clause.rhs,
     span: clause.span,
   }));
-  return lambdaOf(names, { kind: 'case', scrutinee, alts, span, what }, span);
+  return generatedLambda(names, { kind: 'case', scrutinee, alts, span, what }, span);
 }
 
 /** Converts a multi-way `if` into a `case` of `()` whose only alternative has the guards. */
@@ -2245,20 +2209,13 @@ function convertMultiWayIf(features: ConvertContext, node: Node, span: Span): Ex
     checkSeparator(match, '->');
     const guardsNode = field(match, 'guards');
     if (!guardsNode) throw syntaxError(spanOf(match), 'ガード（|）が足りません。');
-    return lowerImplicitGuards({
+    return {
       guards: fields(guardsNode, 'guard').flatMap((node) => convertGuard(features, node)),
       expr: convertExpr(features, required(match, 'expression')),
       span: spanOf(match),
-    });
+    };
   });
-  const unit: Expr = { kind: 'con', name: { name: '()', span }, span };
-  return {
-    kind: 'case',
-    scrutinee: unit,
-    alts: [{ pat: { kind: 'pwild', span }, rhs: { body: { kind: 'guarded', branches }, where: [], span }, span }],
-    span,
-    what: 'multi-way if',
-  };
+  return multiWayIf(branches, span);
 }
 
 /**
@@ -2292,16 +2249,10 @@ function requireTemplateHaskell(features: ConvertContext, span: Span, quotes = f
   }
 }
 
-function convertQuote(outer: ConvertContext, node: Node, span: Span): Expr {
-  requireTemplateHaskell(outer, span, true);
+function convertQuote(features: ConvertContext, node: Node, span: Span): Expr {
+  requireTemplateHaskell(features, span, true);
   const inner = namedChildren(node).find((child) => child.type.startsWith('quoted_'));
   if (!inner) throw syntaxError(span, '書き方に誤りがあります。');
-  // A quote holds its literals as written, `LitE (StringL "abc")` and `ListE`; overloading them is for where they
-  // are spliced.
-  const features: ConvertContext = {
-    ...outer,
-    allows: (feature) => feature !== 'overloadedStrings' && feature !== 'overloadedLists' && outer.allows(feature),
-  };
   const body = (): QuoteBody => {
     switch (inner.type) {
       case 'quoted_pattern': {
@@ -2320,7 +2271,7 @@ function convertQuote(outer: ConvertContext, node: Node, span: Span): Expr {
   };
   const quoted = body();
   if (node.type !== 'typed_quote' || quoted.kind !== 'exp') return { kind: 'quote', body: quoted, span };
-  return { kind: 'quote', body: quoted, witness: convertExpr(outer, namedChildren(inner)[0]), span };
+  return { kind: 'quote', body: quoted, witness: convertExpr(features, namedChildren(inner)[0]), span };
 }
 
 function requireRecordDot(features: ConvertContext, span: Span): void {
@@ -2335,19 +2286,6 @@ function fieldLabel(node: Node): string {
 
 function fieldsOfSelector(node: Node): string[] {
   return fields(node, 'field').map(fieldLabel);
-}
-
-function varOf(name: string, span: Span): Expr {
-  return { kind: 'var', name: { name, span }, span };
-}
-
-function lambdaOf(names: string[], body: Expr, span: Span): Expr {
-  return {
-    kind: 'lambda',
-    pats: names.map((name) => ({ kind: 'pvar', name: { name, span }, span }) as Pat),
-    body,
-    span,
-  };
 }
 
 function convertBlock(features: ConvertContext, node: Node, span: Span): Expr {
@@ -2369,10 +2307,10 @@ function convertBlock(features: ConvertContext, node: Node, span: Span): Expr {
     case 'do': {
       const doModule = namedChildren(node).find((child) => child.type === 'do_module');
       if (doModule) return convertQualifiedDo(features, node, moduleName(required(doModule, 'module')), span);
-      const written = fields(node, 'statement').map((child) => convertStatement(features, child));
-      if (written.length === 0) throw syntaxError(span, 'do の中に文がありません。');
-      const statements = lowerImplicitStmts(written, hasToken(node, 'mdo') ? 'mdo' : 'do');
+      const statements = fields(node, 'statement').map((child) => convertStatement(features, child));
+      if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
       if (hasToken(node, 'mdo')) {
+        rejectImplicitStmts(statements, 'mdo');
         if (!features.allows('recursiveDo')) throw syntaxError(span, 'mdo を使うには、RecursiveDo の拡張が要ります。');
         const last = statements.at(-1) as Stmt;
         const rest = statements.slice(0, -1);
@@ -2387,9 +2325,6 @@ function convertBlock(features: ConvertContext, node: Node, span: Span): Expr {
   }
 }
 
-/** What the case of a qualified do block's bind is, whose failing alternative the renamer may drop. */
-export const QUALIFIED_DO_BIND = 'qualified do bind';
-
 /**
  * Converts `M.do`, which QualifiedDo reads with the `>>=`, `>>`, and `fail` of the module `M`: `x <- e; s` as
  * `e M.>>= \x -> s`, `e; s` as `e M.>> s`, and a bind whose pattern can fail as one that calls `M.fail` then.
@@ -2398,10 +2333,8 @@ function convertQualifiedDo(features: ConvertContext, node: Node, module: string
   if (!features.allows('qualifiedDo'))
     throw syntaxError(span, '修飾つきの do を使うには、QualifiedDo の拡張が要ります。');
   if (hasToken(node, 'mdo')) throw unsupportedError(span, '修飾つきの mdo');
-  const statements = lowerImplicitStmts(
-    fields(node, 'statement').map((node) => convertStatement(features, node)),
-    'qualifiedDo'
-  );
+  const statements = fields(node, 'statement').map((node) => convertStatement(features, node));
+  rejectImplicitStmts(statements, '修飾つきの do');
   if (statements.length === 0) throw syntaxError(span, 'do の中に文がありません。');
   const qualified = (name: string, at: Span): Expr => ({
     kind: 'var',
@@ -2439,12 +2372,13 @@ function convertQualifiedDo(features: ConvertContext, node: Node, module: string
           ],
         },
         span: stmt.span,
+        generated: true,
       };
       // Whether the pattern can fail, which decides whether M.fail is needed, depends on its constructors, which
       // the renamer knows: it drops the failing alternative of a pattern that cannot fail.
       const body: Expr = {
         kind: 'case',
-        scrutinee: varOf(name, stmt.span),
+        scrutinee: variable(name, stmt.span),
         alts: [
           { pat: stmt.pat, rhs: plainRhs(rest, span), span },
           {
@@ -2456,7 +2390,7 @@ function convertQualifiedDo(features: ConvertContext, node: Node, module: string
         span,
         what: QUALIFIED_DO_BIND,
       };
-      const lambda = lambdaOf([name], body, span);
+      const lambda = generatedLambda([name], body, span);
       result = {
         kind: 'app',
         fn: { kind: 'app', fn: qualified('>>=', stmt.span), arg: stmt.expr, span: stmt.span },
@@ -2546,7 +2480,7 @@ function convertRecordExpr(features: ConvertContext, node: Node): Expr {
     return [
       {
         field: fieldName,
-        value: value ? convertExpr(features, value) : varOf(punnedName(features, fieldName, fieldSpan), fieldSpan),
+        value: value ? convertExpr(features, value) : variable(punnedName(features, fieldName, fieldSpan), fieldSpan),
         span: fieldSpan,
       },
     ];
@@ -2561,7 +2495,7 @@ function convertRecordExpr(features: ConvertContext, node: Node): Expr {
 function convertAlternative(features: ConvertContext, node: Node): Alt {
   if (field(node, 'patterns')) throw unsupported(node);
   return {
-    pat: strictPattern(features, convertPattern(features, required(node, 'pattern'))),
+    pat: convertPattern(features, required(node, 'pattern')),
     rhs: convertRhs(features, node, '->'),
     span: spanOf(node),
   };
@@ -2582,7 +2516,7 @@ function convertStatement(features: ConvertContext, node: Node): Stmt {
       }
       const patternNode = field(node, 'pattern') ?? field(node, 'name');
       if (!patternNode) throw syntaxError(span, '書き方に誤りがあります。');
-      const pat = strictPattern(features, convertPattern(features, patternNode));
+      const pat = convertPattern(features, patternNode);
       return { kind: 'bind', pat, expr: convertExpr(features, required(node, 'expression')), span };
     }
     case 'let': {
@@ -2608,7 +2542,8 @@ function convertStatement(features: ConvertContext, node: Node): Stmt {
     case 'rec': {
       if (!features.allows('recursiveDo')) throw syntaxError(span, 'rec を使うには、RecursiveDo の拡張が要ります。');
       const stmts = fields(node, 'statement').map((node) => convertStatement(features, node));
-      return { kind: 'rec', stmts: lowerImplicitStmts(stmts, 'rec'), span };
+      rejectImplicitStmts(stmts, 'rec');
+      return { kind: 'rec', stmts, span };
     }
     default: {
       throw syntaxError(span, '書き方に誤りがあります。');
@@ -2724,7 +2659,6 @@ export function convertPattern(features: ConvertContext, node: Node): Pat {
     }
     case 'literal': {
       const lit = convertLiteral(features, namedChildren(node)[0] ?? node);
-      if (lit.kind === 'string' && features.allows('overloadedStrings')) return overloadedStringPattern(lit, span);
       return { kind: 'plit', lit, negative: false, span };
     }
     case 'negation': {
@@ -2775,7 +2709,7 @@ export function convertPattern(features: ConvertContext, node: Node): Pat {
         elems: fields(node, 'element').map((node) => convertPattern(features, node)),
         span,
       };
-      return features.allows('overloadedLists') ? overloadedListPattern(list) : list;
+      return list;
     }
     case 'as': {
       return {

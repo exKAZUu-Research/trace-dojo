@@ -1,6 +1,6 @@
 import type { ClassEntity, ConInfo, DictParam, Evidence, FieldInfo, Fixity, TypeEntity, ValueEntity } from './entities';
 import type { LocalNamespace } from './localScope';
-import type { Expr, Literal, Pat, Span } from './syntax';
+import type { Expr, FieldBang, Literal, Pat, Span } from './syntax';
 import type { Scheme, Type } from './types';
 
 export interface LocalVar {
@@ -422,7 +422,7 @@ export type QDecl =
 
 export interface QCon {
   name: QRef;
-  fields: { name?: QRef; strict: boolean; type: QType }[];
+  fields: { name?: QRef; bang: FieldBang; type: QType }[];
   infix: boolean;
 }
 

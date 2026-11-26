@@ -1,15 +1,16 @@
 import { CONS_CON } from './builtinTypes';
 import { unsupportedError } from './errors';
-import type { FeatureGates } from './features';
-import {
-  overloadedList,
-  overloadedListPattern,
-  overloadedSequence,
-  overloadedString,
-  overloadedStringPattern,
-} from './overloadedLiterals';
 import { define, forceString, unit } from './primitives';
 import type { Runtime } from './runtime';
+import {
+  generatedLambda,
+  generatedName,
+  lambdaCase,
+  multiWayIf,
+  projectionSelector,
+  tupleSection,
+  variable,
+} from './surfaceForms';
 import type {
   Alt,
   ChainItem,
@@ -18,6 +19,7 @@ import type {
   Decl,
   DerivingClause,
   Expr,
+  FieldBang,
   Guard,
   GuardedExpr,
   Literal,
@@ -118,14 +120,8 @@ const UNAVAILABLE = {
  * node at the splice's span. A new name a splice binds at its top level keeps its spelling, so the program refers to
  * it; one it binds inside gets a spelling of its own.
  */
-export function decodeSplice(
-  runtime: Runtime,
-  result: Slot,
-  span: Span,
-  names: SpliceNames,
-  site: FeatureGates<'convert'>
-): SpliceSyntax {
-  return new SpliceDecoder(runtime, span, names, site).splice(result);
+export function decodeSplice(runtime: Runtime, result: Slot, span: Span, names: SpliceNames): SpliceSyntax {
+  return new SpliceDecoder(runtime, span, names).splice(result);
 }
 
 class SpliceDecoder {
@@ -135,8 +131,7 @@ class SpliceDecoder {
   constructor(
     private readonly runtime: Runtime,
     private readonly span: Span,
-    private readonly names: SpliceNames,
-    private readonly site: FeatureGates<'convert'>
+    private readonly names: SpliceNames
   ) {}
 
   splice(slot: Slot): SpliceSyntax {
@@ -455,8 +450,7 @@ class SpliceDecoder {
         if (literal.kind === 'int' && literal.value < 0n) {
           return { kind: 'paren', expr: { kind: 'neg', expr: this.integer(-literal.value), span }, span };
         }
-        const expr: Extract<Expr, { kind: 'lit' }> = { kind: 'lit', lit: literal, span };
-        return literal.kind === 'string' && this.site.allows('overloadedStrings') ? overloadedString(expr) : expr;
+        return { kind: 'lit', lit: literal, span };
       }
       case 'AppE': {
         const arg = this.con(f[1]);
@@ -481,45 +475,26 @@ class SpliceDecoder {
         return { kind: 'lambda', pats: this.list(f[0]).map((p) => this.pat(p)), body: this.exp(f[1]), span };
       }
       case 'LamCaseE': {
-        const name = ' case0';
-        return {
-          kind: 'lambda',
-          pats: [{ kind: 'pvar', name: { name, span }, span }],
-          body: {
-            kind: 'case',
-            scrutinee: { kind: 'var', name: { name, span }, span },
-            alts: this.list(f[0]).map((m) => this.match(m)),
-            span,
-            what: String.raw`\case`,
-          },
-          span,
-        };
+        return lambdaCase(
+          this.list(f[0]).map((m) => this.match(m)),
+          span
+        );
       }
       case 'TupE': {
         const slots = this.list(f[0]).map((elem) => this.maybe(elem));
         if (slots.length === 1 && slots[0]) return { kind: 'paren', expr: this.exp(slots[0]), span };
-        if (slots.every(Boolean)) return { kind: 'tuple', elems: slots.map((elem) => this.exp(elem as Slot)), span };
-        const pats: Pat[] = [];
-        const elems = slots.map((elem): Expr => {
-          if (elem) return this.exp(elem);
-          const name = ` section${pats.length}`;
-          pats.push({ kind: 'pvar', name: { name, span }, span });
-          return { kind: 'var', name: { name, span }, span };
-        });
-        return { kind: 'lambda', pats, body: { kind: 'tuple', elems, span }, span };
+        const elems = slots.map((elem) => (elem === undefined ? undefined : this.exp(elem)));
+        if (elems.every(Boolean)) return { kind: 'tuple', elems: elems as Expr[], span };
+        return tupleSection(elems, span);
       }
       case 'CondE': {
         return { kind: 'if', cond: this.exp(f[0]), ifTrue: this.exp(f[1]), ifFalse: this.exp(f[2]), span };
       }
       case 'MultiIfE': {
-        const branches = this.list(f[0]).map((alt) => this.guarded(alt));
-        return {
-          kind: 'case',
-          scrutinee: { kind: 'con', name: { name: '()', span }, span },
-          alts: [{ pat: { kind: 'pwild', span }, rhs: { body: { kind: 'guarded', branches }, where: [], span }, span }],
-          span,
-          what: 'multi-way if',
-        };
+        return multiWayIf(
+          this.list(f[0]).map((alt) => this.guarded(alt)),
+          span
+        );
       }
       case 'LetE': {
         return { kind: 'let', decls: this.decs(f[0]), body: this.exp(f[1]), span };
@@ -571,15 +546,10 @@ class SpliceDecoder {
           ...(to ? { to } : {}),
           span,
         };
-        return this.site.allows('overloadedLists') ? overloadedSequence(sequence) : sequence;
+        return sequence;
       }
       case 'ListE': {
-        const list: Extract<Expr, { kind: 'list' }> = {
-          kind: 'list',
-          elems: this.list(f[0]).map((elem) => this.exp(elem)),
-          span,
-        };
-        return this.site.allows('overloadedLists') ? overloadedList(list) : list;
+        return { kind: 'list', elems: this.list(f[0]).map((elem) => this.exp(elem)), span };
       }
       case 'SigE': {
         return { kind: 'typed', expr: this.exp(f[0]), sig: this.sigType(f[1]), span };
@@ -605,11 +575,10 @@ class SpliceDecoder {
         return { kind: 'projection', expr: this.exp(f[0]), field: this.str(f[1]), span };
       }
       case 'ProjectionE': {
-        const name = ' record0';
-        let body: Expr = { kind: 'var', name: { name, span }, span };
-        for (const label of this.nonEmpty(f[0]))
-          body = { kind: 'projection', expr: body, field: this.str(label), span };
-        return { kind: 'lambda', pats: [{ kind: 'pvar', name: { name, span }, span }], body, span };
+        return projectionSelector(
+          this.nonEmpty(f[0]).map((label) => this.str(label)),
+          span
+        );
       }
       case 'LamCasesE':
       case 'UnboxedTupE':
@@ -646,14 +615,8 @@ class SpliceDecoder {
       if (left && right) return this.apply(fn, this.exp(left), this.exp(right));
       if (left) return this.apply(fn, this.exp(left));
       if (right) {
-        const name = ' section0';
-        const x: Expr = { kind: 'var', name: { name, span }, span };
-        return {
-          kind: 'lambda',
-          pats: [{ kind: 'pvar', name: { name, span }, span }],
-          body: this.apply(fn, x, this.exp(right)),
-          span,
-        };
+        const name = generatedName('section', 0);
+        return generatedLambda([name], this.apply(fn, variable(name, span), this.exp(right)), span);
       }
       return fn;
     }
@@ -779,11 +742,7 @@ class SpliceDecoder {
           const value = negative ? -literal.value : literal.value;
           return { kind: 'plit', lit: { kind: 'int', value, text: String(value) }, negative, span };
         }
-        const written: SourceLiteral = { ...literal, text: '' };
-        if (written.kind === 'string' && this.site.allows('overloadedStrings')) {
-          return overloadedStringPattern(written, span);
-        }
-        return { kind: 'plit', lit: written, negative: false, span };
+        return { kind: 'plit', lit: { ...literal, text: '' }, negative: false, span };
       }
       case 'VarP': {
         return { kind: 'pvar', name: this.binder(f[0]), span };
@@ -824,12 +783,7 @@ class SpliceDecoder {
         return { kind: 'precord', con: this.ref(f[0], 'con'), fields, span };
       }
       case 'ListP': {
-        const list: Extract<Pat, { kind: 'plist' }> = {
-          kind: 'plist',
-          elems: this.list(f[0]).map((elem) => this.pat(elem)),
-          span,
-        };
-        return this.site.allows('overloadedLists') ? overloadedListPattern(list) : list;
+        return { kind: 'plist', elems: this.list(f[0]).map((elem) => this.pat(elem)), span };
       }
       case 'SigP': {
         return { kind: 'psig', pat: this.pat(f[0]), type: this.type(f[1]), span };
@@ -1224,20 +1178,20 @@ class SpliceDecoder {
       case 'NormalC':
       case 'RecC': {
         const record = c.con.name === 'RecC';
-        const strict: number[] = [];
+        const bangs: FieldBang[] = [];
         const fields: TypeExpr[] = [];
         const fieldNames: Name[] = [];
-        for (const [index, item] of this.list(f[1]).entries()) {
+        for (const item of this.list(f[1])) {
           const parts = this.con(item).fields;
           if (record) fieldNames.push(this.binder(parts[0]));
           const [bang, type] = record ? [parts[1], parts[2]] : [parts[0], parts[1]];
-          if (this.isStrict(bang)) strict.push(index);
+          bangs.push(this.bang(bang));
           fields.push(this.type(type));
         }
         return {
           name: this.binder(f[0]),
           fields,
-          ...(strict.length > 0 ? { strictFields: strict } : {}),
+          ...(bangs.some(Boolean) ? { bangs } : {}),
           ...(record ? { fieldNames } : {}),
           isInfix: false,
           span,
@@ -1246,11 +1200,11 @@ class SpliceDecoder {
       case 'InfixC': {
         const [leftBang, leftType] = this.con(f[0]).fields;
         const [rightBang, rightType] = this.con(f[2]).fields;
-        const strict = [this.isStrict(leftBang) ? 0 : -1, this.isStrict(rightBang) ? 1 : -1].filter((i) => i >= 0);
+        const bangs = [this.bang(leftBang), this.bang(rightBang)];
         return {
           name: this.binder(f[1]),
           fields: [this.type(leftType), this.type(rightType)],
-          ...(strict.length > 0 ? { strictFields: strict } : {}),
+          ...(bangs.some(Boolean) ? { bangs } : {}),
           isInfix: true,
           span,
         };
@@ -1274,10 +1228,9 @@ class SpliceDecoder {
     }
   }
 
-  /** Whether a field is strict: marked `!`, or under the splice site's StrictData not marked `~`. */
-  private isStrict(slot: Slot): boolean {
+  private bang(slot: Slot): FieldBang {
     const strictness = this.con(this.con(slot).fields[1]).con.name;
-    return strictness === 'SourceStrict' || (strictness !== 'SourceLazy' && this.site.allows('strictData'));
+    return strictness === 'SourceStrict' ? 'strict' : strictness === 'SourceLazy' ? 'lazy' : undefined;
   }
 }
 
