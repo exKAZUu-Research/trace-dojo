@@ -1109,7 +1109,7 @@ pprExp p (InfixE (Just a) op (Just b)) = parensIf (p >= opPrec) (pprExp opPrec a
 pprExp _ (InfixE (Just a) op Nothing) = "(" ++ pprExp noPrec a ++ " " ++ pprOp op ++ ")"
 pprExp _ (InfixE Nothing op (Just b)) = "(" ++ pprOp op ++ " " ++ pprExp noPrec b ++ ")"
 pprExp _ (InfixE Nothing op Nothing) = "(" ++ pprOp op ++ ")"
-pprExp p (UInfixE a op b) = parensIf (p >= sigPrec) (pprExp sigPrec a ++ " " ++ pprOp op ++ " " ++ pprExp sigPrec b)
+pprExp p (UInfixE a op b) = parensIf (p > unopPrec) (pprExp unopPrec a ++ " " ++ pprOp op ++ " " ++ pprExp unopPrec b)
 pprExp _ (ParensE e) = "(" ++ pprExp noPrec e ++ ")"
 pprExp p (LamE [] e) = pprExp p e
 pprExp p (LamE ps e) = parensIf (p > noPrec) ("\\" ++ unwords (map (pprPat appPrec) ps) ++ " -> " ++ pprExp noPrec e)
@@ -1177,7 +1177,7 @@ pprPat _ (TupP ps) = "(" ++ intercalate ", " (map (pprPat noPrec) ps) ++ ")"
 pprPat _ (ConP n _ []) = pprNamePrefix n
 pprPat p (ConP n _ ps) = parensIf (p >= appPrec) (pprNamePrefix n ++ " " ++ unwords (map (pprPat appPrec) ps))
 pprPat p (InfixP a n b) = parensIf (p >= opPrec) (pprPat opPrec a ++ " " ++ pprNameInfix n ++ " " ++ pprPat opPrec b)
-pprPat p (UInfixP a n b) = parensIf (p >= opPrec) (pprPat opPrec a ++ " " ++ pprNameInfix n ++ " " ++ pprPat opPrec b)
+pprPat p (UInfixP a n b) = parensIf (p > unopPrec) (pprPat unopPrec a ++ " " ++ pprNameInfix n ++ " " ++ pprPat unopPrec b)
 pprPat _ (ParensP q) = "(" ++ pprPat noPrec q ++ ")"
 pprPat p (TildeP q) = parensIf (p > noPrec) ("~" ++ pprPat appPrec q)
 pprPat p (BangP q) = parensIf (p > noPrec) ("!" ++ pprPat appPrec q)
@@ -1206,7 +1206,9 @@ pprType _ (ConT n) = pprNamePrefix n
 pprType _ (PromotedT n) = "'" ++ pprNamePrefix n
 pprType _ (SigT t k) = "(" ++ pprType noPrec t ++ " :: " ++ pprType noPrec k ++ ")"
 pprType p (InfixT a n b) = pprInfixT p opPrec a "" n b
+pprType p (UInfixT a n b) = pprInfixT p unopPrec a "" n b
 pprType p (PromotedInfixT a n b) = pprInfixT p opPrec a "'" n b
+pprType p (PromotedUInfixT a n b) = pprInfixT p unopPrec a "'" n b
 pprType _ (ParensT t) = "(" ++ pprType noPrec t ++ ")"
 pprType _ (TupleT 0) = "()"
 pprType _ (TupleT n) = "(" ++ replicate (n - 1) ',' ++ ")"
