@@ -52,6 +52,7 @@ const CLONE_CONTAINERS = new Set([
 
 const DEBUG_TYPES = new Set([
   'CStr',
+  'Pin',
   'Arc',
   'Mutex',
   'RwLock',
@@ -499,7 +500,7 @@ function display({ solver, t, all }: Goal): Answer {
   )
     return 'yes';
   if (
-    ['Box', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(
+    ['Box', 'Pin', 'Rc', 'Ref', 'RefMut', 'Arc', 'MutexGuard', 'RwLockReadGuard', 'RwLockWriteGuard'].includes(
       t.def.builtin ?? ''
     )
   ) {

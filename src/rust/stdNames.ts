@@ -179,6 +179,46 @@ export function builtinStruct(module: Module, name: string): BuiltinAdt | undefi
   return module.path === 'std::io' ? 'IoError' : undefined;
 }
 
+/** The macros of the standard library that the converter expands, by the module that defines them. */
+const STD_MACROS: Record<string, ReadonlySet<string>> = {
+  '': new Set([
+    'assert',
+    'assert_eq',
+    'assert_ne',
+    'cfg',
+    'column',
+    'dbg',
+    'debug_assert',
+    'debug_assert_eq',
+    'debug_assert_ne',
+    'eprint',
+    'eprintln',
+    'file',
+    'format',
+    'line',
+    'matches',
+    'module_path',
+    'panic',
+    'print',
+    'println',
+    'stringify',
+    'todo',
+    'unimplemented',
+    'unreachable',
+    'vec',
+    'write',
+    'writeln',
+  ]),
+  pin: new Set(['pin']),
+};
+
+/** Whether a `use` path names a macro of the standard library (`use std::pin::pin;`), which needs no binding. */
+export function isStdMacroPath(path: readonly string[]): boolean {
+  const [crate, ...rest] = path;
+  if (crate !== 'std' && crate !== 'core' && crate !== 'alloc') return false;
+  return STD_MACROS[rest.slice(0, -1).join('::')]?.has(rest.at(-1) ?? '') ?? false;
+}
+
 export function unavailableStdItem(segments: string[], span: Span): never {
   checkUnavailableStd(segments, span);
   return compileError(span, `${segments.join('::')} は、この採点環境では使えません。`);

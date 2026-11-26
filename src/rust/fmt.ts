@@ -166,7 +166,8 @@ export class Formatter {
           case 'String': {
             return padString(textOf(v), spec, write);
           }
-          case 'Box': {
+          case 'Box':
+          case 'Pin': {
             return this.display(v, t.args[0], spec, write);
           }
           case 'Rc': {
@@ -306,7 +307,8 @@ export class Formatter {
         );
         return list('[', ']', items, indent, write);
       }
-      case 'Box': {
+      case 'Box':
+      case 'Pin': {
         return this.debug(v, t.args[0], spec, indent, write);
       }
       case 'HashMap':

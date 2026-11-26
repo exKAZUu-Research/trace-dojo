@@ -34,6 +34,7 @@ import {
   BUILTIN_ENUMS,
   builtinStruct,
   checkUnavailableStd,
+  isStdMacroPath,
   renderTypeKey,
   REQUIRED_STD_METHODS,
   STD_TRAITS_LEARNERS_IMPLEMENT,
@@ -1171,7 +1172,7 @@ function resolveImport(module: Module, entry: Import): void {
       entry.types = { binding: { kind: 'mod', module: module.program.std }, visibleWithin: entry.visibleWithin };
     } else {
       const { types, values } = resolveImportedName(module, entry);
-      if (!types && !values) {
+      if (!types && !values && !isStdMacroPath(path)) {
         compileError(span, `use ${path.join('::')} の ${last} が見つかりません。`);
       }
       if (types) entry.types = scopedImport(types, entry);
@@ -1205,7 +1206,7 @@ function resolveImportedName(
   if (parent.kind === 'mod') {
     const typeEntry = ownType(parent.module, last, span, new Set());
     const valueEntry = ownValue(parent.module, last, span, new Set());
-    if (!typeEntry && !valueEntry && parent.module.isStd)
+    if (!typeEntry && !valueEntry && parent.module.isStd && !isStdMacroPath(path))
       unavailableStdItem([...parent.module.path.split('::'), last], span);
     checkVisible(typeEntry, module, last, span);
     checkVisible(valueEntry, module, last, span);
