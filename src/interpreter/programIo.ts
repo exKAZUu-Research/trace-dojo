@@ -18,7 +18,6 @@ export interface ProgramOutput {
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
 /** The path that reads standard input as a file, as on Linux. */
-/** The path at which a program reads what remains of its standard input as a file. */
 export const STDIN_PATH = '/dev/stdin';
 
 /**
