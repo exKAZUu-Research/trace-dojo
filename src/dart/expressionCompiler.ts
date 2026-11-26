@@ -22,7 +22,7 @@ import { addToList, building, type ElementCode } from './collectionElements';
 import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import {
   elementTypeOfContext,
-  isDoubleContext,
+  isDoubleLiteralContext,
   literalTypeArgument,
   mapTypesOfContext,
   unresolvedCollectionType,
@@ -640,7 +640,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     negated: boolean
   ): Compiled {
     const exact = negated ? -expression.value : expression.value;
-    if (context && isDoubleContext(context)) {
+    if (context && isDoubleLiteralContext(context)) {
       // Negating the converted magnitude keeps `-0` negative, which a bigint cannot.
       const magnitude = Number(expression.value);
       const value = negated ? -magnitude : magnitude;

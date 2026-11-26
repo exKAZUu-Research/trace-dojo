@@ -18,6 +18,15 @@ export function intArithmeticContext(context: DartType | undefined): DartType | 
   return undefined;
 }
 
+/**
+ * Whether an integer literal in the context is a double, as Dart's rule says: double is assignable to the context
+ * and int is not, as for double, double?, and FutureOr<double>.
+ */
+export function isDoubleLiteralContext(context: DartType): boolean {
+  if (context.kind === 'dynamic' || isInferenceHole(context)) return false;
+  return isSubtype(interfaceType(coreTypes.double), context) && !isSubtype(interfaceType(coreTypes.int), context);
+}
+
 export function isDoubleContext(context: DartType): boolean {
   const base = context.kind === 'interface' ? context : undefined;
   return base?.cls === coreTypes.double;
