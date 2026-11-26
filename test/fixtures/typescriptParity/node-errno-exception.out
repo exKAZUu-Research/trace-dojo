@@ -1,0 +1,2 @@
+ENOENT open -2 nope-file.txt true
+true

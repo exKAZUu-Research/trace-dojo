@@ -317,6 +317,12 @@ interface Buffer extends Uint8Array {
 }
 declare var Buffer: any;
 declare namespace NodeJS {
+    interface ErrnoException extends Error {
+        errno?: number;
+        code?: string;
+        path?: string;
+        syscall?: string;
+    }
     interface WritableStream {
         write(buffer: string, cb?: (err?: Error | null) => void): boolean;
         write(str: string, encoding?: BufferEncoding, cb?: (err?: Error | null) => void): boolean;
