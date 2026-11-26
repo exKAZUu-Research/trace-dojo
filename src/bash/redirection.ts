@@ -46,9 +46,12 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
   }
   const target = openRedirectTarget(shell, redirect);
   const file = target === 'close' ? target : target.file;
+  const movedFrom = target === 'close' ? undefined : target.movedFrom;
   if (redirect.fdVariable && file !== 'close') {
     const fd = shell.fds.allocate();
     shell.fds.set(fd, file);
+    // A `{name}` redirection's changes stay after the command, its move's closed source as well.
+    if (movedFrom !== undefined) shell.fds.close(movedFrom);
     shell.assignVariable(redirect.fdVariable, String(fd));
     return;
   }
@@ -57,6 +60,10 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
     changed.push(fd);
     if (file === 'close') shell.fds.close(fd);
     else shell.fds.set(fd, file);
+  }
+  if (movedFrom !== undefined) {
+    changed.push(movedFrom);
+    shell.fds.close(movedFrom);
   }
 }
 
@@ -68,7 +75,7 @@ function applyRedirect(shell: Shell, redirect: Redirect, changed: number[]): voi
 function openRedirectTarget(
   shell: Shell,
   redirect: Exclude<Redirect, { kind: 'close' }>
-): { file: OpenFile; withStandardError: boolean } | 'close' {
+): { file: OpenFile; withStandardError: boolean; movedFrom?: number } | 'close' {
   switch (redirect.kind) {
     case 'text': {
       const text = shell.expander.expandString(redirect.body);
@@ -90,8 +97,9 @@ function openRedirectTarget(
         const source = Number(copy[1]);
         const file = shell.fds.get(source);
         if (!file) throw new RedirectionError(`${copy[1]}: Bad file descriptor`);
-        if (copy[2] === '-' && source !== redirect.fd) shell.fds.close(source);
-        return { file, withStandardError: false };
+        // `N>&M-` moves the descriptor: the source closes as well, which the command's end restores.
+        const movedFrom = copy[2] === '-' && source !== redirect.fd ? source : undefined;
+        return { file, withStandardError: false, movedFrom };
       }
       if (redirect.operator === '>&' && !redirect.hasDescriptor && !redirect.fdVariable) {
         return { file: openPath(shell, target, '>'), withStandardError: true };
