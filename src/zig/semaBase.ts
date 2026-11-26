@@ -1137,7 +1137,8 @@ export abstract class SemaBase implements SemaApi {
       from.kind === 'pointer' &&
       from.size === 'c' &&
       to.child.kind === 'pointer' &&
-      this.tryCoerce(expression, to.child, span)
+      // Only whether the conversion exists matters, so the value, which may be a known null, is not converted.
+      this.tryCoerce({ ...expression, known: false, value: undefined }, to.child, span)
     )
       return { ...expression, type: to, place: undefined };
     const payload = this.tryCoerce(expression, to.child, span);
