@@ -26,6 +26,9 @@ instance PrintfArg Word where
 instance PrintfArg Integer where
   formatArg x = UInteger x 0 'd'
 
+instance PrintfArg Natural where
+  formatArg x = UInteger (toInteger x) 0 'd'
+
 instance PrintfArg Double where
   formatArg x = UDouble x
 

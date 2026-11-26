@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** `IO`, standard output, the Turtle API, `Data.Char`, `Data.List`, and `Data.Bits`. */
 export const BASE_MISC = String.raw`
 -- IO
 
@@ -39,63 +38,6 @@ putStrLn = primitive "putStrLn"
 
 putChar :: Char -> IO ()
 putChar c = putStr [c]
-
-ioError :: IOError -> IO a
-ioError err = return () >>= \_ -> case err of IOError message -> primitive "ioError" message
-
-userError :: String -> IOError
-userError message = IOError ("user error (" ++ message ++ ")")
-
-data IOError = IOError String
-
-instance Show IOError where
-  showsPrec _ (IOError message) = showString message
-
-data Handle = HandleStdout | HandleStderr
-
-instance Show Handle where
-  showsPrec _ HandleStdout = showString "{handle: <stdout>}"
-  showsPrec _ HandleStderr = showString "{handle: <stderr>}"
-
-instance Eq Handle where
-  a == b = primConTag a == primConTag b
-
-stdout :: Handle
-stdout = HandleStdout
-
-stderr :: Handle
-stderr = HandleStderr
-
-data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
-
-instance Eq BufferMode where
-  NoBuffering == NoBuffering = True
-  LineBuffering == LineBuffering = True
-  BlockBuffering a == BlockBuffering b = a == b
-  _ == _ = False
-
-instance Show BufferMode where
-  showsPrec _ NoBuffering = showString "NoBuffering"
-  showsPrec _ LineBuffering = showString "LineBuffering"
-  showsPrec d (BlockBuffering m) = showParen (d >= 11) (showString "BlockBuffering " . showsPrec 11 m)
-
-hPutStr :: Handle -> String -> IO ()
-hPutStr = primitive "hPutStr"
-
-hPutStrLn :: Handle -> String -> IO ()
-hPutStrLn h s = hPutStr h (s ++ "\n")
-
-hPutChar :: Handle -> Char -> IO ()
-hPutChar h c = hPutStr h [c]
-
-hPrint :: Show a => Handle -> a -> IO ()
-hPrint h x = hPutStrLn h (show x)
-
-hFlush :: Handle -> IO ()
-hFlush = primitive "hFlush"
-
-hSetBuffering :: Handle -> BufferMode -> IO ()
-hSetBuffering = primitive "hSetBuffering"
 
 -- Turtles
 
@@ -187,9 +129,7 @@ isPrint c = case generalCategory c of
   _ -> True
 
 isSpace :: Char -> Bool
-isSpace c =
-  let uc = ord c
-  in if uc <= 0x377 then uc == 32 || (uc >= 9 && uc <= 13) || uc == 0xa0 else generalCategory c == Space
+isSpace = primitive "isSpace"
 
 isUpper :: Char -> Bool
 isUpper c = case generalCategory c of
@@ -754,6 +694,7 @@ instance Traversable Down where
 
 instance Semigroup a => Semigroup (Down a) where
   Down x <> Down y = Down (x <> y)
+  stimes n (Down x) = Down (stimes n x)
 
 instance Monoid a => Monoid (Down a) where
   mempty = Down mempty
@@ -815,58 +756,4 @@ instance RealFloat a => RealFloat (Down a) where
   isNegativeZero (Down x) = isNegativeZero x
   isIEEE (Down x) = isIEEE x
 
-`;
-
-/** Standard input and files, which this environment rejects before running, as Java's Scanner and files are. */
-export const BASE_UNSUPPORTED = String.raw`
-unsupportedIO :: IO a
-unsupportedIO = errorWithoutStackTrace "unsupported"
-
-getLine :: IO String
-getLine = unsupportedIO
-
-getContents :: IO String
-getContents = unsupportedIO
-
-getChar :: IO Char
-getChar = unsupportedIO
-
-interact :: (String -> String) -> IO ()
-interact _ = unsupportedIO
-
-readFile :: FilePath -> IO String
-readFile _ = unsupportedIO
-
-writeFile :: FilePath -> String -> IO ()
-writeFile _ _ = unsupportedIO
-
-appendFile :: FilePath -> String -> IO ()
-appendFile _ _ = unsupportedIO
-
-readLn :: Read a => IO a
-readLn = unsupportedIO
-
-readIO :: Read a => String -> IO a
-readIO s = return () >>= \_ -> case [x | (x, t) <- reads s, ("", "") <- lex t] of
-  [x] -> return x
-  [] -> fail "Prelude.readIO: no parse"
-  _ -> fail "Prelude.readIO: ambiguous parse"
-
-stdin :: Handle
-stdin = errorWithoutStackTrace "stdin"
-
-hGetLine :: Handle -> IO String
-hGetLine _ = unsupportedIO
-
-hGetContents :: Handle -> IO String
-hGetContents _ = unsupportedIO
-
-hGetChar :: Handle -> IO Char
-hGetChar _ = unsupportedIO
-
-hClose :: Handle -> IO ()
-hClose _ = unsupportedIO
-
-isEOF :: IO Bool
-isEOF = unsupportedIO
 `;

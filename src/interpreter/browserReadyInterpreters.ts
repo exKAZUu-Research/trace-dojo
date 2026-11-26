@@ -5,6 +5,7 @@
  * This module must stay free of imports, because `oxlint.config.ts` loads it.
  */
 export const browserReadyInterpreters = {
+  bash: () => import('./languages/bash'),
   c: () => import('./languages/c'),
   cpp: () => import('./languages/cpp'),
   csharp: () => import('./languages/csharp'),

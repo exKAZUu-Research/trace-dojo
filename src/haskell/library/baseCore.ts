@@ -1,6 +1,5 @@
 import { BT } from './source';
 
-/** The core of the library: the basic types, the standard classes, and the numeric instances. */
 export const BASE_CORE = String.raw`module Base where
 
 infixr 9 .
@@ -40,8 +39,6 @@ type Rational = Ratio Integer
 type ShowS = String -> String
 type ReadS a = String -> [(a, String)]
 type FilePath = String
-
--- Functions
 
 id :: a -> a
 id x = x
@@ -106,8 +103,6 @@ primConAt = primitive "primConAt"
 errorEmptyList :: [Char] -> a
 errorEmptyList = primitive "errorEmptyList"
 
--- Booleans
-
 (&&) :: Bool -> Bool -> Bool
 True && x = x
 False && _ = False
@@ -127,8 +122,6 @@ bool :: a -> a -> Bool -> a
 bool f _ False = f
 bool _ t True = t
 
--- Tuples
-
 fst :: (a, b) -> a
 fst (x, _) = x
 
@@ -144,8 +137,6 @@ uncurry f p = f (fst p) (snd p)
 swap :: (a, b) -> (b, a)
 swap (a, b) = (b, a)
 
--- Maybe and Either
-
 maybe :: b -> (a -> b) -> Maybe a -> b
 maybe n _ Nothing = n
 maybe _ f (Just x) = f x
@@ -153,8 +144,6 @@ maybe _ f (Just x) = f x
 either :: (a -> c) -> (b -> c) -> Either a b -> c
 either f _ (Left x) = f x
 either _ g (Right y) = g y
-
--- Eq and Ord
 
 class Eq a where
   (==), (/=) :: a -> a -> Bool
@@ -321,8 +310,6 @@ instance Ord Float where
   (>=) = primitive "floatGe"
   compare x y = if x < y then LT else if x == y then EQ else GT
 
--- Numbers
-
 class Num a where
   (+), (-), (*) :: a -> a -> a
   negate, abs, signum :: a -> a
@@ -426,6 +413,12 @@ gcd x y = gcd' (abs x) (abs y)
 
 divZeroError :: a
 divZeroError = primitive "divZeroError"
+
+overflowError :: a
+overflowError = primitive "overflowError"
+
+ratioZeroDenominatorError :: a
+ratioZeroDenominatorError = primitive "ratioZeroDenominatorError"
 
 lcm :: Integral a => a -> a -> a
 lcm x y = if y == fromInteger 0 || x == fromInteger 0 then fromInteger 0 else abs ((x ${BT}quot${BT} (gcd x y)) * y)
@@ -693,10 +686,8 @@ floatToRational :: RealFloat a => a -> Rational
 floatToRational x = let (m, e) = decodeFloat x
                     in if e >= 0 then (m * 2 ^ e) :% 1 else reduce m (2 ^ negate e)
 
--- Rationals
-
 reduce :: Integral a => a -> a -> Ratio a
-reduce x y = if y == fromInteger 0 then errorWithoutStackTrace "Ratio has zero denominator"
+reduce x y = if y == fromInteger 0 then ratioZeroDenominatorError
              else let d = gcd x y in (x ${BT}quot${BT} d) :% (y ${BT}quot${BT} d)
 
 (%) :: Integral a => a -> a -> Ratio a
@@ -726,7 +717,7 @@ instance Integral a => Num (Ratio a) where
 
 instance Integral a => Fractional (Ratio a) where
   (x :% y) / (x' :% y') = (x * y') % (y * x')
-  recip (x :% y) = if x == fromInteger 0 then errorWithoutStackTrace "Ratio has zero denominator"
+  recip (x :% y) = if x == fromInteger 0 then ratioZeroDenominatorError
                    else if x < fromInteger 0 then negate y :% negate x else y :% x
   fromRational (x :% y) = fromInteger x % fromInteger y
 
@@ -735,8 +726,6 @@ instance Integral a => Real (Ratio a) where
 
 instance Integral a => RealFrac (Ratio a) where
   properFraction (x :% y) = let (q, r) = quotRem x y in (fromInteger (toInteger q), r :% y)
-
--- Enum and Bounded
 
 class Enum a where
   succ, pred :: a -> a
@@ -763,28 +752,29 @@ boundedEnumFromThen :: (Enum a, Bounded a) => a -> a -> [a]
 boundedEnumFromThen n1 n2 = if fromEnum n2 >= fromEnum n1 then enumFromThenTo n1 n2 maxBound
                             else enumFromThenTo n1 n2 minBound
 
-derivedToEnum :: [Char] -> a -> Int -> a
-derivedToEnum name witness n =
-  if n >= 0 && n < primConCount witness then primConAt witness n
-  else errorWithoutStackTrace ("Enum.toEnum{" ++ name ++ "}: tag (" ++ show n ++ ") is outside of enumeration's range (0," ++ show (primConCount witness - 1) ++ ")")
+-- A derived Enum's constructors are the type's from tag first, count of them: a data family's instance has its own.
+derivedToEnum :: [Char] -> a -> Int -> Int -> Int -> a
+derivedToEnum name witness first count n =
+  if n >= 0 && n < count then primConAt witness (first + n)
+  else errorWithoutStackTrace ("Enum.toEnum{" ++ name ++ "}: tag (" ++ show n ++ ") is outside of enumeration's range (0," ++ show (count - 1) ++ ")")
 
-derivedSucc :: [Char] -> a -> Int -> a
-derivedSucc name witness n =
-  if n + 1 >= primConCount witness then errorWithoutStackTrace ("Enum.succ{" ++ name ++ "}: tried to take ${BT}succ' of last tag in enumeration")
-  else primConAt witness (n + 1)
+derivedSucc :: [Char] -> a -> Int -> Int -> Int -> a
+derivedSucc name witness first count n =
+  if n + 1 >= count then errorWithoutStackTrace ("Enum.succ{" ++ name ++ "}: tried to take ${BT}succ' of last tag in enumeration")
+  else primConAt witness (first + n + 1)
 
-derivedPred :: [Char] -> a -> Int -> a
-derivedPred name witness n =
+derivedPred :: [Char] -> a -> Int -> Int -> Int -> a
+derivedPred name witness first _ n =
   if n == 0 then errorWithoutStackTrace ("Enum.pred{" ++ name ++ "}: tried to take ${BT}pred' of first tag in enumeration")
-  else primConAt witness (n - 1)
+  else primConAt witness (first + n - 1)
 
-derivedEnumFrom :: a -> Int -> [a]
-derivedEnumFrom witness n = n ${BT}seq${BT} map (primConAt witness) (enumFromTo n (primConCount witness - 1))
+derivedEnumFrom :: a -> Int -> Int -> Int -> [a]
+derivedEnumFrom witness first count n = n ${BT}seq${BT} map (\i -> primConAt witness (first + i)) (enumFromTo n (count - 1))
 
-derivedEnumFromThen :: a -> Int -> Int -> [a]
-derivedEnumFromThen witness a b =
-  a ${BT}seq${BT} b ${BT}seq${BT} let limit = if b >= a then primConCount witness - 1 else 0
-  in map (primConAt witness) (enumFromThenTo a b limit)
+derivedEnumFromThen :: a -> Int -> Int -> Int -> Int -> [a]
+derivedEnumFromThen witness first count a b =
+  a ${BT}seq${BT} b ${BT}seq${BT} let limit = if b >= a then count - 1 else 0
+  in map (\i -> primConAt witness (first + i)) (enumFromThenTo a b limit)
 
 instance Enum Bool where
   succ False = True

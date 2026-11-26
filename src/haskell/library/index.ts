@@ -1,22 +1,53 @@
+import { ARROW_SOURCE, BIFUNCTOR_SOURCE } from './arrow';
 import { BASE_CORE } from './baseCore';
 import { BASE_LIST } from './baseList';
-import { BASE_MISC, BASE_UNSUPPORTED } from './baseMisc';
+import { BASE_MISC } from './baseMisc';
 import { BASE_TEXT } from './baseText';
 import { MAP_SOURCE, SET_SOURCE, STRICT_MAP_SOURCE, STRICT_MAP_VALUES } from './containers';
 import { BASE_EXTRA } from './extra';
+import { BASE_SMALL_MODULES, TREE_SOURCE } from './extraModules';
+import { FIXED_WIDTH_LIFT, FIXED_WIDTH_PRINTF, FIXED_WIDTH_SOURCE } from './fixedWidth';
+import { GHC_EXPORTS } from './ghcExports';
+import { BASE_MONOID, NON_EMPTY_SOURCE, SEMIGROUP_SOURCE } from './monoid';
+import { NATURAL_SOURCE, TYPE_NATS_SOURCE } from './natural';
+import { OVERLOADED_SOURCE, OVERLOADED_SUPPORT } from './overloaded';
 import { PRINTF_SOURCE } from './printf';
+import { SEQUENCE_SOURCE, SEQUENCE_VALUES } from './sequence';
+import { SYSTEM_IO } from './systemIo';
+import { TEMPLATE_HASKELL_SOURCE } from './templateHaskell';
 import { BASE_TUPLES } from './tuples';
 
 /** The library's own modules in dependency order, which public modules re-export. */
 export const LIBRARY_SOURCES: { name: string; source: string }[] = [
   {
     name: 'Base',
-    source: [BASE_CORE, BASE_LIST, BASE_TEXT, BASE_MISC, BASE_UNSUPPORTED, BASE_TUPLES, BASE_EXTRA].join('\n'),
+    source: [
+      BASE_CORE,
+      BASE_LIST,
+      BASE_TEXT,
+      BASE_MISC,
+      NATURAL_SOURCE,
+      FIXED_WIDTH_SOURCE,
+      BASE_SMALL_MODULES,
+      SYSTEM_IO,
+      BASE_MONOID,
+      BASE_TUPLES,
+      BASE_EXTRA,
+    ].join('\n'),
   },
+  { name: 'Data.Semigroup.Internal', source: SEMIGROUP_SOURCE },
+  { name: 'Data.List.NonEmpty.Internal', source: NON_EMPTY_SOURCE },
+  { name: 'Data.Tree.Internal', source: TREE_SOURCE },
+  { name: 'GHC.TypeNats.Internal', source: TYPE_NATS_SOURCE },
+  { name: 'Data.Bifunctor.Internal', source: BIFUNCTOR_SOURCE },
+  { name: 'Control.Arrow.Internal', source: ARROW_SOURCE },
+  { name: 'Language.Haskell.TH.Internal', source: TEMPLATE_HASKELL_SOURCE + FIXED_WIDTH_LIFT },
   { name: 'Data.Set.Internal', source: SET_SOURCE },
   { name: 'Data.Map.Internal', source: MAP_SOURCE },
   { name: 'Data.Map.Strict.Internal', source: STRICT_MAP_SOURCE },
-  { name: 'Text.Printf.Internal', source: PRINTF_SOURCE },
+  { name: 'Data.Sequence.Internal', source: SEQUENCE_SOURCE },
+  { name: 'Text.Printf.Internal', source: PRINTF_SOURCE + FIXED_WIDTH_PRINTF },
+  { name: 'GHC.Overloaded.Internal', source: OVERLOADED_SOURCE + OVERLOADED_SUPPORT },
 ];
 
 /** A public module: the library module it re-exports from, and its values and types (with their children). */
@@ -447,7 +478,36 @@ const SET_VALUES = [
   'deleteFindMax',
 ];
 
-/** The modules a program may import, by name. */
+const TEMPLATE_HASKELL_DECLARED = (() => {
+  const internal =
+    /^(quote[A-Z]|run[A-Z]\w*Splice|runSplice|storeSplice|reportSplice|typedQuote|thNewUnique|newNameIO|splice|ppr[A-Z]|isSymOcc|parensIf|showRational|indent)/;
+  const values = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^([a-z_][\w']*|\([^)]+\)) ::/gm)]
+    .map((match) => match[1])
+    .filter((name) => !internal.test(name));
+  const types = [...TEMPLATE_HASKELL_SOURCE.matchAll(/^(?:data|newtype|type|class) (?:[^=]*=> )?([A-Z]\w*)/gm)].map(
+    (match) => match[1]
+  );
+  return { values: new Set(values), types: new Set(types) };
+})();
+
+/** A module of Template Haskell: what GHC's module exports among what the source declares, but its own helpers. */
+function templateHaskellModule(name: string): PublicModule {
+  const ghc = GHC_EXPORTS[name];
+  return {
+    from: 'Language.Haskell.TH.Internal',
+    types: Object.entries(ghc.types)
+      .filter(([type]) => TEMPLATE_HASKELL_DECLARED.types.has(type))
+      .map(([type, children]) => [type, children.split(' ')]),
+    values: ghc.values.split(' ').filter((value) => TEMPLATE_HASKELL_DECLARED.values.has(value)),
+  };
+}
+
+/** The names among `names` that GHC's module exports, for a module that shares a list of another one. */
+function exportedByGhc(module: string, names: string[]): string[] {
+  const exported = new Set(GHC_EXPORTS[module].values.split(' '));
+  return names.filter((name) => exported.has(name));
+}
+
 export const PUBLIC_MODULES: Record<string, PublicModule> = {
   Prelude: PRELUDE,
   'Data.List': { from: 'Base', types: [], values: DATA_LIST_VALUES },
@@ -686,6 +746,7 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       ['IO', 'none'],
       ['Handle', 'none'],
       ['BufferMode', 'all'],
+      ['IOMode', 'all'],
       ['FilePath', 'none'],
     ],
     values: [
@@ -699,24 +760,404 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
       'hPutChar',
       'hFlush',
       'hSetBuffering',
+      'hGetBuffering',
+      'hSetEcho',
+      'hGetEcho',
       'stdout',
       'stderr',
       'stdin',
       'getLine',
       'getContents',
+      "getContents'",
       'getChar',
       'interact',
       'readFile',
+      "readFile'",
       'writeFile',
       'appendFile',
       'readLn',
       'readIO',
       'hGetLine',
       'hGetContents',
+      "hGetContents'",
       'hGetChar',
       'hClose',
+      'hIsEOF',
+      'hIsOpen',
+      'hIsClosed',
+      'hReady',
+      'hWaitForInput',
       'isEOF',
+      'openFile',
+      'withFile',
     ],
+  },
+  'System.IO.Error': {
+    from: 'Base',
+    types: [
+      ['IOError', 'none'],
+      ['IOErrorType', 'none'],
+    ],
+    values: [
+      'ioError',
+      'userError',
+      'mkIOError',
+      'annotateIOError',
+      'catchIOError',
+      'tryIOError',
+      'modifyIOError',
+      'ioeGetErrorType',
+      'ioeGetErrorString',
+      'ioeGetLocation',
+      'ioeGetHandle',
+      'ioeGetFileName',
+      'ioeSetErrorType',
+      'ioeSetErrorString',
+      'ioeSetLocation',
+      'ioeSetHandle',
+      'ioeSetFileName',
+      'isAlreadyExistsError',
+      'isDoesNotExistError',
+      'isAlreadyInUseError',
+      'isFullError',
+      'isEOFError',
+      'isIllegalOperation',
+      'isPermissionError',
+      'isUserError',
+      'isResourceVanishedError',
+      'alreadyExistsErrorType',
+      'doesNotExistErrorType',
+      'alreadyInUseErrorType',
+      'fullErrorType',
+      'eofErrorType',
+      'illegalOperationErrorType',
+      'permissionErrorType',
+      'userErrorType',
+      'isAlreadyExistsErrorType',
+      'isDoesNotExistErrorType',
+      'isAlreadyInUseErrorType',
+      'isFullErrorType',
+      'isEOFErrorType',
+      'isIllegalOperationErrorType',
+      'isPermissionErrorType',
+      'isUserErrorType',
+    ],
+  },
+  'Control.Exception': {
+    from: 'Base',
+    types: [
+      ['SomeException', 'all'],
+      ['Exception', 'all'],
+      ['ErrorCall', 'all'],
+      ['ArithException', 'all'],
+      ['ArrayException', 'all'],
+      ['AssertionFailed', 'all'],
+      ['PatternMatchFail', 'all'],
+      ['IOException', 'none'],
+      ['Handler', 'all'],
+    ],
+    values: [
+      'throw',
+      'throwIO',
+      'ioError',
+      'catch',
+      'catches',
+      'catchJust',
+      'handle',
+      'handleJust',
+      'try',
+      'tryJust',
+      'evaluate',
+      'mask',
+      'mask_',
+      'uninterruptibleMask',
+      'uninterruptibleMask_',
+      'bracket',
+      'bracket_',
+      'bracketOnError',
+      'finally',
+      'onException',
+      'assert',
+    ],
+  },
+  'System.Exit': {
+    from: 'Base',
+    types: [['ExitCode', 'all']],
+    values: ['exitWith', 'exitFailure', 'exitSuccess', 'die'],
+  },
+  'System.Environment': {
+    from: 'Base',
+    types: [],
+    values: ['getArgs', 'getProgName', 'withArgs', 'lookupEnv', 'getEnv', 'getEnvironment'],
+  },
+  'Data.IORef': {
+    from: 'Base',
+    types: [['IORef', 'none']],
+    values: [
+      'newIORef',
+      'readIORef',
+      'writeIORef',
+      'modifyIORef',
+      "modifyIORef'",
+      'atomicModifyIORef',
+      "atomicModifyIORef'",
+      'atomicWriteIORef',
+    ],
+  },
+  'Control.Monad.ST': {
+    from: 'Base',
+    types: [
+      ['ST', 'none'],
+      ['RealWorld', 'none'],
+    ],
+    values: ['runST', 'stToIO'],
+  },
+  'Data.STRef': {
+    from: 'Base',
+    types: [['STRef', 'none']],
+    values: ['newSTRef', 'readSTRef', 'writeSTRef', 'modifySTRef', "modifySTRef'"],
+  },
+  'Data.Proxy': {
+    from: 'Base',
+    types: [['Proxy', 'all']],
+    values: ['asProxyTypeOf'],
+  },
+  'GHC.TypeLits': {
+    from: 'Base',
+    types: [
+      ['Natural', 'none'],
+      ['Symbol', 'none'],
+      ['KnownNat', 'none'],
+      ['KnownSymbol', 'none'],
+    ],
+    values: ['natVal', 'symbolVal'],
+  },
+  'GHC.TypeNats': {
+    from: 'Base',
+    types: [
+      ['Natural', 'none'],
+      ['KnownNat', 'none'],
+    ],
+    values: [],
+    overrides: { from: 'GHC.TypeNats.Internal', values: ['natVal'] },
+  },
+  'Numeric.Natural': { from: 'Base', types: [['Natural', 'none']], values: ['minusNaturalMaybe'] },
+  'Data.Monoid': {
+    from: 'Base',
+    types: [
+      ['Monoid', 'all'],
+      ['Dual', 'all'],
+      ['Endo', 'all'],
+      ['All', 'all'],
+      ['Any', 'all'],
+      ['Sum', 'all'],
+      ['Product', 'all'],
+      ['First', 'all'],
+      ['Last', 'all'],
+      ['Alt', 'all'],
+      ['Ap', 'all'],
+    ],
+    values: [
+      '<>',
+      'getDual',
+      'appEndo',
+      'getAll',
+      'getAny',
+      'getSum',
+      'getProduct',
+      'getFirst',
+      'getLast',
+      'getAlt',
+      'getAp',
+    ],
+  },
+  'Data.Semigroup': {
+    from: 'Data.Semigroup.Internal',
+    types: [
+      ['Semigroup', 'all'],
+      ['Min', 'all'],
+      ['Max', 'all'],
+      ['First', 'all'],
+      ['Last', 'all'],
+      ['WrappedMonoid', 'all'],
+      ['Arg', 'all'],
+      ['ArgMin', 'none'],
+      ['ArgMax', 'none'],
+      ['Dual', 'all'],
+      ['Endo', 'all'],
+      ['All', 'all'],
+      ['Any', 'all'],
+      ['Sum', 'all'],
+      ['Product', 'all'],
+    ],
+    values: [
+      'getMin',
+      'getMax',
+      'getFirst',
+      'getLast',
+      'unwrapMonoid',
+      'getDual',
+      'appEndo',
+      'getAll',
+      'getAny',
+      'getSum',
+      'getProduct',
+      'diff',
+      'cycle1',
+      'mtimesDefault',
+      'stimesMonoid',
+      'stimesIdempotent',
+      'stimesIdempotentMonoid',
+    ],
+  },
+  'Data.List.NonEmpty': {
+    from: 'Base',
+    types: [['NonEmpty', 'all']],
+    values: [],
+    overrides: {
+      from: 'Data.List.NonEmpty.Internal',
+      values: [
+        'nonEmpty',
+        'fromList',
+        'toList',
+        'singleton',
+        'map',
+        'head',
+        'tail',
+        'last',
+        'init',
+        'length',
+        '<|',
+        'cons',
+        'uncons',
+        'reverse',
+        'sort',
+        'sortBy',
+        'sortOn',
+        'sortWith',
+        'inits',
+        'tails',
+        'append',
+        'unfold',
+        'nub',
+        'nubBy',
+        'intersperse',
+        'zip',
+        'zipWith',
+        'unzip',
+        'filter',
+        'partition',
+        'takeWhile',
+        'dropWhile',
+        'span',
+        'break',
+        'take',
+        'drop',
+        'splitAt',
+        '!!',
+        'iterate',
+        'repeat',
+        'cycle',
+        'scanl',
+        'scanr',
+        'scanl1',
+        'scanr1',
+        'insert',
+        'groupBy',
+        'group',
+        'groupWith',
+        'groupAllWith',
+        'groupBy1',
+        'group1',
+        'isPrefixOf',
+        'transpose',
+        'unfoldr',
+        'xor',
+        'some1',
+      ],
+    },
+  },
+  'Data.Functor.Identity': { from: 'Base', types: [['Identity', 'all']], values: ['runIdentity'] },
+  'Data.Functor.Const': { from: 'Base', types: [['Const', 'all']], values: ['getConst'] },
+  'Data.Functor.Compose': { from: 'Base', types: [['Compose', 'all']], values: ['getCompose'] },
+  'Language.Haskell.TH': templateHaskellModule('Language.Haskell.TH'),
+  'Language.Haskell.TH.Syntax': templateHaskellModule('Language.Haskell.TH.Syntax'),
+  'Language.Haskell.TH.Lib': templateHaskellModule('Language.Haskell.TH.Lib'),
+  'Language.Haskell.TH.Ppr': templateHaskellModule('Language.Haskell.TH.Ppr'),
+  'Language.Haskell.TH.Quote': {
+    from: 'Language.Haskell.TH.Internal',
+    types: [['QuasiQuoter', 'all']],
+    values: ['quoteExp', 'quotePat', 'quoteType', 'quoteDec'],
+  },
+  'Data.Word': {
+    from: 'Base',
+    types: [
+      ['Word', 'none'],
+      ['Word8', 'none'],
+      ['Word16', 'none'],
+      ['Word32', 'none'],
+      ['Word64', 'none'],
+    ],
+    values: [],
+  },
+  'Data.Int': {
+    from: 'Base',
+    types: [
+      ['Int', 'none'],
+      ['Int8', 'none'],
+      ['Int16', 'none'],
+      ['Int32', 'none'],
+      ['Int64', 'none'],
+    ],
+    values: [],
+  },
+  'Data.Coerce': {
+    from: 'Base',
+    types: [['Coercible', 'none']],
+    values: ['coerce'],
+  },
+  'GHC.Records': {
+    from: 'Base',
+    types: [['HasField', 'none']],
+    values: ['getField'],
+  },
+  'Data.String': {
+    from: 'GHC.Overloaded.Internal',
+    types: [['IsString', 'all']],
+    values: [],
+    overrides: { from: 'Base', values: ['lines', 'words', 'unlines', 'unwords'] },
+  },
+  'GHC.IsList': {
+    from: 'GHC.Overloaded.Internal',
+    types: [
+      ['IsList', 'all'],
+      ['Item', 'none'],
+    ],
+    values: [],
+  },
+  'GHC.Exts': {
+    from: 'GHC.Overloaded.Internal',
+    types: [
+      ['IsList', 'all'],
+      ['Item', 'none'],
+      ['IsString', 'all'],
+    ],
+    values: ['the', 'sortWith', 'groupWith'],
+  },
+  'GHC.OverloadedLabels': {
+    from: 'GHC.Overloaded.Internal',
+    types: [['IsLabel', 'all']],
+    values: [],
+  },
+  'Control.Monad.Fix': {
+    from: 'Base',
+    types: [['MonadFix', 'all']],
+    values: ['fix'],
+  },
+  'Debug.Trace': {
+    from: 'Base',
+    types: [],
+    values: ['trace', 'traceShow', 'traceShowId', 'traceId', 'traceM', 'traceShowM', 'traceWith', 'traceShowWith'],
   },
   'Data.Map': { from: 'Data.Map.Internal', types: [['Map', 'none']], values: MAP_VALUES },
   'Data.Map.Strict': {
@@ -726,6 +1167,89 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     overrides: { from: 'Data.Map.Strict.Internal', values: STRICT_MAP_VALUES },
   },
   'Data.Set': { from: 'Data.Set.Internal', types: [['Set', 'none']], values: SET_VALUES },
+  'Data.IntMap': {
+    from: 'Data.Map.Internal',
+    types: [
+      ['IntMap', 'none'],
+      ['Key', 'none'],
+    ],
+    values: exportedByGhc('Data.IntMap', MAP_VALUES),
+  },
+  'Data.IntMap.Strict': {
+    from: 'Data.Map.Internal',
+    types: [
+      ['IntMap', 'none'],
+      ['Key', 'none'],
+    ],
+    values: exportedByGhc('Data.IntMap.Strict', MAP_VALUES),
+    overrides: { from: 'Data.Map.Strict.Internal', values: exportedByGhc('Data.IntMap.Strict', STRICT_MAP_VALUES) },
+  },
+  'Data.IntSet': {
+    from: 'Data.Set.Internal',
+    types: [
+      ['IntSet', 'none'],
+      ['Key', 'none'],
+    ],
+    values: exportedByGhc('Data.IntSet', SET_VALUES),
+  },
+  'Data.Tree': {
+    from: 'Data.Tree.Internal',
+    types: [
+      ['Tree', 'all'],
+      ['Forest', 'none'],
+    ],
+    values: [
+      'rootLabel',
+      'subForest',
+      'flatten',
+      'levels',
+      'foldTree',
+      'unfoldTree',
+      'unfoldForest',
+      'drawTree',
+      'drawForest',
+    ],
+  },
+  'Data.Sequence': {
+    from: 'Data.Sequence.Internal',
+    types: [
+      ['Seq', 'none'],
+      ['ViewL', 'all'],
+      ['ViewR', 'all'],
+    ],
+    values: SEQUENCE_VALUES,
+  },
+  'Data.Bifunctor': {
+    from: 'Data.Bifunctor.Internal',
+    types: [['Bifunctor', 'all']],
+    values: [],
+  },
+  'Control.Category': {
+    from: 'Control.Arrow.Internal',
+    types: [['Category', 'all']],
+    values: ['<<<', '>>>'],
+  },
+  'Control.Arrow': {
+    from: 'Control.Arrow.Internal',
+    types: [
+      ['Arrow', 'all'],
+      ['Kleisli', 'all'],
+      ['ArrowZero', 'all'],
+      ['ArrowPlus', 'all'],
+      ['ArrowChoice', 'all'],
+      ['ArrowApply', 'all'],
+      ['ArrowMonad', 'all'],
+      ['ArrowLoop', 'all'],
+    ],
+    values: ['returnA', '^>>', '>>^', '>>>', '<<<', '<<^', '^<<', 'leftApp'],
+  },
+  'Data.Void': { from: 'Base', types: [['Void', 'none']], values: ['absurd', 'vacuous'] },
+  'Data.Complex': {
+    from: 'Base',
+    types: [['Complex', 'all']],
+    values: ['realPart', 'imagPart', 'conjugate', 'mkPolar', 'cis', 'polar', 'magnitude', 'phase'],
+  },
+  'Data.Fixed': { from: 'Base', types: [], values: ["div'", "mod'", "divMod'"] },
   'Text.Printf': {
     from: 'Text.Printf.Internal',
     types: [
@@ -739,67 +1263,46 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
 };
 
 /** The values a program cannot use, with what to name in the message that rejects them. */
-export const UNSUPPORTED_VALUES: Record<string, string> = {
-  getLine: '標準入力（getLine）',
-  getContents: '標準入力（getContents）',
-  getChar: '標準入力（getChar）',
-  interact: '標準入力（interact）',
-  readLn: '標準入力（readLn）',
-  stdin: '標準入力（stdin）',
-  hGetLine: '標準入力（hGetLine）',
-  hGetContents: '標準入力（hGetContents）',
-  hGetChar: '標準入力（hGetChar）',
-  isEOF: '標準入力（isEOF）',
-  readFile: 'ファイルの読み書き（readFile）',
-  writeFile: 'ファイルの読み書き（writeFile）',
-  appendFile: 'ファイルの読み書き（appendFile）',
-  hClose: 'ファイルの読み書き（hClose）',
-};
+export const UNSUPPORTED_VALUES: Record<string, string> = {};
+
+/**
+ * Template Haskell's functions that look at the program being compiled (its declarations, instances, and source),
+ * which splices cannot here.
+ */
+export const TEMPLATE_HASKELL_UNSUPPORTED = [
+  'reify',
+  'reifyInstances',
+  'reifyFixity',
+  'reifyType',
+  'reifyRoles',
+  'isInstance',
+  'lookupTypeName',
+  'lookupValueName',
+  'location',
+  'addTopDecls',
+  'isExtEnabled',
+  'extsEnabled',
+];
 
 /** Modules this environment knows but does not provide, with what to name in the message that rejects them. */
 export const UNSUPPORTED_MODULES: Record<string, string> = {
-  'Data.IORef': '可変の参照（Data.IORef）',
-  'Data.STRef': '可変の参照（Data.STRef）',
-  'Control.Monad.ST': 'ST モナド（Control.Monad.ST）',
-  'Control.Exception': '例外の捕捉（Control.Exception）',
-  'System.IO.Error': '例外の捕捉（System.IO.Error）',
   'Control.Concurrent': '並行処理（Control.Concurrent）',
   'Control.Concurrent.MVar': '並行処理（Control.Concurrent.MVar）',
   'Control.Concurrent.STM': '並行処理（Control.Concurrent.STM）',
   'System.IO.Unsafe': 'unsafePerformIO（System.IO.Unsafe）',
-  'Debug.Trace': 'デバッグ用の出力（Debug.Trace）',
-  'System.Environment': 'コマンドラインの引数と環境変数（System.Environment）',
-  'System.Exit': 'プログラムの終了（System.Exit）',
   'System.Process': '外部のプロセス（System.Process）',
   'System.Random': '乱数（System.Random。base 以外のパッケージ）',
   'Data.Array': '配列（Data.Array。base・containers 以外のパッケージ）',
-  'Data.Word': '符号なし整数の型（Data.Word）',
-  'Data.Int': '大きさを指定した整数の型（Data.Int）',
-  'Data.Monoid': 'Data.Monoid',
-  'Data.Semigroup': 'Data.Semigroup',
-  'Data.List.NonEmpty': 'Data.List.NonEmpty',
-  'Data.Complex': '複素数（Data.Complex）',
-  'Data.Fixed': 'Data.Fixed',
-  'Data.Kind': 'Data.Kind',
-  'Data.Void': 'Data.Void',
-  'Data.Proxy': 'Data.Proxy',
   'Data.Typeable': 'リフレクション（Data.Typeable）',
   'Data.Dynamic': 'リフレクション（Data.Dynamic）',
   'Data.Data': 'リフレクション（Data.Data）',
   'GHC.Generics': 'GHC.Generics',
-  'Data.Coerce': 'Data.Coerce',
-  'Data.Sequence': 'Data.Sequence',
-  'Data.IntMap': 'Data.IntMap',
-  'Data.IntMap.Strict': 'Data.IntMap.Strict',
-  'Data.IntSet': 'Data.IntSet',
-  'Data.Tree': 'Data.Tree',
   'Data.Graph': 'Data.Graph',
   'Data.Text': '文字列の型 Text（text パッケージ）',
   'Data.ByteString': 'ByteString（bytestring パッケージ）',
   'Control.Monad.State': 'mtl のモナド変換子（Control.Monad.State）',
   'Control.Monad.Reader': 'mtl のモナド変換子（Control.Monad.Reader）',
   'Control.Monad.Writer': 'mtl のモナド変換子（Control.Monad.Writer）',
-  'Language.Haskell.TH': 'Template Haskell（Language.Haskell.TH）',
   Foreign: '外部の関数（Foreign）',
   'Foreign.C': '外部の関数（Foreign.C）',
 };

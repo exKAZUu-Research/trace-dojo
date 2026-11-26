@@ -1,4 +1,4 @@
-import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
+import { formatFloatField } from '../../interpreter/floatFormat';
 import { CppRuntimeError } from '../errors';
 import type { Runtime } from '../runtime';
 import { intMax, type IntName, intRank, isCharType, isWide, type Type } from '../types';
@@ -17,34 +17,14 @@ export interface FloatFormat {
 /** Formats a double as macOS's libc does for a printf conversion, with its sign but without padding. */
 export function formatFloat(value: number, format: FloatFormat): string {
   const { conversion, upper = false, alternate = false } = format;
-  const negative = value < 0 || Object.is(value, -0);
-  const sign = negative ? '-' : (format.sign ?? '');
-  const magnitude = Math.abs(value);
-  if (!Number.isFinite(magnitude)) {
-    const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
-    // macOS prints no sign for a NaN.
-    return (Number.isNaN(magnitude) ? '' : sign) + (upper ? text.toUpperCase() : text);
-  }
-  let body: string;
-  switch (conversion) {
-    case 'f': {
-      body = formatFixed(magnitude, format.precision ?? 6);
-      if (alternate && !body.includes('.')) body += '.';
-      break;
-    }
-    case 'e': {
-      body = formatScientific(magnitude, format.precision ?? 6, alternate);
-      break;
-    }
-    case 'g': {
-      body = formatGeneral(magnitude, format.precision ?? 6, alternate);
-      break;
-    }
-    default: {
-      body = formatHex(magnitude, format.precision, alternate);
-    }
-  }
-  return sign + (upper ? body.toUpperCase() : body);
+  return formatFloatField(
+    {
+      flags: `${format.sign ?? ''}${alternate ? '#' : ''}`,
+      precision: format.precision,
+      conversion: upper ? conversion.toUpperCase() : conversion,
+    },
+    value
+  );
 }
 
 interface Spec {

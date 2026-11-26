@@ -26,6 +26,8 @@ export interface Primitive {
   /** The arguments forced to weak head normal form before the primitive runs. */
   strict: number[] | 'all';
   fn: (args: Slot[], runtime: Runtime) => PrimResult;
+  /** Whether a pure call performs an effect (`Debug.Trace` output), which a trace's display must not. */
+  effectful?: true;
 }
 
 const registry = new Map<string, Primitive>();
@@ -36,19 +38,24 @@ export function primitiveNamed(name: string): Primitive {
   return prim;
 }
 
-function define(name: string, arity: number, strict: Primitive['strict'], fn: Primitive['fn']): void {
-  registry.set(name, { name, arity, strict, fn });
+export function define(
+  name: string,
+  arity: number,
+  strict: Primitive['strict'],
+  fn: Primitive['fn'],
+  effectful?: true
+): void {
+  registry.set(name, { name, arity, strict, fn, effectful });
 }
 
 /** Defines a primitive whose arguments are all forced, taking their values. */
-function strict(name: string, arity: number, fn: (args: Value[], runtime: Runtime) => PrimResult): void {
+export function strict(name: string, arity: number, fn: (args: Value[], runtime: Runtime) => PrimResult): void {
   define(name, arity, 'all', (args, runtime) => fn(args as Value[], runtime));
 }
 
 let boolCons: { false: ConInfo; true: ConInfo } | undefined;
 let orderingCons: ConInfo[] | undefined;
 
-/** Registers the library's `Bool` and `Ordering`, which primitives return. */
 export function setPrimitiveTypes(bool: ConInfo[], ordering: ConInfo[]): void {
   boolCons = { false: bool[0], true: bool[1] };
   orderingCons = ordering;
@@ -66,7 +73,7 @@ function ordering(order: number): Value {
 
 strict('newtypeField', 1, ([value]) => (value as ConValue).fields[0]);
 
-const unit = (): Value => nullary(UNIT_CON);
+export const unit = (): Value => nullary(UNIT_CON);
 
 export function tuple(...items: Slot[]): Value {
   return new ConValue(tupleCon(items.length), items);
@@ -89,6 +96,58 @@ export function forceString(slot: Slot, runtime: Runtime): string {
   return text;
 }
 
+/**
+ * The number a string starts with, after ASCII spaces and an optional `-`: decimal digits, and for a fractional one
+ * an optional `.digits` and exponent, when the character after it cannot continue a number's lexeme (the end, a
+ * space, `)`, `]` or `,`). Reads only the cells up to that character.
+ */
+function plainNumber(
+  text: Slot,
+  runtime: Runtime,
+  fractional: boolean
+): { negative: boolean; token: string; rest: Slot } | undefined {
+  let rest = text;
+  let cell = runtime.machine.force(rest) as ConValue;
+  const charOf = (): string | undefined =>
+    cell.con === CONS_CON ? (runtime.machine.force(cell.fields[0]) as string) : undefined;
+  let token = '';
+  const take = (): void => {
+    token += charOf() as string;
+    rest = cell.fields[1];
+    cell = runtime.machine.force(rest) as ConValue;
+    runtime.spend();
+  };
+  const isDigit = (): boolean => {
+    const char = charOf();
+    return char !== undefined && char >= '0' && char <= '9';
+  };
+  const digits = (): boolean => {
+    if (!isDigit()) return false;
+    while (isDigit()) take();
+    return true;
+  };
+  while (charOf() !== undefined && ASCII_SPACE.test(charOf() as string)) take();
+  const negative = charOf() === '-';
+  if (negative) take();
+  token = '';
+  if (!digits()) return undefined;
+  if (fractional && charOf() === '.') {
+    take();
+    if (!digits()) return undefined;
+  }
+  if (fractional && (charOf() === 'e' || charOf() === 'E')) {
+    take();
+    if (charOf() === '+' || charOf() === '-') take();
+    if (!digits()) return undefined;
+  }
+  const next = charOf();
+  if (next !== undefined && !ASCII_SPACE.test(next) && !')],'.includes(next)) return undefined;
+  return { negative, token, rest };
+}
+
+/** The characters `isSpace` holds for below U+0080. */
+const ASCII_SPACE = /^[\t\n\v\f\r ]$/;
+
 function haskellError(message: string): HaskellException {
   return new HaskellException(message);
 }
@@ -100,7 +159,11 @@ function wrapInt(value: bigint): bigint {
 }
 
 function divideByZero(): HaskellException {
-  return new HaskellException('divide by zero');
+  return new HaskellException('divide by zero', { kind: 'arith', error: 'DivideByZero' });
+}
+
+function underflow(): HaskellException {
+  return new HaskellException('arithmetic underflow', { kind: 'arith', error: 'Underflow' });
 }
 
 /** Floor division and modulus, as Haskell's `div` and `mod` round toward negative infinity. */
@@ -113,9 +176,6 @@ function floorMod(a: bigint, b: bigint): bigint {
   const r = a % b;
   return r !== 0n && r < 0n !== b < 0n ? r + b : r;
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// Int and Integer
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
 // code-gauge-allow functionNcss -- Each branch reproduces one of GHC's error or overflow behaviors for integral division.
@@ -135,7 +195,7 @@ function defineIntegral(prefix: 'int' | 'integer' | 'word', wrap: (value: bigint
       if ((b as bigint) === 0n) throw divideByZero();
       if (prefix === 'int' && (a as bigint) === INT_MIN && (b as bigint) === -1n) {
         // GHC reports the overflow of the one quotient that does not fit.
-        throw new HaskellException('arithmetic overflow');
+        throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
       }
       return wrap(op(a as bigint, b as bigint));
     };
@@ -185,7 +245,7 @@ function rotate64(value: bigint, count: bigint): bigint {
 
 function shiftCount(value: Value): bigint {
   const count = value as bigint;
-  if (count < 0n) throw new HaskellException('arithmetic overflow');
+  if (count < 0n) throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
   return count;
 }
 
@@ -205,7 +265,6 @@ strict('wordShiftR', 2, ([a, b]) => (shiftCount(b) >= 64n ? 0n : (a as bigint) >
 strict('wordPopCount', 1, ([a]) => BigInt(countOnes(a as bigint)));
 strict('integerToInt', 1, ([a]) => wrapInt(a as bigint));
 strict('intToInteger', 1, ([a]) => a);
-// Bits
 strict('intRotate', 2, ([a, b]) => wrapInt(rotate64(a as bigint, b as bigint)));
 strict('wordRotate', 2, ([a, b]) => rotate64(a as bigint, b as bigint));
 strict('leadingZeros64', 1, ([a]) => {
@@ -262,9 +321,6 @@ strict('integerPopCount', 1, ([a]) => {
   const count = countOnes(value < 0n ? -value : value);
   return BigInt(value < 0n ? -count : count);
 });
-
-// ---------------------------------------------------------------------------------------------------------------
-// Double and Float
 
 // code-gauge-allow functionNcss -- One definition per floating-point primitive.
 function defineFloating(prefix: 'double' | 'float', round: (value: number) => number): void {
@@ -523,9 +579,6 @@ function generateDigits(r: bigint, s: bigint, mUp: bigint, mDn: bigint): number[
   }
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// Characters
-
 strict('charEq', 2, ([a, b]) => bool(a === b));
 strict('charLt', 2, ([a, b]) =>
   bool(((a as string).codePointAt(0) as number) < ((b as string).codePointAt(0) as number))
@@ -546,7 +599,7 @@ strict('chr', 1, ([a]) => {
   return String.fromCodePoint(Number(code));
 });
 
-function showSignedInt(value: bigint): string {
+export function showSignedInt(value: bigint): string {
   return value < 0n ? `(${value})` : String(value);
 }
 
@@ -581,6 +634,11 @@ const CATEGORY_PATTERNS: [string, RegExp][] = [
   ['Cs', /\p{Cs}/u],
   ['Co', /\p{Co}/u],
 ];
+
+/** GHC's `isSpace`: the ASCII control spaces and the characters of category Zs, unlike JavaScript's `\s`. */
+strict('isSpace', 1, ([a]) => bool(HASKELL_SPACE.test(a as string)));
+
+const HASKELL_SPACE = /^[\t\n\v\f\r\p{Zs}]$/u;
 
 /** GHC's `generalCategory` as the index of its constructor in `GeneralCategory`. */
 strict('generalCategory', 1, ([a]) => {
@@ -653,10 +711,19 @@ strict('toTitle', 1, ([a]) => {
   return TITLE_CASES[char] ?? greekIotaUpper(char) ?? singleCase(char, char.toUpperCase());
 });
 
-// ---------------------------------------------------------------------------------------------------------------
-// Showing and reading numbers
-
 define('readDecimal', 1, [], ([text], runtime) => BigInt(forceString(text, runtime)));
+define('plainDecimal', 1, [], ([text], runtime) => {
+  const plain = plainNumber(text, runtime, false);
+  return plain
+    ? tuple(bool(true), bool(plain.negative), BigInt(plain.token), plain.rest)
+    : tuple(bool(false), bool(false), 0n, text);
+});
+define('plainFractional', 1, [], ([text], runtime) => {
+  const plain = plainNumber(text, runtime, true);
+  return plain
+    ? tuple(bool(true), bool(plain.negative), unpackString(plain.token, 0), plain.rest)
+    : tuple(bool(false), bool(false), NIL(), text);
+});
 define('readFloatText', 1, [], ([text], runtime) => {
   const parts = decimalParts(forceString(text, runtime));
   return tuple(...decimalRatio(parts, runtime));
@@ -697,9 +764,6 @@ function decimalRatio({ digits, exponent }: DecimalParts, runtime: Runtime): [bi
 define('readHexText', 1, [], ([text], runtime) => BigInt(`0x${forceString(text, runtime)}`));
 define('readOctText', 1, [], ([text], runtime) => BigInt(`0o${forceString(text, runtime)}`));
 
-// ---------------------------------------------------------------------------------------------------------------
-// Control
-
 define('seq', 2, [0], ([, b]) => b);
 define('error', 1, [], ([message], runtime) => {
   throw haskellError(forceString(message, runtime));
@@ -709,19 +773,27 @@ define('errorEmptyList', 1, [], ([name], runtime) => {
 });
 strict('primConTag', 1, ([a]) => BigInt((a as ConValue).con.tag));
 strict('primConCount', 1, ([a]) => BigInt((a as ConValue).con.type.cons.length));
-strict('primConAt', 2, ([a, n]) => nullary((a as ConValue).con.type.cons[Number(n as bigint)]));
-
-// ---------------------------------------------------------------------------------------------------------------
-// IO
+strict('primConAt', 2, ([a, n]) => {
+  const { cons, name } = (a as ConValue).con.type;
+  const tag = n as bigint;
+  if (tag < 0n || tag >= BigInt(cons.length)) {
+    throw haskellError(
+      `Enum.toEnum{${name}}: tag (${showSignedInt(tag)}) is outside of enumeration's range (0,${cons.length - 1})`
+    );
+  }
+  return nullary(cons[Number(tag)]);
+});
 
 define('ioReturn', 1, [], ([a]) => new IOReturn(a));
 define('ioBind', 2, [], ([m, k]) => new IOBind(m, k));
 define('ioThen', 2, [], ([m, n]) => new IOThen(m, n));
 
-/** Writes a string as it is evaluated, so that what precedes an error in it is still written. */
-function writeLazily(slot: Slot, runtime: Runtime, channel: 'stdout' | 'stderr', suffix: string): void {
+/**
+ * Writes a string to a sink as it is evaluated, so that what precedes an error in it is still written, and that error,
+ * not one the sink raises for the rest, is what escapes.
+ */
+export function writeString(slot: Slot, runtime: Runtime, write: (chunk: string) => void): void {
   let buffer = '';
-  const out = runtime.io[channel];
   try {
     let current = runtime.machine.force(slot) as ConValue;
     while (current.con === CONS_CON) {
@@ -729,102 +801,40 @@ function writeLazily(slot: Slot, runtime: Runtime, channel: 'stdout' | 'stderr',
       const codePoint = character.codePointAt(0)!;
       buffer += codePoint >= 0xd8_00 && codePoint <= 0xdf_ff ? '?' : character;
       if (buffer.length >= 256) {
-        out.write(buffer);
+        const chunk = buffer;
         buffer = '';
+        write(chunk);
       }
       current = runtime.machine.force(current.fields[1]) as ConValue;
       runtime.spend();
     }
-  } finally {
-    out.write(buffer);
+  } catch (error) {
+    try {
+      write(buffer);
+    } catch {
+      // The string's own failure came first, so it is the one the program sees.
+    }
+    throw error;
   }
-  if (suffix) out.write(suffix);
+  write(buffer);
 }
 
-define(
-  'putStr',
-  1,
-  [],
-  ([text], runtime) =>
-    new IOPrim(
-      'putStr',
-      () => {
-        writeLazily(text, runtime, 'stdout', '');
-        return unit();
-      },
-      [text]
-    )
-);
-define(
-  'putStrLn',
-  1,
-  [],
-  ([text], runtime) =>
-    new IOPrim(
-      'putStrLn',
-      () => {
-        writeLazily(text, runtime, 'stdout', '\n');
-        return unit();
-      },
-      [text]
-    )
-);
-define(
-  'hPutStr',
-  2,
-  [],
-  ([handle, text], runtime) =>
-    new IOPrim(
-      'hPutStr',
-      () => {
-        const value = runtime.machine.force(handle) as ConValue;
-        writeLazily(text, runtime, value.con.tag === 0 ? 'stdout' : 'stderr', '');
-        return unit();
-      },
-      [handle, text]
-    )
-);
-define(
-  'hFlush',
-  1,
-  [],
-  ([handle], runtime) =>
-    new IOPrim(
-      'hFlush',
-      () => {
-        runtime.machine.force(handle);
-        return unit();
-      },
-      [handle]
-    )
-);
-define(
-  'hSetBuffering',
-  2,
-  [],
-  ([handle, mode], runtime) =>
-    new IOPrim(
-      'hSetBuffering',
-      () => {
-        runtime.machine.force(handle);
-        const buffering = runtime.machine.force(mode) as ConValue;
-        if (buffering.con.name === 'BlockBuffering') {
-          const size = runtime.machine.force(buffering.fields[0]) as ConValue;
-          if (size.con.name === 'Just') {
-            const count = runtime.machine.force(size.fields[0]) as bigint;
-            if (count <= 0n)
-              throw new HaskellException(
-                `hSetBuffering: invalid argument (illegal buffer size ${showSignedInt(count)})`
-              );
-          }
-        }
-        return unit();
-      },
-      [handle, mode]
-    )
-);
 define('divZeroError', 0, [], () => {
   throw divideByZero();
+});
+define('ratioZeroDenominatorError', 0, [], () => {
+  throw new HaskellException('Ratio has zero denominator', { kind: 'arith', error: 'RatioZeroDenominator' });
+});
+define('overflowError', 0, [], () => {
+  throw new HaskellException('arithmetic overflow', { kind: 'arith', error: 'Overflow' });
+});
+define('underflowError', 0, [], () => {
+  throw underflow();
+});
+strict('naturalToInteger', 1, ([a]) => a);
+strict('integerToNatural', 1, ([a]) => {
+  if ((a as bigint) < 0n) throw underflow();
+  return a;
 });
 define('ioUnit', 0, [], () => new IOReturn(unit()));
 define(
@@ -835,27 +845,17 @@ define(
     new IOPrim(
       'fail',
       () => {
-        throw new HaskellException(`user error (${forceString(message, runtime)})`);
+        const description = forceString(message, runtime);
+        throw new HaskellException(`user error (${description})`, {
+          kind: 'io',
+          type: 'UserError',
+          location: '',
+          description,
+        });
       },
       [message]
     )
 );
-define(
-  'ioError',
-  1,
-  [],
-  ([message], runtime) =>
-    new IOPrim(
-      'ioError',
-      () => {
-        throw new HaskellException(forceString(message, runtime));
-      },
-      [message]
-    )
-);
-
-// ---------------------------------------------------------------------------------------------------------------
-// Turtles
 
 function turtleOf(slot: Slot, runtime: Runtime): TurtleValue {
   return runtime.machine.force(slot) as TurtleValue;
