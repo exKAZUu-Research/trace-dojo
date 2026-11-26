@@ -720,7 +720,6 @@ class SpliceDecoder {
 
   // Patterns
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per constructor of Template Haskell's Pat.
   private pat(slot: Slot): Pat {
     const { span } = this;
     const p = this.con(slot);
@@ -818,7 +817,6 @@ class SpliceDecoder {
 
   // Types
 
-  // code-gauge-allow functionCognitiveComplexity -- One case per constructor of Template Haskell's Type.
   private type(slot: Slot): TypeExpr {
     const { span } = this;
     const t = this.con(slot);

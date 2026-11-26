@@ -511,14 +511,7 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch checks one condition GHC places on a derivable class.
 function deriveInstances(checker: Checker, module: RModule, options: TypecheckOptions): DeclaredInstance[] {
-  const pending: {
-    decl: RDataDecl;
-    cls: ClassEntity;
-    info: InstanceInfo;
-    span: Span;
-    how: DerivingHow;
-    rep?: Type;
-  }[] = [];
+  const pending: PendingDerivation[] = [];
   for (const decl of module.dataDecls) {
     for (const { cls, span, strategy, via } of decl.deriving) {
       assert(cls, 'The derived class is unresolved');
@@ -555,7 +548,18 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
       pending.push({ decl, cls, info, span, how });
     }
   }
-  // Infer the contexts together, since derived instances of mutually recursive types depend on each other.
+  inferDerivedContexts(checker, pending);
+  return pending.map((item) => ({
+    info: item.info,
+    typeNames: item.decl.params,
+    bindings: item.how === 'stock' ? deriveInstance(item.decl, item.cls, options.derivingSupport) : [],
+    span: item.span,
+    rep: item.rep,
+  }));
+}
+
+/** Infers derived instances' contexts together, since those of mutually recursive types depend on each other. */
+function inferDerivedContexts(checker: Checker, pending: readonly PendingDerivation[]): void {
   for (let round = 0; round < 50; round++) {
     let changed = false;
     for (const item of pending) {
@@ -566,15 +570,17 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
         changed = true;
       }
     }
-    if (!changed) break;
+    if (!changed) return;
   }
-  return pending.map((item) => ({
-    info: item.info,
-    typeNames: item.decl.params,
-    bindings: item.how === 'stock' ? deriveInstance(item.decl, item.cls, options.derivingSupport) : [],
-    span: item.span,
-    rep: item.rep,
-  }));
+}
+
+interface PendingDerivation {
+  decl: RDataDecl;
+  cls: ClassEntity;
+  info: InstanceInfo;
+  span: Span;
+  how: DerivingHow;
+  rep?: Type;
 }
 
 type DerivingHow = 'stock' | 'anyclass' | 'newtype' | 'via';

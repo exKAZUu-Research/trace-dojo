@@ -194,12 +194,7 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
   } else if (value instanceof RefValue) {
     push(value.value);
   } else if (value instanceof Thunk) {
-    for (const root of runtime.previewRoots(value) ?? []) push(root);
-    for (const root of value.nativeRoots ?? []) push(root);
-    if (value.state === 'done') push(value.value);
-    else if (value.code) pushRefs(freeVarsOf(value.code), value.env, push);
-    else if (value.effect !== undefined) push(value.effect);
-    else push(value.target);
+    pushThunkReferences(runtime, value, push);
   } else if (value instanceof Closure) {
     pushRefs(freeVarsOf(value.lam), value.env, push);
   } else if (value instanceof PrimFn) {
@@ -222,6 +217,15 @@ function pushReferences(runtime: Runtime, value: object, push: Push): void {
   } else if (value instanceof Dict) {
     for (const slot of [...value.methods, ...value.supers, ...value.args]) push(slot);
   }
+}
+
+function pushThunkReferences(runtime: Runtime, thunk: Thunk, push: Push): void {
+  for (const root of runtime.previewRoots(thunk) ?? []) push(root);
+  for (const root of thunk.nativeRoots ?? []) push(root);
+  if (thunk.state === 'done') push(thunk.value);
+  else if (thunk.code) pushRefs(freeVarsOf(thunk.code), thunk.env, push);
+  else if (thunk.effect !== undefined) push(thunk.effect);
+  else push(thunk.target);
 }
 
 function pushPreparedActions(block: PreparedBlock | undefined, push: Push, start = 0): void {

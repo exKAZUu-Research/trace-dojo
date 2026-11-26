@@ -939,16 +939,18 @@ class Renamer {
       deriving,
       span: decl.span,
     });
-    if (decl.kindSig) {
-      // `data T a :: k` gives the kind after T's written parameters: T's own kind runs through theirs first.
-      let kind = this.renameKind(decl.kindSig);
-      for (const [index, param] of decl.params.entries().toArray().toReversed()) {
-        const written = decl.paramKinds?.[index];
-        const from: RType = written ? this.renameKind(written) : { k: 'var', name: ` k${param.name}`, span: decl.span };
-        kind = { k: 'fun', from, to: kind, span: decl.span };
-      }
-      this.dataKindSigs.push({ entity, kind, span: decl.span });
+    if (decl.kindSig) this.dataKindSigs.push({ entity, kind: this.dataKind(decl, decl.kindSig), span: decl.span });
+  }
+
+  /** The kind `data T a :: k` gives T: `k` is the kind after T's written parameters, whose kinds come first. */
+  private dataKind(decl: Extract<Decl, { kind: 'data' }>, kindSig: TypeExpr): RType {
+    let kind = this.renameKind(kindSig);
+    for (const [index, param] of decl.params.entries().toArray().toReversed()) {
+      const written = decl.paramKinds?.[index];
+      const from: RType = written ? this.renameKind(written) : { k: 'var', name: ` k${param.name}`, span: decl.span };
+      kind = { k: 'fun', from, to: kind, span: decl.span };
     }
+    return kind;
   }
 
   /**
