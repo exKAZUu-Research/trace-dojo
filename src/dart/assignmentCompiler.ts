@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import { awaitingCompiled } from './awaitCompiler';
-import { containsAwait, type GenEval, type Part, runSteps, runWithoutWaiting } from './awaitSteps';
+import { containsAwait, type Part, runSteps, runWithoutWaiting } from './awaitSteps';
 import type { ClassInfo, Member } from './classes';
 import {
   type AddElement,
@@ -95,18 +95,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   protected compileAssignment(expression: Extract<Expression, { kind: 'assign' }>): Compiled {
-    if (expression.operator === '??=' && this.awaitsHere(expression.target)) {
-      // `??=` runs only its value on a condition, so it stages its target's awaits itself, which always run first.
-      const { result: target, steps } = this.compileWithSteps(expression.target, () =>
-        this.assignableTarget(expression.target, false)
-      );
-      const assigned = this.assignTo(target, expression.operator, expression.value, expression);
-      const { gen, run } = assigned;
-      return awaitingCompiled(assigned.type, function* (frame) {
-        yield* runSteps(frame, steps);
-        return gen ? yield* gen(frame) : run(frame);
-      });
-    }
     const target = this.assignableTarget(expression.target, expression.operator === '=');
     return this.assignTo(target, expression.operator, expression.value, expression);
   }
@@ -160,11 +148,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const readCurrent = this.readBeforeValue(target, valueSyntax);
     if (operator === '??=') {
       const before = this.flow;
-      // The value runs only when the target is null, so its awaits wait inside the assignment.
-      const awaits = this.awaitRoot?.fn === this.fn && containsAwait(valueSyntax);
-      const { result: written, steps } = this.compileWithSteps(valueSyntax, () =>
-        this.compileExpression(valueSyntax, writeType)
-      );
+      // The value runs only when the target is null: the target is prepared and read in a part of its own, which
+      // guards the value's awaiting parts.
+      const state = this.awaitsHere(valueSyntax) ? this.addStep(ifNullTargetState(target, readCurrent)) : undefined;
+      const guard = (frame: Frame): boolean => {
+        const { prepared, existing } = (state as Eval)(frame) as unknown as IfNullTargetState;
+        return prepared !== SHORTED && existing === undefined;
+      };
+      const written = this.compileGuarded(guard, valueSyntax, () => this.compileExpression(valueSyntax, writeType));
       const value = this.coerce(
         written,
         writeType,
@@ -175,7 +166,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       if (variable) this.afterWrite(variable, upperBound(nonNullable(readType), value.type));
       const type = upperBound(nonNullable(readType), assignedType(written, value));
       const run = value.run;
-      if (awaits) return awaitingCompiled(type, ifNullAssigning(target, readCurrent, steps, run));
+      if (state) return { type, run: ifNullAssigning(target, state, run), isConst: false };
       return {
         type,
         run: withPrepared(target, (frame, prepared) => {
@@ -1130,7 +1121,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // Switch expressions
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   compileSwitchExpression(
     subjectSyntax: Expression,
@@ -1138,30 +1128,38 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     span: Span,
     context: DartType | undefined
   ): Compiled {
-    // Only the matching case's body runs, so the awaits of the bodies wait inside the expression.
-    const awaits = this.awaitRoot?.fn === this.fn && containsAwait([subjectSyntax, cases]);
-    const { result: subject, steps: subjectSteps } = this.compileWithSteps(awaits ? subjectSyntax : undefined, () =>
-      this.compileExpression(subjectSyntax)
-    );
+    // Only the matching case's body runs: the subject and the match are parts evaluated once, and each body's awaits
+    // are guarded by the match.
+    const awaits = this.awaitsHere(cases);
+    const subject = this.decidingValue(this.compileExpression(subjectSyntax), cases);
     const before = this.flow;
     const patternSubject = this.switchSubject(subject, cases);
     let whenFalse = before;
     let after: Flow | undefined;
     let resultType: DartType | undefined;
     const bodyTypes: DartType[] = [];
-    const compiledCases = cases.map((switchCase) => {
+    // The match is a part before the bodies, which it guards; it reads the cases compiled below when it runs.
+    let compiledCases: SwitchExpressionCode[] = [];
+    const readMatch = awaits ? this.addStep((frame) => switchMatch(frame, subject.run, compiledCases)) : undefined;
+    const caseOf = readMatch
+      ? (frame: Frame) => Number(readMatch(frame) as bigint)
+      : (frame: Frame) => Number(switchMatch(frame, subject.run, compiledCases));
+    compiledCases = cases.map((switchCase, index) => {
       this.flow = whenFalse;
       const { result, slots } = this.withScope(() => {
+        // The pattern and its guard run inside the match, so none of their parts is lifted out of it.
         const {
           pattern,
           guard,
           whenFalse: unmatched,
-        } = this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard);
+        } = this.withoutStaging(() => this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard));
         whenFalse = unmatched;
-        const { result: body, steps: bodySteps } = this.compileWithSteps(awaits ? switchCase.body : undefined, () =>
-          this.instantiateInContext(this.compileExpression(switchCase.body, context), context)
+        const body = this.compileGuarded(
+          (frame) => caseOf(frame) === index,
+          switchCase.body,
+          () => this.instantiateInContext(this.compileExpression(switchCase.body, context), context)
         );
-        return { pattern, guard, body, bodySteps };
+        return { pattern, guard, body };
       });
       after = after ? Flow.join(after, this.flow) : this.flow;
       const bodyType = result.body.type;
@@ -1179,38 +1177,52 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     );
     this.flow = after ?? before;
     const type = resultType ? branchesType(resultType, bodyTypes, context) : NEVER;
-    const test = subject.run;
-    const select: GenEval = function* (frame) {
-      yield* runSteps(frame, subjectSteps);
-      return yield* PatternCache.runAwaiting(frame, function* (cache) {
-        const value = test(frame);
-        frame.temporaries.push(value);
+    return {
+      type,
+      run: (frame) => {
+        const switchCase = compiledCases[caseOf(frame)] as SwitchExpressionCode;
         try {
-          for (const switchCase of compiledCases) {
-            try {
-              if (
-                switchCase.pattern.match(frame, value, cache) &&
-                (!switchCase.guard || switchCase.guard(frame) === true)
-              ) {
-                yield* runSteps(frame, switchCase.bodySteps);
-                return switchCase.body.run(frame);
-              }
-            } finally {
-              for (const slot of switchCase.slots) frame.locals[slot] = undefined;
-            }
-          }
+          return switchCase.body.run(frame);
         } finally {
-          frame.temporaries.pop();
+          for (const slot of switchCase.slots) frame.locals[slot] = undefined;
         }
-        return frame.runtime.throwError('StateError', '', ['No switch case matched']);
-      });
+      },
+      isConst: false,
     };
-    if (awaits) return awaitingCompiled(type, select);
-    return { type, run: (frame) => runWithoutWaiting(select(frame)), isConst: false };
   }
 }
 
 export type { Member };
+
+/** A compiled case of a switch expression. */
+interface SwitchExpressionCode {
+  pattern: { match: (frame: Frame, value: Value, cache: PatternCache) => boolean };
+  guard: Eval | undefined;
+  body: Compiled;
+  slots: readonly number[];
+}
+
+/**
+ * The index of a switch expression's case that matches its subject, whose pattern variables stay bound for its body;
+ * the variables of the cases tried before it are cleared.
+ */
+function switchMatch(frame: Frame, subject: Eval, cases: readonly SwitchExpressionCode[]): bigint {
+  return PatternCache.run(frame, (cache) => {
+    const value = subject(frame);
+    frame.temporaries.push(value);
+    try {
+      for (const [index, switchCase] of cases.entries()) {
+        if (switchCase.pattern.match(frame, value, cache) && (!switchCase.guard || switchCase.guard(frame) === true)) {
+          return BigInt(index);
+        }
+        for (const slot of switchCase.slots) frame.locals[slot] = undefined;
+      }
+    } finally {
+      frame.temporaries.pop();
+    }
+    return frame.runtime.throwError('StateError', '', ['No switch case matched']);
+  });
+}
 
 /** A collection `for` element, which runs through its generator only when it awaits. */
 function elementLoop(gen: ElementGen, awaits: boolean): ElementCode {
@@ -1232,26 +1244,37 @@ function conditionalElement(
   };
 }
 
-/** `target ??= value` whose value awaits, which waits only when the target is null. */
-function ifNullAssigning(
-  target: AssignableTarget,
-  read: (frame: Frame, prepared: unknown) => Value,
-  steps: readonly Part[],
-  value: Eval
-): GenEval {
-  return function* (frame) {
-    const count = frame.temporaries.length;
+/** What a `??=` whose value awaits knows of its target before the value: where it is, and what it holds. */
+interface IfNullTargetState {
+  /** The length of the frame's temporaries before the target was prepared, which the assignment restores. */
+  mark: number;
+  prepared: unknown;
+  existing: Value;
+}
+
+/** The part of a `??=` whose value awaits that prepares and reads its target. */
+function ifNullTargetState(target: AssignableTarget, read: (frame: Frame, prepared: unknown) => Value): Eval {
+  return (frame) => {
+    const mark = frame.temporaries.length;
+    const prepared = target.prepare(frame);
+    const existing = prepared === SHORTED ? undefined : read(frame, prepared);
+    const state: IfNullTargetState = { mark, prepared, existing };
+    return state as unknown as Value;
+  };
+}
+
+/** `target ??= value` whose value awaits, given its target's part: the value's guarded parts have run when null. */
+function ifNullAssigning(target: AssignableTarget, state: Eval, value: Eval): Eval {
+  return (frame) => {
+    const { mark, prepared, existing } = state(frame) as unknown as IfNullTargetState;
     try {
-      const prepared = target.prepare(frame);
       if (prepared === SHORTED) return SHORTED;
-      const existing = read(frame, prepared);
       if (existing !== undefined) return existing;
-      yield* runSteps(frame, steps);
       const result = value(frame);
       target.write(frame, prepared, result);
       return result;
     } finally {
-      frame.temporaries.length = count;
+      frame.temporaries.length = mark;
     }
   };
 }

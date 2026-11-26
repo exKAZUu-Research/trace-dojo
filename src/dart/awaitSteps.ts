@@ -147,11 +147,14 @@ export function* evaluateParts<T>(
   run: () => T
 ): Generator<AwaitRequest, T, Value> {
   if (!root) return run();
+  // A part may leave values in flight when an await in a later one throws, such as a `??=`'s prepared target.
+  const mark = frame.temporaries.length;
   try {
     yield* runSteps(frame, root.staging.steps);
     return run();
   } finally {
     for (const slot of root.slots) frame.locals[slot] = undefined;
+    frame.temporaries.length = mark;
   }
 }
 

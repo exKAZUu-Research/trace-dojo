@@ -122,6 +122,17 @@ export abstract class AwaitCompiler extends CompilerBase {
     return read ? { ...compiled, run: read } : compiled;
   }
 
+  /**
+   * Makes a compiled action an ordered part of what is being staged, as a cascade's section is, so that it runs
+   * before the awaits of the parts after it; what it gives is read from its slot.
+   */
+  protected stagePart(compiled: Compiled): Compiled {
+    const root = this.awaitRoot;
+    const staging = this.staging;
+    if (root?.fn !== this.fn || !staging) return compiled;
+    return this.lift(root, staging, compiled);
+  }
+
   /** Whether an expression awaits inside the statement being compiled, so that it must be compiled with steps. */
   protected awaitsHere(node: unknown): boolean {
     return this.awaitRoot?.fn === this.fn && containsAwait(node);
@@ -210,7 +221,7 @@ export abstract class AwaitCompiler extends CompilerBase {
     return read ? { ...compiled, run: read } : compiled;
   }
 
-  private withoutStaging<T>(compile: () => T): T {
+  protected withoutStaging<T>(compile: () => T): T {
     const saved = this.staging;
     this.staging = undefined;
     try {
@@ -258,13 +269,8 @@ function handlesAwaitItself(expression: Expression): boolean {
   switch (expression.kind) {
     case 'await':
     case 'list':
-    case 'setOrMap':
-    case 'switch':
-    case 'cascade': {
+    case 'setOrMap': {
       return true;
-    }
-    case 'assign': {
-      return expression.operator === '??=';
     }
     default: {
       return false;

@@ -9265,6 +9265,36 @@ Future<void> main() async {
   });
 });
 
+test('??=, cascade sections and switch expression bodies that await run as ordered, guarded parts', () => {
+  const source = `var log = <String>[];
+Future<T> f<T>(String s, T v) async { log.add('f$s'); await Future<void>.value(); return v; }
+T t<T>(String s, T v) { log.add('t$s'); return v; }
+void show(String label, Object? v) { print('$label $v $log'); log = []; }
+class B { int? x; Map<int, int?> m = {}; void m2(int v) { log.add('m$v'); } B me(String s) { log.add('me$s'); return this; } }
+Future<void> main() async {
+  final b = B();
+  show('a', b.m[await f<int>('k', 1)] ??= await f('v', 2));
+  show('b', b.m[t<int>('k', 1)] ??= await f('v', 3));
+  B? n;
+  show('c', n?..m2(t('a', 1))..x = await f('b', 2));
+  show('d', (B()..me('a').x = await f('b', 1)..me('c').m2(await f('d', 2))).x);
+  show('e', switch (await f('a', 3)) { 1 => 'one', int v when v > 2 => await f('b', 'big'), _ => 'other' });
+  show('f', switch (t('a', 5)) { < 3 => t('b', 'small'), _ => t('c', 'x') + await f('d', 'y') });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'a 2 [fk, fv]',
+      'b 2 [tk]',
+      'c null []',
+      'd 1 [mea, fb, mec, fd, m2]',
+      'e big [fa, fb]',
+      'f xy [ta, tc, fd]',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

@@ -1,7 +1,5 @@
-// code-gauge-allow-file fileNcss -- The operators that decide when their operands run also build their await-aware forms.
+// code-gauge-allow-file fileNcss -- The operators, conditionals and cascades share the operand and branch staging.
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
-import { awaitingCompiled } from './awaitCompiler';
-import { containsAwait, runSteps } from './awaitSteps';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { branchesType, childContext } from './contextTypes';
 import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
@@ -423,14 +421,12 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss -- The target and each section compile with their own steps, which the generator interleaves.
   protected compileCascade(
     expression: Extract<Expression, { kind: 'cascade' }>,
     context: DartType | undefined
   ): Compiled {
-    const { result: target, steps: targetSteps } = this.compileWithSteps(expression.target, () =>
-      this.compileExpression(expression.target, context)
-    );
+    const awaits = this.awaitsHere(expression.sections);
+    const target = this.decidingValue(this.compileExpression(expression.target, context), expression.sections);
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: target.type };
     const nullAware = expression.sections[0]?.nullAware ?? false;
@@ -440,50 +436,37 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       run: (frame) => (frame.locals[slot] as Cell).v,
       isConst: false,
     };
-    // Each section's awaits wait right before the section runs, after the sections before it.
-    const sections = expression.sections.map((section) =>
-      this.compileWithSteps(
-        section,
-        () => this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result
-      )
-    );
     const targetRun = target.run;
-    if (this.awaitRoot?.fn === this.fn && containsAwait(expression)) {
-      return awaitingCompiled(target.type, function* (frame) {
-        yield* runSteps(frame, targetSteps);
-        const value = targetRun(frame);
-        if (nullAware && value === undefined) return;
-        const previous = frame.locals[slot];
-        frame.locals[slot] = new Cell(value);
-        try {
-          // A section that awaits inside itself, as `..x ??= await f()` does, runs through its generator.
-          for (const { result, steps } of sections) {
-            yield* runSteps(frame, steps);
-            if (result.gen) yield* result.gen(frame);
-            else result.run(frame);
-          }
-        } finally {
-          frame.locals[slot] = previous;
-        }
-        return value;
+    const isShorted = (frame: Frame): boolean => nullAware && targetRun(frame) === undefined;
+    // When a section awaits, the receiver and every section are ordered parts, each section guarded by a null-aware
+    // cascade's receiver, so that a section runs before the awaits of the sections after it.
+    if (awaits) {
+      this.addStep((frame) => {
+        frame.locals[slot] = new Cell(targetRun(frame));
+        return;
       });
     }
-    return {
-      type: target.type,
-      run: (frame) => {
-        const value = targetRun(frame);
-        if (nullAware && value === undefined) return;
-        const previous = frame.locals[slot];
-        frame.locals[slot] = new Cell(value);
-        try {
-          for (const { result } of sections) result.run(frame);
-        } finally {
-          frame.locals[slot] = previous;
+    const sections = expression.sections.map((section) =>
+      this.compileGuarded(
+        (frame) => !isShorted(frame),
+        section,
+        () => {
+          const compiled = this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result;
+          return awaits ? this.stagePart(compiled) : compiled;
         }
-        return value;
-      },
-      isConst: false,
-    };
+      )
+    );
+    if (awaits) {
+      return {
+        type: target.type,
+        run: (frame) => {
+          frame.locals[slot] = undefined;
+          return isShorted(frame) ? undefined : targetRun(frame);
+        },
+        isConst: false,
+      };
+    }
+    return { type: target.type, run: cascadeRun(targetRun, slot, nullAware, sections), isConst: false };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -542,6 +525,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           break;
         }
       }
+      // What a selector gives is lifted before an await later in the section, as the SDK evaluates it first.
+      current = this.liftBeforeLaterAwait(current, selector);
     }
     if (assignment && last) {
       return this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
@@ -565,6 +550,22 @@ const INTEGER_OPERAND_METHODS = new Map([
   ['>>', '_shrFromInteger'],
   ['>>>', '_ushrFromInteger'],
 ]);
+
+/** A cascade that does not await: its receiver in its slot while each section runs on it in turn. */
+function cascadeRun(targetRun: Eval, slot: number, nullAware: boolean, sections: readonly Compiled[]): Eval {
+  return (frame) => {
+    const value = targetRun(frame);
+    if (nullAware && value === undefined) return;
+    const previous = frame.locals[slot];
+    frame.locals[slot] = new Cell(value);
+    try {
+      for (const section of sections) section.run(frame);
+    } finally {
+      frame.locals[slot] = previous;
+    }
+    return value;
+  };
+}
 
 function assertedNonNullable(type: DartType): DartType {
   const bound = resolveBound(type);
