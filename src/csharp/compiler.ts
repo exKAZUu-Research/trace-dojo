@@ -20,6 +20,7 @@ import { COLLECTIONS_SOURCE } from './library/collectionsSource';
 import { DYNAMIC_SOURCE } from './library/dynamicSource';
 import { GLOBALIZATION_SOURCE } from './library/globalizationSource';
 import { IO_SOURCE } from './library/ioSource';
+import { NUMERICS_SOURCE } from './library/numericsSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
 import { TASKS_SOURCE } from './library/tasksSource';
 import { TURTLE_SOURCE } from './library/turtleSource';
@@ -114,6 +115,7 @@ function buildLibrary(): Library {
     [
       SYSTEM_SOURCE,
       GLOBALIZATION_SOURCE,
+      NUMERICS_SOURCE,
       COLLECTIONS_SOURCE,
       TASKS_SOURCE,
       IO_SOURCE,

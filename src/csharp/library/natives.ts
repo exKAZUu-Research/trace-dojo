@@ -2,6 +2,7 @@
 import './nativesCore';
 import './nativesEnumType';
 import './nativesNumberStatics';
+import './nativesBigInteger';
 import './nativesTime';
 import './nativesDateOnly';
 import './nativesGlobalization';

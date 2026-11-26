@@ -2157,7 +2157,12 @@ export class DeclarationBinder extends BinderBase {
     const others = this.ownMembers(symbol, method.name);
     if (others.some((other) => !(other instanceof MethodSymbol))) {
       this.error(position, 'CS0102', `型 '${displayTypeSymbol(symbol)}' は既に '${method.name}' の定義を含んでいます`);
-    } else if (others.some((other) => other instanceof MethodSymbol && this.sameParameters(other, method))) {
+    } else if (
+      others.some(
+        (other) =>
+          other instanceof MethodSymbol && this.sameParameters(other, method) && clashesByParametersAlone(other, method)
+      )
+    ) {
       this.error(
         position,
         'CS0111',
@@ -2876,4 +2881,16 @@ function refKindOf(parameter: Parameter): Pick<ParameterSymbol, 'refKind' | 'isR
   const { modifier } = parameter;
   const refKind = modifier === 'ref' || modifier === 'out' || modifier === 'in' ? modifier : undefined;
   return parameter.isRefReadonly ? { refKind, isRefReadonly: true } : { refKind };
+}
+
+function isConversionOperator(method: MethodSymbol): boolean {
+  return method.name === 'op_Implicit' || method.name === 'op_Explicit';
+}
+
+/**
+ * Whether two methods with the same parameters clash, which two conversion operators do not: they differ by the type
+ * they convert to, and `checkConversionOperator` reports two that convert between the same types.
+ */
+function clashesByParametersAlone(a: MethodSymbol, b: MethodSymbol): boolean {
+  return !isConversionOperator(a) || !isConversionOperator(b);
 }

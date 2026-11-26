@@ -156,17 +156,47 @@ function integerOfDigits(
 }
 
 function parseRadixText(text: string, styles: number, [min, max]: readonly [bigint, bigint]): bigint | ParseFailure {
-  let start = 0;
-  let end = text.replace(/\0+$/, '').length;
-  if ((styles & NumberStyles.AllowLeadingWhite) !== 0) while (start < end && isWhite(text[start])) start++;
-  if ((styles & NumberStyles.AllowTrailingWhite) !== 0) while (end > start && isWhite(text[end - 1])) end--;
   const isHex = (styles & NumberStyles.AllowHexSpecifier) !== 0;
-  const digits = text.slice(start, end);
+  const digits = radixDigits(text, styles);
   if (!(isHex ? /^[\dA-Fa-f]+$/ : /^[01]+$/).test(digits)) return 'format';
   const bits = BigInt(`0${isHex ? 'x' : 'b'}${digits}`);
   const width = (max - min + 1n).toString(2).length - 1;
   if (bits >= 1n << BigInt(width)) return 'overflow';
   return min < 0n ? BigInt.asIntN(width, bits) : bits;
+}
+
+/**
+ * Parses an integer of any size in a number style, as BigInteger does: a fraction must be zero, and a hexadecimal or
+ * binary number is two's complement, negative when its first digit has the top bit set.
+ */
+export function parseBigIntegerText(text: string, styles: number, culture: Culture): bigint | undefined {
+  if ((styles & RADIX_STYLES) !== 0) return parseTwosComplementText(text, styles);
+  const scanned = scanNumber(text, styles, culture);
+  if (!scanned) return undefined;
+  const written = `${scanned.integer}${scanned.fraction}`;
+  const point = scanned.integer.length + scanned.exponent;
+  if (/[1-9]/.test(written.slice(Math.max(point, 0)))) return undefined;
+  const whole = point <= 0 ? '0' : written.slice(0, point).padEnd(point, '0');
+  const magnitude = BigInt(whole);
+  return scanned.isNegative ? -magnitude : magnitude;
+}
+
+function parseTwosComplementText(text: string, styles: number): bigint | undefined {
+  const isHex = (styles & NumberStyles.AllowHexSpecifier) !== 0;
+  const digits = radixDigits(text, styles);
+  if (!(isHex ? /^[\dA-Fa-f]+$/ : /^[01]+$/).test(digits)) return undefined;
+  const bits = BigInt(`0${isHex ? 'x' : 'b'}${digits}`);
+  const width = BigInt(digits.length * (isHex ? 4 : 1));
+  return bits >> (width - 1n) === 1n ? bits - (1n << width) : bits;
+}
+
+/** The digits of a hexadecimal or binary number, without the white space that its style allows around them. */
+function radixDigits(text: string, styles: number): string {
+  let start = 0;
+  let end = text.replace(/\0+$/, '').length;
+  if ((styles & NumberStyles.AllowLeadingWhite) !== 0) while (start < end && isWhite(text[start])) start++;
+  if ((styles & NumberStyles.AllowTrailingWhite) !== 0) while (end > start && isWhite(text[end - 1])) end--;
+  return text.slice(start, end);
 }
 
 /** Parses a double in a number style, with the culture's symbols for infinity and NaN. */

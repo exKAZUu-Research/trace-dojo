@@ -6,6 +6,7 @@ import { enumText, environmentOf, flagsText, stringOf, unboxed } from '../object
 import type { Frame } from '../runtime';
 import { type NamedType, nullableUnderlying, type Type } from '../types';
 import { CsBox, type CsString, CsStruct, stringText, type Value } from '../values';
+import { formatBigInteger } from './nativesBigInteger';
 import { formatDateOrTimeOnly } from './nativesDateOnly';
 import { formatDateTime, formatTimeSpan } from './nativesTime';
 
@@ -65,7 +66,7 @@ export function formatValue(
   return stringOf(evaluator, value, type, frame);
 }
 
-/** The text of a DateTime, TimeSpan, DateOnly, or TimeOnly in a format, undefined for another struct. */
+/** The text of a DateTime, TimeSpan, DateOnly, TimeOnly, or BigInteger in a format, undefined for another struct. */
 function formatTime(
   evaluator: Evaluator,
   value: CsStruct,
@@ -82,6 +83,9 @@ function formatTime(
     case 'System.DateOnly':
     case 'System.TimeOnly': {
       return formatDateOrTimeOnly(evaluator.runtime, value, format, culture);
+    }
+    case 'System.Numerics.BigInteger': {
+      return formatBigInteger(value.fields[0] as bigint, format, culture);
     }
     default: {
       return undefined;

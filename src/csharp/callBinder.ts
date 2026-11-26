@@ -828,8 +828,8 @@ export abstract class CallBinder extends OperatorBinder {
 
   /** Whether one type is a better conversion target than another: 1 for the first, -1 for the second. */
   protected betterTarget(a: Type, b: Type): number {
-    const aToB = this.conversions.implicit(a, b) !== undefined;
-    const bToA = this.conversions.implicit(b, a) !== undefined;
+    const aToB = this.convertsImplicitly(a, b);
+    const bToA = this.convertsImplicitly(b, a);
     if (aToB && !bToA) return 1;
     if (bToA && !aToB) return -1;
     const signedOver: Record<string, string[]> = {
@@ -843,6 +843,14 @@ export abstract class CallBinder extends OperatorBinder {
     if (signedOver[aSpecial]?.includes(bSpecial)) return 1;
     if (signedOver[bSpecial]?.includes(aSpecial)) return -1;
     return 0;
+  }
+
+  /** Whether a type converts implicitly to another, by a user-defined conversion too, as `long` does to BigInteger. */
+  private convertsImplicitly(source: Type, target: Type): boolean {
+    if (this.conversions.implicit(source, target) !== undefined) return true;
+    if (source.kind !== 'named' || target.kind !== 'named') return false;
+    const user = this.userConversion({ kind: 'default', type: source, row: 0 }, target, false);
+    return user !== undefined && !('ambiguous' in user);
   }
 
   private checkConstraints(applicable: Applicable, row: number): boolean {

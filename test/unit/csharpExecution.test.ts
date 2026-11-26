@@ -813,3 +813,27 @@ try { a.ToString(3); } catch (ArgumentException e) { Console.WriteLine(e.Message
     ].join('\n'),
   });
 });
+
+// .NET 10.0.403 prints these: BigInteger keeps every digit, formats like the other integers with `X` in two's
+// complement, works as a dictionary key, and throws .NET's exceptions on narrowing overflow and division by zero.
+test('System.Numerics.BigInteger computes and prints as in .NET', () => {
+  const program = String.raw`using System.Numerics;
+BigInteger f = 1;
+for (int i = 1; i <= 25; i++) f *= i;
+Console.WriteLine($"{f} {f:N0} {f:E3} {BigInteger.Pow(2, 70) - 1} {new BigInteger(-255):X} {f % 1000007} {f == 0} {(long)(f >> 40)}");
+var d = new Dictionary<BigInteger, int> { [BigInteger.Parse("15511210043330985984000000")] = 1 };
+Console.WriteLine($"{d[f]} {BigInteger.ModPow(3, 100, 1000)} {BigInteger.GreatestCommonDivisor(84, -36)} {BigInteger.Log10(1000):F3} {new BigInteger(2.9e3)}");
+try { Console.WriteLine((int)f); } catch (OverflowException e) { Console.WriteLine(e.Message); }
+try { Console.WriteLine(f / 0); } catch (DivideByZeroException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '15511210043330985984000000 15,511,210,043,330,985,984,000,000 1.551E+025 1180591620717411303423 F01 913534 False 14107363352496',
+      '1 1 12 3.000 2900',
+      'Value was either too large or too small for an Int32.',
+      'Attempted to divide by zero.',
+      '',
+    ].join('\n'),
+  });
+});
