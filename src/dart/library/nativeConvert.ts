@@ -880,13 +880,20 @@ export function textOfWrittenPart(runtime: Runtime, pending: number[], bytes: Va
   }
 }
 
+/** The length of the character a UTF-8 lead byte begins; 0 for one no valid character begins with, as 0xFF. */
+function leadLength(byte: number): number {
+  if (byte >= 0xf5) return 0;
+  if (byte >= 0xf0) return 4;
+  if (byte >= 0xe0) return 3;
+  return byte >= 0xc2 ? 2 : 1;
+}
+
 /** How many bytes at the end begin a character that needs more of them. */
 function unfinishedTail(bytes: Uint8Array): number {
   for (let back = 1; back <= Math.min(3, bytes.length); back++) {
     const byte = bytes[bytes.length - back] as number;
     if ((byte & 0xc0) === 0x80) continue;
-    // Only a valid lead byte begins a character that waits; any other is invalid at once.
-    const length = byte >= 0xf5 ? 0 : byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc2 ? 2 : 1;
+    const length = leadLength(byte);
     return length > back ? back : 0;
   }
   return 0;
