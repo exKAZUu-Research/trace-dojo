@@ -1,9 +1,19 @@
-import { exactParts } from './binaryFloat';
-
 /**
  * Formats doubles as macOS's libc does for `%f`, `%e`, `%g`, and `%a`: from the exact binary value, rounded to the
  * requested digits using macOS rounding rules.
  */
+
+/** The exact value of a finite non-negative double as `mantissa * 2^exponent`. */
+export function exactParts(value: number): { mantissa: bigint; exponent: number } {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  const bits = view.getBigUint64(0);
+  const biased = Number((bits >> 52n) & 0x7_ffn);
+  const fraction = bits & ((1n << 52n) - 1n);
+  return biased === 0
+    ? { mantissa: fraction, exponent: -1074 }
+    : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
+}
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
 // code-gauge-allow duplicateLines -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.
@@ -155,4 +165,86 @@ export function formatHex(value: number, precision: number | undefined, alternat
   }
   const point = hex.length > 0 || alternate ? '.' : '';
   return `0x${lead.toString(16)}${point}${hex}p${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
+}
+
+/** A `printf` conversion of a floating-point value: its flags, width, precision, and letter (`f`, `E`, `g`, `a`...). */
+export interface FloatSpecification {
+  flags: string;
+  width?: number;
+  precision?: number;
+  conversion: string;
+}
+
+/**
+ * Formats a floating-point conversion as macOS's `printf` does, with its sign and zero padding but not the spaces
+ * that pad it to its width, which callers add.
+ */
+// code-gauge-allow functionCognitiveComplexity -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionNcss -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+export function formatFloatField(spec: FloatSpecification, value: number): string {
+  const { conversion } = spec;
+  const upper = conversion === conversion.toUpperCase();
+  const negative = value < 0 || Object.is(value, -0);
+  const sign = negative ? '-' : signOf(spec.flags);
+  const magnitude = Math.abs(value);
+  const alternate = spec.flags.includes('#');
+  if (!Number.isFinite(magnitude)) {
+    const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
+    // macOS prints no sign for a NaN.
+    const shownSign = Number.isNaN(magnitude) ? '' : sign;
+    return shownSign + (upper ? text.toUpperCase() : text);
+  }
+  let body: string;
+  switch (conversion.toLowerCase()) {
+    case 'f': {
+      body = formatFixed(magnitude, spec.precision ?? 6);
+      if (alternate && !body.includes('.')) body += '.';
+      break;
+    }
+    case 'e': {
+      body = formatScientific(magnitude, spec.precision ?? 6, alternate);
+      break;
+    }
+    case 'g': {
+      body = formatGeneral(magnitude, spec.precision ?? 6, alternate);
+      break;
+    }
+    default: {
+      body = formatHex(magnitude, spec.precision, alternate);
+      break;
+    }
+  }
+  if (upper) body = body.toUpperCase();
+  const width = spec.width ?? 0;
+  if (spec.flags.includes('0') && !spec.flags.includes('-')) {
+    if (conversion.toLowerCase() === 'a') {
+      const prefix = body.slice(0, 2);
+      return sign + prefix + body.slice(2).padStart(width - sign.length - 2, '0');
+    }
+    return sign + body.padStart(width - sign.length, '0');
+  }
+  return sign + body;
+}
+
+/** The sign a non-negative value shows with the `+` or space flag. */
+function signOf(flags: string): string {
+  if (flags.includes('+')) return '+';
+  if (flags.includes(' ')) return ' ';
+  return '';
+}
+
+/** Pads a byte-valued `printf` field (`%s`, `%c`) to `spec.width`, zero-filling on `0` without `-` when allowed. */
+export function padPrintfBytes(
+  bytes: ArrayLike<number>,
+  spec: { flags: string; width?: number | undefined },
+  zeroAllowed = true
+): Uint8Array {
+  const width = spec.width ?? 0;
+  const padding = Math.max(width - bytes.length, 0);
+  const leftAlign = spec.flags.includes('-');
+  const result = new Uint8Array(bytes.length + padding).fill(
+    zeroAllowed && !leftAlign && spec.flags.includes('0') ? 0x30 : 0x20
+  );
+  result.set(bytes, leftAlign ? 0 : padding);
+  return result;
 }

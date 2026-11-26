@@ -5,6 +5,8 @@ import type { ReadWasm } from '../interpreter/wasm';
 const wasmUrls: Record<string, () => URL> = {
   '@willbooster/web-tree-sitter/web-tree-sitter.wasm': () =>
     new URL('../../node_modules/@willbooster/web-tree-sitter/web-tree-sitter.wasm', import.meta.url),
+  '@willbooster/tree-sitter-bash/tree-sitter-bash.wasm': () =>
+    new URL('../../node_modules/@willbooster/tree-sitter-bash/tree-sitter-bash.wasm', import.meta.url),
   '@willbooster/tree-sitter-c/tree-sitter-c.wasm': () =>
     new URL('../../node_modules/@willbooster/tree-sitter-c/tree-sitter-c.wasm', import.meta.url),
   '@willbooster/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm': () =>

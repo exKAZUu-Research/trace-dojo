@@ -19,6 +19,7 @@ export async function loadParser(languageWasmSpecifier: string): Promise<Parser>
  *
  * @param missingTokenNames Names for learners of the grammar's named tokens that error recovery may insert;
  * punctuation names itself.
+ * @param options.isBenignError Tells the error nodes of constructs that the language rejects only when it runs them.
  */
 export function parseSource<T>(
   parser: Parser,
@@ -29,11 +30,13 @@ export function parseSource<T>(
     maxNestingDepth = MAX_NESTING_DEPTH,
     tooDeepMessage = NESTING_TOO_DEEP,
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+    isBenignError = (_node: Node): boolean => false,
     progress,
   }: {
     maxNestingDepth?: number;
     tooDeepMessage?: string;
     locateErrors?: (root: Node, errors: SourceDiagnostic[]) => SourceDiagnostic[];
+    isBenignError?: (node: Node) => boolean;
     progress?: (cost?: number) => void;
   } = {}
 ): T {
@@ -63,12 +66,12 @@ export function parseSource<T>(
     assertNestingDepth(tree.rootNode, maxNestingDepth, tooDeepMessage, progress);
     const syntaxErrors = locateErrors(
       tree.rootNode,
-      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, progress)
+      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, isBenignError, progress)
     );
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
-    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, progress);
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, isBenignError, progress);
     if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
     return converted;
   } finally {
@@ -154,17 +157,19 @@ function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
   includeHidden: boolean,
+  isBenignError: (node: Node) => boolean = () => false,
   progress?: (cost?: number) => void
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
+    if (isBenignError(node)) return;
     const own = ownError(node, missingTokenNames);
     if (own) {
       errors.push(own);
       return;
     }
-    if (!node.hasError) return;
+    if (!node.hasError || isExplainedError(node, isBenignError)) return;
     const found = errors.length;
     progress?.(node.childCount);
     for (const child of node.children) visit(child);
@@ -174,6 +179,17 @@ function collectSyntaxErrors(
   };
   visit(root);
   return errors;
+}
+
+/** Whether `node`'s errors all lie in benign descendants; a hidden token missing in `node` itself is not benign. */
+export function isExplainedError(node: Node, isBenignError: (node: Node) => boolean): boolean {
+  return (
+    isBenignError(node) ||
+    (!node.isError &&
+      !node.isMissing &&
+      node.children.some((child) => child.hasError) &&
+      node.children.every((child) => !child.hasError || isExplainedError(child, isBenignError)))
+  );
 }
 
 /** The error a node is itself: a token the parser inserted, or text it could not parse. */
