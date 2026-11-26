@@ -123,46 +123,14 @@ export const FILE_TEST_OPERATORS = new Set([
   '-ef',
 ]);
 
-export type UnsupportedSyntaxKind =
-  | 'background'
-  | 'pipeline'
-  | 'subshell'
-  | 'coproc'
-  | 'time'
-  | 'functionRedirect'
-  | 'heredoc'
-  | 'herestring'
-  | 'redirect'
-  | 'select'
-  | 'subshellFunctionBody'
-  | 'shadowedDeclarationFunction'
-  | 'processSubstitution'
-  | 'extglob'
-  | 'currentShellSubstitution';
+export type UnsupportedSyntaxKind = 'time';
 
-const UNSUPPORTED_SYNTAX_LABELS: Record<
-  Exclude<UnsupportedSyntaxKind, 'redirect' | 'shadowedDeclarationFunction'>,
-  string
-> = {
-  background: 'バックグラウンド実行（&）',
-  pipeline: 'パイプ（|）',
-  subshell: 'サブシェル（( ... )）',
-  coproc: 'coproc',
-  time: 'time',
-  functionRedirect: '関数の定義に付けたリダイレクト',
-  heredoc: 'ヒアドキュメント（<<）',
-  herestring: 'ヒアストリング（<<<）',
-  select: 'select（標準入力を読む）',
-  subshellFunctionBody: 'サブシェルを本体にした関数（f() ( ... )）',
-  processSubstitution: 'プロセス置換（<( ... )）',
-  extglob: '拡張パターン（@( ... ) など）',
-  currentShellSubstitution: '現在のシェルで実行するコマンド置換（${ ...; }）',
+const UNSUPPORTED_SYNTAX_LABELS: Record<UnsupportedSyntaxKind, string> = {
+  time: '実行時間の計測（time）',
 };
 
 /** Formats static unsupported-syntax diagnostics from one declarative catalog for `Converter`. */
-export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind, detail = ''): string {
-  if (kind === 'redirect') return unsupportedMessage(`リダイレクト（${detail}）`);
-  if (kind === 'shadowedDeclarationFunction') return unsupportedMessage(`宣言ビルトインと同名の関数定義（${detail}）`);
+export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind): string {
   return unsupportedMessage(UNSUPPORTED_SYNTAX_LABELS[kind]);
 }
 
@@ -173,29 +141,21 @@ export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
   jobs: 'ジョブ制御（jobs）',
   fg: 'ジョブ制御（fg）',
   bg: 'ジョブ制御（bg）',
-  kill: 'kill',
-  disown: 'disown',
-  suspend: 'suspend',
-  umask: 'umask',
-  ulimit: 'ulimit',
-  times: 'times',
-  type: 'type',
-  command: 'command',
-  builtin: 'builtin',
-  caller: 'caller',
-  getopts: 'getopts',
-  hash: 'hash',
-  enable: 'enable',
-  help: 'help',
-  history: 'history',
-  fc: 'fc',
-  bind: 'bind',
-  alias: 'エイリアス（alias）',
-  unalias: 'エイリアス（unalias）',
-  complete: 'complete',
-  compgen: 'compgen',
-  compopt: 'compopt',
-  logout: 'logout',
+  kill: 'シグナルの送信（kill）',
+  disown: 'ジョブ制御（disown）',
+  suspend: 'ジョブ制御（suspend）',
+  umask: 'ファイルのモードの設定（umask）',
+  ulimit: 'プロセスの資源の制限（ulimit）',
+  times: '実行時間の計測（times）',
+  hash: 'コマンドの場所の記憶（hash）',
+  enable: '組み込みコマンドの一覧と切り替え（enable）',
+  help: '組み込みコマンドの説明（help）',
+  history: 'コマンドの履歴（history）',
+  fc: 'コマンドの履歴（fc）',
+  bind: '対話入力のキーの設定（bind）',
+  complete: '対話入力の補完（complete）',
+  compgen: '対話入力の補完（compgen）',
+  compopt: '対話入力の補完（compopt）',
 };
 
 export type CommandClassification =

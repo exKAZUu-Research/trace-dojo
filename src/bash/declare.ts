@@ -12,9 +12,11 @@ import {
 } from './capabilities';
 import { printDeclarations } from './declarePrint';
 import type { FailureContext } from './failurePolicy';
+import { singleQuote } from './quoting';
 import type { Shell } from './shell';
 import { resolveTargetName } from './targets';
-import { type DestinationIntent, isIdentifier } from './variables';
+import { type CompoundElement, type DestinationIntent, isIdentifier } from './variables';
+import { traceAssignment, traceLine, traceWords } from './xtrace';
 
 const USAGES: Record<string, string> = {
   declare: 'declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]',
@@ -83,7 +85,8 @@ export function executeDeclarationCommand(
   builtin: string,
   staticOptions: StaticDeclarationOptions | undefined,
   args: readonly (Word | Assignment)[],
-  withRedirects: <T>(run: () => T) => T
+  withRedirects: <T>(run: () => T) => T,
+  optionWords: readonly string[] = []
 ): { status: number; assignsAnswer: boolean } {
   const savedGuards = shell.store.compoundGuardDepth();
   try {
@@ -95,6 +98,10 @@ export function executeDeclarationCommand(
       assignsAnswer: false,
       lastArgText: prepared.initialLastArg,
     };
+    if (listsFunctionNames(builtin, prepared.options)) {
+      const names = prepared.operandArgs.map((arg) => operandText(shell, arg));
+      return { status: withRedirects(() => printFunctionNames(shell, names)), assignsAnswer: false };
+    }
     if (hasValidBuiltinContext(shell, builtin, prepared.options)) {
       rejectUnsupportedDeclarationOptions(
         builtin,
@@ -104,6 +111,7 @@ export function executeDeclarationCommand(
       );
     }
     const operands = collectReadyOperands(shell, prepared.operandArgs, state);
+    if (shell.options.xtrace) traceDeclaration(shell, builtin, optionWords, operands);
     shell.store.leaveCompoundGuards(savedGuards);
     const headerCode = withRedirects(() => validateDeclarationHeader(shell, builtin, prepared.options));
     if (headerCode !== undefined) {
@@ -206,6 +214,67 @@ function applyBuiltinImpliedFlags(builtin: string, options: ParsedOptions): void
     if (options.set.delete('n')) options.unset.add('x');
     else options.set.add('x');
   }
+}
+
+/** Whether a declaration is `declare -F` or `typeset -F`, which prints the names of functions. */
+function listsFunctionNames(builtin: string, options: ParsedOptions): boolean {
+  return (
+    (builtin === 'declare' || builtin === 'typeset') &&
+    options.invalidOption === undefined &&
+    options.set.has('F') &&
+    !options.set.has('f') &&
+    options.unset.size === 0
+  );
+}
+
+/** The trace of a declaration waiting for its compound operands to print first. */
+const pendingTraces = new WeakMap<Shell, { words: string[]; compounds: number }>();
+
+/**
+ * Prints a declaration under `set -x` as Bash does: its words, a compound operand by its name alone, and for
+ * `readonly` and `export` each assignment again as the assignment it makes.
+ */
+function traceDeclaration(
+  shell: Shell,
+  builtin: string,
+  optionWords: readonly string[],
+  operands: readonly ReadyOperand[]
+): void {
+  const texts = operands.map((op) =>
+    op.kind === 'word' ? op.text : op.kind === 'scalar' ? op.parsed.rawText : op.arg.name
+  );
+  const compounds = operands.filter((op) => op.kind === 'compound').length;
+  // Bash expands a compound operand, which prints it, before it prints the command.
+  if (compounds > 0) pendingTraces.set(shell, { words: [builtin, ...optionWords, ...texts], compounds });
+  else traceWords(shell, [builtin, ...optionWords, ...texts]);
+  if (builtin !== 'readonly' && builtin !== 'export') return;
+  for (const op of operands) {
+    if (op.kind === 'scalar' && op.parsed.value !== undefined) {
+      traceAssignment(shell, op.parsed.name, op.parsed.append ? '+=' : '=', op.parsed.value);
+    }
+  }
+}
+
+/** The text of a declaration operand as a name, which `declare -F` looks up. */
+function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): string {
+  if ('append' in arg) return arg.text;
+  if (!('kind' in arg)) return shell.expander.expandString(arg);
+  if (arg.kind === 'word') return arg.text;
+  return arg.kind === 'scalar' ? arg.parsed.rawText : arg.arg.text;
+}
+
+/** Prints the functions `names` name that exist, or every function as `declare -f name` when it names none. */
+function printFunctionNames(shell: Shell, names: readonly string[]): number {
+  if (names.length === 0) {
+    for (const name of shell.store.functionNames().toSorted()) shell.fd1.write(`declare -f ${name}\n`);
+    return 0;
+  }
+  let status = 0;
+  for (const name of names) {
+    if (shell.store.hasFunction(name)) shell.fd1.write(`${name}\n`);
+    else status = 1;
+  }
+  return status;
 }
 
 function hasValidBuiltinContext(shell: Shell, builtin: string, options: ParsedOptions): boolean {
@@ -477,6 +546,7 @@ function expandAndCommitCompound(
   const isDeclaration = req.builtin !== undefined;
   const beforeExpandDepth = shell.store.enterCompoundGuard(targetName, false);
   const expanded = shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
+  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements);
   shell.store.leaveCompoundGuards(beforeExpandDepth);
   const { outcome, materializedArray } = shell.store.writeCompoundNamed({
     resolvedName: targetName,
@@ -500,6 +570,21 @@ function expandAndCommitCompound(
     return { ok: false, materialized: false };
   }
   return { ok: true, materialized: materializedArray };
+}
+
+/** Prints a declaration's compound operand as `name=('a' 'b')`, each element quoted, as Bash's trace shows it. */
+function traceCompound(shell: Shell, req: CompoundOperandRequest, elements: readonly CompoundElement[]): void {
+  const texts = elements.map((element) => {
+    if (typeof element === 'string') return singleQuote(element);
+    if ('plain' in element) return singleQuote(element.plain);
+    return `[${element.key}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
+  });
+  traceLine(shell, `${req.name}${req.append ? '+=' : '='}(${texts.join(' ')})`);
+  const pending = pendingTraces.get(shell);
+  if (pending && --pending.compounds === 0) {
+    pendingTraces.delete(shell);
+    traceWords(shell, pending.words);
+  }
 }
 
 function executeScalarDeclarationOperand(

@@ -35,6 +35,7 @@ import {
   UNSUPPORTED_SPECIAL_VARIABLES,
 } from './capabilities';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
+import type { GetoptsState } from './getopts';
 import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
 
 export {
@@ -207,6 +208,10 @@ export class VariableStore {
   readonly jobs = new Map<number, { status: number; reported: boolean; finish?: () => void }>();
   /** The process number of the last background command, which `$!` expands to. */
   lastBackgroundPid: number | undefined;
+  /** The aliases `alias` defined, by name. */
+  aliases = new Map<string, string>();
+  /** Where `getopts` is in the options it reads. */
+  getopts: GetoptsState = { optind: 1, charIndex: 0 };
   private readonly subshellLevel: number;
 
   constructor(
@@ -227,6 +232,8 @@ export class VariableStore {
       previousDirectory: string | undefined;
       directoryStack: string[];
       lastBackgroundPid: number | undefined;
+      aliases: Map<string, string>;
+      getopts: GetoptsState;
     }
   ) {
     if (forked) {
@@ -244,6 +251,8 @@ export class VariableStore {
       this.previousDirectory = forked.previousDirectory;
       this.directoryStack = forked.directoryStack;
       this.lastBackgroundPid = forked.lastBackgroundPid;
+      this.aliases = forked.aliases;
+      this.getopts = forked.getopts;
       return;
     }
     this.scopes = [{ kind: 'global', map: new Map() }];
@@ -315,6 +324,8 @@ export class VariableStore {
       previousDirectory: this.previousDirectory,
       directoryStack: [...this.directoryStack],
       lastBackgroundPid: this.lastBackgroundPid,
+      aliases: new Map(this.aliases),
+      getopts: { ...this.getopts },
     });
   }
 
@@ -410,6 +421,10 @@ export class VariableStore {
 
   hasFunction(name: string): boolean {
     return this.functions.has(name);
+  }
+
+  functionNames(): string[] {
+    return [...this.functions.keys()];
   }
 
   setFunction(fn: FunctionDefinition): void {

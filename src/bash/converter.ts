@@ -119,8 +119,8 @@ export class Converter {
     throw new CompileError([{ row: node.startPosition.row, message }]);
   }
 
-  private unsupported(node: Node, kind: UnsupportedSyntaxKind, detail?: string): never {
-    this.fail(node, unsupportedSyntaxMessage(kind, detail));
+  private unsupported(node: Node, kind: UnsupportedSyntaxKind): never {
+    this.fail(node, unsupportedSyntaxMessage(kind));
   }
 
   private statements(nodes: Node[]): Statement[] {
@@ -315,6 +315,7 @@ export class Converter {
       kind: 'declaration',
       name,
       assignments,
+      words: args,
       ...(normalized
         ? {
             staticOptions: normalized.staticOptions,
@@ -635,9 +636,6 @@ export class Converter {
     const name = nameNode
       ? this.analyzed.originalSource.slice(nameNode.startIndex, nameNode.endIndex).replaceAll('\\\n', '')
       : '';
-    if (Object.hasOwn(DECLARATION_OPTIONS, name)) {
-      this.unsupported(node, 'shadowedDeclarationFunction', name);
-    }
     return {
       row,
       lineRow: row,

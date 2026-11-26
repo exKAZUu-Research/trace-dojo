@@ -47,6 +47,7 @@ import {
 import type { Trap, TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
+import { quoteTraceWord, traceAssignment, traceLine, traceWords } from './xtrace';
 
 export { BASH_VERSION, type FunctionDefinition } from './runtime';
 export type { CompoundElement } from './variables';
@@ -74,6 +75,7 @@ interface ShellContextOptions {
   readonly options?: ShellOptionValues;
   readonly ignoresErrexit?: boolean;
   readonly traps?: Map<TrapCondition, Trap>;
+  readonly traceLevel?: number;
   readonly lineShift?: number;
   readonly readShift?: number;
   readonly loopDepth?: number;
@@ -97,6 +99,8 @@ export class Shell implements ArithmeticHost {
    * after `!`, whose functions and subshells ignore it as well.
    */
   private errexitIgnored: number;
+  /** How many times `set -x` repeats the first character of `PS4`: once, and once more in each command substitution. */
+  readonly traceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
   private runningTrap = false;
@@ -114,6 +118,7 @@ export class Shell implements ArithmeticHost {
     this.options = options?.options ?? defaultOptions();
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
     this.traps = options?.traps ?? new Map();
+    this.traceLevel = options?.traceLevel ?? 1;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
     this.loopDepth = options?.loopDepth ?? 0;
@@ -598,6 +603,9 @@ export class Shell implements ArithmeticHost {
     for (let showsMenu = true; ;) {
       this.runtime.spend();
       this.currentRow = statement.row - this.lineShift;
+      if (this.options.xtrace) {
+        traceLine(this, `select ${statement.variable} in ${values.map(quoteTraceWord).join(' ')}`);
+      }
       if (showsMenu) this.fd2.write(formatSelectMenu(values));
       this.fd2.write(this.store.readScalar('PS3') ?? '#? ');
       if (this.runBuiltin('read', []) !== 0) {
@@ -629,6 +637,7 @@ export class Shell implements ArithmeticHost {
     for (const value of values) {
       this.runtime.spend();
       this.currentRow = statement.row - this.lineShift;
+      if (this.options.xtrace) traceLine(this, `for ${statement.variable} in ${values.map(quoteTraceWord).join(' ')}`);
       if (!this.bindLoopVariable(statement.variable, value, bindsObjects)) {
         last.status = 1;
         return;
@@ -656,6 +665,7 @@ export class Shell implements ArithmeticHost {
     const evaluateHeader = (source: ArithmeticSource, stepAfter: boolean): bigint | undefined => {
       this.currentRow = statement.row - this.lineShift;
       const expanded = this.expander.arithmeticText(source);
+      if (this.options.xtrace) traceLine(this, `(( ${expanded.trim()} ))`);
       const value = this.tryEvaluate(expanded, '((', true);
       if (value !== undefined && stepAfter) this.runtime.steps.step(statement.row);
       return value;
@@ -750,6 +760,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private executeCase(statement: Extract<Statement, { kind: 'case' }>): number {
+    if (this.options.xtrace) traceLine(this, `case ${statement.value.text} in`);
     const value = this.leavingLine(() => this.expander.expandString(statement.value));
     let status = 0;
     let falling = false;
@@ -899,8 +910,9 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs a function or a builtin by name with arguments that need no expansion, as a builtin's callback does. */
-  invokeCommand(name: string, args: string[]): number {
-    const classified = classifyCommandName(name, this.store.hasFunction(name), Object.hasOwn(REGULAR_BUILTINS, name));
+  invokeCommand(name: string, args: string[], { skipFunctions = false } = {}): number {
+    const hasFunction = !skipFunctions && this.store.hasFunction(name);
+    const classified = classifyCommandName(name, hasFunction, this.isRegularBuiltin(name));
     switch (classified.kind) {
       case 'function': {
         return this.callFunction(this.store.getFunction(name) as FunctionDefinition, args, this.currentRow);
@@ -920,6 +932,10 @@ export class Shell implements ArithmeticHost {
         return rejectUnsupportedFeature(classified.feature);
       }
     }
+  }
+
+  isRegularBuiltin(name: string): boolean {
+    return Object.hasOwn(REGULAR_BUILTINS, name);
   }
 
   /** The path a file operation uses for `path`, which starts from the working directory when it is relative. */
@@ -975,6 +991,7 @@ export class Shell implements ArithmeticHost {
   ): number {
     return this.withTemporaryScope(statement.assignments, () =>
       this.withRedirects(statement.redirects, () => {
+        if (this.options.xtrace) traceWords(this, [name, ...args]);
         let code = 127;
         if (kind === 'function') {
           code = this.callFunction(this.store.getFunction(name) as FunctionDefinition, args, statement.row);
@@ -1003,6 +1020,30 @@ export class Shell implements ArithmeticHost {
     return status;
   }
 
+  /**
+   * Calls a function named like a declaration builtin, which receives the operands as words, where Bash keeps one
+   * that looks like an assignment whole as it would for the builtin.
+   */
+  private callShadowingFunction(statement: Extract<Statement, { kind: 'declaration' }>): number {
+    const args: string[] = [];
+    for (const word of statement.words) {
+      if (!('append' in word)) {
+        args.push(...this.expander.expandWords([word]));
+        continue;
+      }
+      if (word.array) rejectUnsupportedFeature(`宣言ビルトインと同名の関数への複合代入（${word.text}）`);
+      const subscript = word.subscript ? `[${this.expander.expandAssignmentSubscript(word.subscript)}]` : '';
+      const value = word.value ? this.expander.expandAssignmentValue(word.value) : '';
+      args.push(`${word.name}${subscript}${word.append ? '+=' : '='}${value}`);
+    }
+    const fn = this.store.getFunction(statement.name) as FunctionDefinition;
+    const status = this.withTemporaryScope(statement.assignments, () =>
+      this.withRedirects(statement.redirects, () => this.callFunction(fn, args, statement.row))
+    );
+    this.store.lastArgument = args.at(-1) ?? statement.name;
+    return status;
+  }
+
   /** Runs a builtin, which fails with status 1 when it writes to a closed descriptor, as Bash's builtins report. */
   runBuiltin(name: string, args: string[]): number {
     try {
@@ -1020,15 +1061,22 @@ export class Shell implements ArithmeticHost {
     ranFunction: boolean;
   } {
     this.expander.lastSubstitutionStatus = 0;
+    if (this.store.hasFunction(statement.name)) {
+      return { status: this.callShadowingFunction(statement), stepMode: 'statement', ranFunction: true };
+    }
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
     const session = this.redirectionSession(statement.redirects);
     try {
+      const optionWords = statement.words
+        .slice(0, statement.words.length - statement.args.length)
+        .map((word) => ('append' in word ? word.text : word.text));
       const { status, assignsAnswer } = executeDeclarationCommand(
         this,
         statement.name,
         statement.staticOptions,
         statement.args,
-        session.run
+        session.run,
+        optionWords
       );
       return { status, stepMode: assignsAnswer ? 'statement' : 'binding', ranFunction: false };
     } catch (error) {
@@ -1081,6 +1129,7 @@ export class Shell implements ArithmeticHost {
       existing?.attributes.has('A') === true;
     rejectUnsupportedPrefixAssignment(assignment, existing?.attributes, isArray);
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
+    if (this.options.xtrace) traceAssignment(this, assignment.name, assignment.append ? '+=' : '=', value);
     const failure = this.store.bindTemporaryScalar(scopeIndex, assignment.name, value, assignment.append);
     if (failure) this.failures.handleStoreFailure('commandPrefix', failure);
   }
@@ -1140,6 +1189,7 @@ export class Shell implements ArithmeticHost {
       lineShift: firstRow !== undefined ? firstRow - this.currentRow : this.lineShift,
       // A command substitution does not keep `set -e` unless `inherit_errexit` is on.
       options: { ...this.options, errexit: this.options.errexit && this.options.inherit_errexit },
+      traceLevel: this.traceLevel + 1,
     });
     return { output: capture.read(), status };
   }
@@ -1174,7 +1224,7 @@ export class Shell implements ArithmeticHost {
   runSubshell(
     body: Statement[],
     fds: DescriptorTable,
-    overrides?: { lineShift: number; options: ShellOptionValues }
+    overrides?: { lineShift: number; options: ShellOptionValues; traceLevel: number }
   ): number {
     this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1);
@@ -1182,7 +1232,7 @@ export class Shell implements ArithmeticHost {
     const childShell = new Shell(this.runtime, {
       store: childStore,
       ...this.childContext(),
-      ...(overrides ? { options: overrides.options } : {}),
+      ...(overrides ? { options: overrides.options, traceLevel: overrides.traceLevel } : {}),
       fds,
       lineShift,
       readShift: lineShift,
@@ -1203,7 +1253,7 @@ export class Shell implements ArithmeticHost {
   }
 
   /** What a subshell copies from this shell besides its variables: descriptors and options. */
-  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit' | 'traps'> {
+  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit' | 'traps' | 'traceLevel'> {
     // A subshell keeps the conditions the shell ignores, and with `set -E` its `ERR` trap.
     const traps = [...this.traps].filter(
       ([condition, trap]) => trap.statements.length === 0 || (condition === 'ERR' && this.options.errtrace)
@@ -1213,6 +1263,7 @@ export class Shell implements ArithmeticHost {
       options: { ...this.options },
       ignoresErrexit: this.errexitIgnored > 0,
       traps: new Map(traps),
+      traceLevel: this.traceLevel,
     };
   }
 
@@ -1268,6 +1319,7 @@ export class Shell implements ArithmeticHost {
 
   arithmeticStatus(source: ArithmeticSource, commandName: string): number {
     const expanded = this.expander.arithmeticText(source);
+    if (this.options.xtrace) traceLine(this, `(( ${expanded} ))`);
     const value = this.tryEvaluate(expanded, commandName, true);
     return value === undefined || value === 0n ? 1 : 0;
   }
@@ -1335,8 +1387,15 @@ export class Shell implements ArithmeticHost {
         message: `\`${assignment.text}': not a valid identifier`,
       });
     }
-    if (assignment.array) return executeCompoundAssignment(this, assignment, context);
+    if (assignment.array) {
+      if (this.options.xtrace) traceLine(this, assignment.text);
+      return executeCompoundAssignment(this, assignment, context);
+    }
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
+    if (this.options.xtrace) {
+      const target = assignment.subscript ? `${assignment.name}[${assignment.subscript.text}]` : assignment.name;
+      traceAssignment(this, target, assignment.append ? '+=' : '=', value);
+    }
     const target = assignment.subscript
       ? resolveSubscriptTarget(this, {
           name: assignment.name,

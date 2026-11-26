@@ -1,5 +1,15 @@
 import { legalNumber } from './characters';
 import { cdBuiltin, dirsBuiltin, popdBuiltin, pushdBuiltin, pwdBuiltin } from './directoryBuiltins';
+import { getoptsBuiltin } from './getopts';
+import {
+  aliasBuiltin,
+  builtinBuiltin,
+  callerBuiltin,
+  commandBuiltin,
+  logoutBuiltin,
+  typeBuiltin,
+  unaliasBuiltin,
+} from './introspectionBuiltins';
 import { waitBuiltin } from './jobBuiltins';
 import { setBuiltin, shoptBuiltin } from './optionBuiltins';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
@@ -339,5 +349,13 @@ export const REGULAR_BUILTINS: Record<string, Builtin> = {
   dirs: dirsBuiltin,
   wait: waitBuiltin,
   trap: trapBuiltin,
+  getopts: getoptsBuiltin,
+  command: commandBuiltin,
+  builtin: builtinBuiltin,
+  type: typeBuiltin,
+  caller: callerBuiltin,
+  alias: aliasBuiltin,
+  unalias: unaliasBuiltin,
+  logout: logoutBuiltin,
   ...TURTLE_BUILTINS,
 };

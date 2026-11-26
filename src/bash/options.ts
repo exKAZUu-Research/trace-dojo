@@ -29,7 +29,7 @@ const SET_OPTION_TABLE = [
   ['privileged', 'p', false, false],
   ['verbose', 'v', false, false],
   ['vi', undefined, false, false],
-  ['xtrace', 'x', false, false],
+  ['xtrace', 'x', false, true],
 ] as const;
 
 /** The options of `shopt`, as Bash 5.3 lists them, with their values in a script and whether changing them works. */

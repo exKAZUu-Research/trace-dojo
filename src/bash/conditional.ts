@@ -8,6 +8,7 @@ import { compileRegex, RegexSyntaxError, searchRegex } from './regex';
 import type { Shell } from './shell';
 import { isResolvedTargetSet, resolveScalarTarget, resolveSubscriptTarget } from './targets';
 import { isIdentifier } from './variables';
+import { traceLine } from './xtrace';
 
 export { FILE_TEST_OPERATORS };
 
@@ -25,7 +26,9 @@ export function conditionalStatus(shell: Shell, expression: TestExpression): num
   const { expander } = shell;
   switch (expression.kind) {
     case 'word': {
-      return expander.expandString(expression.word) === '' ? 1 : 0;
+      const word = expander.expandString(expression.word);
+      if (shell.options.xtrace) traceLine(shell, `[[ ${word} ]]`);
+      return word === '' ? 1 : 0;
     }
     case 'not': {
       return conditionalStatus(shell, expression.expression) === 0 ? 1 : 0;
@@ -39,14 +42,18 @@ export function conditionalStatus(shell: Shell, expression: TestExpression): num
       return left === 0 ? 0 : conditionalStatus(shell, expression.right);
     }
     case 'unary': {
-      return unaryTest(shell, expression.operator, expander.expandString(expression.operand)) ? 0 : 1;
+      const operand = expander.expandString(expression.operand);
+      if (shell.options.xtrace) traceLine(shell, `[[ ${expression.operator} ${operand} ]]`);
+      return unaryTest(shell, expression.operator, operand) ? 0 : 1;
     }
     case 'binary': {
       return evaluateBinaryConditional(shell, expression) ? 0 : 1;
     }
     case 'regex': {
       const left = expander.expandString(expression.left);
-      return regexStatus(shell, left, expander.expandRegex(expression.right));
+      const regex = expander.expandRegex(expression.right);
+      if (shell.options.xtrace) traceLine(shell, `[[ ${left} =~ ${regex} ]]`);
+      return regexStatus(shell, left, regex);
     }
   }
 }
@@ -57,10 +64,12 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
   const left = expander.expandString(expression.left);
   if (operator === '==' || operator === '=' || operator === '!=') {
     const pattern = expander.expandPattern(expression.right);
+    if (shell.options.xtrace) traceLine(shell, `[[ ${left} ${operator} ${pattern} ]]`);
     const matched = expander.matches(left, pattern, { extmatch: true, fold: shell.options.nocasematch });
     return operator === '!=' ? !matched : matched;
   }
   const right = expander.expandString(expression.right);
+  if (shell.options.xtrace) traceLine(shell, `[[ ${left} ${operator} ${right} ]]`);
   if (operator === '<') return compareCollated(left, right) < 0;
   if (operator === '>') return compareCollated(left, right) > 0;
   if (FILE_TEST_OPERATORS.has(operator)) return fileComparison(shell, operator, left, right);

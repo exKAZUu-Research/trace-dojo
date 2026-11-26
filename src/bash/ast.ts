@@ -137,6 +137,8 @@ export type Statement = StatementBase &
         kind: 'declaration';
         name: string;
         assignments: Assignment[];
+        /** The operands as written, which a function named like the builtin receives instead. */
+        words: (Word | Assignment)[];
         /** Pre-parsed leading literal option flags when all leading option words are plain literals. */
         staticOptions?: StaticDeclarationOptions;
         /** Remaining operand arguments when `staticOptions` is set; otherwise all arguments. */
