@@ -67,16 +67,19 @@ export const commandBuiltin: Builtin = (shell, args) => {
   const { options, operands } = parsed;
   if (options.has('p')) rejectUnsupportedFeature('command -p（既定の PATH での検索）');
   if (options.has('v') || options.has('V')) {
-    let status = 0;
+    // Bash succeeds when any of the names is found.
+    let found = false;
     for (const name of operands) {
       const kind = kindOf(shell, name);
       if (kind === undefined) {
         if (options.has('V')) shell.reportError(`command: ${name}: not found`);
-        status = 1;
-      } else if (options.has('V')) describe(shell, name, kind);
+        continue;
+      }
+      found = true;
+      if (options.has('V')) describe(shell, name, kind);
       else shell.fd1.write(`${name}\n`);
     }
-    return status;
+    return found ? 0 : 1;
   }
   const [name, ...rest] = operands;
   if (name === undefined) return 0;
@@ -88,7 +91,9 @@ export const builtinBuiltin: Builtin = (shell, args) => {
   const operands = args[0] === '--' ? args.slice(1) : args;
   const [name, ...rest] = operands;
   if (name === undefined) return 0;
-  if (kindOf(shell, name) === 'builtin' || shell.isRegularBuiltin(name)) {
+  // A function of the same name does not hide the builtin, as a wrapper such as `declare() { builtin declare "$@"; }` needs.
+  const classified = classifyCommandName(name, false, shell.isRegularBuiltin(name));
+  if (classified.kind !== 'notFound' && classified.kind !== 'external') {
     return shell.invokeCommand(name, rest, { skipFunctions: true });
   }
   shell.reportError(`builtin: ${name}: not a shell builtin`);
