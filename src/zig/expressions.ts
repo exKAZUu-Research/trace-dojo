@@ -2432,11 +2432,11 @@ function hasSentinel(type: Type): boolean {
   return false;
 }
 
-/** A many-item or C pointer's value, which must not be null. */
 function isManyOrC(size: string): boolean {
   return size === 'many' || size === 'c';
 }
 
+/** A many-item or C pointer's value, which must not be null. */
 function manyPointer(value: Value): Pointer {
   if (!(value instanceof Pointer)) throw new MemoryFault();
   return value;
