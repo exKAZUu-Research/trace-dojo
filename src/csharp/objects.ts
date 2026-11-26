@@ -5,9 +5,9 @@ import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { formatFloat } from './format';
 import { linqDisplayName } from './library/nativesLinq';
-import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
+import { recordText } from './recordText';
 import type { ExceptionState, Frame, Runtime } from './runtime';
 import {
   type FieldSymbol,
@@ -460,74 +460,6 @@ export function noValue(): PendingException {
   return new PendingException('System.InvalidOperationException', 'Nullable object must have a value.');
 }
 
-/** The members that a record's `ToString` prints: its public instance fields and properties, base record first. */
-interface PrintedMember {
-  name: string;
-  read: (value: CsObject | CsStruct) => Value;
-  type: Type;
-  /** The getter of a property without a backing field, which printing calls. */
-  getter?: MethodSymbol;
-}
-
-function printedMembers(type: NamedType): PrintedMember[] {
-  const chain: NamedType[] = [];
-  for (
-    let current: NamedType | undefined = type;
-    current && current.symbol.special !== 'object' && current.symbol.special !== 'valueType';
-    current = current.symbol.baseType
-      ? (substitute(current.symbol.baseType, substitutionOf(current)) as NamedType)
-      : undefined
-  )
-    chain.unshift(current);
-  return chain.flatMap(ownPrintedMembers);
-}
-
-/** A type's own printed members in the order of their declarations. */
-function ownPrintedMembers(owner: NamedType): PrintedMember[] {
-  const members: (PrintedMember & { row: number; column: number })[] = [];
-  const substitution = substitutionOf(owner);
-  for (const field of owner.symbol.fields) {
-    if (field.isStatic || field.isConst || field.access !== 'public' || field.property || field.isPrimaryParameter)
-      continue;
-    members.push({
-      name: field.name,
-      read: (value) => value.fields[field.slot],
-      type: substitute(field.type, substitution),
-      row: field.row,
-      column: field.column,
-    });
-  }
-  for (const property of owner.symbol.properties) {
-    if (
-      property.isStatic ||
-      property.isIndexer ||
-      property.access !== 'public' ||
-      !property.getter ||
-      property.isOverride
-    )
-      continue;
-    const backing = property.backingField;
-    if (backing)
-      members.push({
-        name: property.name,
-        read: (value) => value.fields[backing.slot],
-        type: substitute(property.type, substitution),
-        row: property.row,
-        column: property.column,
-      });
-    else
-      members.push({
-        name: property.name,
-        read: () => {},
-        type: substitute(property.type, substitution),
-        getter: property.getter,
-        row: property.row,
-        column: property.column,
-      });
-  }
-  return members.toSorted((a, b) => a.row - b.row || a.column - b.column);
-}
-
 /** Runs a member that the compiler synthesizes for records and anonymous types. */
 export function recordMember(
   evaluator: Evaluator,
@@ -568,33 +500,6 @@ export function recordMember(
       throw new Error(`Unknown record member ${name}`);
     }
   }
-}
-
-function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct): string {
-  // The text is built through a metered text, which stops at the string limit before a long member is joined in.
-  const text = new MeteredText(evaluator.runtime);
-  const isAnonymous = value.type.symbol.anonymousDisplay !== undefined;
-  const members = printedMembers(value.type);
-  if (!isAnonymous) text.append(value.type.symbol.name);
-  text.append(isAnonymous ? '{ ' : members.length > 0 ? ' { ' : ' { }');
-  for (const [index, member] of members.entries()) {
-    const getter = member.getter;
-    const memberValue = getter
-      ? evaluator.invoke(
-          frame,
-          evaluator.runtime.dispatch(getter, value),
-          value,
-          [],
-          undefined,
-          environmentOf(evaluator, getter, value)
-        )
-      : member.read(value);
-    if (index > 0) text.append(', ');
-    text.append(`${member.name} = `);
-    if (memberValue !== undefined) text.append(stringOf(evaluator, memberValue, member.type, frame));
-  }
-  if (isAnonymous || members.length > 0) text.append(members.length > 0 ? ' }' : '}');
-  return text.toString();
 }
 
 function recordEquals(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct, other: Value): boolean {
