@@ -228,9 +228,22 @@ export class Converter {
         return { ...base, kind: 'subshell', body: this.nonEmpty(node, this.statements(node.children)) };
       }
       case 'coproc_command': {
-        const body = node.namedChildren.findLast((child) => child?.type !== 'comment') as Node;
-        const name = node.childForFieldName('name')?.text ?? 'COPROC';
-        return { ...base, kind: 'coproc', name, body: this.statement(body) };
+        const nameNode = node.childForFieldName('name');
+        const redirectNodes = this.fieldNodes(node, 'redirect');
+        // The grammar puts a compound body's redirections beside the body, which apply to it as to any compound
+        // command.
+        const bodyNode = node.namedChildren.findLast(
+          (child) =>
+            child !== null &&
+            child.type !== 'comment' &&
+            child.id !== nameNode?.id &&
+            !redirectNodes.some((redirect) => redirect.id === child.id)
+        ) as Node;
+        const converted = this.statement(bodyNode);
+        const redirects = redirectNodes.map((redirect) => this.redirect(redirect));
+        const body: Statement =
+          redirects.length === 0 ? converted : { ...base, kind: 'redirected', body: converted, redirects };
+        return { ...base, kind: 'coproc', name: nameNode?.text ?? 'COPROC', body };
       }
       case 'timed_command': {
         return this.unsupported(node, 'time');
