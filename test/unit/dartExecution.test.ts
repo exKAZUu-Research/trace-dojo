@@ -10783,13 +10783,13 @@ Future<void> main() async {
   });
 });
 
-test('a File at /dev/stdin reads what remains of standard input, as SDK 3.13.7 does', () => {
+test('a File at /dev/stdin or /dev/fd/0 reads what remains of standard input, as SDK 3.13.7 does', () => {
   const program = `import 'dart:io';
 void main() {
   print(File('/dev/stdin').lengthSync());
   print(stdin.readLineSync());
   print(File('/dev/stdin').readAsLinesSync());
-  print(File('/dev/stdin').readAsStringSync().isEmpty);
+  print(File('/dev/fd/0').readAsStringSync().isEmpty);
 }`;
   // Its length reads none of it, as the VM's fstat of a redirected file does not.
   expect(executeProgram('dart', program, { stdin: 'first\nsecond\nthird\n' })).toMatchObject({
