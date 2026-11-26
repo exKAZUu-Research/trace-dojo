@@ -244,13 +244,13 @@ export const mapfileBuiltin: Builtin = (shell, args, name) => {
     }
     const value = options.has('t') && line.endsWith(delimiter) ? line.slice(0, -1) : line;
     if (callback && lineCount % numbers.quantum === 0) {
-      shell.flushArray(arrayName, numbers.origin, lines, options.has('O'));
+      shell.assignIndexedArray(arrayName, lines, 'mapfile', numbers.origin, options.has('O'));
       shell.invokeCommand(callback[0], [...callback.slice(1), String(numbers.origin + lines.length), value]);
     }
     lines.push(value);
     lineCount++;
   }
-  return shell.flushArray(arrayName, numbers.origin, lines, options.has('O')) ? 0 : 1;
+  return shell.assignIndexedArray(arrayName, lines, 'mapfile', numbers.origin, options.has('O')) ? 0 : 1;
 };
 
 function mapfileNumbers(

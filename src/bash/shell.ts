@@ -935,11 +935,9 @@ export class Shell implements ArithmeticHost {
    */
   assignIndexedArray(name: string, values: readonly string[], builtin: string, origin = 0, keep = false): boolean {
     const resolvedName = resolveTargetName(this, name);
-    const elements =
-      keep || origin > 0
-        ? values.map((value, index) => ({ key: String(origin + index), value, append: false }))
-        : [...values];
-    if (!keep && origin > 0) this.store.unsetNamed(resolvedName, false);
+    const elements = keep
+      ? values.map((value, index) => ({ key: String(origin + index), value, append: false }))
+      : [...values];
     const { outcome } = this.store.writeCompoundNamed({
       resolvedName,
       intent: 'visible',
@@ -956,11 +954,6 @@ export class Shell implements ArithmeticHost {
       },
     });
     return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
-  }
-
-  /** Stores the lines `mapfile` has read so far. */
-  flushArray(name: string, origin: number, lines: readonly string[], keep: boolean): boolean {
-    return this.assignIndexedArray(name, lines, 'mapfile', origin, keep);
   }
 
   isAssociativeArray(name: string): boolean {
@@ -1127,7 +1120,7 @@ export class Shell implements ArithmeticHost {
     try {
       const optionWords = statement.words
         .slice(0, statement.words.length - statement.args.length)
-        .map((word) => ('append' in word ? word.text : word.text));
+        .map((word) => word.text);
       const { status, assignsAnswer } = executeDeclarationCommand(
         this,
         statement.name,
