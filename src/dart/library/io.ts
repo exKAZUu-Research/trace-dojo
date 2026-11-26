@@ -181,34 +181,40 @@ class _StdConsumer implements StreamConsumer<List<int>> {
 }
 
 /**
- * The stream controller a standard stream's _IOSinkImpl writes through together with the consumer's subscription to it, which a write
- * that fails, or an added error, cancels, as cancelOnError does; its done is the consumer's addStream future.
+ * The stream controller an _IOSinkImpl writes through together with its consumer's subscription to it, for a consumer
+ * that writes at once: a standard stream's, and a file's once it is open. A write that fails, or an added error,
+ * cancels it, as cancelOnError does, after the consumer's own failure step (a file closes itself); its done is the
+ * consumer's addStream future.
  */
-class _StdChannel implements EventSink<List<int>> {
-  final _StdConsumer _consumer;
+class _WriteChannel implements EventSink<List<int>> {
+  final void Function(List<int>) _write;
+  final void Function() _onFailure;
   final Completer _completer = Completer();
   bool _isCancelled = false;
   bool _isClosed = false;
-  _StdChannel(this._consumer);
+  _WriteChannel(this._write, this._onFailure);
 
   Future get done => _completer.future;
 
   void add(List<int> data) {
     if (_isCancelled) return;
     try {
-      _consumer._writeFromSync(data);
+      _write(data);
     } on UnsupportedError {
       // The unavailable diagnostic stops the run, as it would from any other write; it is no write failure.
       rethrow;
     } catch (e, s) {
-      _isCancelled = true;
-      _completer.completeError(e, s);
+      _fail(e, s);
     }
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     if (_isCancelled) return;
+    _fail(error, stackTrace ?? StackTrace.empty);
+  }
+  void _fail(Object error, StackTrace stackTrace) {
     _isCancelled = true;
-    _completer.completeError(error, stackTrace ?? StackTrace.empty);
+    _onFailure();
+    _completer.completeError(error, stackTrace);
   }
   void close() {
     if (_isClosed) return;
@@ -604,7 +610,8 @@ class _File extends FileSystemEntity implements File {
 
 // _StreamSinkImpl and _IOSinkImpl are the SDK's (lib/io/io_sink.dart) and _FileStreamConsumer is lib/io/file_impl.dart's,
 // over _OpenedFile in place of RandomAccessFile. Modification: _StreamSinkImpl opens its controller through
-// _openController, which gives a standard stream's consumer a _StdChannel, so its controller is an EventSink.
+// _openController, which gives a standard stream's consumer, and a file's once open, a _WriteChannel, so its
+// controller is an EventSink.
 class _StreamSinkImpl<T> implements StreamSink<T> {
   final StreamConsumer<T> _target;
   final Completer _doneCompleter = Completer();
@@ -616,14 +623,22 @@ class _StreamSinkImpl<T> implements StreamSink<T> {
   _StreamSinkImpl(this._target);
   /**
    * The controller the sink writes through, and the future of the target's taking what it is given. A standard
-   * stream's is a _StdChannel, which writes at once as the VM's synchronous controller does and holds none of the
-   * sink's state; the SDK's controller would charge about five times the operations for each write, so that a run
-   * could write a fifth of what Java's can.
+   * stream's, and an open file's, is a _WriteChannel, which writes at once as the VM's synchronous controller does and
+   * holds none of the sink's state; the SDK's controller would charge about five times the operations for each write,
+   * so that a run could write a fifth of what Java's can, and a file flushed per line would reach the limit. A file
+   * not open yet, or whose open failed, keeps the SDK's controller, which waits for the open.
    */
   (EventSink<T>, Future) _openController() {
     final target = _target;
     if (target is _StdConsumer) {
-      final channel = _StdChannel(target as _StdConsumer);
+      final consumer = target as _StdConsumer;
+      final channel = _WriteChannel(consumer._writeFromSync, () {});
+      return (channel as EventSink<T>, channel.done);
+    }
+    final opened = target is _FileStreamConsumer ? (target as _FileStreamConsumer)._opened : null;
+    if (opened != null) {
+      // As the consumer's own failure does, nothing waits on this close, which fails a file already closed.
+      final channel = _WriteChannel(opened.writeFrom, () => opened.close(finishText: false));
       return (channel as EventSink<T>, channel.done);
     }
     final controller = StreamController<T>(sync: true);

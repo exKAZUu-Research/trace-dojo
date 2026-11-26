@@ -10659,6 +10659,40 @@ test.each([
 });
 
 // Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
+test('a file sink writes an open file at once, flushed per line within the limits, and fails as the SDK does', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const perLine = `import 'dart:io';
+Future<void> main() async {
+  final sink = File('o.txt').openWrite();
+  for (var i = 0; i < 2000; i++) {
+    sink.writeln('line $i');
+    await sink.flush();
+  }
+  await sink.close();
+  print(File('o.txt').readAsLinesSync().length);
+}`;
+  expect(executeProgram('dart', perLine)).toMatchObject({ kind: 'executed', stdout: '2000\n' });
+  const failing = `import 'dart:io';
+Future<void> main() async {
+  final sink = File('o.txt').openWrite();
+  sink.write('a');
+  await sink.flush();
+  sink.write('b');
+  File('o.txt').renameSync('p.txt');
+  await sink.flush();
+  sink.addError('bad');
+  try { await sink.flush(); } catch (e) { print('flush $e'); }
+  try { await sink.close(); } catch (e) { print('close $e'); }
+  try { await sink.done; } catch (e) { print('done $e'); }
+  print(File('p.txt').readAsStringSync());
+}`;
+  expect(executeProgram('dart', failing)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "flush bad\nclose FileSystemException: File closed, path = 'o.txt'\ndone FileSystemException: File closed, path = 'o.txt'\nab\n",
+  });
+});
+
 test('Dart reads standard input and the files of its run with the SDK messages', () => {
   const program = `import 'dart:convert';
 import 'dart:io';
