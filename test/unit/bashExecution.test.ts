@@ -369,3 +369,11 @@ echo "$reply"
     stderr: '',
   });
 });
+
+test('a here-document the end of the input cuts off still reads its last line, blanks only included', () => {
+  const show = 'c() { while IFS= read -r l; do echo "[$l]"; done; }\n';
+  const warning = "main.sh: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `EOF')\n";
+  expect(executeProgram('bash', `${show}c <<EOF\nhello`)).toMatchObject({ stdout: '[hello]\n', stderr: warning });
+  expect(executeProgram('bash', `${show}c <<-EOF\n\thello`)).toMatchObject({ stdout: '[hello]\n', stderr: warning });
+  expect(executeProgram('bash', `${show}c <<EOF\n  `)).toMatchObject({ stdout: '[  ]\n', stderr: warning });
+});

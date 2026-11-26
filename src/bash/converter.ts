@@ -630,7 +630,9 @@ export class Converter {
     }
     // Bash reads a body line by line, so a last line the end of the input cuts off still ends with a newline.
     const content = source.slice(body.startIndex, contentEnd);
-    const endsCut = !endsAtDelimiterLine && closedRow === undefined && content.trim() !== '' && !content.endsWith('\n');
+    // A last line of blanks only is a line too; only the newline after the redirection line is no line of the body.
+    const bodyText = content.replace(/^\n/, '');
+    const endsCut = !endsAtDelimiterLine && closedRow === undefined && bodyText !== '' && !bodyText.endsWith('\n');
     const lastNewline: WordPart[] = endsCut ? [{ kind: 'single', text: '\n' }] : [];
     const strip = (text: string, atLineStart: boolean): string =>
       stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
