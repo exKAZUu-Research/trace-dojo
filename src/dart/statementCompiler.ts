@@ -1272,8 +1272,9 @@ export abstract class StatementCompiler extends PatternCompiler {
       return () => completion;
     }
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
-    this.fn.returnsValue = true;
     const compiled = this.compileReturnedValue(statement.value, statement === this.arrowReturn);
+    // A value of type Null or Never infers no return type that `return;` would not fit, so the SDK allows both.
+    if (compiled.type.kind !== 'null' && compiled.type.kind !== 'never') this.fn.returnsValue = true;
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });

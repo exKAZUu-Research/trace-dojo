@@ -10920,6 +10920,25 @@ Future<void> main() async {
   });
 });
 
+test("a function literal's bare return goes with returns of null, not with returns of a value, as SDK 3.13.7 rules", () => {
+  const withNull = `void main() {
+  int? Function(bool) f = (b) { if (b) return; return null; };
+  Future<int?> Function(bool) g = (b) async { if (b) return; return null; };
+  print(f(false));
+}`;
+  expect(executeProgram('dart', withNull)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
+  const withValue = `void main() {
+  int? Function(bool) f = (b) {
+    if (b) return;
+    return 2;
+  };
+}`;
+  expect(executeProgram('dart', withValue)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'この関数は値を return するので、return にも値が必要です。' }],
+  });
+});
+
 test('catchError takes a handler of any type and fails when an error reaches one that does not take Object', () => {
   // Expected output from Dart SDK 3.13.7, whose root zone checks the handler of then but not of catchError.
   const program = `import 'dart:async';
