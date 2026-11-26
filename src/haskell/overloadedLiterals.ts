@@ -40,7 +40,12 @@ export function overloadedStringPattern(lit: SourceLiteral, span: Extract<Pat, {
       span,
     },
     exprText: '==',
-    pat: { kind: 'pcon', con: { name: 'True', span }, args: [], span },
+    pat: {
+      kind: 'pcon',
+      con: { name: 'True', span, global: { module: 'GHC.Internal.Types', namespace: 'con' } },
+      args: [],
+      span,
+    },
     written: { kind: 'plit', lit, negative: false, span },
     span,
   };
