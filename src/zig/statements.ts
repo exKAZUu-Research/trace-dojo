@@ -496,7 +496,21 @@ export abstract class StatementCompiler extends CallCompiler {
       this.error(statement, `分割代入の数が合いません（${count} 個ですが、値は ${elementTypes.length} 個です）。`);
     for (const [index, target] of statement.targets.entries()) {
       const declaration = target.declaration;
-      if (!declaration) return this.error(target, 'comptime の分割代入には、宣言だけを書いてください。');
+      if (!declaration) {
+        const destination = target.target as Expression;
+        if (destination.kind === 'identifier' && isDiscardName(destination)) continue;
+        if (!this.comptimeVariableOf(destination))
+          return this.error(target, 'comptime の分割代入で代入できるのは、comptime var か _ だけです。');
+        const span = { row: target.row, col: target.col, endRow: target.endRow };
+        const element: Expression = {
+          ...span,
+          kind: 'index',
+          object: statement.value,
+          index: { ...span, kind: 'integer', value: BigInt(index) },
+        };
+        this.comptimeVarElementStore(destination, element);
+        continue;
+      }
       const element = this.elementOf(value, index, elementTypes[index], isArray, statement);
       const declared = declaration.type ? this.compileType(declaration.type) : undefined;
       this.declareComptimeLocal(
