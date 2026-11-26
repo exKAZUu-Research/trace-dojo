@@ -5,7 +5,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
  * whether the source has a space before it (before the closing delimiter, for `closeSpaced`), which `stringify!` keeps.
  */
 export type Token =
-  | { kind: 'leaf'; text: string; type: string; spaced?: boolean }
+  | { kind: 'leaf'; text: string; type: string; spaced?: boolean; fromRule?: true }
   | {
       kind: 'group';
       open: string;
@@ -190,9 +190,78 @@ const STOPS: Record<string, ReadonlySet<string>> = {
 export function expand(rules: MacroRule[], input: Token[], name: string): Token[] {
   for (const rule of rules) {
     const bindings = new Map<string, Binding>();
-    if (matchParts(rule.matcher, input, 0, bindings) === input.length) return transcribe(rule.transcriber, bindings);
+    if (matchParts(rule.matcher, input, 0, bindings) === input.length) {
+      return hygienic(transcribe(rule.transcriber, bindings));
+    }
   }
   throw new MacroError(`マクロ ${name}! の規則に、この書き方に合うものがありません。`);
+}
+
+let expansions = 0;
+
+/**
+ * Renames the variables that a rule's own `let`, `for`, and closure parameters introduce, so that they neither see nor
+ * hide the caller's variables of the same name, as rustc's hygiene keeps them apart.
+ */
+function hygienic(tokens: Token[]): Token[] {
+  const binders = new Set<string>();
+  collectBinders(tokens, binders);
+  if (binders.size === 0) return tokens;
+  expansions++;
+  return renamed(tokens, binders, `__${expansions}`);
+}
+
+// code-gauge-allow functionCognitiveComplexity -- One case per way a rule's code introduces a variable.
+function collectBinders(tokens: Token[], binders: Set<string>): void {
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind === 'group') {
+      collectBinders(token.tokens, binders);
+      continue;
+    }
+    if (!token.fromRule) continue;
+    if (token.text === 'let' || token.text === 'for') {
+      let next = index + 1;
+      while (leafText(tokens[next]) === 'mut' || leafText(tokens[next]) === 'ref') next++;
+      addPatternBinders(tokens[next], binders);
+    } else if (token.text === '|' && opensClosure(tokens, 0, index)) {
+      for (let next = index + 1; next < tokens.length && leafText(tokens[next]) !== '|'; next++) {
+        if (next === index + 1 || leafText(tokens[next - 1]) === ',' || leafText(tokens[next - 1]) === 'mut') {
+          addPatternBinders(tokens[next], binders);
+        }
+      }
+    }
+  }
+}
+
+/** The variables a pattern of a rule's own code binds: a name, or the names in a tuple or slice pattern. */
+function addPatternBinders(token: Token | undefined, binders: Set<string>): void {
+  if (token?.kind === 'group' && token.open !== '{') {
+    for (const [index, inner] of token.tokens.entries()) {
+      const after = leafText(token.tokens[index + 1]);
+      if (after !== '(' && after !== '::' && after !== '{') addPatternBinders(inner, binders);
+    }
+    return;
+  }
+  const isName = token?.kind === 'leaf' && /^[\p{Ll}_][\p{L}\p{N}_]*$/u.test(token.text);
+  if (isName && token.fromRule && !['_', 'mut', 'ref'].includes(token.text)) binders.add(token.text);
+}
+
+function renamed(tokens: Token[], binders: Set<string>, suffix: string): Token[] {
+  return tokens.map((token, index) => {
+    if (token.kind === 'group') return { ...token, tokens: renamed(token.tokens, binders, suffix) };
+    if (!token.fromRule) return token;
+    if (token.type === 'string_literal') {
+      // A format string's inline arguments (`{t}`, `{t:>3}`) name the rule's variables too.
+      const text = token.text.replaceAll(/(?<!\{)\{([\p{L}_][\p{L}\p{N}_]*)(?=[}:])/gu, (whole, name: string) =>
+        binders.has(name) ? `{${name}${suffix}` : whole
+      );
+      return { ...token, text };
+    }
+    const before = leafText(tokens[index - 1]);
+    const after = leafText(tokens[index + 1]);
+    const isVariable = binders.has(token.text) && before !== '.' && before !== '::' && after !== '!' && after !== '::';
+    return isVariable ? { ...token, text: `${token.text}${suffix}` } : token;
+  });
 }
 
 /** Matches parts against tokens from `start`, binding variables, and gives the position after them, or -1. */
@@ -364,7 +433,7 @@ function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
   for (const part of parts) {
     switch (part.kind) {
       case 'token': {
-        out.push(part.token);
+        out.push({ ...part.token, fromRule: true });
         break;
       }
       case 'group': {
