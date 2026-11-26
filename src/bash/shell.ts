@@ -202,6 +202,8 @@ export class Shell implements ArithmeticHost {
           this.runStatements(unit);
         } catch (error) {
           if (!(error instanceof DiscardSignal)) throw error;
+          // Under `set -e`, Bash exits at an error that abandons a command, even where it ignores failed statuses.
+          if (this.options.errexit) throw new ExitSignal(error.status);
           this.store.lastStatus = error.status;
           if (error.leftRow !== undefined) this.readShift = (program.unitEndRows[index] as number) - error.leftRow;
         }
