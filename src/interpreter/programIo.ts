@@ -149,6 +149,7 @@ export class TextReader {
   /** Treats the writer as having written its text, as once the shell has waited for it. */
   markWritten(): void {
     this.writtenLate = false;
+    this.endSeen = true;
   }
 
   /**
