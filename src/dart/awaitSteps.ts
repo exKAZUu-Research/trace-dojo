@@ -38,6 +38,8 @@ export interface Step {
   slot: number;
   run: Eval | undefined;
   gen: GenEval | undefined;
+  /** Whether a null-aware selector before the part shorts it, so that the step evaluates nothing. */
+  skipIf?: (frame: Frame) => boolean;
 }
 
 /**
@@ -69,6 +71,11 @@ export function newStaging(awaitStarts: readonly number[]): Staging {
 
 export function* runSteps(frame: Frame, steps: readonly Step[]): Generator<AwaitRequest, void, Value> {
   for (const step of steps) {
+    // A shorted part's slot is never read: the chain gives null at the null-aware selector.
+    if (step.skipIf?.(frame)) {
+      frame.locals[step.slot] = new Cell(undefined);
+      continue;
+    }
     const value = step.gen ? yield* step.gen(frame) : (step.run as Eval)(frame);
     frame.locals[step.slot] = new Cell(value);
   }

@@ -16,6 +16,9 @@ import type { Frame } from './runtime';
 import { coreTypes, type DartType, DYNAMIC, flatten, interfaceType, isSubtype } from './types';
 import type { Cell } from './values';
 
+/** Whether a null-aware selector shorts the chain, reading its receiver, which a step already evaluated. */
+export type ShortingTest = (frame: Frame) => boolean;
+
 /** A compiled expression that awaits, which runs only through its generator. */
 export type AwaitingCompiled = Compiled & { gen: GenEval };
 
@@ -29,19 +32,18 @@ export abstract class AwaitCompiler extends CompilerBase {
   /** The statement or loop condition being compiled whose `await`s suspend its generator, if any. */
   protected awaitRoot: AwaitRoot | undefined;
   /** Where the parts of the expression or statement being compiled are lifted, while it awaits. */
-  protected staging: (Staging & { isShorted?: () => boolean }) | undefined;
+  protected staging: (Staging & { shortingTests?: () => readonly ShortingTest[] }) | undefined;
 
   abstract compileExpression(expression: Expression, context?: DartType): Compiled;
 
-  /** A test of whether the selector chain being compiled has passed a null-aware selector that may short it. */
-  protected abstract shortingProbe(): () => boolean;
+  /** The tests of the null-aware selectors the selector chain being compiled has passed, each true when it shorts. */
+  protected abstract shortingProbe(): () => readonly ShortingTest[];
 
   /**
    * Compiles a part of an expression, through which every expression is compiled. In a statement that awaits, a part
    * that contains an `await` gets a generator, and a part that the expression being staged evaluates before one of
    * its `await`s, or that contains one, is lifted into a step.
    */
-  // code-gauge-allow functionCognitiveComplexity -- Each check decides one case of lifting, in the order they apply.
   protected compileStagedPart(expression: Expression, compile: () => Compiled): Compiled {
     const root = this.awaitRoot;
     const parent = this.staging;
@@ -52,9 +54,9 @@ export abstract class AwaitCompiler extends CompilerBase {
       return awaits ? this.error(expression, 'この位置の await は、この採点環境では使えません。') : compile();
     }
     // Only a null-aware selector before this part shorts it, so the chain is read before the part adds its own.
-    const isShorted = parent.isShorted?.() ?? false;
+    const shorting = parent.shortingTests?.() ?? [];
     const own = awaits && !handlesAwaitItself(expression) ? newStaging(suspensionStarts(expression, false)) : undefined;
-    if (own) Object.assign(own, { isShorted: this.shortingProbe() });
+    if (own) Object.assign(own, { shortingTests: this.shortingProbe() });
     this.staging = own;
     let compiled: Compiled;
     try {
@@ -66,11 +68,8 @@ export abstract class AwaitCompiler extends CompilerBase {
     if (awaits && !compiled.gen) return this.error(expression, 'この位置の await は、この採点環境では使えません。');
     const precedes = parent.awaitStarts.some((start) => start >= expression.end);
     if (!compiled.gen && !(precedes && isLiftable(compiled))) return compiled;
-    // A null-aware selector earlier in the chain shorts what follows it, which a step would evaluate anyway.
-    if (compiled.gen && isShorted) {
-      return this.error(expression, 'null 認識の選択子より後の await は、この採点環境では使えません。');
-    }
-    return this.lift(root, parent, compiled);
+    // A null-aware selector earlier in the chain shorts what follows it, so its step evaluates nothing then.
+    return this.lift(root, parent, compiled, shorting);
   }
 
   /**
@@ -186,11 +185,17 @@ export abstract class AwaitCompiler extends CompilerBase {
     }
   }
 
-  private lift(root: AwaitRoot, staging: Staging, compiled: Compiled): Compiled {
+  private lift(
+    root: AwaitRoot,
+    staging: Staging,
+    compiled: Compiled,
+    shorting: readonly ShortingTest[] = []
+  ): Compiled {
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: DYNAMIC };
     root.slots.push(slot);
-    staging.steps.push({ slot, run: compiled.gen ? undefined : compiled.run, gen: compiled.gen });
+    const skipIf = shorting.length > 0 ? (frame: Frame) => shorting.some((test) => test(frame)) : undefined;
+    staging.steps.push({ slot, run: compiled.gen ? undefined : compiled.run, gen: compiled.gen, skipIf });
     return { ...compiled, gen: undefined, run: (frame) => (frame.locals[slot] as Cell).v };
   }
 }

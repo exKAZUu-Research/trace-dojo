@@ -15,7 +15,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import { chainHead, isDotShorthand } from './astWalk';
-import { AwaitCompiler, awaitingCompiled } from './awaitCompiler';
+import { AwaitCompiler, awaitingCompiled, type ShortingTest } from './awaitCompiler';
 import { shortCircuiting } from './awaitSteps';
 import type { ClassInfo, FieldMember, Member } from './classes';
 import { addToList, building, type ElementCode } from './collectionElements';
@@ -222,7 +222,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     };
   }
 
-  private nullChain = { exit: undefined as Flow | undefined };
+  private nullChain: { exit: Flow | undefined; tests: ShortingTest[] } = { exit: undefined, tests: [] };
   /** The context of the whole selector chain being compiled, which a dot shorthand at its head takes (`A a = .inst.next()`). */
   private chainContext: DartType | undefined;
 
@@ -233,7 +233,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
 
   protected compileNullChain<T>(compile: () => T): { result: T; skipped: Flow | undefined } {
     const outer = this.nullChain;
-    const chain: { exit: Flow | undefined } = { exit: undefined };
+    const chain: { exit: Flow | undefined; tests: ShortingTest[] } = { exit: undefined, tests: [] };
     this.nullChain = chain;
     try {
       const result = compile();
@@ -250,6 +250,11 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     const { whenNull, whenNonNull } = this.nullBranches(receiver);
     const { exit } = this.nullChain;
     this.nullChain.exit = exit ? Flow.join(exit, whenNull) : whenNull;
+    const { run } = receiver;
+    this.nullChain.tests.push((frame) => {
+      const value = run(frame);
+      return value === undefined || value === SHORTED;
+    });
     this.flow = whenNonNull;
   }
 
@@ -484,9 +489,9 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     return this.compileStagedPart(expression, () => this.compileChainPartNow(expression, context));
   }
 
-  protected shortingProbe(): () => boolean {
+  protected shortingProbe(): () => readonly ShortingTest[] {
     const chain = this.nullChain;
-    return () => chain.exit !== undefined;
+    return () => [...chain.tests];
   }
 
   private compileChainPartNow(expression: Expression, context: DartType | undefined): Compiled {
