@@ -159,7 +159,6 @@ function defineConstructors(decl: RDataDecl): void {
         throw compileError(decl.span, `フィールド ${field.name} の型が、構成子ごとに違います。`);
       }
     }
-    field.fieldType = first;
     const [con, position] = [...field.positions].find(([candidate]) => own.has(candidate)) as [ConInfo, number];
     const { kinds, record, field: fieldType } = fieldSelectorType(con, position);
     const written = con.binders?.map((binder) => binder.index) ?? [];

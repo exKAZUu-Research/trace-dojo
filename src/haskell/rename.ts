@@ -794,7 +794,7 @@ class Renamer {
             sort: 'field',
             span: fieldName.span,
           };
-          field = { entity: fieldEntity, type, name: fieldName.name, positions: new Map(), fieldType: STAR_TYPE };
+          field = { entity: fieldEntity, type, name: fieldName.name, positions: new Map() };
           fieldEntity.field = field;
           type.fields.set(fieldName.name, field);
           this.declareOwnValue(fieldName, fieldEntity);
@@ -4115,8 +4115,6 @@ function patternSignatures(
     })
   );
 }
-
-const STAR_TYPE = { tag: 'tgen', index: 0 } as const;
 
 interface RawBinding {
   kind: 'fun' | 'pat';

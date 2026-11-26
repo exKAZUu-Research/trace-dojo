@@ -94,8 +94,6 @@ export interface FieldInfo {
   type: TypeEntity;
   name: string;
   positions: Map<ConInfo, number>;
-  /** The field's type with the data type's parameters as `TGen` indices. */
-  fieldType: Type;
 }
 
 export interface ValueEntity {
