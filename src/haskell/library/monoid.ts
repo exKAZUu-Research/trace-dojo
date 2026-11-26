@@ -437,6 +437,12 @@ instance Ord a => Ord (Arg a b) where
 instance Functor (Arg a) where
   fmap f (Arg x a) = Arg x (f a)
 
+instance Foldable (Arg a) where
+  foldMap f (Arg _ a) = f a
+
+instance Traversable (Arg a) where
+  traverse f (Arg x a) = Arg x <$> f a
+
 diff :: Semigroup m => m -> Endo m
 diff = Endo . (<>)
 
