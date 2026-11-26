@@ -1314,6 +1314,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** The package levels with a class's constructors at the class's own level, if it can be constructed here. */
+  /**
+   * The constructors a call of a class's name may call: none of a class that cannot be instantiated, unless nothing
+   * else answers the name, which then reports it; with a companion `invoke` operator, only those visible here, as a
+   * factory of a class with a private constructor is.
+   */
+  private callableConstructors(scope: Scope, cls: ClassSymbol, hasNoOtherLevel: boolean, row: number): Candidate[] {
+    const instantiable = !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
+    const hasInvoke = cls.companion !== undefined && this.companionInvokeLevels(scope, cls.companion, row).length > 0;
+    if (!instantiable) return hasNoOtherLevel && !hasInvoke ? this.constructorCandidates(cls, row) : [];
+    const candidates = this.constructorCandidates(cls, row);
+    if (!hasInvoke) return candidates;
+    const isInside = this.receiversOf(scope).some((receiver) => receiver.cls === cls || receiver.cls?.outer === cls);
+    return candidates.filter((candidate) => candidate.symbol.visibility !== 'private' || isInside);
+  }
+
   private withConstructors(
     scope: Scope,
     name: string,
@@ -1322,8 +1337,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): CallLevel[] | undefined {
     if (!cls) return undefined;
-    const instantiable = !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
-    const candidates = instantiable || hasNoOtherLevel ? this.constructorCandidates(cls, row) : [];
+    const candidates = this.callableConstructors(scope, cls, hasNoOtherLevel, row);
     if (candidates.length === 0) return undefined;
     return this.topLevelCallLevels(scope, name, row, {
       candidates,
@@ -1809,11 +1823,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     // An inner class needs an instance of its outer class, which `Outer.Inner()` does not give.
     if (nested?.isInner && levels.length === 0)
       this.error(row, `内部クラス ${nested.name} は、${cls.name} のインスタンスから作ってください。`);
-    if (nested && !nested.isInner)
-      levels.push({
-        candidates: this.constructorCandidates(nested, row),
-        receiver: undefined,
-      });
+    if (nested && !nested.isInner) {
+      const constructors = this.callableConstructors(scope, nested, levels.length === 0, row);
+      if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
+      // A nested class's companion `invoke` answers `Outer.Nested(5)` as it answers `Nested(5)`.
+      if (nested.companion) levels.push(...this.companionInvokeLevels(scope, nested.companion, row));
+    }
     if (cls.kind === 'enum' && (name === 'values' || name === 'valueOf')) {
       return this.compileEnumFunction(scope, context, cls, name, { args, typeArgs }, row);
     }
