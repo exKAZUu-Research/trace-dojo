@@ -4,11 +4,12 @@ import {
   type AwaitRoot,
   containsAwait,
   type GenEval,
+  type GuardedParts,
   newStaging,
+  type Part,
   rootCovers,
   runSteps,
   type Staging,
-  type Step,
   suspensionStarts,
 } from './awaitSteps';
 import { type Compiled, CompilerBase, type Eval } from './compilerBase';
@@ -69,15 +70,18 @@ export abstract class AwaitCompiler extends CompilerBase {
     if (awaits && !compiled.gen) return this.error(expression, 'この位置の await は、この採点環境では使えません。');
     const precedes = parent.awaitStarts.some((start) => start >= expression.end);
     if (!compiled.gen && !(precedes && isLiftable(compiled))) return compiled;
-    // A null-aware selector earlier in the chain shorts what follows it, so its step evaluates nothing then.
-    return this.lift(root, parent, compiled, shorting);
+    // A null-aware selector earlier in the chain shorts what follows it, so its step is guarded by the chain.
+    if (shorting.length === 0) return this.lift(root, parent, compiled);
+    const guarded: GuardedParts = { guard: (frame) => !shorting.some((test) => test(frame)), parts: [] };
+    parent.steps.push(guarded);
+    return this.lift(root, { steps: guarded.parts, awaitStarts: parent.awaitStarts }, compiled);
   }
 
   /**
    * Compiles a part of an expression that decides itself when its parts run, as a branch of `?:` does, with its own
    * steps, which the expression runs right before the part's code.
    */
-  protected compileWithSteps<T>(part: unknown, compile: () => T): { result: T; steps: Step[] } {
+  protected compileWithSteps<T>(part: unknown, compile: () => T): { result: T; steps: Part[] } {
     const staging = newStaging(suspensionStarts(part, false));
     const saved = this.staging;
     this.staging = staging;
@@ -89,14 +93,33 @@ export abstract class AwaitCompiler extends CompilerBase {
   }
 
   /**
-   * Lifts an expression that awaits into the steps of what is being staged, when it is compiled outside a part, as a
-   * condition's operands are; inside a part, the part lifts it.
+   * Compiles a part the expression being staged evaluates only when `guard` holds, as a branch of `?:` or the right
+   * operand of `&&` is: its awaiting parts become guarded parts of what is being staged, which run only when the
+   * guard does, and its other code runs where the expression's code runs it. The guard must read only values earlier
+   * parts evaluated.
    */
-  protected liftAwaiting(compiled: AwaitingCompiled): Compiled {
-    const root = this.awaitRoot;
+  protected compileGuarded<T>(guard: (frame: Frame) => boolean, part: unknown, compile: () => T): T {
     const staging = this.staging;
-    if (root?.fn !== this.fn || !staging) return compiled;
-    return this.lift(root, staging, compiled);
+    if (!staging) return compile();
+    // A part without awaits is staged on its own too, so that an await after it lifts none of it out of the guard.
+    const inner = newStaging(this.awaitsHere(part) ? suspensionStarts(part, false) : []);
+    this.staging = inner;
+    try {
+      return compile();
+    } finally {
+      this.staging = staging;
+      if (inner.steps.length > 0) staging.steps.push({ guard, parts: inner.steps });
+    }
+  }
+
+  /**
+   * The value of a part a guard and the expression's code both read, lifted into a step when the expression awaits,
+   * so that it is evaluated once, before what it guards.
+   */
+  protected decidingValue(compiled: Compiled, part: unknown): Compiled {
+    if (!this.awaitsHere(part) || !isLiftable(compiled)) return compiled;
+    const read = this.addStep(compiled.run);
+    return read ? { ...compiled, run: read } : compiled;
   }
 
   /** Whether an expression awaits inside the statement being compiled, so that it must be compiled with steps. */
@@ -197,17 +220,11 @@ export abstract class AwaitCompiler extends CompilerBase {
     }
   }
 
-  private lift(
-    root: AwaitRoot,
-    staging: Staging,
-    compiled: Compiled,
-    shorting: readonly ShortingTest[] = []
-  ): Compiled {
+  private lift(root: AwaitRoot, staging: Staging, compiled: Compiled): Compiled {
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: DYNAMIC };
     root.slots.push(slot);
-    const skipIf = shorting.length > 0 ? (frame: Frame) => shorting.some((test) => test(frame)) : undefined;
-    staging.steps.push({ slot, run: compiled.gen ? undefined : compiled.run, gen: compiled.gen, skipIf });
+    staging.steps.push({ slot, run: compiled.gen ? undefined : compiled.run, gen: compiled.gen });
     return { ...compiled, gen: undefined, run: (frame) => (frame.locals[slot] as Cell).v };
   }
 }
@@ -221,7 +238,7 @@ function runsThroughGenerator(): never {
   throw new Error('An expression that awaits runs only through its generator.');
 }
 
-function withSteps(compiled: Compiled, steps: readonly Step[]): Compiled {
+function withSteps(compiled: Compiled, steps: readonly Part[]): Compiled {
   if (steps.length === 0) return compiled;
   const { run } = compiled;
   return {
@@ -240,15 +257,11 @@ function withSteps(compiled: Compiled, steps: readonly Step[]): Compiled {
 function handlesAwaitItself(expression: Expression): boolean {
   switch (expression.kind) {
     case 'await':
-    case 'conditional':
     case 'list':
     case 'setOrMap':
     case 'switch':
     case 'cascade': {
       return true;
-    }
-    case 'binary': {
-      return expression.operator === '&&' || expression.operator === '||' || expression.operator === '??';
     }
     case 'assign': {
       return expression.operator === '??=';

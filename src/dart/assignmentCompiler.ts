@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import { awaitingCompiled } from './awaitCompiler';
-import { containsAwait, type GenEval, runSteps, runWithoutWaiting, type Step } from './awaitSteps';
+import { containsAwait, type GenEval, type Part, runSteps, runWithoutWaiting } from './awaitSteps';
 import type { ClassInfo, Member } from './classes';
 import {
   type AddElement,
@@ -1219,7 +1219,7 @@ function elementLoop(gen: ElementGen, awaits: boolean): ElementCode {
 
 /** An `if` element that awaits, in its condition or its branches. */
 function conditionalElement(
-  steps: readonly Step[],
+  steps: readonly Part[],
   test: (frame: Frame) => boolean,
   consequent: ElementCode,
   otherwise: ElementCode | undefined
@@ -1236,7 +1236,7 @@ function conditionalElement(
 function ifNullAssigning(
   target: AssignableTarget,
   read: (frame: Frame, prepared: unknown) => Value,
-  steps: readonly Step[],
+  steps: readonly Part[],
   value: Eval
 ): GenEval {
   return function* (frame) {

@@ -38,16 +38,27 @@ export interface Step {
   slot: number;
   run: Eval | undefined;
   gen: GenEval | undefined;
-  /** Whether a null-aware selector before the part shorts it, so that the step evaluates nothing. */
-  skipIf?: (frame: Frame) => boolean;
 }
 
 /**
- * The parts being lifted into steps: those of an expression that awaits, or of a statement, a loop's header, or a
- * branch that does, whose `await`s start at `awaitStarts`.
+ * Parts that run only when their guard holds, the one form every part evaluated on a condition takes: a branch of
+ * `?:`, the right operand of `&&`, `||`, `??` and `??=`, and what follows a null-aware selector. The guard reads
+ * values earlier parts evaluated, so it evaluates nothing itself; a guarded part's slot is read only when it ran.
+ */
+export interface GuardedParts {
+  guard: (frame: Frame) => boolean;
+  parts: Part[];
+}
+
+/** An ordered part of a statement that awaits. */
+export type Part = Step | GuardedParts;
+
+/**
+ * The parts being lifted: those of an expression that awaits, or of a statement, a loop's header, or a branch that
+ * does, whose `await`s start at `awaitStarts`.
  */
 export interface Staging {
-  readonly steps: Step[];
+  readonly steps: Part[];
   readonly awaitStarts: readonly number[];
 }
 
@@ -69,11 +80,10 @@ export function newStaging(awaitStarts: readonly number[]): Staging {
   return { steps: [], awaitStarts };
 }
 
-export function* runSteps(frame: Frame, steps: readonly Step[]): Generator<AwaitRequest, void, Value> {
+export function* runSteps(frame: Frame, steps: readonly Part[]): Generator<AwaitRequest, void, Value> {
   for (const step of steps) {
-    // A shorted part's slot is never read: the chain gives null at the null-aware selector.
-    if (step.skipIf?.(frame)) {
-      frame.locals[step.slot] = new Cell(undefined);
+    if ('guard' in step) {
+      if (step.guard(frame)) yield* runSteps(frame, step.parts);
       continue;
     }
     const value = step.gen ? yield* step.gen(frame) : (step.run as Eval)(frame);
@@ -121,24 +131,6 @@ function collectStarts(node: unknown, withYields: boolean, starts: number[]): vo
 function suspends(node: { kind?: string; isAwait?: boolean }, withYields: boolean): boolean {
   if (node.kind === 'await' || (node.kind === 'forInElement' && node.isAwait === true)) return true;
   return withYields && (node.kind === 'yield' || (node.kind === 'forIn' && node.isAwait === true));
-}
-
-/**
- * An operator that evaluates its right operand only on its left's value (`&&`, `||`, `??`), whose operands' awaits
- * wait in their own steps.
- */
-export function shortCircuiting(
-  left: { steps: readonly Step[]; run: Eval },
-  isDecided: (value: Value) => boolean,
-  right: { steps: readonly Step[]; run: Eval }
-): GenEval {
-  return function* (frame) {
-    yield* runSteps(frame, left.steps);
-    const value = left.run(frame);
-    if (isDecided(value)) return value;
-    yield* runSteps(frame, right.steps);
-    return right.run(frame);
-  };
 }
 
 /** Runs to its end a generator that has nothing to wait for, as code without `await` compiled as one does. */

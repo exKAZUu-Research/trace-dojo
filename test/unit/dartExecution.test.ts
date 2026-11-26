@@ -9236,6 +9236,35 @@ Future<void> main() async {
   });
 });
 
+test('awaits in a branch or a short-circuit operand run only when it does, each part once and in order', () => {
+  const source = `var log = <String>[];
+Future<T> f<T>(String s, T v) async { log.add('f$s'); await Future<void>.value(); return v; }
+T t<T>(String s, T v) { log.add('t$s'); return v; }
+void show(String label, Object? v) { print('$label $v $log'); log = []; }
+Future<void> main() async {
+  show('a', t('a', false) && await f('b', true));
+  show('b', t('a', true) && t('b', false) && await f('c', true));
+  show('c', t('a', false) || await f('b', false));
+  show('d', t<int?>('a', null) ?? t<int?>('b', null) ?? await f('c', 3));
+  show('e', t<int?>('a', 1) ?? await f('b', 2));
+  show('f', await f('a', false) ? t('b', 1) : t('c', 2) + await f('d', 3));
+  show('g', [t('x', 0), t('a', true) ? await f('b', 1) : 0, await f('y', 9)]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'a false [ta]',
+      'b false [ta, tb]',
+      'c false [ta, fb]',
+      'd 3 [ta, tb, fc]',
+      'e 1 [ta]',
+      'f 5 [fa, tc, fd]',
+      'g [0, 1, 9] [tx, ta, fb, fy]',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

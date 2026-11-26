@@ -16,7 +16,6 @@ import type {
 } from './ast';
 import { chainHead, isDotShorthand } from './astWalk';
 import { AwaitCompiler, awaitingCompiled, type ShortingTest } from './awaitCompiler';
-import { shortCircuiting } from './awaitSteps';
 import type { ClassInfo, FieldMember, Member } from './classes';
 import { addToList, building, type ElementCode } from './collectionElements';
 import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
@@ -351,28 +350,20 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     flow: ConditionFlow;
   } {
     const isAnd = expression.operator === '&&';
-    // The right operand runs only on the left's value, so its awaits wait inside the operator.
-    const awaits = this.awaitsHere(expression);
-    const { result: left, steps: leftSteps } = this.compileWithSteps(awaits ? expression.left : undefined, () =>
-      this.compileConditionInner(expression.left)
-    );
-    const leftRun = this.requireBool(left.compiled, expression.left).run;
+    const left = this.compileConditionInner(expression.left);
+    const leftRun = this.decidingValue(this.requireBool(left.compiled, expression.left), expression.right).run;
     this.flow = isAnd ? left.flow.whenTrue : left.flow.whenFalse;
-    const { result: right, steps: rightSteps } = this.compileWithSteps(awaits ? expression.right : undefined, () =>
-      this.compileConditionInner(expression.right)
+    // The right operand runs only on the left's value, so its awaits are guarded by it.
+    const right = this.compileGuarded(
+      (frame) => leftRun(frame) === isAnd,
+      expression.right,
+      () => this.compileConditionInner(expression.right)
     );
     const rightRun = this.requireBool(right.compiled, expression.right).run;
     const flow: ConditionFlow = isAnd
       ? { whenTrue: right.flow.whenTrue, whenFalse: Flow.join(left.flow.whenFalse, right.flow.whenFalse) }
       : { whenTrue: Flow.join(left.flow.whenTrue, right.flow.whenTrue), whenFalse: right.flow.whenFalse };
     this.flow = Flow.join(flow.whenTrue, flow.whenFalse);
-    if (awaits) {
-      const gen = shortCircuiting({ steps: leftSteps, run: leftRun }, (value) => value !== isAnd, {
-        steps: rightSteps,
-        run: rightRun,
-      });
-      return { compiled: this.liftAwaiting(awaitingCompiled(interfaceType(coreTypes.bool), gen)), flow };
-    }
     const isConst = left.compiled.isConst && right.compiled.isConst;
     return {
       compiled: {
