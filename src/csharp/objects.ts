@@ -287,6 +287,9 @@ export function defaultMessage(type: NamedType): string {
     'System.TimeoutException': 'The operation has timed out.',
     'System.OperationCanceledException': 'The operation was canceled.',
     'System.Threading.Tasks.TaskCanceledException': 'A task was canceled.',
+    'System.MemberAccessException': 'Cannot access member.',
+    'System.MissingMemberException': 'Attempted to access a missing member.',
+    'System.Reflection.TargetInvocationException': 'Exception has been thrown by the target of an invocation.',
   };
   return messages[name] ?? `Exception of type '${name}' was thrown.`;
 }

@@ -1347,8 +1347,21 @@ function messageString(exception: CsObject): string | CsString {
   return state.messageString;
 }
 
+/** `TargetInvocationException`'s constructors, whose inner exception .NET names `inner`. */
+const targetInvocationConstructor: NativeMethod = (_call, receiver, args) => {
+  const [message, inner] = args.length === 1 ? [undefined, args[0]] : args;
+  const state: ExceptionState = { message: undefined, inner: inner as CsObject | undefined, wasThrown: false };
+  if (isString(message as Value)) {
+    state.message = stringText(message as CsString);
+    state.messageString = message as CsString;
+  }
+  (receiver as CsObject).native = state;
+  return;
+};
+
 defineNativesKeepingStrings({
   'System.Exception..ctor': exceptionConstructor,
+  'System.Reflection.TargetInvocationException..ctor': targetInvocationConstructor,
   'System.Exception.get_Message': (_call, receiver) => messageString(receiver as CsObject),
   'System.ArgumentException.get_Message': (_call, receiver) => messageString(receiver as CsObject),
   'System.ArgumentOutOfRangeException.get_Message': (_call, receiver) => messageString(receiver as CsObject),

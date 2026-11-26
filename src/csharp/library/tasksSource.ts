@@ -23,9 +23,22 @@ namespace System {
     public OperationCanceledException(string? message, Exception? innerException, System.Threading.CancellationToken token);
     public System.Threading.CancellationToken CancellationToken { get; }
   }
+  public class Lazy<T> {
+    public Lazy();
+    public Lazy(bool isThreadSafe);
+    public Lazy(Func<T> valueFactory);
+    public Lazy(Func<T> valueFactory, bool isThreadSafe);
+    public Lazy(Func<T> valueFactory, System.Threading.LazyThreadSafetyMode mode);
+    public Lazy(System.Threading.LazyThreadSafetyMode mode);
+    public Lazy(T value);
+    public bool IsValueCreated { get; }
+    public T Value { get; }
+    public override string? ToString();
+  }
 }
 
 namespace System.Threading {
+  public enum LazyThreadSafetyMode { None = 0, PublicationOnly = 1, ExecutionAndPublication = 2 }
   public static class Timeout {
     public const int Infinite = -1;
     public static readonly TimeSpan InfiniteTimeSpan = new TimeSpan(0, 0, 0, 0, -1);

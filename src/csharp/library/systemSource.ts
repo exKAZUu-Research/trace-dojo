@@ -1055,6 +1055,8 @@ namespace System {
     'PlatformNotSupportedException:NotSupportedException',
     'TypeInitializationException:SystemException',
     'EntryPointNotFoundException:SystemException',
+    'MemberAccessException:SystemException',
+    'MissingMemberException:MemberAccessException',
   ]
     .map((entry) => {
       const [name, base] = entry.split(':');
@@ -1411,6 +1413,12 @@ namespace System.Runtime.CompilerServices {
   }
 }
 
+namespace System.Reflection {
+  public sealed class TargetInvocationException : ApplicationException {
+    public TargetInvocationException(Exception? inner);
+    public TargetInvocationException(string? message, Exception? inner);
+  }
+}
 namespace System.Text {
   public abstract class Encoding {
     public static Encoding UTF8 { get; }
