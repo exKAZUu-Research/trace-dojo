@@ -1,3 +1,4 @@
+import { AsyncTask } from '../asyncTask';
 import { AwaitRequest, LISTENER_CANCELLED, YieldEachRequest } from '../awaitSteps';
 import { scopedMemberName } from '../classes';
 import { DartThrow, type Frame, type Runtime } from '../runtime';
@@ -21,6 +22,7 @@ interface SuspendedBody {
   /** For `async*`: whether the body has not started, which it does once its stream is listened to. */
   atStart: boolean;
   isStar: boolean;
+  task: AsyncTask;
   values(): Iterable<Value>;
 }
 
@@ -31,7 +33,7 @@ export function startAsync(frame: Frame, valueType: DartType, body: AsyncBody): 
   const state = suspendState(runtime, future, frame, body, false);
   // The caller leaves the frame once this returns; nothing waits on the new future that could resume inside it.
   let next: Resumption | undefined = { kind: 'next', value: undefined };
-  while (next) next = perform(runtime, state, advance(state, next));
+  while (next) next = perform(runtime, state, advanceTask(state, next));
   frame.isSuspended = state.generator !== undefined;
   return future;
 }
@@ -67,6 +69,7 @@ function suspendState(
     atYield: false,
     atStart: isStar,
     isStar,
+    task: new AsyncTask(runtime.steps),
     *values() {
       if (!this.generator) return;
       for (const cell of frame.locals) yield cell?.v;
@@ -76,6 +79,7 @@ function suspendState(
     },
   };
   object.native = state as unknown as DartObject['native'];
+  frame.asyncTask = state.task;
   return state;
 }
 
@@ -92,7 +96,11 @@ type Outcome =
   | { kind: 'return'; value: Value }
   | { kind: 'throw'; error: DartThrow };
 
-/** Runs the body from where it waits until it suspends again or ends. */
+/** Runs the body from where it waits until it suspends again or ends, counting the steps it records meanwhile. */
+function advanceTask(state: SuspendedBody, resumption: Resumption): Outcome {
+  return state.task.run(() => advance(state, resumption));
+}
+
 function advance(state: SuspendedBody, resumption: Resumption): Outcome {
   const generator = state.generator as NonNullable<SuspendedBody['generator']>;
   let result: IteratorResult<unknown, unknown>;
@@ -174,7 +182,7 @@ define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) 
     runtime.enter(frame);
     let outcome: Outcome;
     try {
-      outcome = advance(state, next);
+      outcome = advanceTask(state, next);
     } finally {
       frame.isSuspended = state.generator !== undefined;
       runtime.exit(frame);

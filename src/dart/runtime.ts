@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+// code-gauge-allow-file fileNcss -- Keep runtime dispatch alongside reified types, call frames, and roots.
+import type { AsyncTask } from './asyncTask';
 import {
   type ClassInfo,
   type ConstructorInfo,
@@ -79,6 +80,8 @@ export class Frame implements TracedFrame {
   readonly temporaries: Value[] = [];
   /** Whether the frame's `async` body is waiting at an `await` or `yield`, so that leaving the frame does not end it. */
   isSuspended = false;
+  /** The steps the frame's `async` or `async*` body recorded while it ran, which its driver counts. */
+  asyncTask: AsyncTask | undefined;
 
   // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
