@@ -960,6 +960,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (symbol.isAbstract && owner && !owner.isAbstract && owner.kind !== 'enum') {
       this.error(symbol.row, `abstract なメンバー ${symbol.name} は、abstract なクラスにだけ書けます。`);
     }
+    // An object that is no companion has no subclasses, so its members cannot be protected, as kotlinc says.
+    if (keywords.has('protected') && owner?.isObject && owner.outer?.companion !== owner && !owner.isAnonymous)
+      this.error(symbol.row, 'object のメンバーには protected を付けられません。');
     const memberOnly = ['open', 'abstract', 'override', 'protected'].find((keyword) => keywords.has(keyword));
     if (!owner && memberOnly) {
       this.error(symbol.row, `${memberOnly} 修飾子は、クラスのメンバーにだけ書けます。`);
