@@ -1298,6 +1298,14 @@ defineNativesKeepingStrings({
   'System.Environment.get_NewLine': () => '\n',
 });
 
+defineNatives({
+  'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute..ctor': (_call, receiver, [priority]) => {
+    (receiver as CsObject).native = priority;
+  },
+  'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute.get_Priority': (_call, receiver) =>
+    (receiver as CsObject).native as number,
+});
+
 // ---- Exceptions ----
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.

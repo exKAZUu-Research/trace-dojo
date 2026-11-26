@@ -159,6 +159,8 @@ export class MethodSymbol {
   isSealed = false;
   isNew = false;
   isExtension = false;
+  /** The `[OverloadResolutionPriority]` that ranks the method above the others its type declares. */
+  overloadPriority = 0;
   isExtern = false;
   access: Accessibility = 'private';
   /** The method this one overrides, which virtual calls of it reach this one through. */
@@ -291,6 +293,8 @@ export class PropertySymbol {
   isAbstract = false;
   isOverride = false;
   overridden: PropertySymbol | undefined;
+  /** The `[OverloadResolutionPriority]` that ranks an indexer above the others its type declares. */
+  overloadPriority = 0;
   /** Whether the property is `required`, which every object creation's initializer must set. */
   isRequired = false;
   obsoleteError: string | undefined;

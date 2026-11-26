@@ -304,8 +304,9 @@ export abstract class AttributeBinder extends StatementBinder {
         if (owner instanceof MethodSymbol) owner.setsRequiredMembers = true;
         return;
       }
-      case 'System.Runtime.CompilerServices.EnumeratorCancellationAttribute': {
-        if (owner && 'refKind' in owner && pending.target === 'parameter') owner.isEnumeratorCancellation = true;
+      case 'System.Runtime.CompilerServices.EnumeratorCancellationAttribute':
+      case 'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute': {
+        this.applyCompilerServicesUsage(attribute, owner, pending);
         return;
       }
       case 'System.Runtime.CompilerServices.ModuleInitializerAttribute': {
@@ -326,6 +327,61 @@ export abstract class AttributeBinder extends StatementBinder {
         return;
       }
     }
+  }
+
+  /**
+   * The attributes that change how the compiler binds what uses the declaration: the token an async iterator takes,
+   * and the overload a call chooses.
+   */
+  private applyCompilerServicesUsage(
+    attribute: BoundAttribute,
+    owner: AttributeOwner | undefined,
+    pending: PendingAttributes
+  ): void {
+    const { type, args } = attribute;
+    switch (type.symbol.name) {
+      case 'EnumeratorCancellationAttribute': {
+        if (owner && 'refKind' in owner && pending.target === 'parameter') owner.isEnumeratorCancellation = true;
+        return;
+      }
+      default: {
+        if (owner instanceof MethodSymbol || (owner && 'getter' in owner))
+          this.applyOverloadPriority(attribute, owner, Number(args[0] ?? 0));
+      }
+    }
+  }
+
+  /**
+   * Ranks a method or indexer among its type's overloads, which an override takes from the member it overrides
+   * (CS9261) and which members that overload resolution does not choose among cannot have (CS9262).
+   */
+  private applyOverloadPriority(
+    attribute: BoundAttribute,
+    owner: MethodSymbol | PropertySymbol,
+    priority: number
+  ): void {
+    const name = attribute.node.name;
+    if (owner.isOverride) {
+      this.error(
+        name,
+        'CS9261',
+        "オーバーライドするメンバーに 'OverloadResolutionPriorityAttribute' を使用することはできません。"
+      );
+      return;
+    }
+    // Roslyn ranks user-defined operators, but not conversions, which no call names.
+    const isUnranked =
+      owner.explicitInterface !== undefined ||
+      (owner instanceof MethodSymbol &&
+        (owner.kind === 'getter' ||
+          owner.kind === 'setter' ||
+          owner.name === 'op_Implicit' ||
+          owner.name === 'op_Explicit'));
+    if (isUnranked) {
+      this.error(name, 'CS9262', "このメンバーでは 'OverloadResolutionPriorityAttribute' を使用できません。");
+      return;
+    }
+    owner.overloadPriority = priority;
   }
 
   /** Reports attributes on declarations their `[AttributeUsage]` does not allow (CS0592), or repeated (CS0579). */

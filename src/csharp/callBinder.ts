@@ -133,11 +133,12 @@ export abstract class CallBinder extends OperatorBinder {
       this.reportInapplicable(candidates, args, explicitTypeArgs, row, description);
       return undefined;
     }
+    const ranked = withHighestPriority(applicable);
     // A base type's candidates drop out once one declared in a more derived class or interface applies (C# spec
     // §12.6.4.1), whichever converts better.
-    const mostDerived = applicable.filter(
+    const mostDerived = ranked.filter(
       (candidate) =>
-        !applicable.some(
+        !ranked.some(
           (other) =>
             other !== candidate && this.isMoreDerived(other.candidate.owner.symbol, candidate.candidate.owner.symbol)
         )
@@ -1410,4 +1411,34 @@ function constraintOwner(method: MethodSymbol, typeParameterIndex: number): stri
   return method.isExtensionBlockMember && typeParameterIndex < method.extensionBlockArity
     ? displayExtensionBlock(method)
     : displayMethod(method);
+}
+
+/**
+ * The applicable candidates without those that another candidate of the same declaring type outranks by its
+ * `[OverloadResolutionPriority]`, as Roslyn removes them before it compares conversions.
+ */
+function withHighestPriority(applicable: Applicable[]): Applicable[] {
+  const highest = new Map<TypeSymbol, number>();
+  for (const { candidate } of applicable) {
+    const original = originalDefinition(candidate.method);
+    highest.set(original.owner, Math.max(highest.get(original.owner) ?? -Infinity, overloadPriorityOf(original)));
+  }
+  return applicable.filter(({ candidate }) => {
+    const original = originalDefinition(candidate.method);
+    return overloadPriorityOf(original) === highest.get(original.owner);
+  });
+}
+
+/** The method an override overrides at the root, whose declaration gives its priority and its declaring type. */
+function originalDefinition(method: MethodSymbol): MethodSymbol {
+  let original = method;
+  while (original.overridden) original = original.overridden;
+  return original;
+}
+
+function overloadPriorityOf(method: MethodSymbol): number {
+  if (!method.property) return method.overloadPriority;
+  let property = method.property;
+  while (property.overridden) property = property.overridden;
+  return property.overloadPriority;
 }
