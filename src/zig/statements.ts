@@ -42,11 +42,13 @@ import {
   maxInt,
   minInt,
   NORETURN,
+  pointerOf,
   pointerTo,
   TYPE,
   type Type,
   typeName,
   U8,
+  type UnionField,
   USIZE,
   VOID,
 } from './types';
@@ -2532,7 +2534,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const tagType: Type = union ? (union.tagType as EnumType) : operandType;
     const enumTags = union ? this.enumFields(tagType as EnumType) : undefined;
     const tagsByName = enumTags ? this.fieldIndexes(enumTags) : undefined;
-    const fieldsByTag = new Map<unknown, { name: string; type: Type }>();
+    const fieldsByTag = new Map<unknown, UnionField>();
     if (unionFields && enumTags) {
       const fieldsByName = this.fieldIndexes(unionFields);
       for (const tag of enumTags) {
@@ -2871,7 +2873,7 @@ export abstract class StatementCompiler extends CallCompiler {
       tagType: Type;
       union: Extract<Type, { kind: 'union' }> | undefined;
       unionFields: { name: string; type: Type }[] | undefined;
-      fieldForTag: (key: unknown) => { name: string; type: Type } | undefined;
+      fieldForTag: (key: unknown) => UnionField | undefined;
       resultType: Type | undefined;
       asStatement: boolean;
       seen: Map<unknown, Span>;
@@ -2909,9 +2911,15 @@ export abstract class StatementCompiler extends CallCompiler {
       }
       return types[0] ?? VOID;
     };
+    // A pointer capture carries the alignment that `align(n)` gives the fields it captures, when they share one.
+    const alignmentFor = (keys: unknown[]): number | undefined => {
+      const alignments = new Set(keys.map((key) => fieldForTag(key)?.alignment));
+      return alignments.size === 1 ? alignments.values().next().value : undefined;
+    };
     const compileBody = (
       captureType: Type,
-      tagValue: TExpr | undefined
+      tagValue: TExpr | undefined,
+      alignment?: number
     ): {
       body: Stmt | undefined;
       value: TExpr | undefined;
@@ -2927,7 +2935,11 @@ export abstract class StatementCompiler extends CallCompiler {
           const original = knownOperand?.pointer;
           const constant = original && (payloadPointer ? payloadPointer(original) : original);
           const binding = {
-            ...this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true),
+            ...this.newLocal(
+              capture.name,
+              pointerOf('one', captureType, { isConst: operand.place?.isConst ?? true, alignment }),
+              true
+            ),
             known: constant !== undefined,
             value: constant,
           };
@@ -2999,7 +3011,7 @@ export abstract class StatementCompiler extends CallCompiler {
       for (const key of keys) {
         this.compilationBudget.spend();
         const tagValue = known(tagType, key as Value, each);
-        inline.set(key, compileBody(captureFor([key]), tagValue));
+        inline.set(key, compileBody(captureFor([key]), tagValue, union ? alignmentFor([key]) : undefined));
       }
       const first = inline.values().next().value;
       return {
@@ -3022,7 +3034,8 @@ export abstract class StatementCompiler extends CallCompiler {
           : !each.capture || each.isElse
             ? operandType
             : captureFor(values);
-    const compiled = compileBody(captureType, undefined);
+    const capturesFields = union && unionFields && each.capture && !each.isElse;
+    const compiled = compileBody(captureType, undefined, capturesFields ? alignmentFor(values) : undefined);
     return { values, ranges, ...compiled, isElse: each.isElse, isUnnamed };
   }
 

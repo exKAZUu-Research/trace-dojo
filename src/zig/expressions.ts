@@ -581,18 +581,19 @@ export abstract class ExpressionCompiler extends SemaBase {
       (parent) => new Pointer(parent.load() as ZStruct, index)
     );
     const parent = this.knownAddress(base);
-    // A pointer to a field carries the alignment that `align(n)` gives the field.
     const { alignment } = field;
-    if (parent) {
-      const atField = knownAt(field.type, project(parent), span);
-      return alignment === undefined ? atField : { ...atField, place: { ...(atField.place as Place), alignment } };
-    }
+    if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), alignment);
     const fieldPlace = this.projectedPlace(base, field.type, project, alignment);
     const facts = fieldFacts(valueFactsOf(base), index);
     const result = facts?.exact
       ? this.fixedResult(base, field.type, facts.exact.value, span)
       : this.derived(base, field.type, (value) => (value as ZStruct).slots[index]);
     return { ...result, valueFacts: facts, knownLength: facts?.length, place: fieldPlace, span };
+  }
+
+  /** A field's place, whose pointer carries the alignment that `align(n)` gives the field. */
+  private withFieldAlignment(atField: TExpr, alignment: number | undefined): TExpr {
+    return alignment === undefined ? atField : { ...atField, place: { ...(atField.place as Place), alignment } };
   }
 
   private unionField(base: TExpr, type: Extract<Type, { kind: 'union' }>, name: string, span: Span): TExpr {
@@ -610,11 +611,11 @@ export abstract class ExpressionCompiler extends SemaBase {
         (parent) => new Pointer(view(parent.load()), 0)
       );
       const parent = this.knownAddress(base);
-      if (parent) return knownAt(field.type, project(parent), span);
+      if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), field.alignment);
       return {
         ...this.derived(base, field.type, (value) => view(value).slots[0]),
         span,
-        place: this.projectedPlace(base, field.type, project),
+        place: this.projectedPlace(base, field.type, project, field.alignment),
       };
     }
     const check = (value: Value): ZUnion => {
@@ -636,9 +637,9 @@ export abstract class ExpressionCompiler extends SemaBase {
         );
       }
       const parent = this.knownAddress(base);
-      if (parent) return knownAt(field.type, project(parent), span);
+      if (parent) return this.withFieldAlignment(knownAt(field.type, project(parent), span), field.alignment);
     }
-    const fieldPlace = this.projectedPlace(base, field.type, project);
+    const fieldPlace = this.projectedPlace(base, field.type, project, field.alignment);
     return {
       ...this.derived(base, field.type, (value) => check(value).slots[0]),
       valueFacts: fieldFacts(valueFactsOf(base), index),
