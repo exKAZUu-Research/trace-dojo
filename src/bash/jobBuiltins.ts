@@ -1,3 +1,4 @@
+import { isVariableReference } from './arithmetic';
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
 import type { Shell } from './shell';
@@ -23,12 +24,13 @@ export const waitBuiltin: Builtin = (shell, args) => {
   // Bash unsets the `-p` variable before it waits, so it stays unset when no job is reported.
   const pidName = options.get('p');
   if (pidName !== undefined) {
-    // A name that cannot be unset fails `wait` before it waits, as Bash reports it.
-    if (!isIdentifier(pidName)) {
+    // A name that cannot be unset fails `wait` before it waits, as Bash reports it; an array element is left as it is
+    // until a job is reported.
+    if (!isIdentifier(pidName) && !isVariableReference(pidName)) {
       shell.reportError(`wait: \`${pidName}': not a valid identifier`);
       return 1;
     }
-    const failure = shell.store.unsetNamed(pidName, false);
+    const failure = isIdentifier(pidName) ? shell.store.unsetNamed(pidName, false) : undefined;
     if (failure) {
       shell.reportError(`wait: ${failure.message}`);
       return 1;
