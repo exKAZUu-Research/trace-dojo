@@ -72,6 +72,7 @@ import {
   USIZE,
   VOID,
 } from './types';
+import { unavailableMessage } from './unavailable';
 import { aggregateFacts, fieldFacts, staticResultOf, type ValueFacts, valueFactsOf } from './valueFacts';
 import {
   arrayPointerView,
@@ -1139,8 +1140,11 @@ export abstract class SemaBase implements SemaApi {
       to.child.kind === 'pointer' &&
       // Only whether the conversion exists matters, so the value, which may be a known null, is not converted.
       this.tryCoerce({ ...expression, known: false, value: undefined }, to.child, span)
-    )
+    ) {
+      // Zig turns a known null C pointer into an optional holding address 0, which no other optional can hold here.
+      if (staticResultOf(expression)?.value === NULL) return this.error(span, unavailableMessage('pointer:knownNullC'));
       return { ...expression, type: to, place: undefined };
+    }
     const payload = this.tryCoerce(expression, to.child, span);
     if (!payload) return undefined;
     if (to.child.kind !== 'optional')
