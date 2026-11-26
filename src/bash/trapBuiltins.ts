@@ -77,7 +77,7 @@ export const trapBuiltin: Builtin = (shell, args) => {
       status = 1;
       continue;
     }
-    if (condition === undefined) rejectUnsupportedFeature(`シグナル（trap ${spec}）`);
+    if (condition === undefined) rejectUnsupportedCondition(spec);
     if (resets) shell.traps.delete(condition);
     else
       shell.traps.set(condition, {
@@ -97,7 +97,7 @@ function printTraps(shell: Shell, specs: readonly string[]): number {
       shell.reportError(`trap: ${spec}: invalid signal specification`);
       return 1;
     }
-    if (condition === undefined) rejectUnsupportedFeature(`シグナル（trap ${spec}）`);
+    if (condition === undefined) rejectUnsupportedCondition(spec);
     conditions.push(condition);
   }
   for (const condition of conditions.length > 0 ? conditions : (['EXIT', 'ERR'] as const)) {
@@ -105,6 +105,13 @@ function printTraps(shell: Shell, specs: readonly string[]): number {
     if (trap) shell.fd1.write(`trap -- ${singleQuote(trap.text)} ${condition}\n`);
   }
   return 0;
+}
+
+/** Rejects a signal, or the `DEBUG` or `RETURN` condition, which this environment does not provide. */
+function rejectUnsupportedCondition(spec: string): never {
+  const name = spec.toUpperCase().replace(/^SIG/, '');
+  const isCommandCondition = name === 'DEBUG' || name === 'RETURN';
+  return rejectUnsupportedFeature(`${isCommandCondition ? 'trap の条件' : 'シグナル'}（trap ${spec}）`);
 }
 
 /**

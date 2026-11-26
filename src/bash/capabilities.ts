@@ -319,7 +319,7 @@ export function rejectUnsupportedDeclarationOptions(
   hasPlusOption: boolean
 ): void {
   if (set.has('f') || set.has('F') || unset.has('f') || unset.has('F')) {
-    throw new UnsupportedFeatureError(`${builtin} -f（関数の一覧）`);
+    throw new UnsupportedFeatureError(`${builtin} -f（関数の本文の表示）`);
   }
   if (builtin === 'export' && unset.has('x') && !hasPlusOption) {
     throw new UnsupportedFeatureError('export -n（エクスポート属性の解除）');
