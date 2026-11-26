@@ -1,6 +1,5 @@
 import { type Culture, providerCulture } from '../cultures';
 import { CsDecimal } from '../decimal';
-import { NUMBER_SYMBOLS } from '../format';
 import type { NativeCall, NativeMethod } from '../natives';
 import type { Value } from '../values';
 import { fail, failNull, refOf } from './support';
@@ -211,11 +210,14 @@ export function parseFloatText(text: string, styles: number, culture: Culture): 
 
 /** The value of the culture's infinity and NaN symbols, which .NET compares ignoring case, with a sign or not. */
 function parseSymbol(text: string, culture: Culture): number | undefined {
-  const positive = culture.positiveInfinity.toLowerCase();
-  const nan = NUMBER_SYMBOLS.nan.toLowerCase();
-  if (text === positive || text === `+${positive}`) return Number.POSITIVE_INFINITY;
-  if (text === culture.negativeInfinity.toLowerCase()) return Number.NEGATIVE_INFINITY;
-  if (text === nan || text === `+${nan}` || text === `-${nan}`) return Number.NaN;
+  const { symbols } = culture;
+  const positive = symbols.positiveInfinity.toLowerCase();
+  const nan = symbols.nan.toLowerCase();
+  const plus = symbols.positiveSign.toLowerCase();
+  const minus = symbols.negativeSign.toLowerCase();
+  if (text === positive || text === `${plus}${positive}`) return Number.POSITIVE_INFINITY;
+  if (text === symbols.negativeInfinity.toLowerCase()) return Number.NEGATIVE_INFINITY;
+  if (text === nan || text === `${plus}${nan}` || text === `${minus}${nan}`) return Number.NaN;
   return undefined;
 }
 
@@ -246,6 +248,7 @@ class NumberScanner {
   private hasCurrency = false;
   private inParentheses = false;
   private isNegative = false;
+  private readonly symbols: Culture['symbols'];
 
   constructor(
     private readonly text: string,
@@ -253,6 +256,7 @@ class NumberScanner {
     culture: Culture
   ) {
     this.currency = this.allows(NumberStyles.AllowCurrencySymbol) ? culture.currencySymbol : undefined;
+    this.symbols = culture.symbols;
   }
 
   scan(): ScannedNumber | undefined {
@@ -297,9 +301,15 @@ class NumberScanner {
       const isDigit = char >= '0' && char <= '9';
       if (isDigit && hasPoint) fraction += char;
       else if (isDigit) integer += char;
-      else if (char === NUMBER_SYMBOLS.decimalSeparator && allowsPoint && !hasPoint) hasPoint = true;
-      // A group separator may follow any digit before the decimal point, in groups of any size.
-      else if (char !== NUMBER_SYMBOLS.groupSeparator || !allowsGroups || integer === '' || hasPoint) break;
+      else if (this.startsWith(this.symbols.decimalSeparator) && allowsPoint && !hasPoint) {
+        hasPoint = true;
+        this.index += this.symbols.decimalSeparator.length - 1;
+      } else {
+        // A group separator may follow any digit before the decimal point, in groups of any size.
+        const group = this.groupSeparatorLength();
+        if (group === 0 || !allowsGroups || integer === '' || hasPoint) break;
+        this.index += group - 1;
+      }
     }
     return integer === '' && fraction === '' ? undefined : { integer, fraction };
   }
@@ -324,11 +334,35 @@ class NumberScanner {
     }
   }
 
-  /** Reads a sign at the index, which the style must allow there and which may come only once. */
-  private readSign(char: string, flag: number): boolean {
-    if (!this.allows(flag) || this.hasSign || (char !== '+' && char !== '-')) return false;
+  private startsWith(symbol: string): boolean {
+    return symbol !== '' && this.text.startsWith(symbol, this.index);
+  }
+
+  /**
+   * The length of the group separator at the index, or 0: a space also stands for a culture's no-break space, which
+   * people cannot type.
+   */
+  private groupSeparatorLength(): number {
+    const separator = this.symbols.groupSeparator;
+    if (this.startsWith(separator)) return separator.length;
+    return (separator === '\u00A0' || separator === '\u202F') && this.text[this.index] === ' ' ? 1 : 0;
+  }
+
+  /**
+   * Reads a sign at the index, which the style must allow there and which may come only once: the culture's, or a
+   * hyphen for a culture whose minus sign is another dash, as .NET also reads.
+   */
+  private readSign(_char: string, flag: number): boolean {
+    if (!this.allows(flag) || this.hasSign) return false;
+    const { negativeSign, positiveSign } = this.symbols;
+    let sign: string | undefined;
+    if (this.startsWith(negativeSign)) sign = negativeSign;
+    else if (this.startsWith(positiveSign)) sign = positiveSign;
+    else if (HYPHEN_LIKE_SIGNS.has(negativeSign) && this.text[this.index] === '-') sign = '-';
+    if (sign === undefined) return false;
     this.hasSign = true;
-    this.isNegative = char === '-';
+    this.isNegative = sign !== positiveSign;
+    this.index += sign.length - 1;
     return true;
   }
 
@@ -340,6 +374,9 @@ class NumberScanner {
     return true;
   }
 }
+
+/** The minus signs that .NET also reads a hyphen for. */
+const HYPHEN_LIKE_SIGNS = new Set(['\u2012', '\u207B', '\u208B', '\u2212', '\u2796', '\uFE63', '\uFF0D']);
 
 function isWhite(char: string): boolean {
   return char === ' ' || (char >= '\t' && char <= '\r');

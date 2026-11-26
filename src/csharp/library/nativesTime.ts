@@ -1,8 +1,9 @@
-import { type Culture, INVARIANT, providerCulture } from '../cultures';
+import { type Culture, INVARIANT, JA_JP, providerCulture, requireGregorian } from '../cultures';
 import { MeteredText, type TextBudget } from '../meteredText';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { CsArray, CsBox, CsStruct, plainString, type Value } from '../values';
+import { cultureDateText, dateParseArguments, dateTimeParseError, monthName } from './cultureDates';
 import {
   type ExactDateFields,
   exactFailureMessage,
@@ -223,6 +224,7 @@ export function formatDateTime(
   format: string | undefined,
   culture: Culture
 ): string {
+  requireGregorian(culture);
   const patterns: Record<string, string | undefined> = { ...INVARIANT_DATE_FORMATS, ...culture.datePatterns };
   // "U" writes the value converted from local time to UTC, which stops at DateTime.MinValue, with the full date and
   // time pattern.
@@ -260,9 +262,9 @@ function customDate(parts: DateParts, pattern: string, culture: Culture, result:
       result.read(runEnd - index);
     }
     const count = runEnd - index;
-    const field = dateField(parts, char, count, culture);
+    const field = fieldAt(parts, pattern, index, count, culture);
     if (field === undefined) {
-      const literal = dateLiteral(pattern, index, count);
+      const literal = dateLiteral(pattern, index, count, culture);
       result.read(literal.length);
       // .NET drops a `.` before `F` digits that all come out as zeros, so a whole second shows no point.
       if (!(literal.text === '.' && isEmptyOptionalFraction(parts, pattern, index + literal.length)))
@@ -274,6 +276,19 @@ function customDate(parts: DateParts, pattern: string, culture: Culture, result:
     }
   }
   return result.toString();
+}
+
+/** The text of the run of a specifier at an index of a pattern, where a month's name may depend on the pattern. */
+function fieldAt(
+  parts: DateParts,
+  pattern: string,
+  index: number,
+  count: number,
+  culture: Culture
+): string | undefined {
+  const char = pattern[index];
+  if (char === 'M' && count >= 3) return monthName(parts.month, pattern, index, count, culture);
+  return dateField(parts, char, count, culture);
 }
 
 /** Whether the pattern has a run of `F` at the index whose digits are all zeros for the date. */
@@ -292,8 +307,8 @@ function dateField(parts: DateParts, char: string, count: number, culture: Cultu
       return count <= 2 ? pad(parts.year % 100, count) : pad(parts.year, count);
     }
     case 'M': {
-      if (count <= 2) return pad(parts.month, count);
-      return (count === 3 ? culture.abbreviatedMonthNames : culture.monthNames)[parts.month - 1];
+      // `MMM` and `MMMM` take their names from `monthName`, which reads the pattern around them.
+      return pad(parts.month, count);
     }
     case 'd': {
       if (count <= 2) return pad(parts.day, count);
@@ -337,9 +352,15 @@ function dateField(parts: DateParts, char: string, count: number, culture: Cultu
 }
 
 /** The text of the literal at an index of a custom date format and the length of the pattern it takes. */
-function dateLiteral(pattern: string, index: number, count: number): { text: string; length: number } {
+function dateLiteral(
+  pattern: string,
+  index: number,
+  count: number,
+  culture: Culture
+): { text: string; length: number } {
   const char = pattern[index];
-  if (char === '/' || char === ':') return { text: char, length: 1 };
+  if (char === '/') return { text: culture.dateSeparator, length: 1 };
+  if (char === ':') return { text: culture.timeSeparator, length: 1 };
   if (char === "'" || char === '"') {
     const end = pattern.indexOf(char, index + 1);
     const close = end === -1 ? pattern.length : end;
@@ -649,23 +670,12 @@ defineNatives({
 /** A DateTime's text in a format, with the culture of a format provider, the current culture's for null. */
 function dateText(call: NativeCall, receiver: Value, format: Value, provider?: Value): string {
   const culture = providerCulture(call.frame.runtime, provider);
+  requireGregorian(culture, call.row);
   return formatDateTime(call.frame.runtime, receiver as CsStruct, (format as string | undefined) ?? undefined, culture);
 }
 
 /** The white space that `DateTimeStyles` may allow, which `Parse` skips anyway. */
 export const WHITE_SPACE_STYLES = 7;
-
-/** The string and the culture of a `DateTime.Parse` or `TryParse` call, by the parameters' names. */
-function dateParseArguments(call: NativeCall, args: Value[]): { text: string | undefined; culture: Culture } {
-  const argument = (name: string): Value =>
-    args[call.method.parameters.findIndex((parameter) => parameter.name === name)];
-  const styles = (argument('styles') as number | undefined) ?? 0;
-  if ((styles & ~WHITE_SPACE_STYLES) !== 0) unsupportedCall(call, 'DateTimeStyles の AllowWhiteSpaces 以外の指定');
-  return {
-    text: argument('s') as string | undefined,
-    culture: providerCulture(call.frame.runtime, argument('provider')),
-  };
-}
 
 /** The string, the formats, the culture, and the white space styles of a `ParseExact` or `TryParseExact` call. */
 function exactParseArguments(
@@ -774,6 +784,11 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
  */
 export function parseDate(text: string, culture: Culture): bigint | undefined {
   if (culture.isInvariant) return parseDateParts(text.replace(/^(\s*)(\d{1,2})\/(\d{1,2})\/(\d{4})/, '$1$4/$2/$3'));
+  if (culture !== JA_JP) {
+    requireGregorian(culture);
+    const normalized = cultureDateText(text, culture);
+    return normalized === undefined ? undefined : parseDateParts(normalized);
+  }
   // ja-JP also reads the long date, as `2024年3月5日 10時20分`, with the weekday that the D and F formats write, which
   // must be the date's.
   let weekday: number | undefined;
@@ -826,11 +841,4 @@ function offsetTicks(zone: string): bigint {
   const sign = zone.startsWith('-') ? -1n : 1n;
   const digits = zone.slice(1).replace(':', '');
   return sign * (BigInt(digits.slice(0, 2)) * TICKS_PER_HOUR + BigInt(digits.slice(2) || '0') * TICKS_PER_MINUTE);
-}
-
-/** .NET's message for a string that DateTime.Parse rejects, which points at the first word it does not know. */
-function dateTimeParseError(text: string): string {
-  const word = /\p{L}/u.exec(text);
-  if (!word) return `String '${text}' was not recognized as a valid DateTime.`;
-  return `The string '${text}' was not recognized as a valid DateTime. There is an unknown word starting at index '${word.index}'.`;
 }

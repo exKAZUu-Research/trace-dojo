@@ -42,12 +42,18 @@ function setCurrent(call: NativeCall, which: 'current' | 'currentUi', value: Val
 function cultureOfName(call: NativeCall, name: Value, shownName: (name: string) => string): Culture {
   if (name === undefined) failNull('name');
   const text = name as string;
-  if (cultureSettingsOf(call.frame.runtime).isGlobalizationInvariant && text !== '')
+  const notFound = (reason: string): never =>
     fail(
       'System.Globalization.CultureNotFoundException',
-      `Only the invariant culture is supported in globalization-invariant mode. See https://aka.ms/GlobalizationInvariantMode for more information. (Parameter 'name')\n${shownName(text)} is an invalid culture identifier.`
+      `${reason} (Parameter 'name')\n${shownName(text)} is an invalid culture identifier.`
     );
-  return cultureNamed(text) ?? unsupportedCall(call, `ja-JP と InvariantCulture 以外のカルチャ（${text}）`);
+  if (cultureSettingsOf(call.frame.runtime).isGlobalizationInvariant && text !== '')
+    notFound(
+      'Only the invariant culture is supported in globalization-invariant mode. See https://aka.ms/GlobalizationInvariantMode for more information.'
+    );
+  const culture = cultureNamed(text);
+  if (culture === 'invalid') return notFound('Culture is not supported.');
+  return culture ?? unsupportedCall(call, `カルチャ（${text}）`);
 }
 
 function cultureOf(receiver: Value): Culture {

@@ -125,7 +125,7 @@ class ExactDateParser {
         return this.set('year', year === undefined || count > 2 ? year : year + (year > 49 ? 1900 : 2000));
       }
       case 'M': {
-        return this.set('month', count <= 2 ? this.numberOf(count) : this.name(this.monthNames(count)));
+        return this.set('month', count <= 2 ? this.numberOf(count) : this.monthName(count));
       }
       case 'd': {
         if (count <= 2) return this.set('day', this.numberOf(count));
@@ -283,6 +283,13 @@ class ExactDateParser {
 
   private monthNames(count: number): readonly string[] {
     return count === 3 ? this.culture.abbreviatedMonthNames : this.culture.monthNames;
+  }
+
+  /** The one-based month of the name the text has next, in its own form or the form that goes with a day. */
+  private monthName(count: number): number | undefined {
+    const genitive = count === 3 ? this.culture.abbreviatedMonthGenitiveNames : this.culture.monthGenitiveNames;
+    const index = this.name([...this.monthNames(count), ...genitive]);
+    return index === undefined ? undefined : ((index - 1) % 12) + 1;
   }
 
   /** The one-based index of the longest of the names that the text has next, ignoring case, which it moves past. */

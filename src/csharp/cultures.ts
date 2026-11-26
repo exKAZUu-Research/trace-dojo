@@ -1,13 +1,42 @@
+import { CompileError } from '../interpreter/diagnostics';
+import { intlCulture } from './intlCultures';
 import type { Runtime } from './runtime';
 import { CsObject, type Value } from './values';
 
 /** The standard date and time format letters whose patterns depend on the culture. */
 export type CultureDatePattern = 'd' | 'D' | 'f' | 'F' | 'g' | 'G' | 'm' | 'M' | 't' | 'T' | 'y' | 'Y';
 
+/** The symbols that numbers are written with, as a culture's `NumberFormatInfo` has them. */
+export interface NumberSymbols {
+  decimalSeparator: string;
+  groupSeparator: string;
+  /** The sizes of the digit groups from the decimal point leftward, the last repeating, such as `[3, 2]` for hi-IN. */
+  groupSizes: readonly number[];
+  negativeSign: string;
+  positiveSign: string;
+  nan: string;
+  positiveInfinity: string;
+  negativeInfinity: string;
+  percentSymbol: string;
+  perMilleSymbol: string;
+}
+
 /**
- * What formatting, parsing, and comparing need of one of the two cultures this grader has: ja-JP, the reference
- * machine's culture (with ICU's data), and the invariant culture. Both share the decimal point `.`, the group
- * separator `,`, the negative sign `-`, and `NaN`.
+ * The patterns of signed numbers, as indexes into .NET's lists (`NumberFormatInfo.NumberNegativePattern` and the
+ * like): see `NUMBER_NEGATIVE_PATTERNS` and its siblings in `format.ts`.
+ */
+export interface NumberPatterns {
+  numberNegative: number;
+  currencyPositive: number;
+  currencyNegative: number;
+  percentPositive: number;
+  percentNegative: number;
+}
+
+/**
+ * What formatting, parsing, and comparing need of a culture: ja-JP, the reference machine's culture (with ICU's
+ * data), and the invariant culture are written out here, and any other culture is built from the host's `Intl` data
+ * (see `intlCultures.ts`).
  */
 export interface Culture {
   /** `CultureInfo.Name`, which is empty for the invariant culture. */
@@ -22,17 +51,24 @@ export interface Culture {
   percentDecimalDigits: number;
   currencyDecimalDigits: number;
   currencySymbol: string;
-  positiveInfinity: string;
-  negativeInfinity: string;
-  /** What follows a percentage: `%`, or ` %` in the invariant culture's pattern `n %`. */
-  percentSuffix: string;
-  /** Whether a negative amount of money is written `(¤n)`, the invariant culture's pattern, instead of `-¤n`. */
-  parenthesizesNegativeCurrency: boolean;
+  symbols: NumberSymbols;
+  patterns: NumberPatterns;
+  /**
+   * The calendar of a culture whose dates are not Gregorian, such as ar-SA's `islamic-umalqura`, whose dates this
+   * grader cannot write or read.
+   */
+  otherCalendar?: string;
   datePatterns: Record<CultureDatePattern, string>;
+  /** What the custom date format's `/` and `:` write. */
+  dateSeparator: string;
+  timeSeparator: string;
   dayNames: readonly string[];
   abbreviatedDayNames: readonly string[];
   monthNames: readonly string[];
   abbreviatedMonthNames: readonly string[];
+  /** The months' names as a day's number goes with them, which some languages (ru-RU) inflect. */
+  monthGenitiveNames: readonly string[];
+  abbreviatedMonthGenitiveNames: readonly string[];
   amDesignator: string;
   pmDesignator: string;
   era: string;
@@ -51,10 +87,19 @@ export const JA_JP: Culture = {
   percentDecimalDigits: 3,
   currencyDecimalDigits: 0,
   currencySymbol: '¥',
-  positiveInfinity: '∞',
-  negativeInfinity: '-∞',
-  percentSuffix: '%',
-  parenthesizesNegativeCurrency: false,
+  symbols: {
+    decimalSeparator: '.',
+    groupSeparator: ',',
+    groupSizes: [3],
+    negativeSign: '-',
+    positiveSign: '+',
+    nan: 'NaN',
+    positiveInfinity: '∞',
+    negativeInfinity: '-∞',
+    percentSymbol: '%',
+    perMilleSymbol: '‰',
+  },
+  patterns: { numberNegative: 1, currencyPositive: 0, currencyNegative: 1, percentPositive: 1, percentNegative: 1 },
   datePatterns: {
     d: 'yyyy/MM/dd',
     D: 'yyyy年M月d日 dddd',
@@ -69,10 +114,14 @@ export const JA_JP: Culture = {
     y: 'yyyy年M月',
     Y: 'yyyy年M月',
   },
+  dateSeparator: '/',
+  timeSeparator: ':',
   dayNames: ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'],
   abbreviatedDayNames: ['日', '月', '火', '水', '木', '金', '土'],
   monthNames: JAPANESE_MONTHS,
   abbreviatedMonthNames: JAPANESE_MONTHS,
+  monthGenitiveNames: JAPANESE_MONTHS,
+  abbreviatedMonthGenitiveNames: JAPANESE_MONTHS,
   amDesignator: '午前',
   pmDesignator: '午後',
   era: '西暦',
@@ -82,6 +131,7 @@ const ENGLISH_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'F
 const ENGLISH_MONTHS = 'January February March April May June July August September October November December'.split(
   ' '
 );
+const ENGLISH_ABBREVIATED_MONTHS = ENGLISH_MONTHS.map((month) => month.slice(0, 3));
 
 const INVARIANT_NAME = 'Invariant Language (Invariant Country)';
 
@@ -96,10 +146,19 @@ export const INVARIANT: Culture = {
   percentDecimalDigits: 2,
   currencyDecimalDigits: 2,
   currencySymbol: '¤',
-  positiveInfinity: 'Infinity',
-  negativeInfinity: '-Infinity',
-  percentSuffix: ' %',
-  parenthesizesNegativeCurrency: true,
+  symbols: {
+    decimalSeparator: '.',
+    groupSeparator: ',',
+    groupSizes: [3],
+    negativeSign: '-',
+    positiveSign: '+',
+    nan: 'NaN',
+    positiveInfinity: 'Infinity',
+    negativeInfinity: '-Infinity',
+    percentSymbol: '%',
+    perMilleSymbol: '‰',
+  },
+  patterns: { numberNegative: 1, currencyPositive: 0, currencyNegative: 0, percentPositive: 0, percentNegative: 0 },
   datePatterns: {
     d: 'MM/dd/yyyy',
     D: 'dddd, dd MMMM yyyy',
@@ -114,19 +173,39 @@ export const INVARIANT: Culture = {
     y: 'yyyy MMMM',
     Y: 'yyyy MMMM',
   },
+  dateSeparator: '/',
+  timeSeparator: ':',
   dayNames: ENGLISH_DAYS,
   abbreviatedDayNames: ENGLISH_DAYS.map((day) => day.slice(0, 3)),
   monthNames: ENGLISH_MONTHS,
-  abbreviatedMonthNames: ENGLISH_MONTHS.map((month) => month.slice(0, 3)),
+  abbreviatedMonthNames: ENGLISH_ABBREVIATED_MONTHS,
+  monthGenitiveNames: ENGLISH_MONTHS,
+  abbreviatedMonthGenitiveNames: ENGLISH_ABBREVIATED_MONTHS,
   amDesignator: 'AM',
   pmDesignator: 'PM',
   era: 'A.D.',
 };
 
-/** The culture of a `CultureInfo` name, compared ignoring case as .NET does, or undefined for any other culture. */
-export function cultureNamed(name: string): Culture | undefined {
+/**
+ * The culture of a `CultureInfo` name, compared ignoring case as .NET does: ja-JP, the invariant culture, or one that
+ * the host's `Intl` has. It is `'invalid'` for a name that .NET rejects as no culture identifier, and undefined for
+ * one this grader cannot build.
+ */
+export function cultureNamed(name: string): Culture | 'invalid' | undefined {
   if (name === '') return INVARIANT;
-  return name.toLowerCase() === 'ja-jp' ? JA_JP : undefined;
+  if (name.toLowerCase() === 'ja-jp') return JA_JP;
+  return intlCulture(name);
+}
+
+/**
+ * Rejects the dates of a culture whose calendar is not Gregorian, which this grader has no calendar for, as an
+ * unavailable feature at a row, or at the program's start when the caller does not know the row.
+ */
+export function requireGregorian(culture: Culture, row = 0): void {
+  if (culture.otherCalendar === undefined) return;
+  throw new CompileError([
+    { row, message: `カルチャ ${culture.name} の日付（${culture.otherCalendar} 暦）は、この採点環境では使えません。` },
+  ]);
 }
 
 /** The cultures a run formats and compares by: `CultureInfo.CurrentCulture` and `CurrentUICulture`. */

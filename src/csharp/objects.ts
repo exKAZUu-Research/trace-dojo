@@ -3,7 +3,7 @@ import { compareCulture, ordinalDifference } from './culture';
 import { type Culture, cultureSettingsOf, currentCulture } from './cultures';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
-import { formatFloat } from './format';
+import { decimalText, formatFloat, integerText } from './format';
 import { linqDisplayName } from './library/nativesLinq';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
@@ -166,14 +166,14 @@ export function primitiveText(value: Value, type: Type, culture: Culture): strin
     case 'uint':
     case 'long':
     case 'ulong': {
-      return String(value);
+      return integerText(value as number | bigint, culture.symbols);
     }
     case 'float':
     case 'double': {
       return formatFloat(value as number, type.symbol.special === 'float', culture);
     }
     case 'decimal': {
-      return (value as CsDecimal).toString();
+      return decimalText(value as CsDecimal, culture.symbols);
     }
     case 'string': {
       return stringText(value as string | CsString);

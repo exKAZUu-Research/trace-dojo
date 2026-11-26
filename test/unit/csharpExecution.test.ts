@@ -837,3 +837,30 @@ try { Console.WriteLine(f / 0); } catch (DivideByZeroException e) { Console.Writ
     ].join('\n'),
   });
 });
+
+// .NET 10.0.403 prints these: cultures other than ja-JP format and parse by their own symbols, patterns, and names,
+// which the host's Intl data give, and a malformed name throws CultureNotFoundException. (Display names in Japanese
+// are left out: Node's ICU writes `英語 (…)` where .NET's and Bun's write `英語（…）`.)
+test('cultures from the host Intl data format and parse as in .NET', () => {
+  const program = String.raw`using System.Globalization;
+var us = new CultureInfo("en-US");
+var de = CultureInfo.GetCultureInfo("de-DE");
+var d = new DateTime(2024, 3, 5);
+Console.WriteLine($"{1234.5.ToString("C", us)} {(-1234.5).ToString("C", us)} {1234567.891.ToString("N2", de)} {0.125.ToString("P1", new CultureInfo("fr-FR"))}");
+Console.WriteLine($"{d.ToString("D", de)} {d.ToString("d MMMM", new CultureInfo("ru-RU"))} {d.ToString("MMMM", new CultureInfo("ru-RU"))} {double.Parse("1.234,5", de)} {de.EnglishName}");
+CultureInfo.CurrentCulture = de;
+Console.WriteLine($"{2.5} {-3.25m} {d:d}");
+try { new CultureInfo("en-"); } catch (CultureNotFoundException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '$1,234.50 -$1,234.50 1.234.567,89 12,5 %',
+      'Dienstag, 5. März 2024 5 марта март 1234.5 German (Germany)',
+      '2,5 -3,25 05.03.2024',
+      "Culture is not supported. (Parameter 'name')",
+      'en- is an invalid culture identifier.',
+      '',
+    ].join('\n'),
+  });
+});

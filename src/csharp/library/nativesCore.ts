@@ -432,12 +432,11 @@ for (const [name, special] of INTEGRAL) {
       rotated(bitsOf(value), (amount as number) % width, width, fromBits),
     [`${prefix}.RotateRight`]: (_call: NativeCall, _receiver: Value, [value, amount]: Value[]) =>
       rotated(bitsOf(value), (width - ((amount as number) % width)) % width, width, fromBits),
-    [`${prefix}.ToString()`]: (call: NativeCall, receiver: Value) =>
-      call.frame.runtime.numberString(String(unboxed(receiver))),
+    [`${prefix}.ToString()`]: (call: NativeCall, receiver: Value) => cultureIntegerString(call, receiver, undefined),
     [`${prefix}.ToString(string?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
       integerString(call, receiver, format, prefix),
-    [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value) =>
-      call.frame.runtime.numberString(String(unboxed(receiver))),
+    [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value, [provider]: Value[]) =>
+      cultureIntegerString(call, receiver, provider),
     [`${prefix}.ToString(string?, IFormatProvider?)`]: (
       call: NativeCall,
       receiver: Value,
@@ -651,7 +650,8 @@ defineNatives({
   // The numeric conversion to decimal raises .NET's OverflowException for NaN, infinities, and values out of range.
   'System.Decimal..ctor': (call, _receiver, [value]) =>
     convertNumeric(value as NumericValue, specialOf(call.method.parameters[0].type) as SpecialType, 'decimal'),
-  'System.Decimal.ToString()': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
+  'System.Decimal.ToString()': (call, receiver) =>
+    decimalText(unboxed(receiver) as CsDecimal, providerCulture(call.frame.runtime, undefined).symbols),
   'System.Decimal.ToString(string?)': (call, receiver, [format]) =>
     formatValue(
       evaluatorOf(call),
@@ -660,7 +660,8 @@ defineNatives({
       (format as string | undefined) ?? undefined,
       call.frame
     ),
-  'System.Decimal.ToString(IFormatProvider?)': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
+  'System.Decimal.ToString(IFormatProvider?)': (call, receiver, [provider]) =>
+    decimalText(unboxed(receiver) as CsDecimal, providerCulture(call.frame.runtime, provider as Value).symbols),
   'System.Decimal.ToString(string?, IFormatProvider?)': (call, receiver, [format, provider]) =>
     formatValue(
       evaluatorOf(call),
@@ -1276,7 +1277,18 @@ export function compositeFormat(
   return text.toString();
 }
 
-import { FORMAT_INDEX_ERROR as FORMAT_INDEX, parseCompositeFormat as parseFormat } from '../format';
+import {
+  decimalText,
+  FORMAT_INDEX_ERROR as FORMAT_INDEX,
+  integerText,
+  parseCompositeFormat as parseFormat,
+} from '../format';
+
+/** An integer's `ToString()` or `ToString(provider)`, with the culture's negative sign. */
+function cultureIntegerString(call: NativeCall, receiver: Value, provider: Value): string | CsString {
+  const value = unboxed(receiver) as number | bigint;
+  return call.frame.runtime.numberString(integerText(value, providerCulture(call.frame.runtime, provider).symbols));
+}
 
 const writers =
   (stream: 'stdout' | 'stderr', newline: boolean): NativeMethod =>
