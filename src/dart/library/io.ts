@@ -783,7 +783,9 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
     late StreamSubscription<List<int>> _subscription;
     void error(e, StackTrace stackTrace) {
       _subscription.cancel();
-      openedFile.close();
+      // A character the stream left unfinished cannot fail this close as it fails the program's own: the VM's file
+      // holds bytes, so its close here never fails.
+      openedFile.close().ignore();
       completer.completeError(e, stackTrace);
     }
     // _OpenedFile writes at once, so the subscription need not pause while a write is in flight.
@@ -813,9 +815,11 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
 class _OpenedFile {
   /** The file holds text, so the bytes of a character written in parts wait for the rest of it. */
   final _Utf8Decoder _parts = _Utf8Decoder(false);
-  _OpenedFile._();
+  final String _path;
+  bool _isClosed = false;
+  _OpenedFile._(this._path);
   static Future<_OpenedFile> _openFile(String path, bool appends) {
-    final file = _OpenedFile._();
+    final file = _OpenedFile._(path);
     try {
       file._open(path, appends);
     } catch (error, stackTrace) {
@@ -824,11 +828,18 @@ class _OpenedFile {
     }
     return Future.value(file);
   }
+  /** Fails once the file is closed, as the VM's RandomAccessFile does, which a failed stream closes. */
+  void _requireOpen() {
+    if (_isClosed) throw FileSystemException("File closed", _path);
+  }
   void writeFrom(List<int> bytes) {
+    _requireOpen();
     _writeOpened(_textOfBytes(bytes, _parts));
   }
   Future<void> close() {
     try {
+      _requireOpen();
+      _isClosed = true;
       _finishText(_parts);
     } catch (error, stackTrace) {
       return Future.error(error, stackTrace);
