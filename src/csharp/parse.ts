@@ -67,6 +67,8 @@ function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagn
   if (strayElse) return strayElse;
   const misplaced = misplacedKeywordError(root);
   if (misplaced) return [misplaced];
+  const namespaceModifiers = namespaceModifierErrors(root);
+  if (namespaceModifiers.length > 0) return namespaceModifiers;
   const diagnostics: SourceDiagnostic[] = [];
   for (const diagnostic of errors) {
     const missing = /^「(.+)」が足りません。$/.exec(diagnostic.message);
@@ -159,6 +161,35 @@ function misplacedKeywordError(root: Node): SourceDiagnostic | undefined {
   if (MODIFIERS.has(keyword.text))
     return { row, message: `CS1585: メンバーの種類と名前の前にメンバー修飾子'${keyword.text}' が必要です` };
   return { row, message: `CS1519: メンバー宣言のトークン '${keyword.text}' が無効です` };
+}
+
+const NAMESPACE_MODIFIERS = 'CS1671: 名前空間の宣言に、修飾子または属性を指定することはできません';
+
+/**
+ * The errors of attributes or modifiers before a `namespace`, which the grammar does not read there: Roslyn reports
+ * the first attribute list and the first modifier once each.
+ */
+function namespaceModifierErrors(root: Node): SourceDiagnostic[] {
+  const leaves = leavesOf(root).filter((leaf) => leaf.type !== 'comment');
+  const diagnostics: SourceDiagnostic[] = [];
+  for (const [index, leaf] of leaves.entries()) {
+    if (leaf.type !== 'identifier' || leaf.text !== 'namespace') continue;
+    let attribute: Node | undefined;
+    let modifier: Node | undefined;
+    for (let before = index - 1; before >= 0; before--) {
+      const token = leaves[before];
+      if (MODIFIERS.has(token.text)) modifier = token;
+      else if (token.type === ']' && token.parent?.type === 'attribute_list') {
+        const opening = token.parent.firstChild ?? token;
+        attribute = opening;
+        before = leaves.findIndex((other) => other.id === opening.id);
+      } else break;
+    }
+    const found = [attribute, modifier].filter((token): token is Node => token !== undefined);
+    found.sort((a, b) => a.startIndex - b.startIndex);
+    diagnostics.push(...found.map((token) => ({ row: token.startPosition.row, message: NAMESPACE_MODIFIERS })));
+  }
+  return diagnostics;
 }
 
 /**
