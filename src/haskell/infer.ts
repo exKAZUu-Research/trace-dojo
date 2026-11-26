@@ -1383,19 +1383,15 @@ export class Checker {
     }
   }
 
-  /** A constructor's type at fresh variables, which `vars` holds: a data instance's own, or the data type's parameters. */
+  /**
+   * A constructor's type at fresh variables, which `vars` holds: a data instance's own, or the data type's parameters
+   * and a GADT constructor's own variables.
+   */
   instantiateCon(con: ConInfo): { type: Type; fieldTypes: Type[]; vars: Type[] } {
-    if (con.instanceArgs) {
-      const vars = freshKinds(con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
-      return {
-        type: tap(tcon(con.type), ...con.instanceArgs.map((arg) => instantiateType(arg, vars))),
-        fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
-        vars,
-      };
-    }
-    const vars = freshKinds(typeParamKinds(con.type)).map((kind) => this.freshVar(kind));
+    const { kinds, record } = constructedType(con);
+    const vars = freshKinds(kinds).map((kind) => this.freshVar(kind));
     return {
-      type: tap(tcon(con.type), ...vars),
+      type: instantiateType(record, vars),
       fieldTypes: con.fieldTypes.map((fieldType) => instantiateType(fieldType, vars)),
       vars,
     };
@@ -1994,15 +1990,17 @@ export function polytypeScheme(type: TForall): Scheme {
  * instance's types, or a GADT constructor's result) and the field's type.
  */
 export function fieldSelectorType(con: ConInfo, position: number): { kinds: Kind[]; record: Type; field: Type } {
-  const field = con.fieldTypes[position];
-  if (con.instanceArgs) {
-    return { kinds: con.instanceKinds ?? [], record: tap(tcon(con.type), ...con.instanceArgs), field };
-  }
+  return { ...constructedType(con), field: con.fieldTypes[position] };
+}
+
+/** The type a constructor builds over its own variables, whose kinds `kinds` gives in its field types' numbering. */
+function constructedType(con: ConInfo): { kinds: Kind[]; record: Type } {
+  if (con.instanceArgs) return { kinds: con.instanceKinds ?? [], record: tap(tcon(con.type), ...con.instanceArgs) };
   const params = typeParamKinds(con.type);
   const resultArgs = params.map(
     (_, index): Type => con.equalities?.find(([parameter]) => parameter === index)?.[1] ?? { tag: 'tgen', index }
   );
-  return { kinds: [...params, ...(con.exKinds ?? [])], record: tap(tcon(con.type), ...resultArgs), field };
+  return { kinds: [...params, ...(con.exKinds ?? [])], record: tap(tcon(con.type), ...resultArgs) };
 }
 
 /**
