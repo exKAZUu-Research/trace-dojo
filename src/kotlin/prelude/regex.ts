@@ -83,8 +83,8 @@ external class Regex {
     external constructor(pattern: String, option: RegexOption)
     internal external constructor(pattern: String, options: Array<RegexOption>)
     external val pattern: String
-    // A set however the options are given, as Kotlin/JVM's Regex keeps them.
-    val options: Set<RegexOption> get() = optionList().toSet()
+    // A set in RegexOption's order however the options are given, as Kotlin/JVM's Regex builds it from its flags.
+    val options: Set<RegexOption> get() = optionList().sortedBy { it.ordinal }.toSet()
     internal external fun optionList(): List<RegexOption>
     internal external fun matchData(input: String, startIndex: Int, isWhole: Boolean): IntArray?
     internal external fun groupNameArray(): Array<String>
