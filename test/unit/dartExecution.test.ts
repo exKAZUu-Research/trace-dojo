@@ -3015,6 +3015,19 @@ void main() {
     expect(result.kind).toBe('compileError');
     if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
   }
+  // The same members used through dynamic are unavailable when the run reaches them, not a catchable missing member.
+  const dynamicUse = `import 'dart:io';
+void main() {
+  dynamic file = File('a.txt');
+  try { file.statSync(); } catch (e) { print(e); }
+  try { (stdout as dynamic).nonBlocking; } catch (e) { print(e); }
+  try { (3 as dynamic).foo(); } catch (e) { print(e.runtimeType); }
+}`;
+  expect(executeProgram('dart', dynamicUse)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Unsupported operation: FileSystemEntity.statSyncは、この採点環境では使えません。\nUnsupported operation: Stdout.nonBlockingは、この採点環境では使えません。\nNoSuchMethodError\n',
+  });
 });
 
 test('nullable values can use Object members and still dispatch to overrides', () => {

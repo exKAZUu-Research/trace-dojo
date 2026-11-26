@@ -16,6 +16,8 @@ import {
 } from './classes';
 import { eraseFunctionType } from './eraseExtensionTypes';
 import { EventLoop } from './eventLoop';
+import { throwUnavailable } from './library/nativeSupport';
+import { sdkInstanceMemberOwner } from './library/sdkExports';
 import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
@@ -735,7 +737,22 @@ export class Runtime implements TracedRuntime<Frame> {
       );
     }
     if (found) return this.throwError('NoSuchMethodError', '_withFound', [receiver, invocation, found]);
+    this.requireImplementedSdkMember(receiver, name, kind);
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
+  }
+
+  /**
+   * A dynamic use of a member that the SDK gives the receiver's class but the interpreter does not implement is
+   * unavailable, as the same use through a static type is at compile time, rather than a NoSuchMethodError the program
+   * could catch.
+   */
+  private requireImplementedSdkMember(receiver: Value, name: string, kind: 'method' | 'getter' | 'setter'): void {
+    // A library-private name (scoped by its library) is never an SDK member a learner's program reaches.
+    if (name.includes('\0')) return;
+    const isWrite = kind === 'setter';
+    const memberName = isWrite ? name.slice(0, -1) : name;
+    const owner = sdkInstanceMemberOwner(this.classOf(receiver), memberName, isWrite ? 'write' : 'read');
+    if (owner) throwUnavailable(this, `${owner.name}.${memberName}`);
   }
 
   symbol(name: string, library?: string): Value {

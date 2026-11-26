@@ -135,19 +135,26 @@ function tableName(name: string, access: MemberAccess): string {
  * Whether the SDK gives instances of a class a member for the access, through the nearest SDK classes it is or
  * extends; the interpreter's own supertypes of an SDK class are not consulted, since its hierarchy may differ.
  */
-export function isSdkInstanceMember(
+export function isSdkInstanceMember(cls: ClassInfo, name: string, access: MemberAccess): boolean {
+  return sdkInstanceMemberOwner(cls, name, access) !== undefined;
+}
+
+/** The nearest SDK class whose instances have the member, as {@link isSdkInstanceMember} finds it. */
+export function sdkInstanceMemberOwner(
   cls: ClassInfo,
   name: string,
   access: MemberAccess,
   visited = new Set<ClassInfo>()
-): boolean {
-  if (visited.has(cls)) return false;
+): ClassInfo | undefined {
+  if (visited.has(cls)) return undefined;
   visited.add(cls);
   const members = cls.library ? sdkMembersOf(cls) : undefined;
-  if (members) return hasName(members[0], tableName(name, access));
-  return [cls.superclass, ...cls.interfaces, ...cls.mixins, ...cls.onTypes].some(
-    (type) => type !== undefined && isSdkInstanceMember(type.cls, name, access, visited)
-  );
+  if (members) return hasName(members[0], tableName(name, access)) ? cls : undefined;
+  for (const type of [cls.superclass, ...cls.interfaces, ...cls.mixins, ...cls.onTypes]) {
+    const owner = type && sdkInstanceMemberOwner(type.cls, name, access, visited);
+    if (owner) return owner;
+  }
+  return undefined;
 }
 
 /** Whether the SDK's class has a static member for the access, or a constructor (`''` the unnamed one). */
