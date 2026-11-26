@@ -59,7 +59,6 @@ export const UNAVAILABLE: ReadonlyMap<string, Unavailable> = new Map<string, Una
   ['@typeInfo:opaque', { what: 'opaque 型の @typeInfo' }],
   ['@typeInfo:genericFn', { what: 'generic な関数の型の @typeInfo' }],
   ['testing:bitUnion', { what: 'packed union と extern union の std.testing.expectEqual' }],
-  ['pointer:knownNullC', { what: 'コンパイルのときに null と決まる C ポインタのオプショナルへの変換' }],
   ['pointer:differentMemory', { what: '別々のメモリを指すポインタどうしの引き算' }],
   ['reflection:libraryFn', { what: '標準ライブラリの関数の型の @typeInfo と @typeName' }],
   ['@Vector', { what: 'ベクトル（@Vector）' }],
