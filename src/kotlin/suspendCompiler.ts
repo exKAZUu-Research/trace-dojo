@@ -897,6 +897,9 @@ export abstract class SuspendCompiler extends LocalCompiler {
   private loopingCall(scope: Scope, call: Extract<Expression, { kind: 'call' }>): Statement[] | undefined {
     const lambda = call.trailingLambda;
     if (!lambda || !isLoopingCall(call) || !this.mayYield(scope, lambda.statements)) return undefined;
+    // A break or continue that leaves the lambda belongs to a loop around the call, as in an inline lambda, which the
+    // loop the call would become would take for its own.
+    if (escapesLoops(lambda.statements, new Set())) return undefined;
     const variable = {
       row: lambda.row,
       name: lambda.params?.[0]?.name ?? 'it',
@@ -928,6 +931,19 @@ export abstract class SuspendCompiler extends LocalCompiler {
 }
 
 type Eval = (frame: Frame) => Value;
+
+/** Whether code holds a break or continue of no loop inside it, which loops of `labels` and nested ones are. */
+function escapesLoops(node: unknown, labels: ReadonlySet<string | undefined>): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((each) => escapesLoops(each, labels));
+  const syntax = node as { kind?: string; label?: string };
+  if (syntax.kind === 'break' || syntax.kind === 'continue') return !labels.has(syntax.label);
+  if (syntax.kind !== undefined && OPAQUE_KINDS.has(syntax.kind)) return false;
+  if (Object.getPrototypeOf(node) !== Object.prototype) return false;
+  const isLoop = syntax.kind === 'for' || syntax.kind === 'while' || syntax.kind === 'doWhile';
+  const inner = isLoop ? new Set([...labels, undefined, syntax.label]) : labels;
+  return Object.values(node).some((child) => escapesLoops(child, inner));
+}
 
 /**
  * A lambda's code with each `return@label` that leaves the lambda replaced by the `continue@label` of the loop the
