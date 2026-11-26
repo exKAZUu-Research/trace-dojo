@@ -1490,7 +1490,11 @@ class ShellGrammarValidator {
   private failUnexpected(token: ShellToken): never {
     if (token.kind === 'eof') this.failAtEof();
     const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : formatSyntaxToken(token.value);
-    const closes = this.closer === ')' && this.hasOperator(token, ')');
+    // The symbol closing the substitution, when it comes too early, takes no suffix: `)` and an unquoted word `}`.
+    const closes =
+      this.closer === ')'
+        ? this.hasOperator(token, ')')
+        : token.kind === 'word' && token.value === '}' && !token.quoted;
     const suffix = this.insideSubstitution && !closes ? ` while looking for matching \`${this.closer}'` : '';
     this.text.fail(token.row, `syntax error near unexpected token \`${shown}'${suffix}`);
   }
