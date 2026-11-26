@@ -850,6 +850,7 @@ const LOCAL_CLASS_FORBIDDEN_MODIFIERS = new Set([
   'internal',
   'public',
   'inner',
+  'sealed',
   'companion',
   'annotation',
   'value',
