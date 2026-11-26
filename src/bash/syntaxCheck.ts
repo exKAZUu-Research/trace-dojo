@@ -426,14 +426,11 @@ function startsCompoundCommand(source: string, index: number): boolean {
   );
 }
 
-/** Whether `extglob` is on after a line of the script, which `shopt -s extglob` or `shopt -u extglob` changes. */
-function extglobAfterLine(line: string, enabled: boolean): boolean {
-  let result = enabled;
-  for (const command of line.split(/[;&|]/)) {
-    const match = /^\s*shopt\s+-([su])((?:\s+[\w-]+)*)\s*$/.exec(command);
-    if (match && match[2].split(/\s+/).includes('extglob')) result = match[1] === 's';
-  }
-  return result;
+/** What a simple command's words set `extglob` to, as `shopt -s extglob` or `shopt -u extglob` does. */
+function extglobSetBy(words: readonly string[]): boolean | undefined {
+  const [name, option, ...operands] = words;
+  if (name !== 'shopt' || (option !== '-s' && option !== '-u') || !operands.includes('extglob')) return undefined;
+  return option === '-s';
 }
 
 /** Whether the text before `index`, past blanks, ends a command, so that a word at `index` starts one. */
@@ -668,6 +665,10 @@ class ShellGrammarValidator {
   private readonly stream: ShellTokenStream;
   private cached: ShellToken | undefined;
   private cachedContext: WordContext = 'argument';
+  /** How many compound commands, function bodies, and coprocesses enclose the command being read. */
+  private compoundDepth = 0;
+  /** What the top-level commands of the line being read set `extglob` to, if any of them sets it. */
+  private lineExtglob: boolean | undefined;
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
   constructor(
@@ -684,10 +685,11 @@ class ShellGrammarValidator {
       this.consumeNewlines();
       const start = this.peek();
       if (start.kind === 'eof') return;
+      this.lineExtglob = undefined;
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
-      this.stream.extglob = extglobAfterLine(this.text.source.slice(start.start, end.start), this.stream.extglob);
+      if (this.lineExtglob !== undefined) this.stream.extglob = this.lineExtglob;
     }
   }
 
@@ -774,7 +776,7 @@ class ShellGrammarValidator {
           if (name.kind === 'word' && !this.isKeywordToken(name) && startsCompoundCommand(this.text.source, name.end)) {
             this.advance();
           }
-          this.parseCommand();
+          this.withinCompound(() => this.parseCommand());
           return;
         }
         this.parseCompoundWithRedirections();
@@ -792,8 +794,20 @@ class ShellGrammarValidator {
     });
   }
 
+  private withinCompound(parse: () => void): void {
+    this.compoundDepth++;
+    try {
+      parse();
+    } finally {
+      this.compoundDepth--;
+    }
+  }
+
   private parseCompoundWithRedirections(): void {
-    const requiresSeparator = this.parseCompoundConstruct();
+    let requiresSeparator = false;
+    this.withinCompound(() => {
+      requiresSeparator = this.parseCompoundConstruct();
+    });
     this.parseTrailingRedirections();
     const next = this.peek();
     const closesEnclosing =
@@ -1081,6 +1095,7 @@ class ShellGrammarValidator {
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
   private parseSimpleOrFunctionDef(): void {
     let commandName: string | undefined;
+    const words: string[] = [];
     for (let position = 0; ; position++) {
       const context: WordContext =
         commandName === undefined ? 'command' : DECLARATION_NAMES.has(commandName) ? 'declaration' : 'argument';
@@ -1089,11 +1104,16 @@ class ShellGrammarValidator {
         this.parseOneRedirection();
         continue;
       }
-      if (token.kind !== 'word') return;
+      if (token.kind !== 'word') {
+        // Bash reads each line after running the lines before it, so only a top-level `shopt` changes later lines.
+        if (this.compoundDepth === 0) this.lineExtglob = extglobSetBy(words) ?? this.lineExtglob;
+        return;
+      }
       this.advance();
       if (commandName === undefined && !isAssignmentWord(token.value)) {
         commandName = token.value;
       }
+      if (commandName !== undefined) words.push(token.value);
       if (position === 0 && commandName !== undefined && this.hasOperator(this.peek(), '(')) {
         if (DECLARATION_NAMES.has(token.value) || !isIdentifier(token.value)) {
           this.maskWordToken(token);
