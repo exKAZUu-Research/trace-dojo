@@ -1259,25 +1259,25 @@ export class Shell implements ArithmeticHost {
    */
   captureCurrentShell(body: Statement[], mode: 'current' | 'reply'): { output: string; status: number } {
     const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
-    const savedReply = mode === 'reply' ? this.store.readScalar('REPLY') : undefined;
-    if (mode === 'reply') this.store.unsetNamed('REPLY', true);
     const saved = this.fds.clone();
     const changed = mode === 'current' ? [1] : [];
     if (mode === 'current') this.fds.set(1, { output: capture.target });
+    const scopeIndex = this.store.pushSubstitutionScope(mode === 'reply');
     let status: number;
+    let reply = '';
     try {
-      status = this.runStatements(body);
-    } catch (error) {
-      if (!(error instanceof ReturnSignal)) throw error;
-      status = error.status;
+      try {
+        status = this.runStatements(body);
+      } catch (error) {
+        if (!(error instanceof ReturnSignal)) throw error;
+        status = error.status;
+      }
+      if (mode === 'reply') reply = this.store.readScalar('REPLY') ?? '';
     } finally {
+      this.store.popSubstitutionScope(scopeIndex);
       this.restoreDescriptors(saved, changed);
     }
-    if (mode === 'current') return { output: capture.read(), status };
-    const reply = this.store.readScalar('REPLY') ?? '';
-    if (savedReply === undefined) this.store.unsetNamed('REPLY', true);
-    else this.assignVariable('REPLY', savedReply);
-    return { output: reply, status };
+    return { output: mode === 'current' ? capture.read() : reply, status };
   }
 
   /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */

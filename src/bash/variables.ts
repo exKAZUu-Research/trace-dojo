@@ -387,6 +387,24 @@ export class VariableStore {
     this.scopes.length = scopeIndex;
   }
 
+  /**
+   * Starts the variable scope of `${ ...; }` or `${| ...; }`, which Bash runs as a function call that keeps the
+   * caller's positional parameters, the latter with a local `REPLY` that starts unset.
+   */
+  pushSubstitutionScope(reply: boolean): number {
+    const map = new Map<string, Cell>();
+    if (reply) {
+      map.set('REPLY', createCell('REPLY', undefined));
+      this.runtime.allocateSlots(1);
+    }
+    this.scopes.push({ kind: 'function', map });
+    return this.scopes.length - 1;
+  }
+
+  popSubstitutionScope(scopeIndex: number): void {
+    this.scopes.length = scopeIndex;
+  }
+
   pushTemporaryScope(): number {
     this.scopes.push({ kind: 'temp', map: new Map() });
     return this.scopes.length - 1;
