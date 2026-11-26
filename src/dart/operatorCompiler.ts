@@ -269,20 +269,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   /**
-   * The non-null part of `??`'s left operand: NonNull of its type, except for a variable declared `T?` and promoted to
-   * `T` by a type test (`is! Null`), which the SDK keeps as `T`, potentially nullable through a nullable bound, instead
-   * of promoting it to the bound's non-null part.
+   * The non-null part of `??`'s left operand: NonNull of its type, except for a `T` a type test split off a `T?`
+   * (`is! Null`), which the SDK keeps as `T`, potentially nullable through a nullable bound, instead of promoting it to
+   * the bound's non-null part.
    */
   private ifNullLeftType(left: Compiled): DartType {
-    const { type, variable } = left;
-    const declared = variable?.type;
-    const isSplit =
-      type.kind === 'typeParam' &&
-      !type.nullable &&
-      type.promoted === undefined &&
-      declared?.kind === 'typeParam' &&
-      declared.param === type.param &&
-      declared.nullable;
+    const { type } = left;
+    const isSplit = type.kind === 'typeParam' && type.splitFromNullable === true && type.promoted === undefined;
     return isSplit ? type : nonNullable(type);
   }
 

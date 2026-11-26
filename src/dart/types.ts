@@ -51,6 +51,11 @@ export interface TypeParamType {
   nullable: boolean;
   /** The type a variable of this type was promoted to (`X & S`). */
   promoted?: DartType;
+  /**
+   * Whether a type test split this `T` off a `T?` (`is! Null`), which `??` keeps as `T` for its left operand, as the
+   * SDK does, through a variable it initializes too, instead of promoting it to its bound's non-null part.
+   */
+  splitFromNullable?: boolean;
 }
 
 export type DartType =
@@ -214,7 +219,8 @@ export function factorType(type: DartType, removed: DartType): DartType {
   if (!sameType(normal, type)) return factorType(normal, removed);
   // A type parameter written with `?` splits like any `R?`, into the parameter without that `?`, which stays
   // potentially nullable through a nullable bound; a bare one, nullable only through its bound, does not split.
-  const nonNull = type.kind === 'typeParam' ? { ...type, nullable: false } : nonNullable(type);
+  const nonNull: DartType =
+    type.kind === 'typeParam' ? { ...type, nullable: false, splitFromNullable: true } : nonNullable(type);
   if ((type.kind !== 'typeParam' || type.nullable) && isNullable(type) && !sameType(nonNull, type)) {
     const rest = factorType(nonNull, removed);
     return isSubtype(NULL, removed) ? rest : makeNullable(rest);

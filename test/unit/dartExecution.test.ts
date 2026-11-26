@@ -9347,6 +9347,7 @@ test.each([
   'int f<T extends num?>(T? v) { if (v is! Null) return v.toInt(); return 0; }',
   'T f<T>(T? v) { if (v is Null) { return v; } return v; }',
   'int f<T extends int?>(T? v) { if (v is! Null) { return v ?? 0; } return 1; }',
+  'int f<T extends int?>(T? v) { if (v is! Null) { final w = v; return w ?? 0; } return 1; }',
 ])('a nullable type parameter keeps its nullable bound, and a null value is Null: %s', (declaration) => {
   expect(executeProgram('dart', `${declaration}\nvoid main() { print(f<int>(4)); }`)).toMatchObject({
     kind: 'compileError',
