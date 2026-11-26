@@ -163,6 +163,8 @@ export class Shell implements ArithmeticHost {
    * `ERR` action.
    */
   traceLevel: number;
+  /** The trace level of this shell itself, outside any `ERR` action, which its `EXIT` action runs at. */
+  private readonly ownTraceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
   /**
@@ -234,6 +236,7 @@ export class Shell implements ArithmeticHost {
     this.shownTraps = options?.shownTraps;
     this.standardInputRedirected = options?.standardInputRedirected ?? false;
     this.traceLevel = options?.traceLevel ?? 1;
+    this.ownTraceLevel = this.traceLevel;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
     this.loopDepth = options?.loopDepth ?? 0;
@@ -354,9 +357,10 @@ export class Shell implements ArithmeticHost {
     const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
     this.trapStartStatus = status;
-    // Bash runs an `ERR` action as a string it evaluates, which traces one level deeper; `EXIT` keeps the level.
+    // Bash runs an `ERR` action as a string it evaluates, which traces one level deeper; `EXIT` runs at the shell's
+    // own level, even from an `exit` in an `ERR` action.
     const traceLevel = this.traceLevel;
-    if (condition === 'ERR') this.traceLevel++;
+    this.traceLevel = condition === 'ERR' ? traceLevel + 1 : this.ownTraceLevel;
     this.store.lastStatus = status;
     // Bash numbers an `ERR` action's lines from the failed command's line, and the `EXIT` action's from 1, as it
     // reads the action as a new script then (`SEVAL_RESETLINE`).
@@ -823,6 +827,7 @@ export class Shell implements ArithmeticHost {
       } catch (error) {
         if (!(error instanceof CoprocessWaitSignal)) throw error;
         job.waiting = true;
+        endStatus = error.loopStatus;
         // The body cannot go on from where it waited; it can be left only where the rest would do nothing.
         // A `>(...)` its commands opened would also run once the input ends.
         job.losesRemainder =
@@ -836,13 +841,14 @@ export class Shell implements ArithmeticHost {
     };
     job.finish = run;
     const isWaiting = (): boolean => job.waiting === true;
+    let endStatus = 0;
     job.settleWait = () => {
       if (!isWaiting()) return;
       if (this.isOpenHere(writeEnd) || this.isWrittenElsewhere({ file: writeEnd })) throw new DeadlockError();
       if (job.losesRemainder) rejectUnsupportedFeature('入力を待ったまま残りの処理がある coproc');
       // What waited is a `while read` loop that ends the coprocess, which then ends with the loop's status.
       job.waiting = false;
-      job.status = 0;
+      job.status = endStatus;
     };
     // Bash moves both ends of both pipes to high descriptors and keeps the first and the last of the four.
     const pipeEnds: number[] = [];
@@ -941,7 +947,7 @@ export class Shell implements ArithmeticHost {
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        const cond = this.markWaitingLoop(statement, () => this.runWhileCondition(statement.condition, last));
+        const cond = this.markWaitingLoop(statement, last, () => this.runWhileCondition(statement.condition, last));
         if (cond.action === 'break' || (cond.status === 0) === statement.until) return;
         if (cond.action === 'continue') continue;
         if (this.iterate(statement.body, last) === 'stop') return;
@@ -953,12 +959,22 @@ export class Shell implements ArithmeticHost {
    * Notes a `while` loop whose condition is a lone `read` that waits for a coprocess's input, which ends the loop
    * with nothing more to run once the input ends.
    */
-  private markWaitingLoop<T>(statement: Extract<Statement, { kind: 'while' }>, run: () => T): T {
+  private markWaitingLoop<T>(
+    statement: Extract<Statement, { kind: 'while' }>,
+    last: { status: number },
+    run: () => T
+  ): T {
     try {
       return run();
     } catch (error) {
-      if (error instanceof CoprocessWaitSignal && !statement.until && isLoneRead(statement.condition)) {
-        error.waitingLoop ??= statement;
+      if (
+        error instanceof CoprocessWaitSignal &&
+        error.waitingLoop === undefined &&
+        !statement.until &&
+        isLoneRead(statement.condition)
+      ) {
+        error.waitingLoop = statement;
+        error.loopStatus = last.status;
       }
       throw error;
     }

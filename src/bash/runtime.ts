@@ -172,6 +172,8 @@ export class DeadlockError extends Error {
 export class CoprocessWaitSignal {
   /** The `while read` loop whose condition waited, which ends with nothing more to run once the input ends. */
   waitingLoop: Statement | undefined;
+  /** The status that loop ends with once its input ends: its body's last, or 0 when the body never ran. */
+  loopStatus = 0;
 }
 
 /** Whether `error` is how the shell leaves commands as Bash does, rather than a stop of the whole program. */

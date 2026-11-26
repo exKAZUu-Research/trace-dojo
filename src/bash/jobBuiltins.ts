@@ -22,10 +22,10 @@ export const waitBuiltin: Builtin = (shell, args) => {
   // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
   // would be waited for forever.
   const targets = pids.length > 0 ? pids.map((pid) => jobs.get(pid)) : [...jobs.values()];
-  for (const job of targets) {
-    job?.finish?.();
-    job?.settleWait?.();
-  }
+  for (const job of targets) job?.finish?.();
+  // `wait -n` returns as soon as one of them has ended, so a waiting coprocess matters only when none has.
+  const oneEnded = options.has('n') && targets.some((job) => job?.reported === false && job.waiting !== true);
+  if (!oneEnded) for (const job of targets) job?.settleWait?.();
   // A `>(...)` is waited for when named, or with no operand when `$!` is still its process ID, as Bash 5.3 does.
   const awaited = pids.length > 0 ? pids : [shell.store.lastBackgroundPid].filter((pid) => pid !== undefined);
   for (const pid of awaited) jobs.get(pid)?.awaitEnd?.();
@@ -36,7 +36,9 @@ export const waitBuiltin: Builtin = (shell, args) => {
   };
   if (options.has('n')) {
     const candidates = pids.length > 0 ? pids : [...jobs.keys()];
-    const pid = candidates.find((candidate) => jobs.get(candidate)?.reported === false);
+    const pid = candidates.find(
+      (candidate) => jobs.get(candidate)?.reported === false && !jobs.get(candidate)?.waiting
+    );
     return pid === undefined ? 127 : report(pid, (jobs.get(pid) as { status: number }).status);
   }
   if (pids.length === 0) {
