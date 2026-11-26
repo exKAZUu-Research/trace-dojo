@@ -199,13 +199,17 @@ class AstChecker {
       }
       for (const block of body.comptimeBlocks)
         this.checkBody(() => this.withComptime(block, () => this.expression(block, 'value')));
-      // Zig reports a repeated name at the test that first has it.
+      // Zig reports a repeated name once, at the test that first has it.
       const titles = new Map<string, TestDeclaration>();
+      const repeated = new Set<string>();
       for (const test of body.tests) {
         if (test.title !== undefined) {
           const first = titles.get(test.title);
-          if (first) this.error(first, 'テストの名前が、ほかのテストと同じです。');
-          else titles.set(test.title, test);
+          if (!first) titles.set(test.title, test);
+          else if (!repeated.has(test.title)) {
+            repeated.add(test.title);
+            this.error(first, 'テストの名前が、ほかのテストと同じです。');
+          }
         }
         if (test.decl && !names.has(test.decl.name)) this.reference(test.decl.name, test.decl, 'value');
         this.checkBody(() => this.blockStatements(test.body.statements), true);
@@ -489,7 +493,8 @@ class AstChecker {
         if (statement.isComptime) this.comptimeKeyword(statement);
         if (statement.isComptime && statement.targets.every((target) => target.declaration?.isConst))
           this.error(statement, 'comptime const は冗長です（初期化の式を comptime で囲んでください）。');
-        this.expression(statement.value, 'value');
+        if (statement.isComptime) this.withComptime(statement, () => this.expression(statement.value, 'value'));
+        else this.expression(statement.value, 'value');
         for (const target of statement.targets) {
           if (target.declaration) {
             if (target.declaration.type) this.typeExpression(target.declaration.type);
