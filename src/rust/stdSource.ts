@@ -1758,7 +1758,6 @@ pub mod sync {
         pub fn get_ref(&self) -> &T;
         pub fn get_mut(&mut self) -> &mut T;
     }
-    #[derive(Debug)]
     pub enum TryLockError<T> { Poisoned(PoisonError<T>), WouldBlock }
     pub mod mpsc {
         pub struct Sender<T>;

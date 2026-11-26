@@ -203,6 +203,7 @@ export type BuiltinAdt =
   | 'Sender'
   | 'SendError'
   | 'PoisonError'
+  | 'TryLockError'
   | 'Receiver'
   | 'JoinHandle'
   | 'ScopedJoinHandle'

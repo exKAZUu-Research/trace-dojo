@@ -173,6 +173,7 @@ export const BUILTIN_ENUMS: Record<string, BuiltinAdt> = {
   Ordering: 'Ordering',
   Infallible: 'Infallible',
   IntErrorKind: 'IntErrorKind',
+  TryLockError: 'TryLockError',
 };
 
 export function builtinStruct(module: Module, name: string): BuiltinAdt | undefined {

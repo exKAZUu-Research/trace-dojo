@@ -482,8 +482,8 @@ function debug(goal: Goal): Answer {
   if (t.kind !== 'adt') return 'no';
   const d = derived(goal);
   if (d) return d;
-  // `SendError` and `PoisonError` hide what they hold (`SendError { .. }`), whatever its type.
-  if (t.def.builtin === 'SendError' || t.def.builtin === 'PoisonError') return 'yes';
+  // The errors of channels and locks hide what they hold (`SendError { .. }`, `Poisoned(..)`), whatever its type.
+  if (['SendError', 'PoisonError', 'TryLockError'].includes(t.def.builtin ?? '')) return 'yes';
   if (t.def.builtin === 'Iter') {
     return supportsDebug(t.args[1]) ? all(debugOperands(t.args[0], t.args[1], t.def)) : 'no';
   }
@@ -497,9 +497,16 @@ function display({ solver, t, all }: Goal): Answer {
   if (t.kind === 'dyn') return dynImplies(solver, t, 'Display');
   if (t.kind !== 'adt') return 'no';
   if (
-    ['String', 'CaseIter', 'EscapeDefault', 'EscapeUnicode', 'IoError', 'SendError', 'PoisonError'].includes(
-      t.def.builtin as string
-    ) ||
+    [
+      'String',
+      'CaseIter',
+      'EscapeDefault',
+      'EscapeUnicode',
+      'IoError',
+      'SendError',
+      'PoisonError',
+      'TryLockError',
+    ].includes(t.def.builtin as string) ||
     ERROR_TYPES.has(t.def.builtin as string)
   )
     return 'yes';
@@ -659,7 +666,7 @@ function stdError({ t, all }: Goal): Answer {
   // `io::Error` is an error, though unlike the others it is neither `Clone` nor `PartialEq`.
   if (t.kind === 'adt') {
     return ERROR_TYPES.has(t.def.builtin as string) ||
-      ['IoError', 'SendError', 'PoisonError'].includes(t.def.builtin ?? '')
+      ['IoError', 'SendError', 'PoisonError', 'TryLockError'].includes(t.def.builtin ?? '')
       ? 'yes'
       : 'no';
   }

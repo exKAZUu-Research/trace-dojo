@@ -197,6 +197,13 @@ export class Formatter {
           case 'PoisonError': {
             return padString('poisoned lock: another task failed inside', spec, write);
           }
+          case 'TryLockError': {
+            const poisoned = (v as EnumValue).variant === 0;
+            const text = poisoned
+              ? 'poisoned lock: another task failed inside'
+              : 'try_lock failed because the operation would block';
+            return padString(text, spec, write);
+          }
           default: {
             if (ERROR_TYPES.has(t.def.builtin as string))
               return padString(errorDisplay(t.def.builtin as string, v), spec, write);
@@ -438,6 +445,9 @@ export class Formatter {
           true,
           write
         );
+      }
+      case 'TryLockError': {
+        return emit((v as EnumValue).variant === 0 ? 'Poisoned(..)' : 'WouldBlock', write);
       }
       case 'Sender':
       case 'SendError':
