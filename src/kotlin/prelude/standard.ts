@@ -108,6 +108,28 @@ fun <T> lazy(initializer: () -> T): Lazy<T> = SynchronizedLazyImpl(initializer)
 
 operator fun <T> Lazy<T>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): T = value
 
+// A property delegated to another property's reference, as \`var alias by ::total\`, reads and writes that property.
+operator fun <V> kotlin.reflect.KProperty0<V>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): V = get()
+
+operator fun <V> kotlin.reflect.KMutableProperty0<V>.setValue(
+    thisRef: Any?,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    set(value)
+}
+
+operator fun <T, V> kotlin.reflect.KProperty1<T, V>.getValue(thisRef: T, property: kotlin.reflect.KProperty<*>): V =
+    get(thisRef)
+
+operator fun <T, V> kotlin.reflect.KMutableProperty1<T, V>.setValue(
+    thisRef: T,
+    property: kotlin.reflect.KProperty<*>,
+    value: V
+) {
+    set(thisRef, value)
+}
+
 // The bits of integers, as Java's Integer and Long count and move them.
 fun Int.countOneBits(): Int {
     var bits = this
