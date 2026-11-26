@@ -1308,9 +1308,9 @@ export class Shell implements ArithmeticHost {
     }
     // Without a command word, Bash keeps neither the descriptor nor the variable of a `{name}` redirection, as if
     // it were performed in a subshell; files it opens are still created and its errors still reported.
-    const child = this.forkSubshell(this.fds.clone(), undefined, 0).shell;
-    child.currentRow = this.currentRow;
-    return child.withRedirects(statement.redirects, () => status);
+    const child = this.forkSubshell(this.fds.clone(), undefined, 0);
+    child.shell.currentRow = this.currentRow;
+    return child.runWith(() => child.shell.withRedirects(statement.redirects, () => status));
   }
 
   private withTemporaryScope(assignments: Assignment[], run: () => number): number {
@@ -1467,7 +1467,12 @@ export class Shell implements ArithmeticHost {
     fds: DescriptorTable,
     overrides?: SubshellOverrides,
     levels = 1
-  ): { fds: DescriptorTable; shell: Shell; run: (body: Statement[]) => number } {
+  ): {
+    fds: DescriptorTable;
+    shell: Shell;
+    run: (body: Statement[]) => number;
+    runWith: (action: () => number) => number;
+  } {
     this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1, levels);
     const lineShift = overrides?.lineShift ?? this.lineShift;
@@ -1480,7 +1485,9 @@ export class Shell implements ArithmeticHost {
       readShift: lineShift,
       loopDepth: this.loopDepth,
     });
-    const run = (body: Statement[]): number => {
+    // A subshell ends as a shell does: its process substitutions close, its EXIT trap runs, and the `>(...)`
+    // commands and coprocesses still pending run to their end.
+    const runWith = (action: () => number): number => {
       const subshellFrame: Frame = {
         callRow: undefined,
         isAtomic: false,
@@ -1489,9 +1496,14 @@ export class Shell implements ArithmeticHost {
       };
       this.runtime.frames.push(subshellFrame);
       try {
-        const status = overrides?.readsFile
-          ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
-          : runSubshellCommands(childShell, body);
+        let completed = false;
+        let status: number;
+        try {
+          status = action();
+          completed = true;
+        } finally {
+          childShell.closeProcessSubstitutions(0, completed);
+        }
         const exitStatus = childShell.runExitTrap(status);
         childShell.finishLingeringSubstitutions();
         childShell.finishCoprocesses();
@@ -1500,7 +1512,13 @@ export class Shell implements ArithmeticHost {
         this.runtime.frames.pop();
       }
     };
-    return { fds, shell: childShell, run };
+    const run = (body: Statement[]): number =>
+      runWith(() =>
+        overrides?.readsFile
+          ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
+          : runSubshellCommands(childShell, body)
+      );
+    return { fds, shell: childShell, run, runWith };
   }
 
   /** Runs `$(< file)`, which Bash replaces with the file's contents without running a command. */
