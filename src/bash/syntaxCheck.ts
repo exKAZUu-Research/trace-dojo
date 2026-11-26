@@ -30,6 +30,9 @@ export interface DeferredExpansion {
   readonly inDouble: boolean;
 }
 
+/** Where a `{name}` before a compound command's redirection is written, and its name. */
+type DescriptorVariableSpan = SourceText['descriptorVariables'][number];
+
 export interface AnalyzedBashSource {
   readonly originalSource: string;
   readonly grammarSource: string;
@@ -54,12 +57,13 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     throw new CompileError([{ row: checked.error.row, message: syntaxErrorMessage(checked.error.text) }]);
   }
   const backquotes = analyzeBackquotes(source, checked.backquotes);
+  const descriptorVariables = [...checked.descriptorVariables, ...backquotes.descriptorVariables];
   const literalQuotes = new Set([...checked.literalSingleQuotes, ...backquotes.literalSingleQuotes]);
   const declarationFunctionStarts = new Set([
     ...checked.declarationFunctionStarts,
     ...backquotes.declarationFunctionStarts,
   ]);
-  const withDescriptors = maskDescriptorVariables(backquotes.source, checked.descriptorVariables);
+  const withDescriptors = maskDescriptorVariables(backquotes.source, descriptorVariables);
   const normalized = applySourceNormalizations(withDescriptors, literalQuotes, declarationFunctionStarts);
   const regions = sortDeferredRegions([...checked.arithmeticRegions, ...backquotes.arithmeticRegions]);
   const { grammarSource, deferredArithmetic, deferredExpansions } = resolveDeferredArithmeticRegions(
@@ -76,7 +80,7 @@ export function analyzeBashSource(parser: Parser, source: string): AnalyzedBashS
     backquoteErrors: backquotes.errors,
     literalQuotes,
     declarationFunctionStarts,
-    descriptorVariables: new Map(checked.descriptorVariables.map(({ start, name }) => [start, name])),
+    descriptorVariables: new Map(descriptorVariables.map(({ start, name }) => [start, name])),
     uncertainExtglobRows: new Set(checked.uncertainExtglobRows),
   };
 }
@@ -97,7 +101,7 @@ export function checkBashSyntax(source: string): {
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
-  descriptorVariables: { start: number; end: number; name: string }[];
+  descriptorVariables: DescriptorVariableSpan[];
   uncertainExtglobRows: number[];
 } {
   const text = createValidatorSourceText(source);
@@ -131,11 +135,13 @@ function analyzeBackquotes(
   literalSingleQuotes: number[];
   declarationFunctionStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: DescriptorVariableSpan[];
 } {
   const errors = new Map<number, BackquoteSyntaxError>();
   const literalSingleQuotes: number[] = [];
   const declarationFunctionStarts: number[] = [];
   const arithmeticRegions: DeferredRegion[] = [];
+  const descriptorVariables: DescriptorVariableSpan[] = [];
   let normalized = source;
   for (const { start, end } of backquotes) {
     const inspected = inspectBackquoteSpan(source, start, end);
@@ -147,9 +153,17 @@ function analyzeBackquotes(
       literalSingleQuotes.push(...inspected.quoteOffsets);
       declarationFunctionStarts.push(...inspected.fnStarts);
       arithmeticRegions.push(...inspected.arithmeticRegions);
+      descriptorVariables.push(...inspected.descriptorVariables);
     }
   }
-  return { source: normalized, errors, literalSingleQuotes, declarationFunctionStarts, arithmeticRegions };
+  return {
+    source: normalized,
+    errors,
+    literalSingleQuotes,
+    declarationFunctionStarts,
+    arithmeticRegions,
+    descriptorVariables,
+  };
 }
 
 function inspectBackquoteSpan(
@@ -161,6 +175,7 @@ function inspectBackquoteSpan(
   quoteOffsets: number[];
   fnStarts: number[];
   arithmeticRegions: DeferredRegion[];
+  descriptorVariables: DescriptorVariableSpan[];
 } {
   let body = '';
   const bodyOffsets: number[] = [];
@@ -175,7 +190,13 @@ function inspectBackquoteSpan(
   const padded = `${pad}${body}\n`;
   const checked = checkBashSyntax(padded);
   if (checked.error && checked.error !== 'unknown') {
-    return { error: inspectUnescapedBackquoteBody(body, row), quoteOffsets: [], fnStarts: [], arithmeticRegions: [] };
+    return {
+      error: inspectUnescapedBackquoteBody(body, row),
+      quoteOffsets: [],
+      fnStarts: [],
+      arithmeticRegions: [],
+      descriptorVariables: [],
+    };
   }
   const nested = analyzeBackquotes(padded, checked.backquotes);
   const mapOffset = (idx: number): number | undefined => {
@@ -189,7 +210,12 @@ function inspectBackquoteSpan(
   const arithmeticRegions = [...checked.arithmeticRegions, ...nested.arithmeticRegions]
     .map((r) => mapDeferredRegion(r, mapOffset))
     .filter((r): r is DeferredRegion => r !== undefined);
-  return { quoteOffsets, fnStarts, arithmeticRegions };
+  const descriptorVariables = [...checked.descriptorVariables, ...nested.descriptorVariables].flatMap((span) => {
+    const start = mapOffset(span.start);
+    const last = mapOffset(span.end - 1);
+    return start === undefined || last === undefined ? [] : [{ start, end: last + 1, name: span.name }];
+  });
+  return { quoteOffsets, fnStarts, arithmeticRegions, descriptorVariables };
 }
 
 function mapDeferredRegion(
@@ -352,6 +378,35 @@ function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {
   return out;
 }
 
+/**
+ * Records the `{name}` spans of the command substitutions in a here-document body, which the grammar reads as
+ * commands, without checking them otherwise: Bash reports their syntax errors only when it expands the body.
+ */
+function collectHeredocDescriptorVariables(text: SourceText, start: number, end: number): void {
+  for (let i = text.source.indexOf('$(', start); i !== -1 && i < end; i = text.source.indexOf('$(', i + 2)) {
+    if (text.source[i + 2] === '(' || text.source[i - 1] === '\\') continue;
+    const found = text.descriptorVariables.length;
+    const marks = [
+      text.backquotes.length,
+      text.literalSingleQuotes.length,
+      text.declarationFunctionStarts.length,
+      text.arithmeticRegions.length,
+      text.uncertainExtglobRows.length,
+    ];
+    try {
+      i = new ShellGrammarValidator(text, i + 2, true).validateSubstitution() - 2;
+    } catch (error) {
+      if (!(error instanceof SyntaxFailure || error instanceof UnknownSyntax)) throw error;
+      text.descriptorVariables.length = found;
+    }
+    text.backquotes.length = marks[0];
+    text.literalSingleQuotes.length = marks[1];
+    text.declarationFunctionStarts.length = marks[2];
+    text.arithmeticRegions.length = marks[3];
+    text.uncertainExtglobRows.length = marks[4];
+  }
+}
+
 export function createValidatorSourceText(source: string): SourceText {
   const text = new SourceText(source);
   text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
@@ -492,7 +547,7 @@ class ShellTokenStream {
   /** Whether `extglob` is on only if a `shopt` that may not have run did, which the run checks. */
   extglobUncertain = false;
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
-  private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
+  private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean; expands: boolean }[] = [];
 
   constructor(
     private readonly text: SourceText,
@@ -529,6 +584,7 @@ class ShellTokenStream {
       this.queuedHeredocs.push({
         endMarker: word.value.replaceAll(/\\(.)|["']/g, '$1'),
         stripLeadingTabs: this.pendingHeredocSpec.stripLeadingTabs,
+        expands: !/["'\\]/.test(word.value),
       });
       this.pendingHeredocSpec = undefined;
     }
@@ -536,10 +592,17 @@ class ShellTokenStream {
   }
 
   private consumeQueuedHeredocs(): void {
-    for (const { endMarker, stripLeadingTabs } of this.queuedHeredocs.splice(0)) {
+    for (const { endMarker, stripLeadingTabs, expands } of this.queuedHeredocs.splice(0)) {
+      const bodyStart = this.position;
+      let bodyEnd = bodyStart;
       let line: string | undefined;
-      do line = this.consumeRawLine();
-      while (line !== undefined && (stripLeadingTabs ? line.replace(/^\t+/, '') : line) !== endMarker);
+      for (;;) {
+        const lineStart = this.position;
+        line = this.consumeRawLine();
+        if (line === undefined || (stripLeadingTabs ? line.replace(/^\t+/, '') : line) === endMarker) break;
+        bodyEnd = lineStart + line.length;
+      }
+      if (expands) collectHeredocDescriptorVariables(this.text, bodyStart, bodyEnd);
     }
   }
 
