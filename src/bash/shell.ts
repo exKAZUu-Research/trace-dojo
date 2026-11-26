@@ -350,13 +350,19 @@ export class Shell implements ArithmeticHost {
   }
 
   /**
-   * Handles a failed command whose context does not ignore the failure: runs the `ERR` trap, which functions run
-   * only under `set -E`, and exits when `set -e` is on.
+   * Handles a failed command whose context does not ignore the failure: runs the `ERR` trap if one was set before the
+   * command ran (`trapped`), as Bash decides, and exits when `set -e` is on. A function does not see the caller's
+   * `ERR` trap without `set -E`, which `callFunction` sets aside.
    */
-  private checkErrexit(status: number): void {
+  private checkErrexit(status: number, trapped: boolean): void {
     if (status === 0 || this.errexitIgnored > 0) return;
-    if (this.options.errtrace || !this.isInFunction) this.runTrap('ERR', status);
+    if (trapped) this.runTrap('ERR', status);
     if (this.options.errexit) throw new ExitSignal(status);
+  }
+
+  /** Whether an `ERR` trap is set now, which a command that fails after this runs. */
+  private get errTrapSet(): boolean {
+    return this.traps.has('ERR');
   }
 
   execute(statement: Statement, guarded = false): number {
@@ -456,9 +462,10 @@ export class Shell implements ArithmeticHost {
       case 'declaration':
       case 'arithmetic':
       case 'test': {
+        const trapped = this.errTrapSet;
         status = this.executeSimple(statement, guarded);
         this.store.pipeStatus = [status];
-        if (statement !== this.elementCommand) this.checkErrexit(status);
+        if (statement !== this.elementCommand) this.checkErrexit(status, trapped);
         break;
       }
       case 'if': {
@@ -522,13 +529,14 @@ export class Shell implements ArithmeticHost {
       this.currentRow = this.functionDefinitionRow;
     }
     let redirected = false;
+    const trapped = this.errTrapSet;
     const input = this.fds.get(0);
     const status = this.withRedirects(statement.redirects, () => {
       redirected = true;
       return this.withStandardInputMark(this.fds.get(0) !== input, () => this.execute(statement.body, guarded));
     });
     // A failed redirection fails the compound command itself, while its body applies the rules on its own.
-    if (!redirected) this.checkErrexit(status);
+    if (!redirected) this.checkErrexit(status, trapped);
     return status;
   }
 
@@ -553,16 +561,17 @@ export class Shell implements ArithmeticHost {
   private executeProcessStatement(
     statement: Extract<Statement, { kind: 'subshell' | 'pipeline' | 'background' | 'coproc' }>
   ): number {
+    const trapped = this.errTrapSet;
     switch (statement.kind) {
       case 'subshell': {
         const status = this.runSubshell(statement.body, this.fds.clone(), undefined, 1, true);
         this.store.pipeStatus = [status];
-        this.checkErrexit(status);
+        this.checkErrexit(status, trapped);
         return status;
       }
       case 'pipeline': {
         const status = this.executePipeline(statement.commands);
-        this.checkErrexit(status);
+        this.checkErrexit(status, trapped);
         return status;
       }
       case 'background': {
@@ -1431,8 +1440,12 @@ export class Shell implements ArithmeticHost {
       shift: this.lineShift,
       definitionRow: this.functionDefinitionRow,
       setOptions: this.setOptionsToRestore,
+      // Without `set -E`, the caller's `ERR` trap is set aside for the function, and comes back when it returns,
+      // over a trap the function set; a trap set where none was stays, as in Bash.
+      errTrap: this.options.errtrace ? undefined : this.traps.get('ERR'),
     };
     this.setOptionsToRestore = undefined;
+    if (saved.errTrap) this.traps.delete('ERR');
     this.loopDepth = 0;
     this.lineShift = fn.lineShift;
     this.functionDefinitionRow = fn.definitionRow;
@@ -1450,6 +1463,7 @@ export class Shell implements ArithmeticHost {
       const restored = this.setOptionsToRestore;
       if (restored) for (const name of SET_OPTION_NAMES) this.options[name] = restored[name];
       this.setOptionsToRestore = saved.setOptions;
+      if (saved.errTrap) this.traps.set('ERR', saved.errTrap);
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
