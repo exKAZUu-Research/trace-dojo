@@ -148,8 +148,12 @@ class Stdout extends _StdSink implements IOSink {
  */
 class _StdIOSink implements IOSink {
   final bool _isError;
-  final Completer<void> _closed = Completer<void>();
+  /** Completes once the sink is closed, or fails once an error is added to it. */
+  final Completer<void> _done = Completer<void>();
+  bool _isClosed = false;
   bool _isBound = false;
+  /** Whether an error was added, after which the SDK's consumer, its subscription cancelled, drops what is written. */
+  bool _hasError = false;
   _StdIOSink(this._isError);
   Encoding get encoding => utf8;
   set encoding(Encoding value) => _requireUtf8(value);
@@ -181,27 +185,34 @@ class _StdIOSink implements IOSink {
   }
   void add(List<int> data) {
     _requireWritable();
+    if (_hasError) return;
     // print and the end of the run do not pass through the sink, so a character cannot continue in a later add.
     _writeStream(_isError, _textOfBytes(data));
   }
   void _add(String text) {
     _requireWritable();
+    if (_hasError) return;
     _writeStream(_isError, text);
   }
   /** Fails a write as the SDK's sink does: once it is closed, and while a stream is added to it. */
   void _requireWritable() {
-    if (_closed.isCompleted) throw StateError("StreamSink is closed");
+    if (_isClosed) throw StateError("StreamSink is closed");
     if (_isBound) throw StateError("StreamSink is bound to a stream");
   }
+  /** The error reaches the SDK's consumer, which fails the sink's done, unhandled unless something waits on it. */
   void addError(Object error, [StackTrace? stackTrace]) {
-    Error.throwWithStackTrace(error, stackTrace ?? StackTrace.empty);
+    _requireWritable();
+    if (_hasError) return;
+    _hasError = true;
+    _done.completeError(error, stackTrace ?? StackTrace.empty);
   }
   Future addStream(Stream<List<int>> stream) {
     if (_isBound) throw StateError("StreamSink is already bound to a stream");
+    if (_hasError) return done;
     _isBound = true;
     return stream.forEach((data) {
       // The VM's sink hands a stream to the descriptor's file, which fails each chunk, even an empty one, once closed.
-      if (_closed.isCompleted) throw const FileSystemException("File closed", "");
+      if (_isClosed) throw const FileSystemException("File closed", "");
       _writeStream(_isError, _textOfBytes(data));
     }).whenComplete(() {
       _isBound = false;
@@ -215,10 +226,11 @@ class _StdIOSink implements IOSink {
   Future close() {
     if (_isBound) throw StateError("StreamSink is bound to a stream");
     _closeStream(_isError);
-    if (!_closed.isCompleted) _closed.complete();
-    return _closed.future;
+    _isClosed = true;
+    if (!_done.isCompleted) _done.complete();
+    return _done.future;
   }
-  Future get done => _closed.future;
+  Future get done => _done.future;
 }
 
 external void _writeStream(bool isError, String text);
