@@ -9006,6 +9006,26 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '[1, 2, 3] 10 1 55 1.5s\n' });
 });
 
+// Rust would wait forever on these; the interpreter stops them as deadlocks rather than ending them early.
+test('a receive that no thread can ever answer, or a lock taken twice, stops as a deadlock', () => {
+  const waiting = `use std::sync::mpsc;
+fn main() {
+    let (tx, rx) = mpsc::channel();
+    tx.send(1).unwrap();
+    for v in rx { println!("got {v}"); }
+}`;
+  expect(executeProgram('rust', waiting)).toMatchObject({
+    kind: 'executed',
+    stdout: 'got 1\n',
+    uncaughtException: expect.stringContaining('デッドロック'),
+  });
+  const relocked = `use std::sync::Mutex;
+fn main() { let m = Mutex::new(0); let _a = m.lock().unwrap(); let _b = m.lock().unwrap(); }`;
+  expect(executeProgram('rust', relocked)).toMatchObject({
+    uncaughtException: expect.stringContaining('デッドロック'),
+  });
+});
+
 // The expected text is what rustc 1.99.1 (edition 2024) prints for the same program.
 test('async functions and blocks run under an executor the program writes, with futures it implements', () => {
   const program = String.raw`use std::future::Future;
