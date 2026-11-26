@@ -6,7 +6,7 @@ import type { Checker } from './checker';
 import { FlowState } from './flow';
 import { unavailableNodeMember } from './nodeLibrary';
 import type { Scope, Sym } from './scopes';
-import { spellingSuggestion } from './spelling';
+import { nameSuggestionHint, spellingSuggestion } from './spelling';
 import { named, stringValue } from './syntax';
 import {
   anonymousObject,
@@ -92,7 +92,12 @@ export class Namespaces {
     const value = this.resolvePath(path, 'value');
     if (value.symbol) return;
     const type = this.resolvePath(path, 'type');
-    if (!type.symbol && value.error) this.c.error(target, value.error);
+    if (type.symbol) return;
+    const [root] = path;
+    const error =
+      value.error ??
+      `名前 ${root.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(root), root.text, 'value', this.c.budget)}`;
+    this.c.error(target, error);
   }
 
   /** The symbol the last name of a path names, as a value or a type, through the namespaces of the names before it. */

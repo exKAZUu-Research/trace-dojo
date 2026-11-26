@@ -1,0 +1,4 @@
+(2,12): error TS2304: Cannot find name 'Nope'.
+(2,12): error TS2503: Cannot find namespace 'Nope'.
+(3,12): error TS2552: Cannot find name 'Shape'. Did you mean 'Shapes'?
+(3,12): error TS2833: Cannot find namespace 'Shape'. Did you mean 'Shapes'?

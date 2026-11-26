@@ -1,0 +1,4 @@
+namespace Shapes { export const n = 1; }
+import X = Nope;
+import Y = Shape;
+console.log(X, Y);
