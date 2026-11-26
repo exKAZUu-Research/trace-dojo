@@ -885,6 +885,11 @@ class _JsonStringDecoderSink implements EventSink<String> {
   final List<String> _chunks = <String>[];
   bool _hasFailed = false;
   bool _isRejected = false;
+  /**
+   * The value the chunked parser had committed when the error came: one the chunks before the erroring one complete,
+   * when that chunk has only whitespace before its error, so that it cannot have continued the value.
+   */
+  List<Object?>? _committed;
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
@@ -900,6 +905,8 @@ class _JsonStringDecoderSink implements EventSink<String> {
       final offset = error.offset;
       if (offset != null && offset < source.length) {
         _hasFailed = true;
+        final before = source.length - chunk.length;
+        if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(source.substring(0, before));
         throw _inChunk(error, offset);
       }
     }
@@ -918,8 +925,10 @@ class _JsonStringDecoderSink implements EventSink<String> {
   }
 
   void close() {
+    final committed = _committed;
+    if (_hasFailed && !_isRejected && committed != null) _sink.add(committed[0]);
     // The stream still ends after the rejection, as the SDK's ends after its second error.
-    if (_hasFailed && !_isRejected) _sink.addError(_unavailableAfterError);
+    if (_hasFailed && !_isRejected && committed == null) _sink.addError(_unavailableAfterError);
     if (_hasFailed) {
       _sink.close();
       return;
@@ -933,6 +942,15 @@ class _JsonStringDecoderSink implements EventSink<String> {
     }
     _sink.add(value);
     _sink.close();
+  }
+
+  void _commit(String text) {
+    if (text.trim().isEmpty) return;
+    try {
+      _committed = [_jsonDecode(text, _reviver)];
+    } on FormatException {
+      // The chunks before the erroring one leave the value unfinished.
+    }
   }
 
   FormatException _inChunk(FormatException error, int offset) {
