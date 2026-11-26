@@ -2000,16 +2000,20 @@ export abstract class StatementCompiler extends CallCompiler {
         : undefined;
       iterations.push({ body: body.exec, continuation });
     }
+    const row = this.stepRow(expression);
     return this.unrolledLoop(
       expression,
-      { target, exhausted, noreturn, asStatement, row: this.stepRow(expression) },
+      { target, exhausted, noreturn, asStatement },
       iterations.length,
       (frame, index) => {
         const iteration = iterations[index];
         const id = target.id;
         const completion = loopExit(runBody(iteration.body, frame, id), id);
         if (completion || !iteration.continuation) return completion;
-        return loopExit(runBody(iteration.continuation, frame, id), id);
+        const continued = loopExit(runBody(iteration.continuation, frame, id), id);
+        // The while row records the state its continue expression leaves, as a loop that runs does.
+        if (!continued) frame.runtime.steps.step(row);
+        return continued;
       }
     );
   }
@@ -2021,12 +2025,12 @@ export abstract class StatementCompiler extends CallCompiler {
   // code-gauge-allow functionCognitiveComplexity -- Keeps the generated code of one loop and its else branch together.
   private unrolledLoop(
     expression: ExpressionOf<'while' | 'for'>,
-    loop: { target: JumpTarget; exhausted: boolean; noreturn: boolean; asStatement: boolean; row: number | undefined },
+    loop: { target: JumpTarget; exhausted: boolean; noreturn: boolean; asStatement: boolean },
     count: number,
     runIteration: (frame: Frame, index: number) => Jump | { value: Value } | undefined,
     prepare?: (frame: Frame) => void
   ): { stmt: Stmt; value: TExpr } {
-    const { target, exhausted, asStatement, row } = loop;
+    const { target, exhausted, asStatement } = loop;
     const otherwise =
       exhausted && expression.otherwise
         ? this.branch(expression.otherwise, undefined, target.resultType, asStatement, false)
@@ -2038,7 +2042,6 @@ export abstract class StatementCompiler extends CallCompiler {
       prepare?.(frame);
       for (let index = 0; index < count; index++) {
         frame.runtime.spend();
-        if (expression.kind === 'while') frame.runtime.steps.step(row);
         const completion = runIteration(frame, index);
         if (completion) return completion;
       }
@@ -2422,7 +2425,7 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluateOperands = known.map((each) => each?.evaluateOperand);
     const run = this.unrolledLoop(
       expression,
-      { target, exhausted, noreturn, asStatement, row },
+      { target, exhausted, noreturn, asStatement },
       iterations.length,
       (frame, index) => {
         const iteration = iterations[index];
