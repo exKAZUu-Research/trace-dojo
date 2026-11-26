@@ -268,6 +268,24 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  /**
+   * The non-null part of `??`'s left operand: NonNull of its type, except for a variable declared `T?` and promoted to
+   * `T` by a type test (`is! Null`), which the SDK keeps as `T`, potentially nullable through a nullable bound, instead
+   * of promoting it to the bound's non-null part.
+   */
+  private ifNullLeftType(left: Compiled): DartType {
+    const { type, variable } = left;
+    const declared = variable?.type;
+    const isSplit =
+      type.kind === 'typeParam' &&
+      !type.nullable &&
+      type.promoted === undefined &&
+      declared?.kind === 'typeParam' &&
+      declared.param === type.param &&
+      declared.nullable;
+    return isSplit ? type : nonNullable(type);
+  }
+
   private compileIfNull(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
     const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
     const { whenNull, whenNonNull } = this.nullBranches(left);
@@ -282,7 +300,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     );
     this.flow = Flow.join(whenNonNull, this.flow);
     const rightRun = right.run;
-    const nonNullLeft = left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type);
+    const nonNullLeft = left.type.kind === 'dynamic' ? DYNAMIC : this.ifNullLeftType(left);
     const type = branchesType(upperBound(nonNullLeft, right.type), [nonNullLeft, right.type], context);
     return {
       type,
