@@ -436,11 +436,20 @@ function startsCompoundCommand(source: string, index: number): boolean {
   );
 }
 
-/** What a simple command's words set `extglob` to, as `shopt -s extglob` or `shopt -u extglob` does. */
-function extglobSetBy(words: readonly string[]): boolean | undefined {
-  const [name, option, ...operands] = words;
-  if (name !== 'shopt' || (option !== '-s' && option !== '-u') || !operands.includes('extglob')) return undefined;
-  return option === '-s';
+/**
+ * What a simple command's words set `extglob` to, as `shopt -s extglob` or `shopt -u extglob` does, written with
+ * quotes, grouped flags such as `-sq`, or after `builtin` or `command`.
+ */
+function extglobSetBy(written: readonly string[]): boolean | undefined {
+  const words = written.map((word) => word.replaceAll(/['"\\]/g, ''));
+  while (words[0] === 'builtin' || words[0] === 'command') words.shift();
+  if (words[0] !== 'shopt') return undefined;
+  let flags = '';
+  let index = 1;
+  for (; index < words.length && /^-[a-z]+$/.test(words[index]); index++) flags += words[index].slice(1);
+  if (words[index] === '--') index++;
+  if (!words.slice(index).includes('extglob') || flags.includes('s') === flags.includes('u')) return undefined;
+  return flags.includes('s');
 }
 
 /** Whether the text before `index`, past blanks, ends a command, so that a word at `index` starts one. */
@@ -675,10 +684,13 @@ class ShellGrammarValidator {
   private readonly stream: ShellTokenStream;
   private cached: ShellToken | undefined;
   private cachedContext: WordContext = 'argument';
-  /** How many compound commands, function bodies, and coprocesses enclose the command being read. */
-  private compoundDepth = 0;
-  /** What the top-level commands of the line being read set `extglob` to, if any of them sets it. */
-  private lineExtglob: boolean | undefined;
+  /** How many function bodies, subshells, and coprocesses enclose the command being read. */
+  private separateShellDepth = 0;
+  /**
+   * What the commands of the line being read that run in this shell set `extglob` to, in order: those in a pipeline
+   * of several commands or a background list run in subshells, so they are dropped when the pipeline or list ends.
+   */
+  private readonly lineExtglob: boolean[] = [];
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
 
   constructor(
@@ -695,11 +707,12 @@ class ShellGrammarValidator {
       this.consumeNewlines();
       const start = this.peek();
       if (start.kind === 'eof') return;
-      this.lineExtglob = undefined;
+      this.lineExtglob.length = 0;
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
-      if (this.lineExtglob !== undefined) this.stream.extglob = this.lineExtglob;
+      const last = this.lineExtglob.at(-1);
+      if (last !== undefined) this.stream.extglob = last;
     }
   }
 
@@ -724,6 +737,7 @@ class ShellGrammarValidator {
 
   private parseList(multiline: boolean): void {
     if (multiline) this.consumeNewlines();
+    let listStart = this.lineExtglob.length;
     this.parsePipeline();
     for (;;) {
       const next = this.peek();
@@ -736,9 +750,12 @@ class ShellGrammarValidator {
       const isSeparator =
         this.hasOperator(next, ';') || this.hasOperator(next, '&') || (multiline && next.kind === 'newline');
       if (!isSeparator) return;
+      // A list run in the background runs in a subshell.
+      if (this.hasOperator(next, '&')) this.lineExtglob.length = listStart;
       this.advance();
       if (multiline) this.consumeNewlines();
       if (!this.canBeginCommand(this.peek())) return;
+      listStart = this.lineExtglob.length;
       this.parsePipeline();
     }
   }
@@ -762,12 +779,17 @@ class ShellGrammarValidator {
       if (!emptyTimed) this.parsePipeline();
       return;
     }
+    const pipelineStart = this.lineExtglob.length;
     this.parseCommand();
+    let commandCount = 1;
     while (this.hasOperator(this.peek(), '|') || this.hasOperator(this.peek(), '|&')) {
       this.advance();
       this.consumeNewlines();
       this.parseCommand();
+      commandCount++;
     }
+    // The commands of a pipeline run in subshells, as a script has `lastpipe` off when it is read.
+    if (commandCount > 1) this.lineExtglob.length = pipelineStart;
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Dispatches function definitions, coprocesses, compound constructs, and simple commands.
@@ -786,7 +808,7 @@ class ShellGrammarValidator {
           if (name.kind === 'word' && !this.isKeywordToken(name) && startsCompoundCommand(this.text.source, name.end)) {
             this.advance();
           }
-          this.withinCompound(() => this.parseCommand());
+          this.inSeparateShell(() => this.parseCommand());
           return;
         }
         this.parseCompoundWithRedirections();
@@ -804,20 +826,17 @@ class ShellGrammarValidator {
     });
   }
 
-  private withinCompound(parse: () => void): void {
-    this.compoundDepth++;
+  private inSeparateShell(parse: () => void): void {
+    this.separateShellDepth++;
     try {
       parse();
     } finally {
-      this.compoundDepth--;
+      this.separateShellDepth--;
     }
   }
 
   private parseCompoundWithRedirections(): void {
-    let requiresSeparator = false;
-    this.withinCompound(() => {
-      requiresSeparator = this.parseCompoundConstruct();
-    });
+    const requiresSeparator = this.parseCompoundConstruct();
     this.parseTrailingRedirections();
     const next = this.peek();
     const closesEnclosing =
@@ -834,7 +853,7 @@ class ShellGrammarValidator {
     if (this.hasOperator(this.peek(), '((') && this.tryParseArithmeticConstruct()) return true;
     const lead = this.peek();
     if (this.hasOperator(lead, '(')) {
-      this.parseDelimitedCompound(lead, ')');
+      this.inSeparateShell(() => this.parseDelimitedCompound(lead, ')'));
       return false;
     }
     if (lead.kind !== 'word' || !this.isKeywordToken(lead)) this.failUnexpected(lead);
@@ -1099,7 +1118,8 @@ class ShellGrammarValidator {
     if (!validCompound || bodyLead.value === 'function' || bodyLead.value === 'time' || bodyLead.value === 'coproc') {
       this.failUnexpected(bodyLead);
     }
-    this.parseCompoundWithRedirections();
+    // A function body runs only when the function is called, which a reading of the script cannot tell.
+    this.inSeparateShell(() => this.parseCompoundWithRedirections());
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
@@ -1115,8 +1135,9 @@ class ShellGrammarValidator {
         continue;
       }
       if (token.kind !== 'word') {
-        // Bash reads each line after running the lines before it, so only a top-level `shopt` changes later lines.
-        if (this.compoundDepth === 0) this.lineExtglob = extglobSetBy(words) ?? this.lineExtglob;
+        // Bash reads each line after running the lines before it, so a `shopt` this shell runs changes later lines.
+        const setting = this.separateShellDepth === 0 ? extglobSetBy(words) : undefined;
+        if (setting !== undefined) this.lineExtglob.push(setting);
         return;
       }
       this.advance();
