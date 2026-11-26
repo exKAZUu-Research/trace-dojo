@@ -4,6 +4,7 @@ import './nativesTime';
 import './nativesIndex';
 import './nativesIterators';
 import './nativesIo';
+import './nativesConsole';
 import './nativesTasks';
 import './nativesString';
 import './nativesCollections';
