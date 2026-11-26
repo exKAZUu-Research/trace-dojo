@@ -104,40 +104,40 @@ instance FiniteBits ${name} where
 }
 
 function signedDivision(con: string, lo: bigint): string {
-  return String.raw`  quot (${con} a) (${con} b)
+  return String.raw`  quot (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) && a == (${lo}) = overflowError
     | otherwise = ${con} (quot a b)
-  rem (${con} a) (${con} b)
+  rem (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) = 0
     | otherwise = ${con} (rem a b)
-  div (${con} a) (${con} b)
+  div (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) && a == (${lo}) = overflowError
     | otherwise = ${con} (div a b)
-  mod (${con} a) (${con} b)
+  mod (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) = 0
     | otherwise = ${con} (mod a b)
-  quotRem (${con} a) (${con} b)
+  quotRem (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) && a == (${lo}) = (overflowError, 0)
     | otherwise = (${con} (quot a b), ${con} (rem a b))
-  divMod (${con} a) (${con} b)
+  divMod (${con} !a) (${con} !b)
     | b == 0 = divZeroError
     | b == (-1) && a == (${lo}) = (overflowError, 0)
     | otherwise = (${con} (div a b), ${con} (mod a b))`;
 }
 
 function unsignedDivision(con: string): string {
-  return String.raw`  quot (${con} a) (${con} b)
+  return String.raw`  quot (${con} !a) (${con} !b)
     | b /= 0 = ${con} (quot a b)
     | otherwise = divZeroError
-  rem (${con} a) (${con} b)
+  rem (${con} !a) (${con} !b)
     | b /= 0 = ${con} (rem a b)
     | otherwise = divZeroError
-  quotRem (${con} a) (${con} b)
+  quotRem (${con} !a) (${con} !b)
     | b /= 0 = (${con} (quot a b), ${con} (rem a b))
     | otherwise = divZeroError
   div x y = quot x y
