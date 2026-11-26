@@ -138,7 +138,8 @@ export class Shell implements ArithmeticHost {
     this.store.setLineReader(() => this.currentRow + 1);
     this.failures = new FailurePolicy(
       () => this.currentRow + 1,
-      () => this.fd2
+      () => this.fd2,
+      () => this.options.errexit
     );
     this.expander = new Expander(this);
   }
@@ -208,8 +209,6 @@ export class Shell implements ArithmeticHost {
           this.runStatements(unit);
         } catch (error) {
           if (!(error instanceof DiscardSignal)) throw error;
-          // Under `set -e`, Bash exits at an error that abandons a command, even where it ignores failed statuses.
-          if (this.options.errexit) throw new ExitSignal(error.status);
           this.store.lastStatus = error.status;
           if (error.leftRow !== undefined) this.readShift = (program.unitEndRows[index] as number) - error.leftRow;
         }
@@ -1374,8 +1373,13 @@ export class Shell implements ArithmeticHost {
     this.failures.report(message);
   }
 
-  discard(message: string, status = 1): never {
-    this.failures.discard(message, status);
+  /** Reports an error that ends the shell under `set -e`, as Bash's `report_error` does. */
+  reportShellError(message: string): void {
+    this.failures.reportFatal(message);
+  }
+
+  discard(message: string, status = 1, recoverable = false): never {
+    this.failures.discard(message, status, recoverable);
   }
 
   evaluate(source: ArithmeticSource, commandName: string | undefined): bigint {
@@ -1386,7 +1390,7 @@ export class Shell implements ArithmeticHost {
     try {
       return evaluateArithmetic(text, this, commandName, this.runtime.step, preExpanded);
     } catch (error) {
-      if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticError) this.discard(error.message, 1, true);
       if (error instanceof ArithmeticStoreError) {
         this.failures.handleStoreFailure('expansion', error.failure);
       }
@@ -1398,7 +1402,7 @@ export class Shell implements ArithmeticHost {
     try {
       return evaluateArithmetic(text, this, commandName, this.runtime.step, preExpanded);
     } catch (error) {
-      if (error instanceof ArithmeticError) this.discard(error.message);
+      if (error instanceof ArithmeticError) this.discard(error.message, 1, true);
       if (error instanceof ArithmeticStoreError) {
         this.failures.handleStoreFailure('fatalReadonlyArithmetic', error.failure);
       }

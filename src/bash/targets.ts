@@ -139,7 +139,7 @@ function emptyArithmeticSubscriptTarget(
 ): ResolvedTarget | undefined {
   if (operation === 'arithmeticRead') {
     shell.reportError(`${name}[]: bad array subscript`);
-    shell.reportError(`${name}[]: bad array subscript`);
+    shell.reportShellError(`${name}[]: bad array subscript`);
     return invalidTarget(`${name}[]`, 'badSubscript', '');
   }
   if (operation === 'arithmeticWrite') {
@@ -168,7 +168,7 @@ function resolveWholeArraySubscript(
     );
   }
   if (operation === 'arithmeticRead' || operation === 'arithmeticWrite') {
-    if (operation === 'arithmeticRead') shell.reportError(`${resolved}[${rawSubText}]: bad array subscript`);
+    if (operation === 'arithmeticRead') shell.reportShellError(`${resolved}[${rawSubText}]: bad array subscript`);
     return invalidTarget(
       `${reportedName}[${rawSubText}]`,
       'badSubscript',
@@ -200,7 +200,7 @@ function resolveAssociativeSubscript(
         : opts.operation === 'testSet'
           ? resolved
           : `${opts.name}[${rawSubText}]`;
-    if (opts.operation === 'arithmeticRead') shell.reportError(`${opts.name}[${rawSubText}]: bad array subscript`);
+    if (opts.operation === 'arithmeticRead') shell.reportShellError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
   const own = shell.store.ownView(resolved);
@@ -229,7 +229,7 @@ function resolveIndexedSubscript(
   const rawIndex = shell.evaluateFatalReadonly(normalized, true);
   const index = rawIndex >= 0n ? rawIndex : shell.store.translateNegativeIndex(resolved, rawIndex, forWrite);
   if (index === undefined) {
-    if (opts.operation === 'arithmeticRead') shell.reportError(`${resolved}: bad array subscript`);
+    if (opts.operation === 'arithmeticRead') shell.reportShellError(`${resolved}: bad array subscript`);
     const label = formatBadIndexedLabel(opts.name, resolved, rawSubText, normalized, opts.operation);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }

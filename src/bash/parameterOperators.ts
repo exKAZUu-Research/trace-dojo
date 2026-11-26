@@ -417,7 +417,7 @@ function substring(
   };
   const offset = evaluate(offsetParts);
   const negativeLength = (): never =>
-    shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`);
+    shell.discard(`${rawLengthSource(expansion.text, expansion.name)}: substring expression < 0`, 1, true);
   if (value.kind === 'scalar' || scalarTarget !== undefined) {
     const sliced = sliceString(
       scalarTarget as string,

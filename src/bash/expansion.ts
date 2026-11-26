@@ -249,7 +249,7 @@ export class Expander {
     for (let i = 0; i < words.length; i += 2) {
       const key = this.expandAssignmentValue(words[i]);
       if (key === '') {
-        this.shell.reportError(`${words[i].text}: bad array subscript`);
+        this.shell.reportShellError(`${words[i].text}: bad array subscript`);
         continue;
       }
       const value = i + 1 < words.length ? this.expandAssignmentValue(words[i + 1]) : '';
@@ -513,7 +513,7 @@ export class Expander {
     }
     if (subscript.rawText === '' && expansion) this.shell.discard(`${expansion.text}: bad substitution`);
     if (subscript.text === '' && this.shell.store.isAssociativeName(resolved)) {
-      this.shell.reportError(`${name}: bad array subscript`);
+      this.shell.reportShellError(`${name}: bad array subscript`);
       return { kind: 'scalar', value: undefined };
     }
     const subText = subscript.text === '' ? '0' : subscript.text;
@@ -524,7 +524,7 @@ export class Expander {
       operation: 'read',
     });
     if (target.kind === 'invalid') {
-      if (target.failure.message !== '') this.shell.reportError(target.failure.message);
+      if (target.failure.message !== '') this.shell.reportShellError(target.failure.message);
       return { kind: 'scalar', value: undefined };
     }
     return { kind: 'scalar', value: readResolvedTarget(this.shell, target) };

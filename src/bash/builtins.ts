@@ -246,7 +246,7 @@ function unsetNonIdentifierOperand(shell: Shell, name: string, mode: UnsetMode):
 }
 
 function rejectExtraOperands(shell: Shell, name: string, extra: string[]): void {
-  if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2);
+  if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2, true);
 }
 
 function shift(shell: Shell, args: string[]): number {
