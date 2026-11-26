@@ -20,8 +20,11 @@ import {
 } from './capabilities';
 import { conditionalStatus } from './conditional';
 import { executeCompoundAssignment, executeDeclarationCommand } from './declare';
+import { BadDescriptorError, type DescriptorTable, type OpenFile, type OutputTarget } from './descriptors';
 import { Expander } from './expansion';
 import { FailurePolicy, type StoreOutcome } from './failurePolicy';
+import { defaultOptions, type ShellOptionValues } from './options';
+import { applyRedirects, initialDescriptors, RedirectionError } from './redirection';
 import {
   BreakSignal,
   ContinueSignal,
@@ -29,7 +32,6 @@ import {
   ExitSignal,
   type Frame,
   type FunctionDefinition,
-  type OutputTarget,
   ReturnSignal,
   type Runtime,
 } from './runtime';
@@ -43,17 +45,29 @@ import {
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
 
-export { BASH_VERSION, type FunctionDefinition, type OutputTarget } from './runtime';
+export { BASH_VERSION, type FunctionDefinition } from './runtime';
 export type { CompoundElement } from './variables';
 
 type StepMode = 'statement' | 'binding' | 'skip';
 
 const CONDITION_BUILTINS = new Set<string>(['test', '[', 'true', 'false', ...TURTLE_PREDICATE_NAMES]);
 
+/** What a writer to a closed descriptor gets, which fails the write as Bash's `write` does. */
+const CLOSED_OUTPUT: OutputTarget = {
+  write: () => {
+    throw new BadDescriptorError();
+  },
+};
+
+/** Where error messages go when standard error is closed: nowhere, as Bash's writes to it then fail silently. */
+const DISCARDED_OUTPUT: OutputTarget = { write: () => {} };
+
 interface ShellContextOptions {
   readonly store?: VariableStore;
-  readonly fd1?: OutputTarget;
-  readonly fd2?: OutputTarget;
+  readonly fds?: DescriptorTable;
+  readonly workingDirectory?: string;
+  readonly options?: ShellOptionValues;
+  readonly ignoresErrexit?: boolean;
   readonly lineShift?: number;
   readonly readShift?: number;
   readonly loopDepth?: number;
@@ -67,9 +81,18 @@ export class Shell implements ArithmeticHost {
   readonly store: VariableStore;
   readonly failures: FailurePolicy;
   readonly expander: Expander;
-  fd1: OutputTarget;
-  fd2: OutputTarget;
+  readonly fds: DescriptorTable;
+  readonly options: ShellOptionValues;
+  /** The directory that relative paths start from, which `cd` changes. */
+  workingDirectory: string;
   currentRow = 0;
+  /** The descriptors that `{name}>file` allocated, which stay open after the command, as Bash keeps them. */
+  private readonly allocatedDescriptors = new Set<number>();
+  /**
+   * How many enclosing contexts ignore a failure for `set -e`: a condition, a command before `&&` or `||`, or one
+   * after `!`, whose functions and subshells ignore it as well.
+   */
+  private errexitIgnored: number;
   private readShift: number;
   private lineShift: number;
   private loopDepth: number;
@@ -78,8 +101,10 @@ export class Shell implements ArithmeticHost {
     readonly runtime: Runtime,
     options?: ShellContextOptions
   ) {
-    this.fd1 = options?.fd1 ?? runtime.io.stdout;
-    this.fd2 = options?.fd2 ?? runtime.io.stderr;
+    this.fds = options?.fds ?? initialDescriptors({ runtime });
+    this.workingDirectory = options?.workingDirectory ?? '/';
+    this.options = options?.options ?? defaultOptions();
+    this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
     this.lineShift = options?.lineShift ?? 0;
     this.readShift = options?.readShift ?? 0;
     this.loopDepth = options?.loopDepth ?? 0;
@@ -90,6 +115,16 @@ export class Shell implements ArithmeticHost {
       () => this.fd2
     );
     this.expander = new Expander(this);
+  }
+
+  /** Standard output, where a write fails when the descriptor is closed or open only for reading. */
+  get fd1(): OutputTarget {
+    return this.fds.get(1)?.output ?? CLOSED_OUTPUT;
+  }
+
+  /** Standard error, where error messages go, which are lost when the descriptor is closed. */
+  get fd2(): OutputTarget {
+    return this.fds.get(2)?.output ?? DISCARDED_OUTPUT;
   }
 
   // ---------------------------------------------------------------- running
@@ -121,11 +156,28 @@ export class Shell implements ArithmeticHost {
   }
 
   private runCondition(statements: Statement[]): number {
-    let status = 0;
-    for (const [index, statement] of statements.entries()) {
-      status = this.execute(statement, index === statements.length - 1);
+    return this.ignoringErrexit(() => {
+      let status = 0;
+      for (const [index, statement] of statements.entries()) {
+        status = this.execute(statement, index === statements.length - 1);
+      }
+      return status;
+    });
+  }
+
+  private ignoringErrexit(run: () => number): number {
+    this.errexitIgnored++;
+    try {
+      return run();
+    } finally {
+      this.errexitIgnored--;
     }
-    return status;
+  }
+
+  /** Exits after a failed command when `set -e` is on and the command's context does not ignore the failure. */
+  private checkErrexit(status: number): void {
+    if (status === 0 || this.errexitIgnored > 0) return;
+    if (this.options.errexit) throw new ExitSignal(status);
   }
 
   // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
@@ -139,6 +191,8 @@ export class Shell implements ArithmeticHost {
       case 'arithmetic':
       case 'test': {
         status = this.executeSimple(statement, guarded);
+        this.store.pipeStatus = [status];
+        this.checkErrexit(status);
         break;
       }
       case 'if': {
@@ -175,23 +229,35 @@ export class Shell implements ArithmeticHost {
           name: statement.name,
           body: statement.body,
           isAtomic: statement.isAtomic,
+          redirects: statement.redirects,
           lineShift: this.lineShift,
         });
         status = 0;
         break;
       }
       case 'list': {
-        const left = this.execute(statement.left, true);
+        const left = this.ignoringErrexit(() => this.execute(statement.left, true));
         const runsRight = statement.operator === '&&' ? left === 0 : left !== 0;
         status = runsRight ? this.execute(statement.right, guarded) : left;
         break;
       }
       case 'not': {
-        status = this.execute(statement.body, guarded) === 0 ? 1 : 0;
+        status = this.ignoringErrexit(() => this.execute(statement.body, guarded)) === 0 ? 1 : 0;
         break;
       }
       case 'redirected': {
         status = this.withRedirects(statement.redirects, () => this.execute(statement.body, guarded));
+        break;
+      }
+      case 'subshell': {
+        status = this.runSubshell(statement.body, this.fds.clone());
+        this.store.pipeStatus = [status];
+        this.checkErrexit(status);
+        break;
+      }
+      case 'pipeline': {
+        status = this.executePipeline(statement.commands);
+        this.checkErrexit(status);
         break;
       }
     }
@@ -252,6 +318,40 @@ export class Shell implements ArithmeticHost {
     const status = run();
     this.store.lastStatus = status;
     return status;
+  }
+
+  /**
+   * Runs a pipeline's commands one after another, each in a subshell that reads what the one before it wrote, since
+   * builtins and functions run in one process here; with `lastpipe`, the last runs in this shell.
+   */
+  private executePipeline(commands: readonly Statement[]): number {
+    const statuses: number[] = [];
+    let input: OpenFile | undefined;
+    for (const [index, command] of commands.entries()) {
+      const isLast = index === commands.length - 1;
+      const capture = isLast ? undefined : createCaptureBuffer((cost) => this.runtime.spend(cost));
+      const fds = this.fds.clone();
+      if (input) fds.set(0, input);
+      if (capture) fds.set(1, { output: capture.target });
+      statuses.push(
+        isLast && this.options.lastpipe ? this.runWithDescriptors(fds, command) : this.runSubshell([command], fds)
+      );
+      if (capture) input = { input: this.runtime.io.textReader(capture.read()) };
+    }
+    this.store.pipeStatus = statuses;
+    const last = statuses.at(-1) as number;
+    if (!this.options.pipefail) return last;
+    return statuses.findLast((status) => status !== 0) ?? 0;
+  }
+
+  private runWithDescriptors(fds: DescriptorTable, command: Statement): number {
+    const saved = this.fds.clone();
+    this.fds.restore(fds);
+    try {
+      return this.execute(command);
+    } finally {
+      this.restoreDescriptors(saved);
+    }
   }
 
   private executeIf(statement: Extract<Statement, { kind: 'if' }>): number {
@@ -446,20 +546,148 @@ export class Shell implements ArithmeticHost {
     return status;
   }
 
-  withRedirects<T>(redirects: Redirect[], run: () => T): T {
+  /** Runs a command with its redirections applied, or skips it with status 1 when one fails, as Bash does. */
+  withRedirects(redirects: readonly Redirect[], run: () => number): number {
     if (redirects.length === 0) return run();
-    const saved = { fd1: this.fd1, fd2: this.fd2 };
-    for (const { fd, target } of redirects) {
-      const destination = target === 1 ? this.fd1 : this.fd2;
-      if (fd === 1) this.fd1 = destination;
-      else this.fd2 = destination;
-    }
+    const saved = this.fds.clone();
     try {
+      try {
+        applyRedirects(this, redirects);
+      } catch (error) {
+        if (!(error instanceof RedirectionError)) throw error;
+        this.reportError(error.message);
+        return 1;
+      }
       return run();
     } finally {
-      this.fd1 = saved.fd1;
-      this.fd2 = saved.fd2;
+      this.restoreDescriptors(saved);
     }
+  }
+
+  /**
+   * Applies a command's redirections once for every part of it that runs with them, as a declaration builtin runs
+   * its operands one at a time, throwing a `RedirectionError` when one fails.
+   */
+  redirectionSession(redirects: readonly Redirect[]): { run: <T>(body: () => T) => T } {
+    let applied: DescriptorTable | undefined;
+    return {
+      run: <T>(body: () => T): T => {
+        if (redirects.length === 0) return body();
+        const saved = this.fds.clone();
+        try {
+          if (applied) this.fds.restore(applied);
+          else {
+            applyRedirects(this, redirects);
+            applied = this.fds.clone();
+          }
+          return body();
+        } finally {
+          this.restoreDescriptors(saved);
+        }
+      },
+    };
+  }
+
+  /** Applies redirections to the shell itself, as `exec` without a command does. */
+  applyPermanentRedirects(redirects: readonly Redirect[]): number {
+    try {
+      applyRedirects(this, redirects);
+      return 0;
+    } catch (error) {
+      if (!(error instanceof RedirectionError)) throw error;
+      this.reportError(error.message);
+      return 1;
+    }
+  }
+
+  private restoreDescriptors(saved: DescriptorTable): void {
+    const kept = [...this.allocatedDescriptors].map((fd): [number, OpenFile | undefined] => [fd, this.fds.get(fd)]);
+    this.fds.restore(saved);
+    for (const [fd, file] of kept) {
+      if (file) this.fds.set(fd, file);
+      else this.fds.close(fd);
+    }
+  }
+
+  /** Stores the descriptor that `{name}>file` allocated in `name`. */
+  assignDescriptorVariable(name: string, fd: number): void {
+    this.allocatedDescriptors.add(fd);
+    this.assignVariable(name, String(fd));
+  }
+
+  /** Assigns a scalar variable as a builtin does, reporting a failure such as a readonly variable. */
+  assignVariable(name: string, value: string, builtin?: string): boolean {
+    const target = resolveScalarTarget(this, name, true);
+    const outcome = writeResolvedTarget(this, target, value, false, builtin);
+    return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
+  }
+
+  /**
+   * Replaces an indexed array's elements, or with `keep` sets elements from `origin` on, as `read -a` and `mapfile`
+   * do, reporting a failure such as a readonly array.
+   */
+  assignIndexedArray(name: string, values: readonly string[], builtin: string, origin = 0, keep = false): boolean {
+    const resolvedName = resolveTargetName(this, name);
+    const elements =
+      keep || origin > 0
+        ? values.map((value, index) => ({ key: String(origin + index), value, append: false }))
+        : [...values];
+    if (!keep && origin > 0) this.store.unsetNamed(resolvedName, false);
+    const { outcome } = this.store.writeCompoundNamed({
+      resolvedName,
+      intent: 'visible',
+      isAssoc: false,
+      preAttrs: new Set(),
+      postReadonly: false,
+      elements,
+      hooks: {
+        append: keep,
+        reportedName: name,
+        evalIndex: (resolved, rawKey) => this.evaluateCompoundIndex(resolved, rawKey),
+        evalInt: (expr) => this.evaluateFatalReadonly(expr, false),
+        onItemError: (message) => this.reportError(message),
+      },
+    });
+    return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
+  }
+
+  /** Stores the lines `mapfile` has read so far. */
+  flushArray(name: string, origin: number, lines: readonly string[], keep: boolean): boolean {
+    return this.assignIndexedArray(name, lines, 'mapfile', origin, keep);
+  }
+
+  isAssociativeArray(name: string): boolean {
+    return this.store.isAssociativeName(resolveTargetName(this, name));
+  }
+
+  /** Runs a function or a builtin by name with arguments that need no expansion, as a builtin's callback does. */
+  invokeCommand(name: string, args: string[]): number {
+    const classified = classifyCommandName(name, this.store.hasFunction(name), Object.hasOwn(REGULAR_BUILTINS, name));
+    switch (classified.kind) {
+      case 'function': {
+        return this.callFunction(this.store.getFunction(name) as FunctionDefinition, args, this.currentRow);
+      }
+      case 'builtin': {
+        return this.runBuiltin(name, args);
+      }
+      case 'notFound': {
+        this.reportError(`${name}: command not found`);
+        return 127;
+      }
+      case 'declarationBuiltin':
+      case 'exec': {
+        return rejectUnsupportedDynamicDeclaration(name);
+      }
+      default: {
+        return rejectUnsupportedFeature(classified.feature);
+      }
+    }
+  }
+
+  /** The path a file operation uses for `path`, which starts from the working directory when it is relative. */
+  absolutePath(path: string): string {
+    if (path.startsWith('/') || this.workingDirectory === '/') return path;
+    return `${this.workingDirectory}/${path}`;
   }
 
   // ---------------------------------------------------------------- simple commands & declarations
@@ -486,6 +714,9 @@ export class Shell implements ArithmeticHost {
     if (classified.kind === 'unsupportedBuiltin' || classified.kind === 'external') {
       rejectUnsupportedFeature(classified.feature);
     }
+    if (classified.kind === 'exec') {
+      return { status: this.executeExec(statement, args, lastArg), stepMode: 'statement', ranFunction: false };
+    }
     const isConditionBuiltin =
       guarded && classified.kind === 'builtin' && statement.assignments.length === 0 && CONDITION_BUILTINS.has(name);
     const status = this.invokeOrdinaryCommand(statement, name, args, lastArg, classified.kind);
@@ -509,7 +740,7 @@ export class Shell implements ArithmeticHost {
         if (kind === 'function') {
           code = this.callFunction(this.store.getFunction(name) as FunctionDefinition, args, statement.row);
         } else if (kind === 'builtin') {
-          code = REGULAR_BUILTINS[name](this, args, name);
+          code = this.runBuiltin(name, args);
         } else {
           this.reportError(`${name}: command not found`);
         }
@@ -519,6 +750,31 @@ export class Shell implements ArithmeticHost {
     );
   }
 
+  /**
+   * Runs `exec`, which without a command applies its redirections to the shell itself. A command would replace the
+   * shell with a program found on `PATH`, which this environment cannot run.
+   */
+  private executeExec(statement: Extract<Statement, { kind: 'command' }>, args: string[], lastArg: string): number {
+    const [command] = operandsOf(args);
+    if (command !== undefined) rejectUnsupportedFeature(`外部コマンド（exec ${command}）`);
+    const status = this.withTemporaryScope(statement.assignments, () =>
+      this.applyPermanentRedirects(statement.redirects)
+    );
+    this.store.lastArgument = lastArg;
+    return status;
+  }
+
+  /** Runs a builtin, which fails with status 1 when it writes to a closed descriptor, as Bash's builtins report. */
+  runBuiltin(name: string, args: string[]): number {
+    try {
+      return REGULAR_BUILTINS[name](this, args, name);
+    } catch (error) {
+      if (!(error instanceof BadDescriptorError)) throw error;
+      this.reportError(`${name}: write error: ${error.message}`);
+      return 1;
+    }
+  }
+
   private executeDeclarationStatement(statement: Extract<Statement, { kind: 'declaration' }>): {
     status: number;
     stepMode: StepMode;
@@ -526,14 +782,25 @@ export class Shell implements ArithmeticHost {
   } {
     this.expander.lastSubstitutionStatus = 0;
     if (statement.assignments.length > 0) rejectUnsupportedDeclarationPrefix(statement.name);
-    const { status, assignsAnswer } = executeDeclarationCommand(
-      this,
-      statement.name,
-      statement.staticOptions,
-      statement.args,
-      (run) => this.withRedirects(statement.redirects, run)
-    );
-    return { status, stepMode: assignsAnswer ? 'statement' : 'binding', ranFunction: false };
+    const session = this.redirectionSession(statement.redirects);
+    try {
+      const { status, assignsAnswer } = executeDeclarationCommand(
+        this,
+        statement.name,
+        statement.staticOptions,
+        statement.args,
+        session.run
+      );
+      return { status, stepMode: assignsAnswer ? 'statement' : 'binding', ranFunction: false };
+    } catch (error) {
+      if (error instanceof RedirectionError) {
+        this.reportError(error.message);
+        return { status: 1, stepMode: 'statement', ranFunction: false };
+      }
+      if (!(error instanceof BadDescriptorError)) throw error;
+      this.reportError(`${statement.name}: write error: ${error.message}`);
+      return { status: 1, stepMode: 'statement', ranFunction: false };
+    }
   }
 
   private executeAssignmentOnlyCommand(statement: Extract<Statement, { kind: 'command' }>): number {
@@ -594,7 +861,7 @@ export class Shell implements ArithmeticHost {
     this.loopDepth = 0;
     this.lineShift = fn.lineShift;
     try {
-      return this.restoringLine(() => this.execute(fn.body));
+      return this.restoringLine(() => this.withRedirects(fn.redirects, () => this.execute(fn.body)));
     } catch (error) {
       if (error instanceof ReturnSignal) return error.status;
       throw error;
@@ -628,17 +895,32 @@ export class Shell implements ArithmeticHost {
 
   /** Runs `$(...)` or `` `...` `` in a fresh child `Shell` context over an eager metered `VariableStore` copy. */
   captureSubshell(body: Statement[], startRow?: number): { output: string; status: number } {
-    this.runtime.checkCallDepth();
     const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
     const firstRow = body[0]?.row ?? startRow;
-    const childShift = firstRow !== undefined ? firstRow - this.currentRow : this.lineShift;
+    const status = this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }), {
+      lineShift: firstRow !== undefined ? firstRow - this.currentRow : this.lineShift,
+      // A command substitution does not keep `set -e` unless `inherit_errexit` is on.
+      options: { ...this.options, errexit: this.options.errexit && this.options.inherit_errexit },
+    });
+    return { output: capture.read(), status };
+  }
+
+  /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */
+  runSubshell(
+    body: Statement[],
+    fds: DescriptorTable,
+    overrides?: { lineShift: number; options: ShellOptionValues }
+  ): number {
+    this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1);
+    const lineShift = overrides?.lineShift ?? this.lineShift;
     const childShell = new Shell(this.runtime, {
       store: childStore,
-      fd1: capture.target,
-      fd2: this.fd2,
-      lineShift: childShift,
-      readShift: childShift,
+      ...this.childContext(),
+      ...(overrides ? { options: overrides.options } : {}),
+      fds,
+      lineShift,
+      readShift: lineShift,
       loopDepth: this.loopDepth,
     });
     const subshellFrame: Frame = {
@@ -649,11 +931,32 @@ export class Shell implements ArithmeticHost {
     };
     this.runtime.frames.push(subshellFrame);
     try {
-      const status = runSubshellBody(childShell, body);
-      return { output: capture.read(), status };
+      return runSubshellBody(childShell, body);
     } finally {
       this.runtime.frames.pop();
     }
+  }
+
+  /** What a subshell copies from this shell besides its variables: descriptors, directory, and options. */
+  childContext(): Pick<ShellContextOptions, 'fds' | 'workingDirectory' | 'options' | 'ignoresErrexit'> {
+    return {
+      fds: this.fds.clone(),
+      workingDirectory: this.workingDirectory,
+      options: { ...this.options },
+      ignoresErrexit: this.errexitIgnored > 0,
+    };
+  }
+
+  /** A copy of this shell's descriptors where `fd` is `file`. */
+  descriptorsWith(fd: number, file: OpenFile): DescriptorTable {
+    const fds = this.fds.clone();
+    fds.set(fd, file);
+    return fds;
+  }
+
+  /** Rejects a device this environment does not have, such as a terminal. */
+  rejectDevice(path: string): never {
+    rejectUnsupportedFeature(`デバイス（${path}）`);
   }
 
   // ---------------------------------------------------------------- errors & arithmetic
@@ -731,7 +1034,17 @@ export class Shell implements ArithmeticHost {
   }
 
   readTarget(target: ArithmeticTarget): string | undefined {
-    return readResolvedTarget(this, target);
+    const value = readResolvedTarget(this, target);
+    if (value === undefined && this.options.nounset && target.kind !== 'invalid' && target.kind !== 'randomSeed') {
+      const shown =
+        target.kind === 'indexedElement'
+          ? `${target.reportedName}[${target.index}]`
+          : target.kind === 'associativeElement'
+            ? `${target.reportedName}[${target.key}]`
+            : target.reportedName;
+      this.expander.failParameter(shown, 'unbound variable');
+    }
+    return value;
   }
 
   writeTarget(target: ArithmeticTarget, value: string): StoreOutcome {
@@ -777,7 +1090,34 @@ export class Shell implements ArithmeticHost {
   }
 }
 
+/** Skips a leading `--`, which Bash's builtins accept before their operands. */
+function operandsOf(args: string[]): string[] {
+  return args[0] === '--' ? args.slice(1) : args;
+}
+
+/** Whether a command substitution is `$(< file)`, which Bash replaces with the file's contents without a command. */
+function isFileReadSubstitution(body: readonly Statement[]): boolean {
+  const [only] = body;
+  return (
+    body.length === 1 &&
+    only.kind === 'command' &&
+    only.words.length === 0 &&
+    only.assignments.length === 0 &&
+    only.redirects.length === 1 &&
+    only.redirects[0].kind === 'file' &&
+    only.redirects[0].operator === '<'
+  );
+}
+
 function runSubshellBody(childShell: Shell, body: Statement[]): number {
+  if (isFileReadSubstitution(body)) {
+    const [command] = body as Extract<Statement, { kind: 'command' }>[];
+    return childShell.withRedirects(command.redirects, () => {
+      const input = childShell.fds.get(0)?.input;
+      if (input) childShell.fd1.write(input.readRest());
+      return 0;
+    });
+  }
   try {
     return childShell.runStatements(body);
   } catch (error) {

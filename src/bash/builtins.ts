@@ -1,7 +1,8 @@
-import { rejectUnsupportedSetArgs } from './capabilities';
 import { legalNumber } from './characters';
+import { setBuiltin, shoptBuiltin } from './optionBuiltins';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
+import { mapfileBuiltin, readBuiltin } from './readBuiltins';
 import { BreakSignal, ContinueSignal, ExitSignal, ReturnSignal } from './runtime';
 import type { Shell } from './shell';
 import { resolveScalarTarget, resolveSubscriptTarget, unsetResolvedElement, writeResolvedTarget } from './targets';
@@ -308,16 +309,6 @@ function loopControl(kind: 'break' | 'continue'): Builtin {
   };
 }
 
-function set(shell: Shell, args: string[]): number {
-  if (args.length === 0) rejectUnsupportedSetArgs();
-  if (args[0] === '--' || args[0] === '-' || !/^[-+]/.test(args[0])) {
-    const rest = args[0] === '--' || args[0] === '-' ? args.slice(1) : args;
-    shell.store.setPositionalArgs(rest);
-    return 0;
-  }
-  rejectUnsupportedSetArgs(args[0]);
-}
-
 export const REGULAR_BUILTINS: Record<string, Builtin> = {
   echo,
   printf,
@@ -333,6 +324,10 @@ export const REGULAR_BUILTINS: Record<string, Builtin> = {
   exit: exitBuiltin,
   break: loopControl('break'),
   continue: loopControl('continue'),
-  set,
+  set: setBuiltin,
+  shopt: shoptBuiltin,
+  read: readBuiltin,
+  mapfile: mapfileBuiltin,
+  readarray: mapfileBuiltin,
   ...TURTLE_BUILTINS,
 };

@@ -169,7 +169,7 @@ echo "$shadow|\${box[k]}|$global_sum|\${TMP-unset}"
     'f() { local TMP; }; TMP=scoped f\n',
     'x=1; declare -a x\n',
     'a=(1 2); local_fn() { local -n r="a[0]"; }; local_fn\n',
-    'echo "${PIPESTATUS[0]}"\n',
+    'PIPESTATUS=(1)\n',
     'unset RANDOM\n',
     'f() { local PATH=x; declare -g PATH; }; f; echo "${PATH-unset}"\n',
   ]) {
@@ -248,9 +248,9 @@ test('a deep nesting and a huge printf field stop at a limit instead of exhausti
 });
 
 test('features this environment does not provide stop the program with a message', () => {
-  expect(executeProgram('bash', 'echo a | cat\n')).toEqual({
-    kind: 'compileError',
-    diagnostics: [{ row: 0, message: 'パイプ（|）は、この採点環境では使えません。' }],
+  expect(executeProgram('bash', 'echo a | cat\n')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: '外部コマンド（cat）は、この採点環境では使えません。',
   });
   expect(executeProgram('bash', 'echo before\nls\necho after\n')).toMatchObject({
     kind: 'executed',
@@ -260,8 +260,8 @@ test('features this environment does not provide stop the program with a message
   expect(executeProgram('bash', 'echo *\n')).toMatchObject({
     uncaughtException: expect.stringContaining('ファイル名の展開'),
   });
-  expect(executeProgram('bash', 'read x\n')).toMatchObject({
-    uncaughtException: '標準入力（read）は、この採点環境では使えません。',
+  expect(executeProgram('bash', 'eval x=1\n')).toMatchObject({
+    uncaughtException: '文字列の評価（eval）は、この採点環境では使えません。',
   });
 });
 

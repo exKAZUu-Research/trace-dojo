@@ -32,6 +32,13 @@ const EXPANSION_TYPES = new Set([
   'translated_string',
 ]);
 
+type FileRedirectOperator = Extract<Redirect, { kind: 'file' }>['operator'];
+
+const FILE_REDIRECT_OPERATORS = new Set<string>(['<', '>', '>>', '>|', '<>', '&>', '&>>']);
+
+/** A `{name}` word written right before a redirection, which names the variable that receives its descriptor. */
+const FD_VARIABLE_PATTERN = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+
 export interface ConverterHooks {
   readonly rawPieces: (raw: string) => (string | WordPart)[];
   /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
@@ -44,6 +51,8 @@ export interface ConverterHooks {
 export class Converter {
   /** The rows of the `# atomic` annotations that a function's header holds. */
   readonly claimedAtomicRows = new Set<number>();
+  /** The body of each here-document, by the start of its redirection, which the grammar puts after the command. */
+  private readonly heredocBodies = new Map<number, Node>();
 
   private get source(): string {
     return this.analyzed.grammarSource;
@@ -56,6 +65,7 @@ export class Converter {
   ) {}
 
   convertProgram(root: Node): Program {
+    this.collectHeredocBodies(root);
     const units: Statement[][] = [];
     const unitEndRows: number[] = [];
     let unit: Statement[] = [];
@@ -67,6 +77,11 @@ export class Converter {
         continue;
       }
       if (child.type === 'comment') continue;
+      if (child.type === 'heredoc_body') {
+        previousEnd = child.endIndex;
+        previousEndRow = child.endPosition.row;
+        continue;
+      }
       // Bash removes backslash-newline continuations before reading a logical line, and discards that line on error.
       if (previousEnd !== undefined && hasLogicalNewline(this.source.slice(previousEnd, child.startIndex))) {
         units.push(unit);
@@ -82,6 +97,22 @@ export class Converter {
       unitEndRows.push(previousEndRow);
     }
     return { units, unitEndRows };
+  }
+
+  /** Pairs here-document redirections with their bodies, which follow in the same order in the source. */
+  private collectHeredocBodies(root: Node): void {
+    const redirects: Node[] = [];
+    const bodies: Node[] = [];
+    const pending: Node[] = [root];
+    for (let node = pending.pop(); node; node = pending.pop()) {
+      if (node.type === 'heredoc_redirect') redirects.push(node);
+      else if (node.type === 'heredoc_body') bodies.push(node);
+      for (let i = node.childCount - 1; i >= 0; i--) pending.push(node.child(i) as Node);
+    }
+    for (const [index, redirect] of redirects.entries()) {
+      const body = bodies[index];
+      if (body) this.heredocBodies.set(redirect.startIndex, body);
+    }
   }
 
   private fail(node: Node, message: string): never {
@@ -103,7 +134,7 @@ export class Converter {
         this.checkTerminator(node);
         continue;
       }
-      if (node.type === 'comment') continue;
+      if (node.type === 'comment' || node.type === 'heredoc_body') continue;
       result.push(this.statement(node));
     }
     return result;
@@ -182,10 +213,10 @@ export class Converter {
         return this.redirectedStatement(node, base);
       }
       case 'pipeline': {
-        return this.unsupported(node, 'pipeline');
+        return this.pipeline(node, base);
       }
       case 'subshell': {
-        return this.unsupported(node, 'subshell');
+        return { ...base, kind: 'subshell', body: this.nonEmpty(node, this.statements(node.children)) };
       }
       case 'coproc_command': {
         return this.unsupported(node, 'coproc');
@@ -201,14 +232,24 @@ export class Converter {
 
   private redirectedStatement(node: Node, base: { row: number; lineRow: number }): Statement {
     const bodyNode = node.childForFieldName('body');
-    if (bodyNode?.type === 'function_definition') this.unsupported(node, 'functionRedirect');
     const redirects = this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect));
     if (!bodyNode) return { ...base, kind: 'command', assignments: [], words: [], redirects };
     const converted = this.statement(bodyNode);
-    if (converted.kind === 'command' || converted.kind === 'declaration') {
+    if (converted.kind === 'command' || converted.kind === 'declaration' || converted.kind === 'function') {
       return { ...converted, redirects: [...converted.redirects, ...redirects] };
     }
     return { ...base, kind: 'redirected', body: converted, redirects };
+  }
+
+  private pipeline(node: Node, base: { row: number; lineRow: number }): Statement {
+    const commands: Statement[] = [];
+    for (const child of node.children) {
+      if (child.type === '|&') {
+        const previous = commands.pop() as Statement;
+        commands.push(withStandardErrorToOutput(previous, child.startPosition.row));
+      } else if (child.isNamed && child.type !== 'comment') commands.push(this.statement(child));
+    }
+    return { ...base, kind: 'pipeline', commands };
   }
 
   private body(node: Node): Statement[] {
@@ -234,15 +275,21 @@ export class Converter {
     const nameNode = node.childForFieldName('name');
     const words = [...leadingWords];
     if (nameNode) words.push(this.word(nameNode.namedChildren.at(-1) as Node));
-    for (const argument of this.fieldNodes(node, 'argument')) words.push(this.word(argument));
-    return {
-      row,
-      lineRow: lineRowOf(node),
-      kind: 'command',
-      assignments,
-      words,
-      redirects: this.fieldNodes(node, 'redirect').map((redirect) => this.redirect(redirect)),
-    };
+    const redirects: Redirect[] = [];
+    const { children } = node;
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      const field = node.fieldNameForChild(index);
+      if (field === 'redirect') redirects.push(this.redirect(child));
+      if (field !== 'argument') continue;
+      const next = children[index + 1];
+      const fdVariable = FD_VARIABLE_PATTERN.exec(child.text)?.[1];
+      if (fdVariable && node.fieldNameForChild(index + 1) === 'redirect' && next?.startIndex === child.endIndex) {
+        redirects.push(this.redirect(next, fdVariable));
+        index++;
+      } else words.push(this.word(child));
+    }
+    return { row, lineRow: lineRowOf(node), kind: 'command', assignments, words, redirects };
   }
 
   private declaration(node: Node): Statement {
@@ -444,18 +491,69 @@ export class Converter {
     };
   }
 
-  private redirect(node: Node): Redirect {
-    if (node.type === 'heredoc_redirect') this.unsupported(node, 'heredoc');
-    if (node.type === 'herestring_redirect') this.unsupported(node, 'herestring');
+  private redirect(node: Node, fdVariable?: string): Redirect {
+    const descriptorText = node.childForFieldName('descriptor')?.text;
+    const variable = fdVariable === undefined ? {} : { fdVariable };
+    if (node.type === 'heredoc_redirect') {
+      return {
+        fd: Number(descriptorText ?? 0),
+        ...variable,
+        kind: 'text',
+        body: this.heredocBody(node),
+        appendsNewline: false,
+      };
+    }
+    if (node.type === 'herestring_redirect') {
+      const value = node.childForFieldName('value') ?? node.namedChildren.at(-1);
+      return {
+        fd: Number(descriptorText ?? 0),
+        ...variable,
+        kind: 'text',
+        body: this.word(value as Node),
+        appendsNewline: true,
+      };
+    }
     const operator = node.childForFieldName('operator')?.type ?? '';
-    const descriptor = node.childForFieldName('descriptor')?.text;
-    const destination = node.childForFieldName('destination');
-    const fd = descriptor === undefined ? 1 : Number(descriptor);
-    const target = destination?.type === 'word' ? destination.text : undefined;
-    const isCopy =
-      (operator === '>&' || operator === '<&') && (fd === 1 || fd === 2) && (target === '1' || target === '2');
-    if (isCopy && (operator === '>&' || fd === Number(target))) return { fd, target: Number(target) as 1 | 2 };
-    return this.unsupported(node, 'redirect', node.text);
+    const destinations = this.fieldNodes(node, 'destination');
+    const readsByDefault = operator.startsWith('<') && operator !== '<<<';
+    const fd = descriptorText === undefined ? (readsByDefault ? 0 : 1) : Number(descriptorText);
+    if (operator === '>&-' || operator === '<&-') return { fd, ...variable, kind: 'close' };
+    if (destinations.length !== 1) this.fail(node, unexpectedTokenMessage('newline'));
+    const target = this.word(destinations[0]);
+    if (operator === '>&' || operator === '<&') {
+      return { fd, ...variable, kind: 'duplicate', operator, target, hasDescriptor: descriptorText !== undefined };
+    }
+    if (!FILE_REDIRECT_OPERATORS.has(operator)) this.fail(node, unexpectedTokenMessage(operator));
+    return { fd, ...variable, kind: 'file', operator: operator as FileRedirectOperator, target };
+  }
+
+  /** The text of a here-document, which expands like a double-quoted string unless its delimiter is quoted. */
+  private heredocBody(redirect: Node): Word {
+    const body = this.heredocBodies.get(redirect.startIndex);
+    const row = redirect.startPosition.row;
+    const stripsTabs = redirect.childForFieldName('operator')?.type === '<<-';
+    if (!body) return { parts: [], row, text: '' };
+    const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
+    const contentEnd = end?.startIndex ?? body.endIndex;
+    const delimiter = redirect.childForFieldName('delimiter')?.text ?? '';
+    const strip = (text: string, atLineStart: boolean): string =>
+      stripsTabs ? text.replaceAll(atLineStart ? /(^|\n)\t+/g : /(\n)\t+/g, '$1') : text;
+    if (/['"\\]/.test(delimiter)) {
+      const raw = this.analyzed.originalSource.slice(body.startIndex, contentEnd).replace(/^\n/, '');
+      return { parts: [{ kind: 'single', text: strip(raw, true) }], row, text: raw };
+    }
+    const parts: WordPart[] = [];
+    let atStart = true;
+    for (const child of body.namedChildren) {
+      if (!child || child.type === 'heredoc_end') continue;
+      if (child.type === 'heredoc_content') {
+        const raw = this.restoreQuotes(child.text, child.startIndex);
+        const text = atStart ? raw.replace(/^\n/, '') : raw;
+        parts.push({ kind: 'single', text: unescapeHeredoc(strip(text, atStart)) });
+      } else parts.push({ kind: 'double', parts: this.wordParts(child), rawText: child.text });
+      atStart = false;
+    }
+    return { parts, row, text: this.analyzed.originalSource.slice(body.startIndex, contentEnd) };
   }
 
   private ifStatement(node: Node): Statement {
@@ -526,7 +624,6 @@ export class Converter {
   private functionDefinition(node: Node): Statement {
     const row = node.startPosition.row;
     const body = node.childForFieldName('body') as Node;
-    if (body.type === 'subshell') this.unsupported(body, 'subshellFunctionBody');
     const opening = body.type === 'compound_statement' ? body.child(0) : undefined;
     const headerEnd = opening?.startPosition.row ?? body.startPosition.row;
     let isAtomic = false;
@@ -550,6 +647,7 @@ export class Converter {
       name,
       body: this.statement(body),
       isAtomic,
+      redirects: [],
     };
   }
 
@@ -797,6 +895,21 @@ export class Converter {
   }
 }
 
+/** A command whose standard error also goes to its output, after its own redirections, as `|&` makes it. */
+function withStandardErrorToOutput(statement: Statement, row: number): Statement {
+  const copy: Redirect = {
+    fd: 2,
+    kind: 'duplicate',
+    operator: '>&',
+    target: { parts: [{ kind: 'literal', text: '1' }], row, text: '1' },
+    hasDescriptor: true,
+  };
+  if (statement.kind === 'command' || statement.kind === 'declaration' || statement.kind === 'redirected') {
+    return { ...statement, redirects: [...statement.redirects, copy] };
+  }
+  return { row: statement.row, lineRow: statement.lineRow, kind: 'redirected', body: statement, redirects: [copy] };
+}
+
 function restoreNormalizedChar(
   ch: string,
   index: number,
@@ -879,7 +992,10 @@ function lineRowOf(node: Node): number {
   switch (node.type) {
     case 'command':
     case 'declaration_command': {
-      return (node.namedChildren.find((child) => child?.type !== 'comment') ?? node).endPosition.row;
+      const first = node.namedChildren.find((child) => child?.type !== 'comment') ?? node;
+      // A redirection node reaches the next line, where its destination word does not.
+      const word = first.type === 'file_redirect' ? (first.namedChildren.at(-1) ?? first) : first;
+      return word.endPosition.row;
     }
     case 'variable_assignment':
     case 'arithmetic_command': {
@@ -1057,4 +1173,9 @@ function ansiCEscape(text: string, index: number): { bytes: number[]; last: numb
     };
   }
   return { bytes: [92, ...new TextEncoder().encode(next)], last: index };
+}
+
+/** Removes the backslashes that quote `$`, `` ` ``, and a backslash in a here-document, and joins its continued lines. */
+function unescapeHeredoc(text: string): string {
+  return text.replaceAll(/\\([$`\\\n])/g, (_, c: string) => (c === '\n' ? '' : c));
 }

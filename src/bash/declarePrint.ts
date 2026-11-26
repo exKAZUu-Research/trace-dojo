@@ -1,7 +1,7 @@
 import { appendMetered, type CostMeter } from './budget';
 import { ATTRIBUTE_ORDER, rejectUnsupportedVariableRead } from './capabilities';
+import type { OutputTarget } from './descriptors';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
-import type { OutputTarget } from './runtime';
 import type { Shell } from './shell';
 import { sortedElements, type VariableView } from './variables';
 

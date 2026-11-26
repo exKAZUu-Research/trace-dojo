@@ -11,12 +11,20 @@ export type Attribute = 'a' | 'A' | 'i' | 'n' | 'r' | 'x';
 export const ATTRIBUTE_ORDER: readonly Attribute[] = ['a', 'A', 'i', 'n', 'r', 'x'];
 
 /** Supported dynamic variables computed on read through store-owned descriptors. */
-export const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME']);
+export const DYNAMIC_VARIABLES = new Set([
+  'RANDOM',
+  'LINENO',
+  'FUNCNAME',
+  'BASH_SUBSHELL',
+  'PIPESTATUS',
+  'BASH_LINENO',
+  'BASH_SOURCE',
+]);
 
-export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO']);
+export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
 
 /** Deferred Bash internal variables whose reads, writes, declarations, tests, and unsets are rejected. */
-export const UNSUPPORTED_SPECIAL_VARIABLES = new Set(['PIPESTATUS', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
+export const UNSUPPORTED_SPECIAL_VARIABLES = new Set<string>();
 
 /** Special variables whose user writes, unsets, and declarations are rejected except scalar `RANDOM` seeding. */
 export const SPECIAL_MUTATION_BLOCKED = new Set([
@@ -160,13 +168,9 @@ export function unsupportedSyntaxMessage(kind: UnsupportedSyntaxKind, detail = '
 }
 
 export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
-  read: '標準入力（read）',
-  mapfile: '標準入力（mapfile）',
-  readarray: '標準入力（readarray）',
   eval: '文字列の評価（eval）',
   source: '別ファイルの読み込み（source）',
   '.': '別ファイルの読み込み（.）',
-  exec: 'exec',
   trap: 'trap',
   wait: 'wait',
   jobs: 'ジョブ制御（jobs）',
@@ -200,7 +204,6 @@ export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
   compgen: 'compgen',
   compopt: 'compopt',
   logout: 'logout',
-  shopt: 'シェルのオプション（shopt）',
 };
 
 export type CommandClassification =
@@ -208,6 +211,7 @@ export type CommandClassification =
   | { kind: 'declarationBuiltin'; name: string }
   | { kind: 'unsupportedBuiltin'; feature: string }
   | { kind: 'builtin'; name: string }
+  | { kind: 'exec' }
   | { kind: 'external'; feature: string }
   | { kind: 'notFound' };
 
@@ -219,6 +223,7 @@ export function classifyCommandName(
 ): CommandClassification {
   if (hasFunction) return { kind: 'function' };
   if (DECLARATION_BUILTIN_NAMES.has(name)) return { kind: 'declarationBuiltin', name };
+  if (name === 'exec') return { kind: 'exec' };
   if (Object.hasOwn(UNSUPPORTED_BUILTIN_FEATURES, name)) {
     return { kind: 'unsupportedBuiltin', feature: UNSUPPORTED_BUILTIN_FEATURES[name] };
   }
@@ -461,9 +466,8 @@ export function rejectUnsupportedPrintfConversion(conversion: 'n' | '('): never 
   throw new UnsupportedFeatureError('printf の時刻の書式（%(...)T）');
 }
 
-export function rejectUnsupportedSetArgs(firstArg?: string): never {
-  if (firstArg === undefined) throw new UnsupportedFeatureError('set の変数の一覧');
-  throw new UnsupportedFeatureError(`シェルのオプション（set ${firstArg}）`);
+export function rejectUnsupportedSetArgs(): never {
+  throw new UnsupportedFeatureError('set の変数の一覧');
 }
 
 export function rejectUnsupportedBracketClass(): never {

@@ -25,6 +25,7 @@ import {
   type WordContext,
   type WordSegment,
 } from './fields';
+import { flagsOf } from './options';
 import { applyOperator } from './parameterOperators';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
 import { singleQuote } from './quoting';
@@ -52,6 +53,9 @@ export interface SubscriptRef {
   readonly word?: Word;
   readonly indirect?: string;
 }
+
+/** The operators that test whether a parameter is set, which `set -u` lets expand an unset one. */
+const UNSET_TESTING_OPERATORS = new Set(['-', ':-', '=', ':=', '?', ':?', '+', ':+']);
 
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
 const SUBSCRIPT_WORD_CONTEXT: WordContext = { inDouble: false, spacedStar: false, inSubscript: true };
@@ -416,11 +420,20 @@ export class Expander {
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, ctx);
     if (expansion.prefix === '#') return this.expandLength(name, subscript, expansion, ctx);
     const value = this.parameterValue(name, subscript, expansion);
+    if (expansion.operator === undefined || !UNSET_TESTING_OPERATORS.has(expansion.operator)) {
+      this.requireSet(value, name, subscript);
+    }
     if (expansion.operator === undefined) {
       if (expansion.argument.length > 0) this.shell.discard(`${expansion.text}: bad substitution`);
       return this.valueSegments(value, ctx, expansion.text);
     }
     return applyOperator(this, this.shell, expansion, value, name, subscript, ctx);
+  }
+
+  /** Stops the shell at an unset parameter under `set -u`, which `$@`, `$*`, and `${a[@]}` never are. */
+  private requireSet(value: ParameterValue, name: string, subscript: SubscriptRef | undefined): void {
+    if (!this.shell.options.nounset || value.kind !== 'scalar' || value.value !== undefined) return;
+    this.failParameter(subscript ? `${name}[${subscript.text}]` : name, 'unbound variable');
   }
 
   private expandLength(
@@ -434,7 +447,9 @@ export class Expander {
       const count = this.shell.store.readArrayLength(resolved);
       return this.valueSegments({ kind: 'scalar', value: String(count) }, ctx, expansion.text);
     }
-    return this.valueSegments(lengthOf(this.parameterValue(name, subscript, expansion)), ctx, expansion.text);
+    const value = this.parameterValue(name, subscript, expansion);
+    this.requireSet(value, name, subscript);
+    return this.valueSegments(lengthOf(value), ctx, expansion.text);
   }
 
   private elementLengthValue(expansion: ParameterExpansion): ParameterValue {
@@ -514,7 +529,7 @@ export class Expander {
         return { kind: 'scalar', value: String(this.shell.store.lastStatus) };
       }
       case '-': {
-        return { kind: 'scalar', value: 'hB' };
+        return { kind: 'scalar', value: flagsOf(this.shell.options) };
       }
       case '$': {
         return rejectUnsupportedExpansion('pid');

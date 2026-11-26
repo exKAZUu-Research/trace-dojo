@@ -3,7 +3,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
-import type { Statement } from './ast';
+import type { Redirect, Statement } from './ast';
 import { chargeStoreSlots, type StepMeter } from './budget';
 import type { VariableStore } from './variables';
 
@@ -12,15 +12,11 @@ export const SCRIPT_NAME = 'main.sh';
 
 export const BASH_VERSION = '5.3.0(1)-release';
 
-/** Where a file descriptor writes: the run's standard output or error, or the text a command substitution captures. */
-export interface OutputTarget {
-  write(text: string): void;
-}
-
 export interface FunctionDefinition {
   name: string;
   body: Statement;
   isAtomic: boolean;
+  redirects: Redirect[];
   /** How far the lines Bash numbered the function with are behind its rows. */
   lineShift: number;
 }

@@ -80,13 +80,24 @@ export interface StaticDeclarationOptions {
   readonly invalidOption?: string;
 }
 
-/** A redirection between standard output and standard error, the only ones a program can use here. */
-export interface Redirect {
+/** A redirection, which changes a file descriptor for the command it follows. */
+export type Redirect = {
   /** The descriptor that the redirection changes. */
-  fd: 1 | 2;
-  /** The descriptor that it becomes a copy of. */
-  target: 1 | 2;
-}
+  fd: number;
+  /** The variable of `{name}>file`, which receives a newly allocated descriptor instead of `fd`. */
+  fdVariable?: string;
+} & (
+  | {
+      kind: 'file';
+      operator: '<' | '>' | '>>' | '>|' | '<>' | '&>' | '&>>';
+      target: Word;
+    }
+  /** `n>&word` or `n<&word`, which copies, moves (`m-`), or closes (`-`) a descriptor, or with `>&file` opens a file. */
+  | { kind: 'duplicate'; operator: '>&' | '<&'; target: Word; hasDescriptor: boolean }
+  | { kind: 'close' }
+  /** A here-document or a here-string, whose expanded text the descriptor reads. */
+  | { kind: 'text'; body: Word; appendsNewline: boolean }
+);
 
 export type TestExpression =
   | { kind: 'word'; word: Word }
@@ -136,10 +147,15 @@ export type Statement = StatementBase &
       }
     | { kind: 'case'; value: Word; items: CaseItem[] }
     | { kind: 'group'; body: Statement[] }
-    | { kind: 'function'; name: string; body: Statement; isAtomic: boolean }
+    /** A function definition, whose redirections apply each time the function runs. */
+    | { kind: 'function'; name: string; body: Statement; isAtomic: boolean; redirects: Redirect[] }
     | { kind: 'list'; operator: '&&' | '||'; left: Statement; right: Statement }
     | { kind: 'not'; body: Statement }
     | { kind: 'redirected'; body: Statement; redirects: Redirect[] }
+    /** `( ... )`, which runs its body in a copy of the shell. */
+    | { kind: 'subshell'; body: Statement[] }
+    /** Commands joined by `|`, where `|&` has added `2>&1` after the redirections of the command before it. */
+    | { kind: 'pipeline'; commands: Statement[] }
   );
 
 export interface Program {

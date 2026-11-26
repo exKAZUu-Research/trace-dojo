@@ -1,4 +1,5 @@
-import { DiscardSignal, ExitSignal, type OutputTarget, SCRIPT_NAME } from './runtime';
+import type { OutputTarget } from './descriptors';
+import { DiscardSignal, ExitSignal, SCRIPT_NAME } from './runtime';
 
 export type FailureContext =
   | 'scriptAssignment'

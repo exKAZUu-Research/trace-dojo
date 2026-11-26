@@ -35,7 +35,7 @@ import {
   UNSUPPORTED_SPECIAL_VARIABLES,
 } from './capabilities';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
-import { BASH_VERSION, type FunctionDefinition, type Runtime } from './runtime';
+import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
 
 export {
   ASSOCIATIVE_BUCKETS,
@@ -195,6 +195,8 @@ export class VariableStore {
   private readonly prng: RandomStream;
   lastStatus = 0;
   lastArgument: string | undefined;
+  /** The statuses of the commands of the last pipeline, which `PIPESTATUS` holds. */
+  pipeStatus: readonly number[] = [0];
   private readonly subshellLevel: number;
 
   constructor(
@@ -210,6 +212,7 @@ export class VariableStore {
       lastStatus: number;
       lastArgument: string | undefined;
       subshellLevel: number;
+      pipeStatus: readonly number[];
     }
   ) {
     if (forked) {
@@ -222,6 +225,7 @@ export class VariableStore {
       this.lastStatus = forked.lastStatus;
       this.lastArgument = forked.lastArgument;
       this.subshellLevel = forked.subshellLevel;
+      this.pipeStatus = forked.pipeStatus;
       return;
     }
     this.scopes = [{ kind: 'global', map: new Map() }];
@@ -288,6 +292,7 @@ export class VariableStore {
       lastStatus: this.lastStatus,
       lastArgument: this.lastArgument,
       subshellLevel: nextLevel,
+      pipeStatus: this.pipeStatus,
     });
   }
 
@@ -909,6 +914,7 @@ export class VariableStore {
   private readDynamicScalar(name: string): string | undefined {
     if (name === 'RANDOM') return String(this.prng.next());
     if (name === 'LINENO') return String(this.currentLine());
+    if (name === 'BASH_SUBSHELL') return String(this.subshellLevel);
     return this.readDynamicElements(name)?.get(0n);
   }
 
@@ -918,9 +924,11 @@ export class VariableStore {
     }
     if (name === 'FUNCNAME') {
       if (this.calls.length === 0) return undefined;
-      const items = [...this.calls.toReversed().map((c) => c.name), 'main'];
-      return new IndexedTable(items.map((v, i) => [BigInt(i), v]));
+      return tableOf([...this.calls.toReversed().map((c) => c.name), 'main']);
     }
+    if (name === 'BASH_LINENO') return tableOf([...this.calls.toReversed().map((c) => String(c.line)), '0']);
+    if (name === 'BASH_SOURCE') return tableOf(Array.from({ length: this.calls.length + 1 }, () => SCRIPT_NAME));
+    if (name === 'PIPESTATUS') return tableOf(this.pipeStatus.map(String));
     return undefined;
   }
 
@@ -1322,4 +1330,8 @@ function cellElementKeys(value: CellValue): string[] {
   if (value.kind === 'scalar') return ['0'];
   if (value.kind === 'indexed') return sortedElements(value.elements).map(([k]) => String(k));
   return value.table.entries().map(([k]) => k);
+}
+
+function tableOf(values: readonly string[]): IndexedTable {
+  return new IndexedTable(values.map((value, index) => [BigInt(index), value]));
 }

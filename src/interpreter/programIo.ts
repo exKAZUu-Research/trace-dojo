@@ -234,6 +234,11 @@ export class FileHandle {
     this.files.writeAt(this.node, this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
   }
+
+  /** Moves where the next write goes, for a descriptor that reads and writes a file through one offset. */
+  seek(position: number): void {
+    this.position = position;
+  }
 }
 
 type FileSystemNode = FileNode | DirectoryNode;
