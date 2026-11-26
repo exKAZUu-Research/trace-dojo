@@ -261,7 +261,13 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
     }
     const value = flatten(compiled.type);
-    if (valueType && value.kind !== 'dynamic' && !isSubtype(value, valueType)) {
+    // The returned value fits when it is a FutureOr of the value type, as Dart's rule says, which flatten would not
+    // tell for a value type that is itself a future: Future<Future<int>> takes a Future<int>.
+    if (
+      valueType &&
+      compiled.type.kind !== 'dynamic' &&
+      !isSubtype(compiled.type, interfaceType(coreTypes.futureOr, [valueType]))
+    ) {
       this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
     }
     this.fn.returnTypes?.push(value);
