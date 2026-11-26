@@ -828,6 +828,8 @@ class ShellGrammarValidator {
   /** The values a function body sets `extglob` to, which a call may set at any later line. */
   private readonly functionExtglob = new Set<boolean>();
   private readonly activeBlocks: { keyword: string; row: number }[] = [];
+  /** The symbol that closes the substitution being read: `)` for `$( )`, `}` for `${ ...; }`. */
+  private readonly closer: ')' | '}';
 
   constructor(
     private readonly text: SourceText,
@@ -835,6 +837,7 @@ class ShellGrammarValidator {
     private readonly insideSubstitution: boolean,
     closesBrace = false
   ) {
+    this.closer = closesBrace ? '}' : ')';
     this.stream = new ShellTokenStream(text, start, closesBrace, insideSubstitution && !closesBrace);
     if (insideSubstitution) {
       const { on, uncertain } = text.readingExtglob;
@@ -894,6 +897,15 @@ class ShellGrammarValidator {
   }
 
   validateBraceSubstitution(): number {
+    // Bash accepts a body without commands, which expands to nothing, even where a `}` right after it starts no command,
+    // as in `"${ }"`.
+    const empty = /^[ \t\n]*\}/.exec(this.text.source.slice(this.stream.position));
+    if (empty) {
+      this.stream.position += empty[0].length;
+      return this.stream.position;
+    }
+    this.consumeNewlines();
+    if (this.hasKeyword(this.peek(), '}')) return this.advance().end;
     this.parseCompoundList();
     const end = this.peek();
     if (!this.hasKeyword(end, '}')) this.failUnexpected(end);
@@ -1478,13 +1490,14 @@ class ShellGrammarValidator {
   private failUnexpected(token: ShellToken): never {
     if (token.kind === 'eof') this.failAtEof();
     const shown = token.kind === 'newline' ? 'newline' : token.value === '((' ? '(' : formatSyntaxToken(token.value);
-    const suffix = this.insideSubstitution && !this.hasOperator(token, ')') ? " while looking for matching `)'" : '';
+    const closes = this.closer === ')' && this.hasOperator(token, ')');
+    const suffix = this.insideSubstitution && !closes ? ` while looking for matching \`${this.closer}'` : '';
     this.text.fail(token.row, `syntax error near unexpected token \`${shown}'${suffix}`);
   }
 
   private failAtEof(): never {
     const row = this.text.eofRow;
-    if (this.insideSubstitution) this.text.fail(row, "unexpected EOF while looking for matching `)'");
+    if (this.insideSubstitution) this.text.fail(row, `unexpected EOF while looking for matching \`${this.closer}'`);
     const innermost = this.activeBlocks.at(-1);
     if (innermost) {
       this.text.fail(
