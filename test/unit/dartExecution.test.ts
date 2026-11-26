@@ -10696,7 +10696,6 @@ test.each([
   expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
 });
 
-// Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
 test('a file write opens the file when called and lands after the code that wrote it, as the SDK does', () => {
   // Expected output from Dart SDK 3.13.7.
   const written = `import 'dart:io';
@@ -10784,6 +10783,7 @@ Future<void> main() async {
   });
 });
 
+// Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
 test('Dart reads standard input and the files of its run with the SDK messages', () => {
   const program = `import 'dart:convert';
 import 'dart:io';
