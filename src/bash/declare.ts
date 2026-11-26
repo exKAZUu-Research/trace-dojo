@@ -102,7 +102,12 @@ export function executeDeclarationCommand(
     };
     if (listsFunctionNames(builtin, prepared.options)) {
       const names = prepared.operandArgs.map((arg) => operandText(shell, arg));
-      return { status: withRedirects(() => printFunctionNames(shell, names)), assignsAnswer: false };
+      if (shell.options.xtrace) traceWords(shell, [builtin, ...optionWords, ...names]);
+      const printsDeclarations = prepared.options.set.has('p');
+      return {
+        status: withRedirects(() => printFunctionNames(shell, names, printsDeclarations)),
+        assignsAnswer: false,
+      };
     }
     if (hasValidBuiltinContext(shell, builtin, prepared.options)) {
       rejectUnsupportedDeclarationOptions(
@@ -267,14 +272,15 @@ function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): strin
 }
 
 /** Prints the functions `names` name that exist, or every function as `declare -f name` when it names none. */
-function printFunctionNames(shell: Shell, names: readonly string[]): number {
+/** `declare -F`, which lists every function as `declare -f name`, or prints the names given, as such with `-p`. */
+function printFunctionNames(shell: Shell, names: readonly string[], printsDeclarations: boolean): number {
   if (names.length === 0) {
     for (const name of shell.store.functionNames().toSorted()) shell.fd1.write(`declare -f ${name}\n`);
     return 0;
   }
   let status = 0;
   for (const name of names) {
-    if (shell.store.hasFunction(name)) shell.fd1.write(`${name}\n`);
+    if (shell.store.hasFunction(name)) shell.fd1.write(printsDeclarations ? `declare -f ${name}\n` : `${name}\n`);
     else status = 1;
   }
   return status;
@@ -555,7 +561,7 @@ function expandAndCommitCompound(
   const isDeclaration = req.builtin !== undefined;
   const beforeExpandDepth = shell.store.enterCompoundGuard(targetName, false);
   const expanded = shell.expander.expandCompound(req.words, isAssoc, isDeclaration, req.name);
-  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements);
+  if (isDeclaration && shell.options.xtrace) traceCompound(shell, req, expanded.elements, isAssoc);
   shell.store.leaveCompoundGuards(beforeExpandDepth);
   const { outcome, materializedArray } = shell.store.writeCompoundNamed({
     resolvedName: targetName,
@@ -581,12 +587,21 @@ function expandAndCommitCompound(
   return { ok: true, materialized: materializedArray };
 }
 
-/** Prints a declaration's compound operand as `name=('a' 'b')`, each element quoted, as Bash's trace shows it. */
-function traceCompound(shell: Shell, req: CompoundOperandRequest, elements: readonly CompoundElement[]): void {
+/**
+ * Prints a declaration's compound operand as `name=('a' 'b')`, each element quoted, and an associative array's keys
+ * as well, as Bash's trace shows it.
+ */
+function traceCompound(
+  shell: Shell,
+  req: CompoundOperandRequest,
+  elements: readonly CompoundElement[],
+  isAssoc: boolean
+): void {
   const texts = elements.map((element) => {
     if (typeof element === 'string') return singleQuote(element);
     if ('plain' in element) return singleQuote(element.plain);
-    return `[${element.key}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
+    const key = isAssoc ? singleQuote(element.key) : element.key;
+    return `[${key}]${element.append ? '+=' : '='}${singleQuote(element.value)}`;
   });
   traceLine(shell, `${req.name}${req.append ? '+=' : '='}(${texts.join(' ')})`);
   const pending = pendingTraces.get(shell);

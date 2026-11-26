@@ -171,7 +171,7 @@ export function openPath(
 
 function descriptorOfVariable(shell: Shell, name: string): number {
   const value = shell.readNamed(name);
-  if (value === undefined || !/^\d+$/.test(value)) throw new RedirectionError(`${value ?? ''}: ambiguous redirect`);
+  if (value === undefined || !/^\d+$/.test(value)) throw new RedirectionError(`${name}: ambiguous redirect`);
   return Number(value);
 }
 
