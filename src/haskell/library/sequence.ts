@@ -3088,6 +3088,9 @@ foldToMaybeWithIndexTree = foldToMaybeWithIndexTree'
 
 export const SEQUENCE_VALUES = [
   'empty',
+  'cycleTaking',
+  'unfoldl',
+  'findIndicesL',
   'singleton',
   'fromList',
   'replicate',
