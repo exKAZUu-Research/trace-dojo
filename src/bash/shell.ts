@@ -581,7 +581,7 @@ export class Shell implements ArithmeticHost {
     return fd;
   }
 
-  /** Runs the coprocesses nothing has read from, as they run to their end when the script ends. */
+  /** Runs the coprocesses nothing has read from, as they run to their end when the shell or subshell ends. */
   finishCoprocesses(): void {
     for (const job of this.store.jobs.values()) job.finish?.();
   }
@@ -1312,6 +1312,7 @@ export class Shell implements ArithmeticHost {
           : runSubshellCommands(childShell, body);
         const exitStatus = childShell.runExitTrap(status);
         childShell.finishLingeringSubstitutions();
+        childShell.finishCoprocesses();
         return exitStatus;
       } finally {
         this.runtime.frames.pop();
