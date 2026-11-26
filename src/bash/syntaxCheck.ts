@@ -549,7 +549,10 @@ function extglobSetBy(written: readonly string[]): boolean | undefined {
   let index = 1;
   for (; index < words.length && /^-[a-z]+$/.test(words[index]); index++) flags += words[index].slice(1);
   if (words[index] === '--') index++;
-  if (!words.slice(index).includes('extglob') || flags.includes('s') === flags.includes('u')) return undefined;
+  // With `-o`, `shopt` names `set -o` options, of which `extglob` is none, so it changes nothing.
+  if (flags.includes('o') || !words.slice(index).includes('extglob') || flags.includes('s') === flags.includes('u')) {
+    return undefined;
+  }
   return flags.includes('s');
 }
 

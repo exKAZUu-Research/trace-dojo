@@ -95,7 +95,8 @@ export const shoptBuiltin: Builtin = (shell, args) => {
   const setting = flags.has('s') ? true : flags.has('u') ? false : undefined;
   if (setting !== undefined && requested.length > 0) {
     for (const name of names) changeOption(shell, name, setting, `shopt ${setting ? '-s' : '-u'} ${name}`);
-    return status;
+    // Bash reports an invalid `set -o` name that `shopt -o` sets but still succeeds, unlike for a `shopt` name.
+    return usesSet ? 0 : status;
   }
   const allNames: readonly OptionName[] = usesSet ? SET_OPTION_NAMES : SHOPT_NAMES;
   const shown =
