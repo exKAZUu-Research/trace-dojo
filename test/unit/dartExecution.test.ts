@@ -9304,6 +9304,18 @@ test.each([
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 2 }] });
 });
 
+test('an async function literal whose context is Future<Object?> may return a void value, as its type is inferred', () => {
+  const source = `void vf() {}
+Future<void> main() async {
+  Future<Object?> Function() k = () async { return vf(); };
+  Future<Object?> Function() a = () async => vf();
+  await k();
+  await a();
+  print('x');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'x\n' });
+});
+
 test('an async function returning Future<void> may return a future of void, and not another value', () => {
   const accepted = `Future<void> g() async {}
 Future<void> f() async { return g(); }
