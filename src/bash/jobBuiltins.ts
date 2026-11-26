@@ -27,7 +27,8 @@ export const waitBuiltin: Builtin = (shell, args) => {
   // `wait -n` returns as soon as one of them has ended, so a waiting coprocess matters only when none has.
   const oneEnded = options.has('n') && targets.some((job) => job?.reported === false && job.waiting !== true);
   if (!oneEnded) for (const job of targets) job?.settleWait?.();
-  // A coprocess that has ended is reaped once waited for, which unsets its variables, and is no child afterwards.
+  // A coprocess that has ended is reaped once waited for, which unsets its variables; only `wait` without operands
+  // forgets it, while one that names it keeps its status for a later `wait` that names it again.
   const reaped: number[] = [];
   if (!options.has('n')) {
     for (const [index, job] of targets.entries()) {
@@ -73,7 +74,6 @@ export const waitBuiltin: Builtin = (shell, args) => {
       status = 127;
     }
   }
-  forgetReaped();
   return status;
 };
 
