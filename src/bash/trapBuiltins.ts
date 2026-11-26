@@ -68,8 +68,16 @@ export const trapBuiltin: Builtin = (shell, args) => {
   // A subshell that changes a trap shows its own traps from then on.
   shell.shownTraps = undefined;
   const [first, ...rest] = operands;
-  const resets = first === '-' || (rest.length === 0 && conditionOf(first) !== undefined);
-  const specs = resets && first !== '-' ? operands : rest;
+  // As Bash's `trap` reads its operands: a leading signal number, or a lone signal name, resets; otherwise the first
+  // operand is the action, which needs a signal after it, and `-` as the action resets too.
+  const isSignal = conditionOf(first) !== 'invalid';
+  const resetsAll = (/^\d+$/.test(first) && isSignal) || (first !== '-' && rest.length === 0 && isSignal);
+  if (!resetsAll && rest.length === 0) {
+    shell.fd2.write('trap: usage: trap [-Plp] [[action] signal_spec ...]\n');
+    return 2;
+  }
+  const resets = resetsAll || first === '-';
+  const specs = resetsAll ? operands : rest;
   let status = 0;
   for (const spec of specs) {
     const condition = conditionOf(spec);
