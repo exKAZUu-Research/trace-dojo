@@ -1490,7 +1490,7 @@ pub mod io {
         WouldBlock, NotADirectory, IsADirectory, DirectoryNotEmpty, ReadOnlyFilesystem, StaleNetworkFileHandle,
         InvalidInput, InvalidData, TimedOut, WriteZero, StorageFull, NotSeekable, QuotaExceeded, FileTooLarge,
         ResourceBusy, ExecutableFileBusy, Deadlock, CrossesDevices, TooManyLinks, InvalidFilename,
-        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other,
+        ArgumentListTooLong, Interrupted, Unsupported, UnexpectedEof, OutOfMemory, Other, Uncategorized,
     }
     impl Error {
         pub fn new<E: super::fmt::Display>(kind: ErrorKind, error: E) -> Error;

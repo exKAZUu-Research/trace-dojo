@@ -103,7 +103,6 @@ function printMacro(c: Compiler, macro: Macro<'print'>): Eval {
   };
 }
 
-// code-gauge-allow functionNcss -- One case per kind of write target.
 function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   const target = c.read(macro.target);
   const format = macro.format ? compileFormat(c, macro.format) : () => '';
@@ -116,14 +115,7 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   }
   const stream = outputStream(inner);
   if (stream) return writeStream(c, macro, target, format, stream, newline);
-  if (writesFile(inner)) {
-    return (frame) => {
-      const file = target(frame);
-      const { text } = formatPartly(format, frame);
-      writeToStream(file, text + newline);
-      return writeResult(c.program, false);
-    };
-  }
+  if (writesFile(inner)) return writeFile(c.program, target, format, newline);
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
@@ -135,6 +127,14 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
     if (!failed && newline) value.writeChunk?.(newline);
     value.text += written;
     return writeResult(program, failed);
+  };
+}
+
+function writeFile(program: Program, target: Eval, format: FormatEval, newline: string): Eval {
+  return (frame) => {
+    const { text } = formatPartly(format, frame);
+    const error = writeToStream(program, target(frame), text + newline);
+    return error ? new EnumValue(program.adtDef('Result'), 1, [error]) : writeResult(program, false);
   };
 }
 

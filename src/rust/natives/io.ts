@@ -1,6 +1,7 @@
 import { FileSystemError, type FileSystemErrorCode, type TextReader } from '../../interpreter/programIo';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
+import type { Program } from '../items';
 import { shallow } from '../types';
 import { decodeUtf8 } from '../utf8';
 import {
@@ -31,13 +32,17 @@ class OpenOptionsValue {
 
 /** What an `io::Error` holds: the POSIX code of a file system's failure, or the kind and message the program gave. */
 export interface IoErrorPayload {
-  code?: FileSystemErrorCode;
+  code?: OsErrorCode;
   kind: string;
   message?: string;
 }
 
+/** A file system's failure, or a write to a handle opened only for reading (`EBADF`). */
+type OsErrorCode = FileSystemErrorCode | 'EBADF';
+
 /** The text, the code, and the kind of each error, as Rust reports them on macOS. */
-const OS_ERRORS: Record<FileSystemErrorCode, [string, number, string]> = {
+const OS_ERRORS: Record<OsErrorCode, [string, number, string]> = {
+  EBADF: ['Bad file descriptor', 9, 'Uncategorized'],
   ENOENT: ['No such file or directory', 2, 'NotFound'],
   EEXIST: ['File exists', 17, 'AlreadyExists'],
   EISDIR: ['Is a directory', 21, 'IsADirectory'],
@@ -317,11 +322,16 @@ function option(ctx: NativeContext, value: Value | undefined): Value {
     : new EnumValue(ctx.interp.program.adtDef('Option'), 1, [value]);
 }
 
-/** Writes text to a file a stream writes to, for `write!` and `Write::write_all` on a file. */
-export function writeToStream(target: Value, text: string): void {
+/**
+ * Writes text to a file a stream writes to, for `write!` and `Write::write_all` on a file, giving the `io::Error` of a
+ * file opened only for reading.
+ */
+export function writeToStream(program: Program, target: Value, text: string): Value | undefined {
   const { writer } = stream(target);
-  if (!writer) throw new Error('A stream without a writer');
+  if (!writer)
+    return new StructValue(program.adtDef('IoError'), [{ code: 'EBADF', kind: 'Uncategorized' } as unknown as Value]);
   writer.write(text);
+  return undefined;
 }
 
 /** Whether a type is one whose `Write` impl writes to a file: a `File`, or a `BufWriter` of one. */
