@@ -1,7 +1,6 @@
 import { isIdentifier } from './associativeTable';
 import type { Assignment } from './ast';
 import { EXTERNAL_COMMANDS } from './externalCommands';
-import { quoteReusable } from './quoting';
 import { UnsupportedFeatureError, unsupportedMessage } from './unsupported';
 
 /** Variable attribute flags recognized by the supported declaration surface and listed by `declare -p`. */
@@ -19,9 +18,11 @@ export const DYNAMIC_VARIABLES = new Set([
   'PIPESTATUS',
   'BASH_LINENO',
   'BASH_SOURCE',
+  'PWD',
+  'OLDPWD',
 ]);
 
-export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL']);
+export const SCALAR_DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'BASH_SUBSHELL', 'PWD', 'OLDPWD']);
 
 /** Deferred Bash internal variables whose reads, writes, declarations, tests, and unsets are rejected. */
 export const UNSUPPORTED_SPECIAL_VARIABLES = new Set<string>();
@@ -39,8 +40,6 @@ export const ENVIRONMENT_VARIABLES = new Set([
   'PATH',
   'USER',
   'LOGNAME',
-  'PWD',
-  'OLDPWD',
   'SHELL',
   'TERM',
   'LANG',
@@ -179,11 +178,6 @@ export const UNSUPPORTED_BUILTIN_FEATURES: Record<string, string> = {
   kill: 'kill',
   disown: 'disown',
   suspend: 'suspend',
-  cd: 'ディレクトリの移動（cd）',
-  pwd: 'pwd',
-  pushd: 'pushd',
-  popd: 'popd',
-  dirs: 'dirs',
   umask: 'umask',
   ulimit: 'ulimit',
   times: 'times',
@@ -495,12 +489,6 @@ const UNSUPPORTED_EXPANSION_LABELS: Record<UnsupportedExpansionKind, string> = {
 
 export function rejectUnsupportedExpansion(kind: UnsupportedExpansionKind): never {
   throw new UnsupportedFeatureError(UNSUPPORTED_EXPANSION_LABELS[kind]);
-}
-
-export function rejectUnsupportedPathnameExpansion(word: string): never {
-  throw new UnsupportedFeatureError(
-    `ファイル名の展開（引用符で囲まれていない * ? [ ]。文字として使うときは ${quoteReusable(word)} のように引用符で囲む）`
-  );
 }
 
 export function rejectUnsupportedPrefixListing(prefix: string): never {

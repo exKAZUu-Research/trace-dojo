@@ -54,6 +54,8 @@ export class SourceText {
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
   };
+  /** Parses the commands of `${ ...; }` or `${| ...; }` from just after `${ ` or `${|`, returning the index after its `}`. */
+  parseBraceSubstitution: (start: number) => number = (start) => skipBalanced(this, start - 1, '{', '}');
 
   constructor(readonly source: string) {
     for (let i = 0; i < source.length; i++) if (source[i] === '\n') this.lineStarts.push(i + 1);
@@ -180,6 +182,9 @@ function skipBraces(text: SourceText, open: number, inDouble = false): number {
     const { source } = text;
     let i = open + 1;
     let closeEnd: number;
+    if (source[i] !== undefined && ' \t\n|'.includes(source[i])) {
+      return text.parseBraceSubstitution(source[i] === '|' ? i + 1 : i);
+    }
     if (inDouble) {
       i = skipParameterHeader(text, i);
       closeEnd = usesDoubleQuotedBraceBody(source, i)

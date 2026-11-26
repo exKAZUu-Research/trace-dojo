@@ -5,7 +5,7 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { skipSubscript } from './arithmetic';
 import type { ParameterExpansion, Program, Statement, WordPart } from './ast';
-import { rejectUnsupportedFeature, unsupportedSyntaxMessage } from './capabilities';
+import { rejectUnsupportedFeature } from './capabilities';
 import { Converter, decodeAnsiC } from './converter';
 import { analyzeBashSource, createValidatorSourceText, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { syntaxErrorsOf } from './syntaxErrors';
@@ -381,8 +381,12 @@ function readBracedExpansionPiece(
   }
   const slice = raw.slice(i, end);
   if (/^\$\{[ \t\n|]/.test(slice)) {
-    const msg = unsupportedSyntaxMessage('currentShellSubstitution');
-    rejectUnsupportedFeature(msg.slice(0, -'は、この採点環境では使えません。'.length));
+    const reply = slice[2] === '|';
+    const body = parseSafeSubstitutionBody(slice.slice(reply ? 3 : 2, -1));
+    const part: WordPart = body
+      ? { kind: 'commandSubstitution', body, text: slice, row: 0, mode: reply ? 'reply' : 'current' }
+      : { kind: 'single', text: slice };
+    return { parts: [part], next: end };
   }
   return { parts: [parseBracedParameterExpansion(slice, inDouble)], next: end };
 }

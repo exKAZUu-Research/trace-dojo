@@ -283,7 +283,7 @@ function mapValues(
 function removePattern(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
   if (operator === '#') {
     const end = shortestPrefixMatch(glob, chars, 0, step);
     return end === undefined ? text : chars.slice(end).join('');
@@ -366,7 +366,7 @@ function substitute(
   const chars = charactersOf(text);
   const spend = (cost?: number): void => shell.runtime.spend(cost);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
   const replace = (start: number, end: number): string =>
     replacementFor(replacement, chars.slice(start, end).join(''), spend);
   if (operator === '/#') {
@@ -639,7 +639,7 @@ function updateSubstringNesting(c: string, state: SubstringScanState): boolean {
 function changeCase(text: string, pattern: string, operator: string, shell: Shell): string {
   const chars = charactersOf(text);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step);
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
   const all = operator.length === 2;
   for (let i = 0; i < chars.length; i++) {
     if (!all && i > 0) break;

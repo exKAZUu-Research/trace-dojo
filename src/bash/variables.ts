@@ -197,6 +197,12 @@ export class VariableStore {
   lastArgument: string | undefined;
   /** The statuses of the commands of the last pipeline, which `PIPESTATUS` holds. */
   pipeStatus: readonly number[] = [0];
+  /** The directory that relative paths start from, which `cd` changes and `PWD` holds. */
+  workingDirectory = '/';
+  /** The directory before the last `cd`, which `OLDPWD` holds. */
+  previousDirectory: string | undefined;
+  /** The directories `pushd` remembers, most recent first, below the working directory. */
+  directoryStack: string[] = [];
   private readonly subshellLevel: number;
 
   constructor(
@@ -213,6 +219,9 @@ export class VariableStore {
       lastArgument: string | undefined;
       subshellLevel: number;
       pipeStatus: readonly number[];
+      workingDirectory: string;
+      previousDirectory: string | undefined;
+      directoryStack: string[];
     }
   ) {
     if (forked) {
@@ -226,6 +235,9 @@ export class VariableStore {
       this.lastArgument = forked.lastArgument;
       this.subshellLevel = forked.subshellLevel;
       this.pipeStatus = forked.pipeStatus;
+      this.workingDirectory = forked.workingDirectory;
+      this.previousDirectory = forked.previousDirectory;
+      this.directoryStack = forked.directoryStack;
       return;
     }
     this.scopes = [{ kind: 'global', map: new Map() }];
@@ -293,6 +305,9 @@ export class VariableStore {
       lastArgument: this.lastArgument,
       subshellLevel: nextLevel,
       pipeStatus: this.pipeStatus,
+      workingDirectory: this.workingDirectory,
+      previousDirectory: this.previousDirectory,
+      directoryStack: [...this.directoryStack],
     });
   }
 
@@ -431,7 +446,9 @@ export class VariableStore {
 
   isDynamic(name: string): boolean {
     if (this.findOwnCell(name)) return false;
-    return name === 'BASH_REMATCH' ? this.rematch !== undefined : DYNAMIC_VARIABLES.has(name);
+    if (name === 'BASH_REMATCH') return this.rematch !== undefined;
+    if (name === 'OLDPWD') return this.previousDirectory !== undefined;
+    return DYNAMIC_VARIABLES.has(name);
   }
 
   /** Resolves a variable name across at most one function-local nameref hop, enforcing capability invariants. */
@@ -915,6 +932,8 @@ export class VariableStore {
     if (name === 'RANDOM') return String(this.prng.next());
     if (name === 'LINENO') return String(this.currentLine());
     if (name === 'BASH_SUBSHELL') return String(this.subshellLevel);
+    if (name === 'PWD') return this.workingDirectory;
+    if (name === 'OLDPWD') return this.previousDirectory;
     return this.readDynamicElements(name)?.get(0n);
   }
 

@@ -65,7 +65,6 @@ const DISCARDED_OUTPUT: OutputTarget = { write: () => {} };
 interface ShellContextOptions {
   readonly store?: VariableStore;
   readonly fds?: DescriptorTable;
-  readonly workingDirectory?: string;
   readonly options?: ShellOptionValues;
   readonly ignoresErrexit?: boolean;
   readonly lineShift?: number;
@@ -83,8 +82,6 @@ export class Shell implements ArithmeticHost {
   readonly expander: Expander;
   readonly fds: DescriptorTable;
   readonly options: ShellOptionValues;
-  /** The directory that relative paths start from, which `cd` changes. */
-  workingDirectory: string;
   currentRow = 0;
   /** The descriptors that `{name}>file` allocated, which stay open after the command, as Bash keeps them. */
   private readonly allocatedDescriptors = new Set<number>();
@@ -102,7 +99,6 @@ export class Shell implements ArithmeticHost {
     options?: ShellContextOptions
   ) {
     this.fds = options?.fds ?? initialDescriptors({ runtime });
-    this.workingDirectory = options?.workingDirectory ?? '/';
     this.options = options?.options ?? defaultOptions();
     this.errexitIgnored = options?.ignoresErrexit ? 1 : 0;
     this.lineShift = options?.lineShift ?? 0;
@@ -537,7 +533,12 @@ export class Shell implements ArithmeticHost {
     for (const item of statement.items) {
       const matches =
         falling ||
-        item.patterns.some((pattern) => this.expander.matches(value, this.expander.expandPattern(pattern, true)));
+        item.patterns.some((pattern) =>
+          this.expander.matches(value, this.expander.expandPattern(pattern, true), {
+            extmatch: this.options.extglob,
+            fold: this.options.nocasematch,
+          })
+        );
       if (!matches) continue;
       status = this.runStatements(item.body);
       if (item.terminator === ';;') return status;
@@ -686,8 +687,9 @@ export class Shell implements ArithmeticHost {
 
   /** The path a file operation uses for `path`, which starts from the working directory when it is relative. */
   absolutePath(path: string): string {
-    if (path.startsWith('/') || this.workingDirectory === '/') return path;
-    return `${this.workingDirectory}/${path}`;
+    const { workingDirectory } = this.store;
+    if (path.startsWith('/') || workingDirectory === '/') return path;
+    return `${workingDirectory}/${path}`;
   }
 
   // ---------------------------------------------------------------- simple commands & declarations
@@ -905,6 +907,32 @@ export class Shell implements ArithmeticHost {
     return { output: capture.read(), status };
   }
 
+  /**
+   * Runs `${ ...; }` in this shell with its output captured, or `${| ...; }` with a local `REPLY` whose value it
+   * expands to. `return` ends only the substitution, while `break`, `continue`, and `exit` act on the shell.
+   */
+  captureCurrentShell(body: Statement[], mode: 'current' | 'reply'): { output: string; status: number } {
+    const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
+    const savedReply = mode === 'reply' ? this.store.readScalar('REPLY') : undefined;
+    if (mode === 'reply') this.store.unsetNamed('REPLY', true);
+    const saved = this.fds.clone();
+    if (mode === 'current') this.fds.set(1, { output: capture.target });
+    let status: number;
+    try {
+      status = this.runStatements(body);
+    } catch (error) {
+      if (!(error instanceof ReturnSignal)) throw error;
+      status = error.status;
+    } finally {
+      this.restoreDescriptors(saved);
+    }
+    if (mode === 'current') return { output: capture.read(), status };
+    const reply = this.store.readScalar('REPLY') ?? '';
+    if (savedReply === undefined) this.store.unsetNamed('REPLY', true);
+    else this.assignVariable('REPLY', savedReply);
+    return { output: reply, status };
+  }
+
   /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */
   runSubshell(
     body: Statement[],
@@ -937,11 +965,10 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  /** What a subshell copies from this shell besides its variables: descriptors, directory, and options. */
-  childContext(): Pick<ShellContextOptions, 'fds' | 'workingDirectory' | 'options' | 'ignoresErrexit'> {
+  /** What a subshell copies from this shell besides its variables: descriptors and options. */
+  childContext(): Pick<ShellContextOptions, 'fds' | 'options' | 'ignoresErrexit'> {
     return {
       fds: this.fds.clone(),
-      workingDirectory: this.workingDirectory,
       options: { ...this.options },
       ignoresErrexit: this.errexitIgnored > 0,
     };

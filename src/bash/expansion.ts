@@ -7,7 +7,6 @@ import {
   rejectQuotedSubscriptExpansion,
   rejectUnsupportedExpansion,
   rejectUnsupportedNamerefMutation,
-  rejectUnsupportedPathnameExpansion,
 } from './capabilities';
 import { charactersOf } from './characters';
 import {
@@ -27,7 +26,8 @@ import {
 } from './fields';
 import { flagsOf } from './options';
 import { applyOperator } from './parameterOperators';
-import { hasExtendedGlob, hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
+import { expandPathname } from './pathnameExpansion';
+import { hasExtendedGlob, hasPatternCharacters, matchesPattern, type PatternMode, quotePattern } from './pattern';
 import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { Shell } from './shell';
@@ -83,7 +83,7 @@ export class Expander {
       for (const parts of expandBraces(word.parts, this.shell.runtime.step)) {
         this.checkTilde(parts, false);
         for (const field of this.splitFields(this.expandParts(parts, FIELD_SPLITTING_WORD_CONTEXT))) {
-          pushMeteredItem(fields, this.finishField(field), this.shell.runtime.step);
+          for (const result of this.finishField(field)) pushMeteredItem(fields, result, this.shell.runtime.step);
         }
       }
     }
@@ -143,8 +143,8 @@ export class Expander {
     return this.arithmeticText({ pieces, row: word.row }, unquoteAnsiC, true);
   }
 
-  matches(text: string, pattern: string, extmatch = false): boolean {
-    return matchesPattern(pattern, text, this.shell.runtime.step, extmatch);
+  matches(text: string, pattern: string, mode: PatternMode): boolean {
+    return matchesPattern(pattern, text, this.shell.runtime.step, mode);
   }
 
   /** Expands raw compound items of `name=(...)` through metered word and string helpers. */
@@ -369,7 +369,9 @@ export class Expander {
     inDouble: boolean
   ): WordSegment[] {
     if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-    const { output, status } = this.shell.captureSubshell(part.body, part.row);
+    const { output, status } = part.mode
+      ? this.shell.captureCurrentShell(part.body, part.mode)
+      : this.shell.captureSubshell(part.body, part.row);
     this.lastSubstitutionStatus = status;
     this.shell.store.lastStatus = status;
     if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
@@ -734,7 +736,6 @@ export class Expander {
       const chunk = fragment.quoted ? quotePattern(fragment.text) : fragment.text;
       pattern = appendMetered(pattern, chunk, spend);
     }
-    if (hasExtendedGlob(pattern, this.shell.runtime.step)) rejectUnsupportedExpansion('extglob');
     return pattern;
   }
 
@@ -745,7 +746,8 @@ export class Expander {
     return splitWordSegments(segments, needsIfs ? this.currentIfs() : ' \t\n');
   }
 
-  finishField(field: readonly TextSegment[]): string {
+  /** Removes a field's quotes and expands it as a pattern into the paths it matches, as Bash does last. */
+  finishField(field: readonly TextSegment[]): string[] {
     const spend = (cost?: number): void => this.spend(cost);
     let result = '';
     let unquoted = '';
@@ -753,8 +755,14 @@ export class Expander {
       result = appendMetered(result, fragment.text, spend);
       unquoted = appendMetered(unquoted, fragment.quoted ? quotePattern(fragment.text) : fragment.text, spend);
     }
-    if (hasPatternCharacters(unquoted, this.shell.runtime.step)) rejectUnsupportedPathnameExpansion(result);
-    return result;
+    const { options } = this.shell;
+    const step = this.shell.runtime.step;
+    const isPattern = hasPatternCharacters(unquoted, step) || (options.extglob && hasExtendedGlob(unquoted, step));
+    if (options.noglob || !isPattern) return [result];
+    const paths = expandPathname(this.shell, unquoted);
+    if (paths.length > 0) return paths;
+    if (options.failglob) this.shell.discard(`no match: ${result}`);
+    return options.nullglob ? [] : [result];
   }
 
   private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): WordSegment[] {

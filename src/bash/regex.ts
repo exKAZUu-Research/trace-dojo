@@ -30,11 +30,38 @@ export interface CompiledRegex {
 
 const CLASSES = POSIX_CHARACTER_CLASSES;
 
-export function compileRegex(source: string, spend: StepMeter): CompiledRegex {
+/** @param fold Whether letters match either case, as `shopt -s nocasematch` makes `=~` match. */
+export function compileRegex(source: string, spend: StepMeter, fold = false): CompiledRegex {
   const parser = new RegexParser(charactersOf(source), spend);
   const root = parser.parseAlternation();
   if (parser.position < parser.chars.length) throw new RegexSyntaxError('parentheses not balanced');
-  return { root, groups: parser.groups };
+  return { root: fold ? foldCase(root) : root, groups: parser.groups };
+}
+
+function foldCase(node: RegexNode): RegexNode {
+  switch (node.kind) {
+    case 'char': {
+      const lower = node.c.toLowerCase();
+      return { kind: 'set', negated: false, test: (c) => c.toLowerCase() === lower };
+    }
+    case 'set': {
+      const { test } = node;
+      return { ...node, test: (c) => test(c) || test(c.toLowerCase()) || test(c.toUpperCase()) };
+    }
+    case 'group':
+    case 'repeat': {
+      return { ...node, body: foldCase(node.body) };
+    }
+    case 'concat': {
+      return { ...node, items: node.items.map(foldCase) };
+    }
+    case 'alternation': {
+      return { ...node, options: node.options.map(foldCase) };
+    }
+    default: {
+      return node;
+    }
+  }
 }
 
 class RegexParser {

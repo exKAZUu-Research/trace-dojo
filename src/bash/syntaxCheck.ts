@@ -331,6 +331,8 @@ function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {
 export function createValidatorSourceText(source: string): SourceText {
   const text = new SourceText(source);
   text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  text.parseBraceSubstitution = (start) =>
+    new ShellGrammarValidator(text, start, true, true).validateBraceSubstitution();
   return text;
 }
 
@@ -417,13 +419,37 @@ function isCompoundAssignmentPrefix(prefix: string): boolean {
 
 type WordContext = 'command' | 'declaration' | 'argument';
 
+/** Whether `extglob` is on after a line of the script, which `shopt -s extglob` or `shopt -u extglob` changes. */
+function extglobAfterLine(line: string, enabled: boolean): boolean {
+  let result = enabled;
+  for (const command of line.split(/[;&|]/)) {
+    const match = /^\s*shopt\s+-([su])((?:\s+[\w-]+)*)\s*$/.exec(command);
+    if (match && match[2].split(/\s+/).includes('extglob')) result = match[1] === 's';
+  }
+  return result;
+}
+
+/** Whether the text before `index`, past blanks, ends a command, so that a word at `index` starts one. */
+function endsCommand(source: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && (source[i] === ' ' || source[i] === '\t')) i--;
+  return i >= 0 && ';&|\n'.includes(source[i]);
+}
+
 class ShellTokenStream {
+  /**
+   * Whether `shopt -s extglob` ran before the line being read, which makes `@(...)` and the other extended patterns
+   * part of a word, as Bash reads each line of a script after running the ones before it.
+   */
+  extglob = false;
   private pendingHeredocSpec: { stripLeadingTabs: boolean } | undefined;
   private readonly queuedHeredocs: { endMarker: string; stripLeadingTabs: boolean }[] = [];
 
   constructor(
     private readonly text: SourceText,
-    public position: number
+    public position: number,
+    /** Whether a `}` that starts a command ends the list, even with a word right after it, as in `"${ f; }"`. */
+    private readonly closesBrace = false
   ) {}
 
   readNext(context: WordContext): ShellToken {
@@ -433,6 +459,10 @@ class ShellTokenStream {
     const row = this.text.rowAt(start);
     if (start >= source.length) return this.makeToken('eof', '', row, start, false);
     const ch = source[start];
+    if (this.closesBrace && ch === '}' && endsCommand(source, start)) {
+      this.position++;
+      return this.makeToken('word', '}', row, start, false);
+    }
     if (ch === '\n') {
       this.position++;
       this.consumeQueuedHeredocs();
@@ -482,6 +512,10 @@ class ShellTokenStream {
     while (this.position < source.length) {
       const ch = source[this.position];
       if (this.tryScanSpecialWordSegment(start, context, ch, unclosedBrackets)) continue;
+      if (this.extglob && '?*+@!'.includes(ch) && source[this.position + 1] === '(') {
+        this.position = skipBalanced(this.text, this.position + 1, '(', ')');
+        continue;
+      }
       if (WORD_BREAK_CHARS.has(ch)) break;
       if (`'"\\\`$`.includes(ch)) quoted ||= ch !== '$';
       this.position = skipWordPiece(this.text, this.position);
@@ -632,18 +666,21 @@ class ShellGrammarValidator {
   constructor(
     private readonly text: SourceText,
     start: number,
-    private readonly insideSubstitution: boolean
+    private readonly insideSubstitution: boolean,
+    closesBrace = false
   ) {
-    this.stream = new ShellTokenStream(text, start);
+    this.stream = new ShellTokenStream(text, start, closesBrace);
   }
 
   validateScript(): void {
     for (;;) {
       this.consumeNewlines();
-      if (this.peek().kind === 'eof') return;
+      const start = this.peek();
+      if (start.kind === 'eof') return;
       this.parseList(false);
       const end = this.peek();
       if (end.kind !== 'newline' && end.kind !== 'eof') this.failUnexpected(end);
+      this.stream.extglob = extglobAfterLine(this.text.source.slice(start.start, end.start), this.stream.extglob);
     }
   }
 
@@ -653,6 +690,13 @@ class ShellGrammarValidator {
       if (this.hasOperator(this.peek(), ')')) return this.advance().end;
       this.parseList(false);
     }
+  }
+
+  validateBraceSubstitution(): number {
+    this.parseCompoundList();
+    const end = this.peek();
+    if (!this.hasKeyword(end, '}')) this.failUnexpected(end);
+    return this.advance().end;
   }
 
   private parseCompoundList(): void {

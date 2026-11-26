@@ -1,4 +1,5 @@
 import { legalNumber } from './characters';
+import { cdBuiltin, dirsBuiltin, popdBuiltin, pushdBuiltin, pwdBuiltin } from './directoryBuiltins';
 import { setBuiltin, shoptBuiltin } from './optionBuiltins';
 import { decodeBytes, encodeText, formatPrintf } from './printf';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
@@ -329,5 +330,10 @@ export const REGULAR_BUILTINS: Record<string, Builtin> = {
   read: readBuiltin,
   mapfile: mapfileBuiltin,
   readarray: mapfileBuiltin,
+  cd: cdBuiltin,
+  pwd: pwdBuiltin,
+  pushd: pushdBuiltin,
+  popd: popdBuiltin,
+  dirs: dirsBuiltin,
   ...TURTLE_BUILTINS,
 };

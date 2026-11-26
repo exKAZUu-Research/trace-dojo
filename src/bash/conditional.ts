@@ -55,7 +55,8 @@ function evaluateBinaryConditional(shell: Shell, expression: Extract<TestExpress
   const { operator } = expression;
   const left = expander.expandString(expression.left);
   if (operator === '==' || operator === '=' || operator === '!=') {
-    const matched = expander.matches(left, expander.expandPattern(expression.right), true);
+    const pattern = expander.expandPattern(expression.right);
+    const matched = expander.matches(left, pattern, { extmatch: true, fold: shell.options.nocasematch });
     return operator === '!=' ? !matched : matched;
   }
   const right = expander.expandString(expression.right);
@@ -129,7 +130,7 @@ function isSet(shell: Shell, operand: string): boolean {
 function regexStatus(shell: Shell, text: string, source: string): number {
   let compiled;
   try {
-    compiled = compileRegex(source, shell.runtime.step);
+    compiled = compileRegex(source, shell.runtime.step, shell.options.nocasematch);
   } catch (error) {
     if (!(error instanceof RegexSyntaxError)) throw error;
     shell.reportError(`[[: invalid regular expression \`${source}': ${error.message}`);

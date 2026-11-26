@@ -821,7 +821,7 @@ export class Converter {
         return this.unsupported(node, 'processSubstitution');
       }
       case 'extglob_pattern': {
-        return this.unsupported(node, 'extglob');
+        return [{ kind: 'literal', text: this.restoreQuotes(node.text, node.startIndex) }];
       }
       default: {
         return this.fail(node, unexpectedTokenMessage(node.text));
@@ -843,10 +843,16 @@ export class Converter {
 
   private commandSubstitution(node: Node): WordPart {
     const opening = node.child(0);
-    if (opening && opening.type !== '$(' && opening.type !== '`') {
-      this.unsupported(node, 'currentShellSubstitution');
-    }
     const row = node.startPosition.row;
+    if (opening?.type === '${') {
+      return {
+        kind: 'commandSubstitution',
+        body: this.statements(node.children.filter((child) => child.isNamed || child.type === '&')),
+        text: this.restoreQuotes(node.text, node.startIndex),
+        row,
+        mode: this.source[node.startIndex + 2] === '|' ? 'reply' : 'current',
+      };
+    }
     const text =
       opening?.type === '`'
         ? this.analyzed.originalSource.slice(node.startIndex, node.endIndex)

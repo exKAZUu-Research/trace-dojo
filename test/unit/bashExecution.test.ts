@@ -257,8 +257,8 @@ test('features this environment does not provide stop the program with a message
     stdout: 'before\n',
     uncaughtException: '外部コマンド（ls）は、この採点環境では使えません。',
   });
-  expect(executeProgram('bash', 'echo *\n')).toMatchObject({
-    uncaughtException: expect.stringContaining('ファイル名の展開'),
+  expect(executeProgram('bash', 'echo $$\n')).toMatchObject({
+    uncaughtException: 'プロセス番号（$$）は、この採点環境では使えません。',
   });
   expect(executeProgram('bash', 'eval x=1\n')).toMatchObject({
     uncaughtException: '文字列の評価（eval）は、この採点環境では使えません。',
