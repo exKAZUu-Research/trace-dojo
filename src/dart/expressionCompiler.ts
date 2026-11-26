@@ -245,17 +245,26 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     }
   }
 
-  protected skipOnNull(receiver: Compiled, nullAware: boolean): void {
-    if (!nullAware) return;
+  /**
+   * Notes the null-aware selector after the receiver, giving the receiver to compile on with: one an await after it
+   * waits for is lifted into a step, so that it runs once and before the await, as the SDK evaluates it, and the
+   * selector's test of whether it shorts reads it.
+   */
+  protected skipOnNull(receiver: Compiled, nullAware: boolean, selector?: Span): Compiled {
+    // A selector after a null-aware one is shorted too when its receiver is: the receiver's value is SHORTED.
+    if (!nullAware && this.nullChain.exit === undefined) return receiver;
+    const lifted = selector ? this.liftBeforeLaterAwait(receiver, selector) : receiver;
+    const { run } = lifted;
+    this.nullChain.tests.push((frame) => {
+      const value = run(frame);
+      return value === SHORTED || (nullAware && value === undefined);
+    });
+    if (!nullAware) return lifted;
     const { whenNull, whenNonNull } = this.nullBranches(receiver);
     const { exit } = this.nullChain;
     this.nullChain.exit = exit ? Flow.join(exit, whenNull) : whenNull;
-    const { run } = receiver;
-    this.nullChain.tests.push((frame) => {
-      const value = run(frame);
-      return value === undefined || value === SHORTED;
-    });
     this.flow = whenNonNull;
+    return lifted;
   }
 
   protected nullBranches(value: Compiled): { whenNull: Flow; whenNonNull: Flow } {
@@ -489,9 +498,13 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     return this.compileStagedPart(expression, () => this.compileChainPartNow(expression, context));
   }
 
+  /**
+   * The test of the selector chain's last selector so far, whose receiver a step evaluated: SHORTED when an earlier
+   * null-aware selector shorted, so it alone tells whether what follows runs.
+   */
   protected shortingProbe(): () => readonly ShortingTest[] {
     const chain = this.nullChain;
-    return () => [...chain.tests];
+    return () => chain.tests.slice(-1);
   }
 
   private compileChainPartNow(expression: Expression, context: DartType | undefined): Compiled {
@@ -1371,7 +1384,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
-    this.skipOnNull(receiver, nullAware);
+    receiver = this.skipOnNull(receiver, nullAware, span);
     const dispatchType = this.dynamicDispatchType(receiver, nullAware);
     if (dispatchType) {
       const { run } = receiver;

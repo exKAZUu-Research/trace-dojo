@@ -455,7 +455,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   // code-gauge-allow functionNcss -- Static and dynamic property targets share the prepared receiver.
   private memberTarget(receiver: Compiled, name: string, nullAware: boolean, span: Span): AssignableTarget {
     const receiverType = receiver.type;
-    this.skipOnNull(receiver, nullAware);
+    receiver = this.skipOnNull(receiver, nullAware, span);
     const prepare = preparingReceiver(receiver.run, nullAware);
     const memberName = this.runtimeMemberName(name);
     const dispatchType = this.dynamicDispatchType(receiver, nullAware);
@@ -513,7 +513,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     isPlainAssignment: boolean
   ): AssignableTarget {
     const receiverType = receiver.type;
-    this.skipOnNull(receiver, nullAware);
+    receiver = this.skipOnNull(receiver, nullAware, span);
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     let indexContext: DartType | undefined;
     let readContext: DartType | undefined;

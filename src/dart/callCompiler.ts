@@ -469,7 +469,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   ): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
-    this.skipOnNull(receiver, nullAware);
+    receiver = this.skipOnNull(receiver, nullAware, span);
     if (this.dynamicDispatchType(receiver, nullAware)) {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }

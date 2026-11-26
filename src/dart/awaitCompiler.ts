@@ -1,4 +1,4 @@
-import type { Expression } from './ast';
+import type { Expression, Span } from './ast';
 import {
   AwaitRequest,
   type AwaitRoot,
@@ -173,6 +173,16 @@ export abstract class AwaitCompiler extends CompilerBase {
         return run(frame);
       },
     };
+  }
+
+  /** The value, lifted into a step when an await that starts within or after `span` waits after it. */
+  protected liftBeforeLaterAwait(compiled: Compiled, span: Span): Compiled {
+    const staging = this.staging;
+    if (compiled.gen || !isLiftable(compiled) || !staging?.awaitStarts.some((start) => start >= span.start)) {
+      return compiled;
+    }
+    const read = this.addStep(compiled.run);
+    return read ? { ...compiled, run: read } : compiled;
   }
 
   private withoutStaging<T>(compile: () => T): T {
