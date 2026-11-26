@@ -33,10 +33,6 @@ export const cdBuiltin: Builtin = (shell, args) => {
     shell.fd1.write(`${shell.store.workingDirectory}\n`);
     return 0;
   }
-  // `CDPATH` would search other directories for a relative name, as Bash does unless it starts with `.` or `/`.
-  if (!/^(\/|\.\.?(\/|$))/.test(operand)) {
-    rejectControlVariable(shell.store.readScalar('CDPATH'), 'CDPATH', 'cd の検索');
-  }
   return changeDirectory(shell, 'cd', operand, operand) ? 0 : 1;
 };
 
@@ -45,6 +41,11 @@ function changeDirectory(shell: Shell, builtin: string, path: string, shown: str
   if (path === '') {
     shell.reportError(`${builtin}: null directory`);
     return false;
+  }
+  // `CDPATH` would search other directories for a relative name, as `cd` and `pushd` do in Bash unless the name
+  // starts with `.` or `/`; the directory stack and `OLDPWD` hold absolute names, which it never applies to.
+  if (!/^(\/|\.\.?(\/|$))/.test(path)) {
+    rejectControlVariable(shell.store.readScalar('CDPATH'), 'CDPATH', `${builtin} の検索`);
   }
   const full = path.startsWith('/') ? path : `${shell.store.workingDirectory}/${path}`;
   const target = resolvePath(full);
