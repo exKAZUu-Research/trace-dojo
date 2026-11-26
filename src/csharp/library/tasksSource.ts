@@ -92,7 +92,7 @@ namespace System.Threading {
 }
 
 namespace System.Collections.Generic {
-  public interface IAsyncEnumerable<out T> { IAsyncEnumerator<T> GetAsyncEnumerator(); }
+  public interface IAsyncEnumerable<out T> { IAsyncEnumerator<T> GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default); }
   public interface IAsyncEnumerator<out T> : IAsyncDisposable {
     T Current { get; }
     System.Threading.Tasks.ValueTask<bool> MoveNextAsync();
@@ -123,6 +123,11 @@ namespace System.Threading.Tasks {
     public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state);
     public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state, System.Threading.CancellationToken cancellationToken);
     public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state, TaskCreationOptions creationOptions);
+  }
+  public static class TaskAsyncEnumerableExtensions {
+    public static System.Runtime.CompilerServices.ConfiguredAsyncDisposable ConfigureAwait(this IAsyncDisposable source, bool continueOnCapturedContext);
+    public static System.Runtime.CompilerServices.ConfiguredCancelableAsyncEnumerable<T> ConfigureAwait<T>(this IAsyncEnumerable<T> source, bool continueOnCapturedContext);
+    public static System.Runtime.CompilerServices.ConfiguredCancelableAsyncEnumerable<T> WithCancellation<T>(this IAsyncEnumerable<T> source, System.Threading.CancellationToken cancellationToken);
   }
   public static class TaskExtensions {
     public static Task Unwrap(this Task<Task> task);
@@ -304,6 +309,27 @@ namespace System.Runtime.CompilerServices {
       public void UnsafeOnCompleted(Action continuation);
     }
   }
+  public readonly struct ConfiguredCancelableAsyncEnumerable<T> {
+    private readonly IAsyncEnumerable<T> _enumerable;
+    private readonly System.Threading.CancellationToken _cancellationToken;
+    public ConfiguredCancelableAsyncEnumerable<T> ConfigureAwait(bool continueOnCapturedContext);
+    public ConfiguredCancelableAsyncEnumerable<T> WithCancellation(System.Threading.CancellationToken cancellationToken);
+    public Enumerator GetAsyncEnumerator();
+    public readonly struct Enumerator {
+      private readonly IAsyncEnumerator<T> _enumerator;
+      public T Current { get; }
+      public ConfiguredTaskAwaitable<bool> MoveNextAsync();
+      public ConfiguredTaskAwaitable DisposeAsync();
+    }
+  }
+  /** Implements IAsyncDisposable, unlike .NET's, so that \`await using\` disposes it as one. */
+  public readonly struct ConfiguredAsyncDisposable : IAsyncDisposable {
+    private readonly IAsyncDisposable _source;
+    public ConfiguredTaskAwaitable DisposeAsync();
+    System.Threading.Tasks.ValueTask IAsyncDisposable.DisposeAsync();
+  }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class EnumeratorCancellationAttribute : Attribute { public EnumeratorCancellationAttribute(); }
   public readonly struct YieldAwaitable {
     public YieldAwaiter GetAwaiter();
     public readonly struct YieldAwaiter : ICriticalNotifyCompletion {

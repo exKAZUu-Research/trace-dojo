@@ -123,6 +123,8 @@ export interface ParameterSymbol {
   defaultContext?: TypeContext;
   /** What a `[Caller...]` attribute makes an omitted argument receive. */
   callerInfo?: CallerInfo;
+  /** Whether `[EnumeratorCancellation]` makes an async iterator's parameter receive `GetAsyncEnumerator`'s token. */
+  isEnumeratorCancellation?: boolean;
   position?: Position;
 }
 

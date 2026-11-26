@@ -671,7 +671,7 @@ defineNatives({
 });
 
 /** The task a ValueTask wraps; `default(ValueTask)` wraps none and is a completed one. */
-function valueTaskObject(call: NativeCall, receiver: Value): CsObject {
+export function valueTaskObject(call: NativeCall, receiver: Value): CsObject {
   const task = (receiver as CsStruct).fields[0];
   if (task instanceof CsObject) return task;
   const type = (receiver as CsStruct).type as NamedType;

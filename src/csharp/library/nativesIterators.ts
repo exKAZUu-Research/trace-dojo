@@ -2,7 +2,8 @@ import type { IteratorState } from '../iterators';
 import { defineNatives, type NativeCall } from '../natives';
 import { taskObject, type TaskState } from '../tasks';
 import type { Type } from '../types';
-import { CsObject, CsStruct } from '../values';
+import { CsObject, CsStruct, type Value } from '../values';
+import { passEnumeratorToken } from './nativesAsyncStreams';
 import { evaluatorOf, fail, libraryType } from './support';
 
 function stateOf(receiver: unknown): IteratorState {
@@ -49,7 +50,11 @@ function valueTaskOf(call: NativeCall, state: TaskState, resultType?: Type): CsS
 }
 
 defineNatives({
-  'System.Linq.Internal.YieldAsyncIterator`1.GetAsyncEnumerator': (_call, receiver) => enumeratorOf(receiver),
+  'System.Linq.Internal.YieldAsyncIterator`1.GetAsyncEnumerator': (call, receiver, [token]) => {
+    const enumerator = enumeratorOf(receiver);
+    passEnumeratorToken(call, stateOf(enumerator), token as Value);
+    return enumerator;
+  },
   'System.Linq.Internal.YieldAsyncIterator`1.get_Current': (_call, receiver) => stateOf(receiver).current,
   'System.Linq.Internal.YieldAsyncIterator`1.MoveNextAsync': (call, receiver) =>
     valueTaskOf(call, evaluatorOf(call).moveNextAsync(stateOf(receiver)), libraryType(call, 'System.Boolean')),

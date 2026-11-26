@@ -159,7 +159,7 @@ function cancelAfter(call: NativeCall, receiver: Value, milliseconds: number, pa
 }
 
 /** A source canceled when any of the tokens' sources is, or at once when one already is. */
-function linkedSource(call: NativeCall, tokens: Value[]): CsObject {
+export function linkedSource(call: NativeCall, tokens: Value[]): CsObject {
   const linked = newSource(call);
   for (const token of tokens) {
     const source = tokenSource(token);

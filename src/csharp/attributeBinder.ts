@@ -304,6 +304,10 @@ export abstract class AttributeBinder extends StatementBinder {
         if (owner instanceof MethodSymbol) owner.setsRequiredMembers = true;
         return;
       }
+      case 'System.Runtime.CompilerServices.EnumeratorCancellationAttribute': {
+        if (owner && 'refKind' in owner && pending.target === 'parameter') owner.isEnumeratorCancellation = true;
+        return;
+      }
       case 'System.Runtime.CompilerServices.ModuleInitializerAttribute': {
         if (owner instanceof MethodSymbol) owner.isModuleInitializer = true;
         return;

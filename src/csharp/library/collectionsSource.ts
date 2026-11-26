@@ -646,7 +646,7 @@ namespace System.Linq.Internal {
   /** What an iterator method returns, which runs the method's body as \`MoveNext\` asks for its values. */
   public sealed class YieldIterator<T> : IEnumerable<T>, IEnumerator<T> { public IEnumerator<T> GetEnumerator(); public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
   /** What an async iterator method returns, which runs the method's body as \`MoveNextAsync\` asks for its values. */
-  public sealed class YieldAsyncIterator<T> : IAsyncEnumerable<T>, IAsyncEnumerator<T> { public IAsyncEnumerator<T> GetAsyncEnumerator(); public T Current { get; } public System.Threading.Tasks.ValueTask<bool> MoveNextAsync(); public System.Threading.Tasks.ValueTask DisposeAsync(); }
+  public sealed class YieldAsyncIterator<T> : IAsyncEnumerable<T>, IAsyncEnumerator<T> { public IAsyncEnumerator<T> GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default); public T Current { get; } public System.Threading.Tasks.ValueTask<bool> MoveNextAsync(); public System.Threading.Tasks.ValueTask DisposeAsync(); }
   public sealed class Grouping<TKey, TElement> : IGrouping<TKey, TElement> { public TKey Key { get; } public IEnumerator<TElement> GetEnumerator(); }
   public sealed class Lookup<TKey, TElement> : ILookup<TKey, TElement> {
     public int Count { get; }
