@@ -38,6 +38,7 @@ export type Value =
   | BorrowGuard
   | RawPtr
   | IoStream
+  | BufferedWriter
   | ChannelEnd
   | ThreadHandle
   | DurationValue
@@ -399,6 +400,39 @@ export class IoStream {
     readonly reader: TextReader | undefined,
     readonly writer: FileHandle | undefined
   ) {}
+}
+
+/** std's default capacity of a `BufWriter`, in bytes. */
+const BUF_WRITER_CAPACITY = 8 * 1024;
+
+/**
+ * A `BufWriter`: the text written to it that it has not passed on yet to the writer it wraps, which a full buffer,
+ * `flush`, and its drop pass on, as std's buffers bytes up to its capacity. `writeInner` gives the `io::Error` of a
+ * failed write.
+ */
+export class BufferedWriter {
+  private pending = '';
+  private pendingBytes = 0;
+  constructor(private readonly writeInner: (text: string) => Value | undefined) {}
+
+  write(text: string): Value | undefined {
+    const bytes = new TextEncoder().encode(text).length;
+    if (this.pendingBytes + bytes > BUF_WRITER_CAPACITY) {
+      const error = this.flush();
+      if (error) return error;
+    }
+    if (bytes >= BUF_WRITER_CAPACITY) return this.writeInner(text);
+    this.pending += text;
+    this.pendingBytes += bytes;
+    return undefined;
+  }
+
+  flush(): Value | undefined {
+    const text = this.pending;
+    this.pending = '';
+    this.pendingBytes = 0;
+    return text ? this.writeInner(text) : undefined;
+  }
 }
 
 /** The queue of an `mpsc` channel, which its `Sender`s and its `Receiver` share. */

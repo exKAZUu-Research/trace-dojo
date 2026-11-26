@@ -1,7 +1,7 @@
 import { type BuiltinAdt, outputStream } from '../types';
 import { decodeUtf8 } from '../utf8';
-import { sliceItems, type SliceView, StructValue, UNIT_VALUE, type Value } from '../values';
-import { writesFile, writeToStream } from './io';
+import { type BufferedWriter, sliceItems, type SliceView, StructValue, UNIT_VALUE, type Value } from '../values';
+import { writeTarget, writeToStream } from './io';
 import { define, deref, err, type NativeContext, ok } from './support';
 
 define({
@@ -12,7 +12,10 @@ define({
   'std::io::Write::write': ([target, bytes], ctx) =>
     write(ctx, bytes, target, BigInt(sliceItems(deref(bytes) as Value[] | SliceView).length)),
   'std::io::Write::write_all': ([target, bytes], ctx) => write(ctx, bytes, target, UNIT_VALUE),
-  'std::io::Write::flush': (_args, ctx) => ok(ctx, UNIT_VALUE),
+  'std::io::Write::flush': ([target], ctx) => {
+    const error = writeTarget(ctx.typeArgs[0]) === 'buffered' ? (deref(target) as BufferedWriter).flush() : undefined;
+    return error ? err(ctx, error) : ok(ctx, UNIT_VALUE);
+  },
 });
 
 function handle(ctx: NativeContext, type: BuiltinAdt): StructValue {
@@ -23,12 +26,13 @@ function handle(ctx: NativeContext, type: BuiltinAdt): StructValue {
 function write(ctx: NativeContext, input: Value, target: Value, written: Value): Value {
   const bytes = sliceItems(deref(input) as Value[] | SliceView);
   ctx.runtime.allocateString(bytes.length);
-  if (writesFile(ctx.typeArgs[0])) {
-    const error = writeToStream(
-      ctx.interp.program,
-      target,
-      decodeUtf8(Uint8Array.from(bytes, (byte) => Number(byte as bigint)))
-    );
+  const kind = writeTarget(ctx.typeArgs[0]);
+  if (kind) {
+    const text = decodeUtf8(Uint8Array.from(bytes, (byte) => Number(byte as bigint)));
+    const error =
+      kind === 'buffered'
+        ? (deref(target) as BufferedWriter).write(text)
+        : writeToStream(ctx.interp.program, target, text);
     return error ? err(ctx, error) : ok(ctx, written);
   }
   const stream = outputStream(ctx.typeArgs[0]);

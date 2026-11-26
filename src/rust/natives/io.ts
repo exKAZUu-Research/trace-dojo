@@ -2,9 +2,10 @@ import { FileSystemError, type FileSystemErrorCode, type TextReader } from '../.
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
 import type { Program } from '../items';
-import { shallow } from '../types';
+import { outputStream, shallow } from '../types';
 import { decodeUtf8 } from '../utf8';
 import {
+  BufferedWriter,
   DONE,
   EnumValue,
   IoStream,
@@ -209,7 +210,18 @@ define({
   'std::io::BufRead::lines': ([self], ctx) => linesOf(ctx, self),
   'std::io::read_to_string': ([reader], ctx) => reading(ctx, reader, (source) => source.readRest()),
   'BufReader<_>::new': ([inner]) => inner,
-  'BufWriter<_>::new': ([inner]) => inner,
+  'BufWriter<_>::new': ([inner], ctx) => {
+    // Its drop passes on what it holds.
+    ctx.interp.dropper.activate();
+    const { program } = ctx.interp;
+    const { runtime } = ctx;
+    const stream = outputStream(ctx.typeArgs[0]);
+    return new BufferedWriter((text) => {
+      if (!stream) return writeToStream(program, inner, text);
+      runtime.write(stream, text);
+      return;
+    });
+  },
   'Error::new': ([kind, error], ctx) =>
     ioError(ctx, {
       kind: ctx.interp.program.adtDef('IoErrorKind').variants[(deref(kind) as EnumValue).variant].name,
@@ -343,11 +355,12 @@ export function writeToStream(program: Program, target: Value, text: string): Va
   return undefined;
 }
 
-/** Whether a type is one whose `Write` impl writes to a file: a `File`, or a `BufWriter` of one. */
-export function writesFile(type: Parameters<typeof normalize>[0]): boolean {
+/** How a type's `Write` impl writes: to a file, through a `BufWriter`'s buffer, or not at all. */
+export function writeTarget(type: Parameters<typeof normalize>[0]): 'file' | 'buffered' | undefined {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
-  if (t.kind !== 'adt') return false;
-  if (t.def.builtin === 'File') return true;
-  return t.def.builtin === 'BufWriter' && t.args.length > 0 && writesFile(t.args[0]);
+  if (t.kind !== 'adt') return undefined;
+  if (t.def.builtin === 'File') return 'file';
+  if (t.def.builtin !== 'BufWriter' || t.args.length === 0) return undefined;
+  return writeTarget(t.args[0]) === 'file' || outputStream(t.args[0]) ? 'buffered' : undefined;
 }

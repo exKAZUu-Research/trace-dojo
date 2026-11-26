@@ -1,14 +1,14 @@
 import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
 import { stringByteLength, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
-import { evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
+import { derefAll, evaluateValues, stringish, withEvaluatedValues } from './compilerCommon';
 import { compilePatternInput, takesWhole } from './compilerPatterns';
 import type { WriteChunk } from './debugText';
 import type { Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
 import { allocVecElements } from './natives/capacityNatives';
-import { writesFile, writeToStream } from './natives/io';
+import { writeTarget, writeToStream } from './natives/io';
 import { sizeOf } from './natives/layout';
 import { cloneValue, valuesEqual } from './ops';
 import { FmtFailure, type Frame, RustPanic, writtenText } from './runtime';
@@ -16,6 +16,7 @@ import { runtimeType } from './runtimeTypes';
 import { outputStream, resolve, shallow } from './types';
 import { utf8Length } from './utf8';
 import {
+  type BufferedWriter,
   EnumValue,
   type FormatterValue,
   isPlace,
@@ -115,7 +116,8 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   }
   const stream = outputStream(inner);
   if (stream) return writeStream(c, macro, target, format, stream, newline);
-  if (writesFile(inner)) return writeFile(c.program, target, format, newline);
+  const written = writeTarget(inner);
+  if (written) return writeFile(c.program, target, format, newline, written === 'buffered');
   const { program } = c;
   return (frame) => {
     let formatter = target(frame);
@@ -130,10 +132,13 @@ function writeMacro(c: Compiler, macro: Macro<'write'>): Eval {
   };
 }
 
-function writeFile(program: Program, target: Eval, format: FormatEval, newline: string): Eval {
+/** `write!` to a file, or to a `BufWriter`'s buffer. */
+function writeFile(program: Program, target: Eval, format: FormatEval, newline: string, buffered: boolean): Eval {
   return (frame) => {
     const { text } = formatPartly(format, frame);
-    const error = writeToStream(program, target(frame), text + newline);
+    const error = buffered
+      ? (derefAll(target(frame)) as BufferedWriter).write(text + newline)
+      : writeToStream(program, target(frame), text + newline);
     return error ? new EnumValue(program.adtDef('Result'), 1, [error]) : writeResult(program, false);
   };
 }

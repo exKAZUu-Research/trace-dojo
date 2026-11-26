@@ -5,6 +5,7 @@ import { concreteType, typeKey } from './runtimeTypes';
 import { type FnDef, type ImplDef, sameType, shallow, substitute, type Type, type TypeParam } from './types';
 import {
   type BorrowGuard,
+  type BufferedWriter,
   type CellBox,
   CellPlace,
   type ChannelEnd,
@@ -174,6 +175,11 @@ export class Dropper {
         (target as ChannelEnd).receiverDropped = true;
         return;
       }
+      case 'BufWriter': {
+        // Dropping a `BufWriter` passes on what it holds, and ignores a failure as std does.
+        (target as BufferedWriter).flush();
+        return;
+      }
       case 'RefCell':
       case 'Cell':
       case 'Mutex':
@@ -262,6 +268,7 @@ const COUNTED = new Set([
   'RwLockReadGuard',
   'RwLockWriteGuard',
   'Receiver',
+  'BufWriter',
 ]);
 
 function argsOf(t: Type & { kind: 'adt' }): Map<TypeParam, Type> {

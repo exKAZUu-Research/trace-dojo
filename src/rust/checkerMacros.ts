@@ -7,7 +7,7 @@ import { checkPattern } from './checkerPatterns';
 import { requireMutablePlace } from './checkerPlaces';
 import { normalize } from './infer';
 import { compileError, resolveTypePath } from './items';
-import { writesFile } from './natives/io';
+import { writeTarget } from './natives/io';
 import { BOOL, freshVar, NEVER, outputStream, resolve, shallow, type Type, typeToString, UNIT, USIZE } from './types';
 
 // code-gauge-allow functionNcss -- One case per kind of macro.
@@ -60,7 +60,7 @@ function writeMacro(c: Checker, macro: Extract<MacroCall, { kind: 'write' }>): T
   const inner = target.kind === 'ref' ? normalize(shallow(target.target)) : target;
   const isFormatter = inner.kind === 'adt' && inner.def.builtin === 'Formatter';
   const isString = inner.kind === 'adt' && inner.def.builtin === 'String';
-  const stream = outputStream(inner) ?? (writesFile(inner) ? 'file' : undefined);
+  const stream = outputStream(inner) ?? writeTarget(inner);
   if (!isFormatter && !isString && !stream) {
     compileError(
       macro.target.span,
