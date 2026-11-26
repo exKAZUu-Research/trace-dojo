@@ -233,6 +233,8 @@ export abstract class CallCompiler extends ReflectionCompiler {
         `引数の数が合いません（${params.length - offset} 個が必要ですが、${argExpressions.length - offset} 個です）。`
       );
     }
+    // Zig analyzes a call that the compiler runs for its argument values, so a branch they do not take is not analyzed.
+    const atCompileTime = this.context.comptimeDepth > 0 || this.analyzedFunction()?.atCompileTime === true;
     // A parameter's type may refer to earlier parameters, as `b: @TypeOf(a)` does.
     const declaredTypes: (Type | undefined)[] = [];
     const args: TExpr[] = [];
@@ -241,7 +243,7 @@ export abstract class CallCompiler extends ReflectionCompiler {
         ref.decl,
         index,
         args.map((each) => each.type),
-        args.map((arg, position) => this.comptimeArgument(arg, params[position].isComptime))
+        args.map((arg, position) => this.comptimeArgument(arg, params[position].isComptime || atCompileTime))
       );
       declaredTypes.push(declared);
       let bound: TExpr;
@@ -269,7 +271,7 @@ export abstract class CallCompiler extends ReflectionCompiler {
         );
       }
     }
-    const instance = this.instantiate(ref, argTypes, expression, args);
+    const instance = this.instantiate(ref, argTypes, expression, args, atCompileTime);
     if (!this.requiresComptime(instance.returnType, expression)) this.refuseRuntimeArguments(params, args);
     const evaluators = valueEvaluators(args);
     const row = expression.row;
@@ -451,18 +453,26 @@ export abstract class CallCompiler extends ReflectionCompiler {
   /** The instance of a function for argument types, compiling its body the first time. */
   // code-gauge-allow functionCognitiveComplexity -- Resolves parameter and return types in the same specialization scope.
   // code-gauge-allow functionNcss -- Keeps specialization identity and its compilation inputs together.
-  instantiate(ref: FnRef, argTypes: readonly Type[], span: Span, args: readonly TExpr[] = []): FunctionInstance {
+  instantiate(
+    ref: FnRef,
+    argTypes: readonly Type[],
+    span: Span,
+    args: readonly TExpr[] = [],
+    atCompileTime = false
+  ): FunctionInstance {
     const { decl } = ref;
     const syntax = decl.syntax;
     const paramTypes: Type[] = [];
-    const comptimeArgs = args.map((arg, index) => this.comptimeArgument(arg, syntax.params[index]?.isComptime));
+    const comptimeArgs = args.map((arg, index) =>
+      this.comptimeArgument(arg, syntax.params[index]?.isComptime || atCompileTime)
+    );
     for (const [index, param] of syntax.params.entries()) {
       const type = param.type ? this.parameterType(decl, index, paramTypes, comptimeArgs) : argTypes[index];
       if (!type)
         this.error(span, `関数「${syntax.name}」は anytype の引数を持つので、呼び出さずに値としては使えません。`);
       paramTypes.push(type);
     }
-    const key = this.specializationKey(decl, paramTypes, comptimeArgs);
+    const key = `${this.specializationKey(decl, paramTypes, comptimeArgs)}${atCompileTime ? ' at compile time' : ''}`;
     const existing = this.instances.get(key);
     if (existing) {
       if (existing.state === 'pending' && this.resolvingFields === 0) this.compilePendingBodies();
@@ -494,6 +504,7 @@ export abstract class CallCompiler extends ReflectionCompiler {
       comptimeArgs
     );
     const instance = new FunctionInstance(syntax.name, paramTypes, returnType);
+    instance.atCompileTime = atCompileTime;
     if (syntax.params.every((param) => param.type !== undefined)) instance.identity = decl;
     instance.internal = decl.namespace.internal ?? false;
     instance.isAtomic = !instance.internal && this.atomicRow(syntax);
