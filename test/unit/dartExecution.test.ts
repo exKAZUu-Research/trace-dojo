@@ -3042,6 +3042,15 @@ test('a constructor, a factory and a setter cannot have an async or generator bo
       diagnostics: [{ row: 0, message }],
     });
   }
+  // A method without a return type, which reads as a constructor until its name differs from the class's, may.
+  const untyped = `class A {
+  load(int x) async { await null; print(x); }
+  gen() sync* { yield 2; }
+}
+mixin M { run() async => 3; }
+class B with M {}
+void main() async { A().load(1); print(A().gen().toList()); print(await B().run()); }`;
+  expect(executeProgram('dart', untyped)).toMatchObject({ kind: 'executed', stdout: '[2]\n1\n3\n' });
 });
 
 test('nullable values can use Object members and still dispatch to overrides', () => {

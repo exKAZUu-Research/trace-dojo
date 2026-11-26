@@ -547,10 +547,17 @@ export class Converter extends ExpressionConverter {
 
   private convertMembers(body: Node): MemberDeclaration[] {
     const owner = body.parent ? fieldOf(body.parent, 'name')?.text : undefined;
-    return namedOf(body)
-      .filter((child) => child.type === 'class_member')
-      .flatMap((child) => this.convertMember(child))
-      .map((member) => asUntypedMethod(member, owner) ?? member);
+    return (
+      namedOf(body)
+        .filter((child) => child.type === 'class_member')
+        .flatMap((child) => this.convertMember(child))
+        .map((member) => asUntypedMethod(member, owner) ?? member)
+        // Only once a member without a return type is known to be a method or a constructor can its body be checked.
+        .map((member) => {
+          if (member.kind !== 'field') requireSyncBody(member, member.body);
+          return member;
+        })
+    );
   }
 
   private convertMember(node: Node): MemberDeclaration[] {
@@ -562,12 +569,9 @@ export class Converter extends ExpressionConverter {
     if (inner.type === 'method_declaration') {
       const signatureNode = requireNode(fieldOf(inner, 'signature'), inner);
       const body = this.convertFunctionBody(requireNode(fieldOf(inner, 'body'), inner));
-      const member = this.convertSignature(inner, childrenOf(signatureNode), body, [
-        ...annotations,
-        ...this.annotationsOf(inner),
-      ]);
-      requireSyncBody(member, body);
-      return [member];
+      return [
+        this.convertSignature(inner, childrenOf(signatureNode), body, [...annotations, ...this.annotationsOf(inner)]),
+      ];
     }
     const children = childrenOf(inner);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
