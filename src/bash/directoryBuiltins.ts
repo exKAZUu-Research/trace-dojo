@@ -38,16 +38,30 @@ export const cdBuiltin: Builtin = (shell, args) => {
 
 /** Changes the working directory, reporting a path that names no directory as `builtin: shown: reason`. */
 function changeDirectory(shell: Shell, builtin: string, path: string, shown: string): boolean {
-  const target = resolvePath(path.startsWith('/') ? path : `${shell.store.workingDirectory}/${path}`);
-  const kind = path === '' ? 'directory' : shell.runtime.io.files.kindOf(target);
-  if (kind !== 'directory') {
-    shell.reportError(`${builtin}: ${shown}: ${kind === 'file' ? 'Not a directory' : 'No such file or directory'}`);
+  if (path === '') {
+    shell.reportError(`${builtin}: null directory`);
     return false;
   }
-  if (path === '') return true;
+  const full = path.startsWith('/') ? path : `${shell.store.workingDirectory}/${path}`;
+  const target = resolvePath(full);
+  // `..` leaves a directory by its name, but every directory the path names on the way must exist, as Bash checks.
+  const kinds = [...prefixesBeforeParents(full), target].map((prefix) =>
+    shell.runtime.io.files.kindOf(resolvePath(prefix))
+  );
+  if (kinds.some((kind) => kind !== 'directory')) {
+    const notDirectory = kinds.find((kind) => kind !== 'directory') === 'file';
+    shell.reportError(`${builtin}: ${shown}: ${notDirectory ? 'Not a directory' : 'No such file or directory'}`);
+    return false;
+  }
   shell.store.previousDirectory = shell.store.workingDirectory;
   shell.store.workingDirectory = target;
   return true;
+}
+
+/** The parts of a path up to each `..` in it, whose directories the `..` leaves. */
+function prefixesBeforeParents(path: string): string[] {
+  const parts = path.split('/');
+  return parts.flatMap((part, index) => (part === '..' ? [parts.slice(0, index).join('/') || '/'] : []));
 }
 
 export const pwdBuiltin: Builtin = (shell, args) => {
