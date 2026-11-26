@@ -192,7 +192,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Reports a read of a property that has no getter, or whose getter the code may not use. */
-  protected checkReadable(value: BoundExpression, position: Position, context: BindContext): void {
+  checkReadable(value: BoundExpression, position: Position, context: BindContext): void {
     if (value.kind !== 'property') return;
     for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
       if (current.getter) {

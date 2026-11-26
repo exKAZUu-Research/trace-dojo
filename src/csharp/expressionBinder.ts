@@ -1,4 +1,5 @@
 import type { Designation, Expression, Pattern, Position, TypeNode } from './ast';
+import { bindAwaitPattern } from './awaitPattern';
 import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundMemberInit, BoundPattern } from './bound';
 import type { ArgumentInfo } from './callBinder';
 import { isEnum, isNumeric } from './conversions';
@@ -1876,30 +1877,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
     return { kind: 'compoundAssign', target, operation: converted, type: target.type, row: node.row };
   }
 
-  /**
-   * Binds `await operand` (C# spec §12.9.8) through the awaitable pattern: the operand's `GetAwaiter()`, the awaiter's
-   * `IsCompleted`, and its `GetResult()`, whose type is the expression's. The library's awaiters, of tasks and
-   * `Task.Yield()`, are the ones whose waits the scheduler knows.
-   */
+  /** Binds `await operand` (C# spec §12.9.8), whose awaiter a `dynamic` operand finds only as it runs. */
   private bindAwait(node: Extract<Expression, { kind: 'await' }>, context: BindContext): BoundExpression {
-    const { row } = node;
     this.checkAwaitContext(node, context.fn);
     const operand = this.bindTypedValue(node.operand, context);
-    if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
+    if (operand.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     if (isDynamicType(operand.type)) return this.bindDynamicAwait(node, operand, context);
-    const call = (receiver: BoundExpression, name: string): BoundExpression => {
-      const group = this.bindInstanceMember(receiver, name, undefined, node, context, true);
-      if (group.kind !== 'methodGroup') return this.toValue(group, node);
-      return this.invokeMethodGroup(group, [], node);
-    };
-    const getAwaiter = call({ kind: 'compoundOperand', type: operand.type, row }, 'GetAwaiter');
-    if (getAwaiter.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row };
-    const awaiter: BoundExpression = { kind: 'compoundOperand', type: getAwaiter.type, row };
-    if (getAwaiter.type.kind !== 'named' || !getAwaiter.type.symbol.isLibrary)
-      this.unsupported(node, '独自の awaiter（`GetAwaiter`）');
-    const isCompleted = this.toValue(this.bindInstanceMember(awaiter, 'IsCompleted', undefined, node, context), node);
-    const getResult = call(awaiter, 'GetResult');
-    return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: getResult.type, row };
+    return bindAwaitPattern(this, node, operand, context);
   }
 
   /** Reports an `await` outside an async function (CS4032, CS4033, CS4034) or in a `lock` (CS1996). */

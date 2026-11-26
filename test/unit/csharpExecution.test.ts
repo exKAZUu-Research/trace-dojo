@@ -270,6 +270,69 @@ static async IAsyncEnumerable<int> Count(int count)
   });
 });
 
+// A program's awaiter gets the continuation after the method suspends, so a synchronous call of it resumes the method
+// inside OnCompleted; a struct awaiter's OnCompleted runs on a copy; a continuation invoked after its method ended
+// throws as .NET's does, and one that nothing invokes leaves a deadlock.
+test('awaits of awaiters that the program declares resume through their continuations', () => {
+  const program = String.raw`using System.Runtime.CompilerServices;
+Console.WriteLine(await new Now(1) + await new Later(2));
+Console.WriteLine(await "four");
+dynamic d = new Now(5);
+Console.WriteLine(await d);
+var counter = new Counter();
+Console.WriteLine(await counter);
+try { await new Now(-1); } catch (InvalidOperationException e) { Console.WriteLine(e.Message); }
+await Once();
+await Task.Delay(1);
+Later.Saved!();
+static async Task Once() => Console.WriteLine(await new Later(6));
+static class Ext { public static TaskAwaiter<int> GetAwaiter(this string s) => Task.FromResult(s.Length).GetAwaiter(); }
+class Now(int value) : INotifyCompletion
+{
+    public Now GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public int GetResult() => value < 0 ? throw new InvalidOperationException("bad") : value;
+    public void OnCompleted(Action c) { Console.WriteLine("in"); c(); Console.WriteLine("out"); }
+}
+class Later(int value) : INotifyCompletion
+{
+    public static Action? Saved;
+    public Later GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public int GetResult() => value;
+    public void OnCompleted(Action c) { Saved = c; Task.Delay(10).ContinueWith(_ => c()); }
+}
+class Counter { public CounterAwaiter GetAwaiter() => new(); }
+struct CounterAwaiter : INotifyCompletion
+{
+    int calls;
+    public bool IsCompleted => ++calls > 1;
+    public int GetResult() => calls;
+    public void OnCompleted(Action c) { calls += 100; Task.Run(c); }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['in', 'out', '3', '4', 'in', '5', 'out', '1', 'in', 'bad', 'out', '6', ''].join('\n'),
+    uncaughtException: 'System.NullReferenceException: Object reference not set to an instance of an object.',
+  });
+  const never = String.raw`using System.Runtime.CompilerServices;
+await new Never();
+class Never : INotifyCompletion
+{
+    public Never GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public void GetResult() { }
+    public void OnCompleted(Action c) => Console.WriteLine("dropped");
+}
+`;
+  expect(executeProgram('csharp', never)).toMatchObject({
+    kind: 'executed',
+    stdout: 'dropped\n',
+    uncaughtException: 'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  });
+});
+
 // Unsafe code, with `AllowUnsafeBlocks`, reads and writes through pointers to locals, fixed arrays and strings, stack
 // buffers, and struct fields, reinterpreting bytes little-endian as .NET does; without it, `unsafe` is CS0227.
 test('unsafe code runs with pointers, fixed, and stackalloc', () => {
