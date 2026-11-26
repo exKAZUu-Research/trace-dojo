@@ -1,6 +1,5 @@
 // code-gauge-allow-file fileNcss -- The memberBinder module keeps one stage of the C# interpreter together.
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
-import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
 import { type ArgumentInfo, CallBinder, type CallDescription, type ResolvedCall } from './callBinder';
 import type { BindContext } from './convertBinder';
@@ -8,7 +7,7 @@ import { displayMethodIn } from './declarations';
 import { dynamicObjectCall, dynamicObjectMember } from './dynamicObjects';
 import type { MethodCandidate } from './lookup';
 import type { NamespaceSymbol } from './namespaces';
-import type { FunctionScope } from './scopes';
+import { captureUpToOwner, type FunctionScope, typeParameterNamed } from './scopes';
 import {
   baseTypeOf,
   displayMethod,
@@ -1172,15 +1171,13 @@ export abstract class MemberBinder extends CallBinder {
   /** Declares a local in the current scope, reporting names that clash with others in scope. */
   abstract declareLocal(name: string, type: Type, position: Position, context: BindContext): LocalSymbol;
 
-  /** The variable of `ref x`, which a reference then refers to. */
-  abstract bindRefTarget(
-    operand: Expression,
-    isReadonly: boolean,
-    context: BindContext,
-    use: 'local' | 'return'
-  ): BoundLValue;
-
-  abstract checkRefType(actual: Type, expected: Type, position: Position): void;
+  /** `F = ref x` in an object initializer, which makes a ref field refer to the variable. */
+  abstract bindRefMemberInitializer(
+    target: BoundLValue,
+    member: MemberInitializer,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    context: BindContext
+  ): BoundMemberInit;
 
   /** Binds an expression as storage that an assignment or a `ref` argument writes. */
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
@@ -1373,7 +1370,7 @@ export abstract class MemberBinder extends CallBinder {
       kind: 'invokeDelegate',
       target,
       args: resolved.args,
-      ...(returnsByRef ? { returnsByRef } : {}),
+      returnsByRef,
       type: invoke.returnType,
       row: node.row,
     };
@@ -2112,7 +2109,14 @@ export abstract class MemberBinder extends CallBinder {
   private bindMemberInitializer(member: MemberInitializer, type: Type, context: BindContext): BoundMemberInit {
     // `Xs = { 1, 2 }` reads the member and fills it, so it needs no setter.
     const { value } = member;
-    if (value.kind === 'refExpression') return this.bindRefMemberInitializer(member, value, type, context);
+    // The field of `F = ref x` is not written but pointed elsewhere, so only its readability is checked.
+    if (value.kind === 'refExpression')
+      return this.bindRefMemberInitializer(
+        this.bindInitializerTarget(member, type, true, context),
+        member,
+        value,
+        context
+      );
     const isNested = value.kind === 'collectionInitializer' || value.kind === 'objectInitializer';
     const target = this.bindInitializerTarget(member, type, isNested, context);
     if (isNested) {
@@ -2124,31 +2128,6 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     return { kind: 'memberInit', target, value: this.bindAs(value, target.type, context), nested: undefined };
-  }
-
-  /** `F = ref x` in an object initializer, which makes a ref field refer to the variable. */
-  private bindRefMemberInitializer(
-    member: MemberInitializer,
-    value: Extract<Expression, { kind: 'refExpression' }>,
-    type: Type,
-    context: BindContext
-  ): BoundMemberInit {
-    // The field is not written but pointed elsewhere, so only its readability is checked, as for a nested initializer.
-    const target = this.bindInitializerTarget(member, type, true, context);
-    const field = target.kind === 'field' ? target.field : undefined;
-    if (!field?.byRef) {
-      this.bindValue(value.operand, context);
-      if (target.type.kind !== 'error') this.error(member, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
-      return {
-        kind: 'memberInit',
-        target: { kind: 'discard', type: ERROR_TYPE, row: member.row },
-        value: undefined,
-        nested: undefined,
-      };
-    }
-    const refTarget = this.bindRefTarget(value.operand, field.byRef === 'readonly', context, 'local');
-    if (refTarget.kind !== 'discard') this.checkRefType(refTarget.type, target.type, value);
-    return { kind: 'memberInit', target, value: undefined, refTarget, nested: undefined };
   }
 
   private bindInitializerTarget(
@@ -2241,20 +2220,9 @@ export abstract class MemberBinder extends CallBinder {
   }
 }
 
-/** The type parameter of a name that the enclosing method or types declare, from the innermost out. */
 /** Whether a member is an interface's static abstract or virtual member, which a type parameter's argument implements. */
 function isConstrained(member: MethodSymbol | PropertySymbol): boolean {
   return member.isStatic && member.owner.kind === 'interface' && (member.isAbstract || member.isVirtual);
-}
-
-function typeParameterNamed(name: string, typeContext: TypeContext): Type | undefined {
-  for (const parameter of typeContext.methodTypeParameters.toReversed())
-    if (parameter.name === name) return parameter.type;
-  for (let type = typeContext.type; type; type = type.containing) {
-    const parameter = type.typeParameters.find((candidate) => candidate.name === name);
-    if (parameter) return parameter.type;
-  }
-  return undefined;
 }
 
 export { LocalSymbol, PropertySymbol, FieldSymbol };
@@ -2267,20 +2235,4 @@ export function propertyDisplay(target: Extract<BoundExpression, { kind: 'proper
     ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(owner)))).join(', ')}]`
     : property.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}`;
-}
-
-/** Makes a function and those around it up to a local's owner capture the local, returning whether any did not yet. */
-function captureUpToOwner(fn: FunctionScope, local: LocalSymbol): boolean {
-  let isChanged = false;
-  for (
-    let current: FunctionScope | undefined = fn;
-    current && current.method !== local.owner;
-    current = current.outer
-  ) {
-    if (current.captures.has(local)) continue;
-    current.captures.add(local);
-    local.isCaptured = true;
-    isChanged = true;
-  }
-  return isChanged;
 }

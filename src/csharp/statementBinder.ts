@@ -1,6 +1,7 @@
 import type {
   Block,
   Expression,
+  MemberInitializer,
   MethodDeclaration,
   Position,
   Statement,
@@ -16,6 +17,7 @@ import type {
   BoundCatch,
   BoundExpression,
   BoundLValue,
+  BoundMemberInit,
   BoundStatement,
   BoundSwitchSection,
   ForeachKind,
@@ -163,27 +165,15 @@ export abstract class StatementBinder extends PatternBinder {
         return target;
       }
       case 'refConditional': {
-        // Either side may be the variable, so each must be one the use may write, besides the whole.
-        const before = this.diagnostics.length;
-        for (const side of [target.whenTrue, target.whenFalse])
-          this.checkAssignable(side as BoundExpression, position, context, use);
-        if (this.diagnostics.length === before) return target;
-        this.reportNotAssignable(position, use);
-        return { kind: 'discard', type: ERROR_TYPE, row: position.row };
+        return this.checkRefConditionalAssignable(target, position, context, use);
       }
       case 'invokeDelegate': {
-        if (target.returnsByRef === 'ref') return target;
-        if (target.returnsByRef === 'readonly') this.reportReadonlyRefMethod('Invoke', position, use);
-        else if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
-        return { kind: 'discard', type: ERROR_TYPE, row: position.row };
+        return this.checkReturnedReference(target, target.returnsByRef, 'Invoke', position, use);
       }
       case 'call': {
         // A call of a method that returns by `ref` is the variable it returns.
-        if (target.method.returnsByRef === 'ref') return target;
-        if (target.method.returnsByRef === 'readonly') {
-          this.reportReadonlyRefMethod(target.method.name, position, use);
-          return { kind: 'discard', type: ERROR_TYPE, row: position.row };
-        }
+        if (target.method.returnsByRef)
+          return this.checkReturnedReference(target, target.method.returnsByRef, target.method.name, position, use);
         // An extension property without a setter stays the call of its getter.
         if (target.method.extensionProperty && (use === 'assign' || use === 'compound'))
           this.error(
@@ -228,6 +218,35 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
     }
+  }
+
+  /** `c ? ref a : ref b`, either side of which may be the variable, so each must be one the use may write. */
+  private checkRefConditionalAssignable(
+    target: Extract<BoundExpression, { kind: 'refConditional' }>,
+    position: Position,
+    context: BindContext,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): BoundLValue {
+    const before = this.diagnostics.length;
+    for (const side of [target.whenTrue, target.whenFalse])
+      this.checkAssignable(side as BoundExpression, position, context, use);
+    if (this.diagnostics.length === before) return target;
+    this.reportNotAssignable(position, use);
+    return { kind: 'discard', type: ERROR_TYPE, row: position.row };
+  }
+
+  /** What a call returns by reference, which a `ref readonly` return gives only for reading. */
+  private checkReturnedReference(
+    target: Extract<BoundExpression, { kind: 'call' | 'invokeDelegate' }>,
+    returnsByRef: 'ref' | 'readonly' | undefined,
+    name: string,
+    position: Position,
+    use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'
+  ): BoundLValue {
+    if (returnsByRef === 'ref') return target;
+    if (returnsByRef === 'readonly') this.reportReadonlyRefMethod(name, position, use);
+    else if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
+    return { kind: 'discard', type: ERROR_TYPE, row: position.row };
   }
 
   /** Reports assigning an `in` parameter, a ref readonly local, or a readonly local such as a foreach variable. */
@@ -1297,7 +1316,6 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** `ref int r = ref x;` and `ref readonly var r = ref x;`: locals that refer to other variables. */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private bindRefLocals(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     refType: Extract<TypeNode, { kind: 'refType' }>,
@@ -1306,23 +1324,13 @@ export abstract class StatementBinder extends PatternBinder {
     const isVar = refType.type.kind === 'varType' && !this.findTypeInScope('var', 0, context.fn.typeContext);
     const declaredType = isVar ? undefined : this.resolveType(refType.type, context.fn.typeContext);
     const statements = statement.declarators.map((declarator): BoundStatement => {
-      const { initializer } = declarator;
-      let target: BoundLValue | undefined;
-      if (!initializer) this.error(declarator, 'CS8174', '参照渡し変数の宣言には初期化子が必要です');
-      else if (statement.isRefIteration && initializer.kind === 'refExpression')
-        target = this.bindRefIterationTarget(initializer.operand, refType.isReadonly, declaredType, context);
-      else if (initializer.kind === 'refExpression') {
-        target = this.bindRefTarget(initializer.operand, refType.isReadonly, context, 'local');
-        if (declaredType && target.kind !== 'discard') this.checkRefType(target.type, declaredType, initializer);
-      } else this.reportValueForReference(initializer, declarator, context);
+      const target = this.bindRefLocalTarget(statement, declarator, refType.isReadonly, declaredType, context);
       const type = declaredType ?? (target?.kind === 'discard' ? undefined : target?.type) ?? ERROR_TYPE;
       const local = this.declareLocal(declarator.name, type, declarator, context);
       local.isRefLocal = true;
       local.refKind = refType.isReadonly ? 'in' : 'ref';
-      if (statement.isRefIteration) {
-        local.isRefFixed = true;
-        local.isReadonly = refType.isReadonly;
-      }
+      local.isRefFixed = statement.isRefIteration === true;
+      local.isReadonly = local.isRefFixed && refType.isReadonly;
       if (target !== undefined && target.kind !== 'discard') local.refContext = this.refContextOf(target, context.fn);
       return {
         kind: 'localDeclaration',
@@ -1344,6 +1352,30 @@ export abstract class StatementBinder extends PatternBinder {
       step: 'step',
       isDeclarationGroup: true,
     } as BoundBlock;
+  }
+
+  /** The variable a ref local's initializer `ref x` refers to, or undefined for a missing initializer or a value. */
+  private bindRefLocalTarget(
+    statement: Extract<Statement, { kind: 'localDeclaration' }>,
+    declarator: VariableDeclarator,
+    isReadonly: boolean,
+    declaredType: Type | undefined,
+    context: BindContext
+  ): BoundLValue | undefined {
+    const { initializer } = declarator;
+    if (!initializer) {
+      this.error(declarator, 'CS8174', '参照渡し変数の宣言には初期化子が必要です');
+      return undefined;
+    }
+    if (initializer.kind !== 'refExpression') {
+      this.reportValueForReference(initializer, declarator, context);
+      return undefined;
+    }
+    if (statement.isRefIteration)
+      return this.bindRefIterationTarget(initializer.operand, isReadonly, declaredType, context);
+    const target = this.bindRefTarget(initializer.operand, isReadonly, context, 'local');
+    if (declaredType && target.kind !== 'discard') this.checkRefType(target.type, declaredType, initializer);
+    return target;
   }
 
   /**
@@ -1385,6 +1417,25 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
   }
 
+  /** `F = ref x` in an object initializer, which makes a ref field refer to the variable. */
+  bindRefMemberInitializer(
+    target: BoundLValue,
+    member: MemberInitializer,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    context: BindContext
+  ): BoundMemberInit {
+    const field = target.kind === 'field' ? target.field : undefined;
+    if (!field?.byRef) {
+      this.bindValue(value.operand, context);
+      if (target.type.kind !== 'error') this.error(member, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
+      const discard: BoundLValue = { kind: 'discard', type: ERROR_TYPE, row: member.row };
+      return { kind: 'memberInit', target: discard, value: undefined, nested: undefined };
+    }
+    const refTarget = this.bindRefTarget(value.operand, field.byRef === 'readonly', context, 'local');
+    if (refTarget.kind !== 'discard') this.checkRefType(refTarget.type, target.type, value);
+    return { kind: 'memberInit', target, value: undefined, refTarget, nested: undefined };
+  }
+
   /** Reports a call or property returning by `ref readonly` that a writable reference takes, telling whether it did. */
   private reportsReadonlyReference(bound: BoundExpression, operand: Position, use: 'local' | 'return'): boolean {
     if (bound.kind === 'property' && bound.property.returnsByRef === 'readonly') {
@@ -1420,7 +1471,6 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** How far the variable a reference refers to lives (Roslyn's ref-safe-context). */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   refContextOf(target: BoundLValue, fn: FunctionScope): SafeContext {
     switch (target.kind) {
       case 'local': {
@@ -1575,15 +1625,16 @@ export abstract class StatementBinder extends PatternBinder {
 
   /** Reports a `return ref` of a variable that does not outlive the method, as Roslyn names the variable. */
   private reportRefEscape(target: BoundLValue, position: Position | number, fn: FunctionScope): void {
-    if (target.kind === 'field' && target.field.byRef) {
-      this.reportValueEscape(target.receiver, position, 'return', fn);
-      return;
-    }
-    if (target.kind === 'refConditional') {
+    // A ref field refers to what its ref struct may, and either side of `c ? ref a : ref b` may be the variable.
+    if (target.kind === 'field' && target.field.byRef) this.reportValueEscape(target.receiver, position, 'return', fn);
+    else if (target.kind === 'refConditional') {
       for (const side of [target.whenTrue, target.whenFalse])
         if (this.refScopeOf(side, fn) !== 'return') this.reportRefEscape(side, position, fn);
-      return;
-    }
+    } else this.reportVariableEscape(target, position);
+  }
+
+  /** Reports a `return ref` of a variable of the method's own, as Roslyn names it. */
+  private reportVariableEscape(target: BoundLValue, position: Position | number): void {
     let root: BoundExpression = target as BoundExpression;
     let isMember = false;
     while (root.kind === 'field' && isValueType(root.receiver.type)) {
@@ -1793,8 +1844,7 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
-  // code-gauge-allow functionNcss -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- How foreach binds its variable: by value, by deconstruction, or as a discard.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     let collection = this.bindTypedValue(statement.collection, context);
     // A `dynamic` collection is enumerated as an `IEnumerable`, whose elements are `dynamic` (C# spec §13.9.5).
@@ -1808,42 +1858,7 @@ export abstract class StatementBinder extends PatternBinder {
       );
     const scope = new LocalScope(context.scope, context.fn);
     const inner: BindContext = { scope, fn: context.fn };
-    let iteration: ForeachKind;
-    let elementType: Type;
-    const type = collection.type;
-    if (type.kind === 'error') {
-      iteration = { kind: 'array', rank: 1 };
-      elementType = ERROR_TYPE;
-    } else if (type.kind === 'array') {
-      iteration = { kind: 'array', rank: type.rank };
-      elementType = type.element;
-    } else if (specialOf(type) === 'string') {
-      iteration = { kind: 'string' };
-      elementType = this.specialType('char');
-    } else {
-      const found = this.enumeratorPattern(type, statement.collection, inner);
-      if (!found) {
-        const display = collection.kind === 'unbound' ? 'ラムダ式' : displayType(type);
-        // A type that `await foreach` would iterate gets the hint to use that instead.
-        if (this.hasMethod(type, 'GetAsyncEnumerator', inner))
-          this.error(
-            statement.collection,
-            'CS8414',
-            `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません。'foreach' ではなく 'await foreach' ですか?`
-          );
-        else
-          this.error(
-            statement.collection,
-            'CS1579',
-            `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません`
-          );
-        iteration = { kind: 'array', rank: 1 };
-        elementType = ERROR_TYPE;
-      } else {
-        iteration = found.iteration;
-        elementType = isDynamicCollection ? this.dynamicType : found.elementType;
-      }
-    }
+    const { iteration, elementType } = this.foreachIteration(statement, collection, isDynamicCollection, inner);
     if (statement.type.kind === 'refType')
       return this.bindRefForeach(statement, statement.type, { collection, iteration, elementType }, inner);
     const isVar = statement.type.kind === 'varType';
@@ -1902,6 +1917,37 @@ export abstract class StatementBinder extends PatternBinder {
       row: statement.row,
       step: 'step',
     };
+  }
+
+  /** How foreach goes through a collection's elements, and their type: an array's, a string's, or the pattern's. */
+  private foreachIteration(
+    statement: Extract<Statement, { kind: 'foreach' }>,
+    collection: BoundExpression,
+    isDynamicCollection: boolean,
+    inner: BindContext
+  ): { iteration: ForeachKind; elementType: Type } {
+    const type = collection.type;
+    if (type.kind === 'error') return { iteration: { kind: 'array', rank: 1 }, elementType: ERROR_TYPE };
+    if (type.kind === 'array') return { iteration: { kind: 'array', rank: type.rank }, elementType: type.element };
+    if (specialOf(type) === 'string') return { iteration: { kind: 'string' }, elementType: this.specialType('char') };
+    const found = this.enumeratorPattern(type, statement.collection, inner);
+    if (found)
+      return { iteration: found.iteration, elementType: isDynamicCollection ? this.dynamicType : found.elementType };
+    const display = collection.kind === 'unbound' ? 'ラムダ式' : displayType(type);
+    // A type that `await foreach` would iterate gets the hint to use that instead.
+    if (this.hasMethod(type, 'GetAsyncEnumerator', inner))
+      this.error(
+        statement.collection,
+        'CS8414',
+        `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません。'foreach' ではなく 'await foreach' ですか?`
+      );
+    else
+      this.error(
+        statement.collection,
+        'CS1579',
+        `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません`
+      );
+    return { iteration: { kind: 'array', rank: 1 }, elementType: ERROR_TYPE };
   }
 
   /**

@@ -114,7 +114,7 @@ export type BoundExpression =
       target: BoundExpression;
       args: BoundArgument[];
       /** How the delegate returns by reference (`delegate ref int D()`), if it does. */
-      returnsByRef?: 'ref' | 'readonly';
+      returnsByRef: 'ref' | 'readonly' | undefined;
     } & Base)
   | ({
       kind: 'new';

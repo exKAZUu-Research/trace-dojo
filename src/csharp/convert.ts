@@ -1206,15 +1206,7 @@ export class Converter extends ExpressionConverter {
           ...positionOf(left),
         };
       } else {
-        // C# has no foreach over existing variables: a name lacks its type, and a tuple of names declares nothing.
-        // `ref` before a deconstruction is no ref type, which Roslyn reports before the missing type.
-        const isRef = expression.kind === 'refExpression';
-        const message =
-          expression.kind === 'tuple'
-            ? 'CS8186: foreach ループでは繰り返し変数を宣言する必要があります。'
-            : 'CS0230: foreach ステートメントには、型と識別子の両方が必要です';
-        const row = left.startPosition.row;
-        throw new CompileError([...(isRef ? [{ row, message: "CS1525: 'ref' は無効です" }] : []), { row, message }]);
+        throw new CompileError(foreachWithoutVariable(expression, left.startPosition.row));
       }
     }
     return {
@@ -1370,4 +1362,17 @@ function accessorModifiers(property: Modifiers, accessor: Modifiers): Modifiers 
   const set = new Set([...property.set].filter((modifier) => !ACCESS_MODIFIERS.has(modifier)));
   for (const modifier of own) set.add(modifier);
   return { set, positions: new Map([...property.positions, ...accessor.positions]) };
+}
+
+/**
+ * The errors of a foreach over existing variables, which C# has not: a name lacks its type, and a tuple of names
+ * declares nothing; `ref` before a deconstruction is no ref type, which Roslyn reports before the missing type.
+ */
+function foreachWithoutVariable(expression: Expression, row: number): { row: number; message: string }[] {
+  const missing =
+    expression.kind === 'tuple'
+      ? 'CS8186: foreach ループでは繰り返し変数を宣言する必要があります。'
+      : 'CS0230: foreach ステートメントには、型と識別子の両方が必要です';
+  const misplacedRef = expression.kind === 'refExpression' ? ["CS1525: 'ref' は無効です"] : [];
+  return [...misplacedRef, missing].map((message) => ({ row, message }));
 }

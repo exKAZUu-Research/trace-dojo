@@ -55,6 +55,13 @@ type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
 export abstract class ExpressionBinder extends LambdaBinder {
   /** Binds a pattern against an input type, declaring its variables in the context's scope. */
   abstract bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern;
+  abstract bindRefTarget(
+    operand: Expression,
+    isReadonly: boolean,
+    context: BindContext,
+    use: 'local' | 'return'
+  ): BoundLValue;
+  abstract checkRefType(actual: Type, expected: Type, position: Position): void;
   abstract refScopeOf(target: BoundLValue, fn: FunctionScope): 'return' | 'local';
   abstract refContextOf(target: BoundLValue, fn: FunctionScope): SafeContext;
   abstract valueContextOf(value: BoundExpression, fn: FunctionScope): SafeContext;
@@ -1619,27 +1626,33 @@ export abstract class ExpressionBinder extends LambdaBinder {
       if (left.type.kind !== 'error') this.error(node, 'CS8373', 'ref 代入の左辺は ref 変数である必要があります。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
-    if (local.isRefFixed) {
-      this.error(
-        node.target,
-        'CS1656',
-        `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
-      );
-      return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    }
+    if (local.isRefFixed) return this.reportFixedReference(local, node);
     if (target.kind === 'discard') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     this.checkRefType(target.type, local.type, value);
-    // A reference may not come to refer to a variable that dies sooner than the one it referred to.
-    const localScope = local.isRefLocal && local.refContext === 'local' ? 'local' : 'return';
-    if (localScope === 'return' && this.refScopeOf(target, context.fn) !== 'return') {
-      const name = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
-      this.refSafetyError(
-        node,
-        'CS8374',
-        `'${name}' を '${local.name}' に ref 割り当てすることはできません。'${name}' のエスケープ スコープが '${local.name}' より狭いためです。`
-      );
-    }
+    this.checkRefLocalTarget(local, target, node, context);
     return { kind: 'refAssign', local, target, type: local.type, row: node.row };
+  }
+
+  /** Reports `r = ref x` of a variable that dies sooner than the one the reference referred to. */
+  private checkRefLocalTarget(local: LocalSymbol, target: BoundLValue, node: Position, context: BindContext): void {
+    const localScope = local.isRefLocal && local.refContext === 'local' ? 'local' : 'return';
+    if (localScope !== 'return' || this.refScopeOf(target, context.fn) === 'return') return;
+    const name = target.kind === 'local' ? target.local.name : this.describeRefTarget(target);
+    this.refSafetyError(
+      node,
+      'CS8374',
+      `'${name}' を '${local.name}' に ref 割り当てすることはできません。'${name}' のエスケープ スコープが '${local.name}' より狭いためです。`
+    );
+  }
+
+  /** Reports `x = ref y` of a foreach variable, which refers to its element throughout the iteration. */
+  private reportFixedReference(local: LocalSymbol, node: Extract<Expression, { kind: 'assign' }>): BoundExpression {
+    this.error(
+      node.target,
+      'CS1656',
+      `'${local.name}' は '${local.readonlyReason}' であるため、これに割り当てることはできません`
+    );
+    return { kind: 'default', type: ERROR_TYPE, row: node.row };
   }
 
   /** `r.F = ref x`: a ref field refers to another variable, which must outlive the ref struct holding the field. */
