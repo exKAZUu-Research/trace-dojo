@@ -194,12 +194,9 @@ function resolveAssociativeSubscript(
 ): ResolvedTarget {
   const key = expandAssociativeSubscript(shell, opts.subscript);
   if (key === '') {
-    const label =
-      opts.operation === 'unset'
-        ? `[${rawSubText}]`
-        : opts.operation === 'testSet'
-          ? resolved
-          : `${opts.name}[${rawSubText}]`;
+    // `-v` tests an empty subscript as an unset element, with no error.
+    if (opts.operation === 'testSet') return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', '');
+    const label = opts.operation === 'unset' ? `[${rawSubText}]` : `${opts.name}[${rawSubText}]`;
     if (opts.operation === 'arithmeticRead') shell.reportShellError(`${opts.name}[${rawSubText}]: bad array subscript`);
     return invalidTarget(`${opts.name}[${rawSubText}]`, 'badSubscript', `${label}: bad array subscript`);
   }
@@ -223,7 +220,7 @@ function resolveIndexedSubscript(
   rawSubText: string,
   forWrite: boolean
 ): ResolvedTarget {
-  if (rawSubText === '') return emptyIndexedSubscriptTarget(opts.name, resolved, opts.operation);
+  if (rawSubText === '') return emptyIndexedSubscriptTarget(opts.name, opts.operation);
   const expanded = expandIndexedSubscript(shell, opts.subscript);
   const normalized = expanded === '' ? '0' : expanded;
   const rawIndex = shell.evaluateFatalReadonly(normalized, true);
@@ -244,12 +241,10 @@ function resolveIndexedSubscript(
   };
 }
 
-function emptyIndexedSubscriptTarget(
-  writtenName: string,
-  resolved: string,
-  operation: TargetOperation
-): ResolvedTarget {
-  const label = operation === 'unset' ? '[]' : operation === 'testSet' ? resolved : `${writtenName}[]`;
+function emptyIndexedSubscriptTarget(writtenName: string, operation: TargetOperation): ResolvedTarget {
+  // `-v` tests an empty subscript as an unset element, with no error.
+  if (operation === 'testSet') return invalidTarget(`${writtenName}[]`, 'badSubscript', '');
+  const label = operation === 'unset' ? '[]' : `${writtenName}[]`;
   return invalidTarget(`${writtenName}[]`, 'badSubscript', `${label}: bad array subscript`);
 }
 
