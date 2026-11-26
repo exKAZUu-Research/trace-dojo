@@ -160,9 +160,10 @@ function joinPath(base: string, part: string): string {
   return base.endsWith('/') ? `${base}${part}` : `${base}/${part}`;
 }
 
+/** The last component of a path, skipping `.` components after the first as `Path::components` does. */
 function fileName(path: string): string | undefined {
-  const name = path.replace(/\/+$/, '').split('/').at(-1);
-  return name === undefined || name === '' || name === '..' || name === '.' ? undefined : name;
+  const name = path.split('/').findLast((part, index) => part !== '' && (part !== '.' || index === 0));
+  return name === undefined || name === '..' || name === '.' ? undefined : name;
 }
 
 function options(value: Value): OpenOptionsValue {
