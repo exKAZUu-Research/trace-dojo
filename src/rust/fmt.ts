@@ -279,6 +279,8 @@ export class Formatter {
         return list('[', ']', items, indent, write);
       }
       case 'dyn': {
+        // A thread's panic payload, `Box<dyn Any + Send>`, shows none of what it holds.
+        if (t.trait.trait.name === 'Any') return emit('Any { .. }', write);
         const dynValue = v as DynValue;
         return this.debug(dynValue.value, dynValue.type, spec, indent, write);
       }
