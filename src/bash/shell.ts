@@ -163,6 +163,8 @@ export class Shell implements ArithmeticHost {
    * `ERR` action.
    */
   traceLevel: number;
+  /** Whether this shell is a subshell, where an error that abandons a line ends the whole subshell. */
+  private inSubshell = false;
   /** The trace level of this shell itself, outside any `ERR` action, which its `EXIT` action runs at. */
   private readonly ownTraceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
@@ -379,12 +381,13 @@ export class Shell implements ArithmeticHost {
     // reads the action as a new script then (`SEVAL_RESETLINE`).
     this.lineShift = condition === 'EXIT' ? trap.row : trap.row - this.currentRow;
     try {
-      // As the script's own lines are, each line of the action that an error abandons ends alone, setting `$?`.
+      // As the script's own lines are, each line of the action that an error abandons ends alone, setting `$?`; in a
+      // subshell, as Bash runs it, such an error ends the subshell instead.
       for (const unit of trap.units ?? [trap.statements]) {
         try {
           this.runStatements(unit);
         } catch (error) {
-          if (!(error instanceof DiscardSignal)) throw error;
+          if (!(error instanceof DiscardSignal) || this.inSubshell) throw error;
           this.store.lastStatus = error.status;
         }
       }
@@ -1821,6 +1824,7 @@ export class Shell implements ArithmeticHost {
       // `break` and `continue` in `( )` or a command started with `&` are outside every loop, as in Bash.
       loopDepth: resetsLoops ? 0 : this.loopDepth,
     });
+    childShell.inSubshell = true;
     // A subshell ends as a shell does: its process substitutions close, its EXIT trap runs, and the `>(...)`
     // commands and coprocesses still pending run to their end.
     const runWith = (action: () => number): number => {
