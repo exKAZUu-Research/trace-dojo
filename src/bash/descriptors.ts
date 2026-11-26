@@ -52,6 +52,11 @@ export class DescriptorTable {
     return fd;
   }
 
+  /** Whether a descriptor refers to `file`, as a copy of the descriptor that opened it does. */
+  refersTo(file: OpenFile): boolean {
+    return [...this.open.values()].includes(file);
+  }
+
   clone(): DescriptorTable {
     return new DescriptorTable(this.open);
   }

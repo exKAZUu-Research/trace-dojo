@@ -115,7 +115,9 @@ export class Shell implements ArithmeticHost {
   readonly traps: Map<TrapCondition, Trap>;
   private runningTrap = false;
   /** The descriptors of process substitutions that the commands running now use, with what each runs when done. */
-  private readonly processSubstitutions: { fd: number; finish?: () => void }[] = [];
+  private readonly processSubstitutions: { fd: number; file: OpenFile; finish?: () => void }[] = [];
+  /** The `>(...)` commands whose input another descriptor keeps open past their command, which run as the shell ends. */
+  private readonly lingeringSubstitutions: (() => void)[] = [];
   private readShift: number;
   private lineShift: number;
   private loopDepth: number;
@@ -156,8 +158,14 @@ export class Shell implements ArithmeticHost {
   runProgram(program: Program): number {
     this.runtime.frames.push({ callRow: undefined, isAtomic: false, store: this.store, scopeIndex: 0 });
     const status = this.runExitTrap(this.runUnits(program));
+    this.finishLingeringSubstitutions();
     this.finishCoprocesses();
     return status;
+  }
+
+  /** Runs the `>(...)` commands still reading, as their input reaches its end when the shell ends. */
+  finishLingeringSubstitutions(): void {
+    for (const finish of this.lingeringSubstitutions.splice(0)) finish();
   }
 
   /** Runs the `EXIT` trap as the shell ends with `status`, returning the status it ends with, which `exit` may set. */
@@ -262,23 +270,29 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Runs `<(...)` at once with its output kept for the path it expands to, or for `>(...)` keeps what is written to
-   * the path for the commands, which run once the command using the path ends. Bash runs them alongside the command,
-   * so these orders are ones it could take.
+   * the path for the commands, which run once the command using the path ends, or, when a descriptor such as one
+   * `exec` opened still writes to it, once the shell ends. Bash runs them alongside the shell, so these orders are
+   * ones it could take.
    */
   openProcessSubstitution(direction: '<' | '>', body: Statement[]): string {
     const fd = this.highestFreeDescriptor(PROCESS_SUBSTITUTION_FIRST_FD);
+    const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
     if (direction === '<') {
-      const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
       this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
-      this.fds.set(fd, { input: this.runtime.io.textReader(capture.read()) });
-      this.processSubstitutions.push({ fd });
+      const file = { input: this.runtime.io.textReader(capture.read()) };
+      this.fds.set(fd, file);
+      this.processSubstitutions.push({ fd, file });
     } else {
-      const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
-      this.fds.set(fd, { output: capture.target });
+      // The commands copy the shell's state now, as Bash forks them here, though they run later.
+      const child = this.forkSubshell(this.fds.clone());
+      const file = { output: capture.target };
+      this.fds.set(fd, file);
       this.processSubstitutions.push({
         fd,
+        file,
         finish: () => {
-          this.runSubshell(body, this.descriptorsWith(0, { input: this.runtime.io.textReader(capture.read()) }));
+          child.fds.set(0, { input: this.runtime.io.textReader(capture.read()) });
+          child.run(body);
         },
       });
     }
@@ -286,9 +300,11 @@ export class Shell implements ArithmeticHost {
   }
 
   private closeProcessSubstitutions(mark: number, completed: boolean): void {
-    for (const { fd, finish } of this.processSubstitutions.splice(mark)) {
+    for (const { fd, file, finish } of this.processSubstitutions.splice(mark)) {
       this.fds.close(fd);
-      if (completed) finish?.();
+      if (!completed || !finish) continue;
+      if (this.fds.refersTo(file)) this.lingeringSubstitutions.push(finish);
+      else finish();
     }
   }
 
@@ -1301,7 +1317,9 @@ export class Shell implements ArithmeticHost {
         const status = overrides?.readsFile
           ? childShell.readFileSubstitution(body[0] as Extract<Statement, { kind: 'command' }>)
           : runSubshellCommands(childShell, body);
-        return childShell.runExitTrap(status);
+        const exitStatus = childShell.runExitTrap(status);
+        childShell.finishLingeringSubstitutions();
+        return exitStatus;
       } finally {
         this.runtime.frames.pop();
       }
