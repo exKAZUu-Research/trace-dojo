@@ -105,6 +105,10 @@ export class Converter {
   }
 
   /** Pairs here-document redirections with their bodies, which follow in the same order in the source. */
+  /**
+   * Pairs each here-document redirection with its body: the first body not yet paired that starts after it within
+   * the same command substitution (or the program), as Bash reads a substitution's here-documents apart.
+   */
   private collectHeredocBodies(root: Node): void {
     const redirects: Node[] = [];
     const bodies: Node[] = [];
@@ -114,9 +118,16 @@ export class Converter {
       else if (node.type === 'heredoc_body') bodies.push(node);
       for (let i = node.childCount - 1; i >= 0; i--) pending.push(node.child(i) as Node);
     }
-    for (const [index, redirect] of redirects.entries()) {
-      const body = bodies[index];
-      if (body) this.heredocBodies.set(redirect.startIndex, body);
+    const paired = new Set<Node>();
+    for (const redirect of redirects.toSorted((a, b) => a.startIndex - b.startIndex)) {
+      const scope = substitutionScopeOf(redirect);
+      const body = bodies
+        .filter((candidate) => !paired.has(candidate) && candidate.startIndex >= redirect.endIndex)
+        .filter((candidate) => substitutionScopeOf(candidate) === scope)
+        .toSorted((a, b) => a.startIndex - b.startIndex)[0];
+      if (!body) continue;
+      paired.add(body);
+      this.heredocBodies.set(redirect.startIndex, body);
     }
   }
 
@@ -1053,6 +1064,14 @@ function lineRowOf(node: Node): number {
       return node.startPosition.row;
     }
   }
+}
+
+/** The start of the command substitution that holds a node, or -1 for the program itself. */
+function substitutionScopeOf(node: Node): number {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.type === 'command_substitution' || parent.type === 'process_substitution') return parent.startIndex;
+  }
+  return -1;
 }
 
 /** The word after `after` that starts the next clause of an `if` or ends it: `elif`, `else`, or `fi`. */
