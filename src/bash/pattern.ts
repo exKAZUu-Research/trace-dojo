@@ -527,7 +527,13 @@ function matchesAtom(atom: GlobAtom, ch: string): boolean {
   if (atom.kind === 'any' || atom.kind === 'star') return true;
   if (atom.kind === 'char') return ch === atom.c;
   const candidates = atom.fold ? [ch, ch.toLowerCase(), ch.toUpperCase()] : [ch];
-  const hit = candidates.some((candidate) => atom.specs.some((spec) => matchesSpec(spec, candidate)));
+  // Bash folds case for the characters and ranges of a bracket expression, but a class such as `[:upper:]` tests the
+  // character itself.
+  const hit = atom.specs.some((spec) =>
+    spec.kind === 'char' || spec.kind === 'range'
+      ? candidates.some((candidate) => matchesSpec(spec, candidate))
+      : matchesSpec(spec, ch)
+  );
   return hit !== atom.negated;
 }
 
