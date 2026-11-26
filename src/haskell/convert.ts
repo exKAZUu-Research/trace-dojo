@@ -732,7 +732,9 @@ function convertGuard(features: ConvertContext, node: Node): Guard[] {
 
 /** Under Strict, a pattern that binds is matched strictly, as if it had a `!`, unless it is lazy, `~p`. */
 function strictPattern(features: ConvertContext, pat: Pat): Pat {
-  if (!features.allows('strict') || pat.kind === 'plazy' || pat.kind === 'pbang') return pat;
+  // A type binder, `@a`, binds no value to evaluate.
+  if (!features.allows('strict') || pat.kind === 'plazy' || pat.kind === 'pbang' || pat.kind === 'ptybinder')
+    return pat;
   return { kind: 'pbang', pat, span: pat.span };
 }
 
