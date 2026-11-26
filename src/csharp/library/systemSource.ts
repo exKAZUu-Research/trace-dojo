@@ -1,6 +1,15 @@
 import { MAX_TUPLE_ARITY } from '../types';
 
 /**
+ * The generic math factories that a numeric type has as its own statics, such as `long.CreateChecked(5)`. .NET
+ * constrains the type argument to `INumberBase<TOther>`, which this library lacks, so a struct stands for it.
+ */
+const CREATE_FROM_NUMBER = (keyword: string): string =>
+  ['CreateChecked', 'CreateSaturating', 'CreateTruncating']
+    .map((name) => `public static ${keyword} ${name}<TOther>(TOther value) where TOther : struct;`)
+    .join(' ');
+
+/**
  * The declarations of the `System` library types that programs use, in C#. Members without bodies are implemented
  * natively (see `natives*.ts`); their signatures follow .NET 10, so that overload resolution picks the same members.
  */
@@ -345,6 +354,9 @@ namespace System {
     public static bool IsPositive(${keyword} value);
     public static (${keyword} Quotient, ${keyword} Remainder) DivRem(${keyword} left, ${keyword} right);
     public static ${keyword} CopySign(${keyword} value, ${keyword} sign);
+    public static ${keyword} MaxMagnitude(${keyword} x, ${keyword} y);
+    public static ${keyword} MinMagnitude(${keyword} x, ${keyword} y);
+    ${CREATE_FROM_NUMBER(keyword)}${keyword === 'int' ? 'public static long BigMul(int left, int right);' : keyword === 'uint' ? 'public static ulong BigMul(uint left, uint right);' : ''}
   }`;
     })
     .join('\n') +
@@ -392,6 +404,42 @@ namespace System {
     public static float Truncate(float x);
     public static float Sqrt(float x);
     public static float Pow(float x, float y);
+    public static float Round(float x, int digits);
+    public static float Round(float x, MidpointRounding mode);
+    public static float Round(float x, int digits, MidpointRounding mode);
+    public static int Sign(float value);
+    public static bool IsPositive(float value);
+    public static bool IsEvenInteger(float value);
+    public static bool IsOddInteger(float value);
+    public static bool IsPow2(float value);
+    public static bool IsNormal(float value);
+    public static bool IsSubnormal(float value);
+    public static bool IsRealNumber(float value);
+    public static float CopySign(float value, float sign);
+    public static float MaxMagnitude(float x, float y);
+    public static float MinMagnitude(float x, float y);
+    public static float Exp(float x);
+    public static float Log(float x);
+    public static float Log(float x, float newBase);
+    public static float Log2(float value);
+    public static float Log10(float x);
+    public static float Sin(float x);
+    public static float Cos(float x);
+    public static float Tan(float x);
+    public static float Asin(float x);
+    public static float Acos(float x);
+    public static float Atan(float x);
+    public static float Atan2(float y, float x);
+    public static float Sinh(float x);
+    public static float Cosh(float x);
+    public static float Tanh(float x);
+    public static float Cbrt(float x);
+    public static float Hypot(float x, float y);
+    public static float Lerp(float value1, float value2, float amount);
+    public static float DegreesToRadians(float degrees);
+    public static float RadiansToDegrees(float radians);
+    public static float FusedMultiplyAdd(float left, float right, float addend);
+    ${CREATE_FROM_NUMBER('float')}
   }
   public struct Double : IComparable, IComparable<double>, IEquatable<double>, IFormattable {
     public const double MaxValue = 1.7976931348623157E+308;
@@ -436,6 +484,42 @@ namespace System {
     public static double Truncate(double x);
     public static double Sqrt(double x);
     public static double Pow(double x, double y);
+    public static double Round(double x, int digits);
+    public static double Round(double x, MidpointRounding mode);
+    public static double Round(double x, int digits, MidpointRounding mode);
+    public static int Sign(double value);
+    public static bool IsPositive(double value);
+    public static bool IsEvenInteger(double value);
+    public static bool IsOddInteger(double value);
+    public static bool IsPow2(double value);
+    public static bool IsNormal(double value);
+    public static bool IsSubnormal(double value);
+    public static bool IsRealNumber(double value);
+    public static double CopySign(double value, double sign);
+    public static double MaxMagnitude(double x, double y);
+    public static double MinMagnitude(double x, double y);
+    public static double Exp(double x);
+    public static double Log(double x);
+    public static double Log(double x, double newBase);
+    public static double Log2(double value);
+    public static double Log10(double x);
+    public static double Sin(double x);
+    public static double Cos(double x);
+    public static double Tan(double x);
+    public static double Asin(double x);
+    public static double Acos(double x);
+    public static double Atan(double x);
+    public static double Atan2(double y, double x);
+    public static double Sinh(double x);
+    public static double Cosh(double x);
+    public static double Tanh(double x);
+    public static double Cbrt(double x);
+    public static double Hypot(double x, double y);
+    public static double Lerp(double value1, double value2, double amount);
+    public static double DegreesToRadians(double degrees);
+    public static double RadiansToDegrees(double radians);
+    public static double FusedMultiplyAdd(double left, double right, double addend);
+    ${CREATE_FROM_NUMBER('double')}
   }
   public struct Decimal : IComparable, IComparable<decimal>, IEquatable<decimal>, IFormattable {
     public const decimal MaxValue = 79228162514264337593543950335m;
@@ -486,6 +570,15 @@ namespace System {
     public static int ToInt32(decimal d);
     public static long ToInt64(decimal d);
     public static double ToDouble(decimal d);
+    public static bool IsInteger(decimal value);
+    public static bool IsNegative(decimal value);
+    public static bool IsPositive(decimal value);
+    public static bool IsEvenInteger(decimal value);
+    public static bool IsOddInteger(decimal value);
+    public static decimal CopySign(decimal value, decimal sign);
+    public static decimal MaxMagnitude(decimal x, decimal y);
+    public static decimal MinMagnitude(decimal x, decimal y);
+    ${CREATE_FROM_NUMBER('decimal')}
   }
   public struct Nullable<T> where T : struct {
     public Nullable(T value);

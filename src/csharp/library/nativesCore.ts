@@ -816,7 +816,7 @@ function mathMin(a: number, b: number): number {
 const POWERS_OF_TEN = Array.from({ length: 16 }, (_unused, index) => 10 ** index);
 
 /** `Math.Round(double, digits, mode)`, which .NET computes by scaling by a power of ten. */
-function roundDouble(value: number, digits: number, mode: number): number {
+export function roundDouble(value: number, digits: number, mode: number): number {
   if (digits < 0 || digits > 15)
     fail('System.ArgumentOutOfRangeException', 'Rounding digits must be between 0 and 15, inclusive.', 'digits');
   if (Math.abs(value) >= 1e16) return value;
