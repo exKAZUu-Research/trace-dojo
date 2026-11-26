@@ -39,6 +39,17 @@ inline fun File.forEachLine(action: (line: String) -> Unit) {
 
 inline fun <T> File.useLines(block: (Sequence<String>) -> T): T = block(readLines().asSequence())
 
+// The forms that name a charset, which can only be UTF-8 here, as Charsets.UTF_8 is.
+fun File.readText(charset: java.nio.charset.Charset): String = readText()
+fun File.writeText(text: String, charset: java.nio.charset.Charset) { writeText(text) }
+fun File.appendText(text: String, charset: java.nio.charset.Charset) { appendText(text) }
+fun File.readLines(charset: java.nio.charset.Charset): List<String> = readLines()
+fun File.bufferedReader(charset: java.nio.charset.Charset): BufferedReader = bufferedReader()
+fun File.bufferedWriter(charset: java.nio.charset.Charset): BufferedWriter = bufferedWriter()
+fun File.printWriter(charset: java.nio.charset.Charset): PrintWriter = printWriter()
+inline fun File.forEachLine(charset: java.nio.charset.Charset, action: (line: String) -> Unit) = forEachLine(action)
+inline fun <T> File.useLines(charset: java.nio.charset.Charset, block: (Sequence<String>) -> T): T = useLines(block)
+
 // A reader's lines and text, as Kotlin's extensions of java.io.Reader and BufferedReader read them.
 fun BufferedReader.lineSequence(): Sequence<String> = generateSequence { readLine() }.constrainOnce()
 

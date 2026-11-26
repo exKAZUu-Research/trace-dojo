@@ -40,6 +40,8 @@ export const libraryMemberNames: Readonly<Record<string, string>> = {
   'java.net.URI': 'toPath',
   'java.net.URL': 'readBytes readText',
   'java.nio.ByteBuffer': 'getUuid putUuid',
+  'java.nio.charset.Charset':
+    'aliases canEncode compareTo contains decode displayName encode equals hashCode isRegistered name newDecoder newEncoder toString',
   'java.nio.file.Path':
     'absolute absolutePathString appendBytes appendLines appendText bufferedReader bufferedWriter copyTo copyToIgnoringExistingDirectory copyToRecursively createDirectories createDirectory createFile createLinkPointingTo createParentDirectories createSymbolicLinkPointingTo deleteExisting deleteIfExists deleteRecursively div exists extension fileAttributesView fileAttributesViewOrNull fileSize fileStore forEachDirectoryEntry forEachLine getAttribute getLastModifiedTime getOwner getPosixFilePermissions inputStream invariantSeparatorsPath invariantSeparatorsPathString isDirectory isExecutable isHidden isReadable isRegularFile isSameFileAs isSymbolicLink isWritable listDirectoryEntries moveTo name nameWithoutExtension notExists outputStream pathString readAttributes readBytes readLines readSymbolicLink readText reader relativeTo relativeToOrNull relativeToOrSelf setAttribute setLastModifiedTime setOwner setPosixFilePermissions useDirectoryEntries useLines visitFileTree walk writeBytes writeLines writeText writer',
   'java.time.Duration': 'toKotlinDuration',

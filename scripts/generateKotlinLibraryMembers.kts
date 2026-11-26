@@ -160,6 +160,7 @@ for ((kotlinName, javaType) in mapOf(
     "java.util.SortedSet" to java.util.SortedSet::class.java,
     "java.util.TreeMap" to java.util.TreeMap::class.java,
     "java.util.TreeSet" to java.util.TreeSet::class.java,
+    "java.nio.charset.Charset" to java.nio.charset.Charset::class.java,
     // The JVM exceptions the prelude declares, which the natives throw as the JVM does.
     "java.io.FileNotFoundException" to java.io.FileNotFoundException::class.java,
     "java.io.IOException" to java.io.IOException::class.java,
