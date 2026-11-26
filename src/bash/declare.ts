@@ -566,7 +566,11 @@ function executeUnsubscriptedDeclaration(
     append: op.append,
     evalInt: (expr) => shell.evaluateFatalReadonly(expr, false, builtin),
   });
-  if (failure) return shell.failures.handleStoreFailure('declarationOperand', failure, builtin);
+  if (failure) {
+    // `readonly` and `export` assign as a plain assignment does, whose readonly error names no builtin.
+    const assigns = failure.reason === 'readonly' && (builtin === 'readonly' || builtin === 'export');
+    return shell.failures.handleStoreFailure('declarationOperand', failure, assigns ? undefined : builtin);
+  }
   if (materializedArray) onMaterialize();
   return true;
 }
