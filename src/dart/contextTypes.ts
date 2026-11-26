@@ -1,6 +1,15 @@
 import type { ClassInfo } from './classes';
 import { closeInferenceHoles, containsInferenceHole, INFERENCE_HOLE, isInferenceHole } from './typeInference';
-import { coreTypes, type DartType, DYNAMIC, interfaceType, isSubtype, resolveBound, upperBound } from './types';
+import {
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  futureOrValue,
+  interfaceType,
+  isSubtype,
+  resolveBound,
+  upperBound,
+} from './types';
 
 /**
  * The type Dart's rule for int arithmetic passes from the context K of an int's `+`, `-`, `*`, `%`, `remainder` or
@@ -32,10 +41,20 @@ export function isDoubleContext(context: DartType): boolean {
   return base?.cls === coreTypes.double;
 }
 
+/**
+ * The type a collection literal's context stands for: the context, or for `FutureOr<T>` (as an async function's
+ * return gives) the `T`, which Dart infers the literal from.
+ */
+function collectionContext(context: DartType): DartType {
+  const base = resolveBound(context);
+  const value = futureOrValue(base);
+  return value ? collectionContext(value) : base;
+}
+
 /** The element type a context gives a collection literal, as `List<int>` gives `int` to `[...]`. */
 export function elementTypeOfContext(context: DartType | undefined, cls: ClassInfo): DartType | undefined {
   if (!context) return undefined;
-  const base = resolveBound(context);
+  const base = collectionContext(context);
   if (base.kind !== 'interface') return undefined;
   const target = cls === coreTypes.list && base.cls === coreTypes.iterable ? coreTypes.iterable : cls;
   if (base.cls === coreTypes.iterable || base.cls === coreTypes.object) {
@@ -47,7 +66,7 @@ export function elementTypeOfContext(context: DartType | undefined, cls: ClassIn
 
 export function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] | undefined {
   if (!context) return undefined;
-  const base = resolveBound(context);
+  const base = collectionContext(context);
   if (base.kind !== 'interface' || base.cls !== coreTypes.map) return undefined;
   return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
 }
