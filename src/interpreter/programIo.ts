@@ -18,7 +18,8 @@ export interface ProgramOutput {
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
 /** The path that reads standard input as a file, as on Linux. */
-const STDIN_PATH = '/dev/stdin';
+/** The path at which a program reads what remains of its standard input as a file. */
+export const STDIN_PATH = '/dev/stdin';
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which

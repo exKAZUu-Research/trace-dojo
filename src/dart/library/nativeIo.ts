@@ -3,6 +3,8 @@ import {
   FileSystemError,
   type FileSystemErrorCode,
   parentOf,
+  resolvePath,
+  STDIN_PATH,
   type VirtualFileSystem,
 } from '../../interpreter/programIo';
 import type { Runtime } from '../runtime';
@@ -181,9 +183,19 @@ define('FileSystemEntity._isSameFile', (runtime, _self, [path1, path2]) =>
   filesOf(runtime).isSameFile(stringArg(runtime, path1, 'path1'), stringArg(runtime, path2, 'path2'))
 );
 
-define('_File._read', (runtime, _self, [path, failure]) =>
-  withFileErrors(runtime, failure as string, () => filesOf(runtime).readFile(stringArg(runtime, path, 'path')))
-);
+define('_File._read', (runtime, _self, [path, failure]) => {
+  const filePath = stringArg(runtime, path, 'path');
+  // `/dev/stdin` reads what remains of standard input, as ProgramIO's readers of every language do.
+  if (resolvePath(filePath) === STDIN_PATH) return restOfStdin(runtime);
+  return withFileErrors(runtime, failure as string, () => filesOf(runtime).readFile(filePath));
+});
+
+function restOfStdin(runtime: Runtime): string {
+  const { reader } = runtime.io.stdin;
+  let text = '';
+  for (let character = reader.read(); character !== undefined; character = reader.read()) text += character;
+  return text;
+}
 
 // The VM writes a string's UTF-8 encoding, in which an unpaired surrogate becomes U+FFFD.
 define('_writtenText', (runtime, _self, [bytes]) => textOfWrittenBytes(runtime, bytes));
