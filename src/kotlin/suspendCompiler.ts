@@ -938,13 +938,17 @@ export abstract class SuspendCompiler extends LocalCompiler {
 
 type Eval = (frame: Frame) => Value;
 
-/** Whether code holds a break or continue of no loop inside it, which loops of `labels` and nested ones are. */
+/**
+ * Whether code holds a break or continue of no loop inside it, which loops of `labels` and nested ones are, looking into
+ * nested lambdas.
+ */
 function escapesLoops(node: unknown, labels: ReadonlySet<string | undefined>): boolean {
   if (!node || typeof node !== 'object') return false;
   if (Array.isArray(node)) return node.some((each) => escapesLoops(each, labels));
   const syntax = node as { kind?: string; label?: string };
   if (syntax.kind === 'break' || syntax.kind === 'continue') return !labels.has(syntax.label);
-  if (syntax.kind !== undefined && OPAQUE_KINDS.has(syntax.kind)) return false;
+  // A nested lambda's jumps leave it too when it is inlined, as run's and forEach's are; other declarations' cannot.
+  if (syntax.kind !== undefined && syntax.kind !== 'lambda' && OPAQUE_KINDS.has(syntax.kind)) return false;
   if (Object.getPrototypeOf(node) !== Object.prototype) return false;
   const isLoop = syntax.kind === 'for' || syntax.kind === 'while' || syntax.kind === 'doWhile';
   const inner = isLoop ? new Set([...labels, undefined, syntax.label]) : labels;
