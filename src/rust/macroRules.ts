@@ -1,14 +1,26 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-/** A token of a macro's input or rules: a single token, or a group in delimiters with the tokens inside. */
+/**
+ * A token of a macro's input or rules: a single token, or a group in delimiters with the tokens inside. `spaced` tells
+ * whether the source has a space before it (before the closing delimiter, for `closeSpaced`), which `stringify!` keeps.
+ */
 export type Token =
-  | { kind: 'leaf'; text: string; type: string }
-  | { kind: 'group'; open: string; close: string; tokens: Token[] };
+  | { kind: 'leaf'; text: string; type: string; spaced?: boolean }
+  | {
+      kind: 'group';
+      open: string;
+      close: string;
+      tokens: Token[];
+      spaced?: boolean;
+      closeSpaced?: boolean;
+      /** An `expr` variable's tokens, which keep one operand as parentheses would but which `stringify!` shows bare. */
+      invisible?: true;
+    };
 
 /** A part of a rule's matcher or transcriber. */
 type Part =
   | { kind: 'token'; token: Token & { kind: 'leaf' } }
-  | { kind: 'group'; open: string; close: string; parts: Part[] }
+  | { kind: 'group'; open: string; close: string; parts: Part[]; spaced?: boolean; closeSpaced?: boolean }
   | { kind: 'var'; name: string; fragment: string | undefined }
   | { kind: 'rep'; parts: Part[]; separator: string | undefined; op: '*' | '+' | '?' };
 
@@ -29,24 +41,31 @@ const CLOSERS: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
 // code-gauge-allow functionCognitiveComplexity -- Recovers lifetimes and repetition separators that tree-sitter splits or leaves out.
 export function tokensOf(tree: Node): Token[] {
   const leaves: (Token & { kind: 'leaf' })[] = [];
+  let lastEnd: number | undefined;
+  const push = (text: string, type: string, start: number, end: number): void => {
+    leaves.push({ kind: 'leaf', text, type, spaced: lastEnd !== undefined && start > lastEnd });
+    lastEnd = end;
+  };
   const visit = (node: Node): void => {
     if (node.type === 'line_comment' || node.type === 'block_comment') return;
     if (node.childCount === 0 || LEAF_TYPES.has(node.type) || node.type.endsWith('_literal')) {
       // In a token tree, tree-sitter splits a lifetime (`'a`) into a quote and a name.
       const previous = leaves.at(-1);
       if (previous?.type === "'" && /^\w+$/.test(node.text)) {
-        leaves[leaves.length - 1] = { kind: 'leaf', text: `'${node.text}`, type: 'lifetime' };
+        leaves[leaves.length - 1] = { ...previous, text: `'${node.text}`, type: 'lifetime' };
+        lastEnd = node.endIndex;
         return;
       }
-      leaves.push({ kind: 'leaf', text: node.text, type: node.type });
+      push(node.text, node.type, node.startIndex, node.endIndex);
       return;
     }
     let end = node.startIndex;
     for (const child of node.children) {
       // tree-sitter leaves a repetition's separator (`$(...),*`) out of its tree, so it comes from the text.
       if (node.type.startsWith('token_repetition')) {
-        const gap = node.text.slice(end - node.startIndex, child.startIndex - node.startIndex).trim();
-        if (gap) leaves.push({ kind: 'leaf', text: gap, type: gap });
+        const raw = node.text.slice(end - node.startIndex, child.startIndex - node.startIndex);
+        const start = end + raw.indexOf(raw.trim());
+        if (raw.trim()) push(raw.trim(), raw.trim(), start, start + raw.trim().length);
       }
       visit(child);
       end = child.endIndex;
@@ -67,7 +86,8 @@ function group(leaves: (Token & { kind: 'leaf' })[], start: number, close?: stri
     const closer = CLOSERS[leaf.text];
     if (closer && leaf.type === leaf.text) {
       const [inner, next] = group(leaves, index + 1, closer);
-      tokens.push({ kind: 'group', open: leaf.text, close: closer, tokens: inner });
+      const closeSpaced = leaves[next - 1]?.spaced;
+      tokens.push({ kind: 'group', open: leaf.text, close: closer, tokens: inner, spaced: leaf.spaced, closeSpaced });
       index = next;
       continue;
     }
@@ -86,7 +106,8 @@ export function parseParts(tokens: Token[], matcher: boolean): Part[] {
     const next = tokens[index + 1];
     let read: [Part, number];
     if (token.kind === 'group') {
-      read = [{ kind: 'group', open: token.open, close: token.close, parts: parseParts(token.tokens, matcher) }, index];
+      const { open, close, spaced, closeSpaced } = token;
+      read = [{ kind: 'group', open, close, parts: parseParts(token.tokens, matcher), spaced, closeSpaced }, index];
     } else if (token.type === 'metavariable') {
       read = parseVar(tokens, index, matcher);
     } else if (token.text === '$' && next?.kind === 'group' && next.open === '(') {
@@ -302,7 +323,6 @@ function matchUntilStop(fragment: string, tokens: Token[], start: number, follow
   return end > start ? end : -1;
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One case per kind of transcriber part.
 function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
   const out: Token[] = [];
   for (const part of parts) {
@@ -312,7 +332,8 @@ function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
         break;
       }
       case 'group': {
-        out.push({ kind: 'group', open: part.open, close: part.close, tokens: transcribe(part.parts, bindings) });
+        const { open, close, spaced, closeSpaced } = part;
+        out.push({ kind: 'group', open, close, tokens: transcribe(part.parts, bindings), spaced, closeSpaced });
         break;
       }
       case 'var': {
@@ -320,29 +341,82 @@ function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
         break;
       }
       case 'rep': {
-        const names = variablesIn(part.parts).filter((name) => bindings.get(name)?.kind === 'rep');
-        if (names.length === 0) throw new MacroError('マクロの繰り返しの中に、繰り返す変数がありません。');
-        const counts = names.map((name) => (bindings.get(name) as Binding & { kind: 'rep' }).rounds.length);
-        if (counts.some((count) => count !== counts[0])) {
-          throw new MacroError('マクロの繰り返しの中の変数の、繰り返す回数がそろっていません。');
-        }
-        for (let round = 0; round < counts[0]; round++) {
-          if (round > 0 && part.separator !== undefined) {
-            out.push({ kind: 'leaf', text: part.separator, type: part.separator });
-          }
-          const scope = new Map(bindings);
-          for (const name of names) {
-            for (const [inner, binding] of (bindings.get(name) as Binding & { kind: 'rep' }).rounds[round]) {
-              scope.set(inner, binding);
-            }
-          }
-          out.push(...transcribe(part.parts, scope));
-        }
+        out.push(...transcribeRepetition(part, bindings));
         break;
       }
     }
   }
+  return stringified(out);
+}
+
+function transcribeRepetition(part: Part & { kind: 'rep' }, bindings: Map<string, Binding>): Token[] {
+  const names = variablesIn(part.parts).filter((name) => bindings.get(name)?.kind === 'rep');
+  if (names.length === 0) throw new MacroError('マクロの繰り返しの中に、繰り返す変数がありません。');
+  const counts = names.map((name) => (bindings.get(name) as Binding & { kind: 'rep' }).rounds.length);
+  if (counts.some((count) => count !== counts[0])) {
+    throw new MacroError('マクロの繰り返しの中の変数の、繰り返す回数がそろっていません。');
+  }
+  const out: Token[] = [];
+  for (let round = 0; round < counts[0]; round++) {
+    if (round > 0 && part.separator !== undefined)
+      out.push({ kind: 'leaf', text: part.separator, type: part.separator });
+    const scope = new Map(bindings);
+    for (const name of names) {
+      for (const [inner, binding] of (bindings.get(name) as Binding & { kind: 'rep' }).rounds[round]) {
+        scope.set(inner, binding);
+      }
+    }
+    out.push(...transcribe(part.parts, scope));
+  }
   return out;
+}
+
+/**
+ * Replaces each `stringify!(...)` in a transcription with the string literal of its tokens as written, so that an
+ * `expr` variable shows without the parentheses its expansion keeps it in.
+ */
+function stringified(tokens: Token[]): Token[] {
+  const out: Token[] = [];
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    const bang = tokens[index + 1];
+    const args = tokens[index + 2];
+    if (
+      token.kind !== 'leaf' ||
+      token.text !== 'stringify' ||
+      bang?.kind !== 'leaf' ||
+      bang.text !== '!' ||
+      args?.kind !== 'group'
+    ) {
+      out.push(token);
+      continue;
+    }
+    // A `std::` or `core::` before the macro's name goes with it.
+    const path =
+      out.at(-1)?.kind === 'leaf' &&
+      (out.at(-1) as Token & { kind: 'leaf' }).text === '::' &&
+      ['std', 'core'].includes((out.at(-2) as { text?: string } | undefined)?.text ?? '');
+    const first = path ? (out.splice(-2)[0] as Token) : token;
+    const text = writtenText(args.tokens)
+      .replaceAll('\\', String.raw`\\`)
+      .replaceAll('"', String.raw`\"`);
+    out.push({ kind: 'leaf', text: `"${text}"`, type: 'string_literal', spaced: first.spaced });
+    index += 2;
+  }
+  return out;
+}
+
+/** The text of tokens with the spaces the source has between them, as `stringify!` gives it. */
+function writtenText(tokens: Token[], top = true): string {
+  return tokens
+    .map((token, index) => {
+      const space = (index > 0 || !top) && token.spaced ? ' ' : '';
+      if (token.kind === 'leaf') return `${space}${token.text}`;
+      const inner = writtenText(token.tokens, token.invisible ? top && index === 0 : false);
+      if (token.invisible) return `${space}${inner}`;
+      return `${space}${token.open}${inner}${token.closeSpaced && inner ? ' ' : ''}${token.close}`;
+    })
+    .join('');
 }
 
 function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {
@@ -352,7 +426,7 @@ function transcribeVar(name: string, bindings: Map<string, Binding>): Token[] {
   if (binding.kind === 'rep') throw new MacroError(`マクロの変数 $${name} は、$( ... ) の中で使ってください。`);
   // An expression is one operand where it lands, as rustc keeps it one node: `$x * 2` of `1 + 1` is 4.
   if (binding.fragment === 'expr' || binding.fragment === 'expr_2021') {
-    return [{ kind: 'group', open: '(', close: ')', tokens: binding.tokens }];
+    return [{ kind: 'group', open: '(', close: ')', tokens: binding.tokens, invisible: true }];
   }
   return binding.tokens;
 }
