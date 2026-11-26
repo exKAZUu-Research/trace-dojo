@@ -400,6 +400,11 @@ export class MemberChecker {
       );
       return;
     }
+    // The library declares `Buffer` only as far as a program can use one without running into this rejection.
+    if (this.isLibraryBuffer(node, apparent)) {
+      this.c.error(node, unsupportedMessage('エンコーディングを指定しない readFileSync（Buffer）'));
+      return;
+    }
     // TypeScript names the union a generic type's apparent type is, as `string | number` for `T extends string | number`.
     const shown = apparent.kind === 'union' ? apparent : type;
     const suggestion = this.suggestProperty(shown, name);
@@ -407,6 +412,12 @@ export class MemberChecker {
       node,
       `プロパティ '${name}' は型 '${this.c.print(shown)}' にありません。${suggestion ? `'${suggestion}' のことですか？` : ''}`
     );
+  }
+
+  private isLibraryBuffer(node: TreeNode, type: Type): boolean {
+    if (type.kind !== 'object' || type.name !== 'Buffer') return false;
+    const declarations = this.c.scopeOf(node).lookupType('Buffer')?.typeDeclarations ?? [];
+    return declarations.length > 0 && declarations.every((declaration) => this.c.isLibrary(declaration));
   }
 
   /** A property of the type, or of a primitive's wrapper, as `length` of a string, that `name` may misspell. */
