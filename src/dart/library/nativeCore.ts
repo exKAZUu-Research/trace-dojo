@@ -465,7 +465,10 @@ export { asciiNames, formatDouble, identityOf };
 interface ExpandoEntries {
   /** Held weakly: an entry drops once its key object is no longer reachable, as the VM's does. */
   objects: WeakMap<object, Value>;
-  /** Held strongly, as the types a program names stay reachable for the whole run. */
+  /**
+   * A list, as a Type key is a new object at each evaluation, which a weak table would never find again, so it is
+   * looked up by identical(); its entries are released with the Expando that holds them.
+   */
   types: { type: DartTypeValue; value: Value }[];
 }
 
