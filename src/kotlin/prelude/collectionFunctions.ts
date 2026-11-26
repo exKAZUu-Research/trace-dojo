@@ -1575,6 +1575,21 @@ fun <K, V> MutableMap<K, V>.putIfAbsent(key: K, value: V): V? {
     return current ?: put(key, value)
 }
 
+// java.util.Map's replace and two-argument remove, which act only on a key the map holds.
+fun <K, V> MutableMap<K, V>.replace(key: K, value: V): V? = if (containsKey(key)) put(key, value) else null
+
+fun <K, V> MutableMap<K, V>.replace(key: K, oldValue: V, newValue: V): Boolean {
+    if (!containsKey(key) || get(key) != oldValue) return false
+    put(key, newValue)
+    return true
+}
+
+fun <K, V> MutableMap<K, V>.remove(key: K, value: V): Boolean {
+    if (!containsKey(key) || get(key) != value) return false
+    remove(key)
+    return true
+}
+
 inline fun <K, V> MutableMap<K, V>.merge(key: K, value: V, remappingFunction: (V, V) -> V?): V? {
     val old = get(key)
     val new = if (old == null) value else remappingFunction(old, value)
