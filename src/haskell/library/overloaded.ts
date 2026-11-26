@@ -2,6 +2,7 @@ export const OVERLOADED_SOURCE = String.raw`
 import Base
 import qualified Data.Set.Internal as S
 import qualified Data.Map.Internal as M
+import qualified Data.Sequence.Internal as Q
 
 class IsString a where
   fromString :: String -> a
@@ -33,6 +34,12 @@ instance Ord k => IsList (M.Map k v) where
   type Item (M.Map k v) = (k, v)
   fromList = M.fromList
   toList = M.toList
+
+instance IsList (Q.Seq a) where
+  type Item (Q.Seq a) = a
+  fromList = Q.fromList
+  fromListN _ = Q.fromList
+  toList = foldr (:) []
 
 class IsLabel (x :: Symbol) a where
   fromLabel :: a
