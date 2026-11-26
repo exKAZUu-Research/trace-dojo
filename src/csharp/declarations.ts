@@ -1284,7 +1284,7 @@ export class DeclarationBinder extends BinderBase {
       this.error(member, 'CS1520', 'メソッドは戻り値の型を持たなければなりません');
       return;
     }
-    if (symbol.kind === 'interface')
+    if (symbol.kind === 'interface' && !isStatic)
       this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
     if (symbol.isStatic && !isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
     if (symbol.primaryParameters && !isStatic && member.initializer?.kind !== 'this') {
