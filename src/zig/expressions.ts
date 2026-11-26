@@ -1150,8 +1150,12 @@ export abstract class ExpressionCompiler extends SemaBase {
       isConst = type.isConst;
       sourceSentinel = type.sentinel;
       if (!end) {
-        if (expression.sentinel)
-          this.error(expression, '終わりのない多要素のポインタのスライスには、番兵を書けません。');
+        // The open-ended slice keeps the pointer, so a sentinel must be the one it already has.
+        if (expression.sentinel && !sameSentinel(this.sentinelValue(expression.sentinel, type.child), sourceSentinel))
+          this.error(
+            expression,
+            '終わりのない多要素のポインタのスライスに書く番兵は、元のポインタの番兵と同じにしてください。'
+          );
         return this.combine(
           [operand, start],
           type,
