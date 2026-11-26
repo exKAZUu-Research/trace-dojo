@@ -496,7 +496,7 @@ export class Checker {
     const candidates = [...info.positions.keys()].filter(
       (candidate) =>
         !candidate.instanceArgs ||
-        candidate.instanceArgs.every((instanceArg, index) => couldMatch(instanceArg, args[index]))
+        couldMatch(tap(head, ...candidate.instanceArgs), tap(head, ...args.slice(0, candidate.instanceArgs.length)))
     );
     if (candidates.length === 0) {
       typeError(span, `型 ${head.entity.name} には、フィールド ${String(label.entity.literal)} がありません。`);
@@ -504,7 +504,11 @@ export class Checker {
     if (new Set(candidates.map((candidate) => candidate.instanceArgs)).size > 1) return undefined;
     const con = candidates[0];
     const selector = fieldSelectorType(con, info.positions.get(con) as number);
-    const vars = selector.kinds.map((kind) => this.freshVar(kind));
+    // The record's own types give the constructor's variables where they can, so a signature's rigid variable needs
+    // no fresh variable to stand for it.
+    const bindings: (Type | undefined)[] = [];
+    if (!matchType(selector.record, record, bindings)) bindings.length = 0;
+    const vars = selector.kinds.map((kind, index) => bindings[index] ?? this.freshVar(kind));
     this.unify(record, instantiateType(selector.record, vars), span, `フィールド ${info.name} の型`);
     this.unify(field, instantiateType(selector.field, vars), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
