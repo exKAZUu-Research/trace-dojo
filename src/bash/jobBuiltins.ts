@@ -19,6 +19,9 @@ export const waitBuiltin: Builtin = (shell, args) => {
   const { jobs } = shell.store;
   const pids = processIds(shell, operands);
   if (pids === undefined) return 1;
+  // Bash unsets the `-p` variable before it waits, so it stays unset when no job is reported.
+  const pidName = options.get('p');
+  if (pidName !== undefined) shell.store.unsetNamed(pidName, false);
   // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
   // would be waited for forever.
   const targetPids = pids.length > 0 ? pids : [...jobs.keys()];
