@@ -15,6 +15,7 @@ import {
   intArg,
   iterableValues,
   stringArg,
+  throwUnavailable,
 } from './nativeSupport';
 import { sameVmType, vmTypeHash } from './vmTypeHash';
 
@@ -209,12 +210,9 @@ define('Error.throwWithStackTrace', (runtime, _receiver, [error, stackTrace]) =>
   throw runtime.newThrow(error, stackTrace);
 });
 // The VM's stack traces show file paths and the VM's own frames, which the interpreter cannot reproduce.
-define('StackTrace.current', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['StackTrace.current は、この採点環境では使えません。'])
-);
-define('_StackTrace.toString', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['スタックトレースの中身は、この採点環境では使えません。'])
-);
+define('_unavailable', (runtime, _receiver, [what]) => throwUnavailable(runtime, what as string));
+define('StackTrace.current', (runtime) => throwUnavailable(runtime, 'StackTrace.current'));
+define('_StackTrace.toString', (runtime) => throwUnavailable(runtime, 'スタックトレースの中身'));
 
 function safeToStringOf(runtime: Runtime, root: Value): string {
   const output = new BoundedStringParts(runtime);

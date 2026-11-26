@@ -1631,6 +1631,8 @@ final class pragma {
 // Functions
 
 external void print(Object? object);
+/** Rejects what the interpreter cannot give the SDK's result for, with the diagnostic every such check throws. */
+external Never _unavailable(String what);
 external bool identical(Object? a, Object? b);
 external int identityHashCode(Object? object);
 

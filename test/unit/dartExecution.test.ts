@@ -9160,6 +9160,23 @@ void main() {
   });
 });
 
+test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  print(await Stream.fromIterable(['[1,', ' 2', ', {"a":', ' "b"}]']).transform(json.decoder).toList());
+  try {
+    await Stream.fromIterable(['[1,', ' x]']).transform(json.decoder).toList();
+  } on UnsupportedError catch (error) {
+    print(error.message);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[[1, 2, {a: b}]]\nJSON として読めないテキストを流す json.decoder のストリームは、この採点環境では使えません。\n',
+  });
+});
+
 test('turtle collection skips primitive lists while following reference lists', () => {
   const source = `void main() {
   final numbers = List<num?>.filled(100000, 1);

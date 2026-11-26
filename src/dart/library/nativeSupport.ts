@@ -24,6 +24,14 @@ export type NativeMethod = (
 ) => Value;
 
 /** Registers a method, getter, setter, static member, or top-level function. */
+/**
+ * Rejects at run time what the interpreter cannot give the SDK's result for; every such check, in the libraries'
+ * Dart (through `_unavailable`) and in the natives, throws this one diagnostic.
+ */
+export function throwUnavailable(runtime: Runtime, what: string): never {
+  return runtime.throwError('UnsupportedError', '', [`${what}は、この採点環境では使えません。`]);
+}
+
 export function define(key: string, run: NativeMethod): void {
   const native: Callable = (runtime, receiver, args, typeArgs, callRow) =>
     runtime.withCallRoots(receiver, args, () => run(runtime, receiver, args.positional, args.named, typeArgs), callRow);

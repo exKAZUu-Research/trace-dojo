@@ -874,124 +874,34 @@ final class JsonDecoder extends Converter<String, Object?> {
 
 /**
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
- * as it comes: a native checker reads each chunk once as it arrives, so that an error is reported when its chunk
- * arrives, in that chunk at its offset there, as the chunked parser reports it, and the value when the stream ends.
- * What that parser does after an error (a second error, or a value it had completed), and the error of a number or
- * literal a chunk boundary splits, depend on its internal state, so they are reported as unavailable.
+ * as it comes: the chunks are kept and the text is parsed once when the stream ends, which is when the SDK gives the
+ * value too. An error the chunked parser reports at a time and place of its own state (with the chunk it is in), so
+ * a text that does not parse is reported as unavailable.
  */
 class _JsonStringDecoderSink implements EventSink<String> {
   final EventSink<Object?> _sink;
   final Object? Function(Object? key, Object? value)? _reviver;
-  final List<String> _chunks = <String>[];
-  bool _hasFailed = false;
-  bool _isRejected = false;
-  /**
-   * The value the chunked parser had committed when the error came: one the chunks before the erroring one complete,
-   * when that chunk has only whitespace before its error, so that it cannot have continued the value.
-   */
-  List<Object?>? _committed;
+  final StringBuffer _text = StringBuffer();
 
-  /**
-   * Whether a number or literal may run across the end of the text, whose error the chunked parser reports from its
-   * own state of the token, in words or at a place the joined text's parse does not give.
-   */
-  static bool _endsInToken(String text) {
-    if (text.isEmpty) return false;
-    final char = text.codeUnitAt(text.length - 1);
-    return (char >= 0x30 && char <= 0x39) ||
-        ((char | 0x20) >= 0x61 && (char | 0x20) <= 0x7A) ||
-        char == 0x2E ||
-        char == 0x2B ||
-        char == 0x2D;
-  }
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
-    if (_hasFailed && chunk.isNotEmpty) _afterError();
-    _chunks.add(chunk);
-    if (chunk.isEmpty || _hasFailed) return;
-    // An error before the end of the text so far is one no later chunk can mend, which the SDK's chunked parser
-    // reports as soon as its chunk arrives; the checker reads each chunk once, and leaves a text cut short waiting.
-    try {
-      _checkChunk(chunk);
-    } on FormatException catch (error) {
-      _hasFailed = true;
-      final offset = error.offset!;
-      final before = _length;
-      final earlier = _chunks.sublist(0, _chunks.length - 1).join();
-      if (_endsInToken(earlier)) _afterError();
-      if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(earlier);
-      throw _inChunk(error, offset);
-    } finally {
-      _length += chunk.length;
-    }
+    _text.write(chunk);
   }
-
-  /** The length of the chunks before the one being added. */
-  int _length = 0;
-
-  external void _checkChunk(String chunk);
-
-  Never _afterError() {
-    _isRejected = true;
-    throw _unavailableAfterError;
-  }
-
-  static final UnsupportedError _unavailableAfterError =
-      UnsupportedError("エラーを含む json.decoder のストリームの一部は、この採点環境では使えません。");
 
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);
   }
 
   void close() {
-    final committed = _committed;
-    if (_hasFailed && !_isRejected && committed != null) _sink.add(committed[0]);
-    // The stream still ends after the rejection, as the SDK's ends after its second error.
-    if (_hasFailed && !_isRejected && committed == null) _sink.addError(_unavailableAfterError);
-    if (_hasFailed) {
-      _sink.close();
-      return;
-    }
-    final source = _chunks.join();
     Object? value;
     try {
-      value = _jsonDecode(source, _reviver);
-    } on FormatException catch (error) {
-      // Only a boundary between two non-empty chunks can split a token.
-      final filled = _chunks.where((chunk) => chunk.isNotEmpty).toList();
-      for (var i = 0; i < filled.length - 1; i++) {
-        if (_endsInToken(filled[i])) {
-          _sink.addError(_unavailableAfterError);
-          _sink.close();
-          return;
-        }
-      }
-      throw _inChunk(error, error.offset ?? source.length);
+      value = _jsonDecode(_text.toString(), _reviver);
+    } on FormatException {
+      _unavailable("JSON として読めないテキストを流す json.decoder のストリーム");
     }
     _sink.add(value);
     _sink.close();
-  }
-
-  void _commit(String text) {
-    if (text.trim().isEmpty) return;
-    try {
-      _committed = [_jsonDecode(text, _reviver)];
-    } on FormatException {
-      // The chunks before the erroring one leave the value unfinished.
-    }
-  }
-
-  FormatException _inChunk(FormatException error, int offset) {
-    var start = 0;
-    for (var i = 0; i < _chunks.length; i++) {
-      final chunk = _chunks[i];
-      if (offset < start + chunk.length || i == _chunks.length - 1) {
-        return FormatException(error.message, chunk, offset - start);
-      }
-      start += chunk.length;
-    }
-    return FormatException(error.message, "", 0);
   }
 }
 

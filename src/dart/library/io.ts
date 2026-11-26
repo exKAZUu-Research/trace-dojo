@@ -6,14 +6,8 @@
 export const IO_SOURCE = String.raw`
 abstract interface class IOException implements Exception {}
 
-/**
- * Rejects what the run's files and standard streams cannot take, as they hold text: an encoding other than UTF-8, and
- * bytes that are not UTF-8. Every such check of dart:io throws its diagnostic from here.
- */
-Never _unavailableIo(String what) => throw UnsupportedError(what + "は、この採点環境では使えません。");
-
 void _requireUtf8(Encoding encoding) {
-  if (encoding.name != "utf-8") _unavailableIo("UTF-8 以外の encoding によるファイルと標準入出力の読み書き");
+  if (encoding.name != "utf-8") _unavailable("UTF-8 以外の encoding によるファイルと標準入出力の読み書き");
 }
 
 /**
@@ -24,7 +18,7 @@ String _textOfBytes(List<int> bytes, [_Utf8Decoder? parts]) {
   try {
     return parts == null ? utf8.decode(bytes) : parts.convertChunked(bytes, 0, null);
   } on FormatException {
-    _unavailableIo("UTF-8 でないバイト列の書き込み");
+    _unavailable("UTF-8 でないバイト列の書き込み");
   }
 }
 
@@ -32,7 +26,7 @@ void _finishText(_Utf8Decoder parts) {
   try {
     parts.flush(StringBuffer());
   } on FormatException {
-    _unavailableIo("UTF-8 でないバイト列の書き込み");
+    _unavailable("UTF-8 でないバイト列の書き込み");
   }
 }
 
