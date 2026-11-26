@@ -32,6 +32,7 @@ import {
   ownedDerefLayout,
   regionsOf,
   relate,
+  relateLoopItem,
   type RVar,
   typeAfter,
 } from './regions';
@@ -1082,9 +1083,7 @@ export class LoanBuilder {
     return this.loop(expr.label, undefined, () => {
       const item = this.temp(itemType);
       this.point({ uses: [iterator], defs: item === undefined ? [] : [item] });
-      for (const region of regionsOf(this.layout(item))) {
-        if (!this.graph.universal.has(region)) outlivesAll(this.outlives, this.layouts[iterator], region);
-      }
+      relateLoopItem(this.outlives, this.layouts[iterator], this.layout(item));
       if (this.current !== undefined) this.loops.at(-1)?.breaks.push(this.current);
       this.patternScope(expr.pattern, expr.body, () => {
         this.bind(expr.pattern, this.valuePlace(item));

@@ -277,6 +277,58 @@ function markInvariant(
   }
 }
 
+/**
+ * Relates the regions of an item a `for` loop takes from an iterator of layout `iterator`. A part of the item shaped
+ * like an element of the iterator (the item itself, or what a reference in it points to) takes the regions of the
+ * elements of that shape position by position, as `&'a str` from `&[&'a str]` does; every other region of the item
+ * is outlived by all of the iterator's, as the reference `&'1` to an element of `&'1 [T]` is.
+ */
+export function relateLoopItem(outlives: Outlives, iterator: Layout, item: Layout): void {
+  if (regionsOf(item).length === 0) return;
+  const elements = sameShapeParts(iterator, item);
+  if (elements.length > 0) {
+    for (const element of elements) relate(outlives, element, item);
+  } else if (item.kind === 'ref') {
+    outlivesAll(outlives, iterator, item.region);
+    relateLoopItem(outlives, iterator, item.target);
+  } else if (item.kind === 'tuple') {
+    for (const elem of item.elems) relateLoopItem(outlives, iterator, elem);
+  } else {
+    for (const region of regionsOf(item)) outlivesAll(outlives, iterator, region);
+  }
+}
+
+function sameShapeParts(layout: Layout, shape: Layout): Layout[] {
+  const children =
+    layout.kind === 'ref'
+      ? [layout.target]
+      : layout.kind === 'adt'
+        ? layout.args
+        : layout.kind === 'tuple'
+          ? layout.elems
+          : layout.kind === 'seq'
+            ? [layout.elem]
+            : [];
+  return [...(sameShape(layout, shape) ? [layout] : []), ...children.flatMap((child) => sameShapeParts(child, shape))];
+}
+
+function sameShape(a: Layout, b: Layout): boolean {
+  if (a.kind === 'ref' && b.kind === 'ref') return a.mutable === b.mutable && sameShape(a.target, b.target);
+  if (a.kind === 'adt' && b.kind === 'adt') {
+    return (
+      a.def === b.def &&
+      a.own.length === b.own.length &&
+      a.args.length === b.args.length &&
+      a.args.every((arg, index) => sameShape(arg, b.args[index]))
+    );
+  }
+  if (a.kind === 'tuple' && b.kind === 'tuple') {
+    return a.elems.length === b.elems.length && a.elems.every((elem, index) => sameShape(elem, b.elems[index]));
+  }
+  if (a.kind === 'seq' && b.kind === 'seq') return sameShape(a.elem, b.elem);
+  return a.kind === b.kind;
+}
+
 /** Every region of a layout outlives `region`, as a reference to a value of the layout requires. */
 export function outlivesAll(outlives: Outlives, layout: Layout, region: RVar): void {
   for (const r of regionsOf(layout)) outlives(r, region);
