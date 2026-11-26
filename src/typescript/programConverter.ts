@@ -4,7 +4,7 @@ import type { ClassNode, Expression, IterationSource, MemberExpression, Program,
 import { nameOf, type Node, rowOf, unsupported, unwrapParentheses } from '../javascript/convertNodes';
 import { decodeStringLiteral } from '../javascript/literals';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
-import { countedEnumValue, type FoldedValue, foldEnumValue } from './enumFolding';
+import { countedEnumValue, type EnumsInScope, type FoldedValue, foldEnumValue } from './enumFolding';
 import { isUnsteppedStatement, PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
 /** Converts a TypeScript program, viewed as JavaScript, to the JavaScript interpreter's AST. */
@@ -16,7 +16,8 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   protected override readonly isStrictByDefault = false;
   protected override readonly hasAutoAccessors = true;
   /** What esbuild knows of the members of the enums converted so far, by enum and member. */
-  private readonly foldedEnums = new Map<string, Map<string, FoldedValue>>();
+  /** The folded members of each enum, by the scope declaring its name and the name, as esbuild resolves a reference. */
+  private readonly foldedEnums = new WeakMap<object, Map<string, Map<string, FoldedValue>>>();
   /** The errors of the statements that failed to convert, which tsc reports all of, unlike Node's first one. */
   private readonly statementErrors: SourceDiagnostic[] = [];
 
@@ -76,15 +77,18 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     });
     const text = (value: string): Expression => ({ kind: 'literal', value, row });
     const assignments: Expression[] = [];
-    const folded = this.foldedEnums.get(name) ?? new Map<string, FoldedValue>();
-    this.foldedEnums.set(name, folded);
+    const folded = this.foldedMembers(name);
+    const enumsInScope: EnumsInScope = (enumName) => {
+      const declaring = this.declaringScope(enumName);
+      return declaring && this.foldedEnums.get(declaring)?.get(enumName);
+    };
     let previous: FoldedValue;
     let isFirst = true;
     for (const member of node.childForFieldName('body')?.namedChildren ?? []) {
       if (member.type === 'comment') continue;
       const key = enumMemberName(member);
       const initializer = member.childForFieldName('value');
-      const known = initializer ? foldEnumValue(initializer, this.foldedEnums) : countedEnumValue(previous, isFirst);
+      const known = initializer ? foldEnumValue(initializer, enumsInScope) : countedEnumValue(previous, isFirst);
       const value: Expression = initializer
         ? this.expression(initializer)
         : { kind: 'literal', value: known?.kind === 'number' ? known.value : undefined, row };
@@ -132,6 +136,16 @@ export class TypeScriptProgramConverter extends ProgramConverter {
       rejectsFunctionText: true,
       rejectsUnavailableMembers: true,
     };
+  }
+
+  /** The folded members of the enum `name` declares where the conversion is, which its declarations there add to. */
+  private foldedMembers(name: string): Map<string, FoldedValue> {
+    const scope = this.declaringScope(name) as object;
+    const scopeEnums = this.foldedEnums.get(scope) ?? new Map<string, Map<string, FoldedValue>>();
+    this.foldedEnums.set(scope, scopeEnums);
+    const folded = scopeEnums.get(name) ?? new Map<string, FoldedValue>();
+    scopeEnums.set(name, folded);
+    return folded;
   }
 
   private recoverFromStatementErrors(): void {

@@ -8,13 +8,16 @@ import { decodeStringLiteral } from '../javascript/literals';
  */
 export type FoldedValue = { kind: 'number'; value: number } | { kind: 'string' } | undefined;
 
+/** The folded members of the enum a name refers to where an initializer is, if it is an enum compiled before. */
+export type EnumsInScope = (name: string) => Map<string, FoldedValue> | undefined;
+
 const arithmeticOperators = new Set(['+', '-', '*', '/', '%', '**', '|', '&', '^', '<<', '>>', '>>>']);
 
 /**
  * The value esbuild folds an enum initializer to: number and string literals, template literals (always strings),
  * arithmetic on folded numbers, and members of the enums compiled before, by their enum's name and theirs.
  */
-export function foldEnumValue(node: Node, enums: Map<string, Map<string, FoldedValue>>): FoldedValue {
+export function foldEnumValue(node: Node, enums: EnumsInScope): FoldedValue {
   switch (node.type) {
     case 'number': {
       return { kind: 'number', value: Number(node.text.replaceAll('_', '')) };
@@ -42,7 +45,7 @@ export function foldEnumValue(node: Node, enums: Map<string, Map<string, FoldedV
   }
 }
 
-function foldUnary(node: Node, enums: Map<string, Map<string, FoldedValue>>): FoldedValue {
+function foldUnary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text;
   const operand = foldEnumValue(node.childForFieldName('argument') as Node, enums);
   if (operand?.kind !== 'number') return undefined;
@@ -51,7 +54,7 @@ function foldUnary(node: Node, enums: Map<string, Map<string, FoldedValue>>): Fo
   return operator === '~' ? { kind: 'number', value: ~operand.value } : undefined;
 }
 
-function foldBinary(node: Node, enums: Map<string, Map<string, FoldedValue>>): FoldedValue {
+function foldBinary(node: Node, enums: EnumsInScope): FoldedValue {
   const operator = node.childForFieldName('operator')?.text ?? '';
   const left = foldEnumValue(node.childForFieldName('left') as Node, enums);
   const right = foldEnumValue(node.childForFieldName('right') as Node, enums);
@@ -62,12 +65,12 @@ function foldBinary(node: Node, enums: Map<string, Map<string, FoldedValue>>): F
 }
 
 /** `E.A` or `E["A"]`, a member of an enum compiled before. */
-function foldedMember(node: Node, enums: Map<string, Map<string, FoldedValue>>): FoldedValue {
+function foldedMember(node: Node, enums: EnumsInScope): FoldedValue {
   const object = node.childForFieldName('object');
   const key = node.type === 'member_expression' ? node.childForFieldName('property') : node.childForFieldName('index');
   if (object?.type !== 'identifier' || !key) return undefined;
   const name = key.type === 'string' ? decodeStringLiteral(key.text) : nameOf(key);
-  return enums.get(nameOf(object))?.get(name);
+  return enums(nameOf(object))?.get(name);
 }
 
 /** What a member without an initializer is: 0 first, one more than a folded number before it, or else undefined. */

@@ -183,6 +183,13 @@ export abstract class ConverterBase {
     }
   }
 
+  /** The scope that declares a name where the conversion is, as an identity to key what is known of the name by. */
+  protected declaringScope(name: string): object | undefined {
+    return this.scopes.findLast(
+      (scope) => scope.names.has(name) && (scope.isFunction || scope.names.get(name) !== 'var')
+    );
+  }
+
   private get currentScope(): ScopeBuilder {
     return this.scopes.at(-1) as ScopeBuilder;
   }
