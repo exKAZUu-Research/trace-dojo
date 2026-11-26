@@ -1,0 +1,6 @@
+function exists(path: string): boolean {
+  return fs.existsSync(path);
+}
+console.log(typeof readFileSync, exists('missing.txt'));
+import { readFileSync } from 'fs';
+import * as fs from 'fs';

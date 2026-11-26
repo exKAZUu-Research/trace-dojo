@@ -218,12 +218,16 @@ function unwrappedName(node: TreeNode): TreeNode | undefined {
 
 function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
   const parts: Part[] = [];
+  // An ECMAScript module's imports bind before any of its statements runs, as tsx's output reads them first.
+  const imports: Part[] = [];
   for (const [index, child] of node.children.entries()) {
     if (!child) continue;
     const fieldName = node.fieldNameForChild(index);
-    if (!isErased(node, type, child, fieldName ?? undefined)) parts.push({ node: view(child, binder), fieldName });
+    if (isErased(node, type, child, fieldName ?? undefined)) continue;
+    const isImport = type === 'program' && child.type === 'import_statement';
+    (isImport ? imports : parts).push({ node: view(child, binder), fieldName });
   }
-  return assemble(node, type, parts);
+  return assemble(node, type, [...imports, ...parts]);
 }
 
 /** Whether a child is TypeScript-only syntax, which the JavaScript view leaves out. */
