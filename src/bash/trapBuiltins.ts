@@ -105,7 +105,6 @@ function printTraps(shell: Shell, specs: readonly string[]): number {
 function printTrapActions(shell: Shell, specs: readonly string[]): number {
   if (specs.length === 0) {
     shell.reportError('trap: -P requires at least one signal name');
-    shell.fd2.write('trap: usage: trap [-Plp] [[action] signal_spec ...]\n');
     return 2;
   }
   const conditions = conditionsOf(shell, specs);
