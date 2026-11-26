@@ -103,6 +103,11 @@ export interface Job {
   waiting?: boolean;
   /** Whether a waiting coprocess would still run commands once its input ends, which this environment cannot resume. */
   losesRemainder?: boolean;
+  /**
+   * Settles a waiting coprocess that is waited for: one whose input the shell can still write waits forever, and one
+   * whose input nothing can write any more reads its end, so it ends, unless it would run more then.
+   */
+  settleWait?: () => void;
   awaitEnd?: () => void;
 }
 

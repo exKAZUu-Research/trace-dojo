@@ -1,6 +1,5 @@
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
-import { DeadlockError } from './runtime';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
 
@@ -18,14 +17,15 @@ export const waitBuiltin: Builtin = (shell, args) => {
   if (typeof parsed === 'number') return parsed;
   const { options, operands } = parsed;
   const { jobs } = shell.store;
-  // A coprocess that nothing has read from yet runs now; one that waits for input the shell can still write would be
-  // waited for forever.
-  for (const job of jobs.values()) {
-    job.finish?.();
-    if (job.waiting) throw new DeadlockError();
-  }
   const pids = processIds(shell, operands);
   if (pids === undefined) return 1;
+  // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
+  // would be waited for forever.
+  const targets = pids.length > 0 ? pids.map((pid) => jobs.get(pid)) : [...jobs.values()];
+  for (const job of targets) {
+    job?.finish?.();
+    job?.settleWait?.();
+  }
   // A `>(...)` is waited for when named, or with no operand when `$!` is still its process ID, as Bash 5.3 does.
   const awaited = pids.length > 0 ? pids : [shell.store.lastBackgroundPid].filter((pid) => pid !== undefined);
   for (const pid of awaited) jobs.get(pid)?.awaitEnd?.();

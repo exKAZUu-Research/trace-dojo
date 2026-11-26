@@ -829,6 +829,14 @@ export class Shell implements ArithmeticHost {
     };
     job.finish = run;
     const isWaiting = (): boolean => job.waiting === true;
+    job.settleWait = () => {
+      if (!isWaiting()) return;
+      if (this.isOpenHere(writeEnd) || this.isWrittenElsewhere({ file: writeEnd })) throw new DeadlockError();
+      if (job.losesRemainder) rejectUnsupportedFeature('入力を待ったまま残りの処理がある coproc');
+      // What waited is a `while read` loop that ends the coprocess, which then ends with the loop's status.
+      job.waiting = false;
+      job.status = 0;
+    };
     // Bash moves both ends of both pipes to high descriptors and keeps the first and the last of the four.
     const pipeEnds: number[] = [];
     for (let fd = PROCESS_SUBSTITUTION_FIRST_FD; pipeEnds.length < 4; fd--) {
@@ -842,12 +850,14 @@ export class Shell implements ArithmeticHost {
         () => {
           // Reading past what a waiting coprocess wrote would wait for it forever, as it waits for the shell.
           if (output === undefined) run();
-          else if (!job.waiting) {
+          else {
+            // Reading past what a waiting coprocess wrote waits for it, which ends once nothing can write its input.
+            job.settleWait?.();
             this.store.unsetNamed(name, false);
             this.store.unsetNamed(`${name}_PID`, false);
             return false;
-          } else throw new DeadlockError();
-          if (output === '' && isWaiting()) throw new DeadlockError();
+          }
+          if (output === '') job.settleWait?.();
           return output !== '';
         }
       ),
