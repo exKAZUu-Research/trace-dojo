@@ -653,7 +653,7 @@ function derivingStrategy(
     return 'newtype';
   }
   const stock = options.builtins.derivableClasses.has(cls);
-  const how = strategy ?? defaultStrategy(cls.name, stock, isNewtype, features);
+  const how = strategy ?? defaultStrategy(cls.name, stock, isNewtype && newtypeDerivable(decl, cls), features);
   if (how !== 'stock') {
     if (how === 'none') {
       if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
@@ -681,18 +681,27 @@ function derivingStrategy(
 /**
  * The strategy GHC's user guide gives a deriving clause that names none ("Default deriving strategy"): a stock class
  * is derived by stock, except that for a newtype Eq, Ord, Ix and Bounded always take the newtype strategy, and
- * Functor, Foldable and Enum do under GeneralizedNewtypeDeriving; another class by anyclass under DeriveAnyClass,
- * else by newtype for a newtype under GeneralizedNewtypeDeriving.
+ * Functor, Foldable and Enum do under GeneralizedNewtypeDeriving when that derivation succeeds (the newtype's field
+ * eta-reduces); another class by anyclass under DeriveAnyClass, else by newtype for a newtype under
+ * GeneralizedNewtypeDeriving.
  */
+/** Whether a newtype's field reduces to a type the class's instance can be reused at: GHC's `eta_ok`. */
+function newtypeDerivable(decl: RDataDecl, cls: ClassEntity): boolean {
+  if (cls.packed || decl.instanceArgs) return false;
+  const { kinds } = declHead(decl);
+  const dropped = parameterKinds(cls.tyvarKind).length;
+  return dropped <= kinds.length && etaReduce(decl.cons[0].con.fieldTypes[0], kinds.length, dropped) !== undefined;
+}
+
 function defaultStrategy(
   cls: string,
   stock: boolean,
-  isNewtype: boolean,
+  derivableNewtype: boolean,
   features: FeatureGates<'typecheck'>
 ): DerivingHow | 'none' {
-  const generalized = isNewtype && features.allows('newtypeByDefault');
+  const generalized = derivableNewtype && features.allows('newtypeByDefault');
   if (stock) {
-    if (isNewtype && ['Eq', 'Ord', 'Ix', 'Bounded'].includes(cls)) return 'newtype';
+    if (derivableNewtype && ['Eq', 'Ord', 'Ix', 'Bounded'].includes(cls)) return 'newtype';
     if (generalized && ['Functor', 'Foldable', 'Enum'].includes(cls)) return 'newtype';
     return 'stock';
   }
