@@ -1011,6 +1011,12 @@ export class Shell implements ArithmeticHost {
 
   /** Assigns a scalar variable as a builtin does, reporting a failure such as a readonly variable. */
   assignVariable(name: string, value: string, builtin?: string): boolean {
+    // `_` holds the last argument of the previous command, so a builtin assigning it, as `read a _` does to discard
+    // a field, sets it until the next command does.
+    if (name === '_') {
+      this.store.lastArgument = value;
+      return true;
+    }
     const outcome = writeResolvedTarget(this, this.namedTarget(name, 'write'), value, false, builtin);
     return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
   }
