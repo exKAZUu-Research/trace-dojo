@@ -1,0 +1,15 @@
+namespace Shapes {
+  export interface Box {
+    width: number;
+  }
+}
+namespace Shapes {
+  export interface Box {
+    height: number;
+  }
+  export function area(box: Box): number {
+    return box.width * box.height;
+  }
+}
+const box: Shapes.Box = { width: 3, height: 4 };
+console.log(Shapes.area(box));
