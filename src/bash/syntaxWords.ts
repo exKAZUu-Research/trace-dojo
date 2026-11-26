@@ -148,15 +148,21 @@ function skipDoubleQuoted(text: SourceText, open: number): number {
   return text.nested(() => {
     const { source } = text;
     let i = open + 1;
-    while (i < source.length && source[i] !== '"') {
-      const c = source[i];
-      if (c === '\\') i += 2;
-      else if (c === '`') i = skipBackquoted(text, i);
-      else if (c === '$') i = skipDoubleQuotedDollar(text, i);
-      else i++;
-    }
+    while (i < source.length && source[i] !== '"') i = skipDoubleQuotedPiece(text, i);
     return closeAt(text, open, i < source.length ? i : -1, '"');
   });
+}
+
+/**
+ * Skips one piece of text read as inside double quotes, as a here-document body is: a backslash and what it quotes,
+ * a backquoted command, a `$` expansion, or another character.
+ */
+export function skipDoubleQuotedPiece(text: SourceText, index: number): number {
+  const c = text.source[index];
+  if (c === '\\') return index + 2;
+  if (c === '`') return skipBackquoted(text, index);
+  if (c === '$') return skipDoubleQuotedDollar(text, index);
+  return index + 1;
 }
 
 function skipDoubleQuotedDollar(text: SourceText, dollar: number): number {

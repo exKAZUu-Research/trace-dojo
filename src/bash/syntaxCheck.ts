@@ -18,6 +18,7 @@ import {
   type DeferredRegion,
   skipBalanced,
   skipBlanks,
+  skipDoubleQuotedPiece,
   skipWordPiece,
   SourceText,
   SyntaxFailure,
@@ -383,8 +384,7 @@ function blankDeferredSlice(slice: string, keepsSemicolons: boolean): string {
  * commands, without checking them otherwise: Bash reports their syntax errors only when it expands the body.
  */
 function collectHeredocDescriptorVariables(text: SourceText, start: number, end: number): void {
-  for (let i = text.source.indexOf('$(', start); i !== -1 && i < end; i = text.source.indexOf('$(', i + 2)) {
-    if (text.source[i + 2] === '(' || text.source[i - 1] === '\\') continue;
+  for (let i = start; i < end;) {
     const found = text.descriptorVariables.length;
     const marks = [
       text.backquotes.length,
@@ -393,11 +393,17 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
       text.arithmeticRegions.length,
       text.uncertainExtglobRows.length,
     ];
+    const pieceStart = i;
     try {
-      i = new ShellGrammarValidator(text, i + 2, true).validateSubstitution() - 2;
+      i = skipDoubleQuotedPiece(text, i);
+      // A backquoted body is read apart from the program's, so its spans are mapped back from that reading.
+      for (const { start: open, end: close } of text.backquotes.slice(marks[0])) {
+        text.descriptorVariables.push(...inspectBackquoteSpan(text.source, open, close).descriptorVariables);
+      }
     } catch (error) {
       if (!(error instanceof SyntaxFailure || error instanceof UnknownSyntax)) throw error;
       text.descriptorVariables.length = found;
+      i = pieceStart + 1;
     }
     text.backquotes.length = marks[0];
     text.literalSingleQuotes.length = marks[1];
