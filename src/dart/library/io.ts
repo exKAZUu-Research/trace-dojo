@@ -783,9 +783,9 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
     late StreamSubscription<List<int>> _subscription;
     void error(e, StackTrace stackTrace) {
       _subscription.cancel();
-      // A character the stream left unfinished cannot fail this close as it fails the program's own: the VM's file
-      // holds bytes, so its close here never fails.
-      openedFile.close().ignore();
+      // As in the SDK, nothing waits on this close, which fails a file already closed; a character the stream left
+      // unfinished does not fail it, since the VM's file holds bytes.
+      openedFile.close(finishText: false);
       completer.completeError(e, stackTrace);
     }
     // _OpenedFile writes at once, so the subscription need not pause while a write is in flight.
@@ -836,11 +836,11 @@ class _OpenedFile {
     _requireOpen();
     _writeOpened(_textOfBytes(bytes, _parts));
   }
-  Future<void> close() {
+  Future<void> close({bool finishText = true}) {
     try {
       _requireOpen();
       _isClosed = true;
-      _finishText(_parts);
+      if (finishText) _finishText(_parts);
     } catch (error, stackTrace) {
       return Future.error(error, stackTrace);
     }
