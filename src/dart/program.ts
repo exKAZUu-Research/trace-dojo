@@ -200,6 +200,9 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
   for (const name of ['LinkedHashMap', 'LinkedHashSet']) core.hiddenNames.add(name);
   reexport(core, collection, ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']);
   (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
+  const convert = envs.get('dart:convert') as LibraryEnv | undefined;
+  const castConverter = convert?.declarations.get('_CastConverter') as { cls: ClassInfo } | undefined;
+  if (castConverter) castConverter.cls.vmName = 'CastConverter';
   asyncClass('_Future').vmName = 'Future';
   (collection.declarations.get('_QueueIterator') as { cls: ClassInfo }).cls.vmName = '_ListQueueIterator';
   (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';

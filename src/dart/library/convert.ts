@@ -34,8 +34,22 @@ abstract mixin class Converter<S, T> implements StreamTransformer<S, T> {
   Converter<S, TT> fuse<TT>(Converter<T, TT> other) {
     return _FusedConverter<S, T, TT>(this, other);
   }
-  Stream<T> bind(Stream<S> stream) => stream.map(convert);
-  StreamTransformer<RS, RT> cast<RS, RT>() => StreamTransformer.castFrom<S, T, RS, RT>(this);
+  // The SDK's bind runs startChunkedConversion, which a converter without a chunked implementation, as one a program
+  // declares, fails when the stream is listened to; the library's converters bind their own chunk sinks.
+  Stream<T> bind(Stream<S> stream) => Stream<T>.eventTransformed(
+    stream,
+    (EventSink<T> sink) => throw UnsupportedError("This converter does not support chunked conversions: $this"),
+  );
+  Converter<RS, RT> cast<RS, RT>() => _CastConverter<S, T, RS, RT>(this);
+}
+
+// The SDK's dart:_internal CastConverter, which the VM names so.
+class _CastConverter<SS, ST, TS, TT> extends Converter<TS, TT> {
+  final Converter<SS, ST> _source;
+  _CastConverter(this._source);
+  TT convert(TS input) => _source.convert(input as SS) as TT;
+  Stream<TT> bind(Stream<TS> stream) => _source.bind(stream.cast<SS>()).cast<TT>();
+  Converter<RS, RT> cast<RS, RT>() => _CastConverter<SS, ST, RS, RT>(_source);
 }
 
 class _FusedConverter<S, M, T> extends Converter<S, T> {
@@ -43,6 +57,8 @@ class _FusedConverter<S, M, T> extends Converter<S, T> {
   final Converter<M, T> _second;
   _FusedConverter(this._first, this._second);
   T convert(S input) => _second.convert(_first.convert(input));
+  // The SDK chains the two converters' chunked conversions, which their binds stand for.
+  Stream<T> bind(Stream<S> stream) => _second.bind(_first.bind(stream));
 }
 
 abstract class Encoding extends Codec<String, List<int>> {

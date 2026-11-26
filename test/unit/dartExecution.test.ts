@@ -9359,6 +9359,30 @@ void main() {
   });
 });
 
+test('a converter without chunked conversion fails as a transformer, and cast gives a converter', () => {
+  const source = `import 'dart:convert';
+class Up extends Converter<String, String> { String convert(String s) => s.toUpperCase(); }
+Future<void> main() async {
+  Converter<List<int>, String> c = utf8.decoder.cast<List<int>, String>();
+  print([c.convert([65, 66]), c.runtimeType]);
+  print(await Stream.fromIterable([[67], [68]]).transform(c).toList());
+  try {
+    await Stream.fromIterable(['a']).transform(Up()).toList();
+  } on UnsupportedError catch (error) {
+    print(error.message);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '[AB, CastConverter<List<int>, String, List<int>, String>]',
+      '[C, D]',
+      "This converter does not support chunked conversions: Instance of 'Up'",
+      '',
+    ].join('\n'),
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
