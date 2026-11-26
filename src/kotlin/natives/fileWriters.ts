@@ -1,4 +1,4 @@
-import type { FileHandle } from '../../interpreter/programIo';
+import { encodeJvmText, type FileHandle } from '../../interpreter/programIo';
 import type { Frame } from '../runtime';
 
 /**
@@ -19,6 +19,8 @@ export class BufferedFileWriter {
   private buffered = '';
   private encoded = '';
   private encoderCapacity = ENCODER_START;
+  /** A high surrogate that ended the text passed on, which the encoder holds for the low one, as StreamEncoder does. */
+  private pendingHighSurrogate = '';
   private closed = false;
 
   constructor(private readonly handle: FileHandle) {}
@@ -46,6 +48,12 @@ export class BufferedFileWriter {
     if (this.closed) return;
     try {
       this.flush(frame);
+      // Closing encodes a high surrogate no low one followed as `?`, as the JVM's UTF-8 encoder does.
+      if (this.pendingHighSurrogate !== '') {
+        this.pendingHighSurrogate = '';
+        this.encoded += '?';
+        this.passOnEncoded();
+      }
     } finally {
       this.closed = true;
     }
@@ -58,9 +66,14 @@ export class BufferedFileWriter {
 
   /** OpenJDK's `StreamEncoder`, whose buffer grows, after passing on what it holds, when a write may encode to more. */
   private passOnBuffered(frame: Frame): void {
-    const text = this.buffered;
-    if (text === '') return;
+    if (this.buffered === '') return;
+    let whole = this.pendingHighSurrogate + this.buffered;
     this.buffered = '';
+    this.pendingHighSurrogate = /[\uD800-\uDBFF]$/u.test(whole) ? whole.slice(-1) : '';
+    if (this.pendingHighSurrogate !== '') whole = whole.slice(0, -1);
+    // A lone surrogate encodes as `?` in UTF-8 on the JVM, as the Java interpreter's file sink writes it.
+    const text = encodeJvmText(whole);
+    if (text === '') return;
     const wanted = Math.min(text.length * 3, BUFFER_SIZE);
     if (wanted > this.encoderCapacity) {
       this.passOnEncoded();

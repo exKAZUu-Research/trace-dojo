@@ -1,4 +1,4 @@
-import { type FileHandle, FileSystemError, type TextReader } from '../../interpreter/programIo';
+import { encodeJvmText, type FileHandle, FileSystemError, type TextReader } from '../../interpreter/programIo';
 import { normalizeSlashes, parentPathOf } from '../../java/builtinIoSupport';
 import { stringHash, stringOf } from '../format';
 import { type Frame, ProgramExit } from '../runtime';
@@ -61,7 +61,8 @@ function rethrown(frame: Frame, path: string, error: unknown): never {
 
 function writeFile(frame: Frame, path: string, text: string, append: boolean): void {
   try {
-    frame.runtime.io.files.open(path, { create: 'always', truncate: !append, append }).write(text);
+    // A lone surrogate encodes as `?` in UTF-8 on the JVM, as the Java interpreter's file sink writes it.
+    frame.runtime.io.files.open(path, { create: 'always', truncate: !append, append }).write(encodeJvmText(text));
   } catch (error) {
     rethrown(frame, path, error);
   }
