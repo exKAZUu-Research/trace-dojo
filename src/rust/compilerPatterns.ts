@@ -74,7 +74,7 @@ function isOverloadedPlace(c: Compiler, expr: Expr): boolean {
 }
 
 function bindsByRefMut(c: Compiler, pattern: Pattern): boolean {
-  return patternBindingParts(pattern, c.annotations).some(({ local }) => local.mode === 'refMut');
+  return patternBindingParts(pattern, c.annotations).some(({ local, refMut }) => refMut || local.mode === 'refMut');
 }
 
 /**

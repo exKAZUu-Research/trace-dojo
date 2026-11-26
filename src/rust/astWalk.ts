@@ -245,6 +245,8 @@ export interface PatternBindingPart {
   local: LocalVar;
   path: string;
   throughRef: boolean;
+  /** Whether the pattern writes `ref mut`, which binds a mutable reference whatever the default binding mode is. */
+  refMut: boolean;
 }
 
 /** The variables a pattern binds, in order, each with the part it binds. */
@@ -259,7 +261,9 @@ export function patternBindingParts(pattern: Pattern, annotations: Annotations):
     switch (p.kind) {
       case 'binding': {
         const local = annotations.bindings.get(p);
-        if (local) parts.push({ local, path, throughRef: throughRef || p.byRef !== undefined });
+        if (local) {
+          parts.push({ local, path, throughRef: throughRef || p.byRef !== undefined, refMut: p.byRef === 'refMut' });
+        }
         if (p.sub) visit(p.sub, path, throughRef);
         return;
       }
