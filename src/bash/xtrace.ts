@@ -1,3 +1,4 @@
+import type { Statement } from './ast';
 import { rejectUnsupportedFeature } from './capabilities';
 import { ansicQuote, ansicShouldQuote, singleQuote } from './quoting';
 import type { Shell } from './shell';
@@ -46,4 +47,13 @@ function containsShellMetas(word: string): boolean {
     if (c === '#' && i === 0) return true;
   }
   return false;
+}
+
+/**
+ * What `set -x` shows of a `for` or `select` header after its keyword: the words as written, as Bash prints the
+ * command, with `"$@"` for a header without `in`, which stands for it.
+ */
+export function loopHeaderText(statement: Extract<Statement, { kind: 'for' }>): string {
+  const words = statement.values ? statement.values.map((word) => word.text) : ['"$@"'];
+  return `${statement.variable} in ${words.join(' ')}`;
 }

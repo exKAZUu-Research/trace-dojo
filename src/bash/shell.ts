@@ -9,7 +9,7 @@ import {
 } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { createCaptureBuffer } from './budget';
-import { REGULAR_BUILTINS } from './builtins';
+import { operands, REGULAR_BUILTINS } from './builtins';
 import {
   classifyCommandName,
   rejectUnsupportedDeclarationPrefix,
@@ -35,6 +35,7 @@ import {
   ExitSignal,
   type Frame,
   type FunctionDefinition,
+  isShellSignal,
   ReturnSignal,
   type Runtime,
   SCRIPT_NAME,
@@ -50,7 +51,7 @@ import {
 import type { Trap, TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
 import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
-import { traceAssignment, traceLine, traceWords } from './xtrace';
+import { loopHeaderText, traceAssignment, traceLine, traceWords } from './xtrace';
 
 export { BASH_VERSION, type FunctionDefinition } from './runtime';
 export type { CompoundElement } from './variables';
@@ -477,18 +478,7 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'redirected': {
-        // In a function, Bash reports a failed redirection of these compound commands at the line where the body of
-        // the innermost function starts; subshells, conditions, and arithmetic commands keep their own line.
-        if (this.functionDefinitionRow !== undefined && REPORTS_DEFINITION_ROW.has(statement.body.kind)) {
-          this.currentRow = this.functionDefinitionRow;
-        }
-        let redirected = false;
-        status = this.withRedirects(statement.redirects, () => {
-          redirected = true;
-          return this.execute(statement.body, guarded);
-        });
-        // A failed redirection fails the compound command itself, while its body applies the rules on its own.
-        if (!redirected) this.checkErrexit(status);
+        status = this.executeRedirected(statement, guarded);
         break;
       }
       case 'subshell':
@@ -500,6 +490,22 @@ export class Shell implements ArithmeticHost {
       }
     }
     this.store.lastStatus = status;
+    return status;
+  }
+
+  private executeRedirected(statement: Extract<Statement, { kind: 'redirected' }>, guarded: boolean): number {
+    // In a function, Bash reports a failed redirection of these compound commands at the line where the body of the
+    // innermost function starts; subshells, conditions, and arithmetic commands keep their own line.
+    if (this.functionDefinitionRow !== undefined && REPORTS_DEFINITION_ROW.has(statement.body.kind)) {
+      this.currentRow = this.functionDefinitionRow;
+    }
+    let redirected = false;
+    const status = this.withRedirects(statement.redirects, () => {
+      redirected = true;
+      return this.execute(statement.body, guarded);
+    });
+    // A failed redirection fails the compound command itself, while its body applies the rules on its own.
+    if (!redirected) this.checkErrexit(status);
     return status;
   }
 
@@ -1230,7 +1236,7 @@ export class Shell implements ArithmeticHost {
    * shell with a program found on `PATH`, which this environment cannot run.
    */
   private executeExec(statement: Extract<Statement, { kind: 'command' }>, args: string[], lastArg: string): number {
-    const [command] = operandsOf(args);
+    const [command] = operands(args);
     if (command !== undefined) rejectUnsupportedFeature(`外部コマンド（exec ${command}）`);
     const status = this.withTemporaryScope(statement.assignments, () =>
       this.applyPermanentRedirects(statement.redirects)
@@ -1725,15 +1731,6 @@ export class Shell implements ArithmeticHost {
   }
 }
 
-/**
- * What `set -x` shows of a `for` or `select` header after its keyword: the words as written, as Bash prints the
- * command, with `"$@"` for a header without `in`, which stands for it.
- */
-function loopHeaderText(statement: Extract<Statement, { kind: 'for' }>): string {
-  const words = statement.values ? statement.values.map((word) => word.text) : ['"$@"'];
-  return `${statement.variable} in ${words.join(' ')}`;
-}
-
 /** The compound commands whose failed redirections a function reports at the line where its body starts. */
 const REPORTS_DEFINITION_ROW: ReadonlySet<Statement['kind']> = new Set(['group', 'if', 'while', 'for', 'case']);
 
@@ -1743,11 +1740,6 @@ interface SubshellOverrides {
   options: ShellOptionValues;
   traceLevel: number;
   readsFile: boolean;
-}
-
-/** Skips a leading `--`, which Bash's builtins accept before their operands. */
-function operandsOf(args: string[]): string[] {
-  return args[0] === '--' ? args.slice(1) : args;
 }
 
 /** Whether a command substitution is `$(< file)`, which Bash replaces with the file's contents without a command. */
@@ -1761,19 +1753,6 @@ function isFileReadSubstitution(body: readonly Statement[]): boolean {
     only.redirects.length === 1 &&
     only.redirects[0].kind === 'file' &&
     only.redirects[0].operator === '<'
-  );
-}
-
-/** Whether `error` is how the shell leaves commands as Bash does, rather than a stop of the whole program. */
-function isShellSignal(
-  error: unknown
-): error is ExitSignal | DiscardSignal | ReturnSignal | BreakSignal | ContinueSignal {
-  return (
-    error instanceof ExitSignal ||
-    error instanceof DiscardSignal ||
-    error instanceof ReturnSignal ||
-    error instanceof BreakSignal ||
-    error instanceof ContinueSignal
   );
 }
 

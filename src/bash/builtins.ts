@@ -25,7 +25,7 @@ import { type Builtin, TURTLE_BUILTINS } from './turtle';
 import { isIdentifier } from './variables';
 
 /** Skips a leading `--`, which Bash's builtins accept before their operands. */
-function operands(args: string[]): string[] {
+export function operands(args: string[]): string[] {
   return args[0] === '--' ? args.slice(1) : args;
 }
 
