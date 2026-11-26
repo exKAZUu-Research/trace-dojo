@@ -396,8 +396,17 @@ function executeCompoundDeclarationOperand(
 ): boolean {
   state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
-  // A compound assignment to a global, as `-g` makes one in a function, abandons the line when it fails, as at the top.
-  const failCtx: FailureContext = intent === 'local' ? 'declarationLocalCompound' : 'declarationGlobalCompound';
+  // A failed compound value abandons the line outside a function and fails the builtin inside one; without `-a` or
+  // `-A` it is assigned as a plain array assignment is, whose readonly error `set -e` ends the shell at.
+  const inFunction = shell.isInFunction && builtin !== 'readonly' && builtin !== 'export';
+  const plain = !set.has('a') && !set.has('A');
+  const failCtx: FailureContext = plain
+    ? inFunction
+      ? 'arrayAssignmentInFunction'
+      : 'arrayAssignment'
+    : inFunction
+      ? 'declarationLocalCompound'
+      : 'declarationGlobalCompound';
   const committed = withRedirects(() =>
     commitCompoundOperand(shell, {
       builtin,
