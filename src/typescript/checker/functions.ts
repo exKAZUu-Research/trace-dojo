@@ -616,9 +616,12 @@ export class FunctionChecker {
 
   /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
   private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
+    const asyncReturn = isAsync ? this.c.patterns.iteratorReturnType(operandType, 'asyncIterator') : undefined;
+    // An async generator delegates to a synchronous iterable through its `[Symbol.iterator]()` when it has no async one.
+    const returned = asyncReturn ?? this.c.patterns.iteratorReturnType(operandType, 'iterator');
     return (
       this.iterationTypesOf(operandType, isAsync)?.returnType ??
-      this.c.patterns.iteratorReturnType(operandType, isAsync ? 'asyncIterator' : 'iterator') ??
+      (returned && isAsync ? awaitedType(this.c, returned) : returned) ??
       anyType
     );
   }
