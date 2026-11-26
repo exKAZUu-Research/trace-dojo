@@ -1,9 +1,12 @@
-function* g() {
-  const r: number = yield* [1, 2];
-  return r;
-}
-function* h() {
-  const s: number = yield* "ab";
-  return s;
-}
-console.log([...g()], [...h()]);
+function* g1() { const r: number = yield* [1, 2]; return r; }
+function* g2() { const r: number = yield* "ab"; return r; }
+function* g3() { const r: number = yield* new Set([1]); return r; }
+function* g4() { const r: number = yield* new Map([[1, 2]]); return r; }
+function* g5() { const r: number = yield* arguments; return r; }
+function* g6() { const r: number = yield* [1].entries(); return r; }
+function* g7(it: Iterable<number>) { const r: number = yield* it; return r; }
+function* inner(): Generator<number, string> { yield 1; return "x"; }
+function* g8() { const r: string = yield* inner(); return r; }
+const t: [number, string] = [1, "a"];
+function* g9() { const r: number = yield* t; return r; }
+console.log([...g1()], [...g2()], [...g3()], [...g4()], [...g5()], [...g6()], [...g7([1])], [...g8()], [...g9()]);

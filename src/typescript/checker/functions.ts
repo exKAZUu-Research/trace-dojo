@@ -614,19 +614,13 @@ export class FunctionChecker {
     return { yieldType, returnType, nextType };
   }
 
-  /**
-   * What `yield*` gives back: what the generator it delegates to returns, or `undefined` from an array's or a string's
-   * iterator, whose return type `BuiltinIteratorReturn` is under `--strict`.
-   */
+  /** What `yield*` gives back: what the generator or other iterator it delegates to returns when done. */
   private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
-    const returnType = this.iterationTypesOf(operandType, isAsync)?.returnType;
-    if (returnType) return returnType;
-    const isBuiltinIterable =
-      (operandType.kind === 'object' && this.c.isArrayOrTuple(operandType)) ||
-      isIntrinsic(operandType, 'string') ||
-      (operandType.kind === 'literal' && typeof operandType.value === 'string') ||
-      operandType.kind === 'templateLiteral';
-    return isBuiltinIterable ? undefinedType : anyType;
+    return (
+      this.iterationTypesOf(operandType, isAsync)?.returnType ??
+      this.c.patterns.iteratorReturnType(operandType, isAsync ? 'asyncIterator' : 'iterator') ??
+      anyType
+    );
   }
 
   /**

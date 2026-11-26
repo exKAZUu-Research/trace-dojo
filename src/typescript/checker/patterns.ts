@@ -660,12 +660,9 @@ export class BindingPatterns {
    * iterator's type argument.
    */
   private iteratorElementType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
-    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
-    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
-    if (iteratorType?.kind !== 'object') return undefined;
-    const next = this.c.propertyOf(iteratorType, 'next');
-    const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
-    const settled = result && (method === 'asyncIterator' ? awaitedType(this.c, result) : result);
+    const iteration = this.iteratorResults(type, method);
+    if (!iteration) return undefined;
+    const { iteratorType, settled } = iteration;
     if (!settled) return iteratorType.typeArguments?.[0];
     if (isAnyLike(settled)) return anyType;
     const results = settled.kind === 'union' ? settled.types : [settled];
@@ -676,6 +673,35 @@ export class BindingPatterns {
     const values = yielding.flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
     // tsc gives an iterator whose results are all done elements of type any.
     return values.length > 0 ? unionOf(values) : anyType;
+  }
+
+  /**
+   * What the iterator a value's `[Symbol.iterator]()` or `[Symbol.asyncIterator]()` returns gives back when done, as
+   * `yield*` reads it: the `value` of its done results, or undefined when it is no iterable.
+   */
+  iteratorReturnType(type: Type, method: 'iterator' | 'asyncIterator'): Type | undefined {
+    const iteration = this.iteratorResults(this.c.apparentType(type), method);
+    if (!iteration) return undefined;
+    const { settled } = iteration;
+    if (!settled || isAnyLike(settled)) return anyType;
+    const results = settled.kind === 'union' ? settled.types : [settled];
+    const values = results
+      .filter((member) => this.isDoneResult(member))
+      .flatMap((member) => this.c.propertyOf(member, 'value')?.type() ?? []);
+    return values.length > 0 ? unionOf(values) : anyType;
+  }
+
+  /** The iterator a value's iteration method returns, and what its `next()` settles to (awaited for an async one). */
+  private iteratorResults(
+    type: Type,
+    method: 'iterator' | 'asyncIterator'
+  ): { iteratorType: ObjectType; settled: Type | undefined } | undefined {
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey(method));
+    const iteratorType = iterator && this.c.signaturesOf(iterator.type(), 'call')[0]?.returnType();
+    if (iteratorType?.kind !== 'object') return undefined;
+    const next = this.c.propertyOf(iteratorType, 'next');
+    const result = next && this.c.signaturesOf(next.type(), 'call')[0]?.returnType();
+    return { iteratorType, settled: result && (method === 'asyncIterator' ? awaitedType(this.c, result) : result) };
   }
 
   /** Whether an iterator result says it is done, as `IteratorReturnResult` does, so it yields no element. */
