@@ -1596,6 +1596,12 @@ namespace System.Runtime.CompilerServices {
   public enum MethodImplOptions { Unmanaged = 4, NoInlining = 8, ForwardRef = 16, Synchronized = 32, NoOptimization = 64, PreserveSig = 128, AggressiveInlining = 256, AggressiveOptimization = 512, InternalCall = 4096 }
   [AttributeUsage(AttributeTargets.Method, Inherited = false)]
   public sealed class ModuleInitializerAttribute : Attribute { public ModuleInitializerAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface, Inherited = false)]
+  public sealed class CollectionBuilderAttribute : Attribute {
+    public CollectionBuilderAttribute(Type builderType, string methodName);
+    public Type BuilderType { get; }
+    public string MethodName { get; }
+  }
   [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
   public sealed class OverloadResolutionPriorityAttribute : Attribute {
     public OverloadResolutionPriorityAttribute(int priority);

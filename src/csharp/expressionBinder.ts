@@ -16,6 +16,7 @@ import { sizeOf } from './pointers';
 import { desugarQuery } from './queries';
 import { type FunctionScope, LocalScope } from './scopes';
 import {
+  allInterfacesOf,
   arrayType,
   displayType,
   ERROR_TYPE,
@@ -1319,6 +1320,13 @@ export abstract class ExpressionBinder extends LambdaBinder {
     target: Type,
     context: BindContext
   ): BoundExpression | undefined {
+    if (target.kind === 'named' && target.symbol.collectionBuilder)
+      return this.bindBuiltCollection(node, target, target.symbol.collectionBuilder, context);
+    // A span of the elements is one over an array of them, which Roslyn may put on the stack instead.
+    if (target.kind === 'named' && target.symbol.fullName === 'System.ReadOnlySpan`1') {
+      const elements = this.bindCollectionExpression(node, arrayType(target.args[0]), context);
+      return elements && this.convert(elements, target, node);
+    }
     const elementType = this.collectionElementType(target);
     if (!elementType) {
       this.error(
@@ -1368,6 +1376,79 @@ export abstract class ExpressionBinder extends LambdaBinder {
       value = this.convert(receiver, target, node);
     }
     return { kind: 'sequence', locals: [temporary], sideEffects, value, type: target, row };
+  }
+
+  /**
+   * A collection expression of a type with `[CollectionBuilder]`, which the builder's static method creates from a
+   * `ReadOnlySpan` of the elements, here one over an array of them.
+   */
+  private bindBuiltCollection(
+    node: Extract<Expression, { kind: 'collection' }>,
+    target: NamedType,
+    builder: NonNullable<TypeSymbol['collectionBuilder']>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    const enumerable = allInterfacesOf(target, () => []).find(
+      (face) => face.symbol.fullName === 'System.Collections.Generic.IEnumerable`1'
+    );
+    if (!enumerable) {
+      this.error(
+        node,
+        'CS9188',
+        `'${displayType(target)}' は CollectionBuilderAttribute を持っていますが、要素型を持っていません。`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    const elementType = enumerable.args[0];
+    const span = namedType(this.library.typeNamed('System.ReadOnlySpan', 1), [elementType]);
+    const found = this.builderMethod(builder, target, span);
+    if (!found) {
+      this.error(
+        node,
+        'CS9187',
+        `必要なシグネチャを持つアクセス可能な '${builder.methodName}' メソッドが見つかりませんでした: 最後のパラメーターが '${displayType(span)}' 型で戻り値の型が '${displayType(target)}' の静的メソッド。`
+      );
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    const elements = this.bindCollectionExpression(node, arrayType(elementType), context);
+    if (!elements) return undefined;
+    return {
+      kind: 'call',
+      method: found.method,
+      receiver: undefined,
+      args: [this.convert(elements, span, node)],
+      typeArgs: found.typeArgs,
+      owner: builder.builderType as NamedType,
+      isVirtual: false,
+      type: target,
+      row: node.row,
+    };
+  }
+
+  /**
+   * The builder's static method that takes a span of the elements and returns the type: one of the builder's own, or
+   * a generic one whose type arguments are the type's.
+   */
+  private builderMethod(
+    builder: NonNullable<TypeSymbol['collectionBuilder']>,
+    target: NamedType,
+    span: NamedType
+  ): { method: MethodSymbol; typeArgs: Type[] } | undefined {
+    if (builder.builderType.kind !== 'named') return undefined;
+    for (const method of builder.builderType.symbol.methods) {
+      if (method.name !== builder.methodName || !method.isStatic || method.parameters.length !== 1) continue;
+      if (method.typeParameters.length > 0 && method.typeParameters.length !== target.args.length) continue;
+      const typeArgs = method.typeParameters.length === 0 ? [] : target.args;
+      const substitution = new Map(method.typeParameters.map((parameter, index) => [parameter, typeArgs[index]]));
+      const parameter = method.parameters[0];
+      if (
+        parameter.refKind === undefined &&
+        sameType(substitute(parameter.type, substitution), span) &&
+        sameType(substitute(method.returnType, substitution), target)
+      )
+        return { method, typeArgs };
+    }
+    return undefined;
   }
 
   /** Adds a spread's elements to a collection other than a list one by one, as Roslyn's `foreach` with `Add` does. */

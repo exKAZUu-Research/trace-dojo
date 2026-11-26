@@ -415,6 +415,8 @@ export class TypeSymbol {
   anonymousDisplay: string | undefined;
   /** Whether an enum has `[Flags]`, which prints a combination of members by their names. */
   isFlags = false;
+  /** The builder type and method of a `[CollectionBuilder]`, which create the type from a collection expression. */
+  collectionBuilder: { builderType: Type; methodName: string } | undefined;
   obsoleteError: string | undefined;
   /** For an attribute class, the declarations its `[AttributeUsage]` allows it on, as AttributeTargets bits. */
   attributeUsage: { validOn: number; allowMultiple: boolean } | undefined;

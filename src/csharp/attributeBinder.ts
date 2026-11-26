@@ -305,7 +305,8 @@ export abstract class AttributeBinder extends StatementBinder {
         return;
       }
       case 'System.Runtime.CompilerServices.EnumeratorCancellationAttribute':
-      case 'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute': {
+      case 'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute':
+      case 'System.Runtime.CompilerServices.CollectionBuilderAttribute': {
         this.applyCompilerServicesUsage(attribute, owner, pending);
         return;
       }
@@ -331,7 +332,7 @@ export abstract class AttributeBinder extends StatementBinder {
 
   /**
    * The attributes that change how the compiler binds what uses the declaration: the token an async iterator takes,
-   * and the overload a call chooses.
+   * the overload a call chooses, and the method a collection expression creates the type by.
    */
   private applyCompilerServicesUsage(
     attribute: BoundAttribute,
@@ -344,9 +345,14 @@ export abstract class AttributeBinder extends StatementBinder {
         if (owner && 'refKind' in owner && pending.target === 'parameter') owner.isEnumeratorCancellation = true;
         return;
       }
-      default: {
+      case 'OverloadResolutionPriorityAttribute': {
         if (owner instanceof MethodSymbol || (owner && 'getter' in owner))
           this.applyOverloadPriority(attribute, owner, Number(args[0] ?? 0));
+        return;
+      }
+      default: {
+        if (owner instanceof TypeSymbol && args[0] !== undefined)
+          owner.collectionBuilder = { builderType: args[0] as Type, methodName: String(args[1]) };
       }
     }
   }
