@@ -366,7 +366,8 @@ function substitute(
   const chars = charactersOf(text);
   const spend = (cost?: number): void => shell.runtime.spend(cost);
   const step = shell.runtime.step;
-  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob });
+  // `nocasematch` applies to pattern substitution, but not to removing a prefix or suffix.
+  const glob = compileGlob(pattern, step, { extmatch: shell.options.extglob, fold: shell.options.nocasematch });
   const replace = (start: number, end: number): string =>
     replacementFor(replacement, chars.slice(start, end).join(''), spend);
   if (operator === '/#') {
