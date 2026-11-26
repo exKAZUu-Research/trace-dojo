@@ -3,9 +3,12 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Library } from './binderBase';
+import type { BoundExpression } from './bound';
 import type { Evaluator } from './evaluator';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
+import { PointerMemory } from './pointers';
+import { TaskScheduler } from './tasks';
 import {
   baseTypeOf,
   type FieldSymbol,
@@ -70,6 +73,8 @@ export interface ExceptionState {
   actualValue?: Value;
   /** The actual value itself, which `ActualValue` returns. */
   actualObject?: Value;
+  /** The file that a FileNotFoundException names, which its `ToString()` shows after its message. */
+  fileName?: string;
   /** Whether a `throw` threw the exception, after which `ToString()` would print a stack trace. */
   wasThrown: boolean;
   data?: undefined;
@@ -83,6 +88,13 @@ export class Frame {
   readonly temporaries: Value[] = [];
   /** The current values of compound assignments' targets and of initialized objects, innermost last. */
   readonly operands: Value[] = [];
+  /**
+   * The values of an expression's operands that an async function's `await` evaluation has already evaluated, which
+   * evaluating the expression then takes in place of evaluating them again.
+   */
+  memo: Map<BoundExpression, Value> | undefined;
+  /** Whether the function is suspended at an `await` or a `yield return`, which leaves its frame for now. */
+  isSuspended = false;
 
   constructor(
     readonly runtime: Runtime,
@@ -111,6 +123,9 @@ export class Runtime {
   readonly frames: Frame[] = [];
   readonly world = new TurtleWorld();
   readonly steps = new StepTracker();
+  readonly scheduler = new TaskScheduler(() => this.spend());
+  /** The storage that pointers point into, with the virtual addresses that unsafe code sees. */
+  readonly memory = new PointerMemory();
   readonly budget = new ExecutionBudget();
   readonly io: ProgramIO;
   /** The static fields of each constructed type, keyed by the type's identity. */
@@ -408,6 +423,10 @@ export class Runtime {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private findImplementation(type: NamedType, method: MethodSymbol, face?: NamedType): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
+    if (isInterface) {
+      const explicit = this.findExplicitImplementation(type, method);
+      if (explicit) return explicit;
+    }
     // Without the call's interface type, the interface's own suits a non-generic interface, whose overloads (such as
     // indexers) then map by their parameter types.
     const exact = isInterface
@@ -434,7 +453,55 @@ export class Runtime {
     return undefined;
   }
 
+  /**
+   * The explicit implementation (`void I.M()`) of an interface method in a type's chain, which maps before any public
+   * method does (C# spec §19.6.5), or else the default body that an interface the type implements gives it.
+   */
+  private findExplicitImplementation(type: NamedType, method: MethodSymbol): MethodSymbol | undefined {
+    const isFor = (candidate: MethodSymbol): boolean =>
+      candidate.explicitInterface?.symbol === method.owner &&
+      candidate.name === method.name &&
+      candidate.isStatic === method.isStatic &&
+      candidate.parameters.length === method.parameters.length;
+    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      const accessors = current.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      const found = [...current.symbol.methods, ...accessors].find(
+        (candidate): candidate is MethodSymbol => candidate !== undefined && isFor(candidate)
+      );
+      if (found) return found;
+    }
+    // An interface below the method's may override its body with an explicit one, as `void I.M() { }` in `J : I`.
+    for (const face of allInterfacesOf(type)) {
+      const accessors = face.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      const found = [...face.symbol.methods, ...accessors].find(
+        (candidate): candidate is MethodSymbol => candidate !== undefined && isFor(candidate) && !candidate.isAbstract
+      );
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** The static method of a type argument that implements an interface's static abstract or virtual method. */
+  staticImplementation(type: NamedType, method: MethodSymbol): MethodSymbol {
+    const explicit = this.findExplicitImplementation(type, method);
+    if (explicit) return explicit;
+    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      const accessors = current.symbol.properties.flatMap((property) => [property.getter, property.setter]);
+      const found = [...current.symbol.methods, ...accessors].find(
+        (candidate): candidate is MethodSymbol =>
+          candidate !== undefined &&
+          candidate.isStatic &&
+          candidate.name === method.name &&
+          candidate.access === 'public' &&
+          candidate.parameters.length === method.parameters.length
+      );
+      if (found) return found;
+    }
+    return method;
+  }
+
   /** The method whose parameter types are those of an interface method for the interface's type arguments. */
+  // code-gauge-allow duplicateLines -- The copies follow the same rule at compile time and at run time, which run on different symbols.
   private findExactImplementation(type: NamedType, method: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     const wanted = method.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
     const start = this.declaringClass(type, method.owner) ?? type;
@@ -585,3 +652,16 @@ function nativeReferencesOf(value: CsObject | CsStruct): Iterable<unknown> {
 
 /** The struct fields made per operation charged, so a run makes at most this many times its operations of them. */
 const STRUCT_FIELDS_PER_OPERATION = 16;
+
+/** Every interface that a type implements, through its bases and the interfaces' own bases. */
+function allInterfacesOf(type: NamedType): NamedType[] {
+  const result: NamedType[] = [];
+  const add = (face: NamedType): void => {
+    if (result.some((existing) => existing.symbol === face.symbol)) return;
+    result.push(face);
+    for (const parent of face.symbol.interfaces) add(substitute(parent, substitutionOf(face)) as NamedType);
+  };
+  for (let current: NamedType | undefined = type; current; current = baseTypeOf(current))
+    for (const face of current.symbol.interfaces) add(substitute(face, substitutionOf(current)) as NamedType);
+  return result;
+}

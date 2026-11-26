@@ -1,3 +1,4 @@
+import type { Position } from './ast';
 import type { NestedTypeFound, TypeContext } from './binderBase';
 import { DeclarationBinder } from './declarations';
 import {
@@ -19,6 +20,11 @@ export interface MethodCandidate {
   method: MethodSymbol;
   /** The constructed type that declares the method, whose type arguments its signature takes. */
   owner: NamedType;
+  /**
+   * For a static member of an extension block, the type that the member is accessed through (`List<int>.Create()`),
+   * which must convert to the block's receiver type and which infers the block's type arguments.
+   */
+  staticReceiver?: Type;
 }
 
 export type MemberLookup =
@@ -29,6 +35,30 @@ export type MemberLookup =
 
 /** Finds members by name in types and their bases, honoring hiding, overriding, and accessibility. */
 export class LookupBinder extends DeclarationBinder {
+  /**
+   * Reports a static abstract or virtual member of an interface named through the interface (CS8926), which only a
+   * type parameter's type argument implements; returns whether it did.
+   */
+  protected reportConstrainedAccess(
+    found:
+      | { kind: 'methods'; candidates: { method: MethodSymbol }[] }
+      | { kind: 'field'; field: FieldSymbol }
+      | { kind: 'property'; property: PropertySymbol },
+    position: Position
+  ): boolean {
+    const constrainedOnly =
+      found.kind === 'methods'
+        ? found.candidates.every((candidate) => isConstrained(candidate.method))
+        : isConstrained(found.kind === 'field' ? found.field : found.property);
+    if (constrainedOnly)
+      this.error(
+        position,
+        'CS8926',
+        '静的な仮想または抽象インターフェイス メンバーには、型パラメーターでのみアクセスできます。'
+      );
+    return constrainedOnly;
+  }
+
   /** The constructed types to search for a type's members: the type and its bases, or an interface's bases. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected searchChain(type: Type): NamedType[] {
@@ -121,6 +151,8 @@ export class LookupBinder extends DeclarationBinder {
     let inaccessible: MethodSymbol | undefined;
     for (const method of owner.symbol.methods) {
       if (method.name !== name || method.kind === 'operator' || method.property || method.isOverride) continue;
+      // Explicit interface implementations and event accessors have no name that code can call them by.
+      if (method.explicitInterface || method.isEventAccessor) continue;
       // The library's private members stand for .NET's explicit interface implementations, which no name finds.
       if (method.access === 'private' && owner.symbol.isLibrary) continue;
       if (!this.isAccessible(method.access, owner.symbol, context, type)) {
@@ -139,42 +171,103 @@ export class LookupBinder extends DeclarationBinder {
     for (const owner of this.searchChain(type)) {
       const indexers = owner.symbol.properties.filter(
         (property) =>
-          property.isIndexer && !property.isOverride && this.isAccessible(property.access, owner.symbol, context, type)
+          property.isIndexer &&
+          !property.isOverride &&
+          !property.explicitInterface &&
+          this.isAccessible(property.access, owner.symbol, context, type)
       );
       if (indexers.length > 0) return indexers.map((property) => ({ property, owner }));
     }
     return [];
   }
 
-  /** The user-defined operators of a type and its bases. */
+  /** The user-defined operators of a type and its bases, or else those that extension blocks for the type declare. */
   lookupOperators(type: Type, name: string): MethodCandidate[] {
     const result: MethodCandidate[] = [];
-    if (type.kind !== 'named') return result;
+    if (type.kind !== 'named' && type.kind !== 'typeParameter') return result;
     for (const owner of this.searchChain(type)) {
       for (const method of owner.symbol.methods)
         if (method.kind === 'operator' && method.name === name) result.push({ method, owner });
     }
-    return result;
+    if (result.length > 0 || type.kind !== 'named') return result;
+    return this.extensionOperators(name, (method) => extendsType(method, method.staticExtensionOf, type));
+  }
+
+  /** The operators of a name that the extension blocks in scope of the code being bound declare. */
+  private extensionOperators(name: string, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
+    return this.lookupExtensionMembers(
+      this.operatorScope,
+      (method) => method.kind === 'operator' && method.name === name && matches(method)
+    );
+  }
+
+  /** Whether the binder binds a `dynamic` operation as it runs, where the runtime binder finds no extension methods. */
+  protected isLateBinding = false;
+
+  /**
+   * Where the code being bound is written, whose namespaces in scope offer extension operators; operators bind without
+   * a context of their own, so binding a statement or an expression sets it with {@link withOperatorScope}.
+   */
+  private operatorScope: TypeContext = { namespace: [], usings: [], type: undefined, methodTypeParameters: [] };
+
+  protected withOperatorScope<T>(scope: TypeContext, bind: () => T): T {
+    const enclosing = this.operatorScope;
+    this.operatorScope = scope;
+    try {
+      return bind();
+    } finally {
+      this.operatorScope = enclosing;
+    }
   }
 
   /** The extension methods by name that the namespaces in scope declare in their static classes. */
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   lookupExtensionMethods(name: string, context: TypeContext): MethodCandidate[] {
-    const result: MethodCandidate[] = [];
-    const visit = (types: Map<string, TypeSymbol[]>): void => {
-      for (const list of types.values()) {
-        for (const symbol of list) {
-          if (!symbol.isStatic) continue;
-          for (const method of symbol.methods) {
-            if (method.isExtension && method.name === name) result.push({ method, owner: symbol.declaredType });
-          }
-        }
-      }
-    };
-    for (const namespaces of this.enclosingNamespaces(context)) {
-      for (const namespace of namespaces) visit(namespace.types);
-    }
-    for (const group of context.usings) for (const namespace of group) visit(namespace.types);
+    // An extension property's getter is found by the property's name only.
+    return this.lookupExtensionMembers(
+      context,
+      (method) => method.isExtension && method.name === name && !method.extensionProperty
+    );
+  }
+
+  /** The instance compound assignment and `++`/`--` operators that extension blocks for a type declare. */
+  lookupExtensionAssignmentOperators(type: Type, name: string): MethodCandidate[] {
+    return this.extensionOperators(name, (method) => extendsType(method, method.extensionAssignmentOf, type));
+  }
+
+  /** The getters of the extension properties of a name that the extension blocks in scope declare. */
+  lookupExtensionProperties(name: string, context: TypeContext): MethodCandidate[] {
+    return this.lookupExtensionMembers(
+      context,
+      (method) => method.extensionProperty === name && method.name === `get_${name}`
+    );
+  }
+
+  /**
+   * The static members of extension blocks by name that a type may be accessed through: methods, or with `property`,
+   * property getters. Overload resolution checks the type against each block's receiver type, as Roslyn does.
+   */
+  lookupStaticExtensions(type: Type, name: string, isProperty: boolean, context: TypeContext): MethodCandidate[] {
+    return this.lookupExtensionMembers(
+      context,
+      (method) =>
+        method.staticExtensionOf !== undefined &&
+        (isProperty
+          ? method.extensionProperty === name && method.name === `get_${name}`
+          : method.name === name && !method.extensionProperty)
+    ).map((candidate) => ({ ...candidate, staticReceiver: type }));
+  }
+
+  /** The methods of the static classes in scope that satisfy a test, as extension methods are found. */
+  private lookupExtensionMembers(context: TypeContext, matches: (method: MethodSymbol) => boolean): MethodCandidate[] {
+    if (this.isLateBinding) return [];
+    const namespaces = [...this.enclosingNamespaces(context), ...context.usings].flat();
+    const classes = [
+      ...namespaces.flatMap((namespace) => [...namespace.types.values()].flat().filter((symbol) => symbol.isStatic)),
+      ...(context.staticUsings ?? []).map((type) => type.symbol),
+    ];
+    const result = classes.flatMap((symbol) =>
+      symbol.methods.filter(matches).map((method) => ({ method, owner: symbol.declaredType }))
+    );
     return result.filter(
       (candidate, index) => result.findIndex((other) => other.method === candidate.method) === index
     );
@@ -187,6 +280,8 @@ export class LookupBinder extends DeclarationBinder {
   /** Whether code in the context may use a member with the access of its declaring type. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   isAccessible(access: string, declaringType: TypeSymbol, context: TypeContext, through?: Type): boolean {
+    // The library's internal members are what `dynamic` binds to as it runs, which no code names.
+    if (access === 'internal' && declaringType.isLibrary) return this.isLateBinding;
     if (access === 'public' || access === 'internal' || access === 'protected internal') return true;
     const within = context.type;
     if (!within) return false;
@@ -237,8 +332,12 @@ export class LookupBinder extends DeclarationBinder {
 function memberNamed(owner: NamedType, name: string, isInvoked: boolean): FieldSymbol | PropertySymbol | undefined {
   const { symbol } = owner;
   const found =
-    symbol.fields.find((candidate) => candidate.name === name && !candidate.property) ??
-    symbol.properties.find((candidate) => candidate.name === name && !candidate.isIndexer);
+    symbol.fields.find(
+      (candidate) => candidate.name === name && !candidate.property && !candidate.eventAccessors?.add.explicitInterface
+    ) ??
+    symbol.properties.find(
+      (candidate) => candidate.name === name && !candidate.isIndexer && !candidate.explicitInterface
+    );
   // A member's type in its owner's type arguments, as `Func<int, int>` for KeyValuePair's `Value`, tells if it can be called.
   return found && isInvoked && !isInvocable(substitute(found.type, substitutionOf(owner))) ? undefined : found;
 }
@@ -261,3 +360,19 @@ function isInvocable(type: Type): boolean {
 }
 
 export { MethodSymbol, PropertySymbol, FieldSymbol };
+
+/**
+ * Whether an extension block's member extends a type: the block's type exactly, or for a generic block, a type of the
+ * same definition, whose type arguments the call infers.
+ */
+function extendsType(method: MethodSymbol, extended: Type | undefined, type: Type): boolean {
+  if (!extended) return false;
+  if (method.typeParameters.length === 0) return sameType(extended, type);
+  return extended.kind === 'named' && type.kind === 'named' && extended.symbol === type.symbol;
+}
+
+/** Whether a member is an interface's static abstract or virtual member, which a type parameter's argument implements. */
+export function isConstrained(member: MethodSymbol | PropertySymbol | FieldSymbol): boolean {
+  if (member instanceof FieldSymbol) return false;
+  return member.isStatic && member.owner.kind === 'interface' && (member.isAbstract || member.isVirtual);
+}

@@ -4,21 +4,28 @@ import { isEnum, isIntegral, isNumeric } from './conversions';
 import { ConversionBinder } from './convertBinder';
 import { CsDecimal } from './decimal';
 import type { MethodCandidate } from './lookup';
-import { OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
+import { checkedOperatorName, OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
 import {
   arithmetic,
   booleanOperation,
   compareNumeric,
+  convertNumeric,
   type NumericValue,
   PendingException,
   unaryNumeric,
 } from './numeric';
+import { sizeOf } from './pointers';
 import {
   displayType,
   ERROR_TYPE,
+  isDynamicType,
+  isPointerType,
   isReferenceType,
+  isRefLikeType,
+  isVoidPointer,
   type NamedType,
   nullableUnderlying,
+  pointeeOf,
   sameType,
   specialOf,
   type SpecialType,
@@ -56,6 +63,14 @@ export abstract class OperatorBinder extends ConversionBinder {
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindUnary(operator: string, operand: BoundExpression, row: number): BoundExpression {
     if (operand.type.kind === 'error') return { ...operand, type: ERROR_TYPE };
+    if (isDynamicType(operand.type)) {
+      const position = { row, column: 0 };
+      return this.late(
+        { kind: 'unary', operator: operator as '-', operand: this.lateOperand(0, position), ...position },
+        [operand],
+        { fn: { typeContext: undefined } }
+      );
+    }
     const userDefined = this.userOperator(UNARY_OPERATOR_NAMES[operator], [operand], row);
     if (userDefined) return userDefined;
     const underlying = nullableUnderlying(operand.type);
@@ -108,10 +123,10 @@ export abstract class OperatorBinder extends ConversionBinder {
     if (operand.kind === 'constant' && !isLifted && operand.value !== undefined) {
       if (kind === 'bool') return this.constant(!(operand.value as boolean), type, row);
       if (kind !== 'enum') {
-        // Constant expressions are evaluated in checked mode, as binary ones are in foldBinary.
+        // Constant expressions are evaluated in checked mode outside `unchecked`, as binary ones are in foldBinary.
         try {
           return this.constant(
-            unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue, true),
+            unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue, this.checkedContext !== false),
             type,
             row
           );
@@ -137,6 +152,49 @@ export abstract class OperatorBinder extends ConversionBinder {
    *
    * @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`.
    */
+  /**
+   * The pointer operators of C# spec §24.6: a pointer plus or minus an integer, the difference of two pointers, and
+   * comparisons of pointers (or a pointer and null) by address. `void*` has none but the comparisons (CS0242).
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private bindPointerOperator(
+    operator: string,
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number
+  ): BoundExpression | undefined {
+    const leftPointer = isPointerType(left.type);
+    const rightPointer = isPointerType(right.type);
+    if (!leftPointer && !rightPointer) return undefined;
+    if (['==', '!=', '<', '>', '<=', '>='].includes(operator)) {
+      if (!isPointerOperand(left) || !isPointerOperand(right)) return undefined;
+      return { kind: 'pointerCompare', operator, left, right, type: this.boolType, row };
+    }
+    if (operator !== '+' && operator !== '-') return undefined;
+    const pointer = leftPointer ? left : right;
+    const other = leftPointer ? right : left;
+    if (isVoidPointer(pointer.type)) {
+      this.error(row, 'CS0242', '問題の操作は void ポインターで定義されていません');
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
+    const elementSize = sizeOf(pointeeOf(pointer.type) as Type);
+    if (operator === '-' && leftPointer && rightPointer) {
+      if (!sameType(left.type, right.type)) return undefined;
+      return { kind: 'pointerDiff', left, right, elementSize, type: this.specialType('long'), row };
+    }
+    if (!isIntegral(other.type) || specialOf(other.type) === 'char' || (operator === '-' && !leftPointer))
+      return undefined;
+    return {
+      kind: 'pointerArith',
+      pointer,
+      offset: other,
+      elementSize,
+      isSubtract: operator === '-',
+      type: pointer.type,
+      row,
+    };
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindBinary(
@@ -147,16 +205,29 @@ export abstract class OperatorBinder extends ConversionBinder {
     shownOperator = operator
   ): BoundExpression {
     if (left.type.kind === 'error' || right.type.kind === 'error')
-      return {
-        kind: 'binary',
-        operator,
-        left,
-        right,
-        operandKind: 'int',
-        isLifted: false,
-        type: ERROR_TYPE,
-        row,
-      };
+      return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+    if (
+      (isDynamicType(left.type) || isDynamicType(right.type)) &&
+      left.kind !== 'unbound' &&
+      right.kind !== 'unbound'
+    ) {
+      const position = { row, column: 0 };
+      return this.late(
+        {
+          kind: 'binary',
+          operator,
+          left: this.lateOperand(0, position),
+          right: this.lateOperand(1, position),
+          operatorRow: row,
+          ...position,
+        },
+        [left, right],
+        { fn: { typeContext: undefined } }
+      );
+    }
+    const special =
+      this.utf8Concatenation(operator, left, right, row) ?? this.bindPointerOperator(operator, left, right, row);
+    if (special) return special;
     const userDefined = this.userOperator(OPERATOR_NAMES[operator], [left, right], row);
     if (userDefined) return userDefined;
     if (operator === '+' && (this.isString(left.type) || this.isString(right.type)))
@@ -248,7 +319,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     this.error(
       row,
       'CS0019',
-      `演算子 '${operator}' を '${displayType(left.type)}' と '${displayType(right.type)}' 型のオペランドに適用することはできません`
+      `演算子 '${operator}' を '${operandDisplay(left)}' と '${operandDisplay(right)}' 型のオペランドに適用することはできません`
     );
   }
 
@@ -296,12 +367,8 @@ export abstract class OperatorBinder extends ConversionBinder {
     try {
       if (operandKind === 'bool')
         return this.constant(booleanOperation(operator, left.value as boolean, right.value as boolean), node.type, row);
-      if (
-        operandKind === 'string' ||
-        operandKind === 'object' ||
-        operandKind === 'enum' ||
-        operandKind === 'delegate'
-      ) {
+      if (operandKind === 'enum') return this.foldEnum(node, left.value as NumericValue, right.value as NumericValue);
+      if (operandKind === 'string' || operandKind === 'object' || operandKind === 'delegate') {
         if (operandKind === 'string' && EQUALITY.has(operator))
           return this.constant((left.value === right.value) === (operator === '=='), node.type, row);
         return node;
@@ -312,6 +379,22 @@ export abstract class OperatorBinder extends ConversionBinder {
       this.error(row, 'CS0220', 'この操作はチェック モードでコンパイルしたときにオーバーフローします');
       return node;
     }
+  }
+
+  /** An operation on enum constants, which C# folds as one on their underlying values, as `Read | Write`. */
+  private foldEnum(
+    node: Extract<BoundExpression, { kind: 'binary' }>,
+    left: NumericValue,
+    right: NumericValue
+  ): BoundExpression {
+    const enumType = [node.left.type, node.right.type].find(isEnum) as NamedType | undefined;
+    const underlying = enumType ? specialOf(enumType.symbol.enumUnderlying as Type) : undefined;
+    if (!underlying) return node;
+    const kind = ['long', 'ulong', 'uint'].includes(underlying) ? (underlying as OperandKind) : 'int';
+    if (EQUALITY.has(node.operator) || RELATIONAL.has(node.operator))
+      return this.constant(compareNumeric(node.operator, kind, left, right), node.type, node.row);
+    const value = arithmetic(node.operator, kind, left, right, this.checkedContext !== false);
+    return this.constant(convertNumeric(value, kind, underlying), node.type, node.row);
   }
 
   private foldNumeric(
@@ -331,7 +414,7 @@ export abstract class OperatorBinder extends ConversionBinder {
       this.error(row, 'CS0020', '定数 0 による除算です');
       return node;
     }
-    return this.constant(arithmetic(operator, operandKind, left, right, true), node.type, row);
+    return this.constant(arithmetic(operator, operandKind, left, right, this.checkedContext !== false), node.type, row);
   }
 
   /** The operand kind that binary numeric promotion chooses for two numeric types, if any. */
@@ -474,16 +557,17 @@ export abstract class OperatorBinder extends ConversionBinder {
     const enumType = (leftEnum ? leftType : rightType) as NamedType;
     const underlying = enumType.symbol.enumUnderlying as NamedType;
     const lift = (type: Type): Type => (isLifted ? this.nullableOf(type) : type);
-    const node = (leftOperandType: Type, rightOperandType: Type, resultType: Type): BoundExpression => ({
-      kind: 'binary',
-      operator,
-      left: this.convert(left, lift(leftOperandType), row),
-      right: this.convert(right, lift(rightOperandType), row),
-      operandKind: 'enum',
-      isLifted,
-      type: resultType,
-      row,
-    });
+    const node = (leftOperandType: Type, rightOperandType: Type, resultType: Type): BoundExpression =>
+      this.foldBinary({
+        kind: 'binary',
+        operator,
+        left: this.convert(left, lift(leftOperandType), row),
+        right: this.convert(right, lift(rightOperandType), row),
+        operandKind: 'enum',
+        isLifted,
+        type: resultType,
+        row,
+      });
     const isCompatible = (): boolean =>
       sameType(leftType, rightType) ||
       (leftEnum && this.implicitConversionOf(right, enumType) !== undefined) ||
@@ -500,6 +584,25 @@ export abstract class OperatorBinder extends ConversionBinder {
     if (leftEnum && !rightEnum && this.implicitConversionOf(right, underlying))
       return node(enumType, underlying, lift(enumType));
     return undefined;
+  }
+
+  /** `+` of UTF-8 string literals, which C# allows of literals alone and joins at compile time, not of other spans. */
+  private utf8Concatenation(
+    operator: string,
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number
+  ): BoundExpression | undefined {
+    if (operator !== '+' || (left.kind !== 'utf8' && right.kind !== 'utf8') || !sameType(left.type, right.type))
+      return undefined;
+    if (left.kind === 'utf8' && right.kind === 'utf8')
+      return { kind: 'utf8', bytes: [...left.bytes, ...right.bytes], type: left.type, row };
+    this.error(
+      row,
+      'CS9047',
+      `演算子 '+' は、UTF-8 バイト表現ではない型 '${displayType(left.type)}' および '${displayType(right.type)}' のオペランドには適用できません`
+    );
+    return { kind: 'default', type: ERROR_TYPE, row };
   }
 
   /** `+` with a string operand concatenates, calling `ToString()` on the other operand. */
@@ -519,6 +622,8 @@ export abstract class OperatorBinder extends ConversionBinder {
         row
       );
     }
+    // A ref struct operand would have to be boxed to call its `ToString()`.
+    if (isRefLikeType(left.type) || isRefLikeType(right.type)) this.reportBinary('+', left, right, row);
     for (const part of parts) {
       if (part.kind === 'unbound' || part.type.kind === 'void') {
         this.error(
@@ -535,16 +640,27 @@ export abstract class OperatorBinder extends ConversionBinder {
     return specialOf(type) === 'string';
   }
 
-  /** Binds a user-defined operator of either operand's type, if one applies. */
-  private userOperator(
+  /** Binds a user-defined operator of either operand's type, if one applies; a checked context prefers its checked form. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  protected userOperator(
     name: string | undefined,
     operands: BoundExpression[],
-    row: number
+    row: number,
+    tryChecked = true
   ): BoundExpression | undefined {
     if (!name) return undefined;
+    if (this.checkedContext && tryChecked) {
+      const checkedForm = this.userOperator(checkedOperatorName(name), operands, row, false);
+      if (checkedForm) return checkedForm;
+    }
     const candidates: MethodCandidate[] = [];
     for (const operand of operands) {
       const type = nullableUnderlying(operand.type) ?? operand.type;
+      if (type.kind === 'typeParameter') {
+        for (const candidate of this.lookupOperators(type, name))
+          if (!candidates.some((existing) => existing.method === candidate.method)) candidates.push(candidate);
+        continue;
+      }
       if (
         type.kind !== 'named' ||
         type.symbol.special === 'string' ||
@@ -602,4 +718,16 @@ function isNonNegativeIntConstant(operand: BoundExpression): boolean {
     return false;
   const value = operand.value as number | bigint;
   return value >= 0;
+}
+
+/** Whether an operand may be compared as a pointer: a pointer, or null. */
+function isPointerOperand(operand: BoundExpression): boolean {
+  return isPointerType(operand.type) || operand.type.kind === 'null';
+}
+
+/** An operand's type as Roslyn names it: a `stackalloc` that no pointer local takes is a Span, which has no operators. */
+function operandDisplay(operand: BoundExpression): string {
+  return operand.kind === 'unbound' && operand.spanElement
+    ? `Span<${displayType(operand.spanElement)}>`
+    : displayType(operand.type);
 }

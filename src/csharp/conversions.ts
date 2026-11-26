@@ -1,8 +1,12 @@
 import {
   allInterfacesOf,
   baseTypeOf,
+  isDynamicType,
+  isPointerType,
   isReferenceType,
+  isRefLikeType,
   isValueType,
+  isVoidPointer,
   type NamedType,
   nullableUnderlying,
   sameType,
@@ -16,6 +20,8 @@ import {
 /** How a value of one type becomes a value of another, which decides what the evaluator does with it. */
 export type ConversionKind =
   | 'identity'
+  /** From `dynamic` to another type, which the value's runtime type decides. */
+  | 'dynamic'
   | 'numeric'
   | 'reference'
   /** A reference conversion that checks the value's runtime type, as a downcast does. */
@@ -33,7 +39,11 @@ export type ConversionKind =
   /** A type parameter's value to a type it converts to, which boxes a value type at run time. */
   | 'typeParameterBox'
   /** A value to a type parameter, which unboxes or checks at run time. */
-  | 'typeParameterUnbox';
+  | 'typeParameterUnbox'
+  /** Between pointer types, or between a pointer and an integer, which keeps the address. */
+  | 'pointer'
+  /** An interpolated string to FormattableString, IFormattable, or a handler type, which binds it again. */
+  | 'interpolatedString';
 
 /** The types that conversions and operators know by role. */
 export interface WellKnownTypes {
@@ -116,9 +126,17 @@ export class Conversions {
   constructor(private readonly types: WellKnownTypes) {}
 
   /** The implicit conversion from one type to another, if any, not counting conversions of constants. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   implicit(from: Type, to: Type): ConversionKind | undefined {
     if (to.kind === 'error' || from.kind === 'error' || sameType(from, to)) return 'identity';
     if (from.kind === 'null') return acceptsNullType(to) ? 'nullLiteral' : undefined;
+    // `dynamic` converts as `object` does to it, and implicitly to any type, checked at run time.
+    if (isDynamicType(to)) return this.implicit(from, this.types.object);
+    if (isDynamicType(from))
+      return sameType(to, this.types.object) ? 'reference' : isPointerType(to) ? undefined : 'dynamic';
+    // Any pointer converts to `void*`; a pointer converts to nothing else implicitly, `object` included.
+    if (isPointerType(from) || isPointerType(to))
+      return isPointerType(from) && isVoidPointer(to) ? 'pointer' : undefined;
     if (isImplicitNumeric(from, to)) return 'numeric';
     const toUnderlying = nullableUnderlying(to);
     if (toUnderlying) {
@@ -140,9 +158,15 @@ export class Conversions {
   }
 
   /** The explicit conversion from one type to another that a cast performs, which includes the implicit ones. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   explicit(from: Type, to: Type): ConversionKind | undefined {
     const implicit = this.implicit(from, to);
     if (implicit) return implicit;
+    if (isPointerType(from) || isPointerType(to)) {
+      const isPointerOrIntegral = (type: Type): boolean =>
+        isPointerType(type) || (isIntegral(type) && specialOf(type) !== 'char');
+      return isPointerOrIntegral(from) && isPointerOrIntegral(to) ? 'pointer' : undefined;
+    }
     const numeric = explicitNumeric(from, to);
     if (numeric) return numeric;
     const fromUnderlying = nullableUnderlying(from);
@@ -244,7 +268,7 @@ export class Conversions {
 
   /** Whether boxing a value of the value type gives a value of the reference type. */
   private isBoxingTarget(from: Type, to: Type): boolean {
-    if (to.kind !== 'named') return false;
+    if (to.kind !== 'named' || isRefLikeType(from)) return false;
     if (to.symbol === this.types.object.symbol || to.symbol === this.types.valueType.symbol) return true;
     if (isEnumType(from) && to.symbol === this.types.enum.symbol) return true;
     if (to.symbol.kind !== 'interface') return false;

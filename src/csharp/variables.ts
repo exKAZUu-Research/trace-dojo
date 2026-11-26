@@ -1,4 +1,6 @@
 import type { BoundExpression } from './bound';
+import type { BindResult } from './memberBinder';
+import { isValueType } from './types';
 
 /**
  * Whether an expression denotes a variable, whose struct a member assignment or a method call changes in place: a
@@ -10,11 +12,25 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
     case 'local':
     case 'this':
     case 'element':
+    case 'deref':
+    case 'refValue':
     case 'compoundOperand': {
       return true;
     }
     case 'staticField': {
       return !(readonlyIsValue && expression.field.isReadonly);
+    }
+    case 'implicitIndex': {
+      return isVariable(expression.access, readonlyIsValue);
+    }
+    case 'call': {
+      return expression.method.returnsByRef === 'ref';
+    }
+    case 'invokeDelegate': {
+      return expression.returnsByRef === 'ref';
+    }
+    case 'property': {
+      return expression.property.returnsByRef === 'ref';
     }
     case 'field': {
       if (readonlyIsValue && expression.field.isReadonly) return false;
@@ -27,4 +43,31 @@ export function isVariable(expression: BoundExpression, readonlyIsValue: boolean
       return false;
     }
   }
+}
+
+/**
+ * Whether a variable is fixed, so that `&` takes its address without a `fixed` statement: a local or value parameter,
+ * a field of a struct that is fixed, or what a pointer points to (C# spec §24.4).
+ */
+export function isFixedVariable(expression: BoundExpression): boolean {
+  switch (expression.kind) {
+    case 'local': {
+      // A ref parameter or ref local may refer to a movable variable.
+      return expression.local.refKind === undefined;
+    }
+    case 'deref': {
+      return true;
+    }
+    case 'field': {
+      return isValueType(expression.receiver.type) && isFixedVariable(expression.receiver);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** Whether an expression names a fixed-size buffer, which gives a pointer to its first element. */
+export function isFixedBufferAccess(expression: BindResult): boolean {
+  return expression.kind === 'addressOf' && expression.target.kind === 'field' && !!expression.target.field.fixedBuffer;
 }

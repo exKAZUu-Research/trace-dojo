@@ -1,3 +1,5 @@
+import type { BuildOptions, LineMap } from './preprocessor';
+
 /** The syntax tree of a C# program, converted from tree-sitter's tree with stage C and D syntax already rejected. */
 
 /** Where a node starts, by 0-based row and column, which diagnostics and steps refer to. */
@@ -8,14 +10,29 @@ export interface Position {
 
 export type TypeNode =
   | ({ kind: 'predefinedType'; name: string } & Position)
-  | ({ kind: 'namedType'; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  /** `ref T` or `ref readonly T`, the type of a ref local or of what a method returns by reference. */
+  | ({ kind: 'refType'; type: TypeNode; isReadonly: boolean } & Position)
+  /** `T*`, whose use outside an unsafe context is an error. */
+  | ({ kind: 'pointerType'; element: TypeNode; isUnsafe: boolean } & Position)
+  /** `delegate*<A, R>`, a function pointer of managed calling convention. */
+  | ({ kind: 'functionPointerType'; parameters: TypeNode[]; returnType: TypeNode; isUnsafe: boolean } & Position)
+  | ({
+      kind: 'namedType';
+      name: string;
+      typeArgs: TypeNode[] | undefined;
+      /** For an unbound generic type in `typeof(List<>)`, how many type arguments it leaves out. */
+      unboundArity?: number;
+    } & Position)
   | ({ kind: 'qualifiedType'; left: TypeNode; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  /** A name qualified by a namespace alias, as `global::System` or `G::List<int>`. */
+  | ({ kind: 'aliasQualifiedType'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'arrayType'; element: TypeNode; rank: number } & Position)
   | ({ kind: 'nullableType'; inner: TypeNode } & Position)
   | ({ kind: 'tupleType'; elements: { type: TypeNode; name: string | undefined }[] } & Position)
   | ({ kind: 'varType' } & Position);
 
 export type Modifier =
+  | 'unsafe'
   | 'public'
   | 'private'
   | 'protected'
@@ -33,7 +50,12 @@ export type Modifier =
   | 'ref'
   | 'out'
   | 'in'
-  | 'params';
+  | 'params'
+  | 'partial'
+  | 'required'
+  | 'file'
+  | 'volatile'
+  | 'async';
 
 export interface Modifiers {
   set: ReadonlySet<Modifier>;
@@ -41,11 +63,31 @@ export interface Modifiers {
   positions: ReadonlyMap<Modifier, Position>;
 }
 
-export interface Parameter extends Position {
+/** An attribute (`[Obsolete("x")]`), with the target its list names (`[return: ...]`, `[field: ...]`), if any. */
+export interface AttributeNode extends Position {
+  name: TypeNode;
+  /** The positional arguments and the named ones (`x: 1`), which go to the attribute's constructor. */
+  args: Argument[];
+  /** The field and property assignments (`X = 1`). */
+  assignments: { name: string; value: Expression; row: number; column: number }[];
+  target: string | undefined;
+}
+
+/** A declaration's attributes, which binding checks and gives their meaning. */
+export interface Attributed {
+  attributes?: AttributeNode[];
+}
+
+export interface Parameter extends Position, Attributed {
   name: string;
   type: TypeNode | undefined;
-  modifier: 'ref' | 'out' | 'in' | 'params' | 'this' | undefined;
+  modifier: 'ref' | 'out' | 'in' | 'params' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: true;
+  /** Whether the parameter is an extension method's receiver (`this int x`). */
+  isThis: boolean;
   defaultValue: Expression | undefined;
+  isScoped?: true;
 }
 
 export interface Argument extends Position {
@@ -61,6 +103,8 @@ export type LiteralValue =
   | { type: 'real'; text: string; suffix: '' | 'f' | 'd' | 'm' }
   | { type: 'char'; value: number }
   | { type: 'string'; value: string }
+  /** A UTF-8 string literal (`"..."u8`), a `ReadOnlySpan<byte>` of the string's UTF-8 bytes. */
+  | { type: 'utf8'; value: string }
   | { type: 'bool'; value: boolean }
   | { type: 'null' };
 
@@ -87,6 +131,11 @@ export interface LambdaParameter extends Position {
   name: string;
   type: TypeNode | undefined;
   modifier: 'ref' | 'out' | 'in' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: true;
+  isParams?: true;
+  isScoped?: true;
+  defaultValue?: Expression;
 }
 
 export interface SwitchArm extends Position {
@@ -116,8 +165,17 @@ export type QueryClause =
 export type Expression =
   | ({ kind: 'literal'; value: LiteralValue } & Position)
   | ({ kind: 'interpolated'; parts: InterpolationPart[] } & Position)
-  | ({ kind: 'name'; name: string; typeArgs: TypeNode[] | undefined } & Position)
+  | ({
+      kind: 'name';
+      name: string;
+      typeArgs: TypeNode[] | undefined;
+      /** Whether the name is the `field` keyword of a property's accessor (C# 14), which names its backing field. */
+      isFieldKeyword?: true;
+      /** For an unbound generic name in `nameof(List<>)` (C# 14), how many type arguments it leaves out. */
+      unboundArity?: number;
+    } & Position)
   | ({ kind: 'predefinedTypeName'; name: string } & Position)
+  | ({ kind: 'aliasQualified'; alias: string; name: string; typeArgs: TypeNode[] | undefined } & Position)
   | ({ kind: 'this' } & Position)
   | ({ kind: 'base' } & Position)
   | ({
@@ -126,6 +184,10 @@ export type Expression =
       name: string;
       typeArgs: TypeNode[] | undefined;
       nameRow: number;
+      /** Whether the access is in an unsafe context, where it may name a fixed-size buffer. */
+      isUnsafe?: true;
+      /** For an unbound generic name in `nameof(A.List<>)` (C# 14), how many type arguments it leaves out. */
+      unboundArity?: number;
     } & Position)
   | ({ kind: 'conditionalAccess'; target: Expression; access: Expression } & Position)
   /** The receiver of `?.`, which a conditional access's `access` starts from. */
@@ -155,12 +217,18 @@ export type Expression =
   | ({ kind: 'is'; operand: Expression; pattern: Pattern } & Position)
   | ({
       kind: 'lambda';
+      attributes?: AttributeNode[];
       parameters: LambdaParameter[];
       body: Expression | Block;
       isStatic: boolean;
       returnType: TypeNode | undefined;
       /** Whether a query clause stands for the lambda, whose conversion errors Roslyn reports without CS1662. */
       isQuery?: true;
+      /** An anonymous method written without a parameter list (`delegate { }`), which fits any parameters but `out`. */
+      omitsParameters?: true;
+      /** Whether `delegate (...) { }` wrote it rather than `=>`, which some messages name differently. */
+      isAnonymousMethod?: true;
+      isAsync?: true;
     } & Position)
   | ({ kind: 'default'; type: TypeNode | undefined } & Position)
   | ({ kind: 'declaration'; type: TypeNode; designation: Designation } & Position)
@@ -168,7 +236,38 @@ export type Expression =
   | ({ kind: 'switch'; value: Expression; arms: SwitchArm[] } & Position)
   | ({ kind: 'throw'; value: Expression } & Position)
   | ({ kind: 'with'; value: Expression; members: MemberInitializer[] } & Position)
-  | ({ kind: 'query'; clauses: QueryClause[] } & Position);
+  | ({ kind: 'query'; clauses: QueryClause[] } & Position)
+  | ({ kind: 'typeof'; type: TypeNode } & Position)
+  | ({ kind: 'sizeof'; type: TypeNode; isUnsafe?: boolean } & Position)
+  /** `__makeref(x)`, a `TypedReference` to a variable. */
+  | ({ kind: 'makeRef'; operand: Expression } & Position)
+  /** `__reftype(r)`, the type of the variable a `TypedReference` refers to. */
+  | ({ kind: 'refType'; operand: Expression } & Position)
+  /** `__refvalue(r, T)`, the variable a `TypedReference` refers to, which must be of type T. */
+  | ({ kind: 'refValue'; operand: Expression; type: TypeNode } & Position)
+  /** `ref x`, the variable that a ref local refers to or a method returns by reference. */
+  | ({ kind: 'refExpression'; operand: Expression } & Position)
+  /** `&x`, the address of a variable, or of a method for a function pointer. */
+  | ({ kind: 'addressOf'; operand: Expression; isUnsafe: boolean } & Position)
+  /** `*p`, the variable a pointer points to; `p->X` is `(*p).X`. */
+  | ({ kind: 'deref'; operand: Expression; isUnsafe: boolean } & Position)
+  /** `stackalloc T[n]` or `stackalloc[] { ... }`, a buffer on the stack. */
+  | ({
+      kind: 'stackalloc';
+      elementType: TypeNode | undefined;
+      count: Expression | undefined;
+      initializer: Expression[] | undefined;
+      isUnsafe: boolean;
+      /** `(stackalloc T[n])`, which a pointer local does not take as its own stackalloc initializer. */
+      isParenthesized?: true;
+    } & Position)
+  | ({ kind: 'await'; operand: Expression } & Position)
+  /** `^n`, an index from the end. */
+  | ({ kind: 'fromEnd'; operand: Expression } & Position)
+  /** `a..b`, a range whose omitted ends are the start and the end. */
+  | ({ kind: 'range'; start: Expression | undefined; end: Expression | undefined } & Position)
+  /** `checked(...)` or `unchecked(...)`, which sets whether integral arithmetic inside throws on overflow. */
+  | ({ kind: 'checked'; isChecked: boolean; operand: Expression } & Position);
 
 export type ArrayInitializer = { kind: 'arrayInitializer'; elements: (Expression | ArrayInitializer)[] } & Position;
 
@@ -189,6 +288,10 @@ export type Pattern =
   | ({ kind: 'notPattern'; pattern: Pattern } & Position)
   | ({ kind: 'andPattern'; left: Pattern; right: Pattern } & Position)
   | ({ kind: 'orPattern'; left: Pattern; right: Pattern } & Position)
+  /** `[p1, .. rest, p2]`, which matches a countable, indexable value by its elements. */
+  | ({ kind: 'listPattern'; elements: Pattern[]; designation: Designation | undefined } & Position)
+  /** `..` or `.. p` in a list pattern, which matches the elements between the patterns before and after it. */
+  | ({ kind: 'slicePattern'; pattern: Pattern | undefined } & Position)
   | ({
       kind: 'recursivePattern';
       type: TypeNode | undefined;
@@ -212,6 +315,8 @@ export interface Block extends Position {
 export interface VariableDeclarator extends Position {
   name: string;
   initializer: Expression | ArrayInitializer | undefined;
+  /** The length of a fixed-size buffer, `fixed int Buf[4]`. */
+  fixedSize?: Expression;
 }
 
 export interface SwitchSection extends Position {
@@ -234,8 +339,23 @@ export type Statement =
   | Block
   | ({ kind: 'empty' } & Position)
   | ({ kind: 'expression'; expression: Expression } & Position)
-  | ({ kind: 'localDeclaration'; isConst: boolean; type: TypeNode; declarators: VariableDeclarator[] } & Position)
+  | ({
+      kind: 'localDeclaration';
+      isConst: boolean;
+      type: TypeNode;
+      declarators: VariableDeclarator[];
+      /** A `using` declaration (`using var r = ...;`), which disposes its variables at the end of the enclosing block. */
+      using?: 'using' | 'await using';
+      /** The variable of an `await foreach (ref T x in e)` loop, which `Current` initializes by reference. */
+      isRefIteration?: true;
+      /** A `scoped` local (C# 11), whose reference or ref struct value may not leave the method. */
+      isScoped?: true;
+      /** Modifiers other than `const` (`static`, `readonly`, ...), which a local may not have (CS0106). */
+      invalidModifiers?: string[];
+    } & Position)
   | ({ kind: 'deconstruction'; designation: Designation; value: Expression } & Position)
+  | ({ kind: 'unsafe'; body: Block } & Position)
+  | ({ kind: 'fixed'; type: TypeNode; declarators: VariableDeclarator[]; body: Statement } & Position)
   | ({ kind: 'localFunction'; declaration: MethodDeclaration } & Position)
   | ({ kind: 'if'; condition: Expression; consequence: Statement; alternative: Statement | undefined } & Position)
   | ({ kind: 'while'; condition: Expression; body: Statement } & Position)
@@ -244,21 +364,47 @@ export type Statement =
       kind: 'for';
       initializer:
         | { kind: 'declaration'; type: TypeNode; declarators: VariableDeclarator[] }
+        | { kind: 'deconstruction'; statement: Extract<Statement, { kind: 'deconstruction' }> }
         | { kind: 'expressions'; expressions: Expression[] }
         | undefined;
       condition: Expression | undefined;
       updates: Expression[];
       body: Statement;
     } & Position)
-  | ({ kind: 'foreach'; type: TypeNode; variable: Designation; collection: Expression; body: Statement } & Position)
+  | ({
+      kind: 'foreach';
+      type: TypeNode;
+      variable: Designation;
+      collection: Expression;
+      body: Statement;
+      /** `await foreach`, over an async stream. */
+      isAwait?: true;
+    } & Position)
   | ({ kind: 'switch'; value: Expression; sections: SwitchSection[] } & Position)
   | ({ kind: 'break' } & Position)
   | ({ kind: 'continue' } & Position)
   | ({ kind: 'return'; value: Expression | undefined } & Position)
   | ({ kind: 'throw'; value: Expression | undefined } & Position)
-  | ({ kind: 'try'; body: Block; catches: CatchClause[]; finally: Block | undefined } & Position);
+  | ({ kind: 'try'; body: Block; catches: CatchClause[]; finally: Block | undefined } & Position)
+  | ({ kind: 'checked'; isChecked: boolean; body: Block } & Position)
+  | ({ kind: 'lock'; value: Expression; body: Statement } & Position)
+  | ({ kind: 'goto'; target: GotoTarget } & Position)
+  | ({ kind: 'labeled'; label: string; statement: Statement } & Position)
+  /** `yield return value;`, or `yield break;` without a value. */
+  | ({ kind: 'yield'; value: Expression | undefined } & Position)
+  | ({
+      kind: 'using';
+      /** The declared resources, or the expression whose value is the resource. */
+      resource:
+        | { kind: 'declaration'; type: TypeNode; declarators: VariableDeclarator[] }
+        | { kind: 'expression'; value: Expression };
+      body: Statement;
+      isAwait: boolean;
+    } & Position);
 
-export interface TypeParameterDeclaration extends Position {
+export type GotoTarget = { kind: 'label'; name: string } | { kind: 'case'; value: Expression } | { kind: 'default' };
+
+export interface TypeParameterDeclaration extends Position, Attributed {
   name: string;
   variance: 'in' | 'out' | undefined;
 }
@@ -267,7 +413,11 @@ export type Constraint =
   | ({ kind: 'class'; nullable: boolean } & Position)
   | ({ kind: 'struct' } & Position)
   | ({ kind: 'notnull' } & Position)
+  | ({ kind: 'unmanaged' } & Position)
+  | ({ kind: 'default' } & Position)
   | ({ kind: 'new' } & Position)
+  /** `allows ref struct` (C# 13), an anti-constraint that lets a ref struct be the type argument. */
+  | ({ kind: 'allowsRefStruct' } & Position)
   | ({ kind: 'type'; type: TypeNode } & Position);
 
 export interface ConstraintClause extends Position {
@@ -275,7 +425,7 @@ export interface ConstraintClause extends Position {
   constraints: Constraint[];
 }
 
-export interface MethodDeclaration extends Position {
+export interface MethodDeclaration extends Position, Attributed {
   kind: 'method';
   modifiers: Modifiers;
   returnType: TypeNode;
@@ -288,9 +438,38 @@ export interface MethodDeclaration extends Position {
   bodyRow: number;
   /** The row where the declaration starts, from which an `// atomic` annotation may mark the method. */
   startRow: number;
+  /** A partial method with only its defining declaration, whose calls C# removes with their arguments. */
+  isRemovedPartial?: boolean;
+  /** The interface of an explicit implementation (`void IShape.Draw()`). */
+  explicitInterface?: TypeNode;
+  /**
+   * A member of an extension block (`extension(int n) { ... }`), which the converter turns into a method of the
+   * enclosing static class: an extension property's accessor, or a static member of the receiver's type.
+   */
+  extension?: ExtensionMember;
 }
 
-export interface ConstructorDeclaration extends Position {
+/** How a method of a static class stands for a member of an extension block. */
+export interface ExtensionMember {
+  /** For a property's accessor, the property's name. */
+  property?: string;
+  /** For a property's accessor, the property's position, which tells the properties of several blocks apart. */
+  propertyKey?: string;
+  /** For a property's accessor, whether it is the getter or the setter; `init` is an error there. */
+  accessor?: 'get' | 'set' | 'init';
+  /** For a property, whether it is an auto-property, which an extension block may not declare. */
+  isAuto?: boolean;
+  /** For a static member, the receiver type, whose static members it joins (`string.M()`). */
+  staticReceiver?: TypeNode;
+  /** For a member of an extension block, how many of its type parameters the block declares, which come first. */
+  blockArity?: number;
+  /** The block's receiver type, which names the block in errors (`Ext.extension(string)`). */
+  receiver?: TypeNode;
+  /** For an instance operator (`void operator +=(int k)`), the block's receiver, which it takes first. */
+  receiverParameter?: Parameter;
+}
+
+export interface ConstructorDeclaration extends Position, Attributed {
   kind: 'constructor';
   modifiers: Modifiers;
   name: string;
@@ -301,26 +480,30 @@ export interface ConstructorDeclaration extends Position {
   startRow: number;
 }
 
-export interface DestructorDeclaration extends Position {
+export interface DestructorDeclaration extends Position, Attributed {
   kind: 'destructor';
   name: string;
   body: Block | Expression | undefined;
 }
 
-export interface FieldDeclaration extends Position {
+export interface FieldDeclaration extends Position, Attributed {
   kind: 'field';
   modifiers: Modifiers;
   type: TypeNode;
   declarators: VariableDeclarator[];
+  /** For fixed-size buffers, whether they are declared in an unsafe context. */
+  fixedBuffer?: { isUnsafe: boolean };
 }
 
-export interface Accessor extends Position {
+export interface Accessor extends Position, Attributed {
   kind: 'get' | 'set' | 'init';
   modifiers: Modifiers;
   body: Block | Expression | undefined;
+  /** Whether a property's accessor uses the `field` keyword, which gives the property a backing field (C# 14). */
+  usesField?: true;
 }
 
-export interface PropertyDeclaration extends Position {
+export interface PropertyDeclaration extends Position, Attributed {
   kind: 'property';
   modifiers: Modifiers;
   type: TypeNode;
@@ -330,43 +513,66 @@ export interface PropertyDeclaration extends Position {
   initializer: Expression | ArrayInitializer | undefined;
   /** Whether the property is written with an expression body, which makes it read-only. */
   isExpressionBodied: boolean;
+  explicitInterface?: TypeNode;
 }
 
-export interface IndexerDeclaration extends Position {
+export interface IndexerDeclaration extends Position, Attributed {
   kind: 'indexer';
   modifiers: Modifiers;
   type: TypeNode;
   parameters: Parameter[];
   accessors: Accessor[];
+  explicitInterface?: TypeNode;
 }
 
-export interface EventFieldDeclaration extends Position {
+/** An event with its own `add` and `remove` accessors, which keeps no delegate field. */
+export interface EventAccessorDeclaration extends Position, Attributed {
+  kind: 'eventAccessors';
+  modifiers: Modifiers;
+  type: TypeNode;
+  name: string;
+  add: Block | Expression | undefined;
+  remove: Block | Expression | undefined;
+  explicitInterface?: TypeNode;
+}
+
+export interface EventFieldDeclaration extends Position, Attributed {
   kind: 'event';
   modifiers: Modifiers;
   type: TypeNode;
   declarators: VariableDeclarator[];
 }
 
-export interface OperatorDeclaration extends Position {
+export interface OperatorDeclaration extends Position, Attributed {
   kind: 'operator';
   modifiers: Modifiers;
   returnType: TypeNode;
+  /** The operator's token, or `implicit` or `explicit` for a conversion operator. */
   operator: string;
+  /** Whether the operator is `checked`, which a checked context uses in place of the regular one. */
+  isChecked: boolean;
   parameters: Parameter[];
   body: Block | Expression | undefined;
   bodyRow: number;
   startRow: number;
+  /** For an operator of an extension block, the type it extends, whose operators it joins. */
+  extension?: ExtensionMember;
+  /** A generic extension block's type parameters, which its operators take as a generic method does. */
+  typeParameters?: TypeParameterDeclaration[];
+  constraints?: ConstraintClause[];
 }
 
-export interface EnumMember extends Position {
+export interface EnumMember extends Position, Attributed {
   name: string;
   value: Expression | undefined;
 }
 
-export interface TypeDeclaration extends Position {
+export interface TypeDeclaration extends Position, Attributed {
   kind: 'type';
   typeKind: 'class' | 'struct' | 'interface' | 'enum' | 'delegate';
   isRecord: boolean;
+  /** Whether a struct is a `ref struct`, whose values live only on the stack. */
+  isRefStruct: boolean;
   modifiers: Modifiers;
   name: string;
   typeParameters: TypeParameterDeclaration[];
@@ -393,6 +599,7 @@ export type MemberDeclaration =
   | PropertyDeclaration
   | IndexerDeclaration
   | EventFieldDeclaration
+  | EventAccessorDeclaration
   | OperatorDeclaration
   | TypeDeclaration;
 
@@ -403,9 +610,11 @@ export interface NamespaceDeclaration extends Position {
   members: (TypeDeclaration | NamespaceDeclaration)[];
 }
 
-export interface UsingDirective extends Position {
-  name: string[];
-}
+export type UsingDirective = (
+  | { kind: 'namespace'; name: TypeNode }
+  | { kind: 'static'; name: TypeNode }
+  | { kind: 'alias'; alias: string; name: TypeNode }
+) & { isGlobal: boolean } & Position;
 
 export interface CompilationUnit {
   usings: UsingDirective[];
@@ -414,4 +623,12 @@ export interface CompilationUnit {
   members: (TypeDeclaration | NamespaceDeclaration)[];
   /** The rows of `// atomic` annotations, which the trace uses. */
   sourceRows: number;
+  /** The compiler options that the program's `#:property` directives set; the library has none. */
+  options?: BuildOptions;
+  /** The rows that `#line` directives map the diagnostics to; the library has none. */
+  lineMap?: LineMap;
+  /** The `[assembly: ...]` and `[module: ...]` attributes. */
+  attributes?: AttributeNode[];
+  /** The rows of the `unsafe` code of a program built without `AllowUnsafeBlocks`, each an error (CS0227). */
+  unsafeRows?: number[];
 }

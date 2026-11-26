@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
+import { type Culture, isCultureInfo, providerCulture } from '../cultures';
 import { CsDecimal } from '../decimal';
 import { combineDelegates } from '../delegates';
 import { MeteredText } from '../meteredText';
@@ -34,7 +35,8 @@ import {
   unboxed,
   valuesEqual,
 } from '../objects';
-import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
+import { CsThrow, type ExceptionState, ProgramExit, type Runtime } from '../runtime';
+import { typedReferenceTarget } from '../typedReferences';
 import {
   type FieldSymbol,
   MAX_TUPLE_ARITY,
@@ -62,8 +64,20 @@ import {
   type Value,
   type VariableReference,
 } from '../values';
-import { formatValue, normalizeNumberText, parseNumber, trimNumberText } from './formatting';
+import { forwardTo, redirectionOf } from './consoleRedirection';
+import { formatValue } from './formatting';
 import { linqDisplayName } from './nativesLinq';
+import {
+  checkFloatStyles,
+  checkIntegerStyles,
+  DECIMAL_NAME,
+  NumberStyles,
+  parseDecimalText,
+  type ParseFailure,
+  parseFloatText,
+  parseIntegerText,
+  parseNatives,
+} from './numberParsing';
 import {
   arrayValues,
   evaluatorOf,
@@ -188,22 +202,45 @@ defineNatives({
   },
 });
 
+defineNatives({
+  'System.TypedReference.GetTargetType': (call, _receiver, [value]) => {
+    const target = typedReferenceTarget(value as Value);
+    return target && typeObject(call, target.type);
+  },
+  'System.TypedReference.ToObject': (call, _receiver, [value]) => {
+    const target = typedReferenceTarget(value as Value);
+    if (!target) fail('System.ArgumentNullException', 'Type in TypedReference cannot be null.', 'value');
+    return evaluatorOf(call).box(target.reference.get(), target.type);
+  },
+  'System.TypedReference.Equals': () => fail('System.NotSupportedException', 'This feature is not implemented.'),
+  // .NET hashes the referenced variable's type, whose Type object's identity hash this is.
+  'System.TypedReference.GetHashCode': (call, receiver) => {
+    const target = typedReferenceTarget(receiver);
+    return target ? identityHash(call.frame.runtime, typeObject(call, target.type)) : 0;
+  },
+});
+
 /**
  * A `System.Type` object standing for a type, which only names it: a type of the program or the library, or the full
  * name of a LINQ iterator, which stands for .NET's internal classes.
  */
-function typeObject(call: NativeCall, type: Type | string): CsObject {
-  // .NET has one `Type` object per type, so that `==` and `ReferenceEquals` compare types.
-  let objects = typeObjects.get(call.frame.runtime);
+export function typeObject(call: NativeCall, type: Type | string): CsObject {
+  return typeObjectOf(call.frame.runtime, type);
+}
+
+/** The run's one `Type` object of a type, which `GetType()` and `typeof` give, so that `==` compares types. */
+export function typeObjectOf(runtime: Runtime, type: Type | string): CsObject {
+  let objects = typeObjects.get(runtime);
   if (!objects) {
     objects = new Map();
-    typeObjects.set(call.frame.runtime, objects);
+    typeObjects.set(runtime, objects);
   }
-  const key = typeof type === 'string' ? type : runtimeTypeName(type);
+  const target = typeof type !== 'string' && type.kind === 'void' ? 'System.Void' : type;
+  const key = typeof target === 'string' ? target : runtimeTypeName(target);
   let object = objects.get(key);
   if (!object) {
-    object = new CsObject(libraryType(call, 'System.Type'), []);
-    object.native = type;
+    object = new CsObject(namedType(runtime.library.typeNamed('System.Type')), []);
+    object.native = target;
     objects.set(key, object);
   }
   return object;
@@ -211,7 +248,7 @@ function typeObject(call: NativeCall, type: Type | string): CsObject {
 
 const typeObjects = new WeakMap<object, Map<string, CsObject>>();
 
-function typeOf(receiver: Value): Type | string {
+export function typeOf(receiver: Value): Type | string {
   return (receiver as CsObject).native as Type | string;
 }
 
@@ -298,7 +335,7 @@ defineNatives({
 });
 
 /** The members of an enum in the order of their values as unsigned numbers, as `GetValues` and `GetNames` list them. */
-function enumMembers(type: NamedType): FieldSymbol[] {
+export function enumMembers(type: NamedType): FieldSymbol[] {
   return type.symbol.fields
     .filter((field) => field.isConst)
     .toSorted((a, b) => {
@@ -311,19 +348,41 @@ function unsignedValue(field: FieldSymbol): bigint {
   return BigInt.asUintN(64, BigInt(field.constantValue as number | bigint));
 }
 
-function parseEnum(call: NativeCall, text: string | undefined, ignoreCase: boolean, throws: boolean): Value {
-  const type = call.typeArgs[0] as NamedType;
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+export function parseEnum(
+  call: NativeCall,
+  text: string | undefined,
+  ignoreCase: boolean,
+  throws: boolean,
+  type = call.typeArgs[0] as NamedType
+): Value {
   if (text === undefined) {
     if (throws) failNull('value');
     return undefined;
   }
-  const trimmed = text.trim();
-  const member = type.symbol.fields.find(
-    (field) =>
-      field.isConst && (ignoreCase ? field.name.toLowerCase() === trimmed.toLowerCase() : field.name === trimmed)
-  );
-  if (member) return member.constantValue as Value;
-  if (/^[+-]?\d+$/.test(trimmed)) return Number(trimmed);
+  if (text.trim() === '') {
+    if (throws) fail('System.ArgumentException', 'Must specify valid information for parsing in the string.', 'value');
+    return undefined;
+  }
+  // .NET reads a list of names as the bitwise OR of their members, with or without `[Flags]`.
+  let combined: bigint | undefined = 0n;
+  for (const part of text.split(',')) {
+    const trimmed = part.trim();
+    const member = type.symbol.fields.find(
+      (field) =>
+        field.isConst && (ignoreCase ? field.name.toLowerCase() === trimmed.toLowerCase() : field.name === trimmed)
+    );
+    if (member) combined |= BigInt(member.constantValue as number | bigint);
+    else if (/^[+-]?\d+$/.test(trimmed)) combined |= BigInt(trimmed);
+    else {
+      combined = undefined;
+      break;
+    }
+  }
+  if (combined !== undefined) {
+    const special = (type.symbol.enumUnderlying as NamedType).symbol.special as SpecialType;
+    return special === 'long' || special === 'ulong' ? combined : Number(combined);
+  }
   if (throws) fail('System.ArgumentException', `Requested value '${text}' was not found.`);
   return undefined;
 }
@@ -335,9 +394,16 @@ const parsers: Record<string, NativeMethod> = {};
  * An integer's `ToString` with a format: .NET returns its cached text of a small number for the formats that print
  * the plain digits, which are `G` without a precision and `D` with at most one digit, and a new string for others.
  */
-function integerString(call: NativeCall, receiver: Value, format: Value, prefix: string): string | CsString {
+function integerString(
+  call: NativeCall,
+  receiver: Value,
+  format: Value,
+  prefix: string,
+  provider?: Value
+): string | CsString {
   const formatText = (format as string | undefined) ?? undefined;
-  const text = formatValue(evaluatorOf(call), unboxed(receiver), libraryType(call, prefix), formatText, call.frame);
+  const type = libraryType(call, prefix);
+  const text = formatValue(evaluatorOf(call), unboxed(receiver), type, formatText, call.frame, provider);
   return /^(?:[Gg]0*|[Dd]0*1?)?$/.test(formatText ?? '') ? call.frame.runtime.numberString(text) : text;
 }
 
@@ -366,14 +432,16 @@ for (const [name, special] of INTEGRAL) {
       rotated(bitsOf(value), (amount as number) % width, width, fromBits),
     [`${prefix}.RotateRight`]: (_call: NativeCall, _receiver: Value, [value, amount]: Value[]) =>
       rotated(bitsOf(value), (width - ((amount as number) % width)) % width, width, fromBits),
-    [`${prefix}.ToString()`]: (call: NativeCall, receiver: Value) =>
-      call.frame.runtime.numberString(String(unboxed(receiver))),
+    [`${prefix}.ToString()`]: (call: NativeCall, receiver: Value) => cultureIntegerString(call, receiver, undefined),
     [`${prefix}.ToString(string?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
       integerString(call, receiver, format, prefix),
-    [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value) =>
-      call.frame.runtime.numberString(String(unboxed(receiver))),
-    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
-      integerString(call, receiver, format, prefix),
+    [`${prefix}.ToString(IFormatProvider?)`]: (call: NativeCall, receiver: Value, [provider]: Value[]) =>
+      cultureIntegerString(call, receiver, provider),
+    [`${prefix}.ToString(string?, IFormatProvider?)`]: (
+      call: NativeCall,
+      receiver: Value,
+      [format, provider]: Value[]
+    ) => integerString(call, receiver, format, prefix, provider),
     [`${prefix}.Equals`]: (_call: NativeCall, receiver: Value, [other]: Value[]) => {
       if (other instanceof CsBox) return specialOf(other.type) === special && unboxed(receiver) === other.value;
       return unboxed(receiver) === other;
@@ -393,21 +461,16 @@ for (const [name, special] of INTEGRAL) {
       if (NARROW_INTEGRALS.has(special)) return Number(a - b);
       return a < b ? -1 : a > b ? 1 : 0;
     },
-    [`${prefix}.Parse`]: (_call: NativeCall, _receiver: Value, [text]: Value[]) => {
-      if (text === undefined) failNull('s');
-      return fromBig(parseInteger(text as string, min, max, special, true) as bigint);
-    },
-    [`${prefix}.TryParse`]: (_call: NativeCall, _receiver: Value, [text, result]: (Value | VariableReference)[]) => {
-      const parsed = text === undefined ? undefined : parseInteger(text as string, min, max, special, false);
-      refOf(result).set(fromBig(parsed ?? 0n));
-      return parsed !== undefined;
-    },
-    [`${prefix}.Abs`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
-      const integer = toBig(value);
-      if (integer === min && min < 0n)
-        fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
-      return fromBig(integer < 0n ? -integer : integer);
-    },
+    ...parseNatives(prefix, {
+      parse: (text, styles, culture) => {
+        const parsed = parseIntegerText(text, styles, culture, [min, max]);
+        return typeof parsed === 'bigint' ? fromBig(parsed) : parsed;
+      },
+      defaultStyles: NumberStyles.Integer,
+      checkStyles: checkIntegerStyles,
+      overflowName: OVERFLOW_NAMES[special] as string,
+      zero: fromBig(0n),
+    }),
     [`${prefix}.Max`]: (_call: NativeCall, _receiver: Value, [a, b]: Value[]) => (toBig(a) >= toBig(b) ? a : b),
     [`${prefix}.Min`]: (_call: NativeCall, _receiver: Value, [a, b]: Value[]) => (toBig(a) <= toBig(b) ? a : b),
     [`${prefix}.Clamp`]: (_call: NativeCall, _receiver: Value, [value, low, high]: Value[]) =>
@@ -425,16 +488,26 @@ for (const [name, special] of INTEGRAL) {
       if (a / b > max) fail('System.OverflowException', 'Arithmetic operation resulted in an overflow.');
       return new CsStruct(call.method.returnType as NamedType, [fromBig(a / b), fromBig(a % b)]);
     },
-    [`${prefix}.CopySign`]: (_call: NativeCall, _receiver: Value, [value, sign]: Value[]) => {
-      const magnitude = toBig(value) < 0n ? -toBig(value) : toBig(value);
-      const result = toBig(sign) < 0n ? -magnitude : magnitude;
-      if (result > max)
-        fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
-      return fromBig(result);
-    },
-    [`${prefix}.IsNegative`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) < 0n,
-    [`${prefix}.IsPositive`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) >= 0n,
   });
+  // The unsigned types implement these members of INumberBase only explicitly, which a program cannot call.
+  if (isSigned)
+    Object.assign(parsers, {
+      [`${prefix}.Abs`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
+        const integer = toBig(value);
+        if (integer === min)
+          fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
+        return fromBig(integer < 0n ? -integer : integer);
+      },
+      [`${prefix}.CopySign`]: (_call: NativeCall, _receiver: Value, [value, sign]: Value[]) => {
+        const magnitude = toBig(value) < 0n ? -toBig(value) : toBig(value);
+        const result = toBig(sign) < 0n ? -magnitude : magnitude;
+        if (result > max)
+          fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
+        return fromBig(result);
+      },
+      [`${prefix}.IsNegative`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) < 0n,
+      [`${prefix}.IsPositive`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) >= 0n,
+    });
 }
 defineNatives(parsers);
 
@@ -456,28 +529,6 @@ function clampInteger(value: Value, low: Value, high: Value, toBig: (value: Valu
   return value;
 }
 
-/** Parses an integer as `int.Parse` does: optional whitespace and sign, decimal digits, and a thousands-free number. */
-function parseInteger(
-  text: string,
-  min: bigint,
-  max: bigint,
-  special: SpecialType,
-  throws: boolean
-): bigint | undefined {
-  const match = /^([+-]?)(\d+)$/.exec(trimNumberText(text));
-  if (!match) {
-    if (throws) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-    return undefined;
-  }
-  const value = BigInt(`${match[1]}${match[2]}`);
-  if (value < min || value > max) {
-    if (throws)
-      fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[special]}.`);
-    return undefined;
-  }
-  return value;
-}
-
 for (const [name, special] of [
   ['Double', 'double'],
   ['Single', 'float'],
@@ -496,15 +547,23 @@ for (const [name, special] of [
         (format as string | undefined) ?? undefined,
         call.frame
       ),
-    [`${prefix}.ToString(IFormatProvider?)`]: (call, receiver) =>
-      formatValue(evaluatorOf(call), unboxed(receiver), libraryType(call, prefix), undefined, call.frame),
-    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call, receiver, [format]) =>
+    [`${prefix}.ToString(IFormatProvider?)`]: (call, receiver, [provider]) =>
+      formatValue(
+        evaluatorOf(call),
+        unboxed(receiver),
+        libraryType(call, prefix),
+        undefined,
+        call.frame,
+        provider as Value
+      ),
+    [`${prefix}.ToString(string?, IFormatProvider?)`]: (call, receiver, [format, provider]) =>
       formatValue(
         evaluatorOf(call),
         unboxed(receiver),
         libraryType(call, prefix),
         (format as string | undefined) ?? undefined,
-        call.frame
+        call.frame,
+        provider as Value
       ),
     [`${prefix}.Equals`]: (_call, receiver, [other]) => {
       const a = unboxed(receiver) as number;
@@ -521,18 +580,16 @@ for (const [name, special] of [
       if (Number.isNaN(b)) return 1;
       return a < b ? -1 : a > b ? 1 : 0;
     },
-    [`${prefix}.Parse`]: (_call, _receiver, [text]) => {
-      if (text === undefined) failNull('s');
-      const value = parseNumber(text as string);
-      if (value === undefined)
-        fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-      return round(value);
-    },
-    [`${prefix}.TryParse`]: (_call, _receiver, [text, result]) => {
-      const value = text === undefined ? undefined : parseNumber(text as string);
-      refOf(result).set(value === undefined ? 0 : round(value));
-      return value !== undefined;
-    },
+    ...parseNatives(prefix, {
+      parse: (text, styles, culture) => {
+        const parsed = parseFloatText(text, styles, culture);
+        return parsed === undefined ? 'format' : round(parsed);
+      },
+      defaultStyles: NumberStyles.FloatWithThousands,
+      checkStyles: checkFloatStyles,
+      overflowName: name,
+      zero: 0,
+    }),
     [`${prefix}.IsNaN`]: (_call, _receiver, [value]) => Number.isNaN(value),
     [`${prefix}.IsInfinity`]: (_call, _receiver, [value]) =>
       value === Number.POSITIVE_INFINITY || value === Number.NEGATIVE_INFINITY,
@@ -593,7 +650,8 @@ defineNatives({
   // The numeric conversion to decimal raises .NET's OverflowException for NaN, infinities, and values out of range.
   'System.Decimal..ctor': (call, _receiver, [value]) =>
     convertNumeric(value as NumericValue, specialOf(call.method.parameters[0].type) as SpecialType, 'decimal'),
-  'System.Decimal.ToString()': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
+  'System.Decimal.ToString()': (call, receiver) =>
+    decimalText(unboxed(receiver) as CsDecimal, providerCulture(call.frame.runtime, undefined).symbols),
   'System.Decimal.ToString(string?)': (call, receiver, [format]) =>
     formatValue(
       evaluatorOf(call),
@@ -602,14 +660,16 @@ defineNatives({
       (format as string | undefined) ?? undefined,
       call.frame
     ),
-  'System.Decimal.ToString(IFormatProvider?)': (_call, receiver) => (unboxed(receiver) as CsDecimal).toString(),
-  'System.Decimal.ToString(string?, IFormatProvider?)': (call, receiver, [format]) =>
+  'System.Decimal.ToString(IFormatProvider?)': (call, receiver, [provider]) =>
+    decimalText(unboxed(receiver) as CsDecimal, providerCulture(call.frame.runtime, provider as Value).symbols),
+  'System.Decimal.ToString(string?, IFormatProvider?)': (call, receiver, [format, provider]) =>
     formatValue(
       evaluatorOf(call),
       unboxed(receiver),
       libraryType(call, 'System.Decimal'),
       (format as string | undefined) ?? undefined,
-      call.frame
+      call.frame,
+      provider as Value
     ),
   'System.Decimal.Equals': (_call, receiver, [other]) => {
     const b = unboxed(other as Value);
@@ -622,17 +682,13 @@ defineNatives({
     if (!(value instanceof CsDecimal)) fail('System.ArgumentException', 'Object must be of type Decimal.');
     return (unboxed(receiver) as CsDecimal).compare(value);
   },
-  'System.Decimal.Parse': (_call, _receiver, [text]) => {
-    if (text === undefined) failNull('s');
-    const parsed = parseDecimal(text as string);
-    if (!parsed) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-    return parsed;
-  },
-  'System.Decimal.TryParse': (_call, _receiver, [text, result]) => {
-    const parsed = text === undefined ? undefined : parseDecimal(text as string);
-    refOf(result).set(parsed ?? CsDecimal.ZERO);
-    return parsed !== undefined;
-  },
+  ...parseNatives('System.Decimal', {
+    parse: parseDecimalText,
+    defaultStyles: NumberStyles.Number,
+    checkStyles: checkFloatStyles,
+    overflowName: DECIMAL_NAME,
+    zero: CsDecimal.ZERO,
+  }),
   'System.Decimal.Abs': (_call, _receiver, [value]) => {
     const decimal = value as CsDecimal;
     return decimal.isNegative ? decimal.negate() : decimal;
@@ -712,12 +768,6 @@ defineNativesKeepingStrings({
     ),
 });
 
-/** Parses a decimal as `decimal.Parse` does, whose number style allows group separators but no exponent. */
-function parseDecimal(text: string): CsDecimal | undefined {
-  const normalized = normalizeNumberText(text, false);
-  return normalized === undefined ? undefined : CsDecimal.parse(normalized);
-}
-
 // ---- Math ----
 
 function checkDecimals(digits: number): number {
@@ -772,7 +822,7 @@ function mathMin(a: number, b: number): number {
 const POWERS_OF_TEN = Array.from({ length: 16 }, (_unused, index) => 10 ** index);
 
 /** `Math.Round(double, digits, mode)`, which .NET computes by scaling by a power of ten. */
-function roundDouble(value: number, digits: number, mode: number): number {
+export function roundDouble(value: number, digits: number, mode: number): number {
   if (digits < 0 || digits > 15)
     fail('System.ArgumentOutOfRangeException', 'Rounding digits must be between 0 and 15, inclusive.', 'digits');
   if (Math.abs(value) >= 1e16) return value;
@@ -979,9 +1029,12 @@ defineNativesKeepingStrings({
     radixText(call, BigInt(value as number), base as number, 16),
   'System.Convert.ToString(byte, int)': (call, _receiver, [value, base]) =>
     radixText(call, BigInt(value as number), base as number, 8),
-  // `ToString()` of the value, as the object it returns.
-  'System.Convert.ToString': (call, _receiver, [value]) =>
-    toStringValue(evaluatorOf(call), value as Value, parameterType(call, 0), call.frame),
+  // `ToString()` of the value, as the object it returns, or `ToString(provider)` with a culture of its own.
+  'System.Convert.ToString': (call, _receiver, [value, provider]) => {
+    const type = parameterType(call, 0);
+    if (!isCultureInfo(provider as Value)) return toStringValue(evaluatorOf(call), value as Value, type, call.frame);
+    return freshString(formatValue(evaluatorOf(call), value as Value, type, undefined, call.frame, provider as Value));
+  },
 });
 
 /** The digits of an integer in a base, of which base 10 is `ToString()` and its cached text of a small number. */
@@ -992,13 +1045,18 @@ function radixText(call: NativeCall, value: bigint, base: number, bits: number):
 }
 
 function convertTo(call: NativeCall, args: (Value | VariableReference)[], target: SpecialType): Value {
-  const [value, fromBase] = args as Value[];
+  const [value, second] = args as Value[];
+  const takesProvider = call.method.parameters[1]?.name === 'provider';
+  const fromBase = takesProvider ? undefined : second;
   const declared = specialOf(parameterType(call, 0));
   const isUntyped = declared === 'object' || declared === undefined;
   if (isUntyped && value === undefined) return zeroOf(target);
   const { source, inner } = isUntyped ? convertibleOf(call, value) : { source: declared, inner: value };
   checkConvertible(source, target);
-  if (source === 'string') return convertString(inner as string | undefined, fromBase, target);
+  if (source === 'string') {
+    const culture = providerCulture(call.frame.runtime, takesProvider ? second : undefined);
+    return convertString(inner as string | undefined, fromBase, target, culture);
+  }
   if (source === 'bool') return boolNumber(inner as boolean, target);
   if (isIntegral(target)) {
     if (source === 'double' || source === 'float') return floatToInteger(inner as number, target);
@@ -1047,26 +1105,33 @@ function convertibleOf(call: NativeCall, value: Value): { source: SpecialType; i
   );
 }
 
-function convertString(text: string | undefined, fromBase: Value, target: SpecialType): Value {
+function convertString(text: string | undefined, fromBase: Value, target: SpecialType, culture: Culture): Value {
   if (text === undefined) {
     if (target === 'char') fail('System.ArgumentNullException', 'Value cannot be null.', 'value');
     return zeroOf(target);
   }
   if (fromBase !== undefined) return parseRadix(text, fromBase as number, target);
-  if (!isIntegral(target)) return parseNonIntegral(text, target);
   if (target === 'char') {
     if (text.length !== 1) fail('System.FormatException', 'String must be exactly one character long.');
     return text.charCodeAt(0);
   }
-  const [min, max] = integerRange(target);
-  const parsed = parseInteger(text, min, max, target, true) as bigint;
-  return isBigIntKind(target) ? parsed : Number(parsed);
+  const parsed = parseText(text, target, culture);
+  if (parsed === 'format') fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
+  if (parsed === 'overflow') {
+    if (target === 'decimal')
+      fail('System.OverflowException', `Value was either too large or too small for ${DECIMAL_NAME}.`);
+    overflowFor(target);
+  }
+  if (target === 'float') return Math.fround(parsed as number);
+  return typeof parsed === 'bigint' && !isBigIntKind(target) ? Number(parsed) : parsed;
 }
 
-function parseNonIntegral(text: string, target: SpecialType): Value {
-  const parsed = target === 'decimal' ? parseDecimal(text) : parseNumber(text);
-  if (parsed === undefined) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-  return target === 'float' ? Math.fround(parsed as number) : parsed;
+/** A string's number as `Parse` of the target type reads it in its default style. */
+function parseText(text: string, target: SpecialType, culture: Culture): NumericValue | ParseFailure {
+  if (target === 'decimal') return parseDecimalText(text, NumberStyles.Number, culture);
+  if (target === 'double' || target === 'float')
+    return parseFloatText(text, NumberStyles.FloatWithThousands, culture) ?? 'format';
+  return parseIntegerText(text, NumberStyles.Integer, culture, integerRange(target));
 }
 
 function boolNumber(value: boolean, target: SpecialType): Value {
@@ -1145,7 +1210,8 @@ function parseRadix(text: string, base: number, target: SpecialType): Value {
 // ---- Console and TextWriter ----
 
 /** Writes what `Write` and `WriteLine` print for their argument types and composite formats. */
-function writeText(call: NativeCall, args: Value[]): string {
+/** The text that a `Write` overload writes for its arguments, as Console and TextWriter format it. */
+export function writeText(call: NativeCall, args: Value[]): string {
   const parameters = call.method.parameters;
   if (args.length === 0) return '';
   if (parameters.length >= 2 && specialOf(parameters[0].type) === 'string' && parameters[0].name === 'format') {
@@ -1192,7 +1258,8 @@ function textOfChars(chars: readonly Value[]): string {
 export function compositeFormat(
   call: NativeCall,
   format: string | undefined,
-  args: { value: Value; type: Type }[]
+  args: { value: Value; type: Type }[],
+  provider?: Value
 ): string {
   if (format === undefined) failNull('format');
   const evaluator = evaluatorOf(call);
@@ -1205,16 +1272,29 @@ export function compositeFormat(
     }
     const arg = args[part.index];
     if (!arg) throw FORMAT_INDEX();
-    text.append(evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame));
+    text.append(evaluator.formatHole(arg.value, arg.type, part.format, part.alignment, call.frame, provider));
   }
   return text.toString();
 }
 
-import { FORMAT_INDEX_ERROR as FORMAT_INDEX, parseCompositeFormat as parseFormat } from '../format';
+import {
+  decimalText,
+  FORMAT_INDEX_ERROR as FORMAT_INDEX,
+  integerText,
+  parseCompositeFormat as parseFormat,
+} from '../format';
+
+/** An integer's `ToString()` or `ToString(provider)`, with the culture's negative sign. */
+function cultureIntegerString(call: NativeCall, receiver: Value, provider: Value): string | CsString {
+  const value = unboxed(receiver) as number | bigint;
+  return call.frame.runtime.numberString(integerText(value, providerCulture(call.frame.runtime, provider).symbols));
+}
 
 const writers =
   (stream: 'stdout' | 'stderr', newline: boolean): NativeMethod =>
   (call, _receiver, args) => {
+    const redirected = stream === 'stdout' ? redirectionOf(call).out : undefined;
+    if (redirected) return forwardTo(call, redirected, 'System.IO.TextWriter', args);
     const text = writeText(call, args as Value[]) + (newline ? '\n' : '');
     call.frame.runtime.io[stream].write(text);
     return;
@@ -1223,14 +1303,6 @@ const writers =
 defineNatives({
   'System.Console.Write': writers('stdout', false),
   'System.Console.WriteLine': writers('stdout', true),
-  'System.Console.get_Out': (call) => textWriter(call, 'stdout'),
-  'System.Console.get_Error': (call) => textWriter(call, 'stderr'),
-  'System.IO.TextWriter.Write': (call, receiver, args) =>
-    writers((receiver as CsObject).native as 'stdout', false)(call, receiver, args),
-  'System.IO.TextWriter.WriteLine': (call, receiver, args) =>
-    writers((receiver as CsObject).native as 'stdout', true)(call, receiver, args),
-  'System.IO.TextWriter.Flush': () => {},
-  'System.IO.TextWriter.Dispose': () => {},
   'System.Environment.Exit': (_call, _receiver, [code]) => {
     throw new ProgramExit(code as number);
   },
@@ -1242,28 +1314,18 @@ defineNativesKeepingStrings({
   'System.Environment.get_NewLine': () => '\n',
 });
 
-const textWriters = new WeakMap<object, Record<string, CsObject>>();
-
-function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
-  const runtime = call.frame.runtime;
-  let writers = textWriters.get(runtime);
-  if (!writers) {
-    writers = {};
-    textWriters.set(runtime, writers);
-  }
-  let writer = writers[stream];
-  if (!writer) {
-    writer = new CsObject(libraryType(call, 'System.IO.TextWriter'), []);
-    writer.native = stream;
-    writers[stream] = writer;
-  }
-  return writer;
-}
+defineNatives({
+  'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute..ctor': (_call, receiver, [priority]) => {
+    (receiver as CsObject).native = priority;
+  },
+  'System.Runtime.CompilerServices.OverloadResolutionPriorityAttribute.get_Priority': (_call, receiver) =>
+    (receiver as CsObject).native as number,
+});
 
 // ---- Exceptions ----
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
-const exceptionConstructor: NativeMethod = (call, receiver, args) => {
+export const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);
   const state: ExceptionState = {
@@ -1278,6 +1340,7 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
       state.messageString = value;
     }
     if (name === 'innerException') state.inner = value as CsObject | undefined;
+    if (name === 'fileName' && isString(value)) state.fileName = stringText(value);
     if (name === 'paramName' && isString(value)) {
       state.paramName = stringText(value);
       state.paramNameString = value;
@@ -1311,8 +1374,21 @@ function messageString(exception: CsObject): string | CsString {
   return state.messageString;
 }
 
+/** `TargetInvocationException`'s constructors, whose inner exception .NET names `inner`. */
+const targetInvocationConstructor: NativeMethod = (_call, receiver, args) => {
+  const [message, inner] = args.length === 1 ? [undefined, args[0]] : args;
+  const state: ExceptionState = { message: undefined, inner: inner as CsObject | undefined, wasThrown: false };
+  if (isString(message as Value)) {
+    state.message = stringText(message as CsString);
+    state.messageString = message as CsString;
+  }
+  (receiver as CsObject).native = state;
+  return;
+};
+
 defineNativesKeepingStrings({
   'System.Exception..ctor': exceptionConstructor,
+  'System.Reflection.TargetInvocationException..ctor': targetInvocationConstructor,
   'System.Exception.get_Message': (_call, receiver) => messageString(receiver as CsObject),
   'System.ArgumentException.get_Message': (_call, receiver) => messageString(receiver as CsObject),
   'System.ArgumentOutOfRangeException.get_Message': (_call, receiver) => messageString(receiver as CsObject),

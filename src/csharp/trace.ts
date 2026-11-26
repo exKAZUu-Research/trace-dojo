@@ -7,6 +7,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/trace';
 import { type CompiledProgram, compileProgram } from './compiler';
+import { INVARIANT } from './cultures';
 import { CsDecimal } from './decimal';
 import { Evaluator } from './evaluator';
 import { runProgram } from './execute';
@@ -14,11 +15,13 @@ import { formatFloat } from './format';
 import type { EnumerableState } from './library/iteration';
 import { enumText, exceptionMessage, isExceptionState } from './objects';
 import { parseCSharp } from './parse';
+import { CsPointer } from './pointers';
 import { type Frame, type NativeState, Runtime } from './runtime';
 import {
   type ArrayType,
   baseTypeOf,
   type FieldSymbol,
+  isDynamicType,
   type NamedType,
   nullableUnderlying,
   substitute,
@@ -189,11 +192,18 @@ function addVariable(variables: TraceVariables, name: string, value: Value, type
 
 function addThis(variables: TraceVariables, self: CsObject | CsStruct): void {
   for (const [field, type] of instanceFields(self)) {
-    const scalar = scalarOf(self.fields[field.slot], type);
+    const scalar = scalarOf(fieldValueOf(self, field), type);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${field.property?.name ?? field.name}`] = scalar;
   }
   const node = displayNodeOf(self, self.type, new Set());
   if (node) variables.referenceVars.this = node;
+}
+
+/** A field's value, which for a ref field is the value of the variable it refers to, or none for a null one. */
+function fieldValueOf(self: CsObject | CsStruct, field: FieldSymbol): Value {
+  const value = self.fields[field.slot];
+  if (!field.byRef) return value;
+  return isReference(value) ? value.get() : undefined;
 }
 
 /**
@@ -209,6 +219,7 @@ function instanceFields(self: CsObject | CsStruct): [FieldSymbol, Type][] {
     const own = type.symbol.fields.filter(
       (field) =>
         !field.isStatic &&
+        !field.eventAccessors &&
         !(field.isPrimaryParameter && !field.property) &&
         (!field.name.startsWith('<') || field.property !== undefined)
     );
@@ -226,6 +237,8 @@ const NOT_SCALAR = Symbol('notScalar');
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;
   if (value instanceof CsBox) return scalarOf(value.value, value.type);
+  // A pointer shows its virtual address, as the hexadecimal text a debugger shows.
+  if (value instanceof CsPointer) return shownText(value.text);
   // A null variable shows no value, as a null String in the Java interpreter's traces; arrays show null elements.
   if (value === undefined) return NOT_SCALAR;
   if (underlying.kind === 'array') {
@@ -241,6 +254,8 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     ) as TraceItemVariable[string];
   }
   if (underlying.kind !== 'named') return NOT_SCALAR;
+  // A `dynamic` variable shows its value as an `object` variable does.
+  if (isDynamicType(underlying) && isString(value)) return shownText(stringText(value));
   if (underlying.symbol.kind === 'enum') return shownText(enumText(underlying, value));
   switch (underlying.symbol.special) {
     case 'bool': {
@@ -272,7 +287,7 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     case 'float': {
       // A float shows its own shortest digits, as .NET prints `1.1f` as 1.1, not the double it widens to.
       const number = value as number;
-      return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true)) : number;
+      return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true, INVARIANT)) : number;
     }
     case 'object': {
       return isString(value) ? shownText(stringText(value)) : NOT_SCALAR;
@@ -335,7 +350,12 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   if (value === undefined) return NULL_NODE;
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && !Array.isArray(scalar)) return { kind: 'value', value: scalar as TraceScalar };
-  if (typeof value !== 'object' || value instanceof CsDecimal || value instanceof CsString)
+  if (
+    typeof value !== 'object' ||
+    value instanceof CsDecimal ||
+    value instanceof CsString ||
+    value instanceof CsPointer
+  )
     return { kind: 'value', value: shownText(String(value)) };
   if (seen.has(value)) return undefined;
   if (value instanceof CsObject && value.turtle) return turtleNodeOf(value.turtle);
@@ -360,7 +380,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     if (value instanceof CsObject && isExceptionState(value.native))
       entries.Message = { kind: 'value', value: shownText(exceptionMessage(value)) };
     for (const [field, fieldType] of instanceFields(value)) {
-      const node = displayNodeOf(value.fields[field.slot], fieldType, seen);
+      const node = displayNodeOf(fieldValueOf(value, field), fieldType, seen);
       if (node) entries[field.property?.name ?? field.name] = node;
     }
     return { kind: 'object', entries };

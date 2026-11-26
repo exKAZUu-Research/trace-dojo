@@ -1,4 +1,4 @@
-import type { BoundDeconstructTarget, BoundExpression, BoundLValue, BoundPattern } from './bound';
+import type { BoundDeconstruct, BoundDeconstructTarget, BoundExpression, BoundLValue, BoundPattern } from './bound';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { EvaluatorBase, NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
@@ -66,7 +66,32 @@ export abstract class PatternMatcher extends EvaluatorBase {
       case 'recursive': {
         return this.matchesRecursive(pattern, value, frame);
       }
+      case 'list': {
+        return this.matchesList(pattern, value, frame);
+      }
     }
+  }
+
+  /** Matches a list pattern: a value of the length it needs whose elements, and slice, match their patterns. */
+  private matchesList(pattern: Extract<BoundPattern, { kind: 'list' }>, value: Value, frame: Frame): boolean {
+    if (value === undefined) return false;
+    this.storeLocal(frame, pattern.list, value);
+    const length = this.evaluate(pattern.length, frame) as number;
+    const fixed = pattern.before.length + pattern.after.length;
+    if (pattern.hasSlice ? length < fixed : length !== fixed) return false;
+    const elementMatches = (sub: BoundPattern, index: number): boolean => {
+      this.storeLocal(frame, pattern.index, index);
+      return this.matches(sub, this.evaluate(pattern.element, frame), frame);
+    };
+    if (!pattern.before.every((sub, index) => elementMatches(sub, index))) return false;
+    if (!pattern.after.every((sub, index) => elementMatches(sub, length - pattern.after.length + index))) return false;
+    if (pattern.slice) {
+      this.storeLocal(frame, pattern.start, pattern.before.length);
+      this.storeLocal(frame, pattern.end, length - pattern.after.length);
+      if (!this.matches(pattern.slice.pattern, this.evaluate(pattern.slice.value, frame), frame)) return false;
+    }
+    if (pattern.local) this.storeLocal(frame, pattern.local, value);
+    return true;
   }
 
   private matchesConstant(pattern: Extract<BoundPattern, { kind: 'constant' }>, value: Value, frame: Frame): boolean {
@@ -165,7 +190,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
     }
     const elements = pattern.isTuple
       ? (target as CsStruct).fields
-      : this.deconstructedElements(pattern.deconstruct as MethodSymbol, target, pattern.positional.length, frame);
+      : this.deconstructedElements(pattern.deconstruct as BoundDeconstruct, target, pattern.positional.length, frame);
     return pattern.positional.every((sub, index) => this.matches(sub, elements[index], frame));
   }
 
@@ -225,7 +250,7 @@ export abstract class PatternMatcher extends EvaluatorBase {
   }
 
   /** The values that a `Deconstruct` method gives through its `out` parameters. */
-  private deconstructedElements(deconstruct: MethodSymbol, target: Value, count: number, frame: Frame): Value[] {
+  private deconstructedElements(deconstruct: BoundDeconstruct, target: Value, count: number, frame: Frame): Value[] {
     const cells = Array.from({ length: count }, () => new Cell(undefined));
     const references = cells.map(
       (cell) =>
@@ -234,15 +259,22 @@ export abstract class PatternMatcher extends EvaluatorBase {
           (stored) => (cell.value = stored)
         )
     );
-    const method = this.runtime.dispatch(deconstruct, target);
-    this.invoke(
-      frame,
-      method,
-      target,
-      references,
-      undefined,
-      this.environmentFor(method, this.runtime.runtimeTypeOf(target))
-    );
+    const { method: declared, typeArgs } = deconstruct;
+    if (declared.isStatic) {
+      // An extension method takes the value as its first argument.
+      const environment = this.staticEnvironment(declared, typeArgs, frame);
+      this.invoke(frame, declared, undefined, [target, ...references], undefined, environment);
+    } else {
+      const method = this.runtime.dispatch(declared, target);
+      this.invoke(
+        frame,
+        method,
+        target,
+        references,
+        undefined,
+        this.environmentFor(method, this.runtime.runtimeTypeOf(target))
+      );
+    }
     return cells.map((cell) => cell.value as Value);
   }
 }

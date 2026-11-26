@@ -6,6 +6,8 @@ import { CompileError } from '../interpreter/diagnostics';
 import type {
   Argument,
   ArrayInitializer,
+  Attributed,
+  AttributeNode,
   Block,
   CollectionElement,
   Designation,
@@ -26,43 +28,51 @@ import {
   field,
   fieldChildren,
   hasToken,
+  identifierText,
+  inUnsafeContext,
   namedChildren,
   positionOf,
   requiredField,
   sameNode,
   unescape,
   unsupported,
+  withoutVerbatimPrefix,
 } from './convertBase';
 
-/** The syntax of each stage C or D expression node, named for learners. */
-const UNSUPPORTED_EXPRESSIONS: Record<string, string> = {
-  alias_qualified_name: '`global::` などの別名で修飾した名前',
-  anonymous_method_expression: '`delegate` による匿名メソッド',
-  checked_expression: '`checked`・`unchecked` 式',
-  makeref_expression: '`__makeref`',
-  reftype_expression: '`__reftype`',
-  refvalue_expression: '`__refvalue`',
-  range_expression: '範囲（`..`）',
-  ref_expression: '`ref` 式',
-  sizeof_expression: '`sizeof`',
-  typeof_expression: '`typeof`',
-  await_expression: '`await`',
-  stackalloc_expression: '`stackalloc`',
-  implicit_stackalloc_expression: '`stackalloc`',
-  preproc_if: 'プリプロセッサ ディレクティブ（`#if` など）',
-};
+const UNSUPPORTED_TYPES: Record<string, string> = {};
 
-const UNSUPPORTED_TYPES: Record<string, string> = {
-  alias_qualified_name: '`global::` などの別名で修飾した名前',
-  pointer_type: 'ポインター型',
-  function_pointer_type: '関数ポインター型',
-  ref_type: '`ref` 型',
-  scoped_type: '`scoped`',
-};
+/** The keywords that name types, which the grammar reads as names after `scoped`. */
+const PREDEFINED_TYPE_NAMES = new Set([
+  'bool',
+  'byte',
+  'char',
+  'decimal',
+  'double',
+  'dynamic',
+  'float',
+  'int',
+  'long',
+  'nint',
+  'nuint',
+  'object',
+  'sbyte',
+  'short',
+  'string',
+  'uint',
+  'ulong',
+  'ushort',
+]);
 
 export class ExpressionConverter {
   /** @param isLibrary Whether the source is this grader's own library declarations, which use more syntax. */
-  constructor(protected readonly isLibrary: boolean) {}
+  /** @param allowsUnsafe Whether the program is built with `AllowUnsafeBlocks`, without which `unsafe` is an error. */
+  constructor(
+    protected readonly isLibrary: boolean,
+    protected readonly allowsUnsafe = false
+  ) {}
+
+  /** While a property's accessor is being converted, how many `field` keywords it uses; otherwise undefined. */
+  protected fieldKeywordUses: number | undefined;
 
   /** Converts the body of a block, provided by the statement converter. */
   protected convertBlockNode(_node: Node): Block {
@@ -70,6 +80,7 @@ export class ExpressionConverter {
   }
 
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   convertType(node: Node): TypeNode {
     const position = positionOf(node);
     switch (node.type) {
@@ -80,17 +91,21 @@ export class ExpressionConverter {
         return { kind: 'varType', ...position };
       }
       case 'identifier': {
-        return { kind: 'namedType', name: node.text, typeArgs: undefined, ...position };
+        return { kind: 'namedType', name: identifierText(node), typeArgs: undefined, ...position };
       }
       case 'generic_name': {
         const [name, args] = this.genericParts(node);
+        // `List<>` and `Dictionary<,>` leave their type arguments out, which only `typeof` allows.
+        const unbound = unboundArityOf(node);
+        if (unbound.unboundArity !== undefined)
+          return { kind: 'namedType', name, typeArgs: undefined, ...unbound, ...position };
         return { kind: 'namedType', name, typeArgs: args, ...position };
       }
       case 'qualified_name': {
         const left = this.convertType(requiredField(node, 'qualifier'));
         const nameNode = requiredField(node, 'name');
         const [name, typeArgs] =
-          nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
+          nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
         return { kind: 'qualifiedType', left, name, typeArgs, ...position };
       }
       case 'array_type': {
@@ -116,15 +131,55 @@ export class ExpressionConverter {
         }
         return type;
       }
+      case 'alias_qualified_name': {
+        return { kind: 'aliasQualifiedType', ...this.aliasQualifiedParts(node), ...position };
+      }
       case 'nullable_type': {
         return { kind: 'nullableType', inner: this.convertType(requiredField(node, 'type')), ...position };
       }
       case 'tuple_type': {
         const elements = namedChildren(node).map((element) => ({
           type: this.convertType(requiredField(element, 'type')),
-          name: field(element, 'name')?.text,
+          name: identifierText(field(element, 'name')),
         }));
         return { kind: 'tupleType', elements, ...position };
+      }
+      case 'ref_type': {
+        return {
+          kind: 'refType',
+          type: this.convertType(requiredField(node, 'type')),
+          isReadonly: hasToken(node, 'readonly'),
+          ...position,
+        };
+      }
+      case 'pointer_type': {
+        return {
+          kind: 'pointerType',
+          element: this.convertType(requiredField(node, 'type')),
+          isUnsafe: this.isLibrary || inUnsafeContext(node),
+          ...position,
+        };
+      }
+      case 'function_pointer_type': {
+        const convention = namedChildren(node).find((child) => child.type === 'calling_convention');
+        if (convention && convention.text !== 'managed') unsupported(node, 'アンマネージ関数ポインター');
+        return {
+          kind: 'functionPointerType',
+          parameters: namedChildren(node)
+            .filter((child) => child.type === 'function_pointer_parameter')
+            .map((child) => this.convertType(requiredField(child, 'type'))),
+          returnType: this.convertType(requiredField(node, 'returns')),
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
+      }
+      case 'scoped_type': {
+        // A declaration reads its `scoped`. The grammar reads a keyword type after it, as `scoped int`, as a name.
+        const inner = requiredField(node, 'type');
+        if (inner.type === 'identifier' && inner.text === 'var') return { kind: 'varType', ...positionOf(inner) };
+        if (inner.type === 'identifier' && PREDEFINED_TYPE_NAMES.has(inner.text))
+          return { kind: 'predefinedType', name: inner.text, ...positionOf(inner) };
+        return this.convertType(inner);
       }
       default: {
         const what = UNSUPPORTED_TYPES[node.type];
@@ -134,9 +189,54 @@ export class ExpressionConverter {
     }
   }
 
+  protected aliasQualifiedParts(node: Node): { alias: string; name: string; typeArgs: TypeNode[] | undefined } {
+    const nameNode = requiredField(node, 'name');
+    const [name, typeArgs] =
+      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
+    return { alias: identifierText(requiredField(node, 'alias')), name, typeArgs };
+  }
+
+  /** The attributes of a declaration's attribute lists, as a property to spread into its syntax, if it has any. */
+  protected attributed(node: Node): Attributed {
+    const attributes = namedChildren(node)
+      .filter((child) => child.type === 'attribute_list')
+      .flatMap((list) => this.convertAttributeList(list));
+    return attributes.length > 0 ? { attributes } : {};
+  }
+
+  protected convertAttributeList(list: Node): AttributeNode[] {
+    const target = namedChildren(list).find((child) => child.type === 'attribute_target_specifier');
+    const targetName = target ? childrenOf(target)[0].text : undefined;
+    return namedChildren(list)
+      .filter((child) => child.type === 'attribute')
+      .map((attribute) => this.convertAttribute(attribute, targetName));
+  }
+
+  protected convertAttribute(node: Node, target: string | undefined): AttributeNode {
+    const args: Argument[] = [];
+    const assignments: AttributeNode['assignments'] = [];
+    const list = namedChildren(node).find((child) => child.type === 'attribute_argument_list');
+    for (const arg of list ? namedChildren(list) : []) {
+      const nameNode = field(arg, 'name');
+      const valueNode = namedChildren(arg).find((child) => !sameNode(child, nameNode)) as Node;
+      const value = this.convertExpression(valueNode);
+      if (nameNode && hasToken(arg, '='))
+        assignments.push({ name: identifierText(nameNode), value, ...positionOf(nameNode) });
+      else
+        args.push({
+          name: identifierText(nameNode),
+          modifier: undefined,
+          value,
+          text: valueNode.text,
+          ...positionOf(arg),
+        });
+    }
+    return { name: this.convertType(requiredField(node, 'name')), args, assignments, target, ...positionOf(node) };
+  }
+
   protected genericParts(node: Node): [string, TypeNode[]] {
     const [nameNode, argsNode] = namedChildren(node);
-    return [nameNode.text, namedChildren(argsNode).map((arg) => this.convertType(arg))];
+    return [identifierText(nameNode), namedChildren(argsNode).map((arg) => this.convertType(arg))];
   }
 
   convertExpression(node: Node): Expression {
@@ -154,8 +254,8 @@ export class ExpressionConverter {
     const position = positionOf(node);
     switch (node.type) {
       case 'parenthesized_expression': {
-        const [inner] = namedChildren(node);
-        return this.convertExpression(inner);
+        const inner = this.convertExpression(namedChildren(node)[0]);
+        return inner.kind === 'stackalloc' ? { ...inner, isParenthesized: true } : inner;
       }
       case 'integer_literal':
       case 'real_literal':
@@ -171,14 +271,21 @@ export class ExpressionConverter {
         return { kind: 'interpolated', parts: this.convertInterpolated(node), ...position };
       }
       case 'identifier': {
-        return { kind: 'name', name: node.text, typeArgs: undefined, ...position };
+        if (node.text === 'field' && this.fieldKeywordUses !== undefined) {
+          this.fieldKeywordUses++;
+          return { kind: 'name', name: node.text, typeArgs: undefined, isFieldKeyword: true, ...position };
+        }
+        return { kind: 'name', name: identifierText(node), typeArgs: undefined, ...position };
       }
       case 'generic_name': {
         const [name, typeArgs] = this.genericParts(node);
-        return { kind: 'name', name, typeArgs, ...position };
+        return { kind: 'name', name, typeArgs, ...unboundArityOf(node), ...position };
       }
       case 'predefined_type': {
         return { kind: 'predefinedTypeName', name: node.text, ...position };
+      }
+      case 'alias_qualified_name': {
+        return { kind: 'aliasQualified', ...this.aliasQualifiedParts(node), ...position };
       }
       case 'this': {
         return { kind: 'this', ...position };
@@ -191,16 +298,13 @@ export class ExpressionConverter {
         return { kind: 'default', type: typeNode ? this.convertType(typeNode) : undefined, ...position };
       }
       case 'declaration_expression': {
-        return {
-          kind: 'declaration',
-          type: this.convertType(requiredField(node, 'type')),
-          designation: {
-            kind: 'single',
-            name: requiredField(node, 'name').text,
-            ...positionOf(requiredField(node, 'name')),
-          },
-          ...position,
-        };
+        const name = requiredField(node, 'name');
+        // `out var _` and `(var _, var y) = ...` discard; only a local declaration `var _ = 1;` names a variable `_`.
+        const designation: Designation =
+          name.text === '_'
+            ? { kind: 'discard', ...positionOf(name) }
+            : { kind: 'single', name: identifierText(name), ...positionOf(name) };
+        return { kind: 'declaration', type: this.convertType(requiredField(node, 'type')), designation, ...position };
       }
       case 'tuple_expression': {
         return { kind: 'tuple', elements: namedChildren(node).map((arg) => this.convertArgument(arg)), ...position };
@@ -224,7 +328,11 @@ export class ExpressionConverter {
       }
       case 'member_access_expression': {
         const targetNode = requiredField(node, 'expression');
-        const target = this.convertOperand(targetNode);
+        const operand = this.convertOperand(targetNode);
+        // `p->X` is `(*p).X`.
+        const target: Expression = childrenOf(node).some((child) => child.type === '->')
+          ? { kind: 'deref', operand, isUnsafe: inUnsafeContext(node), ...position }
+          : operand;
         return this.memberAccess(target, requiredField(node, 'name'), position);
       }
       case 'member_binding_expression': {
@@ -416,11 +524,50 @@ export class ExpressionConverter {
     }
   }
 
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private convertOtherExpression(node: Node): Expression {
     const position = positionOf(node);
     switch (node.type) {
       case 'lambda_expression': {
         return this.convertLambda(node);
+      }
+      case 'anonymous_method_expression': {
+        return this.convertAnonymousMethod(node);
+      }
+      case 'await_expression': {
+        return { kind: 'await', operand: this.convertExpression(namedChildren(node)[0]), ...position };
+      }
+      case 'typeof_expression': {
+        return { kind: 'typeof', type: this.convertType(requiredField(node, 'type')), ...position };
+      }
+      case 'sizeof_expression': {
+        return {
+          kind: 'sizeof',
+          type: this.convertType(requiredField(node, 'type')),
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
+      }
+      case 'range_expression': {
+        const children = childrenOf(node);
+        const dots = children.findIndex((child) => child.type === '..');
+        const start = children.slice(0, dots).find((child) => child.isNamed);
+        const end = children.slice(dots + 1).find((child) => child.isNamed);
+        return {
+          kind: 'range',
+          start: start ? this.convertExpression(start) : undefined,
+          end: end ? this.convertExpression(end) : undefined,
+          ...position,
+        };
+      }
+      case 'checked_expression': {
+        return {
+          kind: 'checked',
+          isChecked: hasToken(node, 'checked'),
+          operand: this.convertExpression(namedChildren(node)[0]),
+          ...position,
+        };
       }
       case 'switch_expression': {
         return this.convertSwitchExpression(node);
@@ -432,10 +579,42 @@ export class ExpressionConverter {
       case 'query_expression': {
         return { kind: 'query', clauses: this.convertQuery(node), ...position };
       }
+      case 'stackalloc_expression':
+      case 'implicit_stackalloc_expression': {
+        const arrayType = field(node, 'type');
+        const rank = arrayType ? field(arrayType, 'rank') : undefined;
+        const lengthNode = rank ? namedChildren(rank)[0] : undefined;
+        const initializer = namedChildren(node).find((child) => child.type === 'initializer_expression');
+        return {
+          kind: 'stackalloc',
+          elementType: arrayType ? this.convertType(requiredField(arrayType, 'type')) : undefined,
+          count: lengthNode ? this.convertExpression(lengthNode) : undefined,
+          initializer: initializer
+            ? namedChildren(initializer).map((value) => this.convertExpression(value))
+            : undefined,
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
+      }
+      case 'ref_expression': {
+        const [operand] = namedChildren(node);
+        return { kind: 'refExpression', operand: this.convertExpression(operand), ...position };
+      }
+      case 'makeref_expression':
+      case 'reftype_expression': {
+        const [operand] = namedChildren(node);
+        const kind = node.type === 'makeref_expression' ? 'makeRef' : 'refType';
+        return { kind, operand: this.convertExpression(operand), ...position };
+      }
+      case 'refvalue_expression': {
+        return {
+          kind: 'refValue',
+          operand: this.convertExpression(requiredField(node, 'value')),
+          type: this.convertType(requiredField(node, 'type')),
+          ...position,
+        };
+      }
       default: {
-        const what = UNSUPPORTED_EXPRESSIONS[node.type];
-        if (what) unsupported(node, what);
-        if (node.type === 'unary_expression') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
       }
     }
@@ -448,8 +627,17 @@ export class ExpressionConverter {
 
   private memberAccess(target: Expression, nameNode: Node, position: ReturnType<typeof positionOf>): Expression {
     const [name, typeArgs] =
-      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [nameNode.text, undefined];
-    return { kind: 'memberAccess', target, name, typeArgs, nameRow: nameNode.startPosition.row, ...position };
+      nameNode.type === 'generic_name' ? this.genericParts(nameNode) : [identifierText(nameNode), undefined];
+    return {
+      kind: 'memberAccess',
+      target,
+      name,
+      typeArgs,
+      ...(nameNode.type === 'generic_name' ? unboundArityOf(nameNode) : {}),
+      nameRow: nameNode.startPosition.row,
+      ...(inUnsafeContext(nameNode) ? { isUnsafe: true as const } : {}),
+      ...position,
+    };
   }
 
   private convertPrefixUnary(node: Node): Expression {
@@ -468,13 +656,16 @@ export class ExpressionConverter {
         return { kind: 'unary', operator, operand: this.convertExpression(operand), ...position };
       }
       case '^': {
-        return unsupported(node, '末尾からの添字（`^`）');
+        return { kind: 'fromEnd', operand: this.convertExpression(operand), ...position };
       }
-      case '&': {
-        return unsupported(node, 'アドレス演算子（`&`）');
-      }
+      case '&':
       case '*': {
-        return unsupported(node, 'ポインターの間接参照（`*`）');
+        return {
+          kind: operator === '&' ? 'addressOf' : 'deref',
+          operand: this.convertExpression(operand),
+          isUnsafe: inUnsafeContext(node),
+          ...position,
+        };
       }
       default: {
         throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
@@ -488,7 +679,6 @@ export class ExpressionConverter {
 
   protected convertArgument(node: Node): Argument {
     if (node.type !== 'argument') {
-      if (node.type === 'preproc_if') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
       return {
         name: undefined,
         modifier: undefined,
@@ -506,7 +696,7 @@ export class ExpressionConverter {
       ]);
     const modifier = (['ref', 'out', 'in'] as const).find((token) => hasToken(node, token));
     return {
-      name: nameNode?.text,
+      name: identifierText(nameNode),
       modifier,
       value: this.convertExpression(valueNode),
       text: valueNode.text,
@@ -598,7 +788,8 @@ export class ExpressionConverter {
     const right = requiredField(node, 'right');
     const value =
       right.type === 'initializer_expression' ? this.convertInitializer(right) : this.convertExpression(right);
-    if (left.type === 'identifier') return { kind: 'memberAssign', name: left.text, value, ...positionOf(node) };
+    if (left.type === 'identifier')
+      return { kind: 'memberAssign', name: identifierText(left), value, ...positionOf(node) };
     if (left.type === 'element_binding_expression') {
       return {
         kind: 'indexAssign',
@@ -615,14 +806,13 @@ export class ExpressionConverter {
     const parts = namedChildren(node);
     for (let index = 0; index + 1 < parts.length; index += 2) {
       const value = this.convertExpression(parts[index + 1]);
-      members.push({ kind: 'memberAssign', name: parts[index].text, value, ...positionOf(parts[index]) });
+      members.push({ kind: 'memberAssign', name: identifierText(parts[index]), value, ...positionOf(parts[index]) });
     }
     return members;
   }
 
   private convertCollectionElement(node: Node): CollectionElement {
     const [element] = namedChildren(node);
-    if (!element) unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
     const [value] = namedChildren(element);
     return { spread: element.type === 'spread_element', value: this.convertExpression(value), ...positionOf(node) };
   }
@@ -634,7 +824,7 @@ export class ExpressionConverter {
       const child = children[index];
       if (!child.isNamed) continue;
       if (children[index + 1]?.type === '=') {
-        members.push({ name: child.text, value: this.convertExpression(children[index + 2]) });
+        members.push({ name: identifierText(child), value: this.convertExpression(children[index + 2]) });
         index += 2;
       } else {
         members.push({ name: undefined, value: this.convertExpression(child) });
@@ -643,38 +833,118 @@ export class ExpressionConverter {
     return members;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private convertAnonymousMethod(node: Node): Expression {
+    const modifiers = new Set(
+      namedChildren(node)
+        .filter((child) => child.type === 'modifier')
+        .map((child) => child.text)
+    );
+    const parametersNode = field(node, 'parameters');
+    const body = namedChildren(node).find((child) => child.type === 'block') as Node;
+    return {
+      kind: 'lambda',
+      parameters: parametersNode ? this.convertLambdaParameters(parametersNode) : [],
+      body: this.convertBlockNode(body),
+      isStatic: modifiers.has('static'),
+      returnType: undefined,
+      isAnonymousMethod: true,
+      ...(modifiers.has('async') ? { isAsync: true as const } : {}),
+      ...(parametersNode ? {} : { omitsParameters: true as const }),
+      ...positionOf(node),
+    };
+  }
+
+  private convertLambdaParameters(node: Node): LambdaParameter[] {
+    const parameters: LambdaParameter[] = [];
+    const children = childrenOf(node);
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      if (child.type === 'parameter') parameters.push(this.convertLambdaParameter(child));
+      else if (child.type === 'params') {
+        // The grammar keeps a `params` parameter's parts directly in the list.
+        const typeNode = children[index + 1];
+        const nameNode = children[index + 2];
+        parameters.push({
+          name: identifierText(nameNode),
+          type: this.convertType(typeNode),
+          modifier: undefined,
+          isParams: true,
+          ...positionOf(nameNode),
+        });
+        index += 2;
+      }
+    }
+    return parameters;
+  }
+
+  private convertLambdaParameter(parameter: Node): LambdaParameter {
+    const typeNode = field(parameter, 'type');
+    const nameNode = requiredField(parameter, 'name');
+    const modifiers = namedChildren(parameter).filter((child) => child.type === 'modifier');
+    const defaultNode = namedChildren(parameter).find(
+      (child) =>
+        !sameNode(child, typeNode) &&
+        !sameNode(child, nameNode) &&
+        child.type !== 'modifier' &&
+        child.type !== 'attribute_list'
+    );
+    const written = this.lambdaParameterModifiers(parameter, modifiers);
+    return {
+      ...written,
+      name: identifierText(nameNode),
+      type: typeNode ? this.convertType(typeNode) : undefined,
+      ...(typeNode?.type === 'scoped_type' ? { isScoped: true as const } : {}),
+      ...(defaultNode ? { defaultValue: this.convertExpression(defaultNode) } : {}),
+    };
+  }
+
+  /** A lambda parameter's position and what its modifiers say. */
+  private lambdaParameterModifiers(
+    parameter: Node,
+    modifiers: Node[]
+  ): Pick<LambdaParameter, 'modifier' | 'isRefReadonly' | 'isScoped' | 'row' | 'column'> {
+    let modifier: LambdaParameter['modifier'];
+    let isScoped = false;
+    let isRefReadonly = false;
+    for (const child of modifiers) {
+      if (child.text === 'scoped') isScoped = true;
+      else if (['ref', 'out', 'in'].includes(child.text)) modifier = child.text as LambdaParameter['modifier'];
+      else if (child.text === 'readonly' && modifier === 'ref') isRefReadonly = true;
+      else if (child.text === 'this')
+        throw new CompileError([
+          { row: child.startPosition.row, message: "CS1041: 識別子が必要です。'this' はキーワードです" },
+        ]);
+      else unsupported(parameter, `ラムダ式の引数の \`${child.text}\``);
+    }
+    return {
+      // A `ref readonly` parameter is passed by reference and read only, as an `in` parameter is.
+      modifier: isRefReadonly ? 'in' : modifier,
+      ...(isRefReadonly ? { isRefReadonly: true as const } : {}),
+      ...(isScoped ? { isScoped: true as const } : {}),
+      ...positionOf(parameter),
+    };
+  }
+
   private convertLambda(node: Node): Expression {
     const modifiers = new Set(
       childrenOf(node)
         .filter((child) => child.type === 'modifier')
         .map((child) => child.text)
     );
-    if (modifiers.has('async')) unsupported(node, '`async` のラムダ式');
-    if (childrenOf(node).some((child) => child.type === 'attribute_list')) unsupported(node, '属性');
     const parameters: LambdaParameter[] = [];
+    // The grammar keeps the modifiers of implicitly typed parameters (C# 14), as `(ref a, out b)`, beside them.
+    let written: Node[] = [];
     for (const parameterNode of fieldChildren(node, 'parameters')) {
-      if (parameterNode.type === 'implicit_parameter') {
+      if (parameterNode.type === 'modifier') written.push(parameterNode);
+      else if (parameterNode.type === 'implicit_parameter') {
         parameters.push({
-          name: parameterNode.text,
+          ...this.lambdaParameterModifiers(parameterNode, written),
+          name: identifierText(parameterNode),
           type: undefined,
-          modifier: undefined,
-          ...positionOf(parameterNode),
         });
+        written = [];
       } else if (parameterNode.type === 'parameter_list') {
-        for (const parameter of namedChildren(parameterNode)) {
-          if (parameter.type !== 'parameter') unsupported(parameter, '属性');
-          const typeNode = field(parameter, 'type');
-          const modifier = namedChildren(parameter).find((child) => child.type === 'modifier')?.text;
-          if (modifier !== undefined && !['ref', 'out', 'in'].includes(modifier))
-            unsupported(parameter, `ラムダ式の引数の \`${modifier}\``);
-          parameters.push({
-            name: requiredField(parameter, 'name').text,
-            type: typeNode ? this.convertType(typeNode) : undefined,
-            modifier: modifier as LambdaParameter['modifier'],
-            ...positionOf(parameter),
-          });
-        }
+        parameters.push(...this.convertLambdaParameters(parameterNode));
       }
     }
     const mixed = parameters.find((parameter) => (parameter.type === undefined) !== (parameters[0].type === undefined));
@@ -691,10 +961,12 @@ export class ExpressionConverter {
     const returnTypeNode = field(node, 'type');
     return {
       kind: 'lambda',
+      ...this.attributed(node),
       parameters,
       body: bodyNode.type === 'block' ? this.convertBlockNode(bodyNode) : this.convertExpression(bodyNode),
       isStatic: modifiers.has('static'),
       returnType: returnTypeNode ? this.convertType(returnTypeNode) : undefined,
+      ...(modifiers.has('async') ? { isAsync: true as const } : {}),
       ...positionOf(node),
     };
   }
@@ -731,7 +1003,7 @@ export class ExpressionConverter {
           const source = parts.find((part) => !sameNode(part, nameNode) && !sameNode(part, typeNode)) as Node;
           clauses.push({
             kind: 'from',
-            name: nameNode.text,
+            name: identifierText(nameNode),
             type: typeNode ? this.convertType(typeNode) : undefined,
             source: this.convertExpression(source),
             ...position,
@@ -739,7 +1011,12 @@ export class ExpressionConverter {
           break;
         }
         case 'let_clause': {
-          clauses.push({ kind: 'let', name: parts[0].text, value: this.convertExpression(parts[1]), ...position });
+          clauses.push({
+            kind: 'let',
+            name: identifierText(parts[0]),
+            value: this.convertExpression(parts[1]),
+            ...position,
+          });
           break;
         }
         case 'where_clause': {
@@ -769,7 +1046,7 @@ export class ExpressionConverter {
         }
         case 'into': {
           const nameNode = children[index + 1];
-          clauses.push({ kind: 'into', name: nameNode.text, ...positionOf(nameNode) });
+          clauses.push({ kind: 'into', name: identifierText(nameNode), ...positionOf(nameNode) });
           index++;
           break;
         }
@@ -791,12 +1068,12 @@ export class ExpressionConverter {
     const [nameNode, source, outerKey, innerKey] = parts.filter((part) => !sameNode(part, intoNode));
     return {
       kind: 'join',
-      name: nameNode.text,
+      name: identifierText(nameNode),
       type: typeNode ? this.convertType(typeNode) : undefined,
       source: this.convertExpression(source),
       outerKey: this.convertExpression(outerKey),
       innerKey: this.convertExpression(innerKey),
-      into: intoNode ? namedChildren(intoNode)[0].text : undefined,
+      into: intoNode ? identifierText(namedChildren(intoNode)[0]) : undefined,
       ...positionOf(node),
     };
   }
@@ -822,7 +1099,7 @@ export class ExpressionConverter {
         const typeNode = requiredField(node, 'type');
         const nameNode = field(node, 'name');
         const designation: Designation = nameNode
-          ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) }
+          ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) }
           : { kind: 'discard', ...position };
         if (typeNode.type === 'implicit_type') return { kind: 'varPattern', designation, ...position };
         return { kind: 'declarationPattern', type: this.convertType(typeNode), designation, ...position };
@@ -858,9 +1135,19 @@ export class ExpressionConverter {
       case 'recursive_pattern': {
         return this.convertRecursivePattern(node);
       }
-      case 'list_pattern':
+      case 'list_pattern': {
+        const nameNode = field(node, 'name');
+        return {
+          kind: 'listPattern',
+          elements: parts.filter((part) => !sameNode(part, nameNode)).map((part) => this.convertPattern(part)),
+          designation: nameNode
+            ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) }
+            : undefined,
+          ...position,
+        };
+      }
       case 'slice_pattern': {
-        return unsupported(node, 'リスト パターン（`[1, .., 3]`）');
+        return { kind: 'slicePattern', pattern: parts[0] ? this.convertPattern(parts[0]) : undefined, ...position };
       }
       default: {
         // An expression in a pattern position, such as a constant without the constant_pattern wrapper.
@@ -901,7 +1188,7 @@ export class ExpressionConverter {
       type: typeNode ? this.convertType(typeNode) : undefined,
       positional,
       properties,
-      designation: nameNode ? { kind: 'single', name: nameNode.text, ...positionOf(nameNode) } : undefined,
+      designation: nameNode ? { kind: 'single', name: identifierText(nameNode), ...positionOf(nameNode) } : undefined,
       ...positionOf(node),
     };
   }
@@ -920,13 +1207,13 @@ export class ExpressionConverter {
         ]);
       return { names: undefined, pattern: this.convertPattern(patternNode), ...positionOf(node) };
     }
-    const names = parts[0].text.split('.').map((name) => name.trim());
+    const names = parts[0].text.split('.').map((name) => withoutVerbatimPrefix(name.trim()));
     return { names, pattern: this.convertPattern(patternNode), ...positionOf(node) };
   }
 
   protected convertDesignation(node: Node): Designation {
     const position = positionOf(node);
-    if (node.type === 'identifier') return { kind: 'single', name: node.text, ...position };
+    if (node.type === 'identifier') return { kind: 'single', name: identifierText(node), ...position };
     if (node.type === 'discard') return { kind: 'discard', ...position };
     if (node.type === 'parenthesized_variable_designation' || node.type === 'tuple_pattern') {
       return {
@@ -962,20 +1249,23 @@ export class ExpressionConverter {
       }
       case 'string_literal': {
         let value = '';
+        let isUtf8 = false;
         for (const part of namedChildren(node)) {
-          if (part.type === 'string_literal_encoding') unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
-          value += part.type === 'escape_sequence' ? unescape(part, part.text) : part.text;
+          if (part.type === 'string_literal_encoding') isUtf8 = true;
+          else value += part.type === 'escape_sequence' ? unescape(part, part.text) : part.text;
         }
-        return { type: 'string', value };
+        return { type: isUtf8 ? 'utf8' : 'string', value };
       }
       case 'verbatim_string_literal': {
-        if (/u8$/i.test(node.text)) unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
-        return { type: 'string', value: node.text.slice(2, -1).replaceAll('""', '"') };
+        const isUtf8 = /u8$/i.test(node.text);
+        const text = isUtf8 ? node.text.slice(0, -2) : node.text;
+        return { type: isUtf8 ? 'utf8' : 'string', value: text.slice(2, -1).replaceAll('""', '"') };
       }
       case 'raw_string_literal': {
-        if (/u8$/i.test(node.text)) unsupported(node, 'UTF-8 文字列リテラル（`u8`）');
+        const isUtf8 = /u8$/i.test(node.text);
+        const text = isUtf8 ? node.text.slice(0, -2) : node.text;
         const content = namedChildren(node).find((part) => part.type === 'raw_string_content');
-        return { type: 'string', value: rawStringValue(node, content?.text ?? '', node.text) };
+        return { type: isUtf8 ? 'utf8' : 'string', value: rawStringValue(node, content?.text ?? '', text) };
       }
       case 'boolean_literal': {
         return { type: 'bool', value: node.text === 'true' };
@@ -1101,4 +1391,11 @@ function dedentRawParts(node: Node, parts: InterpolationPart[]): InterpolationPa
     if (index < holes.length) result.push(holes[holeIndex++]);
   }
   return result;
+}
+
+/** The arity of a generic name without type arguments, as `Dictionary<,>`, as a property to spread into its syntax. */
+function unboundArityOf(node: Node): { unboundArity?: number } {
+  const [, argsNode] = namedChildren(node);
+  if (namedChildren(argsNode).length > 0) return {};
+  return { unboundArity: childrenOf(argsNode).filter((child) => child.type === ',').length + 1 };
 }

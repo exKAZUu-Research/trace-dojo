@@ -5,9 +5,11 @@ import type { ConversionKind, Conversions } from './conversions';
 import { CsDecimal } from './decimal';
 import { convertNumeric, type NumericValue, PendingException } from './numeric';
 import { runtimeTypeName } from './objects';
+import { CsPointer } from './pointers';
 import type { Frame, Runtime, Slot } from './runtime';
 import {
   baseTypeOf,
+  isPointerType,
   isReferenceType,
   type LocalSymbol,
   type MethodSymbol,
@@ -135,6 +137,11 @@ export abstract class EvaluatorBase {
     throw NULL_REFERENCE();
   }
 
+  /** The type environment of a generic static method, as an extension method, called with type arguments. */
+  protected staticEnvironment(method: MethodSymbol, typeArgs: Type[], frame: Frame): Map<TypeParameterSymbol, Type> {
+    return new Map(method.typeParameters.map((parameter, index) => [parameter, frame.resolve(typeArgs[index])]));
+  }
+
   /** The type environment of an instance method called on a receiver of a runtime type. */
   protected environmentFor(method: MethodSymbol, receiverType: Type | undefined): Map<TypeParameterSymbol, Type> {
     if (!receiverType || receiverType.kind !== 'named') return new Map();
@@ -183,7 +190,9 @@ export abstract class EvaluatorBase {
 
   // ---- Conversions ----
 
-  convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type): Value {
+  /** Converts a value; `isChecked` makes a numeric conversion's integral overflow throw, as `checked` does. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type, isChecked = false): Value {
     switch (conversion) {
       case 'identity':
       case 'reference':
@@ -194,7 +203,7 @@ export abstract class EvaluatorBase {
       case 'numeric':
       case 'enumNumeric': {
         if (value === undefined) throw NULL_REFERENCE();
-        return convertNumeric(value as NumericValue, numericKindOf(from), numericKindOf(to));
+        return convertNumeric(value as NumericValue, numericKindOf(from), numericKindOf(to), isChecked);
       }
       case 'referenceCheck': {
         if (value === undefined || this.isInstanceOf(value, to)) return value;
@@ -209,10 +218,10 @@ export abstract class EvaluatorBase {
         return this.unbox(value, to);
       }
       case 'nullableUnwrap': {
-        return this.unwrapNullable(value, from, to);
+        return this.unwrapNullable(value, from, to, isChecked);
       }
       case 'nullableLifted': {
-        return this.convertLifted(value, from, to);
+        return this.convertLifted(value, from, to, isChecked);
       }
       case 'tuple': {
         return this.convertTuple(value as CsStruct, from as NamedType, to as NamedType);
@@ -220,7 +229,21 @@ export abstract class EvaluatorBase {
       case 'userDefined': {
         throw new Error('User-defined conversions are not supported');
       }
+      case 'pointer': {
+        return this.convertPointer(value, from, to);
+      }
     }
+  }
+
+  /** A pointer as another pointer type, as its address, or an address as a pointer into the storage there. */
+  private convertPointer(value: Value, from: Type, to: Type): Value {
+    if (isPointerType(from) && isPointerType(to)) return value;
+    if (isPointerType(from)) {
+      const address = value instanceof CsPointer ? value.address : 0n;
+      return convertNumeric(address, 'ulong', numericKindOf(to), false);
+    }
+    const address = BigInt.asUintN(64, typeof value === 'bigint' ? value : BigInt(value as number));
+    return this.runtime.memory.pointerAt(address);
   }
 
   box(value: Value, from: Type): Value {
@@ -231,22 +254,22 @@ export abstract class EvaluatorBase {
     return new CsBox(boxedType, copyValue(value));
   }
 
-  private unwrapNullable(value: Value, from: Type, to: Type): Value {
+  private unwrapNullable(value: Value, from: Type, to: Type, isChecked: boolean): Value {
     if (value === undefined)
       throw new PendingException('System.InvalidOperationException', 'Nullable object must have a value.');
     const underlying = nullableUnderlying(from) as Type;
     return sameType(underlying, to)
       ? value
-      : convertNumeric(value as NumericValue, numericKindOf(underlying), numericKindOf(to));
+      : convertNumeric(value as NumericValue, numericKindOf(underlying), numericKindOf(to), isChecked);
   }
 
-  private convertLifted(value: Value, from: Type, to: Type): Value {
+  private convertLifted(value: Value, from: Type, to: Type, isChecked: boolean): Value {
     if (value === undefined) return undefined;
     const fromType = nullableUnderlying(from) ?? from;
     const toType = nullableUnderlying(to) ?? to;
     if (sameType(fromType, toType)) return value;
     if (value instanceof CsBox) return this.unbox(value, to);
-    return convertNumeric(value as NumericValue, numericKindOf(fromType), numericKindOf(toType));
+    return convertNumeric(value as NumericValue, numericKindOf(fromType), numericKindOf(toType), isChecked);
   }
 
   private convertTuple(tuple: CsStruct, from: NamedType, to: NamedType): Value {
@@ -367,7 +390,9 @@ export abstract class EvaluatorBase {
     const fields: Value[] = Array.from<Value>({ length: type.symbol.instanceFieldCount });
     const substitution = substitutionOf(type);
     for (const field of type.symbol.fields) {
-      if (!field.isStatic && !field.isConst) fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
+      // A ref field starts as a null reference, which holds no variable.
+      if (!field.isStatic && !field.isConst && !field.byRef)
+        fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
     }
     return new CsStruct(type, fields);
   }
@@ -386,7 +411,8 @@ export abstract class EvaluatorBase {
     const substitution = substitutionOf(type);
     let count = type.symbol.instanceFieldCount;
     for (const field of type.symbol.fields) {
-      if (!field.isStatic && !field.isConst) count += this.defaultSlotCount(substitute(field.type, substitution));
+      if (!field.isStatic && !field.isConst && !field.byRef)
+        count += this.defaultSlotCount(substitute(field.type, substitution));
       // A layout past the slot limit fails to allocate whatever its size, so counting stops there, which also bounds
       // the work of constructions that share no counts.
       if (count > LIMITS.maxSlots) break;

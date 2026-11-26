@@ -1,8 +1,11 @@
 // code-gauge-allow-file fileNcss -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
-import { displayMethodIn } from './declarations';
+import { displayExtensionBlock, displayExtensionMember, displayMethodIn } from './declarations';
+import { convertHandlerArguments, interpolationTargetOf, type PendingHandlerArgument } from './interpolatedConversions';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
+import { isBetterParamsCollection, type ParamsCollection, paramsCollectionOf } from './paramsCollections';
+import type { LineMap } from './preprocessor';
 import {
   allInterfacesOf,
   arrayType,
@@ -12,6 +15,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   isReferenceType,
+  isRefLikeType,
   type MethodSymbol,
   type NamedType,
   nullableUnderlying,
@@ -27,6 +31,9 @@ import {
 import { type DotnetOverload, dotnetOverloadsOf } from './unavailable';
 
 /** An argument as written, bound to its natural type or left unbound until its parameter's type is known. */
+/** The path that `[CallerFilePath]` gives, which stands for the program's file, whose real path no run has. */
+const CALLER_FILE_PATH = '/Program.cs';
+
 export interface ArgumentInfo {
   expression: BoundExpression;
   name: string | undefined;
@@ -40,6 +47,8 @@ export interface ArgumentInfo {
   isOutVar?: boolean;
   /** The argument's source text. */
   text?: string;
+  /** Whether the argument is the receiver of an extension method call, which a `ref this` parameter takes by reference. */
+  isReceiver?: boolean;
 }
 
 /** A candidate that the arguments fit, with how each argument maps to its parameters. */
@@ -68,6 +77,8 @@ export interface CallDescription {
   typeName?: string;
   /** Whether the candidates are extension methods, whose first argument is the receiver. */
   isExtension?: boolean;
+  /** Whether the call is a collection initializer's `Add`, whose bad arguments Roslyn introduces with CS1950. */
+  isCollectionInitializerAdd?: boolean;
 }
 
 interface Bounds {
@@ -102,7 +113,19 @@ export abstract class CallBinder extends OperatorBinder {
     expression: Extract<BoundExpression, { kind: 'unbound' }>
   ): Type[] | undefined;
 
+  /**
+   * The params collection of a class or struct, or the `List<T>` of an interface, that the parameterless constructor
+   * creates and an `Add` call for each element fills, whose accessibility the method's declaring type decides.
+   */
+  protected abstract createParamsCollection(
+    collection: Extract<ParamsCollection, { kind: 'constructible' | 'list' }>,
+    elements: BoundExpression[],
+    declaringType: TypeSymbol,
+    row: number
+  ): BoundExpression;
+
   /** Resolves a call among candidates, reporting Roslyn's error when none applies or several tie. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   resolveCall(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -126,11 +149,12 @@ export abstract class CallBinder extends OperatorBinder {
       this.reportInapplicable(candidates, args, explicitTypeArgs, row, description);
       return undefined;
     }
+    const ranked = withHighestPriority(applicable);
     // A base type's candidates drop out once one declared in a more derived class or interface applies (C# spec
     // §12.6.4.1), whichever converts better.
-    const mostDerived = applicable.filter(
+    const mostDerived = ranked.filter(
       (candidate) =>
-        !applicable.some(
+        !ranked.some(
           (other) =>
             other !== candidate && this.isMoreDerived(other.candidate.owner.symbol, candidate.candidate.owner.symbol)
         )
@@ -142,6 +166,15 @@ export abstract class CallBinder extends OperatorBinder {
       if (args.some((arg) => arg.expression.type.kind === 'error' && arg.expression.kind !== 'unbound'))
         return undefined;
       const [first, second] = this.tiedCandidates(mostDerived, args);
+      // The runtime binder names them by their full type names and with `params`.
+      const runtimeTie = this.isLateBinding ? this.runtimeBinderTie(mostDerived, args) : [first, second];
+      this.lastAmbiguity = runtimeTie.map(({ candidate }) => {
+        const parameters = candidate.method.parameters.map(
+          (parameter) =>
+            `${parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitutionOf(candidate.owner)))}`
+        );
+        return `${candidate.owner.symbol.fullName.replace(/`\d+$/, '')}.${candidate.method.name}(${parameters.join(', ')})`;
+      });
       this.error(
         row,
         'CS0121',
@@ -166,6 +199,32 @@ export abstract class CallBinder extends OperatorBinder {
     return [list[0], list[1]];
   }
 
+  /**
+   * The two candidates the runtime binder names in an ambiguity: it keeps the better of each candidate and the next,
+   * skips past a pair that ties, and then checks the one it kept against those before it.
+   */
+  private runtimeBinderTie(applicable: Applicable[], args: ArgumentInfo[]): [Applicable, Applicable] {
+    let tie: [Applicable, Applicable] | undefined;
+    let kept = applicable[0];
+    for (let index = 1; index < applicable.length; index++) {
+      const contender = applicable[index];
+      if (this.isBetter(kept, contender, args)) continue;
+      if (this.isBetter(contender, kept, args)) {
+        kept = contender;
+        continue;
+      }
+      tie = [kept, contender];
+      index++;
+      if (index >= applicable.length) return tie;
+      kept = applicable[index];
+    }
+    for (const earlier of applicable) {
+      if (earlier === kept) break;
+      if (!this.isBetter(kept, earlier, args)) return [kept, earlier];
+    }
+    return tie ?? [applicable[0], applicable[1]];
+  }
+
   /** Maps arguments to a candidate's parameters, infers its type arguments, and checks the arguments convert. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private applicability(
@@ -175,7 +234,7 @@ export abstract class CallBinder extends OperatorBinder {
   ): Applicable | undefined {
     const { method } = candidate;
     for (const form of [false, true]) {
-      if (form && !method.parameters.at(-1)?.isParams) break;
+      if (form && !this.hasExpandedForm(method)) break;
       const mapping = this.mapArguments(method, args, form);
       if (!mapping) continue;
       let typeArgs: Type[];
@@ -194,6 +253,7 @@ export abstract class CallBinder extends OperatorBinder {
         typeArgs = [];
       }
       const substitution = this.callSubstitution(candidate, typeArgs);
+      if (!this.staticReceiverFits(candidate, substitution)) continue;
       const argumentTypes = args.map((_arg, index) =>
         this.parameterType(method, mapping.parameterOf[index], form, substitution)
       );
@@ -215,6 +275,18 @@ export abstract class CallBinder extends OperatorBinder {
     return undefined;
   }
 
+  /**
+   * Whether the type that a static member of an extension block is accessed through converts to the block's receiver
+   * type by identity, reference, or boxing, as an extension method's receiver does.
+   */
+  private staticReceiverFits(candidate: MethodCandidate, substitution: Map<TypeParameterSymbol, Type>): boolean {
+    const { staticReceiver } = candidate;
+    const extended = candidate.method.staticExtensionOf;
+    if (!staticReceiver || !extended) return true;
+    const kind = this.conversions.implicit(staticReceiver, substitute(extended, substitution));
+    return kind === 'identity' || kind === 'reference' || kind === 'boxing' || kind === 'typeParameterBox';
+  }
+
   protected callSubstitution(candidate: MethodCandidate, typeArgs: Type[]): Map<TypeParameterSymbol, Type> {
     const substitution = substitutionOf(candidate.owner);
     for (const [index, parameter] of candidate.method.typeParameters.entries())
@@ -231,8 +303,22 @@ export abstract class CallBinder extends OperatorBinder {
   ): Type {
     const parameter = method.parameters[index];
     const type = substitute(parameter.type, substitution);
-    if (expanded && parameter.isParams && type.kind === 'array') return type.element;
-    return type;
+    return expanded && parameter.isParams ? this.paramsElementType(type) : type;
+  }
+
+  /** The element type that a `params` parameter of the type takes in expanded form, or the type when it takes none. */
+  private paramsElementType(type: Type): Type {
+    return paramsCollectionOf(type, this.objectType)?.element ?? type;
+  }
+
+  /**
+   * Whether a method has an expanded form: its last parameter is `params` of a collection type, or of a type parameter
+   * of an anonymous delegate, which its type argument makes one.
+   */
+  private hasExpandedForm(method: MethodSymbol): boolean {
+    const last = method.parameters.at(-1);
+    if (!last?.isParams) return false;
+    return last.type.kind === 'typeParameter' || paramsCollectionOf(last.type, this.objectType) !== undefined;
   }
 
   private mapArguments(
@@ -240,6 +326,7 @@ export abstract class CallBinder extends OperatorBinder {
     args: ArgumentInfo[],
     expanded: boolean
   ): { parameterOf: number[]; defaultsUsed: number } | undefined {
+    if (expanded && !this.hasExpandedForm(method)) return undefined;
     const parameters = method.parameters;
     const parameterOf: number[] = [];
     const filled = new Set<number>();
@@ -255,7 +342,6 @@ export abstract class CallBinder extends OperatorBinder {
     }
     const defaultsUsed = this.countDefaultsUsed(parameters, filled, expanded);
     if (defaultsUsed === undefined) return undefined;
-    if (expanded && !filled.has(paramsIndex) && args.length < parameters.length - 1) return undefined;
     return { parameterOf, defaultsUsed };
   }
 
@@ -308,6 +394,12 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   private argumentFits(arg: ArgumentInfo, type: Type, refKind: 'ref' | 'out' | 'in' | undefined): boolean {
+    // A receiver that is no variable still fits a `ref` receiver, which then reports it (CS1510).
+    if (arg.isReceiver && refKind === 'ref')
+      return sameType(arg.expression.type, type) || arg.expression.type.kind === 'error';
+    // A `ref` argument may stand for an `in` or `ref readonly` parameter (C# 12), which Roslyn only warns of for `in`.
+    if (refKind === 'in' && arg.refKind === 'ref')
+      return sameType(arg.expression.type, type) || arg.expression.type.kind === 'error';
     if (refKind === 'ref' || refKind === 'out') {
       if (arg.refKind !== refKind) return false;
       if (arg.isOutVar) return true;
@@ -336,10 +428,11 @@ export abstract class CallBinder extends OperatorBinder {
       formals: args.map((_arg, index) => {
         const parameter = method.parameters[parameterOf[index]];
         const type = substitute(parameter.type, ownerSubstitution);
-        return expanded && parameter.isParams && type.kind === 'array' ? type.element : type;
+        return expanded && parameter.isParams ? this.paramsElementType(type) : type;
       }),
       pending: new Set(),
     };
+    this.inferFromStaticReceiver(candidate, inference);
     this.inferFromArguments(inference, method, parameterOf);
     for (let round = 0; round <= parameters.length + args.length; round++) {
       this.inferLambdaReturnTypes(inference);
@@ -352,6 +445,17 @@ export abstract class CallBinder extends OperatorBinder {
     }
     if (parameters.some((parameter) => !inference.fixed.has(parameter))) return undefined;
     return parameters.map((parameter) => inference.fixed.get(parameter) as Type);
+  }
+
+  /** The type that a static member of an extension block is accessed through infers the block's type arguments. */
+  private inferFromStaticReceiver(candidate: MethodCandidate, inference: Inference): void {
+    const extended = candidate.method.staticExtensionOf;
+    if (candidate.staticReceiver && extended)
+      this.lowerBoundInference(
+        candidate.staticReceiver,
+        substitute(extended, inference.ownerSubstitution),
+        inference.bounds
+      );
   }
 
   /** The first phase: bounds from the arguments with types, and from the explicit parameter types of lambdas. */
@@ -549,7 +653,11 @@ export abstract class CallBinder extends OperatorBinder {
   private fix(bounds: Bounds): Type | undefined {
     if (bounds.exact.length > 0) {
       const [first] = bounds.exact;
-      return bounds.exact.every((type) => sameType(type, first)) ? first : undefined;
+      const fits =
+        bounds.exact.every((type) => sameType(type, first)) &&
+        bounds.lower.every((lower) => this.conversions.implicit(lower, first) !== undefined) &&
+        bounds.upper.every((upper) => this.conversions.implicit(first, upper) !== undefined);
+      return fits ? first : undefined;
     }
     const candidates = [...bounds.lower, ...bounds.upper].filter(
       (type, index, list) => list.findIndex((other) => sameType(other, type)) === index
@@ -588,12 +696,33 @@ export abstract class CallBinder extends OperatorBinder {
     const bGeneric = b.candidate.method.typeParameters.length > 0;
     if (!aGeneric && bGeneric) return true;
     if (aGeneric && !bGeneric) return false;
-    if (!a.isExpanded && b.isExpanded) return true;
-    if (a.isExpanded && !b.isExpanded) return false;
+    if (a.isExpanded !== b.isExpanded) return b.isExpanded;
+    const collectionOrder = a.isExpanded ? this.compareParamsCollections(a, b) : 0;
+    if (collectionOrder !== 0) return collectionOrder > 0;
     if (a.defaultsUsed < b.defaultsUsed) return true;
     if (a.defaultsUsed > b.defaultsUsed) return false;
     const aSpecific = this.moreSpecific(a, b);
     return aSpecific === 1;
+  }
+
+  /** Compares the params collections of two candidates in expanded form (C# 13): 1 when the first is better. */
+  private compareParamsCollections(a: Applicable, b: Applicable): number {
+    const aCollection = this.expandedCollection(a);
+    const bCollection = this.expandedCollection(b);
+    if (!aCollection || !bCollection || sameType(aCollection.type, bCollection.type)) return 0;
+    const converts = (from: Type, to: Type): boolean => this.conversions.implicit(from, to) !== undefined;
+    if (isBetterParamsCollection(aCollection, bCollection, converts)) return 1;
+    return isBetterParamsCollection(bCollection, aCollection, converts) ? -1 : 0;
+  }
+
+  /** The collection that a candidate in expanded form passes its `params` arguments in. */
+  private expandedCollection(applicable: Applicable): ParamsCollection | undefined {
+    const { method } = applicable.candidate;
+    const type = method.parameters.at(-1)?.type ?? ERROR_TYPE;
+    return paramsCollectionOf(
+      substitute(type, this.callSubstitution(applicable.candidate, applicable.typeArgs)),
+      this.objectType
+    );
   }
 
   /** Compares declared parameter types, where a type parameter is less specific than any other type. */
@@ -633,15 +762,41 @@ export abstract class CallBinder extends OperatorBinder {
   protected compareConversions(arg: ArgumentInfo, a: Type, b: Type): number {
     if (sameType(a, b)) return 0;
     const expression = arg.expression;
-    if (expression.kind === 'unbound')
+    if (expression.kind === 'unbound') {
+      if (expression.node.kind === 'collection') return this.compareCollectionConversions(expression, a, b);
       return this.compareLambdaConversions(expression, a, b) ?? this.betterTarget(a, b);
-    if (!arg.isOutVar) {
-      const aExact = sameType(expression.type, a);
-      const bExact = sameType(expression.type, b);
-      if (aExact && !bExact) return 1;
-      if (bExact && !aExact) return -1;
     }
-    return this.betterTarget(a, b);
+    return compareHandlerConversions(expression, a, b) ?? compareExactConversions(arg, a, b) ?? this.betterTarget(a, b);
+  }
+
+  /**
+   * Compares a collection expression's conversions to two collection types (C# 13): by its elements' conversions to
+   * the element types where those differ, and otherwise by the types themselves.
+   */
+  private compareCollectionConversions(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>,
+    a: Type,
+    b: Type
+  ): number {
+    const aElement = collectionExpressionElement(a) ?? this.collectionElementType(a);
+    const bElement = collectionExpressionElement(b) ?? this.collectionElementType(b);
+    if (!aElement || !bElement) return this.betterTarget(a, b);
+    if (sameType(aElement, bElement)) {
+      if (isBetterCollectionType(a, b, (from, to) => this.conversions.implicit(from, to) !== undefined)) return 1;
+      return isBetterCollectionType(b, a, (from, to) => this.conversions.implicit(from, to) !== undefined) ? -1 : 0;
+    }
+    // Each element must convert to one element type at least as well as to the other, and one better.
+    let result = 0;
+    for (const element of this.collectionElementValues(expression)) {
+      const order = this.compareConversions(
+        { expression: element, name: undefined, refKind: undefined, row: element.row, target: undefined },
+        aElement,
+        bElement
+      );
+      if (order !== 0 && result !== 0 && order !== result) return 0;
+      if (order !== 0) result = order;
+    }
+    return result;
   }
 
   /** Compares a lambda's conversions to delegate types of the same parameter types by its inferred return type. */
@@ -659,11 +814,13 @@ export abstract class CallBinder extends OperatorBinder {
       !aInvoke.parameterTypes.every((type, index) => sameType(type, bInvoke.parameterTypes[index]))
     )
       return undefined;
-    const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
-    if (!inferred) return undefined;
+    // A delegate with a return type is better than a void one when the lambda converts to both (C# spec
+    // §12.6.4.5), as `() => throw e` for `Func<Task>` over `Action`.
     const aReturns = aInvoke.returnType.kind !== 'void';
     const bReturns = bInvoke.returnType.kind !== 'void';
-    if (inferred.kind !== 'void' && aReturns !== bReturns) return aReturns ? 1 : -1;
+    if (aReturns !== bReturns) return aReturns ? 1 : -1;
+    const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
+    if (!inferred) return undefined;
     if (sameType(inferred, aInvoke.returnType) && !sameType(inferred, bInvoke.returnType)) return 1;
     if (sameType(inferred, bInvoke.returnType) && !sameType(inferred, aInvoke.returnType)) return -1;
     return this.betterTarget(aInvoke.returnType, bInvoke.returnType);
@@ -671,8 +828,8 @@ export abstract class CallBinder extends OperatorBinder {
 
   /** Whether one type is a better conversion target than another: 1 for the first, -1 for the second. */
   protected betterTarget(a: Type, b: Type): number {
-    const aToB = this.conversions.implicit(a, b) !== undefined;
-    const bToA = this.conversions.implicit(b, a) !== undefined;
+    const aToB = this.convertsImplicitly(a, b);
+    const bToA = this.convertsImplicitly(b, a);
     if (aToB && !bToA) return 1;
     if (bToA && !aToB) return -1;
     const signedOver: Record<string, string[]> = {
@@ -688,6 +845,14 @@ export abstract class CallBinder extends OperatorBinder {
     return 0;
   }
 
+  /** Whether a type converts implicitly to another, by a user-defined conversion too, as `long` does to BigInteger. */
+  private convertsImplicitly(source: Type, target: Type): boolean {
+    if (this.conversions.implicit(source, target) !== undefined) return true;
+    if (source.kind !== 'named' || target.kind !== 'named') return false;
+    const user = this.userConversion({ kind: 'default', type: source, row: 0 }, target, false);
+    return user !== undefined && !('ambiguous' in user);
+  }
+
   private checkConstraints(applicable: Applicable, row: number): boolean {
     const { method } = applicable.candidate;
     for (const [index, parameter] of method.typeParameters.entries()) {
@@ -698,7 +863,7 @@ export abstract class CallBinder extends OperatorBinder {
           parameter,
           this.callSubstitution(applicable.candidate, applicable.typeArgs),
           row,
-          displayMethod(method)
+          constraintOwner(method, index)
         )
       )
         return false;
@@ -716,6 +881,7 @@ export abstract class CallBinder extends OperatorBinder {
     owner: string
   ): boolean {
     if (arg.kind === 'error') return true;
+    if (!this.checkTypeArgumentKind(arg, parameter.name, owner, row, parameter.allowsRefStruct)) return false;
     if (
       parameter.hasReferenceConstraint &&
       !this.isReference(arg) &&
@@ -725,6 +891,14 @@ export abstract class CallBinder extends OperatorBinder {
         row,
         'CS0452',
         `型 '${displayType(arg)}' は、ジェネリック型のパラメーター '${parameter.name}'、またはメソッド '${owner}' として使用するために、参照型でなければなりません`
+      );
+      return false;
+    }
+    if (parameter.hasUnmanagedConstraint && !isUnmanagedType(arg)) {
+      this.error(
+        row,
+        'CS8377',
+        `型 '${displayType(arg)}' と、入れ子になっているあらゆるレベルのすべてのフィールドは、ジェネリック型またはメソッド '${owner}' のパラメーター '${parameter.name}' として使用するために、Null 非許容の値型でなければなりません`
       );
       return false;
     }
@@ -760,6 +934,7 @@ export abstract class CallBinder extends OperatorBinder {
       const target = substitute(constraint, substitution);
       if (
         !this.conversions.implicit(arg, target) &&
+        !this.refStructImplements(arg, target) &&
         !(
           arg.kind === 'named' &&
           target.kind === 'named' &&
@@ -783,42 +958,113 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
+  /**
+   * Whether a ref struct implements an interface, which satisfies an interface constraint of a parameter with `allows
+   * ref struct` (C# 13) although it has no boxing conversion to it.
+   */
+  private refStructImplements(arg: Type, target: Type): boolean {
+    return (
+      arg.kind === 'named' &&
+      isRefLikeType(arg) &&
+      target.kind === 'named' &&
+      this.allInterfaces(arg).some((face) => sameType(face, target))
+    );
+  }
+
+  /** The variable of a `ref` or `out` argument, reporting a receiver that is none for a `ref` receiver (CS1510). */
+  private refArgumentTarget(arg: ArgumentInfo, type: Type, row: number): BoundLValue {
+    if (arg.declareOut) return arg.declareOut(type);
+    if (arg.target) return arg.target;
+    if (arg.isReceiver) this.error(row, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+    return { kind: 'discard', type: ERROR_TYPE, row: arg.row };
+  }
+
   /** Converts the arguments to their parameters' types and orders them as the parameters, filling defaults and packing `params`. */
   private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArguments {
     const { method } = applicable.candidate;
     const substitution = this.callSubstitution(applicable.candidate, applicable.typeArgs);
     const result: (BoundArgument | undefined)[] = Array.from({ length: method.parameters.length });
     const paramsElements: BoundExpression[] = [];
+    const handlers: PendingHandlerArgument[] = [];
     for (const [index, arg] of args.entries()) {
       const parameterIndex = applicable.parameterOf[index];
       const parameter = method.parameters[parameterIndex];
       const type = applicable.argumentTypes[index];
       if (parameter.refKind === 'ref' || parameter.refKind === 'out') {
-        const target = arg.declareOut ? arg.declareOut(type) : (arg.target as BoundLValue);
+        const target = this.refArgumentTarget(arg, type, row);
         result[parameterIndex] = { kind: 'refArgument', target, refKind: parameter.refKind, type, row: arg.row };
+        continue;
+      }
+      const handler = this.pendingHandlerArgument(arg, parameter, parameterIndex, type);
+      if (handler) {
+        handlers.push(handler);
+        result[parameterIndex] = { kind: 'default', type, row: arg.row };
         continue;
       }
       const converted = this.convert(arg.expression, type, arg.row);
       if (applicable.isExpanded && parameterIndex === method.parameters.length - 1) paramsElements.push(converted);
       else result[parameterIndex] = converted;
     }
-    if (applicable.isExpanded) {
-      const arrayType = substitute(method.parameters.at(-1)?.type ?? ERROR_TYPE, substitution);
-      if (arrayType.kind === 'array') {
-        result[method.parameters.length - 1] = {
-          kind: 'newArray',
-          arrayType,
-          sizes: [this.constant(paramsElements.length, this.intType, row)],
-          elements: paramsElements,
-          type: arrayType,
-          row,
-        };
-      }
-    }
+    const collection = applicable.isExpanded ? this.expandedCollection(applicable) : undefined;
+    if (collection) result[method.parameters.length - 1] = this.packParams(collection, paramsElements, method, row);
     for (const [index, parameter] of method.parameters.entries()) {
       result[index] ??= this.omittedArgument(method, parameter, substitution, args, applicable.parameterOf, row);
     }
-    return withSourceOrder(result as BoundArgument[], applicable.parameterOf);
+    return this.withHandlerArguments(handlers, applicable, result, row);
+  }
+
+  /** The `params` collection of the arguments of the expanded form, created as a collection expression of them is. */
+  private packParams(
+    collection: ParamsCollection,
+    elements: BoundExpression[],
+    method: MethodSymbol,
+    row: number
+  ): BoundExpression {
+    if (collection.kind === 'constructible' || collection.kind === 'list')
+      return this.createParamsCollection(collection, elements, method.owner, row);
+    const array = arrayType(collection.element);
+    const created: BoundExpression = {
+      kind: 'newArray',
+      arrayType: array,
+      sizes: [this.constant(elements.length, this.intType, row)],
+      elements,
+      type: array,
+      row,
+    };
+    return collection.kind === 'span' ? this.convert(created, collection.type, row) : created;
+  }
+
+  /**
+   * Converts the deferred handler arguments once the others are, ordering the arguments as the source evaluates them,
+   * with the local that a handler takes the receiver from, if any, which the call then keeps the receiver in.
+   */
+  private withHandlerArguments(
+    handlers: PendingHandlerArgument[],
+    applicable: Applicable,
+    result: (BoundArgument | undefined)[],
+    row: number
+  ): BoundArguments {
+    const handlerReceiver = convertHandlerArguments(
+      handlers,
+      applicable.candidate.method,
+      applicable.candidate.owner,
+      result,
+      (source, target, values) => this.bindInterpolationConversion(source, target, values, row)
+    );
+    const finished = withSourceOrder(result as BoundArgument[], applicable.parameterOf);
+    return handlerReceiver ? Object.assign(finished, { handlerReceiver }) : finished;
+  }
+
+  /** An interpolated string argument of a handler parameter whose constructor takes other arguments of the call. */
+  private pendingHandlerArgument(
+    arg: ArgumentInfo,
+    parameter: ParameterSymbol,
+    parameterIndex: number,
+    type: Type
+  ): PendingHandlerArgument | undefined {
+    if (!parameter.handlerArguments || interpolationTargetOf(type) !== 'handler') return undefined;
+    const source = this.interpolationConvertingTo(arg.expression, type);
+    return source && { parameter, parameterIndex, source, type: type as NamedType };
   }
 
   /** The value of an omitted optional argument, or the source text of another argument that it names. */
@@ -831,6 +1077,27 @@ export abstract class CallBinder extends OperatorBinder {
     row: number
   ): BoundExpression {
     const type = substitute(parameter.type, substitution);
+    const info = parameter.callerInfo;
+    if (info && parameter.defaultSyntax) {
+      switch (info.kind) {
+        case 'MemberName': {
+          return this.constant(this.callerMember, type, row);
+        }
+        case 'LineNumber': {
+          const line = (this.lineMap?.map(row) ?? row) + 1;
+          return this.convert(this.constant(line, this.intType, row), type, row);
+        }
+        case 'FilePath': {
+          return this.constant(CALLER_FILE_PATH, type, row);
+        }
+        case 'ArgumentExpression': {
+          const index = method.parameters.findIndex((other) => other.name === info.parameterName);
+          const text = index === -1 ? undefined : args[parameterOf.indexOf(index)]?.text;
+          if (text !== undefined) return this.constant(text, type, row);
+          break;
+        }
+      }
+    }
     const callerArgument = this.callerArgumentExpression(method, parameter, args, parameterOf);
     return callerArgument === undefined
       ? this.defaultArgument(parameter, type, row)
@@ -851,6 +1118,11 @@ export abstract class CallBinder extends OperatorBinder {
       return undefined;
     return args[parameterOf.indexOf(0)]?.text;
   }
+
+  /** The name of the member whose body is being bound, which `[CallerMemberName]` gives. */
+  protected callerMember = '';
+  /** The rows that `#line` directives give `[CallerLineNumber]`. */
+  protected lineMap: LineMap | undefined;
 
   /** The value of an omitted optional argument. */
   protected abstract defaultArgument(
@@ -960,7 +1232,7 @@ export abstract class CallBinder extends OperatorBinder {
     const byArity = candidates.filter(
       (candidate) =>
         this.mapArguments(candidate.method, args, false) !== undefined ||
-        (candidate.method.parameters.at(-1)?.isParams && this.mapArguments(candidate.method, args, true))
+        this.mapArguments(candidate.method, args, true) !== undefined
     );
     this.rejectUnavailableOverload(candidates, args, byArity.length, row);
     if (byArity.length === 0) {
@@ -978,8 +1250,13 @@ export abstract class CallBinder extends OperatorBinder {
         ? []
         : this.reportedTypeArguments(candidate, args, explicitTypeArgs, mapping.parameterOf, expanded);
     const substitution = this.callSubstitution(candidate, typeArgs);
+    if (!this.staticReceiverFits(candidate, substitution)) {
+      this.reportStaticReceiverMismatch(candidate, typeArgs, substitution, row);
+      return;
+    }
     // Roslyn reports each argument that does not fit, but only the receiver of an extension method that does not.
     let hasBadArgument = false;
+    let isIntroduced = !description.isCollectionInitializerAdd;
     for (const [index, arg] of args.entries()) {
       const parameter = method.parameters[mapping.parameterOf[index]];
       const type = this.parameterType(method, mapping.parameterOf[index], expanded, substitution);
@@ -987,14 +1264,34 @@ export abstract class CallBinder extends OperatorBinder {
       if (this.reportRefKindMismatch(arg, parameter, position)) {
         hasBadArgument = true;
       } else if (!this.argumentFits(arg, type, parameter.refKind)) {
+        if (description.isExtension && position === 0) {
+          this.reportReceiverMismatch(candidate, arg, type, row, description, typeArgs);
+          return;
+        }
+        // A lambda's own errors explain why it does not fit, which Roslyn does not introduce.
+        if (!isIntroduced && (arg.expression.kind !== 'unbound' || arg.expression.methodGroup)) {
+          this.error(
+            row,
+            'CS1950',
+            `コレクション初期化子に最も適しているオーバーロード Add メソッド '${displayMethodIn(method, candidate.owner)}' には無効な引数がいくつか含まれています`
+          );
+          isIntroduced = true;
+        }
         this.reportInconvertible(candidate, arg, position, type, row, description);
-        if (description.isExtension && position === 0) return;
         hasBadArgument = true;
       }
     }
     if (hasBadArgument) return;
     for (const [index, typeArg] of typeArgs.entries()) {
-      if (!this.satisfiesConstraints(typeArg, method.typeParameters[index], substitution, row, displayMethod(method)))
+      if (
+        !this.satisfiesConstraints(
+          typeArg,
+          method.typeParameters[index],
+          substitution,
+          row,
+          constraintOwner(method, index)
+        )
+      )
         return;
     }
   }
@@ -1011,7 +1308,7 @@ export abstract class CallBinder extends OperatorBinder {
     const { method } = candidate;
     const normal = this.mapArguments(method, args, false);
     if (!normal) return true;
-    const expanded = method.parameters.at(-1)?.isParams ? this.mapArguments(method, args, true) : undefined;
+    const expanded = this.mapArguments(method, args, true);
     if (!expanded) return false;
     const badCount = (form: boolean, parameterOf: number[]): number => {
       const typeArgs =
@@ -1112,6 +1409,22 @@ export abstract class CallBinder extends OperatorBinder {
     }
   }
 
+  private reportStaticReceiverMismatch(
+    candidate: MethodCandidate,
+    typeArgs: Type[],
+    substitution: Map<TypeParameterSymbol, Type>,
+    row: number
+  ): void {
+    const { method } = candidate;
+    const receiver = displayType(candidate.staticReceiver as Type);
+    const extended = displayType(substitute(method.staticExtensionOf as Type, substitution), true);
+    this.error(
+      row,
+      'CS1929',
+      `'${receiver}' に '${method.extensionProperty ?? method.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayExtensionMember(method, typeArgs)}' には '${extended}' 型のレシーバーが必要です`
+    );
+  }
+
   /** Reports a generic candidate whose type arguments cannot be inferred, telling whether it did. */
   private reportUninferable(
     candidate: MethodCandidate,
@@ -1127,10 +1440,23 @@ export abstract class CallBinder extends OperatorBinder {
       this.inferTypeArguments(candidate, args, mapping.parameterOf, !this.mapArguments(method, args, false))
     )
       return false;
+    if (candidate.staticReceiver && method.extensionProperty) {
+      // An extension property takes no type arguments, so Roslyn finds none that the type can access.
+      const receiver = displayType(candidate.staticReceiver);
+      this.error(
+        row,
+        'CS1061',
+        `'${receiver}' に '${method.extensionProperty}' の定義が含まれておらず、型 '${receiver}' の最初の引数を受け付けるアクセス可能な拡張メソッド '${method.extensionProperty}' が見つかりませんでした。using ディレクティブまたはアセンブリ参照が不足していないことを確認してください`
+      );
+      return true;
+    }
+    const shown = method.isExtensionBlockMember
+      ? displayExtensionMember(method)
+      : displayMethodIn(method, candidate.owner);
     this.error(
       row,
       'CS0411',
-      `メソッド '${displayMethodIn(method, candidate.owner)}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
+      `メソッド '${shown}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
     );
     return true;
   }
@@ -1142,7 +1468,9 @@ export abstract class CallBinder extends OperatorBinder {
     position: number
   ): boolean {
     if (
+      arg.isReceiver ||
       parameter.refKind === arg.refKind ||
+      (parameter.refKind === 'in' && arg.refKind === 'ref') ||
       (parameter.refKind !== 'ref' && parameter.refKind !== 'out' && arg.refKind !== 'ref' && arg.refKind !== 'out')
     )
       return false;
@@ -1150,6 +1478,47 @@ export abstract class CallBinder extends OperatorBinder {
       this.error(arg.row, 'CS1615', `引数 ${position} はキーワード '${arg.refKind}' と共に渡すことはできません`);
     else this.error(arg.row, 'CS1620', `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`);
     return true;
+  }
+
+  /** The two methods of the last ambiguous call, as the runtime binder's message names them. */
+  protected lastAmbiguity: string[] | undefined;
+
+  /** The runtime binder's message for the last call whose argument did not convert, which names its method or delegate. */
+  protected lastInconvertibleCall: string | undefined;
+
+  protected abstract rejectUnknownLibraryMember(type: Type, name: string, position: number): void;
+
+  /** The element type of a collection expression that creates a type, or undefined for a type it cannot create. */
+  protected abstract collectionElementType(target: Type): Type | undefined;
+
+  /**
+   * The elements of a collection expression bound without a target type, a spread as a value of its elements' type,
+   * leaving out those without a type of their own.
+   */
+  protected abstract collectionElementValues(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>
+  ): BoundExpression[];
+
+  /** Reports the receiver of an extension method that does not convert to the type that the method extends. */
+  private reportReceiverMismatch(
+    candidate: MethodCandidate,
+    arg: ArgumentInfo,
+    type: Type,
+    row: number,
+    description: CallDescription,
+    typeArgs: Type[]
+  ): void {
+    // An extension method of .NET's that the library lacks, such as a span's, is unavailable rather than a mismatch.
+    this.rejectUnknownLibraryMember(arg.expression.type, description.name, row);
+    const { method } = candidate;
+    const shown = method.isExtensionBlockMember
+      ? displayExtensionMember(method, typeArgs)
+      : displayMethodIn(method, candidate.owner);
+    this.error(
+      row,
+      'CS1929',
+      `'${displayType(arg.expression.type)}' に '${method.extensionProperty ?? description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${shown}' には '${displayType(type, method.isExtensionBlockMember)}' 型のレシーバーが必要です`
+    );
   }
 
   /** Reports an argument that does not convert to its parameter's type. */
@@ -1162,6 +1531,17 @@ export abstract class CallBinder extends OperatorBinder {
     description: CallDescription
   ): void {
     if (arg.expression.kind === 'unbound' && arg.expression.methodGroup) {
+      // A method of the delegate's parameters but another return type is CS0407, as when assigning the group.
+      const expression = arg.expression;
+      const saved = this.diagnostics.length;
+      const reported = this.quietly(() => {
+        this.convert(expression, type, arg.row);
+        return this.diagnostics.slice(saved);
+      });
+      if (reported?.length === 1 && reported[0].message.startsWith('CS0407:')) {
+        this.diagnostics.push(reported[0]);
+        return;
+      }
       this.error(
         arg.row,
         'CS1503',
@@ -1170,13 +1550,11 @@ export abstract class CallBinder extends OperatorBinder {
     } else if (arg.expression.kind === 'unbound') {
       // Converting reports why the lambda does not fit, as Roslyn reports the body's errors.
       this.convert(arg.expression, type, arg.row);
-    } else if (description.isExtension && position === 0) {
-      this.error(
-        row,
-        'CS1929',
-        `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(candidate.method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
-      );
     } else {
+      this.lastInconvertibleCall =
+        description.kind === 'delegate'
+          ? `Delegate '${displayType(candidate.owner, true).replaceAll(', ', ',')}' has some invalid arguments`
+          : `The best overloaded method match for '${displayMethodIn(candidate.method, candidate.owner)}' has some invalid arguments`;
       this.error(
         arg.row,
         'CS1503',
@@ -1195,4 +1573,106 @@ function withSourceOrder(args: BoundArgument[], parameterOf: number[]): BoundArg
   const sourceOrder = [...new Set(parameterOf)];
   const isReordered = sourceOrder.some((parameterIndex, index) => index > 0 && parameterIndex < sourceOrder[index - 1]);
   return isReordered ? Object.assign(args, { sourceOrder }) : args;
+}
+
+/**
+ * Whether a type is unmanaged (C# spec §8.8): a non-nullable value type whose fields, at every level, are value types,
+ * as the `unmanaged` constraint requires.
+ */
+export function isUnmanagedType(type: Type, seen = new Set<TypeSymbol>()): boolean {
+  if (type.kind === 'typeParameter') return type.symbol.hasUnmanagedConstraint;
+  if (type.kind !== 'named' || !type.symbol.isValueType || nullableUnderlying(type)) return false;
+  if (type.symbol.kind === 'enum' || type.symbol.special !== undefined) return type.symbol.special !== 'nullable';
+  if (seen.has(type.symbol)) return true;
+  seen.add(type.symbol);
+  const substitution = substitutionOf(type);
+  return type.symbol.fields
+    .filter((field) => !field.isStatic && !field.isConst)
+    .every((field) => isUnmanagedType(substitute(field.type, substitution), seen));
+}
+
+/** The name of the generic method or extension block whose type parameter a type argument breaks a constraint of. */
+function constraintOwner(method: MethodSymbol, typeParameterIndex: number): string {
+  return method.isExtensionBlockMember && typeParameterIndex < method.extensionBlockArity
+    ? displayExtensionBlock(method)
+    : displayMethod(method);
+}
+
+/**
+ * The applicable candidates without those that another candidate of the same declaring type outranks by its
+ * `[OverloadResolutionPriority]`, as Roslyn removes them before it compares conversions.
+ */
+function withHighestPriority(applicable: Applicable[]): Applicable[] {
+  const highest = new Map<TypeSymbol, number>();
+  for (const { candidate } of applicable) {
+    const original = originalDefinition(candidate.method);
+    highest.set(original.owner, Math.max(highest.get(original.owner) ?? -Infinity, overloadPriorityOf(original)));
+  }
+  return applicable.filter(({ candidate }) => {
+    const original = originalDefinition(candidate.method);
+    return overloadPriorityOf(original) === highest.get(original.owner);
+  });
+}
+
+/** The method an override overrides at the root, whose declaration gives its priority and its declaring type. */
+function originalDefinition(method: MethodSymbol): MethodSymbol {
+  let original = method;
+  while (original.overridden) original = original.overridden;
+  return original;
+}
+
+function overloadPriorityOf(method: MethodSymbol): number {
+  if (!method.property) return method.overloadPriority;
+  let property = method.property;
+  while (property.overridden) property = property.overridden;
+  return property.overloadPriority;
+}
+
+/** The element type of a span, which a collection expression creates over an array of its elements. */
+function collectionExpressionElement(type: Type): Type | undefined {
+  if (type.kind !== 'named') return undefined;
+  const name = type.symbol.fullName;
+  return name === 'System.ReadOnlySpan`1' || name === 'System.Span`1' ? type.args[0] : undefined;
+}
+
+const ARRAY_INTERFACES = new Set([
+  'System.Collections.Generic.IEnumerable`1',
+  'System.Collections.Generic.IReadOnlyCollection`1',
+  'System.Collections.Generic.IReadOnlyList`1',
+  'System.Collections.Generic.ICollection`1',
+  'System.Collections.Generic.IList`1',
+]);
+
+function spanName(type: Type): string | undefined {
+  return collectionExpressionElement(type) && type.kind === 'named' ? type.symbol.fullName : undefined;
+}
+
+/**
+ * Whether a collection expression converts better to the first of two collection types of the same element type:
+ * a `ReadOnlySpan<T>` over a `Span<T>`, a span over an array or an interface that one implements, and otherwise a
+ * type that converts implicitly to the other.
+ */
+function isBetterCollectionType(a: Type, b: Type, converts: (from: Type, to: Type) => boolean): boolean {
+  const aSpan = spanName(a);
+  const bSpan = spanName(b);
+  if (aSpan === 'System.ReadOnlySpan`1' && bSpan === 'System.Span`1') return true;
+  if (aSpan) return b.kind === 'array' || (b.kind === 'named' && !bSpan && ARRAY_INTERFACES.has(b.symbol.fullName));
+  return !bSpan && converts(a, b);
+}
+
+/** A handler conversion is better than any other for an interpolated string that is not constant (C# 10). */
+function compareHandlerConversions(expression: BoundExpression, a: Type, b: Type): number | undefined {
+  if (expression.kind !== 'interpolated') return undefined;
+  const aIsHandler = interpolationTargetOf(a) === 'handler';
+  if (aIsHandler === (interpolationTargetOf(b) === 'handler')) return undefined;
+  return aIsHandler ? 1 : -1;
+}
+
+/** A conversion to the argument's own type is better than one to another type. */
+function compareExactConversions(arg: ArgumentInfo, a: Type, b: Type): number | undefined {
+  if (arg.isOutVar) return undefined;
+  const aExact = sameType(arg.expression.type, a);
+  const bExact = sameType(arg.expression.type, b);
+  if (aExact === bExact) return undefined;
+  return aExact ? 1 : -1;
 }

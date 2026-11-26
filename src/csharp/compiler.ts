@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss -- The compiler module keeps one stage of the C# interpreter together.
 import { CompileError } from '../interpreter/diagnostics';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import type {
@@ -10,28 +9,38 @@ import type {
   Position,
   Statement,
 } from './ast';
+import { AttributeBinder } from './attributeBinder';
 import type { Library, TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression, BoundStatement } from './bound';
-import type { BindContext } from './convertBinder';
+import { type BindContext, lateOperandName } from './convertBinder';
 import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
+import { discardResult } from './lambdaBinder';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
+import { DYNAMIC_SOURCE } from './library/dynamicSource';
+import { GLOBALIZATION_SOURCE } from './library/globalizationSource';
+import { IO_SOURCE } from './library/ioSource';
+import { NUMERICS_SOURCE } from './library/numericsSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
+import { TASKS_SOURCE } from './library/tasksSource';
 import { TURTLE_SOURCE } from './library/turtleSource';
 import { NamespaceSymbol } from './namespaces';
 import { parseCSharp } from './parse';
 import { FunctionScope, LocalScope } from './scopes';
-import { isObjectCreation, StatementBinder } from './statementBinder';
+import { isObjectCreation } from './statementBinder';
+// code-gauge-allow-file fileNcss -- The compiler module keeps one stage of the C# interpreter together.
+import { anyStatement } from './statementSearch';
 import {
   arrayType,
   displayMethod,
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
-  type FieldSymbol,
+  FieldSymbol,
   type LocalSymbol,
   MethodSymbol,
   type NamedType,
+  namedType,
   type ParameterSymbol,
   substitute,
   substitutionOf,
@@ -55,7 +64,19 @@ export interface CompiledProgram {
   entry: MethodSymbol;
   /** Whether the entry is the method of the top-level statements, whose locals the trace shows as `Main`'s. */
   isTopLevel: boolean;
+  /** Whether integral overflow throws outside `checked` and `unchecked`, as `CheckForOverflowUnderflow` makes it. */
+  checkOverflow: boolean;
+  /** Whether `InvariantGlobalization` makes the invariant culture the current one and the only one. */
+  invariantGlobalization: boolean;
+  /** Binds an operation on `dynamic` values to its operands' types when it runs, as the runtime binder does. */
+  /** `target` is the type a conversion converts to, with the type arguments of the code that runs it. */
+  bindLate?: (node: LateNode, types: Type[], target: Type | undefined) => LateBinding;
 }
+
+type LateNode = Extract<BoundExpression, { kind: 'late' }>;
+
+/** A late-bound operation bound to its operands' types: the expression to evaluate, or the runtime binder's error. */
+export type LateBinding = { bound: BoundExpression; method: MethodSymbol } | { message: string };
 
 let libraryCache: Library | undefined;
 
@@ -90,7 +111,19 @@ function buildLibrary(): Library {
   };
   const compiler = new Compiler(library, {});
   // One unit, since the library's namespaces refer to each other's types.
-  const unit = parseCSharp([SYSTEM_SOURCE, COLLECTIONS_SOURCE, TURTLE_SOURCE].join('\n'), true);
+  const unit = parseCSharp(
+    [
+      SYSTEM_SOURCE,
+      GLOBALIZATION_SOURCE,
+      NUMERICS_SOURCE,
+      COLLECTIONS_SOURCE,
+      TASKS_SOURCE,
+      IO_SOURCE,
+      DYNAMIC_SOURCE,
+      TURTLE_SOURCE,
+    ].join('\n'),
+    true
+  );
   const declared = compiler.declareUnit(unit, root, true);
   compiler.bindLibraryMembers(declared);
   if (compiler.diagnostics.length > 0)
@@ -103,10 +136,14 @@ function buildLibrary(): Library {
 /** Compiles a program: parses nothing itself, but declares, binds, and checks it. */
 export function compileProgram(unit: CompilationUnit, options: CompileOptions = {}): CompiledProgram {
   const compiler = new Compiler(getLibrary(), options);
-  return compiler.compile(unit);
+  try {
+    return compiler.compile(unit);
+  } catch (error) {
+    throw error instanceof CompileError && unit.lineMap ? unit.lineMap.remap(error) : error;
+  }
 }
 
-export class Compiler extends StatementBinder {
+export class Compiler extends AttributeBinder {
   /** The rows whose `// atomic` annotations a declaration claimed. */
   private readonly claimedAtomicRows = new Set<number>();
   private readonly constantsInProgress = new Set<FieldSymbol>();
@@ -119,23 +156,43 @@ export class Compiler extends StatementBinder {
     super(library);
   }
 
+  /** Declares the program's types and top-level statements, handing the types over as soon as they exist. */
+  private declareProgram(
+    unit: CompilationUnit,
+    onDeclared: (declared: DeclaredType[]) => void
+  ): ReturnType<Compiler['declareTopLevel']> | undefined {
+    // Roslyn reports `unsafe` without `AllowUnsafeBlocks` among the declarations' errors, so no method body is bound.
+    for (const row of unit.unsafeRows ?? [])
+      this.error(row, 'CS0227', 'アンセーフ コードは /unsafe でコンパイルした場合のみ有効です');
+    const declared = this.declareUnit(unit, this.userRoot, false);
+    onDeclared(declared);
+    this.checkStructLayouts(declared);
+    const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
+    this.collectAttributes(unit.attributes, 'assembly', undefined, this.rootContext(unit), {
+      assembly: undefined,
+      module: undefined,
+    });
+    this.definedSymbols = new Set(unit.options?.symbols);
+    this.bindPendingAttributes();
+    this.removeConditionalCalls(declared);
+    return program;
+  }
+
   compile(unit: CompilationUnit): CompiledProgram {
     let entry: MethodSymbol | undefined;
     let isTopLevel = false;
     let declared: DeclaredType[] = [];
+    this.lineMap = unit.lineMap;
     this.runGuarded(() => {
-      declared = this.declareUnit(unit, this.userRoot, false);
-      this.checkStructLayouts(declared);
-      const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
+      const program = this.declareProgram(unit, (types) => (declared = types));
       // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
       if (this.diagnostics.length > 0) return;
+      // Roslyn reports a missing or misdeclared entry point before the errors of method bodies.
+      entry = program ? program.entry : this.findMain(declared);
       for (const type of declared) this.bindTypeMembers(type);
       if (program) {
         this.bindTopLevel(program, unit);
-        entry = program.entry;
         isTopLevel = true;
-      } else {
-        entry = this.findMain(declared);
       }
       this.checkTypeArguments();
       this.checkAtomicAnnotations();
@@ -144,13 +201,18 @@ export class Compiler extends StatementBinder {
       for (const type of declared) this.assignSlots(type.symbol);
     });
     this.finishWithErrors();
-    if (!entry)
-      throw new CompileError([
-        { row: 0, message: "CS5001: プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません" },
-      ]);
+    if (!entry) throw new Error('A program without an entry point compiled without errors.');
     const types = declared.map((type) => type.symbol);
-    if (isTopLevel) types.push(entry.owner);
-    return { library: this.library, types, entry, isTopLevel };
+    if (isTopLevel && !types.includes(entry.owner)) types.push(entry.owner);
+    return {
+      library: this.library,
+      types,
+      entry,
+      isTopLevel,
+      checkOverflow: unit.options?.checkOverflow ?? false,
+      invariantGlobalization: unit.options?.invariantGlobalization ?? false,
+      bindLate: (node, operandTypes, target) => this.bindLate(node, operandTypes, target),
+    };
   }
 
   /** Reports each instance field of a struct whose type holds that struct by value (CS0523), as Roslyn does. */
@@ -182,6 +244,7 @@ export class Compiler extends StatementBinder {
 
   /** Binds the constants and default parameter values of the library, whose methods have no bodies. */
   bindLibraryMembers(declared: DeclaredType[]): void {
+    this.bindPendingAttributes();
     for (const type of declared) {
       for (const field of type.symbol.fields) if (field.isConst) this.constantValueOf(field);
       for (const method of [...type.symbol.methods, ...type.symbol.constructors]) {
@@ -192,20 +255,187 @@ export class Compiler extends StatementBinder {
     }
   }
 
+  /** The context of the attributes of the whole program, `[assembly: ...]`, which see its global names. */
+  private readonly lateBindings = new WeakMap<LateNode, Map<string, LateBinding>>();
+
+  /**
+   * Binds a late-bound operation with its operands as hidden locals of the given types, in the context of the code
+   * that wrote it, once per site and types. Its compile errors become the runtime binder's messages.
+   */
+  private bindLate(node: LateNode, types: Type[], target: Type | undefined): LateBinding {
+    let bySite = this.lateBindings.get(node);
+    if (!bySite) {
+      bySite = new Map();
+      this.lateBindings.set(node, bySite);
+    }
+    const key = [...types, ...(target ? [target] : [])].map((type) => displayType(type, true)).join('|');
+    let binding = bySite.get(key);
+    if (!binding) {
+      binding = this.bindLateOnce(node, types, target);
+      bySite.set(key, binding);
+    }
+    return binding;
+  }
+
+  private bindLateOnce(node: LateNode, types: Type[], target: Type | undefined): LateBinding {
+    const { method, context } = this.lateContext(node);
+    const saved = this.diagnostics.length;
+    this.lastInconvertibleCall = undefined;
+    // The runtime binder does not look for extension methods.
+    this.isLateBinding = true;
+    try {
+      for (const [index, type] of types.entries()) {
+        const local = this.declareLocal(lateOperandName(index), type, node.syntax, context);
+        local.isHidden = true;
+        // The operand of a `ref` or `out` argument refers to the caller's variable.
+        local.isRefLocal = node.operands[index].kind === 'refArgument';
+      }
+      let bound = this.bindLateSyntax(node, context);
+      if (node.target && target)
+        bound = this.convert(bound, target, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
+      else if (bound.type.kind === 'void' && !node.isDiscarded)
+        return { message: "Cannot implicitly convert type 'void' to 'object'" };
+      else if (bound.type.kind !== 'void' && bound.type.kind !== 'error')
+        bound = this.convert(bound, this.dynamicType, node.syntax);
+      const diagnostic = this.diagnostics[saved];
+      if (diagnostic) return { message: this.runtimeBinderMessage(diagnostic.message) };
+      return { bound, method };
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return { message: this.runtimeBinderMessage(error.diagnostics.at(-1)?.message ?? '') };
+    } finally {
+      this.diagnostics.length = saved;
+      this.isLateBinding = false;
+    }
+  }
+
+  private bindLateSyntax(node: LateNode, context: BindContext): BoundExpression {
+    const bound = this.bindValue(node.syntax, context);
+    // An operation that binds to another late one, as a call of an ExpandoObject's member does, drops its value too.
+    if (node.isDiscarded) discardResult(bound);
+    return bound;
+  }
+
+  /** The method that a late-bound operation binds in, in the context of the code that wrote it. */
+  private lateContext(node: LateNode): { method: MethodSymbol; context: BindContext } {
+    const typeContext = node.typeContext ?? {
+      namespace: [this.userRoot, this.library.root],
+      usings: [],
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    return this.staticScope('<dynamic>', typeContext.type ?? this.objectType.symbol, typeContext);
+  }
+
+  /** A static method of an owner to bind code outside any member's body in, such as a default parameter value. */
+  private staticScope(
+    name: string,
+    owner: TypeSymbol,
+    typeContext: TypeContext
+  ): { method: MethodSymbol; context: BindContext } {
+    const method = new MethodSymbol(name, owner, 'method');
+    method.isStatic = true;
+    const fn = new FunctionScope(method, undefined, typeContext, VOID_TYPE, true, undefined, 'initializer');
+    return { method, context: { scope: new LocalScope(undefined, fn), fn } };
+  }
+
+  /** The runtime binder's message for the compile error that binding an operation to its runtime types gave. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  private runtimeBinderMessage(text: string): string {
+    const code = /^(CS\d+): /.exec(text)?.[1];
+    const quoted = [...text.matchAll(/'([^']*)'/g)].map((match) => match[1]);
+    switch (code) {
+      case 'CS1061':
+      case 'CS0117': {
+        return `'${quoted[0]}' does not contain a definition for '${quoted[1]}'`;
+      }
+      case 'CS0122': {
+        return `'${quoted[0]}' is inaccessible due to its protection level`;
+      }
+      case 'CS1501': {
+        const count = /引数 (\d+) /.exec(text)?.[1];
+        return `No overload for method '${quoted[0]}' takes ${count} arguments`;
+      }
+      case 'CS0121': {
+        const [first, second] = this.lastAmbiguity ?? [];
+        return `The call is ambiguous between the following methods or properties: '${first}' and '${second}'`;
+      }
+      case 'CS1503': {
+        return this.lastInconvertibleCall ?? '';
+      }
+      case 'CS0149': {
+        return 'Cannot invoke a non-delegate type';
+      }
+      case 'CS0019': {
+        return `Operator '${quoted[0]}' cannot be applied to operands of type '${quoted[1]}' and '${quoted[2]}'`;
+      }
+      case 'CS0023': {
+        return `Operator '${quoted[0]}' cannot be applied to operand of type '${quoted[1]}'`;
+      }
+      case 'CS0029': {
+        return `Cannot implicitly convert type '${quoted[0]}' to '${quoted[1]}'`;
+      }
+      case 'CS0266': {
+        return `Cannot implicitly convert type '${quoted[0]}' to '${quoted[1]}'. An explicit conversion exists (are you missing a cast?)`;
+      }
+      case 'CS0030': {
+        return `Cannot convert type '${quoted[0]}' to '${quoted[1]}'`;
+      }
+      case 'CS0021': {
+        return `Cannot apply indexing with [] to an expression of type '${quoted[0]}'`;
+      }
+      case 'CS0200': {
+        return `Property or indexer '${quoted[0]}' cannot be assigned to -- it is read only`;
+      }
+      default: {
+        return text.replace(/^CS\d+: /, '');
+      }
+    }
+  }
+
+  private rootContext(unit: CompilationUnit): TypeContext {
+    const context: TypeContext = {
+      namespace: [this.userRoot, this.library.root],
+      usings: [],
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    this.importInto(context, [], unit.usings);
+    return context;
+  }
+
+  /** Removes the calls of `[Conditional]` methods none of whose symbols the program defines (C# spec §23.5.3). */
+  private removeConditionalCalls(declared: DeclaredType[]): void {
+    for (const { symbol } of declared)
+      for (const method of symbol.methods)
+        if (method.conditionalSymbols && method.returnType.kind === 'void')
+          method.callsAreRemoved = !method.conditionalSymbols.some((name) => this.definedSymbols.has(name));
+  }
+
   // ---- Top-level statements ----
 
   private declareTopLevel(unit: CompilationUnit): { entry: MethodSymbol; type: TypeSymbol } {
+    // The top-level statements join a partial class Program that the program declares, as Roslyn's generated one does.
     const existing = this.userRoot.findType('Program', 0);
-    if (existing) this.unsupported(existing.row, '`partial` クラス');
-    const type = new TypeSymbol('Program', 'class', '', undefined);
-    type.baseType = this.objectType;
-    type.access = 'internal';
-    this.userRoot.addType(type);
+    if (existing && !existing.declaration?.modifiers.set.has('partial'))
+      this.error(existing.row, 'CS0260', "partial 修飾子が型 'Program' にありません。この型の別の部分宣言が存在します");
+    const type = existing ?? new TypeSymbol('Program', 'class', '', undefined);
+    if (!existing) {
+      type.baseType = this.objectType;
+      type.access = 'internal';
+      this.userRoot.addType(type);
+    }
     const returnsValue = containsValueReturn(unit.statements);
     const entry = new MethodSymbol('<Main>$', type, 'method');
     entry.isStatic = true;
     entry.access = 'private';
     entry.returnType = returnsValue ? this.intType : VOID_TYPE;
+    // Top-level statements with `await` make an async entry point, returning Task or Task<int>.
+    if (unit.statements.some(containsAwait)) {
+      entry.isAsync = true;
+      const task = this.library.typeNamed('System.Threading.Tasks.Task', returnsValue ? 1 : 0);
+      entry.returnType = returnsValue ? namedType(task, [this.intType]) : namedType(task);
+    }
     entry.parameters = [{ name: 'args', type: arrayType(this.stringType), refKind: undefined, isParams: false }];
     entry.row = unit.statements[0].row;
     type.methods.push(entry);
@@ -215,10 +445,11 @@ export class Compiler extends StatementBinder {
   private bindTopLevel(program: { entry: MethodSymbol; type: TypeSymbol }, unit: CompilationUnit): void {
     const typeContext: TypeContext = {
       namespace: [this.userRoot, this.library.root],
-      usings: this.resolveUsings(unit.usings),
+      usings: [],
       type: program.type,
       methodTypeParameters: [],
     };
+    this.importInto(typeContext, [], unit.usings);
     const block = {
       kind: 'block' as const,
       statements: unit.statements,
@@ -232,7 +463,7 @@ export class Compiler extends StatementBinder {
   /** Finds the static `Main` method that the program starts from. */
   private findMain(declared: DeclaredType[]): MethodSymbol | undefined {
     // A method of a generic type, or of a type nested in one, is no entry point.
-    const candidates = declared.flatMap((type) =>
+    const mains = declared.flatMap((type) =>
       type.symbol.allTypeParameters.length > 0
         ? []
         : type.symbol.methods.filter(
@@ -240,8 +471,17 @@ export class Compiler extends StatementBinder {
               method.name === 'Main' &&
               method.isStatic &&
               method.typeParameters.length === 0 &&
-              this.isEntrySignature(method)
+              this.hasEntryParameters(method)
           )
+    );
+    const shaped = mains.map((method) => ({ method, returns: this.entryReturnKind(method) }));
+    for (const { method, returns } of shaped)
+      if (method.isAsync && returns === 'plain')
+        this.error(method.row, 'CS4009', 'エントリ ポイントを返す void または int を async にすることはできません');
+    // Roslyn prefers a `Main` returning void or int to one returning a task, warning about the latter (CS8892).
+    const plain = shaped.filter(({ method, returns }) => returns === 'plain' && !method.isAsync);
+    const candidates = (plain.length > 0 ? plain : shaped.filter(({ returns }) => returns === 'task')).map(
+      ({ method }) => method
     );
     if (candidates.length > 1) {
       this.error(
@@ -251,14 +491,28 @@ export class Compiler extends StatementBinder {
       );
       return undefined;
     }
+    // Roslyn reports this error without a location, which the first row stands for.
+    if (candidates.length === 0)
+      this.error(0, 'CS5001', "プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません");
     return candidates[0];
   }
 
-  private isEntrySignature(method: MethodSymbol): boolean {
-    const returns =
-      method.returnType.kind === 'void' ||
-      (method.returnType.kind === 'named' && method.returnType.symbol.special === 'int');
-    if (!returns) return false;
+  /** Whether an entry point returns void or int (`plain`), `Task` or `Task<int>` (`task`), or anything else. */
+  private entryReturnKind(method: MethodSymbol): 'plain' | 'task' | undefined {
+    const { returnType } = method;
+    if (returnType.kind === 'void') return 'plain';
+    if (returnType.kind !== 'named') return undefined;
+    if (returnType.symbol.special === 'int') return 'plain';
+    if (returnType.symbol === this.library.typeNamed('System.Threading.Tasks.Task', 0)) return 'task';
+    const [result] = returnType.args;
+    return returnType.symbol === this.library.typeNamed('System.Threading.Tasks.Task', 1) &&
+      result.kind === 'named' &&
+      result.symbol.special === 'int'
+      ? 'task'
+      : undefined;
+  }
+
+  private hasEntryParameters(method: MethodSymbol): boolean {
     if (method.parameters.length === 0) return true;
     const [parameter] = method.parameters;
     return (
@@ -279,6 +533,7 @@ export class Compiler extends StatementBinder {
       return;
     }
     for (const field of symbol.fields) if (field.isConst) this.constantValueOf(field);
+    for (const field of symbol.fields) if (field.fixedBuffer) this.sizeFixedBuffer(field, field.fixedBuffer);
     const parameters = [...symbol.methods, ...symbol.constructors, ...symbol.properties].flatMap(
       (owner) => owner.parameters
     );
@@ -286,14 +541,24 @@ export class Compiler extends StatementBinder {
       if (parameter.defaultSyntax) this.bindParameterDefault(parameter, parameter.type);
     symbol.instanceInitializer = this.bindFieldInitializers(symbol, context, false);
     symbol.staticInitializer = this.bindFieldInitializers(symbol, context, true);
-    for (const method of symbol.methods) this.bindDeclaredMethod(method, context);
-    for (const accessor of symbol.properties.flatMap((property) => [property.getter, property.setter])) {
-      if (!accessor?.declaration) continue;
-      const body = (accessor.declaration as unknown as { body: MethodDeclaration['body'] }).body;
-      this.bindMethod(accessor, context, body, undefined);
-    }
+    this.bindMethodsAndAccessors(symbol, context);
     for (const constructor of symbol.constructors) this.bindConstructor(constructor, type);
     if (symbol.staticConstructor) this.bindConstructor(symbol.staticConstructor, type);
+  }
+
+  /** Binds the methods and property accessors of a type in the order the program declares them, as Roslyn does. */
+  private bindMethodsAndAccessors(symbol: TypeSymbol, context: TypeContext): void {
+    const accessors = symbol.properties
+      .flatMap((property) => [property.getter, property.setter])
+      .filter((accessor) => accessor?.declaration !== undefined) as MethodSymbol[];
+    for (const method of [...symbol.methods, ...accessors].toSorted((a, b) => a.row - b.row)) {
+      if (method.kind === 'getter' || method.kind === 'setter') {
+        const body = (method.declaration as unknown as { body: MethodDeclaration['body'] }).body;
+        this.bindMethod(method, context, body, undefined);
+      } else {
+        this.bindDeclaredMethod(method, context);
+      }
+    }
   }
 
   private bindDeclaredMethod(method: MethodSymbol, context: TypeContext): void {
@@ -306,6 +571,7 @@ export class Compiler extends StatementBinder {
 
   /** Binds the initializers of a type's fields, which run as one block before a constructor's body. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private bindFieldInitializers(symbol: TypeSymbol, context: TypeContext, isStatic: boolean): BoundBlock | undefined {
     const fields = symbol.fields.filter(
       (field) => field.isStatic === isStatic && !field.isConst && field.initializer !== undefined
@@ -329,7 +595,12 @@ export class Compiler extends StatementBinder {
     }
     const statements: BoundStatement[] = [];
     for (const field of fields) {
+      this.callerMember = field.property?.name ?? field.name;
       const initializer = field.initializer as NonNullable<FieldSymbol['initializer']>;
+      if (field.byRef && !isStatic) {
+        statements.push(this.bindRefFieldInitializer(field, symbol, initializer, bindContext));
+        continue;
+      }
       const value =
         initializer.kind === 'arrayInitializer'
           ? this.bindArrayInitializer(initializer, field.type, bindContext)
@@ -368,10 +639,40 @@ export class Compiler extends StatementBinder {
     return block;
   }
 
+  /** `ref int F = ref x;`, which makes a ref field refer to the variable before a constructor's body runs. */
+  private bindRefFieldInitializer(
+    field: FieldSymbol,
+    symbol: TypeSymbol,
+    initializer: NonNullable<FieldSymbol['initializer']>,
+    context: BindContext
+  ): BoundStatement {
+    const row = field.row;
+    const left = {
+      kind: 'field' as const,
+      receiver: { kind: 'this' as const, type: symbol.declaredType, row },
+      field,
+      type: field.type,
+      row,
+    };
+    if (initializer.kind !== 'refExpression') {
+      if (initializer.kind === 'arrayInitializer')
+        this.error(row, 'CS8172', '値を使用して参照渡し変数を初期化することはできません');
+      else this.reportValueForReference(initializer, { row, column: 0 }, context);
+      return { kind: 'empty', row, step: 'none' };
+    }
+    const target = this.bindRefTarget(initializer.operand, field.byRef === 'readonly', context, 'local');
+    if (target.kind === 'discard') return { kind: 'empty', row, step: 'none' };
+    this.checkRefType(target.type, field.type, initializer);
+    this.checkRefFieldTarget(target, field, this.valueContextOf(left.receiver, context.fn), initializer, context);
+    const expression: BoundExpression = { kind: 'refFieldAssign', field: left, target, type: field.type, row };
+    return { kind: 'expression', expression, row, step: 'step' };
+  }
+
   private bindConstructor(constructor: MethodSymbol, type: DeclaredType): void {
     const { symbol, context } = type;
     const declaration = constructor.declaration as ConstructorDeclaration | undefined;
     if (constructor.native) return;
+    this.callerMember = constructor.name;
     const fn = new FunctionScope(
       constructor,
       undefined,
@@ -529,6 +830,8 @@ export class Compiler extends StatementBinder {
     body: MethodDeclaration['body'],
     declaration: MethodDeclaration | undefined
   ): void {
+    this.callerMember =
+      method.property?.name ?? (method.isEventAccessor ? method.name.replace(/^(add|remove)_/, '') : method.name);
     const thisType = method.isStatic ? undefined : method.owner.declaredType;
     const fn = new FunctionScope(
       method,
@@ -584,6 +887,7 @@ export class Compiler extends StatementBinder {
       markCapturedLocals(body);
       return;
     }
+    this.flushRefSafetyDiagnostics();
     this.summarizeLocalFunctions();
     this.analyzeFlow(method, body);
   }
@@ -668,9 +972,18 @@ export class Compiler extends StatementBinder {
           'CS0177',
           `out パラメーター '${local.name}' はコントロールが現在のメソッドを抜ける前に割り当てられる必要があります`
         ),
+      heldAcrossSuspension: (local, row) =>
+        this.error(
+          row,
+          'CS4007',
+          `'${displayType(local.type, true)}' 型のインスタンスは、'await' または 'yield' 境界を越えて保持することはできません。`
+        ),
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
-    const returnsValue = method.returnType.kind !== 'void' && method.returnType.kind !== 'error';
+    // An iterator ends by falling off its body, which returns no value, and an async function returns what its task
+    // type wraps.
+    const returnType = method.async ? method.async.resultType : method.returnType;
+    const returnsValue = returnType.kind !== 'void' && returnType.kind !== 'error' && !method.iterator;
     const assignedAtExit = analyzer.analyzeFunction(method, body, parameters, returnsValue, body.row);
     if (method.kind === 'localFunction') {
       method.assignedAtExit = assignedAtExit;
@@ -711,6 +1024,29 @@ export class Compiler extends StatementBinder {
     }
   }
 
+  /** Gives a fixed-size buffer's struct its elements, as many as its length, a constant above zero, says. */
+  private sizeFixedBuffer(field: FieldSymbol, buffer: NonNullable<FieldSymbol['fixedBuffer']>): void {
+    // The length binds as a constant of the field's name would, which Roslyn's errors name it by.
+    const size = new FieldSymbol(field.name, this.intType, field.owner);
+    size.isConst = true;
+    size.isStatic = true;
+    size.initializer = buffer.size;
+    size.row = field.row;
+    const errors = this.diagnostics.length;
+    const length = Number(this.constantValueOf(size));
+    if (length <= 0 && this.diagnostics.length === errors)
+      this.error(field.row, 'CS1665', '固定サイズ バッファーには、0 よりも大きい値を指定しなければなりません');
+    buffer.length = Math.max(length, 1);
+    const elements = (field.type as NamedType).symbol;
+    elements.fields = Array.from({ length: buffer.length }, (_, index) => {
+      const element = new FieldSymbol(`<${index}>`, buffer.elementType, elements);
+      element.access = 'public';
+      element.slot = index;
+      return element;
+    });
+    elements.instanceFieldCount = buffer.length;
+  }
+
   private evaluateConstant(field: FieldSymbol): unknown {
     const owner = field.owner;
     const declared = this.declaredTypes.find((type) => type.symbol === owner);
@@ -727,9 +1063,11 @@ export class Compiler extends StatementBinder {
     if (owner.kind === 'enum') return this.enumMemberValue(field, bindContext);
     // The parser rejects a constant without a value.
     if (!field.initializer) return 0;
+    const saved = this.diagnostics.length;
     const value = this.bindAs(field.initializer as Expression, field.type, bindContext);
     if (value.kind !== 'constant') {
-      if (value.type.kind !== 'error')
+      // An initializer with errors, as an overflow (CS0220), is no constant that Roslyn reports again.
+      if (value.type.kind !== 'error' && this.diagnostics.length === saved)
         this.error(
           field.row,
           'CS0133',
@@ -747,12 +1085,12 @@ export class Compiler extends StatementBinder {
     const underlying = owner.enumUnderlying as NamedType;
     const isBig = underlying.symbol.special === 'long' || underlying.symbol.special === 'ulong';
     if (field.initializer) {
+      // The member's value may combine other members of its enum, as `All = Read | Write`, which is a constant of it.
+      const asEnum = this.quietly(() => this.bindValue(field.initializer as Expression, context));
+      if (asEnum?.kind === 'constant' && asEnum.type.kind === 'named' && asEnum.type.symbol === owner)
+        return asEnum.value;
       const value = this.bindAs(field.initializer as Expression, underlying, context);
       if (value.kind !== 'constant') {
-        // The member's value may refer to other members of its enum, which convert to the underlying type.
-        const asEnum = this.bindValue(field.initializer as Expression, context);
-        if (asEnum.kind === 'constant' && asEnum.type.kind === 'named' && asEnum.type.symbol === owner)
-          return asEnum.value;
         if (value.type.kind !== 'error')
           this.error(
             field.row,
@@ -769,27 +1107,11 @@ export class Compiler extends StatementBinder {
     return typeof previous === 'bigint' ? previous + 1n : (previous as number) + 1;
   }
 
-  protected bindParameterDefault(parameter: ParameterSymbol, type: Type): BoundExpression {
+  protected bindParameterDefault(parameter: ParameterSymbol, type: Type, scope?: BindContext): BoundExpression {
     if (parameter.defaultValue)
       return { kind: 'constant', value: parameter.defaultValue.value, type, row: parameter.position?.row ?? 0 };
     const syntax = parameter.defaultSyntax as Expression;
-    const method = new MethodSymbol('<default>', this.objectType.symbol, 'method');
-    method.isStatic = true;
-    const fn = new FunctionScope(
-      method,
-      undefined,
-      parameter.defaultContext ?? {
-        namespace: [this.userRoot, this.library.root],
-        usings: this.resolveUsings([]),
-        type: undefined,
-        methodTypeParameters: [],
-      },
-      VOID_TYPE,
-      true,
-      undefined,
-      'initializer'
-    );
-    const context: BindContext = { scope: new LocalScope(undefined, fn), fn };
+    const context = scope ?? this.defaultValueContext(parameter);
     const bound = this.bindAs(syntax, type, context);
     if (bound.kind === 'constant') {
       parameter.defaultValue = { value: bound.value };
@@ -811,43 +1133,34 @@ export class Compiler extends StatementBinder {
     parameter.defaultValue = { value: undefined };
     return { kind: 'default', type: ERROR_TYPE, row: syntax.row };
   }
+
+  /** The scope of a member's default parameter value, which sees the names where the member is declared. */
+  private defaultValueContext(parameter: ParameterSymbol): BindContext {
+    const typeContext = parameter.defaultContext ?? {
+      namespace: [this.userRoot, this.library.root],
+      usings: this.globalImports([]).usings,
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    return this.staticScope('<default>', this.objectType.symbol, typeContext).context;
+  }
 }
 
 /** Whether top-level statements return a value, which makes the entry point return `int`. */
+/** Whether syntax holds an `await` of its own function, outside the lambdas and local functions in it. */
+function containsAwait(node: unknown): boolean {
+  if (typeof node !== 'object' || node === null) return false;
+  if (Array.isArray(node)) return node.some(containsAwait);
+  const record = node as { kind?: string; isAwait?: boolean; using?: string };
+  if (record.kind === 'lambda' || record.kind === 'localFunction') return false;
+  if (record.kind === 'await' || record.isAwait === true || record.using === 'await using') return true;
+  return Object.values(record).some(containsAwait);
+}
+
 function containsValueReturn(statements: Statement[]): boolean {
-  const visit = (statement: Statement): boolean => {
-    switch (statement.kind) {
-      case 'return': {
-        return statement.value !== undefined;
-      }
-      case 'block': {
-        return statement.statements.some(visit);
-      }
-      case 'if': {
-        return visit(statement.consequence) || (statement.alternative !== undefined && visit(statement.alternative));
-      }
-      case 'while':
-      case 'do':
-      case 'for':
-      case 'foreach': {
-        return visit(statement.body);
-      }
-      case 'switch': {
-        return statement.sections.some((section) => section.statements.some(visit));
-      }
-      case 'try': {
-        return (
-          visit(statement.body) ||
-          statement.catches.some((clause) => visit(clause.body)) ||
-          (statement.finally !== undefined && visit(statement.finally))
-        );
-      }
-      default: {
-        return false;
-      }
-    }
-  };
-  return statements.some(visit);
+  return statements.some((statement) =>
+    anyStatement(statement, (inner) => inner.kind === 'return' && inner.value !== undefined)
+  );
 }
 
 /** Lists in each scope the locals that lambdas or local functions capture, which then live in fresh cells. */
@@ -867,8 +1180,14 @@ function markCapturedLocals(block: BoundBlock): void {
         break;
       }
       case 'while':
-      case 'do': {
+      case 'do':
+      case 'lock':
+      case 'using': {
         visit(statement.body);
+        break;
+      }
+      case 'labeled': {
+        visit(statement.statement);
         break;
       }
       case 'for': {

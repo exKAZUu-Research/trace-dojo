@@ -329,7 +329,8 @@ export function compareNumeric(operator: string, kind: OperandKind, left: Numeri
 }
 
 // code-gauge-allow duplicateLines -- Each interpreter maps comparison operators on its own.
-function relation(operator: string, order: number): boolean {
+/** Whether a comparison operator holds for an order: negative, zero, or positive as the left is less, equal, or more. */
+export function relation(operator: string, order: number): boolean {
   switch (operator) {
     case '==': {
       return order === 0;
@@ -365,10 +366,15 @@ export function unaryNumeric(operator: string, kind: OperandKind, value: Numeric
 }
 
 /** The value one more or one less than a value of a numeric type, wrapping as unchecked `++` and `--` do. */
-export function stepNumeric(kind: SpecialType, value: NumericValue, delta: 1 | -1): NumericValue {
+export function stepNumeric(kind: SpecialType, value: NumericValue, delta: 1 | -1, checked = false): NumericValue {
   if (kind === 'decimal') return arithmetic('+', 'decimal', value, CsDecimal.fromBigInt(BigInt(delta)));
   if (kind === 'double') return (value as number) + delta;
   if (kind === 'float') return Math.fround((value as number) + delta);
   const integer = typeof value === 'bigint' ? value : BigInt(value as number);
+  if (checked) {
+    const [min, max] = integerRange(kind);
+    const result = integer + BigInt(delta);
+    if (result < min || result > max) throw ARITHMETIC_OVERFLOW();
+  }
   return wrapInteger(integer + BigInt(delta), kind);
 }

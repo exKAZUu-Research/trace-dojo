@@ -1,24 +1,44 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import type { SourceDiagnostic } from '../interpreter/diagnostics';
+import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { CompilationUnit } from './ast';
 import { Converter } from './convert';
+import { preprocess } from './preprocessor';
 
 const parser = await loadParser('@willbooster/tree-sitter-c-sharp/tree-sitter-c_sharp.wasm');
 
 /** Parses a C# source file, throwing a `CompileError` for invalid or unsupported syntax. */
 export function parseCSharp(source: string, isLibrary = false): CompilationUnit {
-  return parseSource(
-    parser,
-    parenthesizeExpressionStatements(source),
-    MISSING_TOKEN_NAMES,
-    (root) => new Converter(isLibrary).convertCompilationUnit(root),
-    {
-      locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors),
-    }
-  );
+  const { text, options, lineMap, diagnostics } = isLibrary
+    ? { text: source, options: undefined, lineMap: undefined, diagnostics: [] as SourceDiagnostic[] }
+    : preprocess(source);
+  let unit: CompilationUnit | undefined;
+  let syntaxErrors: SourceDiagnostic[] = [];
+  try {
+    unit = parseSource(
+      parser,
+      parenthesizeExpressionStatements(text),
+      MISSING_TOKEN_NAMES,
+      (root) => ({
+        ...new Converter(isLibrary, options?.allowUnsafe ?? false).convertCompilationUnit(root),
+        options,
+        lineMap,
+      }),
+      { locateErrors: (root: Node, errors: SourceDiagnostic[]) => roslynSyntaxErrors(root, errors) }
+    );
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    syntaxErrors = error.diagnostics;
+  }
+  if (!unit || diagnostics.length > 0) {
+    const merged =
+      diagnostics.length > 0 ? [...diagnostics, ...syntaxErrors].toSorted((a, b) => a.row - b.row) : syntaxErrors;
+    const error = new CompileError(merged);
+    throw lineMap ? lineMap.remap(error) : error;
+  }
+  return unit;
 }
 
 const MISSING_TOKEN_NAMES = { identifier: '識別子' };
@@ -41,21 +61,58 @@ const MISSING_TOKENS: Record<string, string> = {
  * without its operand.
  */
 function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const extension = extensionMemberErrors(root);
+  if (extension.length > 0) return extension;
   const strayElse = strayElseErrors(root);
   if (strayElse) return strayElse;
   const misplaced = misplacedKeywordError(root);
   if (misplaced) return [misplaced];
+  const namespaceModifiers = namespaceModifierErrors(root);
+  if (namespaceModifiers.length > 0) return namespaceModifiers;
   const diagnostics: SourceDiagnostic[] = [];
   for (const diagnostic of errors) {
     const missing = /^「(.+)」が足りません。$/.exec(diagnostic.message);
     if (missing) {
-      const token = missing[1] === ';' && endsDeclarationBeforeMore(root, diagnostic.row) ? ',' : missing[1];
+      const endsDeclaration = missing[1] === ';' && endsDeclarationBeforeMore(root, diagnostic.row);
+      const token = endsDeclaration ? ',' : missing[1];
       const message = MISSING_TOKENS[token] ?? `CS1003: 構文エラーです。'${token}' が必要です`;
       diagnostics.push({ row: diagnostic.row, message });
+      if (endsDeclaration) diagnostics.push(...skippedDeclarationErrors(root, diagnostic.row));
     }
   }
   for (const error of outermostErrors(root)) diagnostics.push(...roslynErrorsOf(root, error));
   return diagnostics.toSorted((a, b) => a.row - b.row);
+}
+
+const TYPE_DECLARATION_KEYWORDS = new Set(['class', 'struct', 'interface', 'enum', 'record']);
+const NOT_IN_EXTENSION = 'CS9282: このメンバーは拡張ブロックでは使用できません';
+
+/**
+ * The errors of the members that an extension block may not declare, which the grammar does not read there: fields,
+ * events, constructors, conversion operators, nested types, and indexers, which C# 14 leaves in preview.
+ */
+function extensionMemberErrors(root: Node): SourceDiagnostic[] {
+  return root
+    .descendantsOfType('extension_body')
+    .flatMap((body) => body?.namedChildren ?? [])
+    .flatMap((member) =>
+      member ? extensionMemberMessages(member).map((message) => ({ row: member.startPosition.row, message })) : []
+    );
+}
+
+function extensionMemberMessages(member: Node): string[] {
+  const name = member.childForFieldName('name');
+  const type = member.childForFieldName('type');
+  if (member.type === 'ERROR') return [NOT_IN_EXTENSION];
+  if (member.type === 'property_declaration' && name?.text === 'this')
+    return [
+      "CS8652: 機能 '拡張インデクサー' は現在、プレビュー段階であり、*サポートされていません*。プレビュー機能を使用するには、'preview' 言語バージョンを使用してください。",
+    ];
+  if (member.type === 'property_declaration' && type && TYPE_DECLARATION_KEYWORDS.has(type.text))
+    return [NOT_IN_EXTENSION];
+  if (member.type === 'method_declaration' && (!name || name.isMissing || name.text === ''))
+    return ['CS1520: メソッドは戻り値の型を持たなければなりません', NOT_IN_EXTENSION];
+  return [];
 }
 
 const MODIFIERS = new Set([
@@ -108,6 +165,35 @@ function misplacedKeywordError(root: Node): SourceDiagnostic | undefined {
   return { row, message: `CS1519: メンバー宣言のトークン '${keyword.text}' が無効です` };
 }
 
+const NAMESPACE_MODIFIERS = 'CS1671: 名前空間の宣言に、修飾子または属性を指定することはできません';
+
+/**
+ * The errors of attributes or modifiers before a `namespace`, which the grammar does not read there: Roslyn reports
+ * the first attribute list and the first modifier once each.
+ */
+function namespaceModifierErrors(root: Node): SourceDiagnostic[] {
+  const leaves = leavesOf(root).filter((leaf) => leaf.type !== 'comment');
+  const diagnostics: SourceDiagnostic[] = [];
+  for (const [index, leaf] of leaves.entries()) {
+    if (leaf.type !== 'identifier' || leaf.text !== 'namespace') continue;
+    let attribute: Node | undefined;
+    let modifier: Node | undefined;
+    for (let before = index - 1; before >= 0; before--) {
+      const token = leaves[before];
+      if (MODIFIERS.has(token.text)) modifier = token;
+      else if (token.type === ']' && token.parent?.type === 'attribute_list') {
+        const opening = token.parent.firstChild ?? token;
+        attribute = opening;
+        before = leaves.findIndex((other) => other.id === opening.id);
+      } else break;
+    }
+    const found = [attribute, modifier].filter((token): token is Node => token !== undefined);
+    found.sort((a, b) => a.startIndex - b.startIndex);
+    diagnostics.push(...found.map((token) => ({ row: token.startPosition.row, message: NAMESPACE_MODIFIERS })));
+  }
+  return diagnostics;
+}
+
 /**
  * The errors of an `else` inside the block it should follow, as `if (x) { a(); else { b(); }`, which the grammar reads
  * as an identifier: Roslyn reads a statement that cannot start with `else`, then misses the block's `}` at the end.
@@ -140,6 +226,62 @@ function endsDeclarationBeforeMore(root: Node, row: number): boolean {
     return false;
   const next = nextLeafOf(root, missing);
   return next !== undefined && next.type !== '}';
+}
+
+/**
+ * The errors after a top-level declaration without its `;`, which Roslyn reads on as declarators to skip: up to the
+ * next `;`, or else to a `}`, before which it expects the `;` (CS1002); a `}` whose `{` it skipped then closes nothing
+ * (CS1022). A skip that stops inside parentheses, at a label's `:`, or before a clause such as `else` leaves Roslyn
+ * more errors to report, which only the first stands for here.
+ */
+function skippedDeclarationErrors(root: Node, row: number): SourceDiagnostic[] {
+  const leaves = leavesOf(root).filter((leaf) => !leaf.isMissing && leaf.type !== 'comment');
+  const missing = leavesOf(root).find((leaf) => leaf.isMissing && leaf.type === ';' && leaf.startPosition.row === row);
+  if (!missing) return [];
+  const skip = skippedTokens(
+    leaves,
+    leaves.findIndex((leaf) => leaf.startIndex >= missing.endIndex)
+  );
+  if (!skip) return [];
+  const diagnostics: SourceDiagnostic[] = [];
+  if (leaves[skip.end].type === '}')
+    diagnostics.push({ row: leaves[skip.end - 1].startPosition.row, message: MISSING_TOKENS[';'] });
+  return unmatchedBraces(root, skip.opened, diagnostics);
+}
+
+const NESTING: Record<string, number> = { '(': 1, '[': 1, ')': -1, ']': -1 };
+
+/**
+ * Where the skip from a token ends: at the `;` or `}` outside parentheses, with the `{` it passes; or undefined when it
+ * meets a `:` or `,` first, or none.
+ */
+function skippedTokens(leaves: Node[], start: number): { end: number; opened: Node[] } | undefined {
+  if (start < 0) return undefined;
+  const opened: Node[] = [];
+  let depth = 0;
+  for (let index = start; index < leaves.length; index++) {
+    const { type } = leaves[index];
+    if (type === ':' || type === ',' || depth < 0) return undefined;
+    if (type === ';' || type === '}') return depth === 0 ? { end: index, opened } : undefined;
+    if (type === '{') opened.push(leaves[index]);
+    depth += NESTING[type] ?? 0;
+  }
+  return undefined;
+}
+
+/** The skipped `{` of blocks, whose `}` each then stands alone (CS1022), unless a clause follows it. */
+function unmatchedBraces(root: Node, opened: Node[], diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {
+  for (const brace of opened) {
+    const close = brace.parent?.type === 'block' ? lastLeafOf(brace.parent) : undefined;
+    if (close?.type !== '}') return [];
+    const next = nextLeafOf(root, close);
+    if (next && ['else', 'catch', 'finally'].includes(next.type)) return [];
+    diagnostics.push({
+      row: close.startPosition.row,
+      message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です',
+    });
+  }
+  return diagnostics;
 }
 
 function outermostErrors(root: Node): Node[] {

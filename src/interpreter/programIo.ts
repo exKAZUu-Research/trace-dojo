@@ -229,6 +229,21 @@ export class FileHandle {
     if (this.position !== undefined) this.position += text.length;
   }
 
+  /** The file itself, the same object for every handle and path of it, for a language that tracks its open files. */
+  get file(): object {
+    return this.node;
+  }
+
+  /** The file's whole text as it is now. */
+  get text(): string {
+    return this.node.content;
+  }
+
+  /** Replaces the file's whole text, for a language that edits a file as bytes rather than as text. */
+  replace(text: string): void {
+    this.files.replaceContent(this.node, text);
+  }
+
   /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */
   writeAt(position: number, text: string): void {
     this.files.writeAt(this.node, position, text);
@@ -301,6 +316,24 @@ export class VirtualFileSystem {
       node.content = '';
     }
     return new FileHandle(this, node, mode.append);
+  }
+
+  /** The file a path names, the same object as {@link FileHandle.file} of its handles, or `undefined` for none. */
+  fileOf(path: string): object | undefined {
+    try {
+      const { node } = this.locate(path);
+      return node?.kind === 'file' ? node : undefined;
+    } catch (error) {
+      if (error instanceof FileSystemError) return undefined;
+      throw error;
+    }
+  }
+
+  replaceContent(node: FileNode, text: string): void {
+    this.budget.spend(Math.ceil((text.length + 1) / 64));
+    this.storedLength += node.isLinked ? text.length - node.content.length : text.length;
+    if (this.storedLength > LIMITS.maxStoredLength) throw new ExecutionLimitError('storage');
+    node.content = text;
   }
 
   writeAt(node: FileNode, position: number, text: string): void {
@@ -468,11 +501,7 @@ export class VirtualFileSystem {
    * The names of a path from the root, keeping `.` and `..` for the walk to resolve, and whether the path must name a
    * directory, while charging the run for reading the path and walking its names.
    */
-  private componentsOf(path: string): {
-    components: string[];
-    namesDirectory: boolean;
-    dots: '.' | '..' | undefined;
-  } {
+  private componentsOf(path: string): { components: string[]; namesDirectory: boolean; dots: '.' | '..' | undefined } {
     this.budget.spend(Math.ceil((path.length + 1) / 16));
     const absolute = path.startsWith('/') ? path : `${WORKING_DIRECTORY}/${path}`;
     const raw = absolute.split('/');

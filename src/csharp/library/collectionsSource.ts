@@ -92,7 +92,7 @@ namespace System.Collections.Generic {
     public List(IEnumerable<T> collection);
     public int Capacity { get; set; }
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T this[int index] { get; set; }
     public void Add(T item);
     public void AddRange(IEnumerable<T> collection);
@@ -154,7 +154,7 @@ namespace System.Collections.Generic {
     public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer);
     public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public KeyCollection Keys { get; }
     public ValueCollection Values { get; }
@@ -184,7 +184,7 @@ namespace System.Collections.Generic {
     }
     public sealed class KeyCollection : ICollection<TKey>, IReadOnlyCollection<TKey> {
       public int Count { get; }
-      public bool IsReadOnly { get; }
+      bool ICollection<TKey>.IsReadOnly { get; }
       public Enumerator GetEnumerator();
       public bool Contains(TKey item);
       public void CopyTo(TKey[] array, int index);
@@ -200,7 +200,7 @@ namespace System.Collections.Generic {
     }
     public sealed class ValueCollection : ICollection<TValue>, IReadOnlyCollection<TValue> {
       public int Count { get; }
-      public bool IsReadOnly { get; }
+      bool ICollection<TValue>.IsReadOnly { get; }
       public Enumerator GetEnumerator();
       public bool Contains(TValue item);
       public void CopyTo(TValue[] array, int index);
@@ -220,7 +220,7 @@ namespace System.Collections.Generic {
     public SortedDictionary(IComparer<TKey>? comparer);
     public SortedDictionary(IDictionary<TKey, TValue> dictionary);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public ICollection<TKey> Keys { get; }
     public ICollection<TValue> Values { get; }
@@ -241,7 +241,7 @@ namespace System.Collections.Generic {
     public SortedList();
     public SortedList(IComparer<TKey>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly { get; }
     public TValue this[TKey key] { get; set; }
     public IList<TKey> Keys { get; }
     public IList<TValue> Values { get; }
@@ -267,7 +267,7 @@ namespace System.Collections.Generic {
     public HashSet(IEqualityComparer<T>? comparer);
     public HashSet(IEnumerable<T> collection, IEqualityComparer<T>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public bool Add(T item);
     public void Clear();
     public bool Contains(T item);
@@ -300,7 +300,7 @@ namespace System.Collections.Generic {
     public SortedSet(IComparer<T>? comparer);
     public SortedSet(IEnumerable<T> collection, IComparer<T>? comparer);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T? Min { get; }
     public T? Max { get; }
     public bool Add(T item);
@@ -369,10 +369,10 @@ namespace System.Collections.Generic {
     public LinkedList();
     public LinkedList(IEnumerable<T> collection);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public LinkedListNode<T>? First { get; }
     public LinkedListNode<T>? Last { get; }
-    public void Add(T item);
+    void ICollection<T>.Add(T item);
     public LinkedListNode<T> AddAfter(LinkedListNode<T> node, T value);
     public LinkedListNode<T> AddBefore(LinkedListNode<T> node, T value);
     public LinkedListNode<T> AddFirst(T value);
@@ -424,7 +424,7 @@ namespace System.Collections.ObjectModel {
   public class ReadOnlyCollection<T> : IList<T>, IReadOnlyList<T> {
     public ReadOnlyCollection(IList<T> list);
     public int Count { get; }
-    public bool IsReadOnly { get; }
+    bool ICollection<T>.IsReadOnly { get; }
     public T this[int index] { get; private set; }
     public bool Contains(T value);
     public void CopyTo(T[] array, int index);
@@ -502,6 +502,11 @@ namespace System.Linq {
     public static IEnumerable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector);
     public static IEnumerable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector);
     public static IEnumerable<TResult> GroupBy<TSource, TKey, TResult>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TKey, IEnumerable<TSource>, TResult> resultSelector);
+    public static IEnumerable<IGrouping<TKey, TSource>> GroupBy<TSource, TKey>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, IEqualityComparer<TKey>? comparer);
+    public static IEnumerable<IGrouping<TKey, TElement>> GroupBy<TSource, TKey, TElement>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector, IEqualityComparer<TKey>? comparer);
+    public static IEnumerable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector, Func<TKey, IEnumerable<TElement>, TResult> resultSelector);
+    public static IEnumerable<TResult> GroupBy<TSource, TKey, TResult>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TKey, IEnumerable<TSource>, TResult> resultSelector, IEqualityComparer<TKey>? comparer);
+    public static IEnumerable<TResult> GroupBy<TSource, TKey, TElement, TResult>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector, Func<TKey, IEnumerable<TElement>, TResult> resultSelector, IEqualityComparer<TKey>? comparer);
     public static IEnumerable<TResult> GroupJoin<TOuter, TInner, TKey, TResult>(this IEnumerable<TOuter> outer, IEnumerable<TInner> inner, Func<TOuter, TKey> outerKeySelector, Func<TInner, TKey> innerKeySelector, Func<TOuter, IEnumerable<TInner>, TResult> resultSelector);
     public static IEnumerable<(int Index, TSource Item)> Index<TSource>(this IEnumerable<TSource> source);
     public static IEnumerable<TSource> Intersect<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second);
@@ -604,6 +609,8 @@ namespace System.Linq {
     public static List<TSource> ToList<TSource>(this IEnumerable<TSource> source);
     public static ILookup<TKey, TSource> ToLookup<TSource, TKey>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector);
     public static ILookup<TKey, TElement> ToLookup<TSource, TKey, TElement>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector);
+    public static ILookup<TKey, TSource> ToLookup<TSource, TKey>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, IEqualityComparer<TKey>? comparer);
+    public static ILookup<TKey, TElement> ToLookup<TSource, TKey, TElement>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TSource, TElement> elementSelector, IEqualityComparer<TKey>? comparer);
     public static IEnumerable<TSource> Union<TSource>(this IEnumerable<TSource> first, IEnumerable<TSource> second);
     public static IEnumerable<TSource> UnionBy<TSource, TKey>(this IEnumerable<TSource> first, IEnumerable<TSource> second, Func<TSource, TKey> keySelector);
     public static IEnumerable<TSource> Where<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
@@ -636,6 +643,10 @@ namespace System.Linq.Internal {
   public static class CollectionBuilder { public static void AddAll<T>(ICollection<T> target, IEnumerable<T> items); }
   public sealed class Iterator<T> : IOrderedEnumerable<T> { public IEnumerator<T> GetEnumerator(); }
   public sealed class Enumerator<T> : IEnumerator<T> { public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
+  /** What an iterator method returns, which runs the method's body as \`MoveNext\` asks for its values. */
+  public sealed class YieldIterator<T> : IEnumerable<T>, IEnumerator<T> { public IEnumerator<T> GetEnumerator(); public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
+  /** What an async iterator method returns, which runs the method's body as \`MoveNextAsync\` asks for its values. */
+  public sealed class YieldAsyncIterator<T> : IAsyncEnumerable<T>, IAsyncEnumerator<T> { public IAsyncEnumerator<T> GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default); public T Current { get; } public System.Threading.Tasks.ValueTask<bool> MoveNextAsync(); public System.Threading.Tasks.ValueTask DisposeAsync(); }
   public sealed class Grouping<TKey, TElement> : IGrouping<TKey, TElement> { public TKey Key { get; } public IEnumerator<TElement> GetEnumerator(); }
   public sealed class Lookup<TKey, TElement> : ILookup<TKey, TElement> {
     public int Count { get; }

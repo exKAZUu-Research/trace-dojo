@@ -5,18 +5,26 @@ import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue
 import { type ArgumentInfo, CallBinder, type CallDescription, type ResolvedCall } from './callBinder';
 import type { BindContext } from './convertBinder';
 import { displayMethodIn } from './declarations';
-import type { MethodCandidate } from './lookup';
+import { dynamicObjectCall, dynamicObjectMember } from './dynamicObjects';
+import { isConstrained, type MethodCandidate } from './lookup';
+import { withBoundTypeArguments } from './nameofArguments';
 import type { NamespaceSymbol } from './namespaces';
-import type { FunctionScope } from './scopes';
+import { createParamsCollection, type ParamsCollection } from './paramsCollections';
+import { captureUpToOwner, type FunctionScope, typeParameterNamed } from './scopes';
 import {
+  baseTypeOf,
   displayMethod,
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
   FieldSymbol,
+  isDynamicType,
   isReferenceType,
+  isRefLikeType,
+  isRestrictedType,
+  isValueType,
   LocalSymbol,
-  type MethodSymbol,
+  MethodSymbol,
   type NamedType,
   namedType,
   nullableUnderlying,
@@ -26,7 +34,8 @@ import {
   substitute,
   substitutionOf,
   type Type,
-  type TypeSymbol,
+  type TypeParameterSymbol,
+  TypeSymbol,
 } from './types';
 import { isKnownLibraryMember } from './unavailable';
 
@@ -46,6 +55,8 @@ export type NonValue =
       /** Extension methods for a receiver that no instance method fits. */
       extensions: MethodCandidate[];
       isBaseAccess: boolean;
+      /** For `T.M()` on a type parameter, the parameter whose type argument implements the static abstract method. */
+      constrainedType?: Type;
       row: number;
     }
   | { kind: 'discard'; row: number };
@@ -137,29 +148,6 @@ export abstract class MemberBinder extends CallBinder {
     return { kind: 'default', type: ERROR_TYPE, row: node.row };
   }
 
-  /**
-   * Binds the value a deconstruction takes apart. A tuple literal's elements convert to the types of their targets
-   * where the targets have them, as in `(x, s) = (1, null)`, and otherwise need types of their own.
-   */
-  protected deconstructedValue(
-    node: Expression,
-    context: BindContext,
-    targetTypes: (Type | undefined)[] = []
-  ): BoundExpression {
-    const value = this.bindValue(node, context);
-    if (value.kind !== 'unbound') return value;
-    if (value.node.kind !== 'tuple') return this.typedValue(value, node);
-    const types = value.node.elements.map((element, index): Type => {
-      const target = targetTypes[index];
-      if (target && target.kind !== 'error') return target;
-      const typed = this.quietly(() => this.bindTypedValue(element.value, context));
-      if (typed && typed.type.kind !== 'error') return typed.type;
-      return this.bindTypedValue(element.value, context).type;
-    });
-    if (types.some((type) => type.kind === 'error')) return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    return this.convert(value, this.tupleType(types), node);
-  }
-
   /** The target of the `+=` or `-=` being bound, the one expression that may name an event outside its type. */
   protected subscriptionTarget: Expression | undefined;
 
@@ -185,7 +173,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Reports a read of a property that has no getter, or whose getter the code may not use. */
-  protected checkReadable(value: BoundExpression, position: Position, context: BindContext): void {
+  checkReadable(value: BoundExpression, position: Position, context: BindContext): void {
     if (value.kind !== 'property') return;
     for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden) {
       if (current.getter) {
@@ -242,6 +230,19 @@ export abstract class MemberBinder extends CallBinder {
     return this.convert(this.bindValue(node, context), type, node);
   }
 
+  /**
+   * Binds a boolean expression (C# spec §12.25), the condition of an `if`, a loop, or `?:`: a value of a type without
+   * an implicit conversion to bool is true by its type's `operator true`.
+   */
+  bindCondition(node: Expression, context: BindContext): BoundExpression {
+    const value = this.bindValue(node, context);
+    if (value.kind !== 'unbound' && value.type.kind !== 'error' && !this.implicitConversionOf(value, this.boolType)) {
+      const truth = this.userOperator('op_True', [value], node.row);
+      if (truth) return truth;
+    }
+    return this.convert(value, this.boolType, node);
+  }
+
   /** Turns what a name denotes into a value, reporting a type, a namespace, or a method group used as a value. */
   toValue(result: BindResult, position: Position): BoundExpression {
     switch (result.kind) {
@@ -292,6 +293,8 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a simple name: a local, a member of an enclosing type, a type, or a namespace. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindSimpleName(name: string, typeArgs: TypeNode[] | undefined, position: Position, context: BindContext): BindResult {
     const local = this.bindLocalName(name, typeArgs, position, context);
     if (local) return local;
@@ -304,7 +307,16 @@ export abstract class MemberBinder extends CallBinder {
     const inaccessibleType = this.inaccessibleNestedType;
     const parameter = typeArgs ? undefined : typeParameterNamed(name, typeContext);
     if (parameter) return { kind: 'typeRef', type: parameter, row: position.row };
+    const alias = typeArgs ? undefined : typeContext.aliases?.get(name);
+    if (alias?.kind === 'type') return { kind: 'typeRef', type: alias.type, row: position.row };
+    if (alias) return { kind: 'namespaceRef', path: alias.path, namespaces: alias.namespaces, row: position.row };
     const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
+    // A call leaves out a type that a using imports, which is not invocable, for a method that `using static` imports.
+    const imported =
+      !symbol || (isCallee && symbol.isLibrary)
+        ? this.bindStaticImport(name, resolvedTypeArgs, isCallee, position, context)
+        : undefined;
+    if (imported?.kind === 'methodGroup' || (imported && !symbol)) return imported;
     if (symbol)
       return { kind: 'typeRef', type: this.construct(position, symbol, resolvedTypeArgs ?? []), row: position.row };
     const namespaces = this.namespacesAt([name]);
@@ -319,8 +331,88 @@ export abstract class MemberBinder extends CallBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
-    this.reportUndefinedName(name, position);
+    this.reportUndefinedName(name, position, typeContext);
     return { kind: 'default', type: ERROR_TYPE, row: position.row };
+  }
+
+  /**
+   * Binds a static member that `using static` imports: the methods of every imported type join one method group, and
+   * extension methods stay out of it, as C# spec §14.5.4 says.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private bindStaticImport(
+    name: string,
+    typeArgs: Type[] | undefined,
+    isCallee: boolean,
+    position: Position,
+    context: BindContext
+  ): BindResult | undefined {
+    const typeContext = context.fn.typeContext;
+    const candidates: MethodCandidate[] = [];
+    for (const type of typeContext.staticUsings ?? []) {
+      const { found } = this.lookupMember(type, name, typeContext, typeArgs?.length ?? 0, isCallee);
+      if (!found) continue;
+      if (found.kind === 'methods') {
+        candidates.push(
+          ...found.candidates.filter((candidate) => candidate.method.isStatic && !candidate.method.isExtension)
+        );
+        continue;
+      }
+      if (candidates.length > 0) continue;
+      if (found.kind === 'type')
+        return {
+          kind: 'typeRef',
+          type: this.construct(position, found.symbol, [...found.outerArgs, ...(typeArgs ?? [])]),
+          row: position.row,
+        };
+      const isStatic = found.kind === 'field' ? found.field.isStatic || found.field.isConst : found.property.isStatic;
+      if (isStatic) return this.memberAccessOn(undefined, found, position, context);
+    }
+    if (candidates.length === 0) return undefined;
+    return {
+      kind: 'methodGroup',
+      name,
+      candidates,
+      receiver: undefined,
+      isSimpleName: true,
+      typeArgs,
+      extensions: [],
+      isBaseAccess: false,
+      row: position.row,
+    };
+  }
+
+  /** Binds `alias::name`, which names a type or a namespace in the namespace the alias names. */
+  protected bindAliasQualified(
+    node: Extract<Expression, { kind: 'aliasQualified' }>,
+    context: BindContext
+  ): BindResult {
+    const typeContext = context.fn.typeContext;
+    const outer = this.aliasNamespaces(node.alias, node, typeContext);
+    if (!outer) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    const typeArgs = node.typeArgs?.map((arg) => this.resolveType(arg, typeContext)) ?? [];
+    for (const namespace of outer.namespaces) {
+      const type = namespace.findType(node.name, typeArgs.length);
+      if (type) return { kind: 'typeRef', type: this.construct(node, type, typeArgs), row: node.row };
+    }
+    const path = [...outer.path, node.name];
+    const namespaces = this.namespacesAt(path);
+    if (namespaces.length > 0 && !node.typeArgs) return { kind: 'namespaceRef', path, namespaces, row: node.row };
+    return {
+      kind: 'typeRef',
+      type: this.resolveType(
+        {
+          kind: 'aliasQualifiedType',
+          alias: node.alias,
+          name: node.name,
+          typeArgs: node.typeArgs,
+          row: node.row,
+          column: node.column,
+        },
+        typeContext
+      ),
+      row: node.row,
+    };
   }
 
   /** Binds a name that a local scope declares: a local, a local function, or a query's range variable. */
@@ -411,13 +503,16 @@ export abstract class MemberBinder extends CallBinder {
     return undefined;
   }
 
-  protected reportUndefinedName(name: string, position: Position): void {
-    this.rejectUnavailableName(name, position);
+  protected reportUndefinedName(name: string, position: Position, context: TypeContext): void {
+    this.rejectUnavailableName(name, position, context);
     this.error(position, 'CS0103', `現在のコンテキストに '${name}' という名前は存在しません`);
   }
 
-  /** Rejects a name of the .NET library that this grader does not provide. */
-  protected abstract rejectUnavailableName(name: string, position: Position): void;
+  /**
+   * Rejects a name of the .NET library that this grader does not provide: a dotted one, or a simple one that a
+   * namespace in scope of the context gives it.
+   */
+  protected abstract rejectUnavailableName(name: string, position: Position, context?: TypeContext): void;
 
   /** The type to look members up in from inside a type, which is the type with its own type parameters. */
   private instanceTypeOf(type: TypeSymbol, context: BindContext): NamedType {
@@ -449,6 +544,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** A local variable, recording that a lambda or local function captures it from an enclosing function. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   protected localReference(local: LocalSymbol, position: Position, context: BindContext): BoundExpression {
     // A local constant is its value, which any function may use, static ones included, without capturing it.
     if (local.isConst) {
@@ -456,6 +552,19 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'constant', value: local.constantValue, type: local.type, row: position.row };
     }
     if (local.owner && local.owner !== context.fn.method) {
+      // A ref local refers to a variable of its method's frame, which a lambda may outlive, as a ref struct may.
+      if (isRestrictedType(local.type))
+        this.error(
+          position,
+          'CS4013',
+          `型 '${displayType(local.type, false)}' のインスタンスは、入れ子になった関数、クエリ式、反復子ブロック、または非同期メソッドの中では使用できません`
+        );
+      else if (local.isRefLocal || isRefLikeType(local.type))
+        this.error(
+          position,
+          'CS8175',
+          `匿名メソッド、ラムダ式、クエリ式内で ref ローカル変数 '${local.name}' は使用できません`
+        );
       local.isCaptured = true;
       for (let fn: typeof context.fn | undefined = context.fn; fn && fn.method !== local.owner; fn = fn.outer) {
         // A static lambda or local function, nested at any depth, may not capture an enclosing local.
@@ -547,6 +656,18 @@ export abstract class MemberBinder extends CallBinder {
     }
   }
 
+  /** Reports a use of a member or type that `[Obsolete(message, true)]` makes an error (CS0619). */
+  protected checkObsolete(member: MethodSymbol | FieldSymbol | PropertySymbol | TypeSymbol, position: Position): void {
+    if (member.obsoleteError === undefined) return;
+    const name =
+      member instanceof MethodSymbol
+        ? displayMethod(member)
+        : member instanceof TypeSymbol
+          ? displayTypeSymbol(member)
+          : `${displayTypeSymbol(member.owner)}.${member.name}`;
+    this.error(position, 'CS0619', `'${name}' は旧形式です ('${member.obsoleteError}')`);
+  }
+
   /** A field or property of a receiver, or a static one when the receiver is undefined. */
   protected memberAccessOn(
     receiver: BoundExpression | undefined,
@@ -555,10 +676,20 @@ export abstract class MemberBinder extends CallBinder {
     context: BindContext
   ): BoundExpression {
     const substitution = substitutionOf(found.owner);
+    this.checkObsolete(found.kind === 'field' ? found.field : found.property, position);
     if (found.kind === 'field') {
       const { field } = found;
       const type = substitute(field.type, substitution);
       if (field.isConst) return this.constantField(field, type, position);
+      // An event with its own accessors has no delegate to read, inside its type or out.
+      if (field.eventAccessors && !this.isEventSubscriptionTarget && !this.isBindingName) {
+        this.error(
+          position,
+          'CS0079',
+          `イベント '${displayTypeSymbol(field.owner)}.${field.name}' は += または -= の左側にのみ使用できます`
+        );
+        return { kind: 'default', type: ERROR_TYPE, row: position.row };
+      }
       // Outside its declaring type, an event may only be subscribed to or unsubscribed from.
       if (
         field.isEvent &&
@@ -574,7 +705,14 @@ export abstract class MemberBinder extends CallBinder {
         );
       }
       if (field.isStatic) return { kind: 'staticField', field, owner: found.owner, type, row: position.row };
-      return { kind: 'field', receiver: receiver as BoundExpression, field, type, row: position.row };
+      const access: BoundExpression = {
+        kind: 'field',
+        receiver: receiver as BoundExpression,
+        field,
+        type,
+        row: position.row,
+      };
+      return field.fixedBuffer ? this.fixedBufferAccess(access, field.fixedBuffer.elementType, position) : access;
     }
     const { property } = found;
     const type = substitute(property.type, substitution);
@@ -583,6 +721,9 @@ export abstract class MemberBinder extends CallBinder {
 
   /** The value of a constant field, binding its initializer when it has not been bound yet. */
   protected abstract constantField(field: FieldSymbol, type: Type, position: Position): BoundExpression;
+
+  /** A fixed-size buffer's field named, which gives a pointer to the buffer's first element. */
+  protected abstract fixedBufferAccess(access: BoundExpression, elementType: Type, position: Position): BoundExpression;
 
   /**
    * Reports a member that the code may not access: as CS1540 when a derived class reads a protected member through
@@ -649,6 +790,9 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (receiver.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    // A member of a `dynamic` value is found when the access runs, on the value's type.
+    if (isDynamicType(receiver.type) && receiver.kind !== 'unbound')
+      return this.late({ ...node, target: this.lateOperand(0, node.target) }, [receiver], context, { receiver: 0 });
     if (receiver.kind === 'unbound' || receiver.type.kind === 'null' || receiver.type.kind === 'void') {
       this.error(
         position,
@@ -703,6 +847,8 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a static member of a type, or a nested type. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   bindStaticMember(
     type: Type,
     name: string,
@@ -713,6 +859,8 @@ export abstract class MemberBinder extends CallBinder {
   ): BindResult {
     if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: position.row };
     if (type.kind === 'typeParameter') {
+      const constrained = this.bindConstrainedMember(type, name, typeArgs, position, context, isCallee);
+      if (constrained) return constrained;
       this.error(
         position,
         'CS0704',
@@ -728,6 +876,8 @@ export abstract class MemberBinder extends CallBinder {
       isCallee
     );
     if (!found) {
+      const fromExtension = this.bindStaticExtension(type, name, typeArgs, position, context, isCallee);
+      if (fromExtension) return fromExtension;
       if (inaccessible) {
         this.reportInaccessible(inaccessible, position);
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
@@ -748,6 +898,7 @@ export abstract class MemberBinder extends CallBinder {
         row: position.row,
       };
     }
+    if (this.reportConstrainedAccess(found, position)) return { kind: 'default', type: ERROR_TYPE, row: position.row };
     if (found.kind === 'methods') {
       return {
         kind: 'methodGroup',
@@ -762,6 +913,9 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     const member = found.kind === 'field' ? found.field : found.property;
+    // `nameof(List<int>.Count)` names an instance member through its type, whose members it may name in turn.
+    if (!member.isStatic && this.isBindingName)
+      return { kind: 'default', type: substitute(member.type, substitutionOf(found.owner)), row: position.row };
     if (!member.isStatic) {
       this.error(
         position,
@@ -771,6 +925,42 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
     return this.memberAccessOn(undefined, found, position, context);
+  }
+
+  /**
+   * Binds `T.M()` or `T.P` on a type parameter to a static abstract or virtual member of its constraint interfaces
+   * (C# spec §19.4.4), which the type argument's implementation answers at run time.
+   */
+  private bindConstrainedMember(
+    type: Extract<Type, { kind: 'typeParameter' }>,
+    name: string,
+    typeArgs: Type[] | undefined,
+    position: Position,
+    context: BindContext,
+    isCallee: boolean
+  ): BindResult | undefined {
+    const { found } = this.lookupMember(type, name, context.fn.typeContext, typeArgs?.length ?? 0, isCallee);
+    if (found?.kind === 'methods') {
+      const candidates = found.candidates.filter((candidate) => isConstrained(candidate.method));
+      if (candidates.length === 0) return undefined;
+      return {
+        kind: 'methodGroup',
+        name,
+        candidates,
+        receiver: undefined,
+        isSimpleName: false,
+        typeArgs,
+        extensions: [],
+        isBaseAccess: false,
+        constrainedType: type,
+        row: position.row,
+      };
+    }
+    if (found?.kind === 'property' && isConstrained(found.property)) {
+      const access = this.memberAccessOn(undefined, found, position, context);
+      return { ...access, constrainedType: type } as BoundExpression;
+    }
+    return undefined;
   }
 
   /**
@@ -789,7 +979,10 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Rejects a member that .NET's library type has but this grader's does not. */
-  protected rejectUnknownLibraryMember(type: Type, name: string, position: Position): void {
+  protected rejectUnknownLibraryMember(type: Type, name: string, position: Position | number): void {
+    // An extension method's receiver converts from an array to a span, so an array takes MemoryExtensions' methods.
+    if (type.kind === 'array' && isKnownLibraryMember('System.MemoryExtensions', name))
+      this.unsupported(position, `MemoryExtensions.${name}`);
     const symbol =
       type.kind === 'named' ? type.symbol : type.kind === 'array' ? this.wellKnown.array.symbol : undefined;
     if (!symbol?.isLibrary) return;
@@ -813,6 +1006,7 @@ export abstract class MemberBinder extends CallBinder {
 
   /** Binds an instance member of a value, or an extension method that takes it. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   bindInstanceMember(
     receiver: BoundExpression,
     name: string,
@@ -833,6 +1027,15 @@ export abstract class MemberBinder extends CallBinder {
     );
     const extensions = this.lookupExtensionMethods(name, context.fn.typeContext);
     if (!found) {
+      const dynamicMember = this.isLateBinding
+        ? dynamicObjectMember(this, receiver, name, position, isCallee)
+        : undefined;
+      if (dynamicMember) return dynamicMember;
+      const getters = isCallee ? [] : this.lookupExtensionProperties(name, context.fn.typeContext);
+      if (getters.length > 0) {
+        const group = this.extensionGroup(`get_${name}`, receiver, getters, position);
+        return this.extensionPropertyAccess(this.invokeMethodGroup(group, [], position));
+      }
       if (extensions.length > 0) {
         return {
           kind: 'methodGroup',
@@ -870,9 +1073,12 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found.kind === 'methods') {
       // Static methods do not apply to an instance, which then calls an extension method of the name, as
-      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse; with none, the call or the conversion
-      // reports the static method it chose.
+      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse; with none, an array's call of a
+      // MemoryExtensions method, as `array.Sort()`, is unavailable, and any other call or conversion reports the static
+      // method it chose.
       const instance = found.candidates.filter((candidate) => !candidate.method.isStatic);
+      if (instance.length === 0 && extensions.length === 0 && type.kind === 'array')
+        this.rejectUnknownLibraryMember(type, name, position);
       return {
         kind: 'methodGroup',
         name,
@@ -969,6 +1175,14 @@ export abstract class MemberBinder extends CallBinder {
   /** Declares a local in the current scope, reporting names that clash with others in scope. */
   abstract declareLocal(name: string, type: Type, position: Position, context: BindContext): LocalSymbol;
 
+  /** `F = ref x` in an object initializer, which makes a ref field refer to the variable. */
+  abstract bindRefMemberInitializer(
+    target: BoundLValue,
+    member: MemberInitializer,
+    value: Extract<Expression, { kind: 'refExpression' }>,
+    context: BindContext
+  ): BoundMemberInit;
+
   /** Binds an expression as storage that an assignment or a `ref` argument writes. */
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
 
@@ -1001,9 +1215,8 @@ export abstract class MemberBinder extends CallBinder {
       return undefined;
     }
     const method = resolved.candidate.method;
-    const returnType =
-      this.covariantReturn(group, method) ??
-      substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
+    const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
+    const returnType = this.covariantReturn(group, method, substitution) ?? substitute(method.returnType, substitution);
     const returnsMatch =
       (returnType.kind === 'void' && invoke.returnType.kind === 'void') ||
       (returnType.kind !== 'void' &&
@@ -1104,15 +1317,27 @@ export abstract class MemberBinder extends CallBinder {
     return resolved;
   }
 
+  private lateDynamicObjectCall(
+    node: Extract<Expression, { kind: 'invocation' }>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    return this.isLateBinding ? dynamicObjectCall(this, node, context) : undefined;
+  }
+
   /** Binds a call: of a method group, a delegate, or `nameof`. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
       return this.bindNameof(node, context);
+    const dynamicCall = this.lateDynamicObjectCall(node, context);
+    if (dynamicCall) return dynamicCall;
     this.isBindingCallee = true;
     const target = this.bindExpression(node.target, context);
     this.isBindingCallee = false;
     const args = this.bindArguments(node.args, context);
-    if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node);
+    const late = this.lateInvocation(node, target, args, context);
+    if (late) return late;
+    if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node, context);
     if (target.kind === 'typeRef' || target.kind === 'namespaceRef' || target.kind === 'discard') {
       if (target.kind === 'typeRef') {
         // Roslyn names the type by its definition, as `List<T>`.
@@ -1143,7 +1368,149 @@ export abstract class MemberBinder extends CallBinder {
       { name: displayType(target.type), kind: 'delegate' }
     );
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    return { kind: 'invokeDelegate', target, args: resolved.args, type: invoke.returnType, row: node.row };
+    const { returnsByRef } = delegateSymbol.invoke as MethodSymbol;
+    return {
+      kind: 'invokeDelegate',
+      target,
+      args: resolved.args,
+      returnsByRef,
+      type: invoke.returnType,
+      row: node.row,
+    };
+  }
+
+  /**
+   * A call that binds when it runs: a method of a `dynamic` value, or a method called with a `dynamic` argument,
+   * whose overload is chosen by the arguments' runtime types (C# spec §12.3.3).
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private lateInvocation(
+    node: Extract<Expression, { kind: 'invocation' }>,
+    target: BindResult,
+    args: ArgumentInfo[],
+    context: BindContext
+  ): BoundExpression | undefined {
+    const onDynamic = target.kind === 'late' && node.target.kind === 'memberAccess';
+    // Invoking a `dynamic` value calls it as the delegate it holds.
+    const ofDynamic = !onDynamic && !isNonValue(target) && isDynamicType(target.type);
+    const hasDynamicArgument = args.some(
+      (arg) => arg.expression.kind !== 'unbound' && isDynamicType(arg.expression.type)
+    );
+    if (target.kind === 'methodGroup' && hasDynamicArgument && this.rejectsDynamicLocalCall(target, node)) {
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    }
+    const withDynamic =
+      target.kind === 'methodGroup' &&
+      hasDynamicArgument &&
+      !target.candidates.some((candidate) => candidate.method.kind === 'localFunction');
+    if (!onDynamic && !ofDynamic && !withDynamic) return undefined;
+    if (this.rejectsLateCall(target, args, node)) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    let receiver: BoundExpression | undefined;
+    let callee: Expression = node.target;
+    if (onDynamic) receiver = (target as Extract<BoundExpression, { kind: 'late' }>).operands[0] as BoundExpression;
+    else if (ofDynamic) {
+      receiver = target as BoundExpression;
+      callee = this.lateOperand(0, node.target);
+    } else if (target.kind === 'methodGroup' && target.receiver && target.candidates.some((c) => !c.method.isStatic))
+      receiver = target.receiver;
+    if (receiver && !ofDynamic) {
+      const name = node.target.kind === 'memberAccess' ? node.target.name : (target as { name: string }).name;
+      const typeArgs =
+        node.target.kind === 'memberAccess' || node.target.kind === 'name' ? node.target.typeArgs : undefined;
+      callee = {
+        kind: 'memberAccess',
+        target: this.lateOperand(0, node.target),
+        name,
+        typeArgs,
+        nameRow: node.target.row,
+        row: node.target.row,
+        column: node.target.column,
+      };
+    }
+    const offset = receiver ? 1 : 0;
+    const syntax: Expression = {
+      kind: 'invocation',
+      target: callee,
+      args: args.map((arg, index) => ({
+        name: arg.name,
+        modifier: arg.refKind === 'in' ? undefined : arg.refKind,
+        value: this.lateOperand(index + offset, { row: arg.row, column: 0 }),
+        row: arg.row,
+        column: 0,
+      })),
+      row: node.row,
+      column: node.column,
+    };
+    const operands = [
+      ...(receiver ? [receiver] : []),
+      ...args.map((arg, index) => this.lateArgument(arg, node.args[index])),
+    ];
+    return this.late(syntax, operands, context, { receiver: receiver ? 0 : undefined, isStatement: true });
+  }
+
+  /**
+   * Reports what a late-bound call cannot take: an extension method, which the runtime binder does not find (CS1973),
+   * or a lambda argument (CS1977).
+   */
+  private rejectsLateCall(target: BindResult, args: ArgumentInfo[], node: Position): boolean {
+    if (target.kind === 'methodGroup' && target.candidates.length === 0 && target.receiver) {
+      this.error(
+        node,
+        'CS1973',
+        `'${displayType(target.receiver.type)}' には、'${target.name}'という名前の該当するメソッドがありませんが、同じ名前の拡張メソッドがあるようです。拡張メソッドは動的ディスパッチできません。動的引数をキャストするか、または拡張メソッド構文を使用しないで拡張メソッドを呼び出すことを検討してください。`
+      );
+      return true;
+    }
+    const lambda = args.find((arg) => arg.expression.kind === 'unbound');
+    if (!lambda) return false;
+    this.error(
+      lambda.row,
+      'CS1977',
+      '最初にデリゲートまたは式ツリー型にキャストしていない場合は、ラムダ式を、動的ディスパッチされる操作の引数として使用することはできません。'
+    );
+    return true;
+  }
+
+  /**
+   * Reports a call of a generic local function whose type arguments would be inferred from `dynamic` arguments
+   * (CS8322), which Roslyn cannot bind at run time.
+   */
+  private rejectsDynamicLocalCall(group: Extract<BindResult, { kind: 'methodGroup' }>, node: Position): boolean {
+    const local = group.candidates.find((candidate) => candidate.method.kind === 'localFunction')?.method;
+    if (!local || local.typeParameters.length === 0 || group.typeArgs) return false;
+    this.error(
+      node,
+      'CS8322',
+      `動的な型のある引数は、推定された型の引数のある汎用ローカル関数 '${local.name}' に渡すことはできません。`
+    );
+    return true;
+  }
+
+  /**
+   * The operand of a late-bound call's argument: its value, or for `ref` and `out` the variable, which an `out var`
+   * cannot declare without the parameter's type (CS8197).
+   */
+  private lateArgument(arg: ArgumentInfo, syntax: Argument): BoundArgument {
+    if (arg.refKind !== 'ref' && arg.refKind !== 'out') return arg.expression;
+    let target = arg.target;
+    if (arg.declareOut) {
+      const declaration = syntax.value;
+      if (arg.isOutVar && declaration.kind === 'declaration' && declaration.designation.kind === 'single') {
+        this.error(
+          declaration.designation,
+          'CS8197',
+          `暗黙的に型指定された out 変数 '${declaration.designation.name}' の型を推論できません。`
+        );
+      }
+      target = arg.declareOut(arg.isOutVar ? ERROR_TYPE : arg.expression.type);
+    }
+    return {
+      kind: 'refArgument',
+      target: target as BoundLValue,
+      refKind: arg.refKind,
+      type: arg.expression.type,
+      row: arg.row,
+    };
   }
 
   private bindNameof(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
@@ -1167,7 +1534,7 @@ export abstract class MemberBinder extends CallBinder {
     }
     this.isBindingName = true;
     try {
-      this.bindExpression(value, context);
+      this.bindExpression(withBoundTypeArguments(value), context);
     } finally {
       this.isBindingName = false;
     }
@@ -1175,12 +1542,76 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Calls the best method of a group, falling back to extension methods when no instance method applies. */
+  /** A method group of extension members, which a call resolves with the receiver as their first argument. */
+  private extensionGroup(
+    name: string,
+    receiver: BoundExpression | undefined,
+    methods: MethodCandidate[],
+    position: Position
+  ): Extract<NonValue, { kind: 'methodGroup' }> {
+    return {
+      kind: 'methodGroup',
+      name,
+      candidates: receiver ? [] : methods,
+      receiver,
+      isSimpleName: false,
+      typeArgs: undefined,
+      extensions: receiver ? methods : [],
+      isBaseAccess: false,
+      row: position.row,
+    };
+  }
+
+  /** `T.M()` or `T.P` of a static member that an extension block for `T` declares. */
+  private bindStaticExtension(
+    type: Type,
+    name: string,
+    typeArgs: Type[] | undefined,
+    position: Position,
+    context: BindContext,
+    isCallee: boolean
+  ): BindResult | undefined {
+    // Explicit type arguments give the block's type parameters as well as the method's, and leave out other arities.
+    const methods = this.lookupStaticExtensions(type, name, false, context.fn.typeContext).filter(
+      ({ method }) => !typeArgs || method.typeParameters.length === typeArgs.length
+    );
+    if (methods.length > 0) return { ...this.extensionGroup(name, undefined, methods, position), typeArgs };
+    if (isCallee) return undefined;
+    const getters = this.lookupStaticExtensions(type, name, true, context.fn.typeContext);
+    if (getters.length === 0) return undefined;
+    return this.extensionPropertyAccess(
+      this.invokeMethodGroup(this.extensionGroup(`get_${name}`, undefined, getters, position), [], position)
+    );
+  }
+
+  /**
+   * The read of an extension property with a setter, as a static property whose accessors take the getter's
+   * arguments, the receiver among them, so that an assignment calls the setter; a read-only one stays a call.
+   */
+  private extensionPropertyAccess(read: BoundExpression): BoundExpression {
+    const property = read.kind === 'call' ? read.method.extensionAccessorOf : undefined;
+    if (read.kind !== 'call' || !property?.setter) return read;
+    return {
+      kind: 'property',
+      receiver: undefined,
+      property,
+      args: read.args,
+      owner: read.owner ?? read.method.owner.declaredType,
+      typeArgs: read.typeArgs,
+      type: read.type,
+      row: read.row,
+    };
+  }
+
+  /** @param context Where the call is written, which decides whether a readonly field may be a `ref` receiver. */
   invokeMethodGroup(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     args: ArgumentInfo[],
-    node: Position
+    node: Position,
+    context?: BindContext,
+    isCollectionInitializerAdd = false
   ): BoundExpression {
-    const description: CallDescription = { name: group.name, kind: 'method' };
+    const description: CallDescription = { name: group.name, kind: 'method', isCollectionInitializerAdd };
     if (group.candidates.length > 0) {
       const saved = this.diagnostics.length;
       const canFallBack = group.extensions.length > 0 && group.receiver !== undefined;
@@ -1190,18 +1621,29 @@ export abstract class MemberBinder extends CallBinder {
       this.diagnostics.length = saved;
     }
     const receiver = group.receiver as BoundExpression;
+    const isVariable =
+      ['local', 'field', 'staticField', 'element'].includes(receiver.kind) ||
+      (receiver.kind === 'this' && isValueType(receiver.type));
     const receiverArg: ArgumentInfo = {
       expression: receiver,
       name: undefined,
       refKind: undefined,
       row: receiver.row,
-      target: undefined,
+      target: isVariable ? (receiver as BoundLValue) : undefined,
+      isReceiver: true,
     };
     const resolved = this.resolveCall(group.extensions, [receiverArg, ...args], group.typeArgs, node.row, {
       ...description,
       isExtension: true,
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    // A `ref` receiver writes the field, which a readonly one allows only in its type's constructor (CS0192, CS0199).
+    if (
+      context &&
+      resolved.candidate.method.parameters[0]?.refKind === 'ref' &&
+      (receiver.kind === 'field' || receiver.kind === 'staticField')
+    )
+      this.checkAssignable(receiver, node, context, 'ref');
     return this.callNode({ ...group, receiver: undefined }, resolved, node);
   }
 
@@ -1235,8 +1677,10 @@ export abstract class MemberBinder extends CallBinder {
     // `base.M()` calls the implementation that the base class has, which may override the method found by name.
     const method =
       group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
+    this.checkObsolete(method, node);
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
-    const returnType = this.covariantReturn(group, method) ?? substitute(method.returnType, substitution);
+    const returnType = this.covariantReturn(group, method, substitution) ?? substitute(method.returnType, substitution);
+    const constrained = group.constrainedType ? { constrainedType: group.constrainedType } : {};
     let receiver = method.isStatic ? undefined : group.receiver;
     if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
       this.error(
@@ -1278,6 +1722,35 @@ export abstract class MemberBinder extends CallBinder {
     ) {
       receiver = this.convert(receiver, this.objectType, node);
     }
+    // A handler's constructor that takes the receiver reads it from the local that the receiver is first kept in, which
+    // outlives the sequence that stores it.
+    const { handlerReceiver } = resolved.args as { handlerReceiver?: LocalSymbol };
+    if (receiver && handlerReceiver) {
+      const local: BoundExpression = {
+        kind: 'local',
+        local: handlerReceiver,
+        type: handlerReceiver.type,
+        row: node.row,
+      };
+      receiver = {
+        kind: 'sequence',
+        locals: [],
+        sideEffects: [
+          {
+            kind: 'assign',
+            target: local as BoundLValue,
+            value: this.convert(receiver, handlerReceiver.type, node),
+            type: handlerReceiver.type,
+            row: node.row,
+          },
+        ],
+        value: local,
+        type: handlerReceiver.type,
+        row: node.row,
+      };
+    }
+    if (receiver && isRefLikeType(receiver.type) && method.owner.kind === 'class')
+      this.reportInheritedOnRefStruct(receiver.type, method, node);
     const isVirtual =
       !group.isBaseAccess &&
       (method.isVirtual || method.isAbstract || method.isOverride || method.owner.kind === 'interface');
@@ -1290,8 +1763,31 @@ export abstract class MemberBinder extends CallBinder {
       owner: resolved.candidate.owner,
       isVirtual,
       type: returnType,
+      ...constrained,
       row: node.row,
     };
+  }
+
+  /**
+   * Reports a call of a method that a ref struct inherits, which runs on the boxed value that a ref struct has none of,
+   * naming the class whose override the call would box the value to, as Roslyn does.
+   */
+  private reportInheritedOnRefStruct(receiverType: Type, method: MethodSymbol, position: Position): void {
+    let declaring = method.owner;
+    for (let type = receiverType as NamedType | undefined; type; type = baseTypeOf(type)) {
+      const overrides = type.symbol.methods.some(
+        (candidate) => candidate.name === method.name && candidate.parameters.length === method.parameters.length
+      );
+      if (!overrides) continue;
+      if (type === receiverType) return;
+      declaring = type.symbol;
+      break;
+    }
+    this.error(
+      position,
+      'CS0029',
+      `型 '${displayType(receiverType, true)}' を '${displayTypeSymbol(declaring, [], true)}' に暗黙的に変換できません`
+    );
   }
 
   /**
@@ -1322,13 +1818,22 @@ export abstract class MemberBinder extends CallBinder {
    * The return type of the most derived override that the receiver's static type has, which a call gets when an
    * override returns a more derived reference type (C# 9 covariant returns); undefined to use the method's own.
    */
-  private covariantReturn(group: Extract<NonValue, { kind: 'methodGroup' }>, method: MethodSymbol): Type | undefined {
+  private covariantReturn(
+    group: Extract<NonValue, { kind: 'methodGroup' }>,
+    method: MethodSymbol,
+    substitution: Map<TypeParameterSymbol, Type>
+  ): Type | undefined {
     if (!group.receiver || method.isStatic || !(method.isVirtual || method.isAbstract || method.isOverride))
       return undefined;
     const override = this.implementationIn(group.receiver.type, method);
     // A generic class's override would need its own type arguments, which introductory programs do not combine with this.
     if (override === method || override.owner.typeParameters.length > 0) return undefined;
-    return sameType(override.returnType, method.returnType) ? undefined : override.returnType;
+    // The override names its own type parameters, which stand for the method's by position.
+    const ownTypeParameters = new Map<TypeParameterSymbol, Type>(
+      override.typeParameters.map((parameter, index) => [parameter, method.typeParameters[index].type])
+    );
+    const returnType = substitute(override.returnType, ownTypeParameters);
+    return sameType(returnType, method.returnType) ? undefined : substitute(returnType, substitution);
   }
 
   /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
@@ -1357,14 +1862,20 @@ export abstract class MemberBinder extends CallBinder {
       row,
       target: undefined,
     }));
-    const applicable = candidates.filter(
-      (candidate) =>
-        candidate.method.parameters.length === operands.length &&
-        operands.every(
-          (operand, index) =>
-            this.implicitConversionOf(operand, this.operatorParameterType(candidate, index)) !== undefined
-        )
-    );
+    const applicable = candidates.filter((candidate) => {
+      if (candidate.method.parameters.length !== operands.length) return false;
+      // A generic extension block's operator applies once its type arguments are inferred from the operands.
+      const { typeParameters } = candidate.method;
+      const typeArgs =
+        typeParameters.length > 0 ? this.inferTypeArguments(candidate, args, operands.keys().toArray(), false) : [];
+      if (!typeArgs) return false;
+      const substitution = this.callSubstitution(candidate, typeArgs);
+      return operands.every(
+        (operand, index) =>
+          this.implicitConversionOf(operand, substitute(candidate.method.parameters[index].type, substitution)) !==
+          undefined
+      );
+    });
     if (applicable.length === 0) return undefined;
     const resolved = this.resolveCall(applicable, args, undefined, row, {
       name: candidates[0].method.name,
@@ -1372,15 +1883,21 @@ export abstract class MemberBinder extends CallBinder {
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row };
     const method = resolved.candidate.method;
+    // An interface's static abstract operator runs the one that the operand's type argument implements.
+    const constrainedType =
+      method.owner.kind === 'interface'
+        ? operands.find((operand) => operand.type.kind === 'typeParameter')?.type
+        : undefined;
     return {
       kind: 'call',
       method,
       receiver: undefined,
       args: resolved.args,
-      typeArgs: [],
+      typeArgs: resolved.typeArgs,
       owner: resolved.candidate.owner,
       isVirtual: false,
-      type: substitute(method.returnType, substitutionOf(resolved.candidate.owner)),
+      type: substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs)),
+      ...(constrainedType ? { constrainedType } : {}),
       row,
     };
   }
@@ -1523,6 +2040,7 @@ export abstract class MemberBinder extends CallBinder {
         );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
+      this.checkRequiredMembers(type, initializer, node);
       return {
         kind: 'new',
         constructor: undefined,
@@ -1533,22 +2051,15 @@ export abstract class MemberBinder extends CallBinder {
         row: node.row,
       };
     }
-    const candidates = symbol.constructors
-      .filter((constructor) => this.isAccessible(constructor.access, symbol, context.fn.typeContext))
-      .map((method) => ({ method, owner: type }));
-    if (candidates.length === 0 && symbol.constructors.length > 0) {
-      this.error(
-        node,
-        'CS0122',
-        `'${displayMethod(symbol.constructors[0])}' はアクセスできない保護レベルになっています`
-      );
+    const description: CallDescription = { name: symbol.name, kind: 'constructor', typeName: displayType(type) };
+    const all = symbol.constructors.map((method) => ({ method, owner: type }));
+    const isAccessible = ({ method }: MethodCandidate): boolean =>
+      this.isAccessible(method.access, symbol, context.fn.typeContext);
+    const candidates = all.filter(isAccessible);
+    const inaccessible = all.filter((candidate) => !isAccessible(candidate));
+    if (this.reportInaccessibleConstructor(type, candidates, inaccessible, args, node, description))
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
-    }
-    const resolved = this.resolveCall(candidates, args, undefined, node.row, {
-      name: symbol.name,
-      kind: 'constructor',
-      typeName: displayType(type),
-    });
+    const resolved = this.resolveCall(candidates, args, undefined, node.row, description);
     // A creation whose arguments fit no constructor still has its type, which later errors then use, as in Roslyn.
     if (!resolved)
       return {
@@ -1563,6 +2074,8 @@ export abstract class MemberBinder extends CallBinder {
     const constructor = resolved.candidate.method;
     if (!constructor.native && symbol.isLibrary && !constructor.declaration && !(symbol.kind === 'struct'))
       this.unsupported(node, `${displayTypeSymbol(symbol)} のコンストラクター`);
+    if (!constructor.setsRequiredMembers) this.checkRequiredMembers(type, initializer, node);
+    this.checkObsolete(constructor, node);
     return {
       kind: 'new',
       constructor,
@@ -1572,6 +2085,64 @@ export abstract class MemberBinder extends CallBinder {
       type,
       row: node.row,
     };
+  }
+
+  /**
+   * Reports an inaccessible constructor that the arguments fit when no accessible one does (CS0122), and with none of
+   * either, the arguments' count (CS1729), as Roslyn's overload resolution does, telling whether it reported.
+   */
+  private reportInaccessibleConstructor(
+    type: NamedType,
+    candidates: MethodCandidate[],
+    inaccessible: MethodCandidate[],
+    args: ArgumentInfo[],
+    node: Position,
+    description: CallDescription
+  ): boolean {
+    if (inaccessible.length === 0) return false;
+    if (this.quietly(() => this.resolveCall(candidates, args, undefined, node.row, description))) return false;
+    const fitting = this.quietly(() => this.resolveCall(inaccessible, args, undefined, node.row, description));
+    if (fitting) {
+      this.error(
+        node,
+        'CS0122',
+        `'${displayMethod(fitting.candidate.method)}' はアクセスできない保護レベルになっています`
+      );
+      return true;
+    }
+    if (candidates.length > 0) return false;
+    this.error(
+      node,
+      'CS1729',
+      `'${displayType(type)}' には、引数 ${args.length} を指定するコンストラクターは含まれていません`
+    );
+    return true;
+  }
+
+  /**
+   * Reports each `required` member of a type and its bases that a creation's object initializer leaves unset (CS9035),
+   * in the order the members are declared, base members first.
+   */
+  private checkRequiredMembers(type: NamedType, initializer: Initializer | undefined, node: Position): void {
+    const assigned = new Set(
+      initializer?.kind === 'objectInitializer'
+        ? initializer.members.flatMap((member) => (member.kind === 'memberAssign' ? [member.name] : []))
+        : []
+    );
+    const chain: TypeSymbol[] = [];
+    for (let current: NamedType | undefined = type; current; current = current.symbol.baseType)
+      chain.unshift(current.symbol);
+    for (const symbol of chain) {
+      const members = [...symbol.fields, ...symbol.properties]
+        .filter((member) => member.isRequired && !assigned.has(member.name))
+        .toSorted((a, b) => a.row - b.row || a.column - b.column);
+      for (const member of members)
+        this.error(
+          node,
+          'CS9035',
+          `必要なメンバー '${displayTypeSymbol(member.owner)}.${member.name}' は、オブジェクト初期化子または属性コンストラクターに設定する必要があります。`
+        );
+    }
   }
 
   /** Binds `new D(method)`, which converts a method group or a delegate to a delegate type. */
@@ -1603,6 +2174,14 @@ export abstract class MemberBinder extends CallBinder {
   private bindMemberInitializer(member: MemberInitializer, type: Type, context: BindContext): BoundMemberInit {
     // `Xs = { 1, 2 }` reads the member and fills it, so it needs no setter.
     const { value } = member;
+    // The field of `F = ref x` is not written but pointed elsewhere, so only its readability is checked.
+    if (value.kind === 'refExpression')
+      return this.bindRefMemberInitializer(
+        this.bindInitializerTarget(member, type, true, context),
+        member,
+        value,
+        context
+      );
     const isNested = value.kind === 'collectionInitializer' || value.kind === 'objectInitializer';
     const target = this.bindInitializerTarget(member, type, isNested, context);
     if (isNested) {
@@ -1633,13 +2212,22 @@ export abstract class MemberBinder extends CallBinder {
       }
       access = this.memberAccessOn(placeholder, found, member, context);
     } else {
-      access = this.bindElementAccess(placeholder, member.args, member, context);
+      access = this.bindIndexInitializerTarget(placeholder, member, context);
     }
     // An assigned member or indexer is written, so it goes through the assignment's accessor checks, while a nested
     // initializer reads the member and fills what it holds, so the member must be readable.
     if (!isNested) return this.checkAssignable(access, member, context, 'initializer');
     this.checkReadable(access, member, context);
     return access as BoundLValue;
+  }
+
+  protected createParamsCollection(
+    collection: Extract<ParamsCollection, { kind: 'constructible' | 'list' }>,
+    elements: BoundExpression[],
+    declaringType: TypeSymbol,
+    row: number
+  ): BoundExpression {
+    return createParamsCollection(this, collection, elements, declaringType, row);
   }
 
   /** Binds collection initializer elements as `Add` calls, which `{ a, b }` makes for each element. */
@@ -1684,9 +2272,16 @@ export abstract class MemberBinder extends CallBinder {
           kind: 'collectionAdd' as const,
           call: { kind: 'default' as const, type: ERROR_TYPE, row: element.row },
         };
-      return { kind: 'collectionAdd' as const, call: this.invokeMethodGroup(group, args, element) };
+      return { kind: 'collectionAdd' as const, call: this.invokeMethodGroup(group, args, element, undefined, true) };
     });
   }
+
+  /** The element that `[i] = v` in an object initializer assigns, of the object that the placeholder stands for. */
+  protected abstract bindIndexInitializerTarget(
+    placeholder: BoundExpression,
+    member: Extract<MemberInitializer, { kind: 'indexAssign' }>,
+    context: BindContext
+  ): BoundExpression;
 
   /** Checks that storage can be assigned, reporting read-only fields, properties without setters, and values that are not variables. */
   abstract checkAssignable(
@@ -1706,17 +2301,6 @@ export abstract class MemberBinder extends CallBinder {
   }
 }
 
-/** The type parameter of a name that the enclosing method or types declare, from the innermost out. */
-function typeParameterNamed(name: string, typeContext: TypeContext): Type | undefined {
-  for (const parameter of typeContext.methodTypeParameters.toReversed())
-    if (parameter.name === name) return parameter.type;
-  for (let type = typeContext.type; type; type = type.containing) {
-    const parameter = type.typeParameters.find((candidate) => candidate.name === name);
-    if (parameter) return parameter.type;
-  }
-  return undefined;
-}
-
 export { LocalSymbol, PropertySymbol, FieldSymbol };
 export type { BoundArgument };
 
@@ -1727,20 +2311,4 @@ export function propertyDisplay(target: Extract<BoundExpression, { kind: 'proper
     ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(owner)))).join(', ')}]`
     : property.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}`;
-}
-
-/** Makes a function and those around it up to a local's owner capture the local, returning whether any did not yet. */
-function captureUpToOwner(fn: FunctionScope, local: LocalSymbol): boolean {
-  let isChanged = false;
-  for (
-    let current: FunctionScope | undefined = fn;
-    current && current.method !== local.owner;
-    current = current.outer
-  ) {
-    if (current.captures.has(local)) continue;
-    current.captures.add(local);
-    local.isCaptured = true;
-    isChanged = true;
-  }
-  return isChanged;
 }

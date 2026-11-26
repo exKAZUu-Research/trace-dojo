@@ -195,13 +195,696 @@ test('hostile programs stop within the limits, and runs share no state', () => {
     expect(executeProgram('csharp', hashCodes)).toMatchObject({ stdout: '58225482 54267293\n33574638\n' });
 });
 
-test('syntax and library members beyond the grader are rejected as unavailable', () => {
-  expect(executeProgram('csharp', 'int[] a = { 1, 2 };\nConsole.WriteLine(a[^1]);\n')).toEqual({
-    kind: 'compileError',
-    diagnostics: [{ row: 1, message: '末尾からの添字（`^`）は、この採点環境では使えません。' }],
+// Console reads standard input and writes standard error, and System.IO works on the run's virtual file system, whose
+// working directory is `/`. A StreamWriter holds 1024 characters, then its FileStream 4096 bytes, as .NET's do, so
+// what a program never flushes is lost.
+test('standard input, standard error, and files behave as in .NET', () => {
+  const reading = String.raw`int n = int.Parse(Console.ReadLine()!);
+int[] xs = Console.ReadLine()!.Split(' ').Select(int.Parse).ToArray();
+Console.WriteLine($"{n} {xs.Sum()} {Console.ReadLine() == null}");
+Console.Error.WriteLine("warning");
+File.WriteAllLines("out/a.txt", xs.Select(x => $"{x * x}"));
+`;
+  expect(executeProgram('csharp', reading, { stdin: '3\n1 2 3\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: '3 6 True\n',
+    stderr:
+      "warning\nUnhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path '/out/a.txt'.\n",
+    finalFiles: {},
   });
-  expect(executeProgram('csharp', 'Console.WriteLine(Console.ReadLine());\n')).toMatchObject({
+  const files = String.raw`Directory.CreateDirectory("out");
+File.WriteAllLines("out/a.txt", new[] { "1", "4" });
+File.AppendAllText("out/a.txt", "9");
+Console.WriteLine(string.Join("+", File.ReadAllLines("out/a.txt")));
+var w = new StreamWriter("out/b.txt");
+w.Write(new string('x', 5000));
+Console.WriteLine($"{File.ReadAllText("out/b.txt").Length} {Path.GetExtension("out/b.txt")}");
+try { File.ReadAllText("none.txt"); } catch (FileNotFoundException e) { Console.WriteLine(e.Message); }
+using (var u = new StreamWriter("out/c.txt")) u.Write("kept");
+var lost = new StreamWriter("out/d.txt");
+lost.Write("lost");
+`;
+  expect(executeProgram('csharp', files)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: "1+4+9\n0 .txt\nCould not find file '/none.txt'.\n",
+    finalFiles: { 'out/a.txt': '1\n4\n9', 'out/b.txt': '', 'out/c.txt': 'kept', 'out/d.txt': '' },
+  });
+});
+
+// One thread runs every task: Task.Run work waits until the running code awaits, timers fire by a virtual clock, and
+// WhenAll gathers exceptions in the order the tasks faulted. A wait that nothing can end is a deadlock, an error.
+test('async methods and tasks run in a fixed order', () => {
+  const program = String.raw`var slow = Work("slow", 30);
+var fast = Work("fast", 10);
+var run = Task.Run(() => { Console.WriteLine("run"); return 7; });
+Console.WriteLine("main");
+int[] results = await Task.WhenAll(slow, fast);
+Console.WriteLine($"{string.Join(",", results)} {await run}");
+try { await Task.WhenAll(Fail("a"), Fail("b")); }
+catch (Exception e) { Console.WriteLine(e.Message); }
+await foreach (var n in Count(2)) Console.WriteLine($"n{n}");
+
+static async Task<int> Work(string name, int ms)
+{ Console.WriteLine($"{name} start"); await Task.Delay(ms); Console.WriteLine($"{name} end"); return ms; }
+
+static async Task Fail(string message)
+{ await Task.Delay(message == "a" ? 30 : 1); throw new InvalidOperationException(message); }
+
+static async IAsyncEnumerable<int> Count(int count)
+{ for (int i = 0; i < count; i++) { await Task.Delay(1); yield return i; } }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: ['slow start', 'fast start', 'main', 'run', 'fast end', 'slow end', '30,10 7', 'b', 'n0', 'n1', ''].join(
+      '\n'
+    ),
+  });
+  expect(
+    executeProgram('csharp', 'Console.WriteLine("wait");\nawait new TaskCompletionSource().Task;\n')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'wait\n',
+    uncaughtException: 'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  });
+});
+
+// A program's awaiter gets the continuation after the method suspends, so a synchronous call of it resumes the method
+// inside OnCompleted; a struct awaiter's OnCompleted runs on a copy; a continuation invoked after its method ended
+// throws as .NET's does, and one that nothing invokes leaves a deadlock.
+test('awaits of awaiters that the program declares resume through their continuations', () => {
+  const program = String.raw`using System.Runtime.CompilerServices;
+Console.WriteLine(await new Now(1) + await new Later(2));
+Console.WriteLine(await "four");
+dynamic d = new Now(5);
+Console.WriteLine(await d);
+var counter = new Counter();
+Console.WriteLine(await counter);
+try { await new Now(-1); } catch (InvalidOperationException e) { Console.WriteLine(e.Message); }
+await Once();
+await Task.Delay(1);
+Later.Saved!();
+static async Task Once() => Console.WriteLine(await new Later(6));
+static class Ext { public static TaskAwaiter<int> GetAwaiter(this string s) => Task.FromResult(s.Length).GetAwaiter(); }
+class Now(int value) : INotifyCompletion
+{
+    public Now GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public int GetResult() => value < 0 ? throw new InvalidOperationException("bad") : value;
+    public void OnCompleted(Action c) { Console.WriteLine("in"); c(); Console.WriteLine("out"); }
+}
+class Later(int value) : INotifyCompletion
+{
+    public static Action? Saved;
+    public Later GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public int GetResult() => value;
+    public void OnCompleted(Action c) { Saved = c; Task.Delay(10).ContinueWith(_ => c()); }
+}
+class Counter { public CounterAwaiter GetAwaiter() => new(); }
+struct CounterAwaiter : INotifyCompletion
+{
+    int calls;
+    public bool IsCompleted => ++calls > 1;
+    public int GetResult() => calls;
+    public void OnCompleted(Action c) { calls += 100; Task.Run(c); }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['in', 'out', '3', '4', 'in', '5', 'out', '1', 'in', 'bad', 'out', '6', ''].join('\n'),
+    uncaughtException: 'System.NullReferenceException: Object reference not set to an instance of an object.',
+  });
+  const never = String.raw`using System.Runtime.CompilerServices;
+await new Never();
+class Never : INotifyCompletion
+{
+    public Never GetAwaiter() => this;
+    public bool IsCompleted => false;
+    public void GetResult() { }
+    public void OnCompleted(Action c) => Console.WriteLine("dropped");
+}
+`;
+  expect(executeProgram('csharp', never)).toMatchObject({
+    kind: 'executed',
+    stdout: 'dropped\n',
+    uncaughtException: 'デッドロックが起きました。すべてのスレッドやタスクが待ったままで、どれも先に進めません。',
+  });
+});
+
+// Unsafe code, with `AllowUnsafeBlocks`, reads and writes through pointers to locals, fixed arrays and strings, stack
+// buffers, and struct fields, reinterpreting bytes little-endian as .NET does; without it, `unsafe` is CS0227.
+test('unsafe code runs with pointers, fixed, and stackalloc', () => {
+  const program = String.raw`#:property AllowUnsafeBlocks=true
+unsafe
+{
+    int x = 5;
+    int* p = &x;
+    *p += 2;
+    Console.WriteLine($"{x} {*p} {p == &x} {p != null}");
+    int[] a = { 1, 2, 3, 4 };
+    fixed (int* q = a)
+    {
+        int* r = q + 1;
+        *r = 20;
+        r++;
+        r[1] = 40;
+        Console.WriteLine($"{*q} {q[1]} {*(q + 2)} {r - q} {r > q}");
+        for (int* s = q; s < q + a.Length; s++) *s *= 10;
+    }
+    Console.WriteLine(string.Join(",", a));
+    int* buf = stackalloc int[3];
+    for (int i = 0; i < 3; i++) buf[i] = i * i;
+    Console.WriteLine(buf[0] + buf[1] + buf[2]);
+    Point pt = new Point { X = 1, Y = 2 };
+    Point* pp = &pt;
+    pp->X = 9;
+    (*pp).Y = 8;
+    Console.WriteLine($"{pt.X} {pt.Y} {pp->X + pp->Y}");
+    Console.WriteLine($"{sizeof(Point)} {sizeof(int*) } {sizeof(long)}");
+    fixed (char* c = "hello") Console.WriteLine(c[1]);
+    byte* bp = (byte*)&x;
+    Console.WriteLine(bp[0]);
+    void* vp = &x;
+    Console.WriteLine(*(int*)vp);
+    delegate*<int, int> f = &Twice;
+    Console.WriteLine(f(21));
+    int** pp2 = &p;
+    **pp2 = 100;
+    Console.WriteLine(x);
+}
+static int Twice(int v) => v * 2;
+struct Point { public int X; public int Y; }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: [
+      '7 7 True True',
+      '1 20 3 2 True',
+      '10,200,30,400',
+      '5',
+      '9 8 17',
+      '8 8 8',
+      'e',
+      '7',
+      '7',
+      '42',
+      '100',
+      '',
+    ].join('\n'),
+  });
+  expect(executeProgram('csharp', 'unsafe { int x = 1; }\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'CS0227: アンセーフ コードは /unsafe でコンパイルした場合のみ有効です' }],
+  });
+});
+
+// A `dynamic` operation binds when it runs, to the types of the values: overloads, operators, and members, with the
+// runtime binder's messages for what does not bind. The runtime binder finds no extension methods.
+test('dynamic values bind at run time as .NET binds them', () => {
+  const program = String.raw`dynamic a = 3, s = "x";
+dynamic p = new P { X = 2 };
+p.X = p.X * 3;
+a += 10;
+a++;
+Console.WriteLine($"{s + a} {p.Show(5)} {p.Show("v")} {a == 14} {Math.Max(a, 100)}");
+try { s.Missing(); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { Console.WriteLine(a - s); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { int k = s; } catch (Exception e) { Console.WriteLine(e.Message); }
+dynamic none = null;
+none.ToString();
+class P
+{ public int X { get; set; } public string Show(string v) => "s:" + v; public string Show(int v) => "i:" + v; }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'x14 i:5 s:v True 100',
+      "'string' does not contain a definition for 'Missing'",
+      "Operator '-' cannot be applied to operands of type 'int' and 'string'",
+      "Cannot implicitly convert type 'string' to 'int'",
+      '',
+    ].join('\n'),
+    uncaughtException:
+      'Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: Cannot perform runtime binding on a null reference',
+  });
+  expect(executeProgram('csharp', 'dynamic d = new List<int>();\nd.Select(x => x);\n')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('CS1977') }],
+  });
+});
+
+// `?.` and invoking a delegate work on `dynamic` values, a call passes `ref` and `out` variables, `await` takes a
+// task held as `dynamic`, and the runtime binder names the overloads it finds ambiguous as .NET does.
+test('dynamic invocations, ref arguments, and await bind at run time as .NET binds them', () => {
+  const program = String.raw`dynamic c = new C(), none = null, f = (Func<int, int>)(x => x + 1);
+Console.WriteLine($"{c?.Name} {none?.Name == null} {f(2)}");
+int got, count = 1;
+c.Get(5, out got);
+c.Inc(ref count);
+Console.WriteLine($"{got} {count} {await (dynamic)Later()}");
+try { var nothing = c.Inc(ref count); } catch (Exception e) { Console.WriteLine(e.Message); }
+try { f("x"); } catch (Exception e) { Console.WriteLine(e.Message); }
+Console.WriteLine(none);
+static async Task<string> Later() { await Task.Yield(); return "later"; }
+class C {
+    public string Name => "c";
+    public void Get(int x, out int y) { y = x * 3; }
+    public void Inc(ref int x) { x++; }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'c True 3',
+      '15 2 later',
+      "Cannot implicitly convert type 'void' to 'object'",
+      "Delegate 'System.Func<int,int>' has some invalid arguments",
+      '',
+    ].join('\n'),
+    uncaughtException:
+      "Microsoft.CSharp.RuntimeBinder.RuntimeBinderException: The call is ambiguous between the following methods or properties: 'System.Console.WriteLine(string, params object[])' and 'System.Console.WriteLine(char[])'",
+  });
+  expect(executeProgram('csharp', 'dynamic d = 1;\nint.TryParse(d, out var n);\n')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: "CS8197: 暗黙的に型指定された out 変数 'n' の型を推論できません。" }],
+  });
+});
+
+// A TypedReference refers to a variable, whose exact type `__refvalue` checks when it runs; as a ref struct, it may
+// not be boxed or captured by a lambda. A UTF-8 string literal is a ReadOnlySpan<byte>, another ref struct.
+test('typed references and UTF-8 string literals behave as ref structs do in .NET', () => {
+  const program = String.raw`int x = 1;
+TypedReference r = __makeref(x);
+__refvalue(r, int) += 4;
+Console.WriteLine($"{x} {__reftype(r)} {TypedReference.ToObject(r)}");
+try { Console.WriteLine(__refvalue(r, long)); } catch (InvalidCastException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['5 System.Int32 5', 'Specified cast is not valid.', ''].join('\n'),
+  });
+  const utf8 = String.raw`var b = "hé"u8 + "!"u8;
+Console.WriteLine($"{b.Length} {b[1]} {b.ToString()} {string.Join(",", b.ToArray())}");
+foreach (var x in b[1..]) Console.Write(x + " ");
+Console.WriteLine(System.Text.Encoding.UTF8.GetString(b));
+`;
+  expect(executeProgram('csharp', utf8)).toMatchObject({
+    kind: 'executed',
+    stdout: ['4 195 System.ReadOnlySpan<Byte>[4] 104,195,169,33', '195 169 33 hé!', ''].join('\n'),
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'int x = 1;\nvar r = __makeref(x);\nobject o = r;\nFunc<int> f = () => __refvalue(r, int);\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: "CS0029: 型 'System.TypedReference' を 'object' に暗黙的に変換できません" },
+      {
+        row: 3,
+        message:
+          "CS4013: 型 'TypedReference' のインスタンスは、入れ子になった関数、クエリ式、反復子ブロック、または非同期メソッドの中では使用できません",
+      },
+    ],
+  });
+});
+
+// A Main returning a task is an entry point whose task the program waits for; an async one returning void or int is
+// not.
+test('a class Main returning Task or Task<int> runs as the entry point and is waited for', () => {
+  const program = String.raw`class Program {
+    static async Task<int> Main(string[] args) {
+        Console.WriteLine(args.Length);
+        await Task.Delay(1);
+        Console.WriteLine("after");
+        throw new InvalidOperationException("boom");
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: ['0', 'after', ''].join('\n'),
+    stderr: 'Unhandled exception. System.InvalidOperationException: boom\n',
+  });
+  expect(
+    executeProgram('csharp', 'class Program {\n    static async void Main() { await Task.Delay(1); }\n}\n')
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 1, message: 'CS4009: エントリ ポイントを返す void または int を async にすることはできません' },
+      { row: 0, message: "CS5001: プログラムは、エントリ ポイントに適切な静的 'Main' メソッドを含んでいません" },
+    ],
+  });
+});
+
+// `#line` moves the rows that compile errors and `[CallerLineNumber]` report, and directive errors come with the
+// syntax errors in row order.
+test('#line maps the rows of compile errors and caller line numbers as Roslyn does', () => {
+  const caller = String.raw`using System.Runtime.CompilerServices;
+#line 100
+Show();
+#line hidden
+Show();
+#line default
+Show();
+static void Show([CallerLineNumber] int line = 0) => Console.WriteLine(line);
+`;
+  expect(executeProgram('csharp', caller)).toMatchObject({ kind: 'executed', stdout: '100\n102\n7\n' });
+  const errors =
+    'int a = "x";\n#line 200\nint b = "y";\n#line (1,1)-(5,60) "f.cs"\nint c = "z";\n#line default\nint d = "w";\n';
+  const conversion = "CS0029: 型 'string' を 'int' に暗黙的に変換できません";
+  expect(executeProgram('csharp', errors)).toEqual({
+    kind: 'compileError',
+    diagnostics: [0, 199, 0, 6].map((row) => ({ row, message: conversion })),
+  });
+  expect(executeProgram('csharp', 'Console.WriteLine(1);\n#line 40\nint x = 1\n#line bad\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 39, message: 'CS1002: ; が必要です' },
+      { row: 40, message: 'CS1576: #line ディレクティブの行数が指定されていないか、無効です' },
+    ],
+  });
+  expect(executeProgram('csharp', '#if A\n#region r\n#endif\n#endregion\nConsole.WriteLine(1);\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: 'CS1038: #endregion ディレクティブが必要です' },
+      { row: 5, message: 'CS1027: #endif ディレクティブ が必要です' },
+    ],
+  });
+});
+
+// A property or indexer returning by reference names the variable its getter returns, which assignments, `++`, and
+// ref arguments write through; a `ref readonly` one is read-only.
+test('properties and indexers returning by reference read and write the variable they return', () => {
+  const program = String.raw`class Buffer {
+    private int[] items = new int[3];
+    private int count = 10;
+    public ref int this[int i] => ref items[i];
+    public ref int Count { get { return ref count; } }
+    public ref readonly int Fixed => ref count;
+    public string Show() => string.Join(",", items) + " " + count;
+}
+class Program {
+    static void Inc(ref int x) => x++;
+    static void Main() {
+        var b = new Buffer();
+        b[0] = 5;
+        b[0]++;
+        b[1] += 3;
+        Inc(ref b.Count);
+        ref int last = ref b[2];
+        last = 7;
+        Console.WriteLine(b.Show() + " " + b.Fixed);
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({ kind: 'executed', stdout: '6,3,7 11 11\n' });
+  const errors = String.raw`class C {
+    int f;
+    public ref readonly int A => ref f;
+    public ref int B => ref A;
+    void M() { A = 1; ref int r = ref A; }
+    static void Main() { }
+}
+`;
+  expect(executeProgram('csharp', errors)).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 3,
+        message:
+          "CS8333: プロパティ 'A' は読み取り専用の変数であるため、書き込み可能な参照によって返すことはできません",
+      },
+      {
+        row: 4,
+        message:
+          "CS8331: プロパティ に割り当てることができません。'A' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。",
+      },
+      {
+        row: 4,
+        message:
+          "CS8329: プロパティ 'A' は、読み取り専用の変数であるため、ref 値または out 値として使用することはできません",
+      },
+    ],
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'class C {\n    int f;\n    public ref int D { get => ref f; set { } }\n    static void Main() { }\n}\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'CS8147: 参照渡しで返すプロパティは set アクセサーを持つことができません' }],
+  });
+});
+
+// C# 14 extension blocks declare settable properties, whose setter takes the receiver (by reference for a `ref`
+// receiver), and operators of the type they extend; members that need storage or a constructor are errors.
+test('extension blocks declare settable properties and operators', () => {
+  const program = String.raw`struct Vector {
+    public int X, Y;
+    public Vector(int x, int y) { X = x; Y = y; }
+    public override string ToString() => $"<{X}, {Y}>";
+}
+class Counter { public int N; }
+static class Ext {
+    static int created;
+    extension(Counter c) { public int Value { get => c.N; set => c.N = value; } }
+    extension(Counter) { public static int Created { get => created; set => created = value; } }
+    extension(ref Vector v) {
+        public int Sum { get => v.X + v.Y; set { v.X = value - v.Y; } }
+        public void operator +=(int k) { v.X += k; v.Y += k; }
+    }
+    extension(Vector) {
+        public static Vector operator +(Vector a, Vector b) => new Vector(a.X + b.X, a.Y + b.Y);
+        public static bool operator ==(Vector a, Vector b) => a.X == b.X && a.Y == b.Y;
+        public static bool operator !=(Vector a, Vector b) => !(a == b);
+    }
+}
+class Program {
+    static void Main() {
+        var c = new Counter();
+        c.Value = 5;
+        c.Value++;
+        Counter.Created += 2;
+        var v = new Vector(1, 2);
+        v.Sum = 10;
+        v += 1;
+        var w = v + new Vector(1, 1);
+        w += new Vector(0, 1);
+        Console.WriteLine($"{c.N} {Counter.Created} {v} {w} {v == w} {v != w}");
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '6 2 <9, 3> <10, 5> False True\n',
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'static class Ext {\n    extension(string s) {\n        public int f;\n    }\n}\nclass P { static void Main() { } }\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'CS9282: このメンバーは拡張ブロックでは使用できません' }],
+  });
+  expect(
+    executeProgram(
+      'csharp',
+      'static class Ext {\n    extension(string s) {\n        public int Len { init { } get => s.Length; }\n        public static int operator +(int a, int b) => a;\n    }\n}\nclass P { static void Main() { } }\n'
+    )
+  ).toEqual({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 2, message: "CS9304: 'Ext.extension(string).Len': 拡張ブロックで init のみのアクセサーを宣言できません" },
+      { row: 3, message: 'CS9319: 2 項演算子のパラメーターの 1 つは、拡張型である必要があります。' },
+    ],
+  });
+});
+
+// A generic extension block's operators infer the block's type arguments from the operands; extension operators come
+// from the namespaces in scope; and a readonly field is a `ref` receiver only in its type's constructor.
+test('extension operators infer generic blocks, follow the namespaces in scope, and guard readonly receivers', () => {
+  const program = String.raw`using Ops;
+var box = new Box<string>("a") + new Box<string>("b");
+var pair = new Pair<int, string>(2, "x") * 3;
+Console.WriteLine($"{box.Value} {pair.First} {pair.Second} {(-new Box<int>(4)).Value}");
+public record Box<T>(T Value);
+public record Pair<A, B>(A First, B Second);
+namespace Ops
+{
+    public static class BoxOps
+    {
+        extension<T>(Box<T>)
+        {
+            public static Box<T> operator +(Box<T> x, Box<T> y) => new Box<T>((T)(object)($"{x.Value}{y.Value}"));
+            public static Box<T> operator -(Box<T> x) => x;
+        }
+        extension<A, B>(Pair<A, B>)
+        { public static Pair<A, B> operator *(Pair<A, B> p, int n) => new Pair<A, B>(p.First, p.Second); }
+    }
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({ kind: 'executed', stdout: 'ab 2 x 4\n' });
+  expect(executeProgram('csharp', program.replace('using Ops;', ''))).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 1,
+        message: "CS0019: 演算子 '+' を 'Box<string>' と 'Box<string>' 型のオペランドに適用することはできません",
+      },
+      {
+        row: 2,
+        message: "CS0019: 演算子 '*' を 'Pair<int, string>' と 'int' 型のオペランドに適用することはできません",
+      },
+      { row: 3, message: "CS0023: 演算子 '-' は 'Box<int>' 型のオペランドに適用できません" },
+    ],
+  });
+  const receiver = String.raw`new Holder().Bump();
+public struct S { public int N; }
+public class Holder
+{ public readonly S Value; public Holder() { Value.Inc(); } public void Bump() => Value.Inc(); }
+public static class Ext { extension(ref S s) { public void Inc() { s.N++; } } }
+`;
+  expect(executeProgram('csharp', receiver)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 3,
+        message:
+          'CS0192: 読み取り専用フィールドを ref 値または out 値として使用することはできません (コンストラクターでは可)',
+      },
+    ],
+  });
+});
+
+test('syntax and library members beyond the grader are rejected as unavailable', () => {
+  expect(executeProgram('csharp', 'var n = 1;\nvar c = new System.Net.Http.HttpClient();\n')).toEqual({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: 'ネットワーク（System.Net）は、この採点環境では使えません。' }],
+  });
+  expect(executeProgram('csharp', 'new Thread(() => { }).Start();\n')).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 0, message: expect.stringContaining('この採点環境では使えません。') }],
+  });
+});
+
+// .NET normalizes by ICU's Unicode data, which the host's matches; a lone surrogate throws, and InvariantGlobalization
+// has no Unicode data, so it returns the text as it is.
+test('strings normalize as in .NET', () => {
+  const program = String.raw`using System.Text;
+string s = "é ｶﾞ ①";
+Console.WriteLine($"{s.Normalize().Length} {s.Normalize(NormalizationForm.FormKC).Length} {s.Normalize(NormalizationForm.FormD).IsNormalized(NormalizationForm.FormD)} {s.IsNormalized()}");
+try { "a\uD800".Normalize(); } catch (ArgumentException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "6 5 True False\nString contains invalid Unicode code points. (Parameter 'strInput')\n",
+  });
+  const invariant = `#:property InvariantGlobalization=true\nConsole.WriteLine("e\\u0301".Normalize().Length);\n`;
+  expect(executeProgram('csharp', invariant)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});
+
+// .NET 10.0.403 prints these: Version compares component by component with null first, prints only the components
+// it has, and `Environment.Version` is the runtime's 10.0.14.
+test('System.Version parses, compares, and prints as in .NET', () => {
+  const program = String.raw`var a = new Version(1, 2);
+var c = Version.Parse("1.2.3.4");
+Version? n = null;
+Console.WriteLine($"{a} {c} {c.Build} {a.Build} {c.GetHashCode()} {a < c} {n < a} {a >= n} {c.ToString(2)}");
+Console.WriteLine($"{Environment.Version} {Version.TryParse("1.x", out var r)} {r is null}");
+try { new Version("1.-2"); } catch (ArgumentOutOfRangeException e) { Console.WriteLine(e.Message); }
+try { a.ToString(3); } catch (ArgumentException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '1.2 1.2.3.4 3 -1 270544900 True True True 1.2',
+      '10.0.14 False True',
+      "input ('-2') must be a non-negative value. (Parameter 'input')",
+      'Actual value was -2.',
+      "Argument must be between 0 and 2. (Parameter 'fieldCount')",
+      '',
+    ].join('\n'),
+  });
+});
+
+// .NET 10.0.403 prints these: BigInteger keeps every digit, formats like the other integers with `X` in two's
+// complement, works as a dictionary key, and throws .NET's exceptions on narrowing overflow and division by zero.
+test('System.Numerics.BigInteger computes and prints as in .NET', () => {
+  const program = String.raw`using System.Numerics;
+BigInteger f = 1;
+for (int i = 1; i <= 25; i++) f *= i;
+Console.WriteLine($"{f} {f:N0} {f:E3} {BigInteger.Pow(2, 70) - 1} {new BigInteger(-255):X} {f % 1000007} {f == 0} {(long)(f >> 40)}");
+var d = new Dictionary<BigInteger, int> { [BigInteger.Parse("15511210043330985984000000")] = 1 };
+Console.WriteLine($"{d[f]} {BigInteger.ModPow(3, 100, 1000)} {BigInteger.GreatestCommonDivisor(84, -36)} {BigInteger.Log10(1000):F3} {new BigInteger(2.9e3)}");
+try { Console.WriteLine((int)f); } catch (OverflowException e) { Console.WriteLine(e.Message); }
+try { Console.WriteLine(f / 0); } catch (DivideByZeroException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '15511210043330985984000000 15,511,210,043,330,985,984,000,000 1.551E+025 1180591620717411303423 F01 913534 False 14107363352496',
+      '1 1 12 3.000 2900',
+      'Value was either too large or too small for an Int32.',
+      'Attempted to divide by zero.',
+      '',
+    ].join('\n'),
+  });
+});
+
+// .NET 10.0.403 prints these: cultures other than ja-JP format and parse by their own symbols, patterns, and names,
+// which the host's Intl data give, and a malformed name throws CultureNotFoundException. (Display names in Japanese
+// are left out: Node's ICU writes `英語 (…)` where .NET's and Bun's write `英語（…）`.)
+test('cultures from the host Intl data format and parse as in .NET', () => {
+  const program = String.raw`using System.Globalization;
+var us = new CultureInfo("en-US");
+var de = CultureInfo.GetCultureInfo("de-DE");
+var d = new DateTime(2024, 3, 5);
+Console.WriteLine($"{1234.5.ToString("C", us)} {(-1234.5).ToString("C", us)} {1234567.891.ToString("N2", de)} {0.125.ToString("P1", new CultureInfo("fr-FR"))}");
+Console.WriteLine($"{d.ToString("D", de)} {d.ToString("d MMMM", new CultureInfo("ru-RU"))} {d.ToString("MMMM", new CultureInfo("ru-RU"))} {double.Parse("1.234,5", de)} {de.EnglishName}");
+CultureInfo.CurrentCulture = de;
+Console.WriteLine($"{2.5} {-3.25m} {d:d}");
+try { new CultureInfo("en-"); } catch (CultureNotFoundException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '$1,234.50 -$1,234.50 1.234.567,89 12,5 %',
+      'Dienstag, 5. März 2024 5 марта март 1234.5 German (Germany)',
+      '2,5 -3,25 05.03.2024',
+      "Culture is not supported. (Parameter 'name')",
+      'en- is an invalid culture identifier.',
+      '',
+    ].join('\n'),
+  });
+});
+
+// .NET 10.0.403 prints these: each culture sorts by its own tailoring, and Turkish pairs i with İ and ı with I.
+test('cultures compare and change case by their own rules', () => {
+  const program = String.raw`using System.Globalization;
+var words = new List<string> { "zebra", "äpple", "ña", "nz", "ch", "cz", "ıslak", "İstanbul", "iyi" };
+foreach (var name in new[] { "en-US", "sv-SE", "es-ES", "cs-CZ", "tr-TR" })
+{
+    CultureInfo.CurrentCulture = new CultureInfo(name);
+    words.Sort();
+    Console.WriteLine($"{name}: {string.Join(" ", words)} {"istanbul".ToUpper()} {"ILIK".ToLower()} {char.ToUpper('i')}");
+}
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'en-US: äpple ch cz İstanbul iyi ıslak ña nz zebra ISTANBUL ilik I',
+      'sv-SE: ch cz İstanbul iyi ıslak ña nz zebra äpple ISTANBUL ilik I',
+      'es-ES: äpple ch cz İstanbul iyi ıslak nz ña zebra ISTANBUL ilik I',
+      'cs-CZ: äpple cz ch İstanbul iyi ıslak ña nz zebra ISTANBUL ilik I',
+      'tr-TR: äpple ch cz ıslak İstanbul iyi ña nz zebra İSTANBUL ılık İ',
+      '',
+    ].join('\n'),
   });
 });

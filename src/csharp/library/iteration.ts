@@ -3,7 +3,7 @@ import type { NativeCall } from '../natives';
 import { PendingException } from '../numeric';
 import { environmentOf } from '../objects';
 import type { NativeState } from '../runtime';
-import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
+import { type MethodSymbol, namedType, substitute, substitutionOf, type Type } from '../types';
 import { copyValue, CsArray, CsObject, CsStruct, isString, stringText, type Value } from '../values';
 import { evaluatorOf, fail, failNull } from './support';
 
@@ -136,7 +136,25 @@ function* enumerateThroughInterface(call: NativeCall, value: Value): Generator<V
     }
   } finally {
     call.frame.temporaries.pop();
+    disposeEnumerator(call, enumerator);
   }
+}
+
+/** Disposes an enumerator that implements IDisposable, as the `foreach` that a LINQ method runs in .NET does. */
+function disposeEnumerator(call: NativeCall, enumerator: Value): void {
+  const evaluator = evaluatorOf(call);
+  const disposable = evaluator.runtime.library.typeNamed('System.IDisposable');
+  if (!evaluator.isInstanceOf(enumerator, namedType(disposable))) return;
+  const dispose = disposable.methods.find((method) => method.name === 'Dispose') as MethodSymbol;
+  const implementation = evaluator.runtime.dispatch(dispose, enumerator);
+  evaluator.invoke(
+    call.frame,
+    implementation,
+    enumerator,
+    [],
+    undefined,
+    environmentOf(evaluator, implementation, enumerator)
+  );
 }
 
 /** An enumerator of a library collection or a LINQ query, which keeps the iteration of its source. */

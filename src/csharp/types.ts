@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss -- The types module keeps the symbols and types that every stage shares together.
 import type {
   ArrayInitializer,
   ConstructorDeclaration,
@@ -8,6 +9,7 @@ import type {
   PropertyDeclaration,
   TypeDeclaration,
 } from './ast';
+import type { CallerInfo } from './attributeBinder';
 import type { TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression } from './bound';
 import type { NativeMethod } from './natives';
@@ -92,6 +94,10 @@ export class TypeParameterSymbol {
   hasValueConstraint = false;
   hasConstructorConstraint = false;
   hasNotNullConstraint = false;
+  /** Whether `allows ref struct` lets a ref struct be the type argument. */
+  allowsRefStruct = false;
+  /** The `unmanaged` constraint, which also makes the parameter a value type. */
+  hasUnmanagedConstraint = false;
 
   constructor(
     readonly name: string,
@@ -110,6 +116,8 @@ export interface ParameterSymbol {
   name: string;
   type: Type;
   refKind: 'ref' | 'out' | 'in' | undefined;
+  /** Whether an `in` parameter is written `ref readonly`, which delegate types and conversions tell apart. */
+  isRefReadonly?: boolean;
   isParams: boolean;
   /** The value an omitted optional argument takes, already converted to the parameter's type. */
   defaultValue?: { value: unknown };
@@ -117,6 +125,16 @@ export interface ParameterSymbol {
   defaultSyntax?: Expression;
   /** The names in scope where the default value is written, such as the declaring type's constants. */
   defaultContext?: TypeContext;
+  /** What a `[Caller...]` attribute makes an omitted argument receive. */
+  callerInfo?: CallerInfo;
+  isScoped?: boolean;
+  /**
+   * The parameters whose arguments an interpolated string handler's constructor also takes, by an
+   * `[InterpolatedStringHandlerArgument]` attribute: their names, or `""` for the receiver.
+   */
+  handlerArguments?: string[];
+  /** Whether `[EnumeratorCancellation]` makes an async iterator's parameter receive `GetAsyncEnumerator`'s token. */
+  isEnumeratorCancellation?: boolean;
   position?: Position;
 }
 
@@ -131,6 +149,15 @@ export type MethodKind =
   | 'destructor'
   | 'delegateInvoke';
 
+/**
+ * What an async function's return type makes of its body: a task (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`) that
+ * its `return` completes with `resultType`, nothing (`async void`), or an async stream of `resultType` values.
+ */
+export interface AsyncShape {
+  kind: 'void' | 'task' | 'valueTask' | 'asyncEnumerable' | 'asyncEnumerator';
+  resultType: Type;
+}
+
 export class MethodSymbol {
   typeParameters: TypeParameterSymbol[] = [];
   parameters: ParameterSymbol[] = [];
@@ -142,6 +169,8 @@ export class MethodSymbol {
   isSealed = false;
   isNew = false;
   isExtension = false;
+  /** The `[OverloadResolutionPriority]` that ranks the method above the others its type declares. */
+  overloadPriority = 0;
   isExtern = false;
   access: Accessibility = 'private';
   /** The method this one overrides, which virtual calls of it reach this one through. */
@@ -171,6 +200,45 @@ export class MethodSymbol {
   row = 0;
   /** For an operator, its token (`+`, `==`). */
   operatorToken: string | undefined;
+  /**
+   * Whether C# removes the method's calls, arguments and all: a partial method without an implementation, or a
+   * `[Conditional]` method whose symbols the program does not define.
+   */
+  callsAreRemoved = false;
+  /** The symbols of the method's `[Conditional]` attributes. */
+  conditionalSymbols: string[] | undefined;
+  /** Whether the method is `async`, and for one, what its return type wraps: the type its `return` statements give. */
+  isAsync = false;
+  /** For the getter of an extension block's property, the property's name, which `x.P` finds it by. */
+  extensionProperty: string | undefined;
+  /**
+   * For an accessor of an extension block's property with a setter, the property, which `x.P = v` assigns as a
+   * static property whose accessors take the receiver as their first argument.
+   */
+  extensionAccessorOf: PropertySymbol | undefined;
+  /** For an extension block's instance compound assignment or `++`/`--` operator, the type of its receiver. */
+  extensionAssignmentOf: Type | undefined;
+  /** For a static member of an extension block, the receiver type, whose static members it joins (`string.M()`). */
+  staticExtensionOf: Type | undefined;
+  /** Whether the method stands for a member of an extension block, which Roslyn names after the block. */
+  isExtensionBlockMember = false;
+  /** For a member of an extension block, how many of its type parameters are the block's, which come first. */
+  extensionBlockArity = 0;
+  /** How a method returns by reference (`ref T M()`, `ref readonly T M()`), if it does. */
+  returnsByRef: 'ref' | 'readonly' | undefined;
+  async: AsyncShape | undefined;
+  /** For an iterator (a body with `yield`), the type of its values and whether it returns an enumerable. */
+  iterator: { elementType: Type; isEnumerable: boolean } | undefined;
+  /** Whether `[ModuleInitializer]` runs the method before the entry point. */
+  isModuleInitializer = false;
+  /** The message of an `[Obsolete(message, true)]` attribute, which makes every use an error (CS0619). */
+  obsoleteError: string | undefined;
+  /** For an explicit interface implementation (`void IShape.Draw()`), the interface it implements a member of. */
+  explicitInterface: NamedType | undefined;
+  /** Whether the method is an event's `add` or `remove` accessor, which no name finds. */
+  isEventAccessor = false;
+  /** Whether a constructor has `[SetsRequiredMembers]`, which frees its callers from setting the required members. */
+  setsRequiredMembers = false;
 
   constructor(
     readonly name: string,
@@ -183,6 +251,11 @@ export class FieldSymbol {
   isStatic = false;
   isReadonly = false;
   isConst = false;
+  /**
+   * How a ref field of a ref struct refers to a variable (`ref T F`, `ref readonly T F`); its slot holds a reference,
+   * or nothing for a null reference. `readonly` then forbids `F = ref x` outside constructors, not writes through it.
+   */
+  byRef: 'ref' | 'readonly' | undefined;
   constantValue: unknown;
   access: Accessibility = 'private';
   /** The index of the field among its object's or its type's fields. */
@@ -197,6 +270,21 @@ export class FieldSymbol {
   column = 0;
   /** Whether the field holds a primary constructor's parameter, which the program reads by the parameter's name. */
   isPrimaryParameter = false;
+  /** Whether the field is `required`, which every object creation's initializer must set. */
+  isRequired = false;
+  obsoleteError: string | undefined;
+  /** For an event with `add` and `remove` accessors, which it uses in place of a delegate field. */
+  eventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
+  /**
+   * For a virtual, abstract, or override field-like event of a class, its accessors, which `+=` and `-=` call so that
+   * the handler reaches the field of the override that the object's type declares.
+   */
+  virtualEventAccessors: { add: MethodSymbol; remove: MethodSymbol } | undefined;
+  /**
+   * For a fixed-size buffer (`fixed int Buf[4]`), its elements and the length that members binding sets; the field
+   * holds a struct of the elements, and naming it gives a pointer to the first one.
+   */
+  fixedBuffer: { elementType: Type; length: number; size: Expression } | undefined;
 
   constructor(
     readonly name: string,
@@ -210,10 +298,19 @@ export class PropertySymbol {
   setter: MethodSymbol | undefined;
   /** Whether the setter is an `init` accessor. */
   isInitOnly = false;
+  /** Whether the property returns a `ref readonly` variable, which the program may read but not assign. */
+  isRefReadonly = false;
+  /** How a property of the program returns by reference (`ref T P`, `ref readonly T P`), if it does. */
+  returnsByRef: 'ref' | 'readonly' | undefined;
   isStatic = false;
   access: Accessibility = 'private';
   /** The backing field of an auto-property. */
   backingField: FieldSymbol | undefined;
+  /**
+   * The backing field of a property whose accessors use the `field` keyword or mix bodies with `get;` or `set;` (C#
+   * 14), which its accessors read and write but which, unlike an auto-property's, no access reaches past them.
+   */
+  keywordField: FieldSymbol | undefined;
   /** For an indexer, its parameters. */
   parameters: ParameterSymbol[] = [];
   declaration: PropertyDeclaration | undefined;
@@ -221,6 +318,13 @@ export class PropertySymbol {
   isAbstract = false;
   isOverride = false;
   overridden: PropertySymbol | undefined;
+  /** The `[OverloadResolutionPriority]` that ranks an indexer above the others its type declares. */
+  overloadPriority = 0;
+  /** Whether the property is `required`, which every object creation's initializer must set. */
+  isRequired = false;
+  obsoleteError: string | undefined;
+  /** For an explicit interface implementation (`int IShape.Area { get; }`), the interface. */
+  explicitInterface: NamedType | undefined;
   row = 0;
   /** The column of the declaration, which orders the members a record prints. */
   column = 0;
@@ -233,6 +337,24 @@ export class PropertySymbol {
   ) {}
 }
 
+/**
+ * How far a variable, or the variables a ref struct value refers to, live, from the widest: beyond the method's caller
+ * (`caller`, as the heap's do), as far as a `return` (`return`, as a ref parameter's do), or only while the method runs.
+ */
+export type SafeContext = 'caller' | 'return' | 'local';
+
+const SAFE_CONTEXT_RANKS: Record<SafeContext, number> = { local: 0, return: 1, caller: 2 };
+
+/** Whether a variable living as far as `context` lives at least as far as `required`. */
+export function outlives(context: SafeContext, required: SafeContext): boolean {
+  return SAFE_CONTEXT_RANKS[context] >= SAFE_CONTEXT_RANKS[required];
+}
+
+/** The narrower of two contexts. */
+export function narrowerContext(a: SafeContext, b: SafeContext): SafeContext {
+  return outlives(a, b) ? b : a;
+}
+
 export class LocalSymbol {
   /** The index of the variable among its function's locals. */
   slot = 0;
@@ -243,8 +365,20 @@ export class LocalSymbol {
   /** Whether the variable is a parameter, and how it is passed. */
   isParameter = false;
   refKind: 'ref' | 'out' | 'in' | undefined;
+  /** Whether a parameter is `scoped`, so that its reference, or the variables its ref struct refers to, stay in the method. */
+  isScoped = false;
+  /** Whether the variable is a ref local (`ref int r = ref x;`), whose slot holds a reference to another variable. */
+  isRefLocal = false;
+  /** How far the variable that a ref local refers to lives, which bounds where the method may give the local by `ref`. */
+  refContext: SafeContext = 'local';
+  /** How far the variables that a ref struct local's ref fields may refer to live, which bounds where it may go. */
+  valueContext: SafeContext = 'caller';
+  /** Whether `r = ref x` may not make the ref local refer elsewhere, as for `foreach (ref T r in e)`. */
+  isRefFixed = false;
   /** Whether the program can assign the variable, which `foreach` variables and `using` variables forbid. */
   isReadonly = false;
+  /** What makes a readonly variable so, as Roslyn's messages name it (`foreach 繰り返し変数`, `using 変数`). */
+  readonlyReason = 'foreach 繰り返し変数';
   /** Whether the program read the variable, for the warning-free checks that need it. */
   isUsed = false;
   /** The function that declares the variable. */
@@ -292,6 +426,8 @@ export class TypeSymbol {
   isSealed = false;
   isRecord = false;
   isReadonly = false;
+  /** Whether the type is a `ref struct`, such as `ReadOnlySpan<T>` or `TypedReference`, whose values never leave the stack. */
+  isRefLike = false;
   access: Accessibility = 'internal';
   special: SpecialType | undefined;
   declaration: TypeDeclaration | undefined;
@@ -304,6 +440,15 @@ export class TypeSymbol {
   runtimeNameOverride: string | undefined;
   /** How Roslyn shows an anonymous type, such as `<anonymous type: int X>`. */
   anonymousDisplay: string | undefined;
+  /** Whether an enum has `[Flags]`, which prints a combination of members by their names. */
+  isFlags = false;
+  /** Whether the type has `[InterpolatedStringHandler]`, which an interpolated string converts to. */
+  isInterpolatedStringHandler = false;
+  /** The builder type and method of a `[CollectionBuilder]`, which create the type from a collection expression. */
+  collectionBuilder: { builderType: Type; methodName: string } | undefined;
+  obsoleteError: string | undefined;
+  /** For an attribute class, the declarations its `[AttributeUsage]` allows it on, as AttributeTargets bits. */
+  attributeUsage: { validOn: number; allowMultiple: boolean } | undefined;
   row = 0;
 
   constructor(
@@ -360,6 +505,11 @@ export function specialOf(type: Type): SpecialType | undefined {
   return type.kind === 'named' ? type.symbol.special : undefined;
 }
 
+/** The type itself, or the type that it wraps when it is a `T?` of a value type. */
+export function withoutNullable(type: Type): Type {
+  return nullableUnderlying(type) ?? type;
+}
+
 /** The type that a `T?` of a value type wraps, or undefined. */
 export function nullableUnderlying(type: Type): Type | undefined {
   return type.kind === 'named' && type.symbol.special === 'nullable' ? type.args[0] : undefined;
@@ -369,6 +519,19 @@ export function isValueType(type: Type): boolean {
   if (type.kind === 'named') return type.symbol.isValueType;
   if (type.kind === 'typeParameter') return type.symbol.hasValueConstraint;
   return false;
+}
+
+/** Whether values of the type live only on the stack, so that they are never boxed, captured, or stored in the heap. */
+export function isRefLikeType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isRefLike;
+}
+
+/**
+ * Whether the type is `TypedReference`, one of the restricted types that predate ref structs, for which Roslyn reports
+ * its older errors where a ref struct gets the newer ones.
+ */
+export function isRestrictedType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isLibrary && type.symbol.fullName === 'System.TypedReference';
 }
 
 export function isReferenceType(type: Type): boolean {
@@ -536,15 +699,40 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
  * A type as Roslyn's diagnostics show it. With `qualified`, as its conversion errors do, a type outside the global
  * namespace carries its namespace, such as `System.Collections.Generic.List<int>`.
  */
-// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 /**
  * A type as Roslyn's messages show it; `qualified` adds the namespaces, and `annotated` the `?` of a nullable reference
  * type, which Roslyn shows for the types that declarations write.
  */
+/** Whether a type is `dynamic`, which the library's hidden `__Dynamic` stands for. */
+export function isDynamicType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isLibrary && type.symbol.name === '__Dynamic';
+}
+
+/** Whether a type is a pointer type `T*`, which the library's hidden `__Pointer<T>` stands for. */
+export function isPointerType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.isLibrary && type.symbol.name === '__Pointer';
+}
+
+/** Whether a type is `void*`, which points to no type that a dereference could read. */
+export function isVoidPointer(type: Type): boolean {
+  const pointee = pointeeOf(type);
+  return pointee?.kind === 'named' && pointee.symbol.name === '__Void';
+}
+
+/** The type a pointer type points to. */
+export function pointeeOf(type: Type): Type | undefined {
+  return type.kind === 'named' && isPointerType(type) ? type.args[0] : undefined;
+}
+
+// code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function displayType(type: Type, qualified = false, annotated = false): string {
   const mark = annotated && 'isAnnotated' in type && type.isAnnotated ? '?' : '';
   switch (type.kind) {
     case 'named': {
+      if (isDynamicType(type)) return 'dynamic';
+      if (isPointerType(type))
+        return `${isVoidPointer(type) ? 'void' : displayType(pointeeOf(type) as Type, qualified, annotated)}*`;
       const keyword = type.symbol.special ? KEYWORD_NAMES[type.symbol.special] : undefined;
       if (keyword) return `${keyword}${mark}`;
       if (type.symbol.special === 'nullable') return `${displayType(type.args[0], qualified, annotated)}?`;
@@ -603,13 +791,18 @@ export function displayTypeSymbol(
   return `${prefix}${symbol.name}${suffix}`;
 }
 
+/** The keyword that a parameter passed by reference is declared with: `ref`, `out`, `in`, or `ref readonly`. */
+export function refKeyword(parameter: Pick<ParameterSymbol, 'refKind' | 'isRefReadonly'>): string | undefined {
+  return parameter.isRefReadonly ? 'ref readonly' : parameter.refKind;
+}
+
 /** The name of a method as Roslyn's diagnostics show it, such as `A.M(int, string)`. */
 export function displayMethod(method: MethodSymbol): string {
   const owner = displayTypeSymbol(method.owner);
   const parameters = method.parameters
     .map(
       (parameter) =>
-        `${parameter.refKind ? `${parameter.refKind} ` : ''}${parameter.isParams ? 'params ' : ''}${displayType(parameter.type)}`
+        `${parameter.refKind ? `${refKeyword(parameter)} ` : ''}${parameter.isParams ? 'params ' : ''}${displayType(parameter.type)}`
     )
     .join(', ');
   const typeParameters =

@@ -647,6 +647,30 @@ function first(
   throw predicate ? noMatch() : noElements();
 }
 
+/** The arguments of a `GroupBy` or `ToLookup` overload, by the parameters' names. */
+function groupingArguments(
+  call: NativeCall,
+  args: Value[]
+): {
+  items: Value;
+  keyOf: (value: Value) => Value;
+  elementOf: (value: Value) => Value;
+  resultSelector: Value;
+  comparer: Value;
+} {
+  const argument = (name: string): Value =>
+    args[call.method.parameters.findIndex((parameter) => parameter.name === name)];
+  const elementSelector = argument('elementSelector');
+  const hasElement = call.method.parameters.some((parameter) => parameter.name === 'elementSelector');
+  return {
+    items: args[0],
+    keyOf: delegateCall(call, argument('keySelector'), 'keySelector'),
+    elementOf: hasElement ? delegateCall(call, elementSelector, 'elementSelector') : (item: Value): Value => item,
+    resultSelector: argument('resultSelector'),
+    comparer: argument('comparer'),
+  };
+}
+
 /** Groups elements by key in the order their keys first appear, as `GroupBy` and `ToLookup` do. */
 function groupsOf(
   call: NativeCall,
@@ -1074,54 +1098,36 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.SingleOrDefault`]: (call, _receiver, args) =>
     first(call, args as Value[], { single: true, orDefault: true }),
   [`${ENUMERABLE}.GroupBy`]: (call, _receiver, args) => {
-    const [items, keySelector, third] = args as Value[];
-    const keyOf = delegateCall(call, keySelector, 'keySelector');
+    const { items, keyOf, elementOf, resultSelector, comparer } = groupingArguments(call, args as Value[]);
     const all = source(call, items);
     const [sourceType, keyType] = call.typeArgs;
-    const thirdType = call.method.parameters[2]?.type;
-    const isResult = thirdType !== undefined && thirdType.kind === 'named' && thirdType.args.length === 3;
-    if (isResult) {
-      const resultOf = delegateCall(call, third, 'resultSelector');
-      return query(
-        call,
-        call.typeArgs[2],
-        iteratorName('GroupByResultIterator', [sourceType, keyType, call.typeArgs[2]]),
-        [items],
-        () =>
-          groupsOf(call, all, keyOf, (item) => item, undefined).map((group) =>
-            resultOf(group.key, newArray(call, sourceType, group.elements))
-          )
+    const hasElement = call.method.parameters.some((parameter) => parameter.name === 'elementSelector');
+    const elementType = hasElement ? call.typeArgs[2] : sourceType;
+    const groups = (): { key: Value; elements: Value[] }[] => groupsOf(call, all, keyOf, elementOf, comparer);
+    if (call.method.parameters.some((parameter) => parameter.name === 'resultSelector')) {
+      const resultOf = delegateCall(call, resultSelector, 'resultSelector');
+      const resultType = call.typeArgs.at(-1) as Type;
+      return query(call, resultType, iteratorName('GroupByResultIterator', call.typeArgs), [items], () =>
+        groups().map((group) => resultOf(group.key, newArray(call, elementType, group.elements)))
       );
     }
-    const elementOf = third === undefined ? (item: Value): Value => item : delegateCall(call, third, 'elementSelector');
-    const elementType = third === undefined ? sourceType : call.typeArgs[2];
     const groupType = libraryType(call, 'System.Linq.IGrouping', [keyType, elementType]);
-    return query(
-      call,
-      groupType,
-      third === undefined
-        ? iteratorName('GroupByIterator', [sourceType, keyType])
-        : iteratorName('GroupByIterator', [sourceType, keyType, elementType]),
-      [items],
-      () => groupsOf(call, all, keyOf, elementOf, undefined).map((group) => grouping(call, keyType, elementType, group))
+    return query(call, groupType, iteratorName('GroupByIterator', call.typeArgs), [items], () =>
+      groups().map((group) => grouping(call, keyType, elementType, group))
     );
   },
   [`${ENUMERABLE}.ToLookup`]: (call, _receiver, args) => {
-    const [items, keySelector, elementSelector] = args as Value[];
-    const keyOf = delegateCall(call, keySelector, 'keySelector');
-    const elementOf =
-      elementSelector === undefined
-        ? (item: Value): Value => item
-        : delegateCall(call, elementSelector, 'elementSelector');
-    const [, keyType] = call.typeArgs;
-    const elementType = elementSelector === undefined ? call.typeArgs[0] : call.typeArgs[2];
-    const groups = groupsOf(call, source(call, items), keyOf, elementOf, undefined);
+    const { items, keyOf, elementOf, comparer } = groupingArguments(call, args as Value[]);
+    const [sourceType, keyType] = call.typeArgs;
+    const elementType = call.typeArgs[2] ?? sourceType;
+    const groups = groupsOf(call, source(call, items), keyOf, elementOf, comparer);
     const lookup = new CsObject(libraryType(call, 'System.Linq.Internal.Lookup', [keyType, elementType]), []);
     lookup.native = new LookupState(
       groups.map((group) => grouping(call, keyType, elementType, group)),
       groups,
       keyType,
-      elementType
+      elementType,
+      comparer
     );
     return lookup;
   },
@@ -1486,7 +1492,7 @@ function setOperationBy(
 
 /** The index of a lookup's group of a key, where a null key has its own group. */
 function groupIndexOf(call: NativeCall, state: LookupState, key: Value): number {
-  const equality = equalityOf(call, undefined);
+  const equality = equalityOf(call, state.comparer, state.keyType);
   return state.groups.findIndex((group) =>
     group.key === undefined ? key === undefined : key !== undefined && equality.equals(group.key, key)
   );
@@ -1497,7 +1503,9 @@ class LookupState implements NativeState {
     readonly groupings: CsObject[],
     readonly groups: { key: Value; elements: Value[] }[],
     readonly keyType: Type,
-    readonly elementType: Type
+    readonly elementType: Type,
+    /** The key comparer that the lookup was made with, which its indexer and Contains find keys by. */
+    readonly comparer: Value
   ) {}
 
   enumerate(): Iterable<Value> {
@@ -1505,7 +1513,7 @@ class LookupState implements NativeState {
   }
 
   references(): Value[] {
-    return this.groupings;
+    return [...this.groupings, this.comparer];
   }
 }
 

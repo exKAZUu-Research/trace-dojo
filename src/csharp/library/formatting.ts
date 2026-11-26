@@ -1,10 +1,13 @@
+import { type Culture, providerCulture } from '../cultures';
 import type { Evaluator } from '../evaluator';
-import { CULTURE, formatNumber, type NumericKind } from '../format';
+import { formatNumber, type NumericKind } from '../format';
 import { PendingException } from '../numeric';
-import { enumText, stringOf, unboxed } from '../objects';
+import { enumText, environmentOf, flagsText, stringOf, unboxed } from '../objects';
 import type { Frame } from '../runtime';
 import { type NamedType, nullableUnderlying, type Type } from '../types';
-import { CsBox, CsStruct, type Value } from '../values';
+import { CsBox, type CsString, CsStruct, stringText, type Value } from '../values';
+import { formatBigInteger } from './nativesBigInteger';
+import { formatDateOrTimeOnly } from './nativesDateOnly';
 import { formatDateTime, formatTimeSpan } from './nativesTime';
 
 const NUMERIC_KINDS: Record<string, NumericKind> = {
@@ -26,8 +29,9 @@ const NUMERIC_KINDS: Record<string, NumericKind> = {
 const INTEGER_BITS: Partial<Record<string, number>> = { sbyte: 8, byte: 8, short: 16, ushort: 16, long: 64, ulong: 64 };
 
 /**
- * Formats a value with a format string, as an interpolation hole or a composite format item does: numbers, enums,
- * dates, and times by the format, and anything else by its `ToString()`.
+ * Formats a value with a format string and a format provider, as an interpolation hole or a composite format item
+ * does: numbers, enums, dates, and times by the format and the provider's culture, a program's `IFormattable` by its
+ * `ToString(format, provider)`, and anything else by its `ToString()`.
  */
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
 export function formatValue(
@@ -35,7 +39,8 @@ export function formatValue(
   value: Value,
   type: Type,
   format: string | undefined,
-  frame: Frame
+  frame: Frame,
+  provider?: Value
 ): string {
   if (value === undefined) return '';
   let actualType = nullableUnderlying(type) ?? type;
@@ -44,21 +49,70 @@ export function formatValue(
     actualType = value.type;
     inner = value.value;
   }
-  if (format === undefined) return stringOf(evaluator, value, type, frame);
+  const formatted = formatProgramFormattable(evaluator, value, format, provider, frame);
+  if (formatted !== undefined) return formatted;
+  if (format === undefined && provider === undefined) return stringOf(evaluator, value, type, frame);
   if (actualType.kind === 'named') {
     const special = actualType.symbol.special;
     if (special === 'char' || special === 'bool' || special === 'string')
       return stringOf(evaluator, inner, actualType, frame);
+    const culture = providerCulture(evaluator.runtime, provider);
     const kind = special ? NUMERIC_KINDS[special] : undefined;
-    if (kind) return formatNumber(inner as number, kind, format, special ? (INTEGER_BITS[special] ?? 32) : 32);
-    if (actualType.symbol.kind === 'enum') return formatEnum(actualType, inner, format);
-    if (inner instanceof CsStruct) {
-      const name = actualType.symbol.fullName;
-      if (name === 'System.DateTime') return formatDateTime(evaluator.runtime, inner, format);
-      if (name === 'System.TimeSpan') return formatTimeSpan(evaluator.runtime, inner, format);
-    }
+    if (kind) return formatNumber(inner as number, kind, format, culture, special ? (INTEGER_BITS[special] ?? 32) : 32);
+    if (actualType.symbol.kind === 'enum' && format !== undefined) return formatEnum(actualType, inner, format);
+    const time = inner instanceof CsStruct ? formatTime(evaluator, inner, format, culture) : undefined;
+    if (time !== undefined) return time;
   }
   return stringOf(evaluator, value, type, frame);
+}
+
+/** The text of a DateTime, TimeSpan, DateOnly, TimeOnly, or BigInteger in a format, undefined for another struct. */
+function formatTime(
+  evaluator: Evaluator,
+  value: CsStruct,
+  format: string | undefined,
+  culture: Culture
+): string | undefined {
+  switch (value.type.symbol.fullName) {
+    case 'System.DateTime': {
+      return formatDateTime(evaluator.runtime, value, format, culture);
+    }
+    case 'System.TimeSpan': {
+      return formatTimeSpan(evaluator.runtime, value, format);
+    }
+    case 'System.DateOnly':
+    case 'System.TimeOnly': {
+      return formatDateOrTimeOnly(evaluator.runtime, value, format, culture);
+    }
+    case 'System.Numerics.BigInteger': {
+      return formatBigInteger(value.fields[0] as bigint, format, culture);
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * The text of a value of the program's type that implements `IFormattable`, from its `ToString(format, provider)`,
+ * which composite formatting calls instead of `ToString()`; undefined for any other value.
+ */
+function formatProgramFormattable(
+  evaluator: Evaluator,
+  value: Value,
+  format: string | undefined,
+  provider: Value,
+  frame: Frame
+): string | undefined {
+  const runtime = evaluator.runtime;
+  const type = runtime.runtimeTypeOf(value);
+  if (type?.kind !== 'named' || type.symbol.isLibrary) return undefined;
+  const method = runtime.library.typeNamed('System.IFormattable').methods[0];
+  const implementation = runtime.dispatch(method, value);
+  if (implementation === method) return undefined;
+  const environment = environmentOf(evaluator, implementation, value);
+  const result = evaluator.invoke(frame, implementation, value, [format, provider], undefined, environment);
+  return result === undefined ? '' : stringText(result as string | CsString);
 }
 
 function formatEnum(type: NamedType, value: Value, format: string): string {
@@ -95,78 +149,6 @@ function formatEnum(type: NamedType, value: Value, format: string): string {
       );
     }
   }
-}
-
-/**
- * An enum value as `ToString("F")` gives it: its member's name, or the names of the members whose bits make it up, as
- * `Red, Green`, even without `[Flags]`, or its number when no members make it up.
- */
-function flagsText(type: NamedType, value: Value): string {
-  const exact = enumText(type, value);
-  const number = BigInt(value as number | bigint);
-  if (exact !== String(value) || number === 0n) return exact;
-  const members = type.symbol.fields
-    .filter((field) => field.isConst && BigInt(field.constantValue as number | bigint) !== 0n)
-    .map((field) => ({ name: field.name, bits: BigInt(field.constantValue as number | bigint) }))
-    .toSorted((a, b) => (a.bits < b.bits ? 1 : a.bits > b.bits ? -1 : 0));
-  let rest = number;
-  const names: string[] = [];
-  for (const member of members) {
-    if ((rest & member.bits) !== member.bits) continue;
-    rest &= ~member.bits;
-    names.unshift(member.name);
-  }
-  return rest === 0n ? names.join(', ') : String(value);
-}
-
-/**
- * A number's text without the white space that .NET's number parsing skips: only tab to carriage return and the
- * space, not the other Unicode spaces such as U+3000, with trailing NUL characters too.
- */
-export function trimNumberText(text: string): string {
-  // Scanning from both ends keeps a long run of spaces linear, which an unanchored regex retries at every position.
-  let start = 0;
-  let end = text.length;
-  while (start < end && isSpace(text[start], false)) start++;
-  while (end > start && isSpace(text[end - 1], true)) end--;
-  return text.slice(start, end);
-}
-
-function isSpace(char: string, isTrailing: boolean): boolean {
-  return char === ' ' || (char >= '\t' && char <= '\r') || (isTrailing && char === '\0');
-}
-
-/** Parses a floating-point number as `double.Parse` does with the culture's symbols, or returns undefined. */
-export function parseNumber(text: string): number | undefined {
-  const trimmed = trimNumberText(text);
-  // .NET compares the culture's symbols ignoring case.
-  if (trimmed.toLowerCase() === CULTURE.nan.toLowerCase()) return Number.NaN;
-  // ja-JP spells infinity `∞`, so `Infinity` does not parse.
-  if (trimmed === CULTURE.positiveInfinity || trimmed === `+${CULTURE.positiveInfinity}`)
-    return Number.POSITIVE_INFINITY;
-  if (trimmed === CULTURE.negativeInfinity) return Number.NEGATIVE_INFINITY;
-  const normalized = normalizeNumberText(trimmed, true);
-  return normalized === undefined ? undefined : Number(normalized);
-}
-
-/**
- * A number's text, without white space and group separators, if it follows .NET's grammar for `double.Parse`
- * (`isFloat`, with an exponent) or `decimal.Parse` (with a trailing sign instead). A group separator may follow any
- * digit before the decimal point, in groups of any size.
- */
-export function normalizeNumberText(text: string, isFloat: boolean): string | undefined {
-  let body = trimNumberText(text);
-  let sign = '';
-  if (/^[+-]/.test(body)) {
-    sign = body[0];
-    body = body.slice(1);
-  } else if (!isFloat && /[+-]$/.test(body)) {
-    sign = body.at(-1) as string;
-    body = body.slice(0, -1);
-  }
-  const match = /^(\d[\d,]*|)(\.\d*)?([eE][+-]?\d+)?$/.exec(body);
-  if (!match || (match[3] && !isFloat) || !/\d/.test(match[1] + (match[2] ?? ''))) return undefined;
-  return `${sign === '-' ? '-' : ''}${match[1].replaceAll(',', '')}${match[2] ?? ''}${match[3] ?? ''}`;
 }
 
 export { unboxed };

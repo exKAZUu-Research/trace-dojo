@@ -1,6 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { LambdaInfo } from './bound';
 import type { CsDecimal } from './decimal';
+import type { CsPointer } from './pointers';
 import type { ArrayType, MethodSymbol, NamedType, Type } from './types';
 
 /**
@@ -21,7 +22,8 @@ export type Value =
   | CsStruct
   | CsBox
   | CsArray
-  | CsDelegate;
+  | CsDelegate
+  | CsPointer;
 
 /**
  * A string that the program made at run time, which .NET keeps as an object of its own: `ReferenceEquals` tells two

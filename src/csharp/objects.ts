@@ -1,12 +1,13 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import { compareCulture } from './culture';
+import { compareCulture, ordinalDifference } from './culture';
+import { collationLocale, type Culture, cultureSettingsOf, currentCulture } from './cultures';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
-import { formatFloat } from './format';
+import { decimalText, formatFloat, integerText } from './format';
 import { linqDisplayName } from './library/nativesLinq';
-import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
+import { recordText } from './recordText';
 import type { ExceptionState, Frame, Runtime } from './runtime';
 import {
   type FieldSymbol,
@@ -77,10 +78,34 @@ export function unboxed(value: Value): Value {
   return value instanceof CsBox ? value.value : plainString(value);
 }
 
-/** The member name of an enum value, or its number when no member has it. */
+/** The member name of an enum value, or its number when no member has it, or for `[Flags]` the names of its bits. */
 export function enumText(type: NamedType, value: Value): string {
   const member = type.symbol.fields.find((field) => field.isConst && sameNumber(field.constantValue, value));
-  return member ? member.name : String(value);
+  if (member) return member.name;
+  return type.symbol.isFlags ? flagsText(type, value) : String(value);
+}
+
+/**
+ * An enum value as `ToString("F")` gives it: its member's name, or the names of the members whose bits make it up, as
+ * `Red, Green`, even without `[Flags]`, or its number when no members make it up.
+ */
+export function flagsText(type: NamedType, value: Value): string {
+  const exact = type.symbol.fields.find((field) => field.isConst && sameNumber(field.constantValue, value));
+  if (exact) return exact.name;
+  const number = BigInt(value as number | bigint);
+  if (number === 0n) return String(value);
+  const members = type.symbol.fields
+    .filter((field) => field.isConst && BigInt(field.constantValue as number | bigint) !== 0n)
+    .map((field) => ({ name: field.name, bits: BigInt(field.constantValue as number | bigint) }))
+    .toSorted((a, b) => (a.bits < b.bits ? 1 : a.bits > b.bits ? -1 : 0));
+  let rest = number;
+  const names: string[] = [];
+  for (const member of members) {
+    if ((rest & member.bits) !== member.bits) continue;
+    rest &= ~member.bits;
+    names.unshift(member.name);
+  }
+  return rest === 0n ? names.join(', ') : String(value);
 }
 
 function sameNumber(a: unknown, b: unknown): boolean {
@@ -92,7 +117,7 @@ function sameNumber(a: unknown, b: unknown): boolean {
 export function stringOf(evaluator: Evaluator, value: Value, type: Type, frame: Frame): string {
   if (value === undefined) return '';
   const underlying = nullableUnderlying(type) ?? type;
-  const primitive = primitiveText(value, underlying);
+  const primitive = primitiveText(value, underlying, currentCulture(evaluator.runtime));
   if (primitive !== undefined) return primitive;
   return stringText(invokeToString(evaluator, value, frame) ?? '');
 }
@@ -106,7 +131,7 @@ export function toStringValue(evaluator: Evaluator, value: Value, type: Type, fr
   if (isString(value)) return value;
   const underlying = value instanceof CsBox ? value.type : (nullableUnderlying(type) ?? type);
   const inner = unboxed(value);
-  const primitive = primitiveText(inner, underlying);
+  const primitive = primitiveText(inner, underlying, currentCulture(evaluator.runtime));
   if (primitive === undefined) return invokeToString(evaluator, value, frame) ?? '';
   if (typeof inner === 'boolean') return primitive;
   const runtime = evaluator.runtime;
@@ -122,8 +147,8 @@ function isIntegral(type: Type): boolean {
 }
 
 /** The text of a value whose static type says how its representation reads, for primitives. */
-export function primitiveText(value: Value, type: Type): string | undefined {
-  if (value instanceof CsBox) return primitiveText(value.value, value.type);
+export function primitiveText(value: Value, type: Type, culture: Culture): string | undefined {
+  if (value instanceof CsBox) return primitiveText(value.value, value.type, culture);
   if (type.kind !== 'named') return undefined;
   if (type.symbol.kind === 'enum') return enumText(type, value);
   switch (type.symbol.special) {
@@ -141,14 +166,14 @@ export function primitiveText(value: Value, type: Type): string | undefined {
     case 'uint':
     case 'long':
     case 'ulong': {
-      return String(value);
+      return integerText(value as number | bigint, culture.symbols);
     }
     case 'float':
     case 'double': {
-      return formatFloat(value as number, type.symbol.special === 'float');
+      return formatFloat(value as number, type.symbol.special === 'float', culture);
     }
     case 'decimal': {
-      return (value as CsDecimal).toString();
+      return decimalText(value as CsDecimal, culture.symbols);
     }
     case 'string': {
       return stringText(value as string | CsString);
@@ -213,7 +238,8 @@ export function defaultToString(evaluator: Evaluator, value: Value): string {
   if (value instanceof CsObject && value.native && isExceptionState(value.native))
     return exceptionText(evaluator, value);
   const type = evaluator.runtime.runtimeTypeOf(value);
-  if (value instanceof CsBox) return primitiveText(value.value, value.type) ?? runtimeTypeName(value.type);
+  if (value instanceof CsBox)
+    return primitiveText(value.value, value.type, currentCulture(evaluator.runtime)) ?? runtimeTypeName(value.type);
   return type ? runtimeTypeName(type) : 'System.Object';
 }
 
@@ -259,6 +285,13 @@ export function defaultMessage(type: NamedType): string {
     'System.ApplicationException': 'Error in the application.',
     'System.SystemException': 'System error.',
     'System.TimeoutException': 'The operation has timed out.',
+    'System.OperationCanceledException': 'The operation was canceled.',
+    'System.Threading.Tasks.TaskCanceledException': 'A task was canceled.',
+    'System.MemberAccessException': 'Cannot access member.',
+    'System.Threading.SynchronizationLockException':
+      'Object synchronization method was called from an unsynchronized block of code.',
+    'System.MissingMemberException': 'Attempted to access a missing member.',
+    'System.Reflection.TargetInvocationException': 'Exception has been thrown by the target of an invocation.',
   };
   return messages[name] ?? `Exception of type '${name}' was thrown.`;
 }
@@ -268,6 +301,7 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
   const state = exception.native as ExceptionState;
   const message = evaluator.exceptionMessageOf(exception);
   let text = `${runtimeTypeName(exception.type)}${message ? `: ${message}` : ''}`;
+  if (state.fileName !== undefined) text += `\nFile name: '${state.fileName}'`;
   if (state.inner)
     text += `\n ---> ${exceptionText(evaluator, state.inner)}\n   --- End of inner exception stack trace ---`;
   return text;
@@ -378,18 +412,27 @@ export function structHash(evaluator: Evaluator, value: CsStruct, frame: Frame):
 export function defaultCompare(evaluator: Evaluator, a: Value, b: Value, frame: Frame): number {
   if (a === undefined) return b === undefined ? 0 : -1;
   if (b === undefined) return 1;
-  const spend = (cost: number): void => evaluator.runtime.spend(cost);
-  return comparePrimitives(unboxed(a), unboxed(b), spend) ?? evaluator.compareThroughInterface(a, b, frame);
+  return comparePrimitives(evaluator.runtime, unboxed(a), unboxed(b)) ?? evaluator.compareThroughInterface(a, b, frame);
 }
 
 /** The order of two primitive values of the same kind, or undefined for other values. */
-function comparePrimitives(x: Value, y: Value, spend: (cost: number) => void): number | undefined {
-  if (typeof x === 'string' && typeof y === 'string') return compareCulture(x, y, { spend });
+function comparePrimitives(runtime: Runtime, x: Value, y: Value): number | undefined {
+  if (typeof x === 'string' && typeof y === 'string') return compareStrings(runtime, x, y);
   if (typeof x === 'number' && typeof y === 'number') return compareNumbers(x, y);
   if (typeof x === 'bigint' && typeof y === 'bigint') return orderOf(x, y);
   if (x instanceof CsDecimal && y instanceof CsDecimal) return x.compare(y);
   if (typeof x === 'boolean' && typeof y === 'boolean') return orderOf(Number(x), Number(y));
   return undefined;
+}
+
+/**
+ * The order of two strings by the current culture, or ordinal in globalization-invariant mode, where no culture has
+ * collation data.
+ */
+function compareStrings(runtime: Runtime, x: string, y: string): number {
+  const settings = cultureSettingsOf(runtime);
+  if (settings.isGlobalizationInvariant) return ordinalDifference(x, y);
+  return compareCulture(x, y, { spend: (cost) => runtime.spend(cost), locale: collationLocale(settings.current) });
 }
 
 /** The order of two numbers, where NaN comes before every other number, as `double.CompareTo` does. */
@@ -415,74 +458,6 @@ export function tupleText(evaluator: Evaluator, tuple: CsStruct, frame: Frame): 
 
 export function noValue(): PendingException {
   return new PendingException('System.InvalidOperationException', 'Nullable object must have a value.');
-}
-
-/** The members that a record's `ToString` prints: its public instance fields and properties, base record first. */
-interface PrintedMember {
-  name: string;
-  read: (value: CsObject | CsStruct) => Value;
-  type: Type;
-  /** The getter of a property without a backing field, which printing calls. */
-  getter?: MethodSymbol;
-}
-
-function printedMembers(type: NamedType): PrintedMember[] {
-  const chain: NamedType[] = [];
-  for (
-    let current: NamedType | undefined = type;
-    current && current.symbol.special !== 'object' && current.symbol.special !== 'valueType';
-    current = current.symbol.baseType
-      ? (substitute(current.symbol.baseType, substitutionOf(current)) as NamedType)
-      : undefined
-  )
-    chain.unshift(current);
-  return chain.flatMap(ownPrintedMembers);
-}
-
-/** A type's own printed members in the order of their declarations. */
-function ownPrintedMembers(owner: NamedType): PrintedMember[] {
-  const members: (PrintedMember & { row: number; column: number })[] = [];
-  const substitution = substitutionOf(owner);
-  for (const field of owner.symbol.fields) {
-    if (field.isStatic || field.isConst || field.access !== 'public' || field.property || field.isPrimaryParameter)
-      continue;
-    members.push({
-      name: field.name,
-      read: (value) => value.fields[field.slot],
-      type: substitute(field.type, substitution),
-      row: field.row,
-      column: field.column,
-    });
-  }
-  for (const property of owner.symbol.properties) {
-    if (
-      property.isStatic ||
-      property.isIndexer ||
-      property.access !== 'public' ||
-      !property.getter ||
-      property.isOverride
-    )
-      continue;
-    const backing = property.backingField;
-    if (backing)
-      members.push({
-        name: property.name,
-        read: (value) => value.fields[backing.slot],
-        type: substitute(property.type, substitution),
-        row: property.row,
-        column: property.column,
-      });
-    else
-      members.push({
-        name: property.name,
-        read: () => {},
-        type: substitute(property.type, substitution),
-        getter: property.getter,
-        row: property.row,
-        column: property.column,
-      });
-  }
-  return members.toSorted((a, b) => a.row - b.row || a.column - b.column);
 }
 
 /** Runs a member that the compiler synthesizes for records and anonymous types. */
@@ -525,33 +500,6 @@ export function recordMember(
       throw new Error(`Unknown record member ${name}`);
     }
   }
-}
-
-function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct): string {
-  // The text is built through a metered text, which stops at the string limit before a long member is joined in.
-  const text = new MeteredText(evaluator.runtime);
-  const isAnonymous = value.type.symbol.anonymousDisplay !== undefined;
-  const members = printedMembers(value.type);
-  if (!isAnonymous) text.append(value.type.symbol.name);
-  text.append(isAnonymous ? '{ ' : members.length > 0 ? ' { ' : ' { }');
-  for (const [index, member] of members.entries()) {
-    const getter = member.getter;
-    const memberValue = getter
-      ? evaluator.invoke(
-          frame,
-          evaluator.runtime.dispatch(getter, value),
-          value,
-          [],
-          undefined,
-          environmentOf(evaluator, getter, value)
-        )
-      : member.read(value);
-    if (index > 0) text.append(', ');
-    text.append(`${member.name} = `);
-    if (memberValue !== undefined) text.append(stringOf(evaluator, memberValue, member.type, frame));
-  }
-  if (isAnonymous || members.length > 0) text.append(members.length > 0 ? ' }' : '}');
-  return text.toString();
 }
 
 function recordEquals(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct, other: Value): boolean {

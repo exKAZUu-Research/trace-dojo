@@ -1,24 +1,41 @@
 // code-gauge-allow-file fileNcss -- The declarations module keeps one stage of the C# interpreter together.
 import type {
   Accessor,
+  AttributeNode,
   CompilationUnit,
   ConstraintClause,
+  EventAccessorDeclaration,
   EventFieldDeclaration,
+  Expression,
+  ExtensionMember,
   FieldDeclaration,
+  IndexerDeclaration,
   MethodDeclaration,
   Modifiers,
   NamespaceDeclaration,
   Parameter,
   Position,
+  PropertyDeclaration,
   TypeDeclaration,
   TypeNode,
   TypeParameterDeclaration,
   UsingDirective,
   VariableDeclarator,
 } from './ast';
+import type { AttributeOwner, AttributeTarget, PendingAttributes } from './attributeBinder';
 import { BinderBase, namespacePathOf, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
+import { fieldEventAccessor } from './fieldEvents';
+import { typeObjectOf } from './library/nativesCore';
 import type { NamespaceSymbol } from './namespaces';
-import { nativeOf, OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
+import {
+  ASSIGNMENT_OPERATOR_NAMES,
+  checkedOperatorName,
+  nativeOf,
+  OPERATOR_NAMES,
+  UNARY_OPERATOR_NAMES,
+} from './natives';
+import { paramsCollectionOf } from './paramsCollections';
+import { joinPartialMembers, joinPartialType } from './partials';
 import {
   type Accessibility,
   baseTypeOf,
@@ -29,11 +46,17 @@ import {
   FieldSymbol,
   interfacesOf,
   isReferenceType,
+  isRefLikeType,
+  isRestrictedType,
+  isValueType,
   MethodSymbol,
   type NamedType,
+  namedType,
   type ParameterSymbol,
   PropertySymbol,
+  refKeyword,
   sameType,
+  specialOf,
   substitute,
   type Substitution,
   substitutionOf,
@@ -41,14 +64,37 @@ import {
   TypeParameterSymbol,
   TypeSymbol,
   VOID_TYPE,
+  withoutNullable,
 } from './types';
 
 /** A type declared in source, with where its names resolve. */
+/** The `using` directives of a namespace declaration, with the namespace their targets resolve in. */
+interface UsingLevel {
+  usings: readonly UsingDirective[];
+  namespace: NamespaceSymbol[];
+}
+
 export interface DeclaredType {
   symbol: TypeSymbol;
   declaration: TypeDeclaration;
   context: TypeContext;
 }
+
+/** The element types a fixed-size buffer may have. */
+const FIXED_BUFFER_ELEMENTS = new Set([
+  'bool',
+  'byte',
+  'short',
+  'int',
+  'long',
+  'char',
+  'sbyte',
+  'ushort',
+  'uint',
+  'ulong',
+  'float',
+  'double',
+]);
 
 /** Declares the types and members of compilation units: the library's, then a program's. */
 export class DeclarationBinder extends BinderBase {
@@ -56,6 +102,21 @@ export class DeclarationBinder extends BinderBase {
   /** The contexts of the methods' signatures and bodies, which include their type parameters. */
   readonly methodContexts = new Map<MethodSymbol, TypeContext>();
   protected isLibraryUnit = false;
+  /** The attributes of the declarations, which the compiler binds once every type is declared. */
+  readonly pendingAttributes: PendingAttributes[] = [];
+
+  /** Keeps a declaration's attributes for binding, with the targets their specifiers may name instead. */
+  protected collectAttributes(
+    attributes: AttributeNode[] | undefined,
+    target: AttributeTarget,
+    owner: AttributeOwner | undefined,
+    context: TypeContext,
+    specifiers: PendingAttributes['specifiers'],
+    parameters?: readonly ParameterSymbol[]
+  ): void {
+    if (attributes && attributes.length > 0)
+      this.pendingAttributes.push({ attributes, target, owner, context, specifiers, parameters });
+  }
 
   /** Declares every type of a unit and its members, in the order that inheritance needs. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
@@ -67,14 +128,9 @@ export class DeclarationBinder extends BinderBase {
     this.collectMembers(unit.members, root, rootContext, []);
     const declared = this.declaredTypes.slice(start);
     // Usings resolve once every namespace exists, since a using may name a namespace declared later.
-    const unitUsings = this.resolveUsings(unit.usings);
-    for (const type of declared) {
-      const chain = this.namespaceUsings.get(type) ?? [];
-      type.context.usings = [
-        ...chain.toReversed().flatMap((usings) => this.resolveUsings(usings, false)),
-        ...unitUsings,
-      ];
-    }
+    if (!isLibrary && unit.options) this.implicitUsings = unit.options.implicitUsings;
+    for (const type of declared)
+      this.importInto(type.context, (this.namespaceUsings.get(type) ?? []).toReversed(), unit.usings);
     for (const type of declared) this.resolveBases(type);
     this.breakInheritanceCycles(declared);
     const ordered = this.orderByInheritance(declared);
@@ -162,16 +218,19 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** The `using` directives of the namespaces around each type, outermost first. */
-  private readonly namespaceUsings = new Map<DeclaredType, UsingDirective[][]>();
+  private readonly namespaceUsings = new Map<DeclaredType, UsingLevel[]>();
 
   private collectMembers(
     members: (TypeDeclaration | NamespaceDeclaration)[],
     namespace: NamespaceSymbol,
     context: TypeContext,
-    usingChain: UsingDirective[][]
+    usingChain: UsingLevel[]
   ): void {
     for (const member of members) {
       if (member.kind === 'namespace') {
+        for (const using of member.usings)
+          if (using.isGlobal)
+            this.error(using, 'CS8914', 'グローバル using ディレクティブを名前空間宣言で使用することはできません。');
         const inner = namespace.resolve(member.name, true) as NamespaceSymbol;
         const namespaces = [
           inner,
@@ -179,7 +238,7 @@ export class DeclarationBinder extends BinderBase {
         ];
         this.collectMembers(member.members, inner, { ...context, namespace: namespaces }, [
           ...usingChain,
-          member.usings,
+          { usings: member.usings, namespace: namespaces },
         ]);
       } else {
         this.declareType(member, namespace, undefined, context, usingChain);
@@ -194,8 +253,9 @@ export class DeclarationBinder extends BinderBase {
     namespace: NamespaceSymbol,
     containing: TypeSymbol | undefined,
     outer: TypeContext,
-    usingChain: UsingDirective[][]
+    usingChain: UsingLevel[]
   ): void {
+    if (this.joinsPartialType(declaration, namespace, containing, usingChain)) return;
     const symbol = new TypeSymbol(
       declaration.name,
       declaration.typeKind,
@@ -216,6 +276,7 @@ export class DeclarationBinder extends BinderBase {
       declaration.typeKind === 'enum' ||
       declaration.typeKind === 'delegate';
     symbol.isReadonly = modifiers.has('readonly');
+    symbol.isRefLike = declaration.isRefStruct;
     symbol.access = accessibilityOf(declaration.modifiers, containing ? 'private' : 'internal');
     symbol.typeParameters = declaration.typeParameters.map(
       (parameter, index) => new TypeParameterSymbol(parameter.name, symbol, index, parameter.variance)
@@ -260,6 +321,11 @@ export class DeclarationBinder extends BinderBase {
     }
     const context: TypeContext = { namespace: outer.namespace, usings: [], type: symbol, methodTypeParameters: [] };
     const declared = { symbol, declaration, context };
+    this.collectAttributes(declaration.attributes, typeTarget(declaration), symbol, context, { type: symbol });
+    for (const [index, parameter] of declaration.typeParameters.entries())
+      this.collectAttributes(parameter.attributes, 'genericParameter', symbol.typeParameters[index], context, {
+        typevar: symbol.typeParameters[index],
+      });
     this.declaredTypes.push(declared);
     this.namespaceUsings.set(declared, usingChain);
     for (const member of declaration.members) {
@@ -267,7 +333,54 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  /**
+   * Adds a declaration to an earlier part of the same partial type, telling whether it did; a type declared twice
+   * without `partial` on both is left to the duplicate checks, which report CS0260 for the part that lacks it.
+   */
+  private joinsPartialType(
+    declaration: TypeDeclaration,
+    namespace: NamespaceSymbol,
+    containing: TypeSymbol | undefined,
+    usingChain: UsingLevel[]
+  ): boolean {
+    if (this.isLibraryUnit) return false;
+    const arity = declaration.typeParameters.length;
+    const existing = containing
+      ? containing.nestedTypes.find((other) => other.name === declaration.name && other.typeParameters.length === arity)
+      : namespace.types
+          .get(declaration.name)
+          ?.find((other) => other.typeParameters.length === arity && !other.isLibrary);
+    const first = existing && this.declaredTypes.find((type) => type.symbol === existing);
+    if (!first) return false;
+    const isPartial = declaration.modifiers.set.has('partial');
+    const wasPartial = first.declaration.modifiers.set.has('partial');
+    if (!isPartial && !wasPartial) return false;
+    if (!isPartial || !wasPartial) {
+      const lacking = isPartial ? first.declaration : declaration;
+      this.error(
+        lacking,
+        'CS0260',
+        `partial 修飾子が型 '${displayTypeSymbol(first.symbol)}' にありません。この型の別の部分宣言が存在します`
+      );
+      return true;
+    }
+    joinPartialType(first.declaration, declaration, (position, code, message) => this.error(position, code, message));
+    this.collectAttributes(declaration.attributes, typeTarget(declaration), first.symbol, first.context, {
+      type: first.symbol,
+    });
+    for (const member of declaration.members) {
+      if (member.kind === 'type') this.declareType(member, namespace, first.symbol, first.context, usingChain);
+    }
+    return true;
+  }
+
   private checkTypeModifiers(declaration: TypeDeclaration, containing: TypeSymbol | undefined): void {
+    if (declaration.modifiers.set.has('file') && containing)
+      this.error(
+        declaration,
+        'CS9054',
+        `ファイル ローカル型 '${displayTypeSymbol(containing)}.${declaration.name}' は、最上位レベルの型で定義する必要があります。'${displayTypeSymbol(containing)}.${declaration.name}' は入れ子にされた型です。`
+      );
     const modifiers = declaration.modifiers;
     if (!containing && (modifiers.set.has('private') || modifiers.set.has('protected'))) {
       this.error(
@@ -352,6 +465,15 @@ export class DeclarationBinder extends BinderBase {
   }
 
   private reportsInvalidBaseClass(symbol: TypeSymbol, node: TypeNode, baseType: NamedType, index: number): boolean {
+    if (symbol.kind === 'class' && index > 0 && symbol.declaration?.modifiers.set.has('partial') && symbol.baseType) {
+      // The parts of a partial class each name a base class of their own.
+      this.error(
+        symbol.row,
+        'CS0263',
+        `'${displayTypeSymbol(symbol)}' の partial 宣言では、異なる基底クラスを指定してはいけません`
+      );
+      return true;
+    }
     if (symbol.kind === 'class' && index > 0) {
       this.error(
         node,
@@ -472,7 +594,40 @@ export class DeclarationBinder extends BinderBase {
     this.applyConstraints(type.symbol.typeParameters, type.declaration.constraints, type.context);
   }
 
+  /** A constraint by a type: an interface, a class that is not sealed, or a type parameter not leading back to this one. */
+  private applyTypeConstraint(
+    parameter: TypeParameterSymbol,
+    constraint: Extract<ConstraintClause['constraints'][number], { kind: 'type' }>,
+    context: TypeContext
+  ): void {
+    const constraintType = this.resolveType(constraint.type, context);
+    if (
+      constraintType.kind === 'named' &&
+      constraintType.symbol.isSealed &&
+      constraintType.symbol.kind !== 'interface' &&
+      !this.isLibraryUnit &&
+      constraintType.symbol.special !== 'enum'
+    ) {
+      this.error(
+        constraint,
+        'CS0701',
+        `'${displayType(constraintType)}' は有効な制約ではありません。制約として使用された型はインターフェイス、非シール クラス、または型パラメーターでなければなりません。`
+      );
+    }
+    // A constraint that leads back to its own parameter, as `where T : U where U : T`, is circular (CS0454).
+    if (constraintType.kind === 'typeParameter' && constrainsBackTo(constraintType.symbol, parameter, new Set())) {
+      this.error(
+        constraint,
+        'CS0454',
+        `'${constraintType.symbol.name}' と '${parameter.name}' を含む、循環制約の依存関係です`
+      );
+      return;
+    }
+    if (constraintType.kind !== 'error') parameter.constraintTypes.push(constraintType);
+  }
+
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   protected applyConstraints(
     parameters: TypeParameterSymbol[],
     clauses: ConstraintClause[],
@@ -488,7 +643,15 @@ export class DeclarationBinder extends BinderBase {
         );
         continue;
       }
-      for (const constraint of clause.constraints) {
+      for (const [index, constraint] of clause.constraints.entries()) {
+        if (index > 0 && ['class', 'struct', 'unmanaged', 'notnull', 'default'].includes(constraint.kind)) {
+          this.error(
+            constraint,
+            'CS0449',
+            "'class'、'struct'、'unmanaged'、'notnull'、'default' の制約を組み合わせたり、複製したりすることはできません。これらは制約リストの最初に指定する必要があります。"
+          );
+          continue;
+        }
         switch (constraint.kind) {
           case 'class': {
             parameter.hasReferenceConstraint = true;
@@ -506,34 +669,28 @@ export class DeclarationBinder extends BinderBase {
             parameter.hasNotNullConstraint = true;
             break;
           }
+          case 'allowsRefStruct': {
+            parameter.allowsRefStruct = true;
+            break;
+          }
+          case 'unmanaged': {
+            parameter.hasUnmanagedConstraint = true;
+            parameter.hasValueConstraint = true;
+            break;
+          }
+          case 'default': {
+            // `default` only tells an override's `T?` from a nullable value type, which needs no check at run time.
+            const owner = parameter.owner;
+            if (!(owner instanceof MethodSymbol) || !(owner.isOverride || owner.explicitInterface))
+              this.error(
+                constraint,
+                'CS8823',
+                "'default' 制約は、オーバーライドおよび明示的なインターフェイスの実装メソッドでのみ有効です。"
+              );
+            break;
+          }
           case 'type': {
-            const constraintType = this.resolveType(constraint.type, context);
-            if (
-              constraintType.kind === 'named' &&
-              constraintType.symbol.isSealed &&
-              constraintType.symbol.kind !== 'interface' &&
-              !this.isLibraryUnit &&
-              constraintType.symbol.special !== 'enum'
-            ) {
-              this.error(
-                constraint,
-                'CS0701',
-                `'${displayType(constraintType)}' は有効な制約ではありません。制約として使用された型はインターフェイス、非シール クラス、または型パラメーターでなければなりません。`
-              );
-            }
-            // A constraint that leads back to its own parameter, as `where T : U where U : T`, is circular (CS0454).
-            if (
-              constraintType.kind === 'typeParameter' &&
-              constrainsBackTo(constraintType.symbol, parameter, new Set())
-            ) {
-              this.error(
-                constraint,
-                'CS0454',
-                `'${constraintType.symbol.name}' と '${parameter.name}' を含む、循環制約の依存関係です`
-              );
-              break;
-            }
-            if (constraintType.kind !== 'error') parameter.constraintTypes.push(constraintType);
+            this.applyTypeConstraint(parameter, constraint, context);
             break;
           }
         }
@@ -553,6 +710,8 @@ export class DeclarationBinder extends BinderBase {
       this.declareDelegateInvoke(type);
       return;
     }
+    if (!this.isLibraryUnit)
+      joinPartialMembers(declaration, (position, code, message) => this.error(position, code, message));
     if (declaration.primaryParameters) this.declarePrimaryParameters(type);
     for (const member of declaration.members) {
       switch (member.kind) {
@@ -562,6 +721,10 @@ export class DeclarationBinder extends BinderBase {
         }
         case 'event': {
           for (const declarator of member.declarators) this.declareEvent(type, member, declarator);
+          break;
+        }
+        case 'eventAccessors': {
+          this.declareEventAccessors(type, member);
           break;
         }
         case 'method': {
@@ -601,12 +764,15 @@ export class DeclarationBinder extends BinderBase {
     for (const method of operators) {
       const pair = method.operatorToken ? OPERATOR_PAIRS[method.operatorToken] : undefined;
       if (!pair) continue;
-      const hasPair = operators.some(
-        (other) =>
-          other.operatorToken === pair &&
-          other.parameters.length === method.parameters.length &&
-          other.parameters.every((parameter, index) => sameType(parameter.type, method.parameters[index].type))
-      );
+      // The operators of a generic extension block each take its type parameters as their own.
+      const hasPair = operators.some((other) => {
+        if (other.operatorToken !== pair || other.parameters.length !== method.parameters.length) return false;
+        if (other.typeParameters.length !== method.typeParameters.length) return false;
+        const substitution = this.methodSubstitution(other, method);
+        return other.parameters.every((parameter, index) =>
+          sameType(substitute(parameter.type, substitution), method.parameters[index].type)
+        );
+      });
       if (!hasPair)
         this.error(
           method.row ?? 0,
@@ -621,7 +787,7 @@ export class DeclarationBinder extends BinderBase {
     invoke.access = 'public';
     invoke.parameters = this.resolveParameters(declaration.delegateParameters, context, invoke);
     invoke.returnType = declaration.delegateReturnType
-      ? this.resolveType(declaration.delegateReturnType, context)
+      ? this.resolveReturnType(declaration.delegateReturnType, context, invoke)
       : VOID_TYPE;
     symbol.invoke = invoke;
     symbol.methods.push(invoke);
@@ -630,7 +796,9 @@ export class DeclarationBinder extends BinderBase {
   private declareField(type: DeclaredType, member: FieldDeclaration, declarator: VariableDeclarator): void {
     const { symbol, context } = type;
     const field = new FieldSymbol(declarator.name, ERROR_TYPE, symbol);
-    field.type = this.resolveType(member.type, context);
+    const declared = refTypeOf(member.type);
+    field.type = this.resolveType(declared.type, context);
+    field.byRef = declared.returnsByRef;
     field.isStatic = member.modifiers.set.has('static') || member.modifiers.set.has('const');
     field.isConst = member.modifiers.set.has('const');
     field.isReadonly = member.modifiers.set.has('readonly');
@@ -638,10 +806,47 @@ export class DeclarationBinder extends BinderBase {
     field.initializer = declarator.initializer;
     field.row = declarator.row;
     field.column = declarator.column;
+    field.isRequired = member.modifiers.set.has('required');
+    if (field.isRequired) this.checkRequiredAccess(field, declarator);
+    this.collectAttributes(member.attributes, 'field', field, context, { field });
     if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
+    if (declarator.fixedSize) this.declareFixedBuffer(type, member, declarator, field, declarator.fixedSize);
     this.checkField(type, member, declarator, field);
     this.addMember(symbol, field, declarator);
     symbol.fields.push(field);
+  }
+
+  /**
+   * Declares a fixed-size buffer: its field holds a struct of the elements, which gets them once the members binding
+   * knows the length.
+   */
+  private declareFixedBuffer(
+    { symbol }: DeclaredType,
+    member: FieldDeclaration,
+    declarator: VariableDeclarator,
+    field: FieldSymbol,
+    size: Expression
+  ): void {
+    for (const modifier of ['static', 'readonly'] as const)
+      if (member.modifiers.set.has(modifier))
+        this.error(declarator, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
+    if (!member.fixedBuffer?.isUnsafe) this.reportOutsideUnsafe(declarator);
+    if (symbol.kind !== 'struct')
+      this.error(declarator, 'CS1642', '固定サイズ バッファー フィールドは、構造体のメンバーにしかなれません');
+    const elementType = field.type;
+    if (elementType.kind !== 'error' && !FIXED_BUFFER_ELEMENTS.has(specialOf(elementType) ?? ''))
+      this.error(
+        declarator,
+        'CS1663',
+        '固定サイズ バッファーの型は次のうちの 1 つでなければなりません: bool、byte、short、int、long、char、sbyte、ushort、uint、ulong、float または double'
+      );
+    field.isStatic = false;
+    field.isReadonly = false;
+    const buffer = new TypeSymbol(`<${field.name}>e__FixedBuffer`, 'struct', '', symbol);
+    buffer.access = 'public';
+    buffer.baseType = this.wellKnown.valueType;
+    field.type = buffer.declaredType;
+    field.fixedBuffer = { elementType, length: 0, size };
   }
 
   private checkField(
@@ -670,6 +875,9 @@ export class DeclarationBinder extends BinderBase {
         'CS0504',
         `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
       );
+    if (member.modifiers.set.has('volatile')) this.checkVolatile(declarator, field);
+    if (field.byRef) this.checkRefField(field, member.type);
+    else this.checkStoredType(field, member.type);
     if (
       symbol.kind === 'struct' &&
       !field.isStatic &&
@@ -685,6 +893,71 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  /** Reports a ref field outside a ref struct, or one that refers to a ref struct. */
+  private checkRefField(field: FieldSymbol, position: Position): void {
+    // A ref field lives in an instance, so `static` and `const`, which `static` comes with, are no modifiers of one.
+    if (field.isStatic) {
+      this.error(position, 'CS0106', "修飾子 'static' がこの項目に対して有効ではありません");
+      if (field.isConst) this.error(position, 'CS0106', "修飾子 'const' がこの項目に対して有効ではありません");
+      // As for an instance ref field's initializer, a value is no variable for the field to refer to.
+      if (field.isConst && field.initializer && field.initializer.kind !== 'refExpression') {
+        this.error(position, 'CS8172', '値を使用して参照渡し変数を初期化することはできません');
+        this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+      }
+    } else if (!field.owner.isRefLike)
+      this.error(position, 'CS9059', 'ref フィールドは ref 構造体でのみ宣言できます。');
+    else if (isRefLikeType(field.type)) this.error(position, 'CS9050', 'ref フィールドは ref 構造体を参照できません。');
+  }
+
+  /** Reports a field of a ref struct type, which only an instance of a ref struct, itself on the stack, may hold. */
+  private checkStoredType(field: FieldSymbol, position: Position): void {
+    if (isRestrictedType(field.type))
+      this.error(
+        position,
+        'CS0610',
+        `フィールドまたはプロパティに型 '${displayType(field.type)}' を指定することはできません`
+      );
+    else if (isRefLikeType(field.type) && (field.isStatic || !field.owner.isRefLike))
+      this.error(
+        position,
+        'CS8345',
+        `フィールドまたは自動実装プロパティは、それが ref 構造体のインスタンス メンバーである場合を除いて、型 '${displayType(field.type)}' にすることができません。`
+      );
+  }
+
+  /** Reports a required member less accessible than its type, which code creating the type could not set (CS9032). */
+  private checkRequiredAccess(member: FieldSymbol | PropertySymbol, position: Position): void {
+    if (ACCESS_RANKS[member.access] >= ACCESS_RANKS[member.owner.access]) return;
+    this.error(
+      position,
+      'CS9032',
+      `必要なメンバー '${displayTypeSymbol(member.owner)}.${member.name}' の表示を減らす、また含まれる型の '${displayTypeSymbol(member.owner)}' より小さいセッターの表示を設定することはできません。`
+    );
+  }
+
+  /** Checks a volatile field's type, which must be read and written atomically (C# spec §15.5.4). */
+  private checkVolatile(declarator: VariableDeclarator, field: FieldSymbol): void {
+    const display = `${displayTypeSymbol(field.owner)}.${declarator.name}`;
+    if (field.isReadonly)
+      this.error(
+        declarator,
+        'CS0678',
+        `'${display}': フィールドに volatile と readonly の両方を指定することはできません`
+      );
+    const { type } = field;
+    const special = type.kind === 'named' ? (type.symbol.enumUnderlying ?? type).symbol.special : undefined;
+    const allowed =
+      isReferenceType(type) ||
+      (type.kind === 'named' &&
+        ['sbyte', 'byte', 'short', 'ushort', 'int', 'uint', 'char', 'float', 'bool'].includes(special ?? ''));
+    if (!allowed && type.kind !== 'error')
+      this.error(
+        declarator,
+        'CS0677',
+        `'${display}': volatile フィールドの型を '${displayType(type)}' にすることはできません`
+      );
+  }
+
   private declareEvent(
     { symbol, context }: DeclaredType,
     member: EventFieldDeclaration,
@@ -693,10 +966,12 @@ export class DeclarationBinder extends BinderBase {
     const field = new FieldSymbol(declarator.name, this.resolveType(member.type, context), symbol);
     field.isEvent = true;
     field.isStatic = member.modifiers.set.has('static');
-    field.access = accessibilityOf(member.modifiers, 'private');
+    field.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
+    this.collectAttributes(member.attributes, 'event', field, context, { event: field, field, method: undefined });
     field.initializer = declarator.initializer;
     field.row = declarator.row;
     field.column = declarator.column;
+    this.declareFieldEventAccessors(symbol, field, member.modifiers.set);
     if (field.type.kind !== 'error' && !(field.type.kind === 'named' && field.type.symbol.kind === 'delegate')) {
       this.error(
         declarator,
@@ -708,7 +983,132 @@ export class DeclarationBinder extends BinderBase {
     symbol.fields.push(field);
   }
 
-  private declareMethodMember({ symbol, context }: DeclaredType, member: MethodDeclaration): void {
+  /** Reports an explicit implementation of a member that its interface lacks (CS0539). */
+  private checkExplicitImplementation(symbol: TypeSymbol, method: MethodSymbol): void {
+    const face = method.explicitInterface;
+    if (!face || method.property || method.isEventAccessor) return;
+    const exists = [...this.allInterfaces(face), face].some((owner) =>
+      owner.symbol.methods.some(
+        (member) => member.name === method.name && this.sameParameters(member, method, owner, symbol.declaredType)
+      )
+    );
+    if (!exists)
+      this.error(
+        method.row,
+        'CS0539',
+        `明示的なインターフェイス宣言内の '${displayTypeSymbol(symbol)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' が、実装可能なインターフェイスのメンバーの中に見つかりません`
+      );
+  }
+
+  /**
+   * Resolves the interface of an explicit implementation, reporting a type that is no interface (CS0538), one the
+   * containing type does not implement (CS0540), and the access modifiers explicit implementations may not have (CS0106).
+   */
+  private explicitInterfaceOf(
+    { symbol, context }: DeclaredType,
+    member: MethodDeclaration | PropertyDeclaration | IndexerDeclaration | EventAccessorDeclaration,
+    node: TypeNode,
+    /** The member's name after the interface's, with its parameter types for a method. */
+    describe: () => string
+  ): NamedType | undefined {
+    const face = this.resolveType(node, context);
+    const modifier = (['public', 'private', 'protected', 'internal', 'virtual', 'override', 'abstract'] as const).find(
+      (candidate) => member.modifiers.set.has(candidate)
+    );
+    if (modifier && symbol.kind !== 'interface')
+      this.error(member, 'CS0106', `修飾子 '${modifier}' がこの項目に対して有効ではありません`);
+    if (face.kind === 'error') return undefined;
+    if (face.kind !== 'named' || face.symbol.kind !== 'interface') {
+      this.error(
+        node,
+        'CS0538',
+        `明示的なインターフェイス宣言内の '${displayType(face)}' はインターフェイスではありません`
+      );
+      return undefined;
+    }
+    if (!this.allInterfaces(symbol.declaredType).some((implemented) => sameType(implemented, face))) {
+      this.error(
+        member,
+        'CS0540',
+        `'${displayTypeSymbol(symbol)}.${displayType(face)}.${describe()}': 含む型は、インターフェイス '${displayType(face)}' を実装しません`
+      );
+      return undefined;
+    }
+    return face;
+  }
+
+  /**
+   * Gives a field-like event its `add` and `remove` accessors: an interface's are abstract, which `+=` and `-=` call in
+   * place of a delegate field, and a class's subscribe to its delegate field, which calls through an interface reach,
+   * as do `+=` and `-=` of a virtual one, which an override's field then takes.
+   */
+  private declareFieldEventAccessors(symbol: TypeSymbol, field: FieldSymbol, modifiers: ReadonlySet<string>): void {
+    if (field.isStatic || this.isLibraryUnit) return;
+    const isInterface = symbol.kind === 'interface';
+    const accessor = (kind: 'add' | 'remove'): MethodSymbol => {
+      const method = new MethodSymbol(`${kind}_${field.name}`, symbol, 'method');
+      method.isEventAccessor = true;
+      method.isAbstract = isInterface || modifiers.has('abstract');
+      method.isVirtual = modifiers.has('virtual');
+      method.isOverride = modifiers.has('override');
+      method.isSealed = modifiers.has('sealed');
+      method.access = field.access;
+      method.row = field.row;
+      method.parameters = [{ name: 'value', type: field.type, refKind: undefined, isParams: false }];
+      if (!isInterface) method.native = fieldEventAccessor(field, kind === 'add');
+      symbol.methods.push(method);
+      return method;
+    };
+    const accessors = { add: accessor('add'), remove: accessor('remove') };
+    if (isInterface) field.eventAccessors = accessors;
+    else if (accessors.add.isAbstract || accessors.add.isVirtual || accessors.add.isOverride)
+      field.virtualEventAccessors = accessors;
+  }
+
+  /** Declares an event with `add` and `remove` accessors, which `+=` and `-=` call in place of a delegate field. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  private declareEventAccessors(type: DeclaredType, member: EventAccessorDeclaration): void {
+    const { symbol, context } = type;
+    const field = new FieldSymbol(member.name, this.resolveType(member.type, context), symbol);
+    field.isEvent = true;
+    field.isStatic = member.modifiers.set.has('static');
+    field.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
+    field.row = member.row;
+    field.column = member.column;
+    const explicitInterface = member.explicitInterface
+      ? this.explicitInterfaceOf(type, member, member.explicitInterface, () => member.name)
+      : undefined;
+    if (explicitInterface) field.access = 'private';
+    if (!member.add || !member.remove)
+      this.error(
+        member,
+        'CS0065',
+        `'${displayTypeSymbol(symbol)}.${member.name}': イベント プロパティには、add および remove アクセサーの両方を指定する必要があります`
+      );
+    const accessor = (kind: 'add' | 'remove', body: EventAccessorDeclaration['add']): MethodSymbol => {
+      const method = new MethodSymbol(`${kind}_${member.name}`, symbol, 'method');
+      method.isEventAccessor = true;
+      method.isStatic = field.isStatic;
+      method.isVirtual = member.modifiers.set.has('virtual');
+      method.isOverride = member.modifiers.set.has('override');
+      method.isAbstract = member.modifiers.set.has('abstract');
+      method.access = field.access;
+      method.explicitInterface = explicitInterface;
+      method.row = member.row;
+      method.parameters = [{ name: 'value', type: field.type, refKind: undefined, isParams: false }];
+      method.declaration = body ? ({ kind: 'method', body, bodyRow: member.row, row: member.row } as never) : undefined;
+      this.methodContexts.set(method, context);
+      symbol.methods.push(method);
+      return method;
+    };
+    field.eventAccessors = { add: accessor('add', member.add), remove: accessor('remove', member.remove) };
+    this.collectAttributes(member.attributes, 'event', field, context, { event: field, method: undefined });
+    this.addMember(symbol, field, member);
+    symbol.fields.push(field);
+  }
+
+  private declareMethodMember(type: DeclaredType, member: MethodDeclaration): void {
+    const { symbol, context } = type;
     const method = this.declareMethod(
       symbol,
       member.name,
@@ -720,15 +1120,123 @@ export class DeclarationBinder extends BinderBase {
       member.constraints
     );
     method.declaration = member;
+    method.callsAreRemoved = member.isRemovedPartial === true;
     const methodContext = this.methodContexts.get(method) as TypeContext;
-    method.returnType = this.resolveType(member.returnType, methodContext);
-    method.parameters = this.resolveParameters(member.parameters, methodContext, method);
-    method.isExtension = member.parameters[0]?.modifier === 'this';
+    this.declareSignature(type.symbol, member, method, methodContext);
+    method.isExtension = member.parameters[0]?.isThis === true;
+    method.extensionProperty = member.extension?.property;
+    method.isExtensionBlockMember = member.extension?.blockArity !== undefined;
+    method.extensionBlockArity = member.extension?.blockArity ?? 0;
+    if (member.extension?.staticReceiver)
+      method.staticExtensionOf = this.resolveType(member.extension.staticReceiver, methodContext);
+    if (member.extension?.accessor) this.declareExtensionAccessor(method, member, methodContext);
+    this.collectAttributes(
+      member.attributes,
+      'method',
+      method,
+      methodContext,
+      { method, return: undefined },
+      method.parameters
+    );
+    for (const [index, parameter] of member.typeParameters.entries())
+      this.collectAttributes(parameter.attributes, 'genericParameter', method.typeParameters[index], methodContext, {
+        typevar: method.typeParameters[index],
+      });
+    if (member.explicitInterface) {
+      method.explicitInterface = this.explicitInterfaceOf(
+        type,
+        member,
+        member.explicitInterface,
+        () => `${member.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`
+      );
+      method.access = 'private';
+      method.isAbstract = false;
+      method.isVirtual = false;
+    }
     this.attachNative(method, member.body === undefined);
     this.checkMethodBody(method, member.body !== undefined, member);
     if (method.name === symbol.name)
       this.error(member, 'CS0542', `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`);
     this.addMethod(symbol, method, member);
+  }
+
+  /** The properties of extension blocks, by the position of their declarations. */
+  private readonly extensionProperties = new Map<string, PropertySymbol>();
+
+  /**
+   * Joins an accessor of an extension block's property to the property, which the program assigns through its
+   * setter, and reports the accessors and modifiers that an extension block's property may not have.
+   */
+  private declareExtensionAccessor(method: MethodSymbol, member: MethodDeclaration, context: TypeContext): void {
+    const extension = member.extension as ExtensionMember;
+    const name = extension.property as string;
+    const block = this.extensionOwnerName(method.owner, this.resolveType(extension.receiver as TypeNode, context));
+    if (extension.accessor === 'init')
+      this.error(member, 'CS9304', `'${block}.${name}': 拡張ブロックで init のみのアクセサーを宣言できません`);
+    const key = extension.propertyKey as string;
+    let property = this.extensionProperties.get(key);
+    if (!property) {
+      if (member.modifiers.set.has('required'))
+        this.error(member, 'CS0106', "修飾子 'required' がこの項目に対して有効ではありません");
+      const isGetter = extension.accessor === 'get';
+      const type = isGetter ? method.returnType : (method.parameters.at(-1)?.type ?? ERROR_TYPE);
+      property = new PropertySymbol(name, type, method.owner, false);
+      property.isStatic = true;
+      property.access = method.access;
+      property.parameters = isGetter ? method.parameters : method.parameters.slice(0, -1);
+      property.row = member.row;
+      this.extensionProperties.set(key, property);
+    }
+    if (extension.accessor === 'get') property.getter = method;
+    else property.setter = method;
+    method.extensionAccessorOf = property;
+  }
+
+  /**
+   * Resolves a method's parameters and then its return type, as Roslyn binds them, then checks its receiver and that a
+   * static class's method is static.
+   */
+  private declareSignature(
+    owner: TypeSymbol,
+    member: MethodDeclaration,
+    method: MethodSymbol,
+    context: TypeContext
+  ): void {
+    method.parameters = this.resolveParameters(member.parameters, context, undefined);
+    method.returnType = this.resolveReturnType(member.returnType, context, method);
+    const receiver = member.parameters.findIndex((parameter) => parameter.isThis);
+    if (receiver !== -1)
+      this.checkExtensionReceiver(member.parameters[receiver], method.parameters[receiver].type, method, receiver);
+    if (owner.isStatic && !method.isStatic)
+      this.error(member, 'CS0708', `'${member.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`);
+  }
+
+  /** Checks where an extension method's `this` parameter may stand (C# spec §15.6.10). */
+  private checkExtensionReceiver(parameter: Parameter, type: Type, method: MethodSymbol, index: number): void {
+    const owner = method.owner;
+    if (index > 0) {
+      this.error(
+        parameter,
+        'CS1100',
+        `メソッド '${method.name}' には、最初のパラメーターではないパラメーター修飾子 'this' が指定されています`
+      );
+    } else if (!owner.isStatic || owner.typeParameters.length > 0 || method.kind === 'localFunction') {
+      this.error(owner.row, 'CS1106', '拡張メソッドは、非ジェネリック静的クラスで定義される必要があります');
+    } else if (owner.containing) {
+      this.error(
+        parameter,
+        'CS1109',
+        `拡張メソッドは、トップ レベルの静的クラスで定義される必要があります。${owner.name} は入れ子にされたクラスです`
+      );
+    } else if (!method.isStatic) {
+      this.error(parameter, 'CS1105', '拡張メソッドはスタティックでなければなりません');
+    } else if (parameter.modifier === 'ref' && !isValueType(type)) {
+      this.error(
+        parameter,
+        'CS8337',
+        `ref' 拡張メソッド '${method.name}' の最初のパラメーターは、値型または構造体に制限されたジェネリック型でなければなりません。`
+      );
+    }
   }
 
   private declareEnumMembers(type: DeclaredType): void {
@@ -742,6 +1250,7 @@ export class DeclarationBinder extends BinderBase {
       field.initializer = member.value;
       field.row = member.row;
       field.column = member.column;
+      this.collectAttributes(member.attributes, 'field', field, type.context, { field });
       this.addMember(symbol, field, member);
       symbol.fields.push(field);
     }
@@ -758,6 +1267,42 @@ export class DeclarationBinder extends BinderBase {
     symbol.primaryParameters = parameters;
     symbol.constructors.push(constructor);
     this.methodContexts.set(constructor, context);
+  }
+
+  /** Reports an instance constructor in a type that cannot declare one as written. */
+  private checkInstanceConstructorOwner(
+    symbol: DeclaredType['symbol'],
+    member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
+  ): void {
+    if (symbol.kind === 'interface')
+      this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
+    if (symbol.isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
+    if (symbol.primaryParameters && member.initializer?.kind !== 'this') {
+      this.error(
+        member,
+        'CS8862',
+        "パラメーター リストを持つ型で宣言されたコンストラクターには、'this' コンストラクター初期化子が必要です。"
+      );
+    }
+  }
+
+  /** Reports parameters or access modifiers on a static constructor. */
+  private checkStaticConstructorShape(
+    constructor: MethodSymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'constructor' }>
+  ): void {
+    if (member.parameters.length > 0)
+      this.error(
+        member,
+        'CS0132',
+        `'${displayMethod(constructor)}': 静的コンストラクターにパラメーターがあってはなりません`
+      );
+    if (accessModifierCount(member.modifiers) > 0)
+      this.error(
+        member,
+        'CS0515',
+        `'${displayMethod(constructor)}': アクセス修飾子は静的コンストラクターでは許可されていません`
+      );
   }
 
   private declareConstructor(
@@ -779,29 +1324,10 @@ export class DeclarationBinder extends BinderBase {
       this.error(member, 'CS1520', 'メソッドは戻り値の型を持たなければなりません');
       return;
     }
-    if (symbol.kind === 'interface')
-      this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
-    if (symbol.isStatic && !isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
-    if (symbol.primaryParameters && !isStatic && member.initializer?.kind !== 'this') {
-      this.error(
-        member,
-        'CS8862',
-        "パラメーター リストを持つ型で宣言されたコンストラクターには、'this' コンストラクター初期化子が必要です。"
-      );
-    }
+    if (!isStatic) this.checkInstanceConstructorOwner(symbol, member);
     constructor.parameters = this.resolveParameters(member.parameters, context, constructor);
-    if (isStatic && member.parameters.length > 0)
-      this.error(
-        member,
-        'CS0132',
-        `'${displayMethod(constructor)}': 静的コンストラクターにパラメーターがあってはなりません`
-      );
-    if (isStatic && accessModifierCount(member.modifiers) > 0)
-      this.error(
-        member,
-        'CS0515',
-        `'${displayMethod(constructor)}': アクセス修飾子は静的コンストラクターでは許可されていません`
-      );
+    this.collectAttributes(member.attributes, 'constructor', constructor, context, { method: constructor });
+    if (isStatic) this.checkStaticConstructorShape(constructor, member);
     this.methodContexts.set(constructor, context);
     this.attachNative(constructor, member.body === undefined);
     if (isStatic) {
@@ -818,6 +1344,45 @@ export class DeclarationBinder extends BinderBase {
     symbol.constructors.push(constructor);
   }
 
+  /** Reports a private virtual or abstract property (CS0621) and a sealed one that overrides nothing (CS0238). */
+  private checkPropertyModifiers(
+    property: PropertySymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>,
+    shownName: string
+  ): void {
+    const symbol = property.owner;
+    if (this.isLibraryUnit) return;
+    if (property.isStatic) this.checkStaticPropertyModifiers(property, member);
+    if (symbol.kind === 'interface') return;
+    if ((property.isVirtual || property.isAbstract || property.isOverride) && property.access === 'private')
+      this.error(
+        member,
+        'CS0621',
+        `'${displayTypeSymbol(symbol)}.${shownName}': 仮想または抽象メンバーには、private を指定できません`
+      );
+    if (member.modifiers.set.has('sealed') && !property.isOverride)
+      this.error(
+        member,
+        'CS0238',
+        `'${displayTypeSymbol(symbol)}.${shownName}' はオーバーライドではないため、シールドにできません`
+      );
+  }
+
+  /**
+   * A static property may be abstract or virtual only in an interface (C# 11), and overrides nothing there either,
+   * which Roslyn reports as an invalid modifier.
+   */
+  private checkStaticPropertyModifiers(property: PropertySymbol, member: Position): void {
+    if (property.owner.kind === 'interface') {
+      if (property.isOverride) this.error(member, 'CS0106', "修飾子 'override' がこの項目に対して有効ではありません");
+      return;
+    }
+    if (property.isVirtual || property.isOverride || property.isAbstract) {
+      const keyword = property.isVirtual ? 'virtual' : property.isOverride ? 'override' : 'abstract';
+      this.error(member, 'CS0112', `静的なメンバーを '${keyword}' とマークすることはできません。`);
+    }
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private declareProperty(
@@ -827,34 +1392,27 @@ export class DeclarationBinder extends BinderBase {
     const { symbol, context } = type;
     const isIndexer = member.kind === 'indexer';
     const name = isIndexer ? 'Item' : member.name;
-    const property = new PropertySymbol(name, this.resolveType(member.type, context), symbol, isIndexer);
+    const shownName = isIndexer ? 'this' : name;
+    // The library declares `ref readonly` indexers, which read as values and refuse assignment as Roslyn does; the
+    // program's ref properties return the variable, as its methods returning by reference do.
+    const { type: valueType, returnsByRef } = refTypeOf(member.type);
+    const property = new PropertySymbol(name, this.resolveType(valueType, context), symbol, isIndexer);
+    property.isRefReadonly = returnsByRef === 'readonly';
+    if (!this.isLibraryUnit) property.returnsByRef = returnsByRef;
     const modifiers = member.modifiers.set;
     property.isStatic = modifiers.has('static');
     property.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
     property.isVirtual = modifiers.has('virtual');
     property.isAbstract = modifiers.has('abstract') || (symbol.kind === 'interface' && !modifiers.has('static'));
     property.isOverride = modifiers.has('override');
-    if (
-      (property.isVirtual || property.isAbstract || property.isOverride) &&
-      property.access === 'private' &&
-      symbol.kind !== 'interface' &&
-      !this.isLibraryUnit
-    ) {
-      const shown = isIndexer ? 'this' : name;
-      this.error(
-        member,
-        'CS0621',
-        `'${displayTypeSymbol(symbol)}.${shown}': 仮想または抽象メンバーには、private を指定できません`
-      );
+    property.isRequired = modifiers.has('required');
+    if (member.explicitInterface) {
+      property.explicitInterface = this.explicitInterfaceOf(type, member, member.explicitInterface, () => shownName);
+      property.access = 'private';
+      property.isAbstract = false;
     }
-    if (modifiers.has('sealed') && !property.isOverride && symbol.kind !== 'interface' && !this.isLibraryUnit) {
-      const shown = isIndexer ? 'this' : name;
-      this.error(
-        member,
-        'CS0238',
-        `'${displayTypeSymbol(symbol)}.${shown}' はオーバーライドではないため、シールドにできません`
-      );
-    }
+    if (property.isRequired) this.checkRequiredAccess(property, member);
+    this.checkPropertyModifiers(property, member, shownName);
     property.row = member.row;
     property.column = member.column;
     if (member.kind === 'property') property.declaration = member;
@@ -869,9 +1427,12 @@ export class DeclarationBinder extends BinderBase {
         `'${displayTypeSymbol(symbol)}.${member.kind === 'property' ? member.name : 'this'}': プロパティまたはインデクサーに void 型を指定することはできません`
       );
     const hasBodies = member.accessors.some((accessor) => accessor.body !== undefined);
-    if (symbol.kind === 'interface' && !this.isLibraryUnit) {
-      if (property.isStatic) this.unsupported(member, 'インターフェイスの静的メンバー');
-      else if (hasBodies) this.unsupported(member, 'インターフェイスの既定の実装');
+    // A body makes an interface property its default implementation, which is virtual, not abstract.
+    if (symbol.kind === 'interface' && hasBodies && !modifiers.has('abstract')) {
+      property.isAbstract = false;
+      // A static one is virtual only when declared so (C# 11), which a type argument's own property may then replace.
+      property.isVirtual =
+        modifiers.has('virtual') || (!property.isStatic && property.access !== 'private' && !modifiers.has('sealed'));
     }
     const isAuto =
       !this.isLibraryUnit &&
@@ -879,8 +1440,9 @@ export class DeclarationBinder extends BinderBase {
       !member.isExpressionBodied &&
       !hasBodies &&
       !property.isAbstract &&
-      symbol.kind !== 'interface';
-    if (member.kind === 'property' && member.initializer && !isAuto) {
+      (symbol.kind !== 'interface' || property.isStatic);
+    const hasKeywordField = !isAuto && member.kind === 'property' && this.declareKeywordField(symbol, property, member);
+    if (member.kind === 'property' && member.initializer && !isAuto && !hasKeywordField) {
       this.error(
         member,
         'CS8050',
@@ -888,6 +1450,10 @@ export class DeclarationBinder extends BinderBase {
       );
     }
     if (isAuto) this.declareBackingField(symbol, property, member);
+    this.collectAttributes(member.attributes, 'property', property, context, {
+      property,
+      field: property.backingField ?? property.keywordField,
+    });
     for (const accessor of member.accessors) this.declareAccessor(type, property, accessor, member.modifiers);
     if (
       member.accessors.filter((accessor) => accessor.kind === 'get').length > 1 ||
@@ -897,24 +1463,70 @@ export class DeclarationBinder extends BinderBase {
     }
     if (isAuto && !property.getter)
       this.error(member, 'CS8051', '自動実装プロパティは get アクセサーを持つ必要があります。');
+    this.checkRefProperty(property, member, isAuto);
     this.addMember(symbol, property, member);
     symbol.properties.push(property);
   }
 
-  private declareBackingField(
+  /**
+   * Gives a backing field to a property whose accessors use `field`, or that mixes `get;` or `set;` with bodies (C#
+   * 14), returning whether the property has one.
+   */
+  private declareKeywordField(
     symbol: TypeSymbol,
     property: PropertySymbol,
     member: Extract<TypeDeclaration['members'][number], { kind: 'property' }>
+  ): boolean {
+    if (this.isLibraryUnit || property.isAbstract) return false;
+    const usesField = member.accessors.some((accessor) => accessor.usesField);
+    const isSemiAuto =
+      member.accessors.some((accessor) => accessor.body !== undefined) &&
+      member.accessors.some((accessor) => accessor.body === undefined);
+    if (!usesField && !isSemiAuto) return false;
+    if (symbol.kind === 'interface' && !property.isStatic)
+      this.error(member, 'CS0525', 'インターフェイスにインスタンス フィールドを含めることはできません');
+    else this.declareBackingField(symbol, property, member, 'keyword');
+    return true;
+  }
+
+  /** Reports the accessors that a property returning by reference may not have, as Roslyn does. */
+  private checkRefProperty(
+    property: PropertySymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>,
+    isAuto: boolean
+  ): void {
+    if (!property.returnsByRef) return;
+    if (isAuto) this.error(member, 'CS8145', '自動実装プロパティは参照渡しで返すことができません');
+    if (!member.accessors.some((accessor) => accessor.kind === 'get')) {
+      this.error(member, 'CS8146', '参照渡しで返すプロパティは get アクセサーを持たなければなりません');
+      return;
+    }
+    for (const accessor of member.accessors)
+      if (accessor.kind !== 'get')
+        this.error(accessor, 'CS8147', '参照渡しで返すプロパティは set アクセサーを持つことができません');
+  }
+
+  /**
+   * Declares the backing field of an auto-property, or of a property whose accessors use `field` (`keyword`), which
+   * those accessors may assign even in a property without a setter.
+   */
+  private declareBackingField(
+    symbol: TypeSymbol,
+    property: PropertySymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'property' }>,
+    kind: 'auto' | 'keyword' = 'auto'
   ): void {
     const field = new FieldSymbol(`<${property.name}>k__BackingField`, property.type, symbol);
     field.isStatic = property.isStatic;
-    field.isReadonly = !member.accessors.some((accessor) => accessor.kind === 'set');
+    field.isReadonly = kind === 'auto' && !member.accessors.some((accessor) => accessor.kind === 'set');
     field.property = property;
     field.initializer = member.initializer;
     field.row = member.row;
     field.column = member.column;
-    property.backingField = field;
+    if (kind === 'auto') property.backingField = field;
+    else property.keywordField = field;
     symbol.fields.push(field);
+    this.checkStoredType(field, member.type);
     if (symbol.isStatic && !property.isStatic)
       this.error(
         member,
@@ -942,6 +1554,7 @@ export class DeclarationBinder extends BinderBase {
     method.isAbstract = property.isAbstract;
     method.isOverride = property.isOverride;
     method.isSealed = propertyModifiers.set.has('sealed');
+    method.explicitInterface = property.explicitInterface;
     if (accessModifierCount(accessor.modifiers) > 0) {
       method.access = accessibilityOf(accessor.modifiers, property.access);
       this.checkAccessorAccessibility(accessor, method, property, symbol);
@@ -950,9 +1563,16 @@ export class DeclarationBinder extends BinderBase {
     }
     method.row = accessor.row;
     method.returnType = isGetter ? property.type : VOID_TYPE;
-    method.parameters = [...property.parameters];
-    if (!isGetter) method.parameters.push({ name: 'value', type: property.type, refKind: undefined, isParams: false });
+    method.returnsByRef = isGetter ? property.returnsByRef : undefined;
+    method.parameters = isGetter
+      ? [...property.parameters]
+      : [...property.parameters, { name: 'value', type: property.type, refKind: undefined, isParams: false }];
     this.methodContexts.set(method, context);
+    this.collectAttributes(accessor.attributes, 'method', method, context, {
+      method,
+      return: undefined,
+      param: undefined,
+    });
     method.declaration = accessor.body
       ? ({ kind: 'method', body: accessor.body, bodyRow: accessor.row, row: accessor.row } as never)
       : undefined;
@@ -980,37 +1600,153 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one kind of operator declaration.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private declareOperator(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>
   ): void {
-    const { symbol, context } = type;
+    const { symbol } = type;
     const isUnary = member.parameters.length === 1;
-    const name = (isUnary ? UNARY_OPERATOR_NAMES[member.operator] : undefined) ?? OPERATOR_NAMES[member.operator];
-    const method = this.declareMethod(symbol, name, 'operator', member.modifiers, member, context);
+    const assignmentName = ASSIGNMENT_OPERATOR_NAMES[member.operator];
+    if (member.operator.endsWith('=') && assignmentName && member.modifiers.set.has('static')) {
+      this.error(member, 'CS1020', 'オーバーロード可能な 2 項演算子が必要です');
+      return;
+    }
+    // C# 14's compound assignment and `++`/`--` operators are instance methods that change the operand in place.
+    const isInstanceAssignment =
+      assignmentName !== undefined &&
+      !member.modifiers.set.has('static') &&
+      member.parameters.length === (member.operator === '++' || member.operator === '--' ? 0 : 1);
+    const regularName = isInstanceAssignment
+      ? assignmentName
+      : ((isUnary ? UNARY_OPERATOR_NAMES[member.operator] : undefined) ?? OPERATOR_NAMES[member.operator]);
+    const name = member.isChecked ? checkedOperatorName(regularName) : regularName;
+    const method = this.declareMethod(
+      symbol,
+      name,
+      'operator',
+      member.modifiers,
+      member,
+      type.context,
+      member.typeParameters,
+      member.constraints
+    );
+    const context = this.methodContexts.get(method) as TypeContext;
     method.operatorToken = member.operator;
     method.declaration = member;
     method.returnType = this.resolveType(member.returnType, context);
     method.parameters = this.resolveParameters(member.parameters, context, method);
-    if (!member.modifiers.set.has('public') || !member.modifiers.set.has('static')) {
+    const parameterList = method.parameters.map((parameter) => displayType(parameter.type)).join(', ');
+    const extended = this.declareExtensionOperator(method, member, context);
+    this.collectAttributes(member.attributes, 'method', method, context, { method, return: undefined });
+    const signature = `${this.extensionOwnerName(symbol, extended)}.operator ${member.operator}(${parameterList})`;
+    if (isInstanceAssignment) {
+      if (!member.modifiers.set.has('public'))
+        this.error(member, 'CS9308', `ユーザー定義演算子 '${signature}' は公開用として宣言する必要があります`);
+      if (method.returnType.kind !== 'void')
+        this.error(member.returnType, 'CS9310', 'この演算子の戻り値の型は void である必要があります');
+    } else if (method.access !== 'public' || !method.isStatic) {
       this.error(
         member,
         'CS0558',
-        `ユーザー定義の演算子 '${displayTypeSymbol(symbol)}.operator ${member.operator}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' は static および public として宣言されなければなりません`
+        `ユーザー定義の演算子 '${signature}' は static および public として宣言されなければなりません`
       );
     }
-    const ownType = symbol.declaredType;
-    if (
-      !method.parameters.some(
-        (parameter) => sameType(parameter.type, ownType) || sameType(parameter.type, this.nullableOf(ownType))
-      )
-    ) {
+    const ownType = extended ?? symbol.declaredType;
+    // An interface's static abstract operator may take a type parameter that the interface constrains to itself.
+    const isOwn = (candidate: Type): boolean =>
+      sameType(candidate, ownType) ||
+      sameType(candidate, this.nullableOf(ownType)) ||
+      (symbol.kind === 'interface' &&
+        candidate.kind === 'typeParameter' &&
+        candidate.symbol.owner === symbol &&
+        candidate.symbol.constraintTypes.some(
+          (constraint) => constraint.kind === 'named' && constraint.symbol === symbol
+        ));
+    if (member.operator === 'implicit' || member.operator === 'explicit') {
+      this.checkConversionOperator(symbol, method, member);
+    } else if (!isInstanceAssignment && !method.parameters.some((parameter) => isOwn(parameter.type))) {
+      if (extended) return this.reportForeignExtensionOperator(member, isUnary);
       const code = isUnary ? 'CS0562' : 'CS0563';
       const what = isUnary ? '単項演算子のパラメーター' : '二項演算子のパラメーターのうち 1 つ';
       this.error(member, code, `${what}は、それを含んでいる型でなければなりません`);
     }
     this.attachNative(method, member.body === undefined);
     this.addMethod(symbol, method, member);
+  }
+
+  /**
+   * Makes an extension block's operator one of the type that the block extends, which it returns; an instance one
+   * becomes a static method of the class that takes the receiver first.
+   */
+  private declareExtensionOperator(
+    method: MethodSymbol,
+    member: Extract<TypeDeclaration['members'][number], { kind: 'operator' }>,
+    context: TypeContext
+  ): Type | undefined {
+    const { extension } = member;
+    if (extension?.receiverParameter) {
+      const [receiver] = this.resolveParameters([extension.receiverParameter], context, method);
+      method.parameters = [receiver, ...method.parameters];
+      method.isStatic = true;
+      method.extensionAssignmentOf = receiver.type;
+      return receiver.type;
+    }
+    if (extension?.staticReceiver) method.staticExtensionOf = this.resolveType(extension.staticReceiver, context);
+    return method.staticExtensionOf;
+  }
+
+  /** How Roslyn names the type that declares a member, or for an extension block's, the block. */
+  private extensionOwnerName(symbol: TypeSymbol, extended: Type | undefined): string {
+    return extended ? `${displayTypeSymbol(symbol)}.extension(${displayType(extended)})` : displayTypeSymbol(symbol);
+  }
+
+  /** Reports an extension block's operator that takes none of the extended type, as Roslyn does. */
+  private reportForeignExtensionOperator(member: Position & { operator: string }, isUnary: boolean): void {
+    if (member.operator === '++' || member.operator === '--')
+      this.error(member, 'CS9318', '++ または -- 演算子のパラメーター型は、拡張型である必要があります。');
+    else if (isUnary) this.error(member, 'CS9317', '単項演算子のパラメーターは、拡張型である必要があります。');
+    else this.error(member, 'CS9319', '2 項演算子のパラメーターの 1 つは、拡張型である必要があります。');
+  }
+
+  /** Checks a conversion operator's types (C# spec §15.10.4), and that the type declares no other between them. */
+  private checkConversionOperator(symbol: TypeSymbol, method: MethodSymbol, position: Position): void {
+    const ownType = symbol.declaredType;
+    const source = withoutNullable(method.parameters[0]?.type ?? ERROR_TYPE);
+    const target = withoutNullable(method.returnType);
+    const signature = `${displayTypeSymbol(symbol)}.${method.name === 'op_Implicit' ? 'implicit' : 'explicit'} operator ${displayType(method.returnType)}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+    if (!sameType(source, ownType) && !sameType(target, ownType)) {
+      this.error(position, 'CS0556', 'ユーザー定義の変換では、それを囲む型に/から変換しなければなりません');
+      return;
+    }
+    if (sameType(source, target)) {
+      this.error(position, 'CS0555', 'ユーザー定義の演算子は、型をそれ自体に変換することはできません。');
+      return;
+    }
+    const other = sameType(source, ownType) ? target : source;
+    if (other.kind === 'named' && other.symbol.kind === 'interface') {
+      this.error(
+        position,
+        'CS0552',
+        `'${signature}': インターフェイスとの間におけるユーザー定義の変換は許可されていません`
+      );
+      return;
+    }
+    if (other.kind === 'named' && (derivesFromClass(symbol, other.symbol) || derivesFromClass(other.symbol, symbol))) {
+      this.error(
+        position,
+        'CS0553',
+        `'${signature}': 基本データ型との間におけるユーザー定義の変換は許可されていません`
+      );
+      return;
+    }
+    const isConversion = (candidate: MethodSymbol): boolean =>
+      (candidate.name === 'op_Implicit' || candidate.name === 'op_Explicit') &&
+      sameType(candidate.returnType, method.returnType) &&
+      sameType(candidate.parameters[0]?.type ?? ERROR_TYPE, method.parameters[0]?.type ?? ERROR_TYPE);
+    if (symbol.methods.some(isConversion))
+      this.error(position, 'CS0557', `型 '${displayTypeSymbol(symbol)}' で重複するユーザー定義の変換です`);
   }
 
   // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
@@ -1028,11 +1764,14 @@ export class DeclarationBinder extends BinderBase {
     const set = modifiers.set;
     method.isStatic = set.has('static');
     method.isVirtual = set.has('virtual');
-    method.isAbstract = set.has('abstract') || (symbol.kind === 'interface' && !set.has('static'));
+    method.isAbstract =
+      set.has('abstract') ||
+      (symbol.kind === 'interface' && !set.has('static') && !set.has('sealed') && !set.has('private'));
     method.isOverride = set.has('override');
     method.isSealed = set.has('sealed');
     method.isNew = set.has('new');
     method.isExtern = set.has('extern');
+    method.isAsync = set.has('async');
     method.access = accessibilityOf(modifiers, symbol.kind === 'interface' ? 'public' : 'private');
     method.row = position.row;
     method.typeParameters = typeParameters.map(
@@ -1044,8 +1783,6 @@ export class DeclarationBinder extends BinderBase {
     };
     this.methodContexts.set(method, methodContext);
     this.applyConstraints(method.typeParameters, constraints, methodContext);
-    if (symbol.isStatic && !method.isStatic && kind === 'method')
-      this.error(position, 'CS0708', `'${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`);
     this.checkMethodModifiers(method, modifiers, position);
     return method;
   }
@@ -1069,11 +1806,15 @@ export class DeclarationBinder extends BinderBase {
     }
     if (
       method.isStatic &&
-      (method.isVirtual || method.isOverride || (modifiers.set.has('abstract') && method.owner.kind !== 'interface'))
+      method.owner.kind !== 'interface' &&
+      (method.isVirtual || method.isOverride || modifiers.set.has('abstract'))
     ) {
       const keyword = method.isVirtual ? 'virtual' : method.isOverride ? 'override' : 'abstract';
       this.error(position, 'CS0112', `静的なメンバーを '${keyword}' とマークすることはできません。`);
     }
+    // An interface's static members may be abstract or virtual (C# 11), but have no base member to override.
+    if (method.isStatic && method.isOverride && method.owner.kind === 'interface')
+      this.error(position, 'CS0106', "修飾子 'override' がこの項目に対して有効ではありません");
     if (method.isSealed && !method.isOverride && method.owner.kind !== 'interface')
       this.error(position, 'CS0238', `'${display()}' はオーバーライドではないため、シールドにできません`);
     if (method.isVirtual && method.isOverride)
@@ -1097,11 +1838,30 @@ export class DeclarationBinder extends BinderBase {
   private checkMethodBody(method: MethodSymbol, hasBody: boolean, position: Position): void {
     if (this.isLibraryUnit) return;
     if (method.owner.kind === 'interface') {
-      if (hasBody && !method.isStatic) this.unsupported(position, 'インターフェイスの既定の実装');
-      if (method.isStatic) this.unsupported(position, 'インターフェイスの静的メンバー');
+      // A body makes an interface member its default implementation (C# spec §19.4), which classes need not write.
+      if (
+        hasBody &&
+        method.isAbstract &&
+        !(method.declaration && 'modifiers' in method.declaration && method.declaration.modifiers.set.has('abstract'))
+      ) {
+        method.isAbstract = false;
+        method.isVirtual = method.access !== 'private' && !method.isSealed && !method.isStatic;
+      } else if (hasBody && method.isAbstract) {
+        this.error(
+          position,
+          'CS0500',
+          `'${displayMethod(method)}' は abstract に指定されているため本体を宣言できません`
+        );
+      } else if (!hasBody && !method.isAbstract) {
+        this.error(
+          position,
+          'CS0501',
+          `'${displayMethod(method)}' は abstract、extern、または partial に指定されていないため、本体を宣言する必要があります`
+        );
+      }
       return;
     }
-    if (!hasBody && !method.isAbstract && !method.isExtern) {
+    if (!hasBody && !method.isAbstract && !method.isExtern && !method.callsAreRemoved) {
       this.error(
         position,
         'CS0501',
@@ -1141,30 +1901,39 @@ export class DeclarationBinder extends BinderBase {
             'CS0231',
             'params パラメーターは、パラメーター リストの最後のパラメーターでなければなりません'
           );
-        if (type.kind !== 'array' && type.kind !== 'error')
+        if (type.kind !== 'error' && !paramsCollectionOf(type, this.objectType))
           this.error(parameter, 'CS0225', 'params パラメーターには有効なコレクションの種類が必要です');
       }
-      if (
-        parameter.modifier === 'this' &&
-        method &&
-        (!method.owner.isStatic || method.owner.typeParameters.length > 0 || method.owner.containing)
-      ) {
-        this.error(parameter, 'CS1106', `拡張メソッドは、非ジェネリック静的クラスで定義される必要があります`);
-      }
-      result.push({
+      if (parameter.isThis && method) this.checkExtensionReceiver(parameter, type, method, index);
+      if (parameter.isScoped) this.checkScoped(parameter, type, parameter.modifier);
+      const symbol: ParameterSymbol = {
         name: parameter.name,
         type,
-        refKind:
-          parameter.modifier === 'ref' || parameter.modifier === 'out' || parameter.modifier === 'in'
-            ? parameter.modifier
-            : undefined,
+        ...refKindOf(parameter),
         isParams: parameter.modifier === 'params',
+        ...(parameter.isScoped ? { isScoped: true } : {}),
         defaultSyntax: parameter.defaultValue,
         defaultContext: parameter.defaultValue ? context : undefined,
         position: parameter,
-      });
+      };
+      // A record's or a primary constructor's parameter may also aim its attributes at the property or field it makes.
+      this.collectAttributes(
+        parameter.attributes,
+        'parameter',
+        symbol,
+        context,
+        { param: symbol, property: undefined, field: undefined },
+        result
+      );
+      result.push(symbol);
     }
     return result;
+  }
+
+  /** Reports a `scoped` parameter that is passed by value and of no ref struct type, which refers to no variable. */
+  checkScoped(position: Position, type: Type, refKind: string | undefined): void {
+    if ((refKind === undefined || refKind === 'params') && type.kind !== 'error' && !isRefLikeType(type))
+      this.error(position, 'CS9048', "'scoped' 修飾子は refs および ref 構造体の値にのみ使用できます。");
   }
 
   /** Declares the members that the compiler gives a record. */
@@ -1201,6 +1970,7 @@ export class DeclarationBinder extends BinderBase {
       symbol.properties.push(property);
     }
     void context;
+    if (symbol.kind === 'class') this.declareEqualityContract(symbol);
     const synthesize = (
       name: string,
       parameters: ParameterSymbol[],
@@ -1258,6 +2028,27 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  /**
+   * A record class's `EqualityContract`, the type that its equality compares, which is protected, or private in a
+   * sealed record; its getter gives the object's own type, as each record's override does in .NET.
+   */
+  private declareEqualityContract(symbol: TypeSymbol): void {
+    if (this.ownMembers(symbol, 'EqualityContract').length > 0) return;
+    const typeType = namedType(this.library.typeNamed('System.Type'));
+    const property = new PropertySymbol('EqualityContract', typeType, symbol, false);
+    property.access = symbol.isSealed ? 'private' : 'protected';
+    property.row = symbol.row;
+    const getter = new MethodSymbol('get_EqualityContract', symbol, 'getter');
+    getter.property = property;
+    getter.access = property.access;
+    getter.returnType = typeType;
+    getter.row = symbol.row;
+    getter.native = (call, receiver) =>
+      typeObjectOf(call.frame.runtime, call.frame.runtime.runtimeTypeOf(receiver) ?? symbol.declaredType);
+    property.getter = getter;
+    symbol.properties.push(property);
+  }
+
   /** Gives a class without constructors a parameterless one, and a struct its implicit one. */
   private declareImplicitConstructors(type: DeclaredType): void {
     const { symbol } = type;
@@ -1285,8 +2076,10 @@ export class DeclarationBinder extends BinderBase {
   private ownMembers(symbol: TypeSymbol, name: string): (FieldSymbol | MethodSymbol | PropertySymbol | TypeSymbol)[] {
     return [
       ...symbol.fields.filter((field) => field.name === name),
-      ...symbol.methods.filter((method) => method.name === name),
-      ...symbol.properties.filter((property) => property.name === name && !property.isIndexer),
+      ...symbol.methods.filter((method) => method.name === name && !method.explicitInterface),
+      ...symbol.properties.filter(
+        (property) => property.name === name && !property.isIndexer && !property.explicitInterface
+      ),
       ...symbol.nestedTypes.filter((nested) => nested.name === name),
     ];
   }
@@ -1307,6 +2100,10 @@ export class DeclarationBinder extends BinderBase {
         );
       return;
     }
+    if (member instanceof PropertySymbol && member.explicitInterface) {
+      this.checkExplicitPropertyDuplicate(symbol, member, member.explicitInterface, position);
+      return;
+    }
     if (this.ownMembers(symbol, member.name).length > 0) {
       this.error(position, 'CS0102', `型 '${displayTypeSymbol(symbol)}' は既に '${member.name}' の定義を含んでいます`);
     }
@@ -1314,11 +2111,58 @@ export class DeclarationBinder extends BinderBase {
       this.error(position, 'CS0542', `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`);
   }
 
+  /** An explicit implementation's name is its interface's member's, which only another one for that interface takes. */
+  private checkExplicitPropertyDuplicate(
+    symbol: TypeSymbol,
+    property: PropertySymbol,
+    face: NamedType,
+    position: Position
+  ): void {
+    const duplicate = symbol.properties.some(
+      (other) =>
+        other.name === property.name &&
+        !other.isIndexer &&
+        other.explicitInterface !== undefined &&
+        sameType(other.explicitInterface, face)
+    );
+    if (!duplicate) return;
+    const display = `${displayType(face)}.${property.name}`;
+    this.error(symbol.row, 'CS8646', `'${display}' が複数回、明示的に実装されています。`);
+    this.error(position, 'CS0102', `型 '${displayTypeSymbol(symbol)}' は既に '${display}' の定義を含んでいます`);
+  }
+
   private addMethod(symbol: TypeSymbol, method: MethodSymbol, position: Position): void {
+    // An explicit implementation's name is its interface's member's, apart from the type's own members.
+    if (method.explicitInterface) {
+      const face = method.explicitInterface;
+      const duplicate = symbol.methods.find(
+        (other) =>
+          other.name === method.name &&
+          other.explicitInterface !== undefined &&
+          sameType(other.explicitInterface, face) &&
+          this.sameParameters(other, method)
+      );
+      if (duplicate) {
+        const display = `${displayType(face)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
+        this.error(symbol.row, 'CS8646', `'${display}' が複数回、明示的に実装されています。`);
+        this.error(
+          position,
+          'CS0111',
+          `型 '${displayTypeSymbol(symbol)}' は、'${displayType(face)}.${method.name}' と呼ばれるメンバーを同じパラメーターの型で既に定義しています`
+        );
+      }
+      symbol.methods.push(method);
+      return;
+    }
     const others = this.ownMembers(symbol, method.name);
     if (others.some((other) => !(other instanceof MethodSymbol))) {
       this.error(position, 'CS0102', `型 '${displayTypeSymbol(symbol)}' は既に '${method.name}' の定義を含んでいます`);
-    } else if (others.some((other) => other instanceof MethodSymbol && this.sameParameters(other, method))) {
+    } else if (
+      others.some(
+        (other) =>
+          other instanceof MethodSymbol && this.sameParameters(other, method) && clashesByParametersAlone(other, method)
+      )
+    ) {
       this.error(
         position,
         'CS0111',
@@ -1373,26 +2217,44 @@ export class DeclarationBinder extends BinderBase {
     if (symbol.kind !== 'class' && symbol.kind !== 'struct') return;
     for (const method of symbol.methods) this.resolveOverride(method, symbol);
     for (const property of symbol.properties) this.resolvePropertyOverride(property, symbol);
-    if (symbol.kind === 'class' && !symbol.isAbstract) {
-      for (const missing of this.unimplementedAbstracts(symbol)) {
-        this.error(
-          symbol.row,
-          'CS0534',
-          `'${displayTypeSymbol(symbol)}' は継承抽象メンバー '${missing}' を実装しません`
-        );
-      }
-    }
+    for (const method of symbol.methods) this.checkExplicitImplementation(symbol, method);
+    if (symbol.kind === 'class' && !symbol.isAbstract) this.reportAbstractMembers(symbol);
     // The library's classes implement their interfaces in .NET, which their declarations here do not all spell out.
     const libraryBase = this.libraryBaseOf(symbol);
     const inherited = libraryBase ? this.allInterfaces(libraryBase) : [];
     for (const face of this.allInterfaces(symbol.declaredType)) {
       if (inherited.some((other) => sameType(other, face))) continue;
       for (const member of face.symbol.methods) {
-        if (member.isStatic || member.property) continue;
+        if ((member.isStatic && !member.isAbstract) || member.property || member.isEventAccessor) continue;
         if (!this.findImplementation(symbol.declaredType, member, face)) this.reportUnimplemented(symbol, member, face);
       }
       for (const property of face.symbol.properties) this.checkPropertyImplementation(symbol, property, face);
+      for (const event of face.symbol.fields)
+        if (event.eventAccessors?.add.isAbstract) this.checkEventImplementation(symbol, event, face);
     }
+  }
+
+  /** Reports an interface's event that a class implements neither by a public event nor explicitly. */
+  private checkEventImplementation(symbol: TypeSymbol, event: FieldSymbol, face: NamedType): void {
+    const eventText = `${displayTypeSymbol(face.symbol, face.args)}.${event.name}`;
+    for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
+      const candidates = current.symbol.fields.filter((field) => field.isEvent && field.name === event.name);
+      if (candidates.some((field) => field.eventAccessors?.add.explicitInterface?.symbol === face.symbol)) return;
+      const close = candidates.find((field) => !field.isStatic && !field.eventAccessors?.add.explicitInterface);
+      if (!close) continue;
+      if (close.access !== 'public')
+        this.error(
+          symbol.row,
+          'CS0737',
+          `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${eventText}' を実装していません。'${displayTypeSymbol(current.symbol, current.args)}.${close.name}' は public ではないため、インターフェイス メンバーを実装できません。`
+        );
+      return;
+    }
+    this.error(
+      symbol.row,
+      'CS0535',
+      `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${eventText}' を実装しません`
+    );
   }
 
   /**
@@ -1415,6 +2277,7 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  // code-gauge-allow duplicateLines -- The copies follow the same rule at compile time and at run time, which run on different symbols.
   private libraryImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     const wanted = member.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
@@ -1459,28 +2322,38 @@ export class DeclarationBinder extends BinderBase {
     if (method.kind === 'operator' || method.isStatic) return;
     const base = symbol.baseType;
     if (!method.isOverride) return;
+    // An event's accessors override together, and Roslyn reports the event once by its name.
+    const isEventRemover = method.isEventAccessor && method.name.startsWith('remove_');
+    const report = (code: string, message: string): void => {
+      if (!isEventRemover) this.error(method.row, code, message);
+    };
+    const shown = method.isEventAccessor
+      ? `${displayTypeSymbol(symbol)}.${eventNameOf(method)}`
+      : displayMethod(method);
+    const shownIn = (candidate: MethodSymbol, owner: NamedType): string =>
+      candidate.isEventAccessor
+        ? `${displayTypeSymbol(owner.symbol, owner.args)}.${eventNameOf(candidate)}`
+        : displayMethodIn(candidate, owner);
     for (let current = base; current; current = baseTypeOf(current)) {
       const candidate = current.symbol.methods.find(
         (other) => other.name === method.name && this.sameParameters(other, method, current, symbol.declaredType)
       );
       if (!candidate) continue;
       if (!candidate.isVirtual && !candidate.isAbstract && !candidate.isOverride) {
-        this.error(
-          method.row,
+        report(
           'CS0506',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' は virtual、abstract または override に設定されていないためオーバーライドできません`
+          `'${shown}': 継承されたメンバー '${shownIn(candidate, current)}' は virtual、abstract または override に設定されていないためオーバーライドできません`
         );
         return;
       }
       if (candidate.isSealed) {
-        this.error(
-          method.row,
+        report(
           'CS0239',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' はシールされているため、オーバーライドできません`
+          `'${shown}': 継承されたメンバー '${shownIn(candidate, current)}' はシールされているため、オーバーライドできません`
         );
         return;
       }
-      const expectedReturn = substitute(candidate.returnType, substitutionOf(current));
+      const expectedReturn = substitute(candidate.returnType, this.methodSubstitution(candidate, method, current));
       // An override may return a type with an implicit reference conversion to the base's return type (C# 9).
       if (
         !sameType(expectedReturn, method.returnType) &&
@@ -1491,32 +2364,27 @@ export class DeclarationBinder extends BinderBase {
         method.returnType.kind !== 'error' &&
         expectedReturn.kind !== 'error'
       ) {
-        this.error(
-          method.row,
+        report(
           'CS0508',
-          `'${displayMethod(method)}': オーバーライドされたメンバー '${displayMethodIn(candidate, current)}' に対応するために戻り値の型は '${displayType(expectedReturn)}' でなければなりません`
+          `'${shown}': オーバーライドされたメンバー '${shownIn(candidate, current)}' に対応するために戻り値の型は '${displayType(expectedReturn)}' でなければなりません`
         );
       }
       if (
         candidate.access !== method.access &&
         !(candidate.owner.isLibrary && candidate.access === 'protected' && method.access === 'protected')
       ) {
-        this.error(
-          method.row,
+        report(
           'CS0507',
-          `'${displayMethod(method)}': '${accessibilityText(candidate.access)}' の継承メンバー '${displayMethodIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
+          `'${shown}': '${accessibilityText(candidate.access)}' の継承メンバー '${shownIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
         );
       }
       method.overridden = candidate;
       return;
     }
-    this.error(
-      method.row,
-      'CS0115',
-      `'${displayMethod(method)}': オーバーライドする適切なメソッドが見つかりませんでした`
-    );
+    report('CS0115', `'${shown}': オーバーライドする適切なメソッドが見つかりませんでした`);
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private resolvePropertyOverride(property: PropertySymbol, symbol: TypeSymbol): void {
     if (!property.isOverride) return;
     for (let current = symbol.baseType; current; current = baseTypeOf(current)) {
@@ -1581,6 +2449,19 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
+  /** Reports the abstract members of a class that is not abstract: its own events (CS0513), inherited ones (CS0534). */
+  private reportAbstractMembers(symbol: TypeSymbol): void {
+    for (const field of symbol.fields.filter((member) => member.virtualEventAccessors?.add.isAbstract))
+      this.error(
+        field.row,
+        'CS0513',
+        `'${displayTypeSymbol(symbol)}.${field.name}' は抽象ですが、非抽象型の '${displayTypeSymbol(symbol)}' に含まれています`
+      );
+    for (const missing of this.unimplementedAbstracts(symbol)) {
+      this.error(symbol.row, 'CS0534', `'${displayTypeSymbol(symbol)}' は継承抽象メンバー '${missing}' を実装しません`);
+    }
+  }
+
   private accessorOf(property: PropertySymbol, kind: 'getter' | 'setter'): MethodSymbol | undefined {
     for (let current: PropertySymbol | undefined = property; current; current = current.overridden) {
       const accessor = kind === 'getter' ? current.getter : current.setter;
@@ -1589,6 +2470,7 @@ export class DeclarationBinder extends BinderBase {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private unimplementedAbstracts(symbol: TypeSymbol): string[] {
     const missing: string[] = [];
     const implemented = new Set<MethodSymbol | PropertySymbol>();
@@ -1596,7 +2478,12 @@ export class DeclarationBinder extends BinderBase {
       // The class's own abstract members are CS0513 instead, as are those of a base class that is not abstract.
       const isOwn = current.symbol === symbol || !current.symbol.isAbstract;
       for (const method of current.symbol.methods) {
-        if (method.isAbstract && !isOwn && !implemented.has(method)) missing.push(displayMethodIn(method, current));
+        if (method.isAbstract && !isOwn && !implemented.has(method))
+          missing.push(
+            method.isEventAccessor
+              ? `${displayTypeSymbol(current.symbol, current.args)}.${eventNameOf(method)}.${method.name.slice(0, method.name.indexOf('_'))}`
+              : displayMethodIn(method, current)
+          );
         addOverriddenChain(method, implemented);
       }
       for (const property of current.symbol.properties) {
@@ -1623,8 +2510,9 @@ export class DeclarationBinder extends BinderBase {
       const close = owner.symbol.methods.find(
         (method) =>
           method.name === member.name &&
-          !method.isStatic &&
-          method.kind === 'method' &&
+          method.isStatic === member.isStatic &&
+          !method.explicitInterface &&
+          (method.kind === 'method' || method.kind === 'operator') &&
           this.sameParameters(method, member, owner, face)
       );
       if (!close) continue;
@@ -1652,23 +2540,32 @@ export class DeclarationBinder extends BinderBase {
     );
   }
 
-  /** The method of a class or its bases that implements an interface's method, which must be public and an instance method. */
+  /**
+   * The method of a class or its bases that implements an interface's method (C# spec §19.6.5): an explicit
+   * implementation first, then a public method of the same signature, static for a static abstract member, and else the
+   * interface's own default body.
+   */
   findImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
-    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
-      const candidate = current.symbol.methods.find(
-        (method) =>
-          method.name === member.name &&
-          !method.isStatic &&
-          method.kind === 'method' &&
-          this.sameParameters(method, member, current, face) &&
-          sameType(
-            substitute(method.returnType, this.methodSubstitution(method, member, current as NamedType)),
-            substitute(member.returnType, substitutionOf(face))
-          )
+    const matches = (method: MethodSymbol, current: NamedType): boolean =>
+      method.name === member.name &&
+      method.isStatic === member.isStatic &&
+      (method.kind === 'method' || method.kind === 'operator') &&
+      this.sameParameters(method, member, current, face) &&
+      sameType(
+        substitute(method.returnType, this.methodSubstitution(method, member, current)),
+        substitute(member.returnType, substitutionOf(face))
       );
-      if (candidate) return candidate.access === 'public' || current.symbol.isLibrary ? candidate : undefined;
+    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      const owner = current;
+      const explicit = owner.symbol.methods.find(
+        (method) =>
+          method.explicitInterface !== undefined && sameType(method.explicitInterface, face) && matches(method, owner)
+      );
+      if (explicit) return explicit;
+      const candidate = owner.symbol.methods.find((method) => !method.explicitInterface && matches(method, owner));
+      if (candidate) return candidate.access === 'public' || owner.symbol.isLibrary ? candidate : undefined;
     }
-    return undefined;
+    return member.isAbstract ? undefined : member;
   }
 
   /**
@@ -1683,10 +2580,22 @@ export class DeclarationBinder extends BinderBase {
         'CS0535',
         `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${name}' を実装しません`
       );
+    // A property with a default body, and a static one without `abstract`, need no implementation.
+    if (!member.isAbstract) return;
     for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
       const substitution = substitutionOf(current);
+      const explicit = current.symbol.properties.find(
+        (property) =>
+          property.explicitInterface !== undefined &&
+          sameType(property.explicitInterface, face) &&
+          isSameProperty(property, substitution, member, substitutionOf(face))
+      );
+      if (explicit) return;
       const candidate = current.symbol.properties.find(
-        (property) => !property.isStatic && isSameProperty(property, substitution, member, substitutionOf(face))
+        (property) =>
+          property.isStatic === member.isStatic &&
+          !property.explicitInterface &&
+          isSameProperty(property, substitution, member, substitutionOf(face))
       );
       if (!candidate) continue;
       const expected = substitute(member.type, substitutionOf(face));
@@ -1699,31 +2608,48 @@ export class DeclarationBinder extends BinderBase {
         );
         return;
       }
-      for (const [kind, keyword] of [
-        ['getter', 'get'],
-        ['setter', 'set'],
-      ] as const) {
-        if (!member[kind]) continue;
-        const accessor = candidate[kind];
-        const candidateName = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
-        if (!accessor) missing(`${memberName}.${keyword}`);
-        else if (kind === 'setter' && candidate.isInitOnly !== member.isInitOnly) {
-          const [wanted, given] = member.isInitOnly ? ['init', 'set'] : ['set', 'init'];
-          this.error(
-            symbol.row,
-            'CS8854',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${wanted}' を実装しません。'${candidateName}.${given}' は '${memberName}.${wanted}' を実装できません。`
-          );
-        } else if (accessor.access !== 'public')
-          this.error(
-            symbol.row,
-            'CS0277',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません。'${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}.${keyword}' はパブリックではありません。`
-          );
-      }
+      this.checkAccessorImplementations(symbol, member, candidate, current, memberName);
       return;
     }
     missing(memberName);
+  }
+
+  /** Reports an interface property's accessor that the implementing property lacks, or implements as `init` for `set`. */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private checkAccessorImplementations(
+    symbol: TypeSymbol,
+    member: PropertySymbol,
+    candidate: PropertySymbol,
+    current: NamedType,
+    memberName: string
+  ): void {
+    for (const [kind, keyword] of [
+      ['getter', 'get'],
+      ['setter', 'set'],
+    ] as const) {
+      if (!member[kind]) continue;
+      const accessor = candidate[kind];
+      const candidateName = `${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}`;
+      if (!accessor)
+        this.error(
+          symbol.row,
+          'CS0535',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません`
+        );
+      else if (kind === 'setter' && candidate.isInitOnly !== member.isInitOnly) {
+        const [wanted, given] = member.isInitOnly ? ['init', 'set'] : ['set', 'init'];
+        this.error(
+          symbol.row,
+          'CS8854',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${wanted}' を実装しません。'${candidateName}.${given}' は '${memberName}.${wanted}' を実装できません。`
+        );
+      } else if (accessor.access !== 'public')
+        this.error(
+          symbol.row,
+          'CS0277',
+          `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberName}.${keyword}' を実装しません。'${displayTypeSymbol(current.symbol, current.args)}.${candidate.isIndexer ? 'this[]' : candidate.name}.${keyword}' はパブリックではありません。`
+        );
+    }
   }
 }
 
@@ -1776,12 +2702,17 @@ function accessibilityText(access: Accessibility): string {
  * A method as Roslyn's diagnostics name it, such as `A.M(int)`. With `isFull`, as its ambiguity errors do, the
  * parameters carry `params` and their types' namespaces.
  */
+/** The name of the event whose `add_E` or `remove_E` accessor a method is. */
+function eventNameOf(accessor: MethodSymbol): string {
+  return accessor.name.slice(accessor.name.indexOf('_') + 1);
+}
+
 export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull = false): string {
   const substitution = substitutionOf(owner);
   const parameters = method.parameters
     .map(
       (parameter) =>
-        `${parameter.refKind ? `${parameter.refKind} ` : ''}${isFull && parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitution), isFull)}`
+        `${parameter.refKind ? `${refKeyword(parameter)} ` : ''}${isFull && parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitution), isFull)}`
     )
     .join(', ');
   if (method.kind === 'getter' || method.kind === 'setter' || method.kind === 'localFunction')
@@ -1789,6 +2720,42 @@ export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull =
   // Roslyn names a constructor after its type, as `A.A(int)`.
   const name = method.kind === 'constructor' ? owner.symbol.name : method.name;
   return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}${method.typeParameters.length > 0 ? `<${method.typeParameters.map((parameter) => parameter.name).join(', ')}>` : ''}(${parameters})`;
+}
+
+/**
+ * How Roslyn names a member of an extension block, after the block (`E.extension<T>(List<T>).Create()`), with the
+ * block's and the member's type parameters, or the type arguments that a call gives them.
+ */
+export function displayExtensionMember(method: MethodSymbol, typeArgs?: Type[]): string {
+  const block = displayExtensionBlock(method, typeArgs);
+  if (method.extensionProperty) return `${block}.${method.extensionProperty}`;
+  const substitution = typeArgumentSubstitution(method, typeArgs);
+  const parameters = method.parameters
+    .slice(method.staticExtensionOf ? 0 : 1)
+    .map((parameter) => displayType(substitute(parameter.type, substitution)));
+  const own = typeArgumentList(method, typeArgs).slice(method.extensionBlockArity);
+  return `${block}.${method.name}${own.length > 0 ? `<${own.join(', ')}>` : ''}(${parameters.join(', ')})`;
+}
+
+/** How Roslyn names the extension block that declares a member, as in a broken constraint of the block's. */
+export function displayExtensionBlock(method: MethodSymbol, typeArgs?: Type[]): string {
+  const blockArgs = typeArgumentList(method, typeArgs).slice(0, method.extensionBlockArity);
+  // An instance member takes the block's receiver as its first parameter.
+  const extended = method.staticExtensionOf ?? method.parameters[0].type;
+  const receiver = substitute(extended, typeArgumentSubstitution(method, typeArgs));
+  return `${displayTypeSymbol(method.owner)}.extension${blockArgs.length > 0 ? `<${blockArgs.join(', ')}>` : ''}(${displayType(receiver)})`;
+}
+
+function typeArgumentList(method: MethodSymbol, typeArgs: Type[] | undefined): string[] {
+  return method.typeParameters.map((parameter, index) =>
+    typeArgs?.[index] ? displayType(typeArgs[index]) : parameter.name
+  );
+}
+
+function typeArgumentSubstitution(method: MethodSymbol, typeArgs: Type[] | undefined): Map<TypeParameterSymbol, Type> {
+  return new Map(
+    typeArgs ? method.typeParameters.map((parameter, index) => [parameter, typeArgs[index] ?? ERROR_TYPE]) : []
+  );
 }
 
 export function isDelegateType(type: Type): type is NamedType {
@@ -1818,6 +2785,18 @@ function displayAccessorIn(property: PropertySymbol, accessor: MethodSymbol, own
 }
 
 /** The operators C# requires to be declared together. */
+/** The kind of declaration of a type, which its attributes' `[AttributeUsage]` must allow. */
+function typeTarget(declaration: TypeDeclaration): AttributeTarget {
+  return declaration.typeKind;
+}
+
+/** Whether a type has a class among its bases, which the declarations know before the binders can tell. */
+function derivesFromClass(type: TypeSymbol, base: TypeSymbol): boolean {
+  for (let current = type.baseType; current; current = current.symbol.baseType)
+    if (current.symbol === base) return true;
+  return false;
+}
+
 const OPERATOR_PAIRS: Record<string, string> = {
   '==': '!=',
   '!=': '==',
@@ -1825,6 +2804,8 @@ const OPERATOR_PAIRS: Record<string, string> = {
   '>': '<',
   '<=': '>=',
   '>=': '<=',
+  true: 'false',
+  false: 'true',
 };
 
 const ACCESS_RANKS: Record<Accessibility, number> = {
@@ -1887,4 +2868,29 @@ function constrainsBackTo(
   return from.constraintTypes.some(
     (constraint) => constraint.kind === 'typeParameter' && constrainsBackTo(constraint.symbol, target, seen)
   );
+}
+
+/** The type of a property's value, and how it returns by reference if its type is `ref T` or `ref readonly T`. */
+function refTypeOf(type: TypeNode): { type: TypeNode; returnsByRef: 'ref' | 'readonly' | undefined } {
+  if (type.kind !== 'refType') return { type, returnsByRef: undefined };
+  return { type: type.type, returnsByRef: type.isReadonly ? 'readonly' : 'ref' };
+}
+
+/** How a declared parameter is passed by reference: by `ref`, `out`, or `in`, which `ref readonly` is written as. */
+function refKindOf(parameter: Parameter): Pick<ParameterSymbol, 'refKind' | 'isRefReadonly'> {
+  const { modifier } = parameter;
+  const refKind = modifier === 'ref' || modifier === 'out' || modifier === 'in' ? modifier : undefined;
+  return parameter.isRefReadonly ? { refKind, isRefReadonly: true } : { refKind };
+}
+
+function isConversionOperator(method: MethodSymbol): boolean {
+  return method.name === 'op_Implicit' || method.name === 'op_Explicit';
+}
+
+/**
+ * Whether two methods with the same parameters clash, which two conversion operators do not: they differ by the type
+ * they convert to, and `checkConversionOperator` reports two that convert between the same types.
+ */
+function clashesByParametersAlone(a: MethodSymbol, b: MethodSymbol): boolean {
+  return !isConversionOperator(a) || !isConversionOperator(b);
 }

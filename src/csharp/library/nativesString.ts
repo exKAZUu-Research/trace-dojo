@@ -10,7 +10,10 @@ import {
   cultureMatches,
   cultureStartsWith,
   equalsCulture,
+  ordinalDifference,
+  ROOT,
 } from '../culture';
+import { collationLocale, type Culture, cultureSettingsOf, currentCulture } from '../cultures';
 import { MeteredText } from '../meteredText';
 import { defineNatives, defineNativesKeepingStrings, type NativeCall, type NativeMethod } from '../natives';
 import { primitiveHash, toStringValue, unboxed } from '../objects';
@@ -51,23 +54,35 @@ const STRING = 'System.String';
  * `StringComparison`'s values: 0 and 1 the current culture, 2 and 3 the invariant one, 4 and 5 ordinal, of which the
  * odd ones ignore case.
  */
-function compareWith(call: NativeCall, a: string, b: string, comparison: number): number {
+function compareWith(call: NativeCall, a: string, b: string, requested: number): number {
+  const comparison = comparisonIn(call, requested);
   const ignoreCase = comparison % 2 === 1;
   // An ordinal comparison gives the difference of the first differing characters, as .NET's does.
   if (comparison >= 4) return ordinalDifference(ignoreCase ? ordinalUpper(a) : a, ignoreCase ? ordinalUpper(b) : b);
   return compareCulture(a, b, cultureOf(call, comparison));
 }
 
-function equalsWith(call: NativeCall, a: string, b: string, comparison: number): boolean {
+function equalsWith(call: NativeCall, a: string, b: string, requested: number): boolean {
+  const comparison = comparisonIn(call, requested);
   if (comparison === 4) return a === b;
   if (comparison === 5) return ordinalUpper(a) === ordinalUpper(b);
   return equalsCulture(a, b, cultureOf(call, comparison));
 }
 
+/**
+ * The `StringComparison` that a run compares by: the requested one, but in globalization-invariant mode, where no
+ * culture has collation data, the ordinal one for each culture one, as .NET does.
+ */
+function comparisonIn(call: NativeCall, comparison: number): number {
+  return comparison < 4 && cultureSettingsOf(call.frame.runtime).isGlobalizationInvariant
+    ? 4 + (comparison % 2)
+    : comparison;
+}
+
 /** A culture comparison of a `StringComparison`, whose work counts against the run's budget. */
 function cultureOf(call: NativeCall, comparison: number): CultureComparison {
   return {
-    isInvariant: comparison >= 2,
+    locale: comparison >= 2 ? ROOT : collationLocale(currentCulture(call.frame.runtime)),
     ignoreCase: comparison % 2 === 1,
     spend: (cost) => call.frame.runtime.spend(cost),
   };
@@ -78,9 +93,10 @@ function searchWith(
   call: NativeCall,
   text: string,
   value: string,
-  comparison: number,
+  requested: number,
   how: 'contains' | 'starts' | 'ends'
 ): boolean {
+  const comparison = comparisonIn(call, requested);
   if (comparison >= 4) {
     const [haystack, needle] = comparison === 5 ? [ordinalUpper(text), ordinalUpper(value)] : [text, value];
     if (how === 'starts') return haystack.startsWith(needle);
@@ -363,9 +379,7 @@ const stringNatives: Record<string, NativeMethod> = {
   },
   [`${STRING}.Clone`]: (_call, receiver) => receiver,
   [`${STRING}.CompareTo`]: (call, receiver, [other]) =>
-    other === undefined
-      ? 1
-      : compareCulture(receiverText(receiver), unboxed(other as Value) as string, cultureOf(call, 0)),
+    other === undefined ? 1 : compareWith(call, receiverText(receiver), unboxed(other as Value) as string, 0),
   [`${STRING}.Contains(string)`]: (_call, receiver, [value]) => {
     if (value === undefined) failNull('value');
     return receiverText(receiver).includes(value as string);
@@ -380,7 +394,7 @@ const stringNatives: Record<string, NativeMethod> = {
     searchWith(call, receiverText(receiver), String.fromCodePoint(value as number), comparison as number, 'contains'),
   [`${STRING}.StartsWith(string)`]: (call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return cultureStartsWith(receiverText(receiver), value as string, cultureOf(call, 0));
+    return searchWith(call, receiverText(receiver), value as string, 0, 'starts');
   },
   [`${STRING}.StartsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).startsWith(String.fromCodePoint(value as number)),
@@ -390,7 +404,7 @@ const stringNatives: Record<string, NativeMethod> = {
   },
   [`${STRING}.EndsWith(string)`]: (call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return cultureEndsWith(receiverText(receiver), value as string, cultureOf(call, 0));
+    return searchWith(call, receiverText(receiver), value as string, 0, 'ends');
   },
   [`${STRING}.EndsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).endsWith(String.fromCodePoint(value as number)),
@@ -478,7 +492,8 @@ const stringNatives: Record<string, NativeMethod> = {
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
     // The culture modes find each match as IndexOf does, so the ja-JP culture matches か in カ as .NET's does.
-    if ((comparison as number) < 4)
+    comparison = comparisonIn(call, comparison as number);
+    if (comparison < 4)
       return culturallyReplacedText(
         call,
         receiverText(receiver),
@@ -535,10 +550,17 @@ const stringNatives: Record<string, NativeMethod> = {
         .map((unit) => unit.charCodeAt(0))
     );
   },
-  [`${STRING}.ToLower`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
-  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
-  [`${STRING}.ToUpper`]: (_call, receiver) => caseMappedText(receiverText(receiver), true),
-  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, true),
+  [`${STRING}.ToLower`]: (call, receiver) =>
+    caseMappedText(receiverText(receiver), false, casingOf(currentCulture(call.frame.runtime))),
+  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false, 'invariant'),
+  [`${STRING}.Normalize`]: (call, receiver, [form]) => normalizedText(call, receiverText(receiver), form, 'strInput'),
+  [`${STRING}.IsNormalized`]: (call, receiver, [form]) => {
+    const text = receiverText(receiver);
+    return normalizedText(call, text, form, 'source') === text;
+  },
+  [`${STRING}.ToUpper`]: (call, receiver) =>
+    caseMappedText(receiverText(receiver), true, casingOf(currentCulture(call.frame.runtime))),
+  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, 'invariant'),
   [`${STRING}.ToString`]: (_call, receiver) => receiverText(receiver),
   [`${STRING}.Trim()`]: (_call, receiver) => trimWith(receiverText(receiver), undefined, true, true),
   [`${STRING}.Trim(char)`]: (_call, receiver, [char]) =>
@@ -555,15 +577,14 @@ const stringNatives: Record<string, NativeMethod> = {
     trimWith(receiverText(receiver), charsOf(char as Value), false, true),
   [`${STRING}.TrimEnd(char[]?)`]: (call, receiver, [chars]) =>
     trimWith(receiverText(receiver), charsOf(chars as Value), false, true),
-  [`${STRING}.IsNormalized`]: (call, receiver) => receiverText(receiver) === receiverText(receiver).normalize(),
   [`${STRING}.Compare`]: (call, _receiver, args) => {
     if (args.length === 5) return compareRanges(call, args);
     const [a, b] = args as (string | undefined)[];
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
-    if (typeof args[2] === 'boolean') return compareCulture(a, b, cultureOf(call, args[2] ? 1 : 0));
+    if (typeof args[2] === 'boolean') return compareWith(call, a, b, args[2] ? 1 : 0);
     if (typeof args[2] === 'number') return compareWith(call, a, b, args[2]);
-    return compareCulture(a, b, cultureOf(call, 0));
+    return compareWith(call, a, b, 0);
   },
   [`${STRING}.CompareOrdinal(string?, string?)`]: (_call, _receiver, [a, b]) => {
     if (a === undefined) return b === undefined ? 0 : -1;
@@ -675,16 +696,7 @@ defineNativesKeepingStrings({
   },
 });
 
-function ordinalDifference(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    const difference = a.charCodeAt(index) - b.charCodeAt(index);
-    if (difference !== 0) return difference;
-  }
-  return a.length - b.length;
-}
-
-/** `string.Format`, whose first argument may be a format provider that the ja-JP culture ignores. */
+/** `string.Format`, whose first argument may be a format provider, which formats the arguments. */
 export function formatCall(call: NativeCall, args: Value[]): string {
   const parameters = call.method.parameters;
   const offset = parameters[0].name === 'provider' ? 1 : 0;
@@ -698,7 +710,7 @@ export function formatCall(call: NativeCall, args: Value[]): string {
     value,
     type: rest[index] && !rest[index].isParams ? parameterType(call, offset + 1 + index) : object,
   }));
-  const text = compositeFormat(call, format, items);
+  const text = compositeFormat(call, format, items, offset === 1 ? args[0] : undefined);
   call.frame.runtime.allocateString(text.length);
   return text;
 }
@@ -766,7 +778,7 @@ function searchArguments(
     if (index === 0) continue;
     if (parameter.name === 'startIndex') start = args[index] as number;
     else if (parameter.name === 'count') count = args[index] as number;
-    else if (parameter.name === 'comparisonType') comparison = args[index] as number;
+    else if (parameter.name === 'comparisonType') comparison = comparisonIn(call, args[index] as number);
   }
   return { start, count, comparison };
 }
@@ -806,6 +818,25 @@ function lastStringIndex(
   const [haystack, target] = ordinalForms(text.slice(first, first + count), needle, comparison);
   const found = haystack.lastIndexOf(target);
   return found === -1 ? -1 : first + found;
+}
+
+const NORMALIZATION_FORMS = new Map<number, 'NFC' | 'NFD' | 'NFKC' | 'NFKD'>([
+  [1, 'NFC'],
+  [2, 'NFD'],
+  [5, 'NFKC'],
+  [6, 'NFKD'],
+]);
+
+/**
+ * The text in a normalization form (FormC when none is given), by the host's Unicode data. .NET rejects a lone
+ * surrogate, which the host would keep, and with `InvariantGlobalization` it has no Unicode data and returns the text.
+ */
+function normalizedText(call: NativeCall, text: string, form: unknown, parameter: string): string {
+  const hostForm = NORMALIZATION_FORMS.get((form as number | undefined) ?? 1);
+  if (!hostForm) fail('System.ArgumentException', 'Invalid or unsupported normalization form.', 'normalizationForm');
+  if (cultureSettingsOf(call.frame.runtime).isGlobalizationInvariant) return text;
+  if (!text.isWellFormed()) fail('System.ArgumentException', 'String contains invalid Unicode code points.', parameter);
+  return text.normalize(hostForm);
 }
 
 function failLastStart(call: NativeCall): never {
@@ -915,10 +946,12 @@ defineNatives({
   [`${CHAR}.IsAsciiHexDigit`]: charTest((char) => /[0-9A-Fa-f]/.test(char)),
   [`${CHAR}.IsBetween`]: (_call, _receiver, [value, low, high]) =>
     (value as number) >= (low as number) && (value as number) <= (high as number),
-  [`${CHAR}.ToUpper`]: (_call, _receiver, [value]) => caseMapped(value as number, true),
-  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true, true),
-  [`${CHAR}.ToLower`]: (_call, _receiver, [value]) => caseMapped(value as number, false),
-  [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false),
+  [`${CHAR}.ToUpper`]: (call, _receiver, [value]) =>
+    caseMapped(value as number, true, casingOf(currentCulture(call.frame.runtime))),
+  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true, 'invariant'),
+  [`${CHAR}.ToLower`]: (call, _receiver, [value]) =>
+    caseMapped(value as number, false, casingOf(currentCulture(call.frame.runtime))),
+  [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false, 'invariant'),
   [`${CHAR}.GetNumericValue`]: (_call, _receiver, args) => {
     const [value, index] = args as Value[];
     const char = typeof value === 'string' ? value.charAt(index as number) : String.fromCharCode(value as number);
@@ -976,9 +1009,11 @@ defineNatives({
  * .NET's simple case mapping of a character, which keeps one character: `ß` stays as JavaScript's `SS` would expand
  * it, and `İ` lowers to `i` without JavaScript's combining dot.
  */
-function caseMapped(code: number, upper: boolean, isInvariant = false): number {
-  // The invariant culture keeps the dotless i, whose uppercase `I` belongs to Turkish.
-  if (isInvariant && upper && code === DOTLESS_I) return code;
+function caseMapped(code: number, upper: boolean, casing: Casing = 'cultural'): number {
+  // The invariant culture keeps the dotless i and the dotted capital I, whose case pairs belong to Turkish.
+  if (casing === 'invariant' && code === (upper ? DOTLESS_I : DOTTED_CAPITAL_I)) return code;
+  // Turkish and Azerbaijani pair i with İ and ı with I.
+  if (casing === 'turkish' && code === (upper ? SMALL_I : CAPITAL_I)) return upper ? DOTTED_CAPITAL_I : DOTLESS_I;
   const char = String.fromCharCode(code);
   const mapped = upper ? char.toUpperCase() : char.toLowerCase();
   if (mapped.length === 1) return mapped.charCodeAt(0);
@@ -986,14 +1021,26 @@ function caseMapped(code: number, upper: boolean, isInvariant = false): number {
 }
 
 /** Maps each character of a text as `ToUpper` and `ToLower` do, without JavaScript's context-sensitive rules. */
-function caseMappedText(text: string, upper: boolean, isInvariant = false): string {
+function caseMappedText(text: string, upper: boolean, casing: Casing = 'cultural'): string {
   let result = '';
   for (let index = 0; index < text.length; index++)
-    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper, isInvariant));
+    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper, casing));
   return result;
 }
 
+/** The case rules of a culture: the invariant culture's, Turkish ones, or the ones every other culture shares. */
+type Casing = 'invariant' | 'turkish' | 'cultural';
+
+function casingOf(culture: Culture): Casing {
+  if (culture.isInvariant) return 'invariant';
+  return TURKISH_CASING.has(culture.twoLetterIsoLanguageName) ? 'turkish' : 'cultural';
+}
+
+const TURKISH_CASING = new Set(['tr', 'az']);
+const SMALL_I = 0x69;
+const CAPITAL_I = 0x49;
 const DOTLESS_I = 0x1_31;
+const DOTTED_CAPITAL_I = 0x1_30;
 const LONG_S = 0x1_7f;
 
 /** A text as `OrdinalIgnoreCase` compares it: uppercased, except that no other letter becomes an ASCII one. */
@@ -1110,9 +1157,9 @@ defineNatives({
     if (a === undefined || b === undefined) return a === b;
     return equalsWith(call, a as string, b as string, comparisonOfComparer(receiver));
   },
-  [`${STRING_COMPARER}.GetHashCode`]: (_call, receiver, [text]) => {
+  [`${STRING_COMPARER}.GetHashCode`]: (call, receiver, [text]) => {
     if (text === undefined) failNull('obj');
-    const comparison = comparisonOfComparer(receiver);
+    const comparison = comparisonIn(call, comparisonOfComparer(receiver));
     if (comparison === 4) return primitiveHash(text as string) ?? 0;
     if (comparison === 5) return primitiveHash(ordinalUpper(text as string)) ?? 0;
     return primitiveHash(cultureHashKey(text as string)) ?? 0;
@@ -1384,7 +1431,7 @@ function compareRanges(call: NativeCall, args: Parameters<NativeMethod>[2]): num
   if (strB === undefined ? indexB !== 0 || length !== 0 : indexB > strB.length) failOutOfRange(call, 'indexB', message);
   if (strA === undefined) return strB === undefined ? 0 : -1;
   if (strB === undefined) return 1;
-  return compareCulture(strA.slice(indexA, indexA + length), strB.slice(indexB, indexB + length), cultureOf(call, 0));
+  return compareWith(call, strA.slice(indexA, indexA + length), strB.slice(indexB, indexB + length), 0);
 }
 
 /** `StringBuilder.Append(string value, int startIndex, int count)`. */

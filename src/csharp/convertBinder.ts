@@ -1,21 +1,28 @@
-import type { Position } from './ast';
-import type { BoundExpression } from './bound';
+import type { Expression, Position } from './ast';
+import type { TypeContext } from './binderBase';
+import type { BoundArgument, BoundExpression } from './bound';
 import { type ConversionKind, INTEGRAL_RANGES, isEnum, isNumeric } from './conversions';
 import { CsDecimal } from './decimal';
+import { type InterpolationSource, interpolationTargetOf } from './interpolatedConversions';
 import { LookupBinder } from './lookup';
 import { convertNumeric, type NumericValue, PendingException } from './numeric';
 import type { FunctionScope, LocalScope } from './scopes';
 import {
   displayType,
   ERROR_TYPE,
+  isDynamicType,
   isReferenceType,
   isValueType,
+  type MethodSymbol,
   type NamedType,
   nullableUnderlying,
   sameType,
   specialOf,
   type SpecialType,
+  substitute,
+  substitutionOf,
   type Type,
+  withoutNullable,
 } from './types';
 
 /** Where an expression is being bound: its block and its function. */
@@ -24,8 +31,30 @@ export interface BindContext {
   fn: FunctionScope;
 }
 
+/** A user-defined conversion operator chosen for a conversion, with the types it converts between. */
+export interface UserConversion {
+  method: MethodSymbol;
+  owner: NamedType;
+  from: Type;
+  to: Type;
+  /** Whether the operator is lifted from value types to their nullable forms. */
+  isLifted: boolean;
+}
+
 /** How a conversion happens, which decides its diagnostics. */
 export type ConversionMode = 'implicit' | 'explicit';
+
+/** What a late-bound operation needs besides its syntax and operands. */
+export interface LateOptions {
+  receiver?: number;
+  target?: { type: Type; isExplicit: boolean };
+  isStatement?: boolean;
+}
+
+/** The name of a late-bound operation's operand, which the binder declares as a hidden local when the operation runs. */
+export function lateOperandName(index: number): string {
+  return `\0d${index}`;
+}
 
 /** Converts bound expressions to types, folding constants and reporting conversions that do not exist. */
 export abstract class ConversionBinder extends LookupBinder {
@@ -40,6 +69,26 @@ export abstract class ConversionBinder extends LookupBinder {
   /** The type that a target-typed expression has on its own, if any, such as a lambda's natural delegate type. */
   protected abstract naturalTypeOf(expression: Extract<BoundExpression, { kind: 'unbound' }>): Type | undefined;
 
+  /** The interpolated strings bound as strings, which convert to FormattableString, IFormattable, and handler types. */
+  protected readonly interpolations = new WeakMap<BoundExpression, InterpolationSource>();
+
+  /**
+   * Binds the interpolated string conversion of an interpolated string to a type that `interpolationTargetOf` names,
+   * whose handler constructor also takes the values of the call's other arguments that its parameter names.
+   */
+  protected abstract bindInterpolationConversion(
+    source: InterpolationSource,
+    target: NamedType,
+    handlerArguments: BoundExpression[],
+    row: number
+  ): BoundExpression;
+
+  /** The interpolated string that an expression is, if it converts to the type by an interpolated string conversion. */
+  protected interpolationConvertingTo(expression: BoundExpression, target: Type): InterpolationSource | undefined {
+    const source = this.interpolations.get(expression);
+    return source && interpolationTargetOf(target) ? source : undefined;
+  }
+
   isConstant(expression: BoundExpression): expression is Extract<BoundExpression, { kind: 'constant' }> {
     return expression.kind === 'constant';
   }
@@ -50,6 +99,16 @@ export abstract class ConversionBinder extends LookupBinder {
 
   /** The implicit conversion of an expression to a type, including the conversions of constants, if any. */
   implicitConversionOf(expression: BoundExpression, target: Type): ConversionKind | undefined {
+    const standard = this.standardImplicitOf(expression, target);
+    if (standard) return standard;
+    if (expression.kind === 'unbound') return undefined;
+    if (this.interpolationConvertingTo(expression, target)) return 'interpolatedString';
+    const user = this.userConversion(expression, target, false);
+    return user && !('ambiguous' in user) ? 'userDefined' : undefined;
+  }
+
+  /** The standard implicit conversion of an expression to a type (C# spec §10.4.2), if any. */
+  private standardImplicitOf(expression: BoundExpression, target: Type): ConversionKind | undefined {
     if (expression.kind === 'unbound')
       return this.bindUnbound(expression, target, 'implicit', false) ? 'identity' : undefined;
     const kind = this.conversions.implicit(expression.type, target);
@@ -61,6 +120,137 @@ export abstract class ConversionBinder extends LookupBinder {
       if (isEnum(target) && isZeroConstant(expression)) return 'enumNumeric';
     }
     return undefined;
+  }
+
+  /**
+   * The user-defined conversion of an expression to a type (C# spec §10.5.4–10.5.5): the conversion operators of the
+   * source and target types and their bases whose parameter the expression converts to and whose result converts to
+   * the target by standard conversions, from the most specific source to the most specific target. An explicit
+   * conversion also takes `explicit` operators and standard explicit conversions around them, and a checked context
+   * prefers an operator's `checked` form. A lifted operator converts between the nullable forms of its value types.
+   */
+  protected userConversion(
+    expression: BoundExpression,
+    target: Type,
+    isExplicit: boolean
+  ): UserConversion | { ambiguous: UserConversion[] } | undefined {
+    const source = expression.type;
+    if (source.kind === 'error' || target.kind === 'error' || source.kind === 'void') return undefined;
+    const candidates = this.conversionCandidates(expression, target, isExplicit);
+    if (candidates.length === 0) return undefined;
+    const preferred = preferCheckedForms(candidates);
+    // The most encompassed source and the most encompassing target, unless one is the exact type (§10.5.3).
+    const sourceType = this.mostSpecificType(
+      preferred.map((candidate) => candidate.from),
+      source,
+      true
+    );
+    const targetType = this.mostSpecificType(
+      preferred.map((candidate) => candidate.to),
+      target,
+      false
+    );
+    if (!sourceType || !targetType) return { ambiguous: preferred };
+    const chosen = preferred.filter(
+      (candidate) => sameType(candidate.from, sourceType) && sameType(candidate.to, targetType)
+    );
+    if (chosen.length !== 1) {
+      const unlifted = chosen.filter((candidate) => !candidate.isLifted);
+      return unlifted.length === 1 ? unlifted[0] : { ambiguous: chosen };
+    }
+    return chosen[0];
+  }
+
+  /**
+   * The conversion operators of the source's and the target's types that apply (§10.5.4): those whose types the
+   * value and the target convert from and to, and the lifted forms of those between value types.
+   */
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  private conversionCandidates(expression: BoundExpression, target: Type, isExplicit: boolean): UserConversion[] {
+    const source = expression.type;
+    const owners = [withoutNullable(source), withoutNullable(target)].filter(
+      (type): type is NamedType =>
+        type.kind === 'named' && (type.symbol.kind === 'class' || type.symbol.kind === 'struct')
+    );
+    const names = isExplicit ? ['op_Implicit', 'op_Explicit'] : ['op_Implicit'];
+    if (isExplicit && this.checkedContext) names.push('op_CheckedExplicit');
+    const operators = owners.flatMap((owner) => names.flatMap((name) => this.lookupOperators(owner, name)));
+    const fromFits = (from: Type): boolean =>
+      sameType(source, from) ||
+      this.standardImplicitOf(expression, from) !== undefined ||
+      (isExplicit && this.conversions.explicit(source, from) !== undefined);
+    const toFits = (to: Type): boolean =>
+      sameType(to, target) ||
+      this.conversions.implicit(to, target) !== undefined ||
+      (isExplicit && this.conversions.explicit(to, target) !== undefined);
+    const candidates: UserConversion[] = [];
+    for (const { method, owner } of operators) {
+      const substitution = substitutionOf(owner);
+      const from = substitute(method.parameters[0]?.type ?? ERROR_TYPE, substitution);
+      const to = substitute(method.returnType, substitution);
+      if (candidates.some((candidate) => candidate.method === method)) continue;
+      if (fromFits(from) && toFits(to)) candidates.push({ method, owner, from, to, isLifted: false });
+      else if (
+        isPlainValueType(from) &&
+        isPlainValueType(to) &&
+        nullableUnderlying(source) &&
+        fromFits(this.nullableOf(from)) &&
+        toFits(this.nullableOf(to))
+      )
+        candidates.push({ method, owner, from: this.nullableOf(from), to: this.nullableOf(to), isLifted: true });
+    }
+    return candidates;
+  }
+
+  /** The type among some that every other converts to (a source) or from (a target), or the exact type if present. */
+  private mostSpecificType(types: Type[], exact: Type, isSource: boolean): Type | undefined {
+    return (
+      types.find((type) => sameType(type, exact)) ??
+      types.find((type) =>
+        types.every(
+          (other) =>
+            sameType(type, other) ||
+            (isSource ? this.conversions.implicit(type, other) : this.conversions.implicit(other, type)) !== undefined
+        )
+      )
+    );
+  }
+
+  /** Binds a user-defined conversion: the standard conversion to the operator's parameter, the call, and then the standard conversion of its result. */
+  private applyUserConversion(
+    expression: BoundExpression,
+    target: Type,
+    conversion: UserConversion,
+    isExplicit: boolean,
+    row: number
+  ): BoundExpression {
+    const mode: ConversionMode = isExplicit ? 'explicit' : 'implicit';
+    const { method, owner, from, to, isLifted } = conversion;
+    const operand = this.convert(expression, from, row, mode);
+    const parameterType = isLifted ? (nullableUnderlying(from) as Type) : from;
+    const call: BoundExpression = {
+      kind: 'call',
+      method,
+      receiver: undefined,
+      args: [{ kind: 'compoundOperand', type: parameterType, row }],
+      typeArgs: [],
+      owner,
+      isVirtual: false,
+      type: isLifted ? (nullableUnderlying(to) as Type) : to,
+      row,
+    };
+    const converted: BoundExpression = {
+      kind: 'convert',
+      operand,
+      conversion: 'userDefined',
+      from,
+      isExplicit,
+      userCall: isLifted ? this.convert(call, to, row) : call,
+      isLifted,
+      type: to,
+      row,
+    };
+    return sameType(to, target) ? converted : this.convert(converted, target, row, mode);
   }
 
   /** Whether a constant of an integral type converts implicitly to a narrower integral type, holding its value. */
@@ -76,7 +266,39 @@ export abstract class ConversionBinder extends LookupBinder {
     return false;
   }
 
-  /** Converts an expression to a type, reporting Roslyn's error when the conversion does not exist. */
+  /** The syntax of a late-bound operation's operand. */
+  lateOperand(index: number, position: Position): Expression {
+    return {
+      kind: 'name',
+      name: lateOperandName(index),
+      typeArgs: undefined,
+      row: position.row,
+      column: position.column,
+    };
+  }
+
+  /** An operation on `dynamic` values, which binds to the values' types when it runs. */
+  late(
+    syntax: Expression,
+    operands: BoundArgument[],
+    context: { fn: { typeContext: TypeContext | undefined } },
+    options: LateOptions = {}
+  ): BoundExpression {
+    return {
+      kind: 'late',
+      syntax,
+      operands,
+      receiver: options.receiver,
+      target: options.target,
+      typeContext: context.fn.typeContext,
+      isStatement: options.isStatement ?? false,
+      type: options.target?.type ?? this.dynamicType,
+      row: syntax.row,
+    };
+  }
+
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   convert(
     expression: BoundExpression,
     target: Type,
@@ -97,8 +319,37 @@ export abstract class ConversionBinder extends LookupBinder {
       this.error(row, 'CS0029', `型 'void' を '${displayType(target, true)}' に暗黙的に変換できません`);
       return { ...expression, type: ERROR_TYPE };
     }
-    const implicit = this.implicitConversionOf(expression, target);
-    const kind = implicit ?? (mode === 'explicit' ? this.conversions.explicit(expression.type, target) : undefined);
+    // A `dynamic` value converts to another type by its runtime type, as the runtime binder decides.
+    if (isDynamicType(expression.type) && !isDynamicType(target) && !sameType(target, this.objectType)) {
+      const at = { row, column: typeof position === 'number' ? 0 : position.column };
+      return this.late(
+        this.lateOperand(0, at),
+        [expression],
+        { fn: { typeContext: undefined } },
+        { target: { type: target, isExplicit: mode === 'explicit' } }
+      );
+    }
+    const interpolation = this.interpolationConvertingTo(expression, target);
+    if (interpolation) return this.bindInterpolationConversion(interpolation, target as NamedType, [], row);
+    const implicit = this.standardImplicitOf(expression, target);
+    const standard = implicit ?? (mode === 'explicit' ? this.conversions.explicit(expression.type, target) : undefined);
+    if (!standard) {
+      const user = this.userConversion(expression, target, mode === 'explicit');
+      if (user && 'ambiguous' in user) {
+        const [first, second] = user.ambiguous.map(
+          ({ method, owner }) =>
+            `${displayType(owner)}.${method.name === 'op_Implicit' ? 'implicit' : 'explicit'} operator ${displayType(method.returnType)}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`
+        );
+        this.error(
+          row,
+          'CS0457',
+          `'${displayType(expression.type, true)}' から '${displayType(target, true)}' へ変換するときの、あいまいなユーザー定義の変換 '${first}' および '${second}' です`
+        );
+        return { ...expression, type: ERROR_TYPE };
+      }
+      if (user) return this.applyUserConversion(expression, target, user, mode === 'explicit', row);
+    }
+    const kind = standard;
     if (!kind) {
       this.reportMissingConversion(expression, target, row, mode);
       return {
@@ -232,6 +483,7 @@ export abstract class ConversionBinder extends LookupBinder {
       const value = expression.value as NumericValue;
       if (
         isExplicit &&
+        this.checkedContext !== false &&
         from !== 'decimal' &&
         targetUnderlying !== 'decimal' &&
         !this.constantFits(value, from, targetUnderlying)
@@ -317,4 +569,23 @@ export function constantText(value: unknown): string {
     return String(value);
   }
   return String(value);
+}
+
+/** A value type that is not nullable, between whose types a conversion operator lifts to their nullable forms. */
+function isPlainValueType(type: Type): boolean {
+  return isValueType(type) && !nullableUnderlying(type);
+}
+
+/** The candidates without an `op_Explicit` whose `op_CheckedExplicit` of the same types a checked context prefers. */
+function preferCheckedForms(candidates: UserConversion[]): UserConversion[] {
+  return candidates.filter(
+    (candidate) =>
+      candidate.method.name !== 'op_Explicit' ||
+      !candidates.some(
+        (other) =>
+          other.method.name === 'op_CheckedExplicit' &&
+          sameType(other.from, candidate.from) &&
+          sameType(other.to, candidate.to)
+      )
+  );
 }

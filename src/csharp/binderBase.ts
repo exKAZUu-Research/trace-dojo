@@ -1,5 +1,7 @@
+// code-gauge-allow-file fileNcss -- The binder base keeps the type resolution that every later binder stage shares together.
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Position, TypeNode, UsingDirective } from './ast';
+import type { LambdaInfo } from './bound';
 import { Conversions, type WellKnownTypes } from './conversions';
 import { IMPLICIT_USINGS, NamespaceSymbol } from './namespaces';
 import {
@@ -7,6 +9,8 @@ import {
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
+  isRefLikeType,
+  isRestrictedType,
   MAX_TUPLE_ARITY,
   type NamedType,
   namedType,
@@ -69,9 +73,72 @@ const KEYWORD_TYPES: Record<string, SpecialType | 'void'> = {
 export interface TypeContext {
   namespace: NamespaceSymbol[];
   usings: NamespaceSymbol[][];
+  /** The `using` aliases in scope. */
+  aliases?: ReadonlyMap<string, UsingAlias>;
+  /** The types whose static members `using static` imports. */
+  staticUsings?: readonly NamedType[];
   type: TypeSymbol | undefined;
   /** The type parameters of the enclosing methods, innermost last. */
   methodTypeParameters: TypeParameterSymbol[];
+}
+
+/** What a `using` alias names: a type, or a namespace by its path. */
+export type UsingAlias =
+  | { kind: 'type'; type: Type }
+  | { kind: 'namespace'; path: string[]; namespaces: NamespaceSymbol[] };
+
+/** The names that `using` directives bring into scope. */
+export interface Imports {
+  usings: NamespaceSymbol[][];
+  aliases: ReadonlyMap<string, UsingAlias>;
+  staticUsings: readonly NamedType[];
+}
+
+/** The imports of a compilation unit or namespace while its using directives are read. */
+interface MutableImports extends Imports {
+  aliases: Map<string, UsingAlias>;
+  staticUsings: NamedType[];
+}
+
+/** Imports of an inner scope before those of an outer one, whose aliases the inner ones hide. */
+function mergeImports(inner: Imports, outer: Imports): Imports {
+  return {
+    usings: [...inner.usings, ...outer.usings],
+    aliases: new Map([...outer.aliases, ...inner.aliases]),
+    staticUsings: [...inner.staticUsings, ...outer.staticUsings],
+  };
+}
+
+/** The dotted path of a using's target when it names a namespace or a non-generic type, with `global::` dropped. */
+function usingPath(node: TypeNode): string[] | undefined {
+  if (node.kind === 'namedType') return node.typeArgs ? undefined : [node.name];
+  if (node.kind === 'aliasQualifiedType') return node.alias === 'global' && !node.typeArgs ? [node.name] : undefined;
+  if (node.kind === 'qualifiedType' && !node.typeArgs) {
+    const left = usingPath(node.left);
+    return left ? [...left, node.name] : undefined;
+  }
+  return undefined;
+}
+
+/** The operations whose overflow a `checked` context makes throw. */
+const OVERFLOW_CHECKED_KINDS = new Set(['binary', 'unary', 'convert']);
+
+/** Marks the operations of a bound tree that no inner context marked, descending into the lambdas it contains. */
+export function markOverflowChecks(node: unknown, isChecked: boolean, seen = new Set<object>()): void {
+  if (typeof node !== 'object' || node === null || seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) markOverflowChecks(item, isChecked, seen);
+    return;
+  }
+  if (Object.getPrototypeOf(node) !== Object.prototype) return;
+  const record = node as Record<string, unknown> & { kind?: string; isChecked?: boolean };
+  if (record.kind && OVERFLOW_CHECKED_KINDS.has(record.kind) && record.isChecked === undefined)
+    record.isChecked = isChecked;
+  if (record.kind === 'lambda') markOverflowChecks((record.lambda as LambdaInfo).method.body, isChecked, seen);
+  for (const [key, value] of Object.entries(record)) {
+    if (key !== 'type' && key !== 'node' && key !== 'context') markOverflowChecks(value, isChecked, seen);
+  }
 }
 
 /** The library's namespaces and the types the compiler knows by role, shared by every compilation. */
@@ -139,6 +206,25 @@ export class BinderBase {
     if (this.diagnostics.length >= 200) throw new TooManyErrors();
   }
 
+  /** The diagnostics of reference lifetimes, which Roslyn reports after the rest of its member's binding errors. */
+  private readonly refSafetyDiagnostics = new WeakSet<object>();
+
+  /** Reports an error of a reference's lifetime (`return ref` of a local), which a member reports last. */
+  protected refSafetyError(position: Position | number, code: string, message: string): void {
+    this.error(position, code, message);
+    const diagnostic = this.diagnostics.at(-1);
+    if (diagnostic) this.refSafetyDiagnostics.add(diagnostic);
+  }
+
+  /** Moves the member's reference lifetime errors after its other binding errors, as Roslyn's separate pass orders them. */
+  protected flushRefSafetyDiagnostics(): void {
+    const late = this.diagnostics.filter((diagnostic) => this.refSafetyDiagnostics.has(diagnostic));
+    if (late.length === 0) return;
+    const rest = this.diagnostics.filter((diagnostic) => !this.refSafetyDiagnostics.has(diagnostic));
+    this.diagnostics.splice(0, this.diagnostics.length, ...rest, ...late);
+    for (const diagnostic of late) this.refSafetyDiagnostics.delete(diagnostic);
+  }
+
   /**
    * Runs a binding whose result only informs another binding, which reports the diagnostics itself: those of this one
    * are dropped, and a binding that stops compiling gives undefined.
@@ -197,41 +283,178 @@ export class BinderBase {
     return namedType(this.wellKnown.nullable, [type]);
   }
 
-  tupleType(elements: Type[], names?: (string | undefined)[]): NamedType {
+  /** @param row Where the program writes the tuple, whose element types are checked as type arguments there. */
+  tupleType(elements: Type[], names?: (string | undefined)[], row?: number): NamedType {
     const symbol = this.library.valueTuples.get(elements.length);
     if (!symbol) this.unsupported(0, `要素が${MAX_TUPLE_ARITY + 1}個以上のタプル`);
+    if (row !== undefined) {
+      const owner = `(${symbol.typeParameters.map((parameter) => parameter.name).join(', ')})`;
+      for (const [index, element] of elements.entries())
+        this.checkTypeArgumentKind(element, `T${index + 1}`, owner, row);
+    }
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;
   }
 
-  /** The namespaces that a list of `using` directives imports, with the implicit ones of a file-based app. */
-  protected resolveUsings(usings: UsingDirective[], withImplicit = true): NamespaceSymbol[][] {
-    const result: NamespaceSymbol[][] = withImplicit ? IMPLICIT_USINGS.map((path) => this.namespacesAt(path)) : [];
-    for (const using of usings) {
-      const namespaces = this.namespacesAt(using.name);
-      if (namespaces.length === 0) {
-        const type = this.findTypeByPath(using.name);
-        if (type) {
-          this.error(
-            using,
-            'CS0138',
-            `using namespace' ディレクティブは名前空間に対してのみ適用できます。'${using.name.join('.')}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください。`
-          );
-          continue;
-        }
-        const unavailable = unavailableNamespaceOf(using.name);
-        if (unavailable) this.unsupported(using, unavailable);
+  /**
+   * Whether the arithmetic being bound is in a `checked` (true) or an `unchecked` (false) context, or in neither, where
+   * constants are checked and the rest follows the program's `CheckForOverflowUnderflow`.
+   */
+  checkedContext: boolean | undefined;
+
+  /**
+   * Binds in a `checked` or `unchecked` context, marking the integral operations and conversions that the binding made
+   * and that no inner context marked, which is lexical, as C# spec §12.8.20 says: lambdas written inside it are in it.
+   */
+  inCheckedContext<T>(isChecked: boolean, bind: () => T): T {
+    const saved = this.checkedContext;
+    this.checkedContext = isChecked;
+    try {
+      const result = bind();
+      markOverflowChecks(result, isChecked);
+      return result;
+    } finally {
+      this.checkedContext = saved;
+    }
+  }
+
+  /** Whether the program imports the implicit global usings of a file-based app, as it does unless it turns them off. */
+  implicitUsings = true;
+  private readonly importsCache = new Map<readonly UsingDirective[], Imports>();
+  private globalImportsCache: Imports | undefined;
+
+  /**
+   * The names that the compilation unit's global usings and the implicit usings bring into every scope, which also
+   * resolve the targets of the other `using` directives.
+   */
+  protected globalImports(unitUsings: readonly UsingDirective[]): Imports {
+    if (this.globalImportsCache) return this.globalImportsCache;
+    const implicit: Imports = {
+      usings: this.implicitUsings ? IMPLICIT_USINGS.map((path) => this.namespacesAt(path)) : [],
+      aliases: new Map(),
+      staticUsings: [],
+    };
+    this.globalImportsCache = implicit;
+    const globals = unitUsings.filter((using) => using.isGlobal);
+    const firstLocal = unitUsings.findIndex((using) => !using.isGlobal);
+    for (const using of unitUsings.slice(firstLocal === -1 ? unitUsings.length : firstLocal))
+      if (using.isGlobal)
         this.error(
           using,
-          'CS0246',
-          `型または名前空間の名前 '${using.name[0]}' が見つかりませんでした (using ディレクティブまたはアセンブリ参照が指定されていることを確認してください)`
+          'CS8915',
+          'グローバル using ディレクティブは、すべての非グローバル using ディレクティブの前に指定する必要があります。'
         );
-        continue;
-      }
-      result.push(namespaces);
+    this.globalImportsCache = mergeImports(this.importUsings(globals, [this.userRoot, this.library.root]), implicit);
+    return this.globalImportsCache;
+  }
+
+  /**
+   * The names that the non-global `using` directives of a compilation unit or a namespace import, whose targets resolve
+   * in the namespace with only the global usings (C# spec §14.5: using directives do not affect each other).
+   */
+  protected resolveUsings(usings: readonly UsingDirective[], namespace: NamespaceSymbol[]): Imports {
+    const cached = this.importsCache.get(usings);
+    if (cached) return cached;
+    const imports = this.importUsings(
+      usings.filter((using) => !using.isGlobal),
+      namespace
+    );
+    this.importsCache.set(usings, imports);
+    return imports;
+  }
+
+  /** Sets what a declaration's context imports: its namespaces' usings, innermost first, then the unit's. */
+  protected importInto(
+    context: TypeContext,
+    levels: readonly { usings: readonly UsingDirective[]; namespace: NamespaceSymbol[] }[],
+    unitUsings: readonly UsingDirective[]
+  ): void {
+    let imports = this.globalImports(unitUsings);
+    imports = mergeImports(this.resolveUsings(unitUsings, [this.userRoot, this.library.root]), imports);
+    for (const level of levels) {
+      imports = mergeImports(this.resolveUsings(level.usings, level.namespace), imports);
     }
-    return result;
+    context.usings = imports.usings;
+    context.aliases = imports.aliases;
+    context.staticUsings = imports.staticUsings;
+  }
+
+  private importUsings(usings: readonly UsingDirective[], namespace: NamespaceSymbol[]): Imports {
+    const imports: MutableImports = { usings: [], aliases: new Map(), staticUsings: [] };
+    const global = this.globalImportsCache;
+    const context: TypeContext = {
+      namespace,
+      usings: global?.usings ?? [],
+      aliases: global?.aliases,
+      staticUsings: global?.staticUsings,
+      type: undefined,
+      methodTypeParameters: [],
+    };
+    for (const using of usings) {
+      if (using.kind === 'alias') this.importAlias(using, imports, context);
+      else if (using.kind === 'static') this.importStatic(using, imports, context);
+      else this.importNamespace(using, imports, context);
+    }
+    return imports;
+  }
+
+  /** `using A = X;`, naming a namespace or a type. */
+  private importAlias(
+    using: Extract<UsingDirective, { kind: 'alias' }>,
+    imports: MutableImports,
+    context: TypeContext
+  ): void {
+    if (imports.aliases.has(using.alias)) {
+      this.error(using, 'CS1537', `using エイリアス '${using.alias}' は以前にこの名前空間で使用されています`);
+      return;
+    }
+    const path = usingPath(using.name);
+    const namespaces = path ? this.namespacesAt(path) : [];
+    if (path && namespaces.length > 0) {
+      imports.aliases.set(using.alias, { kind: 'namespace', path, namespaces });
+      return;
+    }
+    // An alias whose target is missing still names it, so its uses report nothing more.
+    imports.aliases.set(using.alias, { kind: 'type', type: this.resolveType(using.name, context) });
+  }
+
+  /** `using static T;`, which a namespace may not be. */
+  private importStatic(using: UsingDirective, imports: MutableImports, context: TypeContext): void {
+    const path = usingPath(using.name);
+    if (path && this.namespacesAt(path).length > 0) {
+      this.error(
+        using.name,
+        'CS7007',
+        `using static' ディレクティブは型に対してのみ適用できます。'${path.join('.')}' は型ではなく名前空間です。代わりに 'using namespace' ディレクティブを使用することを検討してください。`
+      );
+      return;
+    }
+    const type = this.resolveType(using.name, context);
+    if (type.kind === 'named') imports.staticUsings.push(type);
+  }
+
+  /** `using N;`, which a type may not be. */
+  private importNamespace(using: UsingDirective, imports: MutableImports, context: TypeContext): void {
+    const path = usingPath(using.name);
+    const namespaces = path ? this.namespacesAt(path) : [];
+    if (namespaces.length > 0) {
+      imports.usings.push(namespaces);
+      return;
+    }
+    const display = path?.join('.') ?? '';
+    const type = path ? this.quietly(() => this.resolveType(using.name, context)) : undefined;
+    if (type && type.kind !== 'error') {
+      this.error(
+        using,
+        'CS0138',
+        `using namespace' ディレクティブは名前空間に対してのみ適用できます。'${display}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください。`
+      );
+      return;
+    }
+    const unavailable = path ? unavailableNamespaceOf(path) : undefined;
+    if (unavailable) this.unsupported(using, unavailable);
+    this.resolveType(using.name, context);
   }
 
   /**
@@ -257,33 +480,95 @@ export class BinderBase {
     );
   }
 
-  private findTypeByPath(path: readonly string[]): TypeSymbol | undefined {
-    const namespaces = this.namespacesAt(path.slice(0, -1));
-    for (const namespace of namespaces) {
-      const found = namespace.types.get(path.at(-1) as string)?.[0];
-      if (found) return found;
-    }
-    return undefined;
+  /** `dynamic`, whose operations bind at run time to the types of the values. */
+  get dynamicType(): NamedType {
+    return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Dynamic'));
+  }
+
+  /** Resolves a method's return type, noting a method that returns by reference (`ref T`, `ref readonly T`). */
+  resolveReturnType(
+    node: TypeNode,
+    context: TypeContext,
+    method: { returnsByRef: 'ref' | 'readonly' | undefined }
+  ): Type {
+    if (node.kind !== 'refType') return this.checkReturnType(this.resolveType(node, context), node);
+    method.returnsByRef = node.isReadonly ? 'readonly' : 'ref';
+    return this.checkReturnType(this.resolveType(node.type, context), node);
+  }
+
+  /** Reports a `TypedReference` return type, which C# allows no method or delegate. */
+  checkReturnType(type: Type, position: Position): Type {
+    if (isRestrictedType(type))
+      this.error(
+        position,
+        'CS1599',
+        `メソッド、デリゲート、または関数ポインターの戻り値の型を '${displayType(type)}' にすることはできません`
+      );
+    return type;
+  }
+
+  /** Reports a pointer outside an unsafe context (CS0214). */
+  reportOutsideUnsafe(position: Position | number): void {
+    this.error(
+      position,
+      'CS0214',
+      'ポインターおよび固定サイズ バッファーは、unsafe コンテキストでのみ使用することができます'
+    );
   }
 
   /** Resolves a type in a declaration's context, reporting the names it cannot find. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
       case 'predefinedType': {
         return this.resolvePredefinedType(node);
+      }
+      case 'refType': {
+        // Declarations that may be references take the type apart; elsewhere Roslyn's parser rejects the `ref`.
+        this.error(node, 'CS1073', "予期しないトークン 'ref'");
+        return this.resolveType(node.type, context);
+      }
+      case 'pointerType': {
+        if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+        const element =
+          node.element.kind === 'predefinedType' && node.element.name === 'void'
+            ? namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Void'))
+            : this.resolveType(node.element, context);
+        return namedType(this.library.typeNamed('System.Runtime.CompilerServices.__Pointer', 1), [element]);
+      }
+      case 'functionPointerType': {
+        // A function pointer of managed calling convention calls as the delegate of its signature does.
+        if (!node.isUnsafe) this.reportOutsideUnsafe(node);
+        const parameters = node.parameters.map((parameter) => this.resolveType(parameter, context));
+        const returnType = this.resolveType(node.returnType, context);
+        return returnType.kind === 'void'
+          ? namedType(this.library.typeNamed('System.Action', parameters.length), parameters)
+          : namedType(this.library.typeNamed('System.Func', parameters.length + 1), [...parameters, returnType]);
       }
       case 'varType': {
         // `var` outside a declaration of a local names a type called `var`, which no program declares.
         return this.resolveNamedType(node, 'var', [], context);
       }
       case 'namedType': {
-        if (node.name === 'dynamic' && !node.typeArgs) this.unsupported(node, '`dynamic`');
+        if (node.name === 'dynamic' && !node.typeArgs && !this.findTypeInScope('dynamic', 0, context))
+          return this.dynamicType;
         if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
+        if (node.unboundArity !== undefined && this.findTypeInScope(node.name, node.unboundArity, context)) {
+          this.error(node, 'CS7003', 'バインドされていないジェネリック名の予期しない使用方法です');
+          return ERROR_TYPE;
+        }
         const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
         return this.resolveNamedType(node, node.name, args, context);
       }
       case 'qualifiedType': {
         return this.resolveQualifiedType(node, context);
+      }
+      case 'aliasQualifiedType': {
+        const namespaces = this.aliasNamespaces(node.alias, node, context);
+        if (!namespaces) return ERROR_TYPE;
+        const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
+        return this.typeInNamespaces(node, namespaces.path, namespaces.namespaces, node.name, args);
       }
       case 'arrayType': {
         return this.resolveArrayType(node, context);
@@ -298,7 +583,8 @@ export class BinderBase {
         }
         return this.tupleType(
           node.elements.map((element) => this.resolveType(element.type, context)),
-          node.elements.map((element) => element.name)
+          node.elements.map((element) => element.name),
+          node.row
         );
       }
     }
@@ -309,7 +595,7 @@ export class BinderBase {
     if (special === 'void') return VOID_TYPE;
     if (special) return this.specialType(special);
     if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
-    if (node.name === 'dynamic') this.unsupported(node, '`dynamic`');
+    if (node.name === 'dynamic') return this.dynamicType;
     return ERROR_TYPE;
   }
 
@@ -322,13 +608,17 @@ export class BinderBase {
     if (element.kind === 'named' && element.symbol.isStatic) {
       this.error(node, 'CS0719', `'${displayType(element)}': 配列要素をスタティック型にすることはできません`);
     }
+    if (isRefLikeType(element))
+      this.error(node, 'CS0611', `配列要素を '${displayType(element)}' 型にすることはできません`);
     return arrayType(element, node.rank);
   }
 
   private resolveNullableType(node: Extract<TypeNode, { kind: 'nullableType' }>, context: TypeContext): Type {
     const inner = this.resolveType(node.inner, context);
-    if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable')
+    if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable') {
+      this.checkTypeArgumentKind(inner, 'T', 'Nullable<T>', node.row);
       return this.nullableOf(inner);
+    }
     if (inner.kind === 'typeParameter' && inner.symbol.hasValueConstraint) return this.nullableOf(inner);
     // A nullable reference type is the type itself to the runtime and to conversions, which only Roslyn's messages show.
     if (inner.kind === 'named' || inner.kind === 'array' || inner.kind === 'typeParameter')
@@ -336,29 +626,10 @@ export class BinderBase {
     return inner;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private resolveQualifiedType(node: Extract<TypeNode, { kind: 'qualifiedType' }>, context: TypeContext): Type {
     const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
-    const path = qualifiedPath(node.left);
-    if (path) {
-      const namespaces = this.namespacesAt(path);
-      if (namespaces.length > 0) {
-        for (const namespace of namespaces) {
-          const found = namespace.findType(node.name, args.length);
-          if (found) return this.construct(node, found, args);
-        }
-        const unavailable =
-          this.unavailableType([...path, node.name].join('.'), node.name) ??
-          unavailableDotnetNamespace([...path, node.name]);
-        if (unavailable) this.unsupported(node, unavailable);
-        this.error(
-          node,
-          'CS0234',
-          `型または名前空間の名前 '${node.name}' が名前空間 '${path.join('.')}' に存在しません (アセンブリ参照があることを確認してください)`
-        );
-        return ERROR_TYPE;
-      }
-    }
+    const namespaces = this.namespaceOfQualifier(node.left, context);
+    if (namespaces) return this.typeInNamespaces(node, namespaces.path, namespaces.namespaces, node.name, args);
     const left = this.resolveType(node.left, context);
     if (left.kind === 'error') return ERROR_TYPE;
     if (left.kind === 'named') {
@@ -373,8 +644,85 @@ export class BinderBase {
     return ERROR_TYPE;
   }
 
+  /**
+   * The namespaces a qualifier names, when it names one: a dotted path from the global namespace, `global::N`, or a
+   * namespace alias, which takes the place of the path's first name.
+   */
+  private namespaceOfQualifier(
+    node: TypeNode,
+    context: TypeContext
+  ): { path: string[]; namespaces: NamespaceSymbol[] } | undefined {
+    if (node.kind === 'aliasQualifiedType' && !node.typeArgs) {
+      const outer = this.aliasNamespaces(node.alias, node, context);
+      if (!outer) return undefined;
+      const path = [...outer.path, node.name];
+      const namespaces = this.namespacesAt(path);
+      return namespaces.length > 0 ? { path, namespaces } : undefined;
+    }
+    let path = qualifiedPath(node);
+    if (!path) return undefined;
+    const alias = context.aliases?.get(path[0]);
+    if (alias?.kind === 'namespace') path = [...alias.path, ...path.slice(1)];
+    else if (alias) return undefined;
+    const namespaces = this.namespacesAt(path);
+    return namespaces.length > 0 ? { path, namespaces } : undefined;
+  }
+
+  /** The namespaces of the left side of `alias::name`, reporting an alias that names none. */
+  protected aliasNamespaces(
+    alias: string,
+    position: Position,
+    context: TypeContext
+  ): { path: string[]; namespaces: NamespaceSymbol[] } | undefined {
+    if (alias === 'global') return { path: [], namespaces: [this.userRoot, this.library.root] };
+    const target = context.aliases?.get(alias);
+    if (target?.kind === 'namespace') return target;
+    if (target)
+      this.error(
+        position,
+        'CS0431',
+        `エイリアスが型を参照しているため、エイリアス '${alias}' を '::' と使用できません。'.' を使用してください。`
+      );
+    else this.error(position, 'CS0432', `エイリアス '${alias}' が見つかりません`);
+    return undefined;
+  }
+
+  /** A type of a name in namespaces, reporting it as CS0234 when they lack it. */
+  private typeInNamespaces(
+    position: Position,
+    path: string[],
+    namespaces: NamespaceSymbol[],
+    name: string,
+    args: Type[]
+  ): Type {
+    for (const namespace of namespaces) {
+      const found = namespace.findType(name, args.length);
+      if (found) return this.construct(position, found, args);
+    }
+    // `global::Name` names a type of the global namespace, where .NET has none.
+    const unavailable =
+      (path.length > 0 ? this.unavailableType([...path, name].join('.'), name) : undefined) ??
+      unavailableDotnetNamespace([...path, name]);
+    if (unavailable) this.unsupported(position, unavailable);
+    if (path.length === 0) {
+      this.error(
+        position,
+        'CS0400',
+        `型名または名前空間名 '${name}' がグローバル名前空間に見つかりませんでした (アセンブリ参照が存在することを確認してください)`
+      );
+      return ERROR_TYPE;
+    }
+    this.error(
+      position,
+      'CS0234',
+      `型または名前空間の名前 '${name}' が名前空間 '${path.join('.')}' に存在しません (アセンブリ参照があることを確認してください)`
+    );
+    return ERROR_TYPE;
+  }
+
   /** Finds a type by its simple name, from the innermost scope out, as C#'s name lookup does. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   resolveNamedType(position: Position, name: string, args: Type[], context: TypeContext): Type {
     if (args.length === 0) {
       for (const parameter of context.methodTypeParameters.toReversed())
@@ -390,7 +738,11 @@ export class BinderBase {
       if (lookup.nested) return this.construct(position, lookup.nested.symbol, [...lookup.nested.outerArgs, ...args]);
       inaccessible ??= lookup.inaccessible;
     }
+    const alias = args.length === 0 ? context.aliases?.get(name) : undefined;
+    if (alias?.kind === 'type') return alias.type;
     const found = this.findTypeInScope(name, args.length, context);
+    if (found?.obsoleteError !== undefined)
+      this.error(position, 'CS0619', `'${displayTypeSymbol(found)}' は旧形式です ('${found.obsoleteError}')`);
     if (found) return this.construct(position, found, args);
     if (inaccessible) {
       this.reportInaccessibleType(position, inaccessible.symbol);
@@ -401,7 +753,7 @@ export class BinderBase {
       this.reportTypeArityMismatch(position, otherArity);
       return ERROR_TYPE;
     }
-    const unavailable = this.unavailableType(name, name);
+    const unavailable = this.unavailableType(name, name, context);
     if (unavailable) this.unsupported(position, unavailable);
     this.error(
       position,
@@ -423,12 +775,33 @@ export class BinderBase {
       );
   }
 
-  /** Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too. */
-  protected unavailableType(name: string, simpleName: string): string | undefined {
-    return unavailableTypeOf(name, simpleName, (fullName) => {
-      const parts = fullName.split('.');
-      return this.library.root.resolve(parts.slice(0, -1), false)?.types.has(parts.at(-1) as string) ?? false;
-    });
+  /**
+   * Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too; a simple name
+   * names one only through a namespace in scope of the context, as the name would bind to it in .NET.
+   */
+  protected unavailableType(name: string, simpleName: string, context?: TypeContext): string | undefined {
+    const inScope = context ? this.namespacePathsInScope(context) : new Set<string>();
+    return unavailableTypeOf(
+      name,
+      simpleName,
+      (fullName) => {
+        const parts = fullName.split('.');
+        return this.library.root.resolve(parts.slice(0, -1), false)?.types.has(parts.at(-1) as string) ?? false;
+      },
+      (namespace) => inScope.has(namespace)
+    );
+  }
+
+  /**
+   * The dotted paths of the namespaces whose types a simple name finds in a context: those around it and those its
+   * usings import, with the implicit usings that .NET has although the library lacks some of their namespaces.
+   */
+  private namespacePathsInScope(context: TypeContext): Set<string> {
+    const paths = new Set<string>();
+    for (const group of [...this.enclosingNamespaces(context), ...context.usings])
+      for (const namespace of group) paths.add(namespacePathOf(namespace).join('.'));
+    if (this.implicitUsings) for (const path of IMPLICIT_USINGS) paths.add(path.join('.'));
+    return paths;
   }
 
   /** Finds a type in the namespaces around a declaration and its usings; an arity of -1 matches any arity. */
@@ -517,9 +890,39 @@ export class BinderBase {
         `型 '${displayType(args[0])}' は、ジェネリック型のパラメーター 'T'、またはメソッド 'Nullable<T>' として使用するために、Null 非許容の値型でなければなりません`
       );
     }
-    if (args.length > 0 && symbol.special !== 'nullable')
+    const parameters = symbol.allTypeParameters;
+    const display = displayTypeSymbol(symbol);
+    const areKindsAllowed = args
+      .map((arg, index) =>
+        this.checkTypeArgumentKind(
+          arg,
+          parameters[index].name,
+          display,
+          position.row,
+          parameters[index].allowsRefStruct
+        )
+      )
+      .every(Boolean);
+    if (areKindsAllowed && args.length > 0 && symbol.special !== 'nullable')
       this.constraintChecks.push({ symbol, args, row: position.row });
     return namedType(symbol, args);
+  }
+
+  /** Reports a ref struct as a type argument, which only a type parameter with `allows ref struct` takes. */
+  checkTypeArgumentKind(arg: Type, parameter: string, owner: string, row: number, allowsRefStruct = false): boolean {
+    if (isRestrictedType(arg)) {
+      this.error(row, 'CS0306', `型 '${displayType(arg)}' は型引数として使用できません`);
+      return false;
+    }
+    if (isRefLikeType(arg) && !allowsRefStruct) {
+      this.error(
+        row,
+        'CS9244',
+        `'${displayType(arg)}' 型は、ジェネリック型またはメソッド '${owner}' のパラメーター '${parameter}' として使用するためには、ref 構造体または ref 構造体を許容する型パラメーターにすることはできません。`
+      );
+      return false;
+    }
+    return true;
   }
 }
 
@@ -542,10 +945,8 @@ function qualifiedPath(node: TypeNode): string[] | undefined {
 }
 
 const UNAVAILABLE_NAMESPACES: Record<string, string> = {
-  'System.IO': 'ファイルの読み書き（System.IO）',
   'System.Net': 'ネットワーク（System.Net）',
   'System.Threading': 'スレッド（System.Threading）',
-  'System.Threading.Tasks': '非同期処理（System.Threading.Tasks）',
   'System.Reflection': 'リフレクション（System.Reflection）',
   'System.Diagnostics': 'System.Diagnostics',
   'System.Runtime': 'System.Runtime',

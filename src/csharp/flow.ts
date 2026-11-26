@@ -9,7 +9,7 @@ import type {
   BoundPattern,
   BoundStatement,
 } from './bound';
-import { type FieldSymbol, LocalSymbol, type MethodSymbol, type Type } from './types';
+import { type FieldSymbol, isRefLikeType, LocalSymbol, type MethodSymbol, type Type } from './types';
 
 /** The locals definitely assigned at a point, or every local when the point is unreachable. */
 type State = Set<LocalSymbol> | 'unreachable';
@@ -26,6 +26,8 @@ export interface FlowDiagnostics {
   lambdaNotAllPathsReturn(delegateType: Type, row: number): void;
   fallsThrough(label: string, isLast: boolean, row: number): void;
   outNotAssigned(local: LocalSymbol, row: number): void;
+  /** A read of a ref struct local whose value an `await` or a `yield return` would have to keep. */
+  heldAcrossSuspension(local: LocalSymbol, row: number): void;
 }
 
 function union(a: State, b: State): State {
@@ -73,22 +75,16 @@ type SwitchSection = Extract<BoundStatement, { kind: 'switch' }>['sections'][num
 type LoopStatement = Extract<BoundStatement, { kind: 'while' | 'do' | 'for' | 'foreach' }>;
 type AccessExpression = Extract<
   BoundExpression,
-  {
-    kind: 'field' | 'element' | 'call' | 'property' | 'invokeDelegate' | 'conditionalAccess';
-  }
+  { kind: 'field' | 'element' | 'call' | 'property' | 'invokeDelegate' | 'conditionalAccess' }
 >;
 type CreationExpression = Extract<BoundExpression, { kind: 'new' | 'newArray' | 'newDelegate' | 'lambda' | 'with' }>;
 type OperatorExpression = Extract<
   BoundExpression,
-  {
-    kind: 'unary' | 'convert' | 'as' | 'throw' | 'binary' | 'logical' | 'is' | 'coalesce' | 'conditional' | 'switch';
-  }
+  { kind: 'unary' | 'convert' | 'as' | 'throw' | 'binary' | 'logical' | 'is' | 'coalesce' | 'conditional' | 'switch' }
 >;
 type AssignmentExpression = Extract<
   BoundExpression,
-  {
-    kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor';
-  }
+  { kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor' }
 >;
 
 /** A jump out of statements, with the state it carries to where it goes. */
@@ -109,6 +105,13 @@ export class FlowAnalyzer {
   private outParameters: LocalSymbol[] = [];
   /** The locals of the function being analyzed, which a call that never returns leaves assigned. */
   private functionLocals: LocalSymbol[] = [];
+  /**
+   * The ref struct locals that an `await` or a `yield return` took out of the assigned state, since a suspended
+   * function cannot keep them; a read of one before it is assigned again is an error of its own.
+   */
+  private readonly suspended = new Set<LocalSymbol>();
+  /** The states that the `goto`s analyzed so far carry to each label or switch section. */
+  private readonly gotoStates = new Map<object, State[]>();
 
   constructor(private readonly diagnostics: FlowDiagnostics) {}
 
@@ -158,6 +161,8 @@ export class FlowAnalyzer {
         return this.expression(statement.expression, state);
       }
       case 'localDeclaration': {
+        if (statement.refTarget)
+          return assign(this.reference(statement.refTarget, state, statement.row), statement.local);
         if (!statement.value) return state;
         return assign(this.expression(statement.value, state), statement.local);
       }
@@ -182,7 +187,11 @@ export class FlowAnalyzer {
         return 'unreachable';
       }
       case 'return': {
-        const after = statement.value ? this.expression(statement.value, state) : state;
+        const after = statement.refTarget
+          ? this.reference(statement.refTarget, state, statement.row)
+          : statement.value
+            ? this.expression(statement.value, state)
+            : state;
         this.checkOutParameters(after, statement.row);
         this.jumps.returns.push(after);
         return 'unreachable';
@@ -193,6 +202,31 @@ export class FlowAnalyzer {
       }
       case 'try': {
         return this.tryStatement(statement, state);
+      }
+      case 'labeled': {
+        // A label is reached by falling into it and by the `goto`s before it; one after it carries its state at least.
+        const entry = intersectAll(state, this.gotoStates.get(statement.label) ?? []);
+        return this.statement(statement.statement, entry);
+      }
+      case 'goto': {
+        if (!statement.target) return state;
+        const states = this.gotoStates.get(statement.target) ?? [];
+        states.push(state);
+        this.gotoStates.set(statement.target, states);
+        return 'unreachable';
+      }
+      case 'lock': {
+        return this.statement(statement.body, this.expression(statement.value, state));
+      }
+      case 'using': {
+        return this.statement(statement.body, state);
+      }
+      case 'yieldReturn': {
+        return this.suspend(this.expression(statement.value, state));
+      }
+      case 'yieldBreak': {
+        this.jumps.returns.push(state);
+        return 'unreachable';
       }
     }
   }
@@ -291,7 +325,9 @@ export class FlowAnalyzer {
     };
     let hasDefault = false;
     for (const [index, section] of statement.sections.entries()) {
-      const { entry, coversAll } = this.sectionEntry(section, afterValue);
+      const matched = this.sectionEntry(section, afterValue);
+      const { coversAll } = matched;
+      const entry = intersectAll(matched.entry, this.gotoStates.get(section) ?? []);
       if (coversAll) hasDefault = true;
       if (this.statements(section.statements, entry) !== 'unreachable') {
         const label = section.labels.at(-1);
@@ -383,6 +419,7 @@ export class FlowAnalyzer {
 
   /** The state after matching a pattern: when it matched, its variables are assigned. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private pattern(pattern: BoundPattern, state: State, matched: boolean): State {
     switch (pattern.kind) {
       case 'type':
@@ -398,6 +435,12 @@ export class FlowAnalyzer {
       }
       case 'or': {
         return state;
+      }
+      case 'list': {
+        if (!matched) return state;
+        let current = pattern.local ? assign(state, pattern.local) : state;
+        for (const sub of [...pattern.before, ...pattern.after]) current = this.pattern(sub, current, true);
+        return pattern.slice ? this.pattern(pattern.slice.pattern, current, true) : current;
       }
       case 'recursive': {
         if (!matched) return state;
@@ -448,6 +491,18 @@ export class FlowAnalyzer {
       case 'switch': {
         return this.operatorExpression(expression, state);
       }
+      case 'await': {
+        return this.suspend(this.expression(expression.operand, state));
+      }
+      case 'implicitIndex': {
+        return this.expression(expression.access, this.expressions(expression.setup, state));
+      }
+      case 'userLogical': {
+        // The right operand runs only when the test fails, so it assigns nothing definitely.
+        const left = this.expression(expression.left, state);
+        this.expression(expression.combine, left);
+        return left;
+      }
       case 'assign':
       case 'compoundAssign':
       case 'increment':
@@ -469,6 +524,50 @@ export class FlowAnalyzer {
         let current = state;
         for (const local of expression.locals) current = assign(current, local);
         return this.expression(expression.value, this.expressions(expression.sideEffects, current));
+      }
+      default: {
+        return this.lessCommonExpression(expression, state);
+      }
+    }
+  }
+
+  /** The expressions of `dynamic`, ref reassignment, and pointers, and the ones that read nothing. */
+  private lessCommonExpression(expression: BoundExpression, state: State): State {
+    switch (expression.kind) {
+      case 'late': {
+        return this.arguments(expression.operands, state);
+      }
+      case 'refAssign':
+      case 'makeRef': {
+        return this.reference(expression.target, state, expression.row);
+      }
+      case 'refFieldAssign': {
+        const before = this.targetPrefix(expression.field, state);
+        return this.assignTarget(expression.field, this.reference(expression.target, before, expression.row));
+      }
+      case 'refType':
+      case 'refValue': {
+        return this.expression(expression.operand, state);
+      }
+      case 'addressOf': {
+        // `&x` needs no value in x, and x is definitely assigned after it (C# spec §24.6.5).
+        return this.assignTarget(expression.target, this.targetPrefix(expression.target, state));
+      }
+      case 'deref': {
+        return this.expression(expression.pointer, state);
+      }
+      case 'pointerArith': {
+        return this.expression(expression.offset, this.expression(expression.pointer, state));
+      }
+      case 'pointerDiff':
+      case 'pointerCompare': {
+        return this.expression(expression.right, this.expression(expression.left, state));
+      }
+      case 'stackalloc': {
+        return this.expressions(expression.values ?? [], this.expression(expression.length, state));
+      }
+      case 'fixedAddress': {
+        return this.expression(expression.value, state);
       }
       default: {
         return state;
@@ -668,8 +767,24 @@ export class FlowAnalyzer {
     return fields.length > 0 && fields.every((field) => isAssigned(state, this.fieldOf(local, field)));
   }
 
+  /** The state after a suspension, which leaves no ref struct local assigned. */
+  private suspend(state: State): State {
+    if (state === 'unreachable') return state;
+    const kept = new Set<LocalSymbol>();
+    for (const local of state) {
+      if (isRefLikeType(local.type) && !local.isParameter) this.suspended.add(local);
+      else kept.add(local);
+    }
+    return kept;
+  }
+
   private read(local: LocalSymbol, state: State, row: number): void {
-    if (local.isHidden || isAssigned(state, local) || this.reported.has(local)) return;
+    if (local.isHidden || isAssigned(state, local)) return;
+    if (this.suspended.has(local)) {
+      this.diagnostics.heldAcrossSuspension(local, row);
+      return;
+    }
+    if (this.reported.has(local)) return;
     if (isStructLocal(local) && this.fieldsAssigned(local, state)) return;
     this.reported.add(local);
     this.diagnostics.unassigned(local, row);
@@ -697,10 +812,34 @@ export class FlowAnalyzer {
         const current = target.receiver ? this.expression(target.receiver, state) : state;
         return this.arguments(target.args, current);
       }
+      case 'call':
+      case 'invokeDelegate': {
+        return this.expression(target, state);
+      }
+      case 'deref': {
+        return this.expression(target.pointer, state);
+      }
+      case 'refValue': {
+        return this.expression(target.operand, state);
+      }
+      case 'refConditional': {
+        const condition = this.condition(target.condition, state);
+        return intersect(
+          this.reference(target.whenTrue, condition.whenTrue, target.row),
+          this.reference(target.whenFalse, condition.whenFalse, target.row)
+        );
+      }
       default: {
         return state;
       }
     }
+  }
+
+  /** The state after taking a reference to a variable, which must be definitely assigned, as a `ref` argument is. */
+  private reference(target: BoundLValue, state: State, row: number): State {
+    const current = this.targetPrefix(target, state);
+    if (target.kind === 'local') this.read(target.local, current, row);
+    return current;
   }
 
   private assignTarget(target: BoundLValue, state: State): State {
@@ -751,6 +890,7 @@ export class FlowAnalyzer {
     for (const entry of entries) {
       if (entry.kind === 'collectionAdd') current = this.expression(entry.call, current);
       else if (entry.value) current = this.expression(entry.value, current);
+      else if (entry.refTarget) current = this.reference(entry.refTarget, current, entry.target.row);
       else if (entry.nested) current = this.initializer(entry.nested, current);
     }
     return current;
@@ -766,7 +906,9 @@ export class FlowAnalyzer {
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
     const start = state === 'unreachable' ? state : new Set([...state, ...parameters]);
     const end = this.statement(method.body, start);
-    if (end !== 'unreachable' && method.returnType.kind !== 'void' && method.returnType.kind !== 'error') {
+    // An async lambda returns what its task type wraps.
+    const returnType = method.async ? method.async.resultType : method.returnType;
+    if (end !== 'unreachable' && returnType.kind !== 'void' && returnType.kind !== 'error') {
       this.diagnostics.lambdaNotAllPathsReturn(delegateType, method.row);
     }
     this.jumps = savedJumps;

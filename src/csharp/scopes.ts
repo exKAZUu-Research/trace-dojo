@@ -1,4 +1,5 @@
 import type { TypeContext } from './binderBase';
+import type { BoundStatement, LabelSymbol } from './bound';
 import { type LocalSymbol, type MethodSymbol, type NamedType, type Type } from './types';
 
 /** The function whose body is being bound: a method, an accessor, a lambda, or a local function. */
@@ -17,6 +18,14 @@ export class FunctionScope {
   catchDepth = 0;
   /** How many finally blocks enclose the statement being bound, which control may not leave. */
   finallyDepth = 0;
+  /** How many lock statements enclose the statement being bound, where `await` may not stand. */
+  lockDepth = 0;
+  /** How many try blocks with catch clauses enclose the statement being bound, where `yield return` may not stand. */
+  tryWithCatchDepth = 0;
+  /** For an iterator, the type of the values its `yield return` statements produce. */
+  iteratorElementType: Type | undefined;
+  /** The switch statements around the statement being bound, innermost last, which `goto case` jumps within. */
+  readonly switches: PendingSwitch[] = [];
 
   // code-gauge-allow functionParameterCount -- The values that the operation needs, which share no object.
   constructor(
@@ -43,6 +52,12 @@ export class FunctionScope {
   }
 }
 
+/** A switch statement being bound, with the `goto case` and `goto default` statements to aim once its sections exist. */
+export interface PendingSwitch {
+  governingType: Type;
+  gotos: { statement: Extract<BoundStatement, { kind: 'goto' }>; value: unknown; row: number; text: string }[];
+}
+
 /** A block's names: its locals and local functions, and the names declared later in it, which may not be used yet. */
 export class LocalScope {
   readonly variables = new Map<string, LocalSymbol>();
@@ -50,6 +65,8 @@ export class LocalScope {
   /** The names a block declares anywhere in it, which hide outer names from its start. */
   readonly declaredLater = new Set<string>();
   readonly locals: LocalSymbol[] = [];
+  /** The labels of the block's statements, which `goto` in the block and the blocks inside it may jump to. */
+  readonly labels = new Map<string, LabelSymbol>();
 
   constructor(
     readonly parent: LocalScope | undefined,
@@ -87,4 +104,31 @@ export class LocalScope {
     }
     return false;
   }
+}
+
+/** Makes a function and those around it up to a local's owner capture the local, returning whether any did not yet. */
+export function captureUpToOwner(fn: FunctionScope, local: LocalSymbol): boolean {
+  let isChanged = false;
+  for (
+    let current: FunctionScope | undefined = fn;
+    current && current.method !== local.owner;
+    current = current.outer
+  ) {
+    if (current.captures.has(local)) continue;
+    current.captures.add(local);
+    local.isCaptured = true;
+    isChanged = true;
+  }
+  return isChanged;
+}
+
+/** The type parameter of a name that the enclosing method or types declare, from the innermost out. */
+export function typeParameterNamed(name: string, typeContext: TypeContext): Type | undefined {
+  for (const parameter of typeContext.methodTypeParameters.toReversed())
+    if (parameter.name === name) return parameter.type;
+  for (let type = typeContext.type; type; type = type.containing) {
+    const parameter = type.typeParameters.find((candidate) => candidate.name === name);
+    if (parameter) return parameter.type;
+  }
+  return undefined;
 }

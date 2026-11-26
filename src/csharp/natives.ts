@@ -156,7 +156,33 @@ export const OPERATOR_NAMES: Record<string, string> = {
   '~': 'op_OnesComplement',
   '++': 'op_Increment',
   '--': 'op_Decrement',
+  true: 'op_True',
+  false: 'op_False',
+  implicit: 'op_Implicit',
+  explicit: 'op_Explicit',
 };
+
+/** The names of the instance operators that C# 14 lets a type declare for compound assignment and `++`/`--`. */
+export const ASSIGNMENT_OPERATOR_NAMES: Record<string, string> = {
+  '+=': 'op_AdditionAssignment',
+  '-=': 'op_SubtractionAssignment',
+  '*=': 'op_MultiplicationAssignment',
+  '/=': 'op_DivisionAssignment',
+  '%=': 'op_ModulusAssignment',
+  '&=': 'op_BitwiseAndAssignment',
+  '|=': 'op_BitwiseOrAssignment',
+  '^=': 'op_ExclusiveOrAssignment',
+  '<<=': 'op_LeftShiftAssignment',
+  '>>=': 'op_RightShiftAssignment',
+  '>>>=': 'op_UnsignedRightShiftAssignment',
+  '++': 'op_IncrementAssignment',
+  '--': 'op_DecrementAssignment',
+};
+
+/** The name of an operator's `checked` form, which a checked context prefers (`op_Addition` → `op_CheckedAddition`). */
+export function checkedOperatorName(name: string): string {
+  return name.replace(/^op_/, 'op_Checked');
+}
 
 /** The names of unary operators, which share tokens with binary ones. */
 export const UNARY_OPERATOR_NAMES: Record<string, string> = {

@@ -1,6 +1,26 @@
 import { MAX_TUPLE_ARITY } from '../types';
 
 /**
+ * The generic math factories that a numeric type has as its own statics, such as `long.CreateChecked(5)`. .NET
+ * constrains the type argument to `INumberBase<TOther>`, which this library lacks, so a struct stands for it.
+ */
+const CREATE_FROM_NUMBER = (keyword: string): string =>
+  ['CreateChecked', 'CreateSaturating', 'CreateTruncating']
+    .map((name) => `public static ${keyword} ${name}<TOther>(TOther value) where TOther : struct;`)
+    .join(' ');
+
+/** The members of the signed integer types that the unsigned ones implement only explicitly, from INumberBase. */
+const SIGNED_INTEGER_MEMBERS = (keyword: string): string =>
+  [
+    `public static ${keyword} Abs(${keyword} value);`,
+    `public static bool IsNegative(${keyword} value);`,
+    `public static bool IsPositive(${keyword} value);`,
+    `public static ${keyword} CopySign(${keyword} value, ${keyword} sign);`,
+    `public static ${keyword} MaxMagnitude(${keyword} x, ${keyword} y);`,
+    `public static ${keyword} MinMagnitude(${keyword} x, ${keyword} y);`,
+  ].join(' ');
+
+/**
  * The declarations of the `System` library types that programs use, in C#. Members without bodies are implemented
  * natively (see `natives*.ts`); their signatures follow .NET 10, so that overload resolution picks the same members.
  */
@@ -28,6 +48,31 @@ namespace System {
     public string? Namespace { get; }
     public override string ToString();
   }
+  public readonly ref struct ReadOnlySpan<T> {
+    public ReadOnlySpan(T[]? array);
+    public static ReadOnlySpan<T> Empty { get; }
+    public int Length { get; }
+    public bool IsEmpty { get; }
+    public ref readonly T this[int index] { get; }
+    public T[] ToArray();
+    public ReadOnlySpan<T> Slice(int start);
+    public ReadOnlySpan<T> Slice(int start, int length);
+    public Enumerator GetEnumerator();
+    public override string ToString();
+    public static bool operator ==(ReadOnlySpan<T> left, ReadOnlySpan<T> right);
+    public static bool operator !=(ReadOnlySpan<T> left, ReadOnlySpan<T> right);
+    public static implicit operator ReadOnlySpan<T>(T[]? array);
+    public ref struct Enumerator { public T Current { get; } public bool MoveNext(); }
+  }
+  public static class MemoryExtensions {
+    public static bool SequenceEqual<T>(this ReadOnlySpan<T> span, ReadOnlySpan<T> other) where T : IEquatable<T>;
+  }
+  public ref struct TypedReference {
+    public static Type GetTargetType(TypedReference value);
+    public static object? ToObject(TypedReference value);
+    public override bool Equals(object? o);
+    public override int GetHashCode();
+  }
   public abstract class Enum : ValueType, IComparable, IFormattable {
     public bool HasFlag(Enum flag);
     public int CompareTo(object? target);
@@ -41,17 +86,42 @@ namespace System {
     public static TEnum Parse<TEnum>(string value, bool ignoreCase) where TEnum : struct;
     public static bool TryParse<TEnum>(string? value, out TEnum result) where TEnum : struct;
     public static bool TryParse<TEnum>(string? value, bool ignoreCase, out TEnum result) where TEnum : struct;
+    public static string? GetName(Type enumType, object value);
+    public static string[] GetNames(Type enumType);
+    public static Array GetValues(Type enumType);
+    public static bool IsDefined(Type enumType, object value);
+    public static object Parse(Type enumType, string value);
+    public static object Parse(Type enumType, string value, bool ignoreCase);
+    public static bool TryParse(Type enumType, string? value, out object? result);
+    public static bool TryParse(Type enumType, string? value, bool ignoreCase, out object? result);
+    public static Type GetUnderlyingType(Type enumType);
+    public static object ToObject(Type enumType, object value);
+    public static object ToObject(Type enumType, int value);
+    public static object ToObject(Type enumType, long value);
   }
   public interface IComparable { int CompareTo(object? obj); }
   public interface IComparable<in T> { int CompareTo(T? other); }
   public interface IEquatable<T> { bool Equals(T? other); }
   public interface IFormattable { string ToString(string? format, IFormatProvider? formatProvider); }
-  public interface IFormatProvider { }
+  public abstract class FormattableString : IFormattable {
+    protected FormattableString();
+    public abstract string Format { get; }
+    public abstract int ArgumentCount { get; }
+    public abstract object?[] GetArguments();
+    public abstract object? GetArgument(int index);
+    public abstract string ToString(IFormatProvider? formatProvider);
+    string IFormattable.ToString(string? ignored, IFormatProvider? formatProvider);
+    public override string ToString();
+    public static string Invariant(FormattableString formattable);
+    public static string CurrentCulture(FormattableString formattable);
+  }
+  public interface IFormatProvider { object? GetFormat(Type? formatType); }
   public interface IDisposable { void Dispose(); }
   public interface ICloneable { object Clone(); }
 
   public sealed class String : IComparable, IComparable<string?>, IEquatable<string?>, IEnumerable<char>, ICloneable {
     public static readonly string Empty = "";
+    public static implicit operator ReadOnlySpan<char>(string? value);
     public String(char c, int count);
     public String(char[]? value);
     public String(char[] value, int startIndex, int length);
@@ -125,6 +195,10 @@ namespace System {
     public char[] ToCharArray(int startIndex, int length);
     public string ToLower();
     public string ToLowerInvariant();
+    public bool IsNormalized();
+    public bool IsNormalized(System.Text.NormalizationForm normalizationForm);
+    public string Normalize();
+    public string Normalize(System.Text.NormalizationForm normalizationForm);
     public override string ToString();
     public string ToUpper();
     public string ToUpperInvariant();
@@ -137,7 +211,6 @@ namespace System {
     public string TrimStart();
     public string TrimStart(char trimChar);
     public string TrimStart(params char[]? trimChars);
-    public bool IsNormalized();
     public static int Compare(string? strA, string? strB);
     public static int Compare(string? strA, string? strB, bool ignoreCase);
     public static int Compare(string? strA, string? strB, StringComparison comparisonType);
@@ -159,6 +232,9 @@ namespace System {
     public static string Format(string format, object? arg0, object? arg1);
     public static string Format(string format, object? arg0, object? arg1, object? arg2);
     public static string Format(string format, params object?[] args);
+    public static string Format(IFormatProvider? provider, string format, object? arg0);
+    public static string Format(IFormatProvider? provider, string format, object? arg0, object? arg1);
+    public static string Format(IFormatProvider? provider, string format, object? arg0, object? arg1, object? arg2);
     public static string Format(IFormatProvider? provider, string format, params object?[] args);
     public static bool IsNullOrEmpty(string? value);
     public static bool IsNullOrWhiteSpace(string? value);
@@ -281,8 +357,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static ${keyword} Parse(string s);
     public static ${keyword} Parse(string s, IFormatProvider? provider);
+    public static ${keyword} Parse(string s, System.Globalization.NumberStyles style);
+    public static ${keyword} Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out ${keyword} result);
-    public static ${keyword} Abs(${keyword} value);
+    public static bool TryParse(string? s, IFormatProvider? provider, out ${keyword} result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out ${keyword} result);
     public static ${keyword} Clamp(${keyword} value, ${keyword} min, ${keyword} max);
     public static ${keyword} Max(${keyword} x, ${keyword} y);
     public static ${keyword} Min(${keyword} x, ${keyword} y);
@@ -296,10 +375,9 @@ namespace System {
     public static ${keyword} Log2(${keyword} value);
     public static ${keyword} RotateLeft(${keyword} value, int rotateAmount);
     public static ${keyword} RotateRight(${keyword} value, int rotateAmount);
-    public static bool IsNegative(${keyword} value);
-    public static bool IsPositive(${keyword} value);
     public static (${keyword} Quotient, ${keyword} Remainder) DivRem(${keyword} left, ${keyword} right);
-    public static ${keyword} CopySign(${keyword} value, ${keyword} sign);
+    ${min.startsWith('-') ? SIGNED_INTEGER_MEMBERS(keyword) : ''}
+    ${CREATE_FROM_NUMBER(keyword)}${keyword === 'int' ? 'public static long BigMul(int left, int right);' : keyword === 'uint' ? 'public static ulong BigMul(uint left, uint right);' : ''}
   }`;
     })
     .join('\n') +
@@ -325,7 +403,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static float Parse(string s);
     public static float Parse(string s, IFormatProvider? provider);
+    public static float Parse(string s, System.Globalization.NumberStyles style);
+    public static float Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out float result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out float result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out float result);
     public static bool IsNaN(float f);
     public static bool IsInfinity(float f);
     public static bool IsPositiveInfinity(float f);
@@ -343,6 +425,42 @@ namespace System {
     public static float Truncate(float x);
     public static float Sqrt(float x);
     public static float Pow(float x, float y);
+    public static float Round(float x, int digits);
+    public static float Round(float x, MidpointRounding mode);
+    public static float Round(float x, int digits, MidpointRounding mode);
+    public static int Sign(float value);
+    public static bool IsPositive(float value);
+    public static bool IsEvenInteger(float value);
+    public static bool IsOddInteger(float value);
+    public static bool IsPow2(float value);
+    public static bool IsNormal(float value);
+    public static bool IsSubnormal(float value);
+    public static bool IsRealNumber(float value);
+    public static float CopySign(float value, float sign);
+    public static float MaxMagnitude(float x, float y);
+    public static float MinMagnitude(float x, float y);
+    public static float Exp(float x);
+    public static float Log(float x);
+    public static float Log(float x, float newBase);
+    public static float Log2(float value);
+    public static float Log10(float x);
+    public static float Sin(float x);
+    public static float Cos(float x);
+    public static float Tan(float x);
+    public static float Asin(float x);
+    public static float Acos(float x);
+    public static float Atan(float x);
+    public static float Atan2(float y, float x);
+    public static float Sinh(float x);
+    public static float Cosh(float x);
+    public static float Tanh(float x);
+    public static float Cbrt(float x);
+    public static float Hypot(float x, float y);
+    public static float Lerp(float value1, float value2, float amount);
+    public static float DegreesToRadians(float degrees);
+    public static float RadiansToDegrees(float radians);
+    public static float FusedMultiplyAdd(float left, float right, float addend);
+    ${CREATE_FROM_NUMBER('float')}
   }
   public struct Double : IComparable, IComparable<double>, IEquatable<double>, IFormattable {
     public const double MaxValue = 1.7976931348623157E+308;
@@ -365,7 +483,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static double Parse(string s);
     public static double Parse(string s, IFormatProvider? provider);
+    public static double Parse(string s, System.Globalization.NumberStyles style);
+    public static double Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out double result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out double result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out double result);
     public static bool IsNaN(double d);
     public static bool IsInfinity(double d);
     public static bool IsPositiveInfinity(double d);
@@ -383,6 +505,42 @@ namespace System {
     public static double Truncate(double x);
     public static double Sqrt(double x);
     public static double Pow(double x, double y);
+    public static double Round(double x, int digits);
+    public static double Round(double x, MidpointRounding mode);
+    public static double Round(double x, int digits, MidpointRounding mode);
+    public static int Sign(double value);
+    public static bool IsPositive(double value);
+    public static bool IsEvenInteger(double value);
+    public static bool IsOddInteger(double value);
+    public static bool IsPow2(double value);
+    public static bool IsNormal(double value);
+    public static bool IsSubnormal(double value);
+    public static bool IsRealNumber(double value);
+    public static double CopySign(double value, double sign);
+    public static double MaxMagnitude(double x, double y);
+    public static double MinMagnitude(double x, double y);
+    public static double Exp(double x);
+    public static double Log(double x);
+    public static double Log(double x, double newBase);
+    public static double Log2(double value);
+    public static double Log10(double x);
+    public static double Sin(double x);
+    public static double Cos(double x);
+    public static double Tan(double x);
+    public static double Asin(double x);
+    public static double Acos(double x);
+    public static double Atan(double x);
+    public static double Atan2(double y, double x);
+    public static double Sinh(double x);
+    public static double Cosh(double x);
+    public static double Tanh(double x);
+    public static double Cbrt(double x);
+    public static double Hypot(double x, double y);
+    public static double Lerp(double value1, double value2, double amount);
+    public static double DegreesToRadians(double degrees);
+    public static double RadiansToDegrees(double radians);
+    public static double FusedMultiplyAdd(double left, double right, double addend);
+    ${CREATE_FROM_NUMBER('double')}
   }
   public struct Decimal : IComparable, IComparable<decimal>, IEquatable<decimal>, IFormattable {
     public const decimal MaxValue = 79228162514264337593543950335m;
@@ -407,7 +565,11 @@ namespace System {
     public string ToString(string? format, IFormatProvider? provider);
     public static decimal Parse(string s);
     public static decimal Parse(string s, IFormatProvider? provider);
+    public static decimal Parse(string s, System.Globalization.NumberStyles style);
+    public static decimal Parse(string s, System.Globalization.NumberStyles style, IFormatProvider? provider);
     public static bool TryParse(string? s, out decimal result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out decimal result);
+    public static bool TryParse(string? s, System.Globalization.NumberStyles style, IFormatProvider? provider, out decimal result);
     public static decimal Abs(decimal value);
     public static decimal Max(decimal x, decimal y);
     public static decimal Min(decimal x, decimal y);
@@ -429,6 +591,15 @@ namespace System {
     public static int ToInt32(decimal d);
     public static long ToInt64(decimal d);
     public static double ToDouble(decimal d);
+    public static bool IsInteger(decimal value);
+    public static bool IsNegative(decimal value);
+    public static bool IsPositive(decimal value);
+    public static bool IsEvenInteger(decimal value);
+    public static bool IsOddInteger(decimal value);
+    public static decimal CopySign(decimal value, decimal sign);
+    public static decimal MaxMagnitude(decimal x, decimal y);
+    public static decimal MinMagnitude(decimal x, decimal y);
+    ${CREATE_FROM_NUMBER('decimal')}
   }
   public struct Nullable<T> where T : struct {
     public Nullable(T value);
@@ -456,6 +627,71 @@ namespace System {
   public enum StringSplitOptions { None = 0, RemoveEmptyEntries = 1, TrimEntries = 2 }
   public enum MidpointRounding { ToEven = 0, AwayFromZero = 1, ToZero = 2, ToNegativeInfinity = 3, ToPositiveInfinity = 4 }
   public enum DayOfWeek { Sunday = 0, Monday = 1, Tuesday = 2, Wednesday = 3, Thursday = 4, Friday = 5, Saturday = 6 }
+
+  public readonly struct Index : IEquatable<Index> {
+    private readonly int _value;
+    public Index(int value, bool fromEnd = false);
+    public static Index Start { get; }
+    public static Index End { get; }
+    public static Index FromStart(int value);
+    public static Index FromEnd(int value);
+    public int Value { get; }
+    public bool IsFromEnd { get; }
+    public int GetOffset(int length);
+    public override bool Equals(object? value);
+    public bool Equals(Index other);
+    public override int GetHashCode();
+    public static implicit operator Index(int value);
+    public override string ToString();
+  }
+
+  public readonly struct Range : IEquatable<Range> {
+    private readonly Index _start;
+    private readonly Index _end;
+    public Range(Index start, Index end);
+    public Index Start { get; }
+    public Index End { get; }
+    public static Range All { get; }
+    public static Range StartAt(Index start);
+    public static Range EndAt(Index end);
+    public (int Offset, int Length) GetOffsetAndLength(int length);
+    public override bool Equals(object? value);
+    public bool Equals(Range other);
+    public override int GetHashCode();
+    public override string ToString();
+  }
+
+  public abstract class Attribute { protected Attribute(); }
+  [Flags]
+  public enum AttributeTargets { Assembly = 1, Module = 2, Class = 4, Struct = 8, Enum = 16, Constructor = 32, Method = 64, Property = 128, Field = 256, Event = 512, Interface = 1024, Parameter = 2048, Delegate = 4096, ReturnValue = 8192, GenericParameter = 16384, All = 32767 }
+  [AttributeUsage(AttributeTargets.Class, Inherited = true)]
+  public sealed class AttributeUsageAttribute : Attribute {
+    public AttributeUsageAttribute(AttributeTargets validOn);
+    public bool AllowMultiple { get; set; }
+    public bool Inherited { get; set; }
+    public AttributeTargets ValidOn { get; }
+  }
+  [AttributeUsage(AttributeTargets.Enum, Inherited = false)]
+  public class FlagsAttribute : Attribute { public FlagsAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Event | AttributeTargets.Interface | AttributeTargets.Delegate, Inherited = false)]
+  public sealed class ObsoleteAttribute : Attribute {
+    public ObsoleteAttribute();
+    public ObsoleteAttribute(string? message);
+    public ObsoleteAttribute(string? message, bool error);
+    public string? Message { get; }
+    public bool IsError { get; }
+    public string? DiagnosticId { get; set; }
+    public string? UrlFormat { get; set; }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Delegate, Inherited = false)]
+  public sealed class SerializableAttribute : Attribute { public SerializableAttribute(); }
+  [AttributeUsage(AttributeTargets.Field, Inherited = false)]
+  public sealed class NonSerializedAttribute : Attribute { public NonSerializedAttribute(); }
+  [AttributeUsage(AttributeTargets.All, Inherited = true)]
+  public sealed class CLSCompliantAttribute : Attribute {
+    public CLSCompliantAttribute(bool isCompliant);
+    public bool IsCompliant { get; }
+  }
 
   public struct HashCode {
     public static int Combine<T1>(T1 value1);
@@ -571,16 +807,31 @@ namespace System {
     public static System.IO.TextWriter Out { get; }
     public static System.IO.TextWriter Error { get; }
     public static System.IO.TextReader In { get; }
+    public static void SetOut(System.IO.TextWriter newOut);
+    public static void SetError(System.IO.TextWriter newError);
+    public static void SetIn(System.IO.TextReader newIn);
+    public static System.IO.Stream OpenStandardOutput();
+    public static System.IO.Stream OpenStandardError();
+    public static System.IO.Stream OpenStandardInput();
     public static string? ReadLine();
     public static int Read();
     public static ConsoleKeyInfo ReadKey();
     public static ConsoleKeyInfo ReadKey(bool intercept);
+    public static bool KeyAvailable { get; }
+    public static bool IsInputRedirected { get; }
+    public static bool IsOutputRedirected { get; }
+    public static bool IsErrorRedirected { get; }
     public static void Clear();
     public static void Beep();
+    public static void Beep(int frequency, int duration);
     public static void ResetColor();
     public static ConsoleColor ForegroundColor { get; set; }
     public static ConsoleColor BackgroundColor { get; set; }
     public static string Title { get; set; }
+    public static bool CursorVisible { get; set; }
+    public static int CursorLeft { get; set; }
+    public static int CursorTop { get; set; }
+    public static (int Left, int Top) GetCursorPosition();
     public static void SetCursorPosition(int left, int top);
     public static System.Text.Encoding OutputEncoding { get; set; }
     public static void Write(bool value);
@@ -620,7 +871,23 @@ namespace System {
     public static void WriteLine(ulong value);
   }
   public enum ConsoleColor { Black = 0, DarkBlue = 1, DarkGreen = 2, DarkCyan = 3, DarkRed = 4, DarkMagenta = 5, DarkYellow = 6, Gray = 7, DarkGray = 8, Blue = 9, Green = 10, Cyan = 11, Red = 12, Magenta = 13, Yellow = 14, White = 15 }
-  public struct ConsoleKeyInfo { }
+  public readonly struct ConsoleKeyInfo : IEquatable<ConsoleKeyInfo> {
+    private readonly char _keyChar;
+    private readonly ConsoleKey _key;
+    private readonly ConsoleModifiers _mods;
+    public ConsoleKeyInfo(char keyChar, ConsoleKey key, bool shift, bool alt, bool control);
+    public char KeyChar { get; }
+    public ConsoleKey Key { get; }
+    public ConsoleModifiers Modifiers { get; }
+    public override bool Equals(object? value);
+    public bool Equals(ConsoleKeyInfo obj);
+    public override int GetHashCode();
+    public static bool operator ==(ConsoleKeyInfo a, ConsoleKeyInfo b);
+    public static bool operator !=(ConsoleKeyInfo a, ConsoleKeyInfo b);
+  }
+  public enum ConsoleKey { None = 0, Backspace = 8, Tab = 9, Clear = 12, Enter = 13, Pause = 19, Escape = 27, Spacebar = 32, PageUp = 33, PageDown = 34, End = 35, Home = 36, LeftArrow = 37, UpArrow = 38, RightArrow = 39, DownArrow = 40, Select = 41, Print = 42, Execute = 43, PrintScreen = 44, Insert = 45, Delete = 46, Help = 47, D0 = 48, D1 = 49, D2 = 50, D3 = 51, D4 = 52, D5 = 53, D6 = 54, D7 = 55, D8 = 56, D9 = 57, A = 65, B = 66, C = 67, D = 68, E = 69, F = 70, G = 71, H = 72, I = 73, J = 74, K = 75, L = 76, M = 77, N = 78, O = 79, P = 80, Q = 81, R = 82, S = 83, T = 84, U = 85, V = 86, W = 87, X = 88, Y = 89, Z = 90, LeftWindows = 91, RightWindows = 92, Applications = 93, Sleep = 95, NumPad0 = 96, NumPad1 = 97, NumPad2 = 98, NumPad3 = 99, NumPad4 = 100, NumPad5 = 101, NumPad6 = 102, NumPad7 = 103, NumPad8 = 104, NumPad9 = 105, Multiply = 106, Add = 107, Separator = 108, Subtract = 109, Decimal = 110, Divide = 111, F1 = 112, F2 = 113, F3 = 114, F4 = 115, F5 = 116, F6 = 117, F7 = 118, F8 = 119, F9 = 120, F10 = 121, F11 = 122, F12 = 123, F13 = 124, F14 = 125, F15 = 126, F16 = 127, F17 = 128, F18 = 129, F19 = 130, F20 = 131, F21 = 132, F22 = 133, F23 = 134, F24 = 135, BrowserBack = 166, BrowserForward = 167, BrowserRefresh = 168, BrowserStop = 169, BrowserSearch = 170, BrowserFavorites = 171, BrowserHome = 172, VolumeMute = 173, VolumeDown = 174, VolumeUp = 175, MediaNext = 176, MediaPrevious = 177, MediaStop = 178, MediaPlay = 179, LaunchMail = 180, LaunchMediaSelect = 181, LaunchApp1 = 182, LaunchApp2 = 183, Oem1 = 186, OemPlus = 187, OemComma = 188, OemMinus = 189, OemPeriod = 190, Oem2 = 191, Oem3 = 192, Oem4 = 219, Oem5 = 220, Oem6 = 221, Oem7 = 222, Oem8 = 223, Oem102 = 226, Process = 229, Packet = 231, Attention = 246, CrSel = 247, ExSel = 248, EraseEndOfFile = 249, Play = 250, Zoom = 251, NoName = 252, Pa1 = 253, OemClear = 254 }
+  [Flags]
+  public enum ConsoleModifiers { None = 0, Alt = 1, Shift = 2, Control = 4 }
 
   public static class Convert {
     public static bool ToBoolean(object? value);
@@ -656,6 +923,7 @@ namespace System {
     public static byte ToByte(object? value);
     public static byte ToByte(string? value);
     public static byte ToByte(string? value, int fromBase);
+    public static byte ToByte(string? value, IFormatProvider? provider);
     public static byte ToByte(int value);
     public static byte ToByte(double value);
     public static byte ToByte(char value);
@@ -672,6 +940,7 @@ namespace System {
     public static sbyte ToSByte(object? value);
     public static sbyte ToSByte(string? value);
     public static sbyte ToSByte(string? value, int fromBase);
+    public static sbyte ToSByte(string? value, IFormatProvider? provider);
     public static sbyte ToSByte(int value);
     public static sbyte ToSByte(double value);
     public static sbyte ToSByte(bool value);
@@ -688,6 +957,7 @@ namespace System {
     public static short ToInt16(object? value);
     public static short ToInt16(string? value);
     public static short ToInt16(string? value, int fromBase);
+    public static short ToInt16(string? value, IFormatProvider? provider);
     public static short ToInt16(int value);
     public static short ToInt16(double value);
     public static short ToInt16(bool value);
@@ -715,6 +985,7 @@ namespace System {
     public static int ToInt32(decimal value);
     public static int ToInt32(string? value);
     public static int ToInt32(string? value, int fromBase);
+    public static int ToInt32(string? value, IFormatProvider? provider);
     public static int ToInt32(sbyte value);
     public static int ToInt32(ushort value);
     public static long ToInt64(object? value);
@@ -731,6 +1002,7 @@ namespace System {
     public static long ToInt64(decimal value);
     public static long ToInt64(string? value);
     public static long ToInt64(string? value, int fromBase);
+    public static long ToInt64(string? value, IFormatProvider? provider);
     public static long ToInt64(sbyte value);
     public static long ToInt64(ushort value);
     public static double ToDouble(object? value);
@@ -746,12 +1018,14 @@ namespace System {
     public static double ToDouble(double value);
     public static double ToDouble(decimal value);
     public static double ToDouble(string? value);
+    public static double ToDouble(string? value, IFormatProvider? provider);
     public static double ToDouble(sbyte value);
     public static double ToDouble(ushort value);
     public static float ToSingle(object? value);
     public static float ToSingle(double value);
     public static float ToSingle(char value);
     public static float ToSingle(string? value);
+    public static float ToSingle(string? value, IFormatProvider? provider);
     public static float ToSingle(sbyte value);
     public static float ToSingle(byte value);
     public static float ToSingle(short value);
@@ -774,6 +1048,7 @@ namespace System {
     public static decimal ToDecimal(double value);
     public static decimal ToDecimal(float value);
     public static decimal ToDecimal(string? value);
+    public static decimal ToDecimal(string? value, IFormatProvider? provider);
     public static decimal ToDecimal(sbyte value);
     public static decimal ToDecimal(ushort value);
     public static decimal ToDecimal(decimal value);
@@ -791,6 +1066,12 @@ namespace System {
     public static string ToString(float value);
     public static string ToString(double value);
     public static string ToString(decimal value);
+    public static string ToString(object? value, IFormatProvider? provider);
+    public static string ToString(int value, IFormatProvider? provider);
+    public static string ToString(long value, IFormatProvider? provider);
+    public static string ToString(float value, IFormatProvider? provider);
+    public static string ToString(double value, IFormatProvider? provider);
+    public static string ToString(decimal value, IFormatProvider? provider);
     public static string ToString(byte value, int toBase);
     public static string ToString(short value, int toBase);
     public static string ToString(int value, int toBase);
@@ -818,7 +1099,40 @@ namespace System {
 
   public static class Environment {
     public static string NewLine { get; }
+    public static int TickCount { get; }
+    public static long TickCount64 { get; }
+    public static Version Version { get; }
     public static void Exit(int exitCode);
+  }
+
+  public sealed class Version : ICloneable, IComparable, IComparable<Version?>, IEquatable<Version?> {
+    public Version();
+    public Version(int major, int minor);
+    public Version(int major, int minor, int build);
+    public Version(int major, int minor, int build, int revision);
+    public Version(string version);
+    public int Major { get; }
+    public int Minor { get; }
+    public int Build { get; }
+    public int Revision { get; }
+    public short MajorRevision { get; }
+    public short MinorRevision { get; }
+    public object Clone();
+    public int CompareTo(object? version);
+    public int CompareTo(Version? value);
+    public override bool Equals(object? obj);
+    public bool Equals(Version? obj);
+    public override int GetHashCode();
+    public override string ToString();
+    public string ToString(int fieldCount);
+    public static Version Parse(string input);
+    public static bool TryParse(string? input, out Version? result);
+    public static bool operator ==(Version? v1, Version? v2);
+    public static bool operator !=(Version? v1, Version? v2);
+    public static bool operator <(Version? v1, Version? v2);
+    public static bool operator <=(Version? v1, Version? v2);
+    public static bool operator >(Version? v1, Version? v2);
+    public static bool operator >=(Version? v1, Version? v2);
   }
 
   public abstract class Delegate : ICloneable {
@@ -892,6 +1206,8 @@ namespace System {
     'PlatformNotSupportedException:NotSupportedException',
     'TypeInitializationException:SystemException',
     'EntryPointNotFoundException:SystemException',
+    'MemberAccessException:SystemException',
+    'MissingMemberException:MemberAccessException',
   ]
     .map((entry) => {
       const [name, base] = entry.split(':');
@@ -1114,6 +1430,7 @@ namespace System {
     public override int GetHashCode();
     public override string ToString();
     public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
     public string ToString(string? format, IFormatProvider? provider);
     public string ToShortDateString();
     public string ToLongDateString();
@@ -1122,7 +1439,16 @@ namespace System {
     public static int DaysInMonth(int year, int month);
     public static bool IsLeapYear(int year);
     public static DateTime Parse(string s);
+    public static DateTime Parse(string s, IFormatProvider? provider);
+    public static DateTime Parse(string s, IFormatProvider? provider, System.Globalization.DateTimeStyles styles);
     public static bool TryParse(string? s, out DateTime result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out DateTime result);
+    public static bool TryParse(string? s, IFormatProvider? provider, System.Globalization.DateTimeStyles styles, out DateTime result);
+    public static DateTime ParseExact(string s, string format, IFormatProvider? provider);
+    public static DateTime ParseExact(string s, string format, IFormatProvider? provider, System.Globalization.DateTimeStyles style);
+    public static DateTime ParseExact(string s, string[] formats, IFormatProvider? provider, System.Globalization.DateTimeStyles style);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateTime result);
+    public static bool TryParseExact(string? s, string?[]? formats, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateTime result);
     public static int Compare(DateTime t1, DateTime t2);
     public static DateTime operator +(DateTime d, TimeSpan t);
     public static DateTime operator -(DateTime d, TimeSpan t);
@@ -1134,9 +1460,229 @@ namespace System {
     public static bool operator >(DateTime t1, DateTime t2);
     public static bool operator >=(DateTime t1, DateTime t2);
   }
+  public readonly struct DateOnly : IComparable, IComparable<DateOnly>, IEquatable<DateOnly>, IFormattable {
+    private readonly int _dayNumber;
+    public static DateOnly MinValue { get; }
+    public static DateOnly MaxValue { get; }
+    public DateOnly(int year, int month, int day);
+    public static DateOnly FromDayNumber(int dayNumber);
+    public static DateOnly FromDateTime(DateTime dateTime);
+    public int Year { get; }
+    public int Month { get; }
+    public int Day { get; }
+    public DayOfWeek DayOfWeek { get; }
+    public int DayOfYear { get; }
+    public int DayNumber { get; }
+    public DateOnly AddDays(int value);
+    public DateOnly AddMonths(int value);
+    public DateOnly AddYears(int value);
+    public DateTime ToDateTime(TimeOnly time);
+    public void Deconstruct(out int year, out int month, out int day);
+    public int CompareTo(DateOnly value);
+    public int CompareTo(object? value);
+    public bool Equals(DateOnly value);
+    public override bool Equals(object? value);
+    public override int GetHashCode();
+    public override string ToString();
+    public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
+    public string ToString(string? format, IFormatProvider? provider);
+    public string ToLongDateString();
+    public string ToShortDateString();
+    public static DateOnly Parse(string s);
+    public static DateOnly Parse(string s, IFormatProvider? provider);
+    public static DateOnly ParseExact(string s, string format);
+    public static DateOnly ParseExact(string s, string format, IFormatProvider? provider);
+    public static bool TryParse(string? s, out DateOnly result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out DateOnly result);
+    public static bool TryParseExact(string? s, string? format, out DateOnly result);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out DateOnly result);
+    public static bool operator ==(DateOnly left, DateOnly right);
+    public static bool operator !=(DateOnly left, DateOnly right);
+    public static bool operator <(DateOnly left, DateOnly right);
+    public static bool operator <=(DateOnly left, DateOnly right);
+    public static bool operator >(DateOnly left, DateOnly right);
+    public static bool operator >=(DateOnly left, DateOnly right);
+  }
+  public readonly struct TimeOnly : IComparable, IComparable<TimeOnly>, IEquatable<TimeOnly>, IFormattable {
+    private readonly long _ticks;
+    public static TimeOnly MinValue { get; }
+    public static TimeOnly MaxValue { get; }
+    public TimeOnly(int hour, int minute);
+    public TimeOnly(int hour, int minute, int second);
+    public TimeOnly(int hour, int minute, int second, int millisecond);
+    public TimeOnly(long ticks);
+    public static TimeOnly FromDateTime(DateTime dateTime);
+    public static TimeOnly FromTimeSpan(TimeSpan timeSpan);
+    public int Hour { get; }
+    public int Minute { get; }
+    public int Second { get; }
+    public int Millisecond { get; }
+    public long Ticks { get; }
+    public TimeOnly Add(TimeSpan value);
+    public TimeOnly Add(TimeSpan value, out int wrappedDays);
+    public TimeOnly AddHours(double value);
+    public TimeOnly AddHours(double value, out int wrappedDays);
+    public TimeOnly AddMinutes(double value);
+    public TimeOnly AddMinutes(double value, out int wrappedDays);
+    public bool IsBetween(TimeOnly start, TimeOnly end);
+    public TimeSpan ToTimeSpan();
+    public void Deconstruct(out int hour, out int minute);
+    public void Deconstruct(out int hour, out int minute, out int second);
+    public void Deconstruct(out int hour, out int minute, out int second, out int millisecond);
+    public int CompareTo(TimeOnly value);
+    public int CompareTo(object? value);
+    public bool Equals(TimeOnly value);
+    public override bool Equals(object? value);
+    public override int GetHashCode();
+    public override string ToString();
+    public string ToString(string? format);
+    public string ToString(IFormatProvider? provider);
+    public string ToString(string? format, IFormatProvider? provider);
+    public string ToLongTimeString();
+    public string ToShortTimeString();
+    public static TimeOnly Parse(string s);
+    public static TimeOnly Parse(string s, IFormatProvider? provider);
+    public static TimeOnly ParseExact(string s, string format);
+    public static TimeOnly ParseExact(string s, string format, IFormatProvider? provider);
+    public static bool TryParse(string? s, out TimeOnly result);
+    public static bool TryParse(string? s, IFormatProvider? provider, out TimeOnly result);
+    public static bool TryParseExact(string? s, string? format, out TimeOnly result);
+    public static bool TryParseExact(string? s, string? format, IFormatProvider? provider, System.Globalization.DateTimeStyles style, out TimeOnly result);
+    public static TimeSpan operator -(TimeOnly t1, TimeOnly t2);
+    public static bool operator ==(TimeOnly left, TimeOnly right);
+    public static bool operator !=(TimeOnly left, TimeOnly right);
+    public static bool operator <(TimeOnly left, TimeOnly right);
+    public static bool operator <=(TimeOnly left, TimeOnly right);
+    public static bool operator >(TimeOnly left, TimeOnly right);
+    public static bool operator >=(TimeOnly left, TimeOnly right);
+  }
+}
+
+namespace System.Diagnostics {
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
+  public sealed class ConditionalAttribute : Attribute {
+    public ConditionalAttribute(string conditionString);
+    public string ConditionString { get; }
+  }
+  [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Delegate, AllowMultiple = true)]
+  public sealed class DebuggerDisplayAttribute : Attribute {
+    public DebuggerDisplayAttribute(string? value);
+    public string Value { get; }
+    public string? Name { get; set; }
+    public string? Type { get; set; }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Constructor | AttributeTargets.Method, Inherited = false)]
+  public sealed class DebuggerStepThroughAttribute : Attribute { public DebuggerStepThroughAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
+  public sealed class DebuggerHiddenAttribute : Attribute { public DebuggerHiddenAttribute(); }
+  public class Stopwatch {
+    public Stopwatch();
+    public static readonly long Frequency = 1000000000L;
+    public static readonly bool IsHighResolution = true;
+    public bool IsRunning { get; }
+    public TimeSpan Elapsed { get; }
+    public long ElapsedMilliseconds { get; }
+    public long ElapsedTicks { get; }
+    public static Stopwatch StartNew();
+    public void Start();
+    public void Stop();
+    public void Reset();
+    public void Restart();
+    public static long GetTimestamp();
+    public static TimeSpan GetElapsedTime(long startingTimestamp);
+    public static TimeSpan GetElapsedTime(long startingTimestamp, long endingTimestamp);
+    public override string ToString();
+  }
+}
+
+namespace System.Diagnostics.CodeAnalysis {
+  [AttributeUsage(AttributeTargets.Constructor, AllowMultiple = false, Inherited = false)]
+  public sealed class SetsRequiredMembersAttribute : Attribute { public SetsRequiredMembersAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property | AttributeTargets.ReturnValue, Inherited = false)]
+  public sealed class NotNullAttribute : Attribute { public NotNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property | AttributeTargets.ReturnValue, Inherited = false)]
+  public sealed class MaybeNullAttribute : Attribute { public MaybeNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]
+  public sealed class AllowNullAttribute : Attribute { public AllowNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]
+  public sealed class DisallowNullAttribute : Attribute { public DisallowNullAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class NotNullWhenAttribute : Attribute {
+    public NotNullWhenAttribute(bool returnValue);
+    public bool ReturnValue { get; }
+  }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class MaybeNullWhenAttribute : Attribute {
+    public MaybeNullWhenAttribute(bool returnValue);
+    public bool ReturnValue { get; }
+  }
+  [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+  public sealed class DoesNotReturnAttribute : Attribute { public DoesNotReturnAttribute(); }
+  [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property | AttributeTargets.Event, Inherited = false, AllowMultiple = false)]
+  public sealed class ExcludeFromCodeCoverageAttribute : Attribute {
+    public ExcludeFromCodeCoverageAttribute();
+    public string? Justification { get; set; }
+  }
 }
 
 namespace System.Runtime.CompilerServices {
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerMemberNameAttribute : Attribute { public CallerMemberNameAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerLineNumberAttribute : Attribute { public CallerLineNumberAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
+  public sealed class CallerFilePathAttribute : Attribute { public CallerFilePathAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+  public sealed class CallerArgumentExpressionAttribute : Attribute {
+    public CallerArgumentExpressionAttribute(string parameterName);
+    public string ParameterName { get; }
+  }
+  [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method, Inherited = false)]
+  public sealed class MethodImplAttribute : Attribute {
+    public MethodImplAttribute();
+    public MethodImplAttribute(MethodImplOptions methodImplOptions);
+    public MethodImplOptions Value { get; }
+  }
+  [Flags]
+  public enum MethodImplOptions { Unmanaged = 4, NoInlining = 8, ForwardRef = 16, Synchronized = 32, NoOptimization = 64, PreserveSig = 128, AggressiveInlining = 256, AggressiveOptimization = 512, InternalCall = 4096 }
+  [AttributeUsage(AttributeTargets.Method, Inherited = false)]
+  public sealed class ModuleInitializerAttribute : Attribute { public ModuleInitializerAttribute(); }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface, Inherited = false)]
+  public sealed class CollectionBuilderAttribute : Attribute {
+    public CollectionBuilderAttribute(Type builderType, string methodName);
+    public Type BuilderType { get; }
+    public string MethodName { get; }
+  }
+  [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+  public sealed class OverloadResolutionPriorityAttribute : Attribute {
+    public OverloadResolutionPriorityAttribute(int priority);
+    public int Priority { get; }
+  }
+  public static class FormattableStringFactory {
+    public static FormattableString Create(string format, params object?[] arguments);
+    private sealed class ConcreteFormattableString : FormattableString {
+      public override string Format { get; }
+      public override int ArgumentCount { get; }
+      public override object?[] GetArguments();
+      public override object? GetArgument(int index);
+      public override string ToString(IFormatProvider? formatProvider);
+    }
+  }
+  [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]
+  public sealed class InterpolatedStringHandlerAttribute : Attribute { public InterpolatedStringHandlerAttribute(); }
+  [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false, Inherited = false)]
+  public sealed class InterpolatedStringHandlerArgumentAttribute : Attribute {
+    public InterpolatedStringHandlerArgumentAttribute(string argument);
+    public InterpolatedStringHandlerArgumentAttribute(params string[] arguments);
+    public string[] Arguments { get; }
+  }
+  /** The type of a pointer \`T*\`, which no program names; \`void*\` points to \`__Void\`. */
+  public sealed class __Pointer<T> { }
+  public sealed class __Void { }
+  /** The type \`dynamic\`, which no program names this way; its values are objects bound at run time. */
+  public sealed class __Dynamic { }
+  public static class RuntimeHelpers { public static T[] GetSubArray<T>(T[] array, Range range); }
   public sealed class SwitchExpressionException : InvalidOperationException {
     public SwitchExpressionException();
     public SwitchExpressionException(object? unmatchedValue);
@@ -1144,55 +1690,26 @@ namespace System.Runtime.CompilerServices {
   }
 }
 
-namespace System.IO {
-  public abstract class TextWriter : IDisposable {
-    public virtual string NewLine { get; set; }
-    public virtual void Flush();
-    public void Dispose();
-    public virtual void Write(bool value);
-    public virtual void Write(char value);
-    public virtual void Write(char[]? buffer);
-    public virtual void Write(decimal value);
-    public virtual void Write(double value);
-    public virtual void Write(int value);
-    public virtual void Write(long value);
-    public virtual void Write(object? value);
-    public virtual void Write(float value);
-    public virtual void Write(string? value);
-    public virtual void Write(string format, object? arg0);
-    public virtual void Write(string format, object? arg0, object? arg1);
-    public virtual void Write(string format, object? arg0, object? arg1, object? arg2);
-    public virtual void Write(string format, params object?[] arg);
-    public virtual void Write(uint value);
-    public virtual void Write(ulong value);
-    public virtual void WriteLine();
-    public virtual void WriteLine(bool value);
-    public virtual void WriteLine(char value);
-    public virtual void WriteLine(char[]? buffer);
-    public virtual void WriteLine(decimal value);
-    public virtual void WriteLine(double value);
-    public virtual void WriteLine(int value);
-    public virtual void WriteLine(long value);
-    public virtual void WriteLine(object? value);
-    public virtual void WriteLine(float value);
-    public virtual void WriteLine(string? value);
-    public virtual void WriteLine(string format, object? arg0);
-    public virtual void WriteLine(string format, object? arg0, object? arg1);
-    public virtual void WriteLine(string format, object? arg0, object? arg1, object? arg2);
-    public virtual void WriteLine(string format, params object?[] arg);
-    public virtual void WriteLine(uint value);
-    public virtual void WriteLine(ulong value);
+namespace System.Reflection {
+  public sealed class TargetInvocationException : ApplicationException {
+    public TargetInvocationException(Exception? inner);
+    public TargetInvocationException(string? message, Exception? inner);
   }
-  public abstract class TextReader : IDisposable {
-    public virtual string? ReadLine();
-    public virtual int Read();
-    public virtual string ReadToEnd();
-    public void Dispose();
+}
+namespace System.Text {
+  public enum NormalizationForm { FormC = 1, FormD = 2, FormKC = 5, FormKD = 6 }
+  public abstract class Encoding {
+    public static Encoding UTF8 { get; }
+    public virtual int GetByteCount(char[] chars);
+    public virtual int GetByteCount(string chars);
+    public virtual byte[] GetBytes(string s);
+    public virtual string GetString(byte[] bytes);
+    public string GetString(ReadOnlySpan<byte> bytes);
   }
 }
 
-namespace System.Text {
-  public abstract class Encoding { }
+namespace Microsoft.CSharp.RuntimeBinder {
+  public class RuntimeBinderException : Exception { public RuntimeBinderException(); public RuntimeBinderException(string? message); public RuntimeBinderException(string? message, Exception? innerException); }
 }
 
 `;

@@ -61,6 +61,10 @@ export class PatternSpaces {
       case 'recursive': {
         return this.recursiveSpace(pattern, (sub) => this.under(sub)) ?? [];
       }
+      case 'list': {
+        // Which lengths list patterns together cover is left out, so a list pattern covers no value for sure.
+        return [];
+      }
     }
   }
 
@@ -91,6 +95,9 @@ export class PatternSpaces {
       case 'recursive': {
         const type = underlyingOf(pattern.testType ?? pattern.narrowedType);
         return this.recursiveSpace(pattern, (sub) => this.over(sub)) ?? [{ kind: 'type', type, values: 'all' }];
+      }
+      case 'list': {
+        return [{ kind: 'type', type: underlyingOf(pattern.inputType), values: 'all' }];
       }
     }
   }

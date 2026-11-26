@@ -10,7 +10,10 @@ import type {
 import type { CompiledProgram } from './compiler';
 import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
 import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
+import type { IteratorState } from './iterators';
 import { formatValue } from './library/formatting';
+import { typeObjectOf } from './library/nativesCore';
+import { newSpan } from './library/nativesSpan';
 // code-gauge-allow-file fileNcss -- The evaluator module keeps one stage of the C# interpreter together.
 import { MeteredText } from './meteredText';
 import type { NativeCall } from './natives';
@@ -25,15 +28,20 @@ import {
   unaryNumeric,
 } from './numeric';
 import { environmentOf, exceptionMessage, recordMember, stringOf, toStringValue } from './objects';
+import { isPointerExpression, PointerEvaluator } from './pointerEvaluator';
+import { readAt, writeAt } from './pointers';
 import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
-import { StatementExecutor } from './statementExecutor';
+import { newTypedReference, refValuePlace, typedReferenceTarget } from './typedReferences';
 import {
   type ArrayType,
   baseTypeOf,
+  isDynamicType,
+  isValueType,
   type LocalSymbol,
   type MethodSymbol,
   type NamedType,
   namedType,
+  NULL_TYPE,
   nullableUnderlying,
   specialOf,
   type SpecialType,
@@ -62,19 +70,39 @@ import {
 import { isVariable } from './variables';
 
 type BinaryExpression = Extract<BoundExpression, { kind: 'binary' }>;
+/** The expressions of references, typed references, and UTF-8 literals, which `evaluateAccess` reads. */
+const REFERENCE_KINDS: ReadonlySet<BoundExpression['kind']> = new Set([
+  'refAssign',
+  'refFieldAssign',
+  'refConditional',
+  'makeRef',
+  'refType',
+  'refValue',
+  'utf8',
+]);
+
 type AccessExpression = Extract<
   BoundExpression,
   {
     kind:
       | 'constant'
       | 'local'
+      | 'refAssign'
+      | 'refFieldAssign'
+      | 'refConditional'
       | 'this'
       | 'field'
       | 'staticField'
       | 'element'
       | 'property'
+      | 'implicitIndex'
+      | 'typeOf'
       | 'compoundOperand'
-      | 'conditionalAccess';
+      | 'conditionalAccess'
+      | 'makeRef'
+      | 'refType'
+      | 'refValue'
+      | 'utf8';
   }
 >;
 type InvocationExpression = Extract<
@@ -88,6 +116,7 @@ type OperationExpression = Extract<
       | 'unary'
       | 'binary'
       | 'logical'
+      | 'userLogical'
       | 'coalesce'
       | 'conditional'
       | 'convert'
@@ -106,7 +135,7 @@ type AssignmentExpression = Extract<
 >;
 
 /** Runs the bound tree of a compiled program. */
-export class Evaluator extends StatementExecutor {
+export class Evaluator extends PointerEvaluator {
   constructor(runtime: Runtime, program: CompiledProgram) {
     super(runtime, program);
     runtime.evaluator = this;
@@ -124,6 +153,8 @@ export class Evaluator extends StatementExecutor {
     typeEnvironment: Map<TypeParameterSymbol, Type>,
     captured?: Map<LocalSymbol, Cell>
   ): Value {
+    // A delegate's Invoke has no body: a delegate made from `d.Invoke` calls d's invocation list.
+    if (method.kind === 'delegateInvoke') return this.invokeDelegate(caller, receiver, args, callRow);
     // A struct's method called through its box, as a virtual call on an object does, runs on the boxed value.
     const self = receiver instanceof CsBox && method.owner.isValueType ? receiver.value : receiver;
     if (method.native) {
@@ -145,9 +176,9 @@ export class Evaluator extends StatementExecutor {
       }
     }
     const body = method.body;
-    const backingField = method.property?.backingField;
+    const backingField = method.property?.backingField ?? method.property?.keywordField;
     if (!body && backingField) {
-      // An auto-property's accessors read and write its backing field.
+      // An auto-property's accessors, and `get;` or `set;` beside an accessor using `field`, use its backing field.
       const fields = backingField.isStatic
         ? this.runtime.staticsOf(this.ownerFromEnvironment(method, typeEnvironment) as NamedType)
         : this.fieldsOf(self);
@@ -162,14 +193,15 @@ export class Evaluator extends StatementExecutor {
         throw new PendingException('System.EntryPointNotFoundException', `Entry point was not found.`);
       return undefined;
     }
-    const frame = new Frame(this.runtime, method, self, typeEnvironment, callRow, method.locals.length);
-    if (captured) frame.captured = captured;
-    for (const [index, local] of method.locals.entries()) {
-      if (!local.isParameter || local.owner !== method) continue;
-      // A value parameter receives a copy also when the library calls back with a struct it stores.
-      const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
-      frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
-    }
+    const frame = this.frameFor(method, self, args, typeEnvironment, callRow, captured);
+    if (method.isAsync && !method.iterator) return this.startAsync(method, frame);
+    // An async iterator's state machine is one an iterator's, whose MoveNextAsync also awaits.
+    if (method.iterator)
+      return this.startIterator(
+        method.iterator,
+        () => this.frameFor(method, self, args, typeEnvironment, callRow, captured),
+        frame
+      );
     // An instance constructor, a base class's called from a derived one's included, first runs its class's static
     // constructor, as .NET does before the class's first instance.
     if (method.kind === 'constructor' && !method.isStatic && method.owner.staticConstructor) {
@@ -180,10 +212,61 @@ export class Evaluator extends StatementExecutor {
     try {
       if (method.kind === 'constructor') this.runConstructorPrologue(frame, method);
       const completion = this.executeBlock(body, frame, true);
-      return completion !== undefined && typeof completion === 'object' ? completion.value : undefined;
+      return completion !== undefined && typeof completion === 'object' && 'value' in completion
+        ? completion.value
+        : undefined;
     } finally {
       this.runtime.popFrame();
     }
+  }
+
+  /** The frame of a call of a method with a body, its parameters holding the arguments. */
+  private frameFor(
+    method: MethodSymbol,
+    self: Value,
+    args: (Value | VariableReference)[],
+    typeEnvironment: Map<TypeParameterSymbol, Type>,
+    callRow: number | undefined,
+    captured: Map<LocalSymbol, Cell> | undefined
+  ): Frame {
+    const frame = new Frame(this.runtime, method, self, typeEnvironment, callRow, method.locals.length);
+    if (captured) frame.captured = captured;
+    for (const [index, local] of method.locals.entries()) {
+      if (!local.isParameter || local.owner !== method) continue;
+      // A value parameter receives a copy also when the library calls back with a struct it stores.
+      const arg = args[index] instanceof CsStruct ? copyValue(args[index]) : args[index];
+      frame.slots[local.slot] = local.isCaptured ? new Cell(arg as Value) : arg;
+    }
+    return frame;
+  }
+
+  /**
+   * The object a call of an iterator method returns without running its body: an enumerable, whose each
+   * `GetEnumerator` but the first starts a fresh run with the call's arguments, or an enumerator.
+   */
+  private startIterator(
+    iterator: NonNullable<MethodSymbol['iterator']>,
+    makeFrame: () => Frame,
+    frame: Frame
+  ): CsObject {
+    const elementType = frame.resolve(iterator.elementType);
+    const className = frame.method?.isAsync
+      ? 'System.Linq.Internal.YieldAsyncIterator'
+      : 'System.Linq.Internal.YieldIterator';
+    const type = namedType(this.runtime.library.typeNamed(className, 1), [elementType]);
+    const create = (runFrame: Frame): IteratorState => ({
+      method: runFrame.method as MethodSymbol,
+      frame: runFrame,
+      elementType,
+      steps: undefined,
+      status: 'before',
+      current: this.defaultOf(elementType),
+      restart: iterator.isEnumerable ? () => create(makeFrame()) : undefined,
+      isTaken: !iterator.isEnumerable,
+    });
+    const object = new CsObject(type, []);
+    object.native = create(frame);
+    return object;
   }
 
   private ownerFromEnvironment(
@@ -389,7 +472,18 @@ export class Evaluator extends StatementExecutor {
 
   // code-gauge-allow functionNcss -- One case label per kind of bound expression, grouped into sub-dispatchers.
   evaluate(expression: BoundExpression, frame: Frame): Value {
+    const { memo } = frame;
+    if (memo?.has(expression)) {
+      const value = memo.get(expression);
+      memo.delete(expression);
+      return value;
+    }
+    if (isPointerExpression(expression)) return this.evaluatePointer(expression, frame);
+    if (REFERENCE_KINDS.has(expression.kind)) return this.evaluateAccess(expression as AccessExpression, frame);
     switch (expression.kind) {
+      case 'late': {
+        return this.evaluateLate(expression, frame);
+      }
       case 'constant':
       case 'local':
       case 'this':
@@ -397,6 +491,8 @@ export class Evaluator extends StatementExecutor {
       case 'staticField':
       case 'element':
       case 'property':
+      case 'implicitIndex':
+      case 'typeOf':
       case 'compoundOperand':
       case 'conditionalAccess': {
         return this.evaluateAccess(expression, frame);
@@ -415,6 +511,7 @@ export class Evaluator extends StatementExecutor {
       case 'unary':
       case 'binary':
       case 'logical':
+      case 'userLogical':
       case 'coalesce':
       case 'conditional':
       case 'convert':
@@ -441,6 +538,7 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** Evaluates an expression that reads a value or a variable. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   private evaluateAccess(expression: AccessExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'constant': {
@@ -454,7 +552,8 @@ export class Evaluator extends StatementExecutor {
       }
       case 'field': {
         const receiver = this.evaluate(expression.receiver, frame);
-        return this.fieldsOf(receiver)[expression.field.slot];
+        const value = this.fieldsOf(receiver)[expression.field.slot];
+        return expression.field.byRef ? referenceIn(value).get() : value;
       }
       case 'staticField': {
         return this.runtime.staticsOf(frame.resolve(expression.owner) as NamedType)[expression.field.slot];
@@ -464,6 +563,45 @@ export class Evaluator extends StatementExecutor {
       }
       case 'property': {
         return this.propertyPlace(expression, frame).get();
+      }
+      case 'implicitIndex': {
+        for (const step of expression.setup) this.evaluate(step, frame);
+        return this.evaluate(expression.access, frame);
+      }
+      case 'refAssign': {
+        const reference = this.referenceTo(expression.target, frame);
+        this.bindReference(frame, expression.local, reference);
+        return reference.get();
+      }
+      case 'refConditional': {
+        return this.place(expression, frame).get();
+      }
+      case 'refFieldAssign': {
+        const fields = this.fieldsOf(this.evaluate(expression.field.receiver, frame));
+        const reference = this.referenceTo(expression.target, frame);
+        fields[expression.field.field.slot] = reference as unknown as Value;
+        return reference.get();
+      }
+      case 'typeOf': {
+        return typeObjectOf(this.runtime, frame.resolve(expression.target));
+      }
+      case 'makeRef': {
+        const reference = this.referenceTo(expression.target, frame);
+        return newTypedReference(expression.type, { reference, type: frame.resolve(expression.target.type) });
+      }
+      case 'refType': {
+        const target = typedReferenceTarget(this.evaluate(expression.operand, frame));
+        return target && typeObjectOf(this.runtime, target.type);
+      }
+      case 'refValue': {
+        return this.place(expression, frame).get();
+      }
+      case 'utf8': {
+        return newSpan(expression.type as NamedType, {
+          values: expression.bytes,
+          start: 0,
+          length: expression.bytes.length,
+        });
       }
       case 'compoundOperand': {
         return frame.operands.at(-1) as Value;
@@ -483,10 +621,16 @@ export class Evaluator extends StatementExecutor {
   private evaluateInvocation(expression: InvocationExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'call': {
-        return this.evaluateCall(expression, frame);
+        // C# removes a call of a partial method without an implementation, arguments and all.
+        if (expression.method.callsAreRemoved) return undefined;
+        const result = this.evaluateCall(expression, frame);
+        // A method that returns by reference returns the variable, whose value the call is where it is read.
+        return result instanceof Reference ? result.get() : result;
       }
+
       case 'invokeDelegate': {
-        return this.evaluateInvokeDelegate(expression, frame);
+        const result = this.evaluateInvokeDelegate(expression, frame);
+        return result instanceof Reference ? result.get() : result;
       }
       case 'new': {
         return this.evaluateNew(expression, frame);
@@ -515,6 +659,7 @@ export class Evaluator extends StatementExecutor {
 
   /** Evaluates an expression that operates on the values of its operands. */
   // code-gauge-allow functionNcss -- One case per kind of operation.
+  // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private evaluateOperation(expression: OperationExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'unary': {
@@ -528,6 +673,12 @@ export class Evaluator extends StatementExecutor {
         if (expression.operator === '&&') return left && (this.evaluate(expression.right, frame) as boolean);
         return left || (this.evaluate(expression.right, frame) as boolean);
       }
+      case 'userLogical': {
+        const left = this.evaluate(expression.left, frame);
+        const { test, combine } = expression;
+        if (this.withOperand(frame, left, () => this.evaluate(test, frame))) return left;
+        return this.withOperand(frame, left, () => this.evaluate(combine, frame));
+      }
       case 'coalesce': {
         const left = this.evaluate(expression.left, frame);
         if (left === undefined) return this.evaluate(expression.right, frame);
@@ -540,11 +691,18 @@ export class Evaluator extends StatementExecutor {
           : this.evaluate(expression.whenFalse, frame);
       }
       case 'convert': {
+        if (expression.userCall) {
+          const operand = this.evaluate(expression.operand, frame);
+          if (expression.isLifted && operand === undefined) return undefined;
+          const call = expression.userCall;
+          return this.withOperand(frame, operand, () => this.evaluate(call, frame));
+        }
         return this.convertValue(
           this.evaluate(expression.operand, frame),
           expression.conversion,
           frame.resolve(expression.from),
-          frame.resolve(expression.type)
+          frame.resolve(expression.type),
+          expression.isChecked ?? this.program.checkOverflow
         );
       }
       case 'is': {
@@ -693,7 +851,7 @@ export class Evaluator extends StatementExecutor {
     return this.isInstanceOf(value, target) ? value : undefined;
   }
 
-  private evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
+  protected evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
     const value = this.evaluate(expression.value, frame);
     for (const arm of expression.arms) {
       // Each arm is a scope of its own, whose variables leave it whether the arm is taken or not.
@@ -705,7 +863,16 @@ export class Evaluator extends StatementExecutor {
       );
       if (result) return result.value;
     }
-    throw new PendingException(
+    throw this.unmatched(expression, value, frame);
+  }
+
+  /** The exception of a switch expression that no arm matches. */
+  protected unmatched(
+    expression: Extract<BoundExpression, { kind: 'switch' }>,
+    value: Value,
+    frame: Frame
+  ): PendingException {
+    return new PendingException(
       'System.Runtime.CompilerServices.SwitchExpressionException',
       `Non-exhaustive switch expression failed to match its input.\nUnmatched value was ${this.evaluator().formatUnmatched(value, expression.value.type, frame)}.`
     );
@@ -744,6 +911,14 @@ export class Evaluator extends StatementExecutor {
   }
 
   private evaluateCall(expression: Extract<BoundExpression, { kind: 'call' }>, frame: Frame): Value {
+    if (expression.constrainedType) {
+      const type = frame.resolve(expression.constrainedType) as NamedType;
+      const implementation = this.runtime.staticImplementation(type, expression.method);
+      return this.evaluateCall(
+        { ...expression, method: implementation, owner: type, constrainedType: undefined },
+        frame
+      );
+    }
     const { method } = expression;
     const receiver = this.evaluateReceiver(expression, frame);
     frame.temporaries.push(receiver);
@@ -885,7 +1060,13 @@ export class Evaluator extends StatementExecutor {
     }
   }
 
-  private referenceTo(target: BoundLValue, frame: Frame): Reference {
+  referenceTo(target: BoundLValue, frame: Frame): Reference {
+    if (target.kind === 'call') return this.evaluateCall(target, frame) as unknown as Reference;
+    if (target.kind === 'invokeDelegate') return this.evaluateInvokeDelegate(target, frame) as unknown as Reference;
+    if (target.kind === 'refConditional') return this.referenceTo(this.chosenVariable(target, frame), frame);
+    // A ref field gives the variable it refers to now, which a later `F = ref y` does not change.
+    if (target.kind === 'field' && target.field.byRef)
+      return referenceIn(this.fieldsOf(this.evaluate(target.receiver, frame))[target.field.slot]);
     if (target.kind === 'local') {
       const { local } = target;
       const slot = local.owner === frame.method ? frame.slots[local.slot] : frame.captured.get(local);
@@ -903,8 +1084,13 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** The storage an lvalue names, with its receiver and indices evaluated once. */
+  // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   place(target: BoundLValue, frame: Frame): Place {
     switch (target.kind) {
+      case 'implicitIndex': {
+        for (const step of target.setup) this.evaluate(step, frame);
+        return this.place(target.access as BoundLValue, frame);
+      }
       case 'local': {
         const { local } = target;
         return { get: () => this.readLocal(frame, local), set: (value) => this.storeLocal(frame, local, value) };
@@ -913,6 +1099,7 @@ export class Evaluator extends StatementExecutor {
         const receiver = this.evaluate(target.receiver, frame);
         const fields = this.fieldsOf(receiver);
         const { slot } = target.field;
+        if (target.field.byRef) return referenceIn(fields[slot]);
         return {
           get: () => fields[slot],
           set: (value) => {
@@ -952,7 +1139,28 @@ export class Evaluator extends StatementExecutor {
       case 'discard': {
         return { get: () => {}, set: () => {} };
       }
+      case 'call': {
+        return this.evaluateCall(target, frame) as unknown as Reference;
+      }
+      case 'invokeDelegate': {
+        return this.evaluateInvokeDelegate(target, frame) as unknown as Reference;
+      }
+      case 'deref': {
+        const pointer = this.pointerValue(target.pointer, frame);
+        const type = frame.resolve(target.type);
+        return { get: () => readAt(pointer, type), set: (value) => writeAt(pointer, type, value) };
+      }
+      case 'refValue': {
+        return refValuePlace(this.evaluate(target.operand, frame), frame.resolve(target.type));
+      }
+      case 'refConditional': {
+        return this.place(this.chosenVariable(target, frame), frame);
+      }
     }
+  }
+
+  private chosenVariable(target: Extract<BoundLValue, { kind: 'refConditional' }>, frame: Frame): BoundLValue {
+    return (this.evaluate(target.condition, frame) as boolean) ? target.whenTrue : target.whenFalse;
   }
 
   private elementPlace(target: Extract<BoundExpression, { kind: 'element' }>, frame: Frame): Place {
@@ -976,19 +1184,27 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
+  /** The object or struct whose property an access reads or writes, or `this` for a property of its own. */
+  private propertyReceiver(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Value {
+    const { property } = target;
+    if (!target.receiver) return property.isStatic ? undefined : frame.thisValue;
+    const receiver = this.evaluate(target.receiver, frame);
+    if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
+    // An accessor of a struct runs on a copy of a value that is not a variable, as a method does.
+    return receiver instanceof CsStruct && !isVariable(target.receiver, true) ? receiver.clone() : receiver;
+  }
+
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
-    const { property } = target;
-    let receiver: Value = undefined;
-    if (target.receiver) {
-      receiver = this.evaluate(target.receiver, frame);
-      if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
-      // An accessor of a struct runs on a copy of a value that is not a variable, as a method does.
-      if (receiver instanceof CsStruct && !isVariable(target.receiver, true)) receiver = receiver.clone();
-    } else if (!property.isStatic) {
-      receiver = frame.thisValue;
+    if (target.constrainedType) {
+      const type = frame.resolve(target.constrainedType) as NamedType;
+      const getter = this.runtime.staticImplementation(type, target.property.getter as MethodSymbol);
+      const property = getter.property ?? target.property;
+      return this.propertyPlace({ ...target, property, owner: type, constrainedType: undefined }, frame);
     }
+    const { property } = target;
+    const receiver = this.propertyReceiver(target, frame);
     const isBase = (target.receiver as { isBase?: boolean } | undefined)?.isBase === true;
     const owner = frame.resolve(target.owner) as NamedType;
     if (property.isStatic && owner.symbol.staticConstructor) this.runtime.ensureInitialized(owner);
@@ -1008,7 +1224,7 @@ export class Evaluator extends StatementExecutor {
         receiver,
         [...args, ...extra],
         target.row,
-        this.environmentOf(implementation, implementationOwner, [])
+        this.environmentOf(implementation, implementationOwner, target.typeArgs ?? [])
       );
       return this.boxedAsCalled(accessor, implementation, this.runtime.runtimeTypeOf(receiver), result);
     };
@@ -1038,6 +1254,8 @@ export class Evaluator extends StatementExecutor {
         };
       }
     }
+    // A property returning by reference names the variable that its getter returns, which it calls once.
+    if (property.returnsByRef) return call(this.getterOf(property), []) as unknown as Reference;
     return {
       get: () => call(this.getterOf(property), []),
       set: (value) => {
@@ -1091,13 +1309,19 @@ export class Evaluator extends StatementExecutor {
     return created;
   }
 
-  private initialize(entries: BoundInitializerEntry[], frame: Frame): void {
+  protected initialize(entries: BoundInitializerEntry[], frame: Frame): void {
     for (const entry of entries) {
       if (entry.kind === 'collectionAdd') {
         this.evaluate(entry.call, frame);
         continue;
       }
       if (entry.target.kind === 'discard') continue;
+      if (entry.refTarget) {
+        const target = entry.target as Extract<BoundLValue, { kind: 'field' }>;
+        const fields = this.fieldsOf(this.evaluate(target.receiver, frame));
+        fields[target.field.slot] = this.referenceTo(entry.refTarget, frame) as unknown as Value;
+        continue;
+      }
       if (entry.nested) {
         const place = this.place(entry.target, frame);
         const nested = place.get();
@@ -1185,15 +1409,17 @@ export class Evaluator extends StatementExecutor {
         return stepNumeric(underlying, operand as NumericValue, expression.operator === '++' ? 1 : -1);
       return unaryNumeric('~', underlying as never, operand as NumericValue);
     }
+    const isChecked = expression.isChecked ?? this.program.checkOverflow;
     if (expression.operator === '++' || expression.operator === '--') {
       const type = nullableUnderlying(expression.type) ?? expression.type;
       return stepNumeric(
         specialOf(type) as SpecialType,
         operand as NumericValue,
-        expression.operator === '++' ? 1 : -1
+        expression.operator === '++' ? 1 : -1,
+        isChecked
       );
     }
-    return unaryNumeric(expression.operator, expression.operandKind, operand as NumericValue);
+    return unaryNumeric(expression.operator, expression.operandKind, operand as NumericValue, isChecked);
   }
 
   private evaluateBinary(expression: BinaryExpression, frame: Frame): Value {
@@ -1210,7 +1436,13 @@ export class Evaluator extends StatementExecutor {
     if (operandKind === 'enum') return this.enumBinary(expression, left as NumericValue, right as NumericValue);
     if (COMPARISONS.has(operator))
       return compareNumeric(operator, operandKind, left as NumericValue, right as NumericValue);
-    return arithmetic(operator, operandKind, left as NumericValue, right as NumericValue);
+    return arithmetic(
+      operator,
+      operandKind,
+      left as NumericValue,
+      right as NumericValue,
+      expression.isChecked ?? this.program.checkOverflow
+    );
   }
 
   private enumBinary(expression: BinaryExpression, left: NumericValue, right: NumericValue): Value {
@@ -1256,15 +1488,19 @@ export class Evaluator extends StatementExecutor {
     return freshString(text.toString());
   }
 
-  /** Formats one hole of an interpolated string or a composite format, with its format string and alignment. */
+  /**
+   * Formats one hole of an interpolated string or a composite format, with its format string and alignment, and the
+   * format provider of `string.Format(provider, ...)`.
+   */
   formatHole(
     value: Value,
     type: Type,
     format: string | undefined,
     alignment: number | undefined,
-    frame: Frame
+    frame: Frame,
+    provider?: Value
   ): string {
-    const text = formatValue(this, value, type, format, frame);
+    const text = formatValue(this, value, type, format, frame, provider);
     if (alignment === undefined) return text;
     // A wide alignment is checked against the string limit before the host pads to it.
     this.runtime.allocateString(Math.max(text.length, Math.abs(alignment)), 0);
@@ -1294,6 +1530,71 @@ export class Evaluator extends StatementExecutor {
         | string
         | undefined) ?? ''
     );
+  }
+
+  /**
+   * Runs an operation on `dynamic` values: evaluates its operands in order, binds it to their runtime types (the
+   * static types of operands that are not `dynamic`), and evaluates what it bound to with the operands as locals.
+   */
+  private evaluateLate(expression: Extract<BoundExpression, { kind: 'late' }>, frame: Frame): Value {
+    const values: (Value | Reference)[] = [];
+    const start = frame.temporaries.length;
+    try {
+      for (const operand of expression.operands) {
+        if (operand.kind === 'refArgument') {
+          values.push(this.referenceTo(operand.target, frame));
+          continue;
+        }
+        const value = copyValue(this.evaluate(operand, frame));
+        values.push(value);
+        frame.temporaries.push(value);
+      }
+      if (expression.receiver !== undefined && values[expression.receiver] === undefined)
+        throw this.runtimeBinderError('Cannot perform runtime binding on a null reference');
+      const types = this.lateOperandTypes(expression, values, frame);
+      const target = expression.target && frame.resolve(expression.target.type);
+      const binding = this.program.bindLate?.(expression, types, target);
+      if (!binding) throw new Error('A dynamic operation ran without a binder');
+      if ('message' in binding) throw this.runtimeBinderError(binding.message);
+      const { bound, method } = binding;
+      const inner = new Frame(
+        this.runtime,
+        method,
+        frame.thisValue,
+        frame.typeEnvironment,
+        expression.row,
+        method.locals.length
+      );
+      for (const [index, local] of method.locals.entries()) {
+        const value = values[index];
+        // An operand bound as a value type takes the value out of its box.
+        inner.slots[local.slot] = value instanceof CsBox && isValueType(local.type) ? copyValue(value.value) : value;
+      }
+      return this.evaluate(bound, inner);
+    } finally {
+      frame.temporaries.length = start;
+    }
+  }
+
+  /** The types a late-bound operation binds its operands as: the runtime types of `dynamic` values, else static types. */
+  private lateOperandTypes(
+    expression: Extract<BoundExpression, { kind: 'late' }>,
+    values: (Value | Reference)[],
+    frame: Frame
+  ): Type[] {
+    const objectType = namedType(this.runtime.library.typeNamed('System.Object'));
+    return expression.operands.map((operand, index) => {
+      // A variable passed by reference binds as its declared type, which a `dynamic` one gives as `object`.
+      if (operand.kind === 'refArgument') return isDynamicType(operand.type) ? objectType : frame.resolve(operand.type);
+      if (!isDynamicType(operand.type)) return frame.resolve(operand.type);
+      // A null value binds as the null literal does, which converts to any reference type.
+      if (values[index] === undefined) return index === expression.receiver ? objectType : NULL_TYPE;
+      return this.runtime.runtimeTypeOf(values[index] as Value) ?? objectType;
+    });
+  }
+
+  private runtimeBinderError(message: string): CsThrow {
+    return new CsThrow(this.runtime.createException('Microsoft.CSharp.RuntimeBinder.RuntimeBinderException', message));
   }
 
   /** The text of an exception that escaped the program: its `ToString()`, as .NET prints it after "Unhandled exception.". */
@@ -1404,4 +1705,17 @@ function liftedBool(operator: '&' | '|', a: boolean | undefined, b: boolean | un
   }
   if (a === true || b === true) return true;
   return a === undefined || b === undefined ? undefined : false;
+}
+
+/** The variable a ref field refers to, whose use throws for a null reference, as .NET's does. */
+function referenceIn(slot: Value): Reference {
+  if (slot instanceof Reference) return slot;
+  return new Reference(
+    () => {
+      throw NULL_REFERENCE();
+    },
+    () => {
+      throw NULL_REFERENCE();
+    }
+  );
 }

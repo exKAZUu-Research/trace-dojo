@@ -217,3 +217,29 @@ int b = 2;
   expect(finalVars).toEqual({ a: 1, b: 2 });
   expect(stdout).toBe('x\nm\nabandoned\n');
 });
+
+test('an awaiter’s members are steps called from the await, OnCompleted among them', () => {
+  const program = `using System.Runtime.CompilerServices;
+int v = await new Gate();
+
+class Gate : INotifyCompletion
+{
+    public Gate GetAwaiter() => this;
+    public bool IsCompleted
+    { get { int checks = 1; return false; } }
+    public int GetResult()
+    { int result = 4; return result; }
+    public void OnCompleted(Action c)
+    { int calls = 1; Task.Run(c); }
+}
+`;
+  const { traceItems } = traceProgram('csharp', program, program);
+  expect(traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [8, [2]],
+    [12, [2]],
+    [12, [2]],
+    [10, [2]],
+    [2, []],
+  ]);
+});
