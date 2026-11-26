@@ -145,10 +145,20 @@ export function evaluateParts<T>(
   frame: Frame,
   root: AwaitRoot | undefined,
   run: () => T
-): Generator<AwaitRequest, T, Value> {
+): Iterable<AwaitRequest, T, Value> {
+  // A statement without steps, as every one in a generator without await is, runs at once: two generators for each
+  // test of a sync* body's loop would cost it more than the loop.
+  if (!root) return finished(run());
   return evaluatePartsThen(frame, root, function* () {
     return run();
   });
+}
+
+/** An iterable that has already returned `value`, which `yield*` reads without suspending. */
+function finished<T>(value: T): Iterable<AwaitRequest, T, Value> {
+  const result: IteratorReturnResult<T> = { done: true, value };
+  const iterator: Iterator<AwaitRequest, T, Value> = { next: () => result };
+  return { [Symbol.iterator]: () => iterator };
 }
 
 /** Evaluates a statement's steps, then `run`'s generator, which reads what they computed and may wait too. */

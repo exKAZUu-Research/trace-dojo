@@ -484,7 +484,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       const task = frame.asyncTask as AsyncTask;
       const begun = task.recordedSteps;
       const spawnedBefore = task.spawned.length;
-      const completion = yield* evaluateParts(frame, parts, () => exec(frame));
+      const completion = parts ? yield* evaluateParts(frame, parts, () => exec(frame)) : exec(frame);
       // Only the steps the statement recorded itself, and those of the calls it started, can show what its calls
       // did, not those of other work it waited on.
       if (step) {
@@ -672,7 +672,9 @@ export abstract class ControlCompiler extends StatementCompiler {
     const otherwise = alternative ? this.compileGenScoped(alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
     return function* (frame) {
-      if (yield* evaluateParts(frame, testParts, () => test(frame))) return yield* consequence(frame);
+      if (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame)) {
+        return yield* consequence(frame);
+      }
       if (otherwise) return yield* otherwise(frame);
       return;
     };
@@ -715,7 +717,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const body = this.compileGenLoopBody(statement.body, labels);
     this.finishLoop(flow.whenFalse, this.fn.jumpTargets.pop());
     return function* (frame) {
-      while (yield* evaluateParts(frame, testParts, () => test(frame))) {
+      while (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame)) {
         const completion = yield* body(frame);
         if (completion) {
           const outcome = loopCompletion(completion, labels);
@@ -742,7 +744,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           if (outcome !== 'continue') return outcome;
         }
         frame.runtime.spend();
-      } while (yield* evaluateParts(frame, testParts, () => test(frame)));
+      } while (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame));
       return;
     };
   }
@@ -1030,15 +1032,21 @@ export function* cancelUnfinished(frame: Frame, iterator: Value): Generator<Awai
 }
 
 /** A counted loop in a generator, whose header parts may await through the steps `resume` gives them. */
+// code-gauge-allow functionCognitiveComplexity -- Each header part runs inline when it has no steps, which a helper generator per part would cost a sync* loop again.
 function genForLoop(
   loop: CountedLoop<GenExec>,
   resume: { init?: AwaitRoot; test?: AwaitRoot; update?: AwaitRoot }
 ): GenExec {
   const { test, body, labels } = loop;
   return function* (frame: Frame): ReturnType<GenExec> {
-    yield* evaluateParts(frame, resume.init, () => startCountedLoop(loop, frame));
+    // A header part without steps, as every one in a generator without await is, runs without a generator of its own,
+    // which would cost a sync* body's loop more than its test.
+    if (resume.init) yield* evaluateParts(frame, resume.init, () => startCountedLoop(loop, frame));
+    else startCountedLoop(loop, frame);
     for (;;) {
-      if (test && !(yield* evaluateParts(frame, resume.test, () => test(frame)))) return undefined;
+      if (test && !(resume.test ? yield* evaluateParts(frame, resume.test, () => test(frame)) : test(frame))) {
+        return undefined;
+      }
       const completion = yield* body(frame);
       if (completion) {
         const outcome = loopCompletion(completion, labels);
@@ -1046,7 +1054,8 @@ function genForLoop(
       }
       // The copy comes before the update's steps, which may already assign the loop variable.
       copyLoopVariables(loop, frame);
-      yield* evaluateParts(frame, resume.update, () => runLoopUpdates(loop, frame));
+      if (resume.update) yield* evaluateParts(frame, resume.update, () => runLoopUpdates(loop, frame));
+      else runLoopUpdates(loop, frame);
     }
   };
 }
