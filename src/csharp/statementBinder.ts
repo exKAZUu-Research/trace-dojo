@@ -970,6 +970,10 @@ export abstract class StatementBinder extends PatternBinder {
     return bound;
   }
 
+  private reportNullCollection(collection: Expression): void {
+    this.error(collection, 'CS0186', 'null はこのコンテキストでは使用できません');
+  }
+
   /**
    * Binds `await foreach` as C# spec §13.9.5 expands it: `var e = c.GetAsyncEnumerator(); try { while (await
    * e.MoveNextAsync()) { var x = e.Current; body } } finally { await e.DisposeAsync(); }`, with `e` hidden.
@@ -979,6 +983,18 @@ export abstract class StatementBinder extends PatternBinder {
   private bindAwaitForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     const position = { row: statement.row, column: statement.column };
     const collectionType = this.quietly(() => this.bindTypedValue(statement.collection, context).type);
+    const empty: BoundStatement = {
+      kind: 'block',
+      statements: [],
+      capturedLocals: [],
+      locals: [],
+      row: statement.row,
+      step: 'none',
+    };
+    if (collectionType?.kind === 'null') {
+      this.reportNullCollection(statement.collection);
+      return empty;
+    }
     if (
       collectionType &&
       collectionType.kind !== 'error' &&
@@ -994,7 +1010,7 @@ export abstract class StatementBinder extends PatternBinder {
         'CS8415',
         `'${display}' は 'GetAsyncEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して非同期 foreach ステートメントを使用することはできません。${hint}`
       );
-      return { kind: 'block', statements: [], capturedLocals: [], locals: [], row: statement.row, step: 'none' };
+      return empty;
     }
     // Each loop's enumerator has a name of its own, which nested loops may not hide.
     const enumeratorName = `\0asyncEnumerator${this.asyncLoopCount++}`;
@@ -1989,6 +2005,10 @@ export abstract class StatementBinder extends PatternBinder {
   // code-gauge-allow functionNcss -- How foreach binds its variable: by value, by deconstruction, or as a discard.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     let collection = this.bindTypedValue(statement.collection, context);
+    if (collection.type.kind === 'null') {
+      this.reportNullCollection(statement.collection);
+      collection = { kind: 'default', type: ERROR_TYPE, row: collection.row };
+    }
     // A `dynamic` collection is enumerated as an `IEnumerable`, whose elements are `dynamic` (C# spec §13.9.5).
     const isDynamicCollection = isDynamicType(collection.type);
     if (isDynamicCollection)
