@@ -276,9 +276,7 @@ export class Compiler extends AttributeBinder {
         // The operand of a `ref` or `out` argument refers to the caller's variable.
         local.isRefLocal = node.operands[index].kind === 'refArgument';
       }
-      let bound = this.bindValue(node.syntax, context);
-      // An operation that binds to another late one, as a call of an ExpandoObject's member does, drops its value too.
-      if (node.isDiscarded) discardResult(bound);
+      let bound = this.bindLateSyntax(node, context);
       if (node.target && target)
         bound = this.convert(bound, target, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
       else if (bound.type.kind === 'void' && !node.isDiscarded)
@@ -295,6 +293,13 @@ export class Compiler extends AttributeBinder {
       this.diagnostics.length = saved;
       this.isLateBinding = false;
     }
+  }
+
+  private bindLateSyntax(node: LateNode, context: BindContext): BoundExpression {
+    const bound = this.bindValue(node.syntax, context);
+    // An operation that binds to another late one, as a call of an ExpandoObject's member does, drops its value too.
+    if (node.isDiscarded) discardResult(bound);
+    return bound;
   }
 
   /** The method that a late-bound operation binds in, in the context of the code that wrote it. */

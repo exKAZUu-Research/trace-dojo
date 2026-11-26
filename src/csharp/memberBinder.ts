@@ -5,6 +5,7 @@ import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue
 import { type ArgumentInfo, CallBinder, type CallDescription, type ResolvedCall } from './callBinder';
 import type { BindContext } from './convertBinder';
 import { displayMethodIn } from './declarations';
+import { dynamicObjectCall, dynamicObjectMember } from './dynamicObjects';
 import type { MethodCandidate } from './lookup';
 import type { NamespaceSymbol } from './namespaces';
 import type { FunctionScope } from './scopes';
@@ -1026,7 +1027,9 @@ export abstract class MemberBinder extends CallBinder {
     );
     const extensions = this.lookupExtensionMethods(name, context.fn.typeContext);
     if (!found) {
-      const dynamicMember = this.bindDynamicObjectMember(receiver, name, position, isCallee);
+      const dynamicMember = this.isLateBinding
+        ? dynamicObjectMember(this, receiver, name, position, isCallee)
+        : undefined;
       if (dynamicMember) return dynamicMember;
       const getters = isCallee ? [] : this.lookupExtensionProperties(name, context.fn.typeContext);
       if (getters.length > 0) {
@@ -1304,12 +1307,19 @@ export abstract class MemberBinder extends CallBinder {
     return resolved;
   }
 
+  private lateDynamicObjectCall(
+    node: Extract<Expression, { kind: 'invocation' }>,
+    context: BindContext
+  ): BoundExpression | undefined {
+    return this.isLateBinding ? dynamicObjectCall(this, node, context) : undefined;
+  }
+
   /** Binds a call: of a method group, a delegate, or `nameof`. */
   // code-gauge-allow functionNcss -- One case per kind of syntax or value that the function handles.
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
       return this.bindNameof(node, context);
-    const dynamicCall = this.bindDynamicObjectCall(node, context);
+    const dynamicCall = this.lateDynamicObjectCall(node, context);
     if (dynamicCall) return dynamicCall;
     this.isBindingCallee = true;
     const target = this.bindExpression(node.target, context);
@@ -1532,69 +1542,6 @@ export abstract class MemberBinder extends CallBinder {
       isBaseAccess: false,
       row: position.row,
     };
-  }
-
-  /**
-   * A member that the runtime binder binds on an ExpandoObject or a DynamicObject lacking it: the object's internal
-   * indexer, which reads, assigns, or adds the member by name; a call of an ExpandoObject's member invokes its value.
-   */
-  private bindDynamicObjectMember(
-    receiver: BoundExpression,
-    name: string,
-    position: Position,
-    isCallee: boolean
-  ): BoundExpression | undefined {
-    const owner = this.isLateBinding ? dynamicObjectOwner(receiver.type) : undefined;
-    if (!owner || (isCallee && owner.symbol.name !== 'ExpandoObject')) return undefined;
-    const property = owner.symbol.properties.find(
-      (candidate) => candidate.isIndexer && candidate.access === 'internal'
-    ) as PropertySymbol;
-    return {
-      kind: 'property',
-      receiver,
-      property,
-      args: [this.constant(name, this.stringType, position.row), this.constant(true, this.boolType, position.row)],
-      owner,
-      type: property.type,
-      row: position.row,
-    };
-  }
-
-  /** `d.M(args)` of a DynamicObject whose type lacks `M`, which its TryInvokeMember binds as the call runs. */
-  private bindDynamicObjectCall(
-    node: Extract<Expression, { kind: 'invocation' }>,
-    context: BindContext
-  ): BoundExpression | undefined {
-    if (!this.isLateBinding || node.target.kind !== 'memberAccess' || node.target.target.kind !== 'name')
-      return undefined;
-    const receiver = this.bindExpression(node.target.target, context);
-    if (isNonValue(receiver)) return undefined;
-    const owner = dynamicObjectOwner(receiver.type);
-    if (owner?.symbol.name !== 'DynamicObject') return undefined;
-    const { name } = node.target;
-    if (this.lookupMember(receiver.type, name, context.fn.typeContext, 0, true).found) return undefined;
-    const method = owner.symbol.methods.find(
-      (candidate) => candidate.name === 'InvokeMember' && candidate.access === 'internal'
-    ) as MethodSymbol;
-    const nameArg: ArgumentInfo = {
-      expression: this.constant(name, this.stringType, node.row),
-      name: undefined,
-      refKind: undefined,
-      row: node.row,
-      target: undefined,
-    };
-    const group: Extract<NonValue, { kind: 'methodGroup' }> = {
-      kind: 'methodGroup',
-      name: method.name,
-      candidates: [{ method, owner }],
-      receiver,
-      isSimpleName: false,
-      typeArgs: undefined,
-      extensions: [],
-      isBaseAccess: false,
-      row: node.row,
-    };
-    return this.invokeMethodGroup(group, [nameArg, ...this.bindArguments(node.args, context)], node, context);
   }
 
   /** `T.M()` or `T.P` of a static member that an extension block for `T` declares. */
@@ -2292,16 +2239,4 @@ function captureUpToOwner(fn: FunctionScope, local: LocalSymbol): boolean {
     isChanged = true;
   }
   return isChanged;
-}
-
-/**
- * The library class that binds the members a type lacks at run time, which `dynamic` finds them through: the type
- * itself for an ExpandoObject, or DynamicObject for a class that derives from it.
- */
-function dynamicObjectOwner(type: Type): NamedType | undefined {
-  for (let current = type.kind === 'named' ? type : undefined; current; current = current.symbol.baseType) {
-    const { fullName } = current.symbol;
-    if (fullName === 'System.Dynamic.ExpandoObject' || fullName === 'System.Dynamic.DynamicObject') return current;
-  }
-  return undefined;
 }

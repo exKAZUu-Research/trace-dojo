@@ -49,26 +49,8 @@ export abstract class LambdaBinder extends MemberBinder {
 
   protected naturalTypeOf(expression: Unbound): Type | undefined {
     const node = expression.node;
-    if (expression.methodGroup) {
-      const group = expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>;
-      if (group.candidates.length !== 1) return undefined;
-      const [candidate] = group.candidates;
-      const { method } = candidate;
-      // A static member of a generic extension block takes the block's type arguments from the type it is accessed
-      // through (`List<int>.Create`).
-      const typeArgs =
-        method.typeParameters.length === 0
-          ? []
-          : candidate.staticReceiver && !group.typeArgs
-            ? this.inferTypeArguments(candidate, [], [], false)
-            : undefined;
-      if (!typeArgs) return undefined;
-      const substitution = this.callSubstitution(candidate, typeArgs);
-      return this.functionTypeOf(
-        method.parameters.map((parameter) => substitute(parameter.type, substitution)),
-        substitute(method.returnType, substitution)
-      );
-    }
+    if (expression.methodGroup)
+      return this.naturalTypeOfGroup(expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>);
     if (node.kind === 'lambda') {
       if (node.omitsParameters || node.parameters.some((parameter) => !parameter.type)) return undefined;
       const context = expression.context as BindContext;
@@ -82,6 +64,27 @@ export abstract class LambdaBinder extends MemberBinder {
       return this.functionTypeOf(parameterTypes, returnType);
     }
     return undefined;
+  }
+
+  /** The natural type of a method group of one method, whose type arguments, if any, it must not need inferred. */
+  private naturalTypeOfGroup(group: Extract<NonValue, { kind: 'methodGroup' }>): Type | undefined {
+    if (group.candidates.length !== 1) return undefined;
+    const [candidate] = group.candidates;
+    const { method } = candidate;
+    // A static member of a generic extension block takes the block's type arguments from the type it is accessed
+    // through (`List<int>.Create`).
+    const typeArgs =
+      method.typeParameters.length === 0
+        ? []
+        : candidate.staticReceiver && !group.typeArgs
+          ? this.inferTypeArguments(candidate, [], [], false)
+          : undefined;
+    if (!typeArgs) return undefined;
+    const substitution = this.callSubstitution(candidate, typeArgs);
+    return this.functionTypeOf(
+      method.parameters.map((parameter) => substitute(parameter.type, substitution)),
+      substitute(method.returnType, substitution)
+    );
   }
 
   /** The `Func` or `Action` type of parameter and return types, the natural type of lambdas and method groups. */

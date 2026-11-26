@@ -398,13 +398,7 @@ export abstract class CallBinder extends OperatorBinder {
       }),
       pending: new Set(),
     };
-    // The type that a static member of an extension block is accessed through infers the block's type arguments.
-    if (candidate.staticReceiver && method.staticExtensionOf)
-      this.lowerBoundInference(
-        candidate.staticReceiver,
-        substitute(method.staticExtensionOf, ownerSubstitution),
-        inference.bounds
-      );
+    this.inferFromStaticReceiver(candidate, inference);
     this.inferFromArguments(inference, method, parameterOf);
     for (let round = 0; round <= parameters.length + args.length; round++) {
       this.inferLambdaReturnTypes(inference);
@@ -417,6 +411,17 @@ export abstract class CallBinder extends OperatorBinder {
     }
     if (parameters.some((parameter) => !inference.fixed.has(parameter))) return undefined;
     return parameters.map((parameter) => inference.fixed.get(parameter) as Type);
+  }
+
+  /** The type that a static member of an extension block is accessed through infers the block's type arguments. */
+  private inferFromStaticReceiver(candidate: MethodCandidate, inference: Inference): void {
+    const extended = candidate.method.staticExtensionOf;
+    if (candidate.staticReceiver && extended)
+      this.lowerBoundInference(
+        candidate.staticReceiver,
+        substitute(extended, inference.ownerSubstitution),
+        inference.bounds
+      );
   }
 
   /** The first phase: bounds from the arguments with types, and from the explicit parameter types of lambdas. */
@@ -1105,8 +1110,11 @@ export abstract class CallBinder extends OperatorBinder {
       if (this.reportRefKindMismatch(arg, parameter, position)) {
         hasBadArgument = true;
       } else if (!this.argumentFits(arg, type, parameter.refKind)) {
-        this.reportInconvertible(candidate, arg, position, type, row, description, typeArgs);
-        if (description.isExtension && position === 0) return;
+        if (description.isExtension && position === 0) {
+          this.reportReceiverMismatch(candidate, arg, type, row, description, typeArgs);
+          return;
+        }
+        this.reportInconvertible(candidate, arg, position, type, row, description);
         hasBadArgument = true;
       }
     }
@@ -1316,6 +1324,28 @@ export abstract class CallBinder extends OperatorBinder {
 
   protected abstract rejectUnknownLibraryMember(type: Type, name: string, position: number): void;
 
+  /** Reports the receiver of an extension method that does not convert to the type that the method extends. */
+  private reportReceiverMismatch(
+    candidate: MethodCandidate,
+    arg: ArgumentInfo,
+    type: Type,
+    row: number,
+    description: CallDescription,
+    typeArgs: Type[]
+  ): void {
+    // An extension method of .NET's that the library lacks, such as a span's, is unavailable rather than a mismatch.
+    this.rejectUnknownLibraryMember(arg.expression.type, description.name, row);
+    const { method } = candidate;
+    const shown = method.isExtensionBlockMember
+      ? displayExtensionMember(method, typeArgs)
+      : displayMethodIn(method, candidate.owner);
+    this.error(
+      row,
+      'CS1929',
+      `'${displayType(arg.expression.type)}' に '${method.extensionProperty ?? description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${shown}' には '${displayType(type, method.isExtensionBlockMember)}' 型のレシーバーが必要です`
+    );
+  }
+
   /** Reports an argument that does not convert to its parameter's type. */
   private reportInconvertible(
     candidate: MethodCandidate,
@@ -1323,8 +1353,7 @@ export abstract class CallBinder extends OperatorBinder {
     position: number,
     type: Type,
     row: number,
-    description: CallDescription,
-    typeArgs: Type[]
+    description: CallDescription
   ): void {
     if (arg.expression.kind === 'unbound' && arg.expression.methodGroup) {
       this.error(
@@ -1335,18 +1364,6 @@ export abstract class CallBinder extends OperatorBinder {
     } else if (arg.expression.kind === 'unbound') {
       // Converting reports why the lambda does not fit, as Roslyn reports the body's errors.
       this.convert(arg.expression, type, arg.row);
-    } else if (description.isExtension && position === 0) {
-      // An extension method of .NET's that the library lacks, such as a span's, is unavailable rather than a mismatch.
-      this.rejectUnknownLibraryMember(arg.expression.type, description.name, row);
-      const { method } = candidate;
-      const shown = method.isExtensionBlockMember
-        ? displayExtensionMember(method, typeArgs)
-        : displayMethodIn(method, candidate.owner);
-      this.error(
-        row,
-        'CS1929',
-        `'${displayType(arg.expression.type)}' に '${method.extensionProperty ?? description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${shown}' には '${displayType(type, method.isExtensionBlockMember)}' 型のレシーバーが必要です`
-      );
     } else {
       this.lastInconvertibleCall =
         description.kind === 'delegate'
