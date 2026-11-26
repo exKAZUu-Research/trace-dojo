@@ -1129,18 +1129,19 @@ class _SuspendState {
   }
   void _returnAsync(Object? returnValue) {
     final future = _functionData as _Future;
-    // Modification: when the only listener of the future is the await of another body, that body resumes right after
-    // this one's resumption ends, by its driver's loop, instead of inside the completion, as the VM resumes it, which
-    // nothing else runs between; so that a chain of awaited recursive calls runs in a fixed depth of host frames.
+    // Modification: when the last listener the future's completion runs, the one added last, is the await of another
+    // body, that body resumes right after this one's resumption ends, by its driver's loop, instead of inside the
+    // completion, as the VM resumes it, which nothing else runs between; so that a chain of awaited recursive calls
+    // runs in a fixed depth of host frames. The listeners before it run as the completion runs them.
     final awaiter = future._awaitedBy;
-    final listeners = future._resultOrListeners;
+    final last = future._resultOrListeners;
     if (returnValue is! Future &&
         awaiter != null &&
         future._state == _Future._stateIncomplete &&
-        listeners is _FutureListener &&
-        listeners._nextListener == null &&
-        identical(listeners.callback, awaiter._thenCallback)) {
-      future._setValue(returnValue);
+        last is _FutureListener &&
+        identical(last.callback, awaiter._thenCallback)) {
+      future._resultOrListeners = last._nextListener;
+      future._completeWithValue(returnValue);
       awaiter._resumeLater(returnValue);
       return;
     }

@@ -9342,6 +9342,16 @@ void main() { print([whole<double>(2.5), whole<int>(null), firstOr<int>(null, 4)
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[2, 0, 4]\n' });
 });
 
+test.each([
+  'int f<T extends int?>(T? v) { if (v is! Null) return v + 1; return 0; }',
+  'int f<T extends num?>(T? v) { if (v is! Null) return v.toInt(); return 0; }',
+  'T f<T>(T? v) { if (v is Null) { return v; } return v; }',
+])('a nullable type parameter keeps its nullable bound, and a null value is Null: %s', (declaration) => {
+  expect(executeProgram('dart', `${declaration}\nvoid main() { print(f<int>(4)); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
 test('byte writes keep a byte order mark and text reads drop one, as the VM decodes them', () => {
   const source = `import 'dart:io';
 void main() {
@@ -9381,6 +9391,17 @@ Future<void> main() async {
       '',
     ].join('\n'),
   });
+});
+
+test('awaited async recursion whose futures have another listener first runs as deep as the SDK runs it', () => {
+  const source = `Future<int> e(int n) async { if (n == 0) return 0; final f = e(n - 1); f.then((_) {}); return 1 + await f; }
+Future<void> main() async {
+  print(await e(200));
+  final c = e(2);
+  c.then((v) => print('then $v'));
+  print('await \${await c}');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '200\nthen 2\nawait 2\n' });
 });
 
 test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
