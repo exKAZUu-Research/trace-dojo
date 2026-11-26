@@ -3710,7 +3710,9 @@ function withRequiredTypeArguments(binding: Extract<RBinding, { k: 'fun' }>): vo
   const required = binding.sig?.forall?.filter((binder) => binder.required).length ?? 0;
   if (required === 0) return;
   for (const clause of binding.clauses) {
-    const names = clause.pats.slice(0, required).map((pat) => {
+    const names = clause.pats.slice(0, required).map((written) => {
+      // Strict's implicit bang does not apply to a type argument, which has no value to evaluate.
+      const pat = written.k === 'bang' ? written.pat : written;
       if (pat.k === 'var') return pat.local.name;
       if (pat.k === 'wild') return '_';
       throw compileError(pat.span, '型を受け取る引数には、変数を書いてください。');
