@@ -40,6 +40,11 @@ export interface DeferredRegion {
 
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
 export class SourceText {
+  /**
+   * The values `extglob` may have at the line being read, which a command substitution read inside it starts from, as
+   * Bash reads the substitution with the options of the line it is on.
+   */
+  readingExtglob = { on: false, uncertain: false };
   private readonly lineStarts: number[] = [0];
   private depth = 0;
   /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */

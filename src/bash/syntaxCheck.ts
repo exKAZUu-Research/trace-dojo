@@ -415,9 +415,19 @@ function collectHeredocDescriptorVariables(text: SourceText, start: number, end:
 
 export function createValidatorSourceText(source: string): SourceText {
   const text = new SourceText(source);
-  text.parseSubstitution = (start) => new ShellGrammarValidator(text, start, true).validateSubstitution();
+  // A substitution's own `shopt` lines change what it reads but not the line around it.
+  const keepingExtglob = (read: () => number): number => {
+    const saved = text.readingExtglob;
+    try {
+      return read();
+    } finally {
+      text.readingExtglob = saved;
+    }
+  };
+  text.parseSubstitution = (start) =>
+    keepingExtglob(() => new ShellGrammarValidator(text, start, true).validateSubstitution());
   text.parseBraceSubstitution = (start) =>
-    new ShellGrammarValidator(text, start, true, true).validateBraceSubstitution();
+    keepingExtglob(() => new ShellGrammarValidator(text, start, true, true).validateBraceSubstitution());
   return text;
 }
 
@@ -808,6 +818,14 @@ class ShellGrammarValidator {
     closesBrace = false
   ) {
     this.stream = new ShellTokenStream(text, start, closesBrace);
+    if (insideSubstitution) {
+      const { on, uncertain } = text.readingExtglob;
+      this.possibleExtglob.clear();
+      if (on || uncertain) this.possibleExtglob.add(true);
+      if (!on || uncertain) this.possibleExtglob.add(false);
+      this.stream.extglob = on;
+      this.stream.extglobUncertain = uncertain;
+    }
   }
 
   validateScript(): void {
@@ -838,6 +856,7 @@ class ShellGrammarValidator {
     }
     this.stream.extglob = this.possibleExtglob.has(true);
     this.stream.extglobUncertain = this.possibleExtglob.size > 1;
+    this.text.readingExtglob = { on: this.stream.extglob, uncertain: this.stream.extglobUncertain };
   }
 
   validateSubstitution(): number {
