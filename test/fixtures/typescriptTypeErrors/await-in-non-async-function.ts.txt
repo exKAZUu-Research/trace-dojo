@@ -1,0 +1,8 @@
+async function fetchCount(): Promise<number> {
+  return 1;
+}
+function show(): void {
+  const count = await fetchCount();
+  console.log(count);
+}
+show();

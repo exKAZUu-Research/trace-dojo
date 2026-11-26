@@ -46,9 +46,8 @@ export function awaitedType(c: Checker, type: Type, depth = 0): Type {
  * tsx runs none that does, or in a function that is not async.
  */
 export function checkAwaitPlace(c: Checker, node: TreeNode, isLoop: boolean): void {
-  let container: TreeNode | null = node.parent;
-  while (container && !awaitBoundaries.has(container.type)) container = container.parent;
-  const what = isLoop ? "'for await' ループ" : "'await' 式";
+  const container = awaitContainer(node);
+  const what = awaitWhat(isLoop);
   // tsx compiles a module to CommonJS, where esbuild refuses a top-level await.
   if (!container && c.isModule) c.error(node, `モジュールの一番外側の${what}は、この採点環境では使えません。`);
   else if (!container)
@@ -56,6 +55,29 @@ export function checkAwaitPlace(c: Checker, node: TreeNode, isLoop: boolean): vo
       node,
       `ファイルの一番外側の${what}は、ファイルがモジュールのときしか使えませんが、このファイルには import も export もありません。モジュールにするには、空の 'export {}' を書いてください。`
     );
-  else if (!hasToken(container, 'async'))
-    c.error(node, `${what}は、async 関数の中とモジュールの一番外側でしか使えません。`);
+  else if (!hasToken(container, 'async')) c.error(node, nonAsyncAwaitMessage(isLoop));
+}
+
+/**
+ * The error of an `await` the parser left out of the tree, which it does inside a function that is not async, or
+ * `undefined` when the `await` is elsewhere.
+ */
+export function unparsedAwaitMessage(awaitToken: TreeNode): string | undefined {
+  const container = awaitContainer(awaitToken);
+  if (!container || hasToken(container, 'async')) return undefined;
+  return nonAsyncAwaitMessage(awaitToken.parent?.type === 'for_in_statement');
+}
+
+function awaitContainer(node: TreeNode): TreeNode | null {
+  let container: TreeNode | null = node.parent;
+  while (container && !awaitBoundaries.has(container.type)) container = container.parent;
+  return container;
+}
+
+function nonAsyncAwaitMessage(isLoop: boolean): string {
+  return `${awaitWhat(isLoop)}は、async 関数の中とモジュールの一番外側でしか使えません。`;
+}
+
+function awaitWhat(isLoop: boolean): string {
+  return isLoop ? "'for await' ループ" : "'await' 式";
 }

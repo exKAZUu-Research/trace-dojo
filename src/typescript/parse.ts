@@ -6,6 +6,7 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, findSyntaxErrors, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
 import { nameOf } from '../javascript/convertNodes';
+import { unparsedAwaitMessage } from './checker/awaited';
 import { checkTypeScript } from './checker/checker';
 import { hasInvalidCharacterEscape, isRawTypeTemplateFragment } from './checker/syntax';
 import { javaScriptViewOf } from './jsView';
@@ -172,16 +173,22 @@ function typeScriptSyntaxErrors(root: Node, source: string, parseErrors: SourceD
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
-  return withPostfixOptionalTypes(root, errors).toSorted((left, right) => left.row - right.row);
+  return withNamedSyntaxErrors(root, errors).toSorted((left, right) => left.row - right.row);
 }
 
 /**
- * Names `let a: string?`, which the parser cannot read past the `?`, as tsc does: the `?` written after a type, with
- * the union it suggests in its place, instead of the syntax error the parser gives there.
+ * Replaces the syntax error the parser gives where tsc names the mistake: `let a: string?`, which the parser cannot
+ * read past the `?`, with the `?` written after a type and the union it suggests in its place; and an `await` in a
+ * function that is not async, which the parser leaves out of the tree, with where `await` is allowed.
  */
-function withPostfixOptionalTypes(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
-  const postfix = root.descendantsOfType('ERROR').flatMap((node): SourceDiagnostic[] => {
-    const type = node?.text === '?' ? postfixMarkedType(node) : undefined;
+function withNamedSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
+  const named = root.descendantsOfType('ERROR').flatMap((node): SourceDiagnostic[] => {
+    if (!node) return [];
+    if (node.text === 'await') {
+      const message = unparsedAwaitMessage(node);
+      return message ? [{ row: node.startPosition.row, message }] : [];
+    }
+    const type = node.text === '?' ? postfixMarkedType(node) : undefined;
     if (!type) return [];
     return [
       {
@@ -190,11 +197,8 @@ function withPostfixOptionalTypes(root: Node, errors: SourceDiagnostic[]): Sourc
       },
     ];
   });
-  const rows = new Set(postfix.map((error) => error.row));
-  return [
-    ...errors.filter((error) => !rows.has(error.row) || error.message !== '書き方に誤りがあります。'),
-    ...postfix,
-  ];
+  const rows = new Set(named.map((error) => error.row));
+  return [...errors.filter((error) => !rows.has(error.row) || error.message !== '書き方に誤りがあります。'), ...named];
 }
 
 /**
