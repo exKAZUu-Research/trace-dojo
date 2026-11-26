@@ -220,7 +220,8 @@ export class Binder {
       const exported = outer.namespace?.namespaceExports?.values.get(part.text);
       if (exported?.valueKind === 'namespace' && !outer.values.has(part.text)) outer.values.set(part.text, exported);
       namespace = outer.declareValue(part.text, 'namespace', node, part);
-      if (outer.namespace) this.exportFrom(outer, namespace, 'value');
+      // The path's first name is exported only by an `export` or an ambient body, which `exportDeclared` handles.
+      if (outer !== scope) this.exportFrom(outer, namespace, 'value');
       namespace.namespaceExports ??= new Scope('block', outer, node);
       outer = this.newNamespaceBody(node, namespace, isAmbient);
     }

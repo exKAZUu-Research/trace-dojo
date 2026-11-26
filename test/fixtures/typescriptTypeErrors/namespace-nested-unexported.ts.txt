@@ -1,0 +1,10 @@
+namespace A {
+  namespace B {
+    export const x = 1;
+  }
+  export namespace C.D { export const y = 2; }
+  namespace E.F { export const z = 3; }
+}
+console.log(A.B.x, A.C.D.y, A.E.F.z);
+declare namespace G { namespace H { const w: number; } }
+console.log(G.H.w);
