@@ -13,6 +13,7 @@ import { exprInner } from './checkerExpr';
 import { settleBinaries } from './checkerOperators';
 import { checkParamPatterns, checkPattern, requireRefMutSource } from './checkerPatterns';
 import { checkConstOperations, ConstLint } from './constLint';
+import { checkCopyDestructors } from './copyDestructors';
 import { neverCompletes } from './divergence';
 import { requireSizedSource } from './dynSource';
 import { isIrrefutable, lowerPattern } from './exhaustiveness';
@@ -240,10 +241,11 @@ export class Checker {
 
   /**
    * Rejects a second impl of a trait for the same type (E0119), and an impl of a standard library's trait for a type
-   * the program does not declare (E0117, the orphan rule).
+   * the program does not declare (E0117, the orphan rule), and a type both Copy and Drop (E0184).
    */
   private checkImplCoherence(): void {
     checkInherentItems(this.program, (a, b) => this.implsOverlap(a, b));
+    checkCopyDestructors(this.program);
     const impls = new Map<TraitDef, ImplDef[]>();
     for (const impl of this.program.impls) {
       const traitRef = impl.trait;
