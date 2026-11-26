@@ -3267,7 +3267,8 @@ class _AsyncStarStreamController<T> {
       }
       return false;
     }
-    final whenDoneAdding = controller.addStream(stream, cancelOnError: false);
+    // An attached body adds the stream to the root, where all its events go.
+    final whenDoneAdding = _out.addStream(stream, cancelOnError: false);
     final self = this;
     whenDoneAdding.then((_) {
       self._attachedDone();
