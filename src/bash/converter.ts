@@ -46,6 +46,14 @@ export interface ConverterHooks {
   readonly readsApart?: boolean;
 }
 
+/** The `$( )` a node lies in, if any, written with `$(`. */
+function enclosingSubstitution(node: Node): Node | undefined {
+  for (let current = node.parent; current; current = current.parent) {
+    if (current.type === 'command_substitution') return current.text.startsWith('$(') ? current : undefined;
+  }
+  return undefined;
+}
+
 /** Whether a node lies in a `${ ...; }` or `${| ...; }`, whose body Bash reads apart from the lines after it. */
 function insideCurrentShellSubstitution(node: Node): boolean {
   for (let current = node.parent; current; current = current.parent) {
@@ -64,7 +72,14 @@ export class Converter {
    * The here-documents that end without their delimiter line, with the row of the redirection, the line Bash's warning
    * names as where the body starts, the line it reports from, and the delimiter they wanted.
    */
-  private readonly unterminatedHeredocs: { row: number; startLine: number; line: number; delimiter: string }[] = [];
+  private readonly unterminatedHeredocs: {
+    row: number;
+    startLine: number;
+    line: number;
+    delimiter: string;
+    /** The `$( )` whose here-documents the end of the input left without a body, which Bash counts as it warns. */
+    substitution?: number;
+  }[] = [];
 
   private get source(): string {
     return this.analyzed.grammarSource;
@@ -123,11 +138,22 @@ export class Converter {
    */
   private readWarnings(unitEndRows: readonly number[]): Map<number, string[]> {
     const warnings = new Map<number, string[]>();
-    for (const { row, startLine, line, delimiter } of this.unterminatedHeredocs) {
+    const counted = new Set<number>();
+    for (const { row, startLine, line, delimiter, substitution } of this.unterminatedHeredocs) {
       const index = unitEndRows.findIndex((endRow) => endRow >= row);
       const unit = index === -1 ? unitEndRows.length - 1 : index;
-      const message = `line ${line}: warning: here-document at line ${startLine} delimited by end-of-file (wanted \`${delimiter}')`;
-      warnings.set(unit, [...(warnings.get(unit) ?? []), message]);
+      const messages = warnings.get(unit) ?? [];
+      // Bash first counts the here-documents a command substitution leaves unterminated, then warns of each.
+      if (substitution !== undefined && !counted.has(substitution)) {
+        counted.add(substitution);
+        const count = this.unterminatedHeredocs.filter((entry) => entry.substitution === substitution).length;
+        const noun = count === 1 ? 'here-document' : 'here-documents';
+        messages.push(`line ${line}: warning: command substitution: ${count} unterminated ${noun}`);
+      }
+      messages.push(
+        `line ${line}: warning: here-document at line ${startLine} delimited by end-of-file (wanted \`${delimiter}')`
+      );
+      warnings.set(unit, messages);
     }
     return warnings;
   }
@@ -141,7 +167,8 @@ export class Converter {
     row: number,
     startLine: number | undefined,
     delimiter: string,
-    closedRow: number | undefined
+    closedRow: number | undefined,
+    substitution?: number
   ): void {
     const source = this.analyzed.originalSource;
     const lastLine = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
@@ -150,6 +177,7 @@ export class Converter {
       startLine: startLine ?? lastLine,
       line: closedRow === undefined ? lastLine : closedRow + 1,
       delimiter: delimiter.replaceAll(/['"\\]/g, ''),
+      substitution,
     });
   }
 
@@ -612,7 +640,7 @@ export class Converter {
         return this.unsupported(redirect, 'outerHeredocBody');
       }
       // Bash begins reading the body at the end of the input, where it stops at once.
-      this.noteUnterminatedHeredoc(row, undefined, delimiter, undefined);
+      this.noteUnterminatedHeredoc(row, undefined, delimiter, undefined, enclosingSubstitution(redirect)?.id);
       return { parts: [], row, text: '' };
     }
     const end = body.namedChildren.find((child) => child?.type === 'heredoc_end');
