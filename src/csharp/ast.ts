@@ -322,6 +322,8 @@ export type Statement =
       declarators: VariableDeclarator[];
       /** A `using` declaration (`using var r = ...;`), which disposes its variables at the end of the enclosing block. */
       using?: 'using' | 'await using';
+      /** The variable of an `await foreach (ref T x in e)` loop, which `Current` initializes by reference. */
+      isRefIteration?: true;
     } & Position)
   | ({ kind: 'deconstruction'; designation: Designation; value: Expression } & Position)
   | ({ kind: 'unsafe'; body: Block } & Position)

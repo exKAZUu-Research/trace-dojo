@@ -951,13 +951,21 @@ export abstract class StatementBinder extends PatternBinder {
       nameRow: statement.row,
       ...position,
     };
+    const isRef = statement.type.kind === 'refType';
     const binding: Statement =
       statement.variable.kind === 'single'
         ? {
             kind: 'localDeclaration',
             isConst: false,
             type: statement.type,
-            declarators: [{ name: statement.variable.name, initializer: current, ...position }],
+            declarators: [
+              {
+                name: statement.variable.name,
+                initializer: isRef ? { kind: 'refExpression', operand: current, ...position } : current,
+                ...position,
+              },
+            ],
+            ...(isRef ? { isRefIteration: true as const } : {}),
             ...position,
           }
         : { kind: 'deconstruction', designation: statement.variable, value: current, ...position };
@@ -1301,6 +1309,8 @@ export abstract class StatementBinder extends PatternBinder {
       const { initializer } = declarator;
       let target: BoundLValue | undefined;
       if (!initializer) this.error(declarator, 'CS8174', '参照渡し変数の宣言には初期化子が必要です');
+      else if (statement.isRefIteration && initializer.kind === 'refExpression')
+        target = this.bindRefIterationTarget(initializer.operand, refType.isReadonly, declaredType, context);
       else if (initializer.kind === 'refExpression') {
         target = this.bindRefTarget(initializer.operand, refType.isReadonly, context, 'local');
         if (declaredType && target.kind !== 'discard') this.checkRefType(target.type, declaredType, initializer);
@@ -1309,6 +1319,10 @@ export abstract class StatementBinder extends PatternBinder {
       const local = this.declareLocal(declarator.name, type, declarator, context);
       local.isRefLocal = true;
       local.refKind = refType.isReadonly ? 'in' : 'ref';
+      if (statement.isRefIteration) {
+        local.isRefFixed = true;
+        local.isReadonly = refType.isReadonly;
+      }
       if (target !== undefined && target.kind !== 'discard') local.refContext = this.refContextOf(target, context.fn);
       return {
         kind: 'localDeclaration',
@@ -1904,17 +1918,8 @@ export abstract class StatementBinder extends PatternBinder {
     const isVar = refType.type.kind === 'varType' && !this.findTypeInScope('var', 0, inner.fn.typeContext);
     const declaredType = isVar ? elementType : this.resolveType(refType.type, inner.fn.typeContext);
     const byRef = iteration.kind === 'enumerator' ? iteration.current.returnsByRef : undefined;
-    if (elementType.kind !== 'error') {
-      if (!byRef)
-        this.error(statement.collection, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
-      else if (byRef === 'readonly' && !refType.isReadonly)
-        this.error(
-          statement.collection,
-          'CS8331',
-          "メソッド に割り当てることができません。'Current.get' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。"
-        );
-      else this.checkRefType(elementType, declaredType, statement.collection);
-    }
+    if (elementType.kind !== 'error')
+      this.checkRefIteration(byRef, refType.isReadonly, elementType, declaredType, statement.collection);
     const designation = statement.variable;
     let variable: LocalSymbol;
     if (designation.kind === 'single') variable = this.declareLocal(designation.name, declaredType, designation, inner);
@@ -1945,6 +1950,43 @@ export abstract class StatementBinder extends PatternBinder {
       row: statement.row,
       step: 'step',
     };
+  }
+
+  /** Reports a `Current` that gives no variable a ref iteration variable of its type may refer to. */
+  private checkRefIteration(
+    byRef: 'ref' | 'readonly' | undefined,
+    isReadonly: boolean,
+    elementType: Type,
+    declaredType: Type,
+    position: Position
+  ): boolean {
+    if (!byRef) this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+    else if (byRef === 'readonly' && !isReadonly)
+      this.error(
+        position,
+        'CS8331',
+        "メソッド に割り当てることができません。'Current.get' は読み取り専用変数であるため、ref 割り当ての右辺として使用することはできません。"
+      );
+    else {
+      this.checkRefType(elementType, declaredType, position);
+      return true;
+    }
+    return false;
+  }
+
+  /** The `Current` of an `await foreach` enumerator that a ref iteration variable refers to. */
+  private bindRefIterationTarget(
+    current: Expression,
+    isReadonly: boolean,
+    declaredType: Type | undefined,
+    context: BindContext
+  ): BoundLValue {
+    const bound = this.toValue(this.bindExpression(current, context), current);
+    if (bound.type.kind === 'error') return { kind: 'discard', type: ERROR_TYPE, row: current.row };
+    const byRef = bound.kind === 'property' ? bound.property.returnsByRef : undefined;
+    if (!this.checkRefIteration(byRef, isReadonly, bound.type, declaredType ?? bound.type, current))
+      return { kind: 'discard', type: ERROR_TYPE, row: current.row };
+    return bound as BoundLValue;
   }
 
   /**
