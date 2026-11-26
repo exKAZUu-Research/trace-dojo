@@ -994,26 +994,30 @@ instance Ppr Name where
   ppr = pprNamePrefix
 
 instance Ppr Lit where
-  ppr = pprLit 0
+  ppr = pprLit noPrec
 
 instance Ppr Exp where
-  ppr = pprExp 0
+  ppr = pprExp noPrec
 
 instance Ppr Pat where
-  ppr = pprPat 0
+  ppr = pprPat noPrec
 
 instance Ppr Type where
-  ppr = pprType 0
+  ppr = pprType noPrec
 
 instance Ppr Dec where
   ppr = pprDec
   pprList ds = intercalate "\n" (map pprDec ds)
 
 instance Ppr Match where
-  ppr (Match p b ds) = pprPat 0 p ++ pprBody " ->" b ++ pprWhere ds
+  ppr (Match p b ds) = pprMatchPat p ++ pprBody " ->" b ++ pprWhere ds
+
+pprMatchPat :: Pat -> String
+pprMatchPat p@(SigP _ _) = "(" ++ pprPat noPrec p ++ ")"
+pprMatchPat p = pprPat noPrec p
 
 instance Ppr Clause where
-  ppr (Clause ps b ds) = unwords (map (pprPat 3) ps) ++ pprBody " =" b ++ pprWhere ds
+  ppr (Clause ps b ds) = unwords (map (pprPat appPrec) ps) ++ pprBody " =" b ++ pprWhere ds
 
 instance Ppr Stmt where
   ppr = pprStmt
@@ -1034,106 +1038,133 @@ pprSep parts =
   let one = unwords parts
   in if length one <= 100 && notElem '\n' one then one else intercalate "\n " parts
 
+appPrec :: Int
+appPrec = 6
+
+opPrec :: Int
+opPrec = 5
+
+unopPrec :: Int
+unopPrec = 4
+
+funPrec :: Int
+funPrec = 3
+
+qualPrec :: Int
+qualPrec = 2
+
+sigPrec :: Int
+sigPrec = 1
+
+noPrec :: Int
+noPrec = 0
+
 parensIf :: Bool -> String -> String
 parensIf True s = "(" ++ s ++ ")"
 parensIf False s = s
 
 pprLit :: Int -> Lit -> String
-pprLit p (IntegerL i) = parensIf (p > 1 && i < 0) (show i)
-pprLit _ (CharL c) = show c
-pprLit _ (StringL s) = show s
-pprLit p (RationalL r) = parensIf (p > 1 && r < 0) (showRational r)
-pprLit p (IntPrimL i) = parensIf (p > 1 && i < 0) (show i ++ "#")
+pprLit p (IntPrimL i) = parensIf (p > noPrec && i < 0) (show i ++ "#")
 pprLit _ (WordPrimL i) = show i ++ "##"
-pprLit _ (FloatPrimL r) = showRational r ++ "#"
-pprLit _ (DoublePrimL r) = showRational r ++ "##"
+pprLit p (FloatPrimL r) = parensIf (p > noPrec && r < 0) (show (fromRational r :: Float) ++ "#")
+pprLit p (DoublePrimL r) = parensIf (p > noPrec && r < 0) (show (fromRational r :: Double) ++ "##")
+pprLit p (IntegerL i) = parensIf (p > noPrec && i < 0) (show i)
+pprLit _ (CharL c) = show c
 pprLit _ (CharPrimL c) = show c ++ "#"
-
-showRational :: Rational -> String
-showRational r = case decimal r of
-  Just s -> s
-  Nothing -> show (numerator r) ++ " / " ++ show (denominator r)
+pprLit _ (StringL s) = show s
+pprLit p (RationalL rat)
+  | withoutFactor 2 (withoutFactor 5 (denominator rat)) /= 1 =
+      parensIf (p > noPrec) (show (numerator rat) ++ " / " ++ show (denominator rat))
+  | rat /= 0 && (zeroes < -2 || zeroes > 6), let (n, d) = properFraction (rat / magnitude) =
+      parensIf (p > noPrec && rat < 0) (show (n :: Integer) ++ (if d == 0 then "" else '.' : decimals (abs d)) ++ "e" ++ show zeroes)
+  | let (n, d) = properFraction rat =
+      parensIf (p > noPrec && rat < 0) (show (n :: Integer) ++ "." ++ (if d == 0 then "0" else decimals (abs d)))
   where
-    decimal x
-      | x < 0 = fmap ('-' :) (decimal (negate x))
-      | otherwise = finite (numerator x) (denominator x)
-    finite n d = if twosAndFives d then Just (digits n d) else Nothing
-    twosAndFives d
-      | d == 1 = True
-      | d ${'`'}mod${'`'} 2 == 0 = twosAndFives (d ${'`'}div${'`'} 2)
-      | d ${'`'}mod${'`'} 5 == 0 = twosAndFives (d ${'`'}div${'`'} 5)
-      | otherwise = False
-    digits n d = show (n ${'`'}div${'`'} d) ++ "." ++ fraction (n ${'`'}mod${'`'} d) d
-    fraction 0 _ = "0"
-    fraction n d = go n d
-    go 0 _ = ""
-    go n d = show ((n * 10) ${'`'}div${'`'} d) ++ go ((n * 10) ${'`'}mod${'`'} d) d
+    zeroes :: Integer
+    zeroes = log10 (abs rat)
+    log10 :: Rational -> Integer
+    log10 x
+      | x >= 10 = 1 + log10 (x / 10)
+      | x < 1 = -1 + log10 (x * 10)
+      | otherwise = 0
+    magnitude :: Rational
+    magnitude = 10 ^^ zeroes
+    withoutFactor :: Integer -> Integer -> Integer
+    withoutFactor _ 0 = 0
+    withoutFactor q n = case divMod n q of
+      (n', 0) -> withoutFactor q n'
+      _ -> n
+    decimals :: Rational -> String
+    decimals x
+      | x == 0 = ""
+      | otherwise = let (n, d) = properFraction (x * 10) in show (n :: Integer) ++ decimals d
 
 pprExp :: Int -> Exp -> String
 pprExp _ (VarE n) = pprNamePrefix n
 pprExp _ (ConE n) = pprNamePrefix n
 pprExp p (LitE l) = pprLit p l
-pprExp p (AppE f x) = parensIf (p >= 3) (pprExp 2 f ++ " " ++ pprExp 3 x)
-pprExp p (AppTypeE f t) = parensIf (p >= 3) (pprExp 2 f ++ " @" ++ pprType 3 t)
-pprExp p (InfixE (Just a) op (Just b)) = parensIf (p >= 1) (pprExp 1 a ++ " " ++ pprOp op ++ " " ++ pprExp 1 b)
-pprExp _ (InfixE (Just a) op Nothing) = "(" ++ pprExp 1 a ++ " " ++ pprOp op ++ ")"
-pprExp _ (InfixE Nothing op (Just b)) = "(" ++ pprOp op ++ " " ++ pprExp 1 b ++ ")"
+pprExp p (AppE f x) = parensIf (p >= appPrec) (pprExp opPrec f ++ " " ++ pprExp appPrec x)
+pprExp p (AppTypeE f t) = parensIf (p >= appPrec) (pprExp opPrec f ++ " @" ++ pprType appPrec t)
+pprExp p (InfixE (Just a) op (Just b)) = parensIf (p >= opPrec) (pprExp opPrec a ++ " " ++ pprOp op ++ " " ++ pprExp opPrec b)
+pprExp _ (InfixE (Just a) op Nothing) = "(" ++ pprExp noPrec a ++ " " ++ pprOp op ++ ")"
+pprExp _ (InfixE Nothing op (Just b)) = "(" ++ pprOp op ++ " " ++ pprExp noPrec b ++ ")"
 pprExp _ (InfixE Nothing op Nothing) = "(" ++ pprOp op ++ ")"
-pprExp p (UInfixE a op b) = parensIf (p >= 1) (pprExp 1 a ++ " " ++ pprOp op ++ " " ++ pprExp 1 b)
-pprExp _ (ParensE e) = "(" ++ pprExp 0 e ++ ")"
-pprExp p (LamE ps e) = parensIf (p > 0) ("\\" ++ unwords (map (pprPat 3) ps) ++ " -> " ++ pprExp 0 e)
-pprExp p (LamCaseE ms) = parensIf (p > 0) ("\\case\n" ++ indent (intercalate "\n" (map ppr ms)))
-pprExp _ (TupE es) = "(" ++ intercalate ", " (map (maybe "" (pprExp 0)) es) ++ ")"
-pprExp p (CondE c a b) = parensIf (p > 0) (pprSep ["if " ++ pprExp 0 c, "then " ++ pprExp 0 a, "else " ++ pprExp 0 b])
-pprExp p (MultiIfE alts) = parensIf (p > 0) ("if " ++ intercalate "\n   " [ "| " ++ pprGuard g ++ " -> " ++ pprExp 0 e | (g, e) <- alts ])
-pprExp p (LetE ds e) = parensIf (p > 0) ("let " ++ indentAfterFirst 4 (intercalate "\n" (map pprDec ds)) ++ "\n in " ++ pprExp 0 e)
-pprExp p (CaseE e ms) = parensIf (p > 0) ("case " ++ pprExp 0 e ++ " of {\n" ++ indent (intercalate ";\n" (map ppr ms)) ++ " }")
-pprExp p (DoE _ ss) = parensIf (p > 0) ("do {" ++ intercalate "; " (map pprStmt ss) ++ "}")
-pprExp p (MDoE _ ss) = parensIf (p > 0) ("mdo {" ++ intercalate "; " (map pprStmt ss) ++ "}")
+pprExp p (UInfixE a op b) = parensIf (p >= sigPrec) (pprExp sigPrec a ++ " " ++ pprOp op ++ " " ++ pprExp sigPrec b)
+pprExp _ (ParensE e) = "(" ++ pprExp noPrec e ++ ")"
+pprExp p (LamE [] e) = pprExp p e
+pprExp p (LamE ps e) = parensIf (p > noPrec) ("\\" ++ unwords (map (pprPat appPrec) ps) ++ " -> " ++ pprExp noPrec e)
+pprExp p (LamCaseE ms) = parensIf (p > noPrec) ("\\case\n" ++ indent (intercalate "\n" (map ppr ms)))
+pprExp _ (TupE es) = "(" ++ intercalate ", " (map (maybe "" (pprExp noPrec)) es) ++ ")"
+pprExp p (CondE c a b) = parensIf (p > noPrec) (pprSep ["if " ++ pprExp noPrec c, "then " ++ pprExp noPrec a, "else " ++ pprExp noPrec b])
+pprExp p (MultiIfE alts) = parensIf (p > noPrec) ("if " ++ intercalate "\n   " [ "| " ++ pprGuard g ++ " -> " ++ pprExp noPrec e | (g, e) <- alts ])
+pprExp p (LetE ds e) = parensIf (p > noPrec) ("let " ++ indentAfterFirst 4 (intercalate "\n" (map pprDec ds)) ++ "\n in " ++ pprExp noPrec e)
+pprExp p (CaseE e ms) = parensIf (p > noPrec) ("case " ++ pprExp noPrec e ++ " of {\n" ++ indent (intercalate ";\n" (map ppr ms)) ++ " }")
+pprExp p (DoE _ ss) = parensIf (p > noPrec) ("do {" ++ intercalate "; " (map pprStmt ss) ++ "}")
+pprExp p (MDoE _ ss) = parensIf (p > noPrec) ("mdo {" ++ intercalate "; " (map pprStmt ss) ++ "}")
 pprExp _ (CompE ss) = case reverse ss of
-  (NoBindS e : rest) -> "[" ++ pprExp 0 e ++ " | " ++ intercalate ", " (map pprStmt (reverse rest)) ++ "]"
+  (NoBindS e : rest) -> "[" ++ pprExp noPrec e ++ " | " ++ intercalate ", " (map pprStmt (reverse rest)) ++ "]"
   _ -> "<<empty comprehension>>"
 pprExp _ (ArithSeqE r) = "[" ++ pprRange r ++ "]"
-pprExp _ (ListE es) = "[" ++ intercalate ", " (map (pprExp 0) es) ++ "]"
-pprExp p (SigE e t) = parensIf (p > 0) (pprExp 1 e ++ " :: " ++ pprType 0 t)
-pprExp _ (RecConE n fs) = pprNamePrefix n ++ "{" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprExp 0 e | (f, e) <- fs] ++ "}"
-pprExp _ (RecUpdE e fs) = pprExp 3 e ++ "{" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprExp 0 x | (f, x) <- fs] ++ "}"
-pprExp p (StaticE e) = parensIf (p >= 3) ("static " ++ pprExp 3 e)
+pprExp _ (ListE es) = "[" ++ intercalate ", " (map (pprExp noPrec) es) ++ "]"
+pprExp p (SigE e t) = parensIf (p > noPrec) (pprExp sigPrec e ++ " :: " ++ pprType sigPrec t)
+pprExp _ (RecConE n fs) = pprNamePrefix n ++ "{" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprExp noPrec e | (f, e) <- fs] ++ "}"
+pprExp _ (RecUpdE e fs) = pprExp appPrec e ++ "{" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprExp noPrec x | (f, x) <- fs] ++ "}"
+pprExp p (StaticE e) = parensIf (p >= appPrec) ("static " ++ pprExp appPrec e)
 pprExp _ (UnboundVarE n) = pprNamePrefix n
 pprExp _ (LabelE s) = "#" ++ s
 pprExp _ (ImplicitParamVarE s) = "?" ++ s
-pprExp _ (GetFieldE e f) = pprExp 3 e ++ "." ++ f
-pprExp _ (TypedBracketE e) = "[||" ++ pprExp 0 e ++ "||]"
-pprExp _ (TypedSpliceE e) = "$$" ++ pprExp 3 e
-pprExp _ (TypeE t) = "type " ++ pprType 3 t
+pprExp _ (GetFieldE e f) = pprExp appPrec e ++ "." ++ f
+pprExp _ (TypedBracketE e) = "[||" ++ pprExp noPrec e ++ "||]"
+pprExp _ (TypedSpliceE e) = "$$" ++ pprExp appPrec e
+pprExp p (TypeE t) = parensIf (p > noPrec) ("type " ++ pprType noPrec t)
 pprExp _ e = show e
 
 pprOp :: Exp -> String
 pprOp (VarE n) = pprNameInfix n
 pprOp (ConE n) = pprNameInfix n
 pprOp (UnboundVarE n) = pprNameInfix n
-pprOp e = "${'`'}" ++ pprExp 3 e ++ "${'`'}"
+pprOp e = "${'`'}" ++ pprExp noPrec e ++ "${'`'}"
 
 pprRange :: Range -> String
-pprRange (FromR a) = pprExp 0 a ++ " .."
-pprRange (FromThenR a b) = pprExp 0 a ++ ", " ++ pprExp 0 b ++ " .."
-pprRange (FromToR a b) = pprExp 0 a ++ " .. " ++ pprExp 0 b
-pprRange (FromThenToR a b c) = pprExp 0 a ++ ", " ++ pprExp 0 b ++ " .. " ++ pprExp 0 c
+pprRange (FromR a) = pprExp noPrec a ++ " .."
+pprRange (FromThenR a b) = pprExp noPrec a ++ ", " ++ pprExp noPrec b ++ " .."
+pprRange (FromToR a b) = pprExp noPrec a ++ " .. " ++ pprExp noPrec b
+pprRange (FromThenToR a b c) = pprExp noPrec a ++ ", " ++ pprExp noPrec b ++ " .. " ++ pprExp noPrec c
 
 pprStmt :: Stmt -> String
-pprStmt (BindS p e) = pprPat 0 p ++ " <- " ++ pprExp 0 e
+pprStmt (BindS p e) = pprPat noPrec p ++ " <- " ++ pprExp noPrec e
 pprStmt (LetS ds) = "let {" ++ intercalate "; " (map pprDec ds) ++ "}"
-pprStmt (NoBindS e) = pprExp 0 e
+pprStmt (NoBindS e) = pprExp noPrec e
 pprStmt (ParS sss) = intercalate " | " (map (intercalate ", " . map pprStmt) sss)
 pprStmt (RecS ss) = "rec {" ++ intercalate "; " (map pprStmt ss) ++ "}"
 
 pprGuard :: Guard -> String
-pprGuard (NormalG e) = pprExp 0 e
+pprGuard (NormalG e) = pprExp noPrec e
 pprGuard (PatG ss) = intercalate ", " (map pprStmt ss)
 
 pprBody :: String -> Body -> String
-pprBody eq (NormalB e) = eq ++ " " ++ pprExp 0 e
-pprBody eq (GuardedB gs) = concat ["\n    | " ++ pprGuard g ++ eq ++ " " ++ pprExp 0 e | (g, e) <- gs]
+pprBody eq (NormalB e) = eq ++ " " ++ pprExp noPrec e
+pprBody eq (GuardedB gs) = concat ["\n    | " ++ pprGuard g ++ eq ++ " " ++ pprExp noPrec e | (g, e) <- gs]
 
 pprWhere :: [Dec] -> String
 pprWhere [] = ""
@@ -1142,39 +1173,41 @@ pprWhere ds = "\n    where\n" ++ indent (intercalate "\n" (map pprDec ds))
 pprPat :: Int -> Pat -> String
 pprPat p (LitP l) = pprLit p l
 pprPat _ (VarP n) = pprNamePrefix n
-pprPat _ (TupP ps) = "(" ++ intercalate ", " (map (pprPat 0) ps) ++ ")"
+pprPat _ (TupP ps) = "(" ++ intercalate ", " (map (pprPat noPrec) ps) ++ ")"
 pprPat _ (ConP n _ []) = pprNamePrefix n
-pprPat p (ConP n _ ps) = parensIf (p >= 2) (pprNamePrefix n ++ " " ++ unwords (map (pprPat 3) ps))
-pprPat p (InfixP a n b) = parensIf (p >= 2) (pprPat 2 a ++ " " ++ pprNameInfix n ++ " " ++ pprPat 2 b)
-pprPat p (UInfixP a n b) = parensIf (p >= 2) (pprPat 2 a ++ " " ++ pprNameInfix n ++ " " ++ pprPat 2 b)
-pprPat _ (ParensP q) = "(" ++ pprPat 0 q ++ ")"
-pprPat _ (TildeP q) = "~" ++ pprPat 3 q
-pprPat _ (BangP q) = "!" ++ pprPat 3 q
-pprPat _ (AsP n q) = pprNamePrefix n ++ "@" ++ pprPat 3 q
+pprPat p (ConP n _ ps) = parensIf (p >= appPrec) (pprNamePrefix n ++ " " ++ unwords (map (pprPat appPrec) ps))
+pprPat p (InfixP a n b) = parensIf (p >= opPrec) (pprPat opPrec a ++ " " ++ pprNameInfix n ++ " " ++ pprPat opPrec b)
+pprPat p (UInfixP a n b) = parensIf (p >= opPrec) (pprPat opPrec a ++ " " ++ pprNameInfix n ++ " " ++ pprPat opPrec b)
+pprPat _ (ParensP q) = "(" ++ pprPat noPrec q ++ ")"
+pprPat p (TildeP q) = parensIf (p > noPrec) ("~" ++ pprPat appPrec q)
+pprPat p (BangP q) = parensIf (p > noPrec) ("!" ++ pprPat appPrec q)
+pprPat p (AsP n q) = parensIf (p > noPrec) (pprNamePrefix n ++ "@" ++ pprPat appPrec q)
 pprPat _ WildP = "_"
-pprPat _ (RecP n fs) = pprNamePrefix n ++ " {" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprPat 0 q | (f, q) <- fs] ++ "}"
-pprPat _ (ListP ps) = "[" ++ intercalate ", " (map (pprPat 0) ps) ++ "]"
-pprPat p (SigP q t) = parensIf (p > 0) (pprPat 1 q ++ " :: " ++ pprType 0 t)
-pprPat p (ViewP e q) = parensIf (p > 0) (pprExp 1 e ++ " -> " ++ pprPat 0 q)
+pprPat _ (RecP n fs) = "(" ++ pprNamePrefix n ++ " {" ++ intercalate ", " [pprNamePrefix f ++ " = " ++ pprPat noPrec q | (f, q) <- fs] ++ "})"
+pprPat _ (ListP ps) = "[" ++ intercalate ", " (map (pprPat noPrec) ps) ++ "]"
+pprPat p (SigP q t) = parensIf (p > noPrec) (pprPat sigPrec q ++ " :: " ++ pprType sigPrec t)
+pprPat _ (ViewP e q) = "(" ++ pprExp noPrec e ++ " -> " ++ pprPat noPrec q ++ ")"
 pprPat _ q = show q
 
 pprType :: Int -> Type -> String
 pprType p (ForallT vs c t) =
-  parensIf (p > 0) ("forall " ++ unwords (map pprTyVar vs) ++ " . " ++ pprCxt c ++ pprType 0 t)
-pprType p (AppT (AppT ArrowT a) b) = parensIf (p > 0) (pprType 1 a ++ " -> " ++ pprType 0 b)
-pprType _ (AppT ListT a) = "[" ++ pprType 0 a ++ "]"
+  parensIf (p >= funPrec) ("forall " ++ unwords (map pprTyVar vs) ++ " . " ++ pprCxt c ++ pprType qualPrec t)
+pprType p (AppT (AppT ArrowT a) b) = parensIf (p >= funPrec) (pprType funPrec a ++ " -> " ++ pprType qualPrec b)
+pprType p (AppT (AppT EqualityT a) b) = parensIf (p >= opPrec) (pprType opPrec a ++ " ~ " ++ pprType opPrec b)
+pprType _ (AppT ListT a) = "[" ++ pprType noPrec a ++ "]"
 pprType p t@(AppT _ _) = case splitT t [] of
-  (TupleT n, args) | length args == n -> "(" ++ intercalate ", " (map (pprType 0) args) ++ ")"
-  (f, args) -> parensIf (p >= 3) (unwords (pprType 2 f : map (pprType 3) args))
+  (TupleT n, args) | length args == n -> "(" ++ intercalate ", " (map (pprType noPrec) args) ++ ")"
+  (f, args) -> parensIf (p >= appPrec) (unwords (map (pprType appPrec) (f : args)))
   where
     splitT (AppT f x) acc = splitT f (x : acc)
     splitT f acc = (f, acc)
 pprType _ (VarT n) = pprNamePrefix n
 pprType _ (ConT n) = pprNamePrefix n
 pprType _ (PromotedT n) = "'" ++ pprNamePrefix n
-pprType p (SigT t k) = parensIf (p > 0) (pprType 1 t ++ " :: " ++ pprType 0 k)
-pprType p (InfixT a n b) = parensIf (p > 0) (pprType 1 a ++ " " ++ pprNameInfix n ++ " " ++ pprType 1 b)
-pprType _ (ParensT t) = "(" ++ pprType 0 t ++ ")"
+pprType _ (SigT t k) = "(" ++ pprType noPrec t ++ " :: " ++ pprType noPrec k ++ ")"
+pprType p (InfixT a n b) = pprInfixT p opPrec a "" n b
+pprType p (PromotedInfixT a n b) = pprInfixT p opPrec a "'" n b
+pprType _ (ParensT t) = "(" ++ pprType noPrec t ++ ")"
 pprType _ (TupleT 0) = "()"
 pprType _ (TupleT n) = "(" ++ replicate (n - 1) ',' ++ ")"
 pprType _ ArrowT = "(->)"
@@ -1188,21 +1221,24 @@ pprType _ (LitT (CharTyLit c)) = show c
 pprType _ WildCardT = "_"
 pprType _ t = show t
 
+pprInfixT :: Int -> Int -> Type -> String -> Name -> Type -> String
+pprInfixT p p' a prefix n b = parensIf (p >= p') (pprType opPrec a ++ " " ++ prefix ++ pprNameInfix n ++ " " ++ pprType opPrec b)
+
 pprTyVar :: TyVarBndr flag -> String
 pprTyVar (PlainTV n _) = pprNamePrefix n
-pprTyVar (KindedTV n _ k) = "(" ++ pprNamePrefix n ++ " :: " ++ pprType 0 k ++ ")"
+pprTyVar (KindedTV n _ k) = "(" ++ pprNamePrefix n ++ " :: " ++ pprType noPrec k ++ ")"
 
 pprCxt :: Cxt -> String
 pprCxt [] = ""
-pprCxt [c] = pprType 1 c ++ " => "
-pprCxt cs = "(" ++ intercalate ", " (map (pprType 0) cs) ++ ") => "
+pprCxt [c] = pprType funPrec c ++ " => "
+pprCxt cs = "(" ++ intercalate ", " (map (pprType noPrec) cs) ++ ") => "
 
 pprDec :: Dec -> String
 pprDec (FunD n cs) = intercalate "\n" [pprNamePrefix n ++ " " ++ ppr c | c <- cs]
-pprDec (ValD p b ds) = pprPat 0 p ++ pprBody " =" b ++ pprWhere ds
-pprDec (SigD n t) = pprNamePrefix n ++ " :: " ++ pprType 0 t
-pprDec (KiSigD n k) = "type " ++ pprNamePrefix n ++ " :: " ++ pprType 0 k
-pprDec (TySynD n vs t) = "type " ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ " = " ++ pprType 0 t
+pprDec (ValD p b ds) = pprPat noPrec p ++ pprBody " =" b ++ pprWhere ds
+pprDec (SigD n t) = pprNamePrefix n ++ " :: " ++ pprType noPrec t
+pprDec (KiSigD n k) = "type " ++ pprNamePrefix n ++ " :: " ++ pprType noPrec k
+pprDec (TySynD n vs t) = "type " ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ " = " ++ pprType noPrec t
 pprDec (TypeDataD n vs _ cons) = "type data " ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons cons
 pprDec (DataD c n vs _ cons ders) =
   "data " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons cons ++ pprDerivs ders
@@ -1210,15 +1246,15 @@ pprDec (NewtypeD c n vs _ con ders) =
   "newtype " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprCons [con] ++ pprDerivs ders
 pprDec (ClassD c n vs fds ds) =
   "class " ++ pprCxt c ++ unwords (pprNamePrefix n : map pprTyVar vs) ++ pprFunDeps fds ++ pprMembers ds
-pprDec (InstanceD o c t ds) = "instance " ++ maybe "" pprOverlap o ++ pprCxt c ++ pprType 0 t ++ pprMembers ds
-pprDec (StandaloneDerivD _ c t) = "deriving instance " ++ pprCxt c ++ pprType 0 t
-pprDec (DefaultSigD n t) = "default " ++ pprNamePrefix n ++ " :: " ++ pprType 0 t
+pprDec (InstanceD o c t ds) = "instance " ++ maybe "" pprOverlap o ++ pprCxt c ++ pprType noPrec t ++ pprMembers ds
+pprDec (StandaloneDerivD _ c t) = "deriving instance " ++ pprCxt c ++ pprType noPrec t
+pprDec (DefaultSigD n t) = "default " ++ pprNamePrefix n ++ " :: " ++ pprType noPrec t
 pprDec (InfixD (Fixity p d) _ n) = dir d ++ " " ++ show p ++ " " ++ pprNameInfix n
   where
     dir InfixL = "infixl"
     dir InfixR = "infixr"
     dir InfixN = "infix"
-pprDec (DefaultD ts) = "default (" ++ intercalate ", " (map (pprType 0) ts) ++ ")"
+pprDec (DefaultD ts) = "default (" ++ intercalate ", " (map (pprType noPrec) ts) ++ ")"
 pprDec d = show d
 
 pprMembers :: [Dec] -> String
@@ -1230,9 +1266,9 @@ pprCons [] = ""
 pprCons cons = "\n    = " ++ intercalate "\n    | " (map pprCon cons)
 
 pprCon :: Con -> String
-pprCon (NormalC n bts) = unwords (pprNamePrefix n : [pprBang b ++ pprType 3 t | (b, t) <- bts])
-pprCon (RecC n vbts) = pprNamePrefix n ++ " {" ++ intercalate ", " [pprNamePrefix f ++ " :: " ++ pprBang b ++ pprType 0 t | (f, b, t) <- vbts] ++ "}"
-pprCon (InfixC (b1, t1) n (b2, t2)) = pprBang b1 ++ pprType 2 t1 ++ " " ++ pprNameInfix n ++ " " ++ pprBang b2 ++ pprType 2 t2
+pprCon (NormalC n bts) = unwords (pprNamePrefix n : [pprBang b ++ pprType appPrec t | (b, t) <- bts])
+pprCon (RecC n vbts) = pprNamePrefix n ++ " {" ++ intercalate ", " [pprNamePrefix f ++ " :: " ++ pprBang b ++ pprType noPrec t | (f, b, t) <- vbts] ++ "}"
+pprCon (InfixC (b1, t1) n (b2, t2)) = pprBang b1 ++ pprType appPrec t1 ++ " " ++ pprNameInfix n ++ " " ++ pprBang b2 ++ pprType appPrec t2
 pprCon c = show c
 
 pprBang :: Bang -> String
@@ -1243,9 +1279,9 @@ pprBang _ = ""
 pprDerivs :: [DerivClause] -> String
 pprDerivs ds = concat ["\n    deriving " ++ pprDeriv s c | DerivClause s c <- ds]
   where
-    classes [t] = pprType 0 t
-    classes c = "(" ++ intercalate ", " (map (pprType 0) c) ++ ")"
-    pprDeriv (Just (ViaStrategy t)) c = classes c ++ " via " ++ pprType 0 t
+    classes [t] = pprType noPrec t
+    classes c = "(" ++ intercalate ", " (map (pprType noPrec) c) ++ ")"
+    pprDeriv (Just (ViaStrategy t)) c = classes c ++ " via " ++ pprType appPrec t
     pprDeriv s c = maybe "" pprStrategy s ++ classes c
 
 pprFunDeps :: [FunDep] -> String
@@ -1270,7 +1306,7 @@ pprStrategy :: DerivStrategy -> String
 pprStrategy StockStrategy = "stock "
 pprStrategy AnyclassStrategy = "anyclass "
 pprStrategy NewtypeStrategy = "newtype "
-pprStrategy (ViaStrategy t) = "via " ++ pprType 2 t ++ " "
+pprStrategy (ViaStrategy t) = "via " ++ pprType appPrec t ++ " "
 
 data SpliceResult = SpliceExp Exp | SplicePat Pat | SpliceType Type | SpliceDecs [Dec] deriving (Show)
 
