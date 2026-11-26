@@ -579,7 +579,7 @@ export class Shell implements ArithmeticHost {
       statuses.push(
         isLast && this.options.lastpipe && input
           ? this.runWithStandardInput(input, command)
-          : this.runSubshell([command], fds)
+          : this.runElementSubshell(command, fds)
       );
       if (capture) input = { input: this.runtime.io.textReader(capture.read()) };
     }
@@ -596,7 +596,7 @@ export class Shell implements ArithmeticHost {
    */
   private runInBackground(command: Statement): number {
     const fds = this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
-    const status = this.runSubshell([command], fds);
+    const status = this.runElementSubshell(command, fds);
     const pid = this.runtime.allocateProcessId();
     this.store.jobs.set(pid, { status, reported: false });
     this.store.lastBackgroundPid = pid;
@@ -1393,8 +1393,17 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */
-  runSubshell(body: Statement[], fds: DescriptorTable, overrides?: SubshellOverrides): number {
-    return this.forkSubshell(fds, overrides).run(body);
+  runSubshell(body: Statement[], fds: DescriptorTable, overrides?: SubshellOverrides, levels = 1): number {
+    return this.forkSubshell(fds, overrides, levels).run(body);
+  }
+
+  /**
+   * Runs a pipeline element or a command started with `&` in a subshell, which Bash counts in `BASH_SUBSHELL` only for
+   * a compound command: a simple command runs in the forked process itself, and `( )` merges with it.
+   */
+  private runElementSubshell(command: Statement, fds: DescriptorTable): number {
+    const merges = command.kind === 'command' || command.kind === 'declaration' || command.kind === 'subshell';
+    return this.runSubshell([command], fds, undefined, merges ? 0 : 1);
   }
 
   /**
@@ -1403,10 +1412,11 @@ export class Shell implements ArithmeticHost {
    */
   private forkSubshell(
     fds: DescriptorTable,
-    overrides?: SubshellOverrides
+    overrides?: SubshellOverrides,
+    levels = 1
   ): { fds: DescriptorTable; run: (body: Statement[]) => number } {
     this.runtime.checkCallDepth();
-    const childStore = this.store.fork(() => this.currentRow + 1);
+    const childStore = this.store.fork(() => this.currentRow + 1, levels);
     const lineShift = overrides?.lineShift ?? this.lineShift;
     const childShell = new Shell(this.runtime, {
       store: childStore,

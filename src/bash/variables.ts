@@ -299,7 +299,8 @@ export class VariableStore {
   // ---------------------------------------------------------------- eager metered fork & scopes
 
   /** Creates an isolated child `VariableStore` for `$(...)` via an eager metered full copy of all scopes and containers. */
-  fork(childLineReader: () => number): VariableStore {
+  /** @param levels How much deeper `BASH_SUBSHELL` is in the copy: 1, or 0 for a pipeline's simple command. */
+  fork(childLineReader: () => number, levels = 1): VariableStore {
     const spend = (cost?: number): void => this.runtime.spend(cost);
     const alloc = (count: number): void => this.runtime.allocateSlots(count);
     const clonedScopes: ScopeEntry[] = this.scopes.map((entry) => {
@@ -324,7 +325,7 @@ export class VariableStore {
       prng: this.prng.fork(nextLevel),
       lastStatus: this.lastStatus,
       lastArgument: this.lastArgument,
-      subshellLevel: nextLevel,
+      subshellLevel: this.subshellLevel + levels,
       pipeStatus: this.pipeStatus,
       workingDirectory: this.workingDirectory,
       previousDirectory: this.previousDirectory,
