@@ -106,11 +106,52 @@ namespace System.IO {
     public static StreamWriter CreateText(string path);
     public static StreamWriter AppendText(string path);
   }
-  public sealed class DirectoryInfo {
-    public string Name { get; }
-    public string FullName { get; }
-    public bool Exists { get; }
+  public abstract class FileSystemInfo {
+    public abstract string Name { get; }
+    public virtual string FullName { get; }
+    public string Extension { get; }
+    public abstract bool Exists { get; }
+    public void Refresh();
+    public abstract void Delete();
     public override string ToString();
+  }
+  public sealed class FileInfo : FileSystemInfo {
+    public FileInfo(string fileName);
+    public override string Name { get; }
+    public override bool Exists { get; }
+    public long Length { get; }
+    public string? DirectoryName { get; }
+    public DirectoryInfo? Directory { get; }
+    public override void Delete();
+    public FileInfo CopyTo(string destFileName);
+    public FileInfo CopyTo(string destFileName, bool overwrite);
+    public void MoveTo(string destFileName);
+    public void MoveTo(string destFileName, bool overwrite);
+    public StreamReader OpenText();
+    public StreamWriter CreateText();
+    public StreamWriter AppendText();
+  }
+  public sealed class DirectoryInfo : FileSystemInfo {
+    public DirectoryInfo(string path);
+    public override string Name { get; }
+    public override bool Exists { get; }
+    public DirectoryInfo? Parent { get; }
+    public DirectoryInfo Root { get; }
+    public void Create();
+    public DirectoryInfo CreateSubdirectory(string path);
+    public override void Delete();
+    public void Delete(bool recursive);
+    public FileInfo[] GetFiles();
+    public FileInfo[] GetFiles(string searchPattern);
+    public DirectoryInfo[] GetDirectories();
+    public DirectoryInfo[] GetDirectories(string searchPattern);
+    public FileSystemInfo[] GetFileSystemInfos();
+    public FileSystemInfo[] GetFileSystemInfos(string searchPattern);
+    public IEnumerable<FileInfo> EnumerateFiles();
+    public IEnumerable<FileInfo> EnumerateFiles(string searchPattern);
+    public IEnumerable<DirectoryInfo> EnumerateDirectories();
+    public IEnumerable<DirectoryInfo> EnumerateDirectories(string searchPattern);
+    public void MoveTo(string destDirName);
   }
   public static class Directory {
     public static bool Exists(string? path);

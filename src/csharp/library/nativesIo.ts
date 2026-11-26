@@ -114,7 +114,7 @@ class FileWriter implements WriterState {
   }
 }
 
-function utf8Length(text: string): number {
+export function utf8Length(text: string): number {
   let length = 0;
   for (const char of text) {
     const code = char.codePointAt(0) as number;
@@ -125,26 +125,26 @@ function utf8Length(text: string): number {
 
 // ---- Paths and errors ----
 
-function valueText(value: Value): string {
+export function valueText(value: Value): string {
   return stringText(value as string | CsString);
 }
 
 /** The path argument of a file operation, which may be neither null nor empty. */
-function pathArgument(value: Value, paramName = 'path'): string {
+export function pathArgument(value: Value, paramName = 'path'): string {
   if (value === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', paramName);
   const path = valueText(value);
   if (path === '') fail('System.ArgumentException', 'The value cannot be an empty string.', paramName);
   return path;
 }
 
-function throwException(call: NativeCall, fullName: string, message: string, fileName?: string): never {
+export function throwException(call: NativeCall, fullName: string, message: string, fileName?: string): never {
   const exception = call.frame.runtime.createException(fullName, message);
   if (fileName !== undefined) (exception.native as ExceptionState).fileName = fileName;
   throw new CsThrow(exception);
 }
 
 /** Throws the .NET exception of a failed file system operation, with the full path .NET's messages show. */
-function failFileSystem(call: NativeCall, error: unknown, target: 'file' | 'directory' = 'file'): never {
+export function failFileSystem(call: NativeCall, error: unknown, target: 'file' | 'directory' = 'file'): never {
   if (!(error instanceof FileSystemError)) throw error;
   const full = resolvePath(error.path);
   const files = call.frame.runtime.io.files;
@@ -180,7 +180,7 @@ function failFileSystem(call: NativeCall, error: unknown, target: 'file' | 'dire
   }
 }
 
-function withFiles<T>(call: NativeCall, run: () => T, target: 'file' | 'directory' = 'file'): T {
+export function withFiles<T>(call: NativeCall, run: () => T, target: 'file' | 'directory' = 'file'): T {
   try {
     return run();
   } catch (error) {
@@ -227,23 +227,23 @@ const writing =
     writer.write(writeText(call, args as Value[]) + (newline ? '\n' : ''));
   };
 
-function newWriter(call: NativeCall, typeName: string, state: WriterState): CsObject {
+export function newWriter(call: NativeCall, typeName: string, state: WriterState): CsObject {
   const writer = new CsObject(libraryType(call, typeName), []);
   writer.native = state;
   return writer;
 }
 
-function openFileWriter(call: NativeCall, path: string, append: boolean): FileWriter {
+export function openFileWriter(call: NativeCall, path: string, append: boolean): FileWriter {
   const files = call.frame.runtime.io.files;
   return new FileWriter(withFiles(call, () => files.open(path, { create: 'always', truncate: !append, append })));
 }
 
-function openFileReader(call: NativeCall, path: string): ReaderState {
+export function openFileReader(call: NativeCall, path: string): ReaderState {
   const io = call.frame.runtime.io;
   return { name: 'StreamReader', reader: withFiles(call, () => io.openReader(path)), isClosed: false };
 }
 
-function newReader(call: NativeCall, typeName: string, state: ReaderState): CsObject {
+export function newReader(call: NativeCall, typeName: string, state: ReaderState): CsObject {
   const reader = new CsObject(libraryType(call, typeName), []);
   reader.native = state;
   return reader;
@@ -362,7 +362,18 @@ function readFile(call: NativeCall, path: Value): string {
   return withFiles(call, () => files.readFile(pathArgument(path)));
 }
 
-function copyFile(call: NativeCall, from: Value, to: Value, overwrite: boolean): void {
+/** Deletes a file, where a file that is not there is no error, but a missing directory on its path is. */
+export function deleteFile(call: NativeCall, target: string): void {
+  const files = call.frame.runtime.io.files;
+  if (files.kindOf(target) === undefined) {
+    if (files.kindOf(resolvePath(`${resolvePath(target)}/..`)) !== 'directory')
+      failFileSystem(call, new FileSystemError('ENOTDIR', target));
+    return;
+  }
+  withFiles(call, () => files.remove(target, 'file'));
+}
+
+export function copyFile(call: NativeCall, from: Value, to: Value, overwrite: boolean): void {
   const files = call.frame.runtime.io.files;
   const source = pathArgument(from, 'sourceFileName');
   const target = pathArgument(to, 'destFileName');
@@ -378,7 +389,7 @@ function copyFile(call: NativeCall, from: Value, to: Value, overwrite: boolean):
   writeFile(call, target, text, false);
 }
 
-function moveFile(call: NativeCall, from: Value, to: Value, overwrite: boolean): void {
+export function moveFile(call: NativeCall, from: Value, to: Value, overwrite: boolean): void {
   const files = call.frame.runtime.io.files;
   const source = pathArgument(from, 'sourceFileName');
   const target = pathArgument(to, 'destFileName');
@@ -413,15 +424,7 @@ defineNatives({
     writeFile(call, pathArgument(path as Value), linesText(call, lines as Value), true);
   },
   'System.IO.File.Delete': (call, _receiver, [path]) => {
-    const files = call.frame.runtime.io.files;
-    const target = pathArgument(path as Value);
-    // Deleting a file that is not there is no error, but a missing directory on its path is.
-    if (files.kindOf(target) === undefined) {
-      if (files.kindOf(resolvePath(`${resolvePath(target)}/..`)) !== 'directory')
-        failFileSystem(call, new FileSystemError('ENOTDIR', target));
-      return;
-    }
-    withFiles(call, () => files.remove(target, 'file'));
+    deleteFile(call, pathArgument(path as Value));
   },
   'System.IO.File.Copy(string, string)': (call, _receiver, [from, to]) => {
     copyFile(call, from as Value, to as Value, false);
@@ -446,7 +449,7 @@ defineNatives({
 // ---- Directory ----
 
 /** The pattern of the overloads without one, which list every entry. */
-const ALL = Symbol('all entries');
+export const ALL = Symbol('all entries');
 
 /** Whether a name matches a search pattern of `*` and `?` wildcards, where `*.*` matches every name, as in .NET. */
 function matchesPattern(name: string, pattern: string): boolean {
@@ -459,16 +462,54 @@ function matchesPattern(name: string, pattern: string): boolean {
 }
 
 function entriesOf(call: NativeCall, path: Value, pattern: Value | typeof ALL, kind: 'file' | 'directory'): Value {
+  return stringArray(call, entryPaths(call, pathArgument(path), pattern, kind));
+}
+
+/** The paths of a directory's entries of a kind, or of either kind, whose names match a search pattern. */
+export function entryPaths(
+  call: NativeCall,
+  directory: string,
+  pattern: Value | typeof ALL,
+  kind?: 'file' | 'directory'
+): string[] {
   const files = call.frame.runtime.io.files;
-  const directory = pathArgument(path);
   if (pattern === undefined) fail('System.ArgumentNullException', 'Value cannot be null.', 'searchPattern');
   const search = pattern === ALL ? '*' : valueText(pattern);
   const names = withFiles(call, () => files.list(directory), 'directory');
   const joined = (name: string): string => (directory.endsWith('/') ? `${directory}${name}` : `${directory}/${name}`);
-  return stringArray(
-    call,
-    names.filter((name) => matchesPattern(name, search) && files.kindOf(joined(name)) === kind).map(joined)
-  );
+  return names
+    .filter((name) => matchesPattern(name, search) && (kind === undefined || files.kindOf(joined(name)) === kind))
+    .map(joined);
+}
+
+/**
+ * A FileInfo or DirectoryInfo: the path as the program gave it, which `ToString` shows, its full path, and what it
+ * last found there, which .NET reads on first use and after `Refresh` or an operation of its own that changes it.
+ */
+export interface FileSystemInfoState {
+  readonly kind: 'file' | 'directory';
+  originalPath: string;
+  fullPath: string;
+  /** What the path named when last read, `undefined` for nothing, or `'unread'` before the next read. */
+  found: 'file' | 'directory' | undefined | 'unread';
+  /** The length in bytes of the file found, when one was. */
+  length?: number;
+}
+
+export function fileSystemInfo(call: NativeCall, kind: 'file' | 'directory', originalPath: string): CsObject {
+  const info = new CsObject(libraryType(call, kind === 'file' ? 'System.IO.FileInfo' : 'System.IO.DirectoryInfo'), []);
+  info.native = {
+    kind,
+    originalPath,
+    fullPath: fullPathOf(originalPath),
+    found: 'unread',
+  } satisfies FileSystemInfoState;
+  return info;
+}
+
+export function deleteDirectory(call: NativeCall, target: string, recursive: boolean): void {
+  const files = call.frame.runtime.io.files;
+  withFiles(call, () => (recursive ? removeTree(call, target) : files.remove(target, 'directory')), 'directory');
 }
 
 function removeTree(call: NativeCall, path: string): void {
@@ -481,12 +522,6 @@ function removeTree(call: NativeCall, path: string): void {
   files.remove(path, 'directory');
 }
 
-function directoryInfo(call: NativeCall, path: string): CsObject {
-  const info = new CsObject(libraryType(call, 'System.IO.DirectoryInfo'), []);
-  info.native = path;
-  return info;
-}
-
 defineNatives({
   'System.IO.Directory.Exists': (call, _receiver, [path]) =>
     isString(path as Value) &&
@@ -495,16 +530,13 @@ defineNatives({
   'System.IO.Directory.CreateDirectory': (call, _receiver, [path]) => {
     const target = pathArgument(path as Value);
     withFiles(call, () => call.frame.runtime.io.files.createDirectory(target, true), 'directory');
-    return directoryInfo(call, target);
+    return fileSystemInfo(call, 'directory', target);
   },
   'System.IO.Directory.Delete(string)': (call, _receiver, [path]) => {
-    const target = pathArgument(path as Value);
-    withFiles(call, () => call.frame.runtime.io.files.remove(target, 'directory'), 'directory');
+    deleteDirectory(call, pathArgument(path as Value), false);
   },
   'System.IO.Directory.Delete(string, bool)': (call, _receiver, [path, recursive]) => {
-    const target = pathArgument(path as Value);
-    const files = call.frame.runtime.io.files;
-    withFiles(call, () => (recursive ? removeTree(call, target) : files.remove(target, 'directory')), 'directory');
+    deleteDirectory(call, pathArgument(path as Value), recursive as boolean);
   },
   'System.IO.Directory.GetFiles(string)': (call, _receiver, [path]) => entriesOf(call, path as Value, ALL, 'file'),
   'System.IO.Directory.GetFiles(string, string)': (call, _receiver, [path, pattern]) =>
@@ -522,20 +554,15 @@ defineNatives({
   'System.IO.Directory.EnumerateDirectories(string, string)': (call, _receiver, [path, pattern]) =>
     entriesOf(call, path as Value, pattern as Value, 'directory'),
   'System.IO.Directory.GetCurrentDirectory': () => '/',
-  'System.IO.DirectoryInfo.get_Name': (_call, receiver) => fileNameOf(trimEnd((receiver as CsObject).native as string)),
-  'System.IO.DirectoryInfo.get_FullName': (_call, receiver) => fullPathOf((receiver as CsObject).native as string),
-  'System.IO.DirectoryInfo.get_Exists': (call, receiver) =>
-    call.frame.runtime.io.files.kindOf((receiver as CsObject).native as string) === 'directory',
-  'System.IO.DirectoryInfo.ToString': (_call, receiver) => (receiver as CsObject).native as string,
 });
 
 // ---- Path ----
 
-function trimEnd(path: string): string {
+export function trimEnd(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/u, '') || '/' : path;
 }
 
-function fileNameOf(path: string): string {
+export function fileNameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
@@ -545,7 +572,7 @@ function extensionStart(path: string): number {
 }
 
 /** `Path.GetFullPath`, which keeps a final separator. */
-function fullPathOf(path: string): string {
+export function fullPathOf(path: string): string {
   const resolved = resolvePath(path);
   return path.endsWith('/') && resolved !== '/' ? `${resolved}/` : resolved;
 }

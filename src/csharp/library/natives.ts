@@ -5,6 +5,7 @@ import './nativesIndex';
 import './nativesIterators';
 import './nativesIo';
 import './nativesConsole';
+import './nativesFileInfo';
 import './nativesTasks';
 import './nativesString';
 import './nativesCollections';
