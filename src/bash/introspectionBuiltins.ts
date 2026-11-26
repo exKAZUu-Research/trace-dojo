@@ -30,14 +30,14 @@ const KEYWORDS = new Set([
   'coproc',
 ]);
 
-type CommandKind = 'alias' | 'keyword' | 'function' | 'builtin';
+type CommandKind = 'keyword' | 'function' | 'builtin';
 
 /**
- * What a name runs as, in Bash's order of lookup, or `undefined` when nothing has the name. A name that Bash would
- * find as a program on `PATH` stops the program, since this environment has no programs.
+ * What a name runs as, in Bash's order of lookup, or `undefined` when nothing has the name. Aliases are not looked
+ * up, as Bash looks them up only with `expand_aliases`, which a script has off. A name that Bash would find as a
+ * program on `PATH` stops the program, since this environment has no programs.
  */
 function kindOf(shell: Shell, name: string): CommandKind | undefined {
-  if (shell.store.aliases.has(name)) return 'alias';
   if (KEYWORDS.has(name)) return 'keyword';
   const classified = classifyCommandName(name, shell.store.hasFunction(name), shell.isRegularBuiltin(name));
   switch (classified.kind) {
@@ -74,7 +74,7 @@ export const commandBuiltin: Builtin = (shell, args) => {
         if (options.has('V')) shell.reportError(`command: ${name}: not found`);
         status = 1;
       } else if (options.has('V')) describe(shell, name, kind);
-      else shell.fd1.write(kind === 'alias' ? `${aliasLine(shell, name)}\n` : `${name}\n`);
+      else shell.fd1.write(`${name}\n`);
     }
     return status;
   }
@@ -117,10 +117,6 @@ export const typeBuiltin: Builtin = (shell, args) => {
 
 function describe(shell: Shell, name: string, kind: CommandKind): void {
   switch (kind) {
-    case 'alias': {
-      shell.fd1.write(`${name} is aliased to \`${shell.store.aliases.get(name)}'\n`);
-      return;
-    }
     case 'keyword': {
       shell.fd1.write(`${name} is a shell keyword\n`);
       return;
