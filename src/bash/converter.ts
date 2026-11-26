@@ -16,7 +16,12 @@ import type {
   Word,
   WordPart,
 } from './ast';
-import { DECLARATION_OPTIONS, type UnsupportedSyntaxKind, unsupportedSyntaxMessage } from './capabilities';
+import {
+  DECLARATION_OPTIONS,
+  rejectUnsupportedFeature,
+  type UnsupportedSyntaxKind,
+  unsupportedSyntaxMessage,
+} from './capabilities';
 import { readRadixDigits, SIMPLE_ESCAPE_BYTES } from './quoting';
 import { type AnalyzedBashSource, findForHeaderSemicolons, inspectUnescapedBackquoteBody } from './syntaxCheck';
 import { isReservedCommand, unexpectedTokenMessage } from './syntaxErrors';
@@ -45,6 +50,23 @@ export interface ConverterHooks {
   readonly parseBracedExpansion?: (slice: string, inDouble: boolean, row: number) => ParameterExpansion;
   /** Whether the text is a `${ ...; }` body read apart from the lines after it, which may hold its here-documents. */
   readonly readsApart?: boolean;
+}
+
+/**
+ * Reads a body again while the program runs, where a construct this environment does not provide stops the program
+ * with the unsupported-feature message, as it would have before the run; no compile error leaves a running program.
+ */
+function rereadAtRun(read: () => Statement[]): Statement[] {
+  try {
+    return read();
+  } catch (error) {
+    if (!(error instanceof CompileError)) throw error;
+    const message = error.diagnostics[0]?.message ?? '';
+    const suffix = 'は、この採点環境では使えません。';
+    rejectUnsupportedFeature(
+      message.endsWith(suffix) ? message.slice(0, -suffix.length) : `実行中に読み直したコマンド（${message}）`
+    );
+  }
 }
 
 /** The `$( )` a node lies in, if any, written with `$(`. */
@@ -1059,7 +1081,9 @@ export class Converter {
     const rereadWithOtherExtglob = (): BackquoteRereading => {
       if (other) return other;
       const syntaxError = inspectUnescapedBackquoteBody(unescaped, row, !readExtglob);
-      other = syntaxError ? { body: [], syntaxError } : { body: this.hooks.reparse(unescaped, row, !readExtglob) };
+      other = syntaxError
+        ? { body: [], syntaxError }
+        : { body: rereadAtRun(() => this.hooks.reparse(unescaped, row, !readExtglob)) };
       return other;
     };
     return { readExtglob, rereadWithOtherExtglob };
