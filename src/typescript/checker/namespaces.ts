@@ -143,6 +143,9 @@ export class Namespaces {
       ? this.exportedMember(container, name, meaning)
       : container.enumMembers?.values.get(name);
     if (symbol) return { symbol };
+    // The Node library declares only part of @types/node's NodeJS namespace.
+    if (container.name === 'NodeJS' && container.valueDeclarations.every((node) => this.c.isLibrary(node)))
+      return { error: `NodeJS.${name} は、この採点環境では使えません。` };
     return { error: missingMemberError(container, name) };
   }
 
