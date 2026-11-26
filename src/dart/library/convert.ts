@@ -1683,29 +1683,39 @@ final class LineSplitter extends StreamTransformerBase<String, String> {
       Stream<String>.eventTransformed(stream, (EventSink<String> sink) => _LineSplitterSink(sink));
 }
 
-/** Splits the chunks of a string stream into lines, holding a line that a chunk ends in the middle of. */
+/**
+ * Splits the chunks of a string stream into lines, holding the pieces of a line that chunks end in the middle of until
+ * a line break ends it, as the SDK's sink keeps them in a buffer: each chunk is scanned once.
+ */
 class _LineSplitterSink implements EventSink<String> {
   final EventSink<String> _sink;
-  String _carry = "";
+  final List<String> _pieces = <String>[];
   /** Whether the last chunk ended with a carriage return, whose CRLF the next chunk may end. */
   bool _skipLineFeed = false;
   _LineSplitterSink(this._sink);
   void add(String chunk) {
     // An empty chunk leaves the state as it is, as the SDK's sink skips it.
     if (chunk.isEmpty) return;
-    var text = _carry + chunk;
-    if (_skipLineFeed && text.isNotEmpty && text.codeUnitAt(0) == 10) text = text.substring(1);
-    var end = text.length;
-    while (end > 0 && text.codeUnitAt(end - 1) != 10 && text.codeUnitAt(end - 1) != 13) end--;
-    for (var line in LineSplitter.split(text, 0, end)) _sink.add(line);
-    _carry = text.substring(end);
-    _skipLineFeed = end > 0 && end == text.length && text.codeUnitAt(end - 1) == 13;
+    final start = _skipLineFeed && chunk.codeUnitAt(0) == 10 ? 1 : 0;
+    var end = chunk.length;
+    while (end > start && chunk.codeUnitAt(end - 1) != 10 && chunk.codeUnitAt(end - 1) != 13) end--;
+    if (end == start) {
+      if (start < chunk.length) _pieces.add(chunk.substring(start));
+      _skipLineFeed = false;
+      return;
+    }
+    _pieces.add(chunk.substring(start, end));
+    final text = _pieces.join();
+    _pieces.clear();
+    for (var line in LineSplitter.split(text)) _sink.add(line);
+    if (end < chunk.length) _pieces.add(chunk.substring(end));
+    _skipLineFeed = end == chunk.length && chunk.codeUnitAt(end - 1) == 13;
   }
   void addError(Object error, [StackTrace? stackTrace]) {
     _sink.addError(error, stackTrace);
   }
   void close() {
-    for (var line in LineSplitter.split(_carry)) _sink.add(line);
+    for (var line in LineSplitter.split(_pieces.join())) _sink.add(line);
     _sink.close();
   }
 }

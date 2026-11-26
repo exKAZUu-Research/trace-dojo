@@ -9473,6 +9473,22 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'resume\ngot 1\ngot 2\ndone\n' });
 });
 
+test('an attached async* body forwards a plain stream it yield*s to the root', () => {
+  const source = `Stream<int> b() async* { yield 1; yield* Stream.fromIterable([2, 3]); yield 4; }
+Stream<int> a() async* { yield 0; yield* b(); }
+Future<void> main() async { print(await a().toList()); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1, 2, 3, 4]\n' });
+});
+
+test('LineSplitter scans each chunk once, so thousands of chunks without a line break fit', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  final lines = await Stream.fromIterable(List.generate(3000, (i) => 'x')).transform(const LineSplitter()).toList();
+  print([lines.length, lines.first.length]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[1, 3000]\n' });
+});
+
 test('an async* stream a yield* forwarded counts as listened to, for a later listen or yield*', () => {
   const twice = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
 Stream<int> twice() async* { final s = c(2); yield* s; try { yield* s; } catch (e) { print('inner \${e.runtimeType}'); } yield 99; }
