@@ -1023,7 +1023,8 @@ function thenWord(owner: Node): Node {
 /**
  * The row Bash reports for a statement's errors and `LINENO`: the line its parser was on when it made the command.
  * That is where the first word of a simple command ends, where `))` ends, and where the last operand of `[[` ends, or
- * its `]]` when `&&` or `||` joins the operands; a compound command keeps the row of its first word.
+ * its `]]` when `&&` or `||` joins the operands, and where the redirections of a compound command end; another
+ * compound command keeps the row of its first word.
  */
 function lineRowOf(node: Node): number {
   switch (node.type) {
@@ -1041,6 +1042,12 @@ function lineRowOf(node: Node): number {
     case 'test_command': {
       const inner = node.namedChildren.find((child) => child && child.type !== 'comment');
       return inner && inner.type !== 'logical_test' ? inner.endPosition.row : node.endPosition.row;
+    }
+    case 'redirected_statement': {
+      // The parser has read the redirections when a top-level compound command runs them, so their errors name
+      // the line of the last one's destination.
+      const last = node.childrenForFieldName('redirect').at(-1);
+      return (last?.namedChildren.at(-1) ?? last ?? node).endPosition.row;
     }
     default: {
       return node.startPosition.row;
