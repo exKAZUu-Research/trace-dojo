@@ -415,7 +415,10 @@ export class Expander {
     }
     const { name } = expansion;
     if (!expansion.braced) {
-      return this.valueSegments(this.parameterValue(name, undefined, expansion), ctx, expansion.text);
+      const value = this.parameterValue(name, undefined, expansion);
+      // Bash names an unbraced positional or special parameter with its `$`, as in `$1: unbound variable`.
+      this.requireSet(value, /^[A-Za-z_]/.test(name) ? name : `$${name}`, undefined);
+      return this.valueSegments(value, ctx, expansion.text);
     }
     if (!isValidParameterName(name) || (expansion.prefix === '#' && expansion.operator !== undefined)) {
       this.shell.discard(`${expansion.text}: bad substitution`);
