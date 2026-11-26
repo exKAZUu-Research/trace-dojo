@@ -567,7 +567,11 @@ class ConditionParser {
       if (token === '!') return truth(this.unary() === 0n);
       if (token === '(') {
         const inner = this.or();
-        if (!this.accept(')')) throw compileError(this.row, '#if の式に ) がありません。');
+        if (!this.accept(')')) {
+          const next = this.tokens[this.position];
+          if (next !== undefined) this.unexpected(next);
+          throw compileError(this.row, '#if の式に ) がありません。');
+        }
         return inner;
       }
       if (token !== undefined && /^\d/.test(token)) return this.integer(token);
