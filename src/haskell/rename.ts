@@ -367,9 +367,7 @@ class Renamer {
     this.importModules();
     const pending = this.options.splice?.pending ?? [];
     this.declareTypes(this.module.decls);
-    this.declarePending(() => this.declareTypes(pending));
     this.declareDataInstances(this.module.decls);
-    this.declarePending(() => this.declareDataInstances(pending));
     const decls = this.expandBindingWildcards(this.expandPatternSynonyms(this.module.decls), (name) =>
       this.recordFieldNames(name, () => {
         const own = name.qualifier ? undefined : this.ownValues.get(name.name);
@@ -377,7 +375,7 @@ class Renamer {
       })
     );
     const topBindings = this.declareValues(decls);
-    this.declarePending(() => this.declareValues(pending));
+    this.declarePending(pending);
     this.addOwnToScope();
     this.applyTopFixities([...decls, ...pending]);
     for (const decl of decls) {
@@ -408,10 +406,12 @@ class Renamer {
     };
   }
 
-  private declarePending(declare: () => void): void {
+  private declarePending(pending: Decl[]): void {
     this.declaringPending = true;
     try {
-      declare();
+      this.declareTypes(pending);
+      this.declareDataInstances(pending);
+      this.declareValues(pending);
     } finally {
       this.declaringPending = false;
     }

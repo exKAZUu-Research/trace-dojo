@@ -102,32 +102,31 @@ class ModuleSplices {
    * pending: one that does not convert without its splices' trees still declares the name it is written with.
    */
   private partition(ready: Node[], waiting: Node[]): { complete: Decl[]; pending: Decl[] } {
-    let complete = ready.flatMap((node) => this.loweredOf(node));
+    const complete = ready.flatMap((node) => this.loweredOf(node));
     const pending: Decl[] = [];
     const declared = new Set<string>();
     for (const node of waiting) {
-      let decls: Decl[];
-      try {
-        decls = convertDeclaration(this.extensions, this.grafts, node);
-      } catch (error) {
-        if (!(error instanceof CompileError)) throw error;
+      const decls = this.convertWaiting(node);
+      if (!decls) {
         const name = node.childForFieldName('name')?.text.replaceAll(/[()\s]/g, '');
         if (name) declared.add(name);
         continue;
       }
       for (const decl of decls) {
-        if (decl.kind === 'instance')
-          complete.push({ ...decl, decls: decl.decls.filter((inner) => inner.kind === 'sig') });
-        else pending.push(decl);
+        if (decl.kind !== 'instance') pending.push(decl);
+        else complete.push({ ...decl, decls: decl.decls.filter((inner) => inner.kind === 'sig') });
       }
     }
-    for (const name of pending.flatMap(declaredNames)) declared.add(name);
-    for (;;) {
-      const naming = complete.filter((decl) => mentions(decl, declared));
-      if (naming.length === 0) return { complete, pending };
-      complete = complete.filter((decl) => !naming.includes(decl));
-      pending.push(...naming);
-      for (const name of naming.flatMap(declaredNames)) declared.add(name);
+    return withDependents(complete, pending, declared);
+  }
+
+  /** A declaration whose splices have not all run, unlowered, or `undefined` when it does not convert without them. */
+  private convertWaiting(node: Node): Decl[] | undefined {
+    try {
+      return convertDeclaration(this.extensions, this.grafts, node);
+    } catch (error) {
+      if (error instanceof CompileError) return undefined;
+      throw error;
     }
   }
 
@@ -197,6 +196,23 @@ function spliceCodeNode(node: Node): Node {
   return code.type === 'splice' ? (code.childForFieldName('expression') ?? code) : code;
 }
 
+/** Moves to `pending` every complete declaration that names what a pending one declares, and those naming them. */
+function withDependents(
+  complete: Decl[],
+  pending: Decl[],
+  declared: Set<string>
+): { complete: Decl[]; pending: Decl[] } {
+  let remaining = complete;
+  for (const name of pending.flatMap(declaredNames)) declared.add(name);
+  for (;;) {
+    const naming = remaining.filter((decl) => mentions(decl, declared));
+    if (naming.length === 0) return { complete: remaining, pending };
+    remaining = remaining.filter((decl) => !naming.includes(decl));
+    pending.push(...naming);
+    for (const name of naming.flatMap(declaredNames)) declared.add(name);
+  }
+}
+
 /** The library's function that runs a splice's code of its kind and stores its tree. */
 function spliceRunnerName(node: Node): string {
   const splice = node.type === 'top_splice' ? (node.namedChildren[0] ?? node) : node;
@@ -204,7 +220,6 @@ function spliceRunnerName(node: Node): string {
   return node.type === 'top_splice' ? 'runDecSplice' : 'runSplice';
 }
 
-// code-gauge-allow functionCognitiveComplexity -- One short case per kind of declaration that defines names.
 function declaredNames(decl: Decl): string[] {
   switch (decl.kind) {
     case 'funClause': {
