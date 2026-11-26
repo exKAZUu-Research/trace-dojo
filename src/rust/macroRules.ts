@@ -308,19 +308,55 @@ function matchLiteral(tokens: Token[], start: number): number {
   return token.type.endsWith('_literal') || token.text === 'true' || token.text === 'false' ? start + 1 : -1;
 }
 
-/** A fragment of several tokens (`expr`, `ty`, `pat`, ...), which runs up to a token that may follow it. */
+/**
+ * A fragment of several tokens (`expr`, `ty`, `pat`, ...), which runs up to a token that may follow it. A stop counts
+ * only outside generic arguments (`Vec<i32>`, `HashMap<K, V>`, `f::<T>`) and a closure's parameters (`|a, b|`).
+ */
 function matchUntilStop(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
   const stops = new Set<string>(STOPS[fragment]);
   if (following?.kind === 'token') stops.add(following.token.text);
   if (following?.kind === 'rep' && following.separator) stops.add(following.separator);
+  const types = fragment === 'ty' || fragment === 'path';
+  let depth = 0;
   let end = start;
-  while (end < tokens.length) {
-    const current = tokens[end];
-    if (current.kind === 'leaf' && stops.has(current.text)) break;
+  while (end < tokens.length && !(depth === 0 && stops.has(leafText(tokens[end]) ?? ''))) {
+    if (EXPRESSIONS.has(fragment) && opensClosure(tokens, start, end)) {
+      end = closureParamsEnd(tokens, end);
+      continue;
+    }
+    depth = Math.max(0, depth + angleChange(leafText(tokens[end]), types || leafText(tokens[end - 1]) === '::', depth));
     end++;
   }
   if (fragment === 'vis') return end;
   return end > start ? end : -1;
+}
+
+const EXPRESSIONS = new Set(['expr', 'expr_2021', 'stmt']);
+
+/** How a token changes the depth of generic arguments: `<` opens them where it can, `>` and `>>` close them. */
+function angleChange(text: string | undefined, opens: boolean, depth: number): number {
+  if (text === '<' && opens) return 1;
+  if (depth === 0) return 0;
+  return text === '>' ? -1 : text === '>>' ? -2 : 0;
+}
+
+/** Whether the token at `index` is a `|` that opens a closure's parameters: one where an operand begins. */
+function opensClosure(tokens: Token[], start: number, index: number): boolean {
+  if (leafText(tokens[index]) !== '|') return false;
+  if (index === start) return true;
+  const previous = tokens[index - 1];
+  if (previous.kind !== 'leaf') return false;
+  return previous.text === 'move' || (/^[^\p{L}\p{N}_'"]/u.test(previous.text) && previous.text !== '?');
+}
+
+/** The index after the `|` that closes the closure parameters opened at `index`. */
+function closureParamsEnd(tokens: Token[], index: number): number {
+  for (let end = index + 1; end < tokens.length; end++) if (leafText(tokens[end]) === '|') return end + 1;
+  return tokens.length;
+}
+
+function leafText(token: Token | undefined): string | undefined {
+  return token?.kind === 'leaf' ? token.text : undefined;
 }
 
 function transcribe(parts: Part[], bindings: Map<string, Binding>): Token[] {
