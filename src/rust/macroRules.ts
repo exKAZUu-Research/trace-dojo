@@ -340,35 +340,22 @@ function variablesIn(parts: Part[]): string[] {
 }
 
 /** Where a fragment that starts at `start` ends, or -1 if none does. */
+/** The fragments of one token, by what that token must be. */
+const SINGLE_TOKEN_FRAGMENTS: Record<string, (token: Token) => boolean> = {
+  tt: () => true,
+  ident: (token) => token.kind === 'leaf' && /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(token.text) && token.text !== '_',
+  lifetime: (token) => token.kind === 'leaf' && token.type === 'lifetime',
+  block: (token) => token.kind === 'group' && token.open === '{',
+};
+
 function matchFragment(fragment: string, tokens: Token[], start: number, following: Part | undefined): number {
   const token = tokens[start];
-  switch (fragment) {
-    case 'tt': {
-      return token ? start + 1 : -1;
-    }
-    case 'ident': {
-      const isIdent =
-        token?.kind === 'leaf' && /^(?:r#)?[\p{L}_][\p{L}\p{N}_]*$/u.test(token.text) && token.text !== '_';
-      return isIdent ? start + 1 : -1;
-    }
-    case 'lifetime': {
-      return token?.kind === 'leaf' && token.type === 'lifetime' ? start + 1 : -1;
-    }
-    case 'literal': {
-      return matchLiteral(tokens, start);
-    }
-    case 'block': {
-      return token?.kind === 'group' && token.open === '{' ? start + 1 : -1;
-    }
-    case 'item':
-    case 'meta': {
-      const begins = fragment === 'item' ? beginsItem(tokens, start) : isPathStart(leafText(token));
-      return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
-    }
-    default: {
-      return matchUntilStop(fragment, tokens, start, following);
-    }
-  }
+  if (fragment === 'literal') return matchLiteral(tokens, start);
+  const single = SINGLE_TOKEN_FRAGMENTS[fragment] as ((token: Token) => boolean) | undefined;
+  if (single) return token && single(token) ? start + 1 : -1;
+  // rustc tells from the first token whether an item or a meta can begin, and tries the next rule when neither can.
+  const begins = fragment === 'item' ? beginsItem(tokens, start) : fragment !== 'meta' || isPathStart(leafText(token));
+  return begins ? matchUntilStop(fragment, tokens, start, following) : -1;
 }
 
 /** A literal, with a `-` before a number. */
