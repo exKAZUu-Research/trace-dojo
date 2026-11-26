@@ -532,7 +532,8 @@ export class ProgramConverter extends ExpressionConverter {
       };
     }
     if (member.type === 'field_definition') {
-      const key = this.propertyName(field(member, 'name'));
+      const nameNode = field(member, 'name');
+      const key = this.propertyName(nameNode);
       checkMemberName(member, key, isStatic, true);
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
@@ -544,12 +545,13 @@ export class ProgramConverter extends ExpressionConverter {
         isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
         key,
         value,
-        row: rowOf(member),
+        // The member's own row starts at its decorators.
+        row: rowOf(nameNode),
         decorators: this.decoratorsOf(member),
         isAutoAccessor: this.hasAutoAccessors && hasChild(member, 'accessor') ? true : undefined,
       };
       const recordsStep = value !== undefined && !constant;
-      return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
+      return recordsStep ? this.steppable(nameNode, fieldMember) : fieldMember;
     }
     if (member.type === 'class_static_block') return this.staticBlock(member);
     return unsupported(member, `クラスの中の「${member.type}」`);
