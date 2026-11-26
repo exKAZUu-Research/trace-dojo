@@ -90,14 +90,27 @@ export class Namespaces {
     if (!target) return;
     const path = qualifiedPath(target);
     const value = this.resolvePath(path, 'value');
-    if (value.symbol) return;
-    const type = this.resolvePath(path, 'type');
-    if (type.symbol) return;
-    const [root] = path;
-    const error =
-      value.error ??
-      `名前 ${root.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(root), root.text, 'value', this.c.budget)}`;
-    this.c.error(target, error);
+    const type = value.symbol ? undefined : this.resolvePath(path, 'type');
+    if (path.length === 1) {
+      this.checkSingleNameAlias(target, value.symbol, type?.symbol);
+      return;
+    }
+    if (!value.symbol && !type?.symbol && value.error) this.c.error(target, value.error);
+  }
+
+  /** `import X = Y` names a namespace or an enum, as a namespace path names its first name. */
+  private checkSingleNameAlias(target: TreeNode, value: Sym | undefined, type: Sym | undefined): void {
+    if (value?.namespaceExports || value?.valueKind === 'enum') return;
+    const name = target.text;
+    if (value?.unsupported) this.c.error(target, unsupportedMessage(value.unsupported));
+    else if (type || this.c.scopeOf(target).lookupType(name))
+      this.c.error(target, `'${name}' は型のみを参照していますが、ここでは名前空間として使われています。`);
+    else if (value) this.c.error(target, `名前空間 ${name} が見つかりません。`);
+    else
+      this.c.error(
+        target,
+        `名前 ${name} が見つかりません。${nameSuggestionHint(this.c.scopeOf(target), name, 'value', this.c.budget)}`
+      );
   }
 
   /** The symbol the last name of a path names, as a value or a type, through the namespaces of the names before it. */
