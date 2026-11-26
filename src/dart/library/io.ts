@@ -133,170 +133,20 @@ class Stdout extends _StdSink implements IOSink {
   bool get supportsAnsiEscapes => false;
 }
 
-/**
- * The IOSink a run's standard output or error writes through: the SDK's _StreamSinkImpl and _IOSinkImpl
- * (lib/io/io_sink.dart) over its _StdConsumer (lib/io/stdio.dart), with their states and their order. Modification:
- * the stream controller each writes through, and the consumer's subscription to it, are one _StdChannel, which
- * writes at once as the VM's synchronous controller does; the SDK's controller would charge about five times the
- * operations for each write, so that a run could write a fifth of what Java's can. Text is written as text.
- */
-class _StdIOSink implements IOSink {
+// A run's standard output or error is the SDK's _IOSinkImpl over this, which is lib/io/stdio.dart's (3.13.7)
+// _StdConsumer. Modification: the descriptor is the run's shared standard channel, whose isClosed is the one closed
+// state, in place of a RandomAccessFile.
+class _StdConsumer implements StreamConsumer<List<int>> {
   final bool _isError;
-  final Completer _doneCompleter = Completer();
-  _StdChannel? _controllerInstance;
-  Completer? _controllerCompleter;
-  bool _isClosed = false;
-  bool _isBound = false;
-  bool _hasError = false;
-  /** Whether the consumer closed its file, the descriptor, after which a write to it fails. */
-  bool _isFileClosed = false;
-  _StdIOSink(this._isError);
+  _StdConsumer(this._isError);
 
-  Encoding get encoding => utf8;
-  set encoding(Encoding value) => _requireUtf8(value);
-
-  void write(Object? obj) {
-    String string = '$obj';
-    if (string.isEmpty) return;
-    _addText(string);
-  }
-  void writeAll(Iterable objects, [String separator = ""]) {
-    Iterator iterator = objects.iterator;
-    if (!iterator.moveNext()) return;
-    if (separator.isEmpty) {
-      do {
-        write(iterator.current);
-      } while (iterator.moveNext());
-    } else {
-      write(iterator.current);
-      while (iterator.moveNext()) {
-        write(separator);
-        write(iterator.current);
-      }
-    }
-  }
-  void writeln([Object? object = ""]) {
-    _addText('$object\n');
-  }
-  void writeCharCode(int charCode) {
-    write(String.fromCharCode(charCode));
-  }
-
-  void add(List<int> data) {
-    if (_isClosed) {
-      throw StateError("StreamSink is closed");
-    }
-    _controller.add(data);
-  }
-  void _addText(String text) {
-    if (_isClosed) {
-      throw StateError("StreamSink is closed");
-    }
-    _controller.addText(text);
-  }
-  void addError(Object error, [StackTrace? stackTrace]) {
-    if (_isClosed) {
-      throw StateError("StreamSink is closed");
-    }
-    _controller.addError(error, stackTrace ?? StackTrace.empty);
-  }
   Future addStream(Stream<List<int>> stream) {
-    if (_isBound) {
-      throw StateError("StreamSink is already bound to a stream");
-    }
-    if (_hasError) return done;
-    _isBound = true;
-    var future = _controllerCompleter == null
-        ? _consumerAddStream(stream)
-        : _controllerCompleter!.future.then((_) => _consumerAddStream(stream));
-    _controllerInstance?.close();
-    return future.whenComplete(() {
-      _isBound = false;
-    });
-  }
-  Future flush() {
-    if (_isBound) {
-      throw StateError("StreamSink is bound to a stream");
-    }
-    if (_controllerInstance == null) return Future.value(this);
-    _isBound = true;
-    var future = _controllerCompleter!.future;
-    _controllerInstance!.close();
-    return future.whenComplete(() {
-      _isBound = false;
-    });
-  }
-  Future close() {
-    if (_isBound) {
-      throw StateError("StreamSink is bound to a stream");
-    }
-    if (!_isClosed) {
-      _isClosed = true;
-      if (_controllerInstance != null) {
-        _controllerInstance!.close();
-      } else {
-        _closeTarget();
-      }
-    }
-    return done;
-  }
-  void _closeTarget() {
-    _consumerClose().then(_completeDoneValue, onError: _completeDoneError);
-  }
-  Future get done => _doneCompleter.future;
-  void _completeDoneValue(value) {
-    if (!_doneCompleter.isCompleted) {
-      _doneCompleter.complete(value);
-    }
-  }
-  void _completeDoneError(error, StackTrace? stackTrace) {
-    if (!_doneCompleter.isCompleted) {
-      _hasError = true;
-      _doneCompleter.completeError(error, stackTrace);
-    }
-  }
-  _StdChannel get _controller {
-    if (_isBound) {
-      throw StateError("StreamSink is bound to a stream");
-    }
-    if (_isClosed) {
-      throw StateError("StreamSink is closed");
-    }
-    if (_controllerInstance == null) {
-      _controllerInstance = _StdChannel(this);
-      _controllerCompleter = Completer();
-      _controllerInstance!.done.then(
-        (_) {
-          if (_isBound) {
-            _controllerCompleter!.complete(this);
-            _controllerCompleter = null;
-            _controllerInstance = null;
-          } else {
-            _closeTarget();
-          }
-        },
-        onError: (error, stackTrace) {
-          if (_isBound) {
-            _controllerCompleter!.completeError(error, stackTrace);
-            _controllerCompleter = null;
-            _controllerInstance = null;
-          } else {
-            _completeDoneError(error, stackTrace);
-          }
-        },
-      );
-    }
-    return _controllerInstance!;
-  }
-
-  // _StdConsumer.addStream, close, and its file's writeFromSync.
-  Future _consumerAddStream(Stream<List<int>> stream) {
     var completer = new Completer();
     late StreamSubscription<List<int>> sub;
     sub = stream.listen(
       (data) {
         try {
-          _writeFromSync(_textOfBytes(data));
+          _writeFromSync(data);
         } catch (e, s) {
           sub.cancel();
           completer.completeError(e, s);
@@ -308,51 +158,45 @@ class _StdIOSink implements IOSink {
     );
     return completer.future;
   }
-  Future _consumerClose() {
-    _isFileClosed = true;
+
+  Future close() {
     _closeStream(_isError);
     return new Future.value();
   }
-  void _writeFromSync(String text) {
-    if (_isFileClosed) throw const FileSystemException("File closed", "");
-    // print and the end of the run do not pass through the sink, so a character cannot continue in a later write.
-    _writeStream(_isError, text);
+
+  /** The descriptor's writeFromSync, which fails once it is closed; print does not pass through here. */
+  void _writeFromSync(List<int> data) {
+    if (_isStreamClosed(_isError)) throw const FileSystemException("File closed", "");
+    _writeStream(_isError, data);
   }
 }
 
 /**
- * The stream controller a _StdIOSink writes through together with the consumer's subscription to it, which a write
+ * The stream controller a standard stream's _IOSinkImpl writes through together with the consumer's subscription to it, which a write
  * that fails, or an added error, cancels, as cancelOnError does; its done is the consumer's addStream future.
  */
-class _StdChannel {
-  final _StdIOSink _sink;
+class _StdChannel implements EventSink<List<int>> {
+  final _StdConsumer _consumer;
   final Completer _completer = Completer();
   bool _isCancelled = false;
   bool _isClosed = false;
-  _StdChannel(this._sink);
+  _StdChannel(this._consumer);
 
   Future get done => _completer.future;
 
   void add(List<int> data) {
     if (_isCancelled) return;
-    _write(_textOfBytes(data));
-  }
-  void addText(String text) {
-    if (_isCancelled) return;
-    _write(text);
-  }
-  void _write(String text) {
     try {
-      _sink._writeFromSync(text);
+      _consumer._writeFromSync(data);
     } catch (e, s) {
       _isCancelled = true;
       _completer.completeError(e, s);
     }
   }
-  void addError(Object error, StackTrace stackTrace) {
+  void addError(Object error, [StackTrace? stackTrace]) {
     if (_isCancelled) return;
     _isCancelled = true;
-    _completer.completeError(error, stackTrace);
+    _completer.completeError(error, stackTrace ?? StackTrace.empty);
   }
   void close() {
     if (_isClosed) return;
@@ -361,8 +205,9 @@ class _StdChannel {
   }
 }
 
-external void _writeStream(bool isError, String text);
+external void _writeStream(bool isError, List<int> bytes);
 external void _closeStream(bool isError);
+external bool _isStreamClosed(bool isError);
 
 final _newLineDetector = RegExp(r'(?<!\r)\n');
 final _newLineDetectorAfterCR = RegExp(r'(?<=[^\r])\n');
@@ -472,8 +317,8 @@ class _StdSink implements IOSink {
   Future get done => _sink.done;
 }
 
-final Stdout stdout = Stdout._(_StdIOSink(false), false);
-final Stdout stderr = Stdout._(_StdIOSink(true), true);
+final Stdout stdout = Stdout._(_IOSinkImpl(_StdConsumer(false), utf8), false);
+final Stdout stderr = Stdout._(_IOSinkImpl(_StdConsumer(true), utf8), true);
 
 class Stdin extends Stream<List<int>> {
   Stdin._();
@@ -744,16 +589,32 @@ class _File extends FileSystemEntity implements File {
 }
 
 // _StreamSinkImpl and _IOSinkImpl are the SDK's (lib/io/io_sink.dart) and _FileStreamConsumer is lib/io/file_impl.dart's,
-// over _OpenedFile in place of RandomAccessFile.
+// over _OpenedFile in place of RandomAccessFile. Modification: _StreamSinkImpl opens its controller through
+// _openController, which gives a standard stream's consumer a _StdChannel, so its controller is an EventSink.
 class _StreamSinkImpl<T> implements StreamSink<T> {
   final StreamConsumer<T> _target;
   final Completer _doneCompleter = Completer();
-  StreamController<T>? _controllerInstance;
+  EventSink<T>? _controllerInstance;
   Completer? _controllerCompleter;
   bool _isClosed = false;
   bool _isBound = false;
   bool _hasError = false;
   _StreamSinkImpl(this._target);
+  /**
+   * The controller the sink writes through, and the future of the target's taking what it is given. A standard
+   * stream's is a _StdChannel, which writes at once as the VM's synchronous controller does and holds none of the
+   * sink's state; the SDK's controller would charge about five times the operations for each write, so that a run
+   * could write a fifth of what Java's can.
+   */
+  (EventSink<T>, Future) _openController() {
+    final target = _target;
+    if (target is _StdConsumer) {
+      final channel = _StdChannel(target as _StdConsumer);
+      return (channel as EventSink<T>, channel.done);
+    }
+    final controller = StreamController<T>(sync: true);
+    return (controller, _target.addStream(controller.stream));
+  }
   void add(T data) {
     if (_isClosed) {
       throw StateError("StreamSink is closed");
@@ -821,7 +682,7 @@ class _StreamSinkImpl<T> implements StreamSink<T> {
       _doneCompleter.completeError(error, stackTrace);
     }
   }
-  StreamController<T> get _controller {
+  EventSink<T> get _controller {
     if (_isBound) {
       throw StateError("StreamSink is bound to a stream");
     }
@@ -829,9 +690,10 @@ class _StreamSinkImpl<T> implements StreamSink<T> {
       throw StateError("StreamSink is closed");
     }
     if (_controllerInstance == null) {
-      _controllerInstance = StreamController<T>(sync: true);
+      final (controller, taken) = _openController();
+      _controllerInstance = controller;
       _controllerCompleter = Completer();
-      _target.addStream(_controller.stream).then(
+      taken.then(
         (_) {
           if (_isBound) {
             _controllerCompleter!.complete(this);

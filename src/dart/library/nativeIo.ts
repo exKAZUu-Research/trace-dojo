@@ -49,12 +49,12 @@ function intList(runtime: Runtime, values: number[]): Value {
 }
 
 /**
- * Standard input's state, which every read checks and writes, the one place it is kept: whether its stream has a
- * listener, and whether that stream has read the input to its end, after which the VM's descriptor is closed; and
- * the UTF-8 bytes of the character `readByteSync` has read part of the encoding of.
+ * What Dart's standard input has of its own, the one place it is kept: whether its stream has a listener, and the
+ * UTF-8 bytes of the character `readByteSync` has read part of the encoding of. Whether the stream has read the
+ * input to its end, after which the VM's descriptor is closed, is the shared StandardInput's isClosed.
  */
 interface StdinState {
-  use: 'unread' | 'listened' | 'closed';
+  isListened: boolean;
   pendingBytes: number[];
 }
 
@@ -63,7 +63,7 @@ const stdinStates = new WeakMap<Runtime, StdinState>();
 function stdinStateOf(runtime: Runtime): StdinState {
   let state = stdinStates.get(runtime);
   if (!state) {
-    state = { use: 'unread', pendingBytes: [] };
+    state = { isListened: false, pendingBytes: [] };
     stdinStates.set(runtime, state);
   }
   return state;
@@ -71,15 +71,15 @@ function stdinStateOf(runtime: Runtime): StdinState {
 
 function readOpenStdin(runtime: Runtime): StdinState {
   const state = stdinStateOf(runtime);
-  if (state.use !== 'closed') return state;
+  if (!runtime.io.stdin.isClosed) return state;
   const osError = runtime.links.construct(runtime, 'OSError', '', ['Bad file descriptor', 9n]);
   return runtime.throwError('StdinException', '', ['Error reading byte from stdin', osError]);
 }
 
 define('Stdin._listen', (runtime) => {
   const state = stdinStateOf(runtime);
-  if (state.use !== 'unread') runtime.throwError('StateError', '', ['Stream has already been listened to.']);
-  state.use = 'listened';
+  if (state.isListened) runtime.throwError('StateError', '', ['Stream has already been listened to.']);
+  state.isListened = true;
   return;
 });
 
@@ -120,7 +120,7 @@ define('Stdin._readByte', (runtime) => {
 
 define('Stdin._readRest', (runtime) => {
   const state = stdinStateOf(runtime);
-  state.use = 'closed';
+  runtime.io.stdin.isClosed = true;
   const pending = state.pendingBytes;
   state.pendingBytes = [];
   return intList(runtime, [...pending, ...new TextEncoder().encode(runtime.io.stdin.reader.readRest())]);

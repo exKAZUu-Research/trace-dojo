@@ -234,6 +234,3 @@ export function nativeFunction(arity: number, body: (args: readonly Value[]) => 
     undefined
   );
 }
-
-/** The standard sinks a run has closed, by whether each is standard error; a closed sink fails a write. */
-export const closedSinks = new WeakMap<Runtime, Set<boolean>>();

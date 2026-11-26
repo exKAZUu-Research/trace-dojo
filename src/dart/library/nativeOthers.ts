@@ -1,9 +1,11 @@
 import { power } from '../../interpreter/power';
+import type { OutputChannel } from '../../interpreter/programIo';
 import { encodableText } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
+import { textOfWrittenBytes } from './nativeConvert';
 import { toDouble } from './nativeNumbers';
-import { closedSinks, define, defineConstructor, intArg, numArg } from './nativeSupport';
+import { define, defineConstructor, intArg, numArg } from './nativeSupport';
 
 // dart:math
 
@@ -162,18 +164,21 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 
 // dart:io
 
-define('_writeStream', (runtime, _receiver, [isError, text]) => {
-  const channel = isError === true ? runtime.io.stderr : runtime.io.stdout;
-  channel.write(text as string, encodableText);
+// Whether a standard stream is closed is its shared channel's isClosed, the one place it is kept: a closed channel
+// drops what print writes, as the VM's closed descriptor does, and the sink's consumer fails a write.
+define('_writeStream', (runtime, _receiver, [isError, bytes]) => {
+  standardChannel(runtime, isError).write(textOfWrittenBytes(runtime, bytes), encodableText);
   return;
 });
-// print reads whether standard output is closed, after which it drops what it prints, as the VM's closed descriptor does.
+define('_isStreamClosed', (runtime, _receiver, [isError]) => standardChannel(runtime, isError).isClosed);
 define('_closeStream', (runtime, _receiver, [isError]) => {
-  const closed = closedSinks.get(runtime) ?? new Set<boolean>();
-  closed.add(isError === true);
-  closedSinks.set(runtime, closed);
+  standardChannel(runtime, isError).isClosed = true;
   return;
 });
+
+function standardChannel(runtime: Runtime, isError: Value): OutputChannel {
+  return isError === true ? runtime.io.stderr : runtime.io.stdout;
+}
 define('exit', (runtime, _receiver, [code]) => {
   throw new ProgramExit(Number(intArg(runtime, code, 'code')));
 });

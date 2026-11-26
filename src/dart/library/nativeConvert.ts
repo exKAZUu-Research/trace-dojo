@@ -17,6 +17,7 @@ import {
   newList,
   registerPackedList,
   stringArg,
+  throwUnavailable,
 } from './nativeSupport';
 
 function isMap(value: Value): value is DartObject {
@@ -848,6 +849,23 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
   const text = btoa(binary);
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
+
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * The text of bytes a run writes to a standard stream, which holds text: bytes that are not UTF-8 are rejected, as
+ * dart:io's _textOfBytes rejects them. A byte order mark stays, as the VM writes the bytes as they are.
+ */
+export function textOfWrittenBytes(runtime: Runtime, bytes: Value): string {
+  const read = readByteList(runtime, bytes, 'buffer', (value) =>
+    value >= 0n && value <= 0xffn ? Number(value) : 0xff
+  );
+  try {
+    return STRICT_UTF8.decode(read);
+  } catch {
+    return throwUnavailable(runtime, 'UTF-8 でないバイト列の書き込み');
+  }
+}
 
 function readByteList(
   runtime: Runtime,

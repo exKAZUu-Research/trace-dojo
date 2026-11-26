@@ -8,7 +8,6 @@ import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartType
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
 import {
-  closedSinks,
   define,
   defineConstructor,
   forEachValue,
@@ -368,8 +367,7 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
 
 define('print', (runtime, _receiver, [value]) => {
   const text = `${stringOf(runtime, value)}\n`;
-  // The VM's print still converts its argument once stdout is closed, and then drops the text.
-  if (closedSinks.get(runtime)?.has(false)) return;
+  // The VM's print still converts its argument once stdout is closed; the closed channel drops the text.
   runtime.io.stdout.write(text, encodableText);
   return;
 });
