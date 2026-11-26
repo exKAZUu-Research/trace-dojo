@@ -9368,6 +9368,17 @@ void main() { stdout.add([0x41, 0xE3]); }`;
   });
 });
 
+test('a write of bytes that are not UTF-8 stops the run with its diagnostic instead of dropping later writes', () => {
+  const source = `import 'dart:io';
+void main() { stdout.write('a\\n'); stdout.add([0xFF]); stdout.write('lost\\n'); print('printed'); }`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'a\n',
+    uncaughtException:
+      'Unhandled exception:\nUnsupported operation: UTF-8 でないバイト列の書き込みは、この採点環境では使えません。',
+  });
+});
+
 test('byte writes keep a byte order mark and text reads drop one, as the VM decodes them', () => {
   const source = `import 'dart:io';
 void main() {

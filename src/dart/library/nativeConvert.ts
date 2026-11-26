@@ -885,7 +885,8 @@ function unfinishedTail(bytes: Uint8Array): number {
   for (let back = 1; back <= Math.min(3, bytes.length); back++) {
     const byte = bytes[bytes.length - back] as number;
     if ((byte & 0xc0) === 0x80) continue;
-    const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
+    // Only a valid lead byte begins a character that waits; any other is invalid at once.
+    const length = byte >= 0xf5 ? 0 : byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc2 ? 2 : 1;
     return length > back ? back : 0;
   }
   return 0;

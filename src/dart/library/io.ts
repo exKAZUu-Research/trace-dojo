@@ -154,6 +154,8 @@ class _StdConsumer implements StreamConsumer<List<int>> {
       (data) {
         try {
           _writeFromSync(data);
+        } on UnsupportedError {
+          rethrow;
         } catch (e, s) {
           sub.cancel();
           completer.completeError(e, s);
@@ -195,6 +197,9 @@ class _StdChannel implements EventSink<List<int>> {
     if (_isCancelled) return;
     try {
       _consumer._writeFromSync(data);
+    } on UnsupportedError {
+      // The unavailable diagnostic stops the run, as it would from any other write; it is no write failure.
+      rethrow;
     } catch (e, s) {
       _isCancelled = true;
       _completer.completeError(e, s);
