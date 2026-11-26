@@ -144,6 +144,8 @@ export class Shell implements ArithmeticHost {
    * or nothing checks, as Bash runs no `ERR` trap and no `set -e` in the forked process for it.
    */
   private elementCommand: Statement | undefined;
+  /** Whether the next function call is this pipeline element's own, which Bash counts as a `BASH_SUBSHELL` level. */
+  private deepensAtFunctionCall = false;
   /**
    * The line where the body of the innermost function running starts, which Bash reports when a redirection of a
    * compound command in the body fails; a pipeline element or `&` command inherits it, other subshells do not.
@@ -1369,6 +1371,10 @@ export class Shell implements ArithmeticHost {
 
   callFunction(fn: FunctionDefinition, args: string[], callRow: number): number {
     this.runtime.checkCallDepth();
+    if (this.deepensAtFunctionCall) {
+      this.deepensAtFunctionCall = false;
+      this.store.deepenSubshellLevel();
+    }
     const reportedRow = this.currentRow;
     const scopeIndex = this.store.pushFunctionScope(fn.name, reportedRow + 1, args);
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, store: this.store, scopeIndex };
@@ -1469,16 +1475,16 @@ export class Shell implements ArithmeticHost {
 
   /**
    * Runs a pipeline element or a command started with `&` in a subshell. Bash counts it in `BASH_SUBSHELL` except a
-   * pipeline's simple command, which runs in the forked process itself, and `( )`, which merges with the fork.
+   * pipeline's simple command, which runs in the forked process itself unless it calls a function, `( )`, which
+   * merges with the fork, and a pipeline started with `&`, whose elements fork from the shell themselves.
    */
   private runElementSubshell(command: Statement, fds: DescriptorTable, background = false): number {
     const simple = command.kind === 'command' || command.kind === 'declaration';
-    // A function call runs in the fork as a function, which Bash counts as a level, as it does a compound command.
-    const callsFunction =
-      command.kind === 'command' && command.words.length > 0 && this.store.hasFunction(command.words[0].text);
-    const sameLevel = command.kind === 'subshell' || (simple && !background && !callsFunction);
+    const sameLevel = command.kind === 'subshell' || command.kind === 'pipeline' || (simple && !background);
     const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1);
     if (simple) child.shell.elementCommand = command;
+    // Whether the command calls a function is known only once its name is expanded.
+    if (simple && !background) child.shell.deepensAtFunctionCall = true;
     child.shell.functionDefinitionRow = this.functionDefinitionRow;
     return child.run([command]);
   }

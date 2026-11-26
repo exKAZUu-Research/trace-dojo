@@ -227,7 +227,7 @@ export class VariableStore {
   aliases = new Map<string, string>();
   /** Where `getopts` is in the options it reads. */
   getopts: GetoptsState = { optind: 1, charIndex: 0 };
-  private readonly subshellLevel: number;
+  private subshellLevel: number;
 
   constructor(
     private readonly runtime: Runtime,
@@ -343,6 +343,11 @@ export class VariableStore {
       aliases: new Map(this.aliases),
       getopts: { ...this.getopts },
     });
+  }
+
+  /** Counts one more `BASH_SUBSHELL` level, as Bash does for a function a pipeline's forked element calls. */
+  deepenSubshellLevel(): void {
+    this.subshellLevel++;
   }
 
   get isInFunction(): boolean {
