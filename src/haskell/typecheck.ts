@@ -1,12 +1,11 @@
 import { assert } from 'es-toolkit';
 
-import { CompileError } from '../interpreter/diagnostics';
 import { COERCIBLE_CLASS, COERCIBLE_TYPES, EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
 import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
 import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
-import type { FeatureOf } from './features';
+import type { FeatureGates, FeatureOf } from './features';
 import { type Builtins, Checker, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
@@ -654,13 +653,16 @@ function derivingStrategy(
     return 'newtype';
   }
   const stock = options.builtins.derivableClasses.has(cls);
-  if (!stock) {
-    if (strategy === undefined && features.allows('anyclassByDefault')) return 'anyclass';
-    if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
-      throw unsupportedError(span, `${cls.name} の deriving`);
-    if (strategy === undefined && isNewtype && features.allows('newtypeByDefault')) return 'newtype';
-    throw compileError(span, `クラス ${cls.name} は deriving できません。`);
+  const how = strategy ?? defaultStrategy(cls.name, stock, isNewtype, features);
+  if (how !== 'stock') {
+    if (how === 'none') {
+      if (['Generic', 'Data', 'Lift', 'Typeable'].includes(cls.name))
+        throw unsupportedError(span, `${cls.name} の deriving`);
+      throw compileError(span, `クラス ${cls.name} は deriving できません。`);
+    }
+    return how;
   }
+  if (!stock) throw compileError(span, `クラス ${cls.name} は deriving stock できません。`);
   const derive = (
     {
       Functor: ['deriveFunctor', 'DeriveFunctor'],
@@ -669,19 +671,33 @@ function derivingStrategy(
       Lift: ['deriveLift', 'DeriveLift'],
     } as const
   )[cls.name as 'Functor'] as readonly [FeatureOf<'typecheck'>, string] | undefined;
-  try {
-    if (derive && !features.allows(derive[0])) {
-      throw compileError(span, `${cls.name} を deriving するには、${derive[1]} の拡張が要ります。`);
-    }
-    checkDerivable(decl, cls, span);
-  } catch (error) {
-    // A newtype takes its representation's instance when stock deriving cannot apply, its extension off included,
-    // unless stock was asked for.
-    if (!(error instanceof CompileError) || strategy !== undefined || !isNewtype) throw error;
-    if (!features.allows('newtypeByDefault')) throw error;
-    return 'newtype';
+  if (derive && !features.allows(derive[0])) {
+    throw compileError(span, `${cls.name} を deriving するには、${derive[1]} の拡張が要ります。`);
   }
+  checkDerivable(decl, cls, span);
   return 'stock';
+}
+
+/**
+ * The strategy GHC's user guide gives a deriving clause that names none ("Default deriving strategy"): a stock class
+ * is derived by stock, except that for a newtype Eq, Ord, Ix and Bounded always take the newtype strategy, and
+ * Functor, Foldable and Enum do under GeneralizedNewtypeDeriving; another class by anyclass under DeriveAnyClass,
+ * else by newtype for a newtype under GeneralizedNewtypeDeriving.
+ */
+function defaultStrategy(
+  cls: string,
+  stock: boolean,
+  isNewtype: boolean,
+  features: FeatureGates<'typecheck'>
+): DerivingHow | 'none' {
+  const generalized = isNewtype && features.allows('newtypeByDefault');
+  if (stock) {
+    if (isNewtype && ['Eq', 'Ord', 'Ix', 'Bounded'].includes(cls)) return 'newtype';
+    if (generalized && ['Functor', 'Foldable', 'Enum'].includes(cls)) return 'newtype';
+    return 'stock';
+  }
+  if (features.allows('anyclassByDefault')) return 'anyclass';
+  return generalized ? 'newtype' : 'none';
 }
 
 function splitRType(type: RType): { head: RType; args: RType[] } {
