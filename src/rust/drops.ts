@@ -2,7 +2,7 @@ import { normalize } from './infer';
 import type { Program } from './items';
 import { type Frame, MOVED, UNASSIGNED } from './runtime';
 import { concreteType, typeKey } from './runtimeTypes';
-import { type FnDef, type ImplDef, sameType, shallow, substitute, type Type, type TypeParam } from './types';
+import { type FnDef, type ImplDef, shallow, substitute, type Type, type TypeParam } from './types';
 import {
   type BorrowGuard,
   type BufferedWriter,
@@ -42,8 +42,6 @@ export class Dropper {
   }
 
   private counted = false;
-  /** The types `needsDrop` met again inside themselves during the current outermost query. */
-  private readonly cutAt = new Set<string>();
 
   /** Whether any value of the program can need dropping. */
   get active(): boolean {
@@ -55,56 +53,42 @@ export class Dropper {
     this.counted = true;
   }
 
-  /** Whether a value of a concrete type holds something whose drop does something. */
-  // code-gauge-allow functionNcss -- One case per kind of type.
-  needsDrop(type: Type, seen: Type[] = []): boolean {
+  /**
+   * Whether a value of a concrete type holds something whose drop does something: whether a type that drops by
+   * itself is reachable through its parts. A search that reaches none tells the same of every type it went through,
+   * so each type of a recursive group is searched once.
+   */
+  needsDrop(type: Type): boolean {
     if (!this.active) return false;
-    const t = normalize(shallow(type));
-    const key = typeKey(t);
-    const known = this.needs.get(key);
+    const root = normalize(shallow(type));
+    const rootKey = typeKey(root);
+    const known = this.needs.get(rootKey);
     if (known !== undefined) return known;
-    // A type met again inside itself adds nothing to what its other parts need.
-    if (seen.some((other) => sameType(other, t))) {
-      this.cutAt.add(key);
-      return false;
-    }
-    const inner = [...seen, t];
-    let result: boolean;
-    switch (t.kind) {
-      case 'adt': {
-        result =
-          COUNTED.has(t.def.builtin ?? '') ||
-          this.implFor(t) !== undefined ||
-          t.args.some((arg) => this.needsDrop(arg, inner)) ||
-          t.def.variants.some((variant) =>
-            variant.fields.some((field) => this.needsDrop(substitute(field.type, argsOf(t)), inner))
-          );
-        break;
+    const visited = new Set([rootKey]);
+    const pending = [root];
+    for (let t = pending.pop(); t; t = pending.pop()) {
+      const answer = this.needs.get(typeKey(t));
+      if (answer === false) continue;
+      if (answer === true || this.dropsItself(t)) {
+        this.needs.set(rootKey, true);
+        return true;
       }
-      case 'tuple': {
-        result = t.elems.some((elem) => this.needsDrop(elem, inner));
-        break;
-      }
-      case 'array':
-      case 'slice': {
-        result = this.needsDrop(t.elem, inner);
-        break;
-      }
-      case 'dyn':
-      case 'closure': {
-        result = true;
-        break;
-      }
-      default: {
-        result = false;
+      for (const part of partsOf(t)) {
+        const next = normalize(shallow(part));
+        const key = typeKey(next);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        pending.push(next);
       }
     }
-    // A `false` found while a type it is inside was cut short may change once that type is known, so only the
-    // outermost type's answer is final.
-    this.cutAt.delete(key);
-    if (result || this.cutAt.size === 0 || seen.length === 0) this.needs.set(key, result);
-    if (seen.length === 0) this.cutAt.clear();
-    return result;
+    for (const key of visited) this.needs.set(key, false);
+    return false;
+  }
+
+  /** Whether dropping a value of a type does something itself, whatever its parts hold. */
+  private dropsItself(t: Type): boolean {
+    if (t.kind === 'dyn' || t.kind === 'closure') return true;
+    return t.kind === 'adt' && (COUNTED.has(t.def.builtin ?? '') || this.implFor(t) !== undefined);
   }
 
   /** Drops a value of a concrete type: its `Drop` impl first, then its fields, elements, or contents in order. */
@@ -270,6 +254,28 @@ const COUNTED = new Set([
   'Receiver',
   'BufWriter',
 ]);
+
+/** The types of the values a value of a type holds: its fields and type arguments, elements, or contents. */
+function partsOf(t: Type): Type[] {
+  switch (t.kind) {
+    case 'adt': {
+      const fields = t.def.variants.flatMap((variant) =>
+        variant.fields.map((field) => substitute(field.type, argsOf(t)))
+      );
+      return [...t.args, ...fields];
+    }
+    case 'tuple': {
+      return t.elems;
+    }
+    case 'array':
+    case 'slice': {
+      return [t.elem];
+    }
+    default: {
+      return [];
+    }
+  }
+}
 
 function argsOf(t: Type & { kind: 'adt' }): Map<TypeParam, Type> {
   return new Map(t.def.params.map((param, index) => [param, t.args[index]]));
