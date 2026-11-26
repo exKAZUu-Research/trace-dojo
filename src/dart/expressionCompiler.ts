@@ -1599,7 +1599,7 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     if (target.kind === 'prefix') {
       const declaration = this.library.lookupPrefixed(target.prefix, name);
       if (!declaration) return this.undefinedName(span, name, target.prefix);
-      return this.loadedOnly(target.prefix, this.readDeclaration(declaration, span));
+      return this.loadedThroughPrefix(target.prefix, span, () => this.readDeclaration(declaration, span));
     }
     if (target.kind === 'extension') {
       const member = target.ext.staticMembers.get(name);
@@ -1608,9 +1608,9 @@ export abstract class ExpressionCompiler extends AwaitCompiler {
     }
     const member = target.cls.staticMembers.get(name);
     const { prefix } = target.syntax;
-    if (member) return this.loadedOnlyIfPrefixed(prefix, () => this.readStatic(member, span));
+    if (member) return this.loadedThroughPrefix(prefix, span, () => this.readStatic(member, span));
     if (target.cls.constructors.has(name === 'new' ? '' : name))
-      return this.loadedOnlyIfPrefixed(prefix, () => this.compileConstructorTearoff(target.syntax, name, span));
+      return this.loadedThroughPrefix(prefix, span, () => this.compileConstructorTearoff(target.syntax, name, span));
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
     this.checkUnimplementedMember({ cls: target.cls }, name, 'read', span);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);

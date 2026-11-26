@@ -143,33 +143,35 @@ export abstract class AwaitCompiler extends CompilerBase {
   }
 
   /**
-   * Checks a deferred prefix before the steps of an expression that reads it and awaits, which run before the
-   * expression's own code: the SDK reads the prefix before it evaluates the arguments.
+   * What an expression reaches through a prefix, checked first that a `deferred as` prefix's library is loaded, the
+   * one place every prefixed name (but a type annotation) is checked: the check is the expression's first ordered
+   * part, a step before its arguments' when it awaits, as the SDK reads the prefix before it evaluates them, and
+   * otherwise the first thing its code does.
    */
-  protected checkLoadedFirst(prefix: string, node: unknown): void {
-    if (!this.library.deferredPrefixes.has(prefix) || !this.awaitsHere(node)) return;
-    this.addStep((frame) => {
+  protected loadedThroughPrefix<T extends Compiled | undefined>(
+    prefix: string | undefined,
+    node: unknown,
+    compile: () => T
+  ): T {
+    if (prefix === undefined || !this.library.deferredPrefixes.has(prefix)) return compile();
+    const check = (frame: Frame): void => {
       if (!frame.runtime.loadedPrefixes.has(prefix)) frame.runtime.throwError('_DeferredNotLoadedError', '', [prefix]);
-      return;
-    });
-  }
-
-  protected loadedOnlyIfPrefixed(prefix: string | undefined, compile: () => Compiled): Compiled {
+    };
+    const first =
+      this.awaitsHere(node) &&
+      this.addStep((frame) => {
+        check(frame);
+        return;
+      });
     const compiled = compile();
-    return prefix ? this.loadedOnly(prefix, compiled) : compiled;
-  }
-
-  /** What a prefix of a `deferred as` import reaches, which fails until its library is loaded. */
-  protected loadedOnly(prefix: string, compiled: Compiled): Compiled {
-    if (!this.library.deferredPrefixes.has(prefix)) return compiled;
+    if (!compiled || first) return compiled;
     const { run } = compiled;
     return {
       ...compiled,
       isConst: false,
       constValue: undefined,
-      run: (frame) => {
-        if (!frame.runtime.loadedPrefixes.has(prefix))
-          frame.runtime.throwError('_DeferredNotLoadedError', '', [prefix]);
+      run: (frame: Frame) => {
+        check(frame);
         return run(frame);
       },
     };

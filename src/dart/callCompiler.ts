@@ -336,18 +336,19 @@ export abstract class CallCompiler extends OperatorCompiler {
     const target = this.staticTarget(callee.object);
     if (target?.kind === 'class') {
       // A class reached through a deferred prefix fails until its library is loaded, before the arguments run.
-      const { prefix } = target.syntax;
-      if (prefix) this.checkLoadedFirst(prefix, expression);
-      return this.loadedOnlyIfPrefixed(prefix, () => this.compileClassCall(target, expression, callee, context));
+      return this.loadedThroughPrefix(target.syntax.prefix, expression, () =>
+        this.compileClassCall(target, expression, callee, context)
+      );
     }
     if (target?.kind === 'prefix') {
       const { prefix } = target;
       if (callee.name === 'loadLibrary' && this.library.deferredPrefixes.has(prefix)) {
         return this.compileLoadLibrary(prefix, expression);
       }
-      this.checkLoadedFirst(prefix, expression);
-      const call = this.compilePrefixedCall(prefix, callee, expression, context);
-      if (call) return this.loadedOnly(prefix, call);
+      const call = this.loadedThroughPrefix(prefix, expression, () =>
+        this.compilePrefixedCall(prefix, callee, expression, context)
+      );
+      if (call) return call;
     }
     if (target?.kind === 'extension') {
       const member = target.ext.staticMembers.get(callee.name);
@@ -699,8 +700,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       prefix = undefined;
     }
     const target = this.resolveConstructorType({ ...typeSyntax, name, prefix }, expression, expression.isSelectorCall);
-    if (prefix) this.checkLoadedFirst(prefix, expression);
-    return this.loadedOnlyIfPrefixed(prefix, () =>
+    return this.loadedThroughPrefix(prefix, expression, () =>
       this.compileConstructorCall(
         target.cls,
         constructorName,
