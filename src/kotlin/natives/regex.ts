@@ -91,10 +91,14 @@ defineNative('kotlin.text.Regex.optionList()', (frame, receiver) =>
 defineNative('kotlin.text.Regex.matchData(String, Int, Boolean)', (frame, receiver, [input, startIndex, isWhole]) => {
   const regex = regexOf(receiver);
   const text = input as string;
-  frame.runtime.spend(1 + Math.floor(text.length / 64));
   const regExp = isWhole ? regex.whole : regex.search;
-  regExp.lastIndex = isWhole ? 0 : (startIndex as number);
+  const start = isWhole ? 0 : (startIndex as number);
+  regExp.lastIndex = start;
   const match = regExp.exec(text);
+  // A search costs the text it read, from where it started to where its match ended, so that the finds of findAll
+  // and split cost the text once in all.
+  const end = match ? match.index + match[0].length : text.length;
+  frame.runtime.spend(1 + Math.floor(Math.max(0, end - start) / 64));
   if (!match?.indices) return NULL;
   const data = match.indices.flatMap((range) => (range ? [range[0], range[1]] : [-1, -1]));
   return newItems(frame, 'kotlin.IntArray', data);
