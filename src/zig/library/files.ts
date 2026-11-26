@@ -114,7 +114,8 @@ class ReadError extends Error {
 /**
  * The next piece of the input up to the delimiter, copied into the start of the reader's buffer: with the delimiter
  * when `through`, and read past it when `take`. At the end of the input the piece is the rest, or `undefined` when
- * none is left. A piece longer than the buffer fails with `StreamTooLong`, as Zig's buffered reader does.
+ * none is left. A piece longer than the buffer, or a rest without the delimiter that fills it, fails with
+ * `StreamTooLong`, as Zig's buffered reader does.
  */
 function delimitedPiece(
   frame: Frame,
@@ -133,7 +134,7 @@ function delimitedPiece(
   const found = peeked.endsWith(separator);
   const bytes = new TextEncoder().encode(peeked);
   // Zig fills the whole buffer before it can tell a missing delimiter from the end of the input.
-  if (bytes.length > buffer.length) throw new ReadError('StreamTooLong');
+  if (found ? bytes.length > buffer.length : bytes.length >= buffer.length) throw new ReadError('StreamTooLong');
   const pieceText = found && !options.through ? peeked.slice(0, -1) : peeked;
   const piece = found && !options.through ? bytes.subarray(0, -1) : bytes;
   frame.runtime.spend(piece.length);
