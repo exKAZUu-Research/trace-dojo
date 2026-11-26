@@ -392,6 +392,664 @@ final class RuneIterator implements Iterator<int> {
   }
 }
 
+class DateTime implements Comparable<DateTime> {
+  static const int monday = 1;
+  static const int tuesday = 2;
+  static const int wednesday = 3;
+  static const int thursday = 4;
+  static const int friday = 5;
+  static const int saturday = 6;
+  static const int sunday = 7;
+  static const int daysPerWeek = 7;
+  static const int january = 1;
+  static const int february = 2;
+  static const int march = 3;
+  static const int april = 4;
+  static const int may = 5;
+  static const int june = 6;
+  static const int july = 7;
+  static const int august = 8;
+  static const int september = 9;
+  static const int october = 10;
+  static const int november = 11;
+  static const int december = 12;
+  static const int monthsPerYear = 12;
+  final bool isUtc;
+  DateTime(
+    int year, [
+    int month = 1,
+    int day = 1,
+    int hour = 0,
+    int minute = 0,
+    int second = 0,
+    int millisecond = 0,
+    int microsecond = 0,
+  ]) : this._internal(
+         year,
+         month,
+         day,
+         hour,
+         minute,
+         second,
+         millisecond,
+         microsecond,
+         false,
+       );
+  DateTime.utc(
+    int year, [
+    int month = 1,
+    int day = 1,
+    int hour = 0,
+    int minute = 0,
+    int second = 0,
+    int millisecond = 0,
+    int microsecond = 0,
+  ]) : this._internal(
+         year,
+         month,
+         day,
+         hour,
+         minute,
+         second,
+         millisecond,
+         microsecond,
+         true,
+       );
+  DateTime.now() : this._now();
+  DateTime.timestamp() : this._nowUtc();
+  static DateTime parse(String formattedString) {
+    var re = _parseFormat;
+    Match? match = re.firstMatch(formattedString);
+    if (match != null) {
+      int parseIntOrZero(String? matched) {
+        if (matched == null) return 0;
+        return int.parse(matched);
+      }
+      int parseMilliAndMicroseconds(String? matched) {
+        if (matched == null) return 0;
+        int length = matched.length;
+        int result = 0;
+        for (int i = 0; i < 6; i++) {
+          result *= 10;
+          if (i < matched.length) {
+            result += matched.codeUnitAt(i) ^ 0x30;
+          }
+        }
+        return result;
+      }
+      int years = int.parse(match[1]!);
+      int month = int.parse(match[2]!);
+      int day = int.parse(match[3]!);
+      int hour = parseIntOrZero(match[4]);
+      int minute = parseIntOrZero(match[5]);
+      int second = parseIntOrZero(match[6]);
+      int milliAndMicroseconds = parseMilliAndMicroseconds(match[7]);
+      int millisecond =
+          milliAndMicroseconds ~/ Duration.microsecondsPerMillisecond;
+      int microsecond = milliAndMicroseconds.remainder(
+        Duration.microsecondsPerMillisecond,
+      ) as int;
+      bool isUtc = false;
+      if (match[8] != null) {
+        isUtc = true;
+        String? tzSign = match[9];
+        if (tzSign != null) {
+          int sign = (tzSign == '-') ? -1 : 1;
+          int hourDifference = int.parse(match[10]!);
+          int minuteDifference = parseIntOrZero(match[11]);
+          minuteDifference += 60 * hourDifference;
+          minute -= sign * minuteDifference;
+        }
+      }
+      DateTime? result = _finishParse(
+        years,
+        month,
+        day,
+        hour,
+        minute,
+        second,
+        millisecond,
+        microsecond,
+        isUtc,
+      );
+      if (result == null) {
+        throw FormatException("Time out of range", formattedString);
+      }
+      return result;
+    } else {
+      throw FormatException("Invalid date format", formattedString);
+    }
+  }
+  static DateTime? tryParse(String formattedString) {
+    try {
+      return parse(formattedString);
+    } on FormatException {
+      return null;
+    }
+  }
+  static const int _maxMillisecondsSinceEpoch = 8640000000000000;
+  static const int _maxMicrosecondsSinceEpoch =
+      _maxMillisecondsSinceEpoch * Duration.microsecondsPerMillisecond;
+  static int _validate(
+    int millisecondsSinceEpoch,
+    int microsecond,
+    bool isUtc,
+  ) {
+    if (microsecond < 0 || microsecond > 999) {
+      throw RangeError.range(microsecond, 0, 999, "microsecond");
+    }
+    if (millisecondsSinceEpoch < -_maxMillisecondsSinceEpoch ||
+        millisecondsSinceEpoch > _maxMillisecondsSinceEpoch) {
+      throw RangeError.range(
+        millisecondsSinceEpoch,
+        -_maxMillisecondsSinceEpoch,
+        _maxMillisecondsSinceEpoch,
+        "millisecondsSinceEpoch",
+      );
+    }
+    if (millisecondsSinceEpoch == _maxMillisecondsSinceEpoch &&
+        microsecond != 0) {
+      throw ArgumentError.value(
+        microsecond,
+        "microsecond",
+        "Time including microseconds is outside valid range",
+      );
+    }
+    return millisecondsSinceEpoch;
+  }
+  DateTime toLocal() {
+    if (isUtc) {
+      return _withUtc(isUtc: false);
+    }
+    return this;
+  }
+  DateTime toUtc() {
+    if (isUtc) return this;
+    return _withUtc(isUtc: true);
+  }
+  static String _fourDigits(int n) {
+    int absN = n.abs();
+    String sign = n < 0 ? "-" : "";
+    if (absN >= 1000) return "$n";
+    if (absN >= 100) return sign + "0" + absN.toString();
+    if (absN >= 10) return sign + "00" + absN.toString();
+    return sign + "000" + absN.toString();
+  }
+  static String _sixDigits(int n) {
+    int absN = n.abs();
+    String sign = n < 0 ? "-" : "+";
+    if (absN >= 100000) return "$sign$absN";
+    return sign + "0" + absN.toString();
+  }
+  static String _threeDigits(int n) {
+    if (n >= 100) return n.toString();
+    if (n >= 10) return "0" + n.toString();
+    return "00" + n.toString();
+  }
+  static String _twoDigits(int n) {
+    if (n >= 10) return n.toString();
+    return "0" + n.toString();
+  }
+  String toString() {
+    String y = _fourDigits(year);
+    String m = _twoDigits(month);
+    String d = _twoDigits(day);
+    String h = _twoDigits(hour);
+    String min = _twoDigits(minute);
+    String sec = _twoDigits(second);
+    String ms = _threeDigits(millisecond);
+    String us = microsecond == 0 ? "" : _threeDigits(microsecond);
+    if (isUtc) {
+      return "$y-$m-$d $h:$min:$sec.$ms" + us + "Z";
+    } else {
+      return "$y-$m-$d $h:$min:$sec.$ms$us";
+    }
+  }
+  String toIso8601String() {
+    String y = (year >= -9999 && year <= 9999)
+        ? _fourDigits(year)
+        : _sixDigits(year);
+    String m = _twoDigits(month);
+    String d = _twoDigits(day);
+    String h = _twoDigits(hour);
+    String min = _twoDigits(minute);
+    String sec = _twoDigits(second);
+    String ms = _threeDigits(millisecond);
+    String us = microsecond == 0 ? "" : _threeDigits(microsecond);
+    if (isUtc) {
+      return "$y-$m-" + d + "T$h:$min:$sec.$ms" + us + "Z";
+    } else {
+      return "$y-$m-" + d + "T$h:$min:$sec.$ms$us";
+    }
+  }
+  
+  static final RegExp _parseFormat = RegExp(
+    r'^([+-]?\d{4,6})-?(\d\d)-?(\d\d)' // Day part.
+    r'(?:[ T](\d\d)(?::?(\d\d)(?::?(\d\d)(?:[.,](\d+))?)?)?' // Time part.
+    r'( ?[zZ]| ?([-+])(\d\d)(?::?(\d\d))?)?)?$',
+  ); // Timezone part.
+
+  external static int _getCurrentMicros();
+  external static String _timeZoneNameForClampedSeconds(int secondsSinceEpoch);
+  external static int _timeZoneOffsetInSecondsForClampedSeconds(
+    int secondsSinceEpoch,
+  );
+  static const _MICROSECOND_INDEX = 0;
+  static const _MILLISECOND_INDEX = 1;
+  static const _SECOND_INDEX = 2;
+  static const _MINUTE_INDEX = 3;
+  static const _HOUR_INDEX = 4;
+  static const _DAY_INDEX = 5;
+  static const _WEEKDAY_INDEX = 6;
+  static const _MONTH_INDEX = 7;
+  static const _YEAR_INDEX = 8;
+  final int _value;
+  List<int>? __parts;
+  DateTime._(this._value, {required this.isUtc});
+  DateTime._withValue(this._value, {required this.isUtc}) {
+    _validate(millisecondsSinceEpoch, microsecond, isUtc);
+  }
+  DateTime.fromMillisecondsSinceEpoch(
+    int millisecondsSinceEpoch, {
+    bool isUtc = false,
+  }) : this._withValue(
+         _validateMilliseconds(millisecondsSinceEpoch) *
+             Duration.microsecondsPerMillisecond,
+         isUtc: isUtc,
+       );
+  DateTime.fromMicrosecondsSinceEpoch(
+    int microsecondsSinceEpoch, {
+    bool isUtc = false,
+  }) : this._withValue(microsecondsSinceEpoch, isUtc: isUtc);
+  DateTime._internal(
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+    int millisecond,
+    int microsecond,
+    this.isUtc,
+  ) : _value =
+          _brokenDownDateToValue(
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            millisecond,
+            microsecond,
+            isUtc,
+          ) ??
+          (() => throw ArgumentError(
+            '($year, $month, $day,'
+            ' $hour, $minute, $second, $millisecond, $microsecond)',
+          ))();
+  static int _validateMilliseconds(int millisecondsSinceEpoch) =>
+      RangeError.checkValueInInterval(
+        millisecondsSinceEpoch,
+        -_maxMillisecondsSinceEpoch,
+        _maxMillisecondsSinceEpoch,
+        "millisecondsSinceEpoch",
+      );
+  DateTime._now() : isUtc = false, _value = _getCurrentMicros();
+  DateTime._nowUtc() : isUtc = true, _value = _getCurrentMicros();
+  DateTime _withUtc({required bool isUtc}) {
+    return DateTime._(_value, isUtc: isUtc);
+  }
+  String get timeZoneName {
+    if (isUtc) return "UTC";
+    return _timeZoneName(microsecondsSinceEpoch);
+  }
+  Duration get timeZoneOffset {
+    if (isUtc) return Duration();
+    int offsetInSeconds = _timeZoneOffsetInSeconds(microsecondsSinceEpoch);
+    return Duration(seconds: offsetInSeconds);
+  }
+  bool operator ==(Object other) =>
+      other is DateTime &&
+      _value == other.microsecondsSinceEpoch &&
+      isUtc == other.isUtc;
+  int get hashCode => (_value ^ (_value >> 30)) & 0x3FFFFFFF;
+  bool isBefore(DateTime other) => _value < other.microsecondsSinceEpoch;
+  bool isAfter(DateTime other) => _value > other.microsecondsSinceEpoch;
+  bool isAtSameMomentAs(DateTime other) =>
+      _value == other.microsecondsSinceEpoch;
+  int compareTo(DateTime other) =>
+      _value.compareTo(other.microsecondsSinceEpoch);
+  static const List<List<int>> _DAYS_UNTIL_MONTH = [
+    [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334],
+    [0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335],
+  ];
+  static List<int> _computeUpperPart(int localMicros) {
+    const int DAYS_IN_4_YEARS = 4 * 365 + 1;
+    const int DAYS_IN_100_YEARS = 25 * DAYS_IN_4_YEARS - 1;
+    const int DAYS_IN_400_YEARS = 4 * DAYS_IN_100_YEARS + 1;
+    const int DAYS_1970_TO_2000 = 30 * 365 + 7;
+    const int DAYS_OFFSET =
+        1000 * DAYS_IN_400_YEARS + 5 * DAYS_IN_400_YEARS - DAYS_1970_TO_2000;
+    const int YEARS_OFFSET = 400000;
+    int resultYear = 0;
+    int resultMonth = 0;
+    int resultDay = 0;
+    final int daysSince1970 = _flooredDivision(
+      localMicros,
+      Duration.microsecondsPerDay,
+    );
+    int days = daysSince1970;
+    days += DAYS_OFFSET;
+    resultYear = 400 * (days ~/ DAYS_IN_400_YEARS) - YEARS_OFFSET;
+    days = (days.remainder(DAYS_IN_400_YEARS)) as int;
+    days--;
+    int yd1 = days ~/ DAYS_IN_100_YEARS;
+    days = (days.remainder(DAYS_IN_100_YEARS)) as int;
+    resultYear += 100 * yd1;
+    days++;
+    int yd2 = days ~/ DAYS_IN_4_YEARS;
+    days = (days.remainder(DAYS_IN_4_YEARS)) as int;
+    resultYear += 4 * yd2;
+    days--;
+    int yd3 = days ~/ 365;
+    days = (days.remainder(365)) as int;
+    resultYear += yd3;
+    bool isLeap = (yd1 == 0 || yd2 != 0) && yd3 == 0;
+    if (isLeap) days++;
+    List<int> daysUntilMonth = _DAYS_UNTIL_MONTH[isLeap ? 1 : 0];
+    for (
+      resultMonth = 12;
+      daysUntilMonth[resultMonth - 1] > days;
+      resultMonth--
+    ) {
+    }
+    resultDay = days - daysUntilMonth[resultMonth - 1] + 1;
+    int resultMicrosecond = localMicros % Duration.microsecondsPerMillisecond;
+    int resultMillisecond =
+        _flooredDivision(localMicros, Duration.microsecondsPerMillisecond) %
+        Duration.millisecondsPerSecond;
+    int resultSecond =
+        _flooredDivision(localMicros, Duration.microsecondsPerSecond) %
+        Duration.secondsPerMinute;
+    int resultMinute = _flooredDivision(
+      localMicros,
+      Duration.microsecondsPerMinute,
+    );
+    resultMinute %= Duration.minutesPerHour;
+    int resultHour = _flooredDivision(
+      localMicros,
+      Duration.microsecondsPerHour,
+    );
+    resultHour %= Duration.hoursPerDay;
+    int resultWeekday =
+        ((daysSince1970 + DateTime.thursday - DateTime.monday) %
+            DateTime.daysPerWeek) +
+        DateTime.monday;
+    List<int> list = List<int>.filled(_YEAR_INDEX + 1, 0);
+    list[_MICROSECOND_INDEX] = resultMicrosecond;
+    list[_MILLISECOND_INDEX] = resultMillisecond;
+    list[_SECOND_INDEX] = resultSecond;
+    list[_MINUTE_INDEX] = resultMinute;
+    list[_HOUR_INDEX] = resultHour;
+    list[_DAY_INDEX] = resultDay;
+    list[_WEEKDAY_INDEX] = resultWeekday;
+    list[_MONTH_INDEX] = resultMonth;
+    list[_YEAR_INDEX] = resultYear;
+    return list;
+  }
+  List<int> get _parts {
+    return __parts ??= _computeUpperPart(_localDateInUtcMicros);
+  }
+  DateTime add(Duration duration) {
+    return DateTime._withValue(_value + duration.inMicroseconds, isUtc: isUtc);
+  }
+  DateTime subtract(Duration duration) {
+    return DateTime._withValue(_value - duration.inMicroseconds, isUtc: isUtc);
+  }
+  Duration difference(DateTime other) {
+    return Duration(microseconds: _value - other.microsecondsSinceEpoch);
+  }
+  int get millisecondsSinceEpoch =>
+      _flooredDivision(_value, Duration.microsecondsPerMillisecond);
+  int get microsecondsSinceEpoch => _value;
+  int get microsecond => _parts[_MICROSECOND_INDEX];
+  int get millisecond => _parts[_MILLISECOND_INDEX];
+  int get second => _parts[_SECOND_INDEX];
+  int get minute => _parts[_MINUTE_INDEX];
+  int get hour => _parts[_HOUR_INDEX];
+  int get day => _parts[_DAY_INDEX];
+  int get weekday => _parts[_WEEKDAY_INDEX];
+  int get month => _parts[_MONTH_INDEX];
+  int get year => _parts[_YEAR_INDEX];
+  int get _localDateInUtcMicros {
+    int micros = _value;
+    if (isUtc) return micros;
+    int offset =
+        _timeZoneOffsetInSeconds(micros) * Duration.microsecondsPerSecond;
+    return micros + offset;
+  }
+  static int _flooredDivision(int a, int b) {
+    return (a - (a < 0 ? b - 1 : 0)) ~/ b;
+  }
+  static int _dayFromYear(int year) {
+    return 365 * (year - 1970) +
+        _flooredDivision(year - 1969, 4) -
+        _flooredDivision(year - 1901, 100) +
+        _flooredDivision(year - 1601, 400);
+  }
+  static bool _isLeapYear(int y) {
+    return (y % 4 == 0) && ((y % 16 == 0) || (y % 100 != 0));
+  }
+  static int? _brokenDownDateToValue(
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+    int millisecond,
+    int microsecond,
+    bool isUtc,
+  ) {
+    --month;
+    if (month >= 12) {
+      year += month ~/ 12;
+      month = month % 12;
+    } else if (month < 0) {
+      int realMonth = month % 12;
+      year += (month - realMonth) ~/ 12;
+      month = realMonth;
+    }
+    int days = day - 1;
+    days += _DAYS_UNTIL_MONTH[_isLeapYear(year) ? 1 : 0][month];
+    days += _dayFromYear(year);
+    int microsecondsSinceEpoch =
+        days * Duration.microsecondsPerDay +
+        hour * Duration.microsecondsPerHour +
+        minute * Duration.microsecondsPerMinute +
+        second * Duration.microsecondsPerSecond +
+        millisecond * Duration.microsecondsPerMillisecond +
+        microsecond;
+    if (!isUtc) {
+      if (microsecondsSinceEpoch.abs() >
+          _maxMillisecondsSinceEpoch * Duration.microsecondsPerMillisecond +
+              Duration.microsecondsPerDay) {
+        return null;
+      }
+      microsecondsSinceEpoch -= _toLocalTimeOffset(microsecondsSinceEpoch);
+    }
+    if (microsecondsSinceEpoch.abs() >
+        _maxMillisecondsSinceEpoch * Duration.microsecondsPerMillisecond) {
+      return null;
+    }
+    return microsecondsSinceEpoch;
+  }
+  static DateTime? _finishParse(
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+    int millisecond,
+    int microsecond,
+    bool isUtc,
+  ) {
+    final value = _brokenDownDateToValue(
+      year,
+      month,
+      day,
+      hour,
+      minute,
+      second,
+      millisecond,
+      microsecond,
+      isUtc,
+    );
+    if (value == null) return null;
+    return DateTime._withValue(value, isUtc: isUtc);
+  }
+  static int _weekDay(y) {
+    return (_dayFromYear(y) + 4) % 7;
+  }
+  static int _equivalentYear(int year) {
+    int recentYear = (_isLeapYear(year) ? 1956 : 1967) + (_weekDay(year) * 12);
+    return 2008 + (recentYear - 2008) % 28;
+  }
+  static int _yearsFromSecondsSinceEpoch(int secondsSinceEpoch) {
+    const int DAYS_IN_4_YEARS = 4 * 365 + 1;
+    const int DAYS_IN_100_YEARS = 25 * DAYS_IN_4_YEARS - 1;
+    const int DAYS_YEAR_2098 = DAYS_IN_100_YEARS + 6 * DAYS_IN_4_YEARS;
+    int days = secondsSinceEpoch ~/ Duration.secondsPerDay;
+    if (days > 0 && days < DAYS_YEAR_2098) {
+      return 1970 + (4 * days + 2) ~/ DAYS_IN_4_YEARS;
+    }
+    int micros = secondsSinceEpoch * Duration.microsecondsPerSecond;
+    return _computeUpperPart(micros)[_YEAR_INDEX];
+  }
+  static int _equivalentSeconds(int microsecondsSinceEpoch) {
+    const int CUT_OFF_SECONDS = 0x7FFFFFFF;
+    int secondsSinceEpoch = _flooredDivision(
+      microsecondsSinceEpoch,
+      Duration.microsecondsPerSecond,
+    );
+    if (secondsSinceEpoch.abs() > CUT_OFF_SECONDS) {
+      int year = _yearsFromSecondsSinceEpoch(secondsSinceEpoch);
+      int days = _dayFromYear(year);
+      int equivalentYear = _equivalentYear(year);
+      int equivalentDays = _dayFromYear(equivalentYear);
+      int diffDays = equivalentDays - days;
+      secondsSinceEpoch += diffDays * Duration.secondsPerDay;
+    }
+    return secondsSinceEpoch;
+  }
+  static int _timeZoneOffsetInSeconds(int microsecondsSinceEpoch) {
+    int equivalentSeconds = _equivalentSeconds(microsecondsSinceEpoch);
+    return _timeZoneOffsetInSecondsForClampedSeconds(equivalentSeconds);
+  }
+  static String _timeZoneName(int microsecondsSinceEpoch) {
+    int equivalentSeconds = _equivalentSeconds(microsecondsSinceEpoch);
+    return _timeZoneNameForClampedSeconds(equivalentSeconds);
+  }
+  static int _toLocalTimeOffset(int microsecondsSinceEpoch) {
+    int offset =
+        _timeZoneOffsetInSeconds(microsecondsSinceEpoch) *
+        Duration.microsecondsPerSecond;
+    if (offset != 0) {
+      int offset2 =
+          _timeZoneOffsetInSeconds(microsecondsSinceEpoch - offset) *
+          Duration.microsecondsPerSecond;
+      if (offset2 != offset) {
+        int offset3 =
+            _timeZoneOffsetInSeconds(microsecondsSinceEpoch - offset2) *
+            Duration.microsecondsPerSecond;
+        return (offset2 <= offset3 ? offset2 : offset3);
+      }
+      offset = offset2;
+    }
+    int offset4 =
+        _timeZoneOffsetInSeconds(
+          microsecondsSinceEpoch - offset - 2 * Duration.microsecondsPerHour,
+        ) *
+        Duration.microsecondsPerSecond;
+    if (offset4 > offset) {
+      if (offset4 == offset + 2 * Duration.microsecondsPerHour) {
+        return offset4;
+      }
+      int offset5 =
+          _timeZoneOffsetInSeconds(microsecondsSinceEpoch - offset4) *
+          Duration.microsecondsPerSecond;
+      if (offset5 == offset4) {
+        return offset4;
+      }
+    }
+    return offset;
+  }
+}
+extension DateTimeCopyWith on DateTime {
+  DateTime copyWith({
+    int? year,
+    int? month,
+    int? day,
+    int? hour,
+    int? minute,
+    int? second,
+    int? millisecond,
+    int? microsecond,
+    bool? isUtc,
+  }) {
+    return ((isUtc ?? this.isUtc) ? DateTime.utc : DateTime.new)(
+      year ?? this.year,
+      month ?? this.month,
+      day ?? this.day,
+      hour ?? this.hour,
+      minute ?? this.minute,
+      second ?? this.second,
+      millisecond ?? this.millisecond,
+      microsecond ?? this.microsecond,
+    );
+  }
+}
+
+class Stopwatch {
+  static final int _frequency = _initTicker();
+  int _start = 0;
+  int? _stop = 0;
+  Stopwatch() {
+    _frequency;
+  }
+  int get frequency => _frequency;
+  void start() {
+    int? stop = _stop;
+    if (stop != null) {
+      _start += _now() - stop;
+      _stop = null;
+    }
+  }
+  void stop() {
+    _stop ??= _now();
+  }
+  void reset() {
+    _start = _stop ?? _now();
+  }
+  int get elapsedTicks {
+    return (_stop ?? _now()) - _start;
+  }
+  Duration get elapsed {
+    return Duration(microseconds: elapsedMicroseconds);
+  }
+  int get elapsedMicroseconds => elapsedTicks ~/ 1000;
+  int get elapsedMilliseconds => elapsedTicks ~/ 1000000;
+  bool get isRunning => _stop == null;
+  static int _initTicker() => 1000000000;
+  external static int _now();
+}
+
+abstract interface class Sink<T> {
+  void add(T data);
+  void close();
+}
+
 abstract interface class StringSink {
   void write(Object? object);
   void writeAll(Iterable<dynamic> objects, [String separator = ""]);
@@ -481,6 +1139,33 @@ class _Symbol implements Symbol {
   }
   bool operator ==(Object other) => other is _Symbol && other._name == _name && other._library == _library;
   String toString() => 'Symbol("' + _name + '")';
+}
+
+final class Expando<T extends Object> {
+  final String? name;
+
+  Expando([String? name]) : name = name;
+
+  String toString() => "Expando:" + name.toString();
+
+  T? operator [](Object object) {
+    _checkValidWeakTarget(object, 'object');
+    return _get(object) as T?;
+  }
+
+  void operator []=(Object object, T? value) {
+    _checkValidWeakTarget(object, 'object');
+    _set(object, value);
+  }
+
+  external Object? _get(Object object);
+  external void _set(Object object, Object? value);
+}
+
+void _checkValidWeakTarget(Object? object, String name) {
+  if ((object == null) || (object is bool) || (object is num) || (object is String) || (object is Record)) {
+    throw ArgumentError.value(object, name, "Cannot be a string, number, boolean, record, null, Pointer, Struct or Union");
+  }
 }
 
 abstract interface class StackTrace {
@@ -946,6 +1631,8 @@ final class pragma {
 // Functions
 
 external void print(Object? object);
+/** Rejects what the interpreter cannot give the SDK's result for, with the diagnostic every such check throws. */
+external Never _unavailable(String what);
 external bool identical(Object? a, Object? b);
 external int identityHashCode(Object? object);
 

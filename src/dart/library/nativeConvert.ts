@@ -9,6 +9,7 @@ import { appendJsonQuoted, StringParts } from './boundedStringParts';
 import { forEachEntry, newMap } from './nativeCollections';
 import {
   define,
+  defineConstructor,
   index,
   intArg,
   listElement,
@@ -16,6 +17,7 @@ import {
   newList,
   registerPackedList,
   stringArg,
+  throwUnavailable,
 } from './nativeSupport';
 
 function isMap(value: Value): value is DartObject {
@@ -451,6 +453,12 @@ define('_jsonDecode', (runtime, _receiver, [source, reviver]) =>
 // UTF-8 and Base64
 
 registerPackedList('_Uint8List');
+defineConstructor('_Uint8List.new', (runtime, _instance, args) => {
+  const size = intArg(runtime, args.positional[0], 'length');
+  if (size < 0n) runtime.throwError('RangeError', 'range', [size, 0n, undefined, 'length']);
+  runtime.allocate(Number(size) + 1);
+  return new DartPackedList(runtime.links.classNamed('_Uint8List'), new Uint8Array(Number(size)));
+});
 define('_Uint8List.[]=', (runtime, receiver, [position, value]) => {
   const list = receiver as DartPackedList;
   const at = intArg(runtime, position, 'index');
@@ -482,26 +490,89 @@ define('_utf8Encode', (runtime, _receiver, [input, start = 0n, end]) => {
   runtime.allocate(size + 1);
   return new DartPackedList(runtime.links.classNamed('_Uint8List'), new TextEncoder().encode(text));
 });
-define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed, start = 0n, end]) => {
-  // The VM replaces values that are not bytes with 0xFF, which is invalid.
-  const bytes = readByteList(
-    runtime,
-    codeUnits,
-    'codeUnits',
-    (value) => (value >= 0n && value <= 0xffn ? Number(value) : 0xff),
-    [start, end]
-  );
-  if (allowMalformed === true) return new TextDecoder('utf-8').decode(bytes);
-  const error = utf8Error(bytes);
-  if (error) {
-    return runtime.throwError('FormatException', '', [
-      error.message,
-      codeUnits,
-      BigInt(error.offset) + (start as bigint),
-    ]);
+/* oxlint-disable unicorn/prefer-code-point -- The SDK's encoder reads UTF-16 code units. */
+const isLeadSurrogate = (unit: number): boolean => (unit & 0xfc_00) === 0xd8_00;
+const isTailSurrogate = (unit: number): boolean => (unit & 0xfc_00) === 0xdc_00;
+
+/** The SDK's _Utf8Encoder buffer of a stream's chunk, filled as _fillBuffer fills it. */
+class Utf8ChunkBuffer {
+  bytes: number[] = [];
+
+  constructor(private readonly size: number) {}
+
+  /** _writeSurrogate: a pair writes its four bytes; a lead alone writes U+FFFD. */
+  surrogate(lead: number, next: number): boolean {
+    if (!isTailSurrogate(next)) {
+      this.bytes.push(0xef, 0xbf, 0xbd);
+      return false;
+    }
+    const rune = 0x1_00_00 + ((lead & 0x3_ff) << 10) + (next & 0x3_ff);
+    this.bytes.push(
+      0xf0 | (rune >> 18),
+      0x80 | ((rune >> 12) & 0x3f),
+      0x80 | ((rune >> 6) & 0x3f),
+      0x80 | (rune & 0x3f)
+    );
+    return true;
   }
-  return new TextDecoder('utf-8').decode(bytes);
+
+  /** _fillBuffer: writes characters while the buffer has room for each, giving where it stopped. */
+  fill(text: string, start: number, stringEnd: number): number {
+    const end = start !== stringEnd && isLeadSurrogate(text.charCodeAt(stringEnd - 1)) ? stringEnd - 1 : stringEnd;
+    let index = start;
+    while (index < end) {
+      const next = this.write(text, index);
+      if (next === undefined) break;
+      index = next;
+    }
+    return index;
+  }
+
+  /**
+   * Writes the character at `index` when it fits, as the SDK checks each kind's room (a lead surrogate needs four
+   * bytes whether or not a pair follows), giving the next index.
+   */
+  private write(text: string, index: number): number | undefined {
+    const unit = text.charCodeAt(index);
+    const need = unit <= 0x7f ? 1 : isLeadSurrogate(unit) ? 4 : isTailSurrogate(unit) || unit > 0x7_ff ? 3 : 2;
+    if (this.bytes.length + need > this.size) return undefined;
+    if (need === 4) return this.surrogate(unit, text.charCodeAt(index + 1)) ? index + 2 : index + 1;
+    if (isTailSurrogate(unit)) this.bytes.push(0xef, 0xbf, 0xbd);
+    else if (need === 1) this.bytes.push(unit);
+    else if (need === 2) this.bytes.push(0xc0 | (unit >> 6), 0x80 | (unit & 0x3f));
+    else this.bytes.push(0xe0 | (unit >> 12), 0x80 | ((unit >> 6) & 0x3f), 0x80 | (unit & 0x3f));
+    return index + 1;
+  }
+}
+
+/**
+ * A stream chunk's UTF-8 bytes as the SDK's _Utf8EncoderSink.addSlice gives them: in buffers of 1024 bytes, each
+ * filled as _Utf8Encoder._fillBuffer fills it (a character that does not fit the rest of a buffer starts the next),
+ * with a lead surrogate a chunk ends in carried to the next chunk. Returns the new carry followed by the chunks.
+ */
+define('_Utf8EncoderSink._utf8EncodeChunks', (runtime, _receiver, [input, carryValue]) => {
+  const text = stringArg(runtime, input, 'input');
+  runtime.spend(Math.ceil(text.length / 64));
+  const chunks: Value[] = [];
+  let carry = Number(carryValue as bigint);
+  let start = 0;
+  if (text.length === 0) return newList(runtime, DYNAMIC, [BigInt(carry)]);
+  let buffer = new Utf8ChunkBuffer(1024);
+  if (carry !== 0 && buffer.surrogate(carry, text.charCodeAt(0))) start++;
+  carry = 0;
+  do {
+    start = buffer.fill(text, start, text.length);
+    if (start === text.length - 1 && isLeadSurrogate(text.charCodeAt(start))) {
+      carry = text.charCodeAt(start);
+      start++;
+    }
+    runtime.allocate(buffer.bytes.length + 1);
+    chunks.push(new DartPackedList(runtime.links.classNamed('_Uint8List'), Uint8Array.from(buffer.bytes)));
+    buffer = new Utf8ChunkBuffer(1024);
+  } while (start < text.length);
+  return newList(runtime, DYNAMIC, [BigInt(carry), ...chunks]);
 });
+/* oxlint-enable unicorn/prefer-code-point */
 
 /* oxlint-disable unicorn/prefer-code-point -- The SDK's tables are strings of byte-sized code units. */
 const UTF8_TYPES =
@@ -672,17 +743,185 @@ const UTF8_ERRORS: Record<number, string> = {
   [E7]: 'Unfinished UTF-8 octet sequence',
 };
 
-/** The first error in UTF-8 bytes and its offset, found with the SDK's state machine (utf.dart _Utf8Decoder). */
-function utf8Error(bytes: Uint8Array): { message: string; offset: number } | undefined {
-  let state = IA;
-  const start = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
-  for (let position = start; position < bytes.length; position++) {
-    const type = UTF8_TYPES.charCodeAt(bytes[position]) & 0x1f;
+/** The state of a Dart `_Utf8Decoder`, kept in its fields, which `flush` and `expectsContinuation` read in Dart. */
+interface DecoderState {
+  allowMalformed: boolean;
+  state: number;
+  charOrIndex: number;
+  bomIndex: number;
+}
+
+const DECODER_FIELDS = ['allowMalformed', '_state', '_charOrIndex', '_bomIndex'] as const;
+
+function decoderSlots(decoder: DartObject): number[] {
+  return DECODER_FIELDS.map((name) => {
+    const field = decoder.cls.fields.find((member) => member.name === name);
+    if (!field) throw new Error(`_Utf8Decoder has no field ${name}.`);
+    return field.slot;
+  });
+}
+
+function readDecoder(decoder: DartObject, slots: number[]): DecoderState {
+  const [allowMalformed, state, charOrIndex, bomIndex] = slots.map((slot) => decoder.fields[slot]);
+  return {
+    allowMalformed: allowMalformed === true,
+    state: Number(state),
+    charOrIndex: Number(charOrIndex),
+    bomIndex: Number(bomIndex),
+  };
+}
+
+function writeDecoder(decoder: DartObject, slots: number[], { state, charOrIndex, bomIndex }: DecoderState): void {
+  decoder.fields[slots[1] as number] = BigInt(state);
+  decoder.fields[slots[2] as number] = BigInt(charOrIndex);
+  decoder.fields[slots[3] as number] = BigInt(bomIndex);
+}
+
+const isErrorState = (state: number): boolean => (state & 1) !== 0;
+
+/**
+ * Decodes bytes from the decoder's state as the SDK's `_Utf8Decoder.decodeGeneral` does (utf.dart), leaving the
+ * state after them, or the error state and the error's index when it does not allow malformed input.
+ */
+function decodeGeneral(decoder: DecoderState, bytes: Uint8Array, start: number, end: number, single: boolean): string {
+  let { state, charOrIndex: char } = decoder;
+  const units: number[] = [];
+  for (let index = start; index < end;) {
+    const byte = bytes[index++] as number;
+    const type = UTF8_TYPES.charCodeAt(byte) & 0x1f;
+    char = state <= AB ? byte & (0xf0_fe >> type) : (byte & 0x3f) | (char << 6);
     state = UTF8_TRANSITIONS[state + type] as number;
-    if ((state & 1) !== 0) return { message: UTF8_ERRORS[state] as string, offset: position };
+    if (state === IA) {
+      units.push(char);
+      continue;
+    }
+    if (!isErrorState(state)) continue;
+    if (!decoder.allowMalformed) {
+      Object.assign(decoder, { state, charOrIndex: index - 1 });
+      return '';
+    }
+    index -= replaceMalformed(state, units);
+    state = IA;
   }
-  if (state > AB) return { message: UTF8_ERRORS[E7] as string, offset: bytes.length };
-  return undefined;
+  if (single && state > AB) {
+    if (!decoder.allowMalformed) {
+      Object.assign(decoder, { state: E7, charOrIndex: end });
+      return '';
+    }
+    units.push(0xff_fd);
+  }
+  Object.assign(decoder, { state, charOrIndex: char });
+  return fromCodePoints(units);
+}
+
+/** The text of code points, built a bounded number at a time, as a call takes only so many arguments. */
+function fromCodePoints(units: readonly number[]): string {
+  let text = '';
+  for (let start = 0; start < units.length; start += 0x20_00) {
+    text += String.fromCodePoint(...units.slice(start, start + 0x20_00));
+  }
+  return text;
+}
+
+/**
+ * Writes the replacement of malformed input that ended in an error state, giving how many bytes to read again: a byte
+ * that cannot start a sequence is replaced; an unfinished sequence before a byte that can start one is replaced and
+ * that byte read again; one before a byte that cannot is replaced with the byte.
+ */
+function replaceMalformed(state: number, units: number[]): number {
+  units.push(0xff_fd);
+  if (state === E1) return 1;
+  if (state !== E3 && state !== E2) units.push(0xff_fd);
+  return 0;
+}
+
+/** The bytes the VM's decoder reads, a value that is not a byte being replaced with 0xFF, which is invalid. */
+function decoderBytes(runtime: Runtime, codeUnits: Value, start: Value, end: Value): [Uint8Array, number] {
+  const length = listLength(runtime, codeUnits);
+  const to = end === undefined || end === null ? length : (end as bigint);
+  if ((start as bigint) < 0n || (start as bigint) > length) {
+    runtime.throwError('RangeError', 'range', [start, 0n, length, 'start']);
+  }
+  if (to < (start as bigint) || to > length) runtime.throwError('RangeError', 'range', [to, start, length, 'end']);
+  const bytes = readByteList(
+    runtime,
+    codeUnits,
+    'codeUnits',
+    (value) => (value >= 0n && value <= 0xffn ? Number(value) : 0xff),
+    [start, to]
+  );
+  return [bytes, Number(start)];
+}
+
+function failDecoding(runtime: Runtime, codeUnits: Value, state: DecoderState, errorOffset: number): never {
+  return runtime.throwError('FormatException', '', [
+    UTF8_ERRORS[state.state] as string,
+    codeUnits,
+    BigInt(errorOffset + state.charOrIndex),
+  ]);
+}
+
+/**
+ * The VM's patch of _Utf8Decoder (convert_patch.dart): a single conversion skips a BOM and fails an unfinished
+ * sequence at the end; a chunked one skips a BOM split across chunks and keeps an unfinished sequence for the next.
+ */
+function convertUtf8(
+  runtime: Runtime,
+  receiver: Value,
+  [codeUnits, start, maybeEnd]: Value[],
+  single: boolean
+): string {
+  const decoder = receiver as DartObject;
+  const slots = decoderSlots(decoder);
+  const state = readDecoder(decoder, slots);
+  const [bytes, errorOffset] = decoderBytes(runtime, codeUnits, start, maybeEnd);
+  const from = single ? skipBomSingle(bytes) : skipBomChunked(state, bytes);
+  if (from === bytes.length) {
+    writeDecoder(decoder, slots, state);
+    return '';
+  }
+  chargeCodecString(runtime, bytes.length);
+  const fast = { ...state, allowMalformed: false };
+  const result = decodeGeneral(fast, bytes, from, bytes.length, false);
+  if (single ? fast.state === IA : !isErrorState(fast.state)) {
+    writeDecoder(decoder, slots, fast);
+    return result;
+  }
+  if (!state.allowMalformed) {
+    if (single && !isErrorState(fast.state)) Object.assign(fast, { state: E7, charOrIndex: bytes.length });
+    // A chunked decoder is ready for more input after an error.
+    writeDecoder(decoder, slots, single ? fast : { ...fast, state: IA });
+    return failDecoding(runtime, codeUnits, fast, errorOffset);
+  }
+  // Start over on the slow path, which replaces malformed input.
+  const slow = single ? { ...state, state: IA } : { ...state };
+  const replaced = decodeGeneral(slow, bytes, from, bytes.length, single);
+  writeDecoder(decoder, slots, slow);
+  return replaced;
+}
+
+define('_Utf8Decoder.convertSingle', (runtime, receiver, args) => convertUtf8(runtime, receiver, args, true));
+define('_Utf8Decoder.convertChunked', (runtime, receiver, args) => convertUtf8(runtime, receiver, args, false));
+
+function skipBomSingle(bytes: Uint8Array): number {
+  return bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+}
+
+/** Skips a BOM that may be split across chunks, as the VM's `skipBomChunked` does, giving where decoding starts. */
+function skipBomChunked(state: DecoderState, bytes: Uint8Array): number {
+  if (state.bomIndex === -1) return 0;
+  const bom = [0xef, 0xbb, 0xbf];
+  let index = 0;
+  while (state.bomIndex < 3) {
+    if (index === bytes.length) return 0;
+    if (bytes[index++] !== bom[state.bomIndex++]) {
+      state.bomIndex = -1;
+      return 0;
+    }
+  }
+  state.bomIndex = -1;
+  state.state = IA;
+  return index;
 }
 /* oxlint-enable unicorn/prefer-code-point */
 
@@ -703,6 +942,61 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
   const text = btoa(binary);
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
+
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * The text of bytes a run writes to a standard stream in parts: the bytes of a character the parts split wait in
+ * `pending` for the rest of it, as one decoder holds them for a file sink; the rest is decoded as textOfWrittenBytes
+ * decodes it.
+ */
+export function textOfWrittenPart(runtime: Runtime, pending: number[], bytes: Value): string {
+  const read = readByteList(runtime, bytes, 'buffer', (value) =>
+    value >= 0n && value <= 0xffn ? Number(value) : 0xff
+  );
+  const all = pending.length > 0 ? Uint8Array.of(...pending, ...read) : read;
+  const cut = all.length - unfinishedTail(all);
+  pending.splice(0, pending.length, ...all.subarray(cut));
+  try {
+    return STRICT_UTF8.decode(all.subarray(0, cut));
+  } catch {
+    return throwUnavailable(runtime, 'UTF-8 でないバイト列の書き込み');
+  }
+}
+
+/** The length of the character a UTF-8 lead byte begins; 0 for one no valid character begins with, as 0xFF. */
+function leadLength(byte: number): number {
+  if (byte >= 0xf5) return 0;
+  if (byte >= 0xf0) return 4;
+  if (byte >= 0xe0) return 3;
+  return byte >= 0xc2 ? 2 : 1;
+}
+
+/** How many bytes at the end begin a character that needs more of them. */
+function unfinishedTail(bytes: Uint8Array): number {
+  for (let back = 1; back <= Math.min(3, bytes.length); back++) {
+    const byte = bytes[bytes.length - back] as number;
+    if ((byte & 0xc0) === 0x80) continue;
+    const length = leadLength(byte);
+    return length > back ? back : 0;
+  }
+  return 0;
+}
+
+/**
+ * The text of bytes a run writes to a standard stream, which holds text: bytes that are not UTF-8 are rejected, as
+ * dart:io's _textOfBytes rejects them. A byte order mark stays, as the VM writes the bytes as they are.
+ */
+export function textOfWrittenBytes(runtime: Runtime, bytes: Value): string {
+  const read = readByteList(runtime, bytes, 'buffer', (value) =>
+    value >= 0n && value <= 0xffn ? Number(value) : 0xff
+  );
+  try {
+    return STRICT_UTF8.decode(read);
+  } catch {
+    return throwUnavailable(runtime, 'UTF-8 でないバイト列の書き込み');
+  }
+}
 
 function readByteList(
   runtime: Runtime,
@@ -835,22 +1129,28 @@ const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) =
 function validatedBase64Length(input: string, fail: (message: string, offset: number) => never): number {
   let last = 0;
   let count = 0;
+  // As the SDK's decodeChunk, a code unit is looked up by its low seven bits, and one beyond ASCII is reported
+  // only when no character before the end, or before padding, is invalid by that lookup.
+  let firstNonAscii = -1;
   for (let position = 0; position < input.length; position++) {
     // oxlint-disable-next-line unicorn/prefer-code-point -- Base64 reads UTF-16 code units.
     const code = input.charCodeAt(position);
-    const value = code > 127 ? -2 : (BASE64_VALUES[code] as number);
+    if (code > 127 && firstNonAscii < 0) firstNonAscii = position;
+    const value = BASE64_VALUES[code & 0x7f] as number;
     if (value >= 0) {
       last = value;
       count = (count + 1) & 3;
       continue;
     }
     if (value !== -1 || count <= 1) fail('Invalid character', position);
+    if (firstNonAscii >= 0) break;
     if ((last & (count === 3 ? 0x03 : 0x0f)) !== 0) fail('Invalid encoding before padding', position);
     const expected = (3 - count) * 3 + (input[position] === '%' ? 2 : 0);
     const remaining = checkBase64Padding(input, position + 1, expected, fail);
     if (remaining > 0) fail('Missing padding character', input.length);
     return position;
   }
+  if (firstNonAscii >= 0) fail('Invalid character', firstNonAscii);
   if (count > 0) fail('Invalid length, must be multiple of four', input.length);
   return input.length;
 }

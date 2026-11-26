@@ -50,7 +50,7 @@ import { markCovariantParameters, MemberCompiler } from './memberCompiler';
 import { isPrimitive } from './primitives';
 import { checkRepresentationCycles } from './representationCycles';
 import { Frame, type FunctionInfo, type Runtime, type TypeEnv } from './runtime';
-import { type FunctionContext, primaryParameterInInitializer } from './scope';
+import { bodyKind, type FunctionContext, primaryParameterInInitializer } from './scope';
 import { type GenExec, inheritsCovariance } from './statementCompiler';
 import {
   asInstanceOf,
@@ -1689,7 +1689,7 @@ export class Compiler extends MemberCompiler {
         typeParams,
         kind: {
           returnType: fn.type.returnType,
-          isGenerator: body.modifier === 'sync*',
+          ...bodyKind(body.modifier),
           thisClass: undefined,
           thisType: undefined,
           hasThis: false,
@@ -1803,6 +1803,12 @@ export class Compiler extends MemberCompiler {
   }
 
   protected onlyCalls(expression: Expression, compiled: Compiled): boolean {
+    // An awaited call records what the call records, as the same call without await does.
+    if (expression.kind === 'await') {
+      let operand = expression.value;
+      while (operand.kind === 'parenthesized') operand = operand.expression;
+      return operand.kind === 'call' || operand.kind === 'new';
+    }
     if (expression.kind === 'assign') return expression.operator === '=' && compiled.creates === true;
     if (expression.kind === 'cascade') return false;
     return expression.kind === 'call' || expression.kind === 'new';

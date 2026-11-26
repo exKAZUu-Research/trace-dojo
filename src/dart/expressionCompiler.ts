@@ -15,24 +15,11 @@ import type {
   TypeSyntax,
 } from './ast';
 import { chainHead, isDotShorthand } from './astWalk';
+import { AwaitCompiler, awaitingCompiled, type ShortingTest } from './awaitCompiler';
 import type { ClassInfo, FieldMember, Member } from './classes';
-import {
-  at,
-  type Compiled,
-  CompilerBase,
-  type Eval,
-  extensionMember,
-  type ResolvedMember,
-  typeName,
-  valueIs,
-} from './compilerBase';
-import {
-  elementTypeOfContext,
-  isDoubleContext,
-  literalTypeArgument,
-  mapTypesOfContext,
-  unresolvedCollectionType,
-} from './contextTypes';
+import { addToList, building, type ElementCode } from './collectionElements';
+import { at, type Compiled, type Eval, extensionMember, type ResolvedMember, typeName, valueIs } from './compilerBase';
+import { childContext, literalTypeArgument, unresolvedCollectionType } from './contextTypes';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction, TypeAlias } from './environment';
 import { stringOf } from './format';
 import { BoundedStringParts } from './library/boundedStringParts';
@@ -142,7 +129,7 @@ const COMPOUND_OPERATORS: Record<string, string> = {
   '>>>=': '>>>',
 };
 
-export abstract class ExpressionCompiler extends CompilerBase {
+export abstract class ExpressionCompiler extends AwaitCompiler {
   // Implemented by the subclasses that compile calls, closures, patterns, and declarations.
   abstract compileCall(expression: Extract<Expression, { kind: 'call' }>, context: DartType | undefined): Compiled;
   abstract compileNew(expression: Extract<Expression, { kind: 'new' }>, context: DartType | undefined): Compiled;
@@ -228,7 +215,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  private nullChain = { exit: undefined as Flow | undefined };
+  private nullChain: { exit: Flow | undefined; tests: ShortingTest[] } = { exit: undefined, tests: [] };
   /** The context of the whole selector chain being compiled, which a dot shorthand at its head takes (`A a = .inst.next()`). */
   private chainContext: DartType | undefined;
 
@@ -239,7 +226,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected compileNullChain<T>(compile: () => T): { result: T; skipped: Flow | undefined } {
     const outer = this.nullChain;
-    const chain: { exit: Flow | undefined } = { exit: undefined };
+    const chain: { exit: Flow | undefined; tests: ShortingTest[] } = { exit: undefined, tests: [] };
     this.nullChain = chain;
     try {
       const result = compile();
@@ -251,12 +238,26 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  protected skipOnNull(receiver: Compiled, nullAware: boolean): void {
-    if (!nullAware) return;
+  /**
+   * Notes the null-aware selector after the receiver, giving the receiver to compile on with: one an await after it
+   * waits for is lifted into a step, so that it runs once and before the await, as the SDK evaluates it, and the
+   * selector's test of whether it shorts reads it.
+   */
+  protected skipOnNull(receiver: Compiled, nullAware: boolean, selector?: Span): Compiled {
+    // A selector after a null-aware one is shorted too when its receiver is: the receiver's value is SHORTED.
+    if (!nullAware && this.nullChain.exit === undefined) return receiver;
+    const lifted = selector ? this.liftBeforeLaterAwait(receiver, selector) : receiver;
+    const { run } = lifted;
+    this.nullChain.tests.push((frame) => {
+      const value = run(frame);
+      return value === SHORTED || (nullAware && value === undefined);
+    });
+    if (!nullAware) return lifted;
     const { whenNull, whenNonNull } = this.nullBranches(receiver);
     const { exit } = this.nullChain;
     this.nullChain.exit = exit ? Flow.join(exit, whenNull) : whenNull;
     this.flow = whenNonNull;
+    return lifted;
   }
 
   protected nullBranches(value: Compiled): { whenNull: Flow; whenNonNull: Flow } {
@@ -350,9 +351,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
   } {
     const isAnd = expression.operator === '&&';
     const left = this.compileConditionInner(expression.left);
-    const leftRun = this.requireBool(left.compiled, expression.left).run;
+    const leftRun = this.decidingValue(this.requireBool(left.compiled, expression.left), expression.right).run;
     this.flow = isAnd ? left.flow.whenTrue : left.flow.whenFalse;
-    const right = this.compileConditionInner(expression.right);
+    // The right operand runs only on the left's value, so its awaits are guarded by it.
+    const right = this.compileGuarded(
+      (frame) => leftRun(frame) === isAnd,
+      expression.right,
+      () => this.compileConditionInner(expression.right)
+    );
     const rightRun = this.requireBool(right.compiled, expression.right).run;
     const flow: ConditionFlow = isAnd
       ? { whenTrue: right.flow.whenTrue, whenFalse: Flow.join(left.flow.whenFalse, right.flow.whenFalse) }
@@ -468,42 +474,25 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
-  private compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
-    const value = this.compileExpression(expression.value);
-    if (value.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
-    const type = this.resolveType(expression.type);
-    const resolve = this.runtimeType(type);
-    const { run } = value;
-    const { variable } = value;
-    let tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
-    let promoted = tested;
-    if (variable && this.isPromotable(variable)) {
-      const current = this.promotedType(variable);
-      const narrowed = promotionTarget(current, type);
-      if (narrowed) promoted = tested.promote(variable, narrowed);
-    }
-    // A test the static type already decides leaves its other branch unreachable.
-    if (isSubtype(value.type, type)) tested = tested.unreachable;
-    else if (isNeverType(type) || (type.kind === 'null' && isNonNullable(value.type))) promoted = promoted.unreachable;
-    const { negated } = expression;
-    return {
-      compiled: {
-        type: interfaceType(coreTypes.bool),
-        run: (frame) => {
-          const result = this.valueIsAt(frame, run(frame), resolve(frame));
-          return result !== negated;
-        },
-        isConst: value.isConst && !this.usesLexicalTypeVariables(type),
-      },
-      flow: negated ? { whenTrue: tested, whenFalse: promoted } : { whenTrue: promoted, whenFalse: tested },
-    };
-  }
-
   protected valueIsAt(frame: Frame, value: Value, type: DartType): boolean {
     return valueIs(frame.runtime, value, type);
   }
 
+  /** Compiles part of an expression, which a statement that awaits may lift into a step. */
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
+    return this.compileStagedPart(expression, () => this.compileChainPartNow(expression, context));
+  }
+
+  /**
+   * The test of the selector chain's last selector so far, whose receiver a step evaluated: SHORTED when an earlier
+   * null-aware selector shorted, so it alone tells whether what follows runs.
+   */
+  protected shortingProbe(): () => readonly ShortingTest[] {
+    const chain = this.nullChain;
+    return () => chain.tests.slice(-1);
+  }
+
+  private compileChainPartNow(expression: Expression, context: DartType | undefined): Compiled {
     const explicitlyConst = 'isConst' in expression && expression.isConst;
     const params =
       this.inConstContext || explicitlyConst
@@ -571,7 +560,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return this.compileConstructorTearoff(expression.type, expression.name, expression);
       }
       case 'await': {
-        return this.unsupported(expression, 'await（非同期処理）');
+        return this.compileAwait(expression, context);
       }
       default: {
         return this.compilePrimary(expression, context);
@@ -654,7 +643,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     negated: boolean
   ): Compiled {
     const exact = negated ? -expression.value : expression.value;
-    if (context && isDoubleContext(context)) {
+    const literalType = context && childContext({ kind: 'intLiteral' }, context);
+    if (literalType?.kind === 'interface' && literalType.cls === coreTypes.double) {
       // Negating the converted magnitude keeps `-0` negative, which a bigint cannot.
       const magnitude = Number(expression.value);
       const value = negated ? -magnitude : magnitude;
@@ -716,7 +706,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       if (expression.typeArguments.length !== 1) this.error(expression, 'リストのリテラルの型引数は 1 つです。');
       elementType = this.resolveType(expression.typeArguments[0]);
     }
-    const contextElement = elementType ?? elementTypeOfContext(context, coreTypes.list);
+    const contextElement = elementType ?? childContext({ kind: 'element', cls: coreTypes.list }, context);
     const elements = this.withConstContext(expression.isConst, () =>
       this.compileCollectionElements(expression.elements, 'list', contextElement, undefined)
     );
@@ -730,21 +720,14 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const resolve = this.runtimeType(elementType);
     // Inside a constant context, a literal without `const` is constant too.
     const isConst = expression.isConst || (this.inConstContext && elements.isConst);
-    const build: Eval = (frame) => {
-      const list = new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
-      // The elements built so far stay reachable while later ones are evaluated.
-      frame.temporaries.push(list);
-      try {
-        elements.run(frame, (value) => {
-          list.elements.push(value);
-        });
-      } finally {
-        frame.temporaries.pop();
-      }
-      frame.runtime.allocate(list.elements.length);
-      return list;
-    };
-    return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
+    const { run, gen } = building(
+      (frame) => new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst),
+      addToList,
+      elements,
+      (frame, list) => frame.runtime.allocate((list as DartList).elements.length)
+    );
+    if (gen) return awaitingCompiled(type, gen, { creates: elements.creates });
+    return { type, run: isConst ? this.canonicalized(run) : run, isConst, creates: elements.creates };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
@@ -776,7 +759,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
     const types = typeArguments?.map((argument) => this.resolveType(argument));
     if (kind === 'set') {
-      const contextElement = types?.[0] ?? elementTypeOfContext(context, coreTypes.set);
+      const contextElement = types?.[0] ?? childContext({ kind: 'element', cls: coreTypes.set }, context);
       const compiled = this.withConstContext(expression.isConst, () =>
         this.compileCollectionElements(syntax, 'set', contextElement, undefined)
       );
@@ -790,13 +773,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
         );
       return this.buildSet(
         interfaceType(coreTypes.set, [elementType]),
-        compiled.run,
+        compiled,
         expression.isConst || (this.inConstContext && compiled.isConst)
       );
     }
-    const contextMap = mapTypesOfContext(context);
-    const keyContext = types?.[0] ?? contextMap?.[0];
-    const valueContext = types?.[1] ?? contextMap?.[1];
+    const keyContext = types?.[0] ?? childContext({ kind: 'mapKey' }, context);
+    const valueContext = types?.[1] ?? childContext({ kind: 'mapValue' }, context);
     const compiled = this.withConstContext(expression.isConst, () =>
       this.compileCollectionElements(syntax, 'map', keyContext, valueContext)
     );
@@ -816,7 +798,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       );
     return this.buildMap(
       interfaceType(coreTypes.map, [keyType, valueType]),
-      compiled.run,
+      compiled,
       expression.isConst || (this.inConstContext && compiled.isConst)
     );
   }
@@ -928,16 +910,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  protected abstract buildSet(
-    type: DartType,
-    run: (frame: Frame, add: (key: Value) => void) => void,
-    isConst: boolean
-  ): Compiled;
-  protected abstract buildMap(
-    type: DartType,
-    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void,
-    isConst: boolean
-  ): Compiled;
+  protected abstract buildSet(type: DartType, elements: ElementCode, isConst: boolean): Compiled;
+  protected abstract buildMap(type: DartType, elements: ElementCode, isConst: boolean): Compiled;
 
   // code-gauge-allow functionCognitiveComplexity -- Compile fields in source order and keep named fields sorted in the type and value.
   private compileRecordLiteral(
@@ -1308,7 +1282,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected readStatic(member: Member, span: Span): Compiled {
-    this.checkUnavailableStaticMember(member.owner, member.name, span);
+    this.checkUnimplementedMember({ cls: member.owner }, member.name, 'read', span);
     switch (member.kind) {
       case 'field': {
         const global = this.globals[member.slot];
@@ -1395,8 +1369,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
-    this.skipOnNull(receiver, nullAware);
-    const dispatchType = this.dynamicDispatchType(receiver);
+    receiver = this.skipOnNull(receiver, nullAware, span);
+    const dispatchType = this.dynamicDispatchType(receiver, nullAware);
     if (dispatchType) {
       const { run } = receiver;
       const memberName = this.runtimeMemberName(name);
@@ -1414,7 +1388,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
-      this.checkUnavailableIoMember(lookupType, name, span);
+      this.checkUnimplementedMember({ receiver: lookupType }, name, 'read', span);
       if (this.lookupMember(lookupType, name, true))
         this.error(span, `${name} には getter がないので、値を読めません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
@@ -1616,7 +1590,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (target.kind === 'prefix') {
       const declaration = this.library.lookupPrefixed(target.prefix, name);
       if (!declaration) return this.undefinedName(span, name, target.prefix);
-      return this.readDeclaration(declaration, span);
+      return this.loadedThroughPrefix(target.prefix, span, () => this.readDeclaration(declaration, span));
     }
     if (target.kind === 'extension') {
       const member = target.ext.staticMembers.get(name);
@@ -1624,10 +1598,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       return this.readStatic(member, span);
     }
     const member = target.cls.staticMembers.get(name);
-    if (member) return this.readStatic(member, span);
+    const { prefix } = target.syntax;
+    if (member) return this.loadedThroughPrefix(prefix, span, () => this.readStatic(member, span));
     if (target.cls.constructors.has(name === 'new' ? '' : name))
-      return this.compileConstructorTearoff(target.syntax, name, span);
+      return this.loadedThroughPrefix(prefix, span, () => this.compileConstructorTearoff(target.syntax, name, span));
     if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
+    this.checkUnimplementedMember({ cls: target.cls }, name, 'read', span);
     return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
   }
 
@@ -1707,6 +1683,10 @@ export abstract class ExpressionCompiler extends CompilerBase {
     context: DartType | undefined
   ): Compiled;
   protected abstract compileAs(expression: Extract<Expression, { kind: 'as' }>): Compiled;
+  protected abstract compileIs(expression: Extract<Expression, { kind: 'is' }>): {
+    compiled: Compiled;
+    flow: ConditionFlow;
+  };
   protected abstract compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled;
   protected abstract compileConditional(
     expression: Extract<Expression, { kind: 'conditional' }>,

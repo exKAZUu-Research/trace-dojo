@@ -1,6 +1,7 @@
+// code-gauge-allow-file fileNcss -- The operators, conditionals and cascades share the operand and branch staging.
 import type { Arguments as ArgumentsSyntax, CascadeSection, Expression, Span } from './ast';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { isDoubleContext } from './contextTypes';
+import { branchesType, childContext } from './contextTypes';
 import { ExpressionCompiler, SHORTED, singleArgument } from './expressionCompiler';
 import {
   BITWISE_OPERATORS,
@@ -16,13 +17,15 @@ import {
   wrap,
 } from './operators';
 import type { Frame, Runtime } from './runtime';
-import { Flow } from './scope';
+import { type ConditionFlow, Flow } from './scope';
 import {
   coreTypes,
   type DartType,
   DYNAMIC,
+  factorType,
   interfaceType,
   isNeverType,
+  isNonNullable,
   isPotentiallyNullable,
   isSubtype,
   makeNullable,
@@ -37,8 +40,6 @@ import {
   vmTypeString,
 } from './types';
 import { Cell, type Value } from './values';
-
-const DOUBLE_CONTEXT_OPERATORS = new Set(['+', '-', '*', '%']);
 
 /** Operators, conditionals, casts, throws, and cascades. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -142,10 +143,10 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     if (left.extensionOverride) return this.compileOperatorCall(left, operator, [rightSyntax], span);
     const leftNumeric = numericClassOf(left.type);
     if (leftNumeric) {
-      const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
-      const promotesRight =
-        context && leftNumeric !== 'double' && isDoubleContext(context) && DOUBLE_CONTEXT_OPERATORS.has(operator);
-      const right = this.compileExpression(expression.right, promotesRight ? context : parameterContext);
+      const right = this.compileExpression(
+        expression.right,
+        childContext({ kind: 'numericOperand', operator, left: leftNumeric }, context)
+      );
       return this.numericOperator(operator, left, right, leftNumeric, span);
     }
     if (left.type.kind === 'dynamic') {
@@ -267,16 +268,33 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  /**
+   * The non-null part of `??`'s left operand: NonNull of its type, except for a `T` a type test split off a `T?`
+   * (`is! Null`), which the SDK keeps as `T`, potentially nullable through a nullable bound, instead of promoting it to
+   * the bound's non-null part.
+   */
+  private ifNullLeftType(left: Compiled): DartType {
+    const { type } = left;
+    const isSplit = type.kind === 'typeParam' && type.splitFromNullable === true && type.promoted === undefined;
+    return isSplit ? type : nonNullable(type);
+  }
+
   private compileIfNull(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
     const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
     const { whenNull, whenNonNull } = this.nullBranches(left);
     this.flow = whenNull;
+    const leftRun = this.decidingValue(left, expression.right).run;
     const rightContext = context ?? nonNullable(left.type);
-    const right = this.instantiateInContext(this.compileExpression(expression.right, rightContext), rightContext);
+    // The right operand runs only when the left is null, so its awaits are guarded by it.
+    const right = this.compileGuarded(
+      (frame) => leftRun(frame) === undefined,
+      expression.right,
+      () => this.instantiateInContext(this.compileExpression(expression.right, rightContext), rightContext)
+    );
     this.flow = Flow.join(whenNonNull, this.flow);
-    const leftRun = left.run;
     const rightRun = right.run;
-    const type = upperBound(left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type), right.type);
+    const nonNullLeft = left.type.kind === 'dynamic' ? DYNAMIC : this.ifNullLeftType(left);
+    const type = branchesType(upperBound(nonNullLeft, right.type), [nonNullLeft, right.type], context);
     return {
       type,
       run: (frame) => {
@@ -297,19 +315,30 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     context: DartType | undefined
   ): Compiled {
     const { compiled: condition, flow } = this.compileCondition(expression.condition);
+    const branches = [expression.consequent, expression.alternative];
+    // Only one branch runs, so the awaits of each are guarded by the condition, which is evaluated once before them.
+    const conditionRun = this.decidingValue(condition, branches).run;
     this.flow = flow.whenTrue;
-    const then = this.instantiateInContext(this.compileExpression(expression.consequent, context), context);
+    const then = this.compileGuarded(
+      (frame) => conditionRun(frame) === true,
+      expression.consequent,
+      () => this.instantiateInContext(this.compileExpression(expression.consequent, context), context)
+    );
     const afterThen = this.flow;
     this.flow = flow.whenFalse;
-    const otherwise = this.instantiateInContext(this.compileExpression(expression.alternative, context), context);
+    const otherwise = this.compileGuarded(
+      (frame) => conditionRun(frame) !== true,
+      expression.alternative,
+      () => this.instantiateInContext(this.compileExpression(expression.alternative, context), context)
+    );
     this.flow = Flow.join(afterThen, this.flow);
-    const type =
+    const bound =
       then.type.kind === 'never' && !then.type.nullable
         ? otherwise.type
         : otherwise.type.kind === 'never' && !otherwise.type.nullable
           ? then.type
           : upperBound(then.type, otherwise.type);
-    const conditionRun = condition.run;
+    const type = branchesType(bound, [then.type, otherwise.type], context);
     const thenRun = then.run;
     const otherwiseRun = otherwise.run;
     const constValue =
@@ -323,6 +352,42 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       run: (frame) => (conditionRun(frame) ? thenRun(frame) : otherwiseRun(frame)),
       isConst: condition.isConst && then.isConst && otherwise.isConst,
       constValue,
+    };
+  }
+
+  protected compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
+    const value = this.compileExpression(expression.value);
+    if (value.type.kind === 'void') this.error(expression.value, 'void の値は、式の中では使えません。');
+    const type = this.resolveType(expression.type);
+    const resolve = this.runtimeType(type);
+    const { run } = value;
+    const { variable } = value;
+    let tested = variable ? this.flow.rememberTypeTest(variable, type) : this.flow;
+    let promoted = tested;
+    if (variable && this.isPromotable(variable)) {
+      const current = this.promotedType(variable);
+      const narrowed = promotionTarget(current, type);
+      if (narrowed) promoted = tested.promote(variable, narrowed);
+      // A failed test removes the tested type from a union, as `FutureOr<T>` without `Future<T>` is `T`.
+      const remaining = factorType(current, type);
+      if (!sameType(remaining, current) && isSubtype(remaining, current) && !isNeverType(remaining)) {
+        tested = tested.promote(variable, remaining);
+      }
+    }
+    // A test the static type already decides leaves its other branch unreachable.
+    if (isSubtype(value.type, type)) tested = tested.unreachable;
+    else if (isNeverType(type) || (type.kind === 'null' && isNonNullable(value.type))) promoted = promoted.unreachable;
+    const { negated } = expression;
+    return {
+      compiled: {
+        type: interfaceType(coreTypes.bool),
+        run: (frame) => {
+          const result = this.valueIsAt(frame, run(frame), resolve(frame));
+          return result !== negated;
+        },
+        isConst: value.isConst && !this.usesLexicalTypeVariables(type),
+      },
+      flow: negated ? { whenTrue: tested, whenFalse: promoted } : { whenTrue: promoted, whenFalse: tested },
     };
   }
 
@@ -371,7 +436,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     expression: Extract<Expression, { kind: 'cascade' }>,
     context: DartType | undefined
   ): Compiled {
-    const target = this.compileExpression(expression.target, context);
+    const awaits = this.awaitsHere(expression.sections);
+    const target = this.decidingValue(this.compileExpression(expression.target, context), expression.sections);
     const slot = this.fn.allocateSlot();
     this.fn.info.locals[slot] = { name: '\0', type: target.type };
     const nullAware = expression.sections[0]?.nullAware ?? false;
@@ -381,31 +447,46 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       run: (frame) => (frame.locals[slot] as Cell).v,
       isConst: false,
     };
-    const sections = expression.sections.map(
-      (section) => this.compileNullChain(() => this.compileCascadeSection(receiver, section)).result
-    );
     const targetRun = target.run;
-    return {
-      type: target.type,
-      run: (frame) => {
-        const value = targetRun(frame);
-        if (nullAware && value === undefined) return;
-        const previous = frame.locals[slot];
-        frame.locals[slot] = new Cell(value);
-        try {
-          for (const section of sections) section(frame);
-        } finally {
-          frame.locals[slot] = previous;
+    const isShorted = (frame: Frame): boolean => nullAware && targetRun(frame) === undefined;
+    // When a section awaits, the receiver and every section are ordered parts, each section guarded by a null-aware
+    // cascade's receiver, so that a section runs before the awaits of the sections after it.
+    if (awaits) {
+      this.addStep((frame) => {
+        frame.locals[slot] = new Cell(targetRun(frame));
+        return;
+      });
+    }
+    const sections = expression.sections.map((section) =>
+      this.compileGuarded(
+        (frame) => !isShorted(frame),
+        section,
+        () => {
+          const compiled = this.compileNullChain(() => {
+            // The section's null-aware selectors guard what follows them in it, as a chain's do.
+            if (this.staging) Object.assign(this.staging, { shortingTests: this.shortingProbe() });
+            return this.compileCascadeSection(receiver, section);
+          }).result;
+          return awaits ? this.stagePart(compiled) : compiled;
         }
-        return value;
-      },
-      isConst: false,
-    };
+      )
+    );
+    if (awaits) {
+      return {
+        type: target.type,
+        run: (frame) => {
+          frame.locals[slot] = undefined;
+          return isShorted(frame) ? undefined : targetRun(frame);
+        },
+        isConst: false,
+      };
+    }
+    return { type: target.type, run: cascadeRun(targetRun, slot, nullAware, sections), isConst: false };
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
-  private compileCascadeSection(receiver: Compiled, section: CascadeSection): Eval {
+  private compileCascadeSection(receiver: Compiled, section: CascadeSection): Compiled {
     const span = section;
     let current: Compiled = receiver;
     const { selectors, assignment } = section;
@@ -459,12 +540,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           break;
         }
       }
+      // What a selector gives is lifted before an await later in the section, as the SDK evaluates it first.
+      current = this.liftBeforeLaterAwait(current, selector);
     }
     if (assignment && last) {
-      const compiled = this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
-      return compiled.run;
+      return this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
     }
-    return current.run;
+    return current;
   }
 }
 
@@ -483,6 +565,22 @@ const INTEGER_OPERAND_METHODS = new Map([
   ['>>', '_shrFromInteger'],
   ['>>>', '_ushrFromInteger'],
 ]);
+
+/** A cascade that does not await: its receiver in its slot while each section runs on it in turn. */
+function cascadeRun(targetRun: Eval, slot: number, nullAware: boolean, sections: readonly Compiled[]): Eval {
+  return (frame) => {
+    const value = targetRun(frame);
+    if (nullAware && value === undefined) return;
+    const previous = frame.locals[slot];
+    frame.locals[slot] = new Cell(value);
+    try {
+      for (const section of sections) section.run(frame);
+    } finally {
+      frame.locals[slot] = previous;
+    }
+    return value;
+  };
+}
 
 function assertedNonNullable(type: DartType): DartType {
   const bound = resolveBound(type);

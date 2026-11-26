@@ -27,6 +27,7 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['Enum', 198],
       ['Error', 199],
       ['Exception', 212],
+      ['Expando', 250],
       ['ExpandIterable', 725],
       ['ExpandIterator', 726],
       ['FollowedByIterable', 739],
@@ -132,6 +133,16 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
     ]),
   ],
   [
+    'dart:_uri',
+    new Map([
+      ['Uri', 244],
+      ['UriData', 247],
+      ['_DataUri', 249],
+      ['_SimpleUri', 248],
+      ['_Uri', 246],
+    ]),
+  ],
+  [
     'dart:math',
     new Map([
       ['MutableRectangle', 781],
@@ -140,6 +151,7 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['Rectangle', 780],
       ['_Random', 782],
       ['_RectangleBase', 779],
+      ['_SecureRandom', 783],
     ]),
   ],
   [
@@ -203,6 +215,9 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
   [
     'dart:convert',
     new Map([
+      ['AsciiCodec', 522],
+      ['AsciiDecoder', 530],
+      ['AsciiEncoder', 526],
       ['Base64Codec', 534],
       ['Base64Decoder', 542],
       ['Base64Encoder', 536],
@@ -214,10 +229,16 @@ export const SDK_CLASS_IDS: ReadonlyMap<string, ReadonlyMap<string, number>> = n
       ['JsonDecoder', 563],
       ['JsonEncoder', 559],
       ['JsonUnsupportedObjectError', 556],
+      ['Latin1Codec', 572],
+      ['Latin1Decoder', 574],
+      ['Latin1Encoder', 573],
       ['LineSplitter', 577],
       ['Utf8Codec', 590],
       ['Utf8Decoder', 595],
       ['Utf8Encoder', 591],
+      ['_FusedCodec', 550],
+      ['_FusedConverter', 552],
+      ['_InvertedCodec', 551],
       ['_LineSplitIterable', 580],
       ['_LineSplitIterator', 581],
     ]),

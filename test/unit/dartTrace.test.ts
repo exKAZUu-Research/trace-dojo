@@ -496,3 +496,150 @@ test('learner callbacks retain a single call row for native and SDK operations',
     expect(calls).toEqual([[3], [3]]);
   }
 });
+
+const traceLines = (program: string): number[] =>
+  traceProgram('dart', program, program).traceItems.map(({ line }) => line);
+
+/** A program that creates a Box from a call, awaited or not. */
+function createsFromCall(awaited: boolean): string {
+  return `class Box {
+  final int v;
+  Box(this.v);
+}
+${awaited ? 'Future<int> walk(Turtle t) async' : 'int walk(Turtle t)'} {
+  t.forward();
+  return 1;
+}
+${awaited ? 'Future<void> main() async' : 'void main()'} {
+  var t = Turtle(1, 1);
+  var b = Box(${awaited ? 'await ' : ''}walk(t));
+  print(b.v);
+}`;
+}
+
+test('an awaited call statement records only what the call records, as the same call without await does', () => {
+  const asyncProgram = `Future<void> walk(Turtle t) async {
+  t.forward();
+}
+Future<void> main() async {
+  var t = Turtle(1, 1);
+  await walk(t);
+  await (walk(t));
+  print('end');
+}`;
+  const syncProgram = `void walk(Turtle t) {
+  t.forward();
+}
+void main() {
+  var t = Turtle(1, 1);
+  walk(t);
+  walk(t);
+  print('end');
+}`;
+  expect(traceLines(asyncProgram)).toEqual(traceLines(syncProgram));
+  // A callee that suspends before its steps shows them after it resumes, which count for the awaited call too: the
+  // await statement records no step of its own after them.
+  const suspending = `Future<void> walk(Turtle t) async {
+  await Future.value(0);
+  t.forward();
+}
+Future<void> main() async {
+  var t = Turtle(1, 1);
+  await walk(t);
+  print('end');
+}`;
+  expect(traceLines(suspending)).toEqual([0, 6, 2, 3, 8]);
+  // A declaration that creates an object from an awaited call records no step after the call's, as without await.
+  expect(traceLines(createsFromCall(true))).toEqual(traceLines(createsFromCall(false)));
+});
+
+test('a switch expression arm that awaits and throws ends its pattern variables', () => {
+  const program = `Future<String> g(int v) async {
+  await null;
+  throw 'x';
+}
+Future<void> main() async {
+  try {
+    var r = switch (3) { var n => await g(n) };
+    print(r);
+  } catch (e) {
+    print('c');
+  }
+  print('after');
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.traceItems.filter(({ line }) => line >= 9).every(({ vars }) => !('n' in vars))).toBe(true);
+});
+
+test('the turtles main leaves stay in the trace end when work runs after main', () => {
+  const program = `import 'dart:async';
+void main() {
+  var t = Turtle(1, 1);
+  t.forward();
+  scheduleMicrotask(() => t.forward());
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.finalTurtles).toEqual([{ x: 1, y: 3, color: '#', dir: 'N' }]);
+  // A variable that later work assigns holds its new turtle, as a synchronous run's does.
+  const reassigned = `import 'dart:async';
+void main() {
+  var t = Turtle(1, 1);
+  scheduleMicrotask(() { t = Turtle(5, 5); t.forward(); });
+}`;
+  expect(traceProgram('dart', reassigned, reassigned).finalTurtles).toEqual([{ x: 5, y: 6, color: '#', dir: 'N' }]);
+});
+
+test('Dart async functions record their steps where they resume, without the call that awaited them', () => {
+  const program = `Future<int> walk(Turtle t, int n) async {
+  for (var i = 0; i < n; i++) {
+    t.forward();
+    await Future.delayed(Duration(milliseconds: 10));
+  }
+  return n;
+}
+
+Future<void> main() async {
+  var a = Turtle(1, 1);
+  var b = Turtle(4, 1);
+  var fa = walk(a, 2);
+  var fb = walk(b, 2);
+  var total = await fa + await fb;
+  a.turnRight();
+  print(total);
+  var fc = walk(a, 1);
+  print(await Future.delayed(Duration(milliseconds: 50), () => total));
+}`;
+  const trace = traceProgram('dart', program, program);
+  expect(trace.traceItems.map(({ line, callLines }) => [line, callLines])).toEqual([
+    [0, []],
+    [10, []],
+    [11, []],
+    [2, [12]],
+    [3, [12]],
+    [12, []],
+    [2, [13]],
+    [3, [13]],
+    [13, []],
+    [4, [12]],
+    [2, [12]],
+    [3, [12]],
+    [4, [13]],
+    [2, [13]],
+    [3, [13]],
+    [4, [12]],
+    [2, [12]],
+    [4, [13]],
+    [2, [13]],
+    [14, []],
+    [15, []],
+    [16, []],
+    [2, [17]],
+    [3, [17]],
+    [17, []],
+    [4, [17]],
+    [2, [17]],
+    [18, []],
+  ]);
+  expect(trace.finalVars).toEqual({ total: 4 });
+  expect(trace.stdout).toBe('4\n4\n');
+});

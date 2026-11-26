@@ -8,6 +8,8 @@ export interface Span {
 
 export interface Library extends Span {
   imports: ImportDirective[];
+  /** The `dart:` libraries the library re-exports, which a program of one file only names. */
+  exports: (Span & { uri: string })[];
   declarations: TopLevelDeclaration[];
 }
 
@@ -17,6 +19,8 @@ export interface ImportDirective extends Span {
   prefix: string | undefined;
   show: string[] | undefined;
   hide: string[];
+  /** `deferred as`, whose prefix reaches the library only once `loadLibrary` has loaded it. */
+  isDeferred: boolean;
 }
 
 export type TopLevelDeclaration =
@@ -210,8 +214,6 @@ export interface FormalParameter extends Span {
   isCovariant: boolean;
   isRequired: boolean;
   defaultValue: Expression | undefined;
-  /** An old-style function-typed parameter `int f(int x)`. */
-  functionType: { returnType: TypeSyntax | undefined; parameters: FormalParameters } | undefined;
 }
 
 export interface NamedFormalParameter extends FormalParameter {
@@ -387,7 +389,13 @@ export type CollectionElement =
       updates: Expression[];
       body: CollectionElement;
     } & Span)
-  | ({ kind: 'forInElement'; binding: ForInBinding; iterable: Expression; body: CollectionElement } & Span)
+  | ({
+      kind: 'forInElement';
+      binding: ForInBinding;
+      iterable: Expression;
+      body: CollectionElement;
+      isAwait: boolean;
+    } & Span)
   | ({ kind: 'mapEntry'; key: Expression; value: Expression; nullAwareKey: boolean; nullAwareValue: boolean } & Span);
 
 export type StringPart = string | Expression;

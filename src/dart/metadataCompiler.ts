@@ -156,6 +156,7 @@ export abstract class MetadataCompiler extends ConstructorCompiler {
     this.fn = new FunctionContext(undefined, info, {
       returnType: undefined,
       isGenerator: false,
+      isAsync: false,
       thisClass: cls,
       thisType: cls?.thisType,
       hasThis: !isStatic && !isInitializer && cls !== undefined,

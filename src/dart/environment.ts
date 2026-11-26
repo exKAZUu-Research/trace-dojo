@@ -77,6 +77,8 @@ export class LibraryEnv {
   readonly imports: Import[] = [];
   /** Names only the interpreter's other libraries see, such as dart:core's LinkedHashMap, which dart:collection exports. */
   readonly hiddenNames = new Set<string>();
+  /** The prefixes of `deferred as` imports. */
+  readonly deferredPrefixes = new Set<string>();
   /** Declarations of other libraries this library exports as its own. */
   readonly reexports = new Map<string, Declaration>();
 
@@ -115,6 +117,24 @@ export class LibraryEnv {
       if (found) return found;
     }
     return undefined;
+  }
+
+  /**
+   * The SDK extensions the latest import makes visible, which the SDK rejects through a deferred import: their
+   * members would apply before the library is loaded.
+   */
+  sdkExtensionsOfLastImport(): string[] {
+    const entry = this.imports.at(-1);
+    if (!entry) return [];
+    const names: string[] = [];
+    for (const declarations of [entry.library.declarations, entry.library.reexports]) {
+      for (const [name, declaration] of declarations) {
+        if (declaration.kind !== 'extension' || !isVisible(entry, name) || entry.library.hiddenNames.has(name))
+          continue;
+        if (isSdkExport(entry.library.name, name)) names.push(name);
+      }
+    }
+    return names;
   }
 
   /** The extensions whose members apply here: declared in this library or imported without being hidden. */

@@ -1,4 +1,4 @@
-import type { Span } from './ast';
+import type { BodyModifier, Span } from './ast';
 import type { ClassInfo } from './classes';
 import type { Eval } from './compilerBase';
 import type { FunctionInfo, TypeEnv } from './runtime';
@@ -97,14 +97,24 @@ export class FunctionContext {
   switchDepth = 0;
   assignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
   capturedAssignments: ReadonlyMap<Span, ReadonlySet<string>> = new Map();
+  /**
+   * The `return;` statements of a function literal that its context's nullable value type allows, which a `return`
+   * with a value in the same function rules out, as the SDK requires.
+   */
+  readonly contextBareReturns: Span[] = [];
+  returnsValue = false;
   /** The type of the value each `return` gives, collected to infer a closure's return type. */
   returnTypes: DartType[] | undefined;
+  /** The values an `async` closure's `return`s give, checked against the future value it infers from them. */
+  readonly inferredAsyncReturns: { type: DartType; span: Span }[] = [];
   /** For `sync*` functions, the type of the elements `yield` gives. */
   yieldTypes: DartType[] | undefined;
   /** The catch clause's exception variables in scope, which `rethrow` needs. */
   catchDepth = 0;
   /** The return type a closure's context expects, which its `return` statements are checked against. */
   contextReturn: DartType | undefined;
+  /** What the body's end and its `return`s are checked against, decided once from the function's return type. */
+  returnRule: ReturnRule = { checked: undefined, valueType: undefined, context: undefined, isAsync: false };
   /** The element type a `sync*` function's return type gives its `yield` statements. */
   yieldElement: DartType | undefined;
 
@@ -122,7 +132,10 @@ export class FunctionContext {
     readonly kind: {
       /** The declared or contextual return type, or undefined for a closure whose return type is inferred. */
       returnType: DartType | undefined;
+      /** Whether the body yields: `sync*` and `async*`. */
       isGenerator: boolean;
+      /** Whether the body awaits: `async` and `async*`. */
+      isAsync: boolean;
       /** The class whose members `this` reaches, for methods, constructors, and closures inside them. */
       thisClass: ClassInfo | undefined;
       thisType: InterfaceType | undefined;
@@ -472,4 +485,25 @@ function affectedPath(variable: LocalVar, matches: (part: LocalVar) => boolean):
     if (matches(current)) return true;
   }
   return false;
+}
+
+/** Whether a body with this modifier yields (`sync*`, `async*`) and awaits (`async`, `async*`). */
+export function bodyKind(modifier: BodyModifier | undefined): { isGenerator: boolean; isAsync: boolean } {
+  return {
+    isGenerator: modifier === 'sync*' || modifier === 'async*',
+    isAsync: modifier === 'async' || modifier === 'async*',
+  };
+}
+
+/**
+ * The effective return type of a function, by which Dart's rules for the end of its body and for each `return` are
+ * applied on every path (sync, async, arrow, closure): `checked` is the declared type, or a function literal's
+ * context once it is known; `valueType` is what a returned value must fit, an async function's folded by
+ * futureValueType; `context` is what a returned expression is inferred under.
+ */
+export interface ReturnRule {
+  checked: DartType | undefined;
+  valueType: DartType | undefined;
+  context: DartType | undefined;
+  isAsync: boolean;
 }

@@ -37,10 +37,11 @@ import {
   spanOf,
   syntaxChildrenOf,
   syntaxError,
-  unsupported,
 } from './convertBase';
 
 const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
+/** The keywords that begin an expression rather than name a type, which may follow `await` in a for initializer. */
+const EXPRESSION_KEYWORDS = new Set(['true', 'false', 'new', 'const', 'switch', 'throw']);
 /** `is` and `as`, which, like comparisons, cannot take one another as an unparenthesized operand. */
 const TYPE_OPERATOR_NODES = new Set(['type_test_expression', 'type_cast_expression']);
 const BINARY_NODES = new Set([
@@ -406,7 +407,8 @@ export abstract class ExpressionConverter {
         return this.convertDotShorthand(node);
       }
       case 'await_expression': {
-        return unsupported(node, 'await（非同期処理）');
+        const operand = childrenOf(node).filter((child) => child.type !== 'await' && child.type !== 'comment');
+        return { kind: 'await', value: this.soleExpression(node, operand), ...spanOf(node) };
       }
       default: {
         return syntaxError(node, '書き方に誤りがあります。');
@@ -726,7 +728,8 @@ export abstract class ExpressionConverter {
         const loop = this.convertForParts(node);
         const body = this.elementField(node, 'body');
         if (loop.kind === 'forIn') {
-          return { kind: 'forInElement', binding: loop.binding, iterable: loop.iterable, body, ...span };
+          const { binding, iterable, isAwait } = loop;
+          return { kind: 'forInElement', binding, iterable, body, isAwait, ...span };
         }
         return { kind: 'forElement', init: loop.init, condition: loop.condition, updates: loop.updates, body, ...span };
       }
@@ -1361,8 +1364,8 @@ export abstract class ExpressionConverter {
         condition: Expression | undefined;
         updates: Expression[];
       }
-    | { kind: 'forIn'; binding: ForInBinding; iterable: Expression } {
-    if (hasToken(node, 'await')) return unsupported(node, 'await for（非同期処理）');
+    | { kind: 'forIn'; binding: ForInBinding; iterable: Expression; isAwait: boolean } {
+    const isAwait = hasToken(node, 'await');
     const children = childrenOf(node);
     const inIndex = children.findIndex((child) => child.type === 'in');
     if (inIndex !== -1) {
@@ -1372,13 +1375,21 @@ export abstract class ExpressionConverter {
         kind: 'forIn',
         binding: this.convertForInBinding(node, bindingNodes),
         iterable: this.fieldExpression(node, 'value'),
+        isAwait,
       };
     }
+    // Statements and collection elements alike: only a for-in loop may await, as the SDK's parser decides.
+    if (isAwait) syntaxError(node, 'await は、for-in の for にしか付けられません。');
     const initNodes = fieldsOf(node, 'init');
     let init: ForInitializer;
     if (initNodes.length === 1 && initNodes[0].type === 'local_variable_declaration') {
       init = this.convertLocalDeclaration(initNodes[0]);
     } else if (initNodes.length > 0) {
+      // The SDK's parser reads `await` followed by a name as a declaration of a variable of type await.
+      const [first, second] = leadingTokens(initNodes[0], 2);
+      if (first?.type === 'await' && second && isNameToken(second)) {
+        syntaxError(initNodes[0], "'await' は型ではありません（for の初期化で await の後に名前は書けません）。");
+      }
       init = this.fieldExpressions(node, 'init');
     }
     const conditionNodes = fieldsOf(node, 'condition');
@@ -1510,3 +1521,25 @@ function operandsOf(node: Node): Node[] {
 }
 
 export const VAR_WITH_TYPE = 'var と型の名前は、一緒には書けません。どちらか一方にしてください。';
+
+/** The first tokens of a node, comments left out, as the SDK's parser reads them. */
+function leadingTokens(node: Node, count: number): Node[] {
+  const tokens: Node[] = [];
+  const pending: Node[] = [node];
+  for (let next = pending.pop(); next && tokens.length < count; next = pending.pop()) {
+    if (next.type === 'comment') continue;
+    const children = childrenOf(next);
+    if (children.length === 0) tokens.push(next);
+    else pending.push(...children.toReversed());
+  }
+  return tokens;
+}
+
+/**
+ * Whether a token is a name: an identifier, or a keyword spelled as one (`this`, `super`, `dynamic`) other than those
+ * that begin an expression; a literal or a raw string's prefix is none.
+ */
+function isNameToken(token: Node): boolean {
+  if (token.type === 'identifier') return true;
+  return token.type === token.text && /^[A-Za-z_$][\w$]*$/u.test(token.text) && !EXPRESSION_KEYWORDS.has(token.text);
+}

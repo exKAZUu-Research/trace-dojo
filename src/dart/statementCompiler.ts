@@ -14,20 +14,26 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { assignmentTargets, localNamesIn } from './astWalk';
+import { type AwaitRequest, containsAwait, type GenEval, runWithoutWaiting, type YieldEachRequest } from './awaitSteps';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
+import { childContext } from './contextTypes';
+import { type CompiledPattern, guardHolds, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
-import { Flow, FunctionContext, type JumpTarget, type LocalVar } from './scope';
+import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar, type ReturnRule } from './scope';
+import { closeInferenceHoles, containsInferenceHole } from './typeInference';
 import {
   coreTypes,
   type DartType,
   DYNAMIC,
+  flatten,
   type FunctionType,
   functionType,
+  futureValueType,
   interfaceType,
   isNullable,
+  isObject,
   isPotentiallyNullable,
   isSubtype,
   isTop,
@@ -35,12 +41,15 @@ import {
   makeNullable,
   NEVER,
   nonNullable,
+  norm,
   NULL,
   resolveBound,
+  sameType,
   type TypeParam,
   upperBound,
   vmTypeString,
   VOID,
+  withoutOuterQuestionMark,
 } from './types';
 import { type Arguments, Cell, LateInitializer, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
@@ -50,8 +59,13 @@ export type Completion =
   | { kind: 'return'; value: Value };
 
 export type Exec = (frame: Frame) => Completion | undefined;
-/** A statement of a `sync*` body, which yields elements as it runs. */
-export type GenExec = (frame: Frame) => Generator<Value, Completion | undefined | void, undefined>;
+/**
+ * A statement of a generator or `async` body, which yields the elements of a `sync*` or `async*` function and the
+ * values it awaits as it runs.
+ */
+export type GenExec = (
+  frame: Frame
+) => Generator<Value | AwaitRequest | YieldEachRequest, Completion | undefined | void, Value>;
 
 export const BREAK: Completion = { kind: 'break', label: undefined };
 export const CONTINUE: Completion = { kind: 'continue', label: undefined };
@@ -78,16 +92,20 @@ export abstract class StatementCompiler extends PatternCompiler {
     spec: FunctionSpec,
     expectedReturn: DartType | undefined
   ): (frame: Frame) => Value;
+  protected abstract compileAsyncBody(spec: FunctionSpec): (frame: Frame) => Value;
 
   // Functions
 
-  // code-gauge-allow functionCognitiveComplexity -- Parameters, the body, and return-type inference share the closure's flow.
   // code-gauge-allow functionNcss -- Parameters, the body, and return-type inference share the function context.
   compileFunction(spec: FunctionSpec & { isClosure?: boolean }): CompiledFunction {
     const isClosure = spec.isClosure ?? spec.name === '<anonymous closure>';
     const savedFn = this.fn;
     const savedFlow = this.flow;
     const savedRecords = this.recordsSteps;
+    const savedAwaitRoot = this.awaitRoot;
+    const savedStaging = this.staging;
+    this.awaitRoot = undefined;
+    this.staging = undefined;
     const isAtomic = this.atomicRows !== undefined && this.isAtomicHeader(spec.span.row, spec.headerEndRow);
     const info = this.newFunctionInfo(spec.name, undefined, spec.showsThis);
     info.isAtomic = isAtomic;
@@ -98,6 +116,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (spec.returnType === undefined) fn.returnTypes = [];
     if (spec.kind.isGenerator) fn.yieldTypes = [];
     fn.contextReturn = spec.contextReturnType;
+    fn.returnRule = this.returnRuleOf(spec);
     this.fn = fn;
     // A closure sees what is known of the enclosing function's variables where it is created, except promotions of
     // variables assigned anywhere after their declarations, which may change before the closure runs.
@@ -110,33 +129,29 @@ export abstract class StatementCompiler extends PatternCompiler {
       let run: (frame: Frame) => Value;
       if (spec.kind.isGenerator) {
         run = this.compileGeneratorBody(spec, expectedReturn);
+      } else if (spec.kind.isAsync) {
+        run = this.compileAsyncBody(spec);
       } else if (spec.body.kind === 'expression') {
-        const body = spec.body.expression;
-        const compiled = this.compileReturnValue(body, expectedReturn, true);
+        const compiled = this.compileReturnedValue(spec.body.expression, true);
         const valueRun = compiled.run;
         run = (frame) => valueRun(frame);
       } else {
         const block = this.compileBlock(spec.body.block, false);
-        if (this.flow.reachable) {
-          fn.returnTypes?.push(NULL);
-          if (spec.returnType && this.requiresReturn(spec.returnType)) {
-            this.error(
-              { row: spec.body.block.row },
-              `戻り値の型が ${typeName(spec.returnType)} の関数 ${displayName(spec.name)} は、最後に値を return しなければなりません。`
-            );
-          }
-        }
+        this.checkBodyEnd(spec);
         run = (frame) => {
           const completion = block(frame);
           return completion?.kind === 'return' ? completion.value : undefined;
         };
       }
+      this.checkContextBareReturns();
       const returnType = spec.returnType ?? this.inferredReturnType(fn, spec);
       return { fn, returnType, run, bind: binders, usesTypeEnv: true };
     } finally {
       this.fn = savedFn;
       this.flow = isClosure ? savedFlow.forget([], this.localsNamed(assignments.free)) : savedFlow;
       this.recordsSteps = savedRecords;
+      this.awaitRoot = savedAwaitRoot;
+      this.staging = savedStaging;
     }
   }
 
@@ -155,8 +170,56 @@ export abstract class StatementCompiler extends PatternCompiler {
   /** The annotation rows that mark a function, so that any other one is reported as misplaced. */
   protected readonly usedAtomicRows = new Set<number>();
 
-  /** Whether a function returning `type` must end with a `return`, because `null` is not a value of the type. */
-  protected requiresReturn(type: DartType): boolean {
+  /** The function's effective return type, decided once, which every return rule of its body reads. */
+  private returnRuleOf(spec: FunctionSpec): ReturnRule {
+    const isAsync = spec.kind.isAsync;
+    const checked = this.checkedReturnType(spec);
+    if (isAsync) {
+      const declared = spec.returnType ?? spec.contextReturnType;
+      const valueType = declared ? futureValueType(declared) : undefined;
+      return { checked, valueType, context: childContext({ kind: 'asyncReturn' }, valueType), isAsync };
+    }
+    const context = spec.returnType ?? spec.contextReturnType;
+    return { checked, valueType: checked, context: context?.kind === 'void' ? undefined : context, isAsync };
+  }
+
+  /**
+   * Rejects a body whose end is reachable when its return type does not allow completing with null, the rule for
+   * the end of every body that may return a value.
+   */
+  protected checkBodyEnd(spec: FunctionSpec): void {
+    if (spec.body.kind !== 'block' || !this.flow.reachable) return;
+    this.fn.returnTypes?.push(NULL);
+    const { checked, isAsync } = this.fn.returnRule;
+    if (checked && this.mustReturnValue(checked, isAsync)) {
+      this.error(
+        { row: spec.body.block.row },
+        `戻り値の型が ${typeName(checked)} の${functionLabel(spec.name)}は、最後に値を return しなければなりません。`
+      );
+    }
+  }
+
+  /**
+   * The return type a function's body is checked against: the declared one, or for a function literal the one its
+   * context gives, once that is known; a literal without a context infers its return type instead.
+   */
+  private checkedReturnType(spec: FunctionSpec): DartType | undefined {
+    if (spec.returnType) return spec.returnType;
+    const context = spec.contextReturnType;
+    if (!context || containsInferenceHole(context)) return undefined;
+    // An async literal returns a future, never null, so the `?` outside its context's future does not let it end
+    // without a value: Dart infers `Future<int>` for one whose context is `Future<int>?`.
+    return spec.kind.isAsync ? (withoutOuterQuestionMark(context) ?? context) : context;
+  }
+
+  /**
+   * Whether a function declared to return `declared` must end with a `return` of a value, because `null` is not a
+   * value it may complete with: for an `async` one, decided on the value its future completes with (the argument of
+   * Future or FutureOr), except that a nullable declaration, as Future<int>?, never requires one.
+   */
+  private mustReturnValue(declared: DartType, isAsync: boolean): boolean {
+    if (isAsync && isNullable(declared)) return false;
+    const type = isAsync && !isObject(declared) ? futureValueType(declared) : declared;
     if (isTop(type) || type.kind === 'null' || isNullable(type)) return false;
     if (type.kind === 'never') return true;
     return !isPotentiallyNullable(type) || type.kind === 'typeParam';
@@ -164,13 +227,27 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private inferredReturnType(fn: FunctionContext, spec: FunctionSpec): DartType {
     if (spec.kind.isGenerator) {
-      return interfaceType(coreTypes.iterable, [fn.yieldElement ?? DYNAMIC]);
+      return interfaceType(spec.kind.isAsync ? coreTypes.stream : coreTypes.iterable, [fn.yieldElement ?? DYNAMIC]);
     }
-    const types = fn.returnTypes ?? [];
+    if (spec.kind.isAsync) {
+      const value = this.inferredFutureValue(fn, spec);
+      // The SDK checks each returned value against the future value it inferred, which a nested future is not.
+      for (const { type, span } of fn.inferredAsyncReturns) {
+        if (!asyncValueFits(type, value, false)) {
+          this.error(span, `${typeName(type)} 型の値は、戻り値の型 ${typeName(value)} に合いません。`);
+        }
+      }
+      return interfaceType(coreTypes.future, [value]);
+    }
     if (spec.contextReturnType?.kind === 'void') return VOID;
-    let result: DartType | undefined;
-    for (const type of types) result = result ? upperBound(result, type) : type;
-    return result ?? NEVER;
+    return returnedType(fn, spec.contextReturnType && closeInferenceHoles(spec.contextReturnType));
+  }
+
+  /** The type an `async` closure without a declared return type completes its future with. */
+  protected inferredFutureValue(fn: FunctionContext, spec: FunctionSpec): DartType {
+    const context = spec.contextReturnType && futureValueType(closeInferenceHoles(spec.contextReturnType));
+    if (context?.kind === 'void') return VOID;
+    return returnedType(fn, context);
   }
 
   protected inferYieldElement(fn: FunctionContext): DartType {
@@ -179,12 +256,37 @@ export abstract class StatementCompiler extends PatternCompiler {
     return element ?? DYNAMIC;
   }
 
-  private compileReturnValue(expression: Expression, expected: DartType | undefined, isArrow: boolean): Compiled {
-    const context = expected?.kind === 'void' ? undefined : expected;
+  /**
+   * A returned value, checked by the function's return rule: a void function's `return` takes no value but a void,
+   * dynamic or null one (an arrow body may give any); an async function's value fits when it is a FutureOr of the
+   * value type, as Dart's rule says, which flatten would not tell for a value type that is itself a future; a
+   * synchronous one's is coerced to the return type, which a void value fits only for a top context.
+   */
+  private compileReturnedValue(expression: Expression, isArrow: boolean): Compiled {
+    const { valueType, context, isAsync } = this.fn.returnRule;
     const compiled = this.compileExpression(expression, context);
     const kind = compiled.type.kind;
-    if (expected?.kind === 'void' && !isArrow && kind !== 'void' && kind !== 'dynamic' && kind !== 'null') {
+    const voidType = isAsync ? valueType : (valueType ?? this.fn.contextReturn);
+    // An async function's returned future gives the value its own future completes with, as `return g();` does.
+    const valueKind = isAsync ? flatten(compiled.type).kind : kind;
+    if (
+      voidType?.kind === 'void' &&
+      !isArrow &&
+      valueKind !== 'void' &&
+      valueKind !== 'dynamic' &&
+      valueKind !== 'null'
+    ) {
       this.error(expression, '戻り値の型が void の関数は、値を返せません。');
+    }
+    if (isAsync) {
+      if (valueType && !asyncValueFits(compiled.type, valueType, this.fn.kind.returnType !== undefined)) {
+        this.error(expression, `${typeName(compiled.type)} 型の値は、戻り値の型 ${typeName(valueType)} に合いません。`);
+      }
+      if (this.fn.returnTypes) {
+        this.fn.returnTypes.push(innermostFutureValue(compiled.type));
+        this.fn.inferredAsyncReturns.push({ type: compiled.type, span: expression });
+      }
+      return compiled;
     }
     const allowsVoid =
       kind === 'void' && context && (context.kind === 'dynamic' || (this.fn.returnTypes && isTop(context)));
@@ -378,8 +480,21 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected withStep(statement: { row: number }, exec: Exec, onlyCalls: boolean | (() => boolean)): Exec {
     const row = this.stepRowOf(statement);
     if (row === undefined) return exec;
+    const capture = this.stepCapture;
+    if (capture?.statement === statement) {
+      capture.step = { row, onlyCalls };
+      return exec;
+    }
     return (frame) => frame.runtime.steps.runStatement(row, onlyCalls, () => exec(frame));
   }
+
+  /**
+   * The statement whose step its generator records once it completes, since evaluating it again after an `await`
+   * must not record it each time.
+   */
+  protected stepCapture:
+    | { statement: object; step: { row: number; onlyCalls: boolean | (() => boolean) } | undefined }
+    | undefined;
 
   // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionNcss -- One case per kind of statement.
@@ -392,7 +507,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         return this.compileExpressionStatement(statement);
       }
       case 'local': {
-        return this.compileLocalDeclaration(statement.declaration);
+        return this.compileLocalDeclaration(statement.declaration, statement);
       }
       case 'patternDeclaration': {
         return this.compilePatternDeclaration(statement);
@@ -457,11 +572,17 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // code-gauge-allow functionCognitiveComplexity -- Bind a declaration, retain its constant or promotion, and emit its step.
   // code-gauge-allow functionNcss -- Keep declarator evaluation order, flow, and trace steps together.
-  protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
+  /**
+   * `stepOwner` is the statement whose step the declaration records, which a statement that resumes after an `await`
+   * captures to record once it completes; undefined when the declaration records none, as a `for` loop's does.
+   */
+  protected compileLocalDeclaration(declaration: VariableDeclaration, stepOwner: { row: number } | undefined): Exec {
     this.checkAnnotations(declaration.annotations);
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
     const initialized: Compiled[] = [];
+    // A later initializer may read an earlier variable after its own parts wait, so each variable is set in a step.
+    const setsInSteps = declaration.variables.length > 1 && this.awaitsHere(declaration);
     for (const declarator of declaration.variables) {
       const compiled = this.compileLocalInitializer(declaration, declarator, declaredType);
       if (compiled) initialized.push(compiled);
@@ -486,15 +607,23 @@ export abstract class StatementCompiler extends PatternCompiler {
       variable.condition = this.pendingCondition;
       this.flow = this.flow.rememberCondition(variable);
       this.pendingCondition = undefined;
-      parts.push({ slot: variable.slot, run: compiled?.run, isLate: declaration.isLate });
+      const part = { slot: variable.slot, run: compiled?.run, isLate: declaration.isLate };
+      if (setsInSteps) {
+        this.addStep((frame) => {
+          frame.locals[part.slot] = new Cell(initialLocalValue(frame, part.run, part.isLate));
+          return;
+        });
+      } else {
+        parts.push(part);
+      }
     }
     const exec: Exec = (frame) => {
       for (const { slot, run, isLate } of parts) frame.locals[slot] = new Cell(initialLocalValue(frame, run, isLate));
       return;
     };
-    if (initialized.length === 0 || !recordStep || declaration.isLate) return exec;
+    if (initialized.length === 0 || !stepOwner || declaration.isLate) return exec;
     return this.withStep(
-      declaration,
+      stepOwner,
       exec,
       initialized.every((compiled) => isCreation(compiled))
     );
@@ -550,6 +679,9 @@ export abstract class StatementCompiler extends PatternCompiler {
     declaredType: DartType | undefined,
     isFinal: boolean
   ): Compiled {
+    // The SDK rejects it too: the initializer runs when the variable is first read, outside any await.
+    if (containsAwait(expression))
+      return this.error(expression, 'late のローカル変数の初期値には await を書けません。');
     const span = at(expression);
     const compiled = this.compileFunction({
       name,
@@ -562,7 +694,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       contextReturnType: declaredType,
       body: { ...span, kind: 'expression', expression, modifier: 'sync' },
       typeParams: [],
-      kind: { ...this.fn.kind, returnType: undefined, isGenerator: false, isConstructor: false },
+      kind: { ...this.fn.kind, returnType: undefined, isGenerator: false, isAsync: false, isConstructor: false },
       showsThis: this.fn.info.showsThis,
       isClosure: true,
     });
@@ -615,6 +747,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.checkAnnotations(parameter.annotations);
   }
 
+  // code-gauge-allow duplicateLines -- Local and top-level functions build the same function spec from different sources.
   private compileLocalFunction(statement: Extract<Statement, { kind: 'localFunction' }>): Exec {
     const { declaration } = statement;
     this.checkAnnotations(declaration.annotations);
@@ -647,7 +780,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         kind: {
           ...this.fn.kind,
           returnType,
-          isGenerator: declaration.body?.modifier === 'sync*',
+          ...bodyKind(declaration.body?.modifier),
           isConstructor: false,
         },
         showsThis: false,
@@ -696,7 +829,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     );
     return (frame) => {
       try {
-        if (match(frame)) return consequence(frame);
+        if (runWithoutWaiting(match(frame))) return consequence(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
@@ -708,7 +841,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     statement: Extract<Statement, { kind: 'if' }>,
     compileBody: (body: Statement) => T
   ): {
-    match: (frame: Frame) => boolean;
+    match: (frame: Frame) => Generator<AwaitRequest, boolean, Value>;
     consequence: T;
     otherwise: T | undefined;
     slots: number[];
@@ -718,20 +851,26 @@ export abstract class StatementCompiler extends PatternCompiler {
     const before = this.flow;
     let pattern!: CompiledPattern;
     let guard: Eval | undefined;
+    let guardGen: GenEval | undefined;
     let whenFalse = before;
     const { result: consequence, slots } = this.withScope(() => {
-      ({ pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard));
+      ({ pattern, guard, guardGen, whenFalse } = this.compileCasePattern(
+        casePattern.pattern,
+        subject,
+        casePattern.guard
+      ));
       return compileBody(statement.consequence);
     });
     const afterThen = this.flow;
     this.flow = whenFalse;
     const otherwise = statement.alternative ? compileBody(statement.alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
-    const match = (frame: Frame): boolean => {
+    // A guard that awaits makes the match wait, which only a generator's if runs.
+    const match = function* (frame: Frame): Generator<AwaitRequest, boolean, Value> {
       const value = subject.run(frame);
       frame.temporaries.push(value);
       try {
-        return pattern.match(frame, value) && (!guard || guard(frame) === true);
+        return pattern.match(frame, value) && (yield* guardHolds(frame, guard, guardGen));
       } finally {
         frame.temporaries.pop();
       }
@@ -877,7 +1016,6 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
   }
 
-  // code-gauge-allow duplicateLines -- The counted loop shares its header operations with the generator form.
   private compileFor(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
@@ -937,12 +1075,14 @@ export abstract class StatementCompiler extends PatternCompiler {
     const initExec =
       init.kind === 'patternDeclaration'
         ? this.compilePatternDeclaration(init, false)
-        : this.compileLocalDeclaration(init, false);
+        : this.compileLocalDeclaration(init, undefined);
     const recordsStep = init.kind === 'patternDeclaration' || init.variables.some((variable) => variable.initializer);
     return { initExec, loopSlots: slots?.slice(start) ?? [], initRow: recordsStep ? this.stepRowOf(loop) : undefined };
   }
 
   private compileForIn(statement: Extract<Statement, { kind: 'forIn' }>): Exec {
+    // An async body runs its await for through its generator, so one here is in a function that is not async.
+    if (statement.isAwait) this.requireAsyncBody(statement, 'await for');
     const labels = this.takeLoopLabels();
     const iterable = this.compileExpression(statement.iterable);
     const elementType = this.elementTypeOfIterable(iterable, statement.iterable);
@@ -1045,7 +1185,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** Runs a for-in loop over an iterable through its iterator, as Dart does. */
-  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines -- A for-in statement and a sync* yield* iterate an Iterable alike; one runs a body, the other yields.
   protected forInLoop(iterable: Eval, bind: (frame: Frame, value: Value) => void, body: Exec, labels: string[]): Exec {
     return (frame) => {
       const { runtime } = frame;
@@ -1116,32 +1256,59 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private compileReturn(statement: Extract<Statement, { kind: 'return' }>): Exec {
     if (this.fn.kind.isGenerator) {
-      if (statement.value) this.error(statement, 'sync* の関数では、値を return できません。yield を使ってください。');
+      if (statement.value) {
+        const modifier = this.fn.kind.isAsync ? 'async*' : 'sync*';
+        this.error(statement, `${modifier} の関数では、値を return できません。yield を使ってください。`);
+      }
       this.flow = this.flow.unreachable;
       const done: Completion = { kind: 'return', value: undefined };
       return () => done;
     }
-    const expected = this.fn.kind.returnType ?? (this.fn.returnTypes ? undefined : VOID);
     if (!statement.value) {
       this.fn.returnTypes?.push(NULL);
-      if (
-        expected &&
-        expected.kind !== 'void' &&
-        !isTop(expected) &&
-        expected.kind !== 'null' &&
-        !this.fn.kind.isConstructor
-      ) {
-        this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
-      }
+      this.checkBareReturn(statement);
       this.flow = this.flow.unreachable;
       const completion: Completion = { kind: 'return', value: undefined };
       return () => completion;
     }
     if (this.fn.kind.isConstructor) this.error(statement, 'コンストラクタからは値を返せません。');
-    const compiled = this.compileReturnValue(statement.value, expected ?? this.fn.contextReturn, false);
+    const compiled = this.compileReturnedValue(statement.value, statement === this.arrowReturn);
+    // A value of type Null or Never infers no return type that `return;` would not fit, so the SDK allows both; an
+    // async function returns what its value's future completes with.
+    const returned = this.fn.returnRule.isAsync ? flatten(compiled.type) : compiled.type;
+    if (returned.kind !== 'null' && returned.kind !== 'never') this.fn.returnsValue = true;
     this.flow = this.flow.unreachable;
     const { run } = compiled;
     return (frame) => ({ kind: 'return', value: run(frame) });
+  }
+
+  /** The `return` an async arrow body stands for, which may give a void function's future a value, as `=>` may. */
+  private arrowReturn: Statement | undefined;
+
+  protected arrowBodyReturn(expression: Expression): Statement {
+    const statement: Statement = { kind: 'return', value: expression, ...at(expression) };
+    this.arrowReturn = statement;
+    return statement;
+  }
+
+  /** Rejects `return;` where the function's value type requires a value. */
+  private checkBareReturn(statement: Span): void {
+    const expected = this.fn.returnRule.valueType;
+    if (!expected || expected.kind === 'void' || expected.kind === 'dynamic' || expected.kind === 'null') return;
+    if (this.fn.kind.isConstructor) return;
+    // A function literal's return type comes from its context, which `return;` fits when it allows null.
+    if (this.fn.kind.returnType === undefined && isNullable(expected)) this.fn.contextBareReturns.push(statement);
+    else this.error(statement, `戻り値の型が ${typeName(expected)} なので、return に値が必要です。`);
+  }
+
+  /**
+   * Rejects the `return;`s a function literal's nullable context allowed, once a `return` with a value shows that the
+   * function returns values, as the SDK requires.
+   */
+  private checkContextBareReturns(): void {
+    if (!this.fn.returnsValue) return;
+    for (const bare of this.fn.contextBareReturns)
+      this.error(bare, 'この関数は値を return するので、return にも値が必要です。');
   }
 
   /** The slots holding the exceptions of the catch clauses being compiled, innermost last. */
@@ -1171,11 +1338,14 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private compileAssert(statement: Extract<Statement, { kind: 'assert' }>): Exec {
     const before = this.flow;
-    const { flow } = this.compileCondition(statement.condition);
+    // `dart run` runs without --enable-asserts, which skips assertions, so the steps of their awaits never run.
+    const {
+      result: { flow },
+    } = this.compileWithSteps(statement, () => this.compileCondition(statement.condition));
     this.flow = flow.whenFalse;
-    if (statement.message) this.compileExpression(statement.message);
+    if (statement.message)
+      this.compileWithSteps(statement, () => this.compileExpression(statement.message as Expression));
     this.flow = before.inheritTypeTests(flow.whenTrue).inheritTypeTests(flow.whenFalse);
-    // `dart run` runs without --enable-asserts, which skips assertions.
     return () => {};
   }
 
@@ -1246,7 +1416,6 @@ export interface CountedLoop<Body> {
   updateRow: number | undefined;
 }
 
-// code-gauge-allow duplicateLines -- The generator loop shares the header operations and suspends around its body.
 function forLoop(loop: CountedLoop<Exec>): Exec {
   const { test, body, labels } = loop;
   return (frame) => {
@@ -1269,7 +1438,23 @@ export function startCountedLoop(loop: CountedLoop<unknown>, frame: Frame): void
 }
 
 export function advanceCountedLoop(loop: CountedLoop<unknown>, frame: Frame): void {
-  for (const slot of loop.loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+  copyLoopVariables(loop, frame);
+  runLoopUpdates(loop, frame);
+}
+
+export function copyLoopVariables(loop: CountedLoop<unknown>, frame: Frame): void {
+  copyLoopCells(loop.loopSlots, frame);
+}
+
+/**
+ * Gives the next iteration of a statement's or a collection element's counted for its own loop variables, before the
+ * updates run, so that closures keep this one's.
+ */
+export function copyLoopCells(slots: readonly number[], frame: Frame): void {
+  for (const slot of slots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+}
+
+export function runLoopUpdates(loop: CountedLoop<unknown>, frame: Frame): void {
   for (const update of loop.updates) update(frame);
   if (loop.updateRow !== undefined) frame.runtime.steps.step(loop.updateRow);
   frame.runtime.spend();
@@ -1285,6 +1470,28 @@ export function loopCompletion(completion: Completion, labels: readonly string[]
     return completion;
   }
   return completion;
+}
+
+/**
+ * The return type a closure infers from what it returns, which is the context's when the returned types do not fit
+ * it, as the SDK infers function literals.
+ */
+function returnedType(fn: FunctionContext, context: DartType | undefined): DartType {
+  let result: DartType | undefined;
+  for (const type of fn.returnTypes ?? []) result = result ? upperBound(result, type) : type;
+  const returned = result ?? NEVER;
+  return context && !isSubtype(returned, context) ? context : returned;
+}
+
+/**
+ * The value an `async` function literal infers its future to complete with from a returned value: every Future and
+ * FutureOr taken off its normal form, as the SDK infers `Future<int>` from a `Future<Future<int>>`, though `await`
+ * and the declared return checks take one off the type as written.
+ */
+function innermostFutureValue(type: DartType): DartType {
+  let value = norm(type);
+  for (let inner = flatten(value); !sameType(inner, value); inner = flatten(value)) value = norm(inner);
+  return value;
 }
 
 /** A local declared with `var` keeps the type of its initializer, except that `Null` widens to `dynamic`. */
@@ -1304,6 +1511,12 @@ function isSubtypeOfSame(a: DartType, b: DartType): boolean {
 
 function isCreation(compiled: Compiled): boolean {
   return compiled.creates === true;
+}
+
+/** How a diagnostic names a function: by its name, or as a function literal without one. */
+export function functionLabel(name: string): string {
+  const shown = displayName(name);
+  return shown ? `関数 ${shown} ` : '関数リテラル';
 }
 
 function displayName(name: string): string {
@@ -1336,4 +1549,17 @@ function isConditionShaped(expression: Expression): boolean {
       return false;
     }
   }
+}
+
+/**
+ * Whether an async function whose future completes with `valueType` may return a value of `type`: a FutureOr of the
+ * value type, as Dart's rule says, which flatten would not tell for a value type that is itself a future. In a
+ * function with a declared return type, a value whose future gives void fits only a void or dynamic value type, even
+ * where a top value type takes any other; a function literal infers its return type from the value instead, which
+ * then fits its context's top value type.
+ */
+function asyncValueFits(type: DartType, valueType: DartType, isDeclared: boolean): boolean {
+  if (type.kind === 'dynamic') return true;
+  if (isDeclared && flatten(type).kind === 'void') return valueType.kind === 'void' || valueType.kind === 'dynamic';
+  return isTop(valueType) || isSubtype(type, interfaceType(coreTypes.futureOr, [valueType]));
 }

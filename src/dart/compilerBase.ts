@@ -9,9 +9,11 @@ import type {
   TypeSyntax,
 } from './ast';
 import { declaredMemberNames } from './astWalk';
+import type { GenEval } from './awaitSteps';
 import { type ClassInfo, type Member, memberTypeIn, scopedMemberName } from './classes';
 import type { ExtensionInfo, GlobalVariable, LibraryEnv, TypeAlias } from './environment';
 import { eraseExtensionTypes } from './eraseExtensionTypes';
+import { isSdkInstanceMember, isSdkStaticMember, type MemberAccess } from './library/sdkExports';
 import type { Frame, FunctionInfo, Runtime, TypeEnv } from './runtime';
 import { Flow, type FunctionContext, LocalScope, LocalVar } from './scope';
 import { inferExtensionReceiver, inferTearOffTypes } from './typeInference';
@@ -36,6 +38,7 @@ import {
   makeNullable,
   mentionsTypeParams,
   NEVER,
+  nonNullable,
   NULL,
   objectType,
   resolveBound,
@@ -71,6 +74,8 @@ export interface Compiled {
   creates?: boolean;
   /** An explicit extension application `E(x)`, whose members are the extension's. */
   extensionOverride?: { ext: ExtensionInfo; typeArgs: DartType[] };
+  /** How an expression that awaits is evaluated, which a step of its statement runs instead of `run`. */
+  gen?: GenEval;
 }
 
 /** A member found through a static type, with its type in terms of the receiver's type arguments. */
@@ -89,30 +94,16 @@ export function at(span: Span): Span {
 
 /** Names of the SDK the interpreter does not provide, with what they are, for the message that they are unavailable. */
 const UNAVAILABLE_NAMES: Record<string, string> = {
-  DateTime: 'DateTime（日付と時刻）',
-  Stopwatch: 'Stopwatch（時間の計測）',
-  Future: 'Future（非同期処理）',
-  FutureOr: 'FutureOr（非同期処理）',
-  Stream: 'Stream（非同期処理）',
-  StreamController: 'StreamController（非同期処理）',
-  Timer: 'Timer（非同期処理）',
-  Completer: 'Completer（非同期処理）',
   Zone: 'Zone（非同期処理）',
-  scheduleMicrotask: 'scheduleMicrotask（非同期処理）',
+  runZoned: 'runZoned（非同期処理）',
+  runZonedGuarded: 'runZonedGuarded（非同期処理）',
+  ZoneSpecification: 'ZoneSpecification（非同期処理）',
   Isolate: 'Isolate',
-  stdin: 'stdin（標準入力）',
-  exitCode: 'exitCode（プロセスの終了状態）',
-  File: 'File（ファイルの読み書き）',
-  Directory: 'Directory（ファイルの読み書き）',
-  FileSystemEntity: 'FileSystemEntity（ファイルの読み書き）',
   Platform: 'Platform（実行環境の情報）',
   Process: 'Process（外部のプロセス）',
   HttpClient: 'HttpClient（ネットワーク）',
   HttpServer: 'HttpServer（ネットワーク）',
   Socket: 'Socket（ネットワーク）',
-  Uri: 'Uri',
-  sleep: 'sleep（実行を止める）',
-  Expando: 'Expando',
   WeakReference: 'WeakReference',
   Finalizer: 'Finalizer',
   Uint8List: 'Uint8List（dart:typed_data）',
@@ -121,21 +112,7 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   ByteData: 'ByteData（dart:typed_data）',
 };
 
-const UNAVAILABLE_SINK_MEMBERS = new Set([
-  'add',
-  'addError',
-  'addStream',
-  'close',
-  'done',
-  'encoding',
-  'flush',
-  'hasTerminal',
-  'nonBlocking',
-  'terminalColumns',
-  'terminalLines',
-  'supportsAnsiEscapes',
-]);
-const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:math.Random.secure', 'dart:core.StackTrace.current']);
+const UNAVAILABLE_STATIC_MEMBERS = new Set(['dart:core.StackTrace.current']);
 const SPECIAL_TYPES = new Map<string, DartType>([
   ['dynamic', DYNAMIC],
   ['Never', NEVER],
@@ -182,20 +159,44 @@ export abstract class CompilerBase {
     return this.error(span, `${what}は、この採点環境では使えません。`);
   }
 
-  protected checkUnavailableIoMember(receiver: DartType, name: string, span: Span): void {
-    const type = resolveBound(receiver);
-    if (type.kind !== 'interface' || type.cls.library !== 'dart:io') return;
-    if ((type.cls.name === 'Stdout' || type.cls.name === 'IOSink') && UNAVAILABLE_SINK_MEMBERS.has(name))
-      this.unsupported(span, type.cls.name + '.' + name);
+  /**
+   * Rejects `await` or `await for` outside an `async` or `async*` body, the one place that rule of Dart is decided for
+   * every form the compilers handle (an expression, a statement, a collection element).
+   */
+  protected requireAsyncBody(span: Span | { row: number }, construct: 'await' | 'await for'): void {
+    if (!this.fn.kind.isAsync) this.error(span, `${construct} は async の関数の中にしか書けません。`);
   }
 
-  protected checkUnavailableStaticMember(cls: ClassInfo, name: string, span: Span): void {
+  /**
+   * Rejects as unavailable a member the SDK has for the access (a read or call, or a write through its setter) but
+   * the interpreter does not implement: an instance member of the receiver's type, which the caller found missing,
+   * or a static member or constructor of a class. Every member use decides this here, from the generated SDK table.
+   */
+  protected checkUnimplementedMember(
+    owner: { receiver: DartType } | { cls: ClassInfo },
+    name: string,
+    access: MemberAccess,
+    span: Span
+  ): void {
+    if ('receiver' in owner) {
+      const type = resolveBound(owner.receiver);
+      if (type.kind === 'interface' && isSdkInstanceMember(type.cls, name, access))
+        this.unsupported(span, type.cls.name + '.' + name);
+      return;
+    }
+    const { cls } = owner;
     if (name.startsWith('_') && cls.library !== this.library.name) {
       this.error(span, `${cls.name} の ${name} は、宣言されているライブラリの中だけで使えます。`);
     }
     if (UNAVAILABLE_STATIC_MEMBERS.has(`${cls.library}.${cls.name}.${name}`)) {
       this.unsupported(span, `${cls.name}.${name}`);
     }
+    const constructor = name === 'new' ? '' : name;
+    const isImplemented =
+      access === 'write'
+        ? cls.staticSetters.has(name) || cls.staticMembers.get(name)?.kind === 'field'
+        : cls.staticMembers.has(name) || cls.staticSetters.has(name) || cls.constructors.has(constructor);
+    if (!isImplemented && isSdkStaticMember(cls, constructor, access)) this.unsupported(span, `${cls.name}.${name}`);
   }
 
   protected checkMixinConstraints(base: InterfaceType, mixin: InterfaceType, span: Span): void {
@@ -413,15 +414,20 @@ export abstract class CompilerBase {
         return special;
       }
     }
-    if (prefix !== undefined && !this.library.hasPrefix(prefix)) {
-      this.error(syntax, `${prefix}.${name} という型はありません。`);
-    }
+    if (prefix !== undefined) this.checkTypePrefix(syntax, prefix, name);
     const declaration = prefix === undefined ? this.library.lookup(name) : this.library.lookupPrefixed(prefix, name);
     if (declaration?.kind === 'class') return this.instantiateClass(declaration.cls, syntax, options);
     if (declaration?.kind === 'alias') return this.instantiateAlias(declaration.alias, syntax, options);
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
     this.checkUnavailableName(syntax, name, prefix);
     return this.error(syntax, `型 ${name} が見つかりません。`);
+  }
+
+  private checkTypePrefix(syntax: Span, prefix: string, name: string): void {
+    if (!this.library.hasPrefix(prefix)) this.error(syntax, `${prefix}.${name} という型はありません。`);
+    if (this.library.deferredPrefixes.has(prefix)) {
+      this.error(syntax, `型 ${name} は接頭辞 ${prefix} で遅延読み込みするので、型には書けません。`);
+    }
   }
 
   protected checkTypeNameBinding(name: string, prefix: string | undefined, span: Span): void {
@@ -695,10 +701,14 @@ export abstract class CompilerBase {
     return mentionsTypeParams(type, params);
   }
 
-  protected dynamicDispatchType(receiver: Compiled): DartType | undefined {
+  /**
+   * The type a member access on `receiver` gives when it dispatches at run time, decided on the type its lookup
+   * uses: the non-null part of the receiver's type when the access is null-aware, which is Never for a Null receiver.
+   */
+  protected dynamicDispatchType(receiver: Compiled, nullAware: boolean): DartType | undefined {
     if (receiver.extensionOverride) return;
     if (receiver.type.kind === 'dynamic') return DYNAMIC;
-    return isNeverType(receiver.type) ? NEVER : undefined;
+    return isNeverType(nullAware ? nonNullable(receiver.type) : receiver.type) ? NEVER : undefined;
   }
 
   /** Whether a member may be used on a receiver that may be null: Object's members and extensions on nullable types. */

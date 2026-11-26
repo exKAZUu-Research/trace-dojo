@@ -3003,11 +3003,54 @@ void main() {
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Stdout\na1\n' });
-  for (const statement of ['stdout.flush()', 'stdout.close()', 'print(stdout.done)', 'exitCode = 2']) {
-    const result = executeProgram('dart', `import 'dart:io'; void main() { ${statement}; }`);
+  // Members the SDK has and the interpreter does not implement: instance, inherited, static, and constructor.
+  for (const statement of [
+    'print(stdout.nonBlocking)',
+    'print(utf8.encoder.startChunkedConversion)',
+    "File('a.txt').statSync()",
+    'print(Directory.systemTemp)',
+    'Map.unmodifiableOf({})',
+  ]) {
+    const result = executeProgram('dart', `import 'dart:convert'; import 'dart:io'; void main() { ${statement}; }`);
     expect(result.kind).toBe('compileError');
     if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toMatch(/この採点環境では使えません。$/);
   }
+  // The same members used through dynamic are unavailable when the run reaches them, not a catchable missing member.
+  const dynamicUse = `import 'dart:io';
+void main() {
+  dynamic file = File('a.txt');
+  try { file.statSync(); } catch (e) { print(e); }
+  try { (stdout as dynamic).nonBlocking; } catch (e) { print(e); }
+  try { (3 as dynamic).foo(); } catch (e) { print(e.runtimeType); }
+}`;
+  expect(executeProgram('dart', dynamicUse)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Unsupported operation: FileSystemEntity.statSyncは、この採点環境では使えません。\nUnsupported operation: Stdout.nonBlockingは、この採点環境では使えません。\nNoSuchMethodError\n',
+  });
+});
+
+test('a constructor, a factory and a setter cannot have an async or generator body, as the SDK rejects', () => {
+  for (const [program, message] of [
+    ['class A { A() async {} }', 'コンストラクタの本体には async・async*・sync* を書けません。'],
+    ['class A { A._(); factory A.x() async => A._(); }', 'ファクトリの本体には async・async*・sync* を書けません。'],
+    ['class A { set v(int x) async {} }', 'セッターの本体には async・async*・sync* を書けません。'],
+    ['set v(int x) sync* {}', 'セッターの本体には async・async*・sync* を書けません。'],
+  ]) {
+    expect(executeProgram('dart', `${program}\nvoid main() {}`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message }],
+    });
+  }
+  // A method without a return type, which reads as a constructor until its name differs from the class's, may.
+  const untyped = `class A {
+  load(int x) async { await null; print(x); }
+  gen() sync* { yield 2; }
+}
+mixin M { run() async => 3; }
+class B with M {}
+void main() async { A().load(1); print(A().gen().toList()); print(await B().run()); }`;
+  expect(executeProgram('dart', untyped)).toMatchObject({ kind: 'executed', stdout: '[2]\n1\n3\n' });
 });
 
 test('nullable values can use Object members and still dispatch to overrides', () => {
@@ -3313,17 +3356,9 @@ test.each([
 });
 
 test.each([
-  { name: 'standard input', program: "import 'dart:io';\n\nvoid main() {\n  print(stdin.readLineSync());\n}\n" },
-  { name: 'async functions', program: 'Future<void> main() async {\n  await Future.delayed(Duration.zero);\n}\n' },
-  { name: 'files', program: "import 'dart:io';\n\nvoid main() {\n  print(File('a.txt').readAsStringSync());\n}\n" },
-  {
-    name: 'secure random constructors',
-    program: "import 'dart:math'; void main() { print('before'); try { Random.secure(); } catch (_) {} }",
-  },
-  {
-    name: 'secure random constructor tear-offs',
-    program: "import 'dart:math' as m; typedef RandomAlias = m.Random; void main() { print(RandomAlias.secure); }",
-  },
+  { name: 'isolates', program: "import 'dart:isolate';\n\nvoid main() {\n  print(Isolate.current);\n}\n" },
+  { name: 'zones', program: "import 'dart:async';\n\nvoid main() {\n  runZoned(() => print('zoned'));\n}\n" },
+  { name: 'platform details', program: "import 'dart:io';\n\nvoid main() {\n  print(Platform.operatingSystem);\n}\n" },
   { name: 'stack-trace inspection', program: 'void main() { print(StackTrace.current); }' },
 ])('$name are rejected as unavailable before running', ({ program }) => {
   const result = executeProgram('dart', program);
@@ -5285,10 +5320,10 @@ void main() {
 
 test('unsupported SDK exports respect import prefixes and visibility', () => {
   for (const [declaration, body] of [
-    ["import 'dart:convert';", "print(ascii.encode('A'));"],
+    ["import 'dart:convert';", 'print(ChunkedConversionSink);'],
     ["import 'dart:convert' as codec show htmlEscape;", "print(codec.htmlEscape.convert('<'));"],
     ["import 'dart:collection' as collections;", 'collections.LinkedList<collections.LinkedListEntry>();'],
-    ['', 'Sink? value; print(value);'],
+    ['', 'WeakReference<Object>? value; print(value);'],
     ["import 'dart:io' as io;", 'print(io.HttpDate);'],
   ]) {
     const result = executeProgram('dart', `${declaration} void main() { ${body} }`);
@@ -6892,6 +6927,82 @@ void main() {
     const invalid = `void main() { int n = 3; double d = ${expression}; print(d); }`;
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+test('Dart types FutureOr and nullable types by their normal form', async () => {
+  // Expected output from Dart SDK 3.13.7: a FutureOr of a top type or of Object is that type, and a nullable FutureOr
+  // of a nullable type is the FutureOr itself, in upper bounds, awaits, and async returns.
+  const program = `import 'dart:async';
+T id<T>(T t) => t;
+FutureOr<int?> f1() async => null;
+FutureOr<Object> f2() async => 2;
+Future<void> main() async {
+  print([true ? id<FutureOr<int?>>(1) : id<int?>(2)].runtimeType);
+  print([true ? id<FutureOr<int>>(1) : id<String>('s')].runtimeType);
+  print([true ? id<FutureOr<int>?>(1) : id<String>('s')].runtimeType);
+  print([true ? id<FutureOr<int>>(1) : id<double>(2)].runtimeType);
+  print([true ? id<FutureOr<Object>>(1) : id<int?>(2)].runtimeType);
+  print([await id<FutureOr<int?>>(null)].runtimeType);
+  print(await f1());
+  print(await f2());
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'List<FutureOr<int?>>\nList<Object>\nList<Object?>\nList<FutureOr<num>>\nList<Object?>\nList<int?>\nnull\n2\n',
+  });
+  // The static type keeps the bound as written, which a diagnostic names as the SDK's does.
+  for (const [left, right, bound] of [
+    ['FutureOr<String>', 'int', 'FutureOr<Object>'],
+    ['FutureOr<Object>', 'int?', 'FutureOr<Object>?'],
+    ['FutureOr<int?>', 'int?', 'FutureOr<int?>?'],
+    // A top type is the bound as written, and of two, the one MORETOP picks.
+    ['FutureOr<void>', 'String', 'FutureOr<void>'],
+    ['FutureOr<Object>?', 'int', 'FutureOr<Object>?'],
+    ['FutureOr<Object?>', 'Object?', 'FutureOr<Object?>'],
+    ['Object?', 'FutureOr<Object>?', 'Object?'],
+    ['FutureOr<void>', 'FutureOr<dynamic>', 'FutureOr<void>'],
+    // An Object-like type is the bound with a `?` when the other type may hold null.
+    ['FutureOr<Object>', 'FutureOr<int?>', 'FutureOr<Object>?'],
+  ]) {
+    const source = `import 'dart:async';\nvoid f(${left} a, ${right} b) { bool s = true ? a : b; }\nvoid main() {}`;
+    expect(executeProgram('dart', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: `'${bound}' 型の値は、'bool' 型の変数 s に代入できません。` }],
+    });
+  }
+  // await takes one FutureOr off as written, so a FutureOr<FutureOr<void>> gives a FutureOr<void> that can be passed,
+  // where a FutureOr<void> gives void.
+  const nested = `import 'dart:async';
+Future<void> h(FutureOr<FutureOr<void>> a, int b) async { var c = true ? a : b; print(await c); print(await a); }
+void main() { h(Future.value(1), 2); }`;
+  expect(executeProgram('dart', nested)).toMatchObject({ kind: 'executed', stdout: '1\n1\n' });
+  // An async function literal infers its future's value with every future taken off the returned type's normal form,
+  // and rejects a returned value that does not fit it, as the SDK does.
+  const inferred = `import 'dart:async';
+void main() {
+  var f = (FutureOr<int>? a) async => a;
+  var g = (FutureOr<FutureOr<void>> a) async => a;
+  print([f.runtimeType, g.runtimeType]);
+}`;
+  expect(executeProgram('dart', inferred)).toMatchObject({
+    kind: 'executed',
+    stdout: '[(FutureOr<int>?) => Future<int?>, (void) => Future<void>]\n',
+  });
+  for (const nested of ['Future<Future<int>>', 'FutureOr<FutureOr<int>>']) {
+    expect(
+      executeProgram('dart', `import 'dart:async';\nvoid main() { var f = (${nested} a) async => a; print(f); }`)
+    ).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: `'${nested}' 型の値は、戻り値の型 'int' に合いません。` }],
+    });
+  }
+  // void is more top than dynamic, so their bound cannot be used, as the SDK reports.
+  expect(executeProgram('dart', 'void f(dynamic a, void b) { bool s = true ? a : b; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+  });
+  const literal = 'import "dart:async"; void main() { Future<int>? Function() f = () async {}; print(f); }';
+  expect(executeProgram('dart', literal)).toMatchObject({ kind: 'compileError' });
 });
 
 test('Dart num arithmetic returns double from a double operand or contextual literal', () => {
@@ -9135,6 +9246,597 @@ void main() {
   });
 });
 
+test('file failures at a path written as a directory or under a file are unavailable, and others are the OS errors', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('f.txt').writeAsStringSync('x');
+  Directory('d').createSync();
+  print(Directory('d/').existsSync());
+  for (final run in [
+    () => File('f.txt/').readAsStringSync(),
+    () => File('f.txt/b.txt').writeAsStringSync('z'),
+    () => Directory('f.txt/sub').createSync(recursive: true),
+    () => File('missing.txt').readAsStringSync(),
+  ]) {
+    try { run(); } catch (e) { print(e); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'true',
+      'Unsupported operation: 末尾が区切り文字のパスでのファイル操作の失敗は、この採点環境では使えません。',
+      'Unsupported operation: 途中にファイルがあるパスでのファイル操作の失敗は、この採点環境では使えません。',
+      'Unsupported operation: 途中にファイルがあるパスでのファイル操作の失敗は、この採点環境では使えません。',
+      "PathNotFoundException: Cannot open file, path = 'missing.txt' (OS Error: No such file or directory, errno = 2)",
+      '',
+    ].join('\n'),
+  });
+});
+
+test('Expando finds a Type key as identical does, whichever evaluation made it', () => {
+  const source = `class A {}
+void main() {
+  final m = Expando<String>();
+  m[int] = 'x';
+  m[A().runtimeType] = 'a';
+  print([m[int], m[A], m[String]]);
+  m[int] = null;
+  print(m[int]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[x, a, null]\nnull\n' });
+});
+
+test.each(['await for (var i = 0; i < 2; i++) { print(i); }', 'print([await for (var i = 0; i < 2; i++) i]);'])(
+  'await on a C-style for is a compile error, as the SDK reports it: %s',
+  (body) => {
+    expect(executeProgram('dart', `Future<void> main() async { ${body} }`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message: 'await は、for-in の for にしか付けられません。' }],
+    });
+  }
+);
+
+test('an unavailable dart:async name is unavailable through a prefix too', () => {
+  const source = `import 'dart:async' as async;
+void main() { print(async.Zone.current); }`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: 'Zone（非同期処理）は、この採点環境では使えません。' }],
+  });
+});
+
+test('a cascade section whose ??= value awaits waits for it, in the order of the sections', () => {
+  const source = `class Box { int? x; Map<int, int> m = {}; }
+Future<int> f(int x) async { print('f $x'); return x; }
+Future<void> main() async {
+  final b = Box()..x ??= await f(1)..x ??= await f(2);
+  Box? n;
+  n?..x ??= await f(3);
+  final c = Box()..m[await f(4)] ??= await f(5);
+  print([b.x, n, c.m]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'f 1\nf 4\nf 5\n[1, null, {4: 5}]\n',
+  });
+});
+
+test('awaits in a branch or a short-circuit operand run only when it does, each part once and in order', () => {
+  const source = `var log = <String>[];
+Future<T> f<T>(String s, T v) async { log.add('f$s'); await Future<void>.value(); return v; }
+T t<T>(String s, T v) { log.add('t$s'); return v; }
+void show(String label, Object? v) { print('$label $v $log'); log = []; }
+Future<void> main() async {
+  show('a', t('a', false) && await f('b', true));
+  show('b', t('a', true) && t('b', false) && await f('c', true));
+  show('c', t('a', false) || await f('b', false));
+  show('d', t<int?>('a', null) ?? t<int?>('b', null) ?? await f('c', 3));
+  show('e', t<int?>('a', 1) ?? await f('b', 2));
+  show('f', await f('a', false) ? t('b', 1) : t('c', 2) + await f('d', 3));
+  show('g', [t('x', 0), t('a', true) ? await f('b', 1) : 0, await f('y', 9)]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'a false [ta]',
+      'b false [ta, tb]',
+      'c false [ta, fb]',
+      'd 3 [ta, tb, fc]',
+      'e 1 [ta]',
+      'f 5 [fa, tc, fd]',
+      'g [0, 1, 9] [tx, ta, fb, fy]',
+      '',
+    ].join('\n'),
+  });
+});
+
+test('??=, cascade sections and switch expression bodies that await run as ordered, guarded parts', () => {
+  const source = `var log = <String>[];
+Future<T> f<T>(String s, T v) async { log.add('f$s'); await Future<void>.value(); return v; }
+T t<T>(String s, T v) { log.add('t$s'); return v; }
+void show(String label, Object? v) { print('$label $v $log'); log = []; }
+class B { int? x; Map<int, int?> m = {}; void m2(int v) { log.add('m$v'); } B me(String s) { log.add('me$s'); return this; } }
+Future<void> main() async {
+  final b = B();
+  show('a', b.m[await f<int>('k', 1)] ??= await f('v', 2));
+  show('b', b.m[t<int>('k', 1)] ??= await f('v', 3));
+  B? n;
+  show('c', n?..m2(t('a', 1))..x = await f('b', 2));
+  show('d', (B()..me('a').x = await f('b', 1)..me('c').m2(await f('d', 2))).x);
+  show('e', switch (await f('a', 3)) { 1 => 'one', int v when v > 2 => await f('b', 'big'), _ => 'other' });
+  show('f', switch (t('a', 5)) { < 3 => t('b', 'small'), _ => t('c', 'x') + await f('d', 'y') });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'a 2 [fk, fv]',
+      'b 2 [tk]',
+      'c null []',
+      'd 1 [mea, fb, mec, fd, m2]',
+      'e big [fa, fb]',
+      'f xy [ta, tc, fd]',
+      '',
+    ].join('\n'),
+  });
+});
+
+test.each([
+  'Future<Object> f() async { return g(); }',
+  'Future<Object?> f() async { return vf(); }',
+  'Future<Object?> f() async => vf();',
+])('an async function whose value type is not void or dynamic rejects a void value: %s', (declaration) => {
+  const source = `Future<void> g() async {}\nvoid vf() {}\n${declaration}\nvoid main() {}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 2 }] });
+});
+
+test('an async function literal whose context is Future<Object?> may return a void value, as its type is inferred', () => {
+  const source = `void vf() {}
+Future<void> main() async {
+  Future<Object?> Function() k = () async { return vf(); };
+  Future<Object?> Function() a = () async => vf();
+  await k();
+  await a();
+  print('x');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'x\n' });
+});
+
+test('an async function returning Future<void> may return a future of void, and not another value', () => {
+  const accepted = `Future<void> g() async {}
+Future<void> f() async { return g(); }
+Future<void> h() async { return Future.value(1); }
+Future<void> main() async { await f(); await h(); print('x'); }`;
+  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: 'x\n' });
+  expect(executeProgram('dart', 'Future<void> f() async { return 1; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: '戻り値の型が void の関数は、値を返せません。' }],
+  });
+});
+
+test('is Null and is! Null split a nullable type parameter as any nullable type', () => {
+  const source = `int whole<T extends num>(T? v) {
+  if (v is! Null) return v.toInt();
+  return 0;
+}
+T firstOr<T>(T? value, T fallback) {
+  if (value is Null) return fallback;
+  T result = value;
+  return result;
+}
+void main() { print([whole<double>(2.5), whole<int>(null), firstOr<int>(null, 4)]); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[2, 0, 4]\n' });
+});
+
+test.each([
+  'int f<T extends int?>(T? v) { if (v is! Null) return v + 1; return 0; }',
+  'int f<T extends num?>(T? v) { if (v is! Null) return v.toInt(); return 0; }',
+  'T f<T>(T? v) { if (v is Null) { return v; } return v; }',
+  'int f<T extends int?>(T? v) { if (v is! Null) { return v ?? 0; } return 1; }',
+  'int f<T extends int?>(T? v) { if (v is! Null) { final w = v; return w ?? 0; } return 1; }',
+])('a nullable type parameter keeps its nullable bound, and a null value is Null: %s', (declaration) => {
+  expect(executeProgram('dart', `${declaration}\nvoid main() { print(f<int>(4)); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+});
+
+test('a standard stream holds a character its byte writes split, and rejects text or an end while it does', () => {
+  const split = `import 'dart:io';
+void main() { stdout.add([0xE3]); stdout.add([0x81, 0x82, 10]); print('end'); }`;
+  expect(executeProgram('dart', split)).toMatchObject({ kind: 'executed', stdout: 'あ\nend\n' });
+  const unfinished = `import 'dart:io';
+void main() { stdout.add([0x41, 0xE3]); }`;
+  expect(executeProgram('dart', unfinished)).toMatchObject({
+    kind: 'executed',
+    stdout: 'A',
+    uncaughtException:
+      'Unhandled exception:\nUnsupported operation: 文字の途中で終わるバイト列を標準出力に残したままの出力や終了は、この採点環境では使えません。',
+  });
+  // The end of the run by exit or by an uncaught error reports it too.
+  for (const end of ['exit(0);', "throw StateError('boom');"]) {
+    expect(executeProgram('dart', `import 'dart:io';\nvoid main() { stdout.add([0xE3]); ${end} }`)).toMatchObject({
+      uncaughtException:
+        'Unhandled exception:\nUnsupported operation: 文字の途中で終わるバイト列を標準出力に残したままの出力や終了は、この採点環境では使えません。',
+    });
+  }
+});
+
+test('a write of bytes that are not UTF-8 stops the run with its diagnostic instead of dropping later writes', () => {
+  const source = `import 'dart:io';
+void main() { stdout.write('a\\n'); stdout.add([0xFF]); stdout.write('lost\\n'); print('printed'); }`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'a\n',
+    uncaughtException:
+      'Unhandled exception:\nUnsupported operation: UTF-8 でないバイト列の書き込みは、この採点環境では使えません。',
+  });
+});
+
+test('byte writes keep a byte order mark and text reads drop one, as the VM decodes them', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('c.txt').writeAsBytesSync([0xEF, 0xBB, 0xBF, 0x41]);
+  print([File('c.txt').readAsBytesSync(), File('c.txt').readAsStringSync().codeUnits]);
+  File('d.txt').writeAsStringSync('\\uFEFFhello');
+  print([File('d.txt').readAsStringSync().length, File('d.txt').lengthSync()]);
+  File('e.txt').writeAsStringSync('\\ud800x');
+  print(File('e.txt').readAsStringSync().codeUnits);
+  print(stdin.readLineSync()?.codeUnits);
+}`;
+  expect(executeProgram('dart', source, { stdin: '\uFEFFabc\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: '[[239, 187, 191, 65], [65]]\n[5, 8]\n[65533, 120]\n[97, 98, 99]\n',
+  });
+});
+
+test('a converter without chunked conversion fails as a transformer, and cast gives a converter', () => {
+  const source = `import 'dart:convert';
+class Up extends Converter<String, String> { String convert(String s) => s.toUpperCase(); }
+Future<void> main() async {
+  Converter<List<int>, String> c = utf8.decoder.cast<List<int>, String>();
+  print([c.convert([65, 66]), c.runtimeType]);
+  print(await Stream.fromIterable([[67], [68]]).transform(c).toList());
+  try {
+    await Stream.fromIterable(['a']).transform(Up()).toList();
+  } on UnsupportedError catch (error) {
+    print(error.message);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '[AB, CastConverter<List<int>, String, List<int>, String>]',
+      '[C, D]',
+      "This converter does not support chunked conversions: Instance of 'Up'",
+      '',
+    ].join('\n'),
+  });
+});
+
+test('awaited async recursion whose futures have another listener first runs as deep as the SDK runs it', () => {
+  const source = `Future<int> e(int n) async { if (n == 0) return 0; final f = e(n - 1); f.then((_) {}); return 1 + await f; }
+Future<void> main() async {
+  print(await e(200));
+  final c = e(2);
+  c.then((v) => print('then $v'));
+  print('await \${await c}');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '200\nthen 2\nawait 2\n' });
+});
+
+test('await of a FutureOr<Future<int>> keeps the inner future, as the VM checks a FutureOr operand', () => {
+  const source = `import 'dart:async';
+Future<void> main() async {
+  Future<int> fi = Future.value(4);
+  FutureOr<Future<int>> q = fi;
+  var y = await q;
+  FutureOr<int> a = Future.value(5);
+  print([y is Future<int>, await a, await f<Future<int>>(fi)]);
+}
+Future<bool> f<T extends FutureOr<Future<int>>>(T x) async => (await x) is Future<int>;`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[true, 5, true]\n' });
+});
+
+test('an error thrown at the bottom of a deep chain of awaiting calls reaches the outermost catch', () => {
+  const source = `Future<int> level(int k) async {
+  if (k == 0) { await null; throw StateError('deep'); }
+  try { return await level(k - 1); } catch (e) { rethrow; }
+}
+Future<int> h(int k) async { if (k == 0) { await null; throw 'x'; } final f = h(k - 1); f.catchError((e) => 0); return await f; }
+Future<void> main() async {
+  try { print(await level(250)); } catch (e) { print('level $e'); }
+  try { print(await h(3)); } catch (e) { print('h $e'); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'level Bad state: deep\nh x\n' });
+});
+
+test('a recursive async* yield* runs as deep as the SDK runs it, with its cancel and finally order', () => {
+  const source = `Stream<int> count(int n) async* { if (n > 0) { yield n; yield* count(n - 1); } }
+Stream<int> fin(int n) async* { try { if (n > 0) { yield n; yield* fin(n - 1); } } finally { print('fin $n'); } }
+Future<void> main() async {
+  var total = 0;
+  await for (final v in count(300)) { total += v; }
+  print(total);
+  await for (final v in fin(3)) { print('v $v'); if (v == 2) break; }
+  print('after');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '45150\nv 3\nv 2\nfin 2\nfin 3\nafter\n',
+  });
+});
+
+test('an async* body a yield* attaches while its listener is paused runs once it resumes', () => {
+  const source = `import 'dart:async';
+Stream<int> b() async* { yield 1; yield 2; }
+Stream<int> a() async* { yield* b(); }
+Future<void> main() async {
+  final sub = a().listen((v) => print('got $v'), onDone: () => print('done'));
+  sub.pause();
+  Timer(Duration(milliseconds: 10), () { print('resume'); sub.resume(); });
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'resume\ngot 1\ngot 2\ndone\n' });
+});
+
+test('an attached async* body forwards a plain stream it yield*s to the root', () => {
+  const source = `Stream<int> b() async* { yield 1; yield* Stream.fromIterable([2, 3]); yield 4; }
+Stream<int> a() async* { yield 0; yield* b(); }
+Future<void> main() async { print(await a().toList()); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[0, 1, 2, 3, 4]\n' });
+});
+
+test('LineSplitter scans each chunk once, so thousands of chunks without a line break fit', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  final lines = await Stream.fromIterable(List.generate(3000, (i) => 'x')).transform(const LineSplitter()).toList();
+  print([lines.length, lines.first.length]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[1, 3000]\n' });
+});
+
+test('cancelling a deep recursive yield* chain runs its finally blocks in a fixed depth', () => {
+  const source = `import 'dart:async';
+Stream<int> down(int n) async* {
+  try {
+    if (n == 0) { yield 0; return; }
+    yield n;
+    yield* down(n - 1);
+  } finally {
+    if (n == 0) print('finally 0');
+  }
+}
+void main() async {
+  late StreamSubscription<int> sub;
+  sub = down(600).listen((x) { if (x == 0) { sub.cancel(); print('cancelled'); } });
+  await Future.delayed(Duration(milliseconds: 5));
+  print('end');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'cancelled\nfinally 0\nend\n' });
+});
+
+test('a yield* of a value that is not a stream is reported for yield*', () => {
+  expect(executeProgram('dart', 'Stream<int> a() async* { yield* [1, 2]; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: "'List<int>' 型の値は Stream ではないので、yield* では使えません。" }],
+  });
+});
+
+test('an async* stream a yield* forwarded counts as listened to, for a later listen or yield*', () => {
+  const twice = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
+Stream<int> twice() async* { final s = c(2); yield* s; try { yield* s; } catch (e) { print('inner \${e.runtimeType}'); } yield 99; }
+Future<void> main() async { await for (final v in twice()) print('v $v'); }`;
+  expect(executeProgram('dart', twice)).toMatchObject({
+    kind: 'executed',
+    stdout: 'v 2\nv 1\ninner StateError\nv 99\n',
+  });
+  const later = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
+Stream<int> forward(Stream<int> s) async* { yield* s; }
+Future<void> main() async {
+  final s = c(1);
+  await for (final v in forward(s)) print('f $v');
+  try { s.listen(null); } catch (e) { print('err \${e.runtimeType}'); }
+}`;
+  expect(executeProgram('dart', later)).toMatchObject({ kind: 'executed', stdout: 'f 1\nerr StateError\n' });
+});
+
+test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
+  const source = `import 'dart:async';
+var ticks = 0;
+Future<void> countdown(int n) async {
+  if (n == 0) return;
+  ticks++;
+  await Future.delayed(Duration(milliseconds: 1));
+  await countdown(n - 1);
+}
+Future<int> chain(int n) async {
+  if (n == 0) { print('bottom'); return 0; }
+  final r = await chain(n - 1);
+  print('up $n');
+  return r + 1;
+}
+Future<void> main() async {
+  try {
+    await countdown(300);
+    print('done $ticks');
+  } finally {
+    print('finally');
+  }
+  scheduleMicrotask(() => print('micro'));
+  print(await chain(2));
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'done 300\nfinally\nbottom\nmicro\nup 1\nup 2\n2\n',
+  });
+});
+
+test('a null-aware selector in a cascade section skips the section, awaits included', () => {
+  const source = `class Node { int? v; Node? child; void add(int a) { print('add $a'); } }
+Future<int> g(String s, [int r = 1]) async { print('g $s'); return r; }
+Future<void> main() async {
+  var n = Node();
+  n..child?.add(await g('a'))..child?.v = await g('b');
+  n.child = Node();
+  n..child?.add(await g('c', 5))..child?.v = await g('d', 6);
+  print(n.child?.v);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'g c\nadd 5\ng d\n6\n' });
+});
+
+test('a null-aware map key that is null skips its value, awaits included', () => {
+  const source = `int? sn(String tag) { print('sn $tag'); return null; }
+Future<int> f(String tag, int v) async { print('f $tag'); return v; }
+Future<void> main() async {
+  print({?sn('k1'): await f('v1', 1)});
+  print({for (var i = 0; i < 2; i++) ?(i == 0 ? null : i): await f('v$i', i)});
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'sn k1\n{}\nf v1\n{1: 1}\n' });
+});
+
+test('base64 decoding reports an invalid character after a non-ASCII one where the SDK does', () => {
+  const source = `import 'dart:convert';
+void main() {
+  for (final s in ['\\u00e9d\\u007f', '\\u00e9\\u007f', 'a\\u00e9=', 'ab\\u00bd=']) {
+    try { base64.decode(s); } catch (e) { print((e as FormatException).offset); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '2\n1\n1\n2\n' });
+});
+
+test('a json.decoder stream with a reviver is unavailable, as its calls would move to the end', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  try {
+    await Stream.fromIterable(['[1]']).transform(JsonDecoder((k, v) => v)).toList();
+  } on UnsupportedError catch (e) {
+    print(e.message);
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'reviver を指定した json.decoder のストリームは、この採点環境では使えません。\n',
+  });
+});
+
+test('a Directory rename of a file fails, as the OS fails it, and leaves the file', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('a.txt').writeAsStringSync('x');
+  try { Directory('a.txt').renameSync('b.txt'); } catch (e) { print(e); }
+  print([File('a.txt').existsSync(), File('b.txt').existsSync()]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "FileSystemException: Rename failed, path = 'a.txt' (OS Error: Not a directory, errno = 20)\n[true, false]\n",
+  });
+});
+
+test('an empty file path names nothing, as the OS fails it', () => {
+  const source = `import 'dart:io';
+void main() {
+  print(Directory('').existsSync());
+  try { Directory('').createSync(); } catch (e) { print(e); }
+  try { File('').readAsStringSync(); } catch (e) { print(e); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'false',
+      "PathNotFoundException: Creation failed, path = '' (OS Error: No such file or directory, errno = 2)",
+      "PathNotFoundException: Cannot open file, path = '' (OS Error: No such file or directory, errno = 2)",
+      '',
+    ].join('\n'),
+  });
+});
+
+test("a stream error's stack trace is unavailable to print, as a thrown error's is", () => {
+  const source = `Future<void> main() async {
+  try {
+    await Stream<int>.empty().first;
+  } catch (e, s) {
+    print(e);
+    try { print(s.toString()); } on UnsupportedError catch (x) { print(x.message); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Bad state: No element\nスタックトレースの中身は、この採点環境では使えません。\n',
+  });
+});
+
+test('a when guard that awaits runs after its pattern matches, in each construct that has one', () => {
+  const source = `Future<bool> ok(int x) async { await null; return x > 1; }
+Future<void> main() async {
+  for (var x in [1, 2]) {
+    switch (x) {
+      case int q when await ok(q): print('big $q');
+      default: print('small $x');
+    }
+  }
+  if (3 case int q when await ok(q)) print('if $q');
+  print(switch (2) { 1 => 'one', int v when await ok(v) => 'big $v', _ => 'other' });
+  print([for (final x in [1, 2, 3]) if (x case int q when await ok(q)) q]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'small 1\nbig 2\nif 3\nbig 2\n[2, 3]\n',
+  });
+});
+
+test("a utf8.encoder stream gives each chunk's bytes in buffers of 1024, as the SDK fills them", () => {
+  const source = `import 'dart:convert';
+Future<void> t(List<String> chunks) async =>
+    print((await Stream.fromIterable(chunks).transform(utf8.encoder).toList()).map((c) => c.length).toList());
+Future<void> main() async {
+  await t(['a' * 3000]);
+  await t(['a' * 1022 + 'あ']);
+  await t(['ab\\uD83D', '\\uDE00cd']);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1024, 1024, 952]\n[1022, 3]\n[2, 6]\n',
+  });
+});
+
+test('json.fuse(utf8).encoder is a JsonUtf8Encoder, which streams its bytes in buffers', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  print(await Stream<Object?>.fromIterable([[1]]).transform(json.fuse(utf8).encoder).toList());
+  final big = List.generate(100, (i) => 'é$i');
+  final chunks = await Stream<Object?>.fromIterable([big]).transform(json.fuse(utf8).encoder).toList();
+  print([json.fuse(utf8).encoder.runtimeType, chunks.map((c) => c.length).toList()]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[91, 49, 93]]\n[JsonUtf8Encoder, [256, 256, 179]]\n',
+  });
+});
+
+test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
+  const source = `import 'dart:convert';
+Future<void> main() async {
+  print(await Stream.fromIterable(['[1,', ' 2', ', {"a":', ' "b"}]']).transform(json.decoder).toList());
+  for (final chunks in [['[1,', '2'], ['', '[1,', ''], ['[1,', ' x]']]) {
+    try {
+      await Stream.fromIterable(chunks).transform(json.decoder).toList();
+    } catch (error) {
+      print(error.toString().replaceAll('\\n', '|'));
+    }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '[[1, 2, {a: b}]]',
+      'FormatException: Unexpected end of input (at character 2)|2| ^|',
+      'FormatException: Unexpected end of input (at character 1)||^|',
+      'Unsupported operation: 途中に JSON として読めない部分があるテキストを流す json.decoder のストリームは、この採点環境では使えません。',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('turtle collection skips primitive lists while following reference lists', () => {
   const source = `void main() {
   final numbers = List<num?>.filled(100000, 1);
@@ -9887,4 +10589,544 @@ test('Dart missing semicolon diagnostics use the statement row in recovered cont
       diagnostics: rows.map((row) => ({ row, message: '「;」が足りません。' })),
     });
   }
+});
+
+test('Dart directives pick conditional imports by the VM environment and accept tool-only lines', () => {
+  const program = `#!/usr/bin/env dart
+library my.tools;
+export 'dart:math';
+import 'dart:math' if (dart.library.io) 'dart:collection' as picked;
+import 'dart:math' if (dart.library.html) 'dart:collection' as kept;
+typedef int Compare(int a, int b);
+class Holder {
+  final int Function(int) f;
+  Holder(int this.f(int x));
+}
+int apply(int f(int x), [String g(Object)?]) => f(3);
+void main() {
+  print(picked.Queue.of([1]));
+  print(kept.max(1, 2));
+  Compare compare = (a, b) => a - b;
+  print([compare.runtimeType, apply((x) => x * 2), Holder((x) => x + 1).f(1)]);
+  print([bool.fromEnvironment('dart.library.io'), bool.hasEnvironment('dart.library.html')]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '{1}\n2\n[(int, int) => int, 6, 2]\n[true, false]\n',
+  });
+  for (const directive of ["part of 'main.dart';", "export 'tools.dart';", "int f() native 'f';"]) {
+    expect(executeProgram('dart', `${directive}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+  }
+});
+
+// Dart SDK 3.13.7 (`dart run`) prints the expected output: the order of microtasks, timers, and resumed awaits, the
+// update a concurrent `+=` loses, and the cleanup of an `async*` body whose listener cancelled.
+test('Dart async functions, timers, and streams run in the order of the VM event loop', () => {
+  const program = `import 'dart:async';
+int total = 0;
+Future<int> later(int x) async {
+  await null;
+  return x;
+}
+Future<void> add(int x) async {
+  total += await later(x);
+}
+Stream<int> count(int n) async* {
+  try {
+    for (var i = 1; i <= n; i++) yield i;
+  } finally {
+    print('count closed');
+  }
+}
+void main() async {
+  scheduleMicrotask(() => print('microtask'));
+  Timer(Duration(milliseconds: 5), () => print('timer 5'));
+  Timer.run(() => print('timer 0'));
+  print('main \${[1, await later(2), 3]}');
+  await Future.wait([add(1), add(2)]);
+  print('total $total');
+  var controller = StreamController<String>.broadcast();
+  controller.stream.listen((event) => print('heard $event'));
+  controller.add('a');
+  await for (var i in count(5)) {
+    if (i == 2) break;
+    print('loop $i');
+  }
+  print(await count(3).map((i) => i * 10).toList());
+  try {
+    await Future<int>.error(StateError('no')).timeout(Duration(seconds: 1));
+  } on StateError catch (e) {
+    print(e);
+  }
+  await Future.delayed(Duration(milliseconds: 10));
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'microtask\nmain [1, 2, 3]\ntotal 2\nheard a\nloop 1\ncount closed\ncount closed\n[10, 20, 30]\n' +
+      'Bad state: no\ntimer 0\ntimer 5\nend\n',
+  });
+});
+
+test('an unhandled asynchronous error ends a Dart run before later events', () => {
+  const program = `import 'dart:async';
+void main() {
+  Future.error(StateError('x'));
+  Timer(Duration(seconds: 1), () => print('later'));
+  scheduleMicrotask(() => print('microtask'));
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'end\n',
+    uncaughtException: 'Unhandled exception:\nBad state: x',
+  });
+});
+
+test.each([
+  'int f() async => 1;',
+  'void g() { await null; }',
+  "Future<int> f() async => 'x';",
+  'Future<int> f() async {}',
+  "Stream<int> f() async* { yield 'a'; }",
+  'Stream<int> f() async* { return 1; }',
+  'void g() async { await for (var x in [1]) {} }',
+])('misused async syntax `%s` is a compile error', (declaration) => {
+  expect(executeProgram('dart', `${declaration}\nvoid main() {}`)).toMatchObject({ kind: 'compileError' });
+});
+
+test('a file write opens the file when called and lands after the code that wrote it, as the SDK does', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const written = `import 'dart:io';
+Future<void> main() async {
+  final w = File('a.txt').writeAsString('hi');
+  print([File('a.txt').existsSync(), File('a.txt').readAsStringSync()]);
+  await w;
+  final f = File('b.txt');
+  final s = f.openWrite();
+  s.write('a');
+  await s.flush();
+  s.write('b');
+  print([File('a.txt').readAsStringSync(), f.readAsStringSync()]);
+  await s.close();
+  print(f.readAsStringSync());
+}`;
+  expect(executeProgram('dart', written)).toMatchObject({ kind: 'executed', stdout: '[true, ]\n[hi, a]\nab\n' });
+  // The contents land after the microtasks the caller queued and before its events, and the future completes after
+  // them, the order SDK 3.13.7 gives in every run.
+  const ordered = `import 'dart:async';
+import 'dart:io';
+String rd() => File('e.txt').readAsStringSync();
+Future<void> main() async {
+  final w = File('e.txt').writeAsString('data');
+  scheduleMicrotask(() => print('micro: \${rd()}'));
+  Future(() => print('event: \${rd()}'));
+  await w;
+  print('after: \${rd()}');
+}`;
+  expect(executeProgram('dart', ordered)).toMatchObject({
+    kind: 'executed',
+    stdout: 'micro: \nevent: data\nafter: data\n',
+  });
+  // A sink's close, flush and addStream complete after the events already due, as SDK 3.13.7 runs them.
+  const sink = `import 'dart:io';
+String rd() => File('s.txt').readAsStringSync();
+Future<void> main() async {
+  final s = File('s.txt').openWrite();
+  s.write('a');
+  Future(() => print('event: \${rd()}'));
+  await s.flush();
+  print('flushed: \${rd()}');
+  Future(() => print('event: \${rd()}'));
+  await s.addStream(Stream.value([98]));
+  print('added: \${rd()}');
+  await s.close();
+}`;
+  expect(executeProgram('dart', sink)).toMatchObject({
+    kind: 'executed',
+    stdout: 'event: a\nflushed: a\nevent: ab\nadded: ab\n',
+  });
+});
+
+test('a file sink writes an open file through its channel, flushed per line within the limits, and fails as the SDK does', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const perLine = `import 'dart:io';
+Future<void> main() async {
+  final sink = File('o.txt').openWrite();
+  for (var i = 0; i < 2000; i++) {
+    sink.writeln('line $i');
+    await sink.flush();
+  }
+  await sink.close();
+  print(File('o.txt').readAsLinesSync().length);
+}`;
+  expect(executeProgram('dart', perLine)).toMatchObject({ kind: 'executed', stdout: '2000\n' });
+  const failing = `import 'dart:io';
+Future<void> main() async {
+  final sink = File('o.txt').openWrite();
+  sink.write('a');
+  await sink.flush();
+  sink.write('b');
+  File('o.txt').renameSync('p.txt');
+  await sink.flush();
+  sink.addError('bad');
+  try { await sink.flush(); } catch (e) { print('flush $e'); }
+  try { await sink.close(); } catch (e) { print('close $e'); }
+  try { await sink.done; } catch (e) { print('done $e'); }
+  print(File('p.txt').readAsStringSync());
+}`;
+  expect(executeProgram('dart', failing)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "flush bad\nclose FileSystemException: File closed, path = 'o.txt'\ndone FileSystemException: File closed, path = 'o.txt'\nab\n",
+  });
+});
+
+test('a File at /dev/stdin or /dev/fd/0 reads what remains of standard input, as SDK 3.13.7 does', () => {
+  const program = `import 'dart:io';
+void main() {
+  print(File('/dev/stdin').lengthSync());
+  print(stdin.readLineSync());
+  print(File('/dev/stdin').lengthSync());
+  print(File('/dev/stdin').readAsLinesSync());
+  print(File('/dev/fd/0').readAsStringSync().isEmpty);
+}`;
+  // Its length counts what remains and reads none of it, as the VM answers for piped standard input.
+  expect(executeProgram('dart', program, { stdin: 'first\nsecond\nthird\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: '19\nfirst\n13\n[second, third]\ntrue\n',
+  });
+});
+
+// Dart SDK 3.13.7 (`dart run`) on macOS prints the expected output, whose errno for a non-empty directory is macOS's.
+test('Dart reads standard input and the files of its run with the SDK messages', () => {
+  const program = `import 'dart:convert';
+import 'dart:io';
+void main() async {
+  print([stdin.readLineSync(), stdin.readByteSync(), stdin.readLineSync(), stdin.readLineSync()]);
+  final file = File('notes/a.txt');
+  Directory('notes').createSync();
+  file.writeAsStringSync('one\\ntwo\\n');
+  await file.writeAsString('three\\n', mode: FileMode.append);
+  print([file.readAsLinesSync(), file.lengthSync(), await File('input.txt').readAsString()]);
+  await for (final line in file.openRead().transform(utf8.decoder).transform(const LineSplitter())) print(line);
+  print(Directory('notes').listSync().map((entity) => entity.path).toList());
+  for (final action in [() => File('none.txt').readAsStringSync(), () => Directory('notes').deleteSync()]) {
+    try {
+      action();
+    } on FileSystemException catch (error) {
+      print(error);
+    }
+  }
+  File('notes/a.txt').renameSync('b.txt');
+  Directory('notes').deleteSync();
+  File('log.txt').openWrite().write('unclosed');
+}`;
+  expect(executeProgram('dart', program, { stdin: 'first\nXsecond\n', files: { 'input.txt': 'given' } })).toMatchObject(
+    {
+      kind: 'executed',
+      stdout:
+        '[first, 88, second, null]\n[[one, two, three], 14, given]\none\ntwo\nthree\n[notes/a.txt]\n' +
+        "PathNotFoundException: Cannot open file, path = 'none.txt' (OS Error: No such file or directory, errno = 2)\n" +
+        "FileSystemException: Deletion failed, path = 'notes' (OS Error: Directory not empty, errno = 66)\n",
+      finalFiles: { 'b.txt': 'one\ntwo\nthree\n', 'input.txt': 'given', 'log.txt': 'unclosed' },
+    }
+  );
+});
+
+test('Dart DateTime computes and prints dates as the SDK does', () => {
+  const program = `void main() {
+  final date = DateTime.utc(2024, 2, 29, 13, 5, 9, 7, 3);
+  print([date, date.weekday, date.toIso8601String(), date.add(const Duration(days: 1, hours: 12))]);
+  print([DateTime.utc(2024, 3, 1).difference(DateTime.utc(2024, 1, 1)), DateTime.utc(2024, 13, 35)]);
+  print([DateTime.parse('2023-10-05T08:30:00Z'), DateTime.tryParse('nope'), date.copyWith(year: 2000)]);
+  print([DateTime.fromMillisecondsSinceEpoch(0, isUtc: true), DateTime.utc(-5), DateTime.utc(12345)]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[2024-02-29 13:05:09.007003Z, 4, 2024-02-29T13:05:09.007003Z, 2024-03-02 01:05:09.007003Z]\n' +
+      '[1440:00:00.000000, 2025-02-04 00:00:00.000Z]\n' +
+      '[2023-10-05 08:30:00.000Z, null, 2000-02-29 13:05:09.007003Z]\n' +
+      '[1970-01-01 00:00:00.000Z, -0005-01-01 00:00:00.000Z, 12345-01-01 00:00:00.000Z]\n',
+  });
+});
+
+test('a for initializer that begins with await and a name is a declaration of type await, as the SDK reads it', () => {
+  const message = "'await' は型ではありません（for の初期化で await の後に名前は書けません）。";
+  for (const init of ['await f(0)', 'await f(0) + 1', 'await/* c */f(0)']) {
+    for (const loop of [`for (${init}; k < 3; k++) {}`, `print([for (${init}; k < 3; k++) k]);`]) {
+      const program = `Future<int> f(int x) async => x;\nFuture<void> main() async {\n  var k = 0;\n  ${loop}\n}`;
+      expect(executeProgram('dart', program)).toMatchObject({
+        kind: 'compileError',
+        diagnostics: [{ row: 3, message }],
+      });
+    }
+  }
+  // An expression that begins with a literal, an operator, a keyword such as switch, or a raw string is one, and a
+  // nested comment hides what it holds, as the SDK reads them.
+  const accepted = `Future<int> f(int x) async => x;
+Future<void> main() async {
+  var k = 0;
+  for (await (f(0)); k < 1; k++) {}
+  for (await null; k < 2; k++) {}
+  for (await -k; k < 3; k++) {}
+  for (await switch (k) { _ => 1 }; k < 4; k++) {}
+  for (await r'a'; k < 5; k++) {}
+  for (await /* /* */ f(0) */ 0; k < 6; k++) {}
+  print(k);
+}`;
+  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: '6\n' });
+});
+
+test('an extension application before an await evaluates its receiver first and once, as any receiver', () => {
+  // Expected output from Dart SDK 3.13.7.
+  const program = `class Box { int v = 0; }
+extension Ext on Box { void m(int x) => print('m $x'); int get g => v; set g(int x) => v = x; }
+Future<int> f(String s, int x) async { print('f $s'); return x; }
+Box mk(String s) { print('mk $s'); return Box(); }
+void main() async {
+  Ext(mk('b')).m(await f('b', 2));
+  Ext(mk('d')).g += await f('d', 4);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'mk b\nf b\nm 2\nmk d\nf d\n' });
+});
+
+test("an await throws a program future's failing then at the await, as SDK 3.13.7 does", () => {
+  const future = `import 'dart:async';
+class BadFuture implements Future<int> {
+  @override
+  Future<R> then<R>(FutureOr<R> Function(int value) onValue, {Function? onError}) { throw 'boom'; }
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+`;
+  // The body catches it at the await, and a body that suspended before completes its future with it.
+  const caught = `${future}Future<int> h() async { await null; await BadFuture(); return 1; }
+Future<void> main() async {
+  try { await BadFuture(); } catch (e) { print('caught $e'); }
+  try { await h(); } catch (e) { print('h $e'); }
+}`;
+  expect(executeProgram('dart', caught)).toMatchObject({ kind: 'executed', stdout: 'caught boom\nh boom\n' });
+  // One a body lets out before it first suspended ends the run as an uncaught error, after its caller goes on.
+  const escaped = `${future}Future<int> f() async { await BadFuture(); return 1; }
+Future<void> main() async {
+  final pending = f();
+  print('after call');
+  try { await pending; } catch (e) { print('not reached'); }
+}`;
+  expect(executeProgram('dart', escaped)).toMatchObject({
+    kind: 'executed',
+    stdout: 'after call\n',
+    uncaughtException: 'Unhandled exception:\nboom',
+  });
+  // An async* body's stream reports it, and an error after it, to its listener as any error.
+  const stream = `${future}Stream<int> g() async* { try { await BadFuture(); } catch (e) { print('caught $e'); } throw 'later'; }
+void main() { g().listen(print, onError: (e) => print('err $e'), onDone: () => print('done')); }`;
+  expect(executeProgram('dart', stream)).toMatchObject({ kind: 'executed', stdout: 'caught boom\nerr later\ndone\n' });
+});
+
+test("a function literal's bare return goes with returns of null, not with returns of a value, as SDK 3.13.7 rules", () => {
+  const withNull = `void main() {
+  int? Function(bool) f = (b) { if (b) return; return null; };
+  Future<int?> Function(bool) g = (b) async { if (b) return; return null; };
+  Future<int?> Function(bool) h = (b) async { if (b) return; return nf(); };
+  print(f(false));
+}
+Future<Null> nf() async => null;`;
+  expect(executeProgram('dart', withNull)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
+  const withValue = `void main() {
+  int? Function(bool) f = (b) {
+    if (b) return;
+    return 2;
+  };
+}`;
+  expect(executeProgram('dart', withValue)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'この関数は値を return するので、return にも値が必要です。' }],
+  });
+});
+
+test('catchError takes a handler of any type and fails when an error reaches one that does not take Object', () => {
+  // Expected output from Dart SDK 3.13.7, whose root zone checks the handler of then but not of catchError.
+  const program = `import 'dart:async';
+Future<void> main() async {
+  try { await Future<int>.error('oops').catchError((String e) => 0); } catch (e) { print(e); }
+  print(await Future<int>.error(1).catchError((Object e, StackTrace s) => 2));
+  try { Future<int>.value(1).then((v) => v, onError: (String e) => 0); } catch (e) { print(e.runtimeType); }
+  print('end');
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "type '(String) => int' is not a subtype of type '(Object) => dynamic'\n2\nArgumentError\nend\n",
+  });
+});
+
+test('a deferred import of a library with SDK extensions must hide them, as the SDK requires', () => {
+  expect(executeProgram('dart', "import 'dart:collection' deferred as c;\nvoid main() {}")).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      {
+        row: 0,
+        message:
+          'deferred の import では拡張（IterableExtensions、NullableIterableExtensions）を読み込めません。hide IterableExtensions, NullableIterableExtensions を書いてください。',
+      },
+    ],
+  });
+  for (const directive of [
+    "import 'dart:collection' deferred as c hide IterableExtensions, NullableIterableExtensions;",
+    "import 'dart:async' deferred as a show Future;",
+    "import 'dart:convert' deferred as cv;",
+  ]) {
+    expect(executeProgram('dart', `${directive}\nvoid main() { print(1); }`)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+    });
+  }
+});
+
+test('a deferred Dart import reaches its library only after loadLibrary', () => {
+  const program = `import 'dart:math' deferred as m;
+Future<void> main() async {
+  try {
+    print(m.max(1, 2));
+  } catch (error) {
+    print(error);
+  }
+  await m.loadLibrary();
+  print(m.max(1, 2));
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Deferred library m was not loaded.\n2\n',
+  });
+  const typed = "import 'dart:math' deferred as m;\nm.Random? random;\nvoid main() {}";
+  expect(executeProgram('dart', typed)).toMatchObject({ kind: 'compileError' });
+});
+
+test('Dart types conditional, if-null, and switch expressions with FutureOr', () => {
+  const program = `import 'dart:async';
+Future<int> later(int x) async => x;
+FutureOr<int> either(bool now) => now ? 1 : later(2);
+void main() async {
+  final c = true;
+  FutureOr<int?> x = 1;
+  FutureOr<int?> y = null;
+  print([c ? x : 3, y ?? 3, x!]);
+  int? n;
+  FutureOr<int> z = n ?? later(3);
+  FutureOr<int> w = switch (c) { false => 1, _ => later(4) };
+  print([await either(false), await z, await w]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[1, 3, 1]\n[2, 3, 4]\n' });
+});
+
+// Dart SDK 3.13.7 (`dart run`) prints the expected output.
+test('Dart evaluates the parts around an await once, in source order', () => {
+  const program = `Future<int> f(int x) async {
+  print('f $x');
+  await null;
+  return x;
+}
+int g(String s) {
+  print('g $s');
+  return s.length;
+}
+var total = 1;
+Future<int> bump() async {
+  total += 10;
+  return 1;
+}
+void main() async {
+  print(g('a') + await f(1) + g('bb'));
+  total += await bump();
+  int? m;
+  m ??= await f(2);
+  m ??= await f(3);
+  final t = true;
+  print([total, m, t || await f(4) > 0, t ? await f(5) : await f(6), switch (await f(7)) { 7 => g('s'), _ => 0 }]);
+  final list = <int>[]..add(await f(8))..add(g('c'))..add(await f(9));
+  var a = await f(10), b = a + await f(11);
+  print([list, a, b]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'g a\nf 1\ng bb\n4\nf 2\nf 5\nf 7\ng s\n[2, 2, true, 5, 1]\nf 8\ng c\nf 9\nf 10\nf 11\n[[8, 1, 9], 10, 21]\n',
+  });
+});
+
+test('Dart collection for elements await each element once in order', () => {
+  const program = `Future<int> later(int x) async {
+  await null;
+  print('later $x');
+  return x * 10;
+}
+Iterable<int> numbers() sync* {
+  print('numbers 1');
+  yield 1;
+  print('numbers 2');
+  yield 2;
+}
+Stream<int> stream() async* {
+  yield 1;
+  yield 2;
+}
+void main() async {
+  print([for (var i = 0; i < 2; i++) await later(i), for (var x in numbers()) await later(x)]);
+  print([0, await for (var x in stream()) if (x.isOdd) await later(x) else x]);
+  var count = 0;
+  print([for (var i = 0; i < 3; i += 1, count++) if (i.isEven) await later(i) else count += 10, count]);
+  print([for (var x in numbers()) x, await later(3)]);
+  print({for (var i = 0; i < 1000; i++) i: await Future.value(i)}.length);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'later 0\nlater 1\nnumbers 1\nlater 1\nnumbers 2\nlater 2\n[0, 10, 10, 20]\nlater 1\n[0, 10, 2]\n' +
+      'later 0\nlater 2\n[0, 11, 20, 13]\nnumbers 1\nnumbers 2\nlater 3\n[1, 2, 30]\n1000\n',
+  });
+});
+
+// Dart SDK 3.13.7 (`dart run`) prints the expected output, except Uri.base, which there is the shell's directory.
+test('Dart parses, resolves, and encodes URIs, holds Expando entries, and draws secure random numbers', () => {
+  const program = `import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+void main() {
+  final uri = Uri.parse('https://user@dart.dev:8080/a/./b/../c%20d?x=1&x=2&y=%E3%81%82#top');
+  print([uri.host, uri.port, uri.path, uri.pathSegments, uri.queryParametersAll, uri.normalizePath(), uri.runtimeType]);
+  print([Uri.parse('http://a/b/c/d;p?q').resolve('../../g'), Uri.https('dart.dev', '/q', {'k': 'a b'})]);
+  print([Uri.encodeComponent('a b&é'), Uri.decodeQueryComponent('a+b%2B'), Uri.dataFromBytes([0, 255]), Uri.base]);
+  print([File.fromUri(Uri.file('/tmp/a b.txt')), Directory('d').uri, ascii.encode('A'), latin1.decode([233])]);
+  try {
+    Uri.parse('http://[::1');
+  } on FormatException catch (error) {
+    print(error.message);
+  }
+  final tags = Expando<String>('tag');
+  final key = Object();
+  tags[key] = 'kept';
+  print([tags[key], tags[Object()], tags]);
+  try {
+    tags[1] = 'number';
+  } on ArgumentError catch (error) {
+    print(error.message);
+  }
+  final random = Random.secure();
+  print([List.generate(50, (_) => random.nextInt(6)).every((value) => value >= 0 && value < 6), random.runtimeType]);
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '[dart.dev, 8080, /a/c%20d, [a, c d], {x: [1, 2], y: [あ]}, https://user@dart.dev:8080/a/c%20d?x=1&x=2&y=%E3%81%82#top, _Uri]\n' +
+      '[http://a/g, https://dart.dev/q?k=a+b]\n' +
+      '[a%20b%26%C3%A9, a b+, data:application/octet-stream;base64,AP8=, file:///]\n' +
+      "[File: '/tmp/a b.txt', d/, [65], é]\n" +
+      'Missing end `]` to match `[` in host\n' +
+      '[kept, null, Expando:tag]\n' +
+      'Cannot be a string, number, boolean, record, null, Pointer, Struct or Union\n' +
+      '[true, _SecureRandom]\n',
+  });
 });

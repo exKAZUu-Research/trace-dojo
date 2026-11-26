@@ -10,14 +10,15 @@ import type {
 } from './ast';
 import type { ClassInfo, ConstructorInfo, Member, MethodMember, SetterMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
-import { isDoubleContext } from './contextTypes';
+import { childContext, isDoubleContext } from './contextTypes';
 import type { ExtensionInfo, TopLevelFunction, TypeAlias } from './environment';
 import { SHORTED } from './expressionCompiler';
 import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
-import type { FunctionContext } from './scope';
+import { bodyKind, type FunctionContext } from './scope';
 import {
   closeInferenceHoles,
+  containsInferenceHole,
   INFERENCE_HOLE,
   inferExtensionReceiver,
   inferFromContext,
@@ -38,7 +39,6 @@ import {
   isNullable,
   isPotentiallyNullable,
   isSubtype,
-  isTop,
   mentionsTypeParams,
   NEVER,
   nonNullable,
@@ -253,9 +253,80 @@ export abstract class CallCompiler extends OperatorCompiler {
     return undefined;
   }
 
+  /** A call of a declaration a library prefix reaches, or undefined for one that is not a function or class. */
+  private compilePrefixedCall(
+    prefix: string,
+    callee: Extract<Expression, { kind: 'member' }>,
+    expression: Extract<Expression, { kind: 'call' }>,
+    context: DartType | undefined
+  ): Compiled | undefined {
+    const { arguments: args, typeArguments } = expression;
+    const declaration = this.library.lookupPrefixed(prefix, callee.name);
+    if (declaration?.kind === 'function')
+      return this.compileFunctionCall(declaration.fn, args, typeArguments, expression, context);
+    if (declaration?.kind === 'class') {
+      return this.compileConstructorCall(
+        declaration.cls,
+        undefined,
+        this.classTypeArguments(declaration.cls, typeArguments, callee),
+        args,
+        undefined,
+        expression,
+        context,
+        false
+      );
+    }
+    if (declaration?.kind === 'alias') {
+      const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
+      return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
+    }
+    if (!declaration) return this.undefinedName(callee, callee.name, prefix);
+    return undefined;
+  }
+
+  /** `prefix.loadLibrary()` of a `deferred as` import, which loads the library in a later event as the VM does. */
+  private compileLoadLibrary(prefix: string, expression: Extract<Expression, { kind: 'call' }>): Compiled {
+    const { arguments: args } = expression;
+    if (args.positional.length > 0 || args.named.length > 0 || expression.typeArguments) {
+      this.error(expression, 'loadLibrary には引数を渡せません。');
+    }
+    return {
+      // The SDK types it Future<dynamic>, whose value is null.
+      type: interfaceType(coreTypes.future, [DYNAMIC]),
+      run: (frame) => {
+        const { runtime } = frame;
+        const load = runtime.links.classNamed('_DeferredLoading').staticMembers.get('load');
+        return load?.impl?.(runtime, undefined, { positional: [prefix], named: undefined }, [], undefined);
+      },
+      isConst: false,
+    };
+  }
+
+  /** A call of a class's static member or named constructor, `C.b(...)`. */
+  private compileClassCall(
+    target: Extract<NonNullable<ReturnType<CallCompiler['staticTarget']>>, { kind: 'class' }>,
+    expression: Extract<Expression, { kind: 'call' }>,
+    callee: Extract<Expression, { kind: 'member' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const { arguments: args, typeArguments } = expression;
+    const member = target.cls.staticMembers.get(callee.name);
+    if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
+    const name = callee.name === 'new' ? undefined : callee.name;
+    if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
+      const types =
+        target.typeArgs ??
+        (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
+      return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
+    }
+    this.checkUnimplementedMember({ cls: target.cls }, callee.name, 'read', callee);
+    return this.error(
+      callee,
+      `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
+    );
+  }
+
   /** A call `a.b(...)`: a static member, a named constructor, a prefixed declaration, or a method. */
-  // code-gauge-allow functionCognitiveComplexity -- Static, prefixed, extension and instance calls use distinct dispatch rules.
-  // code-gauge-allow functionNcss -- Static, prefixed, extension and instance calls use distinct dispatch rules.
   private compileMemberCall(
     expression: Extract<Expression, { kind: 'call' }>,
     callee: Extract<Expression, { kind: 'member' }>,
@@ -264,41 +335,20 @@ export abstract class CallCompiler extends OperatorCompiler {
     const { arguments: args, typeArguments } = expression;
     const target = this.staticTarget(callee.object);
     if (target?.kind === 'class') {
-      const member = target.cls.staticMembers.get(callee.name);
-      if (member) return this.compileStaticCall(member, args, typeArguments, expression, context);
-      const name = callee.name === 'new' ? undefined : callee.name;
-      if (target.cls.constructors.has(name ?? '') || target.typeArgs) {
-        const types =
-          target.typeArgs ??
-          (target.alias ? this.aliasConstructor(target.alias, undefined, callee, true).types : undefined);
-        return this.compileConstructorCall(target.cls, name, types, args, typeArguments, expression, context, false);
-      }
-      return this.error(
-        callee,
-        `クラス ${target.cls.name} に ${callee.name} という static なメソッドやコンストラクタはありません。`
+      // A class reached through a deferred prefix fails until its library is loaded, before the arguments run.
+      return this.loadedThroughPrefix(target.syntax.prefix, expression, () =>
+        this.compileClassCall(target, expression, callee, context)
       );
     }
     if (target?.kind === 'prefix') {
-      const declaration = this.library.lookupPrefixed(target.prefix, callee.name);
-      if (declaration?.kind === 'function')
-        return this.compileFunctionCall(declaration.fn, args, typeArguments, expression, context);
-      if (declaration?.kind === 'class') {
-        return this.compileConstructorCall(
-          declaration.cls,
-          undefined,
-          this.classTypeArguments(declaration.cls, typeArguments, callee),
-          args,
-          undefined,
-          expression,
-          context,
-          false
-        );
+      const { prefix } = target;
+      if (callee.name === 'loadLibrary' && this.library.deferredPrefixes.has(prefix)) {
+        return this.compileLoadLibrary(prefix, expression);
       }
-      if (declaration?.kind === 'alias') {
-        const { cls, types } = this.aliasConstructor(declaration.alias, typeArguments, callee);
-        return this.compileConstructorCall(cls, undefined, types, args, undefined, expression, context, false);
-      }
-      if (!declaration) return this.undefinedName(callee, callee.name, target.prefix);
+      const call = this.loadedThroughPrefix(prefix, expression, () =>
+        this.compilePrefixedCall(prefix, callee, expression, context)
+      );
+      if (call) return call;
     }
     if (target?.kind === 'extension') {
       const member = target.ext.staticMembers.get(callee.name);
@@ -420,14 +470,14 @@ export abstract class CallCompiler extends OperatorCompiler {
   ): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
-    this.skipOnNull(receiver, nullAware);
-    if (this.dynamicDispatchType(receiver)) {
+    receiver = this.skipOnNull(receiver, nullAware, span);
+    if (this.dynamicDispatchType(receiver, nullAware)) {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
-      this.checkUnavailableIoMember(lookupType, name, span);
+      this.checkUnimplementedMember({ receiver: lookupType }, name, 'read', span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
     }
     if (
@@ -510,8 +560,9 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /**
-   * The signature `clamp` and `remainder` take in a double context: Dart then gives their arguments a double context (for
-   * `clamp` on a double and `remainder` on any other number), so `x.clamp(0, 1)` passes 0.0 and 1.0.
+   * The signature `clamp` and `remainder` take in a double or an int context: Dart then gives their arguments a double
+   * context (for `clamp` on a double and `remainder` on any other number), so `x.clamp(0, 1)` passes 0.0 and 1.0, and
+   * an int receiver's arguments an int context.
    */
   private specialNumericSignature(
     signature: FunctionType,
@@ -520,10 +571,18 @@ export abstract class CallCompiler extends OperatorCompiler {
     context: DartType | undefined
   ): FunctionType {
     const receiver = numericClassOf(receiverType);
-    if (!receiver || !context || !isDoubleContext(nonNullable(context))) return signature;
-    const doubleArguments = name === 'clamp' ? receiver === 'double' : name === 'remainder' && receiver !== 'double';
-    if (!doubleArguments) return signature;
-    return { ...signature, positional: signature.positional.map(() => interfaceType(coreTypes.double)) };
+    if (!receiver || !context || (name !== 'clamp' && name !== 'remainder')) return signature;
+    const argumentsOf = (cls: ClassInfo): FunctionType => ({
+      ...signature,
+      positional: signature.positional.map(() => interfaceType(cls)),
+    });
+    const special = childContext({ kind: 'intArithmetic' }, context);
+    if (receiver === 'int' && special?.kind === 'interface' && special.cls === coreTypes.int) {
+      return argumentsOf(coreTypes.int);
+    }
+    if (!isDoubleContext(nonNullable(context))) return signature;
+    const doubleArguments = name === 'clamp' ? receiver === 'double' : receiver !== 'double';
+    return doubleArguments ? argumentsOf(coreTypes.double) : signature;
   }
 
   /** The static type of an argument already compiled by the call, read from the types it recorded. */
@@ -579,7 +638,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       const value = this.readStatic(member, span);
       return this.compileValueCall(value, args, typeArguments, span, context);
     }
-    this.checkUnavailableStaticMember(member.owner, member.name, span);
+    this.checkUnimplementedMember({ cls: member.owner }, member.name, 'read', span);
     const bound = this.bindArguments(member.type, args, typeArguments, span, context);
     const row = this.callRow(span);
     const method = member;
@@ -641,15 +700,17 @@ export abstract class CallCompiler extends OperatorCompiler {
       prefix = undefined;
     }
     const target = this.resolveConstructorType({ ...typeSyntax, name, prefix }, expression, expression.isSelectorCall);
-    return this.compileConstructorCall(
-      target.cls,
-      constructorName,
-      target.types,
-      expression.arguments,
-      undefined,
-      expression,
-      context,
-      expression.isConst
+    return this.loadedThroughPrefix(prefix, expression, () =>
+      this.compileConstructorCall(
+        target.cls,
+        constructorName,
+        target.types,
+        expression.arguments,
+        undefined,
+        expression,
+        context,
+        expression.isConst
+      )
     );
   }
 
@@ -690,7 +751,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     isConstSyntax: boolean
   ): Compiled {
     if (methodTypeArguments) this.error(span, 'コンストラクタには、型引数をこの位置には書けません。');
-    this.checkUnavailableStaticMember(cls, name ?? '', span);
+    this.checkUnimplementedMember({ cls }, name ?? '', 'read', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor) {
       if (cls.kind === 'enum') return this.error(span, '列挙型のオブジェクトは作れません。');
@@ -988,7 +1049,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         typeParams,
         kind: {
           returnType: undefined,
-          isGenerator: expression.body.modifier === 'sync*',
+          ...bodyKind(expression.body.modifier),
           thisClass: this.fn.kind.thisClass,
           thisType: this.fn.kind.thisType,
           hasThis: this.fn.kind.hasThis,
@@ -1093,7 +1154,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   compileConstructorTearoff(type: TypeSyntax, name: string | undefined, span: Span): Compiled {
     if (type.kind !== 'named') return this.error(span, 'クラスの名前を書いてください。');
     const { cls, types: typeArgs } = this.resolveConstructorType(type, span);
-    this.checkUnavailableStaticMember(cls, name ?? '', span);
+    this.checkUnimplementedMember({ cls }, name ?? '', 'read', span);
     const constructor = cls.constructors.get(name === 'new' ? '' : (name ?? ''));
     if (!constructor)
       return this.error(span, `クラス ${cls.name} に ${name ?? '名前のない'} コンストラクタはありません。`);
@@ -1159,7 +1220,10 @@ export abstract class CallCompiler extends OperatorCompiler {
       );
     }
     const member = cls.staticMembers.get(name);
-    if (!member) return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
+    if (!member) {
+      this.checkUnimplementedMember({ cls }, name, 'read', expression);
+      return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
+    }
     return this.readStatic(member, expression);
   }
 }
@@ -1312,7 +1376,8 @@ function callArgument(
 /**
  * What a type parameter stands for in an argument's context. A closure's parameters take the context's type over what
  * the other arguments gave, as Dart solves the context first: `num n = ap(1, (a) => a + 1)` types `a` as num. Other
- * arguments see only a context that says more than Object?, as `[3, 9]` in `print(maxOf([3, 9]))` stays a List<int>.
+ * arguments see it too, Object? included: `Object? o = await wrap(f)` infers wrap's T as Object?, while `[1, 2]` in
+ * `Object? o = pick([1, 2])` stays a List<int>, as a literal does under any context that is not a collection.
  * A context beyond the bound is clamped to it, as `print(pick([1], (x) => x.isEven))` types x as num.
  */
 function argumentContextFor(
@@ -1326,10 +1391,7 @@ function argumentContextFor(
   const params = new Set(type.typeParams);
   const contextual = fromContext.get(param);
   const usable =
-    contextual &&
-    !mentionsTypeParams(contextual, params) &&
-    withinBound(param, contextual, type.typeParams) &&
-    (closurePass || !isTop(contextual))
+    contextual && !mentionsTypeParams(contextual, params) && withinBound(param, contextual, type.typeParams)
       ? contextual
       : undefined;
   if (usable) return usable;
@@ -1371,17 +1433,12 @@ function chooseTypeArguments(
     const fromArguments = solution.get(param);
     const contextual = fromContext.get(param);
     const limit = upper.get(param);
-    if (
-      contextual &&
-      !isInferenceHole(contextual) &&
-      !mentionsTypeParams(contextual, params) &&
-      withinBound(param, contextual, type.typeParams)
-    ) {
-      return contextual;
-    }
+    // A context with a part still unknown, as FutureOr<_> from `Future.value(pick(1))`, does not decide the argument.
+    const known = contextual && !containsInferenceHole(contextual) ? contextual : undefined;
+    if (known && !mentionsTypeParams(known, params) && withinBound(param, known, type.typeParams)) return known;
     if (fromArguments && !isInferenceHole(fromArguments)) return fromArguments;
     if (limit && !isInferenceHole(limit)) return limit;
-    if (contextual && !isInferenceHole(contextual)) return contextual;
+    if (known) return known;
     return defaults[index];
   });
 }

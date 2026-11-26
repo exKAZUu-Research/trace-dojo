@@ -6,8 +6,17 @@ import type { Runtime } from '../runtime';
 import { coreTypes, vmTypeString } from '../types';
 import { DartClosure, DartList, DartObject, DartPackedList, DartRecord, DartTypeValue, type Value } from '../values';
 import { appendJsonQuoted, BoundedStringParts } from './boundedStringParts';
+import { requireFinishedCharacter } from './nativeOthers';
 import { appendRegExpDescription, isRegExp } from './nativeRegExp';
-import { define, defineConstructor, forEachValue, intArg, iterableValues, stringArg } from './nativeSupport';
+import {
+  define,
+  defineConstructor,
+  forEachValue,
+  intArg,
+  iterableValues,
+  stringArg,
+  throwUnavailable,
+} from './nativeSupport';
 import { sameVmType, vmTypeHash } from './vmTypeHash';
 
 // Object
@@ -201,12 +210,9 @@ define('Error.throwWithStackTrace', (runtime, _receiver, [error, stackTrace]) =>
   throw runtime.newThrow(error, stackTrace);
 });
 // The VM's stack traces show file paths and the VM's own frames, which the interpreter cannot reproduce.
-define('StackTrace.current', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['StackTrace.current は、この採点環境では使えません。'])
-);
-define('_StackTrace.toString', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['スタックトレースの中身は、この採点環境では使えません。'])
-);
+define('_unavailable', (runtime, _receiver, [what]) => throwUnavailable(runtime, what as string));
+define('StackTrace.current', (runtime) => throwUnavailable(runtime, 'StackTrace.current'));
+define('_StackTrace.toString', (runtime) => throwUnavailable(runtime, 'スタックトレースの中身'));
 
 function safeToStringOf(runtime: Runtime, root: Value): string {
   const output = new BoundedStringParts(runtime);
@@ -361,7 +367,10 @@ function appendInvocationArguments(runtime: Runtime, output: BoundedStringParts,
 // Top-level functions
 
 define('print', (runtime, _receiver, [value]) => {
-  runtime.io.stdout.write(`${stringOf(runtime, value)}\n`, encodableText);
+  const text = `${stringOf(runtime, value)}\n`;
+  requireFinishedCharacter(runtime, false);
+  // The VM's print still converts its argument once stdout is closed; the closed channel drops the text.
+  runtime.io.stdout.write(text, encodableText);
   return;
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));
@@ -450,3 +459,45 @@ defineTurtle('remove', (runtime, state) => {
 });
 
 export { asciiNames, formatDouble, identityOf };
+
+/**
+ * Each Expando's values, by key. A key is found as identical() finds it: objects by identity, and Type values, which
+ * each evaluation of a type literal or runtimeType makes anew, by the type they stand for.
+ */
+interface ExpandoEntries {
+  /** Held weakly: an entry drops once its key object is no longer reachable, as the VM's does. */
+  objects: WeakMap<object, Value>;
+  /**
+   * A list, as a Type key is a new object at each evaluation, which a weak table would never find again, so it is
+   * looked up by identical(); its entries are released with the Expando that holds them.
+   */
+  types: { type: DartTypeValue; value: Value }[];
+}
+
+const expandoEntries = new WeakMap<DartObject, ExpandoEntries>();
+
+function expandoEntriesOf(receiver: Value): ExpandoEntries {
+  let entries = expandoEntries.get(receiver as DartObject);
+  if (!entries) {
+    entries = { objects: new WeakMap(), types: [] };
+    expandoEntries.set(receiver as DartObject, entries);
+  }
+  return entries;
+}
+
+define('Expando._get', (_runtime, receiver, [object]) => {
+  const entries = expandoEntriesOf(receiver);
+  if (object instanceof DartTypeValue) return entries.types.find((entry) => identical(entry.type, object))?.value;
+  return entries.objects.get(object as object);
+});
+define('Expando._set', (_runtime, receiver, [object, value]) => {
+  const entries = expandoEntriesOf(receiver);
+  if (object instanceof DartTypeValue) {
+    entries.types = entries.types.filter((entry) => !identical(entry.type, object));
+    if (value !== undefined) entries.types.push({ type: object, value });
+    return;
+  }
+  if (value === undefined) entries.objects.delete(object as object);
+  else entries.objects.set(object as object, value);
+  return;
+});

@@ -1,45 +1,70 @@
-// code-gauge-allow-file fileNcss -- Switches and loops share flow analysis with their generator forms.
-import type { Block, CatchClause, Pattern, Span, Statement, SwitchCase } from './ast';
+import type { Block, CatchClause, Expression, Pattern, Span, Statement, SwitchCase } from './ast';
 import { localNamesIn } from './astWalk';
-import type { FunctionSpec } from './callCompiler';
-import type { Compiled, Eval } from './compilerBase';
-import { checkExhaustive } from './exhaustiveness';
-import { type CompiledPattern, PatternCache } from './patternCompiler';
-import { DartThrow, type Frame } from './runtime';
-import { Flow, type LocalVar } from './scope';
+// code-gauge-allow-file fileNcss -- Switches and loops share flow analysis with their generator forms.
+import type { AsyncTask } from './asyncTask';
 import {
-  advanceCountedLoop,
+  AwaitRequest,
+  type AwaitRoot,
+  containsSuspension,
+  evaluateParts,
+  evaluatePartsThen,
+  type GenEval,
+  LISTENER_CANCELLED,
+  newAwaitRoot,
+  runWithoutWaiting,
+  suspensionStarts,
+  YieldEachRequest,
+} from './awaitSteps';
+import type { FunctionSpec } from './callCompiler';
+import { type ClassInfo, scopedMemberName } from './classes';
+import { type Compiled, type Eval, typeName } from './compilerBase';
+import { checkExhaustive } from './exhaustiveness';
+import { type CompiledPattern, guardHolds, PatternCache } from './patternCompiler';
+import { DartThrow, type Frame } from './runtime';
+import { type ConditionFlow, Flow, type LocalVar } from './scope';
+import {
   type Completion,
+  copyLoopVariables,
   type CountedLoop,
   type Exec,
   type GenExec,
   loopCompletion,
+  runLoopUpdates,
   startCountedLoop,
   StatementCompiler,
 } from './statementCompiler';
 import {
+  asInstanceOf,
   coreTypes,
   type DartType,
   DYNAMIC,
+  futureValueType,
   interfaceType,
+  isNullable,
   isSubtype,
   iterableElementOf,
+  NEVER,
   nonNullable,
+  resolveBound,
   sameType,
 } from './types';
-import { Cell, type Value } from './values';
+import { Cell, NO_ARGUMENTS, type Value } from './values';
 
 /** Switch, try, and the bodies of sync* generators. */
 export abstract class ControlCompiler extends StatementCompiler {
   protected compileSwitch(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const { groups, select, route } = this.compileSwitchPlan(statement, (body) => this.compileStatements(body));
-    return (frame) => runSwitchFrom(frame, select(frame), groups, route);
+    return (frame) => runSwitchFrom(frame, runWithoutWaiting(select(frame)), groups, route);
   }
 
   private compileSwitchPlan<T>(
     statement: Extract<Statement, { kind: 'switch' }>,
     compileBody: (body: Statement[]) => T
-  ): { groups: SwitchGroup<T>[]; select: (frame: Frame) => number; route: SwitchRoute } {
+  ): {
+    groups: SwitchGroup<T>[];
+    select: (frame: Frame) => Generator<AwaitRequest, number, Value>;
+    route: SwitchRoute;
+  } {
     const labels = this.takeLoopLabels();
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
@@ -55,11 +80,12 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (statement.cases.length === 0) after = before;
     this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
     const test = subject.run;
-    const select = (frame: Frame): number => {
+    // A guard that awaits makes the selection wait, which only a generator's switch runs.
+    const select = function* (frame: Frame): Generator<AwaitRequest, number, Value> {
       const value = test(frame);
       frame.temporaries.push(value);
       try {
-        return PatternCache.run(frame, (cache) => selectSwitchGroup(frame, value, groups, cache));
+        return yield* PatternCache.runAwaiting(frame, (cache) => selectSwitchGroup(frame, value, groups, cache));
       } finally {
         frame.temporaries.pop();
       }
@@ -118,9 +144,9 @@ export abstract class ControlCompiler extends StatementCompiler {
       return head;
     };
     if (cases.length === 1 && !hasLabel) {
-      const { pattern, guard, flow } = compileHead(cases[0]);
+      const { pattern, guard, guardGen, flow } = compileHead(cases[0]);
       this.flow = flow;
-      return { matchers: [{ pattern, guard, slots: [], bindings: [] }], unmatched };
+      return { matchers: [{ pattern, guard, guardGen, slots: [], bindings: [] }], unmatched };
     }
     const heads = cases.map((switchCase) => this.withScope(() => compileHead(switchCase)));
     let joined = heads[0].result.flow;
@@ -131,9 +157,10 @@ export abstract class ControlCompiler extends StatementCompiler {
       heads.map(({ result }) => result.pattern),
       hasLabel
     );
-    const matchers = heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
+    const matchers = heads.map(({ result: { pattern, guard, guardGen }, slots: headSlots }): SwitchMatcher => ({
       pattern,
       guard,
+      guardGen,
       slots: headSlots,
       bindings: variables.flatMap((variable) => {
         const binding = pattern?.variables.get(variable.name);
@@ -160,7 +187,13 @@ export abstract class ControlCompiler extends StatementCompiler {
     switchCase: SwitchCase,
     subject: Compiled,
     before: Flow
-  ): { pattern: CompiledPattern | undefined; guard: Eval | undefined; flow: Flow; whenFalse: Flow } {
+  ): {
+    pattern: CompiledPattern | undefined;
+    guard: Eval | undefined;
+    guardGen?: GenEval;
+    flow: Flow;
+    whenFalse: Flow;
+  } {
     this.flow = before;
     if (!switchCase.pattern) return { pattern: undefined, guard: undefined, flow: before, whenFalse: before };
     const matched = this.compileCasePattern(switchCase.pattern, subject, switchCase.guard);
@@ -364,11 +397,15 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   protected compileGeneratorBody(spec: FunctionSpec, expectedReturn: DartType | undefined): (frame: Frame) => Value {
-    if (spec.body.kind === 'expression') return this.error(spec.body, 'sync* の関数には、=> の本体は書けません。');
-    const elementType = expectedReturn ? iterableElementOf(nonNullable(expectedReturn)) : undefined;
-    const iterable = interfaceType(coreTypes.iterable, [elementType ?? DYNAMIC]);
-    if (expectedReturn && (spec.returnType?.kind === 'void' || !isSubtype(iterable, expectedReturn))) {
-      this.error(spec.span, 'sync* の関数の戻り値の型には、Iterable を代入できる必要があります。');
+    const { isAsync } = spec.kind;
+    const modifier = isAsync ? 'async*' : 'sync*';
+    if (spec.body.kind === 'expression')
+      return this.error(spec.body, `${modifier} の関数には、=> の本体は書けません。`);
+    const container = isAsync ? coreTypes.stream : coreTypes.iterable;
+    const elementType = expectedReturn ? this.elementTypeOf(nonNullable(expectedReturn), container) : undefined;
+    const sequence = interfaceType(container, [elementType ?? DYNAMIC]);
+    if (expectedReturn && (spec.returnType?.kind === 'void' || !isSubtype(sequence, expectedReturn))) {
+      this.error(spec.span, `${modifier} の関数の戻り値の型には、${container.name} を代入できる必要があります。`);
     }
     this.fn.yieldElement = elementType;
     const body = this.compileGenBlock(spec.body.block);
@@ -376,12 +413,93 @@ export abstract class ControlCompiler extends StatementCompiler {
       this.fn.yieldElement = this.inferYieldElement(this.fn);
     }
     const resolveElement = this.runtimeType(this.fn.yieldElement ?? DYNAMIC);
+    if (isAsync) return (frame) => frame.runtime.links.startAsyncStar(frame, resolveElement(frame), body);
     return (frame) => this.makeSyncStarIterable(frame, resolveElement(frame), body);
   }
 
-  private compileGenBlock(block: Block): GenExec {
-    const { result, slots } = this.withScope(() => this.compileGenStatements(block.statements));
-    return clearingSlots(result, slots);
+  private elementTypeOf(type: DartType, container: ClassInfo): DartType | undefined {
+    if (container === coreTypes.iterable) return iterableElementOf(type);
+    const base = resolveBound(type);
+    if (base.kind === 'dynamic') return DYNAMIC;
+    return base.kind === 'interface' && !base.nullable ? asInstanceOf(base, container)?.args[0] : undefined;
+  }
+
+  /** The body of an `async` function, which runs until its first `await` and returns its future. */
+  protected compileAsyncBody(spec: FunctionSpec): (frame: Frame) => Value {
+    const declared = spec.returnType;
+    const futureOfNever = interfaceType(coreTypes.future, [NEVER]);
+    if (declared && (declared.kind === 'void' ? false : !isSubtype(futureOfNever, declared))) {
+      this.error(spec.span, 'async の関数の戻り値の型は、Future か FutureOr にしてください。');
+    }
+    const { body: functionBody } = spec;
+    const body =
+      functionBody.kind === 'expression'
+        ? this.compileGenStatement(this.arrowBodyReturn(functionBody.expression))
+        : this.compileGenBlock(functionBody.block, false);
+    this.checkBodyEnd(spec);
+    const value = declared ? futureValueType(declared) : this.inferredFutureValue(this.fn, spec);
+    const resolveValue = this.runtimeType(value);
+    return (frame) => frame.runtime.links.startAsync(frame, resolveValue(frame), body);
+  }
+
+  /**
+   * Compiles the parts of a statement that `heads` holds, whose `await`s suspend the statement's generator: the steps
+   * that evaluate the parts that await, or undefined when none does.
+   */
+  private resuming<T>(
+    heads: readonly (Span | undefined)[],
+    compile: () => T
+  ): { result: T; parts: AwaitRoot | undefined } {
+    const ranges = heads.filter((head) => head !== undefined);
+    const awaitStarts = ranges.flatMap((head) => suspensionStarts(head, false));
+    if (!this.fn.kind.isAsync || awaitStarts.length === 0) return { result: compile(), parts: undefined };
+    const root = newAwaitRoot(this.fn, ranges, awaitStarts);
+    const savedRoot = this.awaitRoot;
+    const savedStaging = this.staging;
+    this.awaitRoot = root;
+    this.staging = root.staging;
+    try {
+      return { result: compile(), parts: root };
+    } finally {
+      this.awaitRoot = savedRoot;
+      this.staging = savedStaging;
+    }
+  }
+
+  /** A statement without nested statements that awaits, which records its step once it completes. */
+  private compileResumingStatement(statement: Statement): GenExec {
+    const capture: NonNullable<typeof this.stepCapture> = { statement, step: undefined };
+    const savedCapture = this.stepCapture;
+    this.stepCapture = capture;
+    let compiled: { result: Exec; parts: AwaitRoot | undefined };
+    try {
+      compiled = this.resuming([statement], () => this.compileStatement(statement));
+    } finally {
+      this.stepCapture = savedCapture;
+    }
+    const { result: exec, parts } = compiled;
+    const { step } = capture;
+    return function* (frame) {
+      const { steps } = frame.runtime;
+      const task = frame.asyncTask as AsyncTask;
+      const begun = task.recordedSteps;
+      const spawnedBefore = task.spawned.length;
+      const completion = parts ? yield* evaluateParts(frame, parts, () => exec(frame)) : exec(frame);
+      // Only the steps the statement recorded itself, and those of the calls it started, can show what its calls
+      // did, not those of other work it waited on.
+      if (step) {
+        // Counted only for a statement a trace records, as it walks the tasks the statement started.
+        const own = task.recordedSteps - begun + task.spawnedSteps(spawnedBefore);
+        steps.completeStatement(step.row, step.onlyCalls, steps.statementMark() - own);
+      }
+      return completion;
+    };
+  }
+
+  /** @param clear Whether the block's variables end with it, which the body of a function keeps for its trace's end. */
+  private compileGenBlock(block: Block, clear = true): GenExec {
+    const { result, slots } = this.withScope(() => this.compileGenStatements(block.statements), clear);
+    return clear ? clearingSlots(result, slots) : result;
   }
 
   private compileGenStatements(statements: Statement[]): GenExec {
@@ -398,7 +516,7 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   private compileGenStatement(statement: Statement): GenExec {
     if (statement.kind === 'block') return this.compileGenBlock(statement);
-    if (!containsYield(statement)) {
+    if (!containsSuspension(statement)) {
       const exec = this.compileStatement(statement);
       // oxlint-disable-next-line require-yield -- A statement without yield runs as one step of the generator.
       return function* (frame) {
@@ -407,7 +525,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     }
     switch (statement.kind) {
       case 'yield': {
-        return this.compileYield(statement);
+        const { isGenerator, isAsync } = this.fn.kind;
+        return isGenerator && isAsync ? this.compileAsyncYield(statement) : this.compileYield(statement);
       }
       case 'if': {
         return statement.casePattern ? this.compileGenIfCase(statement) : this.compileGenIf(statement);
@@ -434,16 +553,22 @@ export abstract class ControlCompiler extends StatementCompiler {
         return this.compileGenDo(statement);
       }
       default: {
-        return this.unsupported(statement, 'sync* の中の、yield を含むこの文');
+        return this.compileResumingStatement(statement);
       }
     }
   }
 
   private compileGenSwitch(statement: Extract<Statement, { kind: 'switch' }>): GenExec {
-    const { groups, select, route } = this.compileSwitchPlan(statement, (body) => this.compileGenStatements(body));
+    const guards = statement.cases.flatMap((switchCase) => ('guard' in switchCase ? [switchCase.guard] : []));
+    const {
+      result: { groups, select, route },
+      parts: selectParts,
+    } = this.resuming([statement.subject, ...(guards as Span[])], () =>
+      this.compileSwitchPlan(statement, (body) => this.compileGenStatements(body))
+    );
     return function* (frame) {
       frame.runtime.spend();
-      let index = select(frame);
+      let index = yield* evaluatePartsThen(frame, selectParts, () => select(frame));
       while (index >= 0) {
         const group = groups[index];
         let completion: Completion | void;
@@ -538,7 +663,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   private compileGenIf(statement: Extract<Statement, { kind: 'if' }>): GenExec {
-    const { compiled: condition, flow } = this.compileCondition(statement.condition);
+    const { test, flow, parts: testParts } = this.compileResumingCondition(statement.condition);
     this.flow = flow.whenTrue;
     const consequence = this.compileGenScoped(statement.consequence);
     const afterThen = this.flow;
@@ -546,21 +671,35 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { alternative } = statement;
     const otherwise = alternative ? this.compileGenScoped(alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
-    const test = condition.run;
     return function* (frame) {
-      if (test(frame)) return yield* consequence(frame);
+      if (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame)) {
+        return yield* consequence(frame);
+      }
       if (otherwise) return yield* otherwise(frame);
       return;
     };
   }
 
+  /** A condition of a statement in a generator, with the steps that evaluate its parts that await. */
+  private compileResumingCondition(condition: Expression): {
+    test: Eval;
+    flow: ConditionFlow;
+    parts: AwaitRoot | undefined;
+  } {
+    const { result, parts } = this.resuming([condition], () => this.compileCondition(condition));
+    return { test: result.compiled.run, flow: result.flow, parts };
+  }
+
   private compileGenIfCase(statement: Extract<Statement, { kind: 'if' }>): GenExec {
-    const { match, consequence, otherwise, slots } = this.compileIfCaseParts(statement, (body) =>
-      this.compileGenScoped(body)
+    const {
+      result: { match, consequence, otherwise, slots },
+      parts: matchParts,
+    } = this.resuming([statement.condition, statement.casePattern?.guard], () =>
+      this.compileIfCaseParts(statement, (body) => this.compileGenScoped(body))
     );
     return function* (frame) {
       try {
-        if (match(frame)) return yield* consequence(frame);
+        if (yield* evaluatePartsThen(frame, matchParts, () => match(frame))) return yield* consequence(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
@@ -573,13 +712,12 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenWhile(statement: Extract<Statement, { kind: 'while' }>): GenExec {
     const labels = this.takeLoopLabels();
     this.enterLoop(statement);
-    const { compiled: condition, flow } = this.compileCondition(statement.condition);
+    const { test, flow, parts: testParts } = this.compileResumingCondition(statement.condition);
     this.flow = flow.whenTrue;
     const body = this.compileGenLoopBody(statement.body, labels);
     this.finishLoop(flow.whenFalse, this.fn.jumpTargets.pop());
-    const test = condition.run;
     return function* (frame) {
-      while (test(frame)) {
+      while (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame)) {
         const completion = yield* body(frame);
         if (completion) {
           const outcome = loopCompletion(completion, labels);
@@ -591,10 +729,12 @@ export abstract class ControlCompiler extends StatementCompiler {
     };
   }
 
-  // code-gauge-allow duplicateLines -- The synchronous and yielding loops share flow analysis and differ in how the body resumes.
   private compileGenDo(statement: Extract<Statement, { kind: 'do' }>): GenExec {
-    const { labels, body, test } = this.compileDoPlan(statement, (body, labels) =>
-      this.compileGenLoopBody(body, labels)
+    const {
+      result: { labels, body, test },
+      parts: testParts,
+    } = this.resuming([statement.condition], () =>
+      this.compileDoPlan(statement, (body, labels) => this.compileGenLoopBody(body, labels))
     );
     return function* (frame) {
       do {
@@ -604,7 +744,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           if (outcome !== 'continue') return outcome;
         }
         frame.runtime.spend();
-      } while (test(frame));
+      } while (testParts ? yield* evaluateParts(frame, testParts, () => test(frame)) : test(frame));
       return;
     };
   }
@@ -615,65 +755,75 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow duplicateLines -- A generator shares the loop header and suspends around the body.
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const { initExec, initRow, loopSlots } = this.compileForInit(statement);
+      const init = Array.isArray(statement.init) ? statement.init : [statement.init];
+      const {
+        result: { initExec, initRow, loopSlots },
+        parts: initParts,
+      } = this.resuming(init, () => this.compileForInit(statement));
       this.enterLoop(statement);
-      const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
+      const { condition: conditionSyntax } = statement;
+      const { result: condition, parts: testParts } = this.resuming([conditionSyntax], () =>
+        conditionSyntax ? this.compileCondition(conditionSyntax) : undefined
+      );
       const exit = condition?.flow.whenFalse ?? this.flow.unreachable;
       if (condition) this.flow = condition.flow.whenTrue;
       const body = this.compileGenLoopBody(statement.body, labels);
       const target = this.fn.jumpTargets.pop();
       if (target?.continueFlow) this.flow = Flow.join(this.flow, target.continueFlow);
-      const updates = statement.updates.map((update) => this.compileExpression(update).run);
+      const { result: updates, parts: updateParts } = this.resuming(statement.updates, () =>
+        statement.updates.map((update) => this.compileExpression(update).run)
+      );
       this.finishLoop(exit, target);
-      return genForLoop({
-        initExec,
-        initRow,
-        test: condition?.compiled.run,
-        body,
-        updates,
-        labels,
-        loopSlots,
-        updateRow: updates.length > 0 ? this.stepRowOf(statement) : undefined,
-      });
+      return genForLoop(
+        {
+          initExec,
+          initRow,
+          test: condition?.compiled.run,
+          body,
+          updates,
+          labels,
+          loopSlots,
+          updateRow: updates.length > 0 ? this.stepRowOf(statement) : undefined,
+        },
+        { init: initParts, test: testParts, update: updateParts }
+      );
     });
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow duplicateLines -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  // code-gauge-allow functionCognitiveComplexity -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss -- Iteration retains source state while its body suspends.
   private compileGenForIn(statement: Extract<Statement, { kind: 'forIn' }>): GenExec {
     const labels = this.takeLoopLabels();
-    const iterable = this.compileExpression(statement.iterable);
-    const elementType = this.elementTypeOfIterable(iterable, statement.iterable);
+    const { isAwait } = statement;
+    if (isAwait) this.requireAsyncBody(statement, 'await for');
+    const { result: iterable, parts: sourceParts } = this.resuming([statement.iterable], () =>
+      this.compileExpression(statement.iterable)
+    );
+    const elementType = isAwait
+      ? this.elementTypeOfStream(iterable, statement.iterable)
+      : this.elementTypeOfIterable(iterable, statement.iterable);
     const { result, slots } = this.withScope(() => {
       this.enterLoop(statement);
       const before = this.flow;
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
       const body = this.compileGenLoopBody(statement.body, labels);
       this.finishLoop(before, this.fn.jumpTargets.pop());
+      if (isAwait)
+        return awaitForLoop(iterable.run, sourceParts, this.runtimeType(elementType), { bind, body, labels });
       const source = this.iterableSource(iterable);
-      return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
+      const loop: IteratorLoop = { bind, body, labels };
+      return function* (frame: Frame): ReturnType<GenExec> {
         const { runtime } = frame;
-        const values = source(frame);
+        const values = yield* evaluateParts(frame, sourceParts, () => source(frame));
         const iterator = runtime.getProperty(values, 'iterator', undefined);
         frame.temporaries.push(iterator);
         try {
-          for (;;) {
-            runtime.spend();
-            if (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) !== true)
-              return undefined;
-            bind(frame, runtime.getProperty(iterator, 'current', undefined));
-            const completion = yield* body(frame);
-            if (completion) {
-              const outcome = loopCompletion(completion, labels);
-              if (outcome !== 'continue') return outcome;
-            }
-          }
+          // oxlint-disable-next-line require-yield -- An Iterator's moveNext answers at once; a stream's is awaited.
+          return yield* iterate(frame, iterator, loop, function* () {
+            return runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined);
+          });
         } finally {
           const index = frame.temporaries.lastIndexOf(iterator);
           if (index !== -1) frame.temporaries.splice(index, 1);
@@ -681,6 +831,24 @@ export abstract class ControlCompiler extends StatementCompiler {
       };
     });
     return clearingSlots(result, slots);
+  }
+
+  /** The element type of a stream that `await for` or an `async*` body's `yield*`, the construct named, reads. */
+  protected elementTypeOfStream(
+    stream: Compiled,
+    span: Span,
+    construct: 'await for' | 'yield*' = 'await for'
+  ): DartType {
+    const type = resolveBound(stream.type);
+    if (type.kind === 'dynamic') return DYNAMIC;
+    if (isNullable(type)) {
+      this.error(span, `${typeName(stream.type)} 型の値は null かもしれないので、${construct} では使えません。`);
+    }
+    const element = type.kind === 'interface' ? asInstanceOf(type, coreTypes.stream)?.args[0] : undefined;
+    return (
+      element ??
+      this.error(span, `${typeName(stream.type)} 型の値は Stream ではないので、${construct} では使えません。`)
+    );
   }
 
   private compileGenLoopBody(body: Statement, labels: string[]): GenExec {
@@ -697,7 +865,8 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   // code-gauge-allow functionNcss -- One case per form of the construct, which reads best together.
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
-    if (!this.fn.kind.isGenerator) return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
+    if (!this.fn.kind.isGenerator)
+      return this.error(statement, 'yield は sync* か async* の関数の中にしか書けません。');
     const elementType = this.fn.yieldElement;
     const context = statement.isEach
       ? elementType
@@ -752,6 +921,41 @@ export abstract class ControlCompiler extends StatementCompiler {
       return;
     };
   }
+
+  /** `yield` and `yield*` in an `async*` body, which add to the function's stream and may await in their value. */
+  private compileAsyncYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
+    const elementType = this.fn.yieldElement;
+    const { isEach } = statement;
+    const context = isEach ? (elementType ? interfaceType(coreTypes.stream, [elementType]) : undefined) : elementType;
+    const { result: compiled, parts } = this.resuming([statement.value], () => {
+      const value = this.compileExpression(statement.value, context);
+      if (!isEach) {
+        this.fn.yieldTypes?.push(value.type);
+        if (!elementType) return value;
+        return this.coerce(
+          value,
+          elementType,
+          statement.value,
+          (from, to) => `${from} 型の値は、${to} 型の Stream に yield できません。`
+        );
+      }
+      this.fn.yieldTypes?.push(this.elementTypeOfStream(value, statement.value, 'yield*'));
+      return this.coerce(
+        value,
+        context ?? interfaceType(coreTypes.stream, [DYNAMIC]),
+        statement.value,
+        (from, to) => `${from} 型の値は、${to} 型の Stream に yield* できません。`
+      );
+    });
+    const { run } = compiled;
+    const row = this.stepRowOf(statement);
+    return function* (frame) {
+      const value = yield* evaluateParts(frame, parts, () => run(frame));
+      if (row !== undefined) frame.runtime.steps.step(row);
+      const resumed: unknown = yield isEach ? new YieldEachRequest(value) : value;
+      return resumed === LISTENER_CANCELLED ? CANCELLED_RETURN : undefined;
+    };
+  }
 }
 
 function rootCompletion(frame: Frame, completion: Completion | DartThrow | undefined): number {
@@ -761,18 +965,97 @@ function rootCompletion(frame: Frame, completion: Completion | DartThrow | undef
   return mark;
 }
 
-function genForLoop(loop: CountedLoop<GenExec>): GenExec {
+const CANCELLED_RETURN: Completion = { kind: 'return', value: undefined };
+
+/**
+ * `await for`, which reads the stream through a `StreamIterator` and cancels its subscription when the loop ends
+ * before the stream does, as the SDK lowers it.
+ */
+function awaitForLoop(
+  source: Eval,
+  sourceParts: AwaitRoot | undefined,
+  resolveElement: (frame: Frame) => DartType,
+  loop: IteratorLoop
+): GenExec {
+  return function* (frame) {
+    const { runtime } = frame;
+    const stream = yield* evaluateParts(frame, sourceParts, () => source(frame));
+    const iterator = runtime.links.construct(runtime, '_StreamIterator', '', [stream], undefined, [
+      resolveElement(frame),
+    ]);
+    frame.temporaries.push(iterator);
+    try {
+      return yield* iterate(frame, iterator, loop, function* () {
+        return yield new AwaitRequest(runtime.invoke(iterator, 'moveNext', NO_ARGUMENTS, [], undefined));
+      });
+    } finally {
+      yield* cancelUnfinished(frame, iterator);
+    }
+  };
+}
+
+/** What a for-in loop in a generator does with each element. */
+interface IteratorLoop {
+  bind: (frame: Frame, value: Value) => void;
+  body: GenExec;
+  labels: string[];
+}
+
+/** Runs a for-in loop's body for each element of an iterator, whose `moveNext` may be awaited. */
+function* iterate(
+  frame: Frame,
+  iterator: Value,
+  { bind, body, labels }: IteratorLoop,
+  moveNext: () => Generator<AwaitRequest, Value, Value>
+): ReturnType<GenExec> {
+  const { runtime } = frame;
+  for (;;) {
+    runtime.spend();
+    if ((yield* moveNext()) !== true) return undefined;
+    bind(frame, runtime.getProperty(iterator, 'current', undefined));
+    const completion = yield* body(frame);
+    if (completion) {
+      const outcome = loopCompletion(completion, labels);
+      if (outcome !== 'continue') return outcome;
+    }
+  }
+}
+
+/** Ends an `await for` loop, cancelling its subscription when the stream has not ended. */
+export function* cancelUnfinished(frame: Frame, iterator: Value): Generator<AwaitRequest, undefined, Value> {
+  const { runtime } = frame;
+  const index = frame.temporaries.lastIndexOf(iterator);
+  if (index !== -1) frame.temporaries.splice(index, 1);
+  if (runtime.getProperty(iterator, scopedMemberName('_subscription', 'dart:async'), undefined) !== undefined) {
+    yield new AwaitRequest(runtime.invoke(iterator, 'cancel', NO_ARGUMENTS, [], undefined));
+  }
+}
+
+/** A counted loop in a generator, whose header parts may await through the steps `resume` gives them. */
+// code-gauge-allow functionCognitiveComplexity -- Each header part runs inline when it has no steps, which a helper generator per part would cost a sync* loop again.
+function genForLoop(
+  loop: CountedLoop<GenExec>,
+  resume: { init?: AwaitRoot; test?: AwaitRoot; update?: AwaitRoot }
+): GenExec {
   const { test, body, labels } = loop;
-  return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
-    startCountedLoop(loop, frame);
+  return function* (frame: Frame): ReturnType<GenExec> {
+    // A header part without steps, as every one in a generator without await is, runs without a generator of its own,
+    // which would cost a sync* body's loop more than its test.
+    if (resume.init) yield* evaluateParts(frame, resume.init, () => startCountedLoop(loop, frame));
+    else startCountedLoop(loop, frame);
     for (;;) {
-      if (test && !test(frame)) return undefined;
+      if (test && !(resume.test ? yield* evaluateParts(frame, resume.test, () => test(frame)) : test(frame))) {
+        return undefined;
+      }
       const completion = yield* body(frame);
       if (completion) {
         const outcome = loopCompletion(completion, labels);
         if (outcome !== 'continue') return outcome;
       }
-      advanceCountedLoop(loop, frame);
+      // The copy comes before the update's steps, which may already assign the loop variable.
+      copyLoopVariables(loop, frame);
+      if (resume.update) yield* evaluateParts(frame, resume.update, () => runLoopUpdates(loop, frame));
+      else runLoopUpdates(loop, frame);
     }
   };
 }
@@ -792,6 +1075,8 @@ function clearingSlots(result: GenExec, slots: number[]): GenExec {
 interface SwitchMatcher {
   pattern: CompiledPattern | undefined;
   guard: Eval | undefined;
+  /** A guard that awaits, which runs through its generator after the match. */
+  guardGen?: GenEval;
   slots: number[];
   bindings: { from: number; to: number }[];
 }
@@ -807,16 +1092,16 @@ type SwitchRoute = (completion: Completion | void) => number | Completion | unde
 
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
 // code-gauge-allow functionCognitiveComplexity -- Clear the failed matcher while keeping the selected body bindings live.
-function selectSwitchGroup(
+function* selectSwitchGroup(
   frame: Frame,
   value: Value,
   groups: readonly SwitchGroup<unknown>[],
   cache: PatternCache
-): number {
+): Generator<AwaitRequest, number, Value> {
   for (const [index, group] of groups.entries()) {
-    for (const { pattern, guard, slots, bindings } of group.matchers) {
+    for (const { pattern, guard, guardGen, slots, bindings } of group.matchers) {
       try {
-        if (pattern && (!pattern.match(frame, value, cache) || (guard && guard(frame) !== true))) continue;
+        if (pattern && (!pattern.match(frame, value, cache) || !(yield* guardHolds(frame, guard, guardGen)))) continue;
         for (const { from, to } of bindings) frame.locals[to] = new Cell((frame.locals[from] as Cell).v);
         return index;
       } finally {
@@ -880,13 +1165,4 @@ function groupCases(cases: SwitchCase[]): { cases: SwitchCase[]; statements: Sta
     }
   }
   return groups;
-}
-
-function containsYield(node: unknown): boolean {
-  if (Array.isArray(node)) return node.some((item) => containsYield(item));
-  if (typeof node !== 'object' || node === null) return false;
-  const record = node as { kind?: string };
-  if (record.kind === 'yield') return true;
-  if (record.kind === 'function' || record.kind === 'localFunction') return false;
-  return Object.values(record).some((value) => typeof value === 'object' && containsYield(value));
 }

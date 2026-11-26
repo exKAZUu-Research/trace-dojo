@@ -1,5 +1,29 @@
+import type { ClassInfo } from '../classes';
+import { SDK_MEMBERS } from './sdkMembers';
+
+/** The library of dart:core's Uri, apart from the rest because it encodes with dart:convert. */
+export const URI_LIBRARY = 'dart:_uri';
+
 // Dart SDK 3.13.7 public declarations and explicit re-exports. Keep unavailable names visible to diagnostics.
 const SDK_EXPORTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [
+    'dart:async',
+    new Set(
+      `
+    AsyncError Completer ControllerCallback ControllerCancelCallback CreatePeriodicTimerHandler CreateTimerHandler
+    DeferredLoadException ErrorCallbackHandler EventSink ForkHandler Future FutureExtensions FutureIterable FutureOr
+    FutureRecord2 FutureRecord3 FutureRecord4 FutureRecord5 FutureRecord6 FutureRecord7 FutureRecord8 FutureRecord9
+    HandleUncaughtErrorHandler MultiStreamController ParallelWaitError PrintHandler RegisterBinaryCallbackHandler
+    RegisterCallbackHandler RegisterUnaryCallbackHandler RunBinaryHandler RunHandler RunUnaryHandler runZoned
+    runZonedGuarded scheduleMicrotask ScheduleMicrotaskHandler Stream StreamConsumer StreamController StreamIterator
+    StreamSink StreamSubscription StreamTransformer StreamTransformerBase StreamView SynchronousStreamController
+    TimeoutException Timer unawaited Zone ZoneBinaryCallback ZoneCallback ZoneDelegate ZoneSpecification
+    ZoneUnaryCallback
+  `
+        .trim()
+        .split(/\s+/)
+    ),
+  ],
   [
     'dart:collection',
     new Set(
@@ -89,4 +113,55 @@ const SDK_EXPORTS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 
 export function isSdkExport(library: string, name: string): boolean {
   return SDK_EXPORTS.get(library)?.has(name) ?? false;
+}
+
+/** The SDK's members of a class of the interpreter's libraries, by the library the SDK declares the class in. */
+function sdkMembersOf(cls: ClassInfo): readonly [string, string, string] | undefined {
+  return SDK_MEMBERS[cls.library === URI_LIBRARY ? 'dart:core' : cls.library]?.[cls.name];
+}
+
+/** How a member is used: a write uses its setter, which the table writes `name=`. */
+export type MemberAccess = 'read' | 'write';
+
+function hasName(names: string, name: string): boolean {
+  return ` ${names} `.includes(` ${name} `);
+}
+
+function tableName(name: string, access: MemberAccess): string {
+  return access === 'write' ? `${name}=` : name;
+}
+
+/**
+ * Whether the SDK gives instances of a class a member for the access, through the nearest SDK classes it is or
+ * extends; the interpreter's own supertypes of an SDK class are not consulted, since its hierarchy may differ.
+ */
+export function isSdkInstanceMember(cls: ClassInfo, name: string, access: MemberAccess): boolean {
+  return sdkInstanceMemberOwner(cls, name, access) !== undefined;
+}
+
+/** The nearest SDK class whose instances have the member, as {@link isSdkInstanceMember} finds it. */
+export function sdkInstanceMemberOwner(
+  cls: ClassInfo,
+  name: string,
+  access: MemberAccess,
+  visited = new Set<ClassInfo>()
+): ClassInfo | undefined {
+  if (visited.has(cls)) return undefined;
+  visited.add(cls);
+  const members = cls.library ? sdkMembersOf(cls) : undefined;
+  if (members) return hasName(members[0], tableName(name, access)) ? cls : undefined;
+  for (const type of [cls.superclass, ...cls.interfaces, ...cls.mixins, ...cls.onTypes]) {
+    const owner = type && sdkInstanceMemberOwner(type.cls, name, access, visited);
+    if (owner) return owner;
+  }
+  return undefined;
+}
+
+/** Whether the SDK's class has a static member for the access, or a constructor (`''` the unnamed one). */
+export function isSdkStaticMember(cls: ClassInfo, name: string, access: MemberAccess): boolean {
+  const members = cls.library ? sdkMembersOf(cls) : undefined;
+  if (members === undefined) return false;
+  // The unnamed constructor has no name of its own, which every list would match, so it is looked up as `new`.
+  if (name === '') return access === 'read' && hasName(members[2], 'new');
+  return hasName(members[1], tableName(name, access)) || (access === 'read' && hasName(members[2], name));
 }

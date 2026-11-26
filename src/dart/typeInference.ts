@@ -2,12 +2,15 @@ import {
   asInstanceOf,
   boundOf,
   closeTypeVariables,
+  coreTypes,
   type DartType,
   DYNAMIC,
   type FunctionType,
+  futureOrValue,
   instantiateFunction,
   instantiateToBounds,
   type InterfaceType,
+  interfaceType,
   isSubtype,
   lowerBound,
   mentionsTypeParams,
@@ -212,6 +215,7 @@ class InferenceConstraints {
   }
 
   private inferInterface(given: DartType, pattern: InterfaceType, reversed: boolean): void {
+    if (this.inferFutureOr(given, pattern, reversed)) return;
     const base = resolveBound(given);
     if (base.kind === 'dynamic' && !reversed) {
       for (const arg of pattern.args) this.infer(DYNAMIC, arg);
@@ -225,6 +229,37 @@ class InferenceConstraints {
       const actualArg = actualType.args[index];
       if (actualArg) this.infer(actualArg, arg, reversed);
     }
+  }
+
+  /**
+   * The constraints of `FutureOr`, as the SDK generates them: a value of `FutureOr<T>` is either a `T` or a
+   * `Future<T>`. Returns whether either side was one.
+   */
+  private inferFutureOr(given: DartType, pattern: InterfaceType, reversed: boolean): boolean {
+    const patternValue = futureOrValue(pattern);
+    const base = resolveBound(given);
+    const givenValue = futureOrValue(nonNullOf(base));
+    if (!patternValue && !givenValue) return false;
+    const futureValue = (type: DartType): DartType | undefined =>
+      type.kind === 'interface' ? asInstanceOf(nonNullOf(type) as InterfaceType, coreTypes.future)?.args[0] : undefined;
+    if (!reversed) {
+      if (patternValue && givenValue) {
+        this.infer(givenValue, patternValue);
+      } else if (patternValue) {
+        this.infer(futureValue(base) ?? given, patternValue);
+      } else if (givenValue) {
+        this.infer(futureOf(givenValue), pattern);
+        this.infer(givenValue, pattern);
+      }
+      return true;
+    }
+    if (patternValue) {
+      this.infer(given, futureOf(patternValue), true);
+      this.infer(given, patternValue, true);
+    } else if (givenValue) {
+      this.infer(givenValue, futureValue(pattern) ?? pattern, true);
+    }
+    return true;
   }
 
   private inferFunction(given: FunctionType, pattern: FunctionType, reversed: boolean): void {
@@ -280,6 +315,10 @@ class InferenceConstraints {
       if (actualField) this.infer(actualField.type, field.type, reversed);
     }
   }
+}
+
+function futureOf(type: DartType): InterfaceType {
+  return interfaceType(coreTypes.future, [type]);
 }
 
 function nonNullOf(type: DartType): DartType {

@@ -1,11 +1,11 @@
 import { power } from '../../interpreter/power';
 import type { OutputChannel } from '../../interpreter/programIo';
-import { encodableText, stringOf } from '../format';
+import { encodableText } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
+import { textOfWrittenPart } from './nativeConvert';
 import { toDouble } from './nativeNumbers';
-import { characterOf } from './nativeStrings';
-import { define, defineConstructor, forEachValue, intArg, numArg } from './nativeSupport';
+import { define, defineConstructor, intArg, numArg, throwUnavailable } from './nativeSupport';
 
 // dart:math
 
@@ -145,9 +145,12 @@ defineConstructor('Random.new', (runtime, _instance, args) => {
   ) as unknown as DartObject['native'];
   return object;
 });
-defineConstructor('Random.secure', (runtime) =>
-  runtime.throwError('UnsupportedError', '', ['Random.secure は、この採点環境では使えません。'])
-);
+define('_SecureRandom._getBytes', (runtime, _self, [count]) => {
+  const bytes = crypto.getRandomValues(new Uint8Array(Number(intArg(runtime, count, 'count'))));
+  let result = 0n;
+  for (const byte of bytes) result = (result << 8n) | BigInt(byte);
+  return result;
+});
 define('_Random.nextInt', (runtime, receiver, [max]) =>
   randomOf(receiver).nextInt(runtime, intArg(runtime, max, 'max'))
 );
@@ -161,34 +164,50 @@ define('_Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(run
 
 // dart:io
 
-function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
-  const isError = (receiver as DartObject).fields[0] === true;
-  const channel = isError ? runtime.io.stderr : runtime.io.stdout;
-  return { write: (text: string) => channel.write(text, encodableText) };
+// Whether a standard stream is closed is its shared channel's isClosed, the one place it is kept: a closed channel
+// drops what print writes, as the VM's closed descriptor does, and the sink's consumer fails a write.
+define('_writeStream', (runtime, _receiver, [isError, bytes]) => {
+  standardChannel(runtime, isError).write(
+    textOfWrittenPart(runtime, pendingBytesOf(runtime, isError), bytes),
+    encodableText
+  );
+  return;
+});
+define('_isStreamClosed', (runtime, _receiver, [isError]) => standardChannel(runtime, isError).isClosed);
+define('_closeStream', (runtime, _receiver, [isError]) => {
+  requireFinishedCharacter(runtime, isError === true);
+  standardChannel(runtime, isError).isClosed = true;
+  return;
+});
+
+/**
+ * The bytes of a character each standard stream's writes split, which wait for the rest of it, the one pending
+ * state of a standard stream, as a file sink's decoder holds its own.
+ */
+const pendingStandardBytes = new WeakMap<Runtime, { out: number[]; err: number[] }>();
+
+function pendingBytesOf(runtime: Runtime, isError: Value): number[] {
+  let pending = pendingStandardBytes.get(runtime);
+  if (!pending) {
+    pending = { out: [], err: [] };
+    pendingStandardBytes.set(runtime, pending);
+  }
+  return isError === true ? pending.err : pending.out;
 }
 
-define('Stdout.write', (runtime, receiver, [value]) => {
-  sinkOf(runtime, receiver).write(stringOf(runtime, value));
-  return;
-});
-define('Stdout.writeln', (runtime, receiver, args) => {
-  sinkOf(runtime, receiver).write(`${args.length === 0 ? '' : stringOf(runtime, args[0])}\n`);
-  return;
-});
-define('Stdout.writeAll', (runtime, receiver, [objects, separator = '']) => {
-  const sink = sinkOf(runtime, receiver);
-  let first = true;
-  forEachValue(runtime, objects, (value) => {
-    if (!first) sink.write(separator as string);
-    first = false;
-    sink.write(stringOf(runtime, value));
-  });
-  return;
-});
-define('Stdout.writeCharCode', (runtime, receiver, [code]) => {
-  sinkOf(runtime, receiver).write(characterOf(runtime, intArg(runtime, code, 'charCode')));
-  return;
-});
+/**
+ * Rejects text that would follow, or an end that would leave, a character a standard stream's bytes split: the VM
+ * writes the bytes as they are, which the run's text output cannot hold.
+ */
+export function requireFinishedCharacter(runtime: Runtime, isError: boolean): void {
+  if (pendingStandardBytes.get(runtime)?.[isError ? 'err' : 'out'].length) {
+    throwUnavailable(runtime, '文字の途中で終わるバイト列を標準出力に残したままの出力や終了');
+  }
+}
+
+function standardChannel(runtime: Runtime, isError: Value): OutputChannel {
+  return isError === true ? runtime.io.stderr : runtime.io.stdout;
+}
 define('exit', (runtime, _receiver, [code]) => {
   throw new ProgramExit(Number(intArg(runtime, code, 'code')));
 });

@@ -5,6 +5,7 @@ import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { asInstanceOf, coreTypes, interfaceType } from '../types';
 import { DartList, DartObject, DartPackedList, type Value } from '../values';
+import { VM_ENVIRONMENT } from '../vmEnvironment';
 import { BoundedStringParts, copyString, detachShorterString, StringParts, stringSlice } from './boundedStringParts';
 import {
   allMatchesOf,
@@ -454,7 +455,10 @@ define('String.fromCharCodes', (runtime, _receiver, [codes, start = 0n, end]) =>
   );
 });
 define('String.fromCharCode', (runtime, _receiver, [code]) => characterOf(runtime, intArg(runtime, code, 'charCode')));
-define('String.fromEnvironment', (_runtime, _receiver, _args, namedArgs) => named(namedArgs, 'defaultValue', ''));
+define(
+  'String.fromEnvironment',
+  (_runtime, _receiver, [name], namedArgs) => VM_ENVIRONMENT.get(name as string) ?? named(namedArgs, 'defaultValue', '')
+);
 
 function efficientCharacterCount(runtime: Runtime, codes: Value): bigint | undefined {
   if (codes instanceof DartList) return BigInt(codes.elements.length);

@@ -548,6 +548,7 @@ class CodeUnits extends _UnmodifiableListBase<int> {
 }
 
 class _Uint8List extends ListBase<int> {
+  external factory _Uint8List(int length);
   external int get length;
   set length(int value) => throw UnsupportedError("Cannot resize a fixed-length list");
   external int operator [](int index);

@@ -1322,14 +1322,14 @@ define('Map.isNotEmpty', (_runtime, receiver) => store(receiver).size > 0);
 
 interface SyncStarState {
   frame: Frame;
-  body: (frame: Frame) => Generator<Value, unknown, undefined>;
+  body: (frame: Frame) => Generator<unknown, unknown, Value>;
   elementType: DartType;
   values(): Iterable<Value>;
 }
 
 interface SyncStarIteratorState {
   frame: Frame;
-  generator: Generator<Value, unknown, undefined> | undefined;
+  generator: Generator<unknown, unknown, Value> | undefined;
   current: Value;
   values(): Iterable<Value>;
 }
@@ -1382,7 +1382,7 @@ define('_SyncStarIterator.moveNext', (runtime, receiver) => {
   const { generator } = state;
   if (!generator) return false;
   runtime.enter(state.frame);
-  let result: IteratorResult<Value, unknown>;
+  let result: IteratorResult<unknown, unknown>;
   try {
     result = generator.next();
   } catch (error) {
@@ -1397,7 +1397,8 @@ define('_SyncStarIterator.moveNext', (runtime, receiver) => {
     state.current = undefined;
     return false;
   }
-  state.current = result.value;
+  // A sync* body yields only the elements of its iterable.
+  state.current = result.value as Value;
   return true;
 });
 define('_SyncStarIterator.current', (runtime, receiver) => {

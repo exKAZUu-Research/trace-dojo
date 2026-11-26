@@ -7,9 +7,13 @@ import { valueIs } from './compilerBase';
 import { initialGlobals, instantiateObject } from './declarationRuntime';
 import { type GlobalVariable, LibraryEnv, type TopLevelFunction } from './environment';
 import { stringOf } from './format';
+import { ASYNC_SOURCE } from './library/async';
 import { CORE_SOURCE } from './library/core';
+import { startAsync, startAsyncStar } from './library/nativeAsync';
 import { addAllToMap, listIterator, newMap, newSet, quickCopySet, syncStarIterable } from './library/nativeCollections';
 import { COLLECTION_SOURCE, CONVERT_SOURCE, IO_SOURCE, MATH_SOURCE } from './library/others';
+import { URI_LIBRARY } from './library/sdkExports';
+import { URI_SOURCE } from './library/uri';
 import './library/nativeCore';
 import './library/nativeNumbers';
 import './library/nativeStrings';
@@ -17,6 +21,8 @@ import './library/nativeRegExp';
 import './library/nativeOthers';
 import './library/nativeConvert';
 import './library/nativeBigInt';
+import './library/nativeIo';
+import './library/nativeTime';
 import { NATIVES } from './library/nativeSupport';
 import { parseDart } from './parse';
 import { DartThrow, EMPTY_TYPE_ENV, Frame, type FunctionInfo, type LibraryLinks, Runtime } from './runtime';
@@ -42,14 +48,16 @@ interface LibrarySource {
 const LIBRARY_SOURCES: LibrarySource[] = [
   { uri: 'dart:core', source: CORE_SOURCE, imports: ['dart:math'] },
   { uri: 'dart:math', source: MATH_SOURCE, imports: [] },
+  { uri: 'dart:async', source: ASYNC_SOURCE, imports: ['dart:collection'] },
   { uri: 'dart:collection', source: COLLECTION_SOURCE, imports: ['dart:math'] },
-  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:collection'] },
-  { uri: 'dart:io', source: IO_SOURCE, imports: [] },
+  { uri: 'dart:convert', source: CONVERT_SOURCE, imports: ['dart:async', 'dart:collection'] },
+  { uri: 'dart:io', source: IO_SOURCE, imports: ['dart:async', 'dart:convert'] },
+  // dart:core's Uri, apart from the rest of dart:core because it encodes with dart:convert.
+  { uri: URI_LIBRARY, source: URI_SOURCE, imports: ['dart:collection', 'dart:convert'] },
 ];
 
 /** The libraries a program may import, and why the others are unavailable. */
 const UNAVAILABLE_LIBRARIES: Record<string, string> = {
-  'dart:async': 'dart:async（非同期処理）',
   'dart:isolate': 'dart:isolate（Isolate）',
   'dart:mirrors': 'dart:mirrors（リフレクション）',
   'dart:ffi': 'dart:ffi（外部の関数の呼び出し）',
@@ -116,6 +124,22 @@ export function libraries(): Libraries {
 function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
   const core = envs.get('dart:core') as LibraryEnv;
   assignCoreTypes(core);
+  const asyncLibrary = envs.get('dart:async') as LibraryEnv;
+  const asyncClass = (name: string): ClassInfo => (asyncLibrary.declarations.get(name) as { cls: ClassInfo }).cls;
+  Object.assign(coreTypes, {
+    future: asyncClass('Future'),
+    futureOr: asyncClass('FutureOr'),
+    stream: asyncClass('Stream'),
+  });
+  reexport(asyncLibrary, core, [
+    'Future',
+    'Stream',
+    'FutureExtensions',
+    'FutureIterable',
+    ...Array.from({ length: 8 }, (_, index) => `FutureRecord${index + 2}`),
+    'ParallelWaitError',
+  ]);
+  reexport(envs.get(URI_LIBRARY) as LibraryEnv, core, ['Uri', 'UriData']);
   for (const name of [
     'MappedIterable',
     'MappedListIterable',
@@ -174,13 +198,22 @@ function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
     (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
   const collection = envs.get('dart:collection') as LibraryEnv;
   for (const name of ['LinkedHashMap', 'LinkedHashSet']) core.hiddenNames.add(name);
-  for (const name of ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']) {
-    const declaration = core.declarations.get(name);
-    if (declaration) collection.reexports.set(name, declaration);
-  }
+  reexport(core, collection, ['LinkedHashMap', 'LinkedHashSet', 'IterableExtensions', 'NullableIterableExtensions']);
   (core.declarations.get('_Symbol') as { cls: ClassInfo }).cls.vmName = 'Symbol';
+  const convert = envs.get('dart:convert') as LibraryEnv | undefined;
+  const castConverter = convert?.declarations.get('_CastConverter') as { cls: ClassInfo } | undefined;
+  if (castConverter) castConverter.cls.vmName = 'CastConverter';
+  asyncClass('_Future').vmName = 'Future';
   (collection.declarations.get('_QueueIterator') as { cls: ClassInfo }).cls.vmName = '_ListQueueIterator';
   (collection.declarations.get('_Uint8List') as { cls: ClassInfo }).cls.vmName = 'Uint8List';
+}
+
+/** Makes a library export declarations of another, as the SDK's libraries export each other's. */
+function reexport(from: LibraryEnv, to: LibraryEnv, names: readonly string[]): void {
+  for (const name of names) {
+    const declaration = from.declarations.get(name);
+    if (declaration) to.reexports.set(name, declaration);
+  }
 }
 
 function assignCoreTypes(core: LibraryEnv): void {
@@ -222,14 +255,21 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
     env.addImport(envs.get('dart:core') as LibraryEnv, undefined, undefined, []);
   }
   for (const directive of syntax.imports) {
-    const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
-    if (unavailable)
-      throw new CompileError([{ row: directive.row, message: `${unavailable}は、この採点環境では使えません。` }]);
-    const library = envs.get(directive.uri);
-    if (!library)
-      throw new CompileError([{ row: directive.row, message: `ライブラリ ${directive.uri} はありません。` }]);
-    env.addImport(library, directive.prefix, directive.show, directive.hide);
+    env.addImport(libraryAt(envs, directive), directive.prefix, directive.show, directive.hide);
+    if (!directive.isDeferred || !directive.prefix) continue;
+    env.deferredPrefixes.add(directive.prefix);
+    const extensions = env.sdkExtensionsOfLastImport();
+    if (extensions.length > 0) {
+      throw new CompileError([
+        {
+          row: directive.row,
+          message: `deferred の import では拡張（${extensions.join('、')}）を読み込めません。hide ${extensions.join(', ')} を書いてください。`,
+        },
+      ]);
+    }
   }
+  // A program is the only library of its run, so what it exports reaches no other library.
+  for (const directive of syntax.exports) libraryAt(envs, directive);
   const compiler = new Compiler(env, false, options.atomicRows, globals, NATIVES);
   compiler.declareAll(syntax);
   compiler.resolveAll(syntax);
@@ -249,6 +289,16 @@ export function compileProgram(syntax: Library, options: { atomicRows?: Readonly
     programGlobals: globals.slice(libraryGlobals.length),
     mainTakesArguments: main.type.typeParams.length === 0 && main.type.positional.length > 0,
   };
+}
+
+function libraryAt(envs: Map<string, LibraryEnv>, directive: { uri: string; row: number }): LibraryEnv {
+  const unavailable = UNAVAILABLE_LIBRARIES[directive.uri];
+  if (unavailable)
+    throw new CompileError([{ row: directive.row, message: `${unavailable}は、この採点環境では使えません。` }]);
+  // The SDK's own private libraries are not for programs to import.
+  const library = directive.uri.startsWith('dart:_') ? undefined : envs.get(directive.uri);
+  if (!library) throw new CompileError([{ row: directive.row, message: `ライブラリ ${directive.uri} はありません。` }]);
+  return library;
 }
 
 function validateConstants(compiler: Compiler, globals: GlobalVariable[]): void {
@@ -358,6 +408,8 @@ export const LINKS: LibraryLinks = {
   },
   constantIdentityKey,
   syncStarIterable,
+  startAsync,
+  startAsyncStar,
   listIterator,
   isValueOf: (runtime, value, type) => valueIs(runtime, value, type),
 };

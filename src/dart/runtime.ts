@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss -- Keep runtime dispatch alongside reified types, call frames, and roots.
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import type { TracedFrame, TracedRuntime } from '../interpreter/traceRecorder';
 import { TurtleWorld } from '../interpreter/turtleWorld';
+// code-gauge-allow-file fileNcss -- Keep runtime dispatch alongside reified types, call frames, and roots.
+import type { AsyncTask } from './asyncTask';
 import {
   type ClassInfo,
   type ConstructorInfo,
@@ -14,6 +15,9 @@ import {
   sourceMemberName,
 } from './classes';
 import { eraseFunctionType } from './eraseExtensionTypes';
+import { EventLoop } from './eventLoop';
+import { throwUnavailable } from './library/nativeSupport';
+import { sdkInstanceMemberOwner } from './library/sdkExports';
 import { RecordShapes } from './recordShapes';
 import {
   asInstanceOf,
@@ -76,6 +80,10 @@ export class Frame implements TracedFrame {
   readonly locals: (Cell | undefined)[];
   /** Values a statement holds while it evaluates the rest of an expression, which garbage collection keeps. */
   readonly temporaries: Value[] = [];
+  /** Whether the frame's `async` body is waiting at an `await` or `yield`, so that leaving the frame does not end it. */
+  isSuspended = false;
+  /** The steps the frame's `async` or `async*` body recorded while it ran, which its driver counts. */
+  asyncTask: AsyncTask | undefined;
 
   // code-gauge-allow functionParameterCount -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
@@ -124,7 +132,15 @@ export interface LibraryLinks {
   syncStarIterable(
     frame: Frame,
     elementType: DartType,
-    body: (frame: Frame) => Generator<Value, unknown, undefined>
+    body: (frame: Frame) => Generator<unknown, unknown, Value>
+  ): Value;
+  /** Starts an `async` function's body, which runs until its first `await`, and returns its future. */
+  startAsync(frame: Frame, valueType: DartType, body: (frame: Frame) => Generator<unknown, unknown, Value>): Value;
+  /** The stream an `async*` function returns, whose body starts when the stream is listened to. */
+  startAsyncStar(
+    frame: Frame,
+    elementType: DartType,
+    body: (frame: Frame) => Generator<unknown, unknown, Value>
   ): Value;
   listIterator(runtime: Runtime, list: DartList): DartObject;
   /** Whether a value is of a type that holds no type parameters. */
@@ -195,7 +211,14 @@ export class Runtime implements TracedRuntime<Frame> {
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
+    this.events = new EventLoop(this);
   }
+
+  readonly events: EventLoop;
+  /** The prefixes of `deferred as` imports whose libraries `loadLibrary` has loaded. */
+  readonly loadedPrefixes = new Set<string>();
+  /** The entry point's frame once its `async` body suspended, which ends the entry point when it completes. */
+  private suspendedEntry: Frame | undefined;
 
   spend(cost = 1): void {
     this.budget.spend(cost);
@@ -228,11 +251,16 @@ export class Runtime implements TracedRuntime<Frame> {
   private overflowing = false;
 
   exit(frame: Frame): void {
-    if (this.frames.length === 1 && this.onMainExit) {
-      // The entry point's frame still holds its variables, which the end of a trace shows.
-      const callback = this.onMainExit;
-      this.onMainExit = undefined;
-      callback();
+    if (this.onMainExit) {
+      const isEntry = this.frames.length === 1 ? this.suspendedEntry === undefined : frame === this.suspendedEntry;
+      if (isEntry && frame.isSuspended) {
+        this.suspendedEntry = frame;
+      } else if (isEntry || frame === this.suspendedEntry) {
+        // The entry point's frame still holds its variables, which the end of a trace shows.
+        const callback = this.onMainExit;
+        this.onMainExit = undefined;
+        callback();
+      }
     }
     const top = this.frames.pop();
     if (top !== frame) throw new Error('The frames got out of order');
@@ -709,7 +737,22 @@ export class Runtime implements TracedRuntime<Frame> {
       );
     }
     if (found) return this.throwError('NoSuchMethodError', '_withFound', [receiver, invocation, found]);
+    this.requireImplementedSdkMember(receiver, name, kind);
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
+  }
+
+  /**
+   * A dynamic use of a member that the SDK gives the receiver's class but the interpreter does not implement is
+   * unavailable, as the same use through a static type is at compile time, rather than a NoSuchMethodError the program
+   * could catch.
+   */
+  private requireImplementedSdkMember(receiver: Value, name: string, kind: 'method' | 'getter' | 'setter'): void {
+    // A library-private name (scoped by its library) is never an SDK member a learner's program reaches.
+    if (name.includes('\0')) return;
+    const isWrite = kind === 'setter';
+    const memberName = isWrite ? name.slice(0, -1) : name;
+    const owner = sdkInstanceMemberOwner(this.classOf(receiver), memberName, isWrite ? 'write' : 'read');
+    if (owner) throwUnavailable(this, `${owner.name}.${memberName}`);
   }
 
   symbol(name: string, library?: string): Value {

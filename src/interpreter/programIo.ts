@@ -18,7 +18,7 @@ export interface ProgramOutput {
 /** The working directory, which relative paths start from. */
 export const WORKING_DIRECTORY = '/';
 /** The path that reads standard input as a file, as on Linux. */
-const STDIN_PATH = '/dev/stdin';
+export const STDIN_PATH = '/dev/stdin';
 
 /**
  * The standard streams and the file system of one run, which every language's builtins share. Files hold text, which
@@ -227,6 +227,11 @@ export class FileHandle {
   write(text: string): void {
     this.writeAt(this.position ?? this.node.content.length, text);
     if (this.position !== undefined) this.position += text.length;
+  }
+
+  /** Moves the next write to the current end of the file, as opening a file to append and writing at it does. */
+  seekToEnd(): void {
+    this.position = this.node.content.length;
   }
 
   /** Writes at a position that the caller keeps instead of {@link position}, as a handle that also reads does. */

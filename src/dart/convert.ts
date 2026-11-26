@@ -46,6 +46,7 @@ import {
   unsupported,
 } from './convertBase';
 import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
+import { VM_ENVIRONMENT } from './vmEnvironment';
 
 /** Where a parameter list appears; `representation` is an extension type's, whose one parameter may be final. */
 type FormalContext = 'ordinary' | 'constructor' | 'primary' | 'representation';
@@ -97,27 +98,30 @@ export class Converter extends ExpressionConverter {
   // code-gauge-allow functionNcss -- One case per kind of top-level node, which reads best as one dispatch.
   convertLibrary(root: Node): Library {
     const imports: ImportDirective[] = [];
+    const exports: Library['exports'] = [];
     const declarations: TopLevelDeclaration[] = [];
     let pendingAnnotations: Annotation[] = [];
     for (const node of namedOf(root)) {
       switch (node.type) {
         case 'import_or_export': {
-          imports.push(...this.convertImportOrExport(node));
+          const inner = requireNode(namedOf(node)[0], node);
+          if (inner.type === 'library_export') exports.push(this.convertExport(inner));
+          else imports.push(this.convertImport(inner));
           break;
         }
-        case 'library_name': {
-          // `library;` or `library name;` only names the library; dotted names are a legacy form.
-          if (namedOf(node).some((child) => child.type === 'dotted_identifier_list' && child.text.includes('.'))) {
-            return unsupported(node, '. で区切った名前のライブラリ（library a.b;）');
-          }
+        case 'library_name':
+        case 'script_tag': {
+          // A library's name and a `#!` line tell tools how to refer to or run the file, which the run does not use.
           break;
         }
-        case 'part_directive':
-        case 'part_of_directive': {
+        case 'part_directive': {
           return unsupported(node, 'part（別のファイルの読み込み）');
         }
-        case 'script_tag': {
-          return unsupported(node, '#! で始まる行（スクリプトの指定）');
+        case 'part_of_directive': {
+          return syntaxError(
+            node,
+            'part of を書いたファイルは、ほかのライブラリの一部なので、それだけでは実行できません。'
+          );
         }
         case 'annotation': {
           pendingAnnotations.push(this.convertAnnotation(node));
@@ -138,23 +142,23 @@ export class Converter extends ExpressionConverter {
         }
       }
     }
-    return { imports, declarations, ...spanOf(root) };
+    return { imports, exports, declarations, ...spanOf(root) };
   }
 
-  private convertImportOrExport(node: Node): ImportDirective[] {
-    const inner = requireNode(namedOf(node)[0], node);
-    if (inner.type === 'library_export') return unsupported(inner, 'export（ライブラリの再公開）');
+  private convertExport(node: Node): Library['exports'][number] {
+    const uriNode = requireNode(fieldOf(node, 'uri'), node);
+    const uri = this.selectedUri(uriNode);
+    if (!uri.startsWith('dart:')) return unsupported(uriNode, `export '${uri}'（標準ライブラリ以外の再公開）`);
+    return { uri, ...spanOf(node) };
+  }
+
+  private convertImport(inner: Node): ImportDirective {
     const specification = requireNode(
       namedOf(inner).find((child) => child.type === 'import_specification'),
       inner
     );
     const uriNode = requireNode(fieldOf(specification, 'uri'), specification);
-    if (uriNode.type === 'configurable_uri' && namedOf(uriNode).some((child) => child.type === 'configuration_uri')) {
-      return unsupported(uriNode, '条件付きの import');
-    }
-    if (hasToken(specification, 'deferred'))
-      return unsupported(specification, 'deferred as（ライブラリの遅延読み込み）');
-    const uri = this.uriText(uriNode);
+    const uri = this.selectedUri(uriNode);
     if (!uri.startsWith('dart:')) return unsupported(uriNode, `import '${uri}'（標準ライブラリ以外の読み込み）`);
     let show: string[] | undefined;
     const hide: string[] = [];
@@ -163,7 +167,39 @@ export class Converter extends ExpressionConverter {
       if (hasToken(combinator, 'show')) show = show?.filter((name) => names.includes(name)) ?? names;
       else hide.push(...names);
     }
-    return [{ uri, prefix: fieldOf(specification, 'alias')?.text, show, hide, ...spanOf(node) }];
+    return {
+      uri,
+      prefix: fieldOf(specification, 'alias')?.text,
+      show,
+      hide,
+      isDeferred: hasToken(specification, 'deferred'),
+      ...spanOf(inner.parent ?? inner),
+    };
+  }
+
+  /**
+   * The URI a directive reads: the first of its `if (test) 'uri'` alternatives whose test holds where the VM runs,
+   * or else its first URI.
+   */
+  private selectedUri(node: Node): string {
+    if (node.type !== 'configurable_uri') return this.uriText(node);
+    for (const configuration of namedOf(node).filter((child) => child.type === 'configuration_uri')) {
+      const test = requireNode(
+        namedOf(configuration).find((child) => child.type === 'uri_test'),
+        configuration
+      );
+      const [name, expected] = namedOf(test);
+      const value = VM_ENVIRONMENT.get(requireNode(name, test).text.replaceAll(/\s/g, ''));
+      const holds = expected ? value !== undefined && value === this.stringText(expected) : value === 'true';
+      if (holds)
+        return this.uriText(
+          requireNode(
+            namedOf(configuration).find((child) => child.type === 'uri'),
+            configuration
+          )
+        );
+    }
+    return this.uriText(node);
   }
 
   private uriText(node: Node): string {
@@ -174,7 +210,11 @@ export class Converter extends ExpressionConverter {
             namedOf(node).find((child) => child.type === 'uri'),
             node
           );
-    const literal = this.convertExpression(requireNode(namedOf(uri)[0], uri));
+    return this.stringText(requireNode(namedOf(uri)[0], uri));
+  }
+
+  private stringText(node: Node): string {
+    const literal = this.convertExpression(node);
     if (literal.kind !== 'string' || literal.parts.some((part) => typeof part !== 'string')) {
       return syntaxError(node, 'import の URI には、式の入らない文字列を書いてください。');
     }
@@ -436,21 +476,42 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertTypeAlias(node: Node): TypeAliasDeclaration {
-    if (!hasToken(node, '=')) return unsupported(node, '古い形の typedef（typedef int F(int x);）');
     const named = namedOf(node);
-    const nameNode = requireNode(
-      named.find((child) => child.type === 'type_identifier'),
-      node
-    );
-    const aliased = requireNode(
-      named.find((child) => child.type === 'type'),
-      node
-    );
+    const typeParameters = this.convertTypeParameters(named.find((child) => child.type === 'type_parameters'));
+    let nameNode: Node;
+    let aliased: TypeSyntax;
+    if (hasToken(node, '=')) {
+      nameNode = requireNode(
+        named.find((child) => child.type === 'type_identifier'),
+        node
+      );
+      aliased = this.convertType(
+        requireNode(
+          named.find((child) => child.type === 'type'),
+          node
+        )
+      );
+    } else {
+      // `typedef int F(int x);` names the function type `int Function(int x)`; its return type comes first.
+      const nameIndex = named.findIndex((child) => child.type === 'type_identifier');
+      nameNode = requireNode(named[nameIndex], node);
+      const returnNode = named.slice(0, nameIndex).find((child) => child.type === 'type');
+      aliased = this.functionTypeOfFormals(
+        node,
+        returnNode,
+        requireNode(
+          named.find((child) => child.type === 'formal_parameter_list'),
+          node
+        ),
+        [],
+        false
+      );
+    }
     return {
       kind: 'typeAlias',
       name: nameNode.text,
-      typeParameters: this.convertTypeParameters(named.find((child) => child.type === 'type_parameters')),
-      aliased: this.convertType(aliased),
+      typeParameters,
+      aliased,
       annotations: this.annotationsOf(node),
       ...spanOf(node),
     };
@@ -486,10 +547,17 @@ export class Converter extends ExpressionConverter {
 
   private convertMembers(body: Node): MemberDeclaration[] {
     const owner = body.parent ? fieldOf(body.parent, 'name')?.text : undefined;
-    return namedOf(body)
-      .filter((child) => child.type === 'class_member')
-      .flatMap((child) => this.convertMember(child))
-      .map((member) => asUntypedMethod(member, owner) ?? member);
+    return (
+      namedOf(body)
+        .filter((child) => child.type === 'class_member')
+        .flatMap((child) => this.convertMember(child))
+        .map((member) => asUntypedMethod(member, owner) ?? member)
+        // Only once a member without a return type is known to be a method or a constructor can its body be checked.
+        .map((member) => {
+          if (member.kind !== 'field') requireSyncBody(member, member.body);
+          return member;
+        })
+    );
   }
 
   private convertMember(node: Node): MemberDeclaration[] {
@@ -766,6 +834,7 @@ export class Converter extends ExpressionConverter {
     const signature = requireNode(fieldOf(node, 'signature'), node);
     const body = this.convertFunctionBody(requireNode(fieldOf(node, 'body'), node));
     const kind = node.type === 'getter_declaration' ? 'getter' : 'setter';
+    if (kind === 'setter') requireSyncBody({ kind: 'topLevelSetter' }, body);
     return this.functionFromSignature(signature, body, kind, this.annotationsOf(node), spanOf(node), false);
   }
 
@@ -824,7 +893,6 @@ export class Converter extends ExpressionConverter {
         isCovariant: false,
         isRequired: true,
         defaultValue: undefined,
-        functionType: undefined,
         ...span,
       };
       const setter: FunctionDeclaration = {
@@ -868,10 +936,51 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  /**
+   * The type of a parameter, where an old-style function-typed parameter `int f(int x)` or `this.f(int x)` has the
+   * function type its return type and parameter list spell.
+   */
+  private parameterTypeOf(node: Node, parts: Node[], typeNode: Node | undefined): TypeSyntax | undefined {
+    const formals = parts.find((child) => child.type === 'formal_parameter_list');
+    if (!formals) return typeNode ? this.convertType(typeNode) : undefined;
+    const typeParameters = this.convertTypeParameters(parts.find((child) => child.type === 'type_parameters'));
+    return this.functionTypeOfFormals(node, typeNode, formals, typeParameters, parts.at(-1)?.type === '?');
+  }
+
+  private functionTypeOfFormals(
+    node: Node,
+    returnNode: Node | undefined,
+    formals: Node,
+    typeParameters: TypeParameter[],
+    nullable: boolean
+  ): TypeSyntax {
+    const { positional, requiredCount, named } = this.convertFormalParameters(formals);
+    const span = spanOf(node);
+    const typeOf = (parameter: FormalParameter): TypeSyntax =>
+      parameter.type ?? { kind: 'named', prefix: undefined, name: 'dynamic', args: [], nullable: false, ...span };
+    return {
+      kind: 'function',
+      returnType: returnNode ? this.convertType(returnNode) : undefined,
+      typeParameters,
+      parameters: {
+        positional: positional.map((parameter) => ({ name: parameter.name, type: typeOf(parameter) })),
+        requiredCount,
+        named: named.map((parameter) => ({
+          name: parameter.argumentName,
+          type: typeOf(parameter),
+          isRequired: parameter.isRequired,
+        })),
+      },
+      nullable,
+      ...span,
+    };
+  }
+
   convertFunctionBody(node: Node): FunctionBody {
     const span = spanOf(node);
+    // The SDK reads `native 'name'` only in its own libraries and rejects it elsewhere as a missing body.
     if (namedOf(node).some((child) => child.type === 'native')) {
-      return unsupported(node, 'native（処理系の外で定義する本体）');
+      return syntaxError(node, '関数・ゲッター・セッターには本体を書いてください。');
     }
     const tokens = new Set(
       childrenOf(node)
@@ -882,7 +991,6 @@ export class Converter extends ExpressionConverter {
     if (tokens.has('async')) modifier = tokens.has('*') ? 'async*' : 'async';
     else if (tokens.has('async*')) modifier = 'async*';
     else if (tokens.has('sync*') || tokens.has('sync')) modifier = 'sync*';
-    if (modifier === 'async' || modifier === 'async*') return unsupported(node, `${modifier}（非同期処理）`);
     const block = namedOf(node).find((child) => child.type === 'block');
     if (block) return { kind: 'block', block: this.convertBlock(block), modifier, ...span };
     const children = childrenOf(node);
@@ -967,7 +1075,6 @@ export class Converter extends ExpressionConverter {
     return parameters;
   }
 
-  // code-gauge-allow functionCognitiveComplexity -- One check per parameter modifier and form Dart distinguishes.
   private convertFormalParameter(
     node: Node,
     isRequired: boolean,
@@ -986,28 +1093,21 @@ export class Converter extends ExpressionConverter {
         parts.find((child) => child.type === 'identifier'),
         constructorParam
       ).text;
-      if (parts.some((child) => child.type === 'formal_parameter_list')) {
-        return unsupported(node, '関数の型を古い形で書いた引数');
-      }
       const ownTokens = new Set(parts.filter((child) => !child.isNamed).map((child) => child.type));
       const modifier = PARAMETER_MODIFIERS.find((token) => tokens.has(token) || ownTokens.has(token));
       if (modifier) syntaxError(node, `${modifier} は、ここには書けません。`);
       return {
         annotations: this.annotationsOf(node),
         name,
-        type: typeNode ? this.convertType(typeNode) : undefined,
+        type: this.parameterTypeOf(constructorParam, parts, typeNode),
         binding: constructorParam.type === 'constructor_param' ? 'this' : 'super',
         isVar: tokens.has('var') || ownTokens.has('var') || undefined,
         isFinal: true,
         isCovariant: tokens.has('covariant'),
         isRequired,
         defaultValue,
-        functionType: undefined,
         ...span,
       };
-    }
-    if (children.some((child) => child.type === 'formal_parameter_list')) {
-      return unsupported(node, '関数の型を古い形で書いた引数（int f(int x) の形）');
     }
     const typeNode = children.find((child) => child.type === 'type');
     const nameNode = fieldOf(node, 'name') ?? children.find((child) => child.type === 'identifier');
@@ -1016,14 +1116,13 @@ export class Converter extends ExpressionConverter {
     return {
       annotations: this.annotationsOf(node),
       name: requireNode(nameNode, node).text,
-      type: typeNode ? this.convertType(typeNode) : undefined,
+      type: this.parameterTypeOf(node, children, typeNode),
       binding: 'plain',
       isVar: tokens.has('var') || undefined,
       isFinal: tokens.has('final'),
       isCovariant: tokens.has('covariant'),
       isRequired,
       defaultValue,
-      functionType: undefined,
       ...span,
     };
   }
@@ -1093,7 +1192,14 @@ export class Converter extends ExpressionConverter {
         const parts = this.convertForParts(node);
         const body = this.convertStatement(requireNode(fieldOf(node, 'body'), node));
         if (parts.kind === 'forIn') {
-          return { kind: 'forIn', binding: parts.binding, iterable: parts.iterable, body, isAwait: false, ...span };
+          return {
+            kind: 'forIn',
+            binding: parts.binding,
+            iterable: parts.iterable,
+            body,
+            isAwait: parts.isAwait,
+            ...span,
+          };
         }
         return { kind: 'for', init: parts.init, condition: parts.condition, updates: parts.updates, body, ...span };
       }
@@ -1341,4 +1447,17 @@ function asUntypedMethod(member: MemberDeclaration, owner: string | undefined): 
 function requirePlainParameters(positional: FormalParameter[], named: FormalParameter[]): void {
   const invalid = [...positional, ...named].find((parameter) => parameter.binding !== 'plain');
   if (invalid) syntaxError(invalid, `引数 ${invalid.binding}.${invalid.name} は、この引数リストでは使えません。`);
+}
+
+/**
+ * A constructor, a factory and a setter run to their end before their caller goes on, so the SDK rejects a body
+ * marked `async`, `async*` or `sync*` on them, which would otherwise run as a plain body.
+ */
+function requireSyncBody(member: MemberDeclaration | { kind: 'topLevelSetter' }, body: FunctionBody | undefined): void {
+  if (!body || body.modifier === 'sync') return;
+  let what: string | undefined;
+  if (member.kind === 'constructor') what = member.constructorKind === 'generative' ? 'コンストラクタ' : 'ファクトリ';
+  else if (member.kind === 'topLevelSetter' || (member.kind === 'method' && member.methodKind === 'setter'))
+    what = 'セッター';
+  if (what) syntaxError(body, `${what}の本体には async・async*・sync* を書けません。`);
 }
