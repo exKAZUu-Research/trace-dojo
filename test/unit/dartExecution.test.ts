@@ -9295,20 +9295,27 @@ Future<void> main() async {
   });
 });
 
-test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
+test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
   print(await Stream.fromIterable(['[1,', ' 2', ', {"a":', ' "b"}]']).transform(json.decoder).toList());
-  try {
-    await Stream.fromIterable(['[1,', ' x]']).transform(json.decoder).toList();
-  } on UnsupportedError catch (error) {
-    print(error.message);
+  for (final chunks in [['[1,', '2'], ['', '[1,', ''], ['[1,', ' x]']]) {
+    try {
+      await Stream.fromIterable(chunks).transform(json.decoder).toList();
+    } catch (error) {
+      print(error.toString().replaceAll('\\n', '|'));
+    }
   }
 }`;
   expect(executeProgram('dart', source)).toMatchObject({
     kind: 'executed',
-    stdout:
-      '[[1, 2, {a: b}]]\nJSON として読めないテキストを流す json.decoder のストリームは、この採点環境では使えません。\n',
+    stdout: [
+      '[[1, 2, {a: b}]]',
+      'FormatException: Unexpected end of input (at character 2)|2| ^|',
+      'FormatException: Unexpected end of input (at character 1)||^|',
+      'Unsupported operation: 途中に JSON として読めない部分があるテキストを流す json.decoder のストリームは、この採点環境では使えません。',
+      '',
+    ].join('\n'),
   });
 });
 

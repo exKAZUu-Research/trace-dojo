@@ -875,18 +875,21 @@ final class JsonDecoder extends Converter<String, Object?> {
 /**
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
  * as it comes: the chunks are kept and the text is parsed once when the stream ends, which is when the SDK gives the
- * value too. An error the chunked parser reports at a time and place of its own state (with the chunk it is in), so
- * a text that does not parse is reported as unavailable.
+ * value too. A text that ends too early fails there, as the chunked parser fails it, at the end of the last chunk; an
+ * error before the end the chunked parser reports in the chunk it is in and goes on from its own state, with a second
+ * error or a value it had completed, so such a text is reported as unavailable.
  */
 class _JsonStringDecoderSink implements EventSink<String> {
   final EventSink<Object?> _sink;
   final Object? Function(Object? key, Object? value)? _reviver;
   final StringBuffer _text = StringBuffer();
+  String _lastChunk = "";
 
   _JsonStringDecoderSink(this._sink, this._reviver);
 
   void add(String chunk) {
     _text.write(chunk);
+    _lastChunk = chunk;
   }
 
   void addError(Object error, [StackTrace? stackTrace]) {
@@ -894,11 +897,15 @@ class _JsonStringDecoderSink implements EventSink<String> {
   }
 
   void close() {
+    final text = _text.toString();
     Object? value;
     try {
-      value = _jsonDecode(_text.toString(), _reviver);
-    } on FormatException {
-      _unavailable("JSON として読めないテキストを流す json.decoder のストリーム");
+      value = _jsonDecode(text, _reviver);
+    } on FormatException catch (error) {
+      if (error.offset != text.length) {
+        _unavailable("途中に JSON として読めない部分があるテキストを流す json.decoder のストリーム");
+      }
+      throw FormatException(error.message, _lastChunk, _lastChunk.length);
     }
     _sink.add(value);
     _sink.close();
