@@ -2,6 +2,7 @@ import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
+import { isIdentifier } from './variables';
 
 const WAIT_USAGE = 'wait [-fn] [-p var] [id ...]';
 
@@ -21,7 +22,18 @@ export const waitBuiltin: Builtin = (shell, args) => {
   if (pids === undefined) return 1;
   // Bash unsets the `-p` variable before it waits, so it stays unset when no job is reported.
   const pidName = options.get('p');
-  if (pidName !== undefined) shell.store.unsetNamed(pidName, false);
+  if (pidName !== undefined) {
+    // A name that cannot be unset fails `wait` before it waits, as Bash reports it.
+    if (!isIdentifier(pidName)) {
+      shell.reportError(`wait: \`${pidName}': not a valid identifier`);
+      return 1;
+    }
+    const failure = shell.store.unsetNamed(pidName, false);
+    if (failure) {
+      shell.reportError(`wait: ${failure.message}`);
+      return 1;
+    }
+  }
   // A coprocess waited for that nothing has read from yet runs now; one that waits for input the shell can still write
   // would be waited for forever.
   const targetPids = pids.length > 0 ? pids : [...jobs.keys()];
