@@ -3,10 +3,10 @@ import { assert } from 'es-toolkit';
 import { COERCIBLE_CLASS, COERCIBLE_TYPES, EQUALITY_CLASS, FUNCTION_TYPE } from './builtinTypes';
 import { type ClassEnv, superPred } from './classEnv';
 import { deriveInstance, FUNCTOR_LIKE_CLASSES } from './deriving';
-import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
+import { type ClassEntity, type ConInfo, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import type { FeatureGates, FeatureOf } from './features';
-import { type Builtins, Checker, typeParamKinds, typeVarNames } from './infer';
+import { type Builtins, Checker, fieldSelectorType, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
 import type { RBinding, RExpr, RType } from './rast';
@@ -155,12 +155,13 @@ function defineConstructors(decl: RDataDecl): void {
       }
     }
     field.fieldType = first;
-    const { kinds, head: recordType } = declHead(decl);
+    const [con, position] = [...field.positions].find(([candidate]) => own.has(candidate)) as [ConInfo, number];
+    const { kinds, record, field: fieldType } = fieldSelectorType(con, position);
     field.entity.scheme = {
       kinds,
       visibilities: kinds.map((): Visibility => 'inferred'),
       preds: [],
-      type: tap(tcon(FUNCTION_TYPE), recordType, first),
+      type: tap(tcon(FUNCTION_TYPE), record, fieldType),
     };
   }
 }

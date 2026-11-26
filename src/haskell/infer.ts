@@ -503,15 +503,10 @@ export class Checker {
     }
     if (new Set(candidates.map((candidate) => candidate.instanceArgs)).size > 1) return undefined;
     const con = candidates[0];
-    let fieldArgs = args;
-    if (con.instanceArgs) {
-      fieldArgs = (con.instanceKinds ?? []).map((kind) => this.freshVar(kind));
-      for (const [index, instanceArg] of con.instanceArgs.entries()) {
-        this.unify(args[index], instantiateType(instanceArg, fieldArgs), span, `フィールド ${info.name} の型`);
-      }
-    }
-    const fieldType = con.fieldTypes[info.positions.get(con) as number];
-    this.unify(field, instantiateType(fieldType, fieldArgs), span, `フィールド ${info.name} の型`);
+    const selector = fieldSelectorType(con, info.positions.get(con) as number);
+    const vars = selector.kinds.map((kind) => this.freshVar(kind));
+    this.unify(record, instantiateType(selector.record, vars), span, `フィールド ${info.name} の型`);
+    this.unify(field, instantiateType(selector.field, vars), span, `フィールド ${info.name} の型`);
     return { kind: 'field', field: info };
   }
 
@@ -1993,6 +1988,22 @@ export function polytypeScheme(type: TForall): Scheme {
  * GADT constructor quantifies its signature's variables instead, in their written order, before the parameters its
  * result type fixes.
  */
+/**
+ * A field's selector type over its constructor's own variables: the record type the constructor builds (a data
+ * instance's types, or a GADT constructor's result) and the field's type.
+ */
+export function fieldSelectorType(con: ConInfo, position: number): { kinds: Kind[]; record: Type; field: Type } {
+  const field = con.fieldTypes[position];
+  if (con.instanceArgs) {
+    return { kinds: con.instanceKinds ?? [], record: tap(tcon(con.type), ...con.instanceArgs), field };
+  }
+  const params = typeParamKinds(con.type);
+  const resultArgs = params.map(
+    (_, index): Type => con.equalities?.find(([parameter]) => parameter === index)?.[1] ?? { tag: 'tgen', index }
+  );
+  return { kinds: [...params, ...(con.exKinds ?? [])], record: tap(tcon(con.type), ...resultArgs), field };
+}
+
 export function conScheme(con: ConInfo): Scheme {
   if (con.instanceArgs) {
     const kinds = con.instanceKinds ?? [];
