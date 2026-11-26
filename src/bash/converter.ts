@@ -5,6 +5,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type {
   ArithmeticSource,
   Assignment,
+  BackquoteRereading,
   CaseItem,
   ParameterExpansion,
   Program,
@@ -1033,29 +1034,35 @@ export class Converter {
       opening?.type === '`'
         ? this.analyzed.originalSource.slice(node.startIndex, node.endIndex)
         : this.restoreQuotes(node.text, node.startIndex);
-    const syntaxError = opening?.type === '`' ? this.analyzed.backquoteErrors.get(node.startIndex) : undefined;
-    if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? text.slice(1, -1) : '';
-    // A body read where `extglob` may be off is read again without it as it runs, as Bash reads it only then.
-    const withoutExtglob =
-      opening?.type === '`' && this.analyzed.backquoteUncertainExtglob.has(node.startIndex)
-        ? inspectUnescapedBackquoteBody(inner.replaceAll(/\\([$`\\])/g, '$1'), row, false)
-        : undefined;
+    const unescaped = inner.replaceAll(/\\([$`\\])/g, '$1');
+    const readExtglob = this.analyzed.backquoteExtglob.get(node.startIndex) ?? false;
+    // Bash reads a backquoted body only as it runs it, with the `extglob` then in effect, so a body runs as read here
+    // only while that setting is the one it was read with, and is read again with the other.
+    const reread = opening?.type === '`' ? this.backquoteRereader(unescaped, row, readExtglob) : undefined;
+    const syntaxError = opening?.type === '`' ? this.analyzed.backquoteErrors.get(node.startIndex) : undefined;
+    if (syntaxError) return { kind: 'commandSubstitution', body: [], text, row, syntaxError, ...reread };
     const body = /\\[$`\\]/.test(inner)
-      ? this.hooks.reparse(
-          inner.replaceAll(/\\([$`\\])/g, '$1'),
-          row,
-          this.analyzed.backquoteExtglob.get(node.startIndex)
-        )
+      ? this.hooks.reparse(unescaped, row, readExtglob)
       : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
-    return {
-      kind: 'commandSubstitution',
-      body,
-      text,
-      row,
-      ...(withoutExtglob ? { syntaxErrorWithoutExtglob: withoutExtglob } : {}),
+    return { kind: 'commandSubstitution', body, text, row, ...reread };
+  }
+
+  /** How a backquoted body read with `readExtglob` reads with the other setting, read once when first asked. */
+  private backquoteRereader(
+    unescaped: string,
+    row: number,
+    readExtglob: boolean
+  ): { readExtglob: boolean; rereadWithOtherExtglob: () => BackquoteRereading } {
+    let other: BackquoteRereading | undefined;
+    const rereadWithOtherExtglob = (): BackquoteRereading => {
+      if (other) return other;
+      const syntaxError = inspectUnescapedBackquoteBody(unescaped, row, !readExtglob);
+      other = syntaxError ? { body: [], syntaxError } : { body: this.hooks.reparse(unescaped, row, !readExtglob) };
+      return other;
     };
+    return { readExtglob, rereadWithOtherExtglob };
   }
 
   private expansion(node: Node): ParameterExpansion {

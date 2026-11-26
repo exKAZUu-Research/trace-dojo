@@ -7,6 +7,12 @@ export interface Word {
   text: string;
 }
 
+/** A backquoted body read again with another `extglob` setting: its commands, or the syntax error it then has. */
+export interface BackquoteRereading {
+  body: Statement[];
+  syntaxError?: BackquoteSyntaxError;
+}
+
 export type WordPart =
   /** Unquoted text, keeping its backslashes, which quote the character after each. */
   | { kind: 'literal'; text: string }
@@ -23,11 +29,10 @@ export type WordPart =
       text: string;
       row: number;
       syntaxError?: BackquoteSyntaxError;
-      /**
-       * The syntax error a backquoted body read with extended patterns has when `extglob` turns out off as it runs,
-       * where the program cannot tell which before it runs.
-       */
-      syntaxErrorWithoutExtglob?: BackquoteSyntaxError;
+      /** The `extglob` setting a backquoted body was read with, which runs it as read while still in effect. */
+      readExtglob?: boolean;
+      /** The body read with the other `extglob` setting, which Bash reads it with when that is in effect as it runs. */
+      rereadWithOtherExtglob?: () => BackquoteRereading;
       /** `${ ...; }` runs in the current shell, and `${| ...; }` there too, expanding to `REPLY` instead. */
       mode?: 'current' | 'reply';
     }

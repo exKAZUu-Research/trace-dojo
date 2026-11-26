@@ -371,13 +371,14 @@ export class Expander {
     part: Extract<WordPart, { kind: 'commandSubstitution' }>,
     inDouble: boolean
   ): WordSegment[] {
-    if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
-    if (part.syntaxErrorWithoutExtglob && !this.shell.options.extglob) {
-      return this.failBackquoted(part.syntaxErrorWithoutExtglob, inDouble);
-    }
+    const read =
+      part.rereadWithOtherExtglob && part.readExtglob !== this.shell.options.extglob
+        ? part.rereadWithOtherExtglob()
+        : part;
+    if (read.syntaxError) return this.failBackquoted(read.syntaxError, inDouble);
     const { output, status } = part.mode
-      ? this.shell.captureCurrentShell(part.body, part.mode)
-      : this.shell.captureSubshell(part.body, part.row);
+      ? this.shell.captureCurrentShell(read.body, part.mode)
+      : this.shell.captureSubshell(read.body, part.row);
     this.lastSubstitutionStatus = status;
     this.shell.store.lastStatus = status;
     if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
