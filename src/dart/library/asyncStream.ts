@@ -3197,6 +3197,11 @@ class CastStreamTransformer<SS, ST, TS, TT>
   Stream<TT> bind(Stream<TS> stream) =>
       _source.bind(stream.cast<SS>()).cast<TT>();
 }
+// The VM's _AsyncStarStreamController. Modification: a yield* of another async* body's fresh stream attaches that
+// body to the root controller, the one the outermost body's listener listens to, instead of adding its stream through
+// a subscription to it: the attached body adds its data and errors to the root directly, the root's pause, resume
+// and cancel reach the innermost attached body as they would through the subscriptions, in their order, and only
+// its end returns to the body that forwarded it; so a recursive yield* runs in a fixed depth of host frames.
 class _AsyncStarStreamController<T> {
   StreamController<T> controller;
   void Function(Object?)? asyncStarBody;
@@ -3205,22 +3210,36 @@ class _AsyncStarStreamController<T> {
   bool isScheduled = false;
   bool isSuspendedAtYield = false;
   _Future? cancellationFuture = null;
-  Stream<T> get stream => controller.stream;
+  /** The root controller this body adds to directly, once a yield* attached it, and the body that waits for it. */
+  _AsyncStarStreamController? _root;
+  _AsyncStarStreamController? _forwarder;
+  /** The body this one forwards through a yield* that attached it. */
+  _AsyncStarStreamController? _attached;
+  /** Whether the root's cancel reached this attached body, whose end then returns to its forwarder through that. */
+  bool _isCancelledByRoot = false;
+  static final Expando<_AsyncStarStreamController> _streams = Expando<_AsyncStarStreamController>();
+  late final Stream<T> stream = _registered(controller.stream);
+  Stream<T> _registered(Stream<T> stream) {
+    _streams[stream] = this;
+    return stream;
+  }
+  /** The controller this body's events go to: the root's once attached. */
+  StreamController get _out => _root?.controller ?? controller;
   void runBody() {
     isScheduled = false;
     isSuspendedAtYield = false;
-    asyncStarBody!(!controller.hasListener);
+    asyncStarBody!(!_out.hasListener);
   }
   void scheduleGenerator() {
-    if (isScheduled || controller.isPaused || isAdding) {
+    if (isScheduled || _out.isPaused || isAdding) {
       return;
     }
     isScheduled = true;
     scheduleMicrotask(runBody);
   }
   bool add(T event) {
-    controller.add(event);
-    if (!controller.hasListener) {
+    _out.add(event);
+    if (!_out.hasListener) {
       return true;
     }
     scheduleGenerator();
@@ -3228,18 +3247,32 @@ class _AsyncStarStreamController<T> {
     return false;
   }
   bool addStream(Stream<T> stream) {
-    if (!controller.hasListener) {
+    if (!_out.hasListener) {
       return true;
     }
     isAdding = true;
+    final body = _streams[stream];
+    if (body != null && !body.onListenReceived && !body.controller.hasListener) {
+      // The attached body starts as the subscription's listen would start it.
+      body._root = _root ?? this;
+      body._forwarder = this;
+      _attached = body;
+      body.onListen();
+      return false;
+    }
     final whenDoneAdding = controller.addStream(stream, cancelOnError: false);
     final self = this;
     whenDoneAdding.then((_) {
-      self.isAdding = false;
-      self.scheduleGenerator();
-      if (!self.isScheduled) self.isSuspendedAtYield = true;
+      self._attachedDone();
     });
     return false;
+  }
+  /** What the end of the stream this body forwards does: it continues after its yield*. */
+  void _attachedDone() {
+    _attached = null;
+    isAdding = false;
+    scheduleGenerator();
+    if (!isScheduled) isSuspendedAtYield = true;
   }
   void addError(Object error, StackTrace stackTrace) {
     final future = cancellationFuture;
@@ -3247,8 +3280,8 @@ class _AsyncStarStreamController<T> {
       future._completeError(error, stackTrace);
       return;
     }
-    if (!controller.hasListener) return;
-    controller.addError(error, stackTrace);
+    if (!_out.hasListener) return;
+    _out.addError(error, stackTrace);
   }
   close() {
     final future = cancellationFuture;
@@ -3256,11 +3289,15 @@ class _AsyncStarStreamController<T> {
       future._completeWithValue(null);
     }
     controller.close();
+    final forwarder = _forwarder;
+    // The done event of the stream it forwards completes its addStream future, whose listener the forwarder runs a
+    // microtask later; after the root's cancel, the cancel's completion does that instead.
+    if (forwarder != null && !_isCancelledByRoot) scheduleMicrotask(forwarder._attachedDone);
   }
   _AsyncStarStreamController() : controller = StreamController(sync: true) {
     controller.onListen = this.onListen;
-    controller.onResume = this.onResume;
-    controller.onCancel = this.onCancel;
+    controller.onResume = this._onRootResume;
+    controller.onCancel = this._onRootCancel;
   }
   onListen() {
     onListenReceived = true;
@@ -3270,6 +3307,32 @@ class _AsyncStarStreamController<T> {
     if (isSuspendedAtYield) {
       scheduleGenerator();
     }
+  }
+  /** The root's resume, which reaches each attached body in turn, as each subscription's resume would. */
+  void _onRootResume() {
+    for (_AsyncStarStreamController? body = this; body != null; body = body._attached) {
+      body.onResume();
+    }
+  }
+  /**
+   * The root's cancel, which cancels the attached bodies innermost first, as the controller's addStream state cancels
+   * its subscription before the controller's own onCancel runs.
+   */
+  _onRootCancel() {
+    final attached = _attached;
+    if (attached == null) return onCancel();
+    attached._isCancelledByRoot = true;
+    final cancel = attached._onRootCancel();
+    final self = this;
+    final Future result = cancel == null
+        ? (() {
+            scheduleMicrotask(self._attachedDone);
+            return Future<void>.value();
+          })()
+        : (cancel as Future).whenComplete(() {
+            scheduleMicrotask(self._attachedDone);
+          });
+    return result.whenComplete(() => self.onCancel());
   }
   onCancel() {
     if (controller.isClosed) {

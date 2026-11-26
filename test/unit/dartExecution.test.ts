@@ -9433,6 +9433,22 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'level Bad state: deep\nh x\n' });
 });
 
+test('a recursive async* yield* runs as deep as the SDK runs it, with its cancel and finally order', () => {
+  const source = `Stream<int> count(int n) async* { if (n > 0) { yield n; yield* count(n - 1); } }
+Stream<int> fin(int n) async* { try { if (n > 0) { yield n; yield* fin(n - 1); } } finally { print('fin $n'); } }
+Future<void> main() async {
+  var total = 0;
+  await for (final v in count(300)) { total += v; }
+  print(total);
+  await for (final v in fin(3)) { print('v $v'); if (v == 2) break; }
+  print('after');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '45150\nv 3\nv 2\nfin 2\nfin 3\nafter\n',
+  });
+});
+
 test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
   const source = `import 'dart:async';
 var ticks = 0;
