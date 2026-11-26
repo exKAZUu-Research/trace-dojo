@@ -14,12 +14,12 @@ import type {
   VariableDeclaration,
 } from './ast';
 import { assignmentTargets, localNamesIn } from './astWalk';
-import { type AwaitRequest, containsAwait, type YieldEachRequest } from './awaitSteps';
+import { type AwaitRequest, containsAwait, type GenEval, runWithoutWaiting, type YieldEachRequest } from './awaitSteps';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import type { ClassInfo } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { childContext } from './contextTypes';
-import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
+import { type CompiledPattern, guardHolds, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import type { Frame } from './runtime';
 import { bodyKind, Flow, FunctionContext, type JumpTarget, type LocalVar, type ReturnRule } from './scope';
 import { closeInferenceHoles, containsInferenceHole } from './typeInference';
@@ -811,7 +811,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     );
     return (frame) => {
       try {
-        if (match(frame)) return consequence(frame);
+        if (runWithoutWaiting(match(frame))) return consequence(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
@@ -823,7 +823,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     statement: Extract<Statement, { kind: 'if' }>,
     compileBody: (body: Statement) => T
   ): {
-    match: (frame: Frame) => boolean;
+    match: (frame: Frame) => Generator<AwaitRequest, boolean, Value>;
     consequence: T;
     otherwise: T | undefined;
     slots: number[];
@@ -833,20 +833,26 @@ export abstract class StatementCompiler extends PatternCompiler {
     const before = this.flow;
     let pattern!: CompiledPattern;
     let guard: Eval | undefined;
+    let guardGen: GenEval | undefined;
     let whenFalse = before;
     const { result: consequence, slots } = this.withScope(() => {
-      ({ pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard));
+      ({ pattern, guard, guardGen, whenFalse } = this.compileCasePattern(
+        casePattern.pattern,
+        subject,
+        casePattern.guard
+      ));
       return compileBody(statement.consequence);
     });
     const afterThen = this.flow;
     this.flow = whenFalse;
     const otherwise = statement.alternative ? compileBody(statement.alternative) : undefined;
     this.flow = Flow.join(afterThen, this.flow);
-    const match = (frame: Frame): boolean => {
+    // A guard that awaits makes the match wait, which only a generator's if runs.
+    const match = function* (frame: Frame): Generator<AwaitRequest, boolean, Value> {
       const value = subject.run(frame);
       frame.temporaries.push(value);
       try {
-        return pattern.match(frame, value) && (!guard || guard(frame) === true);
+        return pattern.match(frame, value) && (yield* guardHolds(frame, guard, guardGen));
       } finally {
         frame.temporaries.pop();
       }

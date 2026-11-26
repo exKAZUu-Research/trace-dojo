@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Pattern kinds share their type, rooting, and binding helpers.
 import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { nullPatternComparison } from './astWalk';
-import type { AwaitRequest } from './awaitSteps';
+import { type AwaitRequest, type GenEval, runSteps } from './awaitSteps';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
@@ -140,7 +140,7 @@ export abstract class PatternCompiler extends CallCompiler {
     syntax: Pattern,
     subject: Compiled,
     guardSyntax: Expression | undefined
-  ): { pattern: CompiledPattern; guard: Eval | undefined; whenFalse: Flow } {
+  ): { pattern: CompiledPattern; guard: Eval | undefined; guardGen?: GenEval; whenFalse: Flow } {
     const before = this.flow;
     const variable = subject.variable && this.isPromotable(subject.variable) ? subject.variable : undefined;
     const current = variable ? this.promotedType(variable) : subject.type;
@@ -163,19 +163,27 @@ export abstract class PatternCompiler extends CallCompiler {
     return this.compileGuard(pattern, guardSyntax, whenFalse);
   }
 
+  /**
+   * A case's `when` guard, which runs only after its pattern matches. One that awaits is compiled with steps of its
+   * own, which its generator (`guardGen`) runs after the match, as the matching code runs it, instead of `guard`.
+   */
   private compileGuard(
     pattern: CompiledPattern,
     guardSyntax: Expression,
     whenFalse: Flow
-  ): { pattern: CompiledPattern; guard: Eval | undefined; whenFalse: Flow } {
-    // A guard runs only after its pattern matches, while the steps of its statement run before the match.
-    if (this.awaitsHere(guardSyntax))
-      return this.error(guardSyntax, 'when の条件の await は、この採点環境では使えません。');
+  ): { pattern: CompiledPattern; guard: Eval | undefined; guardGen?: GenEval; whenFalse: Flow } {
     for (const binding of pattern.variables.values()) binding.inPatternGuard = true;
     try {
-      const guard = this.compileCondition(guardSyntax);
+      const { result: guard, steps } = this.compileWithSteps(guardSyntax, () => this.compileCondition(guardSyntax));
       this.flow = guard.flow.whenTrue;
-      return { pattern, guard: guard.compiled.run, whenFalse: Flow.join(whenFalse, guard.flow.whenFalse) };
+      const flow = Flow.join(whenFalse, guard.flow.whenFalse);
+      if (steps.length === 0) return { pattern, guard: guard.compiled.run, whenFalse: flow };
+      const { run } = guard.compiled;
+      const guardGen: GenEval = function* (frame) {
+        yield* runSteps(frame, steps);
+        return run(frame);
+      };
+      return { pattern, guard: undefined, guardGen, whenFalse: flow };
     } finally {
       for (const binding of pattern.variables.values()) binding.inPatternGuard = false;
     }
@@ -1035,4 +1043,14 @@ function matchesRecord(
     if (!field.pattern.match(frame, entry?.[1], cache.child(field.name))) return false;
   }
   return true;
+}
+
+/** Whether a case's guard holds, through its generator when it awaits; a case without a guard holds. */
+export function* guardHolds(
+  frame: Frame,
+  guard: Eval | undefined,
+  guardGen: GenEval | undefined
+): Generator<AwaitRequest, boolean, Value> {
+  if (guardGen) return (yield* guardGen(frame)) === true;
+  return !guard || guard(frame) === true;
 }

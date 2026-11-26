@@ -158,6 +158,23 @@ export function* evaluateParts<T>(
   }
 }
 
+/** Evaluates a statement's steps, then `run`'s generator, which reads what they computed and may wait too. */
+export function* evaluatePartsThen<T>(
+  frame: Frame,
+  root: AwaitRoot | undefined,
+  run: () => Generator<AwaitRequest, T, Value>
+): Generator<AwaitRequest, T, Value> {
+  if (!root) return yield* run();
+  const mark = frame.temporaries.length;
+  try {
+    yield* runSteps(frame, root.staging.steps);
+    return yield* run();
+  } finally {
+    for (const slot of root.slots) frame.locals[slot] = undefined;
+    frame.temporaries.length = mark;
+  }
+}
+
 /** Whether a root evaluates an expression, which lies in one of its ranges. */
 export function rootCovers(root: AwaitRoot, span: Span): boolean {
   return root.ranges.some((range) => range.start <= span.start && span.end <= range.end);

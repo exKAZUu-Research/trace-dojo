@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss -- Assignment targets share read and write dispatch.
 import type { CascadeSelector, CollectionElement, Expression, ForInBinding, Span, SwitchExpressionCase } from './ast';
 import { awaitingCompiled } from './awaitCompiler';
-import { containsAwait, type Part, runSteps, runWithoutWaiting } from './awaitSteps';
+import { type AwaitRequest, containsAwait, type GenEval, type Part, runSteps, runWithoutWaiting } from './awaitSteps';
 import type { ClassInfo, Member } from './classes';
 import {
   type AddElement,
@@ -21,7 +21,7 @@ import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, SHORTED } from './expressionCompiler';
 import { forEachValue, implicitCast } from './library/nativeSupport';
 import { wrap } from './operators';
-import { PatternCache } from './patternCompiler';
+import { guardHolds, PatternCache } from './patternCompiler';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
 import { copyLoopCells, isAnsweredType } from './statementCompiler';
@@ -941,9 +941,13 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       );
       const casePattern = element.casePattern;
       const { result, slots } = this.withScope(() => {
-        const { pattern, guard, whenFalse } = this.compileCasePattern(casePattern.pattern, subject, casePattern.guard);
+        const { pattern, guard, guardGen, whenFalse } = this.compileCasePattern(
+          casePattern.pattern,
+          subject,
+          casePattern.guard
+        );
         const body = this.compileCollectionElements([element.consequent], kind, elementContext, valueContext);
-        return { pattern, guard, whenFalse, afterThen: this.flow, body };
+        return { pattern, guard, guardGen, whenFalse, afterThen: this.flow, body };
       });
       this.flow = result.whenFalse;
       const otherwise = element.alternative
@@ -952,15 +956,17 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.flow = Flow.join(result.afterThen, this.flow);
       types.push(...result.body.types, ...(otherwise?.types ?? []));
       const test = subject.run;
-      const matches = (frame: Frame): boolean =>
-        result.pattern.match(frame, test(frame)) && (!result.guard || result.guard(frame) === true);
+      const { pattern, guard, guardGen } = result;
+      const matches = function* (frame: Frame): Generator<AwaitRequest, boolean, Value> {
+        return pattern.match(frame, test(frame)) && (yield* guardHolds(frame, guard, guardGen));
+      };
       return endingVariables(slots, {
         isConst: false,
         run: (frame, add) => {
-          if (matches(frame)) result.body.run(frame, add);
+          if (runWithoutWaiting(matches(frame))) result.body.run(frame, add);
           else otherwise?.run(frame, add);
         },
-        gen: conditionalElement(subjectSteps, matches, result.body, otherwise),
+        gen: conditionalElement(subjectSteps, matches, result.body, otherwise, guardGen !== undefined),
       });
     }
     const {
@@ -983,7 +989,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         if (test(frame)) consequent.run(frame, add);
         else otherwise?.run(frame, add);
       },
-      gen: conditionalElement(steps, (frame) => test(frame) === true, consequent, otherwise),
+      gen: conditionalElement(
+        steps,
+        function* (frame) {
+          return test(frame) === true;
+        },
+        consequent,
+        otherwise
+      ),
     };
   }
 
@@ -1148,10 +1161,18 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const bodyTypes: DartType[] = [];
     // The match is a part before the bodies, which it guards; it reads the cases compiled below when it runs.
     let compiledCases: SwitchExpressionCode[] = [];
-    const readMatch = awaits ? this.addStep((frame) => switchMatch(frame, subject.run, compiledCases)) : undefined;
+    // The match waits when a guard awaits, so it is a step of its own then.
+    const subjectRun = subject.run;
+    const readMatch = awaits
+      ? this.stagePart(
+          awaitingCompiled(DYNAMIC, function* (frame) {
+            return yield* switchMatch(frame, subjectRun, compiledCases);
+          })
+        ).run
+      : undefined;
     const caseOf = readMatch
       ? (frame: Frame) => Number(readMatch(frame) as bigint)
-      : (frame: Frame) => Number(switchMatch(frame, subject.run, compiledCases));
+      : (frame: Frame) => Number(runWithoutWaiting(switchMatch(frame, subjectRun, compiledCases)));
     compiledCases = cases.map((switchCase, index) => {
       this.flow = whenFalse;
       const { result, slots } = this.withScope(() => {
@@ -1159,6 +1180,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         const {
           pattern,
           guard,
+          guardGen,
           whenFalse: unmatched,
         } = this.withoutStaging(() => this.compileCasePattern(switchCase.pattern, patternSubject, switchCase.guard));
         whenFalse = unmatched;
@@ -1167,7 +1189,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
           switchCase.body,
           () => this.instantiateInContext(this.compileExpression(switchCase.body, context), context)
         );
-        return { pattern, guard, body };
+        return { pattern, guard, guardGen, body };
       });
       after = after ? Flow.join(after, this.flow) : this.flow;
       const bodyType = result.body.type;
@@ -1209,6 +1231,7 @@ export type { Member };
 interface SwitchExpressionCode {
   pattern: { match: (frame: Frame, value: Value, cache: PatternCache) => boolean };
   guard: Eval | undefined;
+  guardGen?: GenEval;
   body: Compiled;
   slots: readonly number[];
 }
@@ -1217,13 +1240,20 @@ interface SwitchExpressionCode {
  * The index of a switch expression's case that matches its subject, whose pattern variables stay bound for its body;
  * the variables of the cases tried before it are cleared.
  */
-function switchMatch(frame: Frame, subject: Eval, cases: readonly SwitchExpressionCode[]): bigint {
-  return PatternCache.run(frame, (cache) => {
+function* switchMatch(
+  frame: Frame,
+  subject: Eval,
+  cases: readonly SwitchExpressionCode[]
+): Generator<AwaitRequest, bigint, Value> {
+  return yield* PatternCache.runAwaiting(frame, function* (cache) {
     const value = subject(frame);
     frame.temporaries.push(value);
     try {
       for (const [index, switchCase] of cases.entries()) {
-        if (switchCase.pattern.match(frame, value, cache) && (!switchCase.guard || switchCase.guard(frame) === true)) {
+        if (
+          switchCase.pattern.match(frame, value, cache) &&
+          (yield* guardHolds(frame, switchCase.guard, switchCase.guardGen))
+        ) {
           return BigInt(index);
         }
         for (const slot of switchCase.slots) frame.locals[slot] = undefined;
@@ -1243,14 +1273,15 @@ function elementLoop(gen: ElementGen, awaits: boolean): ElementCode {
 /** An `if` element that awaits, in its condition or its branches. */
 function conditionalElement(
   steps: readonly Part[],
-  test: (frame: Frame) => boolean,
+  test: (frame: Frame) => Generator<AwaitRequest, boolean, Value>,
   consequent: ElementCode,
-  otherwise: ElementCode | undefined
+  otherwise: ElementCode | undefined,
+  testWaits = false
 ): ElementGen | undefined {
-  if (steps.length === 0 && !consequent.gen && !otherwise?.gen) return undefined;
+  if (steps.length === 0 && !testWaits && !consequent.gen && !otherwise?.gen) return undefined;
   return function* (frame, add) {
     yield* runSteps(frame, steps);
-    if (test(frame)) yield* runElement(consequent, frame, add);
+    if (yield* test(frame)) yield* runElement(consequent, frame, add);
     else if (otherwise) yield* runElement(otherwise, frame, add);
   };
 }

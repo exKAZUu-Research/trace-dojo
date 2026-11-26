@@ -9658,6 +9658,25 @@ test("a stream error's stack trace is unavailable to print, as a thrown error's 
   });
 });
 
+test('a when guard that awaits runs after its pattern matches, in each construct that has one', () => {
+  const source = `Future<bool> ok(int x) async { await null; return x > 1; }
+Future<void> main() async {
+  for (var x in [1, 2]) {
+    switch (x) {
+      case int q when await ok(q): print('big $q');
+      default: print('small $x');
+    }
+  }
+  if (3 case int q when await ok(q)) print('if $q');
+  print(switch (2) { 1 => 'one', int v when await ok(v) => 'big $v', _ => 'other' });
+  print([for (final x in [1, 2, 3]) if (x case int q when await ok(q)) q]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'small 1\nbig 2\nif 3\nbig 2\n[2, 3]\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

@@ -7,8 +7,11 @@ import {
   type AwaitRoot,
   containsSuspension,
   evaluateParts,
+  evaluatePartsThen,
+  type GenEval,
   LISTENER_CANCELLED,
   newAwaitRoot,
+  runWithoutWaiting,
   suspensionStarts,
   YieldEachRequest,
 } from './awaitSteps';
@@ -16,7 +19,7 @@ import type { FunctionSpec } from './callCompiler';
 import { type ClassInfo, scopedMemberName } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
-import { type CompiledPattern, PatternCache } from './patternCompiler';
+import { type CompiledPattern, guardHolds, PatternCache } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
 import { type ConditionFlow, Flow, type LocalVar } from './scope';
 import {
@@ -51,13 +54,17 @@ import { Cell, NO_ARGUMENTS, type Value } from './values';
 export abstract class ControlCompiler extends StatementCompiler {
   protected compileSwitch(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const { groups, select, route } = this.compileSwitchPlan(statement, (body) => this.compileStatements(body));
-    return (frame) => runSwitchFrom(frame, select(frame), groups, route);
+    return (frame) => runSwitchFrom(frame, runWithoutWaiting(select(frame)), groups, route);
   }
 
   private compileSwitchPlan<T>(
     statement: Extract<Statement, { kind: 'switch' }>,
     compileBody: (body: Statement[]) => T
-  ): { groups: SwitchGroup<T>[]; select: (frame: Frame) => number; route: SwitchRoute } {
+  ): {
+    groups: SwitchGroup<T>[];
+    select: (frame: Frame) => Generator<AwaitRequest, number, Value>;
+    route: SwitchRoute;
+  } {
     const labels = this.takeLoopLabels();
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
@@ -73,11 +80,12 @@ export abstract class ControlCompiler extends StatementCompiler {
     if (statement.cases.length === 0) after = before;
     this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
     const test = subject.run;
-    const select = (frame: Frame): number => {
+    // A guard that awaits makes the selection wait, which only a generator's switch runs.
+    const select = function* (frame: Frame): Generator<AwaitRequest, number, Value> {
       const value = test(frame);
       frame.temporaries.push(value);
       try {
-        return PatternCache.run(frame, (cache) => selectSwitchGroup(frame, value, groups, cache));
+        return yield* PatternCache.runAwaiting(frame, (cache) => selectSwitchGroup(frame, value, groups, cache));
       } finally {
         frame.temporaries.pop();
       }
@@ -136,9 +144,9 @@ export abstract class ControlCompiler extends StatementCompiler {
       return head;
     };
     if (cases.length === 1 && !hasLabel) {
-      const { pattern, guard, flow } = compileHead(cases[0]);
+      const { pattern, guard, guardGen, flow } = compileHead(cases[0]);
       this.flow = flow;
-      return { matchers: [{ pattern, guard, slots: [], bindings: [] }], unmatched };
+      return { matchers: [{ pattern, guard, guardGen, slots: [], bindings: [] }], unmatched };
     }
     const heads = cases.map((switchCase) => this.withScope(() => compileHead(switchCase)));
     let joined = heads[0].result.flow;
@@ -149,9 +157,10 @@ export abstract class ControlCompiler extends StatementCompiler {
       heads.map(({ result }) => result.pattern),
       hasLabel
     );
-    const matchers = heads.map(({ result: { pattern, guard }, slots: headSlots }): SwitchMatcher => ({
+    const matchers = heads.map(({ result: { pattern, guard, guardGen }, slots: headSlots }): SwitchMatcher => ({
       pattern,
       guard,
+      guardGen,
       slots: headSlots,
       bindings: variables.flatMap((variable) => {
         const binding = pattern?.variables.get(variable.name);
@@ -178,7 +187,13 @@ export abstract class ControlCompiler extends StatementCompiler {
     switchCase: SwitchCase,
     subject: Compiled,
     before: Flow
-  ): { pattern: CompiledPattern | undefined; guard: Eval | undefined; flow: Flow; whenFalse: Flow } {
+  ): {
+    pattern: CompiledPattern | undefined;
+    guard: Eval | undefined;
+    guardGen?: GenEval;
+    flow: Flow;
+    whenFalse: Flow;
+  } {
     this.flow = before;
     if (!switchCase.pattern) return { pattern: undefined, guard: undefined, flow: before, whenFalse: before };
     const matched = this.compileCasePattern(switchCase.pattern, subject, switchCase.guard);
@@ -550,7 +565,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     );
     return function* (frame) {
       frame.runtime.spend();
-      let index = yield* evaluateParts(frame, selectParts, () => select(frame));
+      let index = yield* evaluatePartsThen(frame, selectParts, () => select(frame));
       while (index >= 0) {
         const group = groups[index];
         let completion: Completion | void;
@@ -679,7 +694,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     );
     return function* (frame) {
       try {
-        if (yield* evaluateParts(frame, matchParts, () => match(frame))) return yield* consequence(frame);
+        if (yield* evaluatePartsThen(frame, matchParts, () => match(frame))) return yield* consequence(frame);
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
@@ -1048,6 +1063,8 @@ function clearingSlots(result: GenExec, slots: number[]): GenExec {
 interface SwitchMatcher {
   pattern: CompiledPattern | undefined;
   guard: Eval | undefined;
+  /** A guard that awaits, which runs through its generator after the match. */
+  guardGen?: GenEval;
   slots: number[];
   bindings: { from: number; to: number }[];
 }
@@ -1063,16 +1080,16 @@ type SwitchRoute = (completion: Completion | void) => number | Completion | unde
 
 /** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
 // code-gauge-allow functionCognitiveComplexity -- Clear the failed matcher while keeping the selected body bindings live.
-function selectSwitchGroup(
+function* selectSwitchGroup(
   frame: Frame,
   value: Value,
   groups: readonly SwitchGroup<unknown>[],
   cache: PatternCache
-): number {
+): Generator<AwaitRequest, number, Value> {
   for (const [index, group] of groups.entries()) {
-    for (const { pattern, guard, slots, bindings } of group.matchers) {
+    for (const { pattern, guard, guardGen, slots, bindings } of group.matchers) {
       try {
-        if (pattern && (!pattern.match(frame, value, cache) || (guard && guard(frame) !== true))) continue;
+        if (pattern && (!pattern.match(frame, value, cache) || !(yield* guardHolds(frame, guard, guardGen)))) continue;
         for (const { from, to } of bindings) frame.locals[to] = new Cell((frame.locals[from] as Cell).v);
         return index;
       } finally {
