@@ -158,8 +158,11 @@ export class Shell implements ArithmeticHost {
   private errexitIgnored: number;
   /** The status a running trap started with, which `exit` without an operand ends with there, as in Bash. */
   private trapStartStatus: number | undefined;
-  /** How many times `set -x` repeats the first character of `PS4`: once, and once more in each command substitution. */
-  readonly traceLevel: number;
+  /**
+   * How many times `set -x` repeats the first character of `PS4`: once, and once more in each command substitution and
+   * `ERR` action.
+   */
+  traceLevel: number;
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
   /**
@@ -351,6 +354,9 @@ export class Shell implements ArithmeticHost {
     const saved = { lineShift: this.lineShift, row: this.currentRow, trapStatus: this.trapStartStatus };
     this.runningTraps.add(condition);
     this.trapStartStatus = status;
+    // Bash runs an `ERR` action as a string it evaluates, which traces one level deeper; `EXIT` keeps the level.
+    const traceLevel = this.traceLevel;
+    if (condition === 'ERR') this.traceLevel++;
     this.store.lastStatus = status;
     // Bash numbers an `ERR` action's lines from the failed command's line, and the `EXIT` action's from 1, as it
     // reads the action as a new script then (`SEVAL_RESETLINE`).
@@ -360,6 +366,7 @@ export class Shell implements ArithmeticHost {
     } finally {
       this.runningTraps.delete(condition);
       this.trapStartStatus = saved.trapStatus;
+      this.traceLevel = traceLevel;
       this.lineShift = saved.lineShift;
       this.currentRow = saved.row;
       this.store.lastStatus = status;
