@@ -59,6 +59,8 @@ export interface TypecheckOptions {
   isProgram: boolean;
 
   derivingSupport: (name: string) => ValueEntity;
+  /** The binding a program runs, `main` unless it is a splice's code. */
+  entry?: string;
 }
 
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
@@ -97,7 +99,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
     });
   }
   const defaults = module.classes.flatMap((decl) => checkDefaults(checker, decl));
-  const main = options.isProgram ? checkMain(checker, module, options.builtins) : undefined;
+  const main = options.isProgram ? checkMain(checker, module, options.builtins, options.entry) : undefined;
   const hole = checker.holes[0];
   if (hole) {
     throw compileError(
@@ -915,17 +917,18 @@ function sameContext(a: Pred[], b: Pred[]): boolean {
 function checkMain(
   checker: Checker,
   module: RModule,
-  builtins: Builtins
+  builtins: Builtins,
+  entry = 'main'
 ): { entity: ValueEntity; evidence: Evidence[] } {
-  const main = module.exports.values.get('main');
+  const main = module.exports.values.get(entry);
   const binding = module.values.bindings.find((candidate) =>
     candidate.k === 'pat'
-      ? candidate.globals?.some((entity) => entity.name === 'main')
-      : candidate.binder.kind === 'global' && candidate.binder.entity.name === 'main'
+      ? candidate.globals?.some((entity) => entity.name === entry)
+      : candidate.binder.kind === 'global' && candidate.binder.entity.name === entry
   );
   const entity =
     binding?.k === 'pat'
-      ? binding.globals?.find((global) => global.name === 'main')
+      ? binding.globals?.find((global) => global.name === entry)
       : binding?.binder.kind === 'global'
         ? binding.binder.entity
         : undefined;

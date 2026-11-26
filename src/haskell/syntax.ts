@@ -418,6 +418,8 @@ export interface ImportItem {
 
 export interface Import {
   module: string;
+  /** `import splice M`, whose names only splices' code sees, or `import quote M`, whose names only quotes see. */
+  level?: 'splice' | 'quote';
   qualified: boolean;
   alias?: string;
   hiding: boolean;

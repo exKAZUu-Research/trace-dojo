@@ -1,192 +1,249 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
-import { convertDeclarationsBeforeSplices, spanOf } from './convert';
-import type { Fixity } from './entities';
+import {
+  convertDeclaration,
+  convertModuleHeader,
+  convertSpliceCode,
+  moduleDeclarationNodes,
+  moduleImports,
+  spanOf,
+} from './convert';
 import { compileError } from './errors';
 import type { Extensions } from './extensions';
-import { collectPatNames } from './rename';
-import type { Decl, Name, Span } from './syntax';
+import { lowerDeclarations } from './lowering';
+import { collectPatNames, StageRestrictionError } from './rename';
+import type { Decl, Expr, Module, Name, Span } from './syntax';
 import { SpliceNames, type SpliceSyntax } from './thDecode';
 
-export interface SpliceSite {
-  /** The splice's node's start, by which the conversion finds what the splice gives. */
-  key: number;
-  span: Span;
-  runner: 'runSplice' | 'runDecSplice' | 'runTypedSplice';
-  code: string;
-  column: number;
-}
+/** The name of the binding of a splice's code where it runs, which no program can spell, since it holds a space. */
+export const SPLICE_ENTRY = ' splice';
 
 /**
- * The names a module's own declarations define, by namespace, with the fixities it declares: the programs that run
- * the module's splices have none of its declarations, and their quotes refer to these names as the module's.
+ * Compiles a module whose {@link SPLICE_ENTRY} binds a splice's code and runs that code, giving the tree the splice
+ * gave, decoded with `names`, and what it printed. `pending` are the declarations of the splice's group that cannot
+ * compile before it runs, whose names only quotes may use.
  */
-export interface SpliceModuleNames {
-  module: string;
-  /** Variables, record fields, and class methods. */
-  values: ReadonlySet<string>;
-  /** Data constructors and pattern synonyms. */
-  constructors: ReadonlySet<string>;
-  /** Types and classes. */
-  types: ReadonlySet<string>;
-  fixities: ReadonlyMap<string, Fixity>;
+export type SpliceRunner = (
+  module: Module,
+  pending: Decl[],
+  span: Span,
+  names: SpliceNames
+) => { result: SpliceSyntax; printed: string; printedError: string };
+
+/**
+ * Converts a module whose splices run while it compiles, group by group as GHC's top-level declaration splices split
+ * it: a group's declarations compile before the declaration splice after them runs, which adds its declarations to
+ * the module, and the splices inside a group run in order with what of the group compiles without them. Each
+ * splice's tree enters conversion and lowering where the splice is, as source would.
+ */
+export function convertWithSplices(
+  root: Node,
+  extensions: Extensions,
+  defaultName: string,
+  run: SpliceRunner
+): { module: Module; printed: string; printedError: string } {
+  return new ModuleSplices(root, extensions, defaultName, run).convert();
+}
+
+class ModuleSplices {
+  private readonly header: Omit<Module, 'decls'>;
+  private readonly grafts = new Map<number, SpliceSyntax>();
+  private readonly names = new SpliceNames();
+  /** The lowered declarations of the groups compiled so far. */
+  private readonly compiled: Decl[] = [];
+  /** The lowered declarations of each declaration node whose splices have all run, by the node's start. */
+  private readonly lowered = new Map<number, Decl[]>();
+  private printed = '';
+  private printedError = '';
+
+  constructor(
+    private readonly root: Node,
+    private readonly extensions: Extensions,
+    defaultName: string,
+    private readonly run: SpliceRunner
+  ) {
+    this.header = convertModuleHeader(root, extensions, defaultName);
+  }
+
+  convert(): { module: Module; printed: string; printedError: string } {
+    let group: Node[] = [];
+    for (const node of moduleDeclarationNodes(this.root)) {
+      if (node.type !== 'top_splice') {
+        group.push(node);
+        continue;
+      }
+      this.compileGroup(group);
+      group = [];
+      this.runSplice(node, this.compiled, []);
+      this.compiled.push(...this.loweredOf(node));
+    }
+    this.compileGroup(group);
+    const module = { ...this.header, imports: moduleImports(this.header.imports), decls: this.compiled };
+    return { module, printed: this.printed, printedError: this.printedError };
+  }
+
+  private compileGroup(nodes: Node[]): void {
+    const sites = nodes.map((node) => collectSplices(node));
+    for (const site of sites.flat()) {
+      const ready = nodes.filter((_, index) => sites[index].every((other) => this.grafts.has(other.startIndex)));
+      const { complete, pending } = this.partition(
+        ready,
+        nodes.filter((node) => !ready.includes(node))
+      );
+      this.runSplice(site, [...this.compiled, ...complete], pending);
+    }
+    for (const node of nodes) this.compiled.push(...this.loweredOf(node));
+  }
+
+  /**
+   * The declarations of a group that compile before a splice of it runs: those whose splices have all run and that
+   * name nothing the others declare, with the others' instances, whose methods are left out. The others are
+   * pending: one that does not convert without its splices' trees still declares the name it is written with.
+   */
+  private partition(ready: Node[], waiting: Node[]): { complete: Decl[]; pending: Decl[] } {
+    let complete = ready.flatMap((node) => this.loweredOf(node));
+    const pending: Decl[] = [];
+    const declared = new Set<string>();
+    for (const node of waiting) {
+      let decls: Decl[];
+      try {
+        decls = convertDeclaration(this.extensions, this.grafts, node);
+      } catch (error) {
+        if (!(error instanceof CompileError)) throw error;
+        const name = node.childForFieldName('name')?.text.replaceAll(/[()\s]/g, '');
+        if (name) declared.add(name);
+        continue;
+      }
+      for (const decl of decls) {
+        if (decl.kind === 'instance')
+          complete.push({ ...decl, decls: decl.decls.filter((inner) => inner.kind === 'sig') });
+        else pending.push(decl);
+      }
+    }
+    for (const name of pending.flatMap(declaredNames)) declared.add(name);
+    for (;;) {
+      const naming = complete.filter((decl) => mentions(decl, declared));
+      if (naming.length === 0) return { complete, pending };
+      complete = complete.filter((decl) => !naming.includes(decl));
+      pending.push(...naming);
+      for (const name of naming.flatMap(declaredNames)) declared.add(name);
+    }
+  }
+
+  private loweredOf(node: Node): Decl[] {
+    let decls = this.lowered.get(node.startIndex);
+    if (!decls) {
+      decls = lowerDeclarations(this.extensions, convertDeclaration(this.extensions, this.grafts, node));
+      this.lowered.set(node.startIndex, decls);
+    }
+    return decls;
+  }
+
+  /** Runs a splice, after the splices in its code, in a module of `decls`, and keeps its tree for its place. */
+  private runSplice(node: Node, decls: Decl[], pending: Decl[]): void {
+    for (const inner of collectSplices(spliceCodeNode(node))) this.runSplice(inner, decls, pending);
+    const span = spanOf(node);
+    const code = convertSpliceCode(this.extensions, this.grafts, node);
+    const run: Expr = { kind: 'support', name: spliceRunnerName(node), span };
+    const entry: Decl = {
+      kind: 'funClause',
+      name: { name: SPLICE_ENTRY, span },
+      args: [],
+      rhs: { body: { kind: 'plain', expr: { kind: 'app', fn: run, arg: code, span } }, where: [], span },
+      span,
+    };
+    const module: Module = {
+      ...this.header,
+      exports: undefined,
+      decls: [...decls, ...lowerDeclarations(this.extensions, [entry])],
+    };
+    try {
+      const output = this.run(module, pending, span, this.names);
+      this.printed += output.printed;
+      this.printedError += output.printedError;
+      this.grafts.set(node.startIndex, output.result);
+    } catch (error) {
+      if (!(error instanceof CompileError) || error instanceof StageRestrictionError) throw error;
+      const row = error.diagnostics[0]?.row ?? span.row;
+      // An error of the module's declarations is theirs, not the splice's.
+      if (row < span.row || row > span.endRow) throw error;
+      throw compileError(span, `Template Haskell のスプライスを実行できません。${error.diagnostics[0]?.message ?? ''}`);
+    }
+  }
 }
 
 /** The nodes inside which a splice belongs to the code a quote builds, not to the program's compilation. */
 const QUOTE_NODES = new Set(['quote', 'typed_quote']);
 
-/** The splices of a program's syntax tree that its compilation runs, outermost first and in order. */
-export function collectSplices(root: Node): SpliceSite[] {
-  const sites: SpliceSite[] = [];
-  const visit = (node: Node): void => {
-    if (QUOTE_NODES.has(node.type)) return;
-    if (node.type === 'top_splice' || node.type === 'splice' || node.type === 'quasiquote') {
-      sites.push(spliceSite(node));
+/** The outermost splices inside a node that its compilation runs, in order. */
+function collectSplices(node: Node): Node[] {
+  const sites: Node[] = [];
+  const visit = (child: Node): void => {
+    if (QUOTE_NODES.has(child.type)) return;
+    if (child.type === 'top_splice' || child.type === 'splice' || child.type === 'quasiquote') {
+      sites.push(child);
       return;
     }
-    for (const child of node.namedChildren) if (child) visit(child);
+    for (const grandchild of child.namedChildren) if (grandchild) visit(grandchild);
   };
-  visit(root);
+  for (const child of node.namedChildren) if (child) visit(child);
   return sites;
 }
 
-function spliceSite(node: Node): SpliceSite {
-  const base = { key: node.startIndex, span: spanOf(node) };
-  if (node.type === 'quasiquote') {
-    const quoter = node.childForFieldName('quoter')?.text.trim() ?? '';
-    const body = node.childForFieldName('body')?.text ?? '';
-    return { ...base, runner: 'runSplice', code: `quoteExp ${quoter} ${JSON.stringify(body)}`, column: 0 };
-  }
-  let inner: Node = node;
-  let runner: SpliceSite['runner'] = node.type === 'top_splice' ? 'runDecSplice' : 'runSplice';
-  if (node.type === 'top_splice') inner = node.namedChildren[0] ?? node;
-  if (inner.type === 'splice') {
-    if (inner.text.trimStart().startsWith('$$')) runner = 'runTypedSplice';
-    inner = inner.namedChildren[0] ?? inner;
-  }
-  return { ...base, runner, code: inner.text, column: inner.startPosition.column };
+/** The node of a splice's code, in which the splices inside it are. */
+function spliceCodeNode(node: Node): Node {
+  const code = node.type === 'top_splice' ? (node.namedChildren[0] ?? node) : node;
+  return code.type === 'splice' ? (code.childForFieldName('expression') ?? code) : code;
+}
+
+/** The library's function that runs a splice's code of its kind and stores its tree. */
+function spliceRunnerName(node: Node): string {
+  const splice = node.type === 'top_splice' ? (node.namedChildren[0] ?? node) : node;
+  if (splice.type === 'splice' && splice.text.trimStart().startsWith('$$')) return 'runTypedSplice';
+  return node.type === 'top_splice' ? 'runDecSplice' : 'runSplice';
 }
 
 // code-gauge-allow functionCognitiveComplexity -- One short case per kind of declaration that defines names.
-// code-gauge-allow functionNcss -- One short case per kind of declaration that defines names.
-export function spliceModuleNames(module: string, decls: Decl[]): SpliceModuleNames {
-  const values = new Set<string>();
-  const constructors = new Set<string>();
-  const types = new Set<string>();
-  const fixities = new Map<string, Fixity>();
-  for (const decl of decls) {
-    switch (decl.kind) {
-      case 'funClause': {
-        values.add(decl.name.name);
-        break;
-      }
-      case 'patBind': {
-        const names: Name[] = [];
-        collectPatNames(decl.pat, names);
-        for (const name of names) values.add(name.name);
-        break;
-      }
-      case 'fixity': {
-        for (const op of decl.ops) fixities.set(op.name, { assoc: decl.assoc, prec: decl.prec });
-        break;
-      }
-      case 'data': {
-        if (!decl.instanceOf) types.add(decl.name.name);
-        // The constructors of `type data` are types only.
-        for (const con of decl.cons) (decl.typeData ? types : constructors).add(con.name.name);
-        for (const field of decl.cons.flatMap((con) => con.fieldNames ?? [])) values.add(field.name);
-        break;
-      }
-      case 'class': {
-        types.add(decl.name.name);
-        for (const member of decl.decls.flatMap((d) => (d.kind === 'sig' ? d.names : []))) values.add(member.name);
-        // A class's methods may have their fixities declared in its body.
-        for (const member of decl.decls) {
-          if (member.kind !== 'fixity') continue;
-          for (const op of member.ops) fixities.set(op.name, { assoc: member.assoc, prec: member.prec });
-        }
-        break;
-      }
-      case 'typeSyn':
-      case 'typeFamily':
-      case 'dataFamily': {
-        types.add(decl.name.name);
-        break;
-      }
-      case 'patSyn': {
-        constructors.add(decl.name.name);
-        break;
-      }
-      default: {
-        break;
-      }
+function declaredNames(decl: Decl): string[] {
+  switch (decl.kind) {
+    case 'funClause': {
+      return [decl.name.name];
+    }
+    case 'patBind': {
+      const names: Name[] = [];
+      collectPatNames(decl.pat, names);
+      return names.map((name) => name.name);
+    }
+    case 'data': {
+      return [
+        ...(decl.instanceOf ? [] : [decl.name.name]),
+        ...decl.cons.flatMap((con) => [con.name.name, ...(con.fieldNames ?? []).map((field) => field.name)]),
+      ];
+    }
+    case 'class': {
+      return [
+        decl.name.name,
+        ...decl.decls.flatMap((member) => (member.kind === 'sig' ? member.names : [])).map((name) => name.name),
+      ];
+    }
+    case 'typeSyn':
+    case 'typeFamily':
+    case 'dataFamily':
+    case 'patSyn': {
+      return [decl.name.name];
+    }
+    default: {
+      return [];
     }
   }
-  return { module, values, constructors, types, fixities };
 }
 
-export function spliceHeader(root: Node): string {
-  const lines: string[] = [];
-  for (const child of root.namedChildren) {
-    if (child?.type === 'pragma') lines.push(child.text);
-  }
-  const imports = root.childForFieldName('imports');
-  // The program that runs a splice imports at its own level what the module imports for splices and quotes.
-  if (imports) lines.push(imports.text.replaceAll(/^(\s*import)\s+(?:splice|quote)\b/gm, '$1'));
-  return lines.join('\n');
-}
-
-export type SpliceRunner = (
-  program: string,
-  span: Span,
-  names: SpliceNames,
-  module: SpliceModuleNames
-) => {
-  result: SpliceSyntax;
-  printed: string;
-  printedError: string;
-};
-
-/**
- * Runs a program's splices in the order they are written, as GHC does, giving what each gives by its node's start,
- * and what they printed to each standard stream. A splice runs as a program of the module's pragmas and imports, as
- * GHC's stage restriction allows: it cannot use the module's own definitions, which its quotes name by the module's
- * table of names.
- */
-export function runSplices(
-  root: Node,
-  extensions: Extensions,
-  run: SpliceRunner
-): { grafts: Map<number, SpliceSyntax>; printed: string; printedError: string } {
-  const header = spliceHeader(root);
-  const moduleNode = root.namedChildren.find((child) => child?.type === 'header')?.childForFieldName('module');
-  const moduleName = moduleNode?.text.trim() ?? 'Main';
-  const declared = convertDeclarationsBeforeSplices(root, extensions);
-  let module = spliceModuleNames(moduleName, declared);
-  const names = new SpliceNames();
-  const grafts = new Map<number, SpliceSyntax>();
-  let printed = '';
-  let printedError = '';
-  for (const site of collectSplices(root)) {
-    const lines = site.code.split('\n');
-    const padded = [' '.repeat(site.column + 2) + lines[0], ...lines.slice(1).map((line) => `  ${line}`)].join('\n');
-    const program = `${header}\nimport qualified Language.Haskell.TH.Runner as SpliceRunner\nmain :: IO ()\nmain = SpliceRunner.${site.runner} (\n${padded}\n  )\n`;
-    try {
-      const output = run(program, site.span, names, module);
-      printed += output.printed;
-      printedError += output.printedError;
-      grafts.set(site.key, output.result);
-      // What a declaration splice declares is the module's for the splices after it.
-      if (output.result.kind === 'decs') {
-        declared.push(...output.result.decls);
-        module = spliceModuleNames(moduleName, declared);
-      }
-    } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
-      const detail = error.diagnostics[0]?.message ?? '';
-      throw compileError(site.span, `Template Haskell のスプライスを実行できません。${detail}`);
-    }
-  }
-  return { grafts, printed, printedError };
+/** Whether syntax spells any of the names anywhere, a binder's name included, which may only make it pending. */
+function mentions(syntax: unknown, names: ReadonlySet<string>): boolean {
+  if (Array.isArray(syntax)) return syntax.some((item: unknown) => mentions(item, names));
+  if (typeof syntax !== 'object' || syntax === null) return false;
+  const fields = syntax as Record<string, unknown>;
+  if (typeof fields.name === 'string' && names.has(fields.name)) return true;
+  return Object.values(fields).some((value) => mentions(value, names));
 }

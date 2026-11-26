@@ -1,26 +1,22 @@
-import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { assert } from 'es-toolkit';
+
+import { ExecutionBudget } from '../interpreter/limits';
 
 /** Spends units of the budget in force, throwing when it runs out. */
 type Charge = (units: number) => void;
 
 let spend: Charge | undefined;
-let compilation: Charge | undefined;
-let compilationRemaining = 0;
+let compilation: ExecutionBudget | undefined;
 
 /**
- * A compilation inside another one, such as that of a Template Haskell splice's program, spends the enclosing
- * budget rather than starting afresh.
+ * Runs a compilation on a budget of its own operations, which the code it runs while it compiles (a Template Haskell
+ * splice's) spends too.
  */
 export function withCompilationBudget<T>(work: () => T): T {
-  if (compilation) return withTypeWorkBudget(compilation, work);
-  compilationRemaining = LIMITS.maxOperations;
-  const charge: Charge = (units) => {
-    compilationRemaining -= units;
-    if (compilationRemaining < 0) throw new ExecutionLimitError('operations');
-  };
-  compilation = charge;
+  const budget = new ExecutionBudget(Number.POSITIVE_INFINITY);
+  compilation = budget;
   try {
-    return withTypeWorkBudget(charge, work);
+    return withTypeWorkBudget((units) => budget.spend(units), work);
   } finally {
     compilation = undefined;
   }
@@ -41,7 +37,8 @@ export function chargeTypeWork(units = 1): void {
   spend?.(units);
 }
 
-/** The operations the compilation in progress has left, which a program it runs (a splice's) may spend. */
-export function remainingCompilationWork(): number {
-  return compilation ? Math.max(compilationRemaining, 0) : LIMITS.maxOperations;
+/** The budget of the compilation in progress. */
+export function compilationBudget(): ExecutionBudget {
+  assert(compilation, 'No compilation is in progress');
+  return compilation;
 }

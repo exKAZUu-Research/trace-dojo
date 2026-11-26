@@ -116,8 +116,8 @@ const UNAVAILABLE = {
 } as const;
 
 /**
- * Decodes the evaluated Template Haskell tree a splice's program stored into the syntax the compiler reads, every
- * node at the splice's span. A new name a splice binds at its top level keeps its spelling, so the program refers to
+ * Decodes the evaluated Template Haskell tree a splice's code stored into the unsugared syntax the converter gives,
+ * every node at the splice's span. A new name a splice binds at its top level keeps its spelling, so the program refers to
  * it; one it binds inside gets a spelling of its own.
  */
 export function decodeSplice(runtime: Runtime, result: Slot, span: Span, names: SpliceNames): SpliceSyntax {

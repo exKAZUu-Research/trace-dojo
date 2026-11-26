@@ -1,6 +1,6 @@
 import type { Node, Tree } from '@willbooster/web-tree-sitter';
 
-import { CompileError } from '../interpreter/diagnostics';
+import type { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss -- The syntax-tree conversion covers every node kind of the grammar in one pass.
 import { unboxedSumConName, unboxedTupleName } from './builtinTypes';
 import { compileError as syntaxError, unsupportedError } from './errors';
@@ -166,41 +166,80 @@ function grafted<K extends SpliceSyntax['kind']>(
   return graft as Extract<SpliceSyntax, { kind: K }>;
 }
 
-export function convertModule(
-  root: Node,
-  extensions: Extensions,
-  defaultName = 'Main',
-  grafts: ReadonlyMap<number, SpliceSyntax> = new Map()
-): Module {
-  const gates = extensions.gates('convert');
-  const features: ConvertContext = { allows: (feature) => gates.allows(feature), grafts };
+/** Converts a module that has no splices to run, lowering its declarations. */
+export function convertModule(root: Node, extensions: Extensions, defaultName = 'Main'): Module {
+  const header = convertModuleHeader(root, extensions, defaultName);
+  const decls = moduleDeclarationNodes(root).flatMap((node) => convertDeclaration(extensions, new Map(), node));
+  return { ...header, imports: moduleImports(header.imports), decls: lowerDeclarations(extensions, decls) };
+}
+
+/** The imports a module's own code sees: those of an `import splice` are for its splices' code only. */
+export function moduleImports(imports: Import[]): Import[] {
+  return imports.filter((imp) => imp.level !== 'splice');
+}
+
+/** A module without its declarations, every import of any level among its imports. */
+export function convertModuleHeader(root: Node, extensions: Extensions, defaultName: string): Omit<Module, 'decls'> {
+  const features = contextOf(extensions, new Map());
   checkPragmas(features, root);
   const header = namedChildren(root).find((child) => child.type === 'header');
   const importsNode = field(root, 'imports');
-  const declarationsNode = field(root, 'declarations');
-  // An import for splices only (`import splice M`) gives the program that runs a splice its names, not this module.
-  const imports = importsNode
-    ? fields(importsNode, 'import')
-        .filter((node) => field(node, 'level')?.text.trim() !== 'splice')
-        .map((node) => convertImport(features, node))
-    : [];
-  const decls: Decl[] = [];
-  if (declarationsNode) {
-    for (const child of namedChildren(declarationsNode)) {
-      if (child.type === 'import') {
-        throw syntaxError(spanOf(child), 'import は、宣言より前に書いてください。');
-      }
-      decls.push(...convertTopDecl(features, child));
-    }
-  }
   return {
     name: header ? moduleName(required(header, 'module')) : defaultName,
     extensions,
     exports: header ? convertExports(features, header) : undefined,
-    imports,
-    decls: lowerDeclarations(extensions, decls),
+    imports: importsNode ? fields(importsNode, 'import').map((node) => convertImport(features, node)) : [],
     span: spanOf(root),
   };
+}
+
+/** The nodes of a module's top-level declarations, declaration splices included, in order. */
+export function moduleDeclarationNodes(root: Node): Node[] {
+  const declarationsNode = field(root, 'declarations');
+  const nodes = declarationsNode ? namedChildren(declarationsNode) : [];
+  const misplaced = nodes.find((node) => node.type === 'import');
+  if (misplaced) throw syntaxError(spanOf(misplaced), 'import は、宣言より前に書いてください。');
+  return nodes;
+}
+
+/** Converts a top-level declaration, unlowered, taking from `grafts` what the splices in it gave. */
+export function convertDeclaration(
+  extensions: Extensions,
+  grafts: ReadonlyMap<number, SpliceSyntax>,
+  node: Node
+): Decl[] {
+  return convertTopDecl(contextOf(extensions, grafts), node);
+}
+
+/**
+ * The code a splice runs, unlowered: `e` of `$(e)`, `$$(e)`, `$e`, or of a declaration splice written bare, and for a
+ * quasi-quote `[q|text|]`, `quoteExp q "text"`.
+ */
+export function convertSpliceCode(extensions: Extensions, grafts: ReadonlyMap<number, SpliceSyntax>, node: Node): Expr {
+  const features = contextOf(extensions, grafts);
+  const span = spanOf(node);
+  if (node.type === 'quasiquote') {
+    const quoter = required(node, 'quoter');
+    const text: Expr = {
+      kind: 'lit',
+      // oxlint-disable-next-line typescript/no-misused-spread -- A Haskell string's characters are code points.
+      lit: { kind: 'string', value: [...(field(node, 'body')?.text ?? '')] },
+      span,
+      generated: true,
+    };
+    const quoteExp: Expr = { kind: 'support', name: 'quoteExp', span };
+    const quoterName = qualifiedName(namedChildren(quoter)[0] ?? quoter).name;
+    const applied: Expr = { kind: 'app', fn: quoteExp, arg: { kind: 'var', name: quoterName, span }, span };
+    return { kind: 'app', fn: applied, arg: text, span };
+  }
+  let code = node.type === 'top_splice' ? (namedChildren(node)[0] ?? node) : node;
+  if (code.type === 'splice') code = required(code, 'expression');
+  return convertExpr(features, code.type === 'parens' ? required(code, 'expression') : code);
+}
+
+function contextOf(extensions: Extensions, grafts: ReadonlyMap<number, SpliceSyntax>): ConvertContext {
+  const gates = extensions.gates('convert');
+  return { allows: (feature) => gates.allows(feature), grafts };
 }
 
 function checkPragmas(features: ConvertContext, root: Node): void {
@@ -345,8 +384,10 @@ function convertImport(features: ConvertContext, node: Node): Import {
   }
   const namesNode = field(node, 'names');
   const aliasNode = field(node, 'alias');
+  const levelText = level?.text.trim();
   return {
     module: moduleName(required(node, 'module')),
+    ...(levelText === 'splice' || levelText === 'quote' ? { level: levelText } : {}),
     qualified: hasToken(node, 'qualified'),
     alias: aliasNode ? moduleName(aliasNode) : undefined,
     hiding: hasToken(node, 'hiding') || (namesNode !== undefined && hasToken(namesNode, 'hiding')),
@@ -448,25 +489,6 @@ function convertOperator(node: Node): Operator {
 
 // ---------------------------------------------------------------------------------------------------------------
 // Declarations
-
-/**
- * A module's top-level declarations other than its declaration splices, converted before the splices run; one that
- * does not convert without what the splices give is left out, for the module's conversion to report.
- */
-export function convertDeclarationsBeforeSplices(root: Node, extensions: Extensions): Decl[] {
-  const gates = extensions.gates('convert');
-  const features: ConvertContext = { allows: (feature) => gates.allows(feature), grafts: new Map() };
-  const declarationsNode = field(root, 'declarations');
-  return (declarationsNode ? namedChildren(declarationsNode) : []).flatMap((node) => {
-    if (node.type === 'top_splice') return [];
-    try {
-      return convertTopDecl(features, node);
-    } catch (error) {
-      if (error instanceof CompileError) return [];
-      throw error;
-    }
-  });
-}
 
 function convertTopDecl(features: ConvertContext, node: Node): Decl[] {
   // Pragmas among declarations only guide the compiler, which checkPragmas has checked.

@@ -1089,11 +1089,6 @@ export const PUBLIC_MODULES: Record<string, PublicModule> = {
     types: [['QuasiQuoter', 'all']],
     values: ['quoteExp', 'quotePat', 'quoteType', 'quoteDec'],
   },
-  'Language.Haskell.TH.Runner': {
-    from: 'Language.Haskell.TH.Internal',
-    types: [],
-    values: ['runSplice', 'runDecSplice', 'runTypedSplice', 'quoteExp'],
-  },
   'Data.Word': {
     from: 'Base',
     types: [
@@ -1272,7 +1267,7 @@ export const UNSUPPORTED_VALUES: Record<string, string> = {};
 
 /**
  * Template Haskell's functions that look at the program being compiled (its declarations, instances, and source),
- * which a splice cannot here, since it runs as a program of its own.
+ * which splices cannot here.
  */
 export const TEMPLATE_HASKELL_UNSUPPORTED = [
   'reify',

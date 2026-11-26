@@ -37,8 +37,10 @@ import { GHC_EXPORTS, type GhcModuleExports } from './library/ghcExports';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { misplacedHaskellAtomicMessage, parseHaskell, parseProgram, preprocessProgram } from './parse';
 import { setPrimitiveTypes } from './primitives';
-import { renameModule, type RModule } from './rename';
-import type { SpliceModuleNames, SpliceRunner } from './thSplice';
+import { renameModule, type RenameOptions, type RModule } from './rename';
+import type { Module, Span } from './syntax';
+import type { SpliceNames, SpliceSyntax } from './thDecode';
+import { SPLICE_ENTRY } from './thSplice';
 import { typecheckModule } from './typecheck';
 import { STAR, tcon } from './types';
 import { withCompilationBudget } from './typeWorkBudget';
@@ -426,11 +428,17 @@ function tryClass(cls: (name: string) => ClassEntity, name: string): ClassEntity
   }
 }
 
-let spliceRunner: SpliceRunner | undefined;
+/** Runs a splice's compiled code while the program compiles, which running programs provides. */
+export type SpliceExecutor = (
+  program: CompiledProgram,
+  span: Span,
+  names: SpliceNames
+) => { result: SpliceSyntax; printed: string; printedError: string };
 
-/** Sets how a splice's program runs, giving its code and what it printed, which running programs provides. */
-export function setSpliceRunner(runner: SpliceRunner): void {
-  spliceRunner = runner;
+let spliceExecutor: SpliceExecutor | undefined;
+
+export function setSpliceExecutor(executor: SpliceExecutor): void {
+  spliceExecutor = executor;
 }
 
 export interface CompiledProgram {
@@ -443,61 +451,61 @@ export interface CompiledProgram {
 export interface CompileOptions {
   atomicRows?: ReadonlySet<number>;
   traceTypes?: boolean;
-  /** For the program that runs a splice, the names of the module the splice is in. */
-  spliceModule?: SpliceModuleNames;
 }
 
 /** Compiles a program, throwing a `CompileError` for the errors GHC reports before running and for unsupported code. */
-export function compileProgram(
-  source: string,
-  { atomicRows, traceTypes = false, spliceModule }: CompileOptions = {}
-): CompiledProgram {
+export function compileProgram(source: string, options: CompileOptions = {}): CompiledProgram {
   const lib = (library ??= compileLibrary());
   return withCompilationBudget(() => {
-    // Splices run within the program's budget: each splice's program compiles and runs on the budget that is left.
-    // They are found in the text the C preprocessor leaves, as the program is.
+    // Splices are found in the text the C preprocessor leaves, as the program is.
     const {
-      module: parsed,
+      module,
       printed: compileOutput,
       printedError: compileErrorOutput,
-    } = parseProgram(preprocessProgram(source), (program, span, names, module) => {
-      assert(spliceRunner, 'No runner of Template Haskell splices is set');
-      return spliceRunner(program, span, names, module);
+    } = parseProgram(preprocessProgram(source), (spliceModule, pending, span, names) => {
+      assert(spliceExecutor, 'No executor of Template Haskell splices is set');
+      const main = compileModule(lib, spliceModule, { splice: { entry: SPLICE_ENTRY, pending } });
+      return spliceExecutor({ main }, span, names);
     });
-    const renamed = renameModule(parsed, {
-      modules: lib.modules,
-      implicitPrelude: parsed.extensions.gates('rename').allows('implicitPrelude'),
-      unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
-      weakValues: lib.weakValues,
-      weakTypes: lib.weakTypes,
-      support: lib.value,
-      spliceModule,
-    });
-    const checked = typecheckModule(renamed, {
-      env: new ClassEnv(lib.env),
-      builtins: lib.builtins,
-      isProgram: true,
-      derivingSupport: lib.derivingSupport,
-    });
-    const codegen = new Codegen({
-      support: lib.support,
-      atomicRows,
-      isProgram: true,
-      traceTypes,
-    });
-    codegen.compileTopBindings(renamed.values);
-    for (const instance of checked.instances)
-      codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);
-    for (const binding of checked.defaults) codegen.compileDefault(binding);
-    const misplaced = codegen.checkAtomicClaims();
-    if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
-    assert(checked.main, 'The checked program has no main');
     return {
-      main: codegen.compileEntry(checked.main.entity, checked.main.evidence),
+      main: compileModule(lib, module, options),
       ...(compileOutput ? { compileOutput } : {}),
       ...(compileErrorOutput ? { compileErrorOutput } : {}),
     };
   });
+}
+
+/** Compiles a module of the program, whose entry is `main`, or a splice's code for its run. */
+function compileModule(
+  lib: Library,
+  module: Module,
+  { atomicRows, traceTypes = false, splice }: CompileOptions & { splice?: RenameOptions['splice'] }
+): GlobalDef {
+  const renamed = renameModule(module, {
+    modules: lib.modules,
+    implicitPrelude: module.extensions.gates('rename').allows('implicitPrelude'),
+    unsupportedModule: (name) => (Object.hasOwn(UNSUPPORTED_MODULES, name) ? UNSUPPORTED_MODULES[name] : undefined),
+    weakValues: lib.weakValues,
+    weakTypes: lib.weakTypes,
+    support: lib.value,
+    splice,
+  });
+  const checked = typecheckModule(renamed, {
+    env: new ClassEnv(lib.env),
+    builtins: lib.builtins,
+    isProgram: true,
+    derivingSupport: lib.derivingSupport,
+    entry: splice?.entry,
+  });
+  const codegen = new Codegen({ support: lib.support, atomicRows, isProgram: true, traceTypes });
+  codegen.compileTopBindings(renamed.values);
+  for (const instance of checked.instances)
+    codegen.compileInstance(instance.info, instance.bindings, instance.sourceDefined);
+  for (const binding of checked.defaults) codegen.compileDefault(binding);
+  const misplaced = codegen.checkAtomicClaims();
+  if (misplaced !== undefined) throw new CompileError([{ row: misplaced, message: misplacedHaskellAtomicMessage }]);
+  assert(checked.main, 'The checked program has no main');
+  return codegen.compileEntry(checked.main.entity, checked.main.evidence);
 }
 
 /** A module of GHC's, with its exports here and the key of each name for the GHC entity it is. */

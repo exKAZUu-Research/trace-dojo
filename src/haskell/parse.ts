@@ -5,8 +5,7 @@ import { preprocess } from './cpp';
 import { validateDialect } from './dialect';
 import { Extensions, readExtensions } from './extensions';
 import type { Module } from './syntax';
-import type { SpliceSyntax } from './thDecode';
-import { runSplices, type SpliceRunner } from './thSplice';
+import { convertWithSplices, type SpliceRunner } from './thSplice';
 
 const parser = await loadParser('@willbooster/tree-sitter-haskell/tree-sitter-haskell_ghc2021.wasm');
 /** The grammar with the lexical syntax of the extensions GHC2021 lacks, which a program reads with when it enables one. */
@@ -51,15 +50,9 @@ function parseModule(
     MISSING_TOKEN_NAMES,
     (root) => {
       if (!library) validateDialect(root, extensions);
-      const spliced =
-        run && features.allows('splices')
-          ? runSplices(root, extensions, run)
-          : { grafts: new Map<number, SpliceSyntax>(), printed: '', printedError: '' };
-      return {
-        module: convertModule(root, extensions, defaultName, spliced.grafts),
-        printed: spliced.printed,
-        printedError: spliced.printedError,
-      };
+      return run && features.allows('splices')
+        ? convertWithSplices(root, extensions, defaultName, run)
+        : { module: convertModule(root, extensions, defaultName), printed: '', printedError: '' };
     }
   );
 }

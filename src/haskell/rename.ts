@@ -37,7 +37,6 @@ import type { FeatureGates } from './features';
 import { DEFAULT_FIXITY, resolveExprChain, resolvePatChain, resolveTypeChain, sectionOperand } from './fixity';
 import { TH_NAME_MODULES } from './library/thNames';
 import { type LocalNamespace, LocalScope } from './localScope';
-import { namesSpliceModule } from './moduleNameUses';
 import { emptyExports, type ExportTable, type TypeLike } from './modules';
 import { NEWTYPE_STRICT_FIELDS } from './newtypes';
 import { libraryPackage } from './packages';
@@ -109,7 +108,6 @@ import type {
 import { THIS_MODULE } from './syntax';
 import { mapPatChildren } from './syntaxChildren';
 import { globalNameCode, QuoteBuilder, thString } from './thQuote';
-import type { SpliceModuleNames } from './thSplice';
 import { checkTypeParams } from './typeNames';
 import { type Kind, STAR, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -240,11 +238,15 @@ export interface RenameOptions {
   support?: (name: string) => ValueEntity;
 
   /**
-   * For the program that runs a splice of a module, the names the module's own declarations define, which the
-   * program's quotes refer to as the module's: the program has none of those declarations.
+   * For the compilation that runs a splice: the name of the binding that holds the splice's code, which GHC's stage
+   * restriction keeps from using the module's own values outside quotes, and the declarations of the splice's group
+   * that cannot be compiled before it runs, whose names are in scope while nothing may use them but quotes.
    */
-  spliceModule?: SpliceModuleNames;
+  splice?: { entry: string; pending: Decl[] };
 }
+
+/** GHC's stage restriction: a splice's code may run only imported code, while its quotes may name the module's. */
+export class StageRestrictionError extends CompileError {}
 
 class Candidates<T> {
   readonly map = new Map<string, T[]>();
@@ -341,6 +343,15 @@ class Renamer {
   private quoteBinders?: Set<LocalVar>;
   private readonly quoteClassMethods = new Map<LocalVar, Map<string, LocalVar>>();
   private readonly features: FeatureGates<'rename'>;
+  /** The entities of the declarations `splice.pending` has, which only quotes may refer to. */
+  private readonly pendingEntities = new Set<object>();
+  private declaringPending = false;
+  /** Whether the renamer is renaming a splice's code outside its quotes, which the stage restriction applies to. */
+  private inSpliceCode = false;
+  /** Whether names resolve only to be named, as a quote's are, rather than used. */
+  private namingOnly = false;
+  /** The witnesses of typed quotes, whose code is the module's even inside a splice's code. */
+  private readonly witnesses = new WeakSet<Expr>();
 
   constructor(
     private readonly module: Module,
@@ -354,8 +365,11 @@ class Renamer {
 
   run(): RModule {
     this.importModules();
+    const pending = this.options.splice?.pending ?? [];
     this.declareTypes(this.module.decls);
+    this.declarePending(() => this.declareTypes(pending));
     this.declareDataInstances(this.module.decls);
+    this.declarePending(() => this.declareDataInstances(pending));
     const decls = this.expandBindingWildcards(this.expandPatternSynonyms(this.module.decls), (name) =>
       this.recordFieldNames(name, () => {
         const own = name.qualifier ? undefined : this.ownValues.get(name.name);
@@ -363,8 +377,9 @@ class Renamer {
       })
     );
     const topBindings = this.declareValues(decls);
+    this.declarePending(() => this.declareValues(pending));
     this.addOwnToScope();
-    this.applyTopFixities(decls);
+    this.applyTopFixities([...decls, ...pending]);
     for (const decl of decls) {
       if (decl.kind === 'data') this.renameData(decl);
       else if (decl.kind === 'typeSyn') this.renameSynonym(decl);
@@ -391,6 +406,15 @@ class Renamer {
       hasExportList: this.module.exports !== undefined,
       extensions: this.module.extensions,
     };
+  }
+
+  private declarePending(declare: () => void): void {
+    this.declaringPending = true;
+    try {
+      declare();
+    } finally {
+      this.declaringPending = false;
+    }
   }
 
   private importModules(): void {
@@ -711,6 +735,7 @@ class Renamer {
       throw compileError(name.span, `${name.name} が重複して宣言されています。`);
     }
     this.ownTypes.set(name.name, entity);
+    if (this.declaringPending) this.pendingEntities.add(entity.entity);
   }
 
   private declareOwnValue(name: Name, entity: ValueEntity): void {
@@ -729,6 +754,7 @@ class Renamer {
       throw compileError(name.span, `${name.name} が重複して定義されています。`);
     }
     this.ownValues.set(name.name, entity);
+    if (this.declaringPending) this.pendingEntities.add(entity);
   }
 
   private declareConstructors(decl: Extract<Decl, { kind: 'data' }>, type: TypeEntity): void {
@@ -1276,7 +1302,15 @@ class Renamer {
     const bindings: RBinding[] = raw.map((binding) => {
       if (binding.kind === 'fun') {
         const binder: Binder = { kind: 'global', entity: binding.entities[0] };
-        return this.renameFunBinding(binding, binder, scope, sigs.get(binding.names[0].name));
+        const sig = sigs.get(binding.names[0].name);
+        if (binding.names[0].name !== this.options.splice?.entry)
+          return this.renameFunBinding(binding, binder, scope, sig);
+        this.inSpliceCode = true;
+        try {
+          return this.renameFunBinding(binding, binder, scope, sig);
+        } finally {
+          this.inSpliceCode = false;
+        }
       }
       const renamed = this.renamePatBinding(binding, scope, (name) => this.ownValues.get(name.name) as ValueEntity);
       renamed.patSigs = patternSignatures(renamed, sigs);
@@ -1426,7 +1460,14 @@ class Renamer {
   }
 
   renameExpr(expr: Expr, scope: LocalScope): RExpr {
-    return this.recursion.run(() => this.renameExprCore(expr, scope));
+    if (!this.witnesses.has(expr)) return this.recursion.run(() => this.renameExprCore(expr, scope));
+    const saved = this.inSpliceCode;
+    this.inSpliceCode = false;
+    try {
+      return this.recursion.run(() => this.renameExprCore(expr, scope));
+    } finally {
+      this.inSpliceCode = saved;
+    }
   }
 
   // code-gauge-allow functionNcss -- One short case per expression kind.
@@ -2474,27 +2515,9 @@ class Renamer {
     const { span } = expr;
     const built = new QuoteBuilder(span).build(this.renameQuote(expr.body, scope));
     if (!expr.witness) return built;
-    // In the program that runs a splice, the module's own names are not there to check the witness against; the
-    // quote's type is then left to the code it is spliced into, which checks it. A witness whose names resolve here,
-    // a local that shadows one of them included, keeps its type.
-    const outer = this.options.spliceModule;
-    const witness: Expr =
-      outer && namesSpliceModule(expr.witness, outer) && !this.renames(expr.witness, scope)
-        ? { kind: 'support', name: 'undefined', span }
-        : expr.witness;
-    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: witness, span };
+    this.witnesses.add(expr.witness);
+    const typer: Expr = { kind: 'lambda', pats: [{ kind: 'pwild', span }], body: expr.witness, span };
     return thCall(span, 'typedQuote', typer, built);
-  }
-
-  /** Whether an expression's names all resolve in a scope. */
-  private renames(expr: Expr, scope: LocalScope): boolean {
-    try {
-      this.renameExpr(expr, scope);
-      return true;
-    } catch (error) {
-      if (error instanceof CompileError) return false;
-      throw error;
-    }
   }
 
   /**
@@ -3242,26 +3265,25 @@ class Renamer {
   }
 
   /**
-   * The global name a quote refers to: one of the module whose splice this program runs, as its table of names has
-   * it, or one of the program's scope; otherwise an unbound name, which the code its tree is spliced into binds. A
-   * `required` name must be in scope, except in the program that runs a splice, whose module's own declarations
-   * (such as those other splices give) this program lacks, as GHC's stage restriction has it.
+   * The global name a quote refers to in the module's scope, otherwise an unbound name, which the code its tree is
+   * spliced into binds; a `required` name must be in scope.
    */
   private quoteGlobal(namespace: QuoteNamespace, name: QName, required: boolean): QRef {
-    const outer = this.options.spliceModule;
-    // `M.x` with the module's own name refers to its definition as `x` does.
-    const own = outer && (!name.qualifier || name.qualifier === outer.module);
-    const outerSpace = own ? spliceModuleSpace(outer, namespace, name.name) : undefined;
-    if (outer && outerSpace) return this.globalRef(outerSpace, outer.module, name.name);
-    const found = this.programGlobal(namespace, name);
-    if (found) return found;
-    if (required && !outer) {
-      // The lookup reports what the scope lacks.
-      if (namespace === 'con') this.lookupCon(name);
-      else if (namespace === 'type') this.lookupType(name);
-      else this.lookupValue(name, namespace === 'var');
+    const saved = this.namingOnly;
+    this.namingOnly = true;
+    try {
+      const found = this.programGlobal(namespace, name);
+      if (found) return found;
+      if (required) {
+        // The lookup reports what the scope lacks.
+        if (namespace === 'con') this.lookupCon(name);
+        else if (namespace === 'type') this.lookupType(name);
+        else this.lookupValue(name, namespace === 'var');
+      }
+      return { k: 'unbound', name: name.name };
+    } finally {
+      this.namingOnly = saved;
     }
-    return { k: 'unbound', name: name.name };
   }
 
   private programGlobal(namespace: QuoteNamespace, name: QName): QRef | undefined {
@@ -3298,11 +3320,6 @@ class Renamer {
 
   /** The fixity of a global operator a quote applies, which an operator nothing defines lacks. */
   private quoteFixity(op: Operator): Fixity {
-    const outer = this.options.spliceModule;
-    const own = outer && (!op.qualifier || op.qualifier === outer.module);
-    if (own && (op.isConstructor ? outer.constructors : outer.values).has(op.name)) {
-      return outer.fixities.get(op.name) ?? DEFAULT_FIXITY;
-    }
     if (op.isConstructor) {
       if (!op.qualifier && this.patternSynonyms.has(op.name)) return DEFAULT_FIXITY;
       return this.conExists(op) ? (this.lookupCon(op).entity.fixity ?? DEFAULT_FIXITY) : DEFAULT_FIXITY;
@@ -3313,8 +3330,7 @@ class Renamer {
 
   /** A global name of a quote, with the package of its module: the program's own, `main`, or the library's. */
   private globalRef(space: 'v' | 'd' | 'tc', module: string, name: string): QRef {
-    const own = module === this.module.name || module === this.options.spliceModule?.module;
-    return { k: 'global', space, package: own ? 'main' : libraryPackage(module), module, name };
+    return { k: 'global', space, package: module === this.module.name ? 'main' : libraryPackage(module), module, name };
   }
 
   /** The module GHC defines a name in, which Template Haskell shows it with. */
@@ -3427,7 +3443,30 @@ class Renamer {
       }
     }
     if (variablesOnly) candidates = candidates.filter((entity) => entity.sort !== 'con');
-    return this.pickOne(candidates, name, 'value');
+    return this.checkUse(this.pickOne(candidates, name, 'value'), name);
+  }
+
+  /**
+   * A value the code uses: in a splice's code outside quotes, not one of the module's own, and anywhere not one of a
+   * declaration that cannot be compiled before the splice runs.
+   */
+  private checkUse<T extends ValueEntity | TypeEntity | ClassEntity>(entity: T, name: QName, isValue = true): T {
+    if (this.quoteBinders || this.namingOnly) return entity;
+    if (this.inSpliceCode && isValue && entity.module === this.module.name) {
+      throw new StageRestrictionError([
+        {
+          row: name.span.row,
+          message: `${describeName(name)} はこのモジュールで定義されているので、スプライスのコードではクォートの中でしか使えません（GHC のステージ制限）。`,
+        },
+      ]);
+    }
+    if (this.pendingEntities.has(entity)) {
+      throw compileError(
+        name.span,
+        `${describeName(name)} は、このスプライスを実行する時点ではまだコンパイルされていない宣言なので、クォートの中で名前として使うことしかできません。`
+      );
+    }
+    return entity;
   }
 
   private pickOne<T extends { module: string; name: string }>(
@@ -3438,7 +3477,8 @@ class Renamer {
   ): T {
     let found = candidates;
     if (found.length > 1) found = found.filter((entity) => !(entity as { weak?: boolean }).weak);
-    if (found.length > 1 && this.options.ownShadowsImports) {
+    // A quote names a definition of the module's own, such as one a declaration splice gave, over an import's.
+    if (found.length > 1 && (this.options.ownShadowsImports || this.namingOnly || this.quoteBinders)) {
       const own = found.filter((entity) => entity.module === this.module.name);
       if (own.length === 1) found = own;
     }
@@ -3490,7 +3530,7 @@ class Renamer {
       }
       throw compileError(name.span, `構成子 ${describeName(name)} がスコープにありません。`);
     }
-    return this.pickOne(candidates, name, 'value').con as ConInfo;
+    return this.checkUse(this.pickOne(candidates, name, 'value'), name).con as ConInfo;
   }
 
   private lookupField(name: QName, types?: readonly TypeEntity[]): FieldInfo {
@@ -3540,6 +3580,7 @@ class Renamer {
     if (picked.candidate.kind === 'type' && picked.candidate.entity.unsupported) {
       throw unsupportedError(name.span, picked.candidate.entity.unsupported);
     }
+    this.checkUse(picked.candidate.entity, name, false);
     return picked.candidate;
   }
 
@@ -4328,17 +4369,6 @@ function thNameModules(): Map<string, string> {
     Object.entries(TH_NAME_MODULES).flatMap(([module, keys]) => keys.map((key): [string, string] => [key, module]))
   );
   return nameModules;
-}
-
-/** The space of the global name a module's table of names gives a name of a namespace, if the table has it. */
-function spliceModuleSpace(
-  names: SpliceModuleNames,
-  namespace: QuoteNamespace,
-  name: string
-): 'v' | 'd' | 'tc' | undefined {
-  if (namespace === 'type') return names.types.has(name) ? 'tc' : undefined;
-  if (namespace !== 'con' && names.values.has(name)) return 'v';
-  return namespace !== 'var' && names.constructors.has(name) ? 'd' : undefined;
 }
 
 /** GHC's names of the types of special syntax: lists, unit, tuples, and functions. */

@@ -1333,7 +1333,7 @@ instance Splice a => Splice [a] where
       decsOf (SpliceDecs ds) = ds
       decsOf r = errorWithoutStackTrace ("not a declaration: " ++ show r)
 
--- The stored result is the splice program's last action, so a splice that exits or fails before it stores none. Its
+-- The stored result is the splice's last action, so a splice that exits or fails before it stores none. Its
 -- Show instance demands every part of the tree, which runs whatever the tree still has to compute while the splice
 -- runs.
 runSplice :: Splice a => Q a -> IO ()

@@ -1,34 +1,30 @@
 import { CompileError } from '../interpreter/diagnostics';
-import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
+import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
-import { type CompiledProgram, compileProgram, setSpliceRunner } from './compile';
+import { type CompiledProgram, compileProgram, setSpliceExecutor } from './compile';
 import type { GlobalDef } from './core';
+import { compileError } from './errors';
 import { ioSupport } from './ioPrimitives';
 import { forceString } from './primitives';
 import { Runtime, type TraceFrame } from './runtime';
 import { decodeSplice } from './thDecode';
-import { chargeTypeWork, remainingCompilationWork } from './typeWorkBudget';
+import { compilationBudget } from './typeWorkBudget';
 import { type ConValue, HaskellException, type Slot, type Value } from './values';
 
-// A splice runs as a program of its own while the program that has it compiles, on what is left of the compilation's
-// budget: it stores its tree, which the compiler grafts in its place, and what it prints is the compiler's output, as
-// runIO's is in GHC. An error it reports with reportError fails it, as does an exit or an end without a stored tree.
-setSpliceRunner((program, span, names, module) => {
-  const budget = new ExecutionBudget(LIMITS.maxMilliseconds, remainingCompilationWork());
+// A splice's code runs while the program that has it compiles, on the compilation's own budget: it stores its tree,
+// which the compiler grafts in its place, and what it prints is the compiler's output, as runIO's is in GHC. An error
+// it reports with reportError fails it, as does an exit or an end without a stored tree.
+setSpliceExecutor((program, span, names) => {
+  const budget = compilationBudget();
   const runtime = new Runtime(undefined, budget);
-  let run: ProgramRun;
-  try {
-    run = runProgram(runtime, compileProgram(program, { spliceModule: module }));
-  } finally {
-    chargeTypeWork(budget.spent);
-  }
+  const run = budget.withinMilliseconds(LIMITS.maxMilliseconds, () => runProgram(runtime, program));
   const failure =
     run.uncaughtException ??
     runtime.splice.errors[0] ??
     runtime.splice.exit ??
     (runtime.splice.result ? undefined : 'Exception when trying to run compile-time code');
-  if (failure !== undefined) throw new CompileError([{ row: 0, message: failure }]);
+  if (failure !== undefined) throw compileError(span, failure);
   return {
     result: decodeSplice(runtime, runtime.splice.result as Slot, span, names),
     printed: run.stdout,
