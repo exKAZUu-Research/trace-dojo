@@ -32,6 +32,7 @@ import {
   rejectUnsupportedVariableRead,
   SCALAR_DYNAMIC_VARIABLES,
 } from './capabilities';
+import type { DescriptorTable } from './descriptors';
 import type { StoreFailure, StoreOutcome } from './failurePolicy';
 import type { GetoptsState } from './getopts';
 import { BASH_VERSION, type FunctionDefinition, type Runtime, SCRIPT_NAME } from './runtime';
@@ -203,7 +204,14 @@ export class VariableStore {
   /** The directories `pushd` remembers, most recent first, below the working directory. */
   directoryStack: string[] = [];
   /** The background commands this shell started, by process number, with their statuses and whether `wait` told them. */
-  readonly jobs = new Map<number, { status: number; reported: boolean; finish?: () => void }>();
+  /**
+   * The background jobs and coprocesses by process ID; a coprocess that has not run yet keeps `finish`, which runs
+   * it, and the descriptors it was started with, through which it will write.
+   */
+  readonly jobs = new Map<
+    number,
+    { status: number; reported: boolean; finish?: () => void; descriptors?: DescriptorTable }
+  >();
   /** The process number of the last background command, which `$!` expands to. */
   lastBackgroundPid: number | undefined;
   /** The aliases `alias` defined, by name. */

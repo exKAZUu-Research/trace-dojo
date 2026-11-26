@@ -114,10 +114,22 @@ export class Shell implements ArithmeticHost {
   /** The commands `trap` set for the shell's exit and for failed commands. */
   readonly traps: Map<TrapCondition, Trap>;
   private runningTrap = false;
-  /** The descriptors of process substitutions that the commands running now use, with what each runs when done. */
-  private readonly processSubstitutions: { fd: number; file: OpenFile; finish?: () => void }[] = [];
-  /** The `>(...)` commands whose input another descriptor keeps open past their command, which run as the shell ends. */
-  private readonly lingeringSubstitutions: (() => void)[] = [];
+  /**
+   * The descriptors of process substitutions that the commands running now use, with what each `>(...)` runs when
+   * done and the descriptors its commands were started with.
+   */
+  private readonly processSubstitutions: {
+    fd: number;
+    file: OpenFile;
+    consumer?: { holder: DescriptorTable; finish: () => void };
+  }[] = [];
+  /**
+   * The `>(...)` commands whose command has ended while something can still write to their input, which run once
+   * nothing can, as their input then reaches its end.
+   */
+  private readonly lingeringSubstitutions: { file: OpenFile; holder: DescriptorTable; finish: () => void }[] = [];
+  /** The descriptor tables that the commands running now keep to restore, whose files stay open meanwhile. */
+  private readonly savedDescriptors: DescriptorTable[] = [];
   private readShift: number;
   private lineShift: number;
   private loopDepth: number;
@@ -166,7 +178,41 @@ export class Shell implements ArithmeticHost {
 
   /** Runs the `>(...)` commands still reading, as their input reaches its end when the shell ends. */
   finishLingeringSubstitutions(): void {
-    for (const finish of this.lingeringSubstitutions.splice(0)) finish();
+    this.runReadySubstitutions(true);
+  }
+
+  /**
+   * Runs each lingering `>(...)` that nothing can write to any more: no descriptor of this shell, of a table a
+   * running command keeps to restore, of another lingering `>(...)`, or of a coprocess that has not run. As the shell
+   * ends, its own descriptors no longer count, a coprocess that writes to one runs first, and a cycle, which Bash runs
+   * concurrently, runs in the order the substitutions started.
+   */
+  private runReadySubstitutions(shellEnds: boolean): void {
+    for (;;) {
+      const ready = this.lingeringSubstitutions.find(
+        (entry) => (shellEnds || !this.isOpenHere(entry.file)) && !this.isWrittenElsewhere(entry)
+      );
+      if (ready) {
+        this.lingeringSubstitutions.splice(this.lingeringSubstitutions.indexOf(ready), 1);
+        ready.finish();
+        continue;
+      }
+      if (!shellEnds || this.lingeringSubstitutions.length === 0) return;
+      const writer = [...this.store.jobs.values()].find((job) => job.finish !== undefined);
+      if (writer) writer.finish?.();
+      else (this.lingeringSubstitutions.shift() as { finish: () => void }).finish();
+    }
+  }
+
+  private isOpenHere(file: OpenFile): boolean {
+    return this.fds.refersTo(file) || this.savedDescriptors.some((table) => table.refersTo(file));
+  }
+
+  private isWrittenElsewhere(entry: { file: OpenFile }): boolean {
+    return (
+      this.lingeringSubstitutions.some((other) => other !== entry && other.holder.refersTo(entry.file)) ||
+      [...this.store.jobs.values()].some((job) => job.finish !== undefined && job.descriptors?.refersTo(entry.file))
+    );
   }
 
   /** Runs the `EXIT` trap as the shell ends with `status`, returning the status it ends with, which `exit` may set. */
@@ -289,14 +335,27 @@ export class Shell implements ArithmeticHost {
     } else {
       // The commands copy the shell's state now, as Bash forks them here, though they run later.
       const child = this.forkSubshell(this.fds.clone());
-      const file = { output: capture.target };
+      let ran = false;
+      const file = {
+        output: {
+          write: (text: string) => {
+            // Answering what is written after the commands have read their input would need them to run alongside.
+            if (ran) rejectUnsupportedFeature('動き終わった >(...) への書き込み');
+            capture.target.write(text);
+          },
+        },
+      };
       this.fds.set(fd, file);
       this.processSubstitutions.push({
         fd,
         file,
-        finish: () => {
-          child.fds.set(0, { input: this.runtime.io.textReader(capture.read()) });
-          child.run(body);
+        consumer: {
+          holder: child.fds,
+          finish: () => {
+            ran = true;
+            child.fds.set(0, { input: this.runtime.io.textReader(capture.read()) });
+            child.run(body);
+          },
         },
       });
     }
@@ -304,12 +363,12 @@ export class Shell implements ArithmeticHost {
   }
 
   private closeProcessSubstitutions(mark: number, completed: boolean): void {
-    for (const { fd, file, finish } of this.processSubstitutions.splice(mark)) {
+    const closed = this.processSubstitutions.splice(mark);
+    for (const { fd, file, consumer } of closed) {
       this.fds.close(fd);
-      if (!completed || !finish) continue;
-      if (this.fds.refersTo(file)) this.lingeringSubstitutions.push(finish);
-      else finish();
+      if (completed && consumer) this.lingeringSubstitutions.push({ file, ...consumer });
     }
+    if (this.lingeringSubstitutions.length > 0) this.runReadySubstitutions(false);
   }
 
   // code-gauge-allow functionNcss -- One case per statement kind, delegating each construct to its runner.
@@ -536,9 +595,13 @@ export class Shell implements ArithmeticHost {
     const pid = this.runtime.allocateProcessId();
     const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
     let output: string | undefined;
-    const job: { status: number; reported: boolean; finish?: () => void } = { status: 0, reported: false };
     // The coprocess copies the shell's state when it starts, though it runs later.
     const child = this.forkSubshell(this.fds.clone());
+    const job: { status: number; reported: boolean; finish?: () => void; descriptors?: DescriptorTable } = {
+      status: 0,
+      reported: false,
+      descriptors: child.fds,
+    };
     const run = (): void => {
       job.finish = undefined;
       const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
@@ -595,7 +658,7 @@ export class Shell implements ArithmeticHost {
   }
 
   private runWithStandardInput(input: OpenFile, command: Statement): number {
-    const saved = this.fds.clone();
+    const saved = this.saveDescriptors();
     this.fds.set(0, input);
     try {
       return this.execute(command);
@@ -846,7 +909,7 @@ export class Shell implements ArithmeticHost {
   /** Runs a command with its redirections applied, or skips it with status 1 when one fails, as Bash does. */
   withRedirects(redirects: readonly Redirect[], run: () => number): number {
     if (redirects.length === 0) return run();
-    const saved = this.fds.clone();
+    const saved = this.saveDescriptors();
     const changed: number[] = [];
     try {
       try {
@@ -876,7 +939,7 @@ export class Shell implements ArithmeticHost {
     return {
       run: <T>(body: () => T): T => {
         if (redirects.length === 0) return body();
-        const saved = this.fds.clone();
+        const saved = this.saveDescriptors();
         try {
           if (applied) for (const fd of changed) this.copyDescriptor(applied, fd);
           else {
@@ -911,7 +974,15 @@ export class Shell implements ArithmeticHost {
    * command opened otherwise, as `exec` and `{name}>file` do, stay open after it.
    */
   private restoreDescriptors(saved: DescriptorTable, changed: readonly number[]): void {
+    this.savedDescriptors.splice(this.savedDescriptors.lastIndexOf(saved), 1);
     for (const fd of changed) this.copyDescriptor(saved, fd);
+  }
+
+  /** A copy of the descriptors to restore when a command ends, whose files stay open until then. */
+  private saveDescriptors(): DescriptorTable {
+    const saved = this.fds.clone();
+    this.savedDescriptors.push(saved);
+    return saved;
   }
 
   /** Makes `fd` what it is in `table`, closing it when it is closed there. */
@@ -1264,7 +1335,7 @@ export class Shell implements ArithmeticHost {
    */
   captureCurrentShell(body: Statement[], mode: 'current' | 'reply'): { output: string; status: number } {
     const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
-    const saved = this.fds.clone();
+    const saved = this.saveDescriptors();
     const changed = mode === 'current' ? [1] : [];
     if (mode === 'current') this.fds.set(1, { output: capture.target });
     const scopeIndex = this.store.pushSubstitutionScope(mode === 'reply');
