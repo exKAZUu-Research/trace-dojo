@@ -299,15 +299,15 @@ export class Shell implements ArithmeticHost {
     );
   }
 
-  /**
-   * Ends the shell as `exit` does: the `EXIT` trap runs here, where `exit` ran, with the function's variables,
-   * positional parameters, and redirections still in place, as Bash runs it, and does not run again as the shell ends.
-   */
   /** The status `exit` without an operand ends with: the last command's, or in a trap the status the trap started with. */
   get statusForExit(): number {
     return this.trapStartStatus ?? this.store.lastStatus;
   }
 
+  /**
+   * Ends the shell as `exit` does: the `EXIT` trap runs here, where `exit` ran, with the function's variables,
+   * positional parameters, and redirections still in place, as Bash runs it, and does not run again as the shell ends.
+   */
   exitShell(status: number): never {
     const finalStatus = this.runExitTrap(status);
     this.traps.delete('EXIT');
@@ -601,9 +601,9 @@ export class Shell implements ArithmeticHost {
     const trapped = this.errTrapSet;
     const status = this.withRedirects(statement.redirects, () => {
       redirected = true;
-      if (statement === this.pipeInputStatement) return this.runRedirectedBody(statement, guarded, true);
+      if (statement === this.pipeInputStatement) return this.runRedirectedBody(statement.body, guarded, true);
       return this.withStandardInputMark(statement.redirects, () =>
-        this.runRedirectedBody(statement, guarded, this.standardInputRedirected)
+        this.runRedirectedBody(statement.body, guarded, this.standardInputRedirected)
       );
     });
     // A failed redirection fails the compound command itself, while its body applies the rules on its own.
@@ -878,19 +878,15 @@ export class Shell implements ArithmeticHost {
   }
 
   /**
-   * Runs the body of a redirected compound command, noting for a `( )` whether its own redirections give it standard
-   * input (`givesInput`), which its fork takes as its mark.
+   * Runs the body of a redirected compound command or function definition, noting for a `( )` whether those
+   * redirections give it standard input (`givesInput`), which its fork takes as its mark.
    */
-  private runRedirectedBody(
-    statement: Extract<Statement, { kind: 'redirected' }>,
-    guarded: boolean,
-    givesInput: boolean
-  ): number {
-    if (statement.body.kind !== 'subshell') return this.execute(statement.body, guarded);
+  private runRedirectedBody(body: Statement, guarded: boolean, givesInput: boolean): number {
+    if (body.kind !== 'subshell') return this.execute(body, guarded);
     const saved = this.redirectedSubshell;
-    this.redirectedSubshell = { body: statement.body, givesInput };
+    this.redirectedSubshell = { body, givesInput };
     try {
-      return this.execute(statement.body, guarded);
+      return this.execute(body, guarded);
     } finally {
       this.redirectedSubshell = saved;
     }
@@ -1578,7 +1574,11 @@ export class Shell implements ArithmeticHost {
       // Bash names the line where the definition starts when the function's own redirections fail.
       if (fn.redirects.length > 0) this.currentRow = fn.definitionRow;
       return this.restoringLine(() =>
-        this.withRedirects(fn.redirects, () => this.withStandardInputMark(fn.redirects, () => this.execute(fn.body)))
+        this.withRedirects(fn.redirects, () =>
+          this.withStandardInputMark(fn.redirects, () =>
+            this.runRedirectedBody(fn.body, false, fn.redirects.length > 0 && this.standardInputRedirected)
+          )
+        )
       );
     } catch (error) {
       if (error instanceof ReturnSignal) return error.status;
