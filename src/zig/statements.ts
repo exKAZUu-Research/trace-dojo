@@ -499,8 +499,18 @@ export abstract class StatementCompiler extends CallCompiler {
       if (!declaration) {
         const destination = target.target as Expression;
         if (destination.kind === 'identifier' && isDiscardName(destination)) continue;
-        if (!this.comptimeVariableOf(destination))
-          return this.error(target, 'comptime の分割代入で代入できるのは、comptime var か _ だけです。');
+        const variable = this.comptimeVariableOf(destination);
+        if (!variable) return this.error(target, 'comptime の分割代入で代入できるのは、comptime var か _ だけです。');
+        // A literal's elements may read the targets that earlier elements store, as Zig re-reads them; any other value
+        // was computed once already, and code it called cannot see the function's comptime vars.
+        const literal = unwrapParens(statement.value);
+        if (literal.kind !== 'arrayInit' || literal.type) {
+          const { type } = this.compile(destination);
+          this.refuseComptimeStoreUnderRuntimeCondition(variable, target);
+          const element = this.elementOf(value, index, elementTypes[index], isArray, statement);
+          this.storeComptimeCell(destination, this.coerce(element, type, target), variable);
+          continue;
+        }
         const span = { row: target.row, col: target.col, endRow: target.endRow };
         const element: Expression = {
           ...span,
@@ -830,31 +840,15 @@ export abstract class StatementCompiler extends CallCompiler {
     if (expression.targets.length !== 1) return this.error(expression, '書き方に誤りがあります。');
     const [target] = expression.targets;
     const variable = this.comptimeVariableOf(target);
-    // A `comptime` block inside a runtime branch still stores under the branch's condition.
     const cell = variable?.comptimeCell;
-    if (cell && this.context.runtimeConditionDepth > cell.conditionDepth) {
-      // A function whose result exists only at compile time runs its loops then, which the grader analyzes only once.
-      if (this.runsAtCompileTime(span)) this.error(expression, unavailableMessage('syntax:comptimeVarInComptimeLoop'));
-      this.error(expression, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
-    }
-    if (cell && this.context.comptimeDepth === 0) {
-      const stored =
-        expression.operator === '=' ? this.comptimeStoredValue(target, expression.value, variable) : undefined;
-      if (!stored) this.requireComptimeOperand(this.compile(expression.value), variable);
+    if (variable && cell) this.refuseComptimeStoreUnderRuntimeCondition(variable, expression);
+    if (variable && cell && this.context.comptimeDepth === 0) {
+      if (expression.operator === '=')
+        return this.storeComptimeCell(target, this.comptimeStoredValue(target, expression.value, variable), variable);
+      this.requireComptimeOperand(this.compile(expression.value), variable);
       // Zig stores to a `comptime var` as it analyzes the assignment, which runs no code when the program runs.
       this.comptimeValue(
         () => {
-          if (stored) {
-            const { place } = this.assignablePlace(target);
-            return runtime(
-              VOID,
-              (frame) => {
-                const pointer = place.locate(frame);
-                storeInto(pointer.target, pointer.index, stored.eval(frame));
-              },
-              expression
-            );
-          }
           const exec = this.assignment(expression, span).exec;
           return runtime(VOID, (frame) => void exec(frame), expression);
         },
@@ -917,6 +911,35 @@ export abstract class StatementCompiler extends CallCompiler {
    * The value `=` stores into a `comptime var`, which Zig analyzes where the assignment stands, so it must be known at
    * compile time: a call to a runtime function gives a runtime value even when its arguments are known.
    */
+  /** A `comptime` block inside a runtime branch still stores under the branch's condition, which Zig refuses. */
+  private refuseComptimeStoreUnderRuntimeCondition(variable: LocalBinding, span: Span): void {
+    const cell = variable.comptimeCell;
+    if (!cell || this.context.runtimeConditionDepth <= cell.conditionDepth) return;
+    // A function whose result exists only at compile time runs its loops then, which the grader analyzes only once.
+    if (this.runsAtCompileTime(span)) this.error(span, unavailableMessage('syntax:comptimeVarInComptimeLoop'));
+    this.error(span, `comptime var「${variable.name}」への代入が、実行時に決まる条件の中にあります。`);
+  }
+
+  /** Stores a known value into a `comptime var` as the compiler analyzes the store, which runs no code at run time. */
+  private storeComptimeCell(target: Expression, stored: TExpr, variable: LocalBinding): Stmt {
+    this.comptimeValue(
+      () => {
+        const { place } = this.assignablePlace(target);
+        return runtime(
+          VOID,
+          (frame) => {
+            const pointer = place.locate(frame);
+            storeInto(pointer.target, pointer.index, stored.eval(frame));
+          },
+          stored.span
+        );
+      },
+      stored.span,
+      variable
+    );
+    return { exec: () => {}, noreturn: false };
+  }
+
   private comptimeStoredValue(target: Expression, value: Expression, variable: LocalBinding): TExpr {
     const { type } = this.compile(target);
     const stored = this.coerce(this.compile(value, type), type, value);
