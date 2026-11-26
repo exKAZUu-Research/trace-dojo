@@ -192,7 +192,7 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       const free = this.freeFunctions(scope, name, expression.row).length > 0 || this.freeProperty(scope, name);
       const companion = free
         ? undefined
-        : this.receiversOf(scope).find((each) => holdsMember(each.cls?.companion, name));
+        : this.receiversOf(scope).find((each) => each.cls?.companion && this.hasMember(each.cls.companion, name));
       return companion?.cls?.companion
         ? this.boundTarget(scope, context, this.objectValue(companion.cls.companion), expression.row)
         : { kind: 'free' };
@@ -203,10 +203,12 @@ export abstract class LocalCompiler extends AnnotationCompiler {
         : this.compileQualifier(scope, receiver.expression);
     const cls = written?.kind === 'class' ? written.cls : undefined;
     if (cls) {
-      // An object's member, or a member of a class's companion object, is bound to that object, as `Util::sq` is.
-      const holder = cls.isObject ? cls : holdsMember(cls, name) ? undefined : cls.companion;
-      if (holder && holdsMember(holder, name))
-        return this.boundTarget(scope, context, this.objectValue(holder), expression.row);
+      // An object's name is its instance, whose members, inherited ones and extensions included, it binds, as
+      // `Util::sq`; a member only a class's companion object has is bound to the companion, as `A::parse`.
+      if (cls.isObject) return this.boundTarget(scope, context, this.objectValue(cls), expression.row);
+      const { companion } = cls;
+      if (companion && !this.hasMember(cls, name) && this.hasMember(companion, name))
+        return this.boundTarget(scope, context, this.objectValue(companion), expression.row);
       if (receiver.kind === 'type') return { kind: 'unbound', type: written as KType };
       return { kind: 'unbound', type: this.starredClassType(cls) };
     }
@@ -216,6 +218,14 @@ export abstract class LocalCompiler extends AnnotationCompiler {
       context,
       this.compileExpression(scope, context, receiver.expression),
       expression.row
+    );
+  }
+
+  /** Whether a class has a function or property of a name, declared or inherited. */
+  private hasMember(cls: ClassSymbol, name: string): boolean {
+    return (
+      this.membersOf<FunctionSymbol>(cls.type, name, 'function').length > 0 ||
+      this.membersOf<PropertySymbol>(cls.type, name, 'property').length > 0
     );
   }
 
@@ -1030,9 +1040,4 @@ function syntheticLambda(names: string[], statements: Statement[], row: number):
     params: names.map((name) => ({ row, name, type: undefined })),
     statements,
   };
-}
-
-/** Whether a class declares a member of a name itself. */
-function holdsMember(cls: ClassSymbol | undefined, name: string): boolean {
-  return (cls?.members.get(name)?.length ?? 0) > 0;
 }
