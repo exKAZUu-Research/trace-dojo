@@ -785,7 +785,7 @@ export abstract class ControlCompiler extends StatementCompiler {
   private compileGenForIn(statement: Extract<Statement, { kind: 'forIn' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { isAwait } = statement;
-    if (isAwait && !this.fn.kind.isAsync) this.error(statement, 'await for は async の関数の中にしか書けません。');
+    if (isAwait) this.requireAsyncBody(statement, 'await for');
     const { result: iterable, parts: sourceParts } = this.resuming([statement.iterable], () =>
       this.compileExpression(statement.iterable)
     );

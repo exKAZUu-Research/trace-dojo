@@ -1001,7 +1001,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     types: ElementTypes[]
   ): ElementCode {
     const { isAwait } = element;
-    if (isAwait && !this.fn.kind.isAsync) this.error(element, 'await for は async の関数の中にしか書けません。');
+    if (isAwait) this.requireAsyncBody(element, 'await for');
     const { result: iterable, steps } = this.compileWithSteps(element.iterable, () =>
       this.compileExpression(element.iterable)
     );

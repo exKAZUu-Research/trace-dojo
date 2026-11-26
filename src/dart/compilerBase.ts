@@ -159,6 +159,14 @@ export abstract class CompilerBase {
     return this.error(span, `${what}は、この採点環境では使えません。`);
   }
 
+  /**
+   * Rejects `await` or `await for` outside an `async` or `async*` body, the one place that rule of Dart is decided for
+   * every form the compilers handle (an expression, a statement, a collection element).
+   */
+  protected requireAsyncBody(span: Span | { row: number }, construct: 'await' | 'await for'): void {
+    if (!this.fn.kind.isAsync) this.error(span, `${construct} は async の関数の中にしか書けません。`);
+  }
+
   /** Rejects as unavailable an instance member the SDK has but the interpreter does not implement. */
   protected checkUnimplementedMember(receiver: DartType, name: string, span: Span): void {
     const type = resolveBound(receiver);

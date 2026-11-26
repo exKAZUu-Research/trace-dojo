@@ -116,7 +116,7 @@ export abstract class AwaitCompiler extends CompilerBase {
   }
 
   protected compileAwait(expression: Extract<Expression, { kind: 'await' }>, context: DartType | undefined): Compiled {
-    if (!this.fn.kind.isAsync) return this.error(expression, 'await は async の関数の中にしか書けません。');
+    this.requireAsyncBody(expression, 'await');
     const root = this.awaitRoot;
     // A late variable's initializer runs when it is first read, outside the statement that can suspend.
     if (root?.fn !== this.fn || !rootCovers(root, expression))

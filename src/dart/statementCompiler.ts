@@ -1054,7 +1054,7 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   private compileForIn(statement: Extract<Statement, { kind: 'forIn' }>): Exec {
     // An async body runs its await for through its generator, so one here is in a function that is not async.
-    if (statement.isAwait) this.error(statement, 'await for は async の関数の中にしか書けません。');
+    if (statement.isAwait) this.requireAsyncBody(statement, 'await for');
     const labels = this.takeLoopLabels();
     const iterable = this.compileExpression(statement.iterable);
     const elementType = this.elementTypeOfIterable(iterable, statement.iterable);
