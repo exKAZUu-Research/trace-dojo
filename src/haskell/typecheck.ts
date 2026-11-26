@@ -143,7 +143,9 @@ function defineConstructors(decl: RDataDecl): void {
   const own = new Set(decl.cons.map(({ con }) => con));
   for (const field of decl.entity.fields.values()) {
     if (![...field.positions.keys()].some((con) => own.has(con))) continue;
-    const types = [...field.positions.entries()].map(([con, position]) => con.fieldTypes[position]);
+    const types = [...field.positions.entries()]
+      .filter(([con]) => own.has(con))
+      .map(([con, position]) => con.fieldTypes[position]);
     const first = types[0];
     for (const other of types.slice(1)) {
       const bindings: (Type | undefined)[] = [];
