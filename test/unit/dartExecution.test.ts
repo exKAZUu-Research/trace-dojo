@@ -9328,6 +9328,37 @@ Future<void> main() async { await f(); await h(); print('x'); }`;
   });
 });
 
+test('is Null and is! Null split a nullable type parameter as any nullable type', () => {
+  const source = `int whole<T extends num>(T? v) {
+  if (v is! Null) return v.toInt();
+  return 0;
+}
+T firstOr<T>(T? value, T fallback) {
+  if (value is Null) return fallback;
+  T result = value;
+  return result;
+}
+void main() { print([whole<double>(2.5), whole<int>(null), firstOr<int>(null, 4)]); }`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[2, 0, 4]\n' });
+});
+
+test('byte writes keep a byte order mark and text reads drop one, as the VM decodes them', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('c.txt').writeAsBytesSync([0xEF, 0xBB, 0xBF, 0x41]);
+  print([File('c.txt').readAsBytesSync(), File('c.txt').readAsStringSync().codeUnits]);
+  File('d.txt').writeAsStringSync('\\uFEFFhello');
+  print([File('d.txt').readAsStringSync().length, File('d.txt').lengthSync()]);
+  File('e.txt').writeAsStringSync('\\ud800x');
+  print(File('e.txt').readAsStringSync().codeUnits);
+  print(stdin.readLineSync()?.codeUnits);
+}`;
+  expect(executeProgram('dart', source, { stdin: '\uFEFFabc\n' })).toMatchObject({
+    kind: 'executed',
+    stdout: '[[239, 187, 191, 65], [65]]\n[5, 8]\n[65533, 120]\n[97, 98, 99]\n',
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {

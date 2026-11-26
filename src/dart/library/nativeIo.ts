@@ -2,6 +2,7 @@ import { type FileHandle, FileSystemError, type FileSystemErrorCode, parentOf } 
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
 import type { DartObject, NativeState, Value } from '../values';
+import { textOfWrittenBytes } from './nativeConvert';
 import { define, intArg, stringArg, throwUnavailable } from './nativeSupport';
 
 /**
@@ -105,13 +106,18 @@ define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
   let line = '';
   for (let character = reader.read(); character !== undefined; character = reader.read()) {
     if (character === '\n') {
-      if (retainNewlines === true) return `${line}\n`;
-      return line.endsWith('\r') ? line.slice(0, -1) : line;
+      if (retainNewlines === true) return withoutBom(`${line}\n`);
+      return withoutBom(line.endsWith('\r') ? line.slice(0, -1) : line);
     }
     line += character;
   }
-  return line;
+  return withoutBom(line);
 });
+
+/** A line as the VM's `readLineSync` decodes its bytes, with UTF-8, which drops one byte order mark at the start. */
+function withoutBom(line: string): string {
+  return line.startsWith('\uFEFF') ? line.slice(1) : line;
+}
 
 define('Stdin._readByte', (runtime) => {
   const state = readOpenStdin(runtime);
@@ -151,6 +157,9 @@ define('_File._read', (runtime, _self, [path, failure]) =>
   withFileErrors(runtime, failure as string, () => runtime.io.files.readFile(stringArg(runtime, path, 'path')))
 );
 
+// The VM writes a string's UTF-8 encoding, in which an unpaired surrogate becomes U+FFFD.
+define('_writtenText', (runtime, _self, [bytes]) => textOfWrittenBytes(runtime, bytes));
+
 define('_File._write', (runtime, _self, [path, contents, append, failure, shownPath]) => {
   withFileErrors(
     runtime,
@@ -162,7 +171,7 @@ define('_File._write', (runtime, _self, [path, contents, append, failure, shownP
           truncate: append !== true,
           append: append === true,
         })
-        .write(contents as string),
+        .write((contents as string).toWellFormed()),
     shownPath as string | undefined
   );
   return;
@@ -190,7 +199,7 @@ define('_OpenedFile._open', (runtime, self, [path, appends]) => {
 });
 
 define('_OpenedFile._writeOpened', (_runtime, self, [contents]) => {
-  ((self as DartObject).native as SinkFile).handle.write(contents as string);
+  ((self as DartObject).native as SinkFile).handle.write((contents as string).toWellFormed());
   return;
 });
 

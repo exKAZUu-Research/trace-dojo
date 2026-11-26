@@ -1034,6 +1034,9 @@ class _Utf8ConversionSink implements EventSink<List<int>> {
   }
 }
 
+/** A decoder of bytes written to a file in parts, which keeps a byte order mark at their start, as the VM writes it. */
+_Utf8Decoder _bytesDecoder() => _Utf8Decoder(false).._bomIndex = -1;
+
 // From the SDK's lib/convert/utf.dart (3.13.7), class _Utf8Decoder, with the VM's patch of it
 // (lib/_internal/vm/lib/convert_patch.dart). Modifications: convertSingle and convertChunked run natively
 // (nativeConvert.ts), which also hold the state machine's tables, so typeTable, transitionTable, the state

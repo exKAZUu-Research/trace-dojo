@@ -11,16 +11,23 @@ void _requireUtf8(Encoding encoding) {
 }
 
 /**
- * The text of bytes written to a file or a standard stream. Bytes given in parts go through one decoder, which keeps
- * a character the parts split until the next part; finishing it fails a character left unfinished.
+ * The text of bytes written to a file or a standard stream, which keeps a byte order mark, as the VM writes the bytes
+ * as they are. Bytes given in parts go through one decoder, _bytesDecoder, which keeps a character the parts split
+ * until the next part; finishing it fails a character left unfinished.
  */
 String _textOfBytes(List<int> bytes, [_Utf8Decoder? parts]) {
+  if (parts == null) return _writtenText(bytes);
   try {
-    return parts == null ? utf8.decode(bytes) : parts.convertChunked(bytes, 0, null);
+    return parts.convertChunked(bytes, 0, null);
   } on FormatException {
     _unavailable("UTF-8 でないバイト列の書き込み");
   }
 }
+
+external String _writtenText(List<int> bytes);
+
+/** The text a UTF-8 decoder gives for a file's contents, which drops one byte order mark at the start. */
+String _withoutBom(String text) => text.startsWith("\uFEFF") ? text.substring(1) : text;
 
 void _finishText(_Utf8Decoder parts) {
   try {
@@ -533,16 +540,18 @@ class _File extends FileSystemEntity implements File {
     throw PathNotFoundException(path, const OSError("No such file or directory", 2), failure);
   }
   int lengthSync() => utf8.encode(_read(path, "Cannot retrieve length of file")).length;
+  /** The file's contents as stored, which its bytes encode. */
+  String _readStored() => _read(path, "Cannot open file");
   Future<int> length() => Future(lengthSync);
   String readAsStringSync({Encoding encoding = utf8}) {
     _requireUtf8(encoding);
-    return _read(path, "Cannot open file");
+    return _withoutBom(_readStored());
   }
   Future<String> readAsString({Encoding encoding = utf8}) => Future(() => readAsStringSync(encoding: encoding));
   List<String> readAsLinesSync({Encoding encoding = utf8}) =>
       const LineSplitter().convert(readAsStringSync(encoding: encoding));
   Future<List<String>> readAsLines({Encoding encoding = utf8}) => Future(() => readAsLinesSync(encoding: encoding));
-  List<int> readAsBytesSync() => utf8.encode(readAsStringSync());
+  List<int> readAsBytesSync() => utf8.encode(_readStored());
   Future<List<int>> readAsBytes() => Future(readAsBytesSync);
   void writeAsStringSync(String contents, {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) {
     _requireUtf8(encoding);
@@ -816,7 +825,7 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
  */
 class _OpenedFile {
   /** The file holds text, so the bytes of a character written in parts wait for the rest of it. */
-  final _Utf8Decoder _parts = _Utf8Decoder(false);
+  final _Utf8Decoder _parts = _bytesDecoder();
   final String _path;
   bool _isClosed = false;
   _OpenedFile._(this._path);
