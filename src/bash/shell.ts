@@ -1042,6 +1042,10 @@ export class Shell implements ArithmeticHost {
    */
   assignIndexedArray(name: string, values: readonly string[], builtin: string, origin = 0, keep = false): boolean {
     const resolvedName = resolveTargetName(this, name);
+    if (this.store.isAssociativeName(resolvedName)) {
+      this.reportError(`${builtin}: ${name}: not an indexed array`);
+      return false;
+    }
     const elements = keep
       ? values.map((value, index) => ({ key: String(origin + index), value, append: false }))
       : [...values];
@@ -1060,7 +1064,9 @@ export class Shell implements ArithmeticHost {
         onItemError: (message) => this.reportError(message),
       },
     });
-    return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, builtin);
+    // Bash reports a readonly array with its `err_readonly`, which names no builtin.
+    const prefix = !outcome.ok && outcome.reason === 'readonly' ? undefined : builtin;
+    return outcome.ok ? true : this.failures.handleStoreFailure('regularBuiltin', outcome, prefix);
   }
 
   isAssociativeArray(name: string): boolean {
