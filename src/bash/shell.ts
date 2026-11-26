@@ -136,6 +136,11 @@ export class Shell implements ArithmeticHost {
    * nothing can, as their input then reaches its end.
    */
   private readonly lingeringSubstitutions: { file: OpenFile; holder: DescriptorTable; finish: () => void }[] = [];
+  /**
+   * The simple command this subshell runs as a pipeline element or with `&`, whose own failure the parent's pipeline
+   * or nothing checks, as Bash runs no `ERR` trap and no `set -e` in the forked process for it.
+   */
+  private elementCommand: Statement | undefined;
   /** The descriptor tables that the commands running now keep to restore, whose files stay open meanwhile. */
   private readonly savedDescriptors: DescriptorTable[] = [];
   private readShift: number;
@@ -404,7 +409,7 @@ export class Shell implements ArithmeticHost {
       case 'test': {
         status = this.executeSimple(statement, guarded);
         this.store.pipeStatus = [status];
-        this.checkErrexit(status);
+        if (statement !== this.elementCommand) this.checkErrexit(status);
         break;
       }
       case 'if': {
@@ -1402,8 +1407,10 @@ export class Shell implements ArithmeticHost {
    * a compound command: a simple command runs in the forked process itself, and `( )` merges with it.
    */
   private runElementSubshell(command: Statement, fds: DescriptorTable): number {
-    const merges = command.kind === 'command' || command.kind === 'declaration' || command.kind === 'subshell';
-    return this.runSubshell([command], fds, undefined, merges ? 0 : 1);
+    const simple = command.kind === 'command' || command.kind === 'declaration';
+    const child = this.forkSubshell(fds, undefined, simple || command.kind === 'subshell' ? 0 : 1);
+    if (simple) child.shell.elementCommand = command;
+    return child.run([command]);
   }
 
   /**
@@ -1414,7 +1421,7 @@ export class Shell implements ArithmeticHost {
     fds: DescriptorTable,
     overrides?: SubshellOverrides,
     levels = 1
-  ): { fds: DescriptorTable; run: (body: Statement[]) => number } {
+  ): { fds: DescriptorTable; shell: Shell; run: (body: Statement[]) => number } {
     this.runtime.checkCallDepth();
     const childStore = this.store.fork(() => this.currentRow + 1, levels);
     const lineShift = overrides?.lineShift ?? this.lineShift;
@@ -1447,7 +1454,7 @@ export class Shell implements ArithmeticHost {
         this.runtime.frames.pop();
       }
     };
-    return { fds, run };
+    return { fds, shell: childShell, run };
   }
 
   /** Runs `$(< file)`, which Bash replaces with the file's contents without running a command. */
