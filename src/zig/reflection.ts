@@ -496,7 +496,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
             const: type.isConst,
             volatile: type.isVolatile ?? false,
             allowzero: type.allowZero ?? false,
-            align: type.alignment === undefined ? NULL : BigInt(type.alignment),
+            align: optionalAlignment(type.alignment),
           }),
           child: type.child,
           sentinel_ptr: type.sentinel === undefined ? NULL : new Pointer(new Cell(type.sentinel.value), 0),
@@ -541,7 +541,9 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
           backing_integer: optionalValue(type.layout === 'packed' ? backingIntegerOf(type) : undefined),
           field_names: this.names(fields.map((field) => field.name)),
           field_types: this.constSlice(fields.map((field) => field.type)),
-          field_attrs: this.constSlice(fields.map(() => this.structValue(attributes, span, {}))),
+          field_attrs: this.constSlice(
+            fields.map((field) => this.structValue(attributes, span, { align: optionalAlignment(field.alignment) }))
+          ),
           decl_names: this.declNames(type),
         });
       }
@@ -559,6 +561,7 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
     const value = field.comptimeValue?.value ?? field.defaultValue;
     return this.structValue(attributes, span, {
       comptime: field.comptimeValue !== undefined,
+      align: optionalAlignment(field.alignment),
       default_value_ptr: field.hasDefault ? new Pointer(new Cell(value), 0) : NULL,
     });
   }
@@ -566,6 +569,10 @@ export abstract class ReflectionCompiler extends BuiltinCompiler {
 
 function optionalValue(value: Type | undefined): Value {
   return value ?? NULL;
+}
+
+function optionalAlignment(alignment: number | undefined): Value {
+  return alignment === undefined ? NULL : BigInt(alignment);
 }
 
 /** The backing integer of a packed struct or union: the one it names, else the unsigned one of its bits. */

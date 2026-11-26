@@ -165,6 +165,8 @@ export interface EnumType {
 export interface UnionField {
   name: string;
   type: Type;
+  /** The alignment that `align(n)` gives the field. */
+  alignment?: number;
 }
 
 export interface UnionType {

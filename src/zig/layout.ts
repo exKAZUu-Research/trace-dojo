@@ -315,7 +315,7 @@ function unionPayload(type: UnionType, query: LayoutQuery): Layout {
     query.spend();
     const child = query.layout(field.type);
     size = Math.max(size, child.size);
-    align = Math.max(align, child.align);
+    align = Math.max(align, field.alignment ?? child.align);
   }
   return { size, align };
 }

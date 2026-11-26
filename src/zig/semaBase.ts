@@ -742,9 +742,9 @@ export abstract class SemaBase implements SemaApi {
     }
   }
 
-  /** The alignment that `align(n)` gives a struct's field, which a packed struct's fields cannot override. */
-  private fieldAlignment(type: StructType, expression: Expression): number {
-    if (type.layout === 'packed') this.error(expression, 'packed struct のフィールドの整列は変えられません。');
+  /** The alignment that `align(n)` gives a struct's or union's field, which a packed one's fields cannot override. */
+  private fieldAlignment(type: StructType | UnionType, expression: Expression): number {
+    if (type.layout === 'packed') this.error(expression, `packed ${type.kind} のフィールドの整列は変えられません。`);
     return alignmentOperand(this, expression);
   }
 
@@ -878,7 +878,11 @@ export abstract class SemaBase implements SemaApi {
       const fields = syntax.fields.map((field) => {
         this.spendCompilation();
         if (field.name === undefined) this.error(field, 'union のフィールドには名前を書いてください。');
-        return { name: field.name, type: field.type ? this.compileType(field.type) : VOID };
+        return {
+          name: field.name,
+          type: field.type ? this.compileType(field.type) : VOID,
+          ...(field.alignment ? { alignment: this.fieldAlignment(type, field.alignment) } : {}),
+        };
       });
       type.fields = fields;
       if (syntax.taggedByEnum) {
