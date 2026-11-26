@@ -1,3 +1,4 @@
+import { rejectControlVariable } from './capabilities';
 import { compareCollated } from './collation';
 import { hasExtendedGlob, hasPatternCharacters, matchesPattern } from './pattern';
 import type { Shell } from './shell';
@@ -11,6 +12,8 @@ import type { Shell } from './shell';
  * @param pattern The field as a pattern, where a backslash quotes the character after it.
  */
 export function expandPathname(shell: Shell, pattern: string): string[] {
+  rejectControlVariable(shell.store.readScalar('GLOBIGNORE'), 'GLOBIGNORE', 'パス名展開');
+  rejectControlVariable(shell.store.readScalar('GLOBSORT'), 'GLOBSORT', 'パス名展開の並び順');
   const absolute = pattern.startsWith('/');
   const parts = pattern.split('/');
   if (absolute) parts.shift();

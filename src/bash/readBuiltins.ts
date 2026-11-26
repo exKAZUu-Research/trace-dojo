@@ -1,7 +1,7 @@
 import type { TextReader } from '../interpreter/programIo';
 import { isVariableReference } from './arithmetic';
 import { parseBuiltinOptions } from './builtinOptions';
-import { rejectUnsupportedFeature } from './capabilities';
+import { rejectControlVariable, rejectUnsupportedFeature } from './capabilities';
 import { DeadlockError } from './runtime';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
@@ -44,6 +44,7 @@ export const readBuiltin: Builtin = (shell, args) => {
   if (count === 'invalid') return 1;
   const reader = inputReader(shell, 'read', options.get('u'));
   if (!reader) return 1;
+  if (!options.has('t')) rejectControlVariable(shell.store.readScalar('TMOUT'), 'TMOUT', 'read の待ち時間');
   const timeoutStatus = zeroTimeoutStatus(shell, options.get('t'), reader);
   if (timeoutStatus !== undefined) return timeoutStatus;
   if (count === 0) return 0;

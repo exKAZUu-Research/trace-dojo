@@ -182,6 +182,14 @@ export function rejectUnsupportedFeature(feature: string): never {
   throw new UnsupportedFeatureError(feature);
 }
 
+/**
+ * Stops the program where a variable that changes a feature this environment provides, such as `GLOBIGNORE` for
+ * pathname expansion, holds a value that would change it, which this environment does not apply.
+ */
+export function rejectControlVariable(value: string | undefined, name: string, feature: string): void {
+  if (value !== undefined && value !== '') rejectUnsupportedFeature(`${name} による${feature}の変更`);
+}
+
 export function rejectUnsupportedHostEnv(name: string): never {
   throw new UnsupportedFeatureError(`環境変数（${name}）`);
 }

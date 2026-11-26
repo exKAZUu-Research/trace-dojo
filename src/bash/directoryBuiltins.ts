@@ -1,6 +1,6 @@
 import { resolvePath } from '../interpreter/programIo';
 import { parseBuiltinOptions } from './builtinOptions';
-import { rejectUnsupportedFeature, rejectUnsupportedHostEnv } from './capabilities';
+import { rejectControlVariable, rejectUnsupportedFeature, rejectUnsupportedHostEnv } from './capabilities';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
 
@@ -32,6 +32,10 @@ export const cdBuiltin: Builtin = (shell, args) => {
     if (!changeDirectory(shell, 'cd', previous, previous)) return 1;
     shell.fd1.write(`${shell.store.workingDirectory}\n`);
     return 0;
+  }
+  // `CDPATH` would search other directories for a relative name, as Bash does unless it starts with `.` or `/`.
+  if (!/^(\/|\.\.?(\/|$))/.test(operand)) {
+    rejectControlVariable(shell.store.readScalar('CDPATH'), 'CDPATH', 'cd の検索');
   }
   return changeDirectory(shell, 'cd', operand, operand) ? 0 : 1;
 };

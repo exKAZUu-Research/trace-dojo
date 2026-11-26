@@ -1,5 +1,5 @@
 import type { Statement } from './ast';
-import { rejectUnsupportedFeature } from './capabilities';
+import { rejectControlVariable, rejectUnsupportedFeature } from './capabilities';
 import { ansicQuote, ansicShouldQuote, singleQuote } from './quoting';
 import type { Shell } from './shell';
 
@@ -11,6 +11,7 @@ const DEFAULT_PS4 = '+ ';
  * each level of command substitution, as Bash prints it.
  */
 export function traceLine(shell: Shell, text: string): void {
+  rejectControlVariable(shell.store.readScalar('BASH_XTRACEFD'), 'BASH_XTRACEFD', 'set -x の出力先');
   const ps4 = shell.store.readScalar('PS4') ?? DEFAULT_PS4;
   // Bash expands `PS4` like a prompt, whose escapes and expansions this environment does not provide.
   if (/[\\$`]/.test(ps4)) rejectUnsupportedFeature('PS4 の展開');

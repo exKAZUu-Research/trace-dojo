@@ -12,6 +12,7 @@ import { createCaptureBuffer } from './budget';
 import { operands, REGULAR_BUILTINS } from './builtins';
 import {
   classifyCommandName,
+  rejectControlVariable,
   rejectUnsupportedDeclarationPrefix,
   rejectUnsupportedDynamicDeclaration,
   rejectUnsupportedFeature,
@@ -1371,6 +1372,7 @@ export class Shell implements ArithmeticHost {
 
   callFunction(fn: FunctionDefinition, args: string[], callRow: number): number {
     this.runtime.checkCallDepth();
+    rejectControlVariable(this.store.readScalar('FUNCNEST'), 'FUNCNEST', '関数の入れ子の上限');
     if (this.deepensAtFunctionCall) {
       this.deepensAtFunctionCall = false;
       this.store.deepenSubshellLevel();
