@@ -48,33 +48,47 @@ function intList(runtime: Runtime, values: number[]): Value {
   return runtime.links.newList(runtime, interfaceType(coreTypes.int), values.map(BigInt), true);
 }
 
-/** The UTF-8 bytes of standard input that `readByteSync` has read part of a character's encoding from. */
-const pendingBytes = new WeakMap<Runtime, number[]>();
-
 /**
- * Standard input's state, which every read checks: listened to once its stream has a listener, and closed once that
- * stream has read the input to its end, after which the VM's descriptor is closed.
+ * Standard input's state, which every read checks and writes, the one place it is kept: whether its stream has a
+ * listener, and whether that stream has read the input to its end, after which the VM's descriptor is closed; and
+ * the UTF-8 bytes of the character `readByteSync` has read part of the encoding of.
  */
-const stdinStates = new WeakMap<Runtime, 'listened' | 'closed'>();
+interface StdinState {
+  use: 'unread' | 'listened' | 'closed';
+  pendingBytes: number[];
+}
 
-function readOpenStdin(runtime: Runtime): void {
-  if (stdinStates.get(runtime) !== 'closed') return;
+const stdinStates = new WeakMap<Runtime, StdinState>();
+
+function stdinStateOf(runtime: Runtime): StdinState {
+  let state = stdinStates.get(runtime);
+  if (!state) {
+    state = { use: 'unread', pendingBytes: [] };
+    stdinStates.set(runtime, state);
+  }
+  return state;
+}
+
+function readOpenStdin(runtime: Runtime): StdinState {
+  const state = stdinStateOf(runtime);
+  if (state.use !== 'closed') return state;
   const osError = runtime.links.construct(runtime, 'OSError', '', ['Bad file descriptor', 9n]);
-  runtime.throwError('StdinException', '', ['Error reading byte from stdin', osError]);
+  return runtime.throwError('StdinException', '', ['Error reading byte from stdin', osError]);
 }
 
 define('Stdin._listen', (runtime) => {
-  if (stdinStates.has(runtime)) runtime.throwError('StateError', '', ['Stream has already been listened to.']);
-  stdinStates.set(runtime, 'listened');
+  const state = stdinStateOf(runtime);
+  if (state.use !== 'unread') runtime.throwError('StateError', '', ['Stream has already been listened to.']);
+  state.use = 'listened';
   return;
 });
 
 define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
-  readOpenStdin(runtime);
+  const state = readOpenStdin(runtime);
   const { reader } = runtime.io.stdin;
-  if (pendingBytes.get(runtime)?.length) {
+  if (state.pendingBytes.length > 0) {
     // The line starts inside the character readByteSync began, which the VM fails to decode, dropping the line.
-    pendingBytes.delete(runtime);
+    state.pendingBytes = [];
     for (let character = reader.read(); character !== undefined && character !== '\n'; character = reader.read()) {
       // Each character of the line is dropped.
     }
@@ -93,23 +107,22 @@ define('Stdin._readLine', (runtime, _self, [retainNewlines]) => {
 });
 
 define('Stdin._readByte', (runtime) => {
-  readOpenStdin(runtime);
-  let pending = pendingBytes.get(runtime);
-  if (!pending?.length) {
+  const state = readOpenStdin(runtime);
+  if (state.pendingBytes.length === 0) {
     const { reader } = runtime.io.stdin;
     let character = reader.read();
     if (character === undefined) return -1n;
     if (/[\uD800-\uDBFF]/u.test(character) && !reader.isAtEnd) character += reader.read() ?? '';
-    pending = [...new TextEncoder().encode(character)];
-    pendingBytes.set(runtime, pending);
+    state.pendingBytes = [...new TextEncoder().encode(character)];
   }
-  return BigInt(pending.shift() as number);
+  return BigInt(state.pendingBytes.shift() as number);
 });
 
 define('Stdin._readRest', (runtime) => {
-  stdinStates.set(runtime, 'closed');
-  const pending = pendingBytes.get(runtime) ?? [];
-  pendingBytes.delete(runtime);
+  const state = stdinStateOf(runtime);
+  state.use = 'closed';
+  const pending = state.pendingBytes;
+  state.pendingBytes = [];
   return intList(runtime, [...pending, ...new TextEncoder().encode(runtime.io.stdin.reader.readRest())]);
 });
 
