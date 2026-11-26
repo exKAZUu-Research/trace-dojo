@@ -1592,15 +1592,19 @@ export abstract class SemaBase implements SemaApi {
     const left = a.fields ?? [];
     const right = b.fields ?? [];
     if (left.length !== right.length) return undefined;
-    // Zig resolves the fields by their types alone, so a comptime number has no value to fit a runtime type with.
+    // A tuple with a runtime field has no value as a whole, so its comptime number has no value to fit a runtime type.
+    const fits = (a: Type, b: Type): boolean =>
+      isComptimeNumber(a) === isComptimeNumber(b) || (isComptimeNumber(a) ? hasValue(left) : hasValue(right));
     const types = left.map((field, index) =>
-      isComptimeNumber(field.type) === isComptimeNumber(right[index].type)
-        ? this.peerPair(field.type, right[index].type, [])
-        : undefined
+      fits(field.type, right[index].type) ? this.peerPair(field.type, right[index].type, []) : undefined
     );
     if (types.some((type) => type === undefined)) return undefined;
     return this.tupleType(types.map((type, index) => ({ name: String(index), type: type as Type, hasDefault: false })));
   }
+}
+
+function hasValue(fields: readonly StructField[]): boolean {
+  return fields.every((field) => field.comptimeValue !== undefined);
 }
 
 function isComptimeNumber(type: Type): boolean {
