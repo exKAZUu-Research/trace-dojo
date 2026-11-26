@@ -3331,20 +3331,26 @@ class _AsyncStarStreamController<T> {
    * its subscription before the controller's own onCancel runs.
    */
   _onRootCancel() {
-    final attached = _attached;
-    if (attached == null) return onCancel();
-    attached._isCancelledByRoot = true;
-    final cancel = attached._onRootCancel();
-    final self = this;
-    final Future result = cancel == null
-        ? (() {
-            scheduleMicrotask(self._attachedDone);
-            return Future<void>.value();
-          })()
-        : (cancel as Future).whenComplete(() {
-            scheduleMicrotask(self._attachedDone);
-          });
-    return result.whenComplete(() => self.onCancel());
+    // The chain is walked in a loop, innermost first, so that a deep one takes a fixed depth of host frames.
+    final chain = <_AsyncStarStreamController>[];
+    for (_AsyncStarStreamController? body = this; body != null; body = body._attached) {
+      chain.add(body);
+    }
+    var cancel = chain.last.onCancel();
+    for (var i = chain.length - 2; i >= 0; i--) {
+      final level = chain[i];
+      chain[i + 1]._isCancelledByRoot = true;
+      final Future result = cancel == null
+          ? (() {
+              scheduleMicrotask(level._attachedDone);
+              return Future<void>.value();
+            })()
+          : (cancel as Future).whenComplete(() {
+              scheduleMicrotask(level._attachedDone);
+            });
+      cancel = result.whenComplete(() => level.onCancel());
+    }
+    return cancel;
   }
   onCancel() {
     if (controller.isClosed) {

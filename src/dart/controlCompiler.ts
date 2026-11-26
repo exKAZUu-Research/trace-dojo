@@ -813,15 +813,21 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  protected elementTypeOfStream(stream: Compiled, span: Span): DartType {
+  /** The element type of a stream that `await for` or an `async*` body's `yield*`, the construct named, reads. */
+  protected elementTypeOfStream(
+    stream: Compiled,
+    span: Span,
+    construct: 'await for' | 'yield*' = 'await for'
+  ): DartType {
     const type = resolveBound(stream.type);
     if (type.kind === 'dynamic') return DYNAMIC;
     if (isNullable(type)) {
-      this.error(span, `${typeName(stream.type)} 型の値は null かもしれないので、await for では使えません。`);
+      this.error(span, `${typeName(stream.type)} 型の値は null かもしれないので、${construct} では使えません。`);
     }
     const element = type.kind === 'interface' ? asInstanceOf(type, coreTypes.stream)?.args[0] : undefined;
     return (
-      element ?? this.error(span, `${typeName(stream.type)} 型の値は Stream ではないので、await for では使えません。`)
+      element ??
+      this.error(span, `${typeName(stream.type)} 型の値は Stream ではないので、${construct} では使えません。`)
     );
   }
 
@@ -913,7 +919,7 @@ export abstract class ControlCompiler extends StatementCompiler {
           (from, to) => `${from} 型の値は、${to} 型の Stream に yield できません。`
         );
       }
-      this.fn.yieldTypes?.push(this.elementTypeOfStream(value, statement.value));
+      this.fn.yieldTypes?.push(this.elementTypeOfStream(value, statement.value, 'yield*'));
       return this.coerce(
         value,
         context ?? interfaceType(coreTypes.stream, [DYNAMIC]),

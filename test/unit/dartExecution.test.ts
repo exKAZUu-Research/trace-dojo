@@ -9501,6 +9501,33 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '[1, 3000]\n' });
 });
 
+test('cancelling a deep recursive yield* chain runs its finally blocks in a fixed depth', () => {
+  const source = `import 'dart:async';
+Stream<int> down(int n) async* {
+  try {
+    if (n == 0) { yield 0; return; }
+    yield n;
+    yield* down(n - 1);
+  } finally {
+    if (n == 0) print('finally 0');
+  }
+}
+void main() async {
+  late StreamSubscription<int> sub;
+  sub = down(600).listen((x) { if (x == 0) { sub.cancel(); print('cancelled'); } });
+  await Future.delayed(Duration(milliseconds: 5));
+  print('end');
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'cancelled\nfinally 0\nend\n' });
+});
+
+test('a yield* of a value that is not a stream is reported for yield*', () => {
+  expect(executeProgram('dart', 'Stream<int> a() async* { yield* [1, 2]; }\nvoid main() {}')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: "'List<int>' 型の値は Stream ではないので、yield* では使えません。" }],
+  });
+});
+
 test('an async* stream a yield* forwarded counts as listened to, for a later listen or yield*', () => {
   const twice = `Stream<int> c(int n) async* { for (var i = n; i > 0; i--) yield i; }
 Stream<int> twice() async* { final s = c(2); yield* s; try { yield* s; } catch (e) { print('inner \${e.runtimeType}'); } yield 99; }
