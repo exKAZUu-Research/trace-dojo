@@ -143,6 +143,11 @@ export class Shell implements ArithmeticHost {
    * or nothing checks, as Bash runs no `ERR` trap and no `set -e` in the forked process for it.
    */
   private elementCommand: Statement | undefined;
+  /**
+   * The line where the body of the innermost function running starts, which Bash reports when a redirection of a
+   * compound command in the body fails; a pipeline element or `&` command inherits it, other subshells do not.
+   */
+  private functionDefinitionRow: number | undefined;
   /** The descriptor tables that the commands running now keep to restore, whose files stay open meanwhile. */
   private readonly savedDescriptors: DescriptorTable[] = [];
   private readShift: number;
@@ -472,6 +477,11 @@ export class Shell implements ArithmeticHost {
         break;
       }
       case 'redirected': {
+        // In a function, Bash reports a failed redirection of these compound commands at the line where the body of
+        // the innermost function starts; subshells, conditions, and arithmetic commands keep their own line.
+        if (this.functionDefinitionRow !== undefined && REPORTS_DEFINITION_ROW.has(statement.body.kind)) {
+          this.currentRow = this.functionDefinitionRow;
+        }
         let redirected = false;
         status = this.withRedirects(statement.redirects, () => {
           redirected = true;
@@ -504,7 +514,8 @@ export class Shell implements ArithmeticHost {
       isAtomic: statement.isAtomic,
       redirects: statement.redirects,
       lineShift: this.lineShift,
-      definitionRow: statement.row - this.lineShift,
+      // Bash numbers a function by the line where its body starts, as when `{` comes on the line after the name.
+      definitionRow: statement.body.row - this.lineShift,
     });
     return 0;
   }
@@ -1359,9 +1370,11 @@ export class Shell implements ArithmeticHost {
     const saved = {
       loop: this.loopDepth,
       shift: this.lineShift,
+      definitionRow: this.functionDefinitionRow,
     };
     this.loopDepth = 0;
     this.lineShift = fn.lineShift;
+    this.functionDefinitionRow = fn.definitionRow;
     try {
       // Bash names the line where the definition starts when the function's own redirections fail.
       if (fn.redirects.length > 0) this.currentRow = fn.definitionRow;
@@ -1372,6 +1385,7 @@ export class Shell implements ArithmeticHost {
     } finally {
       this.loopDepth = saved.loop;
       this.lineShift = saved.shift;
+      this.functionDefinitionRow = saved.definitionRow;
       this.runtime.frames.pop();
       this.store.popFunctionScope(scopeIndex);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
@@ -1459,6 +1473,7 @@ export class Shell implements ArithmeticHost {
     const sameLevel = command.kind === 'subshell' || (simple && !background && !callsFunction);
     const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1);
     if (simple) child.shell.elementCommand = command;
+    child.shell.functionDefinitionRow = this.functionDefinitionRow;
     return child.run([command]);
   }
 
@@ -1718,6 +1733,9 @@ function loopHeaderText(statement: Extract<Statement, { kind: 'for' }>): string 
   const words = statement.values ? statement.values.map((word) => word.text) : ['"$@"'];
   return `${statement.variable} in ${words.join(' ')}`;
 }
+
+/** The compound commands whose failed redirections a function reports at the line where its body starts. */
+const REPORTS_DEFINITION_ROW: ReadonlySet<Statement['kind']> = new Set(['group', 'if', 'while', 'for', 'case']);
 
 /** What a command substitution changes in the subshell it runs in. */
 interface SubshellOverrides {
