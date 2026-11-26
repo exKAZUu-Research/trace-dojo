@@ -220,7 +220,6 @@ export class VariableStore {
   previousDirectory: string | undefined;
   /** The directories `pushd` remembers, most recent first, below the working directory. */
   directoryStack: string[] = [];
-  /** The background commands this shell started, by process number, with their statuses and whether `wait` told them. */
   /**
    * The background jobs, coprocesses, and process substitutions by process ID; a coprocess that has not run yet
    * keeps `finish`, which runs it (to the end of its input when the shell ends), and the descriptors it was started
@@ -314,8 +313,10 @@ export class VariableStore {
 
   // ---------------------------------------------------------------- eager metered fork & scopes
 
-  /** Creates an isolated child `VariableStore` for `$(...)` via an eager metered full copy of all scopes and containers. */
-  /** @param levels How much deeper `BASH_SUBSHELL` is in the copy: 1, or 0 for a pipeline's simple command. */
+  /**
+   * Creates an isolated child `VariableStore` for `$(...)` via an eager metered full copy of all scopes and containers.
+   * @param levels How much deeper `BASH_SUBSHELL` is in the copy: 1, or 0 for a pipeline's simple command.
+   */
   fork(childLineReader: () => number, levels = 1): VariableStore {
     const spend = (cost?: number): void => this.runtime.spend(cost);
     const alloc = (count: number): void => this.runtime.allocateSlots(count);

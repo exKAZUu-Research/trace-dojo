@@ -277,7 +277,6 @@ function traceDeclaration(
   }
 }
 
-/** The text of a declaration operand as a name, which `declare -F` looks up. */
 /** Whether an operand is written as a lone `-`, as `local -` is. */
 function isLoneDash(arg: Word | Assignment | ReadyOperand): boolean {
   if ('append' in arg) return false;
@@ -285,6 +284,7 @@ function isLoneDash(arg: Word | Assignment | ReadyOperand): boolean {
   return arg.text === '-';
 }
 
+/** The text of a declaration operand as a name, which `declare -F` looks up. */
 function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): string {
   if ('append' in arg) return arg.text;
   if (!('kind' in arg)) return shell.expander.expandString(arg);
@@ -292,7 +292,6 @@ function operandText(shell: Shell, arg: Word | Assignment | ReadyOperand): strin
   return arg.kind === 'scalar' ? arg.parsed.rawText : arg.arg.text;
 }
 
-/** Prints the functions `names` name that exist, or every function as `declare -f name` when it names none. */
 /** `declare -F`, which lists every function as `declare -f name`, or prints the names given, as such with `-p`. */
 function printFunctionNames(shell: Shell, names: readonly string[], printsDeclarations: boolean): number {
   if (names.length === 0) {

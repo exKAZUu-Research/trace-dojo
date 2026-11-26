@@ -91,7 +91,8 @@ export const builtinBuiltin: Builtin = (shell, args) => {
   const operands = args[0] === '--' ? args.slice(1) : args;
   const [name, ...rest] = operands;
   if (name === undefined) return 0;
-  // A function of the same name does not hide the builtin, as a wrapper such as `declare() { builtin declare "$@"; }` needs.
+  // A function of the same name does not hide the builtin, as a wrapper such as `cd() { builtin cd "$@"; }` needs; a
+  // declaration builtin called this way is still rejected as a dynamic declaration.
   const classified = classifyCommandName(name, false, shell.isRegularBuiltin(name));
   if (classified.kind !== 'notFound' && classified.kind !== 'external') {
     return shell.invokeCommand(name, rest, { skipFunctions: true });
