@@ -1,5 +1,6 @@
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
+import { DeadlockError } from './runtime';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
 
@@ -17,8 +18,12 @@ export const waitBuiltin: Builtin = (shell, args) => {
   if (typeof parsed === 'number') return parsed;
   const { options, operands } = parsed;
   const { jobs } = shell.store;
-  // A coprocess that nothing has read from yet runs now, as waiting for it lets it read its input to the end.
-  for (const job of jobs.values()) job.finish?.();
+  // A coprocess that nothing has read from yet runs now; one that waits for input the shell can still write would be
+  // waited for forever.
+  for (const job of jobs.values()) {
+    job.finish?.();
+    if (job.waiting) throw new DeadlockError();
+  }
   const pids = processIds(shell, operands);
   if (pids === undefined) return 1;
   const report = (pid: number, status: number): number => {

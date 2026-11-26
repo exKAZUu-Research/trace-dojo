@@ -4,7 +4,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
 import { parseBash } from './parse';
-import { type Frame, Runtime } from './runtime';
+import { DeadlockError, type Frame, Runtime } from './runtime';
 import { Shell } from './shell';
 import { TurtleError } from './turtle';
 import { UnsupportedFeatureError } from './unsupported';
@@ -38,8 +38,9 @@ export function runProgram(shell: Shell, program: Program, onEnd?: (frame: Frame
     shell.runProgram(program);
   } catch (error) {
     if (error instanceof TurtleError) uncaughtException = error.report;
-    else if (error instanceof UnsupportedFeatureError) uncaughtException = error.message;
-    else if (isHostStackOverflow(error)) throw new ExecutionLimitError('operations');
+    else if (error instanceof UnsupportedFeatureError || error instanceof DeadlockError) {
+      uncaughtException = error.message;
+    } else if (isHostStackOverflow(error)) throw new ExecutionLimitError('operations');
     else throw error;
   }
   onEnd?.(runtime.frames[0]);

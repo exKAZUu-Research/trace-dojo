@@ -206,11 +206,18 @@ export class VariableStore {
   /** The background commands this shell started, by process number, with their statuses and whether `wait` told them. */
   /**
    * The background jobs and coprocesses by process ID; a coprocess that has not run yet keeps `finish`, which runs
-   * it, and the descriptors it was started with, through which it will write.
+   * it (to the end of its input when the shell ends), and the descriptors it was started with, through which it will
+   * write; one that stopped waiting for more input is `waiting`.
    */
   readonly jobs = new Map<
     number,
-    { status: number; reported: boolean; finish?: () => void; descriptors?: DescriptorTable }
+    {
+      status: number;
+      reported: boolean;
+      finish?: (shellEnds?: boolean) => void;
+      descriptors?: DescriptorTable;
+      waiting?: boolean;
+    }
   >();
   /** The process number of the last background command, which `$!` expands to. */
   lastBackgroundPid: number | undefined;

@@ -2,6 +2,7 @@ import type { TextReader } from '../interpreter/programIo';
 import { isVariableReference } from './arithmetic';
 import { parseBuiltinOptions } from './builtinOptions';
 import { rejectUnsupportedFeature } from './capabilities';
+import { DeadlockError } from './runtime';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
 import { isIdentifier } from './variables';
@@ -47,7 +48,15 @@ export const readBuiltin: Builtin = (shell, args) => {
   if (timeoutStatus !== undefined) return timeoutStatus;
   if (count === 0) return 0;
   const delimiter = options.has('d') ? (options.get('d') as string).slice(0, 1) || '\0' : '\n';
-  const text = readText(reader, { delimiter: options.has('N') ? undefined : delimiter, count, raw: options.has('r') });
+  let text: ReadText;
+  try {
+    text = readText(reader, { delimiter: options.has('N') ? undefined : delimiter, count, raw: options.has('r') });
+  } catch (error) {
+    // Input that would never come times a timeout out, as Bash's `read -t` does after waiting, with status 142.
+    if (!(error instanceof DeadlockError) || options.get('t') === undefined) throw error;
+    if (arrayName === undefined) assignAll(shell, names.length === 0 ? ['REPLY'] : names, []);
+    return 142;
+  }
   const ifs = shell.store.readScalar('IFS') ?? DEFAULT_IFS;
   let ok: boolean;
   if (arrayName !== undefined) ok = shell.assignIndexedArray(arrayName, splitAll(text, ifs), 'read');

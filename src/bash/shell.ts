@@ -29,6 +29,8 @@ import { applyRedirects, initialDescriptors, RedirectionError } from './redirect
 import {
   BreakSignal,
   ContinueSignal,
+  CoprocessWaitSignal,
+  DeadlockError,
   DiscardSignal,
   ExitSignal,
   type Frame,
@@ -213,7 +215,7 @@ export class Shell implements ArithmeticHost {
       }
       if (!shellEnds || this.lingeringSubstitutions.length === 0) return;
       const writer = [...this.store.jobs.values()].find((job) => job.finish !== undefined);
-      if (writer) writer.finish?.();
+      if (writer) writer.finish?.(true);
       else (this.lingeringSubstitutions.shift() as { finish: () => void }).finish();
     }
   }
@@ -620,20 +622,48 @@ export class Shell implements ArithmeticHost {
     let output: string | undefined;
     // The coprocess copies the shell's state when it starts, though it runs later.
     const child = this.forkSubshell(this.fds.clone());
-    const job: { status: number; reported: boolean; finish?: () => void; descriptors?: DescriptorTable } = {
-      status: 0,
-      reported: false,
-      descriptors: child.fds,
+    const job: {
+      status: number;
+      reported: boolean;
+      finish?: (shellEnds?: boolean) => void;
+      descriptors?: DescriptorTable;
+      waiting?: boolean;
+    } = { status: 0, reported: false, descriptors: child.fds };
+    const writeEnd: OpenFile = {
+      output: {
+        write: (text) => {
+          if (output !== undefined) rejectUnsupportedFeature(`動き終わった coproc（${name}）への書き込み`);
+          input.target.write(text);
+        },
+      },
     };
-    const run = (): void => {
+    const run = (shellEnds = false): void => {
       job.finish = undefined;
       const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
-      child.fds.set(0, { input: this.runtime.io.textReader(input.read()) });
+      // Having read all the shell wrote, the coprocess waits for more while the shell can still write, as in Bash,
+      // and reads the end of its input only once nothing can.
+      const writable = (): boolean =>
+        !shellEnds && (this.isOpenHere(writeEnd) || this.isWrittenElsewhere({ file: writeEnd }));
+      child.fds.set(0, {
+        input: this.runtime.io.partReader(
+          () => input.read(),
+          () => {
+            if (writable()) throw new CoprocessWaitSignal();
+            return false;
+          }
+        ),
+      });
       child.fds.set(1, { output: capture.target });
-      job.status = child.run([body]);
+      try {
+        job.status = child.run([body]);
+      } catch (error) {
+        if (!(error instanceof CoprocessWaitSignal)) throw error;
+        job.waiting = true;
+      }
       output = capture.read();
     };
     job.finish = run;
+    const isWaiting = (): boolean => job.waiting === true;
     // Bash moves both ends of both pipes to high descriptors and keeps the first and the last of the four.
     const pipeEnds: number[] = [];
     for (let fd = PROCESS_SUBSTITUTION_FIRST_FD; pipeEnds.length < 4; fd--) {
@@ -645,24 +675,19 @@ export class Shell implements ArithmeticHost {
       input: this.runtime.io.partReader(
         () => output ?? '',
         () => {
-          if (output !== undefined) {
+          // Reading past what a waiting coprocess wrote would wait for it forever, as it waits for the shell.
+          if (output === undefined) run();
+          else if (!job.waiting) {
             this.store.unsetNamed(name, false);
             this.store.unsetNamed(`${name}_PID`, false);
             return false;
-          }
-          run();
+          } else throw new DeadlockError();
+          if (output === '' && isWaiting()) throw new DeadlockError();
           return output !== '';
         }
       ),
     });
-    this.fds.set(writeFd, {
-      output: {
-        write: (text) => {
-          if (output !== undefined) rejectUnsupportedFeature(`動き終わった coproc（${name}）への書き込み`);
-          input.target.write(text);
-        },
-      },
-    });
+    this.fds.set(writeFd, writeEnd);
     this.store.jobs.set(pid, job);
     this.assignIndexedArray(name, [String(readFd), String(writeFd)], 'coproc');
     this.assignVariable(`${name}_PID`, String(pid));
@@ -677,7 +702,7 @@ export class Shell implements ArithmeticHost {
 
   /** Runs the coprocesses nothing has read from, as they run to their end when the shell or subshell ends. */
   finishCoprocesses(): void {
-    for (const job of this.store.jobs.values()) job.finish?.();
+    for (const job of this.store.jobs.values()) job.finish?.(true);
   }
 
   private runWithStandardInput(input: OpenFile, command: Statement): number {

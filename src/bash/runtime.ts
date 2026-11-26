@@ -147,3 +147,17 @@ export class Runtime implements TracedRuntime<Frame> {
   /** No-op for `TracedRuntime`: Bash string-handle turtles persist until explicit removal or run end. */
   collectGarbage(): void {}
 }
+
+/**
+ * Stops a program at a wait that never ends, where Bash would wait forever: reading from a coprocess that waits for
+ * input the shell can still write, or waiting for one.
+ */
+export class DeadlockError extends Error {
+  constructor() {
+    super('デッドロックが起きました。シェルとコプロセスが互いの入出力を待ったままで、どれも先に進めません。');
+    this.name = 'DeadlockError';
+  }
+}
+
+/** Stops a coprocess that has read all the shell wrote to it while the shell can still write more, as Bash's waits. */
+export class CoprocessWaitSignal {}
