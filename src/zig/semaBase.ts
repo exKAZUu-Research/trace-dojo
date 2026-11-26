@@ -1132,6 +1132,14 @@ export abstract class SemaBase implements SemaApi {
     if (from.kind === 'null') return known(to, NULL, span);
     if (from.kind === 'optional' && inMemoryCoercible(from.child, to.child)) return { ...expression, type: to };
     if (from.kind === 'optional' && to.child.kind !== 'optional') return undefined;
+    // A C pointer converts to a pointer only by checking it is not null, so a null one becomes the optional's null.
+    if (
+      from.kind === 'pointer' &&
+      from.size === 'c' &&
+      to.child.kind === 'pointer' &&
+      this.tryCoerce(expression, to.child, span)
+    )
+      return { ...expression, type: to, place: undefined };
     const payload = this.tryCoerce(expression, to.child, span);
     if (!payload) return undefined;
     if (to.child.kind !== 'optional')
