@@ -67,8 +67,8 @@ export const commandBuiltin: Builtin = (shell, args) => {
   const { options, operands } = parsed;
   if (options.has('p')) rejectUnsupportedFeature('command -p（既定の PATH での検索）');
   if (options.has('v') || options.has('V')) {
-    // Bash succeeds when any of the names is found.
-    let found = false;
+    // Bash succeeds when any of the names is found, or when there is none to look for.
+    let found = operands.length === 0;
     for (const name of operands) {
       const kind = kindOf(shell, name);
       if (kind === undefined) {
@@ -190,16 +190,20 @@ export const aliasBuiltin: Builtin = (shell, args) => {
 
 export const unaliasBuiltin: Builtin = (shell, args) => {
   const { aliases } = shell.store;
-  if (args[0] === '-a') {
+  const usage = 'unalias [-a] name [name ...]';
+  const parsed = parseBuiltinOptions(shell, 'unalias', args, 'a', usage);
+  if (typeof parsed === 'number') return parsed;
+  const { options, operands } = parsed;
+  if (options.has('a')) {
     aliases.clear();
     return 0;
   }
-  if (args.length === 0) {
-    shell.fd2.write('unalias: usage: unalias [-a] name [name ...]\n');
+  if (operands.length === 0) {
+    shell.fd2.write(`unalias: usage: ${usage}\n`);
     return 2;
   }
   let status = 0;
-  for (const name of args[0] === '--' ? args.slice(1) : args) {
+  for (const name of operands) {
     if (!aliases.delete(name)) {
       shell.reportError(`unalias: ${name}: not found`);
       status = 1;
