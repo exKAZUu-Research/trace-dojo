@@ -615,6 +615,21 @@ export class FunctionChecker {
   }
 
   /**
+   * What `yield*` gives back: what the generator it delegates to returns, or `undefined` from an array's or a string's
+   * iterator, whose return type `BuiltinIteratorReturn` is under `--strict`.
+   */
+  private delegatedReturnType(operandType: Type, isAsync: boolean): Type {
+    const returnType = this.iterationTypesOf(operandType, isAsync)?.returnType;
+    if (returnType) return returnType;
+    const isBuiltinIterable =
+      (operandType.kind === 'object' && this.c.isArrayOrTuple(operandType)) ||
+      isIntrinsic(operandType, 'string') ||
+      (operandType.kind === 'literal' && typeof operandType.value === 'string') ||
+      operandType.kind === 'templateLiteral';
+    return isBuiltinIterable ? undefinedType : anyType;
+  }
+
+  /**
    * The type of what a `yield` yields from, which an unannotated generator's type is inferred from, as from what it
    * returns: a use of the generator there makes its type circular.
    */
@@ -648,7 +663,7 @@ export class FunctionChecker {
     // A contextual yield type only types the operand: the generator is checked against it as a whole, as tsc does.
     if (generator.annotation && generator.yieldType && yielded !== errorType)
       this.c.expressions.checkAssignable(operand ?? node, yielded, generator.yieldType, operand);
-    if (delegated) return this.iterationTypesOf(operandType, isAsync)?.returnType ?? anyType;
+    if (delegated) return this.delegatedReturnType(operandType, isAsync);
     if (generator.nextType) return generator.nextType;
     if (!isResultUnused(node) && (!contextual || isAnyLike(contextual)))
       this.c.error(

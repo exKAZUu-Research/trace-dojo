@@ -1,0 +1,9 @@
+function* g() {
+  const r: number = yield* [1, 2];
+  return r;
+}
+function* h() {
+  const s: number = yield* "ab";
+  return s;
+}
+console.log([...g()], [...h()]);
