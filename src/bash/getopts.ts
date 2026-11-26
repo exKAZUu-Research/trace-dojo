@@ -1,7 +1,7 @@
-import { isVariableReference } from './arithmetic';
 import { SCRIPT_NAME } from './runtime';
 import type { Shell } from './shell';
 import type { Builtin } from './turtle';
+import { isIdentifier } from './variables';
 
 /** Where `getopts` is in its arguments: at `OPTIND`, and inside a word of grouped options such as `-abc`. */
 export interface GetoptsState {
@@ -27,7 +27,7 @@ export const getoptsBuiltin: Builtin = (shell, args) => {
     shell.fd2.write('getopts: usage: getopts optstring name [arg ...]\n');
     return 2;
   }
-  if (!isVariableReference(name)) {
+  if (!isIdentifier(name)) {
     shell.reportError(`getopts: \`${name}': not a valid identifier`);
     return 1;
   }
