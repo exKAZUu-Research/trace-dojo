@@ -189,11 +189,14 @@ export function rejectUnsupportedHostEnv(name: string): never {
 /** Single read gate for host environment variables, which the browser has none of. */
 export function rejectUnsupportedVariableRead(name: string): void {
   if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
+  // `$_` expands to the last argument, which no variable here holds, so reading `_` by name, as `(( _ ))` or
+  // `[[ -v _ ]]` do, would differ; a builtin may still assign it, which Bash's next command overwrites.
+  if (name === '_') throw new UnsupportedFeatureError('名前による変数 _ の参照');
 }
 
 /** Single mutation/unset/declare gate for special and host environment variables (allowing plain scalar `RANDOM` seeding). */
 export function rejectUnsupportedVariableMutation(name: string, allowScalarRandomSeed = false): void {
-  rejectUnsupportedVariableRead(name);
+  if (ENVIRONMENT_VARIABLES.has(name)) rejectUnsupportedHostEnv(name);
   if (!SPECIAL_MUTATION_BLOCKED.has(name)) return;
   if (allowScalarRandomSeed && name === 'RANDOM') return;
   throw new UnsupportedFeatureError(`特殊変数（${name}）の変更`);

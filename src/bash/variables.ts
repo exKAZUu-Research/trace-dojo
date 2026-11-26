@@ -1025,8 +1025,9 @@ export class VariableStore {
   }
 
   private rejectUnsupportedPrefixQuery(prefix: string): void {
-    for (const envName of ENVIRONMENT_VARIABLES) {
-      if (envName.startsWith(prefix)) rejectUnsupportedVariableRead(envName);
+    // `_` is listed by name as well, which reads it.
+    for (const name of [...ENVIRONMENT_VARIABLES, '_']) {
+      if (name.startsWith(prefix)) rejectUnsupportedVariableRead(name);
     }
     if ('BASH'.startsWith(prefix) || prefix.startsWith('BASH') || 'RANDOM'.startsWith(prefix) || prefix === '') {
       rejectUnsupportedPrefixListing(prefix);
