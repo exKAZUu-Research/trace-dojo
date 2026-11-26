@@ -1434,15 +1434,23 @@ export abstract class StatementCompiler extends OperatorCompiler {
    * then its guard hold. The guard may fail after the condition matched, so the branch covers no case and leaves the
    * later branches no smart cast.
    */
+  /** Checks where a when's branch may have an `if` guard, as kotlinc does. */
+  protected checkGuardedEntry(
+    hasSubject: boolean,
+    entry: Extract<Expression, { kind: 'when' }>['entries'][number]
+  ): void {
+    if (!hasSubject) this.error(entry.row, 'if のガードは、主語のある when にだけ書けます。');
+    if (entry.conditions.length > 1)
+      this.error(entry.conditions[1].row, 'if のガードがある分岐には、条件を1つだけ書けます。');
+  }
+
   private compileGuardedEntryHead(
     scope: Scope,
     context: FunctionContext,
     subject: Compiled | undefined,
     entry: Extract<Expression, { kind: 'when' }>['entries'][number]
   ): { tests: ((frame: Frame) => boolean)[]; flow: Flow } {
-    if (!subject) this.error(entry.row, 'if のガードは、主語のある when にだけ書けます。');
-    if (entry.conditions.length > 1)
-      this.error(entry.conditions[1].row, 'if のガードがある分岐には、条件を1つだけ書けます。');
+    this.checkGuardedEntry(subject !== undefined, entry);
     const before = this.flow.copy();
     const [condition] = entry.conditions;
     let matches: (frame: Frame) => boolean = alwaysMatches;

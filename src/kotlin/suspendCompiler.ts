@@ -496,6 +496,9 @@ export abstract class SuspendCompiler extends LocalCompiler {
       }
       case 'when': {
         if (asValue) return this.compileBranchValue(scope, context, expression, expected);
+        // The rewrite keeps a branch's guard, whose placement the when itself must allow.
+        for (const entry of expression.entries)
+          if (entry.guard) this.checkGuardedEntry(expression.subject !== undefined, entry);
         return {
           gen: this.compileSuspendStatements(scope, context, whenAsIf(expression)),
           type: this.unitType,
