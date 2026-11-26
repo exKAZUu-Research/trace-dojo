@@ -14,10 +14,9 @@ export type FailureContext =
   | 'declarationLocalCompound'
   /**
    * A declaration builtin's compound value without `-a` or `-A`, which it assigns as a plain array assignment does, so
-   * that a readonly error ends the shell under `set -e`; outside a function or within one.
+   * that a failure abandons the line and a readonly error ends the shell under `set -e`.
    */
   | 'arrayAssignment'
-  | 'arrayAssignmentInFunction'
   | 'declarationOperand'
   /** `readonly` or `export` assigning a scalar as a plain assignment does, whose readonly error `set -e` ends at. */
   | 'builtinAssignment'
@@ -95,8 +94,7 @@ export class FailurePolicy {
       case 'arrayAssignment': {
         throw new DiscardSignal(1);
       }
-      case 'declarationLocalCompound':
-      case 'arrayAssignmentInFunction': {
+      case 'declarationLocalCompound': {
         if (failure.reason === 'badSubscript') throw new DiscardSignal(1);
         return false;
       }

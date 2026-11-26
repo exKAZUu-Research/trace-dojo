@@ -396,17 +396,16 @@ function executeCompoundDeclarationOperand(
 ): boolean {
   state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
-  // A failed compound value abandons the line outside a function and fails the builtin inside one; to a global
-  // without `-a` or `-A` it is assigned as a plain array assignment is, whose readonly error `set -e` ends the shell at.
+  // A compound value without `-a` or `-A` is assigned as a plain array assignment is: its failure abandons the line,
+  // and its readonly error ends the shell under `set -e`. With them, a failure abandons the line outside a function
+  // and fails the builtin inside one. A local that would shadow a readonly variable fails the builtin either way.
   const inFunction = shell.isInFunction && builtin !== 'readonly' && builtin !== 'export';
-  const plain = !set.has('a') && !set.has('A') && intent !== 'local';
-  const failCtx: FailureContext = plain
-    ? inFunction
-      ? 'arrayAssignmentInFunction'
-      : 'arrayAssignment'
-    : inFunction
-      ? 'declarationLocalCompound'
-      : 'declarationGlobalCompound';
+  const failCtx: FailureContext =
+    !set.has('a') && !set.has('A')
+      ? 'arrayAssignment'
+      : inFunction
+        ? 'declarationLocalCompound'
+        : 'declarationGlobalCompound';
   const committed = withRedirects(() =>
     commitCompoundOperand(shell, {
       builtin,
@@ -520,7 +519,7 @@ function resolveCompoundTargetName(shell: Shell, req: CompoundOperandRequest): s
   }
   const outerRo = req.intent === 'local' ? shell.store.outerReadonlyFailure(targetName) : undefined;
   if (outerRo) {
-    shell.failures.handleStoreFailure(req.context, outerRo, req.builtin);
+    shell.failures.handleStoreFailure('declarationOperand', outerRo, req.builtin);
     return undefined;
   }
   return targetName;
