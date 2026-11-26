@@ -8,7 +8,6 @@ package java.util
 class Locale private constructor()
 `;
 
-/** `kotlin.text`: `StringBuilder` and the functions of strings and characters. */
 /** java.nio.charset.Charset, which only Kotlin's Charsets gives programs. */
 export const CHARSET_SOURCE = kotlin`
 package java.nio.charset
@@ -20,6 +19,7 @@ class Charset internal constructor(private val charsetName: String) {
 }
 `;
 
+/** `kotlin.text`: `StringBuilder` and the functions of strings and characters. */
 export const TEXT_SOURCE = kotlin`
 package kotlin.text
 

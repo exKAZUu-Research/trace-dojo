@@ -449,13 +449,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // Phase 2: headers.
 
-  /** @param assign Receives the parameters before their bounds are resolved, since a bound may mention its class. */
   /** Rejects reified on a class's type parameters, which kotlinc allows only on inline functions'. */
   private rejectReifiedClassParameters(decls: TypeParameterDecl[]): void {
     const reified = decls.find((decl) => decl.isReified);
     if (reified) this.error(reified.row, 'reified な型引数は、インライン関数にだけ書けます。');
   }
 
+  /** @param assign Receives the parameters before their bounds are resolved, since a bound may mention its class. */
   protected declareTypeParameters(
     scope: Scope,
     decls: TypeParameterDecl[],
