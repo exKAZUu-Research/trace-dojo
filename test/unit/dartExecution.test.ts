@@ -10714,6 +10714,22 @@ Future<void> main() async {
   print(f.readAsStringSync());
 }`;
   expect(executeProgram('dart', written)).toMatchObject({ kind: 'executed', stdout: '[true, ]\n[hi, a]\nab\n' });
+  // The contents land after the microtasks the caller queued and before its events, and the future completes after
+  // them, the order SDK 3.13.7 gives in every run.
+  const ordered = `import 'dart:async';
+import 'dart:io';
+String rd() => File('e.txt').readAsStringSync();
+Future<void> main() async {
+  final w = File('e.txt').writeAsString('data');
+  scheduleMicrotask(() => print('micro: \${rd()}'));
+  Future(() => print('event: \${rd()}'));
+  await w;
+  print('after: \${rd()}');
+}`;
+  expect(executeProgram('dart', ordered)).toMatchObject({
+    kind: 'executed',
+    stdout: 'micro: \nevent: data\nafter: data\n',
+  });
 });
 
 test('a file sink writes an open file through its channel, flushed per line within the limits, and fails as the SDK does', () => {

@@ -618,8 +618,10 @@ class _File extends FileSystemEntity implements File {
     _write(path, contents, mode._appends, "Cannot open file");
   }
   /**
-   * As the SDK's, the file is opened, created or truncated, when the call is made, and the contents reach it in a
-   * later event, as the VM's I/O service writes them; a failed open fails the future later.
+   * As the SDK's, the file is opened, created or truncated, when the call is made, and the contents reach it after the
+   * microtasks the calling code queued but before its events, and the future completes after those events, which is
+   * the order the VM's I/O service gives in each of six runs, though the VM's timing for the open itself varies; a
+   * failed open fails the future later.
    */
   Future<File> writeAsString(String contents,
       {FileMode mode = FileMode.write, Encoding encoding = utf8, bool flush = false}) {
@@ -628,10 +630,16 @@ class _File extends FileSystemEntity implements File {
       writeAsStringSync(contents, mode: mode, encoding: encoding);
       return this;
     });
-    return _OpenedFile._openFile(path, mode._appends).then((opened) => Future(() {
-          opened._writeOpened(contents);
-          return opened.close().then((_) => this);
-        }));
+    return _OpenedFile._openFile(path, mode._appends).then((opened) {
+      // The open's future resolves in the first microtask; the write waits behind those the calling code queued, and
+      // the future completes in a later event, as the VM's I/O service answers after the events already queued.
+      final written = Completer<File>.sync();
+      scheduleMicrotask(() {
+        opened._writeOpened(contents);
+        opened.close().then((_) => Timer.run(() => written.complete(this)), onError: written.completeError);
+      });
+      return written.future;
+    });
   }
   void writeAsBytesSync(List<int> bytes, {FileMode mode = FileMode.write, bool flush = false}) {
     writeAsStringSync(_textOfBytes(bytes), mode: mode);
