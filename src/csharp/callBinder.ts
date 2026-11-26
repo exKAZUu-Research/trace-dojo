@@ -760,8 +760,10 @@ export abstract class CallBinder extends OperatorBinder {
   protected compareConversions(arg: ArgumentInfo, a: Type, b: Type): number {
     if (sameType(a, b)) return 0;
     const expression = arg.expression;
-    if (expression.kind === 'unbound')
+    if (expression.kind === 'unbound') {
+      if (expression.node.kind === 'collection') return this.compareCollectionConversions(expression, a, b);
       return this.compareLambdaConversions(expression, a, b) ?? this.betterTarget(a, b);
+    }
     // A handler conversion is better than any other for an interpolated string that is not constant (C# 10).
     if (expression.kind === 'interpolated') {
       const aIsHandler = interpolationTargetOf(a) === 'handler';
@@ -774,6 +776,36 @@ export abstract class CallBinder extends OperatorBinder {
       if (bExact && !aExact) return -1;
     }
     return this.betterTarget(a, b);
+  }
+
+  /**
+   * Compares a collection expression's conversions to two collection types (C# 13): by its elements' conversions to
+   * the element types where those differ, and otherwise by the types themselves.
+   */
+  private compareCollectionConversions(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>,
+    a: Type,
+    b: Type
+  ): number {
+    const aElement = collectionExpressionElement(a) ?? this.collectionElementType(a);
+    const bElement = collectionExpressionElement(b) ?? this.collectionElementType(b);
+    if (!aElement || !bElement) return this.betterTarget(a, b);
+    if (sameType(aElement, bElement)) {
+      if (isBetterCollectionType(a, b, (from, to) => this.conversions.implicit(from, to) !== undefined)) return 1;
+      return isBetterCollectionType(b, a, (from, to) => this.conversions.implicit(from, to) !== undefined) ? -1 : 0;
+    }
+    // Each element must convert to one element type at least as well as to the other, and one better.
+    let result = 0;
+    for (const element of this.collectionElementValues(expression)) {
+      const order = this.compareConversions(
+        { expression: element, name: undefined, refKind: undefined, row: element.row, target: undefined },
+        aElement,
+        bElement
+      );
+      if (order !== 0 && result !== 0 && order !== result) return 0;
+      if (order !== 0) result = order;
+    }
+    return result;
   }
 
   /** Compares a lambda's conversions to delegate types of the same parameter types by its inferred return type. */
@@ -1447,6 +1479,17 @@ export abstract class CallBinder extends OperatorBinder {
 
   protected abstract rejectUnknownLibraryMember(type: Type, name: string, position: number): void;
 
+  /** The element type of a collection expression that creates a type, or undefined for a type it cannot create. */
+  protected abstract collectionElementType(target: Type): Type | undefined;
+
+  /**
+   * The elements of a collection expression bound without a target type, a spread as a value of its elements' type,
+   * leaving out those without a type of their own.
+   */
+  protected abstract collectionElementValues(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>
+  ): BoundExpression[];
+
   /** Reports the receiver of an extension method that does not convert to the type that the method extends. */
   private reportReceiverMismatch(
     candidate: MethodCandidate,
@@ -1563,4 +1606,36 @@ function overloadPriorityOf(method: MethodSymbol): number {
   let property = method.property;
   while (property.overridden) property = property.overridden;
   return property.overloadPriority;
+}
+
+/** The element type of a span, which a collection expression creates over an array of its elements. */
+function collectionExpressionElement(type: Type): Type | undefined {
+  if (type.kind !== 'named') return undefined;
+  const name = type.symbol.fullName;
+  return name === 'System.ReadOnlySpan`1' || name === 'System.Span`1' ? type.args[0] : undefined;
+}
+
+const ARRAY_INTERFACES = new Set([
+  'System.Collections.Generic.IEnumerable`1',
+  'System.Collections.Generic.IReadOnlyCollection`1',
+  'System.Collections.Generic.IReadOnlyList`1',
+  'System.Collections.Generic.ICollection`1',
+  'System.Collections.Generic.IList`1',
+]);
+
+function spanName(type: Type): string | undefined {
+  return collectionExpressionElement(type) && type.kind === 'named' ? type.symbol.fullName : undefined;
+}
+
+/**
+ * Whether a collection expression converts better to the first of two collection types of the same element type:
+ * a `ReadOnlySpan<T>` over a `Span<T>`, a span over an array or an interface that one implements, and otherwise a
+ * type that converts implicitly to the other.
+ */
+function isBetterCollectionType(a: Type, b: Type, converts: (from: Type, to: Type) => boolean): boolean {
+  const aSpan = spanName(a);
+  const bSpan = spanName(b);
+  if (aSpan === 'System.ReadOnlySpan`1' && bSpan === 'System.Span`1') return true;
+  if (aSpan) return b.kind === 'array' || (b.kind === 'named' && !bSpan && ARRAY_INTERFACES.has(b.symbol.fullName));
+  return !bSpan && converts(a, b);
 }

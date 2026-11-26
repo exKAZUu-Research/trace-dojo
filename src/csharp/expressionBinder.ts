@@ -1637,8 +1637,19 @@ export abstract class ExpressionBinder extends LambdaBinder {
     };
   }
 
+  protected collectionElementValues(expression: Unbound): BoundExpression[] {
+    const node = expression.node as Extract<Expression, { kind: 'collection' }>;
+    const context = expression.context as BindContext;
+    return node.elements.flatMap((element) => {
+      const value = this.quietly(() => this.bindValue(element.value, context));
+      if (!value || !element.spread) return value ? [value] : [];
+      const iterated = this.collectionElementType(value.type);
+      return iterated ? [{ kind: 'default' as const, type: iterated, row: value.row }] : [];
+    });
+  }
+
   /** The element type of a collection expression's target: an array's, or a generic collection's type argument. */
-  private collectionElementType(target: Type): Type | undefined {
+  protected collectionElementType(target: Type): Type | undefined {
     if (target.kind === 'array' && target.rank === 1) return target.element;
     if (target.kind !== 'named') return undefined;
     const name = target.symbol.fullName;
