@@ -14,6 +14,64 @@ namespace System {
     public AggregateException Flatten();
     public override string Message { get; }
   }
+  public class OperationCanceledException : SystemException {
+    public OperationCanceledException();
+    public OperationCanceledException(string? message);
+    public OperationCanceledException(string? message, Exception? innerException);
+    public OperationCanceledException(System.Threading.CancellationToken token);
+    public OperationCanceledException(string? message, System.Threading.CancellationToken token);
+    public OperationCanceledException(string? message, Exception? innerException, System.Threading.CancellationToken token);
+    public System.Threading.CancellationToken CancellationToken { get; }
+  }
+}
+
+namespace System.Threading {
+  public static class Timeout {
+    public const int Infinite = -1;
+    public static readonly TimeSpan InfiniteTimeSpan = new TimeSpan(0, 0, 0, 0, -1);
+  }
+  public class CancellationTokenSource : IDisposable {
+    public CancellationTokenSource();
+    public CancellationTokenSource(int millisecondsDelay);
+    public CancellationTokenSource(TimeSpan delay);
+    public bool IsCancellationRequested { get; }
+    public CancellationToken Token { get; }
+    public void Cancel();
+    public System.Threading.Tasks.Task CancelAsync();
+    public void CancelAfter(int millisecondsDelay);
+    public void CancelAfter(TimeSpan delay);
+    public bool TryReset();
+    public void Dispose();
+    public static CancellationTokenSource CreateLinkedTokenSource(CancellationToken token);
+    public static CancellationTokenSource CreateLinkedTokenSource(CancellationToken token1, CancellationToken token2);
+    public static CancellationTokenSource CreateLinkedTokenSource(params CancellationToken[] tokens);
+  }
+  public readonly struct CancellationToken : IEquatable<CancellationToken> {
+    private readonly CancellationTokenSource? _source;
+    public CancellationToken(bool canceled);
+    public static CancellationToken None { get; }
+    public bool IsCancellationRequested { get; }
+    public bool CanBeCanceled { get; }
+    public void ThrowIfCancellationRequested();
+    public CancellationTokenRegistration Register(Action callback);
+    public CancellationTokenRegistration Register(Action callback, bool useSynchronizationContext);
+    public CancellationTokenRegistration Register(Action<object?> callback, object? state);
+    public bool Equals(CancellationToken other);
+    public override bool Equals(object? other);
+    public override int GetHashCode();
+    public static bool operator ==(CancellationToken left, CancellationToken right);
+    public static bool operator !=(CancellationToken left, CancellationToken right);
+  }
+  public readonly struct CancellationTokenRegistration : IDisposable, IEquatable<CancellationTokenRegistration> {
+    private readonly CancellationTokenSource? _source;
+    private readonly long _id;
+    public CancellationToken Token { get; }
+    public void Dispose();
+    public bool Unregister();
+    public bool Equals(CancellationTokenRegistration other);
+    public override bool Equals(object? obj);
+    public override int GetHashCode();
+  }
 }
 
 namespace System.Collections.Generic {
@@ -25,8 +83,43 @@ namespace System.Collections.Generic {
 }
 
 namespace System.Threading.Tasks {
+  public class TaskCanceledException : OperationCanceledException {
+    public TaskCanceledException();
+    public TaskCanceledException(string? message);
+    public TaskCanceledException(string? message, Exception? innerException);
+    public TaskCanceledException(string? message, Exception? innerException, System.Threading.CancellationToken token);
+    public TaskCanceledException(Task? task);
+    public Task? Task { get; }
+  }
+  [Flags] public enum TaskContinuationOptions { None = 0, PreferFairness = 1, LongRunning = 2, AttachedToParent = 4, DenyChildAttach = 8, HideScheduler = 16, LazyCancellation = 32, RunContinuationsAsynchronously = 64, NotOnRanToCompletion = 65536, NotOnFaulted = 131072, OnlyOnCanceled = 196608, NotOnCanceled = 262144, OnlyOnFaulted = 327680, OnlyOnRanToCompletion = 393216, ExecuteSynchronously = 524288 }
+  [Flags] public enum TaskCreationOptions { None = 0, PreferFairness = 1, LongRunning = 2, AttachedToParent = 4, DenyChildAttach = 8, HideScheduler = 16, RunContinuationsAsynchronously = 64 }
+  public class TaskFactory {
+    public Task StartNew(Action action);
+    public Task StartNew(Action action, System.Threading.CancellationToken cancellationToken);
+    public Task StartNew(Action action, TaskCreationOptions creationOptions);
+    public Task StartNew(Action<object?> action, object? state);
+    public Task StartNew(Action<object?> action, object? state, System.Threading.CancellationToken cancellationToken);
+    public Task StartNew(Action<object?> action, object? state, TaskCreationOptions creationOptions);
+    public Task<TResult> StartNew<TResult>(Func<TResult> function);
+    public Task<TResult> StartNew<TResult>(Func<TResult> function, System.Threading.CancellationToken cancellationToken);
+    public Task<TResult> StartNew<TResult>(Func<TResult> function, TaskCreationOptions creationOptions);
+    public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state);
+    public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state, System.Threading.CancellationToken cancellationToken);
+    public Task<TResult> StartNew<TResult>(Func<object?, TResult> function, object? state, TaskCreationOptions creationOptions);
+  }
+  public static class TaskExtensions {
+    public static Task Unwrap(this Task<Task> task);
+    public static Task<TResult> Unwrap<TResult>(this Task<Task<TResult>> task);
+  }
   public enum TaskStatus { Created = 0, WaitingForActivation = 1, WaitingToRun = 2, Running = 3, WaitingForChildrenToComplete = 4, RanToCompletion = 5, Canceled = 6, Faulted = 7 }
   public class Task : IDisposable {
+    public Task(Action action);
+    public Task(Action action, System.Threading.CancellationToken cancellationToken);
+    public Task(Action<object?> action, object? state);
+    public static TaskFactory Factory { get; }
+    public object? AsyncState { get; }
+    public void Start();
+    public void RunSynchronously();
     public static Task CompletedTask { get; }
     public TaskStatus Status { get; }
     public bool IsCompleted { get; }
@@ -44,10 +137,24 @@ namespace System.Threading.Tasks {
     public void Dispose();
     public static Task Delay(int millisecondsDelay);
     public static Task Delay(TimeSpan delay);
+    public static Task Delay(int millisecondsDelay, System.Threading.CancellationToken cancellationToken);
+    public static Task Delay(TimeSpan delay, System.Threading.CancellationToken cancellationToken);
     public static Task Run(Action action);
+    public static Task Run(Action action, System.Threading.CancellationToken cancellationToken);
     public static Task<TResult> Run<TResult>(Func<TResult> function);
+    public static Task<TResult> Run<TResult>(Func<TResult> function, System.Threading.CancellationToken cancellationToken);
     public static Task Run(Func<Task?> function);
+    public static Task Run(Func<Task?> function, System.Threading.CancellationToken cancellationToken);
     public static Task<TResult> Run<TResult>(Func<Task<TResult>?> function);
+    public static Task<TResult> Run<TResult>(Func<Task<TResult>?> function, System.Threading.CancellationToken cancellationToken);
+    public Task ContinueWith(Action<Task> continuationAction);
+    public Task ContinueWith(Action<Task> continuationAction, System.Threading.CancellationToken cancellationToken);
+    public Task ContinueWith(Action<Task> continuationAction, TaskContinuationOptions continuationOptions);
+    public Task<TResult> ContinueWith<TResult>(Func<Task, TResult> continuationFunction);
+    public Task<TResult> ContinueWith<TResult>(Func<Task, TResult> continuationFunction, System.Threading.CancellationToken cancellationToken);
+    public Task<TResult> ContinueWith<TResult>(Func<Task, TResult> continuationFunction, TaskContinuationOptions continuationOptions);
+    public static Task FromCanceled(System.Threading.CancellationToken cancellationToken);
+    public static Task<TResult> FromCanceled<TResult>(System.Threading.CancellationToken cancellationToken);
     public static Task<TResult> FromResult<TResult>(TResult result);
     public static Task FromException(Exception exception);
     public static Task<TResult> FromException<TResult>(Exception exception);
@@ -64,7 +171,16 @@ namespace System.Threading.Tasks {
     public static System.Runtime.CompilerServices.YieldAwaitable Yield();
   }
   public class Task<TResult> : Task {
+    public Task(Func<TResult> function);
+    public Task(Func<TResult> function, System.Threading.CancellationToken cancellationToken);
+    public Task(Func<object?, TResult> function, object? state);
     public TResult Result { get; }
+    public Task ContinueWith(Action<Task<TResult>> continuationAction);
+    public Task ContinueWith(Action<Task<TResult>> continuationAction, System.Threading.CancellationToken cancellationToken);
+    public Task ContinueWith(Action<Task<TResult>> continuationAction, TaskContinuationOptions continuationOptions);
+    public Task<TNewResult> ContinueWith<TNewResult>(Func<Task<TResult>, TNewResult> continuationFunction);
+    public Task<TNewResult> ContinueWith<TNewResult>(Func<Task<TResult>, TNewResult> continuationFunction, System.Threading.CancellationToken cancellationToken);
+    public Task<TNewResult> ContinueWith<TNewResult>(Func<Task<TResult>, TNewResult> continuationFunction, TaskContinuationOptions continuationOptions);
     public new System.Runtime.CompilerServices.TaskAwaiter<TResult> GetAwaiter();
     public new System.Runtime.CompilerServices.ConfiguredTaskAwaitable<TResult> ConfigureAwait(bool continueOnCapturedContext);
   }
@@ -75,6 +191,10 @@ namespace System.Threading.Tasks {
     public bool TrySetResult();
     public void SetException(Exception exception);
     public bool TrySetException(Exception exception);
+    public void SetCanceled();
+    public void SetCanceled(System.Threading.CancellationToken cancellationToken);
+    public bool TrySetCanceled();
+    public bool TrySetCanceled(System.Threading.CancellationToken cancellationToken);
   }
   public class TaskCompletionSource<TResult> {
     public TaskCompletionSource();
@@ -83,6 +203,10 @@ namespace System.Threading.Tasks {
     public bool TrySetResult(TResult result);
     public void SetException(Exception exception);
     public bool TrySetException(Exception exception);
+    public void SetCanceled();
+    public void SetCanceled(System.Threading.CancellationToken cancellationToken);
+    public bool TrySetCanceled();
+    public bool TrySetCanceled(System.Threading.CancellationToken cancellationToken);
   }
   public readonly struct ValueTask {
     private readonly Task? _task;

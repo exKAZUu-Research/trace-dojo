@@ -3,7 +3,13 @@ import type { BoundArgument, BoundBlock, BoundExpression, BoundLValue } from './
 import { IteratorExecutor, type IteratorState, type Steps, type Suspension } from './iterators';
 import type { PendingException } from './numeric';
 import type { Frame } from './runtime';
-import { taskObject, type TaskState, UnhandledAsyncException } from './tasks';
+import {
+  cancellationTokenOf,
+  isCancellationException,
+  taskObject,
+  type TaskState,
+  UnhandledAsyncException,
+} from './tasks';
 import { type AsyncShape, isDynamicType, type MethodSymbol, type NamedType } from './types';
 import { Cell, copyValue, CsBox, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
 
@@ -191,7 +197,9 @@ export abstract class AsyncExecutor extends IteratorExecutor {
       if (!thrown) throw error;
       // An exception that leaves an `async void` method reaches no caller, so the process ends with it.
       if (shape.kind === 'void') throw new UnhandledAsyncException(thrown);
-      state.fault([thrown]);
+      // An OperationCanceledException cancels the method's task, whose `await` rethrows it.
+      if (isCancellationException(thrown.exception)) state.cancel(cancellationTokenOf(thrown.exception), thrown);
+      else state.fault([thrown]);
       return;
     }
     if (result.done) {

@@ -285,6 +285,8 @@ export function defaultMessage(type: NamedType): string {
     'System.ApplicationException': 'Error in the application.',
     'System.SystemException': 'System error.',
     'System.TimeoutException': 'The operation has timed out.',
+    'System.OperationCanceledException': 'The operation was canceled.',
+    'System.Threading.Tasks.TaskCanceledException': 'A task was canceled.',
   };
   return messages[name] ?? `Exception of type '${name}' was thrown.`;
 }

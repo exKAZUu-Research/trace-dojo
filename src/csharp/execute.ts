@@ -8,7 +8,7 @@ import { runtimeTypeName } from './objects';
 import { parseCSharp } from './parse';
 import { PointerRangeError } from './pointers';
 import { type CsThrow, Frame, ProgramExit, Runtime } from './runtime';
-import { DeadlockError, type TaskState, UnhandledAsyncException } from './tasks';
+import { awaitedFailure, DeadlockError, type TaskState, UnhandledAsyncException } from './tasks';
 import { arrayType, namedType, type TypeSymbol } from './types';
 import { CsArray, CsObject, meterStructs, type Value } from './values';
 
@@ -80,7 +80,8 @@ function runEntry(evaluator: Evaluator): string | undefined {
     if (result instanceof CsObject) {
       const state = result.native as TaskState;
       runtime.scheduler.runUntil(() => state.isDone);
-      if (state.status === 'faulted') throw state.firstThrown;
+      const failure = awaitedFailure(runtime, state);
+      if (failure) throw failure;
     }
     return undefined;
   } catch (error) {

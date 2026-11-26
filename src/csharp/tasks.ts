@@ -1,4 +1,4 @@
-import type { CsThrow } from './runtime';
+import { CsThrow, type ExceptionState, type Runtime } from './runtime';
 import type { NamedType } from './types';
 import { CsObject, type Value } from './values';
 
@@ -26,14 +26,27 @@ export class DeadlockError extends Error {
   }
 }
 
-/** The state of a Task: pending until it completes with a result or faults with exceptions. */
+/** The state of a Task: pending until it completes with a result, faults with exceptions, or is canceled. */
 export class TaskState {
-  status: 'pending' | 'completed' | 'faulted' = 'pending';
+  status: 'pending' | 'completed' | 'faulted' | 'canceled' = 'pending';
+  /** The `TaskStatus` a pending task shows: `WaitingForActivation`, or `Created`, `WaitingToRun`, `Running` for work. */
+  pendingStatus: number = TASK_STATUS.waitingForActivation;
   result: Value;
   /** The exceptions of a faulted task: its own, or for `WhenAll` each faulted task's in the order they faulted. */
   exceptions: CsThrow[] = [];
+  /** The OperationCanceledException that canceled the task, which `await` rethrows; without one it makes its own. */
+  cancellation: CsThrow | undefined;
+  /** The source of the CancellationToken the task was created with or canceled by, if any. */
+  token: CsObject | undefined;
   /** The Task object, which `WhenAny` returns. */
   object: CsObject | undefined;
+  /** The state object given to the task's work, which `AsyncState` returns. */
+  asyncState: Value;
+  /**
+   * Where the continuations run when the task ends: on the thread that ends it, unless this queues them, as .NET
+   * queues those of a `Task.Delay` that its token cancels.
+   */
+  runContinuation: ((run: () => void) => void) | undefined;
   private continuations: (() => void)[] = [];
 
   constructor(readonly id: number) {}
@@ -69,6 +82,22 @@ export class TaskState {
     return true;
   }
 
+  cancel(token: CsObject | undefined, cancellation?: CsThrow): boolean {
+    if (this.isDone) return false;
+    this.status = 'canceled';
+    this.token = token;
+    this.cancellation = cancellation;
+    this.runContinuations();
+    return true;
+  }
+
+  /** Settles the task as another one ended, as a task that wraps or unwraps it does. */
+  settleAs(other: TaskState): boolean {
+    if (other.status === 'faulted') return this.fault(other.exceptions);
+    if (other.status === 'canceled') return this.cancel(other.token, other.cancellation);
+    return this.complete(other.result);
+  }
+
   /**
    * Runs the continuations in the order they were registered, on the thread that completes the task, as .NET runs an
    * `await`'s continuation inline when nothing asks it to run asynchronously.
@@ -76,11 +105,65 @@ export class TaskState {
   private runContinuations(): void {
     const continuations = this.continuations;
     this.continuations = [];
-    for (const run of continuations) run();
+    for (const run of continuations) {
+      if (this.runContinuation) this.runContinuation(run);
+      else run();
+    }
   }
 }
 
-interface Timer {
+/** The values of .NET's `TaskStatus`. */
+export const TASK_STATUS = {
+  created: 0,
+  waitingForActivation: 1,
+  waitingToRun: 2,
+  running: 3,
+  ranToCompletion: 5,
+  canceled: 6,
+  faulted: 7,
+} as const;
+
+/** The state of an OperationCanceledException: the source of its token, and the task of a TaskCanceledException. */
+export interface CancellationExceptionState extends ExceptionState {
+  token?: CsObject | undefined;
+  task?: CsObject | undefined;
+}
+
+/** Whether an exception is an OperationCanceledException, which cancels an async method's task instead of faulting it. */
+export function isCancellationException(exception: CsObject): boolean {
+  for (let type: NamedType | undefined = exception.type; type; type = type.symbol.baseType)
+    if (type.symbol.fullName === 'System.OperationCanceledException') return true;
+  return false;
+}
+
+/** The token source of an OperationCanceledException. */
+export function cancellationTokenOf(exception: CsObject): CsObject | undefined {
+  return (exception.native as CancellationExceptionState).token;
+}
+
+/** A new TaskCanceledException for a canceled task, which `Wait()` wraps and an `await` without a cause throws. */
+export function taskCanceledException(runtime: Runtime, state: TaskState): CsThrow {
+  const exception = runtime.createException('System.Threading.Tasks.TaskCanceledException', undefined);
+  const native = exception.native as CancellationExceptionState;
+  native.token = state.token;
+  native.task = state.object;
+  return new CsThrow(exception);
+}
+
+/** What `await` and `GetResult()` throw for a task that did not complete: its first exception, or its cancellation. */
+export function awaitedFailure(runtime: Runtime, state: TaskState): CsThrow | undefined {
+  if (state.status === 'faulted') return state.firstThrown;
+  if (state.status === 'canceled') return state.cancellation ?? taskCanceledException(runtime, state);
+  return undefined;
+}
+
+/** What `Wait()` and `Result` wrap in an AggregateException: a faulted task's exceptions, or a new cancellation. */
+export function blockingFailures(runtime: Runtime, state: TaskState): CsThrow[] {
+  if (state.status === 'canceled') return [taskCanceledException(runtime, state)];
+  return state.exceptions;
+}
+
+export interface Timer {
   due: number;
   order: number;
   run: () => void;
@@ -111,8 +194,16 @@ export class TaskScheduler {
     this.ready.push(run);
   }
 
-  delay(milliseconds: number, run: () => void): void {
-    this.timers.push({ due: this.now + milliseconds, order: this.timerCount++, run });
+  delay(milliseconds: number, run: () => void): Timer {
+    const timer = { due: this.now + milliseconds, order: this.timerCount++, run };
+    this.timers.push(timer);
+    return timer;
+  }
+
+  /** Removes a timer that has not fired, so that it no longer moves the clock. */
+  cancelTimer(timer: Timer): void {
+    const index = this.timers.indexOf(timer);
+    if (index !== -1) this.timers.splice(index, 1);
   }
 
   /** Runs queued work and timers until `isDone` holds, as a thread blocked on a task waits for the others. */

@@ -10,6 +10,7 @@ import './nativesConsole';
 import './nativesFileInfo';
 import './nativesStreams';
 import './nativesTasks';
+import './nativesCancellation';
 import './nativesString';
 import './nativesCollections';
 import './nativesDynamic';

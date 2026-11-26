@@ -1335,6 +1335,8 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
   'System.Object': 'Equals,GetHashCode,GetType,ReferenceEquals,ToString',
   'System.ObjectDisposedException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ObjectName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIf,ToString',
+  'System.OperationCanceledException':
+    'CancellationToken,Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HResult,HelpLink,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.OutOfMemoryException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.OverflowException':
@@ -1390,6 +1392,22 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Data,Equals,Error,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,Offset,ParamName,ReferenceEquals,Source,StackTrace,TargetSite,ThrowIfNullOrEmpty,ThrowIfNullOrWhiteSpace,ToString',
   'System.Text.StringBuilder':
     'Append,AppendFormat,AppendInterpolatedStringHandler,AppendJoin,AppendLine,Capacity,Chars,ChunkEnumerator,Clear,CopyTo,EnsureCapacity,Equals,GetChunks,GetHashCode,GetType,Insert,Length,MaxCapacity,ReferenceEquals,Remove,Replace,ToString',
+  'System.Threading.CancellationToken':
+    'CanBeCanceled,Equals,GetHashCode,GetType,IsCancellationRequested,None,ReferenceEquals,Register,ThrowIfCancellationRequested,ToString,UnsafeRegister,WaitHandle,op_Equality,op_Inequality',
+  'System.Threading.CancellationTokenRegistration':
+    'Dispose,DisposeAsync,Equals,GetHashCode,GetType,ReferenceEquals,ToString,Token,Unregister,op_Equality,op_Inequality',
+  'System.Threading.CancellationTokenSource':
+    'Cancel,CancelAfter,CancelAsync,CreateLinkedTokenSource,Dispose,Equals,GetHashCode,GetType,IsCancellationRequested,ReferenceEquals,ToString,Token,TryReset',
+  'System.Threading.Tasks.Task':
+    'AsyncState,CompletedTask,ConfigureAwait,ContinueWith,CreationOptions,CurrentId,Delay,Dispose,Equals,Exception,Factory,FromCanceled,FromException,FromResult,GetAwaiter,GetHashCode,GetType,Id,IsCanceled,IsCompleted,IsCompletedSuccessfully,IsFaulted,ReferenceEquals,Run,RunSynchronously,Start,Status,ToString,Wait,WaitAll,WaitAny,WaitAsync,WhenAll,WhenAny,WhenEach,Yield',
+  'System.Threading.Tasks.TaskCanceledException':
+    'CancellationToken,Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HResult,HelpLink,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,Task,ToString',
+  'System.Threading.Tasks.TaskExtensions': 'Equals,GetHashCode,GetType,ReferenceEquals,ToString,Unwrap',
+  'System.Threading.Tasks.TaskFactory':
+    'CancellationToken,ContinuationOptions,ContinueWhenAll,ContinueWhenAny,CreationOptions,Equals,FromAsync,GetHashCode,GetType,ReferenceEquals,Scheduler,StartNew,ToString',
+  'System.Threading.Tasks.Task`1':
+    'AsyncState,CompletedTask,ConfigureAwait,ContinueWith,CreationOptions,CurrentId,Delay,Dispose,Equals,Exception,Factory,FromCanceled,FromException,FromResult,GetAwaiter,GetHashCode,GetType,Id,IsCanceled,IsCompleted,IsCompletedSuccessfully,IsFaulted,ReferenceEquals,Result,Run,RunSynchronously,Start,Status,ToString,Wait,WaitAll,WaitAny,WaitAsync,WhenAll,WhenAny,WhenEach,Yield',
+  'System.Threading.Timeout': 'Equals,GetHashCode,GetType,Infinite,InfiniteTimeSpan,ReferenceEquals,ToString',
   'System.TimeSpan':
     'Add,Compare,CompareTo,Days,Divide,Duration,Equals,FromDays,FromHours,FromMicroseconds,FromMilliseconds,FromMinutes,FromSeconds,FromTicks,GetHashCode,GetType,Hours,HoursPerDay,MaxValue,Microseconds,MicrosecondsPerDay,MicrosecondsPerHour,MicrosecondsPerMillisecond,MicrosecondsPerMinute,MicrosecondsPerSecond,Milliseconds,MillisecondsPerDay,MillisecondsPerHour,MillisecondsPerMinute,MillisecondsPerSecond,Minutes,MinutesPerDay,MinutesPerHour,MinValue,Multiply,Nanoseconds,NanosecondsPerTick,Negate,op_Addition,op_Division,op_Equality,op_GreaterThan,op_GreaterThanOrEqual,op_Inequality,op_LessThan,op_LessThanOrEqual,op_Multiply,op_Subtraction,op_UnaryNegation,op_UnaryPlus,Parse,ParseExact,ReferenceEquals,Seconds,SecondsPerDay,SecondsPerHour,SecondsPerMinute,Subtract,Ticks,TicksPerDay,TicksPerHour,TicksPerMicrosecond,TicksPerMillisecond,TicksPerMinute,TicksPerSecond,ToString,TotalDays,TotalHours,TotalMicroseconds,TotalMilliseconds,TotalMinutes,TotalNanoseconds,TotalSeconds,TryFormat,TryParse,TryParseExact,Zero',
   'System.TimeoutException':

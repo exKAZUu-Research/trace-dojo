@@ -1289,7 +1289,7 @@ defineNativesKeepingStrings({
 // ---- Exceptions ----
 
 // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
-const exceptionConstructor: NativeMethod = (call, receiver, args) => {
+export const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);
   const state: ExceptionState = {
