@@ -396,10 +396,8 @@ function executeCompoundDeclarationOperand(
 ): boolean {
   state.lastArgText = arg.name;
   if (!setsNameref) state.assignsAnswer = true;
-  const failCtx: FailureContext =
-    shell.isInFunction && builtin !== 'readonly' && builtin !== 'export'
-      ? 'declarationLocalCompound'
-      : 'declarationGlobalCompound';
+  // A compound assignment to a global, as `-g` makes one in a function, abandons the line when it fails, as at the top.
+  const failCtx: FailureContext = intent === 'local' ? 'declarationLocalCompound' : 'declarationGlobalCompound';
   const committed = withRedirects(() =>
     commitCompoundOperand(shell, {
       builtin,
@@ -657,7 +655,9 @@ function executeUnsubscriptedDeclaration(
   if (failure) {
     // `readonly` and `export` assign as a plain assignment does, whose readonly error names no builtin.
     const assigns = failure.reason === 'readonly' && (builtin === 'readonly' || builtin === 'export');
-    return shell.failures.handleStoreFailure('declarationOperand', failure, assigns ? undefined : builtin);
+    return assigns
+      ? shell.failures.handleStoreFailure('builtinAssignment', failure)
+      : shell.failures.handleStoreFailure('declarationOperand', failure, builtin);
   }
   if (materializedArray) onMaterialize();
   return true;

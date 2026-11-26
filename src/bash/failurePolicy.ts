@@ -13,6 +13,8 @@ export type FailureContext =
   | 'declarationGlobalCompound'
   | 'declarationLocalCompound'
   | 'declarationOperand'
+  /** `readonly` or `export` assigning a scalar as a plain assignment does, whose readonly error `set -e` ends at. */
+  | 'builtinAssignment'
   | 'regularBuiltin'
   | 'parameterRequire';
 
@@ -96,6 +98,7 @@ export class FailurePolicy {
       case 'conditional':
       case 'forHeader':
       case 'declarationOperand':
+      case 'builtinAssignment':
       case 'regularBuiltin': {
         return false;
       }
@@ -105,11 +108,10 @@ export class FailurePolicy {
 
 /**
  * Whether Bash reports a store failure with its `report_error`, which `set -e` makes fatal: a bad subscript, or an
- * assignment to a readonly variable, except where `unset`, `declare`, `local`, or `typeset` reports it itself;
- * `readonly` and `export` assign as a plain assignment does, so their failures name no builtin.
+ * assignment to a readonly variable, except where `unset` or a declaration builtin's operand reports it.
  */
 function isReportedAsShellError(context: FailureContext, failure: StoreFailure, builtinPrefix?: string): boolean {
   if (builtinPrefix === 'unset') return false;
   if (failure.reason === 'badSubscript') return true;
-  return failure.reason === 'readonly' && (builtinPrefix === undefined || !context.startsWith('declaration'));
+  return failure.reason === 'readonly' && !context.startsWith('declaration');
 }
