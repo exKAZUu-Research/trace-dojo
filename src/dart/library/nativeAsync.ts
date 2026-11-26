@@ -109,11 +109,13 @@ function advance(state: SuspendedBody, resumption: Resumption): Outcome {
       resumption.kind === 'throw' ? generator.throw(resumption.error) : generator.next(resumption.value as Value);
   } catch (error) {
     state.generator = undefined;
+    state.task.isDone = true;
     if (error instanceof DartThrow) return { kind: 'throw', error };
     throw error;
   }
   if (result.done) {
     state.generator = undefined;
+    state.task.isDone = true;
     const completion = result.value as { kind: string; value?: Value } | undefined;
     return { kind: 'return', value: completion?.kind === 'return' ? completion.value : undefined };
   }

@@ -13,6 +13,13 @@ export class AsyncTask {
   /** The tasks that started while this one ran. */
   readonly spawned: AsyncTask[] = [];
   private readonly parent: AsyncTask | undefined;
+  /** Whether the body has ended, after its last run. */
+  isDone = false;
+  /**
+   * The detached steps of this task and every task below it, fixed once the task and all of them have ended, which
+   * no later run can change; a statement reads it instead of walking the tasks again.
+   */
+  private subtreeSteps: number | undefined;
 
   constructor(private readonly tracker: { statementMark(): number }) {
     this.parent = running.get(tracker);
@@ -34,7 +41,18 @@ export class AsyncTask {
       this.enteredAt = undefined;
       if (outer) running.set(this.tracker, outer);
       else running.delete(this.tracker);
+      if (this.isDone) this.fixSubtree();
     }
+  }
+
+  /** Fixes the subtree's detached steps when every task below has fixed its own, as an ended recursion's have. */
+  private fixSubtree(): void {
+    let total = this.detachedSteps;
+    for (const task of this.spawned) {
+      if (task.subtreeSteps === undefined) return;
+      total += task.subtreeSteps;
+    }
+    this.subtreeSteps = total;
   }
 
   get recordedSteps(): number {
@@ -47,6 +65,10 @@ export class AsyncTask {
     let total = 0;
     const pending = this.spawned.slice(start);
     for (let task = pending.pop(); task; task = pending.pop()) {
+      if (task.subtreeSteps !== undefined) {
+        total += task.subtreeSteps;
+        continue;
+      }
       total += task.detachedSteps;
       pending.push(...task.spawned);
     }
