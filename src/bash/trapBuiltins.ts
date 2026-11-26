@@ -17,7 +17,7 @@ export interface Trap {
    * For an action with a syntax error, the lines Bash reports when it runs the action, numbered from the line given
    * for its first line; Bash reads the action only then.
    */
-  readonly syntaxError?: (firstLine: number) => string[];
+  readonly syntaxError?: (firstLine: number, showsLine: boolean) => string[];
   /** The row of the `trap` command, where the action's commands are numbered from. */
   readonly row: number;
 }
@@ -98,7 +98,9 @@ export const trapBuiltin: Builtin = (shell, args) => {
       shell.traps.set(condition, {
         text: first,
         statements: statements ?? parseTrapActionPrefix(first, shell.currentRow),
-        ...(statements === undefined ? { syntaxError: (line: number) => trapActionSyntaxError(first, line) } : {}),
+        ...(statements === undefined
+          ? { syntaxError: (line: number, showsLine: boolean) => trapActionSyntaxError(first, line, showsLine) }
+          : {}),
         row: shell.currentRow,
       });
     }

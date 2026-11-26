@@ -356,10 +356,12 @@ export class Shell implements ArithmeticHost {
     if (!trap || this.runningTraps.has(condition)) return;
     // Bash reads the action line by line as it runs it: the commands before a syntax error run, and the error ends
     // the action, numbered from the failed command's line for `ERR` and from 1 for `EXIT`.
-    const errorLines = trap.syntaxError?.(condition === 'ERR' ? this.currentRow + 1 : 1);
+    const firstLine = condition === 'ERR' ? this.currentRow + 1 : 1;
     const reportError = (): void => {
       const label = condition === 'ERR' ? 'error' : 'exit';
-      for (const line of errorLines ?? []) this.fd2.write(`${SCRIPT_NAME}: ${label} trap: ${line}\n`);
+      for (const line of trap.syntaxError?.(firstLine, !this.options.errexit) ?? []) {
+        this.fd2.write(`${SCRIPT_NAME}: ${label} trap: ${line}\n`);
+      }
     };
     if (trap.statements.length === 0) {
       reportError();

@@ -93,6 +93,8 @@ export function parseTrapActionPrefix(text: string, row: number): Statement[] {
     errorRow = error.diagnostics[0]?.row ?? 0;
   }
   for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
+    // A line ending in a backslash joins the next one, so the command does not end there.
+    if (/(^|[^\\])(\\\\)*\\$/.test(lines[count - 1] ?? '')) continue;
     const prefix = parseTrapAction(lines.slice(0, count).join('\n'), row);
     if (prefix !== undefined) return prefix;
   }
@@ -103,7 +105,7 @@ export function parseTrapActionPrefix(text: string, row: number): Statement[] {
  * The syntax error of a `trap` action that `parseTrapAction` could not read, as Bash reports it when the action runs:
  * its message, numbered from `firstLine` for the action's first line, and the action's line it names, if any.
  */
-export function trapActionSyntaxError(text: string, firstLine: number): string[] {
+export function trapActionSyntaxError(text: string, firstLine: number, showsLine: boolean): string[] {
   try {
     parseText(`${text}\n`, new Set());
     return [];
@@ -114,7 +116,8 @@ export function trapActionSyntaxError(text: string, firstLine: number): string[]
     const line = firstLine + row;
     const renumbered = bashMessage.replace(/on line (\d+)/, (_, n: string) => `on line ${firstLine + Number(n) - 1}`);
     const lines = [`line ${line}: ${renumbered}`];
-    if (bashMessage.startsWith('syntax error near unexpected token')) {
+    // Bash shows the line of an unexpected token, but not while `set -e` is on.
+    if (showsLine && bashMessage.startsWith('syntax error near unexpected token')) {
       lines.push(`line ${line}: \`${text.split('\n')[row] ?? ''}'`);
     }
     return lines;
