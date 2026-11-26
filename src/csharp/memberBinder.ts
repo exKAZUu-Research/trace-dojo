@@ -2118,22 +2118,36 @@ export abstract class MemberBinder extends CallBinder {
         row: node.row,
       };
     }
-    const candidates = symbol.constructors
-      .filter((constructor) => this.isAccessible(constructor.access, symbol, context.fn.typeContext))
-      .map((method) => ({ method, owner: type }));
-    if (candidates.length === 0 && symbol.constructors.length > 0) {
-      this.error(
-        node,
-        'CS0122',
-        `'${displayMethod(symbol.constructors[0])}' はアクセスできない保護レベルになっています`
-      );
-      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    const description: CallDescription = { name: symbol.name, kind: 'constructor', typeName: displayType(type) };
+    const all = symbol.constructors.map((method) => ({ method, owner: type }));
+    const isAccessible = ({ method }: MethodCandidate): boolean =>
+      this.isAccessible(method.access, symbol, context.fn.typeContext);
+    const candidates = all.filter(isAccessible);
+    const inaccessible = all.filter((candidate) => !isAccessible(candidate));
+    if (
+      inaccessible.length > 0 &&
+      !this.quietly(() => this.resolveCall(candidates, args, undefined, node.row, description))
+    ) {
+      // Roslyn reports an inaccessible constructor that the arguments fit over the accessible ones that they do not,
+      // and with none of either, the arguments' count.
+      const fitting = this.quietly(() => this.resolveCall(inaccessible, args, undefined, node.row, description));
+      if (fitting || candidates.length === 0) {
+        if (fitting)
+          this.error(
+            node,
+            'CS0122',
+            `'${displayMethod(fitting.candidate.method)}' はアクセスできない保護レベルになっています`
+          );
+        else
+          this.error(
+            node,
+            'CS1729',
+            `'${displayType(type)}' には、引数 ${args.length} を指定するコンストラクターは含まれていません`
+          );
+        return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      }
     }
-    const resolved = this.resolveCall(candidates, args, undefined, node.row, {
-      name: symbol.name,
-      kind: 'constructor',
-      typeName: displayType(type),
-    });
+    const resolved = this.resolveCall(candidates, args, undefined, node.row, description);
     // A creation whose arguments fit no constructor still has its type, which later errors then use, as in Roslyn.
     if (!resolved)
       return {
