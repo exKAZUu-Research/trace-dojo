@@ -39,6 +39,9 @@ export const setBuiltin: Builtin = (shell, args) => {
       return 0;
     }
     if (arg === '-') {
+      // `set -` turns `-x` and `-v` off as well.
+      shell.options.xtrace = false;
+      shell.options.verbose = false;
       if (index + 1 < args.length) shell.store.setPositionalArgs(args.slice(index + 1));
       return 0;
     }
