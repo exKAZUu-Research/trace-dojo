@@ -1453,7 +1453,10 @@ export class Shell implements ArithmeticHost {
    */
   private runElementSubshell(command: Statement, fds: DescriptorTable, background = false): number {
     const simple = command.kind === 'command' || command.kind === 'declaration';
-    const sameLevel = command.kind === 'subshell' || (simple && !background);
+    // A function call runs in the fork as a function, which Bash counts as a level, as it does a compound command.
+    const callsFunction =
+      command.kind === 'command' && command.words.length > 0 && this.store.hasFunction(command.words[0].text);
+    const sameLevel = command.kind === 'subshell' || (simple && !background && !callsFunction);
     const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1);
     if (simple) child.shell.elementCommand = command;
     return child.run([command]);
