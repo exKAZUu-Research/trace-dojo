@@ -1,0 +1,1 @@
+(5,7): error TS2322: Type '0' is not assignable to type '"Green" | "Red"'.

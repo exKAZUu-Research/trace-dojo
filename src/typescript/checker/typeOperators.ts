@@ -957,7 +957,7 @@ function mappedModifiers(
 function indexKeys(structure: Structure): Type[] {
   const keys: Type[] = [];
   if (structure.stringIndex) keys.push(stringType, numberType);
-  else if (structure.numberIndex) keys.push(numberType);
+  else if (structure.numberIndex && !structure.numberIndex.isEnumReverseMapping) keys.push(numberType);
   if (structure.symbolIndex) keys.push(symbolType);
   keys.push(...(structure.patternIndexes ?? []).map((info) => info.keyType));
   return keys;

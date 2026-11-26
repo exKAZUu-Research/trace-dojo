@@ -141,6 +141,8 @@ export interface Signature {
 export interface IndexInfo {
   type: Type;
   readonly: boolean;
+  /** For the reverse mapping of a numeric enum object, which `E[0]` reads but `keyof typeof E` does not list. */
+  isEnumReverseMapping?: boolean;
 }
 
 /** An index signature with the key type it is declared for, as `` [k: `a${string}`]: T `` is for `` `a${string}` ``. */

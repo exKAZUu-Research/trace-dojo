@@ -1,0 +1,7 @@
+enum Color {
+  Red,
+  Green,
+}
+const fromNumber: keyof typeof Color = 0;
+const fromName: keyof typeof Color = 'Green';
+console.log(fromNumber, fromName, Color[0]);
