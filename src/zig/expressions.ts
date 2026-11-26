@@ -1450,7 +1450,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       return this.error(expression, `多要素のポインタには、${operator} は使えません（+ と - だけです）。`);
     const right = this.compile(expression.right, operator === '-' ? undefined : USIZE);
     const leftType = pointer.type as Extract<Type, { kind: 'pointer' }>;
-    if (operator === '-' && right.type.kind === 'pointer' && right.type.size === leftType.size)
+    if (operator === '-' && right.type.kind === 'pointer' && isManyOrC(right.type.size) && isManyOrC(leftType.size))
       return this.pointerDifference(pointer, right, expression);
     const offset = this.coerce(right, USIZE, expression.right);
     const sign = operator === '+' ? 1 : -1;
@@ -1471,6 +1471,11 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (!inMemoryCoercible(child, (right.type as Extract<Type, { kind: 'pointer' }>).child))
       this.error(expression, mismatch(left.type, right.type));
     const size = BigInt(sizeOf(child));
+    if (size === 0n)
+      this.error(
+        expression,
+        `ポインタどうしの引き算には、大きさのある要素の型が必要です（${typeName(child)} 型は大きさが 0 です）。`
+      );
     return this.combine(
       [left, right],
       USIZE,
@@ -1480,7 +1485,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         if (later.target !== earlier.target) throw new UnavailableOperation('pointer:differentMemory');
         // Zig subtracts the addresses with wrapping, then divides by the element's size.
         const bytes = BigInt.asUintN(64, BigInt(later.index - earlier.index) * size);
-        return size === 0n ? 0n : bytes / size;
+        return bytes / size;
       },
       expression
     );
@@ -2428,6 +2433,10 @@ function hasSentinel(type: Type): boolean {
 }
 
 /** A many-item or C pointer's value, which must not be null. */
+function isManyOrC(size: string): boolean {
+  return size === 'many' || size === 'c';
+}
+
 function manyPointer(value: Value): Pointer {
   if (!(value instanceof Pointer)) throw new MemoryFault();
   return value;
