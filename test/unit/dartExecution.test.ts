@@ -9406,6 +9406,19 @@ Future<void> main() async {
   expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: '200\nthen 2\nawait 2\n' });
 });
 
+test('an error thrown at the bottom of a deep chain of awaiting calls reaches the outermost catch', () => {
+  const source = `Future<int> level(int k) async {
+  if (k == 0) { await null; throw StateError('deep'); }
+  try { return await level(k - 1); } catch (e) { rethrow; }
+}
+Future<int> h(int k) async { if (k == 0) { await null; throw 'x'; } final f = h(k - 1); f.catchError((e) => 0); return await f; }
+Future<void> main() async {
+  try { print(await level(250)); } catch (e) { print('level $e'); }
+  try { print(await h(3)); } catch (e) { print('h $e'); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({ kind: 'executed', stdout: 'level Bad state: deep\nh x\n' });
+});
+
 test('awaited async recursion runs as deep as the SDK runs it, in the SDK order', () => {
   const source = `import 'dart:async';
 var ticks = 0;

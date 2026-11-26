@@ -168,7 +168,12 @@ function perform(
  * The resumptions that the resumption running on each runtime asked to run once it ends, one list for each resumption
  * running, innermost last: a body that resumes another this way does not nest its frames in the host's stack.
  */
-const laterResumptions = new WeakMap<Runtime, { state: SuspendedBody & { object: DartObject }; value: Value }[][]>();
+interface LaterResumption {
+  state: SuspendedBody & { object: DartObject };
+  resumption: Resumption;
+}
+
+const laterResumptions = new WeakMap<Runtime, LaterResumption[][]>();
 
 define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) => {
   const state = (self as DartObject).native as unknown as SuspendedBody & { object: DartObject };
@@ -182,24 +187,27 @@ define('_SuspendState._resume', (runtime, self, [value, exception, stackTrace]) 
   }
   const stack = laterResumptions.get(runtime) ?? [];
   laterResumptions.set(runtime, stack);
-  const later: { state: SuspendedBody & { object: DartObject }; value: Value }[] = [];
+  const later: LaterResumption[] = [];
   stack.push(later);
   try {
     resume(runtime, state, next);
     // A body this resumption asked to resume runs now, where it would have finished inside it.
-    for (let job = later.shift(); job; job = later.shift())
-      resume(runtime, job.state, { kind: 'next', value: job.value });
+    for (let job = later.shift(); job; job = later.shift()) resume(runtime, job.state, job.resumption);
   } finally {
     stack.pop();
   }
   return;
 });
 
-define('_SuspendState._resumeLater', (runtime, self, [value]) => {
+define('_SuspendState._resumeLater', (runtime, self, [value, exception, stackTrace]) => {
   const state = (self as DartObject).native as unknown as SuspendedBody & { object: DartObject };
+  const resumption: Resumption =
+    exception === undefined
+      ? { kind: 'next', value }
+      : { kind: 'throw', error: runtime.newThrow(exception, stackTrace) };
   const later = laterResumptions.get(runtime)?.at(-1);
-  if (later) later.push({ state, value });
-  else resume(runtime, state, { kind: 'next', value: state.atStart || state.atYield ? undefined : value });
+  if (later) later.push({ state, resumption });
+  else resume(runtime, state, resumption);
   return;
 });
 

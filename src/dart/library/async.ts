@@ -1133,16 +1133,10 @@ class _SuspendState {
     // body, that body resumes right after this one's resumption ends, by its driver's loop, instead of inside the
     // completion, as the VM resumes it, which nothing else runs between; so that a chain of awaited recursive calls
     // runs in a fixed depth of host frames. The listeners before it run as the completion runs them.
-    final awaiter = future._awaitedBy;
-    final last = future._resultOrListeners;
-    if (returnValue is! Future &&
-        awaiter != null &&
-        future._state == _Future._stateIncomplete &&
-        last is _FutureListener &&
-        identical(last.callback, awaiter._thenCallback)) {
-      future._resultOrListeners = last._nextListener;
+    final awaiter = returnValue is Future ? null : _lastAwaiter(future);
+    if (awaiter != null) {
       future._completeWithValue(returnValue);
-      awaiter._resumeLater(returnValue);
+      awaiter._resumeLater(returnValue, null, null);
       return;
     }
     if (returnValue is Future) {
@@ -1151,9 +1145,34 @@ class _SuspendState {
       future._completeWithValue(returnValue);
     }
   }
+  /**
+   * The body whose await is the last listener the future's completion runs, taken off the future, so that it resumes
+   * by the driver's loop instead (see _returnAsync); the listeners before it stay. A future left without a listener
+   * then ignores its error, which the awaiter handles.
+   */
+  static _SuspendState? _lastAwaiter(_Future future) {
+    final awaiter = future._awaitedBy;
+    final last = future._resultOrListeners;
+    if (awaiter == null ||
+        future._state != _Future._stateIncomplete ||
+        last is! _FutureListener ||
+        !identical(last.callback, awaiter._thenCallback)) {
+      return null;
+    }
+    future._resultOrListeners = last._nextListener;
+    if (last._nextListener == null) future._ignore();
+    return awaiter;
+  }
   void _handleException(bool isSync, Object exception, StackTrace stackTrace) {
     final functionData = _functionData;
     if (functionData is _Future) {
+      // Modification: an error the body throws after it suspended reaches an awaiting body as a return does.
+      final awaiter = isSync ? _lastAwaiter(functionData) : null;
+      if (awaiter != null) {
+        functionData._completeError(exception, stackTrace);
+        awaiter._resumeLater(null, exception, stackTrace);
+        return;
+      }
       if (!isSync) {
         functionData._asyncCompleteError(exception, stackTrace);
       } else {
@@ -1178,7 +1197,7 @@ class _SuspendState {
     (_functionData as _AsyncStarStreamController).close();
   }
   external void _resume(Object? value, Object? exception, StackTrace? stackTrace);
-  external void _resumeLater(Object? value);
+  external void _resumeLater(Object? value, Object? exception, StackTrace? stackTrace);
 }
 ` +
   STREAM_SOURCE;
