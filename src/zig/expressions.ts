@@ -2105,7 +2105,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   /** A comptime field takes only its own value, which Zig checks where a literal gives it. */
-  private checkComptimeField(compiled: TExpr, field: StructField, span: Span): void {
+  protected checkComptimeField(compiled: TExpr, field: StructField, span: Span): void {
     const fact = staticResultOf(compiled);
     const expected = field.comptimeValue?.value;
     if (!fact || !this.sameComptimeValue(field.type, fact.value, expected))

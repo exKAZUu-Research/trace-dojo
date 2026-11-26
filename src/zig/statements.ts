@@ -44,6 +44,7 @@ import {
   NORETURN,
   pointerOf,
   pointerTo,
+  type StructField,
   TYPE,
   type Type,
   typeName,
@@ -1001,15 +1002,17 @@ export abstract class StatementCompiler extends CallCompiler {
     ) {
       return this.fieldStores(value, type, unionPayload);
     }
-    const tupleTypes =
-      type.kind === 'struct' && type.isTuple ? this.structFields(type, value).map((field) => field.type) : undefined;
+    const tupleFields = type.kind === 'struct' && type.isTuple ? this.structFields(type, value) : undefined;
+    const tupleTypes = tupleFields?.map((field) => field.type);
     if (value.kind === 'arrayInit' && !value.type && (type.kind === 'array' || tupleTypes)) {
       const length = type.kind === 'array' ? type.length : BigInt((tupleTypes as Type[]).length);
       if (BigInt(value.elements.length) !== length) {
         this.error(value, `配列の長さが合いません（${length} 個が必要ですが、${value.elements.length} 個です）。`);
       }
       const stores = value.elements.map((element, index) =>
-        this.slotStore(element, type.kind === 'array' ? type.child : (tupleTypes as Type[])[index], unionPayload)
+        tupleFields
+          ? this.fieldStore(element, tupleFields[index], unionPayload)
+          : this.slotStore(element, (type as Extract<Type, { kind: 'array' }>).child, unionPayload)
       );
       if (type.kind === 'array' && type.sentinel !== undefined) {
         stores.push(this.valueStore(type.child, known(type.child, type.sentinel.value, value), unionPayload));
@@ -1092,13 +1095,21 @@ export abstract class StatementCompiler extends CallCompiler {
     const stores = this.structInitializerPlan(value, type).map(({ position, field, value: initializer }) => ({
       position,
       store: initializer
-        ? this.slotStore(initializer, field.type, unionPayload)
+        ? this.fieldStore(initializer, field, unionPayload)
         : this.valueStore(field.type, known(field.type, field.defaultValue, value), unionPayload),
     }));
     return (frame, holder, index) => {
       const struct = holder.slots[index] as ZStruct;
       for (const { position, store } of stores) store(frame, struct, position);
     };
+  }
+
+  /** Stores a field's initializer, which a comptime field accepts only when it is the field's own value. */
+  private fieldStore(initializer: Expression, field: StructField, unionPayload: boolean): ResultStore {
+    if (!field.comptimeValue) return this.slotStore(initializer, field.type, unionPayload);
+    const compiled = this.coerce(this.compile(initializer, field.type), field.type, initializer);
+    this.checkComptimeField(compiled, field, initializer);
+    return this.valueStore(field.type, compiled, unionPayload);
   }
 
   /** `u = .{ .a = ... }` makes `a` the active field first, so the value sees the new tag, as Zig's result location does. */
