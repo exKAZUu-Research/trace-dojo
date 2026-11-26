@@ -11,8 +11,11 @@ export function withBoundTypeArguments(expression: Expression): Expression {
   return expression;
 }
 
-function objectTypeArguments(node: Expression & { unboundArity?: number }): { typeArgs?: TypeNode[] } {
+function objectTypeArguments(node: Expression & { unboundArity?: number }): {
+  typeArgs?: TypeNode[];
+  unboundArity?: undefined;
+} {
   if (node.unboundArity === undefined) return {};
   const object: TypeNode = { kind: 'predefinedType', name: 'object', row: node.row, column: node.column };
-  return { typeArgs: Array.from({ length: node.unboundArity }, () => object) };
+  return { typeArgs: Array.from({ length: node.unboundArity }, () => object), unboundArity: undefined };
 }

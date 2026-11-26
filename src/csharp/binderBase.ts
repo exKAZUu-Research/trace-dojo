@@ -554,6 +554,10 @@ export class BinderBase {
         if (node.name === 'dynamic' && !node.typeArgs && !this.findTypeInScope('dynamic', 0, context))
           return this.dynamicType;
         if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
+        if (node.unboundArity !== undefined && this.findTypeInScope(node.name, node.unboundArity, context)) {
+          this.error(node, 'CS7003', 'バインドされていないジェネリック名の予期しない使用方法です');
+          return ERROR_TYPE;
+        }
         const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
         return this.resolveNamedType(node, node.name, args, context);
       }

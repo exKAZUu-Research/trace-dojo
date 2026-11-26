@@ -135,6 +135,10 @@ export abstract class ExpressionBinder extends LambdaBinder {
       }
       case 'name': {
         if (node.isFieldKeyword) return this.bindFieldKeyword(node, context);
+        if (node.unboundArity !== undefined) {
+          const unbound = this.bindUnboundGenericName(node, node.unboundArity, context);
+          if (unbound) return unbound;
+        }
         return this.namingMemberOf(node, () => this.bindSimpleName(node.name, node.typeArgs, node, context));
       }
       case 'aliasQualified': {
@@ -2118,6 +2122,21 @@ export abstract class ExpressionBinder extends LambdaBinder {
     );
     const getResult = this.late(call('GetResult'), [dynamicOperand], context, options);
     return { kind: 'await', operand, getAwaiter, isCompleted, getResult, type: this.dynamicType, row };
+  }
+
+  /**
+   * `List<>` outside `typeof` and `nameof`, which lacks its type arguments (CS0305) and goes on as the definition, so
+   * that `List<>.Count` is also CS0120 as in Roslyn.
+   */
+  private bindUnboundGenericName(
+    node: Extract<Expression, { kind: 'name' }>,
+    arity: number,
+    context: BindContext
+  ): BindResult | undefined {
+    const symbol = this.findTypeInScope(node.name, arity, context.fn.typeContext);
+    if (!symbol) return undefined;
+    this.construct(node, symbol, []);
+    return { kind: 'typeRef', type: symbol.declaredType, row: node.row };
   }
 
   /** The type of `typeof`, where an unbound generic type (`List<>`) stands for its definition. */
