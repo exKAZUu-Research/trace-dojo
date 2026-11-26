@@ -18,7 +18,11 @@ export function expandPathname(shell: Shell, pattern: string): string[] {
   for (const [index, part] of parts.entries()) {
     const isLast = index === parts.length - 1;
     if (part === '' && isLast) {
-      paths = paths.filter((path) => kindOf(shell, path) === 'directory').map((path) => `${path}/`);
+      // The directory a `**` part stands for itself already ends with `/`, and the working directory, an empty
+      // path, is no match.
+      paths = paths
+        .filter((path) => path !== '' && kindOf(shell, path) === 'directory')
+        .map((path) => (path.endsWith('/') ? path : `${path}/`));
       break;
     }
     if (part === '') {
