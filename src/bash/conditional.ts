@@ -25,7 +25,6 @@ export const ARITHMETIC_OPERATORS: Record<string, (a: bigint, b: bigint) => bool
  * Evaluates `[[ expression ]]` to an exit status: 0 when true, 1 when false or after an arithmetic error, and 2 on bad
  * regex. `inverted` tells that a `!` applies to the term itself, which `set -x` shows with it, as Bash does.
  */
-// code-gauge-allow functionCognitiveComplexity -- One case per conditional expression kind, each tracing its expanded operands under `set -x`.
 export function conditionalStatus(shell: Shell, expression: TestExpression, inverted = false): number {
   const { expander } = shell;
   switch (expression.kind) {
