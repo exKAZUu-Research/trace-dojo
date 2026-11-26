@@ -2,7 +2,7 @@ import { type FileHandle, FileSystemError, type FileSystemErrorCode, parentOf } 
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
 import type { DartObject, NativeState, Value } from '../values';
-import { define, intArg, stringArg } from './nativeSupport';
+import { define, intArg, stringArg, throwUnavailable } from './nativeSupport';
 
 /**
  * The OS error the VM reports with each failure, as macOS words and numbers it; Linux numbers ENOTEMPTY 39 instead.
@@ -17,24 +17,31 @@ const OS_ERRORS: Record<FileSystemErrorCode, [string, bigint]> = {
 };
 
 /**
- * The error the OS gives for a failure at a path written as a directory, as `a.txt/`: a missing name is not found,
- * and a file moved onto an existing directory fails because the target is one, whatever the file system reported.
+ * Rejects a path one of whose ancestors is a file: the OS fails it at the first such ancestor, which the shared file
+ * system, resolving the whole path at once, does not name.
  */
-function reportedCode(runtime: Runtime, code: FileSystemErrorCode, errorPath: string): FileSystemErrorCode {
-  if (!/[^/]\/+$/u.test(errorPath)) return code;
-  const kind = runtime.io.files.kindOf(errorPath.replace(/\/+$/u, ''));
-  if (kind === undefined) return 'ENOENT';
-  return kind === 'directory' && code === 'ENOTDIR' ? 'EISDIR' : code;
+function rejectFileAncestor(runtime: Runtime, path: string): void {
+  const ends = [...path.replace(/\/+$/u, '').matchAll(/\/+/gu)]
+    .map((match) => match.index)
+    .filter((index) => index > 0);
+  if (ends.some((end) => runtime.io.files.kindOf(path.slice(0, end)) === 'file')) {
+    throwUnavailable(runtime, '途中にファイルがあるパスでのファイル操作の失敗');
+  }
 }
 
-/** Runs a file system operation, turning its failure into the exception dart:io throws, with the path shown. */
+/**
+ * Runs a file system operation, turning its failure into the exception dart:io throws, with the path shown: the
+ * error code gives the OS error and the exception's class. A failure at a path written as a directory (`a.txt/`) or
+ * under a file is rejected, as the OS decides its error from what the shared file system does not tell.
+ */
 function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, shownPath?: string): T {
   try {
     return run();
   } catch (error) {
     if (!(error instanceof FileSystemError)) throw error;
-    const { code, path: errorPath } = error;
-    const reported = reportedCode(runtime, code, errorPath);
+    const { code: reported, path: errorPath } = error;
+    if (/[^/]\/+$/u.test(errorPath)) throwUnavailable(runtime, '末尾が区切り文字のパスでのファイル操作の失敗');
+    rejectFileAncestor(runtime, errorPath);
     const [message, errno] = OS_ERRORS[reported];
     const osError = runtime.links.construct(runtime, 'OSError', '', [message, errno]);
     const path = shownPath ?? errorPath;
@@ -191,11 +198,8 @@ define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
   const { files } = runtime.io;
   const text = stringArg(runtime, path, 'path');
   if (recursive === true) {
-    withFileErrors(runtime, 'Creation failed', () => {
-      // A file's ancestors end before its own name, whatever separators follow that name.
-      rejectFileAncestors(runtime, text.replace(/\/+$/u, ''), false);
-      files.createDirectory(parentOf(text), true);
-    });
+    rejectFileAncestor(runtime, text);
+    withFileErrors(runtime, 'Creation failed', () => files.createDirectory(parentOf(text), true));
   }
   withFileErrors(runtime, 'Cannot create file', () =>
     files.open(text, { create: exclusive === true ? 'exclusive' : 'always', truncate: false, append: true })
@@ -210,27 +214,10 @@ define('_Directory._createDirectory', (runtime, _self, [path, recursive]) => {
     const kind = files.kindOf(text);
     if (kind === 'directory') return;
     if (kind === 'file') throw new FileSystemError('ENOTDIR', text);
-    if (recursive === true) rejectFileAncestors(runtime, text, true);
     files.createDirectory(text, recursive === true);
   });
   return;
 });
-
-/**
- * Fails a recursive creation at the first of a path's ancestors that is a file, named as the program spells it, as
- * the SDK's Directory creates the ancestors one by one.
- */
-function rejectFileAncestors(runtime: Runtime, path: string, withPath: boolean): void {
-  // Each ancestor ends at a separator, and the path itself keeps the separators it ends with.
-  const ends = [...path.matchAll(/\/+/gu)].map((match) => match.index).filter((index) => index > 0);
-  if (withPath) ends.push(path.length);
-  for (const end of ends) {
-    const ancestor = path.slice(0, end);
-    // Separators that only end the path belong to the path itself, as the error names it.
-    const named = /^\/*$/u.test(path.slice(end)) ? path : ancestor;
-    if (runtime.io.files.kindOf(ancestor) === 'file') throw new FileSystemError('ENOTDIR', named);
-  }
-}
 
 define('_Directory._list', (runtime, _self, [path, recursive]) => {
   const { files } = runtime.io;

@@ -9160,6 +9160,34 @@ void main() {
   });
 });
 
+test('file failures at a path written as a directory or under a file are unavailable, and others are the OS errors', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('f.txt').writeAsStringSync('x');
+  Directory('d').createSync();
+  print(Directory('d/').existsSync());
+  for (final run in [
+    () => File('f.txt/').readAsStringSync(),
+    () => File('f.txt/b.txt').writeAsStringSync('z'),
+    () => Directory('f.txt/sub').createSync(recursive: true),
+    () => File('missing.txt').readAsStringSync(),
+  ]) {
+    try { run(); } catch (e) { print(e); }
+  }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'true',
+      'Unsupported operation: 末尾が区切り文字のパスでのファイル操作の失敗は、この採点環境では使えません。',
+      'Unsupported operation: 途中にファイルがあるパスでのファイル操作の失敗は、この採点環境では使えません。',
+      'Unsupported operation: 途中にファイルがあるパスでのファイル操作の失敗は、この採点環境では使えません。',
+      "PathNotFoundException: Cannot open file, path = 'missing.txt' (OS Error: No such file or directory, errno = 2)",
+      '',
+    ].join('\n'),
+  });
+});
+
 test('json.decoder streams give the value at the end and reject a text that does not parse', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
