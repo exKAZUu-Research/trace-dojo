@@ -95,11 +95,19 @@ export function executeDeclarationCommand(
     const prepared = staticOptions
       ? prepareNormalizedDeclaration(builtin, staticOptions, args)
       : prepareRuntimeOptionDeclaration(shell, builtin, args);
-    // `local -` makes the function restore the `set` options when it returns, as Bash does.
+    // `local -` makes the function restore the `set` options when it returns, as Bash does; the trace keeps the `-`.
+    const dashWords: string[] = [];
     if (builtin === 'local' && shell.isInFunction && prepared.operandArgs.some(isLoneDash)) {
       shell.restoreSetOptionsOnReturn();
+      dashWords.push('-');
       prepared.operandArgs = prepared.operandArgs.filter((arg) => !isLoneDash(arg));
-      if (prepared.operandArgs.length === 0) return { status: 0, assignsAnswer: false };
+      if (prepared.operandArgs.length === 0) {
+        if (shell.options.xtrace) traceWords(shell, [builtin, ...optionWords, ...dashWords]);
+        withRedirects(() => {
+          shell.store.lastArgument = '-';
+        });
+        return { status: 0, assignsAnswer: false };
+      }
     }
     const state: DeclarationRunState = {
       status: 0,
@@ -124,7 +132,7 @@ export function executeDeclarationCommand(
       );
     }
     const operands = collectReadyOperands(shell, prepared.operandArgs, state);
-    if (shell.options.xtrace) traceDeclaration(shell, builtin, optionWords, operands);
+    if (shell.options.xtrace) traceDeclaration(shell, builtin, [...optionWords, ...dashWords], operands);
     shell.store.leaveCompoundGuards(savedGuards);
     const headerCode = withRedirects(() => validateDeclarationHeader(shell, builtin, prepared.options));
     if (headerCode !== undefined) {
