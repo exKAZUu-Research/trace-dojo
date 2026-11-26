@@ -493,7 +493,7 @@ export abstract class StatementCompiler extends PatternCompiler {
         return this.compileExpressionStatement(statement);
       }
       case 'local': {
-        return this.compileLocalDeclaration(statement.declaration);
+        return this.compileLocalDeclaration(statement.declaration, statement);
       }
       case 'patternDeclaration': {
         return this.compilePatternDeclaration(statement);
@@ -558,7 +558,11 @@ export abstract class StatementCompiler extends PatternCompiler {
 
   // code-gauge-allow functionCognitiveComplexity -- Bind a declaration, retain its constant or promotion, and emit its step.
   // code-gauge-allow functionNcss -- Keep declarator evaluation order, flow, and trace steps together.
-  protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
+  /**
+   * `stepOwner` is the statement whose step the declaration records, which a statement that resumes after an `await`
+   * captures to record once it completes; undefined when the declaration records none, as a `for` loop's does.
+   */
+  protected compileLocalDeclaration(declaration: VariableDeclaration, stepOwner: { row: number } | undefined): Exec {
     this.checkAnnotations(declaration.annotations);
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
@@ -603,9 +607,9 @@ export abstract class StatementCompiler extends PatternCompiler {
       for (const { slot, run, isLate } of parts) frame.locals[slot] = new Cell(initialLocalValue(frame, run, isLate));
       return;
     };
-    if (initialized.length === 0 || !recordStep || declaration.isLate) return exec;
+    if (initialized.length === 0 || !stepOwner || declaration.isLate) return exec;
     return this.withStep(
-      declaration,
+      stepOwner,
       exec,
       initialized.every((compiled) => isCreation(compiled))
     );
@@ -1057,7 +1061,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     const initExec =
       init.kind === 'patternDeclaration'
         ? this.compilePatternDeclaration(init, false)
-        : this.compileLocalDeclaration(init, false);
+        : this.compileLocalDeclaration(init, undefined);
     const recordsStep = init.kind === 'patternDeclaration' || init.variables.some((variable) => variable.initializer);
     return { initExec, loopSlots: slots?.slice(start) ?? [], initRow: recordsStep ? this.stepRowOf(loop) : undefined };
   }

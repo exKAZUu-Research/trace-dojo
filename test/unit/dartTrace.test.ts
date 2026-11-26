@@ -500,6 +500,23 @@ test('learner callbacks retain a single call row for native and SDK operations',
 const traceLines = (program: string): number[] =>
   traceProgram('dart', program, program).traceItems.map(({ line }) => line);
 
+/** A program that creates a Box from a call, awaited or not. */
+function createsFromCall(awaited: boolean): string {
+  return `class Box {
+  final int v;
+  Box(this.v);
+}
+${awaited ? 'Future<int> walk(Turtle t) async' : 'int walk(Turtle t)'} {
+  t.forward();
+  return 1;
+}
+${awaited ? 'Future<void> main() async' : 'void main()'} {
+  var t = Turtle(1, 1);
+  var b = Box(${awaited ? 'await ' : ''}walk(t));
+  print(b.v);
+}`;
+}
+
 test('an awaited call statement records only what the call records, as the same call without await does', () => {
   const asyncProgram = `Future<void> walk(Turtle t) async {
   t.forward();
@@ -532,6 +549,8 @@ Future<void> main() async {
   print('end');
 }`;
   expect(traceLines(suspending)).toEqual([0, 6, 2, 3, 8]);
+  // A declaration that creates an object from an awaited call records no step after the call's, as without await.
+  expect(traceLines(createsFromCall(true))).toEqual(traceLines(createsFromCall(false)));
 });
 
 test('a switch expression arm that awaits and throws ends its pattern variables', () => {
