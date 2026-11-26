@@ -533,7 +533,7 @@ export class Shell implements ArithmeticHost {
   ): number {
     switch (statement.kind) {
       case 'subshell': {
-        const status = this.runSubshell(statement.body, this.fds.clone());
+        const status = this.runSubshell(statement.body, this.fds.clone(), undefined, 1, true);
         this.store.pipeStatus = [status];
         this.checkErrexit(status);
         return status;
@@ -1471,8 +1471,14 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Runs statements in a subshell: a child shell over an eager copy of this shell's variables. */
-  runSubshell(body: Statement[], fds: DescriptorTable, overrides?: SubshellOverrides, levels = 1): number {
-    return this.forkSubshell(fds, overrides, levels).run(body);
+  runSubshell(
+    body: Statement[],
+    fds: DescriptorTable,
+    overrides?: SubshellOverrides,
+    levels = 1,
+    resetsLoops = false
+  ): number {
+    return this.forkSubshell(fds, overrides, levels, resetsLoops).run(body);
   }
 
   /**
@@ -1483,7 +1489,7 @@ export class Shell implements ArithmeticHost {
   private runElementSubshell(command: Statement, fds: DescriptorTable, background = false): number {
     const simple = command.kind === 'command' || command.kind === 'declaration';
     const sameLevel = command.kind === 'subshell' || command.kind === 'pipeline' || (simple && !background);
-    const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1);
+    const child = this.forkSubshell(fds, undefined, sameLevel ? 0 : 1, background);
     if (simple) child.shell.elementCommand = command;
     // Whether the command calls a function is known only once its name is expanded.
     if (simple && !background) child.shell.deepensAtFunctionCall = true;
@@ -1498,7 +1504,8 @@ export class Shell implements ArithmeticHost {
   private forkSubshell(
     fds: DescriptorTable,
     overrides?: SubshellOverrides,
-    levels = 1
+    levels = 1,
+    resetsLoops = false
   ): {
     fds: DescriptorTable;
     shell: Shell;
@@ -1515,7 +1522,8 @@ export class Shell implements ArithmeticHost {
       fds,
       lineShift,
       readShift: lineShift,
-      loopDepth: this.loopDepth,
+      // `break` and `continue` in `( )` or a command started with `&` are outside every loop, as in Bash.
+      loopDepth: resetsLoops ? 0 : this.loopDepth,
     });
     // A subshell ends as a shell does: its process substitutions close, its EXIT trap runs, and the `>(...)`
     // commands and coprocesses still pending run to their end.
