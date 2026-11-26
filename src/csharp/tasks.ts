@@ -206,6 +206,24 @@ export class TaskScheduler {
     if (index !== -1) this.timers.splice(index, 1);
   }
 
+  /**
+   * Blocks for a time on the virtual clock, as `Thread.Sleep` does: the queued work and the timers due by then run,
+   * as other threads would meanwhile, and the clock then stands at the end of the sleep without waiting for it.
+   */
+  sleep(milliseconds: number): void {
+    let isOver = false;
+    this.delay(milliseconds, () => (isOver = true));
+    this.runUntil(() => isOver);
+  }
+
+  /**
+   * The clock that Stopwatch, Environment.TickCount, and DateTime.Now read, in milliseconds: the real time plus the
+   * virtual time that sleeps and timers skipped, so that it advances at least as far as a program waited.
+   */
+  clock(): number {
+    return performance.now() + this.now;
+  }
+
   /** Runs queued work and timers until `isDone` holds, as a thread blocked on a task waits for the others. */
   runUntil(isDone: () => boolean): void {
     while (!isDone()) {

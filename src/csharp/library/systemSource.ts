@@ -967,6 +967,8 @@ namespace System {
 
   public static class Environment {
     public static string NewLine { get; }
+    public static int TickCount { get; }
+    public static long TickCount64 { get; }
     public static void Exit(int exitCode);
   }
 
@@ -1307,6 +1309,24 @@ namespace System.Diagnostics {
   public sealed class DebuggerStepThroughAttribute : Attribute { public DebuggerStepThroughAttribute(); }
   [AttributeUsage(AttributeTargets.Class | AttributeTargets.Constructor | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
   public sealed class DebuggerHiddenAttribute : Attribute { public DebuggerHiddenAttribute(); }
+  public class Stopwatch {
+    public Stopwatch();
+    public static readonly long Frequency = 1000000000L;
+    public static readonly bool IsHighResolution = true;
+    public bool IsRunning { get; }
+    public TimeSpan Elapsed { get; }
+    public long ElapsedMilliseconds { get; }
+    public long ElapsedTicks { get; }
+    public static Stopwatch StartNew();
+    public void Start();
+    public void Stop();
+    public void Reset();
+    public void Restart();
+    public static long GetTimestamp();
+    public static TimeSpan GetElapsedTime(long startingTimestamp);
+    public static TimeSpan GetElapsedTime(long startingTimestamp, long endingTimestamp);
+    public override string ToString();
+  }
 }
 
 namespace System.Diagnostics.CodeAnalysis {

@@ -11,6 +11,7 @@ import './nativesFileInfo';
 import './nativesStreams';
 import './nativesTasks';
 import './nativesCancellation';
+import './nativesClock';
 import './nativesString';
 import './nativesCollections';
 import './nativesDynamic';

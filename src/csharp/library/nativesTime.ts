@@ -162,8 +162,10 @@ function ticksFromParts(
   );
 }
 
-function nowTicks(): bigint {
-  return BigInt(Date.now()) * TICKS_PER_MILLISECOND + UNIX_EPOCH_TICKS + LOCAL_OFFSET_TICKS;
+/** The local time now, which the virtual time that sleeps and timers skipped moves forward as they would. */
+function nowTicks(call: NativeCall): bigint {
+  const skipped = BigInt(Math.round(call.frame.runtime.scheduler.now));
+  return (BigInt(Date.now()) + skipped) * TICKS_PER_MILLISECOND + UNIX_EPOCH_TICKS + LOCAL_OFFSET_TICKS;
 }
 
 /** Truncates a double number of a unit to ticks as .NET's `TimeSpan.From*` and `DateTime.Add*` do. */
@@ -555,9 +557,9 @@ defineNatives({
       receiver,
       ticksFromParts(y as number, mo as number, d as number, h as number, mi as number, s as number, ms as number)
     ),
-  'System.DateTime.get_Now': (call) => dateTime(call, nowTicks()),
-  'System.DateTime.get_UtcNow': (call) => dateTime(call, nowTicks() - LOCAL_OFFSET_TICKS),
-  'System.DateTime.get_Today': (call) => dateTime(call, (nowTicks() / TICKS_PER_DAY) * TICKS_PER_DAY),
+  'System.DateTime.get_Now': (call) => dateTime(call, nowTicks(call)),
+  'System.DateTime.get_UtcNow': (call) => dateTime(call, nowTicks(call) - LOCAL_OFFSET_TICKS),
+  'System.DateTime.get_Today': (call) => dateTime(call, (nowTicks(call) / TICKS_PER_DAY) * TICKS_PER_DAY),
   'System.DateTime.get_Date': (call, receiver) => dateTime(call, (ticksOf(receiver) / TICKS_PER_DAY) * TICKS_PER_DAY),
   'System.DateTime.get_Year': (_call, receiver) => partsOf(ticksOf(receiver)).year,
   'System.DateTime.get_Month': (_call, receiver) => partsOf(ticksOf(receiver)).month,

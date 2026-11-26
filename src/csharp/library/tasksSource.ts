@@ -30,6 +30,10 @@ namespace System.Threading {
     public const int Infinite = -1;
     public static readonly TimeSpan InfiniteTimeSpan = new TimeSpan(0, 0, 0, 0, -1);
   }
+  public sealed class Thread {
+    public static void Sleep(int millisecondsTimeout);
+    public static void Sleep(TimeSpan timeout);
+  }
   public class CancellationTokenSource : IDisposable {
     public CancellationTokenSource();
     public CancellationTokenSource(int millisecondsDelay);
