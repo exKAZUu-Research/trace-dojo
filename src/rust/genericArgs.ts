@@ -18,10 +18,24 @@ export function lowerArrayType(ast: Extract<TypeAst, { kind: 'array' }>, scope: 
 export function lowerConstArg(ast: Extract<TypeAst, { kind: 'constArg' }>, scope: TypeScope): Type {
   const param = constParamOf(ast.value, scope);
   if (param) return { kind: 'param', param };
-  if (ast.value.kind === 'bool' || ast.value.kind === 'char') return constValueType(ast.value.value);
-  const value = constInteger(ast.value, scope);
+  // `{ 2 + 1 }` is the constant expression inside its braces.
+  const expr =
+    ast.value.kind === 'block' && ast.value.stmts.length === 0 && ast.value.tail ? ast.value.tail : ast.value;
+  if (expr.kind === 'bool' || expr.kind === 'char') return constValueType(expr.value);
+  const value = constInteger(expr, scope);
   if (value === undefined) compileError(ast.span, '定数の型引数には、整数のリテラルか定数の式を書いてください。');
   return constValueType(value);
+}
+
+/**
+ * A written type argument for a parameter: a lone name given to a const parameter (`M::<SIZE>`) names a constant,
+ * which the parser cannot tell from a type.
+ */
+export function argumentFor(arg: TypeAst, param: TypeParam | undefined): TypeAst {
+  if (!param?.constType || arg.kind !== 'path' || arg.path.segments.length !== 1 || arg.path.segments[0].args) {
+    return arg;
+  }
+  return { kind: 'constArg', value: { kind: 'path', path: arg.path, span: arg.span } as Expr, span: arg.span };
 }
 
 export function withDefaultArgs(def: AdtDef, written: Type[]): Type[] {

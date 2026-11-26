@@ -3,6 +3,7 @@ import type { Expr, PathAst, Span, TypeAst } from './ast';
 import type { Checker } from './checker';
 import { selfParamType } from './checkerCalls';
 import { checkFieldVisible } from './checkerPlaces';
+import { argumentFor } from './genericArgs';
 import { normalize } from './infer';
 import {
   compileError,
@@ -105,7 +106,7 @@ export function typeArgsFor(
   if (written.length !== params.length) {
     compileError(span, `${what} の型引数の数が合いません（${params.length} 個です）。`);
   }
-  return written.map((arg) => c.lowerType(arg));
+  return written.map((arg, index) => c.lowerType(argumentFor(arg, params[index])));
 }
 
 export function applyWrittenFnArgs(

@@ -28,7 +28,7 @@ import type {
   Visibility,
 } from './ast';
 import { checkVariantNames, defaultVariant, discriminants } from './enumItems';
-import { lowerArrayType, lowerConstArg, withDefaultArgs } from './genericArgs';
+import { argumentFor, lowerArrayType, lowerConstArg, withDefaultArgs } from './genericArgs';
 import { Unifier } from './infer';
 import {
   BUILTIN_ENUMS,
@@ -1485,7 +1485,8 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
     compileError(path.span, 'Self::Item のような関連型は、この採点環境では使えません。');
   }
   const binding = resolveTypePath(names, scope.module, path.span);
-  const args = (last.args ?? []).map((arg) => lowerType(arg, scope));
+  const params = binding.kind === 'adt' ? binding.def.params : [];
+  const args = (last.args ?? []).map((arg, index) => lowerType(argumentFor(arg, params[index]), scope));
   switch (binding.kind) {
     case 'prim': {
       if (last.args) compileError(path.span, `${last.name} には型引数を書けません。`);
