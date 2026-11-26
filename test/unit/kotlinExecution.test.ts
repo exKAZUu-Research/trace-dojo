@@ -6877,6 +6877,17 @@ fun main() {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout: '[1, 2]\n[0, 1, 2]\n' });
 });
 
+test('folds the conversions of constants into const vals as kotlinc does', () => {
+  const source = `const val INF = 1e18.toLong()
+const val MOD = 1e9.toInt() + 7
+const val A = 'a'.code
+fun main() { println(listOf(INF, MOD, A)) }`;
+  expect(executeProgram('kotlin', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '[1000000000000000000, 1000000007, 97]\n',
+  });
+});
+
 test('reads enum entries imported under an alias', () => {
   const source = `package demo
 import demo.Color.GREEN as G

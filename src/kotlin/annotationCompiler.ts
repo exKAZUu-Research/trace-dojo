@@ -239,9 +239,26 @@ export abstract class AnnotationCompiler extends BodyCompiler {
           this.isConstantExpression(scope, expression.right)
         );
       }
-      case 'name':
       case 'member': {
+        if (CONSTANT_PROPERTIES.has(expression.name) && this.isConstantExpression(scope, expression.receiver))
+          return true;
         return this.constantProperty(scope, expression)?.isConst === true;
+      }
+      case 'name': {
+        return this.constantProperty(scope, expression)?.isConst === true;
+      }
+      case 'call': {
+        // kotlinc folds a constant's conversions, as `1e18.toLong()`.
+        const { callee } = expression;
+        return (
+          callee.kind === 'member' &&
+          !callee.isSafe &&
+          CONSTANT_CONVERSIONS.has(callee.name) &&
+          expression.args.length === 0 &&
+          expression.typeArgs.length === 0 &&
+          !expression.trailingLambda &&
+          this.isConstantExpression(scope, callee.receiver)
+        );
       }
       default: {
         return false;
@@ -363,6 +380,21 @@ function isOptInMarker(cls: ClassSymbol | undefined): cls is ClassSymbol {
   const value = level?.value as Expression | undefined;
   return !(value && (value.kind === 'member' || value.kind === 'name') && value.name === 'WARNING');
 }
+
+/** The conversions of constants that kotlinc folds into constants. */
+const CONSTANT_CONVERSIONS = new Set([
+  'toByte',
+  'toShort',
+  'toInt',
+  'toLong',
+  'toFloat',
+  'toDouble',
+  'toChar',
+  'toString',
+]);
+
+/** The properties of constants that kotlinc folds into constants: a Char's code and a String's length. */
+const CONSTANT_PROPERTIES = new Set(['code', 'length']);
 
 const CONSTANT_INFIX_OPERATORS = new Set(['shl', 'shr', 'ushr', 'and', 'or', 'xor']);
 
