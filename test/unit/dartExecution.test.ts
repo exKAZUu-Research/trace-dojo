@@ -10795,16 +10795,20 @@ test('a for initializer that begins with await and a name is a declaration of ty
       });
     }
   }
-  // An expression that begins with a literal or an operator is one, as the SDK accepts it.
+  // An expression that begins with a literal, an operator, a keyword such as switch, or a raw string is one, and a
+  // nested comment hides what it holds, as the SDK reads them.
   const accepted = `Future<int> f(int x) async => x;
 Future<void> main() async {
   var k = 0;
   for (await (f(0)); k < 1; k++) {}
   for (await null; k < 2; k++) {}
   for (await -k; k < 3; k++) {}
+  for (await switch (k) { _ => 1 }; k < 4; k++) {}
+  for (await r'a'; k < 5; k++) {}
+  for (await /* /* */ f(0) */ 0; k < 6; k++) {}
   print(k);
 }`;
-  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: '6\n' });
 });
 
 test('an extension application before an await evaluates its receiver first and once, as any receiver', () => {

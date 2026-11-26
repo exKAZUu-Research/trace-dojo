@@ -40,8 +40,8 @@ import {
 } from './convertBase';
 
 const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
-/** The words that begin an expression rather than name a type, which may follow `await` in a for initializer. */
-const EXPRESSION_KEYWORDS = new Set(['null', 'true', 'false', 'new', 'const']);
+/** The keywords that begin an expression rather than name a type, which may follow `await` in a for initializer. */
+const EXPRESSION_KEYWORDS = new Set(['true', 'false', 'new', 'const', 'switch', 'throw']);
 /** `is` and `as`, which, like comparisons, cannot take one another as an unparenthesized operand. */
 const TYPE_OPERATOR_NODES = new Set(['type_test_expression', 'type_cast_expression']);
 const BINARY_NODES = new Set([
@@ -1386,9 +1386,8 @@ export abstract class ExpressionConverter {
       init = this.convertLocalDeclaration(initNodes[0]);
     } else if (initNodes.length > 0) {
       // The SDK's parser reads `await` followed by a name as a declaration of a variable of type await.
-      // Comments between await and the name separate them as whitespace does.
-      const leadingName = /^await(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)+([A-Za-z_$][\w$]*)/u.exec(initNodes[0].text)?.[1];
-      if (leadingName !== undefined && !EXPRESSION_KEYWORDS.has(leadingName)) {
+      const [first, second] = leadingTokens(initNodes[0], 2);
+      if (first?.type === 'await' && second && isNameToken(second)) {
         syntaxError(initNodes[0], "'await' は型ではありません（for の初期化で await の後に名前は書けません）。");
       }
       init = this.fieldExpressions(node, 'init');
@@ -1522,3 +1521,25 @@ function operandsOf(node: Node): Node[] {
 }
 
 export const VAR_WITH_TYPE = 'var と型の名前は、一緒には書けません。どちらか一方にしてください。';
+
+/** The first tokens of a node, comments left out, as the SDK's parser reads them. */
+function leadingTokens(node: Node, count: number): Node[] {
+  const tokens: Node[] = [];
+  const pending: Node[] = [node];
+  for (let next = pending.pop(); next && tokens.length < count; next = pending.pop()) {
+    if (next.type === 'comment') continue;
+    const children = childrenOf(next);
+    if (children.length === 0) tokens.push(next);
+    else pending.push(...children.toReversed());
+  }
+  return tokens;
+}
+
+/**
+ * Whether a token is a name: an identifier, or a keyword spelled as one (`this`, `super`, `dynamic`) other than those
+ * that begin an expression; a literal or a raw string's prefix is none.
+ */
+function isNameToken(token: Node): boolean {
+  if (token.type === 'identifier') return true;
+  return token.type === token.text && /^[A-Za-z_$][\w$]*$/u.test(token.text) && !EXPRESSION_KEYWORDS.has(token.text);
+}
