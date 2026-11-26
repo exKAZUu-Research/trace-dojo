@@ -124,6 +124,11 @@ external class BufferedReader : Closeable {
 
 external class BufferedWriter : Closeable {
     external fun write(text: String)
+    // Writer's other writes, of one character's code, of characters, and of a part of a string, as java.io.Writer has.
+    fun write(c: Int) { write(c.toChar().toString()) }
+    fun write(chars: CharArray) { write(chars.concatToString()) }
+    fun write(text: String, off: Int, len: Int) { write(text.substring(off, off + len)) }
+    fun write(chars: CharArray, off: Int, len: Int) { write(chars.concatToString(off, off + len)) }
     external fun newLine()
     external fun flush()
     external override fun close()
