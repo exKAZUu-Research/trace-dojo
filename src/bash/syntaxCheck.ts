@@ -886,6 +886,10 @@ class ShellGrammarValidator {
       this.consumeNewlines();
       if (this.hasOperator(this.peek(), ')')) return this.advance().end;
       this.parseList(false);
+      // As in a script, a list ends at a newline or at the `)` that closes the substitution; anything else, such as a
+      // `(` right after a command's words, is the token Bash reports.
+      const next = this.peek();
+      if (next.kind !== 'newline' && !this.hasOperator(next, ')')) this.failUnexpected(next);
     }
   }
 
