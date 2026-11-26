@@ -878,6 +878,7 @@ export class Shell implements ArithmeticHost {
       this.store.unsetNamed(`${name}_PID`, false);
     };
     const isWaiting = (): boolean => job.waiting === true;
+    let polledEmpty = false;
     let endStatus = 0;
     job.settleWait = () => {
       if (!isWaiting()) return;
@@ -908,6 +909,13 @@ export class Shell implements ArithmeticHost {
           }
           if (output === '') job.settleWait?.();
           return output !== '';
+        },
+        // A poll never starts the coprocess; polling one that has not run again would wait for it here forever.
+        () => {
+          if (output !== undefined) return;
+          if (polledEmpty)
+            rejectUnsupportedFeature(`まだ動いていない coproc（${name}）の出力の繰り返しの確認（read -t 0）`);
+          polledEmpty = true;
         }
       ),
     });

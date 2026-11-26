@@ -65,9 +65,12 @@ export class ProgramIO {
     return new TextReader(() => text, this.budget, undefined, true, writtenLate);
   }
 
-  /** A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far. */
-  partReader(source: () => string, refill: () => boolean): TextReader {
-    return new TextReader(source, this.budget, refill, true);
+  /**
+   * A reader of a text that arrives in parts, which `refill` adds when the reader has read the text so far;
+   * `onEmptyPoll` runs when `read -t 0` finds nothing in hand to read.
+   */
+  partReader(source: () => string, refill: () => boolean, onEmptyPoll?: () => void): TextReader {
+    return new TextReader(source, this.budget, refill, true, false, onEmptyPoll);
   }
 
   output(): ProgramOutput {
@@ -133,14 +136,19 @@ export class TextReader {
     /** Whether the text comes through a pipe, which a poll finds ready only while text remains. */
     readonly throughPipe = false,
     /** Whether a poll finds the pipe empty until the text is first read, as its writer has not written yet. */
-    readonly writtenLate = false
+    readonly writtenLate = false,
+    private readonly onEmptyPoll?: () => void
   ) {}
 
-  /** Whether a poll of the descriptor finds text ready to read. */
+  /**
+   * Whether a poll of the descriptor finds text ready to read: it answers from the text in hand and never refills,
+   * so it neither starts nor waits for the command writing the pipe.
+   */
   get readyToPoll(): boolean {
     if (!this.throughPipe) return true;
-    if (this.writtenLate && this.position === 0) return false;
-    return !this.isAtEnd;
+    const ready = !(this.writtenLate && this.position === 0) && this.position < this.text.length;
+    if (!ready) this.onEmptyPoll?.();
+    return ready;
   }
 
   get text(): string {

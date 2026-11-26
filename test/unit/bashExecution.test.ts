@@ -377,3 +377,20 @@ test('a here-document the end of the input cuts off still reads its last line, b
   expect(executeProgram('bash', `${show}c <<-EOF\n\thello`)).toMatchObject({ stdout: '[hello]\n', stderr: warning });
   expect(executeProgram('bash', `${show}c <<EOF\n  `)).toMatchObject({ stdout: '[  ]\n', stderr: warning });
 });
+
+test('read -t 0 polls a coprocess output without starting it, as Bash finds nothing written yet', () => {
+  const program = `coproc c { read -r l; echo "got $l"; }
+read -t 0 -u "\${c[0]}" q; echo "st=$?"
+echo hi >&"\${c[1]}"
+read -r y <&"\${c[0]}"; echo "$y"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({ stdout: 'st=1\ngot hi\n', stderr: '' });
+  // Polling it again before it runs would wait for it forever here, so it stops as unsupported.
+  const polledTwice = `coproc c { read -r l; echo "got $l"; }
+read -t 0 -u "\${c[0]}"; read -t 0 -u "\${c[0]}"
+`;
+  expect(executeProgram('bash', polledTwice)).toMatchObject({
+    uncaughtException:
+      'まだ動いていない coproc（c）の出力の繰り返しの確認（read -t 0）は、この採点環境では使えません。',
+  });
+});
