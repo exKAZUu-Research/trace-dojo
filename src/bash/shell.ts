@@ -50,7 +50,7 @@ import {
 } from './targets';
 import type { Trap, TrapCondition } from './trapBuiltins';
 import { TURTLE_PREDICATE_NAMES } from './turtle';
-import { isIdentifier, isValidFunctionName, VariableStore } from './variables';
+import { isIdentifier, isValidFunctionName, type Job, VariableStore } from './variables';
 import { loopHeaderText, traceAssignment, traceLine, traceWords } from './xtrace';
 
 export { BASH_VERSION, type FunctionDefinition } from './runtime';
@@ -364,10 +364,8 @@ export class Shell implements ArithmeticHost {
     const fd = this.highestFreeDescriptor(PROCESS_SUBSTITUTION_FIRST_FD);
     const capture = createCaptureBuffer((cost) => this.runtime.spend(cost));
     // Bash gives a process substitution a process ID, which `$!` holds and `wait` waits for.
-    const pid = this.runtime.allocateProcessId();
-    const job: { status: number; reported: boolean; awaitEnd?: () => void } = { status: 0, reported: false };
-    this.store.jobs.set(pid, job);
-    this.store.lastBackgroundPid = pid;
+    const job: Job = { status: 0, reported: false };
+    this.startJob(job);
     if (direction === '<') {
       job.status = this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
       const file = { input: this.runtime.io.textReader(capture.read()) };
@@ -642,10 +640,19 @@ export class Shell implements ArithmeticHost {
   private runInBackground(command: Statement): number {
     const fds = this.descriptorsWith(0, nullFile(this.runtime.io.textReader('')));
     const status = this.runElementSubshell(command, fds, true);
-    const pid = this.runtime.allocateProcessId();
-    this.store.jobs.set(pid, { status, reported: false });
-    this.store.lastBackgroundPid = pid;
+    this.startJob({ status, reported: false });
     return 0;
+  }
+
+  /**
+   * Registers a command Bash runs asynchronously, a background command, a process substitution, or a coprocess,
+   * under a new process ID, which `$!` then holds.
+   */
+  private startJob(job: Job): number {
+    const pid = this.runtime.allocateProcessId();
+    this.store.jobs.set(pid, job);
+    this.store.lastBackgroundPid = pid;
+    return pid;
   }
 
   /**
@@ -655,18 +662,11 @@ export class Shell implements ArithmeticHost {
    */
   // code-gauge-allow functionNcss -- Wires a coprocess's lazy start, its two descriptors, its job, and its variables together.
   private startCoprocess(name: string, body: Statement): number {
-    const pid = this.runtime.allocateProcessId();
     const input = createCaptureBuffer((cost) => this.runtime.spend(cost));
     let output: string | undefined;
     // The coprocess copies the shell's state when it starts, though it runs later.
     const child = this.forkSubshell(this.fds.clone());
-    const job: {
-      status: number;
-      reported: boolean;
-      finish?: (shellEnds?: boolean) => void;
-      descriptors?: DescriptorTable;
-      waiting?: boolean;
-    } = { status: 0, reported: false, descriptors: child.fds };
+    const job: Job = { status: 0, reported: false, descriptors: child.fds };
     const writeEnd: OpenFile = {
       output: {
         write: (text) => {
@@ -726,7 +726,7 @@ export class Shell implements ArithmeticHost {
       ),
     });
     this.fds.set(writeFd, writeEnd);
-    this.store.jobs.set(pid, job);
+    const pid = this.startJob(job);
     this.assignIndexedArray(name, [String(readFd), String(writeFd)], 'coproc');
     this.assignVariable(`${name}_PID`, String(pid));
     return 0;

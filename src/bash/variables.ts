@@ -94,6 +94,16 @@ export interface VariableView {
 
 export type DestinationIntent = 'local' | 'global' | 'visible';
 
+/** A command Bash runs asynchronously: a background command, a process substitution, or a coprocess. */
+export interface Job {
+  status: number;
+  reported: boolean;
+  finish?: (shellEnds?: boolean) => void;
+  descriptors?: DescriptorTable;
+  waiting?: boolean;
+  awaitEnd?: () => void;
+}
+
 export type IntEvaluator = (expression: string) => bigint | undefined;
 
 export interface NamedWriteOptions {
@@ -210,17 +220,7 @@ export class VariableStore {
    * with, through which it will write; one that stopped waiting for more input is `waiting`. A `>(...)` keeps
    * `awaitEnd`, which `wait` calls to let it read its input to the end.
    */
-  readonly jobs = new Map<
-    number,
-    {
-      status: number;
-      reported: boolean;
-      finish?: (shellEnds?: boolean) => void;
-      descriptors?: DescriptorTable;
-      waiting?: boolean;
-      awaitEnd?: () => void;
-    }
-  >();
+  readonly jobs = new Map<number, Job>();
   /** The process number of the last background command, which `$!` expands to. */
   lastBackgroundPid: number | undefined;
   /** The aliases `alias` defined, by name. */
