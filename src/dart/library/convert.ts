@@ -874,7 +874,7 @@ final class JsonDecoder extends Converter<String, Object?> {
 
 /**
  * In place of the SDK's _JsonStringDecoderSink, whose chunked parser (the VM's convert_patch.dart) reads each chunk
- * as it comes: the chunks so far are parsed again as each arrives, so that an error is reported when its chunk
+ * as it comes: a native checker reads each chunk once as it arrives, so that an error is reported when its chunk
  * arrives, in that chunk at its offset there, as the chunked parser reports it, and the value when the stream ends.
  * What that parser does after an error (a second error, or a value it had completed), and the error of a number or
  * literal a chunk boundary splits, depend on its internal state, so they are reported as unavailable.
@@ -911,22 +911,26 @@ class _JsonStringDecoderSink implements EventSink<String> {
     _chunks.add(chunk);
     if (chunk.isEmpty || _hasFailed) return;
     // An error before the end of the text so far is one no later chunk can mend, which the SDK's chunked parser
-    // reports as soon as its chunk arrives; one at the end waits for more input.
-    final source = _chunks.join();
+    // reports as soon as its chunk arrives; the checker reads each chunk once, and leaves a text cut short waiting.
     try {
-      _jsonDecode(source, null);
+      _checkChunk(chunk);
     } on FormatException catch (error) {
-      final offset = error.offset;
-      if (offset != null && offset < source.length) {
-        _hasFailed = true;
-        final before = source.length - chunk.length;
-        final earlier = source.substring(0, before);
-        if (_endsInToken(earlier)) _afterError();
-        if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(earlier);
-        throw _inChunk(error, offset);
-      }
+      _hasFailed = true;
+      final offset = error.offset!;
+      final before = _length;
+      final earlier = _chunks.sublist(0, _chunks.length - 1).join();
+      if (_endsInToken(earlier)) _afterError();
+      if (offset >= before && chunk.substring(0, offset - before).trim().isEmpty) _commit(earlier);
+      throw _inChunk(error, offset);
+    } finally {
+      _length += chunk.length;
     }
   }
+
+  /** The length of the chunks before the one being added. */
+  int _length = 0;
+
+  external void _checkChunk(String chunk);
 
   Never _afterError() {
     _isRejected = true;
@@ -954,8 +958,10 @@ class _JsonStringDecoderSink implements EventSink<String> {
     try {
       value = _jsonDecode(source, _reviver);
     } on FormatException catch (error) {
-      for (var i = 0; i < _chunks.length - 1; i++) {
-        if (_endsInToken(_chunks[i])) {
+      // Only a boundary between two non-empty chunks can split a token.
+      final filled = _chunks.where((chunk) => chunk.isNotEmpty).toList();
+      for (var i = 0; i < filled.length - 1; i++) {
+        if (_endsInToken(filled[i])) {
           _sink.addError(_unavailableAfterError);
           _sink.close();
           return;
