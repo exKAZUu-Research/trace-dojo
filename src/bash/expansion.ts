@@ -454,10 +454,11 @@ export class Expander {
   ): WordSegment[] {
     if (subscript?.wholeArray) {
       const resolved = resolveTargetName(this.shell, name);
-      // Under `set -u`, Bash counts the elements only of an array that is set, even an empty one.
+      // Under `set -u`, Bash counts the elements only of an array that is set, even an empty one; counting another
+      // abandons the line, and ends the shell only under `set -e`, unlike reading an unset variable.
       const { store } = this.shell;
       if (this.shell.options.nounset && !(store.isArrayName(resolved) && store.hasMaterializedTarget(resolved))) {
-        this.failParameter(name, 'unbound variable');
+        this.shell.discard(`${name}: unbound variable`);
       }
       const count = store.readArrayLength(resolved);
       return this.valueSegments({ kind: 'scalar', value: String(count) }, ctx, expansion.text);
