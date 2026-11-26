@@ -10930,8 +10930,10 @@ test("a function literal's bare return goes with returns of null, not with retur
   const withNull = `void main() {
   int? Function(bool) f = (b) { if (b) return; return null; };
   Future<int?> Function(bool) g = (b) async { if (b) return; return null; };
+  Future<int?> Function(bool) h = (b) async { if (b) return; return nf(); };
   print(f(false));
-}`;
+}
+Future<Null> nf() async => null;`;
   expect(executeProgram('dart', withNull)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
   const withValue = `void main() {
   int? Function(bool) f = (b) {
