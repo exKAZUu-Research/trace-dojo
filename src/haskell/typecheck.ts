@@ -162,24 +162,30 @@ function defineConstructors(decl: RDataDecl): void {
     field.fieldType = first;
     const [con, position] = [...field.positions].find(([candidate]) => own.has(candidate)) as [ConInfo, number];
     const { kinds, record, field: fieldType } = fieldSelectorType(con, position);
-    field.entity.scheme = selectorScheme(kinds, tap(tcon(FUNCTION_TYPE), record, fieldType));
+    const written = con.binders?.map((binder) => binder.index) ?? [];
+    field.entity.scheme = selectorScheme(kinds, tap(tcon(FUNCTION_TYPE), record, fieldType), written);
   }
 }
 
 /**
- * A selector's scheme as GHC's user guide gives it: the variables in the order they occur in its type, record first,
- * all specified, so `@` can instantiate them; a variable its type does not mention stays inferred.
+ * A selector's scheme as GHC's user guide gives it: the variables its type mentions, all specified so `@` can
+ * instantiate them, in the constructor's written `forall` order, else in the order the type mentions them, record
+ * first; a variable its type does not mention stays inferred.
  */
-function selectorScheme(kinds: readonly Kind[], type: Type): Scheme {
-  const order: number[] = [];
+function selectorScheme(kinds: readonly Kind[], type: Type, written: readonly number[]): Scheme {
+  const occurring: number[] = [];
   const visit = (node: Type): void => {
     if (node.tag === 'tgen') {
-      if (!order.includes(node.index)) order.push(node.index);
+      if (!occurring.includes(node.index)) occurring.push(node.index);
     } else {
       for (const child of typeChildren(node)) visit(child);
     }
   };
   visit(type);
+  const order = [
+    ...written.filter((index) => occurring.includes(index)),
+    ...occurring.filter((index) => !written.includes(index)),
+  ];
   const mentioned = order.length;
   for (const index of kinds.keys()) if (!order.includes(index)) order.push(index);
   const renumbered: Type[] = [];
