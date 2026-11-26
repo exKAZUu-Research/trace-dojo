@@ -6,6 +6,7 @@ using System.Reflection;
 
 string[] namespaces =
 [
+    "Microsoft.CSharp.RuntimeBinder",
     "System",
     "System.Collections",
     "System.Collections.Concurrent",
@@ -13,6 +14,7 @@ string[] namespaces =
     "System.Collections.ObjectModel",
     "System.Collections.Specialized",
     "System.Diagnostics",
+    "System.Dynamic",
     "System.Globalization",
     "System.IO",
     "System.Linq",

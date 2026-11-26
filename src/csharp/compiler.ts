@@ -15,7 +15,9 @@ import type { BoundBlock, BoundExpression, BoundStatement } from './bound';
 import { type BindContext, lateOperandName } from './convertBinder';
 import { type DeclaredType, displayMethodIn } from './declarations';
 import { FlowAnalyzer } from './flow';
+import { discardResult } from './lambdaBinder';
 import { COLLECTIONS_SOURCE } from './library/collectionsSource';
+import { DYNAMIC_SOURCE } from './library/dynamicSource';
 import { GLOBALIZATION_SOURCE } from './library/globalizationSource';
 import { IO_SOURCE } from './library/ioSource';
 import { SYSTEM_SOURCE } from './library/systemSource';
@@ -109,7 +111,15 @@ function buildLibrary(): Library {
   const compiler = new Compiler(library, {});
   // One unit, since the library's namespaces refer to each other's types.
   const unit = parseCSharp(
-    [SYSTEM_SOURCE, GLOBALIZATION_SOURCE, COLLECTIONS_SOURCE, TASKS_SOURCE, IO_SOURCE, TURTLE_SOURCE].join('\n'),
+    [
+      SYSTEM_SOURCE,
+      GLOBALIZATION_SOURCE,
+      COLLECTIONS_SOURCE,
+      TASKS_SOURCE,
+      IO_SOURCE,
+      DYNAMIC_SOURCE,
+      TURTLE_SOURCE,
+    ].join('\n'),
     true
   );
   const declared = compiler.declareUnit(unit, root, true);
@@ -267,6 +277,8 @@ export class Compiler extends AttributeBinder {
         local.isRefLocal = node.operands[index].kind === 'refArgument';
       }
       let bound = this.bindValue(node.syntax, context);
+      // An operation that binds to another late one, as a call of an ExpandoObject's member does, drops its value too.
+      if (node.isDiscarded) discardResult(bound);
       if (node.target && target)
         bound = this.convert(bound, target, node.syntax, node.target.isExplicit ? 'explicit' : 'implicit');
       else if (bound.type.kind === 'void' && !node.isDiscarded)

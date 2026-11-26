@@ -255,6 +255,8 @@ export class LookupBinder extends DeclarationBinder {
   /** Whether code in the context may use a member with the access of its declaring type. */
   // code-gauge-allow functionCognitiveComplexity -- Each branch handles one case of the C# rule that the function applies.
   isAccessible(access: string, declaringType: TypeSymbol, context: TypeContext, through?: Type): boolean {
+    // The library's internal members are what `dynamic` binds to as it runs, which no code names.
+    if (access === 'internal' && declaringType.isLibrary) return this.isLateBinding;
     if (access === 'public' || access === 'internal' || access === 'protected internal') return true;
     const within = context.type;
     if (!within) return false;

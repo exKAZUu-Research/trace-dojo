@@ -12,6 +12,7 @@ import './nativesStreams';
 import './nativesTasks';
 import './nativesString';
 import './nativesCollections';
+import './nativesDynamic';
 import './nativesArray';
 import './nativesLinq';
 import './nativesRandom';

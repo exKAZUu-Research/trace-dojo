@@ -4,6 +4,12 @@
 // call as members of them (String's AsSpan and AsMemory, and the MemoryExtensions methods of ReadOnlySpan<T>), which
 // reflection on the type does not list.
 export const DOTNET_TYPES: readonly string[] = [
+  'Microsoft.CSharp.RuntimeBinder.Binder',
+  'Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo',
+  'Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfoFlags',
+  'Microsoft.CSharp.RuntimeBinder.CSharpBinderFlags',
+  'Microsoft.CSharp.RuntimeBinder.RuntimeBinderException',
+  'Microsoft.CSharp.RuntimeBinder.RuntimeBinderInternalCompilerException',
   'System.AccessViolationException',
   'System.Action',
   'System.Action`1',
@@ -271,6 +277,26 @@ export const DOTNET_TYPES: readonly string[] = [
   'System.DllNotFoundException',
   'System.Double',
   'System.DuplicateWaitObjectException',
+  'System.Dynamic.BinaryOperationBinder',
+  'System.Dynamic.BindingRestrictions',
+  'System.Dynamic.CallInfo',
+  'System.Dynamic.ConvertBinder',
+  'System.Dynamic.CreateInstanceBinder',
+  'System.Dynamic.DeleteIndexBinder',
+  'System.Dynamic.DeleteMemberBinder',
+  'System.Dynamic.DynamicMetaObject',
+  'System.Dynamic.DynamicMetaObjectBinder',
+  'System.Dynamic.DynamicObject',
+  'System.Dynamic.ExpandoObject',
+  'System.Dynamic.GetIndexBinder',
+  'System.Dynamic.GetMemberBinder',
+  'System.Dynamic.IDynamicMetaObjectProvider',
+  'System.Dynamic.IInvokeOnGetBinder',
+  'System.Dynamic.InvokeBinder',
+  'System.Dynamic.InvokeMemberBinder',
+  'System.Dynamic.SetIndexBinder',
+  'System.Dynamic.SetMemberBinder',
+  'System.Dynamic.UnaryOperationBinder',
   'System.EntryPointNotFoundException',
   'System.Enum',
   'System.Environment',
@@ -1020,6 +1046,8 @@ export const DOTNET_TYPES: readonly string[] = [
 ];
 
 export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
+  'Microsoft.CSharp.RuntimeBinder.RuntimeBinderException':
+    'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HResult,HelpLink,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Action':
     'BeginInvoke,Clone,Combine,CreateDelegate,DynamicInvoke,EndInvoke,EnumerateInvocationList,Equals,GetHashCode,GetInvocationList,GetObjectData,GetType,Invoke,Method,op_Equality,op_Inequality,ReferenceEquals,Remove,RemoveAll,Target,ToString',
   'System.Action`1':
@@ -1159,6 +1187,17 @@ export const DOTNET_MEMBERS: Readonly<Record<string, string>> = {
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString',
   'System.Double':
     'Abs,Acos,Acosh,AcosPi,Asin,Asinh,AsinPi,Atan,Atan2,Atan2Pi,Atanh,AtanPi,BitDecrement,BitIncrement,Cbrt,Ceiling,Clamp,ClampNative,CompareTo,ConvertToInteger,ConvertToIntegerNative,CopySign,Cos,Cosh,CosPi,CreateChecked,CreateSaturating,CreateTruncating,DegreesToRadians,E,Epsilon,Equals,Exp,Exp10,Exp10M1,Exp2,Exp2M1,ExpM1,Floor,FusedMultiplyAdd,GetHashCode,GetType,GetTypeCode,Hypot,Ieee754Remainder,ILogB,IsEvenInteger,IsFinite,IsInfinity,IsInteger,IsNaN,IsNegative,IsNegativeInfinity,IsNormal,IsOddInteger,IsPositive,IsPositiveInfinity,IsPow2,IsRealNumber,IsSubnormal,Lerp,Log,Log10,Log10P1,Log2,Log2P1,LogP1,Max,MaxMagnitude,MaxMagnitudeNumber,MaxNative,MaxNumber,MaxValue,Min,MinMagnitude,MinMagnitudeNumber,MinNative,MinNumber,MinValue,MultiplyAddEstimate,NaN,NegativeInfinity,NegativeZero,op_Equality,op_GreaterThan,op_GreaterThanOrEqual,op_Inequality,op_LessThan,op_LessThanOrEqual,Parse,Pi,PositiveInfinity,Pow,RadiansToDegrees,ReciprocalEstimate,ReciprocalSqrtEstimate,ReferenceEquals,RootN,Round,ScaleB,Sign,Sin,SinCos,SinCosPi,Sinh,SinPi,Sqrt,Tan,Tanh,TanPi,Tau,ToString,Truncate,TryFormat,TryParse',
+  'System.Dynamic.CallInfo': 'ArgumentCount,ArgumentNames,Equals,GetHashCode,GetType,ReferenceEquals,ToString',
+  'System.Dynamic.DynamicObject':
+    'Equals,GetDynamicMemberNames,GetHashCode,GetMetaObject,GetType,ReferenceEquals,ToString,TryBinaryOperation,TryConvert,TryCreateInstance,TryDeleteIndex,TryDeleteMember,TryGetIndex,TryGetMember,TryInvoke,TryInvokeMember,TrySetIndex,TrySetMember,TryUnaryOperation',
+  'System.Dynamic.ExpandoObject': 'Equals,GetHashCode,GetType,ReferenceEquals,ToString',
+  'System.Dynamic.GetMemberBinder':
+    'Bind,BindDelegate,Defer,Equals,FallbackGetMember,GetHashCode,GetType,GetUpdateExpression,IgnoreCase,Name,ReferenceEquals,ReturnType,ToString,UpdateLabel',
+  'System.Dynamic.IDynamicMetaObjectProvider': 'GetMetaObject',
+  'System.Dynamic.InvokeMemberBinder':
+    'Bind,BindDelegate,CallInfo,Defer,Equals,FallbackInvoke,FallbackInvokeMember,GetHashCode,GetType,GetUpdateExpression,IgnoreCase,Name,ReferenceEquals,ReturnType,ToString,UpdateLabel',
+  'System.Dynamic.SetMemberBinder':
+    'Bind,BindDelegate,Defer,Equals,FallbackSetMember,GetHashCode,GetType,GetUpdateExpression,IgnoreCase,Name,ReferenceEquals,ReturnType,ToString,UpdateLabel',
   'System.EntryPointNotFoundException':
     'Data,Equals,GetBaseException,GetHashCode,GetObjectData,GetType,HelpLink,HResult,InnerException,Message,ReferenceEquals,Source,StackTrace,TargetSite,ToString,TypeName',
   'System.Enum':
