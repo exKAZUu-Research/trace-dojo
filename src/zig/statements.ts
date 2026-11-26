@@ -501,10 +501,9 @@ export abstract class StatementCompiler extends CallCompiler {
         if (destination.kind === 'identifier' && isDiscardName(destination)) continue;
         const variable = this.comptimeVariableOf(destination);
         if (!variable) return this.error(target, 'comptime の分割代入で代入できるのは、comptime var か _ だけです。');
-        // A literal's elements may read the targets that earlier elements store, as Zig re-reads them; any other value
-        // was computed once already, and code it called cannot see the function's comptime vars.
-        const literal = unwrapParens(statement.value);
-        if (literal.kind !== 'arrayInit' || literal.type) {
+        // Zig stores an anonymous literal reached through parentheses, branches, and block breaks element by element,
+        // so its later elements see what earlier targets stored; any other value is computed once, as here.
+        if (!reachesAnonymousLiteral(statement.value)) {
           const { type } = this.compile(destination);
           this.refuseComptimeStoreUnderRuntimeCondition(variable, target);
           const element = this.elementOf(value, index, elementTypes[index], isArray, statement);
@@ -3362,6 +3361,33 @@ export abstract class StatementCompiler extends CallCompiler {
   protected comptimeInt(): Type {
     return COMPTIME_INT;
   }
+}
+
+/** Whether a value's result location reaches an anonymous literal, as `.{ a, b }` in `blk: { break :blk .{ a, b }; }`. */
+function reachesAnonymousLiteral(expression: Expression): boolean {
+  const value = unwrapParens(expression);
+  if (value.kind === 'arrayInit') return !value.type;
+  if (value.kind === 'if')
+    return (
+      reachesAnonymousLiteral(value.consequent) || (value.otherwise ? reachesAnonymousLiteral(value.otherwise) : false)
+    );
+  if (value.kind === 'block' && value.label) return breaksWithLiteral(value.statements, value.label.name);
+  return false;
+}
+
+/** Whether a statement among these breaks out of the block labeled `label` with an anonymous literal. */
+function breaksWithLiteral(statements: readonly Statement[], label: string): boolean {
+  const reaches = (expression: Expression): boolean => {
+    if (expression.kind === 'break')
+      return (
+        expression.label?.name === label && expression.value !== undefined && reachesAnonymousLiteral(expression.value)
+      );
+    if (expression.kind === 'block') return breaksWithLiteral(expression.statements, label);
+    if (expression.kind === 'if')
+      return reaches(expression.consequent) || (expression.otherwise ? reaches(expression.otherwise) : false);
+    return false;
+  };
+  return statements.some((statement) => statement.kind === 'expression' && reaches(statement.expression));
 }
 
 function unwrapParens(expression: Expression): Expression {
