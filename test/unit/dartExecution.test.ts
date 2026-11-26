@@ -10784,6 +10784,29 @@ test('Dart DateTime computes and prints dates as the SDK does', () => {
   });
 });
 
+test('a for initializer that begins with await and a name is a declaration of type await, as the SDK reads it', () => {
+  const message = "'await' は型ではありません（for の初期化で await の後に名前は書けません）。";
+  for (const init of ['await f(0)', 'await f(0) + 1']) {
+    for (const loop of [`for (${init}; k < 3; k++) {}`, `print([for (${init}; k < 3; k++) k]);`]) {
+      const program = `Future<int> f(int x) async => x;\nFuture<void> main() async {\n  var k = 0;\n  ${loop}\n}`;
+      expect(executeProgram('dart', program)).toMatchObject({
+        kind: 'compileError',
+        diagnostics: [{ row: 3, message }],
+      });
+    }
+  }
+  // An expression that begins with a literal or an operator is one, as the SDK accepts it.
+  const accepted = `Future<int> f(int x) async => x;
+Future<void> main() async {
+  var k = 0;
+  for (await (f(0)); k < 1; k++) {}
+  for (await null; k < 2; k++) {}
+  for (await -k; k < 3; k++) {}
+  print(k);
+}`;
+  expect(executeProgram('dart', accepted)).toMatchObject({ kind: 'executed', stdout: '3\n' });
+});
+
 test('an extension application before an await evaluates its receiver first and once, as any receiver', () => {
   // Expected output from Dart SDK 3.13.7.
   const program = `class Box { int v = 0; }

@@ -40,6 +40,8 @@ import {
 } from './convertBase';
 
 const COMPARISON_NODES = new Set(['equality_expression', 'relational_expression']);
+/** The words that begin an expression rather than name a type, which may follow `await` in a for initializer. */
+const EXPRESSION_KEYWORDS = new Set(['null', 'true', 'false', 'new', 'const']);
 /** `is` and `as`, which, like comparisons, cannot take one another as an unparenthesized operand. */
 const TYPE_OPERATOR_NODES = new Set(['type_test_expression', 'type_cast_expression']);
 const BINARY_NODES = new Set([
@@ -1383,6 +1385,11 @@ export abstract class ExpressionConverter {
     if (initNodes.length === 1 && initNodes[0].type === 'local_variable_declaration') {
       init = this.convertLocalDeclaration(initNodes[0]);
     } else if (initNodes.length > 0) {
+      // The SDK's parser reads `await` followed by a name as a declaration of a variable of type await.
+      const leadingName = /^await\s+([A-Za-z_$][\w$]*)/u.exec(initNodes[0].text)?.[1];
+      if (leadingName !== undefined && !EXPRESSION_KEYWORDS.has(leadingName)) {
+        syntaxError(initNodes[0], "'await' は型ではありません（for の初期化で await の後に名前は書けません）。");
+      }
       init = this.fieldExpressions(node, 'init');
     }
     const conditionNodes = fieldsOf(node, 'condition');
