@@ -212,8 +212,9 @@ export function factorType(type: DartType, removed: DartType): DartType {
   // A FutureOr is factored by its normal form, as FutureOr<Object> is Object.
   const normal = norm(type);
   if (!sameType(normal, type)) return factorType(normal, removed);
-  const nonNull = nonNullable(type);
-  // A type parameter splits like any `R?` when it is written with `?`; a bare one, nullable through its bound, does not.
+  // A type parameter written with `?` splits like any `R?`, into the parameter without that `?`, which stays
+  // potentially nullable through a nullable bound; a bare one, nullable only through its bound, does not split.
+  const nonNull = type.kind === 'typeParam' ? { ...type, nullable: false } : nonNullable(type);
   if ((type.kind !== 'typeParam' || type.nullable) && isNullable(type) && !sameType(nonNull, type)) {
     const rest = factorType(nonNull, removed);
     return isSubtype(NULL, removed) ? rest : makeNullable(rest);
@@ -1069,6 +1070,8 @@ export function numericClassOf(type: DartType): 'int' | 'double' | 'num' | undef
 export function promotionTarget(current: DartType, tested: DartType): DartType | undefined {
   if (sameType(current, tested)) return undefined;
   if (isSubtype(tested, current)) {
+    // A value known to be null has the type Null, which is no type parameter's promotion.
+    if (tested.kind === 'null') return tested;
     if (current.kind === 'typeParam' && !current.promoted) return { ...current, promoted: tested, nullable: false };
     return tested;
   }
