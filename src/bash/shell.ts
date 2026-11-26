@@ -379,7 +379,15 @@ export class Shell implements ArithmeticHost {
     // reads the action as a new script then (`SEVAL_RESETLINE`).
     this.lineShift = condition === 'EXIT' ? trap.row : trap.row - this.currentRow;
     try {
-      this.runStatements(trap.statements);
+      // As the script's own lines are, each line of the action that an error abandons ends alone, setting `$?`.
+      for (const unit of trap.units ?? [trap.statements]) {
+        try {
+          this.runStatements(unit);
+        } catch (error) {
+          if (!(error instanceof DiscardSignal)) throw error;
+          this.store.lastStatus = error.status;
+        }
+      }
       reportError();
     } finally {
       this.runningTraps.delete(condition);

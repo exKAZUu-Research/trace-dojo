@@ -67,9 +67,9 @@ const UNSUPPORTED_SUFFIX = 'は、この採点環境では使えません。';
  * The commands of a `trap` action, read when the trap is set, numbered as the `trap` command's line so that their
  * steps show there, or `undefined` for an action with a syntax error, which Bash finds only as it runs the action.
  */
-export function parseTrapAction(text: string, row: number): Statement[] | undefined {
+export function parseTrapAction(text: string, row: number): Statement[][] | undefined {
   try {
-    return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
+    return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units;
   } catch (error) {
     if (!(error instanceof CompileError)) throw error;
     const message = error.diagnostics[0]?.message ?? '';
@@ -83,7 +83,7 @@ export function parseTrapAction(text: string, row: number): Statement[] | undefi
  * The commands of a `trap` action with a syntax error that Bash runs before it reaches the error: those of the lines
  * before the line of the error that read as complete commands, numbered as `parseTrapAction` numbers them.
  */
-export function parseTrapActionPrefix(text: string, row: number): Statement[] {
+export function parseTrapActionPrefix(text: string, row: number): Statement[][] {
   const lines = text.split('\n');
   let errorRow = lines.length;
   try {
@@ -95,7 +95,7 @@ export function parseTrapActionPrefix(text: string, row: number): Statement[] {
   for (let count = Math.min(errorRow, lines.length); count > 0; count--) {
     const text = lines.slice(0, count).join('\n');
     const prefix = parseTrapAction(text, row);
-    if (prefix !== undefined && endsAtLineEnd(text, prefix.length)) return prefix;
+    if (prefix !== undefined && endsAtLineEnd(text, prefix.flat().length)) return prefix;
   }
   return [];
 }
