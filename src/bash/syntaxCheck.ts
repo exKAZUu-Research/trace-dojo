@@ -711,9 +711,12 @@ class ShellGrammarValidator {
   private readonly stream: ShellTokenStream;
   private cached: ShellToken | undefined;
   private cachedContext: WordContext = 'argument';
-  /** How many function bodies, subshells, and coprocesses enclose the command being read. */
+  /** How many subshells and coprocesses enclose the command being read. */
   private separateShellDepth = 0;
-  /** How many compound commands and `&&` or `||` lists enclose the command being read, which may not run it. */
+  /**
+   * How many compound commands, function bodies, and `&&` or `||` lists enclose the command being read, which may
+   * not run it.
+   */
   private conditionalDepth = 0;
   /**
    * What the commands of the line being read that run in this shell set `extglob` to, in order, and whether they may
@@ -1164,8 +1167,8 @@ class ShellGrammarValidator {
     if (!validCompound || bodyLead.value === 'function' || bodyLead.value === 'time' || bodyLead.value === 'coproc') {
       this.failUnexpected(bodyLead);
     }
-    // A function body runs only when the function is called, which a reading of the script cannot tell.
-    this.inSeparateShell(() => this.parseCompoundWithRedirections());
+    // A function body runs in this shell only when the function is called, which only the run can tell.
+    this.conditionally(() => this.parseCompoundWithRedirections());
   }
 
   // code-gauge-allow functionCognitiveComplexity -- Parses simple commands (redirections, prefix assignments, arguments) and `name () body` functions.
