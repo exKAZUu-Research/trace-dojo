@@ -9625,6 +9625,20 @@ Future<void> main() async {
   });
 });
 
+test('a Directory rename of a file fails, as the OS fails it, and leaves the file', () => {
+  const source = `import 'dart:io';
+void main() {
+  File('a.txt').writeAsStringSync('x');
+  try { Directory('a.txt').renameSync('b.txt'); } catch (e) { print(e); }
+  print([File('a.txt').existsSync(), File('b.txt').existsSync()]);
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      "FileSystemException: Rename failed, path = 'a.txt' (OS Error: Not a directory, errno = 20)\n[true, false]\n",
+  });
+});
+
 test('an empty file path names nothing, as the OS fails it', () => {
   const source = `import 'dart:io';
 void main() {

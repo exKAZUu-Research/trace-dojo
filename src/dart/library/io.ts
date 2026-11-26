@@ -889,6 +889,10 @@ class _Directory extends FileSystemEntity implements Directory {
   Directory get absolute => isAbsolute ? this : _Directory(FileSystemEntity._absolutePath(path));
   bool existsSync() => FileSystemEntity._kindOf(path) == 1;
   Directory renameSync(String newPath) {
+    // A directory's rename fails on a file, as the OS's does for a path its call expects a directory at.
+    if (FileSystemEntity._kindOf(path) == 0) {
+      throw FileSystemException("Rename failed", path, const OSError("Not a directory", 20));
+    }
     _rename(path, newPath, "Rename failed");
     return Directory(newPath);
   }
