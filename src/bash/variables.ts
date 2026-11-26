@@ -108,6 +108,8 @@ export interface Job {
    * whose input nothing can write any more reads its end, so it ends, unless it would run more then.
    */
   settleWait?: () => void;
+  /** Unsets a coprocess's `NAME` and `NAME_PID`, as Bash does once it has reaped the coprocess. */
+  dispose?: () => void;
   awaitEnd?: () => void;
 }
 

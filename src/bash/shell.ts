@@ -483,13 +483,19 @@ export class Shell implements ArithmeticHost {
     const job: Job = { status: 0, reported: false };
     this.startJob(job);
     if (direction === '<') {
-      job.status = this.runSubshell(body, this.descriptorsWith(1, { output: capture.target }));
+      job.status = this.forkSubshell(
+        this.descriptorsWith(1, { output: capture.target }),
+        undefined,
+        1,
+        false,
+        true
+      ).run(body);
       const file = { input: this.runtime.io.textReader(capture.read()) };
       this.fds.set(fd, file);
       this.processSubstitutions.push({ fd, file });
     } else {
       // The commands copy the shell's state now, as Bash forks them here, though they run later.
-      const child = this.forkSubshell(this.fds.clone());
+      const child = this.forkSubshell(this.fds.clone(), undefined, 1, false, true);
       let ran = false;
       const file = {
         output: {
@@ -843,6 +849,10 @@ export class Shell implements ArithmeticHost {
       output = capture.read();
     };
     job.finish = run;
+    job.dispose = () => {
+      this.store.unsetNamed(name, false);
+      this.store.unsetNamed(`${name}_PID`, false);
+    };
     const isWaiting = (): boolean => job.waiting === true;
     let endStatus = 0;
     job.settleWait = () => {
@@ -1757,7 +1767,9 @@ export class Shell implements ArithmeticHost {
     fds: DescriptorTable,
     overrides?: SubshellOverrides,
     levels = 1,
-    resetsLoops = false
+    resetsLoops = false,
+    /** Whether the child traces one level deeper, as the commands of a substitution do. */
+    tracesDeeper = false
   ): {
     fds: DescriptorTable;
     shell: Shell;
@@ -1771,6 +1783,7 @@ export class Shell implements ArithmeticHost {
       store: childStore,
       ...this.childContext(),
       ...(overrides ? { options: overrides.options, traceLevel: overrides.traceLevel } : {}),
+      ...(tracesDeeper ? { traceLevel: this.traceLevel + 1 } : {}),
       fds,
       lineShift,
       readShift: lineShift,

@@ -26,6 +26,10 @@ export const waitBuiltin: Builtin = (shell, args) => {
   // `wait -n` returns as soon as one of them has ended, so a waiting coprocess matters only when none has.
   const oneEnded = options.has('n') && targets.some((job) => job?.reported === false && job.waiting !== true);
   if (!oneEnded) for (const job of targets) job?.settleWait?.();
+  // A coprocess that has ended is reaped once waited for, which unsets its variables.
+  if (!options.has('n')) {
+    for (const job of targets) if (job?.finish === undefined && job?.waiting !== true) job?.dispose?.();
+  }
   // A `>(...)` is waited for when named, or with no operand when `$!` is still its process ID, as Bash 5.3 does.
   const awaited = pids.length > 0 ? pids : [shell.store.lastBackgroundPid].filter((pid) => pid !== undefined);
   for (const pid of awaited) jobs.get(pid)?.awaitEnd?.();
