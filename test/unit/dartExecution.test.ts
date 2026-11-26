@@ -6962,6 +6962,8 @@ Future<void> main() async {
     ['FutureOr<Object?>', 'Object?', 'FutureOr<Object?>'],
     ['Object?', 'FutureOr<Object>?', 'Object?'],
     ['FutureOr<void>', 'FutureOr<dynamic>', 'FutureOr<void>'],
+    // An Object-like type is the bound with a `?` when the other type may hold null.
+    ['FutureOr<Object>', 'FutureOr<int?>', 'FutureOr<Object>?'],
   ]) {
     const source = `import 'dart:async';\nvoid f(${left} a, ${right} b) { bool s = true ? a : b; }\nvoid main() {}`;
     expect(executeProgram('dart', source)).toMatchObject({

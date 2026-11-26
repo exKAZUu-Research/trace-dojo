@@ -719,9 +719,10 @@ function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   const right = withoutOuterQuestionMark(b);
   // A type nullable only through FutureOr's argument, as FutureOr<int?>, has no `?` to take off.
   if (left || right) return makeNullable(upperBound(left ?? a, right ?? b));
-  // An Object-like type bounds as it is written, as FutureOr<Object> stays, which the SDK's diagnostics name.
-  if (isObject(a)) return a;
-  if (isObject(b)) return b;
+  // An Object-like type bounds as it is written, as FutureOr<Object> stays, which the SDK's diagnostics name, and
+  // with a `?` when the other type may hold null.
+  if (isObject(a)) return isNonNullable(b) ? a : makeNullable(a);
+  if (isObject(b)) return isNonNullable(a) ? b : makeNullable(b);
   if (a.kind === 'typeParam' || b.kind === 'typeParam') return typeParamUpperBound(a, b);
   if (futureOrValue(a) || futureOrValue(b)) return futureOrUpperBound(a, b);
   return undefined;
