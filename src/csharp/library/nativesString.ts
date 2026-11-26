@@ -552,6 +552,11 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.ToLower`]: (call, receiver) =>
     caseMappedText(receiverText(receiver), false, currentCulture(call.frame.runtime).isInvariant),
   [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false, true),
+  [`${STRING}.Normalize`]: (call, receiver, [form]) => normalizedText(call, receiverText(receiver), form, 'strInput'),
+  [`${STRING}.IsNormalized`]: (call, receiver, [form]) => {
+    const text = receiverText(receiver);
+    return normalizedText(call, text, form, 'source') === text;
+  },
   [`${STRING}.ToUpper`]: (call, receiver) =>
     caseMappedText(receiverText(receiver), true, currentCulture(call.frame.runtime).isInvariant),
   [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, true),
@@ -571,7 +576,6 @@ const stringNatives: Record<string, NativeMethod> = {
     trimWith(receiverText(receiver), charsOf(char as Value), false, true),
   [`${STRING}.TrimEnd(char[]?)`]: (call, receiver, [chars]) =>
     trimWith(receiverText(receiver), charsOf(chars as Value), false, true),
-  [`${STRING}.IsNormalized`]: (call, receiver) => receiverText(receiver) === receiverText(receiver).normalize(),
   [`${STRING}.Compare`]: (call, _receiver, args) => {
     if (args.length === 5) return compareRanges(call, args);
     const [a, b] = args as (string | undefined)[];
@@ -813,6 +817,25 @@ function lastStringIndex(
   const [haystack, target] = ordinalForms(text.slice(first, first + count), needle, comparison);
   const found = haystack.lastIndexOf(target);
   return found === -1 ? -1 : first + found;
+}
+
+const NORMALIZATION_FORMS = new Map<number, 'NFC' | 'NFD' | 'NFKC' | 'NFKD'>([
+  [1, 'NFC'],
+  [2, 'NFD'],
+  [5, 'NFKC'],
+  [6, 'NFKD'],
+]);
+
+/**
+ * The text in a normalization form (FormC when none is given), by the host's Unicode data. .NET rejects a lone
+ * surrogate, which the host would keep, and with `InvariantGlobalization` it has no Unicode data and returns the text.
+ */
+function normalizedText(call: NativeCall, text: string, form: unknown, parameter: string): string {
+  const hostForm = NORMALIZATION_FORMS.get((form as number | undefined) ?? 1);
+  if (!hostForm) fail('System.ArgumentException', 'Invalid or unsupported normalization form.', 'normalizationForm');
+  if (cultureSettingsOf(call.frame.runtime).isGlobalizationInvariant) return text;
+  if (!text.isWellFormed()) fail('System.ArgumentException', 'String contains invalid Unicode code points.', parameter);
+  return text.normalize(hostForm);
 }
 
 function failLastStart(call: NativeCall): never {

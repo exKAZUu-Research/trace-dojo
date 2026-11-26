@@ -143,6 +143,16 @@ defineNatives({
     }
     return encoding;
   },
+  // A lone surrogate counts as the three bytes of U+FFFD, which both .NET's replacement fallback and the host write.
+  [`${ENCODING}.GetByteCount(char[])`]: (_call, _receiver, [chars]) => {
+    if (chars === undefined) fail('System.ArgumentNullException', undefined, 'chars');
+    const text = String.fromCharCode(...(chars as CsArray).values.map((unit) => unit as number));
+    return new TextEncoder().encode(text).length;
+  },
+  [`${ENCODING}.GetByteCount(string)`]: (_call, _receiver, [text]) => {
+    if (text === undefined) fail('System.ArgumentNullException', undefined, 'chars');
+    return new TextEncoder().encode(stringText(text as CsString | string)).length;
+  },
   [`${ENCODING}.GetBytes(string)`]: (call, _receiver, [text]) => {
     if (text === undefined) fail('System.ArgumentNullException', undefined, 's');
     const bytes = [...new TextEncoder().encode(stringText(text as CsString | string))];

@@ -773,3 +773,19 @@ test('syntax and library members beyond the grader are rejected as unavailable',
     diagnostics: [{ row: 0, message: expect.stringContaining('この採点環境では使えません。') }],
   });
 });
+
+// .NET normalizes by ICU's Unicode data, which the host's matches; a lone surrogate throws, and InvariantGlobalization
+// has no Unicode data, so it returns the text as it is.
+test('strings normalize as in .NET', () => {
+  const program = String.raw`using System.Text;
+string s = "é ｶﾞ ①";
+Console.WriteLine($"{s.Normalize().Length} {s.Normalize(NormalizationForm.FormKC).Length} {s.Normalize(NormalizationForm.FormD).IsNormalized(NormalizationForm.FormD)} {s.IsNormalized()}");
+try { "a\uD800".Normalize(); } catch (ArgumentException e) { Console.WriteLine(e.Message); }
+`;
+  expect(executeProgram('csharp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: "6 5 True False\nString contains invalid Unicode code points. (Parameter 'strInput')\n",
+  });
+  const invariant = `#:property InvariantGlobalization=true\nConsole.WriteLine("e\\u0301".Normalize().Length);\n`;
+  expect(executeProgram('csharp', invariant)).toMatchObject({ kind: 'executed', stdout: '2\n' });
+});

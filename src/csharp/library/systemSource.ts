@@ -195,6 +195,10 @@ namespace System {
     public char[] ToCharArray(int startIndex, int length);
     public string ToLower();
     public string ToLowerInvariant();
+    public bool IsNormalized();
+    public bool IsNormalized(System.Text.NormalizationForm normalizationForm);
+    public string Normalize();
+    public string Normalize(System.Text.NormalizationForm normalizationForm);
     public override string ToString();
     public string ToUpper();
     public string ToUpperInvariant();
@@ -207,7 +211,6 @@ namespace System {
     public string TrimStart();
     public string TrimStart(char trimChar);
     public string TrimStart(params char[]? trimChars);
-    public bool IsNormalized();
     public static int Compare(string? strA, string? strB);
     public static int Compare(string? strA, string? strB, bool ignoreCase);
     public static int Compare(string? strA, string? strB, StringComparison comparisonType);
@@ -1663,8 +1666,11 @@ namespace System.Reflection {
   }
 }
 namespace System.Text {
+  public enum NormalizationForm { FormC = 1, FormD = 2, FormKC = 5, FormKD = 6 }
   public abstract class Encoding {
     public static Encoding UTF8 { get; }
+    public virtual int GetByteCount(char[] chars);
+    public virtual int GetByteCount(string chars);
     public virtual byte[] GetBytes(string s);
     public virtual string GetString(byte[] bytes);
     public string GetString(ReadOnlySpan<byte> bytes);
