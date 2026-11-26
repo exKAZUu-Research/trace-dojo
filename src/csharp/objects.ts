@@ -288,6 +288,8 @@ export function defaultMessage(type: NamedType): string {
     'System.OperationCanceledException': 'The operation was canceled.',
     'System.Threading.Tasks.TaskCanceledException': 'A task was canceled.',
     'System.MemberAccessException': 'Cannot access member.',
+    'System.Threading.SynchronizationLockException':
+      'Object synchronization method was called from an unsynchronized block of code.',
     'System.MissingMemberException': 'Attempted to access a missing member.',
     'System.Reflection.TargetInvocationException': 'Exception has been thrown by the target of an invocation.',
   };

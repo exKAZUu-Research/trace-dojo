@@ -707,6 +707,9 @@ export abstract class StatementBinder extends PatternBinder {
     if (type.kind === 'error' || type.kind === 'null') return;
     const disposable = this.library.typeNamed(isAwait ? 'System.IAsyncDisposable' : 'System.IDisposable').declaredType;
     if (this.conversions.implicit(type, disposable) !== undefined) return;
+    // A ref struct implements an interface without converting to it, which `using` disposes it by all the same.
+    if (isRefLikeType(type) && (type as NamedType).symbol.interfaces.some((face) => face.symbol === disposable.symbol))
+      return;
     if (isAwait) {
       this.error(
         position,
@@ -1163,6 +1166,8 @@ export abstract class StatementBinder extends PatternBinder {
 
   private bindLockStatement(statement: Extract<Statement, { kind: 'lock' }>, context: BindContext): BoundStatement {
     const value = this.bindTypedValue(statement.value, context);
+    if (value.type.kind === 'named' && value.type.symbol.fullName === 'System.Threading.Lock')
+      return this.bindLockScope(statement, value, value.type, context);
     if (value.type.kind !== 'error' && !isReferenceType(value.type) && value.type.kind !== 'null')
       this.error(
         statement.value,
@@ -1171,6 +1176,54 @@ export abstract class StatementBinder extends PatternBinder {
       );
     const body = this.bindEmbedded(statement.body, context);
     return { kind: 'lock', value, body, row: statement.row, step: 'none' };
+  }
+
+  /** `lock` on a `System.Threading.Lock`, which C# 13 runs as `using (value.EnterScope()) body`. */
+  private bindLockScope(
+    statement: Extract<Statement, { kind: 'lock' }>,
+    value: BoundExpression,
+    lockType: NamedType,
+    context: BindContext
+  ): BoundStatement {
+    const enterScope = lockType.symbol.methods.find((method) => method.name === 'EnterScope') as MethodSymbol;
+    // The scope that the lock is held by is a ref struct, which no `yield` may keep, as no `await` may.
+    if (anyStatement(statement.body, (inner) => inner.kind === 'yield' && inner.value !== undefined))
+      this.error(
+        statement.value,
+        'CS4007',
+        `'${displayType(enterScope.returnType, true)}' 型のインスタンスは、'await' または 'yield' 境界を越えて保持することはできません。`
+      );
+    const scope = new LocalScope(context.scope, context.fn);
+    const local = new LocalSymbol('\0using', enterScope.returnType, statement.row, statement.column);
+    local.isHidden = true;
+    context.fn.addLocal(local);
+    const enter: BoundExpression = {
+      kind: 'call',
+      method: enterScope,
+      receiver: value,
+      args: [],
+      typeArgs: [],
+      owner: lockType,
+      isVirtual: false,
+      type: enterScope.returnType,
+      row: statement.row,
+    };
+    const body = this.bindEmbedded(statement.body, { scope, fn: context.fn });
+    const declaration: BoundStatement = {
+      kind: 'localDeclaration',
+      local,
+      value: enter,
+      row: statement.row,
+      step: 'callsOnly',
+    };
+    return {
+      kind: 'block',
+      statements: this.nestUsings([{ declaration, local }], body, false),
+      capturedLocals: [],
+      locals: scope.locals,
+      row: statement.row,
+      step: 'none',
+    };
   }
 
   private bindExpressionStatement(

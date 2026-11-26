@@ -39,6 +39,22 @@ namespace System {
 
 namespace System.Threading {
   public enum LazyThreadSafetyMode { None = 0, PublicationOnly = 1, ExecutionAndPublication = 2 }
+  public sealed class Lock {
+    public Lock();
+    public bool IsHeldByCurrentThread { get; }
+    public void Enter();
+    public bool TryEnter();
+    public bool TryEnter(int millisecondsTimeout);
+    public bool TryEnter(TimeSpan timeout);
+    public void Exit();
+    public Scope EnterScope();
+    public ref struct Scope : IDisposable { private Lock? _lockObj; public void Dispose(); }
+  }
+  public class SynchronizationLockException : SystemException {
+    public SynchronizationLockException();
+    public SynchronizationLockException(string? message);
+    public SynchronizationLockException(string? message, Exception? innerException);
+  }
   public static class Timeout {
     public const int Infinite = -1;
     public static readonly TimeSpan InfiniteTimeSpan = new TimeSpan(0, 0, 0, 0, -1);
