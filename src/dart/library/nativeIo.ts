@@ -1,4 +1,10 @@
-import { type FileHandle, FileSystemError, type FileSystemErrorCode, parentOf } from '../../interpreter/programIo';
+import {
+  type FileHandle,
+  FileSystemError,
+  type FileSystemErrorCode,
+  parentOf,
+  type VirtualFileSystem,
+} from '../../interpreter/programIo';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
 import type { DartObject, NativeState, Value } from '../values';
@@ -25,7 +31,7 @@ function rejectFileAncestor(runtime: Runtime, path: string): void {
   const ends = [...path.replace(/\/+$/u, '').matchAll(/\/+/gu)]
     .map((match) => match.index)
     .filter((index) => index > 0);
-  if (ends.some((end) => runtime.io.files.kindOf(path.slice(0, end)) === 'file')) {
+  if (ends.some((end) => filesOf(runtime).kindOf(path.slice(0, end)) === 'file')) {
     throwUnavailable(runtime, '途中にファイルがあるパスでのファイル操作の失敗');
   }
 }
@@ -50,6 +56,28 @@ function withFileErrors<T>(runtime: Runtime, failure: string, run: () => T, show
     if (reported === 'EEXIST') runtime.throwError('PathExistsException', '', [path, osError, failure]);
     return runtime.throwError('FileSystemException', '', [failure, path, osError]);
   }
+}
+
+/**
+ * The run's file system as Dart's natives use it: an empty path names nothing, as the OS's calls fail it with ENOENT,
+ * where the shared file system reads it as the working directory; only a listing reads it as the working directory,
+ * as the VM's does.
+ */
+function filesOf(runtime: Runtime): VirtualFileSystem {
+  const { files } = runtime.io;
+  return new Proxy(files, {
+    get(target, key, receiver) {
+      const member = Reflect.get(target, key, receiver) as unknown;
+      if (typeof member !== 'function') return member;
+      return (...args: unknown[]) => {
+        if (key !== 'list' && args.some((arg) => arg === '')) {
+          if (key === 'kindOf') return;
+          throw new FileSystemError('ENOENT', '');
+        }
+        return (member as (...values: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
 }
 
 function intList(runtime: Runtime, values: number[]): Value {
@@ -145,16 +173,16 @@ define('_sleep', (runtime, _self, [milliseconds]) => {
 });
 
 define('FileSystemEntity._kindOf', (runtime, _self, [path]) => {
-  const kind = runtime.io.files.kindOf(stringArg(runtime, path, 'path'));
+  const kind = filesOf(runtime).kindOf(stringArg(runtime, path, 'path'));
   return kind === 'file' ? 0n : kind === 'directory' ? 1n : 2n;
 });
 
 define('FileSystemEntity._isSameFile', (runtime, _self, [path1, path2]) =>
-  runtime.io.files.isSameFile(stringArg(runtime, path1, 'path1'), stringArg(runtime, path2, 'path2'))
+  filesOf(runtime).isSameFile(stringArg(runtime, path1, 'path1'), stringArg(runtime, path2, 'path2'))
 );
 
 define('_File._read', (runtime, _self, [path, failure]) =>
-  withFileErrors(runtime, failure as string, () => runtime.io.files.readFile(stringArg(runtime, path, 'path')))
+  withFileErrors(runtime, failure as string, () => filesOf(runtime).readFile(stringArg(runtime, path, 'path')))
 );
 
 // The VM writes a string's UTF-8 encoding, in which an unpaired surrogate becomes U+FFFD.
@@ -165,7 +193,7 @@ define('_File._write', (runtime, _self, [path, contents, append, failure, shownP
     runtime,
     failure as string,
     () =>
-      runtime.io.files
+      filesOf(runtime)
         .open(stringArg(runtime, path, 'path'), {
           create: 'always',
           truncate: append !== true,
@@ -191,7 +219,7 @@ class SinkFile implements NativeState {
 define('_OpenedFile._open', (runtime, self, [path, appends]) => {
   const text = stringArg(runtime, path, 'path');
   const handle = withFileErrors(runtime, 'Cannot open file', () =>
-    runtime.io.files.open(text, { create: 'always', truncate: appends !== true, append: false })
+    filesOf(runtime).open(text, { create: 'always', truncate: appends !== true, append: false })
   );
   if (appends === true) handle.seekToEnd();
   (self as DartObject).native = new SinkFile(handle);
@@ -204,7 +232,7 @@ define('_OpenedFile._writeOpened', (_runtime, self, [contents]) => {
 });
 
 define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
-  const { files } = runtime.io;
+  const files = filesOf(runtime);
   const text = stringArg(runtime, path, 'path');
   if (recursive === true) {
     rejectFileAncestor(runtime, text);
@@ -217,7 +245,7 @@ define('_File._create', (runtime, _self, [path, recursive, exclusive]) => {
 });
 
 define('_Directory._createDirectory', (runtime, _self, [path, recursive]) => {
-  const { files } = runtime.io;
+  const files = filesOf(runtime);
   const text = stringArg(runtime, path, 'path');
   withFileErrors(runtime, 'Creation failed', () => {
     const kind = files.kindOf(text);
@@ -229,7 +257,7 @@ define('_Directory._createDirectory', (runtime, _self, [path, recursive]) => {
 });
 
 define('_Directory._list', (runtime, _self, [path, recursive]) => {
-  const { files } = runtime.io;
+  const files = filesOf(runtime);
   const text = stringArg(runtime, path, 'path');
   const entries: string[] = [];
   // The VM lists a directory depth first, each subdirectory's entries right after it.
@@ -250,14 +278,14 @@ define('_rename', (runtime, _self, [from, to, failure]) => {
   withFileErrors(
     runtime,
     failure as string,
-    () => runtime.io.files.rename(source, stringArg(runtime, to, 'newPath')),
+    () => filesOf(runtime).rename(source, stringArg(runtime, to, 'newPath')),
     source
   );
   return;
 });
 
 define('_delete', (runtime, _self, [path, isDirectory, recursive, failure]) => {
-  const { files } = runtime.io;
+  const files = filesOf(runtime);
   const text = stringArg(runtime, path, 'path');
   const removeTree = (target: string): void => {
     if (files.kindOf(target) === 'directory') {

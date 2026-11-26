@@ -9546,6 +9546,24 @@ Future<void> main() async {
   });
 });
 
+test('an empty file path names nothing, as the OS fails it', () => {
+  const source = `import 'dart:io';
+void main() {
+  print(Directory('').existsSync());
+  try { Directory('').createSync(); } catch (e) { print(e); }
+  try { File('').readAsStringSync(); } catch (e) { print(e); }
+}`;
+  expect(executeProgram('dart', source)).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'false',
+      "PathNotFoundException: Creation failed, path = '' (OS Error: No such file or directory, errno = 2)",
+      "PathNotFoundException: Cannot open file, path = '' (OS Error: No such file or directory, errno = 2)",
+      '',
+    ].join('\n'),
+  });
+});
+
 test('json.decoder streams give the value or an end-of-input error at the end, and reject an error before it', () => {
   const source = `import 'dart:convert';
 Future<void> main() async {
